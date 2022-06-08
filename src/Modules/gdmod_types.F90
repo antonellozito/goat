@@ -19,7 +19,11 @@ module gdmod_types
     private 
 
     ! All types
-    public RunfileOptions
+    public RunfileOptionsUDT
+    public ExportOptionsUDT
+    public GridUDT
+    public DesignParamsUDT 
+    
 
     ! All functions
     public SetDefaultRunfileOptions
@@ -37,13 +41,37 @@ module gdmod_types
     ! statement. 
 
     ! Options for the main runfile type
-    type RunfileOptions
+    type RunfileOptionsUDT
         character(32)       :: runtype ! type of run: 'optimize' or 'test'
         character(32)       :: gridtype ! type of grid: 'plasma' 
         character(32)       :: meth ! method for grid deformation: 'KKT'
         logical             :: export ! do export? 
     end type
-    
+
+    ! Options for exporting
+    type ExportOptionsUDT
+        character(32)       :: gridformat ! format of grid to export
+    end type
+
+
+    ! Grid types
+    !===========
+    ! Main grid structure
+    type GridUDT
+        ! Coordinates
+        real, allocatable   :: x, y ! grid coordinates
+
+    end type
+
+    ! Optimization
+    !=============
+    ! Design parameter structure
+    type DesignParamsUDT
+        ! Design variables
+        real, allocatable   :: phi 
+
+    end type
+
     !==================================================================!
     !                                                                  !
     !                               ROUTINES                           !
@@ -58,7 +86,7 @@ module gdmod_types
         ! Set the default runfile options
 
         ! Declaration
-        type (RunfileOptions), intent(inout)    :: options
+        type (RunfileOptionsUDT), intent(inout)    :: options
 
         ! Default options
         options%runtype     = 'optimize'

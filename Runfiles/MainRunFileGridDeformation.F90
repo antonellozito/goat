@@ -56,19 +56,52 @@ program GridDeformation
     implicit none
 
     ! Declare variables
-    type(RunfileOptions)    :: mainOptions
+    type(RunfileOptionsUDT)    :: runfileOptions ! options for mainfile
+    type(ExportOptionsUDT)     :: exportOptions ! options for exporting
+    type(GridUDT)              :: grid ! grid structure
+    type(DesignParamsUDT)      :: designParams ! design parameters
 
     ! Set the main options
     !=====================
     ! Set the default values
-    call SetRunfileOptions(mainOptions)
-
-    ! Adjust if desired
+    call SetRunfileOptions(runfileOptions)
 
     ! Print
-    print *, 'gd: runtype set to ', mainOptions%runtype
-    print *, 'gd: gridtype set to ', mainOptions%gridtype
-    print *, 'gd: method set to ', mainOptions%meth
-    print *, 'gd: epxort set to ', mainOptions%export
+    print *, 'gd: runtype set to ', runfileOptions%runtype
+    print *, 'gd: gridtype set to ', runfileOptions%gridtype
+    print *, 'gd: method set to ', runfileOptions%meth
+    print *, 'gd: export set to ', runfileOptions%export
+
+    ! Main driver
+    !============
+    select case (runfileOptions%runtype)
+
+    case ('optimize')
+
+        ! Run the main optimization driver
+        call RunGridOptimization(grid,designParams,runfileOptions)
+
+    case default 
+
+        ! Unknown case - print error
+        print *, 'gd: unknown mainOptions%runtype value: ', runfileOptions%meth
+
+    end select
+
+    ! Post-processing
+    !================
+
+    ! Export
+    !=======
+    if (runfileOptions%export) then
+        
+        ! Set the export options
+        call SetExportOptions(exportOptions)
+
+        ! Export
+        call ExportGridData(grid,exportOptions)
+
+    endif
+
 
 end program GridDeformation

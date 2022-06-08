@@ -23,6 +23,7 @@ module gdmod_userinput
 
     ! All functions
     public SetRunfileOptions
+    public SetExportOptions
 
     !==================================================================!
     !                                                                  !
@@ -59,13 +60,29 @@ module gdmod_userinput
         ! SetExportOptions subroutine in this file. 
 
         ! Declaration
-        type (RunfileOptions), intent(inout)    :: options
+        type (RunfileOptionsUDT), intent(inout)    :: options
 
         ! Default options
         options%runtype     = 'optimize'
         options%gridtype    = 'plasma'
         options%meth        = 'KKT'
         options%export      = .true.  
+
+    end subroutine
+
+    subroutine SetExportOptions(options)
+        
+        ! Description
+        !============
+        ! Set the export options. The following fields have to be set:
+        ! - gridformat: the format in which the grid needs to be written
+        ! either 'structured' or 'unstructured'.
+
+        ! Declaration
+        type (ExportOptionsUDT), intent(inout)    :: options
+
+        ! Default options
+        options%gridformat     = 'unstructured'
 
     end subroutine
 
