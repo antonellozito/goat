@@ -1,34 +1,79 @@
 # A very simple and straightforward makefile without too many options 
 # yet. To be improved in the future. 
 
-# Variables
-FC = gfortran # compiler 
-CFLAGS = -c -g -Og -Wall # compiler flags
+# Include the config file
+include config.mk
 
+##
+## %===================================================================%
+## %                                                                   %
+## %                             TARGETS                               %
+## %                                                                   %
+## %===================================================================%
+##
+## % Main targets
+## %=============
+## gdrun			: Create executable for grid deformation
+##
 # Linking
-a.out: gdmod_types.o gdmod_userinput.o MainRunFileGridDeformation.o
-	$(FC) MainRunFileGridDeformation.o gdmod_types.o gdmod_userinput.o
+gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
+	$(FC) -o gdrun *.o
 
-#MainRunFileGridDeformation.o: src/Modules/gdmod_types.o
-
+## % Runfiles
+## %=========
+## MainRunFileGridDeformation.o			: main runfile 
 # Compiling
-gdmod_types.o: src/Modules/gdmod_types.F90
-	$(FC) $(CFLAGS) src/Modules/gdmod_types.F90
-
-gdmod_userinput.o: src/Modules/gdmod_userinput.F90
-	$(FC) $(CFLAGS) src/Modules/gdmod_userinput.F90
-
 MainRunFileGridDeformation.o: Runfiles/MainRunFileGridDeformation.F90
 	$(FC) $(CFLAGS) Runfiles/MainRunFileGridDeformation.F90
 
+##
+## % Folder compilation targets
+## %===========================
+## Modules			: compile modules 
+Modules: $(MODULE_FILES)
+	$(FC) $(CFLAGS) $^
+	touch Modules
 
-# Cleanup
-.PHONY: clean
-clean: 
-	rm *.o a.out
+## Auxiliary			: compile auxiliary routines
+Auxiliary: $(AUXILIARY_FILES)
+	$(FC) $(CFLAGS) $^
+	touch Auxiliary
 
+## Drivers			: compile all driver routines
+Drivers: $(DRIVER_FILES)
+	$(FC) $(CFLAGS) $^
+	touch Drivers
+
+## IO_output 			: compile output routines
+IO_output: $(OUTPUT_FILES)
+	$(FC) $(CFLAGS) $^
+	touch IO_output
+
+##
+## % Run commands
+## %=============
+## gd			: Run grid deformation with gdrun
 # Run
 .PHONY: gd
 gd: 
-	a.out
+	gdrun
 	make clean
+
+##
+## % Auxiliary targets
+## %==================
+## clean			: clean by removing *.o and gdrun 
+# Cleanup
+.PHONY: clean
+clean: 
+	rm *.o gdrun; rm $(GDRUN_TARGETS)
+	
+
+## help			: print out documentation
+# Help - prints out all the ## statements
+.PHONY : help 
+help : config.mk Makefile  
+	@sed -n 's/^##//p' $^
+
+##
+##
