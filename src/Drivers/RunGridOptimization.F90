@@ -16,12 +16,26 @@ subroutine RunGridOptimization(grid,designParams,options)
     implicit none
 
     ! Declare variables
-    type(GridUDT)              :: grid
-    type(DesignParamsUDT)      :: designParams
-    type(RunfileOptionsUDT)    :: options 
+    type(GridUDT)                   :: grid
+    type(DesignParamsUDT)           :: designParams
+    type(RunfileOptionsUDT)         :: options 
+    type(GridOptionsUDT)            :: gridoptions
+    type(DesignOptionsUDT)          :: designoptions
+    type(MagneticFieldOptionsUDT)   :: mfoptions
+    type(NumOptionsUDT)             :: num
 
     ! Set additional options
     !=======================
-    ! 
+    ! Set grid options
+    call SetGridOptions(gridoptions)
+
+    ! Set optimization options
+    call SetDesignOptions(designoptions)
+
+    ! Set other numerical parameters
+    call SetNumOptions(num);
+    
+    ! Magnetic field 
+    call SetMagneticFieldOptions(mfoptions);
 
 end subroutine
