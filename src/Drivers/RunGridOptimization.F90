@@ -38,4 +38,10 @@ subroutine RunGridOptimization(grid,designParams,options)
     ! Magnetic field 
     call SetMagneticFieldOptions(mfoptions);
 
+    ! Initialize
+    !===========
+    ! Construct the initial grid
+    call ConstructGrid(grid,gridoptions,options);
+
+
 end subroutine

@@ -88,6 +88,7 @@ module gdmod_types
 
     ! Options for the grid
     type GridOptionsUDT
+        character(32)       :: inputtype
         logical             :: vesselrefine
         real(kind=8)        :: vesselmaxdist
     end type  
@@ -103,14 +104,42 @@ module gdmod_types
     end type
 
 
-
     ! Grid types
     !===========
+    ! Vertex structure
+    type VertexUDT
+        ! Coordinates
+        real(kind=8), allocatable           :: x,y 
+
+        ! Logicals and indices
+        logical, allocatable                :: BV
+        integer(kind=8), allocatable        :: fieldlineID 
+    end type
+
+    ! Face structure
+    type FaceUDT
+        ! Logicals and indices
+        integer(kind=8), allocatable        :: vert
+        logical, allocatable                :: V 
+    end type
+
+    ! Cell structure
+    type CellUDT
+        ! Logicals and indices
+        integer(kind=8), allocatable        :: vert
+        integer(kind=8)                     :: ntot
+    end type
+
     ! Main grid structure
     type GridUDT
-        ! Coordinates
-        real, allocatable   :: x, y ! grid coordinates
+        ! Vertices
+        type(VertexUDT)                     :: vert
 
+        ! Faces
+        type(FaceUDT)                       :: faces
+
+        ! Cells
+        type(CellUDT)                       :: cells
     end type
 
     ! Optimization

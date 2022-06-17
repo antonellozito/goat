@@ -15,7 +15,7 @@
 ##
 ## % 
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Modules Auxiliary IO_output Drivers
+GDRUN_TARGETS = Modules Auxiliary IO_b25 IO_output IO_input  Setup  Drivers
 
 ##
 ## % Compiler
@@ -23,7 +23,7 @@ GDRUN_TARGETS = Modules Auxiliary IO_output Drivers
 ## FC			: Compiler to be used
 FC = gfortran
 ## CFLAGS			: Compiler flags
-CFLAGS = -c -g -Og -Wall
+CFLAGS = -c -g -Og -Wall 
 
 ##
 ## % Files
@@ -34,14 +34,20 @@ MAIN_RUNFILE = MainRunFileGridDeformation.F90
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
 DRIVER_FILES = $(wildcard src/Drivers/*.F90)
 
-## MODULE_FILES			: Module filenames (.F90) - sequence matters
-MODULE_FILES = src/Modules/gdmod_types.F90\
- src/Modules/gdmod_userinput.F90
+## MODULE_FILES			: Module filenames (.F90, .F) - sequence matters
+MODULE_FILES = $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F)
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
 AUXILIARY_FILES = $(wildcard src/Auxiliary/*.F90)
 
+## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
+B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)
+
+## INPUT_FILES			: input generation filenames (.F90) - unsequenced
+INPUT_FILES = $(wildcard src/IO/Input/*.F90)
+
 ## OUTPUT_FILES			: output generation filenames (.F90) - unsequenced
 OUTPUT_FILES = $(wildcard src/IO/Output/*.F90)
 
-## 
+## SETUP_FILLES			: setup file generation names (.F90) - unsequenced
+SETUP_FILES = $(wildcard src/Setup/*.F90)

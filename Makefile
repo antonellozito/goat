@@ -44,10 +44,25 @@ Drivers: $(DRIVER_FILES)
 	$(FC) $(CFLAGS) $^
 	touch Drivers
 
+## Setupt			: compile all setup routines
+Setup: $(SETUP_FILES)
+	$(FC) $(CFLAGS) $^
+	touch Setup
+
 ## IO_output 			: compile output routines
 IO_output: $(OUTPUT_FILES)
 	$(FC) $(CFLAGS) $^
 	touch IO_output
+
+## IO_input			: compile input routines
+IO_input: $(INPUT_FILES)
+	$(FC) $(CFLAGS) $^
+	touch IO_input
+
+## IO_b25			: compile b25 routines
+IO_b25: $(B25_FILES)
+	$(FC) $(CFLAGS) $^
+	touch IO_b25
 
 ##
 ## % Run commands

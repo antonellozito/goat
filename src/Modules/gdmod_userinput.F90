@@ -166,6 +166,8 @@ module gdmod_userinput
         ! Set the options for the grid. The following fields have to be
         ! set: 
         !
+        ! - inputtype: string containing the type of input 
+        !
         ! - vesselrefine: logical to decide whether the original vessel
         ! polygon should be further refined (increased resolution)
         !
@@ -178,6 +180,7 @@ module gdmod_userinput
         type(GridOptionsUDT)        ::  options
 
         ! Default options
+        options%inputtype           = 'b2fgmtry'
         options%vesselmaxdist       = 0.01
         options%vesselrefine        = .true.
     
