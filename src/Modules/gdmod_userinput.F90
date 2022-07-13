@@ -97,7 +97,7 @@ module gdmod_userinput
         type (ExportOptionsUDT), intent(inout)    :: options
 
         ! Default options
-        options%gridformat     = 'unstructured'
+        options%gridformat     = 'structured'
 
     end subroutine
 
