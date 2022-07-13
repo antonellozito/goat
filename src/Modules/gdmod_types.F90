@@ -117,28 +117,91 @@ module gdmod_types
     !===========
     ! Vertex structure
     type VertexUDT
+        ! Description
+        !============
+        ! Fields:
+        ! - x, y            : coordinates [m]
+        ! - BV              : logical index to indicate if vertex lies
+        !                   on boundary
+        ! - fieldlineID     : ID of the field line the vertex lies on
+        ! - ntot            : total number of vertices  
+        ! - faceP           : ntot-by-2 array containing in the first 
+        !                   column the starting index and in the second
+        !                   column the number of faces of the cell 
+        !                   (for querying the faces of the cell
+        !                   stored in vert%facelist)            
+        ! - facelist        : list of vertex faces, to be queried as 
+        !                   vert%facelist(vert%faceP(i,1):
+        !                   vert%faceP(i,1)+vert%faceP(i,2)-1) 
+        ! - nfacelist       : length of facelist   
+        ! - cellP           : similar to faceP, but for vertex cells
+        ! - celllist        : similar to facelist, but for vertex cells
+        ! - ncellist        : length of celllist        
+
         ! Coordinates
         real(R8), allocatable               :: x(:),y(:) 
 
         ! Logicals and indices
-        logical, allocatable                :: BV
-        integer(I8), allocatable            :: fieldlineID 
+        logical, allocatable                :: BV(:)
+        integer(I8), allocatable            :: fieldlineID(:) 
         integer(I8)                         :: ntot
+
+        integer(I8), allocatable            :: faceP(:,:)
+        integer(I8), allocatable            :: facelist(:)
+        integer(I8)                         :: nfacelist
+
+        integer(I8), allocatable            :: cellP(:,:)
+        integer(I8), allocatable            :: celllist(:)
+        integer(I8)                         :: ncelllist
 
     end type
 
     ! Face structure
     type FaceUDT
+        ! Description
+        !============
+        ! Fields:
+        ! - ntot            : total number of faces
+        ! - vert            : set of (two) vertices belonging to that 
+        !                   face
+        ! - neig            : cell neighbours of face
+
         ! Logicals and indices
-        integer(I8), allocatable            :: vert
-        logical, allocatable                :: V 
+        integer(I8), allocatable            :: vert(:,:)
+        integer(I8), allocatable            :: neig(:,:)
+        integer(I8)                         :: ntot
     end type
 
     ! Cell structure
     type CellUDT
+        ! Description
+        !============
+        ! Fields:   
+        ! - ntot            : total number of cells
+        ! - vertP           : ntot-by-2 array containing in the first 
+        !                   column the starting index and in the second
+        !                   column the number of vertices of the cell 
+        !                   (for querying the vertices of the cell
+        !                   stored in cells%vertlist)            
+        ! - vertlist        : list of cell vertices, to be queried as 
+        !                   cells%vertlist(cells%vertP(i,1):
+        !                   cells%vertP(i,1)+cells%vertP(i,2)-1) 
+        ! - nvertlist       : length of vertlist
+        ! - faceP           : similar to vertP, but for faces
+        ! - facelist        : similar to vertlist, but for faces
+        ! - nfacelist       : similar to nvertlist, but for faces
+
+
         ! Logicals and indices
-        integer(I8), allocatable            :: vert
-        integer(I8)                         :: ntot
+        integer(I8), allocatable            :: vertP(:,:)
+        integer(I8), allocatable            :: vertlist(:)
+        integer(I8)                         :: nvertlist
+
+        integer(I8), allocatable            :: faceP(:,:)
+        integer(I8), allocatable            :: facelist(:)
+        integer(I8)                         :: nfacelist
+
+        integer(I8)                         :: ntot                      
     end type
 
     ! Main grid structure
@@ -205,8 +268,106 @@ module gdmod_types
         if (allocated(grid%vert%x)) return
 
         ! Allocate vertex data
-        allocate(grid%vert%x(grid%vert%ntot))     
+        call AllocateVertices(grid%vert)
+        
+        ! Allocate face data
+        call AllocateFaces(grid%faces)
 
+        ! Allocate cell data
+        call AllocateCells(grid%cells)
+
+
+    end subroutine
+
+    subroutine AllocateVertices(vert)
+        ! Description
+        !============
+        ! Allocate the fields in the vertex structure. At least the 
+        ! following scalar fields have to be present:
+        !
+        ! - ntot        : total number of vertices
+
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(VertexUDT)       :: vert
+
+        ! Allocate
+        !=========
+        ! Vertex data
+        allocate(vert%x(vert%ntot))
+        allocate(vert%y(vert%ntot))
+        allocate(vert%BV(vert%ntot))
+        allocate(vert%fieldlineID(vert%ntot))
+
+        ! Face data
+        allocate(vert%faceP(vert%ntot,2))
+        allocate(vert%facelist(vert%nfacelist)) 
+
+        ! Cell data
+        allocate(vert%cellP(vert%ntot,2))
+        allocate(vert%celllist(vert%ncelllist))
+
+    end subroutine
+
+    subroutine AllocateFaces(faces)
+
+        ! Description
+        !============
+        ! Allocate the fields in the faces structure. At least the 
+        ! following scalar fields have to be present:
+        !
+        ! - ntot        : total number of faces
+
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(FaceUDT)       :: faces
+
+        ! Allocate
+        !=========
+        allocate(faces%vert(faces%ntot,2))
+        allocate(faces%neig(faces%ntot,2))
+
+    end subroutine
+
+    subroutine AllocateCells(cells)
+
+        ! Description
+        !============
+        ! Allocate the fields in the cells structure. At least the 
+        ! following scalar fields have to be present:
+        !
+        ! - ntot        : total number of cells
+        ! - nvertlist   : length of cells%vertlist
+        ! - nfacelist   : length of cells%facelist
+        ! 
+        ! The following fields are allocated: 
+
+        ! Note: roughly the same conventions on data structures
+
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(CellUDT)       :: cells
+
+        ! Allocate
+        !=========
+        ! Vertex values
+        allocate(cells%vertP(cells%ntot,2))
+        allocate(cells%vertlist(cells%nvertlist)) 
+
+        ! Face values
+        allocate(cells%faceP(cells%ntot,2))
+        allocate(cells%facelist(cells%nfacelist))
+
+        
 
     end subroutine
 
