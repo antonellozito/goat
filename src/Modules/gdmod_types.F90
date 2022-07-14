@@ -47,8 +47,9 @@ module gdmod_types
     !                                                                  !
     !==================================================================!
 
-    ! Option types
-    !=============
+    !------------------------------------------------------------------!
+    !                               Options                            !
+    !------------------------------------------------------------------!
     ! Each option type has a setting routine called 
     ! SetDefault<optionname>, see subroutines after the 'contain' 
     ! statement. 
@@ -113,8 +114,12 @@ module gdmod_types
     end type
 
 
-    ! Grid types
-    !===========
+    !------------------------------------------------------------------!
+    !                               Grid                               !
+    !------------------------------------------------------------------!
+
+    ! Main grid substructures
+    !========================
     ! Vertex structure
     type VertexUDT
         ! Description
@@ -204,8 +209,150 @@ module gdmod_types
         integer(I8)                         :: ntot                      
     end type
 
+    ! Additional grid data structures
+    !================================
+    ! Used to collect derived grid data, e.g. which link the grid cells 
+    ! flux tubes. Other output data from the grid generator that does 
+    ! not fit within the classical cell/faces/vert structures can be 
+    ! added as well through user defined types. 
+
+    ! Flux data
+    type FluxDataUDT
+        ! Description
+        !============
+        ! This data type contains all information regarding flux tubes 
+        ! and flux surfaces, and the cells associated with these. 
+        ! Fields:
+        !
+        ! - nFt:            : total number of flux tubes (scalar, to be 
+        !                   read in)
+        ! - nFs:            : total number of flux surfaces (scalar, to be
+        !                   read in)
+        ! - fluxtubecellsP  : nFt-by-2 array where the first index 
+        !                   is the start index in the fluxtubecells 
+        !                   array, and the second the amount of cells of
+        !                   the flux tube.
+        ! - fluxtubecells   : nCv(number of cells)-by-1 array containing 
+        !                   the cell numbers that correspond to flux 
+        !                   tubes. 
+        ! - fluxtubefacesP  : nFt-by-2 array where the first index 
+        !                   is the start index in the fluxtubefaces 
+        !                   array, and the second the amount of faces of
+        !                   the flux tube.
+        ! - fluxtubefaces   : nFv(number of faces)-by-1 array containing 
+        !                   the face numbers that correspond to flux 
+        !                   tubes. 
+        ! - cellfluxtubeID  : nCv(number of cells)-by-1 array containing
+        !                   the flux tube number (ID) for each cell. 
+        ! - fluxsurfacefacesP  : nFs-by-2 array where the first index 
+        !                   is the start index in the fluxsurfacefaces
+        !                   array, and the second the amount of faces of
+        !                   the flux surface.
+        ! - fluxsurfacefaces   : nFv(number of faces)-by-1 array containing 
+        !                   the face numbers that correspond to flux 
+        !                   surfaces. 
+
+        ! Logicals and indices
+        integer(I8)                         :: nFt
+        integer(I8)                         :: nFs
+
+        ! Arrays, flux tube data
+        integer(I8), allocatable            :: fluxtubecellsP(:,:)
+        integer(I8), allocatable            :: fluxtubecells(:)
+        integer(I8), allocatable            :: fluxtubefacesP(:,:)
+        integer(I8), allocatable            :: fluxtubefaces(:)
+        integer(I8), allocatable            :: cellfluxtubeID(:)
+
+        ! Arrays, flux surface data
+        integer(I8), allocatable            :: fluxsurfacefacesP(:,:)
+        integer(I8), allocatable            :: fluxsurfacefaces(:)
+
+    end type
+
+    ! Region data
+    type RegionDataUDT
+        ! Description
+        !============
+        ! Data type to collect all information on which cells/verts/face
+        ! belongs to which grid region. 
+        ! Fields:
+        !
+        ! - cellregID           : grid%cells%ntot-by-1 array containing
+        !                       the region IDs for each cell
+        ! - faceregID           : grid%faces%ntot-by-1 array containing
+        !                       the region IDs for each face
+        ! - fluxtuberegID       : fluxdata%nFt-by-1 array containing 
+        !                       the region IDs for each flux tube
+
+        ! Arrays
+        integer(I8), allocatable            :: cellregID(:)
+        integer(I8), allocatable            :: faceregID(:)
+        integer(I8), allocatable            :: fluxtuberegID(:)
+
+    end type
+
+    ! Structured grid data (to be removed in the future)
+    type StructuredGridDataUDT
+        ! Description
+        !============
+        ! Data type to collect all data related to a possibly initial 
+        ! structured grid that served as basis for the current 
+        ! unstructured grid data. Only saved for backward compatibility 
+        ! reasons. Hopefully deleted in the future. 
+        ! Fields:
+        !
+        ! - isClassicalGrid         : integer indicating whether the
+        !                           whether the grid was a classic 
+        !                           structured grid
+        ! - nx, ny                  : dimensions of the original 
+        !                           structured grid
+
+        ! Logicals & scalars
+        integer(I8)             :: nx, ny
+        integer(I4)             :: isClassicalGrid
+
+    end type
+
+    ! Grid data 
+    type GridDataUDT
+        ! Description
+        !===========
+        ! Data type to collect all other grid related data which is not 
+        ! linked to the core data, i.e. the cells, vertices, and faces.
+        ! This can be additional info from the grid generator on flux 
+        ! tubes, for example, and interconnection data thereof (e.g. 
+        ! the cells that belong to a certain flux tube). 
+        ! Fields:
+        !
+        ! - fluxdata            : UDT with all flux data such as flux
+        !                       flux tube data, flux surfaces, ... 
+        ! - regions             : UDT with all data to which region
+        !                       cells, faces, ... belong
+
+        ! Flux data
+        type(FluxDataUDT)           :: fluxdata
+
+        ! Region data
+        type(RegionDataUDT)         :: regions
+
+        ! Legacy data of structured grid
+        type(StructuredGridDataUDT) :: sglegacy
+
+    end type
+
     ! Main grid structure
+    !====================
     type GridUDT
+        ! Description
+        !============
+        ! Data structure containing all the grid data substructures. 
+        ! Fields:
+        !
+        ! - vert            : see type definition for description
+        ! - faces           
+        ! - cells
+        ! - data
+
         ! Vertices
         type(VertexUDT)                     :: vert
 
@@ -214,10 +361,16 @@ module gdmod_types
 
         ! Cells
         type(CellUDT)                       :: cells
+
+        ! Additional data
+        type(GridDataUDT)                   :: data
+
     end type
 
-    ! Optimization
-    !=============
+    !------------------------------------------------------------------!
+    !                            Optimization                          !
+    !------------------------------------------------------------------!
+
     ! Design parameter structure
     type DesignParamsUDT
         ! Design variables
@@ -233,25 +386,14 @@ module gdmod_types
 
     contains 
 
-    subroutine SetDefaultRunfileOptions(options)
-        ! Description
-        !============
-        ! Set the default runfile options
 
-        ! Declaration
-        type (RunfileOptionsUDT), intent(inout)    :: options
+    !------------------------------------------------------------------!
+    !                               Grid                               !
+    !------------------------------------------------------------------!
 
-        ! Default options
-        options%runtype     = 'optimize'
-        options%gridtype    = 'plasma'
-        options%meth        = 'KKT'
-        options%export      = .true.  
-
-    end subroutine
-
-    ! Grid routines
-    !==============
-    ! Allocation
+    ! Allocation 
+    !===========
+    ! Main grid structure
     subroutine AllocateGrid(grid)
         ! Description
         !============
@@ -276,9 +418,13 @@ module gdmod_types
         ! Allocate cell data
         call AllocateCells(grid%cells)
 
+        ! Allocate other data structures
+        call AllocateGridData(grid%data,grid)
+
 
     end subroutine
 
+    ! Vertex substructure
     subroutine AllocateVertices(vert)
         ! Description
         !============
@@ -312,6 +458,7 @@ module gdmod_types
 
     end subroutine
 
+    ! Face substructure
     subroutine AllocateFaces(faces)
 
         ! Description
@@ -335,6 +482,7 @@ module gdmod_types
 
     end subroutine
 
+    ! Cell substruture
     subroutine AllocateCells(cells)
 
         ! Description
@@ -368,6 +516,90 @@ module gdmod_types
         allocate(cells%facelist(cells%nfacelist))
 
         
+
+    end subroutine
+
+    ! Data substructure
+    subroutine AllocateGridData(data,grid)
+        ! Description
+        !============
+        ! Allocate the structures inside the grid data structures. It 
+        ! is assumed that the main grid structures (cells/faces/vert) 
+        ! are already properly initialized. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridDataUDT)       :: data
+        type(GridUDT)           :: grid
+
+        ! Flux data
+        call AllocateFluxData(data%fluxdata,grid)
+
+        ! Region data
+        call AllocateRegionData(data%regions,grid)
+
+    end subroutine
+
+    ! Flux data substructure
+    subroutine AllocateFluxData(fluxdata,grid)
+        ! Description
+        !============
+        ! Allocate the flux data structure. At least the following 
+        ! fields have to be initialized (see definition of FluxDataUDT
+        ! for explanation): 
+        !
+        ! - nFs
+        ! - nFt
+        ! - grid%cells%ntot
+        ! - grid%faces%ntot
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(FluxDataUDT)       :: fluxdata
+        type(GridUDT)           :: grid
+
+        ! Allocate
+        !=========
+        ! Flux tube data
+        allocate(fluxdata%fluxtubecellsP(fluxdata%nFt,2))
+        allocate(fluxdata%fluxtubecells(grid%cells%ntot)) 
+        allocate(fluxdata%fluxtubefacesP(fluxdata%nFt,2))
+        allocate(fluxdata%fluxtubefaces(grid%faces%ntot)) 
+        allocate(fluxdata%cellfluxtubeID(grid%cells%ntot))
+
+        ! Flux surface data
+        allocate(fluxdata%fluxsurfacefacesP(fluxdata%nFs,2))
+        allocate(fluxdata%fluxsurfacefaces(grid%faces%ntot))
+
+    end subroutine
+
+    ! Region data substrucure
+    subroutine AllocateRegionData(regions,grid)
+        ! Description
+        !============
+        ! Allocat the region data grid substructure. The following 
+        ! fields should be present:
+        !
+        ! - grid%cells%ntot
+        ! - grid%faces%ntot
+        ! - grid%data%fluxdata%nFt
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(RegionDataUDT)         :: regions
+        type(GridUDT)               :: grid
+
+        ! Allocate
+        !=========
+        allocate(regions%cellregID(grid%cells%ntot))
+        allocate(regions%faceregID(grid%faces%ntot))
+        allocate(regions%fluxtuberegID(grid%data%fluxdata%nFt))
 
     end subroutine
 
