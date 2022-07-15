@@ -31,7 +31,7 @@ module gdmod_types
 
     integer, parameter       :: C32     = 32
     integer, parameter       :: C64     = 64
-    integer, parameter       :: C132    = 132
+    integer, parameter       :: C128    = 128
 
     integer, parameter       :: I4      = selected_int_kind(4)
     integer, parameter       :: I8      = selected_int_kind(8)
@@ -122,6 +122,7 @@ module gdmod_types
     !========================
     ! Vertex structure
     type VertexUDT
+    
         ! Description
         !============
         ! Fields:
@@ -163,6 +164,7 @@ module gdmod_types
 
     ! Face structure
     type FaceUDT
+
         ! Description
         !============
         ! Fields:
@@ -179,6 +181,7 @@ module gdmod_types
 
     ! Cell structure
     type CellUDT
+
         ! Description
         !============
         ! Fields:   
@@ -218,6 +221,7 @@ module gdmod_types
 
     ! Flux data
     type FluxDataUDT
+
         ! Description
         !============
         ! This data type contains all information regarding flux tubes 
@@ -271,6 +275,7 @@ module gdmod_types
 
     ! Region data
     type RegionDataUDT
+
         ! Description
         !============
         ! Data type to collect all information on which cells/verts/face
@@ -293,6 +298,7 @@ module gdmod_types
 
     ! Structured grid data (to be removed in the future)
     type StructuredGridDataUDT
+
         ! Description
         !============
         ! Data type to collect all data related to a possibly initial 
@@ -315,6 +321,7 @@ module gdmod_types
 
     ! Grid data 
     type GridDataUDT
+
         ! Description
         !===========
         ! Data type to collect all other grid related data which is not 
@@ -343,6 +350,7 @@ module gdmod_types
     ! Main grid structure
     !====================
     type GridUDT
+
         ! Description
         !============
         ! Data structure containing all the grid data substructures. 
@@ -395,6 +403,7 @@ module gdmod_types
     !===========
     ! Main grid structure
     subroutine AllocateGrid(grid)
+
         ! Description
         !============
         ! Allocate the fields in the vertex, faces, and cell structures
@@ -426,6 +435,7 @@ module gdmod_types
 
     ! Vertex substructure
     subroutine AllocateVertices(vert)
+
         ! Description
         !============
         ! Allocate the fields in the vertex structure. At least the 
