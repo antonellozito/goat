@@ -95,6 +95,45 @@ module gdmod_plots
 
     end subroutine
 
+    subroutine PlotFluxSurfaces(grid,gnuplotoptions)
+
+        ! Description
+        !============
+        ! Plot all the flux surfaces, including the ID of each flux 
+        ! surface vertex
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridUDT)                       :: grid
+        integer                             :: i, fu
+        character(*)                        :: gnuplotoptions
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'plotfluxsurfaces')
+
+        ! Write the data file
+        !====================
+        ! Write vertex coordinates and their surface indices to file
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+    
+        do i = 1, grid%vert%ntot
+            write (fu, *) grid%vert%x(i), grid%vert%y(i), &
+                grid%data%fluxdata%fluxsurfaceID(i)
+        end do
+    
+        close (fu)
+
+        ! Call plotter
+        !=============
+        call gnuplotexe(gnuplotoptions,trim(plotfile))
+
+    end subroutine
+
     ! Optimization
     !=============
 
@@ -119,6 +158,7 @@ module gdmod_plots
         character(*)             :: gnuplotoptions
         character(*)             :: plotfile
 
+        print *, trim(plotfile)
         ! Execute gnuplot
         call execute_command_line('gnuplot ' // trim(gnuplotoptions) &
             // ' ' // trim(plotfile))
