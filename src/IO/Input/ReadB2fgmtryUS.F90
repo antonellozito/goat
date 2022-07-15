@@ -1,4 +1,5 @@
 subroutine ReadB2fgmtryUS(filespec,grid)
+
     ! Description
     !============
     ! Read in the necessary grid data from a b2fgmtry_us file for the 
@@ -10,11 +11,14 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     !===========
     ! Declare modules
     use gdmod_types 
+    use gdmod_plots
 
     ! The usual
     implicit none 
 
     ! Declare variables
+    !==================
+    ! Main variables
     type(GridUDT)               :: grid
 
     integer, intent(in)         :: filespec ! file specifier
@@ -37,6 +41,13 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     real(R8), allocatable       :: nxdummy(:) ! dummy array
 
     integer(I8)                 :: n2,nx  ! legacy structured data
+
+    integer(I8)                 :: i, j, iFT ! loop variables
+
+    ! Auxiliary variables
+    type(FluxDataUDT)           :: fluxdata
+    integer(I8)                 :: itf, ntf
+    integer(I8), allocatable    :: tf(:), tfv(:,:)
 
     ! Read 
     !=====
@@ -170,11 +181,39 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     ! flux surface quantities
     call cfrure (filespec, nc,   cdummyr(:,1), 'cvConn')
     call cfrure (filespec, grid%data%fluxdata%nFs,   fsdummyr,  'fsPsi')
-    
-    ! Add to grid
-    !============
 
-    
+    ! Process the grid
+    !=================
+    ! Extract the fieldline ID's of the vertices based on the flux 
+    ! surface data
 
+    ! Allocate
+    fluxdata = grid%data%fluxdata
+    allocate(tf(maxval(fluxdata%fluxsurfacefacesP(:,2),1)))
+    allocate(tfv(maxval(fluxdata%fluxsurfacefacesP(:,2),1),2))
+
+    ! Loop
+    do iFT = 1, fluxdata%nFs
+        ! Unpack
+        itf = fluxdata%fluxsurfacefacesP(iFT,1); ! start index
+        ntf = fluxdata%fluxsurfacefacesP(iFT,2); ! number of faces 
+        
+        ! Extract faces
+        tf(1:ntf) = fluxdata%fluxsurfacefaces(itf:itf+ntf-1)
+
+        ! Extract vertices of these faces
+        tfv(1:ntf,:) = grid%faces%vert(tf(1:ntf),:)
+
+        ! Set the flux tube index
+        do j = 1, 2
+            do i = 1, ntf 
+                grid%data%fluxdata%fluxsurfaceID(tfv(i,j)) = iFT
+            enddo
+        enddo
+    enddo
+
+    ! Deallocate
+    deallocate(tf)
+    deallocate(tfv)
 
 end subroutine

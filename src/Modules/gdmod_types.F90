@@ -122,7 +122,7 @@ module gdmod_types
     !========================
     ! Vertex structure
     type VertexUDT
-    
+
         ! Description
         !============
         ! Fields:
@@ -255,6 +255,8 @@ module gdmod_types
         ! - fluxsurfacefaces   : nFv(number of faces)-by-1 array containing 
         !                   the face numbers that correspond to flux 
         !                   surfaces. 
+        ! - fluxsurfaceID   : nv(number of vertices)-by-1 array 
+        !                   containing the flux tube ID of each vertex
 
         ! Logicals and indices
         integer(I8)                         :: nFt
@@ -270,6 +272,7 @@ module gdmod_types
         ! Arrays, flux surface data
         integer(I8), allocatable            :: fluxsurfacefacesP(:,:)
         integer(I8), allocatable            :: fluxsurfacefaces(:)
+        integer(I8), allocatable            :: fluxsurfaceID(:)
 
     end type
 
@@ -584,6 +587,7 @@ module gdmod_types
         ! Flux surface data
         allocate(fluxdata%fluxsurfacefacesP(fluxdata%nFs,2))
         allocate(fluxdata%fluxsurfacefaces(grid%faces%ntot))
+        allocate(fluxdata%fluxsurfaceID(grid%vert%ntot))
 
     end subroutine
 
