@@ -47,6 +47,9 @@ subroutine ConstructGrid(grid,gridoptions,options)
             ! Read in the necessary grid data
             call ReadB2fgmtryUS(filespecifier(0),grid)
 
+            ! Extract the necessary grid data structures
+            call ExtractGridData(grid,'b2fgmtry')
+
 
         case default 
 
