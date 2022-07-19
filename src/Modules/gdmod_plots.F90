@@ -58,6 +58,7 @@ module gdmod_plots
 
     ! Grid 
     !=====
+    ! Grid (nodes)
     subroutine PlotGrid(grid,gnuplotoptions)
 
         ! Description
@@ -95,6 +96,113 @@ module gdmod_plots
 
     end subroutine
 
+    ! Cells
+    subroutine PlotGridCells(grid,gnuplotoptions)
+
+        ! Description
+        !============
+        ! Make a plot of the grid cells for inspection. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridUDT)                       :: grid
+        integer                             :: fu
+        character(*)                        :: gnuplotoptions
+
+        integer(I8)                         :: i, j, nvpc, si
+        integer(I8), allocatable            :: tcv(:)
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'plotgridcells')
+
+        ! Write the data file
+        !====================
+        ! Write vertex coordinates to file
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+    
+        ! Loop over all cells
+        do i = 1, grid%cells%ntot
+            ! Write vertex coordinates as ordened in the cell
+            si = grid%cells%vertP(i,1) ! start index
+            nvpc = grid%cells%vertP(i,2) ! number of vertices per cell
+
+            ! Allocate
+            allocate(tcv(nvpc))
+
+            ! Get the vertex indices of the current cell
+            tcv = grid%cells%vertlist(si:si+nvpc-1)
+            do j = 1, nvpc
+                ! Print
+                write (fu, *) grid%vert%x(tcv(j)), grid%vert%y(tcv(j))
+            end do 
+            write(fu, *) ! leave blank line between each cell
+
+            ! Deallocate
+            deallocate(tcv)
+
+        end do
+    
+        close (fu)
+
+        ! Call plotter
+        !=============
+        call gnuplotexe(gnuplotoptions,trim(plotfile))
+
+    end subroutine
+
+    ! Faces
+    subroutine PlotGridFaces(grid,gnuplotoptions)
+
+        ! Description
+        !============
+        ! Make a plot of the grid faces for inspection. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridUDT)                       :: grid
+        integer                             :: fu
+        character(*)                        :: gnuplotoptions
+
+        integer(I8)                         :: i
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'plotgridfaces')
+
+        ! Write the data file
+        !====================
+        ! Write vertex coordinates to file
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+    
+        ! Loop over all faces
+        do i = 1, grid%faces%ntot
+            ! Write vertex coordinates of the face
+            write(fu, *) grid%vert%x(grid%faces%vert(i,1)), &
+                grid%vert%y(grid%faces%vert(i,1))
+            write(fu, *) grid%vert%x(grid%faces%vert(i,2)), &
+                grid%vert%y(grid%faces%vert(i,2))
+            write(fu, *) ! blank line
+
+        end do
+    
+        close (fu)
+
+        ! Call plotter
+        !=============
+        call gnuplotexe(gnuplotoptions,trim(plotfile))
+
+    end subroutine
+
+    ! Flux surfaces as vertices and numbers
     subroutine PlotFluxSurfaces(grid,gnuplotoptions)
 
         ! Description
