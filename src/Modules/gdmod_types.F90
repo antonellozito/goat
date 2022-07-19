@@ -619,5 +619,36 @@ module gdmod_types
 
     ! Deallocation
 
+    ! Vertex substructure
+    subroutine DeallocateVertices(vert)
+
+        ! Description
+        !============
+        ! Deallocate the fields in the vert structure
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(VertexUDT)       :: vert
+
+        ! Deallocate
+        !=========
+        ! Vertex data
+        deallocate(vert%x)
+        deallocate(vert%y)
+        deallocate(vert%BV)
+        deallocate(vert%fieldlineID)
+
+        ! Face data
+        deallocate(vert%faceP)
+        deallocate(vert%facelist) 
+
+        ! Cell data
+        deallocate(vert%cellP)
+        deallocate(vert%celllist)
+
+    end subroutine
+
 
 end module
