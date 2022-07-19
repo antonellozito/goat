@@ -23,7 +23,7 @@ GDRUN_TARGETS = Modules Auxiliary IO_b25 IO_output IO_input  Setup  Drivers
 ## FC			: Compiler to be used
 FC = gfortran
 ## CFLAGS			: Compiler flags
-CFLAGS = -c -g -Og -Wall 
+CFLAGS = -c -g -Og -Wall -pg 
 
 ##
 ## % Files

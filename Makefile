@@ -17,7 +17,7 @@ include config.mk
 ##
 # Linking
 gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
-	$(FC) -o gdrun *.o
+	$(FC) -o gdrun *.o -pg
 
 ## % Runfiles
 ## %=========
