@@ -1,0 +1,23 @@
+# ignore .vscode files
+.vscode/
+
+# ignore module files
+*.mod*
+
+# ignore build
+builds/*
+
+# ignore input
+inputfiles/*
+
+# ignore compiler files
+*.o
+
+# ignore data files
+*.dat
+
+# ignore output files
+*.out
+
+
+
