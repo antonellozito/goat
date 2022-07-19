@@ -11,7 +11,7 @@ subroutine gdErrorHandler(msg)
     implicit none
 
     ! Declare variables
-    character(128)     :: msg
+    character(*)     :: msg
 
     ! Error handling
     !===============
