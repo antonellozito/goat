@@ -242,6 +242,167 @@ module gdmod_plots
 
     end subroutine
 
+    ! Boundaries
+    subroutine PlotGridBoundaries(grid,gnuplotoptions)
+
+        ! Description
+        !============
+        ! Plot all the different boundaries according to the provided
+        ! labels. Will loop over boundaries and 
+        ! plot the faces. Face coordinates are constructed
+        ! locally for plotting starting from the vertex coordinates and
+        ! taking a simple arithmetic average. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridUDT)                       :: grid
+        integer                             :: i, j, fu, tnf, nb
+        real(R8), allocatable               :: fx(:), fy(:), tfx(:), tfy(:)
+        logical, allocatable                :: mask(:)
+        character(*)                        :: gnuplotoptions
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'plotgridboundaries')
+
+        ! Write the data file
+        !====================
+        ! Get number of boundaries
+        nb = size(grid%bnd)
+
+        ! Allocate
+        allocate(fx(grid%faces%ntot))
+        allocate(fy(grid%faces%ntot))
+        allocate(mask(grid%faces%ntot))
+
+        ! Compute coordinates
+        fx(:) = (grid%vert%x(grid%faces%vert(:,1)) & 
+            + grid%vert%x(grid%faces%vert(:,2)))*0.5
+        fy(:) = (grid%vert%y(grid%faces%vert(:,1)) & 
+            + grid%vert%y(grid%faces%vert(:,2)))*0.5
+
+        ! Write vertex coordinates and their surface indices to file
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+    
+        do i = 1, nb
+            ! Get all faces 
+            tnf = size(grid%bnd(i)%faces)
+
+            ! Allocate coordinate vectors, add coordinates
+            allocate(tfx(tnf))
+            allocate(tfy(tnf))
+            print *, tnf 
+
+            tfx = fx(grid%bnd(i)%faces)
+            tfy = fy(grid%bnd(i)%faces)
+
+            ! Write
+            do j = 1, tnf
+                write (fu, *) tfx(j), tfy(j), grid%bnd(i)%ID
+            end do
+
+            ! Write blank line
+            write (fu, *) 
+
+            ! Deallocate coordinates
+            deallocate(tfx)
+            deallocate(tfy)
+            
+        end do
+    
+        close (fu)
+
+        ! Call plotter
+        !=============
+        call gnuplotexe(gnuplotoptions,trim(plotfile))
+
+    end subroutine
+
+    ! Face labels
+    subroutine PlotFaceLabels(grid,labels,gnuplotoptions)
+
+        ! Description
+        !============
+        ! Plot all the different boundaries according to the provided
+        ! face labels. Will loop over face labels and check which faces
+        ! have the specified label. Face coordinates are constructed
+        ! locally for plotting starting from the vertex coordinates and
+        ! taking a simple arithmetic average. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridUDT)                       :: grid
+        integer                             :: i, j, fu, nl, tnf
+        integer                             :: labels(:)
+        real(R8), allocatable               :: fx(:), fy(:), tfx(:), tfy(:)
+        logical, allocatable                :: mask(:)
+        character(*)                        :: gnuplotoptions
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'plotfacelabels')
+
+        ! Write the data file
+        !====================
+        ! Get number of labels
+        nl = size(labels)
+
+        ! Allocate
+        allocate(fx(grid%faces%ntot))
+        allocate(fy(grid%faces%ntot))
+        allocate(mask(grid%faces%ntot))
+
+        ! Compute coordinates
+        fx(:) = (grid%vert%x(grid%faces%vert(:,1)) & 
+            + grid%vert%x(grid%faces%vert(:,2)))*0.5
+        fy(:) = (grid%vert%y(grid%faces%vert(:,1)) & 
+            + grid%vert%y(grid%faces%vert(:,2)))*0.5
+
+        ! Write vertex coordinates and their surface indices to file
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+    
+        do i = 1, nl
+            ! Get all faces with this label
+            mask = grid%data%regions%facelabel == labels(i)
+            tnf = count(mask)
+
+            ! Allocate coordinate vectors, add coordinates
+            allocate(tfx(tnf))
+            allocate(tfy(tnf))
+
+            tfx = pack(fx, mask)
+            tfy = pack(fy, mask)
+
+            ! Write
+            do j = 1, tnf
+                write (fu, *) tfx(j), tfy(j), labels(i)
+            end do
+
+            ! Write blank line
+            write (fu, *) 
+
+            ! Deallocate coordinates
+            deallocate(tfx)
+            deallocate(tfy)
+            
+        end do
+    
+        close (fu)
+
+        ! Call plotter
+        !=============
+        call gnuplotexe(gnuplotoptions,trim(plotfile))
+
+    end subroutine
+
     ! Optimization
     !=============
 
