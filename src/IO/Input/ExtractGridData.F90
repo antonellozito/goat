@@ -5,7 +5,8 @@ subroutine ExtractGridData(grid, meth)
     ! Process the grid data given in 'grid' by adding the necessary 
     ! additional datastructures, checking for ghost vertices, ... 
 
-    ! Notes:
+    ! Notes
+    !======
     ! Note 1: it is assumed that the grid that is read does not contain
     ! any guard cells yet. Otherwise this routine has to be extended. 
 
@@ -15,10 +16,15 @@ subroutine ExtractGridData(grid, meth)
     ! typically the x-point was duplicated. These ghost vertices will be 
     ! removed and the grid structure will be updated accordingly. 
 
+    ! Note 3: it is assumed that for the b2fgmtry case the carre grid 
+    ! generator is used (or that at least the face labels are set up 
+    ! with the same convention as used in carre)
+
     ! Initialize
     !===========
     ! Declare modules
     use gdmod_types 
+    use gdmod_interfaces
 
     ! The usual
     implicit none 
@@ -30,16 +36,20 @@ subroutine ExtractGridData(grid, meth)
     character(len=*)            :: meth
 
     ! Loop variables
-    integer(I8)                 :: i, j, iFT 
+    integer(I8)                 :: i, j, iFT, ib 
 
     ! Auxiliary variables (
     type(FluxDataUDT)           :: fluxdata
     type(VertexUDT)             :: newverts ! necessary if ghost vertices are present
+    type(BndUDT), allocatable   :: Bnd(:)
 
-    integer(I8)                 :: itf, ntf, ngv
+    integer(I8)                 :: itf, ntf, ngv, nbnd, nfpb
     integer(I8), allocatable    :: tf(:), tfv(:,:), indgv(:), vdiff(:)
+    integer(I8), allocatable    :: gglabels(:), gdlabels(:), bndmapping(:,:)
 
     logical, allocatable        :: isghostvert(:), mask(:)
+
+    integer(I8), allocatable    :: facevec(:) ! simply 1:grid%faces%ntot
 
     ! Check ghost vertices
     !=====================
@@ -160,23 +170,45 @@ subroutine ExtractGridData(grid, meth)
                 - vdiff(grid%cells%vertlist)
 
             ! Add the vertex structure
-            call DeallocateVertices(grid%vert) ! first, deallocate
-            grid%vert%ntot = newverts%ntot
-            call AllocateVertices(grid%vert) ! allocate again
-            grid%vert%x = newverts%x ! add the new structures
-            grid%vert%y = newverts%y 
-            grid%vert%fieldlineID = newverts%fieldlineID 
+            grid%vert = newverts
 
             ! Deallocate
             deallocate(indgv)
             deallocate(mask)
+        endif 
 
-        endif
+        ! Extract boundaries
+        !===================
+        ! Get the supported mapping between boundary labels 
+        call InterfaceBoundaryMapping('carre',gglabels,gdlabels, &
+            bndmapping)
+
+        ! Loop over all face labels (not regions here!)
+        nbnd = size(gglabels) ! same amount of boundaries as labels
+        allocate(grid%bnd(nbnd))
+        allocate(mask(grid%faces%ntot))
+        allocate(facevec(grid%faces%ntot))
+        facevec(:) = (/(i, i=1,grid%faces%ntot,1)/)
+        do ib = 1, nbnd
+            ! Add the boundary ID
+            grid%bnd(ib)%ID = bndmapping(ib,2)
+
+            ! Get the faces of this boundary
+            mask(:) = grid%data%regions%facelabel == gglabels(ib);
+            nfpb = count(mask)
+            grid%bnd(ib)%nfaces = nfpb
+
+            ! Allocate this boundary
+            call AllocateBnd(grid%bnd(ib))
+
+            ! Add
+            grid%bnd(ib)%faces(:) = pack(facevec,mask)
+
+        end do
 
         ! Deallocate
         deallocate(isghostvert)
-
-        
+        deallocate(mask)
 
     case default
 
