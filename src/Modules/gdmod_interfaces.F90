@@ -78,8 +78,8 @@ module gdmod_interfaces
             !====================
             ! CARRE         GRID DEFORMATION            PHYSICAL MEANING
             !
-            ! 1             1                           target plate (inner)
-            ! 2             2                           target plate (outer)
+            ! -13           1                           target plate (inner)
+            ! -34           2                           target plate (outer)
             ! -23           3                           private flux
             ! -24           3                           private flux
             ! -21           4                           core boundary
@@ -101,11 +101,11 @@ module gdmod_interfaces
             allocate(bndmapping(nlf,2))
 
             ! Set labels
-            labelsfrom      = (/1, 2, -23, -24, -21, -42, -43, -44/)
-            labelsto        = (/1, 2, 3, 4, 5/)
+            labelsfrom      = (/-13, -34, -23, -24, -21, -42, -43, -44/)
+            labelsto        = (/1,  2, 3, 4, 5/)
     
             ! Set bndmapping
-            bndmapping(:,1) = (/1, 2, -23, -24, -21, -42, -43, -44/)
+            bndmapping(:,1) = labelsfrom
             bndmapping(:,2) = (/1, 2, 3,   3,   4,   5,   5,   5/)
             
     
