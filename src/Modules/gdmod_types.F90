@@ -50,9 +50,8 @@ module gdmod_types
     !------------------------------------------------------------------!
     !                               Options                            !
     !------------------------------------------------------------------!
-    ! Each option type has a setting routine called 
-    ! SetDefault<optionname>, see subroutines after the 'contain' 
-    ! statement. 
+    ! Each option type also has a SetOptions routine in the 
+    ! gdmod_userinput module.
 
     ! Options for the main runfile type
     type RunfileOptionsUDT
@@ -296,6 +295,8 @@ module gdmod_types
         integer(I8), allocatable            :: cellregID(:)
         integer(I8), allocatable            :: faceregID(:)
         integer(I8), allocatable            :: fluxtuberegID(:)
+        integer(I8), allocatable            :: facelabel(:)
+        integer(I8), allocatable            :: celllabel(:)
 
     end type
 
@@ -534,6 +535,7 @@ module gdmod_types
 
     ! Data substructure
     subroutine AllocateGridData(data,grid)
+
         ! Description
         !============
         ! Allocate the structures inside the grid data structures. It 
@@ -557,6 +559,7 @@ module gdmod_types
 
     ! Flux data substructure
     subroutine AllocateFluxData(fluxdata,grid)
+
         ! Description
         !============
         ! Allocate the flux data structure. At least the following 
@@ -593,6 +596,7 @@ module gdmod_types
 
     ! Region data substrucure
     subroutine AllocateRegionData(regions,grid)
+
         ! Description
         !============
         ! Allocat the region data grid substructure. The following 
@@ -614,6 +618,8 @@ module gdmod_types
         allocate(regions%cellregID(grid%cells%ntot))
         allocate(regions%faceregID(grid%faces%ntot))
         allocate(regions%fluxtuberegID(grid%data%fluxdata%nFt))
+        allocate(regions%facelabel(grid%faces%ntot))
+        allocate(regions%celllabel(grid%cells%ntot))
 
     end subroutine
 

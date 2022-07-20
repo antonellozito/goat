@@ -132,8 +132,8 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     call cfruin (filespec, nx, nxdummy, 'icornVx')
 
     ! Read some labels, ignore
-    call cfruin (filespec, nf, fdummy(:,1),'fcLbl')
-    call cfruin (filespec, nc, cdummy(:,1),'cvLbl')
+    call cfruin (filespec, nf, grid%data%regions%facelabel,'fcLbl')
+    call cfruin (filespec, nc, grid%data%regions%celllabel,'cvLbl')
     call cfruin (filespec, grid%data%fluxdata%nFt, ftdummy,'ftLbl')
 
     ! Add geometry data
