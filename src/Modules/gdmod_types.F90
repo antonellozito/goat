@@ -220,12 +220,22 @@ module gdmod_types
         ! - nvert:                      total number of vertices
         ! - vert:                       all vertices belonging to that 
         !                               boundary
+        ! - nfaces:                     total number of faces 
+        ! - faces:                      all face indices 
         ! - ID:                         boundary ID (see below) that 
         !                               identifies the boundary type.
         ! 
         ! See also the interface routine InterfaceBoundaryMapping in 
         ! gdmod_interfaces on how the boundary IDs are mapped given 
         ! input from the grid generator. 
+
+        ! Note: the amount of vertices is per definition the amount of
+        ! faces minus one, also for closed boundaries. In the latter 
+        ! case, the begin and end vertex index are the same. This 
+        ! assumes that the boundaries should be polygons that either 
+        ! close perfectly on themselves, or are simple polygons (i.e. 
+        ! no polygon vertex should have more than three faces it belongs
+        ! to).
 
         ! Boundary ID meaning
         !====================
@@ -239,8 +249,12 @@ module gdmod_types
 
 
         ! Boundary vertices
-        integer(I8)                         :: nvert
+        integer(I8)                         :: nvert ! simply nfaces-1 actually
         integer(I8), allocatable            :: vert(:)   
+
+        ! Boundary faces
+        integer(I8)                         :: nfaces
+        integer(I8), allocatable            :: faces(:)             
         
         ! Boundary ID
         integer(I8)                         :: ID
@@ -400,6 +414,9 @@ module gdmod_types
         ! - faces           
         ! - cells
         ! - data
+        ! - bnd
+        !
+        ! Note: the bnd substructure has to be allocated separately
 
         ! Vertices
         type(VertexUDT)                     :: vert
@@ -412,6 +429,9 @@ module gdmod_types
 
         ! Additional data
         type(GridDataUDT)                   :: data
+
+        ! Boundaries
+        type(BndUDT), allocatable           :: bnd(:)
 
     end type
 
@@ -448,6 +468,10 @@ module gdmod_types
         !============
         ! Allocate the fields in the vertex, faces, and cell structures
         ! of the grid. 
+        !
+        ! Note: the bnd structure has to be allocated separately, since 
+        ! the size of this structure may vary, depending on the rest of
+        ! the grid. 
 
         ! The usual
         implicit none
@@ -577,7 +601,15 @@ module gdmod_types
         ! Allocate the boundary fields. It is assumed that the following
         ! fields are present:
         !
-        ! - nvert: number of boundary vertices
+        ! - nfaces:         number of boundary faces
+        !
+        ! Note: the amount of vertices is per definition the amount of
+        ! faces minus one, also for closed boundaries. In the latter 
+        ! case, the begin and end vertex index are the same. This 
+        ! assumes that the boundaries should be polygons that either 
+        ! close perfectly on themselves, or are simple polygons (i.e. 
+        ! no polygon vertex should have more than three faces it belongs
+        ! to)
         
         ! The usual
         implicit none
@@ -587,7 +619,10 @@ module gdmod_types
 
         ! Allocate
         !=========
+        bnd%nvert = bnd%nfaces-1
+        allocate(bnd%faces(bnd%nfaces))
         allocate(bnd%vert(bnd%nvert))
+        
 
     end subroutine
  
