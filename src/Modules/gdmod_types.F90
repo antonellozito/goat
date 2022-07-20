@@ -211,6 +211,42 @@ module gdmod_types
         integer(I8)                         :: ntot                      
     end type
 
+    ! Boundary structure
+    type BndUDT
+
+        ! Description
+        !============
+        ! Fields:   
+        ! - nvert:                      total number of vertices
+        ! - vert:                       all vertices belonging to that 
+        !                               boundary
+        ! - ID:                         boundary ID (see below) that 
+        !                               identifies the boundary type.
+        ! 
+        ! See also the interface routine InterfaceBoundaryMapping in 
+        ! gdmod_interfaces on how the boundary IDs are mapped given 
+        ! input from the grid generator. 
+
+        ! Boundary ID meaning
+        !====================
+        ! GRID DEFORMATION              PHYSICAL MEANING
+        !
+        ! 1                             target plate (inner)
+        ! 2                             target plate (outer)
+        ! 3                             private flux
+        ! 4                             core boundary
+        ! 5                             outermost flux surf.
+
+
+        ! Boundary vertices
+        integer(I8)                         :: nvert
+        integer(I8), allocatable            :: vert(:)   
+        
+        ! Boundary ID
+        integer(I8)                         :: ID
+
+    end type
+
     ! Additional grid data structures
     !================================
     ! Used to collect derived grid data, e.g. which link the grid cells 
@@ -533,6 +569,31 @@ module gdmod_types
 
     end subroutine
 
+    ! Boundary substructure
+    subroutine AllocateBnd(bnd)
+
+        ! Description
+        !============
+        ! Allocate the boundary fields. It is assumed that the following
+        ! fields are present:
+        !
+        ! - nvert: number of boundary vertices
+        
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(BndUDT)       :: bnd
+
+        ! Allocate
+        !=========
+        allocate(bnd%vert(bnd%nvert))
+
+    end subroutine
+ 
+
+    ! Additional grid data structures
+    !================================
     ! Data substructure
     subroutine AllocateGridData(data,grid)
 
