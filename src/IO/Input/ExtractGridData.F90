@@ -32,8 +32,8 @@ subroutine ExtractGridData(grid, meth)
     ! Declare variables
     !==================
     ! Arguments
-    type(GridUDT)               :: grid
-    character(len=*)            :: meth
+    type(GridUDT), intent(inout)    :: grid
+    character(len=*), intent(in)    :: meth
 
     ! Loop variables
     integer(I8)                 :: i, j, iFT, ib 
@@ -41,13 +41,14 @@ subroutine ExtractGridData(grid, meth)
     ! Auxiliary variables (
     type(FluxDataUDT)           :: fluxdata
     type(VertexUDT)             :: newverts ! necessary if ghost vertices are present
-    type(BndUDT), allocatable   :: Bnd(:)
 
     integer(I8)                 :: itf, ntf, ngv, nbnd, nfpb
     integer(I8), allocatable    :: tf(:), tfv(:,:), indgv(:), vdiff(:)
-    integer(I8), allocatable    :: gglabels(:), gdlabels(:), bndmapping(:,:)
+    integer(I8), allocatable    :: gglabels(:), gdlabels(:), bndmapping(:,:), &
+                                    sortindex(:), temparray(:,:)
 
-    logical, allocatable        :: isghostvert(:), mask(:)
+    logical, allocatable        :: isghostvert(:), mask(:), &
+                                ispolygonstart(:)
 
     integer(I8), allocatable    :: facevec(:) ! simply 1:grid%faces%ntot
 
@@ -204,6 +205,26 @@ subroutine ExtractGridData(grid, meth)
             ! Add
             grid%bnd(ib)%faces(:) = pack(facevec,mask)
 
+            ! Sort the boundary vertices and faces
+            allocate(sortindex(nfpb))
+            allocate(ispolygonstart(nfpb))
+            allocate(temparray(nfpb,2))
+
+            temparray(:,:) = grid%faces%vert(grid%bnd(ib)%faces,:)
+            call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart)
+            
+            ! Check for multiple boundaries, if so -> throw error for now
+            if (count(ispolygonstart) > 1) then
+                call gdErrorHandler('ExtractGridData: multiple polygons detected for single boundary, not supported')
+            end if
+
+            ! Sort faces
+            grid%bnd(ib)%faces(:) = grid%bnd(ib)%faces(sortindex)
+
+            ! Deallocate
+            deallocate(sortindex)
+            deallocate(ispolygonstart)
+            deallocate(temparray)
         end do
 
         ! Deallocate
