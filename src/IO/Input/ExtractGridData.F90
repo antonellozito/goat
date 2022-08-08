@@ -25,6 +25,8 @@ subroutine ExtractGridData(grid, meth)
     ! Declare modules
     use gdmod_types 
     use gdmod_interfaces
+    use gdmod_plots
+    use, intrinsic :: ieee_arithmetic, only: IEEE_Value, IEEE_QUIET_NAN
 
     ! The usual
     implicit none 
@@ -51,6 +53,12 @@ subroutine ExtractGridData(grid, meth)
                                 ispolygonstart(:)
 
     integer(I8), allocatable    :: facevec(:) ! simply 1:grid%faces%ntot
+
+    ! Plotting
+    real(R8)                    :: NaN
+    integer(I8)                 :: ntemp
+    real(R8), allocatable       :: tempx(:), tempy(:) ! coordinates
+    logical                     :: makedebugplots = .false. 
 
     ! Check ghost vertices
     !=====================
@@ -205,7 +213,7 @@ subroutine ExtractGridData(grid, meth)
             ! Add
             grid%bnd(ib)%faces(:) = pack(facevec,mask)
 
-            ! Sort the boundary vertices and faces
+            ! Sort the boundary faces
             allocate(sortindex(nfpb))
             allocate(ispolygonstart(nfpb))
             allocate(temparray(nfpb,2))
@@ -221,11 +229,44 @@ subroutine ExtractGridData(grid, meth)
             ! Sort faces
             grid%bnd(ib)%faces(:) = grid%bnd(ib)%faces(sortindex)
 
+            ! Extract vertices
+            call ExtractPolygonVertices( & 
+                grid%faces%vert(grid%bnd(ib)%faces,:),nfpb, &
+                grid%bnd(ib)%vert)
+
             ! Deallocate
             deallocate(sortindex)
             deallocate(ispolygonstart)
             deallocate(temparray)
         end do
+
+        ! Make a plot to check
+        if (makedebugplots) then
+            ntemp = 0
+            do ib = 1, nbnd
+                ntemp = ntemp + grid%bnd(ib)%nvert + 1
+            end do 
+            allocate(tempx(ntemp))
+            allocate(tempy(ntemp))
+            NaN = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+            ntemp = 1
+            do ib = 1, nbnd
+                print *, grid%bnd(ib)%vert
+                tempx(ntemp:ntemp+grid%bnd(ib)%nvert-1) = &
+                   grid%vert%x(grid%bnd(ib)%vert)
+                tempy(ntemp:ntemp+grid%bnd(ib)%nvert-1) = &
+                    grid%vert%y(grid%bnd(ib)%vert)
+                tempx(ntemp+grid%bnd(ib)%nvert) = NaN
+                tempy(ntemp+grid%bnd(ib)%nvert) = NaN
+                ntemp = ntemp + grid%bnd(ib)%nvert + 1
+            end do
+
+            ntemp = size(tempx)
+            call Plot2DPolygon(tempx, tempy, ntemp, '-p')
+            deallocate(tempx)
+            deallocate(tempy)
+        end if
+
 
         ! Deallocate
         deallocate(isghostvert)
