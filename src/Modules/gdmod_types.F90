@@ -604,7 +604,7 @@ module gdmod_types
         ! - nfaces:         number of boundary faces
         !
         ! Note: the amount of vertices is per definition the amount of
-        ! faces minus one, also for closed boundaries. In the latter 
+        ! faces plus one, also for closed boundaries. In the latter 
         ! case, the begin and end vertex index are the same. This 
         ! assumes that the boundaries should be polygons that either 
         ! close perfectly on themselves, or are simple polygons (i.e. 
@@ -619,7 +619,7 @@ module gdmod_types
 
         ! Allocate
         !=========
-        bnd%nvert = bnd%nfaces-1
+        bnd%nvert = bnd%nfaces+1
         allocate(bnd%faces(bnd%nfaces))
         allocate(bnd%vert(bnd%nvert))
         
