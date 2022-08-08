@@ -28,7 +28,40 @@ subroutine SortPolygonEdges(pein,ne,sortindex,ispolygonstart)
 
     ! Algorithm
     !==========
-    ! 1) Check if the polygon conforms to our demands
+    !
+    ! 0)    Initialize and allocate
+    ! 1)    Find a starting vertex:
+    !
+    !       Take a vertex, check how many times it occurs.
+    ! 
+    !       If one: 
+    !       start vertex found, go to 2). Else, repeat 1). If no
+    !       vertex found (and has not errored meanwhile), only closed
+    !       polygons are left.
+    !       Take any vertex as starting vertex, go to 2)
+    !
+    !       If two:
+    !       inner vertex found of a polygon, repeat 1) for the next
+    !       vertex.
+    !
+    !       If more than two:
+    !       throw error: this indicates branching and is not yet 
+    !       supported.
+    !        
+    ! 2)    Find the edges of the current polygon. 
+    !
+    !       2.1)    Find the edge that contains the current vertex which 
+    !               initially is the starting vertex and which has not
+    !               yet been sorted. If no edges meet this criterion,
+    !               exit the loop and go to 3). If one edge is found,
+    !               go to 2.2). If multiple edges are found, throw error
+    !               (this should be impossible though and would indicate
+    !               a bug in the code)
+    !       2.2)    For the next edge, find the other vertex and set it 
+    !               to the current vertex. Go to 2.1)
+
+    ! 3)    Update data structures, and check if any edges remain. If 
+    !       yes, go to 1), if no, exit the routine and return. 
 
     ! Initialize
     !===========
