@@ -1,4 +1,5 @@
 subroutine ConstructGrid(grid,gridoptions,options)
+    
     ! Description
     !============
     ! This function reads in the grid data (typically from a file 
@@ -44,11 +45,17 @@ subroutine ConstructGrid(grid,gridoptions,options)
             ! Open the file containing the grid data
             call cfopen(filespecifier(0),'inputfiles/b2fgmtry_us','old','un*formatted')
 
-            ! Read in the necessary grid data
+            ! Read in the grid data
             call ReadB2fgmtryUS(filespecifier(0),grid)
 
-            ! Extract the necessary grid data structures
+            ! Extract the grid data structures
             call ExtractGridData(grid,'b2fgmtry')
+
+            ! Open the file containing the vessel data
+
+            ! Read in the vessel data
+
+            ! Extract the vessel data structures
 
 
         case default 
@@ -63,5 +70,10 @@ subroutine ConstructGrid(grid,gridoptions,options)
         call gdErrorHandler('unknown grid type')
 
     end select
+
+    ! Compute grid interconnections
+    !==============================
+    call ComputeGridInterconnections(grid)
+
 
 end subroutine
