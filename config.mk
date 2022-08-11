@@ -15,7 +15,7 @@
 ##
 ## % 
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Modules Auxiliary IO_b25 IO_output IO_input  Setup  Drivers
+GDRUN_TARGETS = Modules Auxiliary IO_b25 IO_output IO_input  Setup  Drivers Numerics
 
 ##
 ## % Compiler
@@ -49,5 +49,8 @@ INPUT_FILES = $(wildcard src/IO/Input/*.F90)
 ## OUTPUT_FILES			: output generation filenames (.F90) - unsequenced
 OUTPUT_FILES = $(wildcard src/IO/Output/*.F90)
 
-## SETUP_FILLES			: setup file generation names (.F90) - unsequenced
+## SETUP_FILES			: setup file generation names (.F90) - unsequenced
 SETUP_FILES = $(wildcard src/Setup/*.F90)
+
+## NUMERICS_FILES 		: numeric file generation names (.F90) - unsequenced
+NUMERICS_FILES = $(wildcard src/Numerics/*.F90)
