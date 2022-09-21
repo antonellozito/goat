@@ -15,7 +15,7 @@
 ##
 ## % 
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Modules Auxiliary IO_b25 IO_output IO_input  Setup  Drivers Numerics
+GDRUN_TARGETS = Modules Auxiliary IO_b25 IO_carre IO_output IO_input  Setup  Drivers Numerics
 
 ##
 ## % Compiler
@@ -42,6 +42,9 @@ AUXILIARY_FILES = $(wildcard src/Auxiliary/*.F90)
 
 ## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
 B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)
+
+## CARRE_FILES			: carre generation filenames (.F90, .F) - unsequenced
+CARRE_FILES = $(wildcard src/IO/CARRE/*.F90) $(wildcard src/IO/CARRE/*.F)
 
 ## INPUT_FILES			: input generation filenames (.F90) - unsequenced
 INPUT_FILES = $(wildcard src/IO/Input/*.F90)

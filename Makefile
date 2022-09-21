@@ -64,6 +64,11 @@ IO_b25: $(B25_FILES)
 	$(FC) $(CFLAGS) $^
 	touch IO_b25
 
+## IO_carre			: compile carre routines
+IO_carre: $(CARRE_FILES)
+	$(FC) $(CFLAGS) $^
+	touch IO_carre
+
 ## Numerics		 	: compile numerics routines
 Numerics: $(NUMERICS_FILES)
 	$(FC) $(CFLAGS) $^
