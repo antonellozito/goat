@@ -17,6 +17,7 @@ subroutine RunGridOptimization(grid,designParams,options)
 
     ! Declare variables
     type(GridUDT)                   :: grid
+    type(MagneticFieldUDT)          :: magneticField
     type(DesignParamsUDT)           :: designParams
     type(RunfileOptionsUDT)         :: options 
     type(GridOptionsUDT)            :: gridoptions
@@ -42,6 +43,9 @@ subroutine RunGridOptimization(grid,designParams,options)
     !===========
     ! Construct the initial grid
     call ConstructGrid(grid,gridoptions,options);
+
+    ! Construct the initial magnetic field
+    call ConstructMagneticField(mfoptions, magneticField)
 
 
 end subroutine
