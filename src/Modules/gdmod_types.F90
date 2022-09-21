@@ -474,12 +474,14 @@ module gdmod_types
         ! - nZ:             number of sample points in the Z-direction
         ! - R:              nR-by-1 array with R-coordinates
         ! - Z:              nZ-by-1 array with Z-coordinates
+        ! - Psi:            nR-by-nZ array with magnetic flux values
 
         ! Coordinates
         integer(I8)                 :: nR 
         integer(I8)                 :: nZ
         real(R8), allocatable       :: R(:)
         real(R8), allocatable       :: Z(:)
+        real(R8), allocatable       :: Psi(:,:)
         
         ! Interpolant
         type(InterpolantUDT)        :: interp
@@ -767,6 +769,29 @@ module gdmod_types
         allocate(regions%fluxtuberegID(grid%data%fluxdata%nFt))
         allocate(regions%facelabel(grid%faces%ntot))
         allocate(regions%celllabel(grid%cells%ntot))
+
+    end subroutine
+
+    ! Magnetic field
+    !===============
+    subroutine AllocateMagneticField(magneticField)
+
+        ! Description
+        !============
+        ! Allocate the magnetic field properties. At least the fields nR
+        ! and nZ should be present. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(MagneticFieldUDT)          :: magneticField
+
+        ! Allocate
+        !=========
+        allocate(magneticField%R(magneticField%nR))
+        allocate(magneticField%Z(magneticField%nZ))
+        allocate(magneticField%Psi(magneticField%nR, magneticField%nZ))
 
     end subroutine
 

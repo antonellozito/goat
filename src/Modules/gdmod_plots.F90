@@ -31,6 +31,7 @@ module gdmod_plots
     ! Load modules
     use gdmod_types
     use gdmod_userinput 
+    use, intrinsic :: ieee_arithmetic, only: IEEE_Value, IEEE_QUIET_NAN
 
     ! The usual
     implicit none
@@ -58,6 +59,7 @@ module gdmod_plots
 
     ! Generic
     !========
+    ! 2D polygon plotter (only points)
     subroutine Plot2DPolygon(x,y,n,gnuplotoptions)
 
         ! Description
@@ -93,6 +95,53 @@ module gdmod_plots
             else
                 ! Write coordinates
                 write (fu, *) x(i), y(i)
+            end if
+        end do
+    
+        close (fu)
+
+        ! Call plotter
+        !=============
+        call gnuplotexe(gnuplotoptions,trim(plotfile))
+
+    end subroutine
+
+    ! Patchplot (filled polygons/curves)
+    subroutine Patchplot2D(x, y, z, n, gnuplotoptions)
+
+        ! Description
+        !============
+        ! Make a patchplot of the polygon with coordinates x, y where 
+        ! the color value of the polygon points is given in z. N should 
+        ! give the total number of points. Polygons should be separated
+        ! with NaNs.
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        integer                             :: n, i, fu
+        real(R8), dimension(n)              :: x, y, z
+        character(*)                        :: gnuplotoptions
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'patchplot')
+
+        ! Write the data file
+        !====================
+        ! Write vertex coordinates to file
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+    
+        do i = 1, n
+            if (isnan(x(i))) then 
+                ! Write blank line
+                write(fu, *)
+            else
+                ! Write coordinates
+                write (fu, *) x(i), y(i), z(i)
             end if
         end do
     
@@ -453,6 +502,94 @@ module gdmod_plots
 
     ! Optimization
     !=============
+
+    ! State
+    !======
+    ! Magnetic flux
+    subroutine PlotMagneticFlux(magneticField, gnuplotoptions)
+
+        ! Description
+        !============
+        ! Plot the magnetic flux values (psi), which are in this case 
+        ! given on a 2D (possibly nonuniform) mesh. The general 
+        ! patchplot routine is used to visualize the data. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(MagneticFieldUDT)              :: magneticField
+        integer                             :: i, j, k, fu, np
+        real(R8), allocatable               :: R(:), Z(:), Psi(:, :), &
+                                            x(:), y(:), val(:)
+        character(*)                        :: gnuplotoptions
+
+        ! Set NaN
+        real(R8)                            :: NaN
+
+        ! Initialize
+        !===========
+        ! Set NaN
+        NaN = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+
+        ! Write the data 
+        !===============
+        ! Number of polygons to be plotted (one cell each)
+        np = (magneticField%nR - 1) * (magneticField%nZ  - 1)
+
+        ! Allocate
+        allocate(R(magneticField%nR))
+        allocate(Z(magneticField%nZ))
+        allocate(Psi(magneticField%nR, magneticField%nZ))
+
+        allocate(x(5*np))
+        allocate(y(5*np))
+        allocate(val(5*np))
+
+        ! Unpack
+        R = magneticField%R
+        Z = magneticField%Z
+        Psi = magneticField%Psi
+
+        ! Loop over both coordinate directions
+        print *, 
+        k = 1
+        do i = 1, magneticField%nZ-1
+            do j = 1, magneticField%nR-1
+                ! Write
+                x(k) = R(j)
+                y(k) = Z(i)
+                val(k) = Psi(j, i)
+                k = k+1
+
+                x(k) = R(j+1)
+                y(k) = Z(i)
+                val(k) = Psi(j+1, i)
+                k = k+1
+
+                x(k) = R(j+1)
+                y(k) = Z(i+1)
+                val(k) = Psi(j+1, i+1)
+                k = k+1
+
+                x(k) = R(j)
+                y(k) = Z(i+1)
+                val(k) = Psi(j, i+1)
+                k = k+1
+
+                x(k) = NaN
+                y(k) = NaN
+                val(k) = NaN
+                k = k+1
+
+            end do
+        end do
+
+        ! Call the plotter
+        !=================
+        call Patchplot2D(x, y, val, 5*np, gnuplotoptions)
+
+    end subroutine
 
 
     !------------------------------------------------------------------!
