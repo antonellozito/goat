@@ -211,8 +211,7 @@ module gdmod_userinput
         type(MagneticFieldOptionsUDT)       :: options
 
         ! Default options   
-        options%readmeth                = 'readpsi'
-
+        options%readmeth                = 'readrzpsi'
 
     end subroutine
 

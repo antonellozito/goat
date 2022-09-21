@@ -436,6 +436,57 @@ module gdmod_types
     end type
 
     !------------------------------------------------------------------!
+    !                           Magnetic field                         !
+    !------------------------------------------------------------------!
+
+    ! Magnetic field substructures
+    !=============================
+    ! Interpolant
+    type InterpolantUDT 
+
+        ! Description
+        !============
+        ! Generic data type for polynomial interpolant construction.
+        ! Fields:
+        !
+        ! - type:           type of interpolant, e.g bicubic
+        ! - coef:           coefficients of the interpolant
+
+        ! Type
+        character(C32)              :: type 
+
+        ! Coefficient matrix
+        real(R8), allocatable       :: coef(:,:)
+
+    end type
+
+    ! Magnetic field
+    !===============
+    type MagneticFieldUDT
+
+        ! Description
+        !============
+        ! Data structure containing all the magnetic field data. The 
+        ! following fields should be present:
+        !
+        ! - interpolant:    see type definition for explanation
+        ! - nR:             number of sample points in the R-direction
+        ! - nZ:             number of sample points in the Z-direction
+        ! - R:              nR-by-1 array with R-coordinates
+        ! - Z:              nZ-by-1 array with Z-coordinates
+
+        ! Coordinates
+        integer(I8)                 :: nR 
+        integer(I8)                 :: nZ
+        real(R8), allocatable       :: R(:)
+        real(R8), allocatable       :: Z(:)
+        
+        ! Interpolant
+        type(InterpolantUDT)        :: interp
+
+    end type
+
+    !------------------------------------------------------------------!
     !                            Optimization                          !
     !------------------------------------------------------------------!
 
