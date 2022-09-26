@@ -12,6 +12,7 @@ subroutine ConstructMagneticField(mfoptions, magneticField)
     !===========
     ! Declare modules
     use gdmod_types 
+    use BicubicSplineInterpolant
 
     ! The usual
     implicit none 
@@ -19,13 +20,14 @@ subroutine ConstructMagneticField(mfoptions, magneticField)
     ! Declare variables
     !==================
     ! Arguments
-    type(MagneticFieldOptionsUDT)   :: mfoptions 
-    type(MagneticFieldUDT)          :: magneticField
+    type(MagneticFieldOptionsUDT)       :: mfoptions 
+    type(MagneticFieldUDT)              :: magneticField
 
     ! Loop variables
 
     ! Auxiliary variables 
-    integer                 :: filespecifier
+    integer                             :: filespecifier
+    type(BicubicSplineInterpolantUDT)   :: interp
 
     ! Data
     data filespecifier /60/
@@ -33,14 +35,17 @@ subroutine ConstructMagneticField(mfoptions, magneticField)
     ! Main program
     !=============
     ! Open the file containing the grid data
-    call cfopen(filespecifier,'inputfiles/rzpsi','old','un*formatted')
+    call cfopen(filespecifier,'inputfiles/rzpsi_asdex.dat','old','un*formatted')
 
     ! Read 
     call ReadMagneticField(filespecifier, mfoptions, magneticField)
 
     ! Construct interpolant representation
-    !call Make2DStructuredInterpolant(magneticField%R, magneticField%Z, &
-    !    magneticField%nR, magneticField%nZ, magneticField%interp)
-    
+    call ConstructBicubicSplineInterpolant(magneticField%Psi, &
+        magneticField%R, magneticField%Z, magneticField%nR, &
+        magneticField%nZ, interp)
+
+    ! Add interpolant to the magnetic field
+    magneticField%interp = interp
 
 end subroutine

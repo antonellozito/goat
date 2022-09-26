@@ -436,29 +436,40 @@ module gdmod_types
     end type
 
     !------------------------------------------------------------------!
-    !                           Magnetic field                         !
+    !                               Numerics                           !
     !------------------------------------------------------------------!
 
-    ! Magnetic field substructures
-    !=============================
-    ! Interpolant
-    type InterpolantUDT 
+    ! Interpolation
+    !==============
+    ! Bicubic spline interpolant
+    type BicubicSplineInterpolantUDT
 
         ! Description
         !============
-        ! Generic data type for polynomial interpolant construction.
-        ! Fields:
-        !
-        ! - type:           type of interpolant, e.g bicubic
-        ! - coef:           coefficients of the interpolant
+        ! Bicubic spline interpolation structure. Stores all necessary 
+        ! data to compute interpolated quantities (data has to be given
+        ! on a structured non-uniform grid) and their spatial 
+        ! derivatives (only in 2D)
 
-        ! Type
-        character(C32)              :: type 
+        ! Dimensions 
+        integer(I8)                 :: nx, ny ! number of points in x, y direction
+        integer(I8)                 :: nc ! number of 'cells' 
 
-        ! Coefficient matrix
-        real(R8), allocatable       :: coef(:,:)
+        ! Coordinates
+        real(R8), allocatable       :: x(:), y(:) ! coordinate vectors
+
+        ! Interpolation coefficients
+        integer(I8), allocatable    :: cellindex(:) ! index of interpolant grid cells
+        real(R8), allocatable       :: a(:,:) ! actual coefficient matrix
+
+        ! Scaling constants of the interpolant
+        real(R8), allocatable       :: refx(:), refy(:), refdx(:), refdy(:) 
 
     end type
+
+    !------------------------------------------------------------------!
+    !                           Magnetic field                         !
+    !------------------------------------------------------------------!
 
     ! Magnetic field
     !===============
@@ -484,7 +495,7 @@ module gdmod_types
         real(R8), allocatable       :: Psi(:,:)
         
         ! Interpolant
-        type(InterpolantUDT)        :: interp
+        type(BicubicSplineInterpolantUDT)        :: interp
 
     end type
 
@@ -772,31 +783,8 @@ module gdmod_types
 
     end subroutine
 
-    ! Magnetic field
-    !===============
-    subroutine AllocateMagneticField(magneticField)
-
-        ! Description
-        !============
-        ! Allocate the magnetic field properties. At least the fields nR
-        ! and nZ should be present. 
-
-        ! The usual
-        implicit none
-
-        ! Declare variables
-        type(MagneticFieldUDT)          :: magneticField
-
-        ! Allocate
-        !=========
-        allocate(magneticField%R(magneticField%nR))
-        allocate(magneticField%Z(magneticField%nZ))
-        allocate(magneticField%Psi(magneticField%nR, magneticField%nZ))
-
-    end subroutine
-
     ! Deallocation
-
+    !=============
     ! Vertex substructure
     subroutine DeallocateVertices(vert)
 
@@ -827,6 +815,66 @@ module gdmod_types
         deallocate(vert%celllist)
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                             Numerics                             !
+    !------------------------------------------------------------------!
+    subroutine AllocateBicubicSplineInterpolant(interp)
+
+        ! Description
+        !============
+        ! Allocate the fields of the interpolant. It is assumed that nx
+        ! and ny are set correctly. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(BicubicSplineInterpolantUDT)   :: interp
+
+        ! Allocate
+        !=========
+        interp%nc = (interp%nx-1)*(interp%ny-1)
+        allocate(interp%x(interp%nx))
+        allocate(interp%y(interp%ny))
+        allocate(interp%a(interp%nc, 16))
+        allocate(interp%refx(interp%nc))
+        allocate(interp%refy(interp%nc))
+        allocate(interp%refdx(interp%nc))
+        allocate(interp%refdy(interp%nc))
+
+
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                          Magnetic field                          !
+    !------------------------------------------------------------------!
+
+    ! Magnetic field
+    !===============
+    subroutine AllocateMagneticField(magneticField)
+
+        ! Description
+        !============
+        ! Allocate the magnetic field properties. At least the fields nR
+        ! and nZ should be present. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(MagneticFieldUDT)          :: magneticField
+
+        ! Allocate
+        !=========
+        allocate(magneticField%R(magneticField%nR))
+        allocate(magneticField%Z(magneticField%nZ))
+        allocate(magneticField%Psi(magneticField%nR, magneticField%nZ))
+
+    end subroutine
+
+    
 
 
 end module

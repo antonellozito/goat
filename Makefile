@@ -17,7 +17,7 @@ include config.mk
 ##
 # Linking
 gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
-	$(FC) -o gdrun *.o -pg
+	$(FC) -o gdrun *.o -pg -l /data/leuven/320/vsc32061/lapack/lapack/liblapack.a /data/leuven/320/vsc32061/lapack/lapack/librefblas.a 
 
 ## % Runfiles
 ## %=========

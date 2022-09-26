@@ -591,6 +591,208 @@ module gdmod_plots
 
     end subroutine
 
+    ! 2D structured state field
+    subroutine Plot2DStructuredField(v, x, y, nx, ny, gnuplotoptions)
+
+        ! Description
+        !============
+        ! Routine to plot 2D unstructured data, e.g. the magnetic field.
+        ! x, y should be nx-by-1 and ny-by-1 arrays. v should be an 
+        ! nx-by-ny array. Plotting is taken care of by the Patchplot2D 
+        ! routine. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        integer(I8), intent(in)             :: nx, ny
+        integer(I8)                         :: i, j, k, np
+        real(R8)                            :: v(1:nx,1:ny), & 
+            x(1:nx), y(1:nx)
+        character(*)                        :: gnuplotoptions
+        real(R8), allocatable               :: xp(:), yp(:), val(:)
+
+        ! Set NaN
+        real(R8)                            :: NaN
+
+        ! Initialize
+        !===========
+        ! Set NaN
+        NaN = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+
+        ! Write the data 
+        !===============
+        ! Number of polygons to be plotted (one cell each)
+        np = (nx - 1) * (ny  - 1)
+
+        ! Allocate
+        allocate(xp(5*np))
+        allocate(yp(5*np))
+        allocate(val(5*np))
+
+        ! Loop over both coordinate directions
+        print *, 
+        k = 1
+        do i = 1, ny-1
+            do j = 1, nx-1
+                ! Write
+                xp(k) = x(j)
+                yp(k) = y(i)
+                val(k) = v(j, i)
+                k = k+1
+
+                xp(k) = x(j+1)
+                yp(k) = y(i)
+                val(k) = v(j+1, i)
+                k = k+1
+
+                xp(k) = x(j+1)
+                yp(k) = y(i+1)
+                val(k) = v(j+1, i+1)
+                k = k+1
+
+                xp(k) = x(j)
+                yp(k) = y(i+1)
+                val(k) = v(j, i+1)
+                k = k+1
+
+                xp(k) = NaN
+                yp(k) = NaN
+                val(k) = NaN
+                k = k+1
+
+            end do
+        end do
+
+        ! Call the plotter
+        !=================
+        call Patchplot2D(xp, yp, val, 5*np, gnuplotoptions)
+
+    end subroutine
+
+    subroutine Plot2DUnstructuredField(field, grid, loc, gnuplotoptions)
+
+        ! Description
+        !============
+        ! Plot a cell-centered 2D field. The field should be a nc-by-1 
+        ! array (with nc the number of cells in grid%cells). This 
+        ! routine calls the Patchplot2D routine to do the plotting. 
+
+        ! The usual
+        implicit none
+
+        ! Arguments
+        real(R8)                            :: field(:)
+        type(GridUDT), intent(in)           :: grid 
+        character(*)                        :: gnuplotoptions
+        character(1)                        :: loc ! location of where to plot 
+
+        ! Loop variables
+        integer(I8)                         :: j, k, ind
+
+        ! Auxiliary variables
+        integer(I8)                         :: np, vertind
+        real(R8), allocatable               :: xp(:), yp(:), val(:)
+
+        ! Set NaN
+        real(R8)                            :: NaN
+
+        ! Initialize
+        !===========
+        ! Set NaN
+        NaN = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+
+        ! Construct plot data
+        !====================
+        ! Check the location 
+        select case (loc)
+
+        case ('c')
+
+            ! Cell based quantities
+
+            ! Length of xp, yp
+            np = sum(grid%cells%vertP(:,2)) + grid%cells%ntot
+
+            ! Allocate
+            allocate(xp(np))
+            allocate(yp(np))
+            allocate(val(np))
+
+            ! Loop over all cells
+            ind = 1
+            do k = 1, grid%cells%ntot
+                ! Loop over all vertices of the current cell
+                do j = 1, grid%cells%vertP(k,2)
+                    ! Add the coordinates and value
+                    vertind = grid%cells%vertP(k,1)+j-1
+                    xp(ind) = grid%vert%x(vertind)
+                    yp(ind) = grid%vert%y(vertind)
+                    val(ind) = field(k)
+
+                    ! Update ind
+                    ind = ind+1
+                end do
+                
+                ! Add NaN
+                xp(ind) = NaN
+                yp(ind) = NaN
+                val(ind) = NaN
+
+                ! Update ind
+                ind = ind+1
+            end do
+
+        case ('v')
+            
+            ! Vertex based quantities (still plotted per cell)
+
+            ! Length of xp, yp
+            np = sum(grid%cells%vertP(:,2)) + grid%cells%ntot
+
+            ! Allocate
+            allocate(xp(np))
+            allocate(yp(np))
+            allocate(val(np))
+
+            ! Loop over all cells
+            ind = 1
+            do k = 1, grid%cells%ntot
+                ! Loop over all vertices of the current cell
+                do j = 1, grid%cells%vertP(k,2)
+                    ! Add the coordinates and value
+                    vertind = grid%cells%vertlist(grid%cells%vertP(k,1)+j-1)
+                    xp(ind) = grid%vert%x(vertind)
+                    yp(ind) = grid%vert%y(vertind)
+                    val(ind) = field(vertind)
+
+                    ! Update ind
+                    ind = ind+1
+                end do
+                
+                ! Add NaN
+                xp(ind) = NaN
+                yp(ind) = NaN
+                val(ind) = NaN
+
+                ! Update ind
+                ind = ind+1
+            end do
+
+        case default
+
+            call gdErrorHandler('Plotter: plot option not implemented')
+
+        end select
+
+        ! Call the plotter
+        !=================
+        print *, size(xp,1), size(yp,1), size(val,1), val(1), np, ind
+        call Patchplot2D(xp, yp, val, np, gnuplotoptions)
+
+
+    end subroutine
+
 
     !------------------------------------------------------------------!
     !                         Auxiliary routines                       !
