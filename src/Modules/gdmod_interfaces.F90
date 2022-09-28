@@ -6,7 +6,7 @@
 
 ! Description
 !============
-! The purpose of this model is to interface with other programs (e.g 
+! The purpose of this module is to interface with other programs (e.g 
 ! the grid generator) and to translate their data types and variables to
 ! those used in the grid deformation modules. 
 

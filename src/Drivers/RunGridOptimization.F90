@@ -28,7 +28,7 @@ subroutine RunGridOptimization(grid,designParams,options)
     type(NumOptionsUDT)             :: num
 
     ! Debug
-    logical                             :: makedebugplots = .true.
+    logical                             :: makedebugplots = .false.
     real(R8), allocatable               :: xq(:), yq(:), vq(:), &
         xqmf(:,:), yqmf(:,:), vqmf(:,:)
 

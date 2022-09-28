@@ -51,13 +51,6 @@ subroutine ConstructGrid(grid,gridoptions,options)
             ! Extract the grid data structures
             call ExtractGridData(grid,'b2fgmtry')
 
-            ! Open the file containing the vessel data
-
-            ! Read in the vessel data
-
-            ! Extract the vessel data structures
-
-
         case default 
 
             call gdErrorHandler('unknown plasma grid input type')

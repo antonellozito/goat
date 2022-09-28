@@ -38,7 +38,7 @@ subroutine ConstructMagneticField(mfoptions, magneticField)
     call cfopen(filespecifier,'inputfiles/rzpsi_asdex.dat','old','un*formatted')
 
     ! Read 
-    call ReadMagneticField(filespecifier, mfoptions, magneticField)
+    call ReadMagneticField(filespecifier, magneticField, mfoptions)
 
     ! Construct interpolant representation
     call ConstructBicubicSplineInterpolant(magneticField%Psi, &

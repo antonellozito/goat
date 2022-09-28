@@ -46,7 +46,7 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     ! First, read the header with the version
     call cfverr(filespec,b2fgmtryversion)
 
-    ! Primray array dimensions
+    ! Primary array dimensions
     call cfruin (filespec,7,idum,'nCi,nCg,nCv,nFc,nVx,nFs,nFt')
     nc = idum(2)
     nf = idum(3)

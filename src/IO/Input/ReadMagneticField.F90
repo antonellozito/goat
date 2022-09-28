@@ -1,4 +1,4 @@
-subroutine ReadMagneticField(filespecifier, mfoptions, magneticField)
+subroutine ReadMagneticField(filespecifier, magneticField, mfoptions)
 
     ! Description
     !============
