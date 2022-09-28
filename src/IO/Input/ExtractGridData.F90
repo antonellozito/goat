@@ -53,6 +53,7 @@ subroutine ExtractGridData(grid, meth)
                                 ispolygonstart(:)
 
     integer(I8), allocatable    :: facevec(:) ! simply 1:grid%faces%ntot
+    integer(I8)                 :: start, nvert, tv(1:4), newv(1:4)
 
     ! Plotting
     real(R8)                    :: NaN
@@ -186,6 +187,28 @@ subroutine ExtractGridData(grid, meth)
             deallocate(mask)
         endif 
 
+        ! Reorden cell vertices
+        !======================
+        ! In a classical quadrilateral grid from CARRE(2), the vertices 
+        ! are not ordened (counter)clockwise. Here, this should be the
+        ! case. Therefore, for each cell that has 4 vertices (normally
+        ! every cell here, otherwise we print a warning), the 3nd and 
+        ! 4th vertex are switched. Guard cells without guard vertices 
+        ! are skipped (these should, in fact, be removed) 
+        do i = 1, grid%cells%ntot
+             if ((grid%cells%vertP(i,2) .ne. 4) .and. (grid%cells%vertP(i,2) .ne. 2))  then
+                print *, 'non-classical grid, vertex reordering may be wrong'
+            else 
+                start = grid%cells%vertP(i,1)
+                nvert = grid%cells%vertP(i,2)
+                tv = grid%cells%vertlist(start:start+nvert)
+                newv = tv 
+                newv(3) = tv(4)
+                newv(4) = tv(3)
+                grid%cells%vertlist(start:start+nvert) = newv
+            end if
+        end do
+
         ! Extract boundaries
         !===================
         ! Get the supported mapping between boundary labels 
@@ -273,6 +296,9 @@ subroutine ExtractGridData(grid, meth)
         deallocate(mask)
 
     case default
+
+        ! Unknown extraction case, throw error
+        call gdErrorHandler('ExtractGridData: unknown method')
 
     end select 
 
