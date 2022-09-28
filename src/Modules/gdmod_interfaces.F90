@@ -112,6 +112,100 @@ module gdmod_interfaces
         end select
     
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                              Vessel data                         !
+    !------------------------------------------------------------------!
+    ! Given the different vessel input formats, several reading routines
+    ! are provided here. Also, the vessel data extraction routines are
+    ! given here, since these can be very specific for each use case. 
+
+    ! Reading vessel data from structure.dat file
+    subroutine read_structure(filespecifier, vessel, vesseloptions)
+
+        ! Description
+        !============
+        ! Read the vessel data from a structure.dat file. This file 
+        ! should be strictly formatted (though not checked) as follows:
+        ! - The first line should contain the number of structures 
+        ! - The next two lines are skipped
+        ! - Starting from the fourth line, the structures follow. Each 
+        ! structure should first start with a header (which is ignored)
+        ! and subsequently with the number of points in the 
+        ! structure, where the sign of this number indicates whether the 
+        ! polygon should be closed (negative) or open (positive).
+
+        ! Notes:
+        ! The vessel should have an allocatable array of substructures
+        ! of the type 'VesselStructure'. This array is allocated while
+        ! reading in the number of vessel structures.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(VesselUDT)                         :: vessel
+        type(VesselOptionsUDT), intent(in)      :: vesseloptions
+        integer(I8), intent(in)                 :: filespecifier
+
+        ! Loop variables
+        integer(I4)                             :: i, j
+
+        ! Auxiliary variables
+        integer(I4)                             :: nstruct, npoints
+        character(C32)                          :: dummy
+
+        ! Initialize
+        !===========
+        ! Print from where we're reading
+        print *, 'reading vessel from file: ', vesseloptions%dir
+
+        ! Open the file
+        open(unit = filespecifier, file = vesseloptions%dir)
+
+        ! Read
+        !=====
+        ! Read the amount of structures
+        read(filespecifier, *) nstruct
+        print *, 'there are ', nstruct, ' structures present'
+        print *, 'vessel structure ID | number of points | is closed'
+
+        ! Allocate
+        vessel%nstructures = nstruct
+        print *, vessel%nstructures
+        allocate(vessel%structures(nstruct))
+
+        ! Skip the next line
+        read(filespecifier, *)
+
+        ! Read in structures
+        do i = 1, nstruct
+            ! Read the header (structure <structureID>)
+            read(filespecifier, *) dummy, vessel%structures(i)%ID
+
+            ! Read the number of points
+            read(filespecifier, *) npoints
+
+            ! Allocate
+            vessel%structures(i)%np = abs(npoints)
+            vessel%structures(i)%isclosed = (npoints < 0)
+            call AllocateVesselStructure(vessel%structures(i))
+
+            ! Print
+            print *, vessel%structures(i)%ID,  vessel%structures(i)%np, vessel%structures(i)%isclosed
+
+            ! Read coordinates
+            do j = 1, vessel%structures(i)%np
+                ! First x, then y coordinate
+                read(filespecifier, *) vessel%structures(i)%x(j), vessel%structures(i)%y(j)
+            end do
+        end do
+
+        ! Close the file
+        !===============
+        close(filespecifier)
+        
+
+    end subroutine
     
 
 

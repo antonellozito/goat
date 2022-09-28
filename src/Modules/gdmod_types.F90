@@ -112,6 +112,20 @@ module gdmod_types
         character(C32)       :: readmeth
     end type
 
+    ! Options for the vessel
+    type VesselOptionsUDT
+        character(C32)       :: readmeth
+        character(C32)       :: geom   
+        real(R8)             :: maxdist
+        logical              :: refine
+        character(:), allocatable :: dir
+    end type
+
+    ! Options for the environment
+    type EnvironmentOptionsUDT
+        character(C32)       :: type
+    end type
+
 
     !------------------------------------------------------------------!
     !                               Grid                               !
@@ -510,6 +524,92 @@ module gdmod_types
 
     end type
 
+    !------------------------------------------------------------------!
+    !                            Environment                           !
+    !------------------------------------------------------------------!
+    ! Vessel structures
+    !==================
+    type VesselStructureUDT
+
+        ! Description
+        !============
+        ! User defined type for the different substructures of the 
+        ! vessel. These are actually polygons (so with x, y coordinates)
+        ! that are used to build up the vessel structure afterwards. 
+        ! The following fields are present:
+        !
+        ! - np:         number of points in the polygon
+        ! - x, y:       polygon coordinates
+        ! - isclosed:   logical to indicate if the polygon should close
+        !               upon itself
+        ! - id:         identifier (integer number)
+
+        ! Coordinates
+        integer(I8)                         :: np
+        real(R8), allocatable               :: x(:), y(:)
+
+        ! Logicals
+        logical                             :: isclosed
+
+        ! ID
+        integer(I4)                         :: ID
+
+    end type
+
+    ! Vessel
+    !=======
+    type VesselUDT
+        
+        ! Description
+        !============
+        ! User defined structure to keep track of all vessel related 
+        ! data that is required for the grid optimization. Currently, 
+        ! this includes the following structures and fields:
+        !
+        ! - np:         number of points in the boundary polygon
+        ! - x, y:       x, y-coordinates (np-by-1 array)
+        ! - TPind:      integer array (np-by-1) indicating on which TP
+        !               a node is located
+        ! - ntp:        number of all target plate indices
+        ! - allTPind:   a list (ntp-by-1) of all target plate indices
+        ! - geom:       the vessel geometry being considered (character)
+        ! - nstructures:number of sub-structures of the vessel
+        ! - strcutures : nstructures-by-1 array of structures
+        
+        ! Coordinates
+        integer(I8)                         :: np
+        real(R8), allocatable               :: x(:), y(:)
+
+        ! Target plates
+        integer(I4)                         :: ntp
+        integer(I4), allocatable            :: allTPind(:)
+        integer(I4), allocatable            :: TPind(:)
+        
+        ! Geometry
+        character(C128)                     :: geom
+
+        ! Structures
+        integer(I4)                         :: nstructures 
+        type(VesselStructureUDT), allocatable       :: structures(:)
+
+    end type
+
+    ! Environment
+    !============
+    type EnvironmentUDT
+
+        ! Description
+        !============
+        ! Overarching type that stores all other structures etc which 
+        ! may be needed for grid optimization, and which are not 
+        ! related to the grid or the magnetic field. Currently, only
+        ! the vessel structure is stored here. 
+
+        type(VesselUDT)                 :: vessel
+
+    end type
+
+
     !==================================================================!
     !                                                                  !
     !                               ROUTINES                           !
@@ -874,7 +974,77 @@ module gdmod_types
 
     end subroutine
 
-    
+    !------------------------------------------------------------------!
+    !                            Environment                           !
+    !------------------------------------------------------------------!
+    ! Vessel structures
+    !==================
+    ! Allocation
+    subroutine AllocateVesselStructure(vesselstructure)
 
+        ! Description
+        !============
+        ! Routine to allocate the vessel structure quantities assuming
+        ! that np is given.
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(VesselStructureUDT)          :: vesselstructure
+
+        ! Allocate
+        !=========
+        allocate(vesselstructure%x(vesselstructure%np))
+        allocate(vesselstructure%y(vesselstructure%np))
+
+    end subroutine
+
+    ! Vessel
+    !=======
+    ! Allocation
+    subroutine AllocateVessel(vessel)
+
+        ! Description
+        !============
+        ! Allocate the vessel quantities assuming that np and ntp are 
+        ! given. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(VesselUDT)          :: vessel
+
+        ! Allocate
+        !=========
+        allocate(vessel%x(vessel%np))
+        allocate(vessel%y(vessel%np))
+        allocate(vessel%TPind(vessel%np))
+        allocate(vessel%allTPind(vessel%ntp))
+
+    end subroutine
+
+    ! Deallocation
+    subroutine DeallocateVessel(vessel)
+
+        ! Description
+        !============
+        ! Deallocate the vessel quantities.
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(VesselUDT)          :: vessel
+
+        ! Allocate
+        !=========
+        deallocate(vessel%x)
+        deallocate(vessel%y)
+        deallocate(vessel%TPind)
+        deallocate(vessel%allTPind)
+
+    end subroutine
 
 end module

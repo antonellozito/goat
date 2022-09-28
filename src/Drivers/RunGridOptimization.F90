@@ -26,6 +26,8 @@ subroutine RunGridOptimization(grid,designParams,options)
     type(DesignOptionsUDT)          :: designoptions
     type(MagneticFieldOptionsUDT)   :: mfoptions
     type(NumOptionsUDT)             :: num
+    type(EnvironmentOptionsUDT)     :: environmentoptions
+    type(EnvironmentUDT)            :: environment
 
     ! Debug
     logical                             :: makedebugplots = .false.
@@ -46,6 +48,9 @@ subroutine RunGridOptimization(grid,designParams,options)
     ! Magnetic field 
     call SetMagneticFieldOptions(mfoptions);
 
+    ! Environment
+    call SetEnvironmentOptions(environmentoptions)
+
     ! Initialize
     !===========
     ! Construct the initial grid
@@ -53,6 +58,9 @@ subroutine RunGridOptimization(grid,designParams,options)
 
     ! Construct the initial magnetic field
     call ConstructMagneticField(mfoptions, magneticField)
+
+    ! Construct the environment
+    call ConstructEnvironment(environment, environmentoptions)
 
     ! Debug plots
     !============
@@ -87,5 +95,7 @@ subroutine RunGridOptimization(grid,designParams,options)
         
         ! call Plot2DUnstructuredField(vq, grid, 'v', '-p')
     end if
+
+
 
 end subroutine

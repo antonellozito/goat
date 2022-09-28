@@ -31,6 +31,8 @@ module gdmod_userinput
     public SetGridOptions
     public SetNumOptions
     public SetMagneticFieldOptions
+    public SetEnvironmentOptions 
+    public SetVesselOptions
 
     !==================================================================!
     !                                                                  !
@@ -181,8 +183,6 @@ module gdmod_userinput
 
         ! Default options
         options%inputtype           = 'b2fgmtry'
-        options%vesselmaxdist       = 0.01
-        options%vesselrefine        = .true.
     
     end subroutine
 
@@ -212,6 +212,42 @@ module gdmod_userinput
 
         ! Default options   
         options%readmeth                = 'readrzpsi'
+
+    end subroutine
+
+    subroutine SetVesselOptions(options)
+
+        ! Description
+        !============
+        ! Set the options for the vessel.
+
+        ! Declare variables
+        !==================
+        type(VesselOptionsUDT)          :: options
+
+        ! Set options
+        !============
+        options%readmeth    = 'read_structure'
+        options%geom        = 'ASDEX_Nathan'
+        options%dir         = 'inputfiles/structure_straight_targets.dat'
+        options%maxdist     = 0.01
+        options%refine      = .true.
+
+    end subroutine
+
+    subroutine SetEnvironmentOptions(options)
+
+        ! Description
+        !============
+        ! Set the options to read in the environment.
+
+        ! Declare variables
+        !==================
+        type(EnvironmentOptionsUDT)         :: options
+
+        ! Set options
+        !============
+        options%type = 'vessel'
 
     end subroutine
 
