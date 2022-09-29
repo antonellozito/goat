@@ -148,7 +148,7 @@ module gdmod_interfaces
         integer(I8), intent(in)                 :: filespecifier
 
         ! Loop variables
-        integer(I4)                             :: i, j
+        integer(I8)                             :: i, j
 
         ! Auxiliary variables
         integer(I4)                             :: nstruct, npoints

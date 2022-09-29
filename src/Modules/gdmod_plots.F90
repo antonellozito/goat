@@ -519,7 +519,7 @@ module gdmod_plots
 
         ! Declare variables
         type(MagneticFieldUDT)              :: magneticField
-        integer                             :: i, j, k, fu, np
+        integer                             :: i, j, k, np
         real(R8), allocatable               :: R(:), Z(:), Psi(:, :), &
                                             x(:), y(:), val(:)
         character(*)                        :: gnuplotoptions
