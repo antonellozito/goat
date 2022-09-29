@@ -91,14 +91,14 @@ module BicubicSplineInterpolant
         integer(I8)                 :: i, j, ind
 
         ! Auxiliary variables 
-        real(R8)                    :: xg(1:nx, 1:ny), yg(1:nx, 1:ny), & 
+        double precision                  :: xg(1:nx, 1:ny), yg(1:nx, 1:ny), & 
             x0(1:nx-1, 1:ny-1), y0(1:nx-1, 1:ny-1), vx(1:nx, 1:ny), &
             vy(1:nx, 1:ny), vxy(1:nx, 1:ny), vyx(1:nx, 1:ny), &
             vxx(1:nx, 1:ny), vyy(1:nx, 1:ny), dx(1:nx-1), dy(1:ny-1), &
             tdx, tdy       
 
-        real                    :: c(1:16,1:16)
-        real, allocatable       :: rhs(:,:)
+        double precision                    :: c(1:16,1:16)
+        double precision, allocatable       :: rhs(:,:)
 
         ! Linear solver variables (dummies basically)
         integer(I8), allocatable           :: ipiv(:)
@@ -226,7 +226,7 @@ module BicubicSplineInterpolant
 
         ! Call the solver (make sure input is in right format!)
         allocate(ipiv(neq))
-        call sgesv(neq, interp%nc, c, neq, ipiv, rhs, neq, info)
+        call dgesv(neq, interp%nc, c, neq, ipiv, rhs, neq, info)
 
         ! Check if converged
         if (info .ne. 0) then
@@ -526,7 +526,6 @@ module BicubicSplineInterpolant
         integer(I8)                         :: k, indx, indy
 
         ! Auxiliary variables 
-        real(R8)                            :: minx, maxx, miny, maxy
         integer(I8)                         :: nq, nx, ny
 
         ! Compute indices
@@ -580,7 +579,6 @@ module BicubicSplineInterpolant
         
         ! Auxiliary
         integer(I8)                     :: nx
-        logical, allocatable            :: temp(:)
         logical                         :: notfound
 
         ! Compute the bin
