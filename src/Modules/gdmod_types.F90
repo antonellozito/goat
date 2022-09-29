@@ -481,6 +481,26 @@ module gdmod_types
 
     end type
 
+    ! Boundary shape functions
+    !=========================
+    type BoundaryShapeFunctionUDT
+
+        ! Description
+        !============
+        ! UDT for objects that describe the boundary shape function. It
+        ! has a type, which specifies the boundary type, and a parameter
+        ! structure, which is dynamically typed to have the required set
+        ! of parameters (these types are set in the boundary shape 
+        ! module)
+
+        ! Type
+        character(C128)             :: type 
+        
+        ! Parameter structure
+        class(*), allocatable       :: parameters
+
+    end type
+
     !------------------------------------------------------------------!
     !                           Magnetic field                         !
     !------------------------------------------------------------------!
@@ -517,10 +537,170 @@ module gdmod_types
     !                            Optimization                          !
     !------------------------------------------------------------------!
 
-    ! Design parameter structure
-    type DesignParamsUDT
+    ! Design variables 
+    !=================
+    type DesignVariablesUDT
+
+        ! Design variable type
+        character(C128)                 :: type
+
+        ! Design variable values
+        real(R8), allocatable           :: phi(:) 
+
+    end type
+
+    ! Cost function
+    !==============
+    type CostFunctionUDT
+
+        ! Note: this is the base class for the cost function. Parameters
+        ! are set as a dynamically typed UDT, which is assigned later
+        ! depending on the cost function type. 
+
+        ! Type 
+        character(C128)                 :: type
+
+        ! Parameters for evaluation
+        class(*), allocatable           :: parameters
+
+    end type
+
+    ! Box constraints
+    !================
+    type BoxConstraintsUDT
+
+        ! Upper and lower bound values for design parameters
+        real(R8), allocatable           :: ub(:), lb(:)
+
+        ! Number of bounds (NOT total box constraints!)
+        integer(I8)                     :: nb 
+
+    end type
+
+    ! Equality constraints
+    !=====================
+    ! Boundary shape functions
+    type ECBoundaryShapeFunctionsParUDT
+
+        ! Number of constraints
+        integer(I8)                     :: neqcon
+
+        ! Boundary list 
+        type(BoundaryShapeFunctionUDT), allocatable     :: Bndlist(:)
+
+    end type
+
+    ! X-point constraints
+    type ECXpointsParUDT
+
+        ! Number of constraints
+        integer(I8)                     :: neqcon
+
+        ! Vertex IDs of x-points
+        integer(I8), allocatable        :: vertID(:)
+
+        ! Coordinate values
+        real(R8), allocatable           :: x(:), y(:)          
+
+    end type 
+
+    ! Flux function constraints
+    type ECFluxfunctionParUDT
+
+        ! Number of constraints
+        integer(I8)                 :: neqcon
+
+        ! Flux value to impose
+        real(R8), allocatable       :: PsiD(:)
+
+        ! Vertex IDs to impose flux on
+        integer(I8), allocatable    :: vertID(:)
+
+    end type
+
+    ! Edge length constraints
+    type ECEdgeLengthParUDT
+
+        ! Number of constraints
+        integer(I8)                 :: neqcon
+
+        ! Vertex pairs to constrain
+        integer(I8)                 :: nvpairs
+        integer(I8), allocatable    :: vpairs(:,:)
+
+
+    end type
+
+    ! Equality constraint main type
+    type EqualityConstraintsUDT 
+
+        ! Total number of equality constraints
+        integer(I8)                 :: neqcontot
+
+        ! Logicals to indicate which constraints to impose
+        logical                     :: boundaryfunctions, fluxfunction, &
+                                    xpoints, edgelengths
+
+        ! Parameters for each of these constraint types
+        type(ECBoundaryShapeFunctionsParUDT)    :: boundaryfunctionspar
+        type(ECFluxfunctionParUDT)              :: fluxfunctionpar
+        type(ECXpointsParUDT)                   :: xpointspar
+        type(ECEdgeLengthParUDT)                :: edgelengthspar
+        
+    end type
+
+    ! Inequality constraints
+    !=======================
+    ! Linefolding constraint parameters
+    type ICLinefoldingUDT
+
+        ! Number of constraints
+        integer(I8)                 :: nineqcon
+
+        ! Vertex pairs where to impose linefolding
+        integer(I8)                 :: nvpairs 
+        integer(I8), allocatable    :: vpairs(:, :)
+
+    end type
+
+    ! Inequality constraint main type
+    type InequalityConstraintsUDT
+
+        ! Total number of inequality constraints
+        integer(I8)                 :: nineqcontot
+
+        ! Logicals to indicate which constraints to impose
+        logical                     :: linefolding
+
+        ! Parameters for each of these constraint types
+        type(ICLinefoldingUDT)      :: linefoldingpar
+
+    end type
+
+
+    ! Constraints (overarching)
+    !==========================
+    type ConstraintsUDT
+
+        ! Box constraints
+        type(BoxConstraintsUDT)             :: box
+
+        ! Equality constraints
+        type(EqualityConstraintsUDT)        :: eqcon
+
+        ! Inequality constraints        
+        type(InequalityConstraintsUDT)      :: ineqcon
+
+    end type
+    
+    ! Optimization problem
+    type OptimizationProblemUDT
+
         ! Design variables
-        real, allocatable   :: phi(:) 
+        type(DesignVariablesUDT)        :: designvariables
+        type(CostFunctionUDT)           :: costfunction
+        type(ConstraintsUDT)            :: constraints 
+        !type(OptimizationHistoryUDT)    :: history
 
     end type
 

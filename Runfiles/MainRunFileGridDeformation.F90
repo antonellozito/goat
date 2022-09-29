@@ -59,7 +59,7 @@ program GridDeformation
     type(RunfileOptionsUDT)    :: runfileOptions ! options for mainfile
     type(ExportOptionsUDT)     :: exportOptions ! options for exporting
     type(GridUDT)              :: grid ! grid structure
-    type(DesignParamsUDT)      :: designParams ! design parameters
+    type(OptimizationProblemUDT)      :: optimizationproblem ! design parameters
 
     ! Set the main options
     !=====================
@@ -79,7 +79,7 @@ program GridDeformation
     case ('optimize')
 
         ! Run the main optimization driver
-        call RunGridOptimization(grid,designParams,runfileOptions)
+        call RunGridOptimization(grid, optimizationproblem, runfileOptions)
 
     case default 
 

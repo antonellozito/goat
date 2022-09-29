@@ -1,4 +1,4 @@
-subroutine RunGridOptimization(grid,designParams,options)
+subroutine RunGridOptimization(grid, optimizationproblem, options)
     ! Description
     !============
     ! Main driver for optimization-based grid deformation. This routine
@@ -20,7 +20,7 @@ subroutine RunGridOptimization(grid,designParams,options)
     ! Declare variables
     type(GridUDT)                   :: grid
     type(MagneticFieldUDT)          :: magneticField
-    type(DesignParamsUDT)           :: designParams
+    type(OptimizationProblemUDT)    :: optimizationproblem
     type(RunfileOptionsUDT)         :: options 
     type(GridOptionsUDT)            :: gridoptions
     type(DesignOptionsUDT)          :: designoptions
@@ -61,6 +61,9 @@ subroutine RunGridOptimization(grid,designParams,options)
 
     ! Construct the environment
     call ConstructEnvironment(environment, environmentoptions)
+
+    ! Initialize the grid design problem (as an optimization problem)
+    !call ConstructGridDesignProblem(optimizationproblem, designoptions)
 
     ! Debug plots
     !============
