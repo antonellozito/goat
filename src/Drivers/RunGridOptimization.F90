@@ -1,4 +1,4 @@
-subroutine RunGridOptimization(grid, optimizationproblem, options)
+subroutine RunGridOptimization(grid, optimizationdriver, options)
     ! Description
     !============
     ! Main driver for optimization-based grid deformation. This routine
@@ -13,6 +13,7 @@ subroutine RunGridOptimization(grid, optimizationproblem, options)
     use gdmod_userinput 
     use gdmod_plots
     use BicubicSplineInterpolant
+    use gdmod_optimizationengine
 
     ! The usual
     implicit none
@@ -20,7 +21,7 @@ subroutine RunGridOptimization(grid, optimizationproblem, options)
     ! Declare variables
     type(GridUDT)                   :: grid
     type(MagneticFieldUDT)          :: magneticField
-    type(OptimizationProblemUDT)    :: optimizationproblem
+    type(OptimizationEngineUDT)     :: optimizationdriver
     type(RunfileOptionsUDT)         :: options 
     type(GridOptionsUDT)            :: gridoptions
     type(DesignOptionsUDT)          :: designoptions
@@ -63,7 +64,15 @@ subroutine RunGridOptimization(grid, optimizationproblem, options)
     call ConstructEnvironment(environment, environmentoptions)
 
     ! Initialize the grid design problem (as an optimization problem)
-    !call ConstructGridDesignProblem(optimizationproblem, designoptions)
+    call ConstructGridDesignProblem(optimizationdriver, designoptions, &
+        grid, magneticField, environment)
+
+    ! Solve
+    !======
+    ! Simply call the solver 
+    call optimizationdriver%solver%SolveOptimizationProblemKKT(optimizationdriver%problem)
+    
+    ! Do any post-processing if necessary
 
     ! Debug plots
     !============

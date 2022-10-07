@@ -68,6 +68,7 @@ module gdmod_types
     ! Options for the constraints
     type ConstraintOptionsUDT
         ! Fields for equality constraints
+        logical             :: boundaryfunctions ! impose boundary functions
         logical             :: fluxfunction ! impose constraints on flux
         logical             :: xpoints ! impose x-point location
         logical             :: edgelengths ! impose edge length cons
@@ -526,18 +527,6 @@ module gdmod_types
     !                            Optimization                          !
     !------------------------------------------------------------------!
 
-    ! Design variables 
-    !=================
-    type DesignVariablesUDT
-
-        ! Design variable type
-        character(C128)                 :: type
-
-        ! Design variable values
-        real(R8), allocatable           :: phi(:) 
-
-    end type
-
     ! Cost function
     !==============
     type CostFunctionUDT
@@ -596,7 +585,7 @@ module gdmod_types
     ! Flux function constraints
     type ECFluxfunctionParUDT
 
-        ! Number of constraints
+        ! Number of constraintsc
         integer(I8)                 :: neqcon
 
         ! Flux value to impose
@@ -667,31 +656,6 @@ module gdmod_types
     end type
 
 
-    ! Constraints (overarching)
-    !==========================
-    type ConstraintsUDT
-
-        ! Box constraints
-        type(BoxConstraintsUDT)             :: box
-
-        ! Equality constraints
-        type(EqualityConstraintsUDT)        :: eqcon
-
-        ! Inequality constraints        
-        type(InequalityConstraintsUDT)      :: ineqcon
-
-    end type
-    
-    ! Optimization problem
-    type OptimizationProblemUDT
-
-        ! Design variables
-        type(DesignVariablesUDT)        :: designvariables
-        type(CostFunctionUDT)           :: costfunction
-        type(ConstraintsUDT)            :: constraints 
-        !type(OptimizationHistoryUDT)    :: history
-
-    end type
 
     !------------------------------------------------------------------!
     !                            Environment                           !
@@ -777,7 +741,12 @@ module gdmod_types
         type(VesselUDT)                 :: vessel
 
     end type
-
+    
+    !==================================================================!
+    !                                                                  !
+    !                             INTERFACES                           !
+    !                                                                  !
+    !==================================================================!
 
     !==================================================================!
     !                                                                  !
@@ -1215,5 +1184,6 @@ module gdmod_types
         deallocate(vessel%allTPind)
 
     end subroutine
+    
 
 end module
