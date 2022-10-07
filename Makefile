@@ -29,6 +29,11 @@ MainRunFileGridDeformation.o: Runfiles/MainRunFileGridDeformation.F90
 ##
 ## % Folder compilation targets
 ## %===========================
+## General 			: compile general files and modules
+General: $(GENERAL_FILES)
+	$(FC) $(CFLAGS) $^
+	touch General
+	
 ## Modules			: compile modules 
 Modules: $(MODULE_FILES)
 	$(FC) $(CFLAGS) $^
@@ -73,6 +78,11 @@ IO_carre: $(CARRE_FILES)
 Numerics: $(NUMERICS_FILES)
 	$(FC) $(CFLAGS) $^
 	touch Numerics
+
+## Optimization		 	: compile optimization routines
+Optimization: $(OPTIMIZATION_FILES)
+	$(FC) $(CFLAGS) $^
+	touch Optimization
 
 ##
 ## % Run commands

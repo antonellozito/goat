@@ -15,7 +15,7 @@
 ##
 ## % 
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Modules Auxiliary IO_b25 IO_carre IO_output IO_input  Setup  Drivers Numerics
+GDRUN_TARGETS = General Optimization Modules Auxiliary IO_b25 IO_carre IO_output IO_input  Setup  Drivers Numerics
 
 ##
 ## % Compiler
@@ -31,11 +31,14 @@ CFLAGS = -c -g -Og -Wall -pg
 ## MAIN_RUNFILE			: Main runfile (.F90) - single file
 MAIN_RUNFILE = MainRunFileGridDeformation.F90
 
+## GENERAL_FILES				: All general files (e.g. precision definition, ... )
+GENERAL_FILES = $(wildcard src/General/*.F90)
+
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
 DRIVER_FILES = $(wildcard src/Drivers/*.F90)
 
 ## MODULE_FILES			: Module filenames (.F90, .F) - sequence matters
-MODULE_FILES = $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F)
+MODULE_FILES =  $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F)
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
 AUXILIARY_FILES = $(wildcard src/Auxiliary/*.F90)
@@ -57,3 +60,6 @@ SETUP_FILES = $(wildcard src/Setup/*.F90)
 
 ## NUMERICS_FILES 		: numeric file generation names (.F90) - unsequenced
 NUMERICS_FILES = $(wildcard src/Numerics/*.F90)
+
+## OPTIMIZATION 		: optimization file generation names (.F90) - unsequenced
+OPTIMIZATION_FILES = $(wildcard src/Optimization/*.F90)
