@@ -146,19 +146,20 @@ module gdmod_userinput
         type (DesignOptionsUDT), intent(inout)    :: options
 
         ! Default options, design variables
-        options%variables%type              = 'coordinates'
+        options%variables%type                  = 'coordinates'
 
         ! Default options, cost function
-        options%costfunction%type           = 'LR_FAD'
+        options%costfunction%type               = 'lengthratio'
 
         ! Default options, equality constraints
-        options%constraints%fluxfunction    = .true.
-        options%constraints%xpoints         = .true.
-        options%constraints%edgelengths     = .true.
-        options%constraints%orthogonality   = .true.
+        options%constraints%boundaryfunctions   = .true.
+        options%constraints%fluxfunction        = .true.
+        options%constraints%xpoints             = .true.
+        options%constraints%edgelengths         = .true.
+        options%constraints%orthogonality       = .true.
 
         ! Default options, inequality constraints
-        options%constraints%linefolding     = .true.
+        options%constraints%linefolding         = .true.
 
     end subroutine
 
