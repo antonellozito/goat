@@ -39,11 +39,14 @@ module optmod_designvariables
     !============
     ! Load modules
     use optmod_state
+    use mod_precision
 
     ! The usual
     implicit none
     save
-    public 
+    public
+
+     
 
     !==================================================================!
     !                                                                  !
@@ -53,16 +56,18 @@ module optmod_designvariables
 
     ! Abstract types
     !===============
-    type, abstract :: DesignVariablesUDT
+    type :: DesignVariablesUDT
 
         ! Description
         !============
-        integer(kind=8)                         :: nphi
-        real(kind=8), allocatable               :: phi(:)
+        integer(I8)                         :: nphi
+        real(R8), allocatable               :: phi(:)
         
     contains
 
-        procedure(InitializeDesign), deferred :: InitializeDesign
+        ! Housekeeping procedures
+        procedure :: Allocate           => AllocateDesign
+        procedure :: Deallocate         => DeallocateDesign
 
     end type
 
@@ -74,22 +79,6 @@ module optmod_designvariables
 
     ! Abstract interfaces
     !====================
-    abstract interface 
-
-        ! Design initialization
-        subroutine InitializeDesign(designvariables, state)
-            ! This routine should initialize the design, based on the 
-            ! data given in the state structure. The user has to provide
-            ! the initialization (with possible choices between 
-            ! different design variables) and, if desired, unpacking 
-            ! routines for the state parameters. 
-            import:: DesignVariablesUDT, StateUDT
-            class(DesignVariablesUDT)   :: designvariables 
-            class(StateUDT)             :: state
-
-        end subroutine
-
-    end interface 
 
     contains
 
@@ -98,5 +87,41 @@ module optmod_designvariables
     !                               ROUTINES                           !
     !                                                                  !
     !==================================================================!
+
+    ! Allocation
+    subroutine AllocateDesign(designvariables)
+
+        ! Description
+        !============
+        ! Allocate the design variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesUDT)       :: designvariables
+
+        ! Allocate
+        !=========
+        allocate(designvariables%phi(designvariables%nphi))
+
+    end subroutine
+
+    ! Deallocation
+    subroutine DeallocateDesign(designvariables)
+
+        ! Description
+        !============
+        ! Allocate the design variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesUDT)       :: designvariables
+
+        ! Allocate
+        !=========
+        deallocate(designvariables%phi)
+
+    end subroutine
 
 end module

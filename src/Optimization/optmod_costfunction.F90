@@ -34,8 +34,9 @@ module optmod_costfunction
 
         ! Description
         !============
-        ! Defines the basic optimization problem: it has a set of 
-        ! design variables, constraints, and a cost function. 
+        ! Defines the basic cost function structure. 
+
+    contains
 
     end type
 

@@ -34,6 +34,7 @@ module optmod_optimizationengine
     use optmod_constraints
     use optmod_state
     use optmod_numerics
+    use optmod_monitor
 
     ! The usual
     implicit none
@@ -48,16 +49,32 @@ module optmod_optimizationengine
 
     ! Optimization problem
     !=====================
-    type OptimizationProblemUDT
+    type, abstract :: OptimizationProblemUDT
 
         ! Description
         !============
-        ! Defines the basic optimization problem: it has a set of 
-        ! design variables, constraints, and a cost function. 
-        class(DesignVariablesUDT), allocatable      :: designvariables        
-        class(CostfunctionUDT), allocatable         :: costfunction 
-        class(ConstraintsUDT), allocatable          :: constraints
-        class(StateUDT), allocatable                :: state
+        ! Defines the basic optimization problem. All that is actually
+        ! required, are deferred procedures that update the design, 
+        ! compute the cost function, constraints (and their derivatives)
+        ! and a routine to update other structures of the problem, if 
+        ! necessary. It is highly adviseable to use the provided 
+        ! design variable, cost function, and constraint types in optmod, 
+        ! as these form the basis of any decent optimization problem. 
+        ! However, this is not a strict requirement to be able to use 
+        ! this module. The only field that is added, is a monitor 
+        ! structure to keep track of the progress of the algorithm. 
+        ! (to be moved to the engine in the future)
+        type(OptimizationMonitorUDT)                :: monitor
+
+    contains 
+
+        ! Dummy setup routine - to be replaced by the user
+        ! General initialization routine 
+        ! Design initialization
+
+        ! Design initialization
+        procedure(InitializeINT), deferred :: Initialize
+        
 
     end type
 
@@ -76,8 +93,8 @@ module optmod_optimizationengine
     contains 
 
         ! Solution procedure using KKT solver
-        procedure :: InitializeKKTSolver => InitializeKKTSolverINT
-        procedure :: SolveOptimizationProblemKKT => KKTSolver
+        procedure :: InitializeKKTSolver => InitializeKKTSolver
+        procedure :: SolveOptimizationProblemKKT => SolveOptimizationProblemKKT
 
     end type
 
@@ -85,25 +102,47 @@ module optmod_optimizationengine
     !====================
     type OptimizationEngineUDT 
 
-        type(OptimizationProblemUDT)                :: problem
+        ! Description
+        !============
+        ! The engine simply contains the problem and solver structures
+        ! (and in the future the monitor). 
+        class(OptimizationProblemUDT), allocatable  :: problem
         type(OptimizationSolverUDT)                 :: solver
 
     contains
 
-        procedure :: SetupOptimizationDriver => SetupOptimizationDriverDummy
+        ! Main driver to solve a problem
+        procedure :: Driver                 => OptimizationEngineDriver
 
     end type
-
-
-
-    ! Abstract types
-    !===============
 
     !==================================================================!
     !                                                                  !
     !                            INTERFACES                            !
     !                                                                  !
     !==================================================================!
+
+    ! Optimization problem
+    !=====================
+    abstract interface
+
+        subroutine InitializeINT(problem)
+            
+            ! Description
+            !============
+            ! This should be a general subroutine that initializes the 
+            ! design, given only the problem as input. Possibly, this 
+            ! problem can contain different substructures that allow 
+            ! the design to be initialized. 
+
+            ! Define interface
+            !=================
+            import :: OptimizationProblemUDT 
+            class(OptimizationProblemUDT) :: problem
+
+        end subroutine
+
+    end interface
 
     contains
 
@@ -113,22 +152,49 @@ module optmod_optimizationengine
     !                                                                  !
     !==================================================================!
 
-    ! Dummy initialization routine - to be overwritten by the user
-    subroutine SetupOptimizationDriverDummy(optimizationdriver) 
+    ! Main driver
+    subroutine OptimizationEngineDriver(optimizationengine)
 
         ! Description
         !============
-        ! This is only a dummy routine for setting up the optimization 
-        ! engine and should be overwritten 
+        ! This is the main generic driver of the optimization problem, 
+        ! which normally should not change anymore, as all user specific
+        ! data etc should be set through different routines. This driver
+        ! sets up and solves an optimization problem of a specific type
+        ! by calling the setup routines of the problem and solver, and 
+        ! then calling the main drivers of these routines. 
 
-        class(OptimizationEngineUDT) :: optimizationdriver 
+        ! Notes
+        !======
+        ! Note 1: as currently only a KKT solver is implemented, these
+        ! routines are called directly. Should be encapsulated in the 
+        ! future. 
 
-        print *, 'please replace this routine with your own setup routines'
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationEngineUDT) :: optimizationengine
+
+        ! Initialize
+        !===========
+        !call optimizationengine%SetupOptimizationDriver()
+        
+        ! Set up the problem
+        call optimizationengine%problem%Initialize()
+
+        ! Set up the solver - now KKT
+        call optimizationengine%solver%InitializeKKTSolver()
+
+        ! Solve
+        !======
+        ! Solve the optimization problem by calling the KKT solver
+        call optimizationengine%solver%SolveOptimizationProblemKKT( &
+            optimizationengine%problem)
 
     end subroutine
 
     ! KKT solver initialization
-    subroutine InitializeKKTSolverINT(solver)
+    subroutine InitializeKKTSolver(solver)
 
         ! Description
         !============
@@ -157,7 +223,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! KKT solver
-    subroutine KKTSolver(solver, problem)
+    subroutine SolveOptimizationProblemKKT(solver, problem)
 
         ! Description
         !============
@@ -172,29 +238,83 @@ module optmod_optimizationengine
         class(OptimizationProblemUDT)               :: problem
     
         ! Loop variables
-        integer(I8)                 :: itopt, maxit
+        integer(I8)                 :: itopt, maxit, verbosity
+        logical                     :: notconverged
         
         ! Auxiliary variables 
         real(R8)                    :: rxf, rxfdesign, rxfdec, rxfmin 
 
         ! Data
 
+        ! Temporary variables (to be deleted in the future)
+        integer(I8)                 :: nphi, neq, nineq
+        real(R8)                    :: opttol
+
         ! Initialize & unpack
         !====================
         ! Initialize the solver
         call solver%InitializeKKTSolver()
 
+        ! Initialize the monitor - only temporary here
+        opttol = 1e-8
+        nphi = 1
+        neq = 1
+        nineq = 1
+        call problem%monitor%Initialize(solver%numKKT%maxit, nphi, neq,&
+            nineq, opttol)
+
+
         ! Initialize counter(s)
         itopt = 1
-        maxit = 1
+        maxit = solver%numKKT%maxit
 
         ! Unpack numerical options
-        associate(maxit => solver%numKKT%maxit)
-            print *, maxit
-        end associate
-        print *, maxit 
+        rxf = solver%numKKT%rxf 
+        rxfdesign = solver%numKKT%rxfdesign 
+        rxfdec = solver%numKKT%rxfdec 
+        rxfmin = solver%numKKT%rxfmin 
+        verbosity = solver%numKKT%verbosity
 
+        ! Main loop
+        !==========
+        ! Set convergence
+        notconverged = .true. 
+
+        ! Print solver header
+        if (verbosity > 0) then
+            ! Print out the header
+            call problem%monitor%PrintHeader()
+
+        end if
+
+        ! Loop
+        do while (notconverged .and. (itopt <= maxit))
+
+            ! Update the monitor
+            problem%monitor%itopt = itopt
+
+            ! Update the monitor again
+            problem%monitor%J(itopt)        = 0
+            problem%monitor%dJ(:,itopt)     = 0
+            problem%monitor%L(itopt)        = 0
+            problem%monitor%dL(:,itopt)     = 0
+            problem%monitor%G(:,itopt)      = 0
+            problem%monitor%H(:,itopt)      = 0
+            problem%monitor%convnorm(itopt) = 0
+
+            ! Print the current iterate
+            if (verbosity > 0) then 
+                ! Print out the iterate
+                call problem%monitor%PrintIterate()
+
+            end if
+
+            ! Update the iteration counter
+            itopt = itopt+1
+
+        end do
 
     end subroutine
+
 
 end module
