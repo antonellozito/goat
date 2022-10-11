@@ -41,40 +41,42 @@ module gdmod_designvariables
     !                                                                  !
     !==================================================================!
 
+    ! Abstract types
+    !===============
+    ! Main design variable type for the grid deformation. Others should 
+    ! be derived from this type. 
+    type, abstract, extends(DesignVariablesUDT) :: DesignVariablesGDUDT
+
+    contains 
+
+        ! Design initialization
+        procedure(InitializeINT), deferred  :: Initialize
+
+        ! Design update
+        !procedure(UpdateINT), deferred      :: Update
+
+    end type
+
     ! Derived types
     !==============
     ! Should all extend the base type DesignVariablesUDT, defined in 
     ! optmod_designvariables.
 
     ! Design variables for coordinates
-    type, extends(DesignVariablesUDT) :: DesignVariablesCoordinatesUDT 
+    type, extends(DesignVariablesGDUDT) :: DesignVariablesCoordinatesUDT 
+
+        ! Coordinate indices
+        integer(I8), allocatable        :: xind(:), yind(:) 
 
     contains 
+    
+        ! Design initialization
+        procedure :: Initialize     => InitializeDesignCoordinates
 
-        procedure ::  InitializeDesign => InitializeDesignCoordinates
-
-    end type
-
-    type, abstract :: DesignVariablesParUDT
-
-    contains
-
-        procedure(InitializeDesignVariablesParametersINT), deferred :: &
-            InitializeDesignVariablesParameters 
-
-    end type  
-
-
-    ! Parameter type for coordinates
-    type, extends(DesignVariablesParUDT) :: DesignVariablesCoordinatesParUDT
-
-        ! Indices for x, y coordinates in phi
-        integer(I8), allocatable        :: xind(:), yind(:)
-
-    contains 
-
-        ! Comment for select type behavior
-        procedure :: InitializeDesignVariablesParameters => InitializeDesignParametersCoordinates
+        ! Housekeeping
+        procedure :: AllocateDesignCoordinates
+        procedure :: DeallocateDesignCoordinates
+        final :: DestroyDesignCoordinates
 
     end type
 
@@ -84,22 +86,34 @@ module gdmod_designvariables
     !                                                                  !
     !==================================================================!
 
-    ! Parameters
+    ! Abstract interfaces
+    !====================
     abstract interface
-    
-        ! Design initialization
-        subroutine InitializeDesignVariablesParametersINT(parameters, &
-            grid, magneticField, environment)
-            import :: DesignVariablesParUDT, &
-                gridUDT, MagneticFieldUDT, EnvironmentUDT 
-            class(DesignVariablesParUDT)        :: parameters 
-            type(GridUDT)                       :: grid
-            type(MagneticFieldUDT)              :: magneticField
-            type(EnvironmentUDT)                :: environment
+
+        ! Design initialization, specific for our purposes
+        subroutine InitializeINT(designvariables, grid, magneticField, &
+            environment)
+
+            ! Description
+            !============
+            ! Interface for the design initialization routine that each
+            ! derived type should have. Since this is specific for the
+            ! grid deformation routines, the grid, magnetic field and
+            ! environment structures can/have to be passed. 
+
+            ! Import
+            import :: DesignVariablesGDUDT, GridUDT, MagneticFieldUDT, & 
+                EnvironmentUDT
+
+            ! Declare
+            class(DesignVariablesGDUDT)         :: designvariables 
+            type(GridUDT), intent(in)           :: grid
+            type(MagneticFieldUDT), intent(in)  :: magneticField 
+            type(EnvironmentUDT) , intent(in)   :: environment
+
         end subroutine
 
     end interface
-
 
     contains
 
@@ -114,7 +128,8 @@ module gdmod_designvariables
     !------------------------------------------------------------------!
 
     ! Design initialization
-    subroutine InitializeDesignCoordinates(designvariables, state)
+    subroutine InitializeDesignCoordinates(designvariables, grid, &
+        magneticField, environment)
 
         ! Description
         !============
@@ -124,190 +139,100 @@ module gdmod_designvariables
         ! Declare variables
         !==================
         ! Arguments
-        class(DesignVariablesCoordinatesUDT)           :: designvariables
-        class(StateUDT)                                :: state 
+        class(DesignVariablesCoordinatesUDT)        :: designvariables
+        type(gridUDT), intent(in)                   :: grid 
+        type(MagneticFieldUDT), intent(in)          :: magneticField 
+        type(EnvironmentUDT), intent(in)            :: environment
     
         ! Loop variables
+        integer(I8)                                 :: i
 
         ! Auxiliary variables 
 
         ! Data
+
+        ! Initialize
+        !===========
+        ! Set the number of design variables
+        designvariables%nphi = 2*grid%vert%ntot 
+
+        ! Allocate (specific routine for this design variable type)
+        call designvariables%AllocateDesignCoordinates(grid)
+
+        print *, designvariables%nphi
+
+        ! Set the design variables
+        designvariables%phi(1:grid%vert%ntot) = grid%vert%x 
+        designvariables%phi(grid%vert%ntot+1:designvariables%nphi) = &
+            grid%vert%y 
+
+        ! Set other fields
+        designvariables%xind = (/(i, i = 1, grid%vert%ntot)/)
+        designvariables%yind = designvariables%xind + grid%vert%ntot
 
     end subroutine
 
-    ! Design initialization (main routine)
-   ! subroutine SetupDesign(designvariables, grid, magneticField, &
-    !    environment)
+    ! Housekeeping
+    subroutine AllocateDesignCoordinates(designvariables, grid)
 
         ! Description
         !============
-        ! Initialize the design variables. It is assumed the design 
-        ! variable type is already set. Based on that, the variables phi
-        ! are initialized differently. 
-
-        ! Notes
-        !======
-
-        ! Initialize
-        !===========
-        ! Declare modules
-
-        ! The usual
+        ! Allocate. Assumed that nphi is given. 
 
         ! Declare variables
         !==================
         ! Arguments
-      !  type(DesignVariablesUDT)            :: designvariables 
-      !  type(GridUDT), intent(in)           :: grid 
-      !  type(MagneticFieldUDT), intent(in)  :: magneticField
-      !  type(EnvironmentUDT), intent(in)    :: environment
+        class(DesignVariablesCoordinatesUDT)        :: designvariables 
+        type(GridUDT)                               :: grid
 
-        ! Loop variables
+        ! Allocate
+        !=========
+        ! Call the parent allocation routine
+        call designvariables%Allocate()
 
-        ! Auxiliary variables 
-      !  class(DesignVariablesCoordinatesParUDT), pointer  :: coordinatespar 
-      !  class(DesignVariablesCoordinatesParUDT), allocatable :: mycoordinatespar
-
-        ! Data
-
-        ! Initialize design
-        !==================
-        ! Check the design type
-      !  select case(trim(designvariables%type))
-
-      !  case ('coordinates')
-
-            ! Design variables are x, y coordinates (first x, then y)
-
-            ! Compute total number of design variables
-      !      designvariables%nphi = 2*grid%vert%ntot 
-
-            ! Allocate
-      !      allocate(designvariables%phi(designvariables%nphi))
-
-            ! Set parameters
-      !      allocate(DesignVariablesCoordinatesParUDT::designvariables%parameters)
-
-            ! Comment for select type beahvior
-      !      call designvariables%parameters%InitializeDesignParameters(grid, magneticField, environment)
-
-            ! This should not work here
-            ! call designvariables%parameters%mydummyroutineforclasses(grid)
-       !     select type(associate=>designvariables%parameters)
-
-      !      type is (DesignVariablesCoordinatesParUDT)
-
-                ! Though we get here... 
-       !         print *, 'we are here in the select type while running classes'
-
-                ! ... None of this works - perfect 'encapsulation'... 
-                ! print *, designvariables%parameters%xind(1)
-                !parameters%mydummyroutineforclasses(grid)
-                !coordinatespar => designvariables%parameters
-
-                ! Though If we really want, we can use other objects NOT related to the original designvariables%parameters...
-         !       allocate(DesignVariablesCoordinatesParUDT::mycoordinatespar)
-
-         !       call mycoordinatespar%InitializeDesignParameters(grid, magneticField, environment)
-         !       call mycoordinatespar%mydummyroutineforclasses(grid)
-!
-                ! Note that this should not work
-                ! call mycoordinatespar%InitializeDesignParametersCoordinates(grid, magneticField, environment)
-
-
-          !  end select
-
-            ! Uncomment for select type behavior
-            ! call InitializeDesignParametersCoordinates(designvariables%parameters, grid, magneticField, environment)
-
-            ! Initialize design variables
-            ! call SetDesignVariables(designvariables%parameters, grid, magneticField, environment)
-
-
-       ! case default
-
-            ! Throw error
-       !     call gdErrorHandler('Design variable type not implemented')
-
-       ! end select
-
-
-   !end subroutine
-
-    ! Design variable value initialization
-    !=====================================
-    subroutine SetDesignVariablesCoordinates(parameters, &
-        designvariables, grid, magneticField, environment)
-
-        ! Description
-        !============
-        ! Set the design variable parameters for the coordinates.
-
-        ! Notes
-        !======
-
-        ! Initialize
-        !===========
-        ! Declare modules
-
-        ! The usual
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(DesignVariablesUDT)                :: designvariables
-        class(DesignVariablesCoordinatesParUDT)  :: parameters 
-        type(GridUDT)              :: grid 
-        type(MagneticFieldUDT)     :: magneticField
-        type(EnvironmentUDT)       :: environment
-
-        ! Loop variables
-
-        ! Auxiliary variables 
-
-        ! Data
-
-        ! Initialize values
-        !==================
-        ! Simply x and y coordinates here
-        !designvariables%phi(parameters%xind) = grid%vert%x
-        !designvariables%phi(parameters%yind) = grid%vert%y
-
+        ! Allocate the remaining fields, specific for this type
+        allocate(designvariables%xind(grid%vert%ntot))
+        allocate(designvariables%yind(grid%vert%ntot))
 
     end subroutine
 
-    ! Parameter initialization
-    !=========================
-    subroutine InitializeDesignParametersCoordinates(parameters, &
-        grid, magneticField, environment)
+    subroutine DeallocateDesignCoordinates(designvariables)
 
         ! Description
         !============
-        ! Set the design variable parameters for the coordinates.
-
-        ! Notes
-        !======
-
-        ! Initialize
-        !===========
-        ! Declare modules
-
-        ! The usual
+        ! Deallocate
 
         ! Declare variables
         !==================
         ! Arguments
-        class(DesignVariablesCoordinatesParUDT)  :: parameters 
-        type(GridUDT)              :: grid 
-        type(MagneticFieldUDT)     :: magneticField
-        type(EnvironmentUDT)       :: environment
+        class(DesignVariablesCoordinatesUDT)        :: designvariables 
 
-        ! Loop variables
+        ! Allocate
+        !=========
+        ! Call the parent allocation routine
+        call designvariables%Deallocate()
 
-        ! Auxiliary variables 
+        ! Allocate the remaining fields, specific for this type
+        deallocate(designvariables%xind)
+        deallocate(designvariables%yind)
 
-        ! Data        
+    end subroutine
 
+    subroutine DestroyDesignCoordinates(designvariables)
+
+        ! Description
+        !============
+        ! Destructor
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(DesignVariablesCoordinatesUDT) :: designvariables
+
+        ! Destroy
+        !========
+        call designvariables%Deallocate()
+        
     end subroutine
 
 end module
