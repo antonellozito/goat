@@ -20,11 +20,16 @@ module gdmod_optimizationengine
     ! Initialize
     !============
     ! Load modules
+    use mod_precision
     use optmod_optimizationengine
-    use optmod_designvariables
-    use optmod_costfunction
-    use optmod_constraints
-    use optmod_state
+    !use optmod_designvariables
+    !use optmod_costfunction
+    !use optmod_constraints
+    !use optmod_state
+    use gdmod_state
+    use gdmod_designvariables
+    use gdmod_costfunction
+    use gdmod_types
 
     ! The usual
     implicit none
@@ -37,10 +42,35 @@ module gdmod_optimizationengine
     !                                                                  !
     !==================================================================!
 
+    ! Optimization problem
+    !=====================
+    type, extends(OptimizationProblemUDT) :: OptimizationProblemGDUDT
+
+        ! Description
+        !============
+        ! Overwrite the initial design routines with our own
+        ! implemented and derived types. 
+
+        ! The classical derived types
+        class(DesignVariablesGDUDT), allocatable :: designvariables
+        class(CostfunctionGDUDT), allocatable    :: costfunction
+
+        ! Additional fields that are needed
+        type(GridUDT)                       :: grid 
+        type(MagneticFieldUDT)              :: magneticField
+        type(EnvironmentUDT)                :: environment
+        
+    contains
+
+        ! Overwrite setup routine with our own setup
+        procedure :: Initialize      => InitializeOptimizationProblemGD
+
+    end type 
 
     ! Optimization engine
     !====================
     type, extends(OptimizationEngineUDT) :: OptimizationEngineGDUDT 
+
 
     contains 
 
@@ -78,8 +108,8 @@ module gdmod_optimizationengine
         ! Initialize
         !===========
         ! Declare modules
-        use gdmod_types
-        use gdmod_userinput
+        !use gdmod_types
+        !use gdmod_userinput
 
         ! The usual
         implicit none 
@@ -90,9 +120,13 @@ module gdmod_optimizationengine
         class(OptimizationEngineGDUDT)      :: optimizationdriver 
 
         ! Loop variables
+        type(DesignVariablesCoordinatesUDT) :: thisdesign
+        type(OptimizationProblemGDUDT)      :: thisproblem
 
         ! Auxiliary variables 
         type(DesignOptionsUDT)              :: designoptions
+        type(StateGDUDT)                    :: thisstate
+        real(R8) :: dummy
 
         ! Data
 
@@ -100,6 +134,93 @@ module gdmod_optimizationengine
         !=================
         ! Set the design options
         call SetDesignOptions(designoptions)
+        allocate(optimizationdriver%problem, source=thisproblem)
+        !allocate(optimizationdriver%problem%designvariables, source=thisdesign)
+        !allocate(optimizationdriver%state, source = thisstate)
+        !call optimizationdriver%problem%designvariables%Initialize(dummy)
+        !call thisdesign%Initialize(dummy)
+
+    end subroutine
+
+    ! Optimization problem initialization
+    subroutine InitializeOptimizationProblemGD(problem) 
+
+        ! Description
+        !============
+        ! This routine further initializes the design variables, cost
+        ! function, and constraints. It is assumed that the grid, 
+        ! magnetic field, and environment structures are properly 
+        ! assigned. The allocatable components of the problem, namely 
+        ! the cost function and design variables.
+
+        ! Initialize
+        !===========
+        ! Declare modules
+        use gdmod_types
+        use gdmod_userinput
+
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)      :: problem
+
+        ! Loop variables
+
+        ! Auxiliary variables 
+        type(DesignOptionsUDT)              :: designoptions
+
+        ! Data
+
+        ! Design options
+        !===============
+        ! Set the design options
+        call SetDesignOptions(designoptions)
+
+        ! Design variables
+        !=================
+        ! Allocate the design variables, depending on the type.
+        select case (trim(designoptions%variables%type))
+
+        case ('coordinates')
+
+            ! Only coordinates
+            
+            allocate(DesignVariablesCoordinatesUDT::problem%designvariables)
+
+        case default
+
+            ! Throw error
+            call gdErrorHandler('Unknown design variable type')
+
+        end select
+
+        ! Initialize the design variables
+        call problem%designvariables%Initialize(problem%grid, &
+            problem%magneticField, problem%environment)
+        
+        ! Cost function
+        !==============
+        ! Allocate the cost function, depending on the type
+        select case (trim(designoptions%costfunction%type))
+
+        case ('lengthratio')
+
+            ! Allocate
+            allocate(CostFunctionLRUDT::problem%costfunction)
+
+        case default
+            
+            call gdErrorHandler('Unknown cost function type')
+
+        end select
+
+        ! Initialize the cost function
+        call problem%costfunction%Initialize(problem%grid, &
+            problem%magneticField, problem%environment)
+
 
 
     end subroutine
