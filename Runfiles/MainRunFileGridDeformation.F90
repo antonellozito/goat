@@ -51,7 +51,7 @@ program GridDeformation
     ! Declare modules to be used
     use gdmod_types
     use gdmod_userinput
-    use optmod_optimizationengine
+    use gdmod_optimizationengine
     
     ! The usual
     implicit none
@@ -60,7 +60,7 @@ program GridDeformation
     type(RunfileOptionsUDT)    :: runfileOptions ! options for mainfile
     type(ExportOptionsUDT)     :: exportOptions ! options for exporting
     type(GridUDT)              :: grid ! grid structure
-    type(OptimizationEngineUDT)      :: optimizationdriver 
+    type(OptimizationEngineGDUDT)      :: optimizationdriver 
 
     ! Set the main options
     !=====================

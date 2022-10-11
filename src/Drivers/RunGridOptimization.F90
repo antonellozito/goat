@@ -21,7 +21,7 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
     ! Declare variables
     type(GridUDT)                   :: grid
     type(MagneticFieldUDT)          :: magneticField
-    type(OptimizationEngineUDT)     :: optimizationdriver
+    type(OptimizationEngineGDUDT)   :: optimizationdriver
     type(RunfileOptionsUDT)         :: options 
     type(GridOptionsUDT)            :: gridoptions
     type(DesignOptionsUDT)          :: designoptions
@@ -69,8 +69,11 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
 
     ! Solve
     !======
-    ! Simply call the solver 
-    call optimizationdriver%solver%SolveOptimizationProblemKKT(optimizationdriver%problem)
+    ! Simply call the solver ... 
+    call optimizationdriver%Driver()
+
+    ! ... and unpack the solution
+    !grid = optimizationdriver%grid
     
     ! Do any post-processing if necessary
 
