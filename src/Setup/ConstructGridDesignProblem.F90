@@ -19,6 +19,7 @@ subroutine ConstructGridDesignProblem(optimizationdriver, &
     use gdmod_types 
     use gdmod_designvariables
     use gdmod_optimizationengine
+    use gdmod_state
     ! use gdmod_costfunction
 
     ! The usual
@@ -29,7 +30,7 @@ subroutine ConstructGridDesignProblem(optimizationdriver, &
     ! Arguments
     type(OptimizationEngineGDUDT)       :: optimizationdriver
     type(DesignOptionsUDT), intent(in)  :: designoptions
-    type(GridUDT), intent(in)           :: grid 
+    type(GridUDT), intent(in)           :: grid
     type(MagneticFieldUDT), intent(in)  :: magneticField
     type(EnvironmentUDT), intent(in)    :: environment
 
@@ -39,26 +40,32 @@ subroutine ConstructGridDesignProblem(optimizationdriver, &
 
     ! Data
 
-    ! Design variables
-    !=================
-    ! Setup the design variables
-    print *, 'we are here'
-    call optimizationdriver%SetupOptimizationDriver()
+    ! State
+    !======
     
-    ! Set the type
-    !optimizationproblem%designvariables%type = &
-    !    designoptions%variables%type 
+    
 
-    ! Initialize the design
-    !call InitializeDesign(optimizationproblem%designvariables, grid, magneticField, &
-    !    environment)
-    !call InitializeDesignParameters(optimizationproblem%designvariables%parameters, &
-    !    optimizationproblem%designvariables, grid, magneticField, environment)
+    call optimizationdriver%SetupOptimizationDriver()
 
-    ! Initialize design variables
-    !call SetDesignVariables(optimizationproblem%designvariables%parameters, grid, &
-    !       magneticField, environment)
+    ! Associate in order to execute select type...
+    associate(thisproblem => optimizationdriver%problem) 
 
+        select type(thisproblem)
 
+        type is (OptimizationProblemGDUDT)
+    
+            ! This should be the only possible type 
+            thisproblem%grid = grid 
+            thisproblem%magneticField = magneticField 
+            thisproblem%environment = environment
+
+        class default
+
+            ! Unknown, throw error
+            stop 'Unknown optimization problem type'
+
+        end select
+
+    end associate
 
 end subroutine
