@@ -32,7 +32,6 @@ module optmod_optimizationengine
     use optmod_designvariables
     use optmod_costfunction
     use optmod_constraints
-    use optmod_state
     use optmod_numerics
     use optmod_monitor
 

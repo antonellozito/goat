@@ -28,7 +28,6 @@ module gdmod_designvariables
     use gdmod_types
     use gdmod_userinput 
     use optmod_designvariables
-    use gdmod_state
 
     ! The usual
     implicit none

@@ -38,7 +38,6 @@ module optmod_designvariables
     ! Initialize
     !============
     ! Load modules
-    use optmod_state
     use mod_precision
 
     ! The usual

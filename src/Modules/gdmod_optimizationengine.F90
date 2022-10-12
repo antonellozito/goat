@@ -22,11 +22,6 @@ module gdmod_optimizationengine
     ! Load modules
     use mod_precision
     use optmod_optimizationengine
-    !use optmod_designvariables
-    !use optmod_costfunction
-    !use optmod_constraints
-    !use optmod_state
-    use gdmod_state
     use gdmod_designvariables
     use gdmod_costfunction
     use gdmod_types
@@ -125,7 +120,6 @@ module gdmod_optimizationengine
 
         ! Auxiliary variables 
         type(DesignOptionsUDT)              :: designoptions
-        type(StateGDUDT)                    :: thisstate
         real(R8) :: dummy
 
         ! Data
