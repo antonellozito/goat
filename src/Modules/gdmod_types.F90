@@ -145,7 +145,12 @@ module gdmod_types
         ! - nfacelist       : length of facelist   
         ! - cellP           : similar to faceP, but for vertex cells
         ! - celllist        : similar to facelist, but for vertex cells
-        ! - ncellist        : length of celllist        
+        ! - ncellist        : length of celllist    
+        ! - neiglist        : list of neighbouring vertices (nneiglist-
+        !                   by-1)
+        ! - nneiglist       : dimension of neiglist (scalar)
+        ! - neigP           : ntot-by-2 array, analogous to faceP and 
+        !                   cellP, but for neiglist.     
 
         ! Coordinates
         real(R8), allocatable               :: x(:),y(:) 
@@ -153,15 +158,19 @@ module gdmod_types
         ! Logicals and indices
         logical, allocatable                :: BV(:)
         integer(I8), allocatable            :: fieldlineID(:) 
-        integer(I8)                         :: ntot
+        integer(I8)                         :: ntot = 0
 
         integer(I8), allocatable            :: faceP(:,:)
         integer(I8), allocatable            :: facelist(:)
-        integer(I8)                         :: nfacelist
+        integer(I8)                         :: nfacelist = 0
 
         integer(I8), allocatable            :: cellP(:,:)
         integer(I8), allocatable            :: celllist(:)
-        integer(I8)                         :: ncelllist
+        integer(I8)                         :: ncelllist = 0
+
+        integer(I8), allocatable            :: neigP(:,:)
+        integer(I8), allocatable            :: neiglist(:)
+        integer(I8)                         :: nneiglist = 0
 
     end type
 
@@ -175,11 +184,14 @@ module gdmod_types
         ! - vert            : set of (two) vertices belonging to that 
         !                   face
         ! - neig            : cell neighbours of face
+        ! - BF              : logical index that is true if the face
+        !                   is a boundary face
 
         ! Logicals and indices
         integer(I8), allocatable            :: vert(:,:)
         integer(I8), allocatable            :: neig(:,:)
-        integer(I8)                         :: ntot
+        integer(I8)                         :: ntot = 0
+        logical, allocatable                :: BF(:)
     end type
 
     ! Cell structure
@@ -201,18 +213,22 @@ module gdmod_types
         ! - faceP           : similar to vertP, but for faces
         ! - facelist        : similar to vertlist, but for faces
         ! - nfacelist       : similar to nvertlist, but for faces
+        ! - GC              : ntot-by-1 logical vector indicating if the
+        !                   cell is a guard cell
 
 
         ! Logicals and indices
         integer(I8), allocatable            :: vertP(:,:)
         integer(I8), allocatable            :: vertlist(:)
-        integer(I8)                         :: nvertlist
+        integer(I8)                         :: nvertlist = 0
 
         integer(I8), allocatable            :: faceP(:,:)
         integer(I8), allocatable            :: facelist(:)
-        integer(I8)                         :: nfacelist
+        integer(I8)                         :: nfacelist = 0
 
-        integer(I8)                         :: ntot                      
+        logical, allocatable                :: GC(:)
+
+        integer(I8)                         :: ntot = 0                      
     end type
 
     ! Boundary structure
@@ -253,11 +269,11 @@ module gdmod_types
 
 
         ! Boundary vertices
-        integer(I8)                         :: nvert ! simply nfaces-1 actually
+        integer(I8)                         :: nvert = 0 ! simply nfaces-1 actually
         integer(I8), allocatable            :: vert(:)   
 
         ! Boundary faces
-        integer(I8)                         :: nfaces
+        integer(I8)                         :: nfaces = 0
         integer(I8), allocatable            :: faces(:)             
         
         ! Boundary ID
@@ -312,8 +328,8 @@ module gdmod_types
         !                   containing the flux tube ID of each vertex
 
         ! Logicals and indices
-        integer(I8)                         :: nFt
-        integer(I8)                         :: nFs
+        integer(I8)                         :: nFt = 0
+        integer(I8)                         :: nFs = 0
 
         ! Arrays, flux tube data
         integer(I8), allocatable            :: fluxtubecellsP(:,:)
@@ -512,8 +528,8 @@ module gdmod_types
         ! - Psi:            nR-by-nZ array with magnetic flux values
 
         ! Coordinates
-        integer(I8)                 :: nR 
-        integer(I8)                 :: nZ
+        integer(I8)                 :: nR = 0 
+        integer(I8)                 :: nZ = 0
         real(R8), allocatable       :: R(:)
         real(R8), allocatable       :: Z(:)
         real(R8), allocatable       :: Psi(:,:)
@@ -551,7 +567,7 @@ module gdmod_types
         real(R8), allocatable           :: ub(:), lb(:)
 
         ! Number of bounds (NOT total box constraints!)
-        integer(I8)                     :: nb 
+        integer(I8)                     :: nb = 0 
 
     end type
 
@@ -561,7 +577,7 @@ module gdmod_types
     type ECBoundaryShapeFunctionsParUDT
 
         ! Number of constraints
-        integer(I8)                     :: neqcon
+        integer(I8)                     :: neqcon = 0
 
         ! Boundary list 
         type(BoundaryShapeFunctionUDT), allocatable     :: Bndlist(:)
@@ -678,7 +694,7 @@ module gdmod_types
         ! - id:         identifier (integer number)
 
         ! Coordinates
-        integer(I8)                         :: np
+        integer(I8)                         :: np = 0
         real(R8), allocatable               :: x(:), y(:)
 
         ! Logicals
@@ -710,11 +726,11 @@ module gdmod_types
         ! - strcutures : nstructures-by-1 array of structures
         
         ! Coordinates
-        integer(I8)                         :: np
+        integer(I8)                         :: np = 0
         real(R8), allocatable               :: x(:), y(:)
 
         ! Target plates
-        integer(I4)                         :: ntp
+        integer(I4)                         :: ntp = 0
         integer(I4), allocatable            :: allTPind(:)
         integer(I4), allocatable            :: TPind(:)
         
@@ -722,7 +738,7 @@ module gdmod_types
         character(C128)                     :: geom
 
         ! Structures
-        integer(I4)                         :: nstructures 
+        integer(I4)                         :: nstructures = 0
         type(VesselStructureUDT), allocatable       :: structures(:)
 
     end type
@@ -809,6 +825,10 @@ module gdmod_types
         !
         ! - ntot        : total number of vertices
 
+        ! Note: derived quantities, such as the vertex neighbours, 
+        ! cannot be allocated beforehand. These should be done 
+        ! separately, e.g. in the ComputeGridInterconnections routine
+
 
         ! The usual
         implicit none
@@ -854,7 +874,8 @@ module gdmod_types
         ! Allocate
         !=========
         allocate(faces%vert(faces%ntot,2))
-        allocate(faces%neig(faces%ntot,2))
+        allocate(faces%neig(faces%ntot,2)) 
+        allocate(faces%BF(faces%ntot))
 
     end subroutine
 
@@ -883,6 +904,8 @@ module gdmod_types
 
         ! Allocate
         !=========
+        ! Guard cells
+        allocate(cells%GC(cells%ntot))
         ! Vertex values
         allocate(cells%vertP(cells%ntot,2))
         allocate(cells%vertlist(cells%nvertlist)) 
