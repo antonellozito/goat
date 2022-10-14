@@ -126,7 +126,7 @@ module optmod_numerics
         ! Set defaults
         !=============
         num%tol         = 1e-6
-        num%maxit       = 1000
+        num%maxit       = 10
         num%verbosity   = 1
 
     end subroutine
