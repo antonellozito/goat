@@ -71,9 +71,14 @@ module optmod_optimizationengine
         ! General initialization routine 
         ! Design initialization
 
+        ! Get problem dimensions
+        procedure(GetProblemDimensionsINT), deferred :: GetProblemDimensions
+
         ! Design initialization
-        procedure(InitializeINT), deferred :: Initialize
-        
+        procedure(InitializeINT), deferred      :: Initialize 
+
+        ! Design updates
+        ! procedure(UpdateDesignINT), deferred    :: UpdateDesign       
 
     end type
 
@@ -125,6 +130,7 @@ module optmod_optimizationengine
     !=====================
     abstract interface
 
+        ! Problem initialization
         subroutine InitializeINT(problem)
             
             ! Description
@@ -138,6 +144,25 @@ module optmod_optimizationengine
             !=================
             import :: OptimizationProblemUDT 
             class(OptimizationProblemUDT) :: problem
+
+        end subroutine
+
+        ! Get problem dimensions
+        subroutine GetProblemDimensionsINT(problem, nphi, neq, nineq)
+
+            ! Description
+            !============
+            ! This routine should return the general problem dimensions.
+            ! Here, nphi is the number of design variables, neq the 
+            ! number of equality constraints, and nineq the number of
+            ! inequality constraints.
+            
+            ! Import
+            import :: OptimizationProblemUDT, I8 
+
+            ! Declare
+            class(OptimizationProblemUDT)       :: problem 
+            integer(I8), intent(out)            :: nphi,  neq, nineq
 
         end subroutine
 
@@ -256,9 +281,7 @@ module optmod_optimizationengine
 
         ! Initialize the monitor - only temporary here
         opttol = 1e-8
-        nphi = 1
-        neq = 1
-        nineq = 1
+        call problem%GetProblemDimensions(nphi, neq, nineq)
         call problem%monitor%Initialize(solver%numKKT%maxit, nphi, neq,&
             nineq, opttol)
 
@@ -288,6 +311,9 @@ module optmod_optimizationengine
 
         ! Loop
         do while (notconverged .and. (itopt <= maxit))
+
+            ! Update the design
+            ! call problem%UpdateDesign()
 
             ! Update the monitor
             problem%monitor%itopt = itopt
