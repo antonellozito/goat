@@ -78,7 +78,7 @@ module optmod_optimizationengine
         procedure(InitializeINT), deferred      :: Initialize 
 
         ! Design updates
-        ! procedure(UpdateDesignINT), deferred    :: UpdateDesign       
+        procedure(UpdateDesignINT), deferred    :: UpdateDesign       
 
     end type
 
@@ -163,6 +163,22 @@ module optmod_optimizationengine
             ! Declare
             class(OptimizationProblemUDT)       :: problem 
             integer(I8), intent(out)            :: nphi,  neq, nineq
+
+        end subroutine
+
+        ! Design update
+        subroutine UpdateDesignINT(problem)
+
+            ! Description
+            !============
+            ! This routine should update all problem structures after
+            ! the design step has been computed. 
+
+            ! Import
+            import :: OptimizationProblemUDT, I8 
+
+            ! Declare
+            class(OptimizationProblemUDT)       :: problem 
 
         end subroutine
 
@@ -313,7 +329,7 @@ module optmod_optimizationengine
         do while (notconverged .and. (itopt <= maxit))
 
             ! Update the design
-            ! call problem%UpdateDesign()
+            call problem%UpdateDesign()
 
             ! Update the monitor
             problem%monitor%itopt = itopt
