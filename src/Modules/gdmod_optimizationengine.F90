@@ -57,11 +57,19 @@ module gdmod_optimizationengine
         
     contains
 
-        ! Overwrite setup routine with our own setup
+        ! Overwrite 
+        !==========
+        ! Problem initialization
         procedure :: Initialize      => InitializeOptimizationProblemGD
 
         ! Dimension query
         procedure :: GetProblemDimensions   => GetProblemDimensionsGD 
+
+        ! Design update
+        procedure :: UpdateDesign           => UpdateDesignGD
+
+        ! Additional routines
+        !====================
 
     end type 
 
@@ -268,6 +276,41 @@ module gdmod_optimizationengine
             problem%magneticField, problem%environment)
 
 
+
+    end subroutine
+
+    ! Design update
+    subroutine UpdateDesignGD(problem)
+
+        ! Description
+        !============
+        ! Update the problem according to the design variables. Here,
+        ! the grid, magnetic field, and environment should be updated,
+        ! depending on the type of design variable. 
+
+        ! Initialize
+        !===========
+        ! Declare modules
+
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+
+        ! Loop variables
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Update design
+        !==============
+        ! Simply call the update routine from the design variables
+        call problem%designvariables%UpdateDesign(problem%grid, &
+            problem%magneticField, problem%environment)
 
     end subroutine
 
