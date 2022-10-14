@@ -52,7 +52,7 @@ module gdmod_designvariables
         procedure(InitializeINT), deferred  :: Initialize
 
         ! Design update
-        !procedure(UpdateINT), deferred      :: Update
+        procedure(UpdateDesignINT), deferred      :: UpdateDesign
 
     end type
 
@@ -71,6 +71,9 @@ module gdmod_designvariables
     
         ! Design initialization
         procedure :: Initialize     => InitializeDesignCoordinates
+
+        ! Design update
+        procedure :: UpdateDesign   => UpdateDesignCoordinates
 
         ! Housekeeping
         procedure :: AllocateDesignCoordinates
@@ -109,6 +112,32 @@ module gdmod_designvariables
             type(GridUDT), intent(in)           :: grid
             type(MagneticFieldUDT), intent(in)  :: magneticField 
             type(EnvironmentUDT) , intent(in)   :: environment
+
+        end subroutine
+
+        ! Design update
+        subroutine UpdateDesignINT(designvariables, grid, &
+            magneticfield, environment)
+
+            ! Description
+            !============
+            ! Interface for the design update routine that each
+            ! derived type should have. Since this is specific for the
+            ! grid deformation routines, the grid, magnetic field and
+            ! environment structures can/have to be passed. 
+            ! This routine should update the grid, magnetic field, and
+            ! environment structure according to the values given in 
+            ! designvariables%phi
+
+            ! Import
+            import :: DesignVariablesGDUDT, GridUDT, MagneticFieldUDT, & 
+                EnvironmentUDT
+
+            ! Declare
+            class(DesignVariablesGDUDT)             :: designvariables 
+            type(GridUDT), intent(inout)            :: grid
+            type(MagneticFieldUDT), intent(inout)   :: magneticField 
+            type(EnvironmentUDT) , intent(inout)    :: environment
 
         end subroutine
 
@@ -168,6 +197,37 @@ module gdmod_designvariables
         ! Set other fields
         designvariables%xind = (/(i, i = 1, grid%vert%ntot)/)
         designvariables%yind = designvariables%xind + grid%vert%ntot
+
+    end subroutine
+
+    ! Design update
+    subroutine UpdateDesignCoordinates(designvariables, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Update the design coordinates according to the phi values. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesCoordinatesUDT)        :: designvariables
+        type(gridUDT), intent(inout)                :: grid 
+        type(MagneticFieldUDT), intent(inout)       :: magneticField 
+        type(EnvironmentUDT), intent(inout)         :: environment
+    
+        ! Loop variables
+        integer(I8)                                 :: i
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Update
+        !=======
+        ! Grid coordinates
+        grid%vert%x = designvariables%phi(designvariables%xind)
+        grid%vert%y = designvariables%phi(designvariables%yind)
 
     end subroutine
 
