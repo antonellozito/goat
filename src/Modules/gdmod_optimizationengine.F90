@@ -60,6 +60,9 @@ module gdmod_optimizationengine
         ! Overwrite setup routine with our own setup
         procedure :: Initialize      => InitializeOptimizationProblemGD
 
+        ! Dimension query
+        procedure :: GetProblemDimensions   => GetProblemDimensionsGD 
+
     end type 
 
     ! Optimization engine
@@ -91,6 +94,9 @@ module gdmod_optimizationengine
     !                                                                  !
     !==================================================================!
 
+    !------------------------------------------------------------------!
+    !                       OPTIMIZATION ENGINE                        !
+    !------------------------------------------------------------------!
     ! Optimization engine initialization
     subroutine SetupOptimizationDriverGD(optimizationdriver) 
 
@@ -133,6 +139,52 @@ module gdmod_optimizationengine
         !allocate(optimizationdriver%state, source = thisstate)
         !call optimizationdriver%problem%designvariables%Initialize(dummy)
         !call thisdesign%Initialize(dummy)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                       OPTIMIZATION PROBLEM                       !
+    !------------------------------------------------------------------!
+    ! Dimension query
+    subroutine GetProblemDimensionsGD(problem, nphi, neq, nineq)
+
+        ! Description
+        !============
+        ! Return the problem dimensions nphi, neq, nineq (number of 
+        ! design variables, equality contraints, and inequality 
+        ! constraints, resp. ). It is assumed that the problem is
+        ! already properly initialized. 
+
+        ! nphi is obtained from designvariables%nphi
+        ! TO DO: change neq, nineq 
+
+        ! Initialize
+        !===========
+        ! Declare modules
+
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        integer(I8), intent(out)            :: nphi, neq, nineq
+
+        ! Loop variables
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Output
+        !=======
+        ! Design variables
+        nphi = problem%designvariables%nphi
+
+        ! Constraints - TO DO
+        neq = 0
+        nineq = 0
 
     end subroutine
 
