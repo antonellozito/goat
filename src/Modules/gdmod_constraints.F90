@@ -7,8 +7,24 @@
 ! Description
 !============
 ! This module contains the constraint classes specific for the grid 
-! deformation. These inherit from the mother type defined in 
-! optmod_constraints.
+! deformation. It relies on user input defined in the gdmod_userinput
+! module, and on the gdmod_user types. 
+
+! The constraints are structured as follows:
+! - All derived constraint types inherit from the 'mother' type 
+!   'GenericConstraintsGDUDT', which contains the field 'ncon', the 
+!   number of constraints, and the initialization and evaluation 
+!   routines. 
+! - The overarching constraints structure contains an object 'eqcon' and 
+!   'ineqcon', which are objects that contain the specific equality and
+!   inequality constraints, respectively. Both objects have general
+!   initialization, evaluation, and destruction routines that should be
+!   used in the optimizer. 
+! - The equality constraints contain different fields (e.g. fluxfunction
+!   ) with a logical (e.g. dofluxfunction) that indicates whether the
+!   constraint should be considered. 
+! - Each specific constraints (e.g. fluxfunction) has its own evaluation
+!   , initialization, and destruction routines (type-bound). 
 
 module gdmod_constraints
     
@@ -30,8 +46,9 @@ module gdmod_constraints
     !                                                                  !
     !==================================================================!
 
-    ! Specific constraint types
-    !==========================
+    ! Abstract types
+    !===============
+    ! Generic constraint type
     type, abstract, extends(ConstraintsUDT) :: GenericConstraintsGDUDT
 
         ! Description
@@ -49,6 +66,9 @@ module gdmod_constraints
 
     end type
 
+    ! Specific constraint types
+    !==========================
+    ! Flux function constraints
     type, extends(GenericConstraintsGDUDT) :: FluxfunctionConstraintsUDT
 
         ! Description
@@ -71,13 +91,14 @@ module gdmod_constraints
 
     end type
 
+    ! Boundary function constraints
     type, extends(ConstraintsUDT) :: BoundaryFunctionConstraintsUDT
 
     end type
 
-    ! Abstract types
-    !===============
-    ! General equality constraint
+    ! Overarching types
+    !==================
+    ! Equality constraints
     type, extends(ConstraintsUDT) :: EqConGDUDT
 
         ! Description
@@ -85,6 +106,9 @@ module gdmod_constraints
         ! This type contains all the different constraints as different
         ! derived types. For each type of constraint, a different
         ! type is defined. 
+
+        ! Total number of constraints 
+        integer(I8)                             :: neqcon = 0
 
         ! Flux function constraint
         logical                                 :: dofluxfunction = .false.
@@ -101,12 +125,15 @@ module gdmod_constraints
 
     end type 
 
-    ! General inequality constraint
+    ! Inequality constraints
     type, extends(ConstraintsUDT) :: IneqConGDUDT
+
+        ! Total number of inequality constraints
+        integer(I8)             :: nineqcon = 0
 
     end type
 
-    ! General constraint type
+    ! All constraints for the grid deformation
     type, extends(ConstraintsUDT) :: ConstraintsGDUDT
 
         ! Description
@@ -115,12 +142,20 @@ module gdmod_constraints
         ! design variables, constraints, and a cost function. 
 
         ! Fields: 
+
+        ! Equality constraints 
         type(EqConGDUDT)        :: eqcon
+
+        ! Inequality constraints 
+        type(IneqConGDUDT)      :: ineqcon
 
     contains
 
         ! Initialization
-        procedure :: Initialize         => InitializeConstraints
+        procedure :: Initialize                 => InitializeConstraints
+
+        ! Number of constraints getter
+        procedure :: GetConstraintsDimensions  
 
         ! Evaluation
         ! procedure(EvaluateConstraintsINT), deferred :: Evaluate
@@ -313,6 +348,29 @@ module gdmod_constraints
             environment, constraintoptions, monitor)
 
         ! Inequality constraints (to do)
+
+    end subroutine
+
+    ! Dimension getter
+    subroutine GetConstraintsDimensions(constraints, neqcon, nineqcon)
+
+        ! Description
+        !============
+        ! Return the current dimensions of the equality and inequality
+        ! constraints. Can be used for initialization of other 
+        ! quantities at higher levels. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(ConstraintsGDUDT)         :: constraints 
+        integer(I8), intent(out)        :: neqcon, nineqcon
+
+        ! Extract dimensions
+        !===================
+        ! Stored in eqcon, ineqcon
+        neqcon = constraints%eqcon%neqcon 
+        nineqcon = constraints%ineqcon%nineqcon
 
     end subroutine
 
