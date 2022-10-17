@@ -68,6 +68,9 @@ module gdmod_optimizationengine
         ! Design update
         procedure :: UpdateDesign           => UpdateDesignGD
 
+        ! Cost function evaluation
+        procedure :: EvaluateCostFunction   => EvaluateCostFunctionGD
+
         ! Additional routines
         !====================
 
@@ -311,6 +314,48 @@ module gdmod_optimizationengine
         ! Simply call the update routine from the design variables
         call problem%designvariables%UpdateDesign(problem%grid, &
             problem%magneticField, problem%environment)
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionGD(problem, J, gradJ, hessJ, &
+        dogradient, dohessian)
+
+         ! Description
+        !============
+        ! Evaluate the cost function, based on the current state of the
+        ! optimization problem. Besides the scalar value itself, also
+        ! the gradient and hessian are evaluated, if needed. This can 
+        ! be set using the dogradient and dohessian logicals. 
+
+        ! Initialize
+        !===========
+        ! Declare modules
+
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        real(R8)                            :: J 
+        real(R8), allocatable               :: gradJ(:)
+        type(MySparseUDT)                   :: hessJ
+        logical                             :: dogradient, dohessian                            
+
+        ! Loop variables
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Compute the cost function
+        !==========================
+        ! Simply call the cost function computation routine
+        call problem%costfunction%Evaluate(J, gradJ, hessJ, problem%grid, &
+            problem%magneticField, problem%environment, dogradient, &
+            dohessian, problem%designvariables)
 
     end subroutine
 
