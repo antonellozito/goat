@@ -573,6 +573,10 @@ module gdmod_constraints
         ! Set the deletion vector
         where(cc >= maxcc) delind = .true. ! don't constrain
 
+        ! Update monitor
+        !===============
+        where (.not. delind) cc = cc + 1
+
         ! Allocate and assign
         !====================
         ! Allocate
