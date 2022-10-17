@@ -17,7 +17,9 @@ module gdmod_costfunction
     !============
     ! Load modules
     use mod_precision
+    use mod_sparseinterface
     use gdmod_types 
+    use gdmod_designvariables
     use optmod_costfunction
 
     ! The usual
@@ -57,7 +59,7 @@ module gdmod_costfunction
         procedure(InitializeCostfunctionINT), deferred :: Initialize
 
         ! Cost function evaluation
-        !procedure(EvaluateCostFunctionINT), deferred :: Evaluate
+        procedure(EvaluateCostFunctionINT), deferred :: Evaluate
 
     end type
 
@@ -77,6 +79,12 @@ module gdmod_costfunction
         ! If certain vertices should not play a role in the cost 
         ! function, set the weight wt to zero for that vertex. 
     
+        ! Cost function formula
+        !======================
+        !
+        !   J_i = wt(i) * (d1/d2 - b)**2 
+        !   J = lambda * sum(J_i), i = 1, vert%ntot
+
         ! Notes
         !======
         ! Note 1: it is assumed that each vertex only has one vertex 
@@ -92,6 +100,9 @@ module gdmod_costfunction
 
         ! Initialization
         procedure :: Initialize             => InitializeCostfunctionLR
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionLR
 
         ! Housekeeping
         procedure :: Allocate               => AllocateCostfunctionLR
@@ -134,8 +145,31 @@ module gdmod_costfunction
         end subroutine
 
         ! Cost function evaluation
-        !subroutine EvaluateCostFunctionINT(costfunction, grid, &
-         !   magneticField, environment, dogradient, dohessian)
+        subroutine EvaluateCostFunctionINT(costfunction, J, gradJ, &
+            hessJ, grid, magneticField, environment, dogradient, &
+            dohessian, designvariables)
+
+            ! Description
+            !============
+            ! Main routine to evaluate the cost function and its 
+            ! derivative and hessian w.r.t. design variables. 
+
+            ! Import
+            import :: CostfunctionGDUDT, MySparseUDT, GridUDT, R8, &
+                MagneticFieldUDT, EnvironmentUDT, DesignVariablesGDUDT
+            
+            ! Declare
+            class(CostfunctionGDUDT)        :: costfunction 
+            real(R8)                        :: J 
+            real(R8), allocatable           :: gradJ(:)
+            type(MySparseUDT)               :: hessJ 
+            type(GridUDT)                   :: grid 
+            type(MagneticFieldUDT)          :: magneticField 
+            type(EnvironmentUDT)            :: environment 
+            logical                         :: dogradient, dohessian
+            class(DesignVariablesGDUDT)     :: designvariables
+
+        end subroutine
 
     end interface
 
@@ -333,6 +367,401 @@ module gdmod_costfunction
         ! End associate
         end associate
 
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionLR(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRUDT)        :: costfunction 
+        real(R8)                        :: J
+        real(R8), allocatable           :: gradJ(:) 
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i, k, cc 
+
+        ! Auxiliary
+        integer(I8)                     :: v1, v2, v3
+        real(R8)                        :: x1, x2, x3, y1, y2, y3
+        real(R8)                        :: dx1, dx2, dy1, dy2, d1, d2
+        integer(I8), allocatable        :: row(:), col(:) 
+        real(R8), allocatable           :: valxx(:),  valxy(:), &
+                                        valyx(:), valyy(:)
+                                        
+        ! Associate
+        !==========
+        associate(&
+            vert    => grid%vert, &
+            vpairs  => costfunction%vpairs, &
+            nvpairs => costfunction%nvpairs, &
+            b0      => costfunction%b0, &
+            x       => grid%vert%x, &
+            y       => grid%vert%y, &
+            lambda  => costfunction%lambda )
+
+        ! Initialize
+        !===========
+        ! Cost function
+        J = 0
+
+        ! Gradient
+        gradJ(:) = 0
+
+        ! Compute cost function
+        !======================
+        ! Loop over all vertices
+        do i = 1, vert%ntot
+            ! Set the current vertex
+            v1 = i 
+
+            ! Loop over all vertex pairs of this vertex
+            do k = 1, nvpairs(i)
+                ! Get the current pair
+                v2 = vpairs(i, 2*k-1)
+                v3 = vpairs(i, 2*k)
+
+                ! Compute intermediate quantities
+                x1 = x(v1)
+                x2 = x(v2)
+                x3 = x(v3)
+
+                y1 = y(v1)
+                y2 = y(v2)
+                y3 = y(v3)
+
+                dx1 = x2 - x1
+                dx2 = x3 - x1 
+
+                dy1 = y2 - y1
+                dy2 = y3 - y1 
+
+                ! Compute lengths
+                d1 = sqrt(dx1**2 + dy1**2)
+                d2 = sqrt(dx2**2 + dy2**2)
+
+                ! Compute cost function contribution
+                J = J + 0.5*(d1/d2 - b0(i))**2
+
+            end do 
+        end do
+
+        ! Scale
+        J = lambda*J
+
+        ! Compute gradient
+        !=================
+        if (dogradient) then 
+
+            ! Check the design variables
+            select case (trim(designvariables%type))
+
+            case ('coordinates')
+
+                ! Loop over all vertices
+                do i = 1, vert%ntot
+                    ! Set the current vertex
+                    v1 = i 
+
+                    ! Loop over all vertex pairs of this vertex
+                    do k = 1, nvpairs(i)
+                        ! Get the current pair
+                        v2 = vpairs(i, 2*k-1)
+                        v3 = vpairs(i, 2*k)
+
+                        ! Compute intermediate quantities
+                        x1 = x(v1)
+                        x2 = x(v2)
+                        x3 = x(v3)
+
+                        y1 = y(v1)
+                        y2 = y(v2)
+                        y3 = y(v3)
+
+                        dx1 = x2 - x1
+                        dx2 = x3 - x1 
+
+                        dy1 = y2 - y1
+                        dy2 = y3 - y1 
+
+                        ! Compute lengths
+                        d1 = sqrt(dx1**2 + dy1**2)
+                        d2 = sqrt(dx2**2 + dy2**2)
+
+                        ! Compute cost function contribution
+                        gradJ(v1) = gradJ(v1) + & 
+                            (b0(i) - d1/d2) * &
+                            (dx1/(d1*d2) - (d1*dx2)/d2**3)
+                        gradJ(v2) = gradJ(v2) + &
+                            -(dx1*(b0(i) - d1/d2))/(d1*d2)
+                        gradJ(v3) = gradJ(v3) + &
+                            (d1*dx2*(b0(i) - d1/d2))/d2**3
+                        
+                        gradJ(v1+vert%ntot) = gradJ(v1+vert%ntot) + &
+                            (b0(i) - d1/d2) * &
+                            (dy1/(d1*d2) - (d1*dy2)/d2**3)
+                        gradJ(v2+vert%ntot) = gradJ(v2+vert%ntot) + &
+                            -(dy1*(b0(i) - d1/d2))/(d1*d2)
+                        gradJ(v3+vert%ntot) = gradJ(v3+vert%ntot) + &
+                            (d1*dy2*(b0(i) - d1/d2))/d2**3
+
+                    end do 
+                end do
+
+            case default
+
+                ! Not implemented, throw error
+                call gdErrorHandler('EvaluateCostFunctionLR: gradient' &
+                    // ' not yet implemented for this design variable' &
+                    // ' type')
+
+            end select
+
+            ! Scale
+            gradJ = lambda*gradJ
+
+        end if
+
+        ! Compute hessian
+        !================
+        if (dohessian) then
+
+            ! Check the design variables
+            select case (trim(designvariables%type))
+
+            case ('coordinates')
+
+                ! Allocate the hessian (if not already done so)
+                if (.not. allocated(hessJ%row)) then
+                    ! Allocate the sparse matrix
+                    hessJ%nval = 36*sum(nvpairs) ! this should be exact and constant
+                    call hessJ%Allocate()
+                end if
+
+                ! Allocate auxiliary variables
+                allocate(row(9*sum(nvpairs)))
+                allocate(col(9*sum(nvpairs)))
+                allocate(valxx(9*sum(nvpairs)))
+                allocate(valxy(9*sum(nvpairs)))
+                allocate(valyx(9*sum(nvpairs)))
+                allocate(valyy(9*sum(nvpairs)))
+
+                ! Initialize counter
+                cc = 1
+
+                ! Loop over all vertices
+                do i = 1, vert%ntot
+                    ! Set the current vertex
+                    v1 = i 
+
+                    ! Loop over all vertex pairs of this vertex
+                    do k = 1, nvpairs(i)
+                        ! Get the current pair
+                        v2 = vpairs(i, 2*k-1)
+                        v3 = vpairs(i, 2*k)
+
+                        ! Compute intermediate quantities
+                        x1 = x(v1)
+                        x2 = x(v2)
+                        x3 = x(v3)
+
+                        y1 = y(v1)
+                        y2 = y(v2)
+                        y3 = y(v3)
+
+                        dx1 = x2 - x1
+                        dx2 = x3 - x1 
+
+                        dy1 = y2 - y1
+                        dy2 = y3 - y1 
+
+                        ! Compute lengths
+                        d1 = sqrt(dx1**2 + dy1**2)
+                        d2 = sqrt(dx2**2 + dy2**2)
+
+                        ! Compute Hessian contributions - ordened per
+                        ! vertex pair (e.g. v1, v1), split up in xx, xy,
+                        ! yx, yy. 
+
+                        ! d2J/dx1**2, d2J/dy1**2, d2J/dx1dy1, d2J/dy1dx1
+                        row(cc) = v1; col(cc) = v1
+                        valxx(cc) = (b0(i) - d1/d2) & 
+                            * (d1/d2**3 - 1/(d1*d2) - & 
+                            (3*d1*dx2**2)/d2**5 + dx1**2/(d1**3*d2) & 
+                            + (2*dx1*dx2)/(d1*d2**3)) + (dx1/(d1*d2) & 
+                            - (d1*dx2)/d2**3)**2
+                        valyy(cc) = (b0(i) - d1/d2) &
+                            * (d1/d2**3 - 1/(d1*d2) - & 
+                            (3*d1*dy2**2)/d2**5 + dy1**2/(d1**3*d2) & 
+                            + (2*dy1*dy2)/(d1*d2**3)) + & 
+                            (dy1/(d1*d2) - (d1*dy2)/d2**3)**2
+                        valxy(cc) = (b0(i) - d1/d2) & 
+                            *((dx1*dy1)/(d1**3*d2) - & 
+                            (3*d1*dx2*dy2)/d2**5 + & 
+                            (dx1*dy2)/(d1*d2**3) + & 
+                            (dx2*dy1)/(d1*d2**3)) + (dx1/(d1*d2) & 
+                            - (d1*dx2)/d2**3)*(dy1/(d1*d2) &
+                            - (d1*dy2)/d2**3)
+                        valyx(cc) = valxy(cc)
+                        cc = cc+1
+                        
+                        ! d2J/dx1dx2, d2J/dy1dy2, d2J/dx1dy2, d2J/dy1dx2
+                        row(cc) = v1; col(cc) = v2
+                        valxx(cc) = - (b0(i) - d1/d2) &
+                            * (dx1**2/(d1**3*d2) - 1/(d1*d2) + & 
+                            (dx1*dx2)/(d1*d2**3)) - (dx1*(dx1/(d1*d2) - & 
+                            (d1*dx2)/d2**3))/(d1*d2) !x1x2
+                        valyy(cc) = - (b0(i) - d1/d2)&
+                            *(dy1**2/(d1**3*d2) - 1/(d1*d2) &
+                            + (dy1*dy2)/(d1*d2**3)) - &
+                            (dy1*(dy1/(d1*d2) - &
+                            (d1*dy2)/d2**3))/(d1*d2) !y1y2
+                        valxy(cc) = - (b0(i) - d1/d2)&
+                            *((dx1*dy1)/(d1**3*d2) + &
+                            (dx2*dy1)/(d1*d2**3)) - &
+                            (dy1*(dx1/(d1*d2) - &
+                            (d1*dx2)/d2**3))/(d1*d2) !x1y2
+                        valyx(cc) = - (b0(i) - d1/d2) &
+                            *((dx1*dy1)/(d1**3*d2) + &
+                            (dx1*dy2)/(d1*d2**3)) - &
+                            (dx1*(dy1/(d1*d2) - &
+                            (d1*dy2)/d2**3))/(d1*d2) !y1x2
+                        cc = cc+1
+                        
+                        row(cc) = v2; col(cc) = v1
+                        valxx(cc) = valxx(cc-1) !x2x1
+                        valyy(cc) = valyy(cc-1) !y2y1
+                        valxy(cc) = valyx(cc-1) !x1y2
+                        valyx(cc) = valxy(cc-1) !y2x1
+                        cc = cc+1
+                        
+                        row(cc) = v2; col(cc) = v2
+                        valxx(cc) = dx1**2/(d1**2*d2**2) - &
+                            (b0(i) - d1/d2)/(d1*d2) + &
+                            (dx1**2*(b0(i) - d1/d2))/(d1**3*d2)
+                        valyy(cc) = dy1**2/(d1**2*d2**2) - &
+                            (b0(i) - d1/d2)/(d1*d2) + &
+                            (dy1**2*(b0(i) - d1/d2))/(d1**3*d2)
+                        valxy(cc) = (dx1*dy1)/(d1**2*d2**2) &
+                            + (dx1*dy1*(b0(i) - d1/d2))/(d1**3*d2)
+                        valyx(cc) = valxy(cc)
+                        cc = cc+1
+                        
+                        row(cc) = v1; col(cc) = v3
+                        valxx(cc) = (d1*dx2*(dx1/(d1*d2) - &
+                            (d1*dx2)/d2**3))/d2**3 - &
+                            (b0(i) - d1/d2)*(d1/d2**3 - &
+                            (3*d1*dx2**2)/d2**5 + (dx1*dx2)/(d1*d2**3))
+                        valyy(cc) = (d1*dy2*(dy1/(d1*d2) - &
+                            (d1*dy2)/d2**3))/d2**3 - &
+                            (b0(i) - d1/d2)*(d1/d2**3 - &
+                            (3*d1*dy2**2)/d2**5 + (dy1*dy2)/(d1*d2**3))
+                        valxy(cc) = (b0(i) - d1/d2) &
+                            *((3*d1*dx2*dy2)/d2**5 - &
+                            (dx1*dy2)/(d1*d2**3)) + &
+                            (d1*dy2*(dx1/(d1*d2) - &
+                            (d1*dx2)/d2**3))/d2**3
+                        valyx(cc) = (b0(i) - d1/d2)&
+                            *((3*d1*dx2*dy2)/d2**5 - &
+                            (dx2*dy1)/(d1*d2**3)) + &
+                            (d1*dx2*(dy1/(d1*d2) - &
+                            (d1*dy2)/d2**3))/d2**3
+                        cc = cc+1
+                        
+                        row(cc) = v3; col(cc) = v1
+                        valxx(cc) = valxx(cc-1)
+                        valyy(cc) = valyy(cc-1)
+                        valxy(cc) = valyx(cc-1)
+                        valyx(cc) = valxy(cc-1)
+                        cc = cc+1
+                        
+                        row(cc) = v2; col(cc) = v3
+                        valxx(cc) = (dx1*dx2*(b0(i) - d1/d2)) &
+                            /(d1*d2**3) - (dx1*dx2)/d2**4
+                        valyy(cc) = (dy1*dy2*(b0(i) - d1/d2)) &
+                            /(d1*d2**3) - (dy1*dy2)/d2**4
+                        valxy(cc) = (dx1*dy2*(b0(i) - d1/d2)) &
+                            /(d1*d2**3) - (dx1*dy2)/d2**4
+                        valyx(cc) = (dx2*dy1*(b0(i) - d1/d2)) &
+                            /(d1*d2**3) - (dx2*dy1)/d2**4
+                        cc = cc+1
+                        
+                        row(cc) = v3; col(cc) = v2
+                        valxx(cc) = valxx(cc-1)
+                        valyy(cc) = valyy(cc-1)
+                        valxy(cc) = valyx(cc-1)
+                        valyx(cc) = valxy(cc-1)
+                        cc = cc+1
+                        
+                        row(cc) = v3; col(cc) = v3
+                        valxx(cc) = (dx2**2*(dx1**2 + dy1**2))/d2**6 &
+                            + (d1*(b0(i) - d1/d2))/d2**3 - &
+                            (3*d1*dx2**2*(b0(i) - d1/d2))/d2**5
+                        valyy(cc) = (dy2**2*(dx1**2 + dy1**2))/d2**6 &
+                            + (d1*(b0(i) - d1/d2))/d2**3 - &
+                            (3*d1*dy2**2*(b0(i) - d1/d2))/d2**5
+                        valxy(cc) = (dx2*dy2*(dx1**2 + dy1**2)) &
+                            /d2**6 - (3*d1*dx2*dy2*(b0(i) - d1/d2)) &
+                            /d2**5
+                        valyx(cc) = valxy(cc)
+                        cc = cc+1
+
+                    end do 
+                end do
+
+                ! Build full hessian
+                hessJ%row = [row, row, row+vert%ntot, row+vert%ntot]
+                hessJ%col = [col, col+vert%ntot, col, col+vert%ntot]
+                hessJ%val = [valxx, valxy, valyx, valyy]
+
+                ! Scale
+                hessJ%val = lambda*hessJ%val
+
+                ! Housekeeping
+                deallocate(row)
+                deallocate(col)
+                deallocate(valxx)
+                deallocate(valxy)
+                deallocate(valyx)
+                deallocate(valyy)
+
+            case default
+
+                ! Not implemented, throw error
+                call gdErrorHandler('EvaluateCostFunctionLR: hessian' &
+                    // ' not yet implemented for this design variable' &
+                    // ' type')
+
+            end select
+
+        end if
+
+        ! Deassociate
+        !============
+        end associate
 
     end subroutine
 
