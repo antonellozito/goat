@@ -458,6 +458,31 @@ module gdmod_constraints
         ! - is overly constrained. It is UP TO THE DEVELOPER to use this
         ! monitor properly!
         
+        ! Note 2: the constraint options are passed to this function in 
+        ! order to determine whether e.g. boundary nodes should be 
+        ! considered for the constraints. 
+
+        ! Note 3: for vessel mode grids (grids reaching up to the 
+        ! vessel wall), some vertices may not belong to a flux surface.
+        ! To fix them anyway on the vessel wall, the logical 
+        ! 'fixfarvesselflux' can be set to 'true'. This is the 
+        ! recommended default value. 
+
+        ! Note 4: for target mode grids, the flux value at the 'corners'
+        ! is typically also determined by averaging over the field line.
+        ! However, this gives issues in some cases where the targets are
+        ! nearly flux-aligned. To avoid this, set the logical 
+        ! 'fixfluxalignedtargets' to true. This is the recommended 
+        ! default value. 
+
+        ! Note 5: it is assumed that the grid contains the flux surface
+        ! data and that the flux surfaces are numbered from 1 to nFs
+
+        ! Initialize
+        !===========
+        ! Modules
+        use BicubicSplineInterpolant
+        
         ! Declare variables
         !==================
         ! Arguments 
@@ -468,20 +493,112 @@ module gdmod_constraints
         type(ConstraintsMonitorUDT)             :: monitor
 
         ! Loop variables
+        integer(I8)                 :: i
 
         ! Auxiliary variables
+        integer(I8), allocatable    :: vert_tmp(:), vertID(:) 
+        real(R8), allocatable       :: PsiD_tmp(:) 
+        logical, allocatable        :: delind(:), mask(:)
+        real(R8)                    :: tpsi
 
         ! Data
-
+        logical                     :: fixfluxalignedtargets = .true. 
+        logical                     :: fixfarvesselflux = .true. 
 
         ! Initialize
         !===========
+        ! Number of constraints
         constraints%ncon = 0
 
+        ! Allocate temporary arrays
+        allocate(vert_tmp(grid%vert%ntot))
+        allocate(PsiD_tmp(grid%vert%ntot))
+
+        ! Allocate auxiliary arrays
+        allocate(mask(grid%vert%ntot))
+        allocate(delind(grid%vert%ntot))
+        allocate(vertID(grid%vert%ntot))
+
+        ! Initialize
+        vert_tmp(:) = 0
+        PsiD_tmp(:) = 0
+        mask(:) = .false.
+        delind(:) = .false.
+        vertID = [(i, i = 1, grid%vert%ntot)]
+
+        ! Associate
+        associate(&
+            vert    => grid%vert,       x       => grid%vert%x,     &
+            y       => grid%vert%y,     cc      => monitor%eqvcc,   &
+            maxcc   => monitor%maxeqvcc)
+        
         ! Determine flux values to impose
         !================================
+        ! Evaluate flux at all nodes
+        call EvaluateBicubicSplineInterpolant(x, y, PsiD_tmp, &
+            magneticField%interp, '0', '0')
 
-        ! Determine constraints
+        ! Loop over all the flux surfaces to compute desired flux
+        do i = 1, grid%data%fluxdata%nFs
+            ! Get all vertices with this ID
+            mask = (vert%fieldlineID == i)
+
+            ! Get the flux values
+            if (any(pack(vert%BV,mask))) then 
+                ! Average only over boundary vertices
+                tpsi = sum(pack(PsiD_tmp, (mask .and. vert%BV))) & 
+                    /count((mask .and. vert%BV))
+            else
+                ! Average over all vertices
+                tpsi = sum(pack(PsiD_tmp, mask))/count(mask)
+            end if
+
+            ! Adjust PsiD
+            where(mask) PsiD_tmp = tpsi 
+
+        end do
+
+        ! Compensate for flux aligned targets?
+        if (fixfluxalignedtargets) then
+            ! This is still to do
+            print *, 'fix for flux aligned targets is not yet available'
+        end if
+
+        ! Fix flux values of vessel boundaries? 
+        if (fixfarvesselflux) then 
+            ! This is still to do
+            print *, 'fix for vessel boundaries is not yet available'
+        end if
+
+        ! Set the deletion vector
+        where(cc >= maxcc) delind = .true. ! don't constrain
+
+        ! Allocate and assign
+        !====================
+        ! Allocate
+        constraints%ncon = count( .not. delind)
+        allocate(constraints%vert(constraints%ncon))
+        allocate(constraints%PsiD(constraints%ncon))
+
+        ! Assign
+        !=======
+        constraints%vert = pack(vert_tmp, (.not. delind))
+        constraints%PsiD = pack(PsiD_tmp, (.not. delind))
+
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+        ! Deallocate temporary arrays
+        deallocate(vert_tmp)
+        deallocate(PsiD_tmp)
+
+        ! Deallocate auxiliary arrays
+        deallocate(mask)
+        deallocate(delind)
+        deallocate(vertID)
+        
         
 
     end subroutine
