@@ -46,6 +46,8 @@ module gdmod_designvariables
     ! be derived from this type. 
     type, abstract, extends(DesignVariablesUDT) :: DesignVariablesGDUDT
 
+        character(:), allocatable                :: type 
+
     contains 
 
         ! Design initialization
@@ -181,6 +183,9 @@ module gdmod_designvariables
 
         ! Initialize
         !===========
+        ! Set the type
+        designvariables%type = 'coordinates' 
+        
         ! Set the number of design variables
         designvariables%nphi = 2*grid%vert%ntot 
 
