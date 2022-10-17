@@ -76,6 +76,10 @@ module gdmod_types
 
         ! Fields for inequality constraints
         logical             :: linefolding ! prevent flux line folding
+
+        ! Number of (continuous) constraints
+        integer(I8)         :: neq ! number of equality constraints
+        integer(I8)         :: nineq ! number of inequality constraints 
     end type
 
     ! Options for design optimization

@@ -157,9 +157,11 @@ module gdmod_userinput
         options%constraints%xpoints             = .true.
         options%constraints%edgelengths         = .true.
         options%constraints%orthogonality       = .true.
+        options%constraints%neq                 = 5 
 
         ! Default options, inequality constraints
         options%constraints%linefolding         = .true.
+        options%constraints%nineq               = 1
 
     end subroutine
 
