@@ -29,6 +29,7 @@ module optmod_optimizationengine
     !============
     ! Load modules
     use mod_precision
+    use mod_sparseinterface
     use optmod_designvariables
     use optmod_costfunction
     use optmod_constraints
@@ -79,6 +80,12 @@ module optmod_optimizationengine
 
         ! Design updates
         procedure(UpdateDesignINT), deferred    :: UpdateDesign       
+
+        ! Cost function evaluation
+        procedure(EvaluateCostFunctionINT), deferred    :: &
+            EvaluateCostFunction
+            
+        
 
     end type
 
@@ -179,6 +186,34 @@ module optmod_optimizationengine
 
             ! Declare
             class(OptimizationProblemUDT)       :: problem 
+
+        end subroutine
+
+        ! Cost function evaluation
+        subroutine EvaluateCostFunctionINT(problem, J, gradJ, hessJ, &
+            dogradient, dohessian)
+
+            ! Description
+            !============
+            ! This routine returns the value of the cost function, J, 
+            ! and (if dogradient is true) the gradient gradJ, and 
+            ! (if dohessian is true) the hessian of J. In case the 
+            ! the gradient or hessian shouldn't be computed, the values
+            ! of gradJ and hessJ are garbage. Note that the hessian is 
+            ! stored in a derived type with row, col and val vectors.
+            ! This should be used later on to construct the actual 
+            ! hessian in any suitable format. For this end, an external
+            ! module 'mod_sparseinterface' is used. 
+            
+            ! Import
+            import :: OptimizationProblemUDT, MySparseUDT, R8
+
+            ! Declare
+            class(OptimizationProblemUDT)       :: problem
+            real(R8)                            :: J
+            real(R8), allocatable               :: gradJ(:)
+            type(MySparseUDT)                   :: hessJ 
+            logical                             :: dogradient, dohessian
 
         end subroutine
 
