@@ -195,9 +195,8 @@ module gdmod_optimizationengine
         ! Design variables
         nphi = problem%designvariables%nphi
 
-        ! Constraints - TO DO
-        neq = 0
-        nineq = 0
+        ! Constraints - call routine
+        call problem%constraints%GetConstraintsDimensions(neq, nineq)
 
     end subroutine
 
