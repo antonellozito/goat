@@ -79,8 +79,8 @@ module optmod_optimizationengine
         procedure(InitializeINT), deferred      :: Initialize 
 
         ! Design updates
-        procedure(UpdateDesignINT), deferred    :: UpdateDesign       
-
+        procedure(UpdateDesignINT), deferred    :: UpdateDesign     
+        
         ! Cost function evaluation
         procedure(EvaluateCostFunctionINT), deferred    :: &
             EvaluateCostFunction
@@ -317,7 +317,12 @@ module optmod_optimizationengine
         logical                     :: notconverged
         
         ! Auxiliary variables 
-        real(R8)                    :: rxf, rxfdesign, rxfdec, rxfmin 
+        real(R8)                    :: rxf, rxfdesign, rxfdec, rxfmin
+        
+        real(R8)                    :: J 
+        real(R8), allocatable       :: gradJ(:)
+        type(MySparseUDT)           :: hessJ 
+        logical                     :: dogradient, dohessian 
 
         ! Data
 
@@ -327,6 +332,10 @@ module optmod_optimizationengine
 
         ! Initialize & unpack
         !====================
+        ! Logicals
+        dogradient  = .true. 
+        dohessian   = .true. 
+
         ! Initialize the solver
         call solver%InitializeKKTSolver()
 
@@ -336,6 +345,12 @@ module optmod_optimizationengine
         call problem%monitor%Initialize(solver%numKKT%maxit, nphi, neq,&
             nineq, opttol)
 
+        ! Cost function quantities
+        allocate(gradJ(nphi))
+        J = 0
+        gradJ(:) = 0
+        hessJ%nrow = nphi 
+        hessJ%ncol = nphi 
 
         ! Initialize counter(s)
         itopt = 1
@@ -366,6 +381,10 @@ module optmod_optimizationengine
             ! Update the design
             call problem%UpdateDesign()
 
+            ! Evaluate cost function
+            call problem%EvaluateCostFunction(J, gradJ, hessJ, &
+                dogradient, dohessian)
+
             ! Update the monitor
             problem%monitor%itopt = itopt
 
@@ -376,7 +395,7 @@ module optmod_optimizationengine
             problem%monitor%dL(:,itopt)     = 0
             problem%monitor%G(:,itopt)      = 0
             problem%monitor%H(:,itopt)      = 0
-            problem%monitor%convnorm(itopt) = 0
+            problem%monitor%convnorm(itopt) = maxval(abs(gradJ))
 
             ! Print the current iterate
             if (verbosity > 0) then 
@@ -389,6 +408,9 @@ module optmod_optimizationengine
             itopt = itopt+1
 
         end do
+
+        ! Housekeeping
+
 
     end subroutine
 
