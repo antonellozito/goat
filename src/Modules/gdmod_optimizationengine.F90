@@ -24,6 +24,7 @@ module gdmod_optimizationengine
     use optmod_optimizationengine
     use gdmod_designvariables
     use gdmod_costfunction
+    use gdmod_constraints
     use gdmod_types
 
     ! The usual
@@ -49,6 +50,7 @@ module gdmod_optimizationengine
         ! The classical derived types
         class(DesignVariablesGDUDT), allocatable :: designvariables
         class(CostfunctionGDUDT), allocatable    :: costfunction
+        type(ConstraintsGDUDT)                   :: constraints
 
         ! Additional fields that are needed
         type(GridUDT)                       :: grid 
@@ -278,6 +280,13 @@ module gdmod_optimizationengine
         call problem%costfunction%Initialize(problem%grid, &
             problem%magneticField, problem%environment)
 
+        ! Constraints
+        !============
+        ! Given the (many) possible options for the constraints, the 
+        ! constraints are set in its own initialization. 
+        call problem%constraints%Initialize(problem%grid, &
+            problem%magneticField, problem%environment, & 
+            designoptions%constraints)
 
 
     end subroutine
