@@ -559,7 +559,7 @@ subroutine ComputeGridInterconnections(grid)
 
             ! Loop over the remaining cells
             k = 1
-            vc = 1 ! vertex counter
+            vc = 0 ! vertex counter
             allnotfound = .true. 
             
             do while (k <= nvc)
@@ -613,7 +613,7 @@ subroutine ComputeGridInterconnections(grid)
                 if (ncf == 1) then 
                     ! Add the first vertex if this is the first found 
                     ! cell
-                    if (vc == 1) then
+                    if (vc == 0) then
                         ! Get other face with this vertex
 
                         ! Get the faces that have the current vertex
@@ -642,15 +642,22 @@ subroutine ComputeGridInterconnections(grid)
                             //' interconnections')
                         end if
 
-                        ! Add cell and vertex neighbour
+                        ! Add cell and vertex neighbour - neighbour only
+                        ! if the current cell is not a guard cell
+                        
                         sp = v%cellP(i,1)
                         v%celllist(sp) = thiscell 
-                        sp = v%neigP(i,1)
-                        tfv = f%vert(tcf2(1),:)
-                        if (tfv(1) == i) then
-                            v%neiglist(sp) = tfv(2)
-                        else
-                            v%neiglist(sp) = tfv(1)
+                        if (.not. c%GC(thiscell)) then
+                            sp = v%neigP(i,1)
+                            tfv = f%vert(tcf2(1),:)
+                            if (tfv(1) == i) then
+                                v%neiglist(sp) = tfv(2)
+                            else
+                                v%neiglist(sp) = tfv(1)
+                            end if
+
+                            ! Update vc
+                            vc = vc+1
                         end if
 
                         ! Housekeeping
@@ -665,7 +672,7 @@ subroutine ComputeGridInterconnections(grid)
                     v%celllist(sp) = nextcell
                     sp = v%neigP(i,1) + vc
                     tfv = f%vert(tcf,:)
-                    if (tfv(1) == 1) then 
+                    if (tfv(1) == i) then 
                         v%neiglist(sp) = tfv(2)
                     else
                         v%neiglist(sp) = tfv(1)
@@ -698,8 +705,11 @@ subroutine ComputeGridInterconnections(grid)
             ! Only in case of boundary vertices
             if ( (v%BV(i)) .and. (v%cellP(i,2) > 1) ) then
 
+                ! First, update vc - is now one-off
+                vc = vc - 1
+
                 ! Sanity check
-                if (vc > v%cellP(i,2)) then
+                if (vc > v%neigP(i,2)) then
                     ! Throw error. This can happen if the supposed 
                     ! boundary vertex is no actual boundary vertex.
                     call gdErrorHandler('ComputeGridInterconnections: ' &
@@ -769,6 +779,13 @@ subroutine ComputeGridInterconnections(grid)
         deallocate(allvertcells)
 
     end do
+
+    !do i = 1, v%ntot 
+    !    print *, i, v%BV(i), v%neiglist(v%neigP(i,1):v%neigP(i,1)+v%neigP(i,2)-1)
+    !end do
+    !    do i = 1, v%ntot 
+    !    print *, i, v%BV(i), v%celllist(v%cellP(i,1):v%cellP(i,1)+v%cellP(i,2)-1)
+    !end do
     
 
     ! Add to grid
