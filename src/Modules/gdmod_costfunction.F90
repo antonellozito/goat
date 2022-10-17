@@ -194,7 +194,7 @@ module gdmod_costfunction
         costfunction%lambda = 1e4 ! seems to agree well with most grids
 
         ! Allocate
-        call costfunction%Allocate(grid%vert%ntot)
+        call costfunction%Allocate(grid%vert%ntot, 4)
         allocate(Btx(grid%vert%ntot))
         allocate(Bty(grid%vert%ntot))
 
@@ -206,6 +206,10 @@ module gdmod_costfunction
 
         ! Set the initial weighting factors
         wt(:) = 1
+
+        ! Initialize
+        vpairs(:, :) = 0
+        nvpairs(:) = 0
 
         ! Compute the magnetic field vectors at the vertex locations
         call EvaluateBicubicSplineInterpolant(x, y, Btx, &
@@ -254,16 +258,16 @@ module gdmod_costfunction
                     ! pairs should be tvn(j) and tvn(j+nvpairs(i))
                     
                     ! Get vertices
-                    v2 = tvn(j);
-                    v3 = tvn(j+nvpairs(i));
+                    v2 = tvn(j)
+                    v3 = tvn(j+nvpairs(i))
                    
                    ! Get vectors
-                    dx2 = x(v2) - x(i); dy2 = y(v2) - y(i);
-                    dx3 = x(v3) - x(i); dy3 = y(v3) - y(i);
+                    dx2 = x(v2) - x(i); dy2 = y(v2) - y(i)
+                    dx3 = x(v3) - x(i); dy3 = y(v3) - y(i)
                     
                     ! Compute weight
                     wt(i) = wt(i) + &
-                        1/(dx2**2 + dy2**2) + 1/(dx3**2 + dy3**2);
+                        1/(dx2**2 + dy2**2) + 1/(dx3**2 + dy3**2)
                     
                     ! Check if we're dealing with an x-point
                     if (nvpairs(i) > 1) then
@@ -271,9 +275,9 @@ module gdmod_costfunction
                         ! cope with this by setting the desired ratio to 1,
                         ! such that it does not matter which length is
                         ! considered first.
-                        b0(i) = 1;
-                        sgn2 = -1;
-                        wt(i) = 0;
+                        b0(i) = 1
+                        sgn2 = -1
+                        wt(i) = 0
                     else
                         ! Evaluate sign of dot product of magnetic field
                         ! coordinates with vector
@@ -301,7 +305,7 @@ module gdmod_costfunction
                             ! vertices
                             
                             b0(i) = 1
-                            costfunction%wt(i) = 0
+                            wt(i) = 0
                             sgn2 = -1
                            
                         end if
@@ -333,7 +337,7 @@ module gdmod_costfunction
     end subroutine
 
     ! Housekeeping
-    subroutine AllocateCostFunctionLR(costfunction, nv)
+    subroutine AllocateCostFunctionLR(costfunction, nv, nvn)
 
         ! Description
         !============
@@ -343,13 +347,13 @@ module gdmod_costfunction
         !==================
         ! Arguments
         class(CostfunctionLRUDT)        :: costfunction
-        integer(I8)                     :: nv
+        integer(I8)                     :: nv, nvn
 
         ! Allocate
         !=========
         print *, nv
         allocate(costfunction%nvpairs(nv))
-        allocate(costfunction%vpairs(nv,2))
+        allocate(costfunction%vpairs(nv,2*nvn))
         allocate(costfunction%b0(nv))
         allocate(costfunction%wt(nv))
 
