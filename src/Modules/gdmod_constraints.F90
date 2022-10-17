@@ -73,21 +73,30 @@ module gdmod_constraints
 
         ! Description
         !============
-        ! Flux function constraints
+        ! Flux function constraints. Fixes the flux function values 
+        ! for a set of desired nodes. The following fields are added:
+        ! - vert:       the vertices to consider (1 constraint per 
+        !               entry of this array, so ncon-by-1 dimension)
+        ! - PsiD:       Desired psi value of each vertex (ncon-by-1)
+        ! - ncon:       (inherited) number of constraints 
+
+        ! No other routines than the standard initialization, evaluation
+        ! and destruction routines are implemented nor needed. 
 
         ! Fields:
-        
-
-
+        integer(I8), allocatable        :: vert(:)
+        real(R8), allocatable           :: PsiD(:)
 
     contains
 
         ! Initialization
         procedure :: Initialize     => InitializeFluxfunctionConstraints
-        ! procedure :: Allocate       => AllocateFluxfunctionConstraints
+
+        ! Evaluation
+        ! procedure :: Evaluate       => EvaluateFluxfunctionConstraints
 
         ! Destructor
-        ! procedure :: DestroyFluxfunctionConstraints
+        final :: DestroyFluxfunctionConstraints
 
     end type
 
@@ -467,13 +476,36 @@ module gdmod_constraints
 
         ! Initialize
         !===========
-        constraints%ncon = 10
+        constraints%ncon = 0
 
         ! Determine flux values to impose
         !================================
 
         ! Determine constraints
         
+
+    end subroutine
+
+    ! Destructor
+    subroutine DestroyFluxfunctionConstraints(constraints)
+
+        ! Description
+        !============
+        ! Destructor of the flux function constraints
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(FluxfunctionConstraintsUDT)        :: constraints 
+
+        ! Destroy
+        !========
+        if (allocated(constraints%vert)) then
+            deallocate(constraints%vert)
+        end if
+        if (allocated(constraints%PsiD)) then
+            deallocate(constraints%PsiD)
+        end if
 
     end subroutine
 
