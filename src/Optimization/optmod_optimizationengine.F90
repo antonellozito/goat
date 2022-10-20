@@ -84,6 +84,10 @@ module optmod_optimizationengine
         ! Cost function evaluation
         procedure(EvaluateCostFunctionINT), deferred    :: &
             EvaluateCostFunction
+
+        ! Equality constraints evaluation
+        procedure(EvaluateEqualityConstraintsINT), deferred     :: &
+            EvaluateEqualityConstraints
             
         
 
@@ -217,6 +221,28 @@ module optmod_optimizationengine
 
         end subroutine
 
+        ! Constraints evaluation
+        subroutine EvaluateEqualityConstraintsINT(problem, G, gradG, hessG, &
+            dogradient, dohessian, lambda)
+
+            ! Description
+            !============
+            ! This routine returns the equality constraints, G, the
+            ! gradient, gradG (in mysparse format), and the hessian-
+            ! vector multiplication with the vector lambda hessG (also 
+            ! in mysparse format).
+
+            ! Import
+            import :: OptimizationProblemUDT, MySparseUDT, R8
+
+            ! Declare
+            class(OptimizationProblemUDT)       :: problem 
+            real(R8), allocatable               :: G(:), lambda(:)
+            type(MySparseUDT)                   :: gradG, hessG 
+            logical                             :: dogradient, dohessian
+
+        end subroutine
+
     end interface
 
     contains
@@ -318,11 +344,14 @@ module optmod_optimizationengine
         
         ! Auxiliary variables 
         real(R8)                    :: rxf, rxfdesign, rxfdec, rxfmin
+        logical                     :: dogradient, dohessian 
         
         real(R8)                    :: J 
         real(R8), allocatable       :: gradJ(:)
         type(MySparseUDT)           :: hessJ 
-        logical                     :: dogradient, dohessian 
+
+        real(R8), allocatable       :: G(:), lambda(:) 
+        type(MySparseUDT)           :: gradG, hessG  
 
         ! Data
 
@@ -351,6 +380,13 @@ module optmod_optimizationengine
         gradJ(:) = 0
         hessJ%nrow = nphi 
         hessJ%ncol = nphi 
+
+        ! Constraint quantities
+        allocate(G(neq), lambda(neq))
+        G(:) = 0
+        lambda(:) = 0
+        gradG%nrow = nphi 
+        gradG%ncol = neq 
 
         ! Initialize counter(s)
         itopt = 1
@@ -385,15 +421,19 @@ module optmod_optimizationengine
             call problem%EvaluateCostFunction(J, gradJ, hessJ, &
                 dogradient, dohessian)
 
+            ! Evaluate the equality constraints
+            call problem%EvaluateEqualityConstraints(G, gradG, hessG, &
+                dogradient, dohessian, lambda)
+
             ! Update the monitor
             problem%monitor%itopt = itopt
 
             ! Update the monitor again
-            problem%monitor%J(itopt)        = 0
-            problem%monitor%dJ(:,itopt)     = 0
+            problem%monitor%J(itopt)        = J
+            problem%monitor%dJ(:,itopt)     = gradJ
             problem%monitor%L(itopt)        = 0
             problem%monitor%dL(:,itopt)     = 0
-            problem%monitor%G(:,itopt)      = 0
+            problem%monitor%G(:,itopt)      = G
             problem%monitor%H(:,itopt)      = 0
             problem%monitor%convnorm(itopt) = maxval(abs(gradJ))
 
