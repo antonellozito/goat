@@ -84,7 +84,7 @@ module BicubicSplineInterpolant
         !==================
         ! Arguments
         type(BicubicSplineInterpolantUDT)   :: interp
-        real(R8)                            :: x(:), y(:), v(:,:)
+        real(R8), intent(in)                :: x(:), y(:), v(:,:)
         integer(I8), intent(in)                :: nx, ny
 
         ! Loop variables
@@ -158,33 +158,33 @@ module BicubicSplineInterpolant
         do i = 0, 3
             do j = 0, 3
                 ! f
-                c(1, ind) = 0**(i)*0**(j)
-                c(2,ind) = 0**(i)*1
+                c(1,ind) = 0**(i)*0**(j)
+                c(2,ind) = 1*0**(j)
                 c(3,ind) = 1
-                c(4,ind) = 1*0**(j)
+                c(4,ind) = 0**(i)*1
 
                 ! fx
                 if (i > 0) then
                     c(5,ind) = i*0**(i-1)*0**(j)
-                    c(6,ind) = i*0**(i-1)*1
+                    c(6,ind) = i*1*0**(j)
                     c(7,ind) = i
-                    c(8,ind) = i*1*0**(j)
+                    c(8,ind) = i*0**(i-1)*1
                 end if
 
                 ! fy
                 if (j > 0) then
                     c(9,ind) = j*0**(i)*0**(j-1)
-                    c(10,ind) = j*0**(i)*1
+                    c(10,ind) = j*1*0**(j-1)
                     c(11,ind) = j
-                    c(12,ind) = j*1*0**(j-1)
+                    c(12,ind) = j*0**(i)*1
                 end if
 
                 ! fxy
                 if ((i > 0) .and. (j > 0)) then
                     c(13,ind) = i*j*0**(i-1)*0**(j-1)
-                    c(14,ind) = i*j*0**(i-1)*1
+                    c(14,ind) = i*j*0**(j-1)
                     c(15,ind) = i*j
-                    c(16,ind) = i*j*0**(j-1)
+                    c(16,ind) = i*j*0**(i-1)*1
                 end if
 
                 ! Update index
@@ -239,6 +239,9 @@ module BicubicSplineInterpolant
         interp%x = x
         interp%y = y
         interp%a = transpose(rhs)
+
+        ! Housekeeping
+        deallocate(rhs, ipiv)
 
     end subroutine
 
@@ -326,6 +329,7 @@ module BicubicSplineInterpolant
             do i = 0, 3
                 do j = 0, 3
                     rep(:,k) = (xqn**i)*(yqn**j)
+                    k = k + 1 
                 end do
             end do
 
@@ -500,6 +504,9 @@ module BicubicSplineInterpolant
 
         ! Evaluate
         vq = sum(aq*rep, 2)
+
+        ! Housekeeping
+        deallocate(aq, rep, ind, xqn, yqn, sf)
 
     end subroutine
 
