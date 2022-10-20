@@ -73,6 +73,10 @@ module gdmod_optimizationengine
         ! Cost function evaluation
         procedure :: EvaluateCostFunction   => EvaluateCostFunctionGD
 
+        ! Constraints evaluation
+        procedure :: EvaluateEqualityConstraints    &
+                        => EvaluateEqualityConstraintsGD
+
         ! Additional routines
         !====================
 
@@ -329,7 +333,7 @@ module gdmod_optimizationengine
     subroutine EvaluateCostFunctionGD(problem, J, gradJ, hessJ, &
         dogradient, dohessian)
 
-         ! Description
+        ! Description
         !============
         ! Evaluate the cost function, based on the current state of the
         ! optimization problem. Besides the scalar value itself, also
@@ -364,6 +368,48 @@ module gdmod_optimizationengine
         call problem%costfunction%Evaluate(J, gradJ, hessJ, problem%grid, &
             problem%magneticField, problem%environment, dogradient, &
             dohessian, problem%designvariables)
+
+    end subroutine
+
+    ! Constraints evaluation
+    subroutine EvaluateEqualityConstraintsGD(problem, G, gradG, hessG, &
+        dogradient, dohessian, lambda)
+
+        ! Description
+        !============
+        ! Evaluate the constraints, based on the current state of the
+        ! problem. Note that the 'hessian' that is returned, is in fact
+        ! the hessian-vector multiplication between the hessian and the
+        ! vector lambda. Lambda should have been initialized with the 
+        ! proper size. 
+
+        ! Initialize
+        !===========
+        ! Declare modules
+
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        real(R8), allocatable               :: G(:), lambda(:)
+        type(MySparseUDT)                   :: gradG, hessG
+        logical                             :: dogradient, dohessian                            
+
+        ! Loop variables
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Compute the constraints
+        !========================
+        ! Simply call the constraint computation routine
+        call problem%constraints%eqcon%Evaluate(G, gradG, hessG, problem%grid, &
+            problem%magneticField, problem%environment, dogradient, &
+            dohessian, problem%designvariables, lambda)
 
     end subroutine
 
