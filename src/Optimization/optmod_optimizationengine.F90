@@ -108,8 +108,12 @@ module optmod_optimizationengine
     contains 
 
         ! Solution procedure using KKT solver
-        procedure :: InitializeKKTSolver => InitializeKKTSolver
-        procedure :: SolveOptimizationProblemKKT => SolveOptimizationProblemKKT
+        procedure ::    InitializeKKTSolver     => InitializeKKTSolver
+        procedure ::    SolveOptimizationProblemKKT &
+                        => SolveOptimizationProblemKKT
+
+        ! Convergence checking
+        procedure :: CheckConvergenceKKT 
 
     end type
 
@@ -253,6 +257,10 @@ module optmod_optimizationengine
     !                                                                  !
     !==================================================================!
 
+    !------------------------------------------------------------------!
+    !                       OPTIMIZATION ENGINE                        !
+    !------------------------------------------------------------------!
+
     ! Main driver
     subroutine OptimizationEngineDriver(optimizationengine)
 
@@ -293,6 +301,10 @@ module optmod_optimizationengine
             optimizationengine%problem)
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                       OPTIMIZATION SOLVER                        !
+    !------------------------------------------------------------------!
 
     ! KKT solver initialization
     subroutine InitializeKKTSolver(solver)
@@ -340,10 +352,11 @@ module optmod_optimizationengine
     
         ! Loop variables
         integer(I8)                 :: itopt, maxit, verbosity
-        logical                     :: notconverged
+        logical                     :: converged
         
         ! Auxiliary variables 
-        real(R8)                    :: rxf, rxfdesign, rxfdec, rxfmin
+        real(R8)                    :: rxf, rxfdesign, rxfdec, rxfmin, &
+            convnorm
         logical                     :: dogradient, dohessian 
         
         real(R8)                    :: J 
@@ -402,7 +415,7 @@ module optmod_optimizationengine
         ! Main loop
         !==========
         ! Set convergence
-        notconverged = .true. 
+        converged = .false. 
 
         ! Print solver header
         if (verbosity > 0) then
@@ -412,7 +425,7 @@ module optmod_optimizationengine
         end if
 
         ! Loop
-        do while (notconverged .and. (itopt <= maxit))
+        do while ( (.not. converged) .and. (itopt <= maxit))
 
             ! Update the design
             call problem%UpdateDesign()
@@ -425,6 +438,9 @@ module optmod_optimizationengine
             call problem%EvaluateEqualityConstraints(G, gradG, hessG, &
                 dogradient, dohessian, lambda)
 
+            ! Check convergence
+            call solver%CheckConvergenceKKT(gradJ, converged, convnorm)
+
             ! Update the monitor
             problem%monitor%itopt = itopt
 
@@ -435,7 +451,7 @@ module optmod_optimizationengine
             problem%monitor%dL(:,itopt)     = 0
             problem%monitor%G(:,itopt)      = G
             problem%monitor%H(:,itopt)      = 0
-            problem%monitor%convnorm(itopt) = maxval(abs(gradJ))
+            problem%monitor%convnorm(itopt) = convnorm
 
             ! Print the current iterate
             if (verbosity > 0) then 
@@ -444,6 +460,8 @@ module optmod_optimizationengine
 
             end if
 
+            
+
             ! Update the iteration counter
             itopt = itopt+1
 
@@ -451,6 +469,34 @@ module optmod_optimizationengine
 
         ! Housekeeping
 
+
+    end subroutine
+
+    ! Convergence checker
+    subroutine CheckConvergenceKKT(solver, gradient, converged, infnorm)
+        
+        ! Description
+        !============
+        ! Check if the optimization problem is converged by checking
+        ! the infinity norm of the Lagrange gradient. Note that it is
+        ! assumed that any projection on box constraints, or accounting
+        ! for other constraints, has been done already. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverUDT)        :: solver 
+        real(R8), intent(in)                :: gradient(:)
+        logical, intent(inout)              :: converged 
+        real(R8), intent(out)               :: infnorm
+
+        ! Check convergence
+        !==================
+        ! Compute infinity norm
+        infnorm = maxval(abs(gradient))
+
+        ! Compare
+        converged = infnorm < solver%numKKT%tol
 
     end subroutine
 
