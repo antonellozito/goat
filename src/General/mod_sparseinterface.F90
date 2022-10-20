@@ -156,9 +156,12 @@ module mod_sparseinterface
 
         ! Allocate
         !=========
-        deallocate(mysparse%col)
-        deallocate(mysparse%row)
-        deallocate(mysparse%val)
+        if (allocated(mysparse%col)) then 
+            ! assume rest is also allocated
+            deallocate(mysparse%col)
+            deallocate(mysparse%row)
+            deallocate(mysparse%val)
+        end if
 
     end subroutine
 
@@ -176,7 +179,7 @@ module mod_sparseinterface
 
         ! Declare variables
         !==================
-        type(MySparseUDT)       :: mysparse
+        type(MySparseUDT), intent(in)       :: mysparse
 
         ! Destroy
         !========
