@@ -118,8 +118,8 @@ module optmod_monitor
         print *, '!         Solving the grid deformation problem      !'
         print *, '!===================================================!'
         print *, 'Performing ', monitor%maxitopt, ' iterations'
-        print "(4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)" &
-            ,   'it  ',    'conv',    'tol'
+        print "(4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)" &
+            ,   'it  ',    'conv',    'tol', 'Gmax', 'Hmax'
 
     end subroutine
 
@@ -137,8 +137,10 @@ module optmod_monitor
 
         ! Print
         !======
-        print "(i8, 4x, e8.2, 4x, e8.2, 4x)", &
-            monitor%itopt, monitor%convnorm(monitor%itopt), monitor%opttol
+        print "(i8, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)", &
+            monitor%itopt, monitor%convnorm(monitor%itopt), &
+            monitor%opttol, maxval(abs(monitor%G(:,monitor%itopt))), &
+            maxval(abs(monitor%H(:,monitor%itopt)))
 
     end subroutine
 
