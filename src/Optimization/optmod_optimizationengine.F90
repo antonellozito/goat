@@ -73,21 +73,28 @@ module optmod_optimizationengine
         ! Design initialization
 
         ! Get problem dimensions
-        procedure(GetProblemDimensionsINT), deferred :: GetProblemDimensions
+        procedure(GetProblemDimensionsINT), deferred :: & 
+            GetProblemDimensions
 
         ! Design initialization
-        procedure(InitializeINT), deferred      :: Initialize 
+        procedure(InitializeINT), deferred :: &
+            Initialize 
 
         ! Design updates
-        procedure(UpdateDesignINT), deferred    :: UpdateDesign     
+        procedure(UpdateDesignINT), deferred :: &
+            UpdateDesign     
         
         ! Cost function evaluation
-        procedure(EvaluateCostFunctionINT), deferred    :: &
+        procedure(EvaluateCostFunctionINT), deferred:: &
             EvaluateCostFunction
 
         ! Equality constraints evaluation
-        procedure(EvaluateEqualityConstraintsINT), deferred     :: &
+        procedure(EvaluateEqualityConstraintsINT), deferred :: &
             EvaluateEqualityConstraints
+
+        ! Inequality constraints evaluation
+        procedure(EvaluateInequalityConstraintsINT), deferred :: &
+            EvaluateInequalityConstraints
             
         
 
@@ -225,9 +232,9 @@ module optmod_optimizationengine
 
         end subroutine
 
-        ! Constraints evaluation
-        subroutine EvaluateEqualityConstraintsINT(problem, G, gradG, hessG, &
-            dogradient, dohessian, lambda)
+        ! Equality constraints evaluation
+        subroutine EvaluateEqualityConstraintsINT(problem, G, gradG, &
+            hessG, dogradient, dohessian, lambda)
 
             ! Description
             !============
@@ -243,6 +250,28 @@ module optmod_optimizationengine
             class(OptimizationProblemUDT)       :: problem 
             real(R8), allocatable               :: G(:), lambda(:)
             type(MySparseUDT)                   :: gradG, hessG 
+            logical                             :: dogradient, dohessian
+
+        end subroutine
+
+        ! Inequality constraints evaluation
+        subroutine EvaluateInequalityConstraintsINT(problem, H, gradH, &
+            hessH, dogradient, dohessian, mu)
+
+            ! Description
+            !============
+            ! This routine returns the inequality constraints, H, the
+            ! gradient, gradH (in mysparse format), and the hessian-
+            ! vector multiplication with the vector mu hessG (also 
+            ! in mysparse format).
+
+            ! Import
+            import :: OptimizationProblemUDT, MySparseUDT, R8
+
+            ! Declare
+            class(OptimizationProblemUDT)       :: problem 
+            real(R8), allocatable               :: H(:), mu(:)
+            type(MySparseUDT)                   :: gradH, hessH 
             logical                             :: dogradient, dohessian
 
         end subroutine
@@ -359,12 +388,18 @@ module optmod_optimizationengine
             convnorm
         logical                     :: dogradient, dohessian 
         
+        ! Cost function variables
         real(R8)                    :: J 
         real(R8), allocatable       :: gradJ(:)
         type(MySparseUDT)           :: hessJ 
 
+        ! Equality constraint variables
         real(R8), allocatable       :: G(:), lambda(:) 
         type(MySparseUDT)           :: gradG, hessG  
+
+        ! Inequality constraint variables
+        real(R8), allocatable       :: H(:), mu(:) 
+        type(MySparseUDT)           :: gradH, hessH  
 
         ! Data
 
@@ -394,12 +429,23 @@ module optmod_optimizationengine
         hessJ%nrow = nphi 
         hessJ%ncol = nphi 
 
-        ! Constraint quantities
+        ! Equality constraint quantities
         allocate(G(neq), lambda(neq))
         G(:) = 0
         lambda(:) = 0
         gradG%nrow = nphi 
         gradG%ncol = neq 
+        hessG%nrow = nphi 
+        hessG%ncol = nphi
+
+        ! Inequality constraint quantities
+        allocate(H(nineq), mu(nineq))
+        H(:) = 0
+        mu(:) = 0
+        gradH%nrow = nphi 
+        gradH%ncol = nineq 
+        hessH%nrow = nphi 
+        hessH%ncol = nphi
 
         ! Initialize counter(s)
         itopt = 1
@@ -431,12 +477,18 @@ module optmod_optimizationengine
             call problem%UpdateDesign()
 
             ! Evaluate cost function
-            call problem%EvaluateCostFunction(J, gradJ, hessJ, &
-                dogradient, dohessian)
+            call problem%EvaluateCostFunction(J, gradJ, & 
+                hessJ, dogradient, dohessian)
 
             ! Evaluate the equality constraints
-            call problem%EvaluateEqualityConstraints(G, gradG, hessG, &
-                dogradient, dohessian, lambda)
+            call problem%EvaluateEqualityConstraints(G, gradG, &
+                hessG, dogradient, dohessian, lambda)
+
+            ! Evaluate the inequality constraints
+            call problem%EvaluateInequalityConstraints(H, gradH, &
+                hessH, dogradient, dohessian, lambda)
+
+            ! Evaluate the Lagrangian
 
             ! Check convergence
             call solver%CheckConvergenceKKT(gradJ, converged, convnorm)
@@ -450,7 +502,7 @@ module optmod_optimizationengine
             problem%monitor%L(itopt)        = 0
             problem%monitor%dL(:,itopt)     = 0
             problem%monitor%G(:,itopt)      = G
-            problem%monitor%H(:,itopt)      = 0
+            problem%monitor%H(:,itopt)      = H
             problem%monitor%convnorm(itopt) = convnorm
 
             ! Print the current iterate
@@ -460,14 +512,13 @@ module optmod_optimizationengine
 
             end if
 
-            
-
             ! Update the iteration counter
             itopt = itopt+1
 
         end do
 
         ! Housekeeping
+        deallocate(G, H, gradJ, lambda, mu)
 
 
     end subroutine
