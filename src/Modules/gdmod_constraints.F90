@@ -146,6 +146,14 @@ module gdmod_constraints
         ! Total number of inequality constraints
         integer(I8)             :: nineqcon = 0
 
+    contains
+
+        ! Constraints initialization
+        procedure :: Initialize         => InitializeIneqCon
+
+        ! Constraints evaluation
+        procedure :: Evaluate           => EvaluateIneqCon
+
     end type
 
     ! All constraints for the grid deformation
@@ -389,7 +397,9 @@ module gdmod_constraints
         call constraints%eqcon%Initialize(grid, magneticField, &
             environment, constraintoptions, monitor)
 
-        ! Inequality constraints (to do)
+        ! Inequality constraints
+        call constraints%ineqcon%Initialize(grid, magneticField, &
+            environment, constraintoptions, monitor)
 
     end subroutine
 
@@ -656,6 +666,140 @@ module gdmod_constraints
 
     end subroutine
 
+
+    !------------------------------------------------------------------!
+    !                          INEQUALITY CONSTRAINTS                  !
+    !------------------------------------------------------------------!
+    ! Initialization
+    subroutine InitializeIneqCon(constraints, grid, magneticField, &
+        environment, constraintoptions, monitor)
+
+        ! Description
+        !============
+        ! Routine that initializes the desired constraints, based on the
+        ! user options d
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IneqConGDUDT)         :: constraints 
+        type(GridUDT)               :: grid 
+        type(MagneticFieldUDT)      :: magneticField 
+        type(EnvironmentUDT)        :: environment 
+        type(ConstraintOptionsUDT)  :: constraintoptions
+        type(ConstraintsMonitorUDT) :: monitor
+
+        ! Loop variables
+
+        ! Auxiliary variables
+
+        ! Initialize
+        !===========
+        !constraints%neqcon = 0
+
+        ! Initialize constraints
+        !=======================
+        constraints%nineqcon = 0
+
+    end subroutine
+
+    ! Constraint evaluation
+    subroutine EvaluateIneqCon(constraints, G, gradG, hessG, &
+        grid, magneticField, environment, dogradient, dohessian, & 
+        designvariables, lambda)
+
+        ! Description
+        !============
+        ! This routine evaluates the constraints G and the corresponding
+        ! gradient and hessian. To do so, every type of constraint is 
+        ! checked whether it is imposed, and the contributions are 
+        ! added by calling the evaluation routine of each constraint. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IneqConGDUDT)             :: constraints
+        real(R8), intent(inout)         :: G(:)
+        real(R8), intent(in)            :: lambda(:)
+        type(MySparseUDT)               :: gradG, hessG 
+        type(GridUDT)                   :: grid
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables 
+
+        ! Loop
+        integer(I8)                     :: ic, ivg, ivh, k
+        integer(I8), allocatable        :: conindex(:)
+
+        ! Auxiliary
+
+        ! Initialize
+        !===========
+        ! Set the constraint counter
+        ic = 0
+
+        ! Initialize
+        G(:) = 0
+    
+        ! Concatenate gradient
+        !=====================
+        if (dogradient) then 
+
+            ! Determine sizes
+            !----------------
+            ! Size of the gradient
+            gradG%ncol = constraints%nineqcon 
+            gradG%nrow = designvariables%nphi
+
+            ! Allocate
+            if (.not. allocated(gradG%val)) then 
+                ! Number of values (to be determined)
+                gradG%nval = 0
+
+                ! Add values of each constraint, if used
+
+                ! Allocate
+                call gradG%Allocate()
+            end if
+
+            ! Add contributions
+            !------------------
+            ! Initialize counter
+            ivg = 0
+            
+        end if
+
+        ! Concatenate the hessian
+        !========================
+        if (dohessian) then 
+
+            ! Determine sizes
+            !----------------
+            ! Size of the hessian
+            hessG%ncol = designvariables%nphi
+            hessG%nrow = designvariables%nphi
+
+            ! Allocate
+            if (.not. allocated(hessG%val)) then 
+                ! Number of values (to be determined)
+                hessG%nval = 0
+
+                ! Add values of each constraint, if used
+
+                ! Allocate
+                call hessG%Allocate()
+            end if
+
+            ! Add contributions
+            !------------------
+            ! Initialize counter
+            ivh = 0
+
+        end if
+
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                           FLUX FUNCTION                          !
