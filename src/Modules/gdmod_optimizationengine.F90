@@ -73,9 +73,13 @@ module gdmod_optimizationengine
         ! Cost function evaluation
         procedure :: EvaluateCostFunction   => EvaluateCostFunctionGD
 
-        ! Constraints evaluation
+        ! Equality constraints evaluation
         procedure :: EvaluateEqualityConstraints    &
                         => EvaluateEqualityConstraintsGD
+
+        ! Inequality constraints evaluation
+        procedure :: EvaluateInequalityConstraints &
+                        => EvaluateInequalityConstraintsGD
 
         ! Additional routines
         !====================
@@ -371,7 +375,7 @@ module gdmod_optimizationengine
 
     end subroutine
 
-    ! Constraints evaluation
+    ! Equality constraints evaluation
     subroutine EvaluateEqualityConstraintsGD(problem, G, gradG, hessG, &
         dogradient, dohessian, lambda)
 
@@ -412,5 +416,48 @@ module gdmod_optimizationengine
             dohessian, problem%designvariables, lambda)
 
     end subroutine
+
+    ! Inequality constraints evaluation
+    subroutine EvaluateInequalityConstraintsGD(problem, H, gradH, &
+        hessH, dogradient, dohessian, mu)
+
+        ! Description
+        !============
+        ! Evaluate the constraints, based on the current state of the
+        ! problem. Note that the 'hessian' that is returned, is in fact
+        ! the hessian-vector multiplication between the hessian and the
+        ! vector mu. mu should have been initialized with the 
+        ! proper size. 
+
+        ! Initialize
+        !===========
+        ! Declare modules
+
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        real(R8), allocatable               :: H(:), mu(:)
+        type(MySparseUDT)                   :: gradH, hessH
+        logical                             :: dogradient, dohessian                            
+
+        ! Loop variables
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Compute the constraints
+        !========================
+        ! Simply call the constraint computation routine
+        call problem%constraints%ineqcon%Evaluate(H, gradH, hessH, &
+            problem%grid, problem%magneticField, problem%environment, &
+            dogradient, dohessian, problem%designvariables, mu)
+
+    end subroutine
+
 
 end module
