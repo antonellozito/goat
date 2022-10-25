@@ -122,6 +122,9 @@ module optmod_optimizationengine
         ! Convergence checking
         procedure :: CheckConvergenceKKT 
 
+        ! Lagrangian evaluation
+        procedure :: EvaluateLagrangian
+
     end type
 
     ! Optimization engine
@@ -388,18 +391,28 @@ module optmod_optimizationengine
             convnorm
         logical                     :: dogradient, dohessian 
         
-        ! Cost function variables
+        ! Cost function 
         real(R8)                    :: J 
         real(R8), allocatable       :: gradJ(:)
         type(MySparseUDT)           :: hessJ 
 
-        ! Equality constraint variables
+        ! Equality constraints 
         real(R8), allocatable       :: G(:), lambda(:) 
         type(MySparseUDT)           :: gradG, hessG  
 
-        ! Inequality constraint variables
+        ! Inequality constraints 
         real(R8), allocatable       :: H(:), mu(:) 
         type(MySparseUDT)           :: gradH, hessH  
+
+        ! nonlinear complementarity function
+        real(R8), allocatable       :: ncp(:) 
+        type(MySparseUDT)           :: gradncp
+        logical, allocatable        :: A(:), I(:) 
+
+        ! Lagrangian 
+        real(R8)                    :: L 
+        real(R8), allocatable       :: gradL(:)
+        type(MySparseUDT)           :: hessL 
 
         ! Data
 
@@ -422,14 +435,14 @@ module optmod_optimizationengine
         call problem%monitor%Initialize(solver%numKKT%maxit, nphi, neq,&
             nineq, opttol)
 
-        ! Cost function quantities
+        ! Cost function 
         allocate(gradJ(nphi))
         J = 0
         gradJ(:) = 0
         hessJ%nrow = nphi 
         hessJ%ncol = nphi 
 
-        ! Equality constraint quantities
+        ! Equality constraint 
         allocate(G(neq), lambda(neq))
         G(:) = 0
         lambda(:) = 0
@@ -438,7 +451,7 @@ module optmod_optimizationengine
         hessG%nrow = nphi 
         hessG%ncol = nphi
 
-        ! Inequality constraint quantities
+        ! Inequality constraint 
         allocate(H(nineq), mu(nineq))
         H(:) = 0
         mu(:) = 0
@@ -446,6 +459,18 @@ module optmod_optimizationengine
         gradH%ncol = nineq 
         hessH%nrow = nphi 
         hessH%ncol = nphi
+
+        ! NCP function
+        allocate(ncp(nineq), A(nineq), I(nineq))
+        gradncp%nrow = nphi 
+        gradncp%ncol = nineq
+        A(:) = .false.
+        I(:) = .not. A
+
+        ! Lagrangian 
+        allocate(gradL(nphi + neq + nineq))
+        hessL%nrow = nphi + neq + nineq
+        hessL%ncol = nphi + neq + nineq
 
         ! Initialize counter(s)
         itopt = 1
@@ -488,10 +513,19 @@ module optmod_optimizationengine
             call problem%EvaluateInequalityConstraints(H, gradH, &
                 hessH, dogradient, dohessian, lambda)
 
+            ! Evaluate the nonlinear complementarity function 
+            !call solver%EvaluateNCPfunction(ncp, A, I, gradncp, &
+            !    H, gradH, mu)
+
             ! Evaluate the Lagrangian
+            call solver%EvaluateLagrangian(L, gradL, hessL, &
+                J, gradJ, hessJ, &
+                G, gradG, hessG, lambda, &
+                H, gradH, hessH, mu, A, &
+                dogradient, dohessian)
 
             ! Check convergence
-            call solver%CheckConvergenceKKT(gradJ, converged, convnorm)
+            !call solver%CheckConvergenceKKT(gradL, converged, convnorm)
 
             ! Update the monitor
             problem%monitor%itopt = itopt
@@ -550,6 +584,166 @@ module optmod_optimizationengine
         converged = infnorm < solver%numKKT%tol
 
     end subroutine
+
+    ! Lagrangian 
+    subroutine EvaluateLagrangian(solver, L, gradL, hessL, J, gradJ, &
+        hessJ, G, gradG, hessG, lambda, H, gradH, hessH, mu, A, &
+        dogradient, dohessian)
+
+        ! Description
+        !============
+        ! Evaluate the lagrangian, its gradient and hessian based on
+        ! the cost function, constraints, and their multipliers. The 
+        ! lagrangian is evaluated as follows:
+        !
+        !   L = J + sum(lambda(i) * G(i)) + sum(mu(j) * H(j), if A(j))
+        !
+        ! where A denotes the active inequality constraints. The 
+        ! Jacobian is then as follows (only computed if dogradient
+        ! is true, transpose is returned):
+        !
+        !   dLdphi      = dJdphi + sum(lambda(i) * dG(i)dphi) 
+        !               + sum(mu(j), dH(j)dphi, A(j))
+        !   dLdlambda   = transp(G)
+        !   dLdmu       = transp(H, A) ! only active constraints
+        !
+        ! And the hessian is equal to (only computed if dohessian is
+        ! true):
+        !
+        !   dLdphi2         = dJdphi2 + sum(lambda(i) * dG(i)dphi2) 
+        !                   + sum(mu(j), dH(j)dphi2, A(j))
+        !   dLdphidlambda   = dGdphi
+        !   dLdphidmu       = dHdphi ! only for active constraints 
+        !   dLdlambdadphi   = transp(dGdphi)
+        !   dLdlambda2      = 0 
+        !   dLdlambdadmu    = 0  
+        !   dLdmdphi        = transp(dHdphi)
+        !   dLdmdlambda     = 0
+        !   dLdm2           = 0
+        !
+        ! It is assumed that the hessian vector product lambda * dGdphi2
+        ! and mu * dHdphi2 is given, the latter one accounting for the
+        ! activeness of the constraints. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverUDT)        :: solver 
+
+        real(R8), intent(inout)             :: L, gradL(:) 
+        type(MySparseUDT), intent(inout)    :: hessL 
+
+        real(R8), intent(in)                :: J, G(:), H(:), mu(:), &
+                                            lambda(:), gradJ(:)
+        type(MySparseUDT), intent(in)       :: hessJ, gradG, hessG, &
+                                            gradH, hessH
+        logical, intent(in)                 :: A(:), dogradient, &
+                                            dohessian 
+
+        ! Loop variables
+        integer(I8)                         :: k 
+
+        ! Auxiliary variables
+        real(R8), allocatable               :: tmu(:)
+                                        
+        ! Compute Lagrangian
+        !===================
+        ! For ease: set mu(.not. A) equal to zero
+        allocate(tmu(size(mu)))
+        where (.not. A) tmu = 0
+        L = J + sum(lambda * G) + sum(tmu * H)
+
+        ! Compute gradient
+        !=================
+        if (dogradient) then 
+
+            ! Cost function contribution
+            gradL = gradJ
+
+            ! Equality constraints contribution
+            do k = 1, gradG%nval
+                gradL(gradG%col(k)) = lambda(gradG%row(k))*gradG%val(k)
+            end do 
+
+            ! Inequality constraints contribution
+            do k = 1, gradH%nval 
+                gradL(gradH%col(k)) = tmu(gradH%row(k))*gradH%val(k)
+            end do
+
+        end if 
+
+        ! Compute hessian
+        !================
+        if (dohessian) then 
+
+            ! Initialize & allocate
+            k = 0
+            hessL%nval  = hessJ%nval + hessG%nval + hessH%nval &
+                        + 2*gradG%nval + 2*gradH%nval   
+
+            if (.not. allocated(hessL%val)) then
+                call hessL%Allocate()
+            end if
+
+            ! dLdpsi2
+            !--------
+            ! Cost function contribution
+            hessL%val(k+1:k+hessJ%nval) = hessJ%val
+            hessL%row(k+1:k+hessJ%nval) = hessJ%row 
+            hessL%col(k+1:k+hessJ%nval) = hessJ%col 
+            k = k + hessJ%nval 
+
+            ! Equality constraints contribution
+            hessL%val(k+1:k+hessG%nval) = hessG%val
+            hessL%row(k+1:k+hessG%nval) = hessG%row 
+            hessL%col(k+1:k+hessG%nval) = hessG%col 
+            k = k + hessG%nval 
+
+            ! Inequality constraints contribution
+            hessL%val(k+1:k+hessH%nval) = hessH%val
+            hessL%row(k+1:k+hessH%nval) = hessH%row 
+            hessL%col(k+1:k+hessH%nval) = hessH%col 
+            k = k + hessH%nval 
+
+            ! dLdlambdadphi
+            !--------------
+            hessL%val(k+1:k+gradG%nval) = gradG%val 
+            hessL%row(k+1:k+gradG%nval) = gradG%row
+            hessL%col(k+1:k+gradG%nval) = gradG%col 
+            k = k + gradG%nval 
+
+            ! dLdphidlambda 
+            !--------------
+            hessL%val(k+1:k+gradG%nval) = gradG%val 
+            hessL%row(k+1:k+gradG%nval) = gradG%col
+            hessL%col(k+1:k+gradG%nval) = gradG%row  
+            k = k + gradG%nval 
+
+            ! dLdmudphi
+            !----------
+            hessL%val(k+1:k+gradH%nval) = gradH%val 
+            hessL%row(k+1:k+gradH%nval) = gradH%row
+            hessL%col(k+1:k+gradH%nval) = gradH%col 
+            k = k + gradH%nval 
+
+            ! dLdphidmu
+            !----------
+            hessL%val(k+1:k+gradH%nval) = gradH%val 
+            hessL%row(k+1:k+gradH%nval) = gradH%col
+            hessL%col(k+1:k+gradH%nval) = gradH%row
+            k = k + gradH%nval 
+
+        end if
+        
+
+
+    end subroutine
+
+    ! Nonlinear complementarity function 
+    !subroutine EvaluateNCPfunction(ncp, A, I, gradncp, H, gradH, mu)
+
+    !end subroutine
+
 
 
 end module
