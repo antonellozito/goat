@@ -76,6 +76,10 @@ module optmod_optimizationengine
         procedure(GetProblemDimensionsINT), deferred :: & 
             GetProblemDimensions
 
+        ! Get problem design variables
+        procedure(GetProblemDesignVariablesINT), deferred :: & 
+            GetProblemDesignVariables
+
         ! Design initialization
         procedure(InitializeINT), deferred :: &
             Initialize 
@@ -83,6 +87,10 @@ module optmod_optimizationengine
         ! Design updates
         procedure(UpdateDesignINT), deferred :: &
             UpdateDesign     
+        
+        ! Problem updates
+        procedure(UpdateProblemINT), deferred :: &
+            UpdateProblem
         
         ! Cost function evaluation
         procedure(EvaluateCostFunctionINT), deferred:: &
@@ -191,8 +199,43 @@ module optmod_optimizationengine
 
         end subroutine
 
+        ! Get problem design variables
+        subroutine GetProblemDesignVariablesINT(problem, phi)
+
+            ! Description
+            !============
+            ! This routine should return the problem's design variables
+            ! as a real array 'phi'
+
+            ! Import
+            import :: OptimizationProblemUDT, R8 
+
+            ! Declare
+            class(OptimizationProblemUDT)       :: problem 
+            real(R8), allocatable, intent(out)  :: phi(:)
+
+        end subroutine
+
         ! Design update
-        subroutine UpdateDesignINT(problem)
+        subroutine UpdateDesignINT(problem, dx)
+
+            ! Description
+            !============
+            ! This routine should update only the design variable vector
+            ! with the increment dx. This increment should have the 
+            ! correct dimensions
+
+            ! Import
+            import :: OptimizationProblemUDT, R8 
+
+            ! Declare
+            class(OptimizationProblemUDT)       :: problem 
+            real(R8), intent(in)                :: dx(:)
+
+        end subroutine
+
+        ! Problem update
+        subroutine UpdateProblemINT(problem)
 
             ! Description
             !============
@@ -200,7 +243,7 @@ module optmod_optimizationengine
             ! the design step has been computed. 
 
             ! Import
-            import :: OptimizationProblemUDT, I8 
+            import :: OptimizationProblemUDT
 
             ! Declare
             class(OptimizationProblemUDT)       :: problem 
@@ -498,8 +541,8 @@ module optmod_optimizationengine
         ! Loop
         do while ( (.not. converged) .and. (itopt <= maxit))
 
-            ! Update the design
-            call problem%UpdateDesign()
+            ! Update the optimization problem 
+            call problem%UpdateProblem()
 
             ! Evaluate cost function
             call problem%EvaluateCostFunction(J, gradJ, & 

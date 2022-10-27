@@ -67,8 +67,15 @@ module gdmod_optimizationengine
         ! Dimension query
         procedure :: GetProblemDimensions   => GetProblemDimensionsGD 
 
+        ! Design variables query
+        procedure :: GetProblemDesignVariables => &
+            GetProblemDesignVariablesGD
+
         ! Design update
         procedure :: UpdateDesign           => UpdateDesignGD
+
+        ! Problem update
+        procedure :: UpdateProblem          => UpdateProblemGD
 
         ! Cost function evaluation
         procedure :: EvaluateCostFunction   => EvaluateCostFunctionGD
@@ -208,6 +215,25 @@ module gdmod_optimizationengine
 
     end subroutine
 
+    ! Design variables query
+    subroutine GetProblemDesignVariablesGD(problem, phi)
+
+        ! Description
+        !============
+        ! This routine returns the current design variable vector phi
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)         :: problem
+        real(R8), allocatable, intent(out)      :: phi(:)
+
+        ! Get!
+        !=====
+        phi = problem%designvariables%phi
+
+    end subroutine
+
     ! Optimization problem initialization
     subroutine InitializeOptimizationProblemGD(problem) 
 
@@ -298,8 +324,8 @@ module gdmod_optimizationengine
 
     end subroutine
 
-    ! Design update
-    subroutine UpdateDesignGD(problem)
+    ! Problem update
+    subroutine UpdateProblemGD(problem)
 
         ! Description
         !============
@@ -330,6 +356,39 @@ module gdmod_optimizationengine
         ! Simply call the update routine from the design variables
         call problem%designvariables%UpdateDesign(problem%grid, &
             problem%magneticField, problem%environment)
+
+    end subroutine
+
+    ! Design update
+    subroutine UpdateDesignGD(problem, dx)
+
+        ! Description
+        !============
+        ! Update the design variables according to the update dx. 
+
+        ! Initialize
+        !===========
+        ! Declare modules
+
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        real(R8), intent(in)                :: dx(:)
+    
+        ! Loop variables
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Update design
+        !==============
+        ! Simply update designvariables%phi
+        problem%designvariables%phi = problem%designvariables%phi + dx 
 
     end subroutine
 
