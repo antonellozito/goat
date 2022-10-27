@@ -457,6 +457,16 @@ module optmod_optimizationengine
         real(R8), allocatable       :: gradL(:)
         type(MySparseUDT)           :: hessL 
 
+        ! Solver & updates
+        real(R8), allocatable       :: fullmat(:, :)
+        integer, allocatable        :: ipiv(:)
+        integer                     :: info
+        integer                     :: matdim 
+        double precision, allocatable :: fullmatrix(:,:), dx(:)
+
+        ! Diagnostics
+        logical                     :: checkgradients 
+
         ! Data
 
         ! Temporary variables (to be deleted in the future)
@@ -515,6 +525,10 @@ module optmod_optimizationengine
         hessL%nrow = nphi + neq + nineq
         hessL%ncol = nphi + neq + nineq
 
+        ! Solver
+        allocate(dx(hessL%nrow))
+        allocate(fullmat(hessL%nrow, hessL%ncol))
+
         ! Initialize counter(s)
         itopt = 1
         maxit = solver%numKKT%maxit
@@ -568,7 +582,45 @@ module optmod_optimizationengine
                 dogradient, dohessian)
 
             ! Check convergence
-            !call solver%CheckConvergenceKKT(gradL, converged, convnorm)
+            call solver%CheckConvergenceKKT(gradL, converged, convnorm)
+
+            ! Solve 
+            if (.not. converged) then 
+                ! Solve, now by casting sparse into full matrix - to be
+                ! replaced later with decent solver routines!
+
+                ! Convert to full matrix
+                call hessL%Full(fullmat)
+                matdim = int(hessL%nrow)
+                allocate(fullmatrix(hessL%nrow,hessL%ncol))
+                fullmatrix = dble(fullmat)
+                deallocate(fullmat)
+                dx = dble(gradL)
+                allocate(ipiv(hessL%nrow))
+                ! ipiv(:) = 0
+                call dgesv(matdim, 1, fullmatrix, &
+                    matdim, ipiv, dx, matdim, info)
+                deallocate(ipiv)
+                deallocate(fullmatrix)
+
+                ! Check if converged
+                if (info .ne. 0) then
+                    ! Not converged - issue error
+                    print *, 'info: ', info
+                    call gdErrorHandler('Could not solve KKT system')
+                end if
+
+                ! Update
+                
+
+            else
+                ! Don't solve again, already converged. Exit 
+                dx(:) = 0
+            end if
+
+            ! Update the design
+            print *, maxval(abs(dx(1:nphi)))
+            call problem%UpdateDesign(1e-3*dx(1:nphi))
 
             ! Update the monitor
             problem%monitor%itopt = itopt
