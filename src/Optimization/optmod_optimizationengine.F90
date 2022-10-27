@@ -709,13 +709,13 @@ module optmod_optimizationengine
             !--------------
             hessL%val(k+1:k+gradG%nval) = gradG%val 
             hessL%row(k+1:k+gradG%nval) = gradG%row
-            hessL%col(k+1:k+gradG%nval) = gradG%col 
+            hessL%col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
             k = k + gradG%nval 
 
             ! dLdphidlambda 
             !--------------
             hessL%val(k+1:k+gradG%nval) = gradG%val 
-            hessL%row(k+1:k+gradG%nval) = gradG%col
+            hessL%row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
             hessL%col(k+1:k+gradG%nval) = gradG%row  
             k = k + gradG%nval 
 
@@ -723,13 +723,13 @@ module optmod_optimizationengine
             !----------
             hessL%val(k+1:k+gradH%nval) = gradH%val 
             hessL%row(k+1:k+gradH%nval) = gradH%row
-            hessL%col(k+1:k+gradH%nval) = gradH%col 
+            hessL%col(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
             k = k + gradH%nval 
 
             ! dLdphidmu
             !----------
             hessL%val(k+1:k+gradH%nval) = gradH%val 
-            hessL%row(k+1:k+gradH%nval) = gradH%col
+            hessL%row(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
             hessL%col(k+1:k+gradH%nval) = gradH%row
             k = k + gradH%nval 
 
