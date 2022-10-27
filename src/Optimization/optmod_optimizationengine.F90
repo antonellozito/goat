@@ -30,6 +30,7 @@ module optmod_optimizationengine
     ! Load modules
     use mod_precision
     use mod_sparseinterface
+    use mod_diagnostics
     use optmod_designvariables
     use optmod_costfunction
     use optmod_constraints
@@ -87,7 +88,7 @@ module optmod_optimizationengine
         ! Design updates
         procedure(UpdateDesignINT), deferred :: &
             UpdateDesign     
-        
+
         ! Problem updates
         procedure(UpdateProblemINT), deferred :: &
             UpdateProblem
@@ -152,6 +153,30 @@ module optmod_optimizationengine
         procedure :: Driver                 => OptimizationEngineDriver
 
     end type
+
+    ! Diagnostics
+    !============
+    ! Function handler
+    type, extends(DiagnosticsFunctionUDT) :: DFCostfunctionUDT 
+
+        ! Description
+        !============
+        ! Function type for evaluating and checking the cost function.
+        class(OptimizationProblemUDT), allocatable      :: problem 
+
+    contains 
+
+        ! Evaluation procedure
+        procedure :: Evaluate       => EvaluateDFCostfunction 
+
+        ! Dimension getter
+        procedure :: GetDimensions  => GetProblemDimensions
+
+        ! Argument getter
+        procedure :: GetArguments   => GetProblemArguments
+
+    end type
+
 
     !==================================================================!
     !                                                                  !
@@ -473,6 +498,8 @@ module optmod_optimizationengine
         integer(I8)                 :: nphi, neq, nineq
         real(R8)                    :: opttol
 
+            external dgesv
+
         ! Initialize & unpack
         !====================
         ! Logicals
@@ -529,6 +556,9 @@ module optmod_optimizationengine
         allocate(dx(hessL%nrow))
         allocate(fullmat(hessL%nrow, hessL%ncol))
 
+        ! Diagnostics
+        checkgradients = .true. ! check gradients in each iteration?
+
         ! Initialize counter(s)
         itopt = 1
         maxit = solver%numKKT%maxit
@@ -557,6 +587,12 @@ module optmod_optimizationengine
 
             ! Update the optimization problem 
             call problem%UpdateProblem()
+
+            ! Check gradients?
+            if (checkgradients) then 
+                ! Cost function
+                call CheckCostFunctionGradient(problem)
+            end if
 
             ! Evaluate cost function
             call problem%EvaluateCostFunction(J, gradJ, & 
@@ -839,6 +875,150 @@ module optmod_optimizationengine
 
     !end subroutine
 
+    !------------------------------------------------------------------!
+    !                           COST FUNCTION                          !
+    !------------------------------------------------------------------!
+    ! Stand-alone driver to check the cost function
+    subroutine CheckCostFunctionGradient(problem)
+
+        ! Description
+        !============
+        ! This routine compares the gradient computed by finite
+        ! differences with the actual gradient computation by 
+        ! using the mod_diagnostics module. The errors are printed to
+        ! the terminal. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemUDT)       :: problem 
+
+        ! Auxiliary
+        type(FDcheckerUDT)                  :: FDchecker 
+
+        integer(I8)                         :: nvars 
+        integer(I8), allocatable            :: vars(:)
+
+        ! Initialize
+        !===========
+        ! Set the design variables to check
+        nvars = 5
+        allocate(vars(nvars))
+        vars = [1, 2, 3, 4, 5] ! some random variables for now
+
+        ! Initialize checker 
+        call FDchecker%Initialize(nvars, vars)
+        allocate(DFCostfunctionUDT::FDchecker%fun)
+
+        ! Associate
+        associate(&
+            fun         => FDchecker%fun)
+        
+        ! Initialize checker functino
+        select type(fun)
+
+        type is (DFCostfunctionUDT)
+
+            ! Set the problem
+            fun%problem = problem
+
+        end select
+
+        ! End associate
+        end associate
+
+        ! Compute errors
+        !===============
+        call FDchecker%CheckGradient()
+
+        ! Deallocate
+        deallocate(vars)
+
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateDFCostfunction(fun, x, f, df, d2f, dogradient, &
+        dohessian)
+
+        ! Description
+        !============
+        ! Evaluate the cost function by first updating the design and
+        ! then computing the cost function value. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFCostfunctionUDT)        :: fun 
+        real(R8), allocatable           :: x(:), df(:)
+        real(R8)                        :: f
+        type(MySparseUDT)               :: d2f 
+        logical                         :: dogradient, dohessian
+
+        ! Auxiliary
+        integer(I8)                     :: nx, neq, nineq
+        real(R8), allocatable           :: xref(:)
+
+        ! Update design
+        !==============
+        ! Get dimensions
+        call fun%problem%GetProblemDimensions(nx, neq, nineq)
+
+        ! Allocate
+        allocate(xref(nx))
+
+        ! Get current design variables
+        call fun%problem%GetProblemDesignVariables(xref)
+
+        ! Update with dx 
+        call fun%problem%UpdateDesign(x - xref)
+
+        ! Update the optimization problem 
+        call fun%problem%UpdateProblem()
+
+        ! Evaluate cost function
+        call fun%problem%EvaluateCostFunction(f, df, & 
+            d2f, dogradient, dohessian)
+
+    end subroutine
+
+    ! Dimension getter
+    subroutine GetProblemDimensions(fun, dimx)
+
+        ! Description
+        !============
+        ! Get cost function dimensions
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFCostfunctionUDT)        :: fun 
+        integer(I8)                     :: dimx, neq, nineq
+
+        ! Get dimensions
+        !===============
+        call fun%problem%GetProblemDimensions(dimx, neq, nineq)
+
+    end subroutine
+
+    ! Arguments getter
+    subroutine GetProblemArguments(fun, x)
+
+        ! Description
+        !============
+        ! Get cost function arguments
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFCostfunctionUDT)        :: fun 
+        real(R8), allocatable           :: x(:)
+
+        ! Get dimensions
+        !===============
+        call fun%problem%GetProblemDesignVariables(x)
+
+    end subroutine
 
 
 end module
