@@ -20,6 +20,7 @@ module mod_sparseinterface
     !============
     ! Load modules
     use mod_precision
+    use gdmod_plots 
 
     ! The usual
     implicit none
@@ -57,6 +58,12 @@ module mod_sparseinterface
 
         ! Constructor
         procedure :: Initialize     => InitializeMySparse
+
+        ! Sparse to full transformation routine
+        procedure :: Full           => ConvertToFull
+
+        ! Visualization
+        procedure :: Spy        
 
         ! Housekeeping procedures
         procedure :: Allocate       => AllocateMySparse
@@ -111,6 +118,97 @@ module mod_sparseinterface
 
     end subroutine
 
+    !------------------------------------------------------------------!
+    !                         DATA CONVERSION                          !
+    !------------------------------------------------------------------!
+
+    ! Sparse to full conversion
+    subroutine ConvertToFull(mysparse, fullmatrix)
+
+        ! Description
+        !============
+        ! Converts a sparse matrix to a full matrix, which is a 2D array
+        ! with the same dimensions as the sparse matrix. 
+
+        ! Initialize
+        !===========
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)                      :: mysparse 
+        real(R8), allocatable, intent(inout)    :: fullmatrix(:, :)
+
+        ! Loop
+        integer(I16)                             :: i
+
+        ! Auxiliary 
+        real(R8)                                :: tv 
+        integer(I8)                             :: tc, tr
+
+        ! Construct
+        !==========
+        ! Allocate
+        if (.not. allocated(fullmatrix)) then 
+            allocate(fullmatrix(mysparse%nrow, mysparse%ncol))
+        end if
+
+        ! Initialize
+        fullmatrix(:, :) = 0
+        
+        ! Associate
+        associate(&
+            col     => mysparse%col, &
+            row     => mysparse%row, &
+            val     => mysparse%val, &
+            nval    => mysparse%nval)
+
+        ! Loop over all elements and add
+        do i = 1, nval
+            ! Unpack
+            tc = col(i)
+            tr = row(i)
+            tv = val(i)
+
+            ! print *, i, tc, tr, tv
+            fullmatrix(tr, tc) = tv
+            
+            
+        end do
+
+        ! Deassoicate
+        end associate
+
+
+
+    end subroutine
+
+    subroutine Spy(mysparse)
+
+        ! Description
+        !============
+        ! Make a spy plot of the matrix by calling the spyplot routine
+
+        ! Initialize
+        !===========
+        
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)       :: mysparse
+
+        ! Call plotter
+        !=============
+        call SpyPlot(mysparse%row, mysparse%col, mysparse%nval, '-p')
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                           HOUSEKEEPING                           !
+    !------------------------------------------------------------------!
     ! Allocation
     subroutine AllocateMySparse(mysparse)
 
