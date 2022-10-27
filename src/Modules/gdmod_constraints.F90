@@ -453,11 +453,7 @@ module gdmod_constraints
         ! Loop variables
 
         ! Auxiliary variables
-
-        ! Initialize
-        !===========
-        !constraints%neqcon = 0
-
+        
         ! Initialize constraints
         !=======================
         constraints%neqcon = 0
@@ -695,7 +691,6 @@ module gdmod_constraints
 
         ! Initialize
         !===========
-        !constraints%neqcon = 0
 
         ! Initialize constraints
         !=======================
@@ -909,7 +904,7 @@ module gdmod_constraints
         call EvaluateBicubicSplineInterpolant(x, y, PsiD_tmp, &
             magneticField%interp, '0', '0')
 
-        call Plot2DUnstructuredField(PsiD_tmp, grid, 'v', '-p')
+        ! call Plot2DUnstructuredField(PsiD_tmp, grid, 'v', '-p')
 
         ! Loop over all the flux surfaces to compute desired flux
         do i = 1, grid%data%fluxdata%nFs
@@ -1184,7 +1179,7 @@ module gdmod_constraints
             case ('coordinates')
             
                 ! Allocate
-                hessG%nval = 4*designvariables%nphi
+                hessG%nval = 4*ntv
                 if (.not. allocated(valindex)) then
                     allocate(valindex(ntv))
                 end if
@@ -1198,6 +1193,11 @@ module gdmod_constraints
                 allocate(valxy(ntv))
                 allocate(valyy(ntv))
 
+                ! Initialize
+                valxx(:) = 0
+                valyy(:) = 0
+                valxy(:) = 0
+
                 ! Compute contributions
                 call EvaluateBicubicSplineInterpolant(&
                     x(tv), y(tv), valxx, Psifun, '2', '0')
@@ -1208,6 +1208,7 @@ module gdmod_constraints
 
                 ! xx-contribution
                 !----------------
+                k = 1
                 ! Build indices
                 valindex = [(k, k = ivh+1, ivh+ntv)] 
 
