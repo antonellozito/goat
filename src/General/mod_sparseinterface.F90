@@ -20,7 +20,6 @@ module mod_sparseinterface
     !============
     ! Load modules
     use mod_precision
-    use gdmod_plots 
 
     ! The usual
     implicit none
@@ -61,9 +60,6 @@ module mod_sparseinterface
 
         ! Sparse to full transformation routine
         procedure :: Full           => ConvertToFull
-
-        ! Visualization
-        procedure :: Spy        
 
         ! Housekeeping procedures
         procedure :: Allocate       => AllocateMySparse
@@ -182,27 +178,6 @@ module mod_sparseinterface
         end associate
 
 
-
-    end subroutine
-
-    subroutine Spy(mysparse)
-
-        ! Description
-        !============
-        ! Make a spy plot of the matrix by calling the spyplot routine
-
-        ! Initialize
-        !===========
-        
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(MySparseUDT)       :: mysparse
-
-        ! Call plotter
-        !=============
-        call SpyPlot(mysparse%row, mysparse%col, mysparse%nval, '-p')
 
     end subroutine
 
