@@ -934,15 +934,25 @@ module optmod_optimizationengine
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
 
-        integer(I8)                         :: nvars 
+        integer(I8)                         :: nvars, nphi, neq, nineq 
         integer(I8), allocatable            :: vars(:)
 
         ! Initialize
         !===========
+        ! Get the problem dimensions
+        call problem%GetProblemDimensions(nphi, neq, nineq)
+
         ! Set the design variables to check
         nvars = 5
         allocate(vars(nvars))
         vars = [1, 1+860, 3, 3+860, 5] ! some random variables for now
+
+        ! Sanity checks
+        if (any(vars > nphi)) then
+            ! Throw error
+            call gdErrorHandler('Design indices exceed the number &
+                & of design variables!')
+        end if
 
         ! Initialize checker 
         call FDchecker%Initialize(nvars, vars)
@@ -1081,15 +1091,25 @@ module optmod_optimizationengine
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
 
-        integer(I8)                         :: nvars 
+        integer(I8)                         :: nvars, nphi, neq, nineq 
         integer(I8), allocatable            :: vars(:)
 
         ! Initialize
         !===========
+        ! Get the problem dimensions
+        call problem%GetProblemDimensions(nphi, neq, nineq)
+
         ! Set the design variables to check
         nvars = 5
         allocate(vars(nvars))
         vars = [1, 1+860, 3, 3+860, 5] ! some random variables for now
+
+        ! Sanity checks
+        if (any(vars > nphi)) then
+            ! Throw error
+            call gdErrorHandler('Design indices exceed the number &
+                & of design variables!')
+        end if
 
         ! Initialize checker 
         call FDchecker%Initialize(nvars, vars)
