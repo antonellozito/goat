@@ -634,7 +634,7 @@ module optmod_optimizationengine
 
             ! Evaluate the inequality constraints
             call problem%EvaluateInequalityConstraints(H, gradH, &
-                hessH, dogradient, dohessian, lambda)
+                hessH, dogradient, dohessian, mu)
 
             ! Evaluate the nonlinear complementarity function 
             !call solver%EvaluateNCPfunction(ncp, A, I, gradncp, &
@@ -823,12 +823,14 @@ module optmod_optimizationengine
 
             ! Equality constraints contribution
             do k = 1, gradG%nval
-                gradL(gradG%col(k)) = lambda(gradG%row(k))*gradG%val(k)
+                gradL(gradG%col(k)) = gradL(gradG%col(k)) + &
+                    lambda(gradG%row(k))*gradG%val(k)
             end do 
 
             ! Inequality constraints contribution
             do k = 1, gradH%nval 
-                gradL(gradH%col(k)) = tmu(gradH%row(k))*gradH%val(k)
+                gradL(gradH%col(k)) = gradL(gradH%col(k)) + &
+                    tmu(gradH%row(k))*gradH%val(k)
             end do
 
         end if 
