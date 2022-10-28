@@ -61,6 +61,10 @@ module mod_sparseinterface
         ! Sparse to full transformation routine
         procedure :: Full           => ConvertToFull
 
+        ! Extraction routines
+        procedure :: ExtractColumnFull 
+        procedure :: ExtractRowFull
+
         ! Housekeeping procedures
         procedure :: Allocate       => AllocateMySparse
         procedure :: Deallocate     => DeallocateMySparse
@@ -178,6 +182,84 @@ module mod_sparseinterface
         end associate
 
 
+
+    end subroutine
+
+    ! Column extraction
+    subroutine ExtractColumnFull(mysparse, col, colID)
+
+        ! Description
+        !============
+        ! Extract the column of a sparse matrix in full form, without
+        ! constructing a full version of the sparse matrix. colID should
+        ! contain the index of the column. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)              :: mysparse 
+        real(R8), allocatable           :: col(:)
+        integer(I8)                     :: colID
+
+        ! Loop
+        integer(I8)                     :: i
+
+        ! Extract
+        !========
+        ! Allocate
+        if (.not. allocated(col)) then 
+            allocate(col(mysparse%nrow))
+        end if
+
+        ! Initialize
+        col(:) = 0
+
+        ! Set
+        do i = 1, mysparse%nval 
+            if (mysparse%col(i) == colID) then 
+                col(mysparse%row(i)) = col(mysparse%row(i)) + &
+                    mysparse%val(i)
+            end if
+        end do
+
+    end subroutine
+
+    ! Row extraction
+    subroutine ExtractRowFull(mysparse, row, rowID)
+
+        ! Description
+        !============
+        ! Extract the column of a sparse matrix in full form, without
+        ! constructing a full version of the sparse matrix. colID should
+        ! contain the index of the column. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)              :: mysparse 
+        real(R8), allocatable           :: row(:)
+        integer(I8)                     :: rowID
+
+        ! Loop
+        integer(I8)                     :: i
+
+        ! Extract
+        !========
+        ! Allocate
+        if (.not. allocated(row)) then 
+            allocate(row(mysparse%ncol))
+        end if 
+
+        ! Initialize
+        row(:) = 0
+
+        ! Set
+        do i = 1, mysparse%nval 
+            if (mysparse%row(i) == rowID) then 
+                row(mysparse%col(i)) = row(mysparse%col(i)) + &
+                    mysparse%val(i)
+            end if
+        end do
 
     end subroutine
 
