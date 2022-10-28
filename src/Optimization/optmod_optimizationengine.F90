@@ -177,6 +177,32 @@ module optmod_optimizationengine
 
     end type
 
+    ! Lagrangian for diagnostics
+    type, extends(DiagnosticsFunctionUDT) :: DFLagrangianUDT 
+
+        ! Description
+        !============
+        ! Function type for evaluating and checking the cost function.
+        class(OptimizationProblemUDT), allocatable      :: problem 
+        type(OptimizationSolverUDT)                     :: solver
+
+        ! Lagrange multipliers
+        real(R8), allocatable, dimension(:)             :: lambda, mu 
+
+
+    contains 
+
+        ! Evaluation procedure
+        procedure :: Evaluate       => EvaluateDFLagrangian 
+
+        ! Dimension getter
+        procedure :: GetDimensions  => GetProblemDimensionsLagrangian
+
+        ! Argument getter
+        procedure :: GetArguments   => GetProblemArgumentsLagrangian
+
+    end type
+
 
     !==================================================================!
     !                                                                  !
@@ -591,7 +617,11 @@ module optmod_optimizationengine
             ! Check gradients?
             if (checkgradients) then 
                 ! Cost function
-                call CheckCostFunctionGradient(problem)
+                ! call CheckCostFunctionGradient(problem)
+
+                ! Lagrangian
+                call CheckLagrangianGradient(problem, solver, lambda, &
+                    mu)
             end if
 
             ! Evaluate cost function
@@ -875,6 +905,12 @@ module optmod_optimizationengine
 
     !end subroutine
 
+    !==================================================================!
+    !                                                                  !
+    !                            DIAGNOSTICS                           !
+    !                                                                  !
+    !==================================================================!
+
     !------------------------------------------------------------------!
     !                           COST FUNCTION                          !
     !------------------------------------------------------------------!
@@ -904,7 +940,7 @@ module optmod_optimizationengine
         ! Set the design variables to check
         nvars = 5
         allocate(vars(nvars))
-        vars = [1, 2, 3, 4, 5] ! some random variables for now
+        vars = [1, 1+860, 3, 3+860, 5] ! some random variables for now
 
         ! Initialize checker 
         call FDchecker%Initialize(nvars, vars)
@@ -1017,6 +1053,257 @@ module optmod_optimizationengine
         ! Get dimensions
         !===============
         call fun%problem%GetProblemDesignVariables(x)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                           LAGRANGIAN                             !
+    !------------------------------------------------------------------!
+    ! Stand-alone driver to check the cost function
+    subroutine CheckLagrangianGradient(problem, solver, lambda, mu)
+
+        ! Description
+        !============
+        ! This routine compares the gradient computed by finite
+        ! differences with the actual gradient computation by 
+        ! using the mod_diagnostics module. The errors are printed to
+        ! the terminal. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemUDT)       :: problem 
+        type(OptimizationSolverUDT)         :: solver
+        real(R8), allocatable               :: lambda(:), mu(:)
+
+        ! Auxiliary
+        type(FDcheckerUDT)                  :: FDchecker 
+
+        integer(I8)                         :: nvars 
+        integer(I8), allocatable            :: vars(:)
+
+        ! Initialize
+        !===========
+        ! Set the design variables to check
+        nvars = 5
+        allocate(vars(nvars))
+        vars = [1, 1+860, 3, 3+860, 5] ! some random variables for now
+
+        ! Initialize checker 
+        call FDchecker%Initialize(nvars, vars)
+        allocate(DFLagrangianUDT::FDchecker%fun)
+
+        ! Associate
+        associate(&
+            fun         => FDchecker%fun)
+        
+        ! Initialize checker functino
+        select type(fun)
+
+        type is (DFLagrangianUDT)
+
+            ! Set the problem
+            fun%problem = problem
+            fun%solver  = solver
+            allocate(fun%lambda(size(lambda)))
+            allocate(fun%mu(size(mu)))
+            fun%lambda = lambda 
+            fun%mu = mu
+
+        end select
+
+        ! End associate
+        end associate
+
+        ! Compute errors
+        !===============
+        call FDchecker%CheckGradient()
+
+        ! Deallocate
+        deallocate(vars)
+
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateDFLagrangian(fun, x, f, df, d2f, dogradient, &
+        dohessian)
+
+        ! Description
+        !============
+        ! Evaluate the cost function by first updating the design and
+        ! then computing the cost function value. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFLagrangianUDT)          :: fun 
+        real(R8), allocatable           :: x(:), df(:)
+        real(R8)                        :: f
+        type(MySparseUDT)               :: d2f 
+        logical                         :: dogradient, dohessian
+
+        ! Auxiliary
+        integer(I8)                     :: nphi, neq, nineq
+        real(R8), allocatable           :: phiref(:), phi(:)
+
+        ! Cost function 
+        real(R8)                    :: J 
+        real(R8), allocatable       :: gradJ(:)
+        type(MySparseUDT)           :: hessJ 
+
+        ! Equality constraints 
+        real(R8), allocatable       :: G(:), lambda(:) 
+        type(MySparseUDT)           :: gradG, hessG  
+
+        ! Inequality constraints 
+        real(R8), allocatable       :: H(:), mu(:) 
+        type(MySparseUDT)           :: gradH, hessH  
+
+        ! nonlinear complementarity function
+        real(R8), allocatable       :: ncp(:) 
+        type(MySparseUDT)           :: gradncp
+        logical, allocatable        :: A(:), I(:) 
+
+        ! Lagrangian 
+        real(R8)                    :: L 
+        real(R8), allocatable       :: gradL(:)
+        type(MySparseUDT)           :: hessL 
+
+        ! Initialize
+        !===========
+        ! Dimensions
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Cost function 
+        allocate(gradJ(nphi))
+        J = 0
+        gradJ(:) = 0
+        hessJ%nrow = nphi 
+        hessJ%ncol = nphi 
+
+        ! Equality constraint 
+        allocate(G(neq), lambda(neq))
+        G(:) = 0
+        lambda(:) = 0
+        gradG%nrow = nphi 
+        gradG%ncol = neq 
+        hessG%nrow = nphi 
+        hessG%ncol = nphi
+
+        ! Inequality constraint 
+        allocate(H(nineq), mu(nineq))
+        H(:) = 0
+        mu(:) = 0
+        gradH%nrow = nphi 
+        gradH%ncol = nineq 
+        hessH%nrow = nphi 
+        hessH%ncol = nphi
+
+        ! NCP function
+        allocate(ncp(nineq), A(nineq), I(nineq))
+        gradncp%nrow = nphi 
+        gradncp%ncol = nineq
+        A(:) = .false.
+        I(:) = .not. A
+
+        ! Lagrangian 
+        allocate(gradL(nphi + neq + nineq))
+        hessL%nrow = nphi + neq + nineq
+        hessL%ncol = nphi + neq + nineq
+
+
+        ! Update design
+        !==============
+        ! Allocate
+        allocate(phiref(nphi))
+
+        ! Get current design variables
+        call fun%problem%GetProblemDesignVariables(phiref)
+
+        ! Update with dx - x contains lambda and mu as well!
+        call fun%problem%UpdateDesign(x(1:nphi) - phiref)
+        fun%lambda  = x(nphi+1:nphi+neq)
+        fun%mu      = x(nphi+neq+1:nphi+neq+nineq)
+
+        ! Update the optimization problem 
+        call fun%problem%UpdateProblem()
+
+        ! Evaluate cost function
+        call fun%problem%EvaluateCostFunction(J, gradJ, & 
+            hessJ, dogradient, dohessian)
+
+        ! Evaluate the equality constraints
+        call fun%problem%EvaluateEqualityConstraints(G, gradG, &
+            hessG, dogradient, dohessian, lambda)
+
+        ! Evaluate the inequality constraints
+        call fun%problem%EvaluateInequalityConstraints(H, gradH, &
+            hessH, dogradient, dohessian, mu)
+
+        ! Evaluate the nonlinear complementarity function 
+        !call solver%EvaluateNCPfunction(ncp, A, I, gradncp, &
+        !    H, gradH, mu)
+
+        ! Evaluate the Lagrangian
+        call fun%solver%EvaluateLagrangian(f, df, d2f, &
+            J, gradJ, hessJ, &
+            G, gradG, hessG, fun%lambda, &
+            H, gradH, hessH, fun%mu, A, &
+            dogradient, dohessian)
+
+    end subroutine
+
+    ! Dimension getter
+    subroutine GetProblemDimensionsLagrangian(fun, dimx)
+
+        ! Description
+        !============
+        ! Get lagrangian dimensions
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFLagrangianUDT)          :: fun 
+        integer(I8)                     :: dimx, neq, nineq, nphi
+
+        ! Get dimensions
+        !===============
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+        dimx = nphi + neq + nineq
+
+    end subroutine
+
+    ! Arguments getter
+    subroutine GetProblemArgumentsLagrangian(fun, x)
+
+        ! Description
+        !============
+        ! Get lagrangian arguments
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFLagrangianUDT)          :: fun 
+        real(R8), allocatable           :: x(:)
+
+        ! Auxiliary
+        real(R8), allocatable           :: phi(:)
+        integer(I8)                     :: nphi, neq, nineq
+
+        ! Get dimensions
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Allocate
+        allocate(phi(nphi))
+
+        ! Get design variables
+        call fun%problem%GetProblemDesignVariables(phi)
+
+        ! Set arguments
+        x(1:nphi)                       = phi
+        x(nphi+1:nphi+neq)              = fun%lambda 
+        x(nphi+neq+1:nphi+neq+nineq)    = fun%mu
 
     end subroutine
 
