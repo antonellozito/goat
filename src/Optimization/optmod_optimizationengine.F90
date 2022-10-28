@@ -156,7 +156,7 @@ module optmod_optimizationengine
 
     ! Diagnostics
     !============
-    ! Function handler
+    ! Cost function for diagnostics
     type, extends(DiagnosticsFunctionUDT) :: DFCostfunctionUDT 
 
         ! Description
@@ -200,6 +200,34 @@ module optmod_optimizationengine
 
         ! Argument getter
         procedure :: GetArguments   => GetProblemArgumentsLagrangian
+
+    end type
+
+    ! Eqcon for diagnostics
+    type, extends(DiagnosticsFunctionUDT) :: DFEqconUDT 
+
+        ! Description
+        !============
+        ! Function type for evaluating and checking the cost function.
+        class(OptimizationProblemUDT), allocatable      :: problem 
+
+        ! Lagrange multipliers
+        real(R8), allocatable, dimension(:)             :: lambda
+        
+        ! Equality constraint ID
+        integer(I8)                                     :: eqID
+
+
+    contains 
+
+        ! Evaluation procedure
+        procedure :: Evaluate       => EvaluateDFEqcon
+
+        ! Dimension getter
+        procedure :: GetDimensions  => GetProblemDimensionsEqcon
+
+        ! Argument getter
+        procedure :: GetArguments   => GetProblemArgumentsEqcon
 
     end type
 
@@ -622,6 +650,9 @@ module optmod_optimizationengine
                 ! Lagrangian
                 call CheckLagrangianGradient(problem, solver, lambda, &
                     mu)
+
+                ! Constraints
+                call CheckEqconGradient(problem, lambda)
             end if
 
             ! Evaluate cost function
@@ -898,8 +929,6 @@ module optmod_optimizationengine
 
         end if
         
-
-
     end subroutine
 
     ! Nonlinear complementarity function 
@@ -1071,7 +1100,7 @@ module optmod_optimizationengine
     !------------------------------------------------------------------!
     !                           LAGRANGIAN                             !
     !------------------------------------------------------------------!
-    ! Stand-alone driver to check the cost function
+    ! Stand-alone driver 
     subroutine CheckLagrangianGradient(problem, solver, lambda, mu)
 
         ! Description
@@ -1329,5 +1358,235 @@ module optmod_optimizationengine
 
     end subroutine
 
+    !------------------------------------------------------------------!
+    !                       EQUALITY CONSTRAINTS                       !
+    !------------------------------------------------------------------!
+    ! Stand-alone driver 
+    subroutine CheckEqconGradient(problem, lambda)
+
+        ! Description
+        !============
+        ! This routine compares the gradient computed by finite
+        ! differences with the actual gradient computation by 
+        ! using the mod_diagnostics module. The errors are printed to
+        ! the terminal. Here, since there are often multiple,
+        ! constraints, we also need to specify which constraints to 
+        ! check and to loop over. Note that, since we only have a 
+        ! general routine to evaluate the constraints as abstraction is 
+        ! made, the computational cost of doing this scales with the 
+        ! computational cost of computing *all* the constraints, i.e. 
+        ! we compute the values for all constraints and afterwards 
+        ! extract the ones we need. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemUDT)       :: problem 
+
+        ! Auxiliary
+        type(FDcheckerUDT)                  :: FDchecker 
+
+        integer(I8)                         :: nvars 
+        integer(I8), allocatable            :: vars(:)
+
+        integer(I8)                         :: neq, neqID, nphi, nineq  
+        integer(I8), allocatable            :: eqID(:)
+
+        real(R8), allocatable               :: lambda(:)
+
+        ! Loop
+        integer(I8)                         :: i
+        
+
+        ! Initialize
+        !===========
+        ! Get the problem dimensions
+        call problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Set the constraints to check
+        neqID =  1
+        allocate(eqID(neqID))
+        eqID = [1] !  some random numbers for now
+
+        ! Set the design variables to check
+        nvars = 5
+        allocate(vars(nvars))
+        vars = [1, 1+860, 3, 3+860, 5] ! some random variables for now
+
+        ! Sanity checks
+        if (any(eqID > neq)) then
+            ! Throw error
+            call gdErrorHandler('Constraint indices exceed the number &
+                & of constraints!')
+        end if
+        if (any(vars > nphi)) then
+            ! Throw error
+            call gdErrorHandler('Design indices exceed the number &
+                & of design variables!')
+        end if
+
+
+        ! Initialize checker 
+        call FDchecker%Initialize(nvars, vars)
+        allocate(DFEqconUDT::FDchecker%fun)
+
+        ! Associate
+        associate(&
+            fun         => FDchecker%fun)
+        
+        ! Initialize checker functino
+        select type(fun)
+
+        type is (DFEqconUDT)
+
+            ! Set the problem
+            fun%problem = problem
+            allocate(fun%lambda(neq))
+            fun%lambda = lambda
+
+            ! Compute errors
+            !===============
+            ! Loop over all constraints
+            do i = 1, neqID
+                ! Set the correct ID
+                fun%eqID = eqID(i)
+
+                ! Print
+                print *, '============================================'
+                print *, 'Checkin equality constraint number: ', eqID(i)
+                print *, '============================================'
+
+                ! Check
+                call FDchecker%CheckGradient()
+            end do
+
+        end select
+
+        ! End associate
+        end associate
+
+        ! Deallocate
+        deallocate(vars, eqID)
+
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateDFEqcon(fun, x, f, df, d2f, dogradient, &
+        dohessian)
+
+        ! Description
+        !============
+        ! Evaluate the cost function by first updating the design and
+        ! then computing the cost function value. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFEQconUDT)               :: fun 
+        real(R8), allocatable           :: x(:), df(:)
+        real(R8)                        :: f
+        type(MySparseUDT)               :: d2f 
+        logical                         :: dogradient, dohessian
+
+        ! Auxiliary
+        integer(I8)                     :: nphi, neq, nineq
+        real(R8), allocatable           :: phiref(:), phi(:)
+
+        ! Equality constraints 
+        real(R8), allocatable       :: G(:), lambda(:)
+        type(MySparseUDT)           :: gradG, hessG  
+        
+
+        ! Initialize
+        !===========
+        ! Dimensions
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Equality constraint 
+        allocate(G(neq), lambda(neq))
+        G(:) = 0
+        lambda(:) = 0
+        gradG%nrow = nphi 
+        gradG%ncol = neq 
+        hessG%nrow = nphi 
+        hessG%ncol = nphi
+
+        ! Update design
+        !==============
+        ! Allocate
+        allocate(phiref(nphi))
+
+        ! Get current design variables
+        call fun%problem%GetProblemDesignVariables(phiref)
+
+        ! Update with dx - x contains lambda and mu as well!
+        call fun%problem%UpdateDesign(x - phiref)
+
+        ! Update the optimization problem 
+        call fun%problem%UpdateProblem()
+
+        ! Evaluate the equality constraints
+        call fun%problem%EvaluateEqualityConstraints(G, gradG, &
+            d2f, dogradient, dohessian, lambda)
+
+        ! Extract the correct constraint
+        f = G(fun%eqID)
+        if (dogradient) then
+            call gradG%ExtractColumnFull(df, fun%eqID)
+        end if
+
+    end subroutine
+
+    ! Dimension getter
+    subroutine GetProblemDimensionsEqcon(fun, dimx)
+
+        ! Description
+        !============
+        ! Get lagrangian dimensions
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFEQconUDT)               :: fun 
+        integer(I8)                     :: dimx, neq, nineq, nphi
+
+        ! Get dimensions
+        !===============
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+        dimx = nphi
+
+    end subroutine
+
+    ! Arguments getter
+    subroutine GetProblemArgumentsEqcon(fun, x)
+
+        ! Description
+        !============
+        ! Get lagrangian arguments
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFEQconUDT)               :: fun 
+        real(R8), allocatable           :: x(:)
+
+        ! Auxiliary
+        real(R8), allocatable           :: phi(:)
+        integer(I8)                     :: nphi, neq, nineq
+
+        ! Get dimensions
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Allocate
+        allocate(phi(nphi))
+
+        ! Get design variables
+        call fun%problem%GetProblemDesignVariables(phi)
+
+        ! Set arguments
+        x = phi
+
+    end subroutine
 
 end module
