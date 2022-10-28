@@ -1108,7 +1108,7 @@ module gdmod_constraints
                 ! non-zero elements as there are design variables. 
 
                 ! Allocate
-                jacG%nval = designvariables%nphi
+                jacG%nval = 2*ntv
                 call jacG%Allocate() 
                 allocate(dpsidx(designvariables%nphi))
                 allocate(dpsidy(designvariables%nphi))
@@ -1151,6 +1151,7 @@ module gdmod_constraints
                 call gradG%Allocate()
                 gradG%row = jacG%col 
                 gradG%col = jacG%row
+                gradG%val = jacG%val
 
                 ! Housekeeping
                 call jacG%Deallocate()
