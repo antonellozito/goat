@@ -31,6 +31,7 @@ module optmod_optimizationengine
     use mod_precision
     use mod_sparseinterface
     use mod_diagnostics
+    use mod_linearsolverinterface
     use optmod_designvariables
     use optmod_costfunction
     use optmod_constraints
@@ -617,7 +618,7 @@ module optmod_optimizationengine
 
         ! Diagnostics
         checkgradients  = .false. ! check gradients in each iteration?
-        checkhessians   = .true. ! check hessians in each iteration?
+        checkhessians   = .false. ! check hessians in each iteration?
 
         ! Initialize counter(s)
         itopt = 1
@@ -686,22 +687,9 @@ module optmod_optimizationengine
 
             ! Solve 
             if (.not. converged) then 
-                ! Solve, now by casting sparse into full matrix - to be
-                ! replaced later with decent solver routines!
-
-                ! Convert to full matrix
-                call hessL%Full(fullmat)
-                matdim = int(hessL%nrow)
-                allocate(fullmatrix(hessL%nrow,hessL%ncol))
-                fullmatrix = dble(fullmat)
-                deallocate(fullmat)
-                dx = dble(gradL)
-                allocate(ipiv(hessL%nrow))
-                ! ipiv(:) = 0
-                call dgesv(matdim, 1, fullmatrix, &
-                    matdim, ipiv, dx, matdim, info)
-                deallocate(ipiv)
-                deallocate(fullmatrix)
+                
+                ! Call the sparse solver
+                call SolveSparseLinearSystemDI(hessL, gradL, dx)
 
                 ! Check if converged
                 if (info .ne. 0) then
@@ -709,17 +697,15 @@ module optmod_optimizationengine
                     print *, 'info: ', info
                     call gdErrorHandler('Could not solve KKT system')
                 end if
-
-                ! Update
-                
-
             else
                 ! Don't solve again, already converged. Exit 
                 dx(:) = 0
             end if
 
             ! Update the design
-            print *, maxval(abs(dx(1:nphi)))
+            !print *, dx(1), gradL(1)
+            !print *, maxval(abs(dx(1:nphi)))
+            !print *, maxloc(abs(dx(1:nphi)))
             call problem%UpdateDesign(1e-3*dx(1:nphi))
 
             ! Update the monitor
@@ -728,7 +714,6 @@ module optmod_optimizationengine
             ! Update the monitor again
             problem%monitor%J(itopt)        = J
             problem%monitor%dJ(:,itopt)     = gradJ
-            problem%monitor%L(itopt)        = 0
             problem%monitor%dL(:,itopt)     = 0
             problem%monitor%G(:,itopt)      = G
             problem%monitor%H(:,itopt)      = H
