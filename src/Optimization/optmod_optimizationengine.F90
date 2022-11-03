@@ -853,19 +853,13 @@ module optmod_optimizationengine
         if (dogradient) then 
 
             ! Cost function contribution
-            gradL = gradJ
+            gradL(1:size(gradJ)) = gradJ(:)
 
             ! Equality constraints contribution
-            do k = 1, gradG%nval
-                gradL(gradG%col(k)) = gradL(gradG%col(k)) + &
-                    lambda(gradG%row(k))*gradG%val(k)
-            end do 
+            gradL(size(gradJ)+1:size(G)) = G(:)
 
             ! Inequality constraints contribution
-            do k = 1, gradH%nval 
-                gradL(gradH%col(k)) = gradL(gradH%col(k)) + &
-                    tmu(gradH%row(k))*gradH%val(k)
-            end do
+            gradL(size(gradJ)+size(G)+1:size(gradL)) = H(:)
 
         end if 
 
