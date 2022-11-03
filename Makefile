@@ -17,14 +17,14 @@ include config.mk
 ##
 # Linking
 gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
-	$(FC) -o gdrun *.o -pg -l /data/leuven/320/vsc32061/lapack/lapack/liblapack.a /data/leuven/320/vsc32061/lapack/lapack/librefblas.a 
+	$(FC) -o gdrun *.o -pg -l /data/leuven/320/vsc32061/lapack/lapack/liblapack.a /data/leuven/320/vsc32061/lapack/lapack/librefblas.a -lumfpack 
 
 ## % Runfiles
 ## %=========
 ## MainRunFileGridDeformation.o			: main runfile 
 # Compiling
 MainRunFileGridDeformation.o: Runfiles/MainRunFileGridDeformation.F90
-	$(FC) $(CFLAGS) Runfiles/MainRunFileGridDeformation.F90
+	$(FC) $(CFLAGS) Runfiles/MainRunFileGridDeformation.F90 
 
 ##
 ## % Folder compilation targets
