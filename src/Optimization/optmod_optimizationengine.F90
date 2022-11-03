@@ -217,6 +217,9 @@ module optmod_optimizationengine
         ! Equality constraint ID
         integer(I8)                                     :: eqID
 
+        ! Indicator to multiply with lambda
+        logical                                         :: multlambda
+
 
     contains 
 
@@ -544,7 +547,7 @@ module optmod_optimizationengine
         double precision, allocatable :: fullmatrix(:,:), dx(:)
 
         ! Diagnostics
-        logical                     :: checkgradients 
+        logical                     :: checkgradients, checkhessians 
 
         ! Data
 
@@ -579,7 +582,7 @@ module optmod_optimizationengine
         ! Equality constraint 
         allocate(G(neq), lambda(neq))
         G(:) = 0
-        lambda(:) = 0
+        lambda(:) = 0.0
         gradG%nrow = nphi 
         gradG%ncol = neq 
         hessG%nrow = nphi 
@@ -605,13 +608,16 @@ module optmod_optimizationengine
         allocate(gradL(nphi + neq + nineq))
         hessL%nrow = nphi + neq + nineq
         hessL%ncol = nphi + neq + nineq
+        L = 0
+        gradL(:) = 0
 
         ! Solver
         allocate(dx(hessL%nrow))
         allocate(fullmat(hessL%nrow, hessL%ncol))
 
         ! Diagnostics
-        checkgradients = .true. ! check gradients in each iteration?
+        checkgradients  = .false. ! check gradients in each iteration?
+        checkhessians   = .true. ! check hessians in each iteration?
 
         ! Initialize counter(s)
         itopt = 1
@@ -642,17 +648,14 @@ module optmod_optimizationengine
             ! Update the optimization problem 
             call problem%UpdateProblem()
 
-            ! Check gradients?
-            if (checkgradients) then 
-                ! Cost function
-                ! call CheckCostFunctionGradient(problem)
-
-                ! Lagrangian
-                call CheckLagrangianGradient(problem, solver, lambda, &
-                    mu)
-
-                ! Constraints
-                call CheckEqconGradient(problem, lambda)
+            ! Check gradients & hessians if needed
+            if (checkgradients .or. checkhessians) then 
+                call CheckCostFunctionLinearization(problem, &
+                    checkgradients, checkhessians)
+                call CheckLagrangianLinearization(problem, solver, lambda, & 
+                    mu, checkgradients, checkhessians)
+                call CheckEqconLinearization(problem, lambda, &
+                    checkgradients, checkhessians)
             end if
 
             ! Evaluate cost function
@@ -946,7 +949,8 @@ module optmod_optimizationengine
     !                           COST FUNCTION                          !
     !------------------------------------------------------------------!
     ! Stand-alone driver to check the cost function
-    subroutine CheckCostFunctionGradient(problem)
+    subroutine CheckCostFunctionLinearization(problem, checkgradient, &
+        checkhessian)
 
         ! Description
         !============
@@ -959,6 +963,8 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(OptimizationProblemUDT)       :: problem 
+        logical                             :: checkgradient, &
+            checkhessian
 
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
@@ -1006,7 +1012,12 @@ module optmod_optimizationengine
 
         ! Compute errors
         !===============
-        call FDchecker%CheckGradient()
+        if (checkgradient) then 
+            call FDchecker%CheckGradient()
+        end if
+        if (checkhessian) then 
+            call FDchecker%CheckHessian()
+        end if
 
         ! Deallocate
         deallocate(vars)
@@ -1101,7 +1112,8 @@ module optmod_optimizationengine
     !                           LAGRANGIAN                             !
     !------------------------------------------------------------------!
     ! Stand-alone driver 
-    subroutine CheckLagrangianGradient(problem, solver, lambda, mu)
+    subroutine CheckLagrangianLinearization(problem, solver, lambda, mu, &
+        checkgradient, checkhessian)
 
         ! Description
         !============
@@ -1116,6 +1128,8 @@ module optmod_optimizationengine
         class(OptimizationProblemUDT)       :: problem 
         type(OptimizationSolverUDT)         :: solver
         real(R8), allocatable               :: lambda(:), mu(:)
+        logical                             :: checkgradient, &
+            checkhessian
 
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
@@ -1168,7 +1182,12 @@ module optmod_optimizationengine
 
         ! Compute errors
         !===============
-        call FDchecker%CheckGradient()
+        if (checkgradient) then 
+            call FDchecker%CheckGradient()
+        end if
+        if (checkhessian) then 
+            call FDchecker%CheckHessian()
+        end if
 
         ! Deallocate
         deallocate(vars)
@@ -1236,7 +1255,7 @@ module optmod_optimizationengine
         ! Equality constraint 
         allocate(G(neq), lambda(neq))
         G(:) = 0
-        lambda(:) = 0
+        lambda(:) = fun%lambda
         gradG%nrow = nphi 
         gradG%ncol = neq 
         hessG%nrow = nphi 
@@ -1245,7 +1264,7 @@ module optmod_optimizationengine
         ! Inequality constraint 
         allocate(H(nineq), mu(nineq))
         H(:) = 0
-        mu(:) = 0
+        mu(:) = fun%mu
         gradH%nrow = nphi 
         gradH%ncol = nineq 
         hessH%nrow = nphi 
@@ -1286,11 +1305,11 @@ module optmod_optimizationengine
 
         ! Evaluate the equality constraints
         call fun%problem%EvaluateEqualityConstraints(G, gradG, &
-            hessG, dogradient, dohessian, lambda)
+            hessG, dogradient, dohessian, fun%lambda)
 
         ! Evaluate the inequality constraints
         call fun%problem%EvaluateInequalityConstraints(H, gradH, &
-            hessH, dogradient, dohessian, mu)
+            hessH, dogradient, dohessian, fun%mu)
 
         ! Evaluate the nonlinear complementarity function 
         !call solver%EvaluateNCPfunction(ncp, A, I, gradncp, &
@@ -1362,7 +1381,8 @@ module optmod_optimizationengine
     !                       EQUALITY CONSTRAINTS                       !
     !------------------------------------------------------------------!
     ! Stand-alone driver 
-    subroutine CheckEqconGradient(problem, lambda)
+    subroutine CheckEqconLinearization(problem, lambda, checkgradient, &
+        checkhessian)
 
         ! Description
         !============
@@ -1382,6 +1402,8 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(OptimizationProblemUDT)       :: problem 
+        logical                             :: checkgradient, &
+            checkhessian
 
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
@@ -1453,11 +1475,20 @@ module optmod_optimizationengine
 
                 ! Print
                 print *, '============================================'
-                print *, 'Checkin equality constraint number: ', eqID(i)
+                print *, 'Checking equality constraint number: ', eqID(i)
                 print *, '============================================'
 
                 ! Check
-                call FDchecker%CheckGradient()
+                if (checkgradient) then 
+                    ! Don't do lambda multiplication
+                    fun%multlambda = .false.
+                    call FDchecker%CheckGradient()
+                end if
+                if (checkhessian) then 
+                    ! Do lambda multiplication
+                    fun%multlambda = .true.
+                    call FDchecker%CheckHessian()
+                end if
             end do
 
         end select
@@ -1477,8 +1508,17 @@ module optmod_optimizationengine
 
         ! Description
         !============
-        ! Evaluate the cost function by first updating the design and
-        ! then computing the cost function value. 
+        ! Evaluate the equality cons by first updating the design and
+        ! then computing the constraint values. Afterwards, the correct
+        ! constraint is unpacked. 
+
+        ! Notes
+        !======
+        ! When checking the hessian-vector product, one must make sure 
+        ! that only the contributions of the current constraint that is
+        ! to be checked are taken into account. To this end, all lambda
+        ! values, except the one of the current constraint, are set to
+        ! zero. 
 
         ! Declare variables
         !==================
@@ -1506,7 +1546,8 @@ module optmod_optimizationengine
         ! Equality constraint 
         allocate(G(neq), lambda(neq))
         G(:) = 0
-        lambda(:) = 0
+        lambda(:) = 0 ! Important! 
+        lambda(fun%eqID) = fun%lambda(fun%eqID) ! only keep the current lambda
         gradG%nrow = nphi 
         gradG%ncol = neq 
         hessG%nrow = nphi 
@@ -1520,7 +1561,7 @@ module optmod_optimizationengine
         ! Get current design variables
         call fun%problem%GetProblemDesignVariables(phiref)
 
-        ! Update with dx - x contains lambda and mu as well!
+        ! Update with dx 
         call fun%problem%UpdateDesign(x - phiref)
 
         ! Update the optimization problem 
@@ -1534,6 +1575,13 @@ module optmod_optimizationengine
         f = G(fun%eqID)
         if (dogradient) then
             call gradG%ExtractColumnFull(df, fun%eqID)
+
+            ! Check if we need to multiply with lambda - e.g. when 
+            ! computing FD for hessian
+            if (fun%multlambda) then
+                df = df*lambda(fun%eqID)
+            end if
+
         end if
 
     end subroutine
