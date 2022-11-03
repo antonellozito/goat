@@ -47,7 +47,9 @@ module mod_diagnostics
     ! The usual
     implicit none
     save
-    public 
+    private
+    
+    public DiagnosticsFunctionUDT, FDcheckerUDT
 
     !==================================================================!
     !                                                                  !
@@ -117,9 +119,14 @@ module mod_diagnostics
         ! Gradient checker
         procedure :: CheckGradient
 
+        ! Hessian checker
+        procedure :: CheckHessian
+
         ! Printing
         procedure :: PrintGradientHeader
         procedure :: PrintGradientIterate
+        procedure :: PrintHessianHeader
+        procedure :: PrintHessianIterate
 
         ! Housekeeping procedures
         procedure :: Allocate       => AllocateFDchecker
@@ -368,9 +375,142 @@ module mod_diagnostics
     end subroutine
 
     ! Hessian checker
-   ! subroutine CheckHessian(FDchecker)
+    subroutine CheckHessian(FDchecker)
 
-    !end subroutine
+        ! Description
+        !============
+        ! This routine computes the hessian and checks by doing a 
+        ! finite difference step study whether the error reduces as
+        ! expected. The results are printed out to the terminal. A 
+        ! central difference scheme is used to compute the derivatives. 
+        ! 
+        ! Notes
+        !======
+        ! Note 1: since the 'hessian' here will be found by computing a
+        ! finite difference of the gradient, computed using the user 
+        ! provided funciton, the outcome will depend on whether these
+        ! gradients are correctly computed! 
+        
+        ! Note 2: what is actually checked, are the columns of the 
+        ! hessian that correspond to the current variable. Note that it 
+        ! is NOT explicitly checked whether the hessian is symmetric 
+        ! (i.e. whether the row is the same as the column transposed)! 
+        ! The true error criterium is the maximal difference between the
+        ! non-zero values of the hessian column. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FDcheckerUDT)         :: FDchecker 
+
+        ! Loop
+        integer(I8)                 :: i, j
+
+        ! Auxiliary
+        real(R8)                    :: fref, fFW, fBW, &
+            gradC, reFW, reBW, reC
+        integer(I8)                 ::  indexFW(1), indexBW(1), indexC(1), index
+        real(R8), allocatable       :: gradref(:), xref(:), xFW(:), &
+            xBW(:), hesscolFW(:), hesscolBW(:), hesscolC(:), &
+            hesscolref(:), gradFW(:), gradBW(:)
+        type(MySparseUDT)           ::  hessref
+
+        integer(I8)                 :: dimx, tv
+
+        ! Data
+        real(R8)                    :: macheps = 1e-15
+
+        ! Dummy
+        type(MySparseUDT)           :: dummyhess
+
+        ! Initialize
+        !===========
+        ! Get the dimensions of x
+        call FDchecker%fun%GetDimensions(dimx)
+
+        ! Allocate
+        allocate(xref(dimx), xFW(dimx), xBW(dimx), &
+            gradref(dimx), hesscolFW(dimx), hesscolBW(dimx), &
+            hesscolC(dimx), hesscolref(dimx), gradFW(dimx), &
+            gradBW(dimx))
+
+        ! Compute reference and its gradient
+        call FDchecker%fun%GetArguments(xref) ! current point
+        call FDchecker%fun%Evaluate(xref, fref, gradref, hessref, &
+            .true., .true.)
+
+        ! Print the header
+        call FDchecker%PrintHessianHeader()
+
+        ! Compute the finite difference gradients
+        !========================================
+        ! Associate
+        associate(&
+            d       => FDchecker%d,     &
+            nd      => FDchecker%nd,    &
+            vars    => FDchecker%vars,  &
+            nvars   => FDchecker%nvars  &
+            )
+
+        ! Loop over all variables
+        do j = 1, nvars
+            ! Get current variable
+            tv = vars(j)
+
+            ! Extract the reference
+            call hessref%ExtractColumnFull(hesscolref, tv)
+
+            ! Loop over all step sizes
+            do i = 1, FDchecker%nd
+                ! Initialize
+                xFW     = xref 
+                xBW     = xref 
+
+                ! Perturb
+                xFW(tv) = xref(tv) + d(i)
+                xBW(tv) = xref(tv) - d(i)
+
+                ! Compute function gradients
+                gradFW(:) = 0 ! very important to re-initialize!
+                gradBW(:) = 0
+                call FDchecker%fun%Evaluate(xFW, fFW, gradFW, &
+                    dummyhess, .true., .false.)
+                call FDchecker%fun%Evaluate(xBW, fBW, gradBW, &
+                    dummyhess, .true., .false.)
+
+                ! Compute FD hessian columns
+                hesscolFW(:) = 0
+                hesscolBW(:) = 0
+                hesscolC(:) = 0
+                hesscolFW  = (gradFW - gradref)/d(i)
+                hesscolBW  = (gradref - gradBW)/d(i)
+                hesscolC   = 0.5*(hesscolBW + hesscolFW)
+
+                ! Compute relative error
+                call ComputeVectorRelativeError(hesscolref, hesscolFW, &
+                    reFW, indexFW)
+                call ComputeVectorRelativeError(hesscolref, hesscolBW, &
+                    reBW, indexBW)
+                call ComputeVectorRelativeError(hesscolref, hesscolC, &
+                    reC, indexC)
+
+                ! Print - we only print the (tv, tv) component!
+                index = indexC(1)
+                call FDchecker%PrintHessianIterate(tv, d(i), &
+                    hesscolref(index), hesscolFW(index), hesscolBW(index), &
+                    hesscolC(index), reFW, reBW, reC)
+                
+            end do
+        end do
+
+        ! End associate
+        end associate
+
+        ! Deallocate
+        deallocate(xref, xFW, xBW, gradref, hesscolFW, hesscolBW, &
+            hesscolC, hesscolref, gradFW, gradBW)
+
+    end subroutine
 
     ! Allocation
     subroutine AllocateFDchecker(FDchecker)
@@ -458,8 +598,56 @@ module mod_diagnostics
 
     end subroutine
 
+    ! Print Hessian header
+    subroutine PrintHessianHeader(FDchecker)
+
+        ! Description
+        !============
+        ! Print out the header of the Hessian checker
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FDcheckerUDT)             :: FDchecker 
+
+        ! Print
+        !======
+        print *, '!===================================================!'
+        print *, '!         Hessian Finite Difference checking        !'
+        print *, '!===================================================!'
+        print "(4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, &
+            & 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)" &
+            ,   'var ', 'step',    'href ',    'hFW ', 'hBW ', 'hC ', &
+            'reFW', 'reBW', 'reC '
+
+    end subroutine
+
     ! Print gradient iterate
     subroutine PrintGradientIterate(FDchecker, var, step, gref, gFW, &
+        gBW, gC, reFW, reBW, reC)
+
+        ! Description
+        !============
+        ! Print an iterate of the gradient checker
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FDcheckerUDT)                 :: FDchecker 
+        integer(I8), intent(in)             :: var 
+        real(R8), intent(in)                :: gref, gFW, gBW, gC, &
+            reFW, reBW, reC, step 
+        
+        ! Print
+        !======
+        print "(i8, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2,&
+         & 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)", &
+            var, step, gref, gFW, gBW, gC, reFW, reBW, reC
+
+    end subroutine
+
+    ! Print Hessian iterate
+    subroutine PrintHessianIterate(FDchecker, var, step, gref, gFW, &
         gBW, gC, reFW, reBW, reC)
 
         ! Description
@@ -505,7 +693,27 @@ module mod_diagnostics
 
     end subroutine
 
-    ! Absolute error computation 
+    subroutine ComputeVectorAbsoluteError(a, b, err)
+
+        ! Description
+        !============
+        ! Compute the absolute error between the vectors a and b based 
+        ! on the infinity norm. 
+
+        ! Declare variables
+        !===================
+        ! Arguments
+        real(R8), intent(in), allocatable       :: a(:), b(:) 
+        real(R8), intent(out)                   :: err
+        
+        ! Compute
+        !========
+        err = maxval(abs(a - b))
+        
+
+    end subroutine
+
+    ! Relative error computation 
     subroutine ComputeScalarRelativeError(a, b, err)
 
         ! Description
@@ -537,6 +745,42 @@ module mod_diagnostics
             ! Compute
             err = err/a 
         end if
+
+    end subroutine
+
+    subroutine ComputeVectorRelativeError(a, b, err, location)
+
+        ! Description
+        !============
+        ! Compute the relative error between the scalars a and b w.r.t.
+        ! the reference a
+
+        ! Declare variables
+        !===================
+        ! Arguments
+        real(R8), intent(in), allocatable       :: a(:), b (:)
+        real(R8), intent(out)                   :: err
+        integer(I8)                             :: location(1)
+
+        ! Auxiliary
+        real(R8), allocatable                   :: errvec(:)
+        
+        ! Compute
+        !========
+        ! Allocate
+        allocate(errvec(size(a)))
+
+        ! Compute absolute error vector
+        where ((a == 0) .and. (b == 0)) errvec = 0 ! perfectly fine
+        where ((a == 0) .and. (b .ne. 0)) errvec = huge(R8) ! infinite
+        where ((a .ne. 0) .and. (b .ne. 0)) errvec = (a - b)/a
+
+        ! Compute maximal value
+        err = maxval(errvec)
+        location = maxloc(errvec)
+
+        ! Deallocate
+        deallocate(errvec)
 
     end subroutine
 
