@@ -18,6 +18,7 @@ subroutine ConstructEnvironment(environment, environmentoptions)
     ! Declare modules
     use gdmod_types 
     use gdmod_userinput
+    use gdmod_plots
 
     ! The usual
     implicit none 
@@ -32,12 +33,14 @@ subroutine ConstructEnvironment(environment, environmentoptions)
 
     ! Auxiliary variables 
     integer                             :: filespecifier
+    logical                             :: debugplots
 
     ! Additional environment structures
     type(VesselOptionsUDT)              :: vesseloptions
 
     ! Data
-    data filespecifier /60/ 
+    data filespecifier /60/
+    data debugplots /.true./
 
     ! Initialize
     !===========
@@ -53,7 +56,13 @@ subroutine ConstructEnvironment(environment, environmentoptions)
         call ReadVessel(filespecifier, environment%vessel, vesseloptions)
 
         ! Extract the vessel data
-        ! call ExtractVesselData(vesseloptions, vessel)
+        call ExtractVesselData(environment%vessel, vesseloptions)
+
+        ! Visualize?
+        if (debugplots) then 
+            ! Visualize
+            call PlotVesselPolygon(environment%vessel, '-p')
+        end if
 
     case default
 
