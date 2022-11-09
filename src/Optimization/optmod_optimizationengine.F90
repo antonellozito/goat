@@ -105,8 +105,6 @@ module optmod_optimizationengine
         ! Inequality constraints evaluation
         procedure(EvaluateInequalityConstraintsINT), deferred :: &
             EvaluateInequalityConstraints
-            
-        
 
     end type
 
@@ -134,6 +132,9 @@ module optmod_optimizationengine
 
         ! Lagrangian evaluation
         procedure :: EvaluateLagrangian
+
+        ! Relaxation of KKT system
+        procedure :: RelaxKKTSystem
 
     end type
 
@@ -687,6 +688,9 @@ module optmod_optimizationengine
 
             ! Solve 
             if (.not. converged) then 
+
+                ! Relax
+                call solver%RelaxKKTSystem(hessL, nphi, neq, nineq)
                 
                 ! Call the sparse solver
                 call SolveSparseLinearSystemDI(hessL, gradL, dx)
@@ -707,6 +711,9 @@ module optmod_optimizationengine
             !print *, maxval(abs(dx(1:nphi)))
             !print *, maxloc(abs(dx(1:nphi)))
             call problem%UpdateDesign(1e-3*dx(1:nphi))
+
+            ! Update lambda
+            lambda(:) = lambda(:) + dx(nphi+1:nphi+neq)
 
             ! Update the monitor
             problem%monitor%itopt = itopt
@@ -733,6 +740,70 @@ module optmod_optimizationengine
 
         ! Housekeeping
         deallocate(G, H, gradJ, lambda, mu)
+
+
+    end subroutine
+
+    ! KKT system relaxation
+    subroutine RelaxKKTSystem(solver, hessL, nphi, neq, nineq)
+
+        ! Description
+        !============
+        ! This routine applies a relaxation procedure on the hessian of
+        ! the KKT system, which should be given by hessL (in mysparse
+        ! format). The relaxation is based on the absolute value of the
+        ! sum of the columns of the hessian. 
+
+        ! We relax here only the design variable part of the hessian, 
+        ! i.e. the d2L/dphi2 part. Here, a diagonal matrix is added that
+        ! is equal to rxf * sum(abs(hessL), 2) on the diagonal. The 
+        ! relaxation factor rxf should be given in the numerics of the
+        ! solver object. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverUDT)        :: solver 
+        type(MySparseUDT)                   :: hessL
+        integer(I8)                         :: nphi, neq, nineq
+
+        ! Auxiliary
+        type(MySparseUDT)                   :: hessL_temp, hessrelax
+        real(R8), allocatable               :: diag(:)
+
+        ! Loop
+        integer(I8)                         :: k
+
+
+        ! Construct relaxator
+        !====================
+        ! Initialize & allocate
+        hessrelax%nrow = nphi + neq + nineq 
+        hessrelax%ncol = hessrelax%nrow 
+        hessrelax%nval = nphi 
+        call hessrelax%Allocate()
+        allocate(diag(hessrelax%nrow))
+        
+        ! Set the diagonal elements
+        call hessL%SumColumnwiseFull(diag)
+
+        ! Set the diagonal elements
+        hessrelax%val = solver%numKKT%rxf*diag(1:nphi)
+        hessrelax%row = [(k, k=1, nphi)]
+        hessrelax%col = hessrelax%row
+
+        ! Relax
+        !======
+        ! Simply add up
+        hessL_temp = hessrelax + hessL
+
+        ! And assign output
+        hessL = hessL_temp
+
+        ! Deallocate
+        deallocate(diag)
+
+
 
 
     end subroutine
