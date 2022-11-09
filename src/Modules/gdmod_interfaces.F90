@@ -171,7 +171,6 @@ module gdmod_interfaces
 
         ! Allocate
         vessel%nstructures = nstruct
-        print *, vessel%nstructures
         allocate(vessel%structures(nstruct))
 
         ! Skip the next line
@@ -187,7 +186,7 @@ module gdmod_interfaces
 
             ! Allocate
             vessel%structures(i)%np = abs(npoints)
-            vessel%structures(i)%isclosed = (npoints < 0)
+            vessel%structures(i)%isclosed = (npoints .gt. 0)
             call AllocateVesselStructure(vessel%structures(i))
 
             ! Print
