@@ -730,7 +730,7 @@ module gdmod_types
         ! - strcutures : nstructures-by-1 array of structures
         
         ! Coordinates
-        integer(I8)                         :: np = 0
+        integer(I8)                         :: nv = 0
         real(R8), allocatable               :: x(:), y(:)
 
         ! Target plates
@@ -744,6 +744,11 @@ module gdmod_types
         ! Structures
         integer(I4)                         :: nstructures = 0
         type(VesselStructureUDT), allocatable       :: structures(:)
+
+        ! General vessel polygon
+        integer(I8)                         :: np, nedges
+        integer(I8), allocatable            :: polygonstart(:)
+        integer(I8), allocatable            :: edges(:, :)
 
     end type
 
@@ -1183,10 +1188,10 @@ module gdmod_types
 
         ! Allocate
         !=========
-        allocate(vessel%x(vessel%np))
-        allocate(vessel%y(vessel%np))
-        allocate(vessel%TPind(vessel%np))
-        allocate(vessel%allTPind(vessel%ntp))
+        !allocate(vessel%x(vessel%nv))
+        !allocate(vessel%y(vessel%nv))
+        !allocate(vessel%TPind(vessel%nv))
+        !allocate(vessel%allTPind(vessel%ntv))
 
     end subroutine
 
