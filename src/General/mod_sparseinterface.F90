@@ -14,6 +14,13 @@
 ! ncol of the matrix. This should be sufficient to construct the sparse
 ! matrix in any desireable format. 
 
+! Notes
+!======
+! Note 1: tt is likely that more efficient routines for operators, 
+! conversion and so on exist. Currently, our implementation relies
+! largely on home-brewn functions, which may, however, be interchanged
+! or interfaced in the future with more optimized libraries. 
+
 module mod_sparseinterface
     
     ! Initialize
@@ -65,6 +72,10 @@ module mod_sparseinterface
         procedure :: ExtractColumnFull 
         procedure :: ExtractRowFull
 
+        ! Summation routines
+        procedure :: SumColumnwiseFull
+        procedure :: SumRowwiseFull
+
         ! Housekeeping procedures
         procedure :: Allocate       => AllocateMySparse
         procedure :: Deallocate     => DeallocateMySparse
@@ -79,6 +90,11 @@ module mod_sparseinterface
     !                            INTERFACES                            !
     !                                                                  !
     !==================================================================!
+
+    ! Overload the summation operator
+    interface  operator(+)
+        module procedure AddSparse
+    end interface
 
     contains
 
@@ -260,6 +276,160 @@ module mod_sparseinterface
                     mysparse%val(i)
             end if
         end do
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                            OPERATORS                             !
+    !------------------------------------------------------------------!
+
+    ! Add sparse matrices
+    function AddSparse(a, b) result(c)
+
+        ! Description
+        !============
+        ! Overloading of the summation operator for sparse matrices. 
+        ! Here, summation is simply carried out by appending the row, 
+        ! col, and val indices of both matrices. Checks are performed
+        ! on the dimensions provided in nrow, ncol to see if the 
+        ! addition is properly defined. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(MySparseUDT), intent(in)       :: a, b 
+        type(MySparseUDT)                   :: c 
+
+        ! Checks
+        !=======
+        ! Proper dimensions?
+        if ( (a%nrow .ne. b%nrow) .or. (a%ncol .ne. b%ncol) )then 
+            call gdErrorHandler('AddSparse: Incompatible matrix', &
+             ' dimensions')
+        end if 
+
+        ! Sum
+        !====
+        ! Initialize 
+        c%nrow = a%nrow 
+        c%ncol = a%ncol 
+        c%nval = a%nval + b%nval 
+
+        ! Allocate
+        call c%Allocate()
+
+        ! Sum
+        c%row = [a%row, b%row]
+        c%col = [a%col, b%col]
+        c%val = [a%val, b%val]
+
+    end function
+
+    ! Sum over columns (returns full)
+    subroutine SumColumnwiseFull(mysparse, col)
+
+        ! Description
+        !============
+        ! Sum the matrix columns into one column, which is returned as
+        ! a full vector (usually, this is the most compact format). 
+        ! The summation is carried out by looping over all values and
+        ! adding on the go. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)          :: mysparse 
+        real(R8), allocatable       :: col(:)
+
+        ! Loop variables
+        integer(I8)                 :: i
+
+        ! Initialize
+        !===========
+        ! Check if allocated
+        if (.not. allocated(col)) then
+            allocate(col(mysparse%nrow))
+        else
+            ! Check if the dimensions are correct, otherwise reallocate
+            if (size(col) .ne. mysparse%nrow) then
+                print *, 'incorrect allocation of col, reallocating'
+                deallocate(col)
+                allocate(col(mysparse%nrow))
+            end if
+        end if
+
+        ! Associate
+        associate(&
+            nval    => mysparse%nval,   &
+            row     => mysparse%row,    &
+            val     => mysparse%val)
+
+        ! Compute
+        !========
+        ! Initialize
+        col(:) = 0
+
+        ! Loop over all values, sum
+        do i = 1, nval 
+            col(row(i)) = col(row(i)) + val(i)
+        end do
+
+        ! End associate
+        end associate
+
+    end subroutine
+
+    ! Sum over rows (returns full)
+    subroutine SumRowwiseFull(mysparse, row)
+
+        ! Description
+        !============
+        ! Sum the matrix rows into one row, which is returned as
+        ! a full vector (usually, this is the most compact format). 
+        ! The summation is carried out by looping over all values and
+        ! adding on the go. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)          :: mysparse 
+        real(R8), allocatable       :: row(:)
+
+        ! Loop variables
+        integer(I8)                 :: i
+
+        ! Initialize
+        !===========
+        ! Check if allocated
+        if (.not. allocated(row)) then
+            allocate(row(mysparse%ncol))
+        else
+            ! Check if the dimensions are correct, otherwise reallocate
+            if (size(row) .ne. mysparse%ncol) then
+                print *, 'incorrect allocation of row, reallocating'
+                deallocate(row)
+                allocate(row(mysparse%ncol))
+            end if
+        end if
+
+        ! Associate
+        associate(&
+            nval    => mysparse%nval,   &
+            col     => mysparse%col,    &
+            val     => mysparse%val)
+
+        ! Compute
+        !========
+        ! Initialize
+        row(:) = 0
+
+        ! Loop over all values, sum
+        do i = 1, nval 
+            row(col(i)) = row(col(i)) + val(i)
+        end do
+
+        ! End associate
+        end associate
 
     end subroutine
 
