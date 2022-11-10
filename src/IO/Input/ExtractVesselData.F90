@@ -67,8 +67,6 @@ subroutine ExtractVesselData(vessel, vesseloptions)
         netot = netot + thisne
     end do
 
-    print *, polygonstarts
-
     ! Allocate
     allocate(xv(nv), yv(nv), pe(netot, 2))
 
@@ -103,29 +101,25 @@ subroutine ExtractVesselData(vessel, vesseloptions)
 
     end do 
 
-    ! Assign to vessel structure
+    ! Allocate vessel
     if (allocated(vessel%x)) then 
         ! Deallocate
         print *, 'ExtractVesselData: reinitializing vessel coordinates'
         deallocate(vessel%x, vessel%y)
     end if
-
     allocate(vessel%x(nv), vessel%y(nv))
     allocate(vessel%edges(netot, 2), &
         vessel%polygonstart(vessel%nstructures))
-    vessel%x = xv 
-    vessel%y = yv 
-    vessel%nv = nv
-    vessel%edges = pe 
-    vessel%nedges = size(pe, 1)
+
+    ! Assign to vessel structure
+    vessel%x            = xv 
+    vessel%y            = yv 
+    vessel%nv           = nv
+    vessel%edges        = pe 
+    vessel%nedges       = size(pe, 1)
     vessel%polygonstart = polygonstarts 
-    vessel%np = vessel%nstructures
-
-    print *, vessel%x 
-    print *, vessel%y 
-    print *, vessel%edges
+    vessel%np           = vessel%nstructures
     
-
     ! Deallocate
     deallocate(polygonstarts, pe, xv, yv)
 
