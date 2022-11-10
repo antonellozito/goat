@@ -40,7 +40,7 @@ subroutine ConstructEnvironment(environment, environmentoptions)
 
     ! Data
     data filespecifier /60/
-    data debugplots /.true./
+    data debugplots /.false./
 
     ! Initialize
     !===========
