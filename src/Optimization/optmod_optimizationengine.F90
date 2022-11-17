@@ -32,6 +32,7 @@ module optmod_optimizationengine
     use mod_sparseinterface
     use mod_diagnostics
     use mod_linearsolverinterface
+    use mod_plotter
     use optmod_designvariables
     use optmod_costfunction
     use optmod_constraints
@@ -691,19 +692,13 @@ module optmod_optimizationengine
 
                 ! Relax
                 call solver%RelaxKKTSystem(hessL, nphi, neq, nineq)
-                
+
                 !print *, 'hessian size: ', hessL%nrow, hessL%ncol
                 !call SpyPlot(hessL%row, hessL%col, hessL%nval, '-p')
                 
                 ! Call the sparse solver
                 call SolveSparseLinearSystemDI(hessL, -gradL, dx)
 
-                ! Check if converged
-                if (info .ne. 0) then
-                    ! Not converged - issue error
-                    print *, 'info: ', info
-                    call gdErrorHandler('Could not solve KKT system')
-                end if
             else
                 ! Don't solve again, already converged. Exit 
                 dx(:) = 0
@@ -1481,12 +1476,12 @@ module optmod_optimizationengine
         ! Set the constraints to check
         neqID =  1
         allocate(eqID(neqID))
-        eqID = [1] !  some random numbers for now
+        eqID = [902] !  some random numbers for now
 
         ! Set the design variables to check
         nvars = 5
         allocate(vars(nvars))
-        vars = [1, 1+860, 3, 3+860, 5] ! some random variables for now
+        vars = [1, 1+860, 860, 3+860, 1720] ! some random variables for now
 
         ! Sanity checks
         if (any(eqID > neq)) then
