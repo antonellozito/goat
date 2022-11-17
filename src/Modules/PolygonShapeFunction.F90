@@ -303,8 +303,8 @@ module PolygonShapeFunction
             ! Normal distance
             !----------------
             ! Compute vectors between query point and edge center
-            vnx(:) = xf(:) - xq(i) 
-            vny(:) = yf(:) - yq(i)
+            vnx(:) = -(xf(:) - xq(i)) 
+            vny(:) = -(yf(:) - yq(i))
 
             ! Project 
             dvn = vnx * nxp + vny * nyp 
@@ -332,6 +332,10 @@ module PolygonShapeFunction
             vnyq(i) = vny(thisloc)
             vtxq(i, :) = vtx(thisloc, :)
             vtyq(i, :) = vty(thisloc, :)
+            txpq(i) = txp(thisloc)
+            typq(i) = typ(thisloc)
+            nxpq(i) = nxp(thisloc)
+            nypq(i) = nyp(thisloc)
 
         end do
 
@@ -357,23 +361,33 @@ module PolygonShapeFunction
 
             ! Set the gradient to 1 - can choose this value, since the 
             ! function is exactly zero here anyway. 
-            where (fq .eq. 0) f = 1
+            where (fq .eq. 0) vq = 1
 
         case ('01')
 
             ! fy
+            vq = nypq*sign(myones, dvnq) - sign(myones, abs(vtyq(:, 1)) &
+                - abs(typq) + abs(vtyq(:, 2))) * &
+                (sign(myones, vtyq(:, 1)) + sign(myones, vtyq(:, 2)))
+
+            ! Set the gradient to 1 - can choose this value, since the 
+            ! function is exactly zero here anyway. 
+            where (fq .eq. 0) vq = 1
 
         case ('20')
 
-            ! fxx 
+            ! fxx - simply zero
+            vq(:) = 0
 
         case ('11')
 
-            ! fxy 
+            ! fxy - simply zero
+            vq(:) = 0
 
         case ('02')
 
-            ! fyy
+            ! fyy - simply zero
+            vq(:) = 0
 
         case default
 
