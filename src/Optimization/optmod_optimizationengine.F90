@@ -713,7 +713,7 @@ module optmod_optimizationengine
             !print *, dx(1), gradL(1)
             !print *, maxval(abs(dx(1:nphi)))
             !print *, maxloc(abs(dx(1:nphi)))
-            call problem%UpdateDesign(1e-3*dx(1:nphi))
+            call problem%UpdateDesign(solver%numKKT%rxfdesign*dx(1:nphi))
 
             ! Update lambda
             lambda(:) = lambda(:) + dx(nphi+1:nphi+neq)
