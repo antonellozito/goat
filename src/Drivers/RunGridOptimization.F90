@@ -33,6 +33,7 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
 
     ! Debug
     logical                             :: makedebugplots = .false.
+    logical                             :: makegridplots  = .true.
     real(R8), allocatable               :: xq(:), yq(:), vq(:), &
         xqmf(:,:), yqmf(:,:), vqmf(:,:)
 
@@ -58,6 +59,11 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
     ! Construct the initial grid
     call ConstructGrid(grid,gridoptions,options);
 
+    ! Plot
+    if (makegridplots) then 
+        call PlotGridCells(grid, '-p')
+    end if
+
     ! Construct the initial magnetic field
     call ConstructMagneticField(mfoptions, magneticField)
 
@@ -72,6 +78,21 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
     !======
     ! Simply call the solver ... 
     call optimizationdriver%Driver()
+
+    ! Plot
+    associate(problem => optimizationdriver%problem)
+        
+    select type (problem)
+
+    type is (OptimizationProblemGDUDT)
+
+        if (makegridplots) then 
+            call PlotGridCells(problem%grid, '-p')
+        end if 
+
+    end select
+
+    end associate
 
     ! ... and unpack the solution
     !grid = optimizationdriver%grid
@@ -107,6 +128,10 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
         print *, size(yqmf, 1), size(yqmf, 2)
         print *, size(xq, 1), size(yq, 1), size(vq, 1)
         call Plot2DStructuredField(vqmf, magneticField%R(2:magneticField%nR-1), &
+        magneticField%Z(2:magneticField%nZ-1), magneticField%nR-2, magneticField%nZ-2, '-p')
+
+        call Plot2DStructuredField(vqmf - magneticField%Psi(2:magneticField%nR-1,2:magneticField%nZ-1)&
+        , magneticField%R(2:magneticField%nR-1), &
         magneticField%Z(2:magneticField%nZ-1), magneticField%nR-2, magneticField%nZ-2, '-p')
         
         ! call Plot2DUnstructuredField(vq, grid, 'v', '-p')
