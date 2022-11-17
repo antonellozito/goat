@@ -35,6 +35,7 @@ module mod_linearsolverinterface
     integer(c_int) :: umfpack_a = 0
     integer(c_int) :: umfpack_control = 20
     integer(c_int) :: umfpack_info = 90
+    integer(c_int) :: umfpack_prl = 1 ! printing level
 
     !==================================================================!
     !                                                                  !
@@ -341,6 +342,10 @@ module mod_linearsolverinterface
         ! The rhs should be given in b, the solution will be returned in
         ! sol. Note that the solver here is a direct solver! 
 
+        ! The result whether the solver is successful is parsed through
+        ! 'info_solver'. It is zero when successful, and nonzero when
+        ! not.
+
         ! Declare variables
         !==================
         ! Arguments
@@ -399,6 +404,7 @@ module mod_linearsolverinterface
         ! Compute the solution
         call UmfpackSolveDI(umfpack_a, Ap, Ai, Ax, sol_c, b, numeric, &
             control, info)
+            print *, info(1)
 
         ! Destroy symbolic
         call UmfpackFreeSymbolicDI(symbolic)
