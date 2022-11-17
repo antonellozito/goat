@@ -42,6 +42,12 @@
 ! multiplication
 ! 5) Construct the interpolant evaluation functions
 
+! Notes
+!======
+! Note 1: step 3 and 4 of the algorithm are actually implemented 
+! differently by simply calling a linear solver instead of explicitly
+! inverting the matrix. 
+
 module BicubicSplineInterpolant
 
     ! Initialize
@@ -55,8 +61,8 @@ module BicubicSplineInterpolant
     save
     public
 
-    external sgesv
-    external findloc
+    !external dgesv
+    !external findloc
     !private
     
     !public ConstructBicubicSplineInterpolant
@@ -625,6 +631,303 @@ module BicubicSplineInterpolant
 
 
     end subroutine
+
+    ! Unit tests
+    !===========
+    ! To be moved? 
+    subroutine TestBicubicSplineInterpolant()
+
+        ! Description
+        !============
+        ! Testing routine for the bicubic spline interpolant. An 
+        ! analytic 2D field is constructed that is used for the 
+        ! interpolant on a non-uniform but cartesian grid. The 
+        ! interpolant is then constructed and evaluated (including 
+        ! derivatives) to check its accuracy. 
+
+        ! Test expectations
+        !==================
+        ! - The values should be reasonably close to the analytic values
+
+        ! Initialize
+        !===========
+
+        ! Declare variables
+        !==================
+        ! Arguments
+
+        ! Auxiliary
+        type(BicubicSplineInterpolantUDT)       :: interp
+        integer(I8)                             :: nx, ny, nxt, nyt
+        real(R8), allocatable                   :: xg(:), yg(:), &
+           val(:), xgf(:), ygf(:), xgt(:), ygt(:), xgft(:), ygft(:), &
+           valt(:), vale(:), vali(:,:)
+
+        ! Loop
+        integer(I8)                             :: i, j, k
+        character, allocatable                  :: derivs(:)
+
+        ! Data
+
+        ! Construct grid
+        !===============
+        ! Set grid dimensions for interpolant
+        nx = 11
+        ny = 21
+
+        ! Set grid dimensions for test evaluation
+        nxt = 21
+        nyt = 41
+
+        ! Allocate
+        allocate(xg(nx), yg(ny), val(nx*ny), vali(nx, ny))
+        allocate(xgf(nx*ny), ygf(nx*ny))
+
+        allocate(xgt(nxt), ygt(nyt), valt(nxt*nyt), vale(nxt*nyt))
+        allocate(xgft(nxt*nyt), ygft(nxt*nyt))
+
+
+        ! Construct interpolant grid
+        call TestGridConstructor(nx, ny, xg, yg, xgf, ygf)
+
+        ! Construct test grid
+        call TestGridConstructor(nxt, nyt, xgt, ygt, xgft, ygft)
+
+        ! Construct interpolant
+        !======================
+        ! Evaluate
+        call TestField(xgf, ygf, val, '00')
+        vali(:,:) = 0
+
+        ! Construct
+        k = 1
+        do j = 1, ny
+            do i = 1, nx
+                vali(i, j) = val(k)
+                k = k + 1
+            end do
+        end do
+
+        call ConstructBicubicSplineInterpolant(vali, xg, yg, nx, ny, &
+            interp)
+
+        ! Test
+        !=====
+        ! Loop
+        allocate(derivs(4))
+        derivs(1) = '0'
+        derivs(2) = '1'
+        derivs(3) = '2'
+        derivs(4) = '3'
+        do i = 1, 4
+            do j = 1, 4-i
+
+                valt(:) = 0
+                vale(:) = 0
+                call EvaluateBicubicSplineInterpolant(xgft, ygft, valt, &
+                    interp, derivs(i), derivs(j))
+
+                call TestField(xgft, ygft, vale, derivs(i) // derivs(j))
+
+                print *, 'error on field ', derivs(i), derivs(j), maxval(abs(valt-vale))
+            end do
+        end do
+
+        !do i = 1, nxt*nyt
+        !    print *, xgft(i), ygft(i), valt(i), vale(i)
+        !end do
+
+        
+        
+        ! Deallocate
+        deallocate(xg, yg, val)
+        deallocate(xgf, ygf)
+
+        deallocate(xgt, ygt, valt, vale)
+        deallocate(xgft, ygft)
+
+        
+
+
+    end subroutine
+
+    ! Grid constructor
+    !=================
+    subroutine TestGridConstructor(nxc, nyc, xgc, ygc, xgfc, ygfc)
+
+        ! Description
+        !============
+        ! 2D grid constructor, taking as inputs nx and ny. Returns
+        ! the gridding vectors xg, yg and all vertex coordinates
+        ! in xgf, ygf. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)                 :: nxc, nyc
+        real(R8), intent(out)                   :: xgc(:), ygc(:), &
+                xgfc(:), ygfc(:)
+
+        ! Auxiliary
+        real(R8), allocatable                   :: dxg(:), dyg(:)
+
+        ! Loop
+        integer(I8)                             :: ii, jj, kk
+
+        ! Data
+
+        ! Construct grid
+        !===============
+        ! Allocate
+        allocate(dxg(nxc-1), dyg(nyc-1))
+        ! Grid increment vectors
+        do ii = 1, nxc-1
+            dxg(ii) = ii**(1.1)
+        end do
+        do ii = 1, nyc-1
+            dyg(ii) = ii**(1.1)
+        end do
+
+        dxg(:) = 1
+        dyg(:) = 1
+
+        ! Grid vectors
+        xgc(1) = 0
+        ygc(1) = 0
+        do ii = 2, nxc
+            xgc(ii) = xgc(ii-1) + dxg(ii-1)
+        end do
+        do ii = 2, nyc 
+            ygc(ii) = ygc(ii-1) + dyg(ii-1)
+        end do
+
+        ! Rescale
+        xgc = xgc/xgc(nxc)
+        ygc = ygc/ygc(nyc)
+
+        ! Full grid vectors
+        kk = 1
+        do jj = 1, nyc 
+            do ii = 1, nxc
+                xgfc(kk) = xgc(ii)
+                ygfc(kk) = ygc(jj)
+                kk = kk + 1
+            end do
+        end do
+
+    end subroutine
+
+    ! Value function
+    !===============
+    subroutine TestField(x, y, val, deriv)
+
+        ! Description
+        !============
+        ! Definition of the test function that we try to
+        ! interpolate. Will return the value or the derivative.
+        ! Here, the test function is defined as the following
+        ! surface: 
+        !
+        !       v(x,y) = 1 + x + y 
+        !              + x² + x*y + y² 
+        !              + x³ + x²*y + x*y² + y³ 
+        !
+        ! The analytic derivatives are
+        !
+        !       vx     = 1 + 2*x + y + 3*x² + 2*x*y + y²
+        !       vy     = 1 + 2*y + x + 3*y² + 2*x*y + x²
+        !       vx²    = 2 + 6*x + 2*y
+        !       vxy    = 1 + 2*x + 2*y
+        !       vy²    = 2 + 6*y + 2*x
+        !       vx³    = 6
+        !       vx²y   = 2 
+        !       vxy²   = 2 
+        !       vy³    = 6
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)            :: x(:), y(:) 
+        real(R8), intent(inout)         :: val(:)
+        character(2)                    :: deriv 
+
+        ! Auxiliary
+
+        ! Loop
+
+        ! Evaluate
+        !=========
+        ! Initialize
+        val(:) = 0
+
+        ! Check which value to compute
+        select case(deriv)
+
+        case ('00')
+
+            ! v
+            val = 1 + x + y &
+                + x**2 + x*y + y**2  &
+                + x**3 + x**2*y + x*y**2 + y**3
+
+        case ('10')
+
+            ! vx
+            val = 1 &
+                + 2*x + y  &
+                + 3*x**2 + 2*x*y + y**2
+
+        case ('01')
+
+            ! vy
+            val = 1 + 2*y + x + 3*y**2 + 2*x*y + x**2
+
+        case ('20')
+
+            ! vx² 
+            val = 2 + 6*x + 2*y
+
+        case ('11')
+
+            ! vxy
+            val = 1 + 2*x + 2*y
+
+        case ('02')
+
+            ! vy² 
+            val = 2 + 6*y + 2*x
+
+        case ('30')
+
+            ! vx³
+            val = 6
+
+        case ('21')
+
+            ! vx²y
+            val = 2
+
+        case ('12')
+
+            ! vxy² 
+            val = 2
+
+        case ('03')
+
+            ! vy³ 
+            val = 6
+
+        case default
+
+            ! Throw error
+            call gdErrorHandler('Testfunction derivative not ' &
+                // 'implemented')
+
+        end select
+        
+
+    end subroutine
+
 
 
     
