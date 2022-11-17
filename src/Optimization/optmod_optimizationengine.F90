@@ -692,8 +692,11 @@ module optmod_optimizationengine
                 ! Relax
                 call solver%RelaxKKTSystem(hessL, nphi, neq, nineq)
                 
+                !print *, 'hessian size: ', hessL%nrow, hessL%ncol
+                !call SpyPlot(hessL%row, hessL%col, hessL%nval, '-p')
+                
                 ! Call the sparse solver
-                call SolveSparseLinearSystemDI(hessL, gradL, dx)
+                call SolveSparseLinearSystemDI(hessL, -gradL, dx)
 
                 ! Check if converged
                 if (info .ne. 0) then
