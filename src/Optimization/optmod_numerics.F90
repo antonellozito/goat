@@ -126,7 +126,7 @@ module optmod_numerics
         ! Set defaults
         !=============
         num%tol         = 1e-6
-        num%maxit       = 1000
+        num%maxit       = 58
         num%verbosity   = 1
 
     end subroutine
@@ -183,8 +183,8 @@ module optmod_numerics
         call num%SetDefaultNumParams()
 
         ! Specifics for KKT numerics
-        num%rxf             = 1e2
-        num%rxfdesign       = 1
+        num%rxf             = 1e5
+        num%rxfdesign       = 0.01
         num%rxfdec          = 0.98
         num%rxfmin          = 2e-3
 
