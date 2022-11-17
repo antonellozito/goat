@@ -35,7 +35,7 @@ subroutine ConstructMagneticField(mfoptions, magneticField)
     ! Main program
     !=============
     ! Open the file containing the grid data
-    call cfopen(filespecifier,'inputfiles/rzpsi_asdex.dat','old','un*formatted')
+    call cfopen(filespecifier,'inputfiles/rzpsi_TCV.dat','old','un*formatted')
 
     ! Read 
     call ReadMagneticField(filespecifier, magneticField, mfoptions)

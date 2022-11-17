@@ -43,7 +43,7 @@ subroutine ConstructGrid(grid,gridoptions,options)
 
             ! Unstructured format in the b2fgmtry style. 
             ! Open the file containing the grid data
-            call cfopen(filespecifier(0),'inputfiles/b2fgmtry_us_asdex','old','un*formatted')
+            call cfopen(filespecifier(0),'inputfiles/b2fgmtry_us_tcv','old','un*formatted')
 
             ! Read in the grid data
             call ReadB2fgmtryUS(filespecifier(0),grid)

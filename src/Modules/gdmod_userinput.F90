@@ -232,7 +232,7 @@ module gdmod_userinput
         !============
         options%readmeth    = 'read_structure'
         options%geom        = 'ASDEX_Nathan'
-        options%dir         = 'inputfiles/structure_straight_targets.dat'
+        options%dir         = 'inputfiles/structure_tcv.dat'
         options%maxdist     = 0.01
         options%refine      = .true.
 
