@@ -369,6 +369,7 @@ module gdmod_optimizationengine
         ! Initialize
         !===========
         ! Declare modules
+        use gdmod_plots
 
         ! The usual
         implicit none 
@@ -382,13 +383,27 @@ module gdmod_optimizationengine
         ! Loop variables
 
         ! Auxiliary variables 
+        logical                             :: dodebugplots
 
         ! Data
+
+        ! Do NOT set this to true unless you
+        ! know what you're doing! prints out a figure, which may be in 
+        ! each optimization iteration!
+        
+        data dodebugplots /.false./ 
 
         ! Update design
         !==============
         ! Simply update designvariables%phi
         problem%designvariables%phi = problem%designvariables%phi + dx 
+
+        ! Debug plots?
+        !=============
+        if (dodebugplots) then
+            ! Call grid visualization
+            call PlotGrid(problem%grid, '-p')
+        end if
 
     end subroutine
 
