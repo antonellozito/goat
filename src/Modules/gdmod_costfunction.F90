@@ -79,6 +79,12 @@ module gdmod_costfunction
         ! If certain vertices should not play a role in the cost 
         ! function, set the weight wt to zero for that vertex. 
     
+        ! IMPORTANT: this cost function shouldn't be used, as it gives
+        ! quite shitty results. It is, however, used in a better way
+        ! by the CostfunctionLRUDT2 cost function, where the bias is 
+        ! also considered in the other direction (see the description
+        ! there)
+    
         ! Cost function formula
         !======================
         !
@@ -108,6 +114,115 @@ module gdmod_costfunction
         procedure :: Allocate               => AllocateCostfunctionLR
         procedure :: Deallocate             => DeallocateCostFunctionLR
         final :: DestroyCostFunctionLR
+
+    end type
+
+    ! Length ratio 2 cost function
+    type, extends(CostfunctionGDUDT) :: CostfunctionLRUDT2 
+
+        ! Description
+        !============
+        ! Cost function based on the length ratio distribution along
+        ! coordinate lines. Similar to the lengthratio cost function, 
+        ! but now we also consider the 'inverse' of this cost function 
+        ! (this is not exactly the inverse though, we simply flip the 
+        ! edge order and of course the bias). Reason for this  is to not
+        ! put excessive weight on smaller edges d2 (which happens in the 
+        ! other cost function). This cost function is recommended over 
+        ! the original length ratio cost function. 
+
+        ! To evaluate it, we simply add the original cost function as an
+        ! object and, in evaluation, we adjust the cost function 
+        ! slightly. 
+    
+        ! Cost function formula
+        !======================
+        !
+        !   J_i = wt(i) * ( (d1/d2 - b)**2  + (d2/d1 - 1/b)**2)
+        !   J = lambda * sum(J_i), i = 1, vert%ntot
+
+        ! Notes
+        !======
+        ! Note 1: it is assumed that each vertex only has one vertex 
+        ! pair 
+
+        ! Fields
+        type(CostfunctionLRUDT)     :: cfv_lr
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionLR2
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionLR2
+
+        ! Housekeeping
+        procedure :: Allocate               => AllocateCostFunctionLR2
+        procedure :: Deallocate             => DeallocateCostFunctionLR2
+        final :: DestroyCostFunctionLR2
+
+    end type
+
+    ! Face angle difference cost function
+    type, extends(CostfunctionGDUDT) :: CostfunctionFADUDT 
+
+        ! Description
+        !============
+        ! Cost function based on the angle between magnetic field and face
+        ! (and the difference of this angle between two vertex pairs). This
+        ! cost function will, ideally, lead to more smooth grids in the
+        ! radial direction.
+        
+        ! Note: this cost function was based on quadrilateral grids, where
+        ! the ideal angle difference between two non-aligned faces is zero,
+        ! i.e. the faces are perfectly perpendicular to the local magnetic
+        ! field. However, for other cell geometries (triangles etc) this
+        ! kind of angle is impossible to achieve. However, this cost
+        ! function will lead in the ideal case to the lowest variation of
+        ! the angle. 
+
+        ! Notes
+        !======
+        ! Note 1: it is technically not yet possible to impose a desired 
+        ! angle difference dtheta0, so the default desired value is 
+        ! zero. This may be further extended in the future if needed. 
+
+        ! Note 2: currently (18/11/22), we do not include vertices with
+        ! more than one vertex pair to consider. This means in practice
+        ! that x-points and vertices that have other cells than 
+        ! quadrilateral cells as neighbours are not included. 
+    
+        ! Cost function formula
+        !======================
+        !
+        !   J_i = wt(i) * ( (theta1 - theta2 )**2 )
+        !   J = lambda * sum(J_i), i = 1, vert%ntot
+        !   theta1 = atan( cross(d1, B1 )/dot(d1, B1) ) (theta2 similar)
+
+        ! Notes
+        !======
+        ! Note 1: it is assumed that each vertex only has one vertex 
+        ! pair 
+
+        ! Fields
+        real(R8)                    :: lambda ! scaling constant
+        integer(I8)                 :: nvpairs ! number of vertex pairs
+        real(R8), allocatable       :: wt(:) ! weight factor per vertex
+        integer(I8), allocatable    :: vpairs(:, :)! vertex pairs
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionFAD
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionFAD
+
+        ! Housekeeping
+        procedure :: Allocate               => AllocateCostFunctionFAD
+        procedure :: Deallocate             => DeallocateCostFunctionFAD
+        final :: DestroyCostFunctionFAD
 
     end type
 
@@ -181,8 +296,10 @@ module gdmod_costfunction
     !                                                                  !
     !==================================================================!
 
-    ! Length ratio cost function
-    !===========================
+    !------------------------------------------------------------------!
+    !                           LENGTH RATIO                           !
+    !------------------------------------------------------------------!
+
     ! Initialization
     subroutine InitializeCostFunctionLR(costfunction, grid, &
         magneticField, environment)
@@ -823,5 +940,192 @@ module gdmod_costfunction
         call costfunction%Deallocate()
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                           LENGTH RATIO 2                         !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionLR2(costfunction, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. 
+
+        ! Simply call the initialization of the original lenght ratio
+        ! cost function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRUDT2)           :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        
+        ! Initialize
+        !===========
+        call costfunction%cfv_lr%Initialize(grid, magneticField, &
+            environment)
+
+        ! (Re)set the scaling constant
+        costfunction%cfv_lr%lambda = 1e4 ! seems to agree well with most grids
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionLR2(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, we simply call the same cost function twice, but switch
+        ! the order of the indices and recompute the bias. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRUDT2)       :: costfunction 
+        real(R8)                        :: J, J1, J2
+        real(R8), allocatable           :: gradJ(:), gradJ1(:), &
+            gradJ2(:) 
+        type(MySparseUDT)               :: hessJ, hessJ1, hessJ2 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i
+
+        ! Auxiliary
+        integer(I8), allocatable        :: tempvpairs(:,:)
+        real(R8), allocatable           :: tempb0(:) 
+                                        
+        ! Initialize
+        !===========
+        ! Store original vertex pairs and bias
+        allocate(tempvpairs, source=costfunction%cfv_lr%vpairs)
+        allocate(tempb0, source=costfunction%cfv_lr%b0)
+        tempvpairs = costfunction%cfv_lr%vpairs 
+        tempb0  = costfunction%cfv_lr%b0
+         
+        ! Cost function
+        J = 0
+        J1 = 0
+        J2 = 0
+
+        ! Gradient
+        gradJ(:) = 0
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+
+        ! Hessian
+        hessJ1%nrow = hessJ%nrow 
+        hessJ2%nrow = hessJ%nrow 
+        hessJ1%ncol = hessJ%ncol 
+        hessJ2%ncol = hessJ%ncol 
+
+        ! Compute cost function
+        !======================
+        ! First contribution
+        call costfunction%cfv_lr%Evaluate(J1, gradJ1, &
+            hessJ1, grid, magneticField, environment, dogradient, &
+            dohessian, designvariables)
+        
+        ! Adjust vertex pairs and bias
+        do i = 1, maxval(costfunction%cfv_lr%nvpairs)
+            costfunction%cfv_lr%vpairs(:, 2*i-1) = tempvpairs(:, 2*i)
+            costfunction%cfv_lr%vpairs(:, 2*i) = tempvpairs(:, 2*i-1)
+        end do
+        costfunction%cfv_lr%b0(:) = 1/tempb0
+
+        ! Second contribution
+        call costfunction%cfv_lr%Evaluate(J2, gradJ2, &
+            hessJ2, grid, magneticField, environment, dogradient, &
+            dohessian, designvariables)
+
+        ! Reset vertex pairs and bias
+        costfunction%cfv_lr%b0(:) = tempb0
+        costfunction%cfv_lr%vpairs(:,:) = tempvpairs
+
+        ! Add
+        J = J1 + J2 
+        gradJ = gradJ1 + gradJ2
+        hessJ = hessJ1 + hessJ2
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJ1, gradJ2)
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionLR2(costfunction, nv, nvn)
+
+        ! Description
+        !============
+        ! Allocate, assumed that costfunction%nvpairs is given
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRUDT2)       :: costfunction
+        integer(I8)                     :: nv, nvn
+
+        ! Allocate
+        !=========
+        call costfunction%cfv_lr%Allocate(nv, nvn)
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionLR2(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRUDT2)       :: costfunction
+
+        ! Deallocate
+        !===========
+        call costfunction%cfv_lr%Deallocate()
+
+    end subroutine
+
+    subroutine DestroyCostFunctionLR2(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionLRUDT2)       :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%cfv_lr%Deallocate()
+
+    end subroutine
+
+    
 
 end module

@@ -303,6 +303,11 @@ module gdmod_optimizationengine
             ! Allocate
             allocate(CostFunctionLRUDT::problem%costfunction)
 
+        case ('lengthratio2')
+
+            ! Allocate
+            allocate(CostFunctionLRUDT2::problem%costfunction)
+
         case default
             
             call gdErrorHandler('Unknown cost function type')
