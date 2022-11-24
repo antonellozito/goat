@@ -762,7 +762,7 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(OptimizationSolverUDT)        :: solver 
-        type(MySparseUDT)                   :: hessL
+        type(MySparseUDT)                   :: hessL, hessL_copy
         integer(I8)                         :: nphi, neq, nineq
 
         ! Auxiliary
@@ -776,6 +776,7 @@ module optmod_optimizationengine
         ! Construct relaxator
         !====================
         ! Initialize & allocate
+        hessL_copy = hessL
         hessrelax%nrow = nphi + neq + nineq 
         hessrelax%ncol = hessrelax%nrow 
         hessrelax%nval = nphi 
@@ -783,7 +784,8 @@ module optmod_optimizationengine
         allocate(diag(hessrelax%nrow))
         
         ! Set the diagonal elements
-        call hessL%SumColumnwiseFull(diag)
+        hessL_copy%val = abs(hessL_copy%val)
+        call hessL_copy%SumColumnwiseFull(diag)
 
         ! Set the diagonal elements
         hessrelax%val = solver%numKKT%rxf*diag(1:nphi)
