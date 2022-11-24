@@ -527,6 +527,54 @@ module gdmod_plots
 
     end subroutine
 
+    ! Data with grid on background
+    subroutine PlotGridWithPoints(grid, xp, yp, gnuplotoptions)
+
+        ! Description
+        !============
+        ! Plot data points on a grid background. First, the 
+        ! PlotGridCells routine is called to construct the grid file 
+        ! (and a plot that is not persisted - may be cleaned up in the
+        ! future), afterwards, the points are plotted. This routine uses
+        ! therefore two separate files to store the data. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridUDT)                       :: grid
+        integer                             :: i, fu
+        character(*)                        :: gnuplotoptions
+
+        real(R8), allocatable, intent(in)   :: xp(:), yp(:)
+
+        ! Plot grid
+        !==========
+        call PlotGridCells(grid, '')
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'plotgridwithpoints')
+
+        ! Write the data file
+        !====================
+        ! Write point coordinates to file
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+    
+        do i = 1, size(xp)
+            write (fu, *) xp(i), yp(i)
+        end do
+    
+        close (fu)
+
+        ! Call plotter
+        !=============
+        call gnuplotexe(gnuplotoptions,trim(plotfile))
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                            Optimization                          !
     !------------------------------------------------------------------!
