@@ -308,6 +308,11 @@ module gdmod_optimizationengine
             ! Allocate
             allocate(CostFunctionLRUDT2::problem%costfunction)
 
+        case ('FAD')
+
+            ! Allocate
+            allocate(CostfunctionFADUDT::problem%costfunction)
+
         case default
             
             call gdErrorHandler('Unknown cost function type')

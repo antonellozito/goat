@@ -21,6 +21,7 @@ module gdmod_costfunction
     use gdmod_types 
     use gdmod_designvariables
     use optmod_costfunction
+    use gdmod_plots
 
     ! The usual
     implicit none
@@ -78,7 +79,7 @@ module gdmod_costfunction
         ! vertex pairs) arrays, where nv is the number of grid vertices.
         ! If certain vertices should not play a role in the cost 
         ! function, set the weight wt to zero for that vertex. 
-    
+
         ! IMPORTANT: this cost function shouldn't be used, as it gives
         ! quite shitty results. It is, however, used in a better way
         ! by the CostfunctionLRUDT2 cost function, where the bias is 
@@ -897,7 +898,6 @@ module gdmod_costfunction
 
         ! Allocate
         !=========
-        print *, nv
         allocate(costfunction%nvpairs(nv))
         allocate(costfunction%vpairs(nv,2*nvn))
         allocate(costfunction%b0(nv))
@@ -934,6 +934,779 @@ module gdmod_costfunction
         !==================
         ! Arguments
         type(CostfunctionLRUDT)        :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%Deallocate()
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                        FACE ANGLE DIFFERENCE                     !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionFAD(costfunction, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. To determine 
+        ! which faces should be considered in the FAD cost function, the
+        ! vertex ID is compared with the ID of its neighbours. If it is 
+        ! the same (and non-zero), the face is NOT considered as it is 
+        ! aligned. If it is not the same and both are non-zero, it is 
+        ! a potential face to consider. 
+
+        ! Modules
+        !========
+        use BicubicSplineInterpolant
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFADUDT)           :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        
+        ! Loop variables
+        integer(I8)                         :: i, j, k, vpc
+
+        ! Auxiliary variables
+        integer(I8)                         :: tID, vp1(1:2), &
+            vp2(1:2), ntvn, ntemptvn, nvp
+
+        real(R8)                            :: dxf, dyf, txf, tyf, tnf,&
+            bxf, byf, bnf, dpf
+
+        logical                             :: thischeck
+
+        integer(I8), allocatable            :: tvn(:), temptvn(:), &
+            vpairs(:,:), nvpairs(:), reverse(:)
+
+        real(R8), allocatable               :: bx(:), by(:), xv(:,:), &
+            yv(:,:), xf(:,:), yf(:,:), gxf(:,:), gyf(:,:), dx(:,:), &
+            dy(:,:), dotprod(:,:), tempvpairs(:,:), xplot(:), yplot(:)
+
+        logical, allocatable                :: cID(:), mask(:), &
+            isaligned(:)
+
+        ! Data
+        real(R8)                            :: epsalignment 
+        data epsalignment /0.1/
+        
+        ! Initialize
+        !===========
+        ! Set the scaling constant
+        costfunction%lambda = 1e-3 ! seems to agree well with most grids
+
+        ! Allocate (initialize too big)
+        nvp = grid%vert%ntot*maxval(grid%vert%neigP(:,2)) ! maximal number of pairs
+        allocate(vpairs(nvp,4), nvpairs(grid%vert%ntot))
+        ! call costfunction%Allocate(grid%vert%ntot, 4)
+
+        ! Compute magnetic field in grid points
+        allocate(bx(grid%vert%ntot), by(grid%vert%ntot))
+        call EvaluateBicubicSplineInterpolant( &
+            grid%vert%x, grid%vert%y, bx, magneticField%interp, '0', '1')
+        call EvaluateBicubicSplineInterpolant( &
+            grid%vert%x, grid%vert%y, by, magneticField%interp, '1', '0')
+        bx = -bx
+
+        ! Associate some fields
+        associate(&
+            vert    => grid%vert, &
+            x       => grid%vert%x, &
+            y       => grid%vert%y &
+            )
+
+        ! Determine vertex pairs
+        !=======================
+        ! Initialize
+        vpairs(:, :) = 0
+        nvpairs(:) = 0
+        vpc = 1 ! vertex pair index & counter
+
+        ! Loop over all vertices
+        do i = 1, vert%ntot
+            ! Skip if the current vertex is a boundary vertex 
+            if (vert%BV(i)) then 
+                cycle ! skip the remainder of the do-loop for this iteration
+            end if
+
+            ! Dimensions
+            ntemptvn = vert%neigP(i, 2)
+
+            ! Allocate
+            allocate(temptvn(ntemptvn))
+            allocate(cID(ntemptvn))
+
+            ! Get the vertex neighbours of this vertex
+            temptvn = vert%neiglist(& 
+                vert%neigP(i, 1):vert%neigP(i, 1)+vert%neigP(i, 2)-1)
+            
+            ! Get the ID of the coordinate line
+            tID = vert%fieldlineID(i)
+
+            ! Check if there is an ID
+            ntvn = 0
+            if (tID == 0) then ! no vertex ID - check all vertex neighbours
+                ! Check which faces are aligned to know which vertex 
+                ! pairs to (not) include. Each vertex pair consists of 
+                ! the current node and one of its neighbours in temptvn. 
+                ! Alignment checking is based on the dot product between 
+                ! the normalized face and magnetic field vectors. The 
+                ! magnetic field vector is interpolated from the 
+                ! precomputed magnetic field on the vertices. 
+
+                ! Allocate & initialize aligned indicator
+                allocate(isaligned(ntemptvn))
+                isaligned(:) = .false. 
+
+                ! Loop
+                do j = 1, ntemptvn
+                    ! Get normalized face vector
+                    dxf = x(temptvn(j)) - x(i)
+                    dyf = y(temptvn(j)) - y(i)
+                    tnf = sqrt(dxf**2 + dyf**2)
+                    txf = dxf/tnf 
+                    tyf = dyf/tnf 
+
+                    ! Get normalized magnetic field vector, approximated
+                    ! by simple arithmetic average
+                    bxf = (bx(temptvn(j)) + bx(i))*0.5
+                    byf = (by(temptvn(j)) + by(i))*0.5
+                    bnf = sqrt(bxf**2 + byf**2)
+                    bxf = bxf/bnf 
+                    byf = byf/bnf
+
+                    ! Compute dot product
+                    dpf = bxf*txf + byf*tyf 
+
+                    ! Check
+                    if (abs( abs(dpf) - 1 ) < epsalignment) then 
+                        ! Consider as aligned 
+                        isaligned(j) = .true.
+                    end if
+                end do
+
+                ! Extract the non-aligned nodes if two non-aligned faces
+                ! remain. Otherwise, set to zero. 
+                ntvn = count(.not. isaligned)
+                if (ntvn .ne. 2) then 
+                    ntvn = 0
+                else
+                    ! Allocate
+                    allocate(tvn(ntvn))
+
+                    ! Extract the vertices
+                    tvn = pack(temptvn, .not. isaligned)
+                end if
+    
+                ! Deallocate
+                deallocate(isaligned)
+
+            else
+                ! Check which vertices have the same ID
+                cID = tID == vert%fieldlineID(temptvn)
+
+                ! Check which faces are aligned
+                allocate(isaligned(ntemptvn))
+
+                ! Loop
+                do j = 1, ntemptvn
+                    ! Get normalized face vector
+                    dxf = x(temptvn(j)) - x(i)
+                    dyf = y(temptvn(j)) - y(i)
+                    tnf = sqrt(dxf**2 + dyf**2)
+                    txf = dxf/tnf 
+                    tyf = dyf/tnf 
+
+                    ! Get normalized magnetic field vector, approximated
+                    ! by simple arithmetic average
+                    bxf = (bx(temptvn(j)) + bx(i))*0.5
+                    byf = (by(temptvn(j)) + by(i))*0.5
+                    bnf = sqrt(bxf**2 + byf**2)
+                    bxf = bxf/bnf 
+                    byf = byf/bnf
+
+                    ! Compute dot product
+                    dpf = bxf*txf + byf*tyf 
+
+                    ! Check
+                    if (abs( abs(dpf) - 1 ) < epsalignment) then 
+                        ! Consider as aligned 
+                        isaligned(j) = .true.
+                    end if
+                end do
+            
+                ! Extract vertices that have NOT the same ID and are not
+                ! aligned. 
+                allocate(mask(ntemptvn))
+                mask = (.not. cID) ! .and. (.not. isaligned)
+                allocate(tvn(count(mask)))
+                tvn = pack(temptvn, mask)
+
+                ! Only keep if there are two vertices 
+                if  (size(tvn) .ne. 2) then
+                    ntvn = 0
+                else
+                    ntvn = 2
+                end if
+
+
+                ! Deallocate
+                deallocate(mask, isaligned)
+            end if
+            
+            ! Constrain each pair (more generally written in case 
+            ! multiple pairs are allowed in the future)
+            nvpairs(i) = (ntvn/2) ! this automatically floors
+            do j = 1, nvpairs(i)
+
+                ! Get the vertex pairs
+                vp1 = [i, tvn(2*j-1)]
+                vp2 = [i, tvn(2*j)]
+                
+                ! Check if these pairs should be added. For now, we 
+                ! don't consider vertices where there are more than two
+                ! pairs, as here the cost function does not make much
+                ! sense. 
+                thischeck = .true.
+                thischeck = thischeck .and. (.not. (nvpairs(i) > 1)) 
+                
+                ! Add the pair if allowed
+                if (thischeck) then 
+                    ! Add the pairs
+                    vpairs(vpc,:) = [vp1, vp2]
+                    
+                    ! Update counter
+                    vpc = vpc+1
+
+                end if
+            end do
+
+            ! Deallocate
+            deallocate(tvn, temptvn, cID)
+        end do
+
+        ! Check order
+        !============
+        ! Check the vertex pair order by computing the dot product with 
+        ! the local magnetic field (now evaluated with the actual face
+        ! coordinates)
+
+        ! Update counter (-1 to get actual number of edges)
+        vpc = vpc-1
+
+        ! Allocate
+        allocate(xv(vpc, 4), yv(vpc, 4), xf(vpc, 2), &
+            yf(vpc, 2), gxf(vpc, 2), gyf(vpc, 2), &
+            dx(vpc, 2), dy(vpc, 2), dotprod(vpc, 2), &
+            tempvpairs(size(vpairs,1), size(vpairs, 2)))
+        call costfunction%Allocate(vpc, 4)
+
+        ! Compute vectors
+        do i = 1, 4
+            xv(:, i) = x(vpairs(1:vpc, i)) !reshape(x(vpairs),[vert%ntot,4])
+            yv(:, i) = y(vpairs(1:vpc, i)) !reshape(y(vpairs),[vert%ntot,4])
+        end do
+
+        ! Compute edge faces
+        xf(:, 1) = xv(:, 1) + xv(:, 2)
+        xf(:, 2) = xv(:, 3) + xv(:, 4)
+        xf = 0.5*xf
+        yf(:, 1) = yv(:, 1) + yv(:, 2)
+        yf(:, 2) = yv(:, 3) + yv(:, 4)
+        yf = 0.5*yf
+
+        ! Compute the vector perpendicular on the magnetic field vector
+        do i = 1, 2
+            call EvaluateBicubicSplineInterpolant( &
+                xf(:,i), yf(:,i), gxf(:,i), magneticField%interp, '1', '0')
+            call EvaluateBicubicSplineInterpolant( &
+                xf(:,i), yf(:,i), gyf(:,i), magneticField%interp, '0', '1')
+        end do
+
+        ! Compute distances
+        dx(:, 1) = xv(:, 2) - xv(:, 1)
+        dx(:, 2) = xv(:, 4) - xv(:, 3)
+        dy(:, 1) = yv(:, 2) - yv(:, 1)
+        dy(:, 2) = yv(:, 4) - yv(:, 3)
+
+        ! Compute dot product
+        dotprod = dx*gxf + dy*gyf
+
+        ! Compute faces to reverse 
+        tempvpairs = vpairs
+        allocate(mask(vpc))
+        do i = 1, 2
+            mask = (dotprod(:,i) < 0)
+            allocate(reverse(count(mask)))
+            reverse = pack([(k, k = 1, vpc)], mask)
+            vpairs(reverse, 2*i-1)  = tempvpairs(reverse, 2*i)
+            vpairs(reverse, 2*i)    = tempvpairs(reverse, 2*i-1)
+            deallocate(reverse)
+        end do
+
+        ! Assign to cost function
+        !========================
+        costfunction%vpairs = vpairs(1:vpc,:)
+        costfunction%nvpairs = vpc 
+        costfunction%wt(:) = 1
+
+        ! Visualize? 
+        allocate(xplot(size(xf)), yplot(size(yf)))
+        xplot = reshape(xf, [size(xf)])
+        yplot = reshape(yf, [size(yf)])
+        call PlotGridWithPoints(grid, xplot, yplot, '-p')
+        
+
+        ! End associate
+        end associate
+
+        ! Deallocate
+        deallocate(tempvpairs, dx, dy, gxf, gyf, xv, yv, xf, &
+            yf, dotprod, bx, by, vpairs, nvpairs, mask)
+            deallocate(xplot, yplot)
+
+        
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionFAD(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, we simply call the same cost function twice, but switch
+        ! the order of the indices and recompute the bias. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFADUDT)       :: costfunction 
+        real(R8)                        :: J, J1, J2
+        real(R8), allocatable           :: gradJ(:), gradJ1(:), &
+            gradJ2(:) 
+        type(MySparseUDT)               :: hessJ, hessJ1, hessJ2 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i
+
+        ! Auxiliary
+        integer(I8), allocatable        :: tempvpairs(:,:)
+        real(R8), allocatable           :: tempb0(:) 
+                                        
+        ! Initialize
+        !===========
+
+        ! Initialize
+        !===========
+        ! Cost function
+        J = 0
+
+        ! Gradient
+        gradJ(:) = 0
+
+        ! Compute cost function
+        !======================
+        ! Loop over all vertices
+        do i = 1, vert%ntot
+            ! Set the current vertex
+            v1 = i 
+
+            ! Loop over all vertex pairs of this vertex
+            do k = 1, nvpairs(i)
+                ! Get the current pair
+                v2 = vpairs(i, 2*k-1)
+                v3 = vpairs(i, 2*k)
+
+                ! Compute intermediate quantities
+                x1 = x(v1)
+                x2 = x(v2)
+                x3 = x(v3)
+
+                y1 = y(v1)
+                y2 = y(v2)
+                y3 = y(v3)
+
+                dx1 = x2 - x1
+                dx2 = x3 - x1 
+
+                dy1 = y2 - y1
+                dy2 = y3 - y1 
+
+                ! Compute lengths
+                d1 = sqrt(dx1**2 + dy1**2)
+                d2 = sqrt(dx2**2 + dy2**2)
+
+                ! Compute cost function contribution
+                J = J + 0.5*(d1/d2 - b0(i))**2
+
+            end do 
+        end do
+
+        ! Scale
+        J = lambda*J
+
+        ! Compute gradient
+        !=================
+        if (dogradient) then 
+
+            ! Check the design variables
+            select case (trim(designvariables%type))
+
+            case ('coordinates')
+
+                ! Loop over all vertices
+                do i = 1, vert%ntot
+                    ! Set the current vertex
+                    v1 = i 
+
+                    ! Loop over all vertex pairs of this vertex
+                    do k = 1, nvpairs(i)
+                        ! Get the current pair
+                        v2 = vpairs(i, 2*k-1)
+                        v3 = vpairs(i, 2*k)
+
+                        ! Compute intermediate quantities
+                        x1 = x(v1)
+                        x2 = x(v2)
+                        x3 = x(v3)
+
+                        y1 = y(v1)
+                        y2 = y(v2)
+                        y3 = y(v3)
+
+                        dx1 = x2 - x1
+                        dx2 = x3 - x1 
+
+                        dy1 = y2 - y1
+                        dy2 = y3 - y1 
+
+                        ! Compute lengths
+                        d1 = sqrt(dx1**2 + dy1**2)
+                        d2 = sqrt(dx2**2 + dy2**2)
+
+                        ! Compute cost function contribution
+                        gradJ(v1) = gradJ(v1) + & 
+                            (b0(i) - d1/d2) * &
+                            (dx1/(d1*d2) - (d1*dx2)/d2**3)
+                        gradJ(v2) = gradJ(v2) + &
+                            -(dx1*(b0(i) - d1/d2))/(d1*d2)
+                        gradJ(v3) = gradJ(v3) + &
+                            (d1*dx2*(b0(i) - d1/d2))/d2**3
+                        
+                        gradJ(v1+vert%ntot) = gradJ(v1+vert%ntot) + &
+                            (b0(i) - d1/d2) * &
+                            (dy1/(d1*d2) - (d1*dy2)/d2**3)
+                        gradJ(v2+vert%ntot) = gradJ(v2+vert%ntot) + &
+                            -(dy1*(b0(i) - d1/d2))/(d1*d2)
+                        gradJ(v3+vert%ntot) = gradJ(v3+vert%ntot) + &
+                            (d1*dy2*(b0(i) - d1/d2))/d2**3
+
+                    end do 
+                end do
+
+            case default
+
+                ! Not implemented, throw error
+                call gdErrorHandler('EvaluateCostFunctionLR: gradient' &
+                    // ' not yet implemented for this design variable' &
+                    // ' type')
+
+            end select
+
+            ! Scale
+            gradJ = lambda*gradJ
+
+        end if
+
+        ! Compute hessian
+        !================
+        if (dohessian) then
+
+            ! Check the design variables
+            select case (trim(designvariables%type))
+
+            case ('coordinates')
+
+                ! Allocate the hessian (if not already done so)
+                if (.not. allocated(hessJ%row)) then
+                    ! Allocate the sparse matrix
+                    hessJ%nval = 36*sum(nvpairs) ! this should be exact and constant
+                    call hessJ%Allocate()
+                end if
+
+                ! Allocate auxiliary variables
+                allocate(row(9*sum(nvpairs)))
+                allocate(col(9*sum(nvpairs)))
+                allocate(valxx(9*sum(nvpairs)))
+                allocate(valxy(9*sum(nvpairs)))
+                allocate(valyx(9*sum(nvpairs)))
+                allocate(valyy(9*sum(nvpairs)))
+
+                ! Initialize counter
+                cc = 1
+
+                ! Loop over all vertices
+                do i = 1, vert%ntot
+                    ! Set the current vertex
+                    v1 = i 
+
+                    ! Loop over all vertex pairs of this vertex
+                    do k = 1, nvpairs(i)
+                        ! Get the current pair
+                        v2 = vpairs(i, 2*k-1)
+                        v3 = vpairs(i, 2*k)
+
+                        ! Compute intermediate quantities
+                        x1 = x(v1)
+                        x2 = x(v2)
+                        x3 = x(v3)
+
+                        y1 = y(v1)
+                        y2 = y(v2)
+                        y3 = y(v3)
+
+                        dx1 = x2 - x1
+                        dx2 = x3 - x1 
+
+                        dy1 = y2 - y1
+                        dy2 = y3 - y1 
+
+                        ! Compute lengths
+                        d1 = sqrt(dx1**2 + dy1**2)
+                        d2 = sqrt(dx2**2 + dy2**2)
+
+                        ! Compute Hessian contributions - ordened per
+                        ! vertex pair (e.g. v1, v1), split up in xx, xy,
+                        ! yx, yy. 
+
+                        ! d2J/dx1**2, d2J/dy1**2, d2J/dx1dy1, d2J/dy1dx1
+                        row(cc) = v1; col(cc) = v1
+                        valxx(cc) = (b0(i) - d1/d2) & 
+                            * (d1/d2**3 - 1/(d1*d2) - & 
+                            (3*d1*dx2**2)/d2**5 + dx1**2/(d1**3*d2) & 
+                            + (2*dx1*dx2)/(d1*d2**3)) + (dx1/(d1*d2) & 
+                            - (d1*dx2)/d2**3)**2
+                        valyy(cc) = (b0(i) - d1/d2) &
+                            * (d1/d2**3 - 1/(d1*d2) - & 
+                            (3*d1*dy2**2)/d2**5 + dy1**2/(d1**3*d2) & 
+                            + (2*dy1*dy2)/(d1*d2**3)) + & 
+                            (dy1/(d1*d2) - (d1*dy2)/d2**3)**2
+                        valxy(cc) = (b0(i) - d1/d2) & 
+                            *((dx1*dy1)/(d1**3*d2) - & 
+                            (3*d1*dx2*dy2)/d2**5 + & 
+                            (dx1*dy2)/(d1*d2**3) + & 
+                            (dx2*dy1)/(d1*d2**3)) + (dx1/(d1*d2) & 
+                            - (d1*dx2)/d2**3)*(dy1/(d1*d2) &
+                            - (d1*dy2)/d2**3)
+                        valyx(cc) = valxy(cc)
+                        cc = cc+1
+                        
+                        ! d2J/dx1dx2, d2J/dy1dy2, d2J/dx1dy2, d2J/dy1dx2
+                        row(cc) = v1; col(cc) = v2
+                        valxx(cc) = - (b0(i) - d1/d2) &
+                            * (dx1**2/(d1**3*d2) - 1/(d1*d2) + & 
+                            (dx1*dx2)/(d1*d2**3)) - (dx1*(dx1/(d1*d2) - & 
+                            (d1*dx2)/d2**3))/(d1*d2) !x1x2
+                        valyy(cc) = - (b0(i) - d1/d2)&
+                            *(dy1**2/(d1**3*d2) - 1/(d1*d2) &
+                            + (dy1*dy2)/(d1*d2**3)) - &
+                            (dy1*(dy1/(d1*d2) - &
+                            (d1*dy2)/d2**3))/(d1*d2) !y1y2
+                        valxy(cc) = - (b0(i) - d1/d2)&
+                            *((dx1*dy1)/(d1**3*d2) + &
+                            (dx2*dy1)/(d1*d2**3)) - &
+                            (dy1*(dx1/(d1*d2) - &
+                            (d1*dx2)/d2**3))/(d1*d2) !x1y2
+                        valyx(cc) = - (b0(i) - d1/d2) &
+                            *((dx1*dy1)/(d1**3*d2) + &
+                            (dx1*dy2)/(d1*d2**3)) - &
+                            (dx1*(dy1/(d1*d2) - &
+                            (d1*dy2)/d2**3))/(d1*d2) !y1x2
+                        cc = cc+1
+                        
+                        row(cc) = v2; col(cc) = v1
+                        valxx(cc) = valxx(cc-1) !x2x1
+                        valyy(cc) = valyy(cc-1) !y2y1
+                        valxy(cc) = valyx(cc-1) !x1y2
+                        valyx(cc) = valxy(cc-1) !y2x1
+                        cc = cc+1
+                        
+                        row(cc) = v2; col(cc) = v2
+                        valxx(cc) = dx1**2/(d1**2*d2**2) - &
+                            (b0(i) - d1/d2)/(d1*d2) + &
+                            (dx1**2*(b0(i) - d1/d2))/(d1**3*d2)
+                        valyy(cc) = dy1**2/(d1**2*d2**2) - &
+                            (b0(i) - d1/d2)/(d1*d2) + &
+                            (dy1**2*(b0(i) - d1/d2))/(d1**3*d2)
+                        valxy(cc) = (dx1*dy1)/(d1**2*d2**2) &
+                            + (dx1*dy1*(b0(i) - d1/d2))/(d1**3*d2)
+                        valyx(cc) = valxy(cc)
+                        cc = cc+1
+                        
+                        row(cc) = v1; col(cc) = v3
+                        valxx(cc) = (d1*dx2*(dx1/(d1*d2) - &
+                            (d1*dx2)/d2**3))/d2**3 - &
+                            (b0(i) - d1/d2)*(d1/d2**3 - &
+                            (3*d1*dx2**2)/d2**5 + (dx1*dx2)/(d1*d2**3))
+                        valyy(cc) = (d1*dy2*(dy1/(d1*d2) - &
+                            (d1*dy2)/d2**3))/d2**3 - &
+                            (b0(i) - d1/d2)*(d1/d2**3 - &
+                            (3*d1*dy2**2)/d2**5 + (dy1*dy2)/(d1*d2**3))
+                        valxy(cc) = (b0(i) - d1/d2) &
+                            *((3*d1*dx2*dy2)/d2**5 - &
+                            (dx1*dy2)/(d1*d2**3)) + &
+                            (d1*dy2*(dx1/(d1*d2) - &
+                            (d1*dx2)/d2**3))/d2**3
+                        valyx(cc) = (b0(i) - d1/d2)&
+                            *((3*d1*dx2*dy2)/d2**5 - &
+                            (dx2*dy1)/(d1*d2**3)) + &
+                            (d1*dx2*(dy1/(d1*d2) - &
+                            (d1*dy2)/d2**3))/d2**3
+                        cc = cc+1
+                        
+                        row(cc) = v3; col(cc) = v1
+                        valxx(cc) = valxx(cc-1)
+                        valyy(cc) = valyy(cc-1)
+                        valxy(cc) = valyx(cc-1)
+                        valyx(cc) = valxy(cc-1)
+                        cc = cc+1
+                        
+                        row(cc) = v2; col(cc) = v3
+                        valxx(cc) = (dx1*dx2*(b0(i) - d1/d2)) &
+                            /(d1*d2**3) - (dx1*dx2)/d2**4
+                        valyy(cc) = (dy1*dy2*(b0(i) - d1/d2)) &
+                            /(d1*d2**3) - (dy1*dy2)/d2**4
+                        valxy(cc) = (dx1*dy2*(b0(i) - d1/d2)) &
+                            /(d1*d2**3) - (dx1*dy2)/d2**4
+                        valyx(cc) = (dx2*dy1*(b0(i) - d1/d2)) &
+                            /(d1*d2**3) - (dx2*dy1)/d2**4
+                        cc = cc+1
+                        
+                        row(cc) = v3; col(cc) = v2
+                        valxx(cc) = valxx(cc-1)
+                        valyy(cc) = valyy(cc-1)
+                        valxy(cc) = valyx(cc-1)
+                        valyx(cc) = valxy(cc-1)
+                        cc = cc+1
+                        
+                        row(cc) = v3; col(cc) = v3
+                        valxx(cc) = (dx2**2*(dx1**2 + dy1**2))/d2**6 &
+                            + (d1*(b0(i) - d1/d2))/d2**3 - &
+                            (3*d1*dx2**2*(b0(i) - d1/d2))/d2**5
+                        valyy(cc) = (dy2**2*(dx1**2 + dy1**2))/d2**6 &
+                            + (d1*(b0(i) - d1/d2))/d2**3 - &
+                            (3*d1*dy2**2*(b0(i) - d1/d2))/d2**5
+                        valxy(cc) = (dx2*dy2*(dx1**2 + dy1**2)) &
+                            /d2**6 - (3*d1*dx2*dy2*(b0(i) - d1/d2)) &
+                            /d2**5
+                        valyx(cc) = valxy(cc)
+                        cc = cc+1
+
+                    end do 
+                end do
+
+                ! Build full hessian
+                hessJ%row = [row, row, row+vert%ntot, row+vert%ntot]
+                hessJ%col = [col, col+vert%ntot, col, col+vert%ntot]
+                hessJ%val = [valxx, valxy, valyx, valyy]
+
+                ! Scale
+                hessJ%val = lambda*hessJ%val
+
+                ! Housekeeping
+                deallocate(row)
+                deallocate(col)
+                deallocate(valxx)
+                deallocate(valxy)
+                deallocate(valyx)
+                deallocate(valyy)
+
+            case default
+
+                ! Not implemented, throw error
+                call gdErrorHandler('EvaluateCostFunctionLR: hessian' &
+                    // ' not yet implemented for this design variable' &
+                    // ' type')
+
+            end select
+
+        end if
+        
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionFAD(costfunction, nv, nvn)
+
+        ! Description
+        !============
+        ! Allocate, assume number of vpairs given
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFADUDT)       :: costfunction
+        integer(I8)                     :: nv, nvn
+
+        ! Allocate
+        !=========
+        allocate(costfunction%vpairs(nv, nvn))
+        allocate(costfunction%wt(nv))
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionFAD(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFADUDT)       :: costfunction
+
+        ! Deallocate
+        !===========
+        deallocate(costfunction%vpairs)
+        deallocate(costfunction%wt)
+
+    end subroutine
+
+    subroutine DestroyCostFunctionFAD(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionFADUDT)       :: costfunction
 
         ! Destroy
         !========
