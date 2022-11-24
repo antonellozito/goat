@@ -407,7 +407,7 @@ module gdmod_optimizationengine
         !=============
         if (dodebugplots) then
             ! Call grid visualization
-            call PlotGrid(problem%grid, '-p')
+            call PlotGridCells(problem%grid, '-p')
         end if
 
     end subroutine
