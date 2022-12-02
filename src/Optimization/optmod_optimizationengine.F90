@@ -734,6 +734,10 @@ module optmod_optimizationengine
             ! Update the iteration counter
             itopt = itopt+1
 
+            ! Update the hessian relaxation factor
+            solver%numKKT%rxf = solver%numKKT%rxf*solver%numKKT%rxfdec
+            solver%numKKT%rxf = max(solver%numKKT%rxf, solver%numKKT%rxfmin)
+
         end do
 
         ! Housekeeping
