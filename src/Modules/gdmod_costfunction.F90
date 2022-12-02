@@ -227,6 +227,47 @@ module gdmod_costfunction
 
     end type
 
+    ! LRFAD cost function
+    type, extends(CostfunctionGDUDT) :: CostfunctionLRFADUDT
+
+        ! Description
+        !============
+        ! Cost function that combines the length ratio 2 and face angle
+        ! difference cost function. The total cost function is simply
+        ! compute as the sum of both cost functions (no additional 
+        ! weighing is applied here, so all weighing is to be done 
+        ! through the lambda values of each cost function separately - 
+        ! see also the initialization routine of this cost function). 
+
+        ! Currently, this is the best performing cost function for 
+        ! practical purposes (02/12/2022)
+    
+        ! Cost function formula
+        !======================
+        ! See formulas of separate cost functions. 
+
+        ! Notes
+        !======
+
+        ! Fields
+        type(CostfunctionLRUDT)     :: cfv_lr
+        type(CostFunctionFADUDT)    :: cfv_fad
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize         => InitializeCostfunctionLRFAD
+
+        ! Evaluation
+        procedure :: Evaluate           => EvaluateCostFunctionLRFAD
+
+        ! Housekeeping
+        procedure :: Allocate           => AllocateCostFunctionLRFAD
+        procedure :: Deallocate         => DeallocateCostFunctionLRFAD
+        final :: DestroyCostFunctionLRFAD
+
+    end type
+
     !==================================================================!
     !                                                                  !
     !                            INTERFACES                            !
@@ -2556,6 +2597,172 @@ module gdmod_costfunction
         ! Destroy
         !========
         call costfunction%cfv_lr%Deallocate()
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                             LR-FAD                               !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionLRFAD(costfunction, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. 
+
+        ! Simply call the initialization of the original lenght ratio
+        ! cost function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRFADUDT)         :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        
+        ! Initialize
+        !===========
+        call costfunction%cfv_lr%Initialize(grid, magneticField, &
+            environment)
+        call costfunction%cfv_fad%Initialize(grid, magneticField, &
+            environment)
+
+        ! (Re)set the scaling constant
+        costfunction%cfv_lr%lambda = 1e4 ! seems to agree well with most grids
+        costfunction%cfv_fad%lambda = 1e3
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionLRFAD(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, we simply call the same cost function twice, but switch
+        ! the order of the indices and recompute the bias. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRFADUDT)     :: costfunction
+        real(R8)                        :: J, J1, J2
+        real(R8), allocatable           :: gradJ(:), gradJ1(:), &
+            gradJ2(:) 
+        type(MySparseUDT)               :: hessJ, hessJ1, hessJ2 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i
+
+        ! Auxiliary
+                                        
+        ! Initialize
+        !===========
+        ! Cost function
+        J = 0
+        J1 = 0
+        J2 = 0
+
+        ! Gradient
+        gradJ(:) = 0
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+
+        ! Hessian
+        hessJ1%nrow = hessJ%nrow 
+        hessJ2%nrow = hessJ%nrow 
+        hessJ1%ncol = hessJ%ncol 
+        hessJ2%ncol = hessJ%ncol 
+
+        ! Compute cost function
+        !======================
+        ! First contribution
+        call costfunction%cfv_lr%Evaluate(J1, gradJ1, &
+            hessJ1, grid, magneticField, environment, dogradient, &
+            dohessian, designvariables)
+        
+        ! Second contribution
+        call costfunction%cfv_fad%Evaluate(J2, gradJ2, &
+            hessJ2, grid, magneticField, environment, dogradient, &
+            dohessian, designvariables)
+
+        ! Add
+        J = J1 + J2 
+        gradJ = gradJ1 + gradJ2
+        hessJ = hessJ1 + hessJ2
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJ1, gradJ2)
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionLRFAD(costfunction)
+
+        ! Description
+        !============
+        ! Dummy function, nothing to be done here
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRFADUDT)     :: costfunction
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionLRFAD(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRFADUDT)       :: costfunction
+
+        ! Deallocate
+        !===========
+        call costfunction%cfv_lr%Deallocate()
+        call costfunction%cfv_fad%Deallocate()
+
+    end subroutine
+
+    subroutine DestroyCostFunctionLRFAD(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionLRFADUDT)       :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%cfv_lr%Deallocate()
+        call costfunction%cfv_fad%Deallocate()
 
     end subroutine
 
