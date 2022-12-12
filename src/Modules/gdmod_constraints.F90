@@ -2248,8 +2248,8 @@ module gdmod_constraints
 
         ! Evaluate
         do i = 1, ntv
-            G(2*i-1) = ( x(tv(i)) - locx(i) )**2
-            G(2*i)   = ( y(tv(i)) - locy(i) )**2
+            G(2*i-1) = ( x(tv(i)) - locx(i) )**2 + ( x(tv(i)) - locx(i) )
+            G(2*i)   = ( y(tv(i)) - locy(i) )**2 + ( y(tv(i)) - locy(i) )
         end do
 
         ! Constraint gradient
@@ -2355,12 +2355,13 @@ module gdmod_constraints
                 !----------------
                 k = 1
                 ! Build indices
+                conindex = [(k, k = ic+1, ic+2*ntv-1, 2)]
                 valindex = [(k, k = ivh+1, ivh+ntv)] 
 
                 ! Add values
                 hessG%row(valindex) = tv 
                 hessG%col(valindex) = tv 
-                hessG%val(valindex) = valxx*lambda ! element-wise mult. 
+                hessG%val(valindex) = valxx*lambda(conindex) ! element-wise mult. 
                 
                 ! xy-contribution
                 !----------------
@@ -2371,7 +2372,7 @@ module gdmod_constraints
                 ! Add values
                 hessG%row(valindex) = tv
                 hessG%col(valindex) = tv + grid%vert%ntot 
-                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+                hessG%val(valindex) = 0 ! element-wise mult. 
 
                 ! yx-contribution
                 !----------------
@@ -2383,18 +2384,19 @@ module gdmod_constraints
                 ! Add values
                 hessG%row(valindex) = tv + grid%vert%ntot 
                 hessG%col(valindex) = tv 
-                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+                hessG%val(valindex) = 0 ! element-wise mult. 
 
                 ! yy-contribution
                 !----------------
                 ! Build indices
                 ivh = ivh + ntv
+                conindex = [(k, k = ic+2, ic+2*ntv, 2)]
                 valindex = valindex + ntv
 
                 ! Add values
                 hessG%row(valindex) = tv + grid%vert%ntot 
                 hessG%col(valindex) = tv + grid%vert%ntot 
-                hessG%val(valindex) = valyy*lambda ! element-wise mult. 
+                hessG%val(valindex) = valyy*lambda(conindex) ! element-wise mult. 
 
             case default
 
