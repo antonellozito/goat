@@ -36,6 +36,7 @@ module gdmod_constraints
     use optmod_constraints
     use gdmod_types
     use gdmod_designvariables
+    use gdmod_utility_optimization
     use PolygonShapeFunction
     
 
@@ -133,6 +134,42 @@ module gdmod_constraints
     
     end type
 
+    ! X-point constraints
+    ! Boundary function constraints
+    type, extends(GenericConstraintsGDUDT) :: XPointConstraintsUDT 
+
+        ! Description
+        !============
+        ! X-point constraints. Constrains the location of the x-point by 
+        ! fixing the initial x-point coordinates (or, perhaps in the
+        ! future, look at where the gradient of the flux function 
+        ! vanishes). The following fields are added:
+        !
+        ! - xpind:      the x-point vertex IDs 
+        ! - nxpind:     the total number of x-points    
+        ! - locx/y:     x and y coordinate locations of the x-points
+    
+        ! Note 1: the initial x-point location and x-point vertices
+        ! are determined by the initial grid. The x-point indices are 
+        ! determined using the DetermineXPoints routine in 
+        ! gdmod_utility_optimization. 
+
+        ! Fields: 
+        integer(I8), allocatable            :: xpind(:)
+        integer(I8)                         :: nxpind 
+        real(R8), allocatable               :: locx(:)
+        real(R8), allocatable               :: locy(:)
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize => InitializeXPointConstraints
+        
+        ! Evaluation
+        procedure :: Evaluate   => EvaluateXPointConstraints
+    
+    end type
+
     ! Overarching types
     !==================
     ! Equality constraints
@@ -147,11 +184,14 @@ module gdmod_constraints
         ! Total number of constraints 
         integer(I8)                         :: neqcon = 0
 
-        ! Flux function constraint
+        ! Constraint switches
         logical                             :: dofluxfunction = .false.
         logical                             :: doboundaryfunction = .false.
+        logical                             :: doxpoints = .false.
+
         type(FluxfunctionConstraintsUDT)    :: fluxfunction 
         type(BoundaryFunctionConstraintsUDT):: boundaryfunction
+        type(XPointConstraintsUDT)          :: xpoints
         
 
     contains
@@ -476,26 +516,28 @@ module gdmod_constraints
         !=======================
         constraints%neqcon = 0
 
-        ! Flux function
-        if (constraintoptions%fluxfunction) then 
+        ! X-points
+        if (constraintoptions%xpoints) then 
+
             ! Set the logical
-            constraints%dofluxfunction = .true.
+            constraints%doxpoints = .true.
 
             ! Initialize
-            call constraints%fluxfunction%Initialize(grid, &
+            call constraints%xpoints%Initialize(grid, &
                 magneticField, environment, monitor)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
-                constraints%fluxfunction%ncon 
+                constraints%xpoints%ncon 
 
             ! Print
-            print *, 'number flux function constraints: ', &
-                constraints%fluxfunction%ncon
+            print *, 'number of x-point function constraints: ', &
+                constraints%xpoints%ncon
+
 
         else
             ! Set to false, don't initialize
-            constraints%dofluxfunction = .false.
+            constraints%doxpoints = .false.
 
         end if
 
@@ -514,7 +556,7 @@ module gdmod_constraints
                 constraints%boundaryfunction%ncon 
 
             ! Print
-            print *, 'number boundary function constraints: ', &
+            print *, 'number of boundary function constraints: ', &
                 constraints%boundaryfunction%ncon
 
 
@@ -523,6 +565,31 @@ module gdmod_constraints
             constraints%doboundaryfunction = .false.
 
         end if
+
+        ! Flux function
+        if (constraintoptions%fluxfunction) then 
+            ! Set the logical
+            constraints%dofluxfunction = .true.
+
+            ! Initialize
+            call constraints%fluxfunction%Initialize(grid, &
+                magneticField, environment, monitor)
+
+            ! Add constraints number
+            constraints%neqcon = constraints%neqcon + &
+                constraints%fluxfunction%ncon 
+
+            ! Print
+            print *, 'number of flux function constraints: ', &
+                constraints%fluxfunction%ncon
+
+        else
+            ! Set to false, don't initialize
+            constraints%dofluxfunction = .false.
+
+        end if
+
+        
 
     end subroutine
 
@@ -562,6 +629,9 @@ module gdmod_constraints
         real(R8), allocatable           :: G_bnd(:), lambda_bnd(:)
         type(MySparseUDT)               :: gradG_bnd, hessG_bnd
 
+        real(R8), allocatable           :: G_xp(:), lambda_xp(:)
+        type(MySparseUDT)               :: gradG_xp, hessG_xp
+
         ! Initialize
         !===========
         ! Set the constraint counter
@@ -570,41 +640,41 @@ module gdmod_constraints
         ! Constraint values
         !==================
 
-        ! Flux function constraints
-        !--------------------------
-        if (constraints%dofluxfunction) then 
+        ! X-point constraints
+        !--------------------
+        if (constraints%doxpoints) then 
             ! Construct the constraint index
-            allocate(conindex(constraints%fluxfunction%ncon))
-            conindex = [(k, k = ic+1, ic+constraints%fluxfunction%ncon)]
+            allocate(conindex(constraints%xpoints%ncon))
+            conindex = [(k, k = ic+1, ic+constraints%xpoints%ncon)]
 
             ! Allocate & initialize
-            allocate(lambda_flux(constraints%fluxfunction%ncon))
-            lambda_flux = lambda(conindex)
+            allocate(lambda_xp(constraints%xpoints%ncon))
+            lambda_xp = lambda(conindex)
 
             ! Call the evaluation routine
-            call constraints%fluxfunction%Evaluate(G_flux, &
-                gradG_flux, hessG_flux, &
+            call constraints%xpoints%Evaluate(G_xp, &
+                gradG_xp, hessG_xp, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
-                lambda_flux)
+                lambda_xp)
 
             ! Assign
-            G(conindex) = G_flux
+            G(conindex) = G_xp
 
             ! Update the gradient column indices
             if (dogradient) then 
                 ! For easier concatenation later on
-                gradG_flux%col = gradG_flux%col + ic
+                gradG_xp%col = gradG_xp%col + ic
 
             end if
 
             ! Update the constraint counter
-            ic = ic + constraints%fluxfunction%ncon
+            ic = ic + constraints%xpoints%ncon
 
             ! Housekeeping
-            deallocate(conindex, lambda_flux) 
-            if (allocated(G_flux)) then
-                deallocate(G_flux)
+            deallocate(conindex, lambda_xp) 
+            if (allocated(G_xp)) then
+                deallocate(G_xp)
             end if
 
         end if
@@ -648,6 +718,46 @@ module gdmod_constraints
 
         end if
 
+        ! Flux function constraints
+        !--------------------------
+        if (constraints%dofluxfunction) then 
+            ! Construct the constraint index
+            allocate(conindex(constraints%fluxfunction%ncon))
+            conindex = [(k, k = ic+1, ic+constraints%fluxfunction%ncon)]
+
+            ! Allocate & initialize
+            allocate(lambda_flux(constraints%fluxfunction%ncon))
+            lambda_flux = lambda(conindex)
+
+            ! Call the evaluation routine
+            call constraints%fluxfunction%Evaluate(G_flux, &
+                gradG_flux, hessG_flux, &
+                grid, magneticField, environment, dogradient, &
+                dohessian, designvariables, &
+                lambda_flux)
+
+            ! Assign
+            G(conindex) = G_flux
+
+            ! Update the gradient column indices
+            if (dogradient) then 
+                ! For easier concatenation later on
+                gradG_flux%col = gradG_flux%col + ic
+
+            end if
+
+            ! Update the constraint counter
+            ic = ic + constraints%fluxfunction%ncon
+
+            ! Housekeeping
+            deallocate(conindex, lambda_flux) 
+            if (allocated(G_flux)) then
+                deallocate(G_flux)
+            end if
+
+        end if
+
+
         ! Concatenate gradient
         !=====================
         if (dogradient) then 
@@ -664,12 +774,15 @@ module gdmod_constraints
                 gradG%nval = 0
 
                 ! Add values of each constraint, if used
-                if (constraints%dofluxfunction) then 
-                    gradG%nval = gradG%nval + gradG_flux%nval  
-                end if 
+                if (constraints%doxpoints) then 
+                    gradG%nval = gradG%nval + gradG_xp%nval 
+                end if
                 if (constraints%doboundaryfunction) then 
                     gradG%nval = gradG%nval + gradG_bnd%nval 
                 end if
+                if (constraints%dofluxfunction) then 
+                    gradG%nval = gradG%nval + gradG_flux%nval  
+                end if 
 
                 ! Allocate
                 call gradG%Allocate()
@@ -679,18 +792,18 @@ module gdmod_constraints
             !------------------
             ! Initialize counter
             ivg = 0
-            
-            ! Flux function
-            if (constraints%dofluxfunction) then 
+
+            ! x-points
+            if (constraints%doxpoints) then 
                 ! Associate 
                 associate(&
-                    nc      => constraints%fluxfunction%ncon, &
-                    nval    => gradG_flux%nval)
+                    nc      => constraints%xpoints%ncon, &
+                    nval    => gradG_xp%nval)
 
                 ! Add values
-                gradG%row(ivg+1:ivg+nval) = gradG_flux%row 
-                gradG%col(ivg+1:ivg+nval) = gradG_flux%col
-                gradG%val(ivg+1:ivg+nval) = gradG_flux%val
+                gradG%row(ivg+1:ivg+nval) = gradG_xp%row 
+                gradG%col(ivg+1:ivg+nval) = gradG_xp%col
+                gradG%val(ivg+1:ivg+nval) = gradG_xp%val
 
                 ! Update counter
                 ivg = ivg + nval 
@@ -719,6 +832,26 @@ module gdmod_constraints
                 end associate
 
             end if
+            
+            ! Flux function
+            if (constraints%dofluxfunction) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%fluxfunction%ncon, &
+                    nval    => gradG_flux%nval)
+
+                ! Add values
+                gradG%row(ivg+1:ivg+nval) = gradG_flux%row 
+                gradG%col(ivg+1:ivg+nval) = gradG_flux%col
+                gradG%val(ivg+1:ivg+nval) = gradG_flux%val
+
+                ! Update counter
+                ivg = ivg + nval 
+
+                ! End associate
+                end associate
+
+            end if
 
         end if
 
@@ -738,33 +871,37 @@ module gdmod_constraints
                 hessG%nval = 0
 
                 ! Add values of each constraint, if used
-                if (constraints%dofluxfunction) then 
-                    hessG%nval = hessG%nval + hessG_flux%nval  
+                if (constraints%doxpoints) then 
+                    hessG%nval = hessG%nval + hessG_xp%nval  
                 end if 
                 if (constraints%doboundaryfunction) then 
                     hessG%nval = hessG%nval + hessG_bnd%nval  
                 end if 
-
+                if (constraints%dofluxfunction) then 
+                    hessG%nval = hessG%nval + hessG_flux%nval  
+                end if 
+                
                 ! Allocate
                 call hessG%Allocate()
+
             end if
 
             ! Add contributions
             !------------------
             ! Initialize counter
             ivh = 0
-            
-            ! Flux function
-            if (constraints%dofluxfunction) then 
+
+            ! Boundary function
+            if (constraints%doxpoints) then 
                 ! Associate 
                 associate(&
-                    nc      => constraints%fluxfunction%ncon, &
-                    nval    => hessG_flux%nval)
+                    nc      => constraints%xpoints%ncon, &
+                    nval    => hessG_xp%nval)
 
                 ! Add values
-                hessG%row(ivh+1:ivh+nval) = hessG_flux%row 
-                hessG%col(ivh+1:ivh+nval) = hessG_flux%col
-                hessG%val(ivh+1:ivh+nval) = hessG_flux%val
+                hessG%row(ivh+1:ivh+nval) = hessG_xp%row 
+                hessG%col(ivh+1:ivh+nval) = hessG_xp%col
+                hessG%val(ivh+1:ivh+nval) = hessG_xp%val
 
                 ! Update counter
                 ivh = ivh + nval 
@@ -785,6 +922,26 @@ module gdmod_constraints
                 hessG%row(ivh+1:ivh+nval) = hessG_bnd%row 
                 hessG%col(ivh+1:ivh+nval) = hessG_bnd%col
                 hessG%val(ivh+1:ivh+nval) = hessG_bnd%val
+
+                ! Update counter
+                ivh = ivh + nval 
+
+                ! End associate
+                end associate
+
+            end if
+            
+            ! Flux function
+            if (constraints%dofluxfunction) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%fluxfunction%ncon, &
+                    nval    => hessG_flux%nval)
+
+                ! Add values
+                hessG%row(ivh+1:ivh+nval) = hessG_flux%row 
+                hessG%col(ivh+1:ivh+nval) = hessG_flux%col
+                hessG%val(ivh+1:ivh+nval) = hessG_flux%val
 
                 ! Update counter
                 ivh = ivh + nval 
@@ -1901,5 +2058,373 @@ module gdmod_constraints
     end subroutine
 
     ! Destructor
+
+    !------------------------------------------------------------------!
+    !                              X-POINTS                            !
+    !------------------------------------------------------------------!
+
+    ! Initialize
+    subroutine InitializeXPointConstraints(constraints, &
+        grid, magneticField, environment, monitor)
+
+        ! Description
+        !============
+        ! Initialize the x-point constraints. Here, the x-point is 
+        ! constrained to its initial location (so it is based on the
+        ! initial grid, not yet on the magnetic field flux gradient).
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(XPointConstraintsUDT)                 :: constraints
+        type(GridUDT)                               :: grid 
+        type(MagneticFieldUDT)                      :: magneticField 
+        type(EnvironmentUDT)                        :: environment 
+        type(ConstraintsMonitorUDT)                 :: monitor
+
+        ! Auxiliary
+        integer(I8)                                 :: nxpind
+        integer(I8), allocatable                    :: xpind(:), order(:)
+
+        logical, allocatable                        :: mask(:)
+
+        ! Data
+
+        ! Initialize
+        !===========
+
+        ! Get x-points
+        !=============
+        ! Get
+        call DetermineXPoints(xpind, nxpind, order, grid)
+
+        ! Allocate
+        allocate(mask(nxpind))
+
+        ! Check which x-points are not yet constrained
+        mask(:) = .false. 
+        where (monitor%eqvcc(xpind) <= monitor%maxeqvcc-2) mask = .true.
+
+        ! Allocate and assign
+        constraints%nxpind = count(mask)
+        allocate(constraints%xpind(count(mask)))
+        constraints%xpind = pack(xpind, mask)
+
+        ! Get current coordinates, assign
+        constraints%locx = grid%vert%x(constraints%xpind)
+        constraints%locy = grid%vert%y(constraints%xpind)
+
+        ! Update constraint quantities
+        !=============================
+        ! Constraints
+        constraints%ncon = 2*constraints%nxpind
+
+        ! Monitor
+        monitor%eqvcc(constraints%xpind) = &
+            monitor%eqvcc(constraints%xpind) + 2
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateXPointConstraints(constraints, G, gradG, & 
+        hessG, grid, magneticField, environment, dogradient, &
+        dohessian, designvariables, lambda)
+
+        ! Description
+        !============
+        ! Evaluate the X-point constraints
+        ! 
+        !       G(2*i-1) = (x_i - x_i0)**2 + (x_i - x_i0) = 0
+        !       G(2*i)   = (y_i - y_i0)**2 + (y_i - y_i0) = 0
+        !
+        ! where x_i and y_i are the i-th x-point coordinates, x_i0, y_i0
+        ! are the desired (and constant) x-point coordinates. 
+        
+        ! The gradient is computed as follows:
+        !
+        !       J(2*i-1, xind(i))      = 2*(x_i - x_i0) + 1
+        !       J(2*i, xind(i) + nv)   = 2*(y_i - y_i0) + 1
+        !
+        ! where nv is the number of vertices in the grid, and xind the 
+        ! vertex ID vector of all x-points considered. 
+
+        ! The Hessian of each ith constraint is:
+        !
+        !       H(2*i-1, xind(i), xind(i)) = 2
+        !       H(2*i, xind(i) + nv, xind(i) + nv) = 2
+        !       Otherwise zero
+        !
+        ! Therefore, the multiplication Hjk,i lambda_i is equal to:
+        !
+        !       Hjk,i lambda_i = 2 * lambda_i 
+
+        ! Notes
+        !======
+        ! Note 1: not the true hessian of the constraint vector is 
+        ! returned, but the hessian-vector multiplication with the 
+        ! vector lambda, which should be of suitable size. 
+
+        ! Note 2: the row and column indices for the constraints are 
+        ! local, meaning that in no way other constraints are accounted
+        ! for in positioning the elements in the matrix. This should be
+        ! done in an overarching routine. 
+
+        ! Note 3: at first, we compute the linearization of the 
+        ! constraints, meaning that we actually compute the Jacobian.
+        ! Afterwards, we switch the row and column indices (i.e. 
+        ! transpose) to obtain the gradient. 
+        
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(XPointConstraintsUDT)         :: constraints 
+        real(R8), allocatable               :: G(:) 
+        real(R8), allocatable               :: lambda(:)
+        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(GridUDT)                       :: grid 
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        logical                             :: dogradient, dohessian
+        class(DesignVariablesGDUDT)         :: designvariables 
+
+        ! Loop variables
+        integer(I8)                         :: i, ic, ivg, ivh, k
+        integer(I8), allocatable            :: valindex(:), conindex(:)
+
+        ! Auxiliary variables
+        real(R8), allocatable               :: dpsfdx(:), dpsfdy(:), &
+            valxx(:), valxy(:), valyy(:)
+        integer(I8)                         :: ntv
+        
+        ! Initialize
+        !===========
+        ! Checks
+        if ( (.not. allocated(lambda)) .and. dohessian) then
+            ! Throw error
+            call gdErrorHandler('When evaluating the hessian vector' &
+                // ' multiplication, lambda must be given')
+        end if
+
+        if (size(lambda) .ne. constraints%ncon) then
+            ! Lambda should have the same size as the constraints
+            call gdErrorHandler('Lambda should have the same size ' &
+                // 'as the constraint vector')
+        end if
+
+        ! Counters
+        ic = 0 ! constraint counter (local)
+        ivg = 0 ! value index for gradient
+        ivh = 0 ! value index for hessian
+
+        ! Associate
+        associate(&
+            nc      => constraints%ncon,        &
+            tv      => constraints%xpind,       &
+            ntv     => constraints%nxpind,      &
+            locx    => constraints%locx,        &
+            locy    => constraints%locy,        &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
+
+        ! Constraint value
+        !=================
+        ! Allocate
+        if (.not. allocated(G)) then 
+            allocate(G(nc))
+        else
+            if (size(G) .ne. nc) then 
+
+                ! Print a warning and reallocate
+                print *, 'EvaluateBoundaryFunctionConstraints: ' &
+                    // 'Wrong dimension of G, reallocating'
+                
+                ! Deallocate and reallocate
+                deallocate(G)
+                allocate(G(nc))
+
+            end if
+        end if
+
+        ! Evaluate
+        do i = 1, ntv
+            G(2*i-1) = ( x(tv(i)) - locx(i) )**2
+            G(2*i)   = ( y(tv(i)) - locy(i) )**2
+        end do
+
+        ! Constraint gradient
+        !====================
+        if (dogradient) then 
+            ! Initialize
+            jacG%nrow = nc 
+            jacG%ncol = designvariables%nphi
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates')
+
+                ! Order in jacobian: first x, then y. 
+
+                ! Allocate
+                jacG%nval = 2*ntv
+                call jacG%Allocate() 
+                allocate(conindex(ntv))
+                allocate(valindex(ntv))
+
+                ! x-contribution
+                !---------------
+                ! Build indices
+                conindex = [(k, k = ic+1, ic+2*ntv-1, 2)]
+                valindex = [(k, k = ivg+1, ivg+ntv)]
+
+                ! Add values
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = tv
+                jacG%val(valindex) = 2*( x(tv) - locx ) + 1
+
+                ! y-contribution
+                !---------------
+                ! Build indices
+                ivg = ivg + ntv
+                conindex = [(k, k = ic+2, ic+2*ntv, 2)]
+                valindex = valindex + ntv
+
+                ! Add values
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = tv + grid%vert%ntot 
+                jacG%val(valindex) = 2*( y(tv) - locy ) + 1 
+
+                ! Build gradient
+                gradG%nrow = jacG%ncol 
+                gradG%ncol = jacG%nrow 
+                gradG%nval = jacG%nval 
+                
+                call gradG%Allocate()
+                gradG%row = jacG%col 
+                gradG%col = jacG%row
+                gradG%val = jacG%val
+
+                ! Housekeeping
+                call jacG%Deallocate()
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+
+        ! Constraint hessian
+        !===================
+        if (dohessian) then 
+
+            ! Initialize
+            hessG%nrow = designvariables%nphi 
+            hessG%ncol = designvariables%nphi 
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates')
+            
+                ! Allocate
+                hessG%nval = 4*ntv
+                if (.not. allocated(valindex)) then
+                    allocate(valindex(ntv))
+                end if
+                if (.not. allocated(conindex)) then 
+                    allocate(conindex(ntv))
+                end if 
+                if (.not. allocated(hessG%val)) then
+                    call hessG%Allocate()
+                end if
+                allocate(valxx(ntv))
+                allocate(valxy(ntv))
+                allocate(valyy(ntv))
+
+                ! Compute contributions
+                valxx(:) = 2
+                valyy(:) = 2
+                valxy(:) = 0
+
+                ! xx-contribution
+                !----------------
+                k = 1
+                ! Build indices
+                valindex = [(k, k = ivh+1, ivh+ntv)] 
+
+                ! Add values
+                hessG%row(valindex) = tv 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = valxx*lambda ! element-wise mult. 
+                
+                ! xy-contribution
+                !----------------
+                ! Build indices
+                ivh = ivh + ntv
+                valindex = valindex + ntv
+
+                ! Add values
+                hessG%row(valindex) = tv
+                hessG%col(valindex) = tv + grid%vert%ntot 
+                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+
+                ! yx-contribution
+                !----------------
+                ! symmetric with xy
+                ! Build indices
+                ivh = ivh + ntv
+                valindex = valindex + ntv 
+
+                ! Add values
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+
+                ! yy-contribution
+                !----------------
+                ! Build indices
+                ivh = ivh + ntv
+                valindex = valindex + ntv
+
+                ! Add values
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv + grid%vert%ntot 
+                hessG%val(valindex) = valyy*lambda ! element-wise mult. 
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+        
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+        ! Deallocate
+
+        if (dogradient) then 
+            deallocate(valindex, conindex)
+        end if 
+
+        if (dohessian) then 
+            if (allocated(valindex)) then 
+                deallocate(valindex, conindex)
+            end if 
+            deallocate(valxx, valxy, valyy)
+        end if
+
+    end subroutine
+
 
 end module
