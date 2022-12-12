@@ -149,7 +149,7 @@ module gdmod_userinput
         options%variables%type                  = 'coordinates'
 
         ! Default options, cost function
-        options%costfunction%type               = 'lengthratio'
+        options%costfunction%type               = 'LRFAD'
 
         ! Default options, equality constraints
         options%constraints%boundaryfunctions   = .true.
