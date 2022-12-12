@@ -135,7 +135,6 @@ module gdmod_constraints
     end type
 
     ! X-point constraints
-    ! Boundary function constraints
     type, extends(GenericConstraintsGDUDT) :: XPointConstraintsUDT 
 
         ! Description
@@ -170,6 +169,35 @@ module gdmod_constraints
     
     end type
 
+    ! Edge lengths constraints
+    type, extends(GenericConstraintsGDUDT) :: EdgeLengthsConstraintsUDT 
+
+        ! Description
+        !============
+        ! Edge length constraints. Constrain an arbitrary set of edges
+        ! to have a certain edge length (in meters) - see also 
+        ! InitializeEdgeLengthsConstraints for additional predefined
+        ! edge sets. The following fields are added:
+        !
+        ! - nedges:     (scalar) total number of edges to constrain
+        ! - edgevert:   (nedges-by-2) edge vertex IDs 
+        ! - d           (nedges-by-1) desired length for each edge   
+
+        ! Fields: 
+        integer(I8), allocatable            :: edgevert(:, :)
+        integer(I8)                         :: nedges
+        real(R8), allocatable               :: d(:)
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize => InitializeEdgeLengthsConstraints
+        
+        ! Evaluation
+        procedure :: Evaluate   => EvaluateEdgeLengthsConstraints
+    
+    end type
+
     ! Overarching types
     !==================
     ! Equality constraints
@@ -188,11 +216,12 @@ module gdmod_constraints
         logical                             :: dofluxfunction = .false.
         logical                             :: doboundaryfunction = .false.
         logical                             :: doxpoints = .false.
+        logical                             :: doedgelengths = .false.
 
         type(FluxfunctionConstraintsUDT)    :: fluxfunction 
         type(BoundaryFunctionConstraintsUDT):: boundaryfunction
         type(XPointConstraintsUDT)          :: xpoints
-        
+        type(EdgeLengthsConstraintsUDT)     :: edgelengths
 
     contains
 
@@ -589,6 +618,29 @@ module gdmod_constraints
 
         end if
 
+        ! Edge lengths
+        if (constraintoptions%edgelengths) then 
+            ! Set the logical
+            constraints%doedgelengths = .true.
+
+            ! Initialize
+            call constraints%edgelengths%Initialize(grid, &
+                magneticField, environment, monitor)
+
+            ! Add constraints number
+            constraints%neqcon = constraints%neqcon + &
+                constraints%edgelengths%ncon 
+
+            ! Print
+            print *, 'number of edge lengths constraints: ', &
+                constraints%edgelengths%ncon
+
+        else
+            ! Set to false, don't initialize
+            constraints%doedgelengths = .false.
+
+        end if
+
         
 
     end subroutine
@@ -631,6 +683,9 @@ module gdmod_constraints
 
         real(R8), allocatable           :: G_xp(:), lambda_xp(:)
         type(MySparseUDT)               :: gradG_xp, hessG_xp
+
+        real(R8), allocatable           :: G_el(:), lambda_el(:)
+        type(MySparseUDT)               :: gradG_el, hessG_el
 
         ! Initialize
         !===========
@@ -757,6 +812,45 @@ module gdmod_constraints
 
         end if
 
+        ! Edge lengths constraints
+        !-------------------------
+        if (constraints%doedgelengths) then 
+            ! Construct the constraint index
+            allocate(conindex(constraints%edgelengths%ncon))
+            conindex = [(k, k = ic+1, ic+constraints%edgelengths%ncon)]
+
+            ! Allocate & initialize
+            allocate(lambda_el(constraints%edgelengths%ncon))
+            lambda_el = lambda(conindex)
+
+            ! Call the evaluation routine
+            call constraints%edgelengths%Evaluate(G_el, &
+                gradG_el, hessG_el, &
+                grid, magneticField, environment, dogradient, &
+                dohessian, designvariables, &
+                lambda_el)
+
+            ! Assign
+            G(conindex) = G_el
+
+            ! Update the gradient column indices
+            if (dogradient) then 
+                ! For easier concatenation later on
+                gradG_el%col = gradG_el%col + ic
+
+            end if
+
+            ! Update the constraint counter
+            ic = ic + constraints%edgelengths%ncon
+
+            ! Housekeeping
+            deallocate(conindex, lambda_el) 
+            if (allocated(G_el)) then
+                deallocate(G_el)
+            end if
+
+        end if
+
 
         ! Concatenate gradient
         !=====================
@@ -782,6 +876,9 @@ module gdmod_constraints
                 end if
                 if (constraints%dofluxfunction) then 
                     gradG%nval = gradG%nval + gradG_flux%nval  
+                end if 
+                if (constraints%doedgelengths) then 
+                    gradG%nval = gradG%nval + gradG_el%nval  
                 end if 
 
                 ! Allocate
@@ -853,6 +950,26 @@ module gdmod_constraints
 
             end if
 
+            ! Edge lengths
+            if (constraints%doedgelengths) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%edgelengths%ncon, &
+                    nval    => gradG_el%nval)
+
+                ! Add values
+                gradG%row(ivg+1:ivg+nval) = gradG_el%row 
+                gradG%col(ivg+1:ivg+nval) = gradG_el%col
+                gradG%val(ivg+1:ivg+nval) = gradG_el%val
+
+                ! Update counter
+                ivg = ivg + nval 
+
+                ! End associate
+                end associate
+
+            end if
+
         end if
 
         ! Concatenate the hessian
@@ -879,6 +996,9 @@ module gdmod_constraints
                 end if 
                 if (constraints%dofluxfunction) then 
                     hessG%nval = hessG%nval + hessG_flux%nval  
+                end if 
+                if (constraints%doedgelengths) then 
+                    hessG%nval = hessG%nval + hessG_el%nval  
                 end if 
                 
                 ! Allocate
@@ -942,6 +1062,26 @@ module gdmod_constraints
                 hessG%row(ivh+1:ivh+nval) = hessG_flux%row 
                 hessG%col(ivh+1:ivh+nval) = hessG_flux%col
                 hessG%val(ivh+1:ivh+nval) = hessG_flux%val
+
+                ! Update counter
+                ivh = ivh + nval 
+
+                ! End associate
+                end associate
+
+            end if
+
+            ! Edge lengths
+            if (constraints%doedgelengths) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%edgelengths%ncon, &
+                    nval    => hessG_el%nval)
+
+                ! Add values
+                hessG%row(ivh+1:ivh+nval) = hessG_el%row 
+                hessG%col(ivh+1:ivh+nval) = hessG_el%col
+                hessG%val(ivh+1:ivh+nval) = hessG_el%val
 
                 ! Update counter
                 ivh = ivh + nval 
@@ -2397,6 +2537,623 @@ module gdmod_constraints
                 hessG%row(valindex) = tv + grid%vert%ntot 
                 hessG%col(valindex) = tv + grid%vert%ntot 
                 hessG%val(valindex) = valyy*lambda(conindex) ! element-wise mult. 
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+        
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+        ! Deallocate
+
+        if (dogradient) then 
+            deallocate(valindex, conindex)
+        end if 
+
+        if (dohessian) then 
+            if (allocated(valindex)) then 
+                deallocate(valindex, conindex)
+            end if 
+            deallocate(valxx, valxy, valyy)
+        end if
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                           EDGE LENGTHS                           !
+    !------------------------------------------------------------------!
+
+    ! Initialize
+    subroutine InitializeEdgeLengthsConstraints(constraints, &
+        grid, magneticField, environment, monitor)
+
+        ! Description
+        !============
+        ! Initialize the (desired) edge length constraints. There are 
+        ! two main parameters here: 
+        !
+        ! - the edge (or face in 2D) indices to be constrained
+        ! - the desired length (in [m]) of these edges. 
+        !
+        ! For the former, some preset options are implemented through 
+        ! routines in the gdmod_utility_optimization module, which can 
+        ! be called here. These currently include:
+        !
+        ! - edges that have one boundary vertex that lies on the vessel
+        !   (these are basically the edges that determine the width of 
+        !   the boundary cell near the target plates or other vessel 
+        !   segments)
+        ! - edges that have an x-point as vertex. 
+        !
+        ! For the latter (i.e. the length), it is in principle possible 
+        ! to apply different lengths for all edges, though the options 
+        ! here allow only to specify a uniform edge length automatically
+        ! which is sufficient for most purposes. Otherwise, this should
+        ! be implemented/given manually. 
+
+        ! Notes
+        !======
+        ! Note 1: in determining to which vertex to assing this 
+        ! constraint (for the monitor), priority is given to the 
+        ! boundary vertices, if it is possible to assign it there. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(EdgeLengthsConstraintsUDT)            :: constraints
+        type(GridUDT)                               :: grid 
+        type(MagneticFieldUDT)                      :: magneticField 
+        type(EnvironmentUDT)                        :: environment 
+        type(ConstraintsMonitorUDT)                 :: monitor
+
+        ! Auxiliary
+        real(R8)                    :: edgedistvessel, edgedistxpoint
+
+        real(R8), allocatable       :: dvesseledges(:), dxpointedges(:)
+
+        integer(I8)                 :: nvesseledges, nxpointedges, cc, &
+            ev(1:2)
+
+        integer(I8), allocatable    :: vesseledges(:, :), &
+            xpointedges(:, :), tempvesseledges(:, :), &
+            tempxpointedges(:, :)
+
+        logical                     :: dovesseledges, doxpointedges, &
+            doTP, doWG
+        
+        logical, allocatable        :: dovesseledgecon(:), &
+            doxpointedgecon(:)
+        
+        ! Loop
+        integer(I8)                 :: i, j
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert        => grid%vert,           &
+            vcc         => monitor%eqvcc,       &
+            maxvcc      => monitor%maxeqvcc)
+
+        ! Do vessel edge lengths?
+        dovesseledges   = .true.
+        edgedistvessel  = 5e-3 ! desired edge length in [m]
+        doTP            = .true. ! do target plates? 
+        doWG            = .true. ! do wide grid boundaries?
+
+        ! Do x-point edge lengths?
+        doxpointedges   = .false. 
+        edgedistxpoint  = 5e-3 ! desired edge length in [m]
+
+        ! Determine edges
+        !================
+        ! Edges near vessel 
+        !------------------
+        nvesseledges = 0
+        if (dovesseledges) then 
+            call DetermineFluxAlignedVesselEdges(nvesseledges, &
+                tempvesseledges, grid, doTP, doWG)
+
+            ! Check for these edges whether they can be constrained
+            allocate(dovesseledgecon(nvesseledges))
+            dovesseledgecon(:) = .true.
+            where ( (vcc(tempvesseledges(:, 1)) >= maxvcc) .and. &
+                (vcc(tempvesseledges(:, 2)) >= maxvcc)) &
+                dovesseledgecon = .false.
+
+            ! Recompute edges
+            nvesseledges = count(dovesseledgecon)
+            allocate(vesseledges(nvesseledges, 2))
+            vesseledges(:, 1) = pack(tempvesseledges(:, 1), &
+                dovesseledgecon)
+            vesseledges(:, 2) = pack(tempvesseledges(:, 2), &
+                dovesseledgecon)
+
+            ! Set lengths
+            allocate(dvesseledges(nvesseledges))
+            dvesseledges(:) = edgedistvessel
+        end if 
+
+        ! Edges near x-point(s)
+        !----------------------
+        nxpointedges = 0
+        if (doxpointedges) then 
+            call DetermineFluxAlignedXPointEdges(nxpointedges, &
+                tempxpointedges, grid)
+
+            ! Check for these edges whether they can be constrained
+            allocate(doxpointedgecon(nxpointedges))
+            doxpointedgecon(:) = .true.
+            where ( (vcc(tempxpointedges(:, 1)) >= maxvcc) .and. &
+                (vcc(tempxpointedges(:, 2)) >= maxvcc)) &
+                doxpointedgecon = .false.
+
+            ! Recompute edges
+            nxpointedges = count(doxpointedgecon)
+            allocate(xpointedges(nxpointedges, 2))
+            xpointedges(:, 1) = pack(tempxpointedges(:, 1), &
+                doxpointedgecon)
+            xpointedges(:, 2) = pack(tempxpointedges(:, 2), &
+                doxpointedgecon)
+
+            ! Set lengths
+            allocate(dxpointedges(nxpointedges))
+            dxpointedges(:) = edgedistxpoint
+        end if
+
+        ! Update constraint quantities
+        !=============================
+        ! Constraints
+        constraints%ncon = nvesseledges + nxpointedges
+        constraints%nedges = nvesseledges + nxpointedges 
+        allocate(constraints%edgevert(constraints%nedges, 2))
+        allocate(constraints%d(constraints%nedges))
+
+        cc = 0 ! constraint counter
+        if (dovesseledges) then 
+            do j = 1, 2
+                constraints%edgevert(cc+1:cc+nvesseledges, j) = &
+                    vesseledges(:, j) 
+            end do
+            constraints%d(cc+1:cc+nvesseledges) = &
+                dvesseledges
+            cc = cc + nvesseledges 
+        end if
+        if (doxpointedges) then 
+            do j = 1, 2
+                constraints%edgevert(cc+1:cc+nxpointedges, j) = &
+                    xpointedges(:, j)
+            end do
+            constraints%d(cc+1:cc+nxpointedges) = &
+                dxpointedges
+            cc = cc + nxpointedges
+        end if
+
+        ! Monitor
+        do i = 1, constraints%nedges 
+            ! Unpack for ease
+            ev = constraints%edgevert(i, 1:2)
+
+            ! Update counter
+            if (vert%BV(ev(1)) .and. (vcc(ev(1)) < maxvcc)) then 
+                ! Assign to boundary vertex
+                vcc(ev(1)) = vcc(ev(1)) + 1
+            elseif (vert%BV(ev(2)) .and. (vcc(ev(2)) < maxvcc)) then 
+                ! Assign to boundary vertex
+                vcc(ev(2)) = vcc(ev(2)) + 1
+            elseif (vcc(ev(1)) <= maxvcc) then 
+                ! Assign to first vertex, no boundary vertex
+                vcc(ev(1)) = vcc(ev(1)) + 1
+            elseif (vcc(ev(2)) <= maxvcc) then 
+                ! Assign to first vertex, no boundary vertex
+                vcc(ev(2)) = vcc(ev(2)) + 1
+            else
+                ! Something wrong - indicates that this edge shouldn't 
+                ! have been added, though this should've been catched 
+                ! before
+                call gdErrorHandler('InitializeEdgelengthsConstraints:' &
+                    // 'edge with vertex IDs as shown above should not' &
+                    // ' have been included in the constraints')
+            end if
+        end do
+
+        ! Housekeeping
+        !=============
+        ! Deallocate
+        if (dovesseledges) then 
+            deallocate(vesseledges, tempvesseledges, dovesseledgecon, &
+            dvesseledges)
+        end if 
+        if (doxpointedges) then 
+            deallocate(xpointedges, tempxpointedges, doxpointedgecon, &
+            dxpointedges)
+        end if
+
+        ! Deassociate
+        end associate
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateEdgeLengthsConstraints(constraints, G, gradG, & 
+        hessG, grid, magneticField, environment, dogradient, &
+        dohessian, designvariables, lambda)
+
+        ! Description
+        !============
+        ! The edge length constraint for the i-th edge (and therefore 
+        ! in this case the i-th constraint) can be mathematically 
+        ! formulated as: 
+        !
+        !       G(i) = 0.5 * (l_i ** 2  - d0 ** 2)
+        !
+        ! This form ensures that at least one part of the gradient 
+        ! w.r.t. the coordinate values is non-zero (for non-zero 
+        ! desired distance, which should always be the case!), while 
+        ! keeping the constraint formulation as a simple quadratic 
+        ! function in terms of the vertex coordinates. Here, l_i is 
+        ! defined as the L2 norm of the edge vector, where the latter is
+        ! formed by the vector between its vertices.
+        !
+        ! The Jacobian w.r.t. the vertex coordinates is then found as
+        !
+        !       J(i, j) = xv(:, 1) - xv(:, 2), if j = edgevert(i, 1)
+        !       J(i, j) = -(xv(:, 1) - xv(:, 2)), if j = edgevert(i, 2)
+        !       J(i, j+nv) = yv(:, 1) - yv(:, 2), if j = edgevert(i, 1)
+        !       J(i, j+nv) = -(yv(:, 1) - yv(:, 2)), if j = edgevert(i, 2)
+        !
+        ! where i is the constraint index, j is the vertex index of the 
+        ! i-th edge (first or second, as specified above), and nv is the
+        ! number of grid vertices.
+        !
+        ! The Hessian w.r.t. the grid vertex coordinates is found as
+        !
+        !       H(i, j, k) = 1 (j = k)
+        !       H(i, j, k) = -1 (j != k)
+        !       H(i, j+nv, k+nv) = 1 (j = k)
+        !       H(i, j+nv, k+nv) = -1 (j != k)
+        !       otherwise zero
+
+        ! Notes
+        !======
+        ! Note 1: not the true hessian of the constraint vector is 
+        ! returned, but the hessian-vector multiplication with the 
+        ! vector lambda, which should be of suitable size. 
+
+        ! Note 2: the row and column indices for the constraints are 
+        ! local, meaning that in no way other constraints are accounted
+        ! for in positioning the elements in the matrix. This should be
+        ! done in an overarching routine. 
+
+        ! Note 3: at first, we compute the linearization of the 
+        ! constraints, meaning that we actually compute the Jacobian.
+        ! Afterwards, we switch the row and column indices (i.e. 
+        ! transpose) to obtain the gradient. 
+        
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(EdgeLengthsConstraintsUDT)    :: constraints 
+        real(R8), allocatable               :: G(:) 
+        real(R8), allocatable               :: lambda(:)
+        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(GridUDT)                       :: grid 
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        logical                             :: dogradient, dohessian
+        class(DesignVariablesGDUDT)         :: designvariables 
+
+        ! Loop variables
+        integer(I8)                         :: i, ic, ivg, ivh, k
+        integer(I8), allocatable            :: valindex(:), conindex(:)
+
+        ! Auxiliary variables
+        real(R8), allocatable               :: valxx(:), valxy(:), &
+            valyy(:), xv1(:), xv2(:), yv1(:), yv2(:), dist(:)
+        integer(I8)                         :: ntv
+        
+        ! Initialize
+        !===========
+        ! Checks
+        if ( (.not. allocated(lambda)) .and. dohessian) then
+            ! Throw error
+            call gdErrorHandler('When evaluating the hessian vector' &
+                // ' multiplication, lambda must be given')
+        end if
+
+        if (size(lambda) .ne. constraints%ncon) then
+            ! Lambda should have the same size as the constraints
+            call gdErrorHandler('Lambda should have the same size ' &
+                // 'as the constraint vector')
+        end if
+
+        ! Counters
+        ic = 0 ! constraint counter (local)
+        ivg = 0 ! value index for gradient
+        ivh = 0 ! value index for hessian
+
+        ! Associate
+        associate(&
+            nc      => constraints%ncon,        &
+            ev      => constraints%edgevert,    &
+            d0      => constraints%d,           &
+            nv      => grid%vert%ntot,          &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
+
+        ! Constraint value
+        !=================
+        ! Allocate
+        if (.not. allocated(G)) then 
+            allocate(G(nc))
+        else
+            if (size(G) .ne. nc) then 
+
+                ! Print a warning and reallocate
+                print *, 'EvaluateEdgelengthsConstraints: ' &
+                    // 'Wrong dimension of G, reallocating'
+                
+                ! Deallocate and reallocate
+                deallocate(G)
+                allocate(G(nc))
+
+            end if
+        end if
+
+        ! Compute lengths
+        allocate(xv1(nc), xv2(nc), yv1(nc), yv2(nc), dist(nc))
+        xv1 = x(ev(:, 1))
+        yv1 = y(ev(:, 1))
+        xv2 = x(ev(:, 2))
+        yv2 = y(ev(:, 2))
+
+        ! Evaluate
+        dist = (xv1 - xv2)**2 + (yv1 - yv2)**2
+        G = 0.5*(dist - d0**2)
+
+        ! Constraint gradient
+        !====================
+        if (dogradient) then 
+            ! Initialize
+            jacG%nrow = nc 
+            jacG%ncol = designvariables%nphi
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates')
+
+                ! Order in jacobian: first x, then y. 
+
+                ! Allocate
+                jacG%nval = 4*nc
+                call jacG%Allocate() 
+                allocate(conindex(nc))
+                allocate(valindex(nc))
+
+                ! Build constraint indices
+                conindex = [(k, k = ic+1, ic+nc)]
+
+                ! x-contribution
+                !---------------
+                ! Build indices for xv1
+                valindex = [(k, k = ivg+1, ivg+nc)]
+
+                ! Add values
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = ev(:, 1)
+                jacG%val(valindex) = xv1 - xv2
+
+                ! Update counters
+                ivg = ivg + nc
+
+                ! Build indices for xv2
+                valindex = [(k, k = ivg+1, ivg+nc)]
+
+                ! Add values
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = ev(:, 2)
+                jacG%val(valindex) = -(xv1 - xv2)
+
+                ! Update counters
+                ivg = ivg + nc
+
+                ! y-contribution
+                !---------------
+                ! Build indices for yv1
+                valindex = [(k, k = ivg+1, ivg+nc)]
+
+                ! Add values
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = ev(:, 1) + grid%vert%ntot 
+                jacG%val(valindex) = yv1 - yv2
+
+                ! Update counters
+                ivg = ivg + nc
+
+                ! Build indices for yv2
+                valindex = [(k, k = ivg+1, ivg+nc)]
+
+                ! Add values
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = ev(:, 2) + grid%vert%ntot 
+                jacG%val(valindex) = -(yv1 - yv2)
+
+                ! Update counters
+                ivg = ivg + nc
+
+                ! Build gradient
+                !---------------
+                gradG%nrow = jacG%ncol 
+                gradG%ncol = jacG%nrow 
+                gradG%nval = jacG%nval 
+                
+                call gradG%Allocate()
+                gradG%row = jacG%col 
+                gradG%col = jacG%row
+                gradG%val = jacG%val
+
+                ! Housekeeping
+                call jacG%Deallocate()
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+
+        ! Constraint hessian
+        !===================
+        if (dohessian) then 
+
+            ! Initialize
+            ic = 0
+            hessG%nrow = designvariables%nphi 
+            hessG%ncol = designvariables%nphi 
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates')
+            
+                ! Allocate
+                hessG%nval = 8*nc 
+                if (.not. allocated(valindex)) then
+                    allocate(valindex(nc))
+                end if
+                if (.not. allocated(conindex)) then 
+                    allocate(conindex(nc))
+                end if 
+                if (.not. allocated(hessG%val)) then
+                    call hessG%Allocate()
+                end if
+                allocate(valxx(nc))
+                allocate(valxy(nc))
+                allocate(valyy(nc))
+
+                ! Compute contributions
+                valxx(:) = 1
+                valyy(:) = 1
+                valxy(:) = 0
+
+                ! Build constraint indices
+                conindex = [(k, k = ic+1, ic+nc)]
+
+                ! xx-contribution
+                !----------------
+                ! Build indices
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+
+                ! Add values
+                hessG%row(valindex) = ev(:, 1) 
+                hessG%col(valindex) = ev(:, 1) 
+                hessG%val(valindex) = valxx*lambda(conindex) ! x1x1
+
+                ! Update counters
+                ivh = ivh + nc
+
+                ! Build indices
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+
+                ! Add values
+                hessG%row(valindex) = ev(:, 1) 
+                hessG%col(valindex) = ev(:, 2) 
+                hessG%val(valindex) = -valxx*lambda(conindex) ! x1x2
+
+                ! Update counters
+                ivh = ivh + nc
+
+                ! Build indices
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+
+                ! Add values
+                hessG%row(valindex) = ev(:, 2) 
+                hessG%col(valindex) = ev(:, 1) 
+                hessG%val(valindex) = -valxx*lambda(conindex) ! x2x1
+
+                ! Update counters
+                ivh = ivh + nc
+
+                ! Build indices
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+
+                ! Add values
+                hessG%row(valindex) = ev(:, 2) 
+                hessG%col(valindex) = ev(:, 2) 
+                hessG%val(valindex) = valxx*lambda(conindex) ! x2x2
+
+                ! Update counters
+                ivh = ivh + nc
+                
+                ! xy-contribution
+                !----------------
+                ! no contributions
+
+                ! yx-contribution
+                !----------------
+                ! no contributions
+
+                ! yy-contribution
+                !----------------
+                ! Build indices
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+
+                ! Add values
+                hessG%row(valindex) = ev(:, 1) + nv
+                hessG%col(valindex) = ev(:, 1) + nv 
+                hessG%val(valindex) = valxx*lambda(conindex) ! y1y1
+
+                ! Update counters
+                ivh = ivh + nc
+
+                ! Build indices
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+
+                ! Add values
+                hessG%row(valindex) = ev(:, 1) + nv 
+                hessG%col(valindex) = ev(:, 2) + nv 
+                hessG%val(valindex) = -valxx*lambda(conindex) ! y1y2
+
+                ! Update counters
+                ivh = ivh + nc
+
+                ! Build indices
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+
+                ! Add values
+                hessG%row(valindex) = ev(:, 2) + nv 
+                hessG%col(valindex) = ev(:, 1) + nv 
+                hessG%val(valindex) = -valxx*lambda(conindex) ! y2y1
+
+                ! Update counters
+                ivh = ivh + nc
+
+                ! Build indices
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+
+                ! Add values
+                hessG%row(valindex) = ev(:, 2) + nv 
+                hessG%col(valindex) = ev(:, 2) + nv 
+                hessG%val(valindex) = valxx*lambda(conindex) ! y2y2
+
+                ! Update counters
+                ivh = ivh + nc
 
             case default
 
