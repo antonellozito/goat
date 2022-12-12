@@ -149,12 +149,10 @@ module gdmod_optimizationengine
         class(OptimizationEngineGDUDT)      :: optimizationdriver 
 
         ! Loop variables
-        type(DesignVariablesCoordinatesUDT) :: thisdesign
         type(OptimizationProblemGDUDT)      :: thisproblem
 
         ! Auxiliary variables 
         type(DesignOptionsUDT)              :: designoptions
-        real(R8) :: dummy
 
         ! Data
 
@@ -163,10 +161,6 @@ module gdmod_optimizationengine
         ! Set the design options
         call SetDesignOptions(designoptions)
         allocate(optimizationdriver%problem, source=thisproblem)
-        !allocate(optimizationdriver%problem%designvariables, source=thisdesign)
-        !allocate(optimizationdriver%state, source = thisstate)
-        !call optimizationdriver%problem%designvariables%Initialize(dummy)
-        !call thisdesign%Initialize(dummy)
 
     end subroutine
 

@@ -367,8 +367,6 @@ module gdmod_costfunction
         integer(I8)                         :: i, j
 
         ! Auxiliary variables
-        type(VertexUDT)                       :: vert
-
         integer                             :: sgn2, sgn3
         integer(I8)                         :: sp, ep, tID, v2, v3
         real(R8)                            :: Btx2, Btx3, Bty2, Bty3, &
@@ -2672,7 +2670,6 @@ module gdmod_costfunction
         class(DesignVariablesGDUDT)     :: designvariables
 
         ! Loop variables
-        integer(I8)                     :: i
 
         ! Auxiliary
                                         
