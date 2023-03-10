@@ -37,7 +37,9 @@ module gdmod_constraints
     use gdmod_types
     use gdmod_designvariables
     use gdmod_utility_optimization
+    use gdmod_plots
     use PolygonShapeFunction
+    use BicubicSplineInterpolant
     
 
     ! The usual
@@ -198,6 +200,36 @@ module gdmod_constraints
     
     end type
 
+    ! Orthogonality constraints
+    type, extends(GenericConstraintsGDUDT) :: OrthogonalityConstraintsUDT 
+
+        ! Description
+        !============
+        ! Orthogonality constraints. These constraints fix certain edges
+        ! to be orthogonal to the magnetic field. See the initialization
+        ! routine (InitializeOrthogonalityConstraints) to see the 
+        ! different options that are available to determine which 
+        ! edges to constrain. Typically, edges near the core and SOL
+        ! are constrained. 
+        ! The following fields are added:
+        !
+        ! - nedges:     (scalar) total number of edges to constrain
+        ! - edgevert:   (nedges-by-2) edge vertex IDs 
+
+        ! Fields: 
+        integer(I8), allocatable            :: edgevert(:, :)
+        integer(I8)                         :: nedges
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize => InitializeOrthogonalityConstraints
+        
+        ! Evaluation
+        procedure :: Evaluate   => EvaluateOrthogonalityConstraints
+    
+    end type
+
     ! Overarching types
     !==================
     ! Equality constraints
@@ -217,11 +249,13 @@ module gdmod_constraints
         logical                             :: doboundaryfunction = .false.
         logical                             :: doxpoints = .false.
         logical                             :: doedgelengths = .false.
+        logical                             :: doorthogonality = .false.
 
         type(FluxfunctionConstraintsUDT)    :: fluxfunction 
         type(BoundaryFunctionConstraintsUDT):: boundaryfunction
         type(XPointConstraintsUDT)          :: xpoints
         type(EdgeLengthsConstraintsUDT)     :: edgelengths
+        type(OrthogonalityConstraintsUDT)   :: orthogonality
 
     contains
 
@@ -641,6 +675,29 @@ module gdmod_constraints
 
         end if
 
+        ! Orthogonality
+        if (constraintoptions%orthogonality) then 
+            ! Set the logical
+            constraints%doorthogonality = .true.
+
+            ! Initialize
+            call constraints%orthogonality%Initialize(grid, &
+                magneticField, environment, monitor)
+
+            ! Add constraints number
+            constraints%neqcon = constraints%neqcon + &
+                constraints%orthogonality%ncon 
+
+            ! Print
+            print *, 'number of orthogonality constraints: ', &
+                constraints%orthogonality%ncon
+
+        else
+            ! Set to false, don't initialize
+            constraints%doorthogonality = .false.
+
+        end if
+
         
 
     end subroutine
@@ -686,6 +743,9 @@ module gdmod_constraints
 
         real(R8), allocatable           :: G_el(:), lambda_el(:)
         type(MySparseUDT)               :: gradG_el, hessG_el
+
+        real(R8), allocatable           :: G_orth(:), lambda_orth(:)
+        type(MySparseUDT)               :: gradG_orth, hessG_orth
 
         ! Initialize
         !===========
@@ -851,6 +911,45 @@ module gdmod_constraints
 
         end if
 
+        ! Orthogonality constraints
+        !--------------------------
+        if (constraints%doorthogonality) then 
+            ! Construct the constraint index
+            allocate(conindex(constraints%orthogonality%ncon))
+            conindex = [(k, k = ic+1, ic+constraints%orthogonality%ncon)]
+
+            ! Allocate & initialize
+            allocate(lambda_orth(constraints%orthogonality%ncon))
+            lambda_orth = lambda(conindex)
+
+            ! Call the evaluation routine
+            call constraints%orthogonality%Evaluate(G_orth, &
+                gradG_orth, hessG_orth, &
+                grid, magneticField, environment, dogradient, &
+                dohessian, designvariables, &
+                lambda_orth)
+
+            ! Assign
+            G(conindex) = G_orth
+
+            ! Update the gradient column indices
+            if (dogradient) then 
+                ! For easier concatenation later on
+                gradG_orth%col = gradG_orth%col + ic
+
+            end if
+
+            ! Update the constraint counter
+            ic = ic + constraints%orthogonality%ncon
+
+            ! Housekeeping
+            deallocate(conindex, lambda_orth) 
+            if (allocated(G_orth)) then
+                deallocate(G_orth)
+            end if
+
+        end if
+
 
         ! Concatenate gradient
         !=====================
@@ -879,6 +978,9 @@ module gdmod_constraints
                 end if 
                 if (constraints%doedgelengths) then 
                     gradG%nval = gradG%nval + gradG_el%nval  
+                end if 
+                if (constraints%doorthogonality) then 
+                    gradG%nval = gradG%nval + gradG_orth%nval  
                 end if 
 
                 ! Allocate
@@ -970,6 +1072,26 @@ module gdmod_constraints
 
             end if
 
+            ! Orthogonality
+            if (constraints%doorthogonality) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%orthogonality%ncon, &
+                    nval    => gradG_orth%nval)
+
+                ! Add values
+                gradG%row(ivg+1:ivg+nval) = gradG_orth%row 
+                gradG%col(ivg+1:ivg+nval) = gradG_orth%col
+                gradG%val(ivg+1:ivg+nval) = gradG_orth%val
+
+                ! Update counter
+                ivg = ivg + nval 
+
+                ! End associate
+                end associate
+
+            end if
+
         end if
 
         ! Concatenate the hessian
@@ -999,6 +1121,9 @@ module gdmod_constraints
                 end if 
                 if (constraints%doedgelengths) then 
                     hessG%nval = hessG%nval + hessG_el%nval  
+                end if 
+                if (constraints%doorthogonality) then 
+                    hessG%nval = hessG%nval + hessG_orth%nval  
                 end if 
                 
                 ! Allocate
@@ -1082,6 +1207,26 @@ module gdmod_constraints
                 hessG%row(ivh+1:ivh+nval) = hessG_el%row 
                 hessG%col(ivh+1:ivh+nval) = hessG_el%col
                 hessG%val(ivh+1:ivh+nval) = hessG_el%val
+
+                ! Update counter
+                ivh = ivh + nval 
+
+                ! End associate
+                end associate
+
+            end if
+
+            ! Orthogonality
+            if (constraints%doorthogonality) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%orthogonality%ncon, &
+                    nval    => hessG_orth%nval)
+
+                ! Add values
+                hessG%row(ivh+1:ivh+nval) = hessG_orth%row 
+                hessG%col(ivh+1:ivh+nval) = hessG_orth%col
+                hessG%val(ivh+1:ivh+nval) = hessG_orth%val
 
                 ! Update counter
                 ivh = ivh + nval 
@@ -3181,6 +3326,799 @@ module gdmod_constraints
                 deallocate(valindex, conindex)
             end if 
             deallocate(valxx, valxy, valyy)
+        end if
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                           ORTHOGONALITY                          !
+    !------------------------------------------------------------------!
+
+    ! Initialize
+    subroutine InitializeOrthogonalityConstraints(constraints, &
+        grid, magneticField, environment, monitor)
+
+        ! Description
+        !============
+        ! Initialize the edge length constraints on the desired edges.
+        ! As there are many ways to determine the edges, this is 
+        ! cast into a function located in the gdmod_utility_optimization
+        ! module, i.e. DetermineEdgesOrthogonalityConstraints. Different
+        ! preset options are present:
+        ! 
+        ! - simple boxes that determine, starting from the original
+        !   grid, which edges to be constrained (or not) by checking if
+        !   edges are within the box. 
+        ! - flux value based: edges with a flux value between certain 
+        !   limits are constrained (useful for e.g. the core)
+        ! - initial orthogonality based: numerically compute the 
+        !   deviation from orthogonality of the original edges and 
+        !   decide based on that whether to include the edges. 
+        !
+        ! See the routine for more options and details. 
+
+        ! Notes
+        !======
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OrthogonalityConstraintsUDT)          :: constraints
+        type(GridUDT)                               :: grid 
+        type(MagneticFieldUDT)                      :: magneticField 
+        type(EnvironmentUDT)                        :: environment 
+        type(ConstraintsMonitorUDT)                 :: monitor
+
+        ! Auxiliary
+        integer(I8)                 :: nincludebox, nexcludebox, tv, &
+            startindex, endindex, tID, nbID(1:2), vpc, tbv, tnbv, tf
+        real(R8)                    :: tx, ty, tn, bx, by, bn, nb, dotprod, &
+            epsortho, epsperp
+        logical                     :: checkperp, isfaceperp, &
+            doincludebox, doexcludebox, debugplots 
+        
+        integer(I8), allocatable    :: cvertlist(:), temp(:), &
+            northcon(:), maxnorthcon(:), tvn(:), vpairs(:, :)
+
+        real(R8), allocatable       :: includeboxlbx(:), &
+            includeboxubx(:), includeboxlby(:), includeboxuby(:), &
+            excludeboxubx(:), excludeboxlby(:), excludeboxuby(:), &
+            excludeboxlbx(:), Btx(:), Bty(:), xf(:), yf(:)
+
+        logical, allocatable        :: cvert(:), boxcheck(:), &
+            movetoback(:), movetofront(:), ismarked(:), isconstrained(:), &
+            isperp(:), cID(:)
+        
+        ! Loop
+        integer(I8)                 :: i, j, k
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            interp      => magneticField%interp,    &
+            vert        => grid%vert,               &
+            vcc         => monitor%eqvcc,           &
+            maxvcc      => monitor%maxeqvcc,        &
+            x           => grid%vert%x,             &
+            y           => grid%vert%y)
+
+        ! Debug plots?
+        debugplots = .false.
+
+        ! Boxes for edges to be included?
+        doincludebox    = .true.
+        nincludebox     = 1 ! number of boxes
+
+        ! Boxes for edges to be excluded
+        doexcludebox    = .false. 
+        nexcludebox     = 1 ! number of boxes
+
+        ! Tolerances (to be moved to input)
+        epsortho    = 0.1
+        epsperp     = 0.1 
+
+        ! Check perpendicularity? (to be moved to input)
+        checkperp = .true.
+
+        ! Allocate
+        allocate(&
+            includeboxlbx(nincludebox), includeboxlby(nincludebox), &
+            includeboxubx(nincludebox), includeboxuby(nincludebox), &
+            excludeboxlbx(nexcludebox), excludeboxlby(nexcludebox), &
+            excludeboxubx(nexcludebox), excludeboxuby(nexcludebox))
+
+        ! Set the values of the boxes (to be read in in the future)
+        includeboxlbx(1:nincludebox) = [-1]
+        includeboxubx(1:nincludebox) = [1]
+        includeboxlby(1:nincludebox) = [-0.2]
+        includeboxuby(1:nincludebox) = [1]
+
+        excludeboxlbx(1:nexcludebox) = [-1]
+        excludeboxubx(1:nexcludebox) = [1]
+        excludeboxlby(1:nexcludebox) = [-1]
+        excludeboxuby(1:nexcludebox) = [1]
+
+        ! Determine edge vertices
+        !========================
+        ! Compute magnetic field vector components Btx, Bty
+        allocate(Btx(vert%ntot), Bty(vert%ntot))
+        call EvaluateBicubicSplineInterpolant(vert%x, vert%y, Btx, interp, &
+            '0', '1')
+        call EvaluateBicubicSplineInterpolant(vert%x, vert%y, Bty, interp, &
+            '1', '0')
+        Btx = -Btx ! adjust sign 
+
+        ! Determine which nodes to consider
+        allocate(cvert(vert%ntot))
+        allocate(boxcheck(vert%ntot))
+        allocate(northcon(vert%ntot), maxnorthcon(vert%ntot))
+
+        cvert(:) = .false.
+        northcon(:) = 0
+        maxnorthcon(:) = 2
+        where (vert%BV) maxnorthcon = 1
+
+        if (doincludebox) then 
+            do i = 1, nincludebox ! include points in the box
+                boxcheck(:) = .false.
+                boxcheck = (vert%x >= includeboxlbx(i)) .and. &
+                    (vert%x <= includeboxubx(i)) .and. &
+                    (vert%y >= includeboxlby(i)) .and. &
+                    (vert%y <= includeboxuby(i))
+                cvert = cvert .or. boxcheck 
+            end do
+        end if 
+
+        if (doexcludebox) then 
+            do i = 1, nincludebox ! exclude points outside the box
+                boxcheck(:) = .false.
+                boxcheck = (vert%x >= includeboxlbx(i)) .and. &
+                    (vert%x <= includeboxubx(i)) .and. &
+                    (vert%y >= includeboxlby(i)) .and. &
+                    (vert%y <= includeboxuby(i))
+                where (boxcheck) cvert = .false.
+            end do
+        end if
+
+        ! Prioritize inner vertices (typically yields better results, 
+        ! but may not be a general approach)
+        allocate(cvertlist(count(cvert)))
+        allocate(ismarked(vert%ntot))
+        allocate(movetoback(count(cvert)))
+        allocate(movetofront(count(cvert)))
+
+        ismarked(:) = .false. 
+        where (cvert) ismarked = .true. 
+        movetoback(:) = .false. 
+        movetofront(:) = .false. 
+        cvertlist = pack( [(k, k = 1, vert%ntot)], cvert) ! node indices
+
+        do i = 1, count(cvert)
+            ! Get the current vertex 
+            tv = cvertlist(i)
+
+            ! Get the neighbours
+            allocate(tvn(vert%neigP(tv, 2)))
+            tvn = vert%neiglist(vert%neigP(tv, 1):vert%neigP(tv, 1)+vert%neigP(tv, 2)-1)
+
+            ! Check if any are not marked
+            if (any(.not. ismarked(tvn))) then
+                movetoback(i) = .true.
+            end if
+
+            ! Check if it is an x-point
+            if (.not. movetoback(i)) then
+                if (vert%neigP(tv, 2) > 4) then ! crude check for x-point 
+                    ! Prioritize, move to front 
+                    movetofront(i) = .true. 
+                end if
+            end if
+
+            ! Deallocate 
+            deallocate(tvn)
+        end do
+
+        ! Rebuild cvertlist
+        allocate(temp(size(cvertlist, 1)))
+        temp = cvertlist
+        startindex = 1
+        endindex = count(movetofront)
+        cvertlist(startindex:endindex) = pack(temp, movetofront)
+        startindex = startindex + endindex 
+        endindex = endindex + count((.not. movetoback) .and. (.not. movetofront))
+        cvertlist(startindex:endindex) = pack(temp, (.not. movetoback) .and. (.not. movetofront))
+        startindex = endindex + 1
+        endindex = endindex + count(movetoback)
+        cvertlist(startindex:endindex) = pack(temp, movetoback)
+
+        deallocate(temp)
+        deallocate(movetoback, movetofront)
+        
+        ! Initialize   
+        allocate(isconstrained(grid%faces%ntot))
+        isconstrained(:) = .false.
+
+        ! Loop 
+        vpc = 0 ! face counter
+        allocate(vpairs(grid%faces%ntot, 2))! allocate too big, trim later
+
+        do i = 1, size(cvertlist, 1)
+            ! Get the current vertex
+            tv = cvertlist(i)
+
+            ! Get the neighbours of this vertex
+            allocate(tvn(vert%neigP(tv, 2)))
+            tvn = vert%neiglist(vert%neigP(tv, 1):vert%neigP(tv, 1)+vert%neigP(tv, 2)-1)
+
+            ! Get the fieldline ID 
+            tID = vert%fieldlineID(tv)
+
+            ! Check if zero 
+            if (tID .eq. 0) then ! this is a vertex without fieldline 
+                ! Check which faces are aligned 
+                allocate(isperp(size(tvn, 1)))
+
+                ! Loop over all vertex neighbours 
+                do j = 1, size(tvn, 1)
+                    ! Get normalized face vector 
+                    tx = x(tvn(j)) - x(tv)
+                    ty = y(tvn(j)) - y(tv)
+                    tn = (tx**2 + tx**2)**0.5
+                    tx = tx/tn 
+                    ty = ty/tn
+                    
+                    ! Get normalized magnetic field vector 
+                    bx = (Btx(tv) + Btx(tvn(j)))*0.5
+                    by = (Bty(tv) + Bty(tvn(j)))*0.5
+                    bn = (bx**2 + by**2)**0.5
+                    bx = bx/bn ! normalize 
+                    by = by/bn
+
+                    ! Compute dot product 
+                    dotprod = tx*bx + ty*by 
+
+                    ! Check 
+                    if (abs(dotprod) < epsortho) then 
+                        isperp(j) = .true.
+                    endif 
+
+                end do
+
+                ! Retain perpendicular faces only if 2 found
+                if (count(isperp) == 2) then
+                    allocate(temp(size(tvn, 1)))
+                    temp = tvn 
+                    deallocate(tvn)
+                    allocate(tvn(count(isperp)))
+                    tvn = pack(temp, isperp)
+
+                    deallocate(temp)
+                else 
+                    deallocate(tvn)
+                    allocate(tvn(0))
+                end if
+
+                ! Deallocate 
+                deallocate(isperp)
+            else
+                ! Check which vertices have the same ID 
+                allocate(cID(size(tvn, 1)))
+                cID = tID .eq. vert%fieldlineID(tvn)
+
+                ! Extract vertices that have NOT the same ID
+                allocate(temp(size(tvn, 1)))
+                temp = tvn
+                deallocate(tvn)
+                allocate(tvn(count(.not. cID)))
+                tvn = pack(temp, .not. cID)
+                deallocate(temp)
+
+                ! If two nodes remain, and they have different field
+                ! line IDs, then constrain. Otherwise don't (probably 
+                ! stacked triangles)
+                if (size(tvn, 1) == 2) then 
+                    nbID = vert%fieldlineID(tvn)
+                    if (nbID(1) == nbID(2)) then 
+                        deallocate(tvn)
+                        allocate(tvn(0))
+                    end if 
+                else
+                    deallocate(tvn)
+                    allocate(tvn(0))
+                end if
+
+                ! Deallocate 
+                deallocate(cID)
+            end if
+
+            ! Constrain each pair 
+            do j = 1, size(tvn, 1)
+                ! Get the face 
+                call MapVertexPairToFace(tv, tvn(j), grid%faces%vert, &
+                    grid%faces%ntot, tf)
+
+                ! Check initial perpendicularity
+                isfaceperp = .true.
+                if (checkperp) then 
+                    ! Get normalized face vector 
+                    tx = x(tvn(j)) - x(tv)
+                    ty = y(tvn(j)) - y(tv)
+                    tn = (tx**2 + tx**2)**0.5
+                    tx = tx/tn 
+                    ty = ty/tn
+                    
+                    ! Get normalized magnetic field vector 
+                    bx = (Btx(tv) + Btx(tvn(j)))*0.5
+                    by = (Bty(tv) + Bty(tvn(j)))*0.5
+                    bn = (bx**2 + by**2)**0.5
+                    bx = bx/bn ! normalize 
+                    by = by/bn
+
+                    ! Compute dot product 
+                    dotprod = tx*bx + ty*by 
+
+                    ! Check 
+                    if (abs(dotprod) > epsperp) then
+                        ! Not perpendicular, don't consider this face 
+                        isfaceperp = .false.
+                    end if 
+                end if
+
+                ! Check if there is a boundary vertex in this edge which 
+                ! already has been constrained. 
+                if ( (.not. isconstrained(tf)) & ! should not be constrained
+                    .and. ( (vcc(tvn(j)) < maxvcc) .or. (vcc(tv) < maxvcc) ) & ! a vertex has less than 2 constraints already imposed
+                    .and. ( (.not. vert%BV(tvn(j))) .or. (.not. vert%BV(tv))) & ! at least one is an internal vertex
+                    .and. ( isfaceperp ) & ! the face is initially almost orthogonal 
+                    .and. ( ( northcon(tvn(j)) < maxnorthcon(tvn(j)) ) .and. ( northcon(tv) < maxnorthcon(tv) ) ) &
+                    ) then
+
+                    ! Add
+                    vpc = vpc + 1
+                    vpairs(vpc, :) = [tv, tvn(j)]
+
+                    ! Update counter - first attribute to BV if possible
+                    if (vert%BV(tv) .or. vert%BV(tvn(j)) ) then 
+                        if (vert%BV(tv)) then 
+                            tbv = tv 
+                            tnbv = tvn(j)
+                        else
+                            tbv = tvn(j) 
+                            tnbv = tv 
+                        end if
+
+                        ! Check if we can add the constraint there
+                        if ( ( northcon(tbv) < maxnorthcon(tbv) ) &
+                            .and. vcc(tbv) < maxvcc ) then 
+                            vcc(tbv) = vcc(tbv) + 1 
+                        else
+                            vcc(tnbv) = vcc(tnbv) + 1 
+                        end if
+                    else
+                        if ( vcc(tv) < maxvcc ) then 
+                            vcc(tv) = vcc(tv) + 1
+                        else
+                            vcc(tvn(j)) = vcc(tvn(j)) +  1
+                        end if 
+                    end if
+
+                    ! Update counters 
+                    northcon(tvn(j)) = northcon(tvn(j)) + 1
+                    northcon(tv) = northcon(tv) + 1
+                    isconstrained(tf) = .true. 
+
+                end if 
+                    
+            end do
+
+            ! Deallocate 
+            deallocate(tvn)
+        end do
+
+        ! Update constraint quantities
+        !=============================
+        ! Constraints
+        constraints%ncon = vpc 
+        constraints%nedges = vpc
+        allocate(constraints%edgevert(constraints%nedges, 2))
+        constraints%edgevert = vpairs(1:vpc, :)
+
+        ! Visualize
+        if (debugplots) then 
+
+            ! Plot the faces that are constrained
+
+            ! Compute face centers
+            allocate(xf(vpc), yf(vpc))
+            xf = 0.5*(x(constraints%edgevert(:, 1)) + x(constraints%edgevert(:, 2)))
+            yf = 0.5*(y(constraints%edgevert(:, 1)) + y(constraints%edgevert(:, 2)))
+            call PlotGridWithPoints(grid, xf, yf, '-p')
+            deallocate(xf, yf)
+
+        end if
+        
+
+        ! Housekeeping
+        !=============
+        ! Deallocate
+        deallocate(includeboxlbx, includeboxlby, includeboxubx, &
+            includeboxuby, excludeboxlbx, excludeboxlby, excludeboxubx, &
+            excludeboxuby, Btx, Bty, cvert, boxcheck, vpairs)
+
+        ! Deassociate
+        end associate
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateOrthogonalityConstraints(constraints, G, gradG, & 
+        hessG, grid, magneticField, environment, dogradient, &
+        dohessian, designvariables, lambda)
+
+        ! Description
+        !============
+        ! The orthogonality constraints are evaluated per vertex pair, 
+        ! where one tries to satisfy the following condition:
+        !
+        !       gx*dx + gy*dy = 0.
+        !
+        ! This ensures orthogonality of the face w.r.t. the magnetic 
+        ! field, given by its components gx and gy. dx and dy are the 
+        ! face tangents (they can be normalized, but this is not 
+        ! strictly necessary, same for the magnetic field. This does, 
+        ! however, influence the absolute value of the constraint). 
+
+
+        ! Notes
+        !======
+        
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(OrthogonalityConstraintsUDT)  :: constraints 
+        real(R8), allocatable               :: G(:) 
+        real(R8), allocatable               :: lambda(:)
+        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(GridUDT)                       :: grid 
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        logical                             :: dogradient, dohessian
+        class(DesignVariablesGDUDT)         :: designvariables 
+
+        ! Loop variables
+        integer(I8)                         :: i, ic, ivg, ivh, k
+        integer(I8), allocatable            :: valindex(:), conindex(:), &
+            row(:), col(:)
+
+        ! Auxiliary variables
+        real(R8), allocatable               :: valxx(:), valxy(:), valyx(:), &
+            valyy(:), xv(:, :), yv(:, :), xf(:), yf(:), gxf(:), gyf(:), &
+            dx(:), dy(:), gxxf(:), gxyf(:), gyxf(:), gyyf(:), gxxxf(:), &
+            gxyxf(:), gyxxf(:), gyyxf(:), gxxyf(:), gxyyf(:), gyxyf(:), &
+            gyyyf(:)
+        
+        ! Initialize
+        !===========
+        ! Checks
+        if ( (.not. allocated(lambda)) .and. dohessian) then
+            ! Throw error
+            call gdErrorHandler('When evaluating the hessian vector' &
+                // ' multiplication, lambda must be given')
+        end if
+
+        if (size(lambda) .ne. constraints%ncon) then
+            ! Lambda should have the same size as the constraints
+            call gdErrorHandler('Lambda should have the same size ' &
+                // 'as the constraint vector')
+        end if
+
+        ! Counters
+        ic = 0 ! constraint counter (local)
+        ivg = 0 ! value index for gradient
+        ivh = 0 ! value index for hessian
+
+        ! Associate
+        associate(&
+            interp  => magneticField%interp,    &
+            nc      => constraints%ncon,        &
+            ev      => constraints%edgevert,    &
+            vert    => grid%vert,               &
+            nv      => grid%vert%ntot,          &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
+
+        ! Constraint value
+        !=================
+        ! Allocate
+        if (.not. allocated(G)) then 
+            allocate(G(nc))
+        else
+            if (size(G) .ne. nc) then 
+
+                ! Print a warning and reallocate
+                print *, 'EvaluateEdgelengthsConstraints: ' &
+                    // 'Wrong dimension of G, reallocating'
+                
+                ! Deallocate and reallocate
+                deallocate(G)
+                allocate(G(nc))
+
+            end if
+        end if
+
+        ! Precompute
+        allocate(xv(nc, 2), yv(nc, 2), xf(nc), yf(nc), gxf(nc), gyf(nc), &
+            dx(nc), dy(nc))
+
+        xv(:, 1) = x(ev(:, 1))
+        xv(:, 2) = x(ev(:, 2)) 
+        yv(:, 1) = y(ev(:, 1))
+        yv(:, 2) = y(ev(:, 2))
+        dx = xv(:, 2) - xv(:, 1)
+        dy = yv(:, 2) - yv(:, 1)
+        xf = 0.5*sum(xv, 2)
+        yf = 0.5*sum(yv, 2) 
+        call EvaluateBicubicSplineInterpolant(xf, yf, gxf, &
+            interp, '0', '1')
+        call EvaluateBicubicSplineInterpolant(xf, yf, gyf, &
+            interp, '1', '0')
+        gxf = -gxf ! take correct sign
+
+        ! Evaluate
+        G = gxf*dx + gyf*dy
+
+        ! Constraint gradient
+        !====================
+        if (dogradient) then 
+            ! Initialize
+            jacG%nrow = nc 
+            jacG%ncol = designvariables%nphi
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates')
+
+                ! Order in jacobian: first x, then y. 
+
+                ! Allocate
+                jacG%nval = 4*nc
+                call jacG%Allocate() 
+                allocate(conindex(nc))
+                allocate(valindex(nc))
+
+                ! Precompute
+                allocate(gxxf(nc), gxyf(nc), gyxf(nc), gyyf(nc))
+                call EvaluateBicubicSplineInterpolant(xf, yf, gxxf, &
+                    interp, '1', '1')
+                call EvaluateBicubicSplineInterpolant(xf, yf, gxyf, &
+                    interp, '0', '2')
+                call EvaluateBicubicSplineInterpolant(xf, yf, gyxf, &
+                    interp, '1', '1')
+                call EvaluateBicubicSplineInterpolant(xf, yf, gyyf, &
+                    interp, '2', '0')
+                gxxf = -gxxf ! correct sign
+                gxyf = -gxyf ! correct sign
+
+                ! Build constraint indices
+                conindex = [(k, k = ic+1, ic+nc)]
+
+                ! x-contribution
+                !---------------
+                ! Build indices for xv1
+                valindex = [(k, k = ivg+1, ivg+nc)]
+
+                ! Add values
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = ev(:, 1)
+                jacG%val(valindex) = (-gxf + 0.5*dx*gxxf + 0.5*dy*gyxf)
+
+                ! Update counters
+                ivg = ivg + nc
+
+                ! Build indices for xv2
+                valindex = [(k, k = ivg+1, ivg+nc)]
+
+                ! Add values
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = ev(:, 2)
+                jacG%val(valindex) = (gxf + 0.5*dx*gxxf + 0.5*dy*gyxf)
+
+                ! Update counters
+                ivg = ivg + nc
+
+                ! y-contribution
+                !---------------
+                ! Build indices for yv1
+                valindex = [(k, k = ivg+1, ivg+nc)]
+
+                ! Add values
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = ev(:, 1) + grid%vert%ntot 
+                jacG%val(valindex) = (-gyf + 0.5*dy*gyyf + 0.5*dx*gxyf)
+
+                ! Update counters
+                ivg = ivg + nc
+
+                ! Build indices for yv2
+                valindex = [(k, k = ivg+1, ivg+nc)]
+
+                ! Add values
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = ev(:, 2) + grid%vert%ntot 
+                jacG%val(valindex) = (gyf + 0.5*dy*gyyf + 0.5*dx*gxyf)
+
+                ! Update counters
+                ivg = ivg + nc
+
+                ! Build gradient
+                !---------------
+                gradG%nrow = jacG%ncol 
+                gradG%ncol = jacG%nrow 
+                gradG%nval = jacG%nval 
+                
+                call gradG%Allocate()
+                gradG%row = jacG%col 
+                gradG%col = jacG%row
+                gradG%val = jacG%val
+
+                ! Housekeeping
+                call jacG%Deallocate()
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+
+        ! Constraint hessian
+        !===================
+        if (dohessian) then 
+
+            ! Initialize
+            ic = 0
+            hessG%nrow = designvariables%nphi 
+            hessG%ncol = designvariables%nphi 
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates')
+            
+                ! Initialize
+                !===========
+                ! Allocate
+                hessG%nval = 16*nc 
+                if (.not. allocated(valindex)) then
+                    allocate(valindex(nc))
+                end if
+                if (.not. allocated(conindex)) then 
+                    allocate(conindex(nc))
+                end if 
+                if (.not. allocated(hessG%val)) then
+                    call hessG%Allocate()
+                end if
+                allocate(valxx(4*nc))
+                allocate(valxy(4*nc))
+                allocate(valyx(4*nc))
+                allocate(valyy(4*nc))
+                allocate(row(4*nc), col(4*nc))
+
+                ! Precompute
+                allocate(gxxxf(nc), gxyxf(nc), gyxxf(nc), gyyxf(nc), &
+                    gxxyf(nc), gxyyf(nc), gyxyf(nc), gyyyf(nc))
+
+                call EvaluateBicubicSplineInterpolant(xf, yf, gxxxf, &
+                    interp, '2', '1')
+                call EvaluateBicubicSplineInterpolant(xf, yf, gxyxf, &
+                    interp, '1', '2')
+                call EvaluateBicubicSplineInterpolant(xf, yf, gyxxf, &
+                    interp, '2', '1')
+                call EvaluateBicubicSplineInterpolant(xf, yf, gyyxf, &
+                    interp, '3', '0') 
+                call EvaluateBicubicSplineInterpolant(xf, yf, gxxyf, &
+                    interp, '1', '2')
+                call EvaluateBicubicSplineInterpolant(xf, yf, gxyyf, &
+                    interp, '0', '3')
+                call EvaluateBicubicSplineInterpolant(xf, yf, gyxyf, &
+                    interp, '1', '2')
+                call EvaluateBicubicSplineInterpolant(xf, yf, gyyyf, &
+                    interp, '2', '1')
+                gxxxf = -gxxxf 
+                gxyxf = -gxyxf 
+                gxxyf = -gxxyf 
+                gxyyf = -gxyyf 
+
+                ! Compute contributions
+                !======================
+
+                ! Build constraint indices
+                conindex = [(k, k = ic+1, ic+nc)]
+
+                ! v1, v1
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+                row(valindex) = ev(:, 1)
+                col(valindex) = ev(:, 1)
+                valxx(valindex) = (0.25*dx*gxxxf - 1.0*gxxf + 0.25*dy*gyxxf)*lambda ! x1x1
+                valxy(valindex) = (0.25*dx*gxyxf - 0.5*gyxf - 0.5*gxyf + 0.25*dy*gyyxf)*lambda ! x1y1
+                valyx(valindex) = (0.25*dx*gxyxf - 0.5*gyxf - 0.5*gxyf + 0.25*dy*gyyxf)*lambda ! y1x1
+                valyy(valindex) = (0.25*dx*gxyyf - 1.0*gyyf + 0.25*dy*gyyyf)*lambda ! y1y1
+                ivh = ivh + nc 
+
+                ! v1, v2
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+                row(valindex) = ev(:, 1)
+                col(valindex) = ev(:, 2)
+                valxx(valindex) = (0.25*dx*gxxxf + 0.25*dy*gyxxf)*lambda ! x1x2
+                valxy(valindex) = (0.5*gyxf - 0.5*gxyf + 0.25*dx*gxyxf + 0.25*dy*gyyxf)*lambda ! x1y2
+                valyx(valindex) = (0.5*gxyf - 0.5*gyxf + 0.25*dx*gxyxf + 0.25*dy*gyyxf)*lambda ! y1x2
+                valyy(valindex) = (0.25*dx*gxyyf + 0.25*dy*gyyyf)*lambda ! y1y2
+                ivh = ivh + nc 
+
+                ! v2, v1
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+                row(valindex) = ev(:, 2)
+                col(valindex) = ev(:, 1)
+                valxx(valindex) = (0.25*dx*gxxxf + 0.25*dy*gyxxf)*lambda ! x2x1
+                valxy(valindex) = (0.5*gxyf - 0.5*gyxf + 0.25*dx*gxyxf + 0.25*dy*gyyxf)*lambda ! x2y1
+                valyx(valindex) = (0.5*gyxf - 0.5*gxyf + 0.25*dx*gxyxf + 0.25*dy*gyyxf)*lambda ! y2x1
+                valyy(valindex) = (0.25*dx*gxyyf + 0.25*dy*gyyyf)*lambda ! y1y2
+                ivh = ivh + nc 
+
+                ! v2, v2
+                valindex = [(k, k = ivh+1, ivh+nc)] 
+                row(valindex) = ev(:, 2)
+                col(valindex) = ev(:, 2)
+                valxx(valindex) = (1.0*gxxf + 0.25*dx*gxxxf + 0.25*dy*gyxxf)*lambda ! x2x2
+                valxy(valindex) = (0.5*gxyf + 0.5*gyxf + 0.25*dx*gxyxf + 0.25*dy*gyyxf)*lambda ! x2y2
+                valyx(valindex) = (0.5*gxyf + 0.5*gyxf + 0.25*dx*gxyxf + 0.25*dy*gyyxf)*lambda ! y2x2
+                valyy(valindex) = (1.0*gyyf + 0.25*dx*gxyyf + 0.25*dy*gyyyf)*lambda ! y2y2
+                ivh = ivh + nc 
+
+                ! Build full hessian
+                !===================
+                hessG%row = [row, row, row+vert%ntot, row+vert%ntot]
+                hessG%col = [col, col+vert%ntot, col, col+vert%ntot]
+                hessG%val = [valxx, valxy, valyx, valyy]
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+        
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+        ! Deallocate
+        deallocate(gxf, gyf, xv, yv, xf, yf, dx, dy)
+
+        if (dogradient) then 
+            deallocate(valindex, conindex)
+            deallocate(gxxf, gxyf, gyxf, gyyf)
+        end if 
+
+        if (dohessian) then 
+            if (allocated(valindex)) then 
+                deallocate(valindex, conindex)
+            end if 
+            deallocate(valxx, valxy, valyx, valyy)
+            deallocate(gxxxf, gxyxf, gyxxf, gyyxf, gxxyf, gxyyf, &
+                gyxyf, gyyyf)  
         end if
 
     end subroutine
