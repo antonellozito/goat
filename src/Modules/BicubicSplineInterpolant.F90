@@ -601,7 +601,7 @@ module BicubicSplineInterpolant
         notfound = .true. 
 
         ! Check if the value lies inside the range
-        if ((xq < (minval(x))) .or. (xq > maxval(x))) then
+        if ((xq < (x(1))) .or. (xq > x(size(x, 1)))) then
             ! Outside of bin
             notfound = .false. 
             ind = 0
