@@ -12,18 +12,57 @@
 ##
 ## Variables are defined in config.mk
 
+## % Library paths
+## %==============
+## LAPACKPATH 			: LAPACK library path (user defined)
+LAPACKPATH = /data/leuven/320/vsc32061/lapack/lapack/liblapack.a
+## BLASPATH 			: BLAS library path (user defined)
+BLASPATH = /data/leuven/320/vsc32061/lapack/lapack/librefblas.a
+## UMFPACKPATH 			: UMFPACK library path (user defined)
+UMFPACKPATH = -lumfpack
+
 ##
-## % 
+## % Targets
+## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = General Optimization Modules Auxiliary IO_b25 IO_carre IO_output IO_input  Setup  Drivers Numerics
+GDRUN_TARGETS = General Optimization Modules Auxiliary IO_b25 IO_carre \
+    IO_output IO_input  Setup  Drivers Numerics
 
 ##
 ## % Compiler
 ## %=========
 ## FC			: Compiler to be used
 FC = gfortran
-## CFLAGS			: Compiler flags
-CFLAGS = -c -g -Og -Wall -pg 
+## CFLAGS			: Compiler flags for standard compilation (may be overridden)
+CFLAGS = -c -Wall -O3
+## CFLAGS_OMP	: compiler flags for OpenMP 
+CFLAGS_OMP = -c -Wall -fopenmp
+## CFLAGS_DEBUG		: compiler flags for debugging
+CFLAGS_DEBUG = -c -g -Wall -pg  -O0 
+## CFLAGS_OMP_DEBUG	: compiler flags for OpenMP and debugging
+CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
+
+## % Linker
+## %=======
+## LFLAGS			: linking flags to be used (apart from libraries)
+LFLAGS =  
+
+## LFLAGS_DEBUG 	: linking flags for debugging
+LFLAGS_DEBUG = -pg -g
+
+## LFLAGS			: linking flags to be used for openMP
+LFLAGS_OMP = -pg -g -fopenmp
+
+## LFLAGS_DEBUG 	: linking flags for debugging
+LFLAGS_OMP_DEBUG = -pg -g -fopenmp
+
+# Set flags
+#==========
+# Set the CFLAGS
+CFLAGS = $(CFLAGS_DEBUG)
+
+# Set the linking flags
+LFLAGS = $(LFLAGS_DEBUG)
 
 ##
 ## % Files

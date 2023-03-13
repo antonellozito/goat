@@ -13,11 +13,10 @@ include config.mk
 ##
 ## % Main targets
 ## %=============
-## gdrun			: Create executable for grid deformation
-##
 # Linking
+## gdrun			: Create executable for grid deformation
 gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
-	$(FC) -o gdrun *.o -pg -l /data/leuven/320/vsc32061/lapack/lapack/liblapack.a /data/leuven/320/vsc32061/lapack/lapack/librefblas.a -lumfpack 
+	$(FC) -o gdrun *.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
 
 ## % Runfiles
 ## %=========
@@ -101,7 +100,7 @@ gd:
 # Cleanup
 .PHONY: clean
 clean: 
-	rm *.o gdrun; rm $(GDRUN_TARGETS)
+	rm *.o $(wildcard gdrun*); rm $(GDRUN_TARGETS)
 	
 
 ## help			: print out documentation
