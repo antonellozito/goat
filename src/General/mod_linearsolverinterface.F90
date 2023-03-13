@@ -404,7 +404,7 @@ module mod_linearsolverinterface
         ! Compute the solution
         call UmfpackSolveDI(umfpack_a, Ap, Ai, Ax, sol_c, b, numeric, &
             control, info)
-            print *, info(1)
+        ! print *, info(1)
 
         ! Destroy symbolic
         call UmfpackFreeSymbolicDI(symbolic)
