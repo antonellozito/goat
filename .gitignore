@@ -13,8 +13,8 @@ inputfiles/*
 # ignore compiler files
 *.o
 
-# ignore data files
-*.dat
+# ignore .dat files in plotter
+src/Visualization/*.dat
 
 # ignore output files
 *.out
