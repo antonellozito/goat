@@ -28,6 +28,9 @@ UMFPACKPATH = -lumfpack
 GDRUN_TARGETS = General Optimization Modules Auxiliary IO_b25 IO_carre \
     IO_output IO_input  Setup  Drivers Numerics
 
+## GOAT_TARGETS             : Targets to be run for the full goat
+GOAT_TARGETS = $(GDRUN_TARGETS) 
+
 ##
 ## % Compiler
 ## %=========

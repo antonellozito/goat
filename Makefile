@@ -18,12 +18,19 @@ include config.mk
 gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
 	$(FC) -o gdrun *.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
 
+goat: $(GOAT_TARGETS) goat.o
+	$(FC) -o goat *.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
+
 ## % Runfiles
 ## %=========
-## MainRunFileGridDeformation.o			: main runfile 
+## MainRunFileGridDeformation.o			: main runfile grid deformation
 # Compiling
 MainRunFileGridDeformation.o: Runfiles/MainRunFileGridDeformation.F90
 	$(FC) $(CFLAGS) Runfiles/MainRunFileGridDeformation.F90 
+
+## Goat.o 			: main run file goat
+goat.o: Runfiles/Goat.F90
+	$(FC) $(CFLAGS) Runfiles/Goat.F90 
 
 ##
 ## % Folder compilation targets
@@ -100,7 +107,8 @@ gd:
 # Cleanup
 .PHONY: clean
 clean: 
-	rm *.o $(wildcard gdrun*); rm $(GDRUN_TARGETS)
+	rm *.o $(wildcard gdrun*); rm $(GDRUN_TARGETS); \
+	rm goat
 	
 
 ## help			: print out documentation
