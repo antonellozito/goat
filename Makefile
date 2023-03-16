@@ -35,6 +35,11 @@ goat.o: Runfiles/Goat.F90
 ##
 ## % Folder compilation targets
 ## %===========================
+## Constants 		: compile files containing constants
+Constants: $(CONSTANTS_FILES) 
+	$(FC) $(CFLAGS) $^
+	touch Constants 
+
 ## General 			: compile general files and modules
 General: $(GENERAL_FILES)
 	$(FC) $(CFLAGS) $^

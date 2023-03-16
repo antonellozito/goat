@@ -25,8 +25,8 @@ UMFPACKPATH = -lumfpack
 ## % Targets
 ## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = General Optimization Modules Auxiliary IO_b25 IO_carre \
-    IO_output IO_input  Setup  Drivers Numerics
+GDRUN_TARGETS = Constants General Optimization Modules Auxiliary IO_b25  \
+    IO_carre IO_output IO_input  Setup  Drivers Numerics
 
 ## GOAT_TARGETS             : Targets to be run for the full goat
 GOAT_TARGETS = $(GDRUN_TARGETS) 
@@ -105,3 +105,6 @@ NUMERICS_FILES = $(wildcard src/Numerics/*.F90)
 
 ## OPTIMIZATION 		: optimization file generation names (.F90) - unsequenced
 OPTIMIZATION_FILES = $(wildcard src/Optimization/*.F90)
+
+## CONSTANTS            : constants such as precision and special characters (.F90) - unsequenced
+CONSTANTS_FILES = $(wildcard src/Constants/*.F90)
