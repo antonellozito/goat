@@ -117,7 +117,6 @@ module goatmod_userinput
 
         ! Mappings
         integer(I8), allocatable    :: facelabelsubfrom(:)
-        integer(I8), allocatable    :: test(:, :)
 
     contains
 
@@ -207,7 +206,6 @@ module goatmod_userinput
 
         ! Mappings
         allocate(options%facelabelsubfrom(0)) ! assume no mappings
-        allocate(options%test(0, 0))
 
     end subroutine
 
@@ -274,9 +272,6 @@ module goatmod_userinput
         field = 'GOAToptions.GDtoGA.facelabelsubfrom'
         call ExtractOptionValueInteger1D(fid, field, &
             options%facelabelsubfrom)
-        field = 'gd.design.ec.par.orthogonality.includeboxx'
-        call ExtractOptionValueInteger2D(fid, field, &
-            options%test)
         
 
         ! Housekeeping
@@ -464,7 +459,198 @@ module goatmod_userinput
                 val = tempi
 
                 ! Print
-                print *, key, ' = ', val(i, :)
+                print *, key, ' = ', val(1, :)
+                do i = 2, size(val, 1) ! print row per row
+                    print *, val(i, :)
+                end do 
+            else 
+                ! Print
+                print *, key, ' = ', val, '(default, illegal value in file)'
+            end if 
+
+        else 
+
+            ! Print  
+            print *, key, ' = ', val, ' (default, could not find in file)'
+
+        end if
+
+    end subroutine
+
+    ! Extract scalar integer
+    subroutine ExtractOptionValueReal0D(fid, key, val)
+
+        ! Description
+        !============
+        ! Main driver to extract scalar real value from a formatted
+        ! .dat input file. It is assumed that the file has been opened 
+        ! and exists (its unit is then given by fid). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer, intent(in)                     :: fid
+        character(:), allocatable, intent(in)   :: key 
+        real(R8)                                :: val 
+
+        ! Auxiliary
+        logical                                 :: islegal, isfound
+        real(R8)                                :: tempr
+        character(:), allocatable               :: temp
+
+        ! Initialize
+        !===========
+        islegal = .false. 
+
+        ! Search
+        !=======
+        ! Get the value belonging to the key in character array format
+        call GetValueWithKey(fid, key, temp, isfound)
+
+        ! Check if it is found, otherwise exit
+        if (isfound) then 
+
+            ! Attribute
+            call ExtractRealFromString0D(temp, tempr, islegal)
+
+            ! Check
+            if (islegal) then 
+                ! Attribute
+                val = tempr
+
+                ! Print
+                print *, key, ' = ', val 
+            else 
+                ! Print
+                print *, key, ' = ', val, '(default, illegal value in file)'
+            end if 
+
+        else 
+
+            ! Print  
+            print *, key, ' = ', val, ' (default, could not find in file)'
+
+        end if
+
+    end subroutine
+
+    ! Extract array integer
+    subroutine ExtractOptionValueReal1D(fid, key, val)
+
+        ! Description
+        !============
+        ! Main driver to extract array real values from a formatted
+        ! .dat input file. It is assumed that the file has been opened 
+        ! and exists (its unit is then given by fid). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer, intent(in)                     :: fid
+        character(:), allocatable, intent(in)   :: key 
+        real(R8), allocatable                   :: val(:) 
+
+        ! Auxiliary
+        logical                                 :: islegal, isfound
+        real(R8), allocatable                   :: tempr(:) 
+        character(:), allocatable               :: temp
+
+        ! Initialize
+        !===========
+        ! Set logicals
+        islegal = .false.
+
+        ! Deallocate if already allocated - can't know the size
+        if (allocated(val)) then 
+            deallocate(val) 
+        end if 
+
+        ! Search
+        !=======
+        ! Get the value belonging to the key in character array format
+        call GetValueWithKey(fid, key, temp, isfound)
+
+        ! Check if it is found, otherwise exit
+        if (isfound) then 
+
+            ! Attribute
+            call ExtractRealFromString1D(temp, tempr, islegal)
+
+            ! Check
+            if (islegal) then 
+                ! Attribute
+                allocate(val(size(tempr)))
+                val = tempr
+
+                ! Print
+                print *, key, ' = ', val 
+            else 
+                ! Print
+                print *, key, ' = ', val, '(default, illegal value in file)'
+            end if 
+
+        else 
+
+            ! Print  
+            print *, key, ' = ', val, ' (default, could not find in file)'
+
+        end if
+
+    end subroutine
+
+    ! Extract matrix integer
+    subroutine ExtractOptionValueReal2D(fid, key, val)
+
+        ! Description
+        !============
+        ! Main driver to extract matrix integer values from a formatted
+        ! .dat input file. It is assumed that the file has been opened 
+        ! and exists (its unit is then given by fid). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer, intent(in)                     :: fid
+        character(:), allocatable, intent(in)   :: key 
+        real(R8), allocatable                   :: val(:, :) 
+
+        ! Auxiliary
+        logical                                 :: islegal, isfound
+        real(R8), allocatable                   :: tempr(:, :) 
+        character(:), allocatable               :: temp
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Set logicals
+        islegal = .false.
+
+        ! Deallocate if already allocated - can't know the size
+        if (allocated(val)) then 
+            deallocate(val) 
+        end if 
+
+        ! Search
+        !=======
+        ! Get the value belonging to the key in character array format
+        call GetValueWithKey(fid, key, temp, isfound)
+
+        ! Check if it is found, otherwise exit
+        if (isfound) then 
+
+            ! Attribute
+            call ExtractRealFromString2D(temp, tempr, islegal)
+
+            ! Check
+            if (islegal) then 
+                ! Attribute
+                allocate(val(size(tempr, 1), size(tempr, 2)))
+                val = tempr
+
+                ! Print
+                print *, key, ' = ', val(1, :)
                 do i = 2, size(val, 1) ! print row per row
                     print *, val(i, :)
                 end do 
