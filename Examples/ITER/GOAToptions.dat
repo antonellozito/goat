@@ -5,8 +5,9 @@ VERSION 1.00.00
 #                                                                         #
 #=========================================================================#
 # See SetGOAToptions for a description of the options. 
-'GOAToptions.vis' '0'
-'GOAToptions.debug' '0'
+'GOAToptions.driver'     'GD'
+'GOAToptions.vis'        '0'
+'GOAToptions.debug'      '0'
 'GOAToptions.readfile'   'traduit.out.b2'
 'GOAToptions.strfile'    'structure.dat'
 'GOAToptions.mfloaddir'  '.'
