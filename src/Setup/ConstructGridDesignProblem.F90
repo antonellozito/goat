@@ -17,6 +17,7 @@ subroutine ConstructGridDesignProblem(optimizationdriver, &
     !===========
     ! Declare modules
     use gdmod_types 
+    use gdmod_userinput
     use gdmod_designvariables
     use gdmod_optimizationengine
     ! use gdmod_costfunction

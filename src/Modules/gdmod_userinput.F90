@@ -19,26 +19,98 @@ module gdmod_userinput
     ! The usual
     implicit none
     save
-    private 
+    public 
 
     ! Read namelist from file
     ! namelist /gridsmoothing/ 
 
     ! All functions
-    public SetRunfileOptions
-    public SetExportOptions
-    public SetDesignOptions
-    public SetGridOptions
-    public SetNumOptions
-    public SetMagneticFieldOptions
-    public SetEnvironmentOptions 
-    public SetVesselOptions
-
+    
     !==================================================================!
     !                                                                  !
     !                               TYPES                              !
     !                                                                  !
     !==================================================================!
+
+    ! Abstract type
+
+    ! Options for the main runfile type
+    type RunfileOptionsUDT
+        character(C32)          :: runtype ! type of run: 'optimize' or 'test'
+        character(C32)          :: gridtype ! type of grid: 'plasma' 
+        character(C32)          :: meth ! method for grid deformation: 'KKT'
+        logical                 :: export ! do export? 
+    end type
+
+    ! Options for exporting
+    type ExportOptionsUDT
+        character(C32)       :: gridformat ! format of grid to export
+    end type
+
+    ! Options for design variables
+    type DesignVariableOptionsUDT
+        character(C32)       :: type ! type of design variables
+    end type
+
+    ! Options for the cost function
+    type CostFunctionOptionsUDT
+        character(C32)       :: type ! the cost function format
+    end type
+
+    ! Options for the constraints
+    type ConstraintOptionsUDT
+        ! Fields for equality constraints
+        logical             :: boundaryfunctions ! impose boundary functions
+        logical             :: fluxfunction ! impose constraints on flux
+        logical             :: xpoints ! impose x-point location
+        logical             :: edgelengths ! impose edge length cons
+        logical             :: orthogonality 
+
+        ! Fields for inequality constraints
+        logical             :: linefolding ! prevent flux line folding
+
+        ! Number of (continuous) constraints
+        integer(I8)         :: neq ! number of equality constraints
+        integer(I8)         :: nineq ! number of inequality constraints 
+    end type
+
+    ! Options for design optimization
+    type DesignOptionsUDT
+        type(CostFunctionOptionsUDT)       :: costfunction
+        type(DesignVariableOptionsUDT)     :: variables
+        type(ConstraintOptionsUDT)         :: constraints
+    end type
+
+    ! Options for the grid
+    type GridOptionsUDT
+        character(C32)          :: inputtype
+        logical                 :: vesselrefine
+        real(R8)                :: vesselmaxdist
+    end type  
+
+    ! Options for numerics
+    type NumOptionsUDT
+        integer(R8)     :: itmax 
+    end type
+
+    ! Options for magnetic field
+    type MagneticFieldOptionsUDT
+        character(C32)       :: readmeth
+    end type
+
+    ! Options for the vessel
+    type VesselOptionsUDT
+        character(C32)       :: readmeth
+        character(C32)       :: geom   
+        real(R8)             :: maxdist
+        logical              :: refine
+        character(:), allocatable :: dir
+    end type
+
+    ! Options for the environment
+    type EnvironmentOptionsUDT
+        character(C32)       :: type
+    end type
     
     !==================================================================!
     !                                                                  !
@@ -47,6 +119,10 @@ module gdmod_userinput
     !==================================================================!
 
     contains 
+
+    !------------------------------------------------------------------!
+    !                            Option setters                        !
+    !------------------------------------------------------------------!
 
     subroutine SetRunfileOptions(options)
         
@@ -253,6 +329,10 @@ module gdmod_userinput
         options%type = 'vessel'
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                            Option readers                        !
+    !------------------------------------------------------------------!
 
 
 end module

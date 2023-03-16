@@ -9,6 +9,7 @@ subroutine ExportGridData(grid,options)
     !===========
     ! Declare modules
     use gdmod_types
+    use gdmod_userinput
 
     ! The usual
     implicit none

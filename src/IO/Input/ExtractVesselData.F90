@@ -14,6 +14,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     !===========
     ! Declare modules
     use gdmod_types 
+    use gdmod_userinput
     use gdmod_interfaces
     use gdmod_plots
     use, intrinsic :: ieee_arithmetic, only: IEEE_Value, IEEE_QUIET_NAN

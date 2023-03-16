@@ -11,6 +11,7 @@ subroutine ReadVessel(filespecifier, vessel, vesseloptions)
     !===========
     ! Declare modules
     use gdmod_types 
+    use gdmod_userinput
     use gdmod_interfaces
 
     ! The usual

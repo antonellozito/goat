@@ -12,6 +12,7 @@ subroutine ConstructMagneticField(mfoptions, magneticField)
     !===========
     ! Declare modules
     use gdmod_types 
+    use gdmod_userinput
     use BicubicSplineInterpolant
 
     ! The usual
