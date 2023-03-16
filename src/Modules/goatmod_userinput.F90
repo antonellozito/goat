@@ -8,7 +8,11 @@
 !============
 ! This module contains the definition of the types and routines used to
 ! process user input for goat. The goat input file is eventually a 
-! set of key-value pairs. The following conventions are adopted:
+! set of key-value pairs. The intention is to read in options or a small
+! amount of data (so no grid data or others, there are dedicated 
+! routines for that). 
+
+! The following conventions are adopted:
 ! 
 ! - The key comes before the value
 ! - The key is delimited by single quotation marks, as is the value. 
@@ -27,18 +31,44 @@
 !       * scalar reals (kind: R8)
 !       * arrays of reals (one- or two-dimensional) (kind: R8)
 !       * arrays of characters (one-dimensional, case-sensitive)
-!   Here, the arrays of integers and scalars should be delimited by 
-!   square brackets. Scalar values may also be delimited with square 
-!   brackets, but this is not required. Values in arrays should be 
-!   separated by commas and semicolons. The commas are used to delimit 
-!   row-wise entries, the semicolons indicate the columns. For one-
+!   Here, the (arrays of) integers and scalars can be delimited by 
+!   square brackets (not required). Values in arrays should be 
+!   separated by commas and semicolons. The commas are used to separate 
+!   row-wise entries, the semicolons indicate the end of rows. For one-
 !   dimensional arrays, only commas should be present. Note that the
 !   precision of reals and integers is fixed. This may be extended in 
 !   the future by defining subroutines that deal with different 
 !   precision specifications. 
 !
-! Note that if a header is present, it will be ignored as long as it 
+
+! Notes
+!======
+! Note 1: if a header is present, it will be ignored as long as it 
 ! does not contain any quotation marks. 
+
+! Note 2: it is important to remark that array and matrix dimensions are 
+! derived from the presence of commas and semicolons. This makes 
+! incrementing some options more easy, but is not suited for large data!
+! This implementation may be extended for different input format, e.g. 
+! where the sizes of the array are parsed beforehand and where one 
+! makes assumptions on the data format used. However, other routines
+! may be more useful for this kind of data. 
+
+! Note 3: though checks are performed on the data to see if everything 
+! is read in correctly, there is no guarantee that all possible errors
+! will be caught. Visual checks by the user can be done based on the 
+! printed output. Matrices will be printed row per row. 
+
+! Note 4: concerning 2D matrices, the following assumptions are made:
+! - The number of row delimiters + 1 is equal to the number of columns.
+!   This means that semicolons should *not* appear at the end of the 
+!   matrix! this is not checked for explicitly
+! - The same holds for row separators: the amount of elements in one
+!   row is assumed to be equal to the number of row separators + 1.
+
+! Note 5: the definition of delimiters etc and which characters are 
+! used for those is given in the general module mod_specialchars. If 
+! desired, one can change the definition there.
 
 module goatmod_userinput
 
@@ -46,6 +76,7 @@ module goatmod_userinput
     !============
     ! Load modules
     use mod_precision
+    use mod_specialchars
     use mod_readwrite
 
     ! The usual
@@ -83,6 +114,10 @@ module goatmod_userinput
         character(:), allocatable   :: driver ! driver to be taken for goat
         integer                     :: itmax 
         character(:), allocatable   :: filepath ! file path to options file
+
+        ! Mappings
+        integer(I8), allocatable    :: facelabelsubfrom(:)
+        integer(I8), allocatable    :: test(:, :)
 
     contains
 
@@ -166,8 +201,13 @@ module goatmod_userinput
 
         ! Set default options
         !====================
+        ! General options
         options%driver = 'GD' ! default driver: grid deformation
         options%itmax = 10
+
+        ! Mappings
+        allocate(options%facelabelsubfrom(0)) ! assume no mappings
+        allocate(options%test(0, 0))
 
     end subroutine
 
@@ -230,6 +270,15 @@ module goatmod_userinput
         field = 'GOAToptions.itmax'
         call ExtractOptionValueInteger0D(fid, field, options%itmax)
 
+        ! Mappings
+        field = 'GOAToptions.GDtoGA.facelabelsubfrom'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%facelabelsubfrom)
+        field = 'gd.design.ec.par.orthogonality.includeboxx'
+        call ExtractOptionValueInteger2D(fid, field, &
+            options%test)
+        
+
         ! Housekeeping
         !=============
         ! Close the file
@@ -242,7 +291,7 @@ module goatmod_userinput
     !                           File processing                        !
     !------------------------------------------------------------------!
 
-    ! Option extractor implementations
+    ! Extract scalar integer
     subroutine ExtractOptionValueInteger0D(fid, key, val)
 
         ! Description
@@ -276,7 +325,7 @@ module goatmod_userinput
         if (isfound) then 
 
             ! Attribute
-            call ExtractIntegerFromString(temp, tempi, islegal)
+            call ExtractIntegerFromString0D(temp, tempi, islegal)
 
             ! Check
             if (islegal) then 
@@ -299,6 +348,141 @@ module goatmod_userinput
 
     end subroutine
 
+    ! Extract array integer
+    subroutine ExtractOptionValueInteger1D(fid, key, val)
+
+        ! Description
+        !============
+        ! Main driver to extract array integer values from a formatted
+        ! .dat input file. It is assumed that the file has been opened 
+        ! and exists (its unit is then given by fid). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer, intent(in)                     :: fid
+        character(:), allocatable, intent(in)   :: key 
+        integer(I8), allocatable                :: val(:) 
+
+        ! Auxiliary
+        logical                                 :: islegal, isfound
+        integer(I8), allocatable                :: tempi(:) 
+        character(:), allocatable               :: temp
+
+        ! Initialize
+        !===========
+        ! Set logicals
+        islegal = .false.
+
+        ! Deallocate if already allocated - can't know the size
+        if (allocated(val)) then 
+            deallocate(val) 
+        end if 
+
+        ! Search
+        !=======
+        ! Get the value belonging to the key in character array format
+        call GetValueWithKey(fid, key, temp, isfound)
+
+        ! Check if it is found, otherwise exit
+        if (isfound) then 
+
+            ! Attribute
+            call ExtractIntegerFromString1D(temp, tempi, islegal)
+
+            ! Check
+            if (islegal) then 
+                ! Attribute
+                allocate(val(size(tempi)))
+                val = tempi
+
+                ! Print
+                print *, key, ' = ', val 
+            else 
+                ! Print
+                print *, key, ' = ', val, '(default, illegal value in file)'
+            end if 
+
+        else 
+
+            ! Print  
+            print *, key, ' = ', val, ' (default, could not find in file)'
+
+        end if
+
+    end subroutine
+
+    ! Extract matrix integer
+    subroutine ExtractOptionValueInteger2D(fid, key, val)
+
+        ! Description
+        !============
+        ! Main driver to extract matrix integer values from a formatted
+        ! .dat input file. It is assumed that the file has been opened 
+        ! and exists (its unit is then given by fid). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer, intent(in)                     :: fid
+        character(:), allocatable, intent(in)   :: key 
+        integer(I8), allocatable                :: val(:, :) 
+
+        ! Auxiliary
+        logical                                 :: islegal, isfound
+        integer(I8), allocatable                :: tempi(:, :) 
+        character(:), allocatable               :: temp
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Set logicals
+        islegal = .false.
+
+        ! Deallocate if already allocated - can't know the size
+        if (allocated(val)) then 
+            deallocate(val) 
+        end if 
+
+        ! Search
+        !=======
+        ! Get the value belonging to the key in character array format
+        call GetValueWithKey(fid, key, temp, isfound)
+
+        ! Check if it is found, otherwise exit
+        if (isfound) then 
+
+            ! Attribute
+            call ExtractIntegerFromString2D(temp, tempi, islegal)
+
+            ! Check
+            if (islegal) then 
+                ! Attribute
+                allocate(val(size(tempi, 1), size(tempi, 2)))
+                val = tempi
+
+                ! Print
+                print *, key, ' = ', val(i, :)
+                do i = 2, size(val, 1) ! print row per row
+                    print *, val(i, :)
+                end do 
+            else 
+                ! Print
+                print *, key, ' = ', val, '(default, illegal value in file)'
+            end if 
+
+        else 
+
+            ! Print  
+            print *, key, ' = ', val, ' (default, could not find in file)'
+
+        end if
+
+    end subroutine
+
+    ! Extract character array
     subroutine ExtractOptionValueCharacter(fid, key, val)
 
         ! Description
@@ -422,11 +606,6 @@ module goatmod_userinput
         ! Loop
         integer(I8)                             :: k
 
-
-        ! Delimiters etc
-        character, parameter                 :: commentchar  = '#'
-        character, parameter                 :: delimiter    = "'"
-
         ! Initialize
         !===========
         ! Set logicals
@@ -468,147 +647,6 @@ module goatmod_userinput
 
 
     end subroutine
-
-    ! Extraction routines
-    subroutine ExtractIntegerFromString(stringval, intval, islegal)
-
-        ! Description
-        !============
-        ! This routine extracts an integer from a string. Some things 
-        ! are checked first: 
-        ! - square brackets must be removed first before extraction, if
-        !   present
-        ! - It must be checked whether the integer is actually an 
-        !   integer 
-        !
-        ! The logical islegal that is returned indicates whether a 
-        ! correct value could be extracted (false if this is not the 
-        ! case).
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        character(:), allocatable, intent(in)   :: stringval
-        integer(I8), intent(out)                :: intval 
-
-        ! Auxiliary
-        integer(I8)                             :: stringlength, &
-            readstatus
-        logical                                 :: islegal ! My lord, is that legal?
-        character(:), allocatable               :: tempc 
-
-        logical, allocatable                    :: check(:), templ(:)
-
-        ! Loop
-        integer(I8)                             :: i, k
-
-        ! Delimiters
-        character, parameter                    :: matstart = '['
-        character, parameter                    :: matend   = ']'
-        character, parameter                    :: decpoint = '.'
-        character, parameter                    :: rowsep   = ','
-        character, parameter                    :: colsep   = ';'
-
-        ! Initialize
-        !===========
-        ! Length of the string
-        stringlength = len(stringval) 
-
-        ! Allocate
-        allocate(check(stringlength), templ(stringlength))
-
-        ! Initialize
-        islegal     = .false. 
-        check(:)    = .false. 
-
-        ! Checks
-        !=======
-        ! Is there a decimal point? 
-        call CompareStringWithCharacter(stringval, decpoint, templ)
-        if (any(templ)) then 
-            return 
-        end if
-
-        ! Is there a row separator? 
-        call CompareStringWithCharacter(stringval, rowsep, templ) 
-        if (any(templ)) then 
-            return 
-        end if
-
-        ! Is there a column separator? 
-        call CompareStringWithCharacter(stringval, colsep, templ) 
-        if (any(templ)) then 
-            return 
-        end if
-
-        ! Remove any square brackets if present
-        call CompareStringWithCharacter(stringval, matstart, templ)
-        check = check .or. templ 
-        call CompareStringWithCharacter(stringval, matend, templ)
-        check = check .or. templ 
-        check = .not. check 
-
-        ! Trim the string
-        k = 1
-        allocate(character(count(check)) :: tempc) 
-        do i = 1, stringlength 
-            if (check(i)) then 
-                tempc(k:k) = stringval(i:i)
-            end if 
-        end do 
-
-        ! Read
-        !=====
-        ! Read
-        read (tempc, *, iostat=readstatus) intval
-
-        ! Check if read succeeded
-        if (readstatus == 0) then 
-            islegal = .true. ! I'll make it legal
-        end if
-
-    end subroutine
-
-    ! Auxiliary routines
-    subroutine CompareStringWithCharacter(s, c, l) 
-
-        ! Description
-        !============
-        ! This routine compares the characters  of a string s to the 
-        ! character given in c. The logical l is of length len(s) and 
-        ! indicates which characters are the same. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        character(:), allocatable, intent(in)   :: s 
-        character, intent(in)                   :: c 
-        logical, allocatable, intent(inout)     :: l(:)
-
-        ! Loop
-        integer(I8)                             :: i 
-
-        ! Initialize
-        !===========
-        ! Allocate
-        if (allocated(l)) then  
-            deallocate(l) 
-            allocate(l(len(s)))
-        end if
-
-        ! Initialize
-        l(:) = .false.
-
-        ! Compare
-        !========
-        do i = 1, len(s) 
-            if (s(i:i) == c) then 
-                l(i) = .true. 
-            end if
-        end do
-
-    end subroutine
-
     
 
 
