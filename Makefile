@@ -108,11 +108,18 @@ gd:
 ##
 ## % Auxiliary targets
 ## %==================
-## clean			: clean by removing *.o and gdrun 
+## clean			: clean by removing *.o and executables 
 # Cleanup
 .PHONY: clean
 clean: 
 	rm *.o $(wildcard gdrun*); rm $(GDRUN_TARGETS); \
+	rm goat
+
+## deepclean			: clean by removing *.o, *.mod, and executables
+# Cleanup
+.PHONY: deepclean
+deepclean: 
+	rm *.o *.mod $(wildcard gdrun*); rm $(GDRUN_TARGETS); \
 	rm goat
 	
 
