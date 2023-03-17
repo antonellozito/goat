@@ -32,7 +32,7 @@
 *   ..construct fname
 *     (max length is len(fname) characters; make lowercase)
       fname = chname
-      call chcase (0, fname)
+      ! call chcase (0, fname)
       call xertst (len(chname).le.len(fname),
      &  'cfopen--faulty argument chname, too long: '//trim(fname))
 *   ..construct fstat
