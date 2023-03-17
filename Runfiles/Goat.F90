@@ -47,15 +47,16 @@ program Goat
 
     ! Auxiliary
     type(GoatoptionsUDT)    :: goatoptions
-    character(*), parameter    :: filepath = './Examples/ITER/GOAToptions.dat'
+    character(:), allocatable    :: filepath
 
     ! Initialize
     !===========
+    filepath = './Examples/ITER/GOAToptions.dat'
 
     ! Read the user input
     !====================
     ! fileID should always be GOAToptions.dat
-    call SetGoatOptions(goatoptions, filepath)
+    call goatoptions%Set(filepath)
     print *, 'Reading goat options from file: ', goatoptions%filepath
 
     ! Run driver

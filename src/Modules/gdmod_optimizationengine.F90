@@ -56,6 +56,7 @@ module gdmod_optimizationengine
         type(GridUDT)                       :: grid 
         type(MagneticFieldUDT)              :: magneticField
         type(EnvironmentUDT)                :: environment
+        type(DesignOptionsUDT)              :: designoptions 
         
     contains
 
@@ -151,15 +152,11 @@ module gdmod_optimizationengine
         ! Loop variables
         type(OptimizationProblemGDUDT)      :: thisproblem
 
-        ! Auxiliary variables 
-        type(DesignOptionsUDT)              :: designoptions
-
         ! Data
 
         ! Design variables
         !=================
         ! Set the design options
-        call SetDesignOptions(designoptions)
         allocate(optimizationdriver%problem, source=thisproblem)
 
     end subroutine
@@ -255,20 +252,17 @@ module gdmod_optimizationengine
 
         ! Loop variables
 
-        ! Auxiliary variables 
-        type(DesignOptionsUDT)              :: designoptions
-
         ! Data
 
         ! Design options
         !===============
         ! Set the design options
-        call SetDesignOptions(designoptions)
+        call problem%designoptions%Set()
 
         ! Design variables
         !=================
         ! Allocate the design variables, depending on the type.
-        select case (trim(designoptions%variables%type))
+        select case (trim(problem%designoptions%variables%type))
 
         case ('coordinates')
 
@@ -290,7 +284,7 @@ module gdmod_optimizationengine
         ! Cost function
         !==============
         ! Allocate the cost function, depending on the type
-        select case (trim(designoptions%costfunction%type))
+        select case (trim(problem%designoptions%costfunction%type))
 
         case ('lengthratio')
 
@@ -307,7 +301,7 @@ module gdmod_optimizationengine
             ! Allocate
             allocate(CostfunctionFADUDT::problem%costfunction)
 
-        case ('LRFAD')
+        case ('LR_FAD')
 
             ! Allocate
             allocate(CostfunctionLRFADUDT::problem%costfunction)
@@ -328,7 +322,7 @@ module gdmod_optimizationengine
         ! constraints are set in its own initialization. 
         call problem%constraints%Initialize(problem%grid, &
             problem%magneticField, problem%environment, & 
-            designoptions%constraints)
+            problem%designoptions%constraints)
 
 
     end subroutine

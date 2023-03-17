@@ -55,9 +55,10 @@ subroutine ConstructGridDesignProblem(optimizationdriver, &
         type is (OptimizationProblemGDUDT)
     
             ! This should be the only possible type 
-            thisproblem%grid = grid 
-            thisproblem%magneticField = magneticField 
-            thisproblem%environment = environment
+            thisproblem%grid            = grid 
+            thisproblem%magneticField   = magneticField 
+            thisproblem%environment     = environment
+            thisproblem%designoptions   = designoptions
 
         class default
 

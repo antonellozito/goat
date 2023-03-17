@@ -64,14 +64,11 @@ program GridDeformation
 
     ! Set the main options
     !=====================
-    ! Set the default values
-    call SetRunfileOptions(runfileOptions)
+    ! Set the reading path
+    runfileOptions%inputfilepath = './Examples/TCV/GOAToptions.dat'
 
-    ! Print
-    print *, 'gd: runtype set to ', runfileOptions%runtype
-    print *, 'gd: gridtype set to ', runfileOptions%gridtype
-    print *, 'gd: method set to ', runfileOptions%meth
-    print *, 'gd: export set to ', runfileOptions%export
+    ! Set the default values
+    call runfileOptions%Set()
 
     ! Main driver
     !============
@@ -94,7 +91,7 @@ program GridDeformation
 
     ! Export
     !=======
-    if (runfileOptions%export) then
+    if (runfileOptions%export == 1) then
         
         ! Set the export options
         call SetExportOptions(exportOptions)

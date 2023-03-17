@@ -580,7 +580,7 @@ module gdmod_constraints
         constraints%neqcon = 0
 
         ! X-points
-        if (constraintoptions%xpoints) then 
+        if (constraintoptions%xpoints == 1) then 
 
             ! Set the logical
             constraints%doxpoints = .true.
@@ -605,7 +605,7 @@ module gdmod_constraints
         end if
 
         ! Boundary function
-        if (constraintoptions%boundaryfunctions) then 
+        if (constraintoptions%boundaryfunctions == 1) then 
 
             ! Set the logical
             constraints%doboundaryfunction = .true.
@@ -630,7 +630,7 @@ module gdmod_constraints
         end if
 
         ! Flux function
-        if (constraintoptions%fluxfunction) then 
+        if (constraintoptions%fluxfunction == 1) then 
             ! Set the logical
             constraints%dofluxfunction = .true.
 
@@ -653,7 +653,7 @@ module gdmod_constraints
         end if
 
         ! Edge lengths
-        if (constraintoptions%edgelengths) then 
+        if (constraintoptions%edgelengths == 1) then 
             ! Set the logical
             constraints%doedgelengths = .true.
 
@@ -676,7 +676,7 @@ module gdmod_constraints
         end if
 
         ! Orthogonality
-        if (constraintoptions%orthogonality) then 
+        if (constraintoptions%orthogonality == 1) then 
             ! Set the logical
             constraints%doorthogonality = .true.
 

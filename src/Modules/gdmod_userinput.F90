@@ -15,6 +15,8 @@ module gdmod_userinput
     !============
     ! Load modules
     use gdmod_types
+    use goatmod_userinput
+    use mod_inputfileparser
 
     ! The usual
     implicit none
@@ -25,111 +27,17 @@ module gdmod_userinput
     ! namelist /gridsmoothing/ 
 
     ! All functions
-    
+
     !==================================================================!
     !                                                                  !
     !                               TYPES                              !
     !                                                                  !
     !==================================================================!
 
-    ! Abstract type
+    ! Options for the main runfile type - extend from general options 
+    type, extends(OptionsUDT) :: RunfileOptionsUDT
 
-    ! Options for the main runfile type
-    type RunfileOptionsUDT
-        character(C32)          :: runtype ! type of run: 'optimize' or 'test'
-        character(C32)          :: gridtype ! type of grid: 'plasma' 
-        character(C32)          :: meth ! method for grid deformation: 'KKT'
-        logical                 :: export ! do export? 
-    end type
-
-    ! Options for exporting
-    type ExportOptionsUDT
-        character(C32)       :: gridformat ! format of grid to export
-    end type
-
-    ! Options for design variables
-    type DesignVariableOptionsUDT
-        character(C32)       :: type ! type of design variables
-    end type
-
-    ! Options for the cost function
-    type CostFunctionOptionsUDT
-        character(C32)       :: type ! the cost function format
-    end type
-
-    ! Options for the constraints
-    type ConstraintOptionsUDT
-        ! Fields for equality constraints
-        logical             :: boundaryfunctions ! impose boundary functions
-        logical             :: fluxfunction ! impose constraints on flux
-        logical             :: xpoints ! impose x-point location
-        logical             :: edgelengths ! impose edge length cons
-        logical             :: orthogonality 
-
-        ! Fields for inequality constraints
-        logical             :: linefolding ! prevent flux line folding
-
-        ! Number of (continuous) constraints
-        integer(I8)         :: neq ! number of equality constraints
-        integer(I8)         :: nineq ! number of inequality constraints 
-    end type
-
-    ! Options for design optimization
-    type DesignOptionsUDT
-        type(CostFunctionOptionsUDT)       :: costfunction
-        type(DesignVariableOptionsUDT)     :: variables
-        type(ConstraintOptionsUDT)         :: constraints
-    end type
-
-    ! Options for the grid
-    type GridOptionsUDT
-        character(C32)          :: inputtype
-        logical                 :: vesselrefine
-        real(R8)                :: vesselmaxdist
-    end type  
-
-    ! Options for numerics
-    type NumOptionsUDT
-        integer(R8)     :: itmax 
-    end type
-
-    ! Options for magnetic field
-    type MagneticFieldOptionsUDT
-        character(C32)       :: readmeth
-    end type
-
-    ! Options for the vessel
-    type VesselOptionsUDT
-        character(C32)       :: readmeth
-        character(C32)       :: geom   
-        real(R8)             :: maxdist
-        logical              :: refine
-        character(:), allocatable :: dir
-    end type
-
-    ! Options for the environment
-    type EnvironmentOptionsUDT
-        character(C32)       :: type
-    end type
-    
-    !==================================================================!
-    !                                                                  !
-    !                               ROUTINES                           !
-    !                                                                  !
-    !==================================================================!
-
-    contains 
-
-    !------------------------------------------------------------------!
-    !                            Option setters                        !
-    !------------------------------------------------------------------!
-
-    subroutine SetRunfileOptions(options)
-        
-        ! Description
-        !============
-        ! Set the run options. The following fields have to be set:
-        !
+        ! Fields
         ! - runtype: define how to run the grid deformation. 'optimize'
         ! will use the optimization drivers (which can be further 
         ! specified using 'meth') - other options are not yet 
@@ -148,17 +56,210 @@ module gdmod_userinput
         ! specified file (can be true or false). See also the
         ! SetExportOptions subroutine in this file. 
 
-        ! Declaration
-        type (RunfileOptionsUDT), intent(inout)    :: options
+        ! - ...filepath: filepaths for the different other options. In
+        ! general, different files for the different options are 
+        ! allowed, but default assumes the same filepath as for the 
+        ! runoptions. 
+
+        character(:), allocatable   :: runtype ! type of run: 'optimize' or 'test'
+        character(:), allocatable   :: gridtype ! type of grid: 'plasma' 
+        character(:), allocatable   :: meth ! method for grid deformation: 'KKT'
+        integer                     :: export ! do export? 
+
+        character(:), allocatable   :: gridfilepath, &
+            environmentfilepath, designfilepath, magneticfieldfilepath
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultRunfileOptions
+        procedure :: Read           => ReadRunfileOptions
+
+    end type
+
+    ! Options for exporting
+    type ExportOptionsUDT
+        character(C32)       :: gridformat ! format of grid to export
+    end type
+
+    ! Options for design variables
+    type, extends(OptionsUDT) :: DesignVariableOptionsUDT
+
+        ! Fields
+        ! - type:   type of design variables. Currently, only 
+        !           'coordinates' is available
+        character(:), allocatable    :: type 
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultDesignVariableOptions
+        procedure :: Read           => ReadDesignVariableOptions
+
+    end type
+
+    ! Options for the cost function
+    type, extends(OptionsUDT) :: CostFunctionOptionsUDT
+
+        ! Fields
+        ! - type:   cost function type (e.g. LR_FAD, LR, LR2, ...) See 
+        !           gdmod_costfunction to see which cost functions are 
+        !           available
+
+        ! Notes: parameters for the cost function are type specific and 
+        ! are therefore not defined here. They should be read in by 
+        ! dedicated routines defined in gdmod_costfunction
+        character(:), allocatable   :: type 
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultCostFunctionOptions
+        procedure :: Read           => ReadCostFunctionOptions
+
+    end type
+
+    ! Options for the constraints
+    type, extends(OptionsUDT) :: ConstraintOptionsUDT
+
+        ! Fields
+        ! - Per type of constraint, a field to indicate to see if the
+        !   constraint should be imposed (then should be equal to 1)
+        ! - total number of equality and inequality constraints
+
+        ! Fields for equality constraints
+        integer(I8)         :: boundaryfunctions ! impose boundary functions
+        integer(I8)         :: fluxfunction ! impose constraints on flux
+        integer(I8)         :: xpoints ! impose x-point location
+        integer(I8)         :: edgelengths ! impose edge length cons
+        integer(I8)         :: orthogonality 
+
+        ! Fields for inequality constraints
+        integer             :: linefolding ! prevent flux line folding
+
+        ! Number of (continuous) constraints
+        integer(I8)         :: neq ! number of equality constraints
+        integer(I8)         :: nineq ! number of inequality constraints 
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultConstraintOptions
+        procedure :: Read           => ReadConstraintOptions
+
+    end type
+
+    ! Options for design optimization
+    type, extends(OptionsUDT) :: DesignOptionsUDT
+
+        ! Contains the different design option structures
+        type(CostFunctionOptionsUDT)       :: costfunction
+        type(DesignVariableOptionsUDT)     :: variables
+        type(ConstraintOptionsUDT)         :: constraints
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultDesignOptions
+        procedure :: Read           => ReadDesignOptions 
+
+    end type
+
+    !==================================================================!
+    !                                                                  !
+    !                              INTERFACES                          !
+    !                                                                  !
+    !==================================================================!
+    
+    !==================================================================!
+    !                                                                  !
+    !                               ROUTINES                           !
+    !                                                                  !
+    !==================================================================!
+
+    contains 
+
+    !------------------------------------------------------------------!
+    !                            Option setters                        !
+    !------------------------------------------------------------------!
+
+    subroutine SetDefaultRunfileOptions(options)
+        
+        ! Description
+        !============
+        ! Set the run options. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(RunfileOptionsUDT)    :: options
 
         ! Default options
+        !================
         options%runtype     = 'optimize'
         options%gridtype    = 'plasma'
         options%meth        = 'KKT'
-        options%export      = .true.
-        
-        ! Overwrite user-defined options
-        ! options%runtype     = runtype
+        options%export      = 1
+
+        options%gridfilepath            = options%inputfilepath 
+        options%magneticfieldfilepath   = options%inputfilepath 
+        options%designfilepath          = options%inputfilepath 
+        options%environmentfilepath     = options%inputfilepath 
+
+    end subroutine
+
+    subroutine SetDefaultDesignVariableOptions(options)
+
+        ! Description
+        !============
+        ! Set default design variable options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariableOptionsUDT) :: options 
+
+        ! Default options
+        !================
+        options%type        = 'coordinates' 
+
+    end subroutine
+
+    subroutine SetDefaultCostFunctionOptions(options)
+
+        ! Description
+        !============
+        ! Set default cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsUDT) :: options 
+
+        ! Default options
+        !================
+        options%type        = 'LR_FAD' 
+
+    end subroutine
+
+    subroutine SetDefaultConstraintOptions(options)
+
+        ! Description
+        !============
+        ! Set default constraint options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(ConstraintOptionsUDT) :: options 
+
+        ! Default options
+        !================
+        options%boundaryfunctions   = 1
+        options%fluxfunction        = 1
+        options%xpoints             = 1
+        options%edgelengths         = 0
+        options%orthogonality       = 1
+
+        options%linefolding         = 0
+
+        options%neq                 = 4
+        options%nineq               = 0
 
     end subroutine
 
@@ -179,7 +280,7 @@ module gdmod_userinput
 
     end subroutine
 
-    subroutine SetDesignOptions(options)
+    subroutine SetDefaultDesignOptions(options)
 
         ! Description
         !============
@@ -216,117 +317,22 @@ module gdmod_userinput
         ! grid nodes move along the magnetic field lines over their 
         ! neighbours. Only possible if the flux function constraint is 
         ! set to true. 
-        !
-
-        ! Declaration
-        type (DesignOptionsUDT), intent(inout)    :: options
-
-        ! Default options, design variables
-        options%variables%type                  = 'coordinates'
-
-        ! Default options, cost function
-        options%costfunction%type               = 'LRFAD'
-
-        ! Default options, equality constraints
-        options%constraints%boundaryfunctions   = .true.
-        options%constraints%fluxfunction        = .true.
-        options%constraints%xpoints             = .true.
-        options%constraints%edgelengths         = .true.
-        options%constraints%orthogonality       = .true.
-        options%constraints%neq                 = 5 
-
-        ! Default options, inequality constraints
-        options%constraints%linefolding         = .true.
-        options%constraints%nineq               = 1
-
-    end subroutine
-
-    subroutine SetGridOptions(options)
-        ! Description
-        !============
-        ! Set the options for the grid. The following fields have to be
-        ! set: 
-        !
-        ! - inputtype: string containing the type of input 
-        !
-        ! - vesselrefine: logical to decide whether the original vessel
-        ! polygon should be further refined (increased resolution)
-        !
-        ! - vesselmaxdist: real number that gives the maximal distance 
-        ! between vessel nodes to be considered when increasing the 
-        ! resolution of the vessel polygon. Only active when vessel
-        ! refinement is active. 
-
-        ! Declaration
-        type(GridOptionsUDT)        ::  options
-
-        ! Default options
-        options%inputtype           = 'b2fgmtry'
-    
-    end subroutine
-
-    subroutine SetNumOptions(options)
-        ! Description
-        !============
-        ! Set the numerical parameters and values. The following fields 
-        ! have to be set:
-        !
-
-        ! Declaration
-        type(NumOptionsUDT)         :: options
-
-        ! Default options
-        options%itmax = 1000
-
-    end subroutine
-
-    subroutine SetMagneticFieldOptions(options)
-        ! Description
-        !============
-        ! Set the options for the magnetic field. The following fields
-        ! have to be set:
-
-        ! Declaration
-        type(MagneticFieldOptionsUDT)       :: options
-
-        ! Default options   
-        options%readmeth                = 'readrzpsi'
-
-    end subroutine
-
-    subroutine SetVesselOptions(options)
-
-        ! Description
-        !============
-        ! Set the options for the vessel.
 
         ! Declare variables
         !==================
-        type(VesselOptionsUDT)          :: options
+        class(DesignOptionsUDT)                :: options
 
-        ! Set options
-        !============
-        options%readmeth    = 'read_structure'
-        options%geom        = 'ASDEX_Nathan'
-        options%dir         = 'inputfiles/structure_tcv.dat'
-        options%maxdist     = 0.01
-        options%refine      = .true.
+        ! Set defaults
+        !=============
+        ! Set inputfile paths 
+        options%variables%inputfilepath = options%inputfilepath 
+        options%costfunction%inputfilepath = options%inputfilepath 
+        options%constraints%inputfilepath = options%inputfilepath
 
-    end subroutine
-
-    subroutine SetEnvironmentOptions(options)
-
-        ! Description
-        !============
-        ! Set the options to read in the environment.
-
-        ! Declare variables
-        !==================
-        type(EnvironmentOptionsUDT)         :: options
-
-        ! Set options
-        !============
-        options%type = 'vessel'
+        ! Default options
+        call options%variables%Set()
+        call options%costfunction%Set() 
+        call options%constraints%Set()
 
     end subroutine
 
@@ -334,5 +340,307 @@ module gdmod_userinput
     !                            Option readers                        !
     !------------------------------------------------------------------!
 
+    subroutine ReadRunfileOptions(options)
+
+        ! Description
+        !============
+        ! Read in user-specified runfile options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(RunfileOptionsUDT)  :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadRunfileOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadRunfileOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Run parameters
+        field = 'gd.main.runtype'
+        call ExtractOptionValueCharacter(fid, field, options%runtype)
+        field = 'gd.main.gridtype'
+        call ExtractOptionValueCharacter(fid, field, options%gridtype)
+        field = 'gd.main.meth'
+        call ExtractOptionValueCharacter(fid, field, options%meth)
+
+        ! File paths
+        field = 'gd.main.gridoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%gridfilepath)
+        field = 'gd.main.magneticfieldoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%magneticfieldfilepath)
+        field = 'gd.main.designoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%designfilepath)
+        field = 'gd.main.environmentoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%environmentfilepath)
+
+        ! Export
+        field = 'gd.main.export'
+        call ExtractOptionValueInteger0D(fid, field, options%export)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadDesignVariableOptions(options)
+
+        ! Description
+        !============
+        ! Read in user-specified design variable options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariableOptionsUDT) :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadDesignVariableOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadDesignVariableOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Type
+        field = 'gd.design.dv.type'
+        call ExtractOptionValueCharacter(fid, field, options%type)
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadCostFunctionOptions(options)
+
+        ! Description
+        !============
+        ! Read in user-specified cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsUDT)   :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Type
+        field = 'gd.design.cfv.type'
+        call ExtractOptionValueCharacter(fid, field, options%type)
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadConstraintOptions(options)
+
+        ! Description
+        !============
+        ! Read in user-specified constraints options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(ConstraintOptionsUDT)     :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Equality constraints
+        field = 'gd.design.ec.boundaryfunctions'
+        call ExtractOptionValueInteger0D(fid, field, options%boundaryfunctions)
+        field = 'gd.design.ec.fluxfunction'
+        call ExtractOptionValueInteger0D(fid, field, options%fluxfunction)
+        field = 'gd.design.ec.xpoints'
+        call ExtractOptionValueInteger0D(fid, field, options%xpoints)
+        field = 'gd.design.ec.edgelengths'
+        call ExtractOptionValueInteger0D(fid, field, options%edgelengths)
+        field = 'gd.design.ec.orthogonality'
+        call ExtractOptionValueInteger0D(fid, field, options%orthogonality)
+
+        ! Inequality constraints
+        field = 'gd.design.inec.linefolding'
+        call ExtractOptionValueInteger0D(fid, field, options%linefolding)
+
+        ! Set number to the correct value
+        options%neq     = 0
+        options%nineq   = 0
+        if (options%boundaryfunctions == 1) then 
+            options%neq = options%neq + 1
+        end if
+        if (options%fluxfunction == 1) then 
+            options%neq = options%neq + 1
+        end if
+        if (options%xpoints == 1) then 
+            options%neq = options%neq + 1
+        end if
+        if (options%edgelengths == 1) then 
+            options%neq = options%neq + 1
+        end if
+        if (options%orthogonality == 1) then 
+            options%neq = options%neq + 1
+        end if
+
+        if (options%linefolding == 1) then 
+            options%nineq = options%nineq + 1
+        end if
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadDesignOptions(options)
+
+        ! Description
+        !============
+        ! Read in user-specified design options - currently nothing to 
+        ! read in, since this is a superstructure without any specific 
+        ! fields. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignOptionsUDT)         :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Do nothing for now...
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
 
 end module

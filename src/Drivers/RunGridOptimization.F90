@@ -27,7 +27,7 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
     type(GridOptionsUDT)            :: gridoptions
     type(DesignOptionsUDT)          :: designoptions
     type(MagneticFieldOptionsUDT)   :: mfoptions
-    type(NumOptionsUDT)             :: num
+    ! type(NumOptionsUDT)             :: num
     type(EnvironmentOptionsUDT)     :: environmentoptions
     type(EnvironmentUDT)            :: environment
 
@@ -39,20 +39,26 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
 
     ! Set additional options
     !=======================
+    ! Set paths from where options should be read
+    gridoptions%inputfilepath           = options%gridfilepath 
+    designoptions%inputfilepath         = options%designfilepath 
+    mfoptions%inputfilepath             = options%magneticfieldfilepath
+    environmentoptions%inputfilepath    = options%environmentfilepath
+    
     ! Set grid options
-    call SetGridOptions(gridoptions)
+    call gridoptions%Set()
 
     ! Set optimization options
-    call SetDesignOptions(designoptions)
+    call designoptions%Set()
 
     ! Set other numerical parameters
-    call SetNumOptions(num);
+    !call SetNumOptions(num);
     
     ! Magnetic field 
-    call SetMagneticFieldOptions(mfoptions);
+    call mfoptions%Set()
 
     ! Environment
-    call SetEnvironmentOptions(environmentoptions)
+    call environmentoptions%Set()
 
     ! Initialize
     !===========

@@ -157,10 +157,10 @@ module gdmod_interfaces
         ! Initialize
         !===========
         ! Print from where we're reading
-        print *, 'reading vessel from file: ', vesseloptions%dir
+        print *, 'reading vessel from file: ', vesseloptions%filepath
 
         ! Open the file
-        open(unit = filespecifier, file = vesseloptions%dir)
+        open(unit = filespecifier, file = vesseloptions%filepath)
 
         ! Read
         !=====
