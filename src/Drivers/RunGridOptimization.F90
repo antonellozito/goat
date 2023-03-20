@@ -63,7 +63,7 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
     ! Initialize
     !===========
     ! Construct the initial grid
-    call ConstructGrid(grid,gridoptions,options);
+    call ConstructGrid(grid, gridoptions)
 
     ! Plot
     if (makegridplots) then 

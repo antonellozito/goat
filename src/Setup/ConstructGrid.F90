@@ -1,4 +1,4 @@
-subroutine ConstructGrid(grid,gridoptions,options)
+subroutine ConstructGrid(grid,gridoptions)
     
     ! Description
     !============
@@ -21,7 +21,6 @@ subroutine ConstructGrid(grid,gridoptions,options)
     ! Declare variables
     type(GridUDT)           :: grid
     type(GridOptionsUDT)    :: gridoptions
-    type(RunfileOptionsUDT) :: options
 
     integer                 :: filespecifier(0:2)
     
@@ -33,14 +32,14 @@ subroutine ConstructGrid(grid,gridoptions,options)
 
     ! Construct grid
     !===============
-    select case(options%gridtype)
+    select case (gridoptions%gridtype)
 
-    case('plasma')
+    case ('plasma')
 
         ! Default plasma edge grid, check the provided format
-        select case(gridoptions%inputtype)
+        select case (gridoptions%inputtype)
 
-        case('b2fgmtry')
+        case ('b2fgmtry')
 
             ! Unstructured format in the b2fgmtry style. 
             ! Open the file containing the grid data
@@ -49,8 +48,11 @@ subroutine ConstructGrid(grid,gridoptions,options)
             ! Read in the grid data
             call ReadB2fgmtryUS(filespecifier(0),grid)
 
+            ! Close the file
+            close(filespecifier(0))
+
             ! Extract the grid data structures
-            call ExtractGridData(grid,'b2fgmtry')
+            call ExtractGridData(grid, 'b2fgmtry', gridoptions)
 
         case default 
 

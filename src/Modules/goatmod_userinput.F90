@@ -91,9 +91,39 @@ module goatmod_userinput
         !                   or 'traduit'. Both are unstructured!
         ! - filepath:       file path indicating where the grid file
         !                   data is stored
+        ! - facelabelsubfrom/facelabelsubto: substitute the labels 
+        !                   in '..from' with the labels defined in 
+        !                   '..to'. This can be used to substitute some
+        !                   boundary labels with other labels if 
+        !                   desired. 
+        ! - facelabelmappingGG/facelabelmappingGD: 
+        !                   defines the mapping between the 
+        !                   face labels of the grid generator (GG) and 
+        !                   the face labels of the grid deformation (GD)
+        !                   see below for a mapping description 
+        !                   
+        ! Mapping description
+        !====================
+        ! GRID DEFORMATION            PHYSICAL MEANING
+        !
+        ! 1                           target plate (inner)
+        ! 2                           target plate (outer)
+        ! 3                           private flux
+        ! 4                           core boundary
+        ! 5                           outermost flux surf.
+        !
+        ! Note that information may be lost in this bndmapping, but this 
+        ! is information that is not used by the grid deformation 
+        ! module. 
 
         character(:), allocatable   :: inputtype
         character(:), allocatable   :: filepath 
+
+        ! Mappings
+        integer(I8), allocatable    :: facelabelsubfrom(:), &
+            facelabelsubto(:), facelabelmappingGG(:), &
+            facelabelmappingGD(:)
+        
 
     contains 
 
@@ -300,10 +330,18 @@ module goatmod_userinput
         class(GridOptionsUDT)        ::  options
 
         ! Default options
+        options%gridtype            = 'plasma'
         options%inputtype           = 'b2fgmtry'
 
         ! Default grid location /data/le/Examples/TCV/b2fgmtry_us_tcv
         options%filepath            = './Examples/TCV/b2fgmtry_us_tcv'
+    
+        ! Default mappings
+        allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
+        allocate(options%facelabelmappingGG(8), options%facelabelmappingGD(8))
+        options%facelabelmappingGG = [-13, -34, -23, -24, -21, -42, -43, -44]
+        options%facelabelmappingGD = [1, 2, 3,   3,   4,   5,   5,   5]
+
     
     end subroutine
 
@@ -495,6 +533,16 @@ module goatmod_userinput
         ! Filepath
         field = 'gd.grid.gridfilepath'
         call ExtractOptionValueCharacter(fid, field, options%filepath)
+
+        ! Mappings
+        field = 'gd.grid.facelabelsubfrom'
+        call ExtractOptionValueInteger1D(fid, field, options%facelabelsubfrom)
+        field = 'gd.grid.facelabelsubto'
+        call ExtractOptionValueInteger1D(fid, field, options%facelabelsubto)
+        field = 'gd.grid.facelabelmappingGG'
+        call ExtractOptionValueInteger1D(fid, field, options%facelabelmappingGG)
+        field = 'gd.grid.facelabelmappingGD'
+        call ExtractOptionValueInteger1D(fid, field, options%facelabelmappingGD)
 
         ! Housekeeping
         !=============

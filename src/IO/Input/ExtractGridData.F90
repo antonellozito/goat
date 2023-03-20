@@ -1,4 +1,4 @@
-subroutine ExtractGridData(grid, meth)
+subroutine ExtractGridData(grid, meth, gridoptions)
 
     ! Description
     !============
@@ -35,6 +35,7 @@ subroutine ExtractGridData(grid, meth)
     !==================
     ! Arguments
     type(GridUDT), intent(inout)    :: grid
+    type(GridOptionsUDT)            :: gridoptions
     character(len=*), intent(in)    :: meth
 
     ! Loop variables
@@ -212,8 +213,14 @@ subroutine ExtractGridData(grid, meth)
         ! Extract boundaries
         !===================
         ! Get the supported mapping between boundary labels 
-        call InterfaceBoundaryMapping('carre',gglabels,gdlabels, &
-            bndmapping)
+        allocate(gglabels(size(gridoptions%facelabelmappingGG)), &
+            gdlabels(size(gridoptions%facelabelmappingGD)))
+        gglabels = gridoptions%facelabelmappingGG
+        gdlabels = gridoptions%facelabelmappingGD 
+
+
+        !call InterfaceBoundaryMapping('carre',gglabels,gdlabels, &
+        !    bndmapping)
 
         ! Loop over all face labels (not regions here!)
         nbnd = size(gglabels) ! same amount of boundaries as labels
@@ -223,7 +230,7 @@ subroutine ExtractGridData(grid, meth)
         facevec(:) = (/(i, i=1,grid%faces%ntot,1)/)
         do ib = 1, nbnd
             ! Add the boundary ID
-            grid%bnd(ib)%ID = bndmapping(ib,2)
+            grid%bnd(ib)%ID = gdlabels(ib)
 
             ! Get the faces of this boundary
             mask(:) = grid%data%regions%facelabel == gglabels(ib);
