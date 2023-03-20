@@ -71,7 +71,7 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
     end if
 
     ! Construct the initial magnetic field
-    call ConstructMagneticField(mfoptions, magneticField)
+    call ConstructMagneticField(magneticField, mfoptions)
 
     ! Construct the environment
     call ConstructEnvironment(environment, environmentoptions)

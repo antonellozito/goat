@@ -1,4 +1,4 @@
-subroutine ConstructMagneticField(mfoptions, magneticField)
+subroutine ConstructMagneticField(magneticField, mfoptions)
 
     ! Description
     !============
