@@ -264,6 +264,7 @@ module gdmod_plots
                 ! Print
                 write (fu, *) grid%vert%x(tcv(j)), grid%vert%y(tcv(j))
             end do 
+            write(fu, *) grid%vert%x(tcv(1)), grid%vert%y(tcv(1))
             write(fu, *) ! leave blank line between each cell
 
             ! Deallocate
