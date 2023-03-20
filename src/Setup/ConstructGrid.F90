@@ -54,6 +54,23 @@ subroutine ConstructGrid(grid,gridoptions)
             ! Extract the grid data structures
             call ExtractGridData(grid, 'b2fgmtry', gridoptions)
 
+        case ('traduit')
+
+            ! Unstructured format in the traduit style.
+            ! Open the file containing the grid data
+            print *, gridoptions%filepath
+            call cfopen(filespecifier(0), gridoptions%filepath, 'old','un*formatted')
+
+            ! Read in the grid data
+            call ReadTraduitUS(filespecifier(0),grid)
+
+            ! Close the file
+            close(filespecifier(0))
+
+            ! Extract the grid data structures - can use the same 
+            ! extraction method as b2fgmtry
+            call ExtractGridData(grid, 'traduit', gridoptions)
+
         case default 
 
             call gdErrorHandler('unknown plasma grid input type')
