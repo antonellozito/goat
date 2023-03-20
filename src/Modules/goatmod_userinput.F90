@@ -73,6 +73,13 @@ module goatmod_userinput
         ! Mappings
         integer(I8), allocatable    :: facelabelsubfrom(:) ! labels
 
+        ! File paths
+        character(:), allocatable   :: gridoptionsfilepath 
+        character(:), allocatable   :: magneticfieldoptionsfilepath  
+        character(:), allocatable   :: environmentoptionsfilepath
+        character(:), allocatable   :: designoptionsfilepath 
+
+
     contains
 
         ! Routines to manipulate the options
@@ -87,6 +94,8 @@ module goatmod_userinput
 
         ! Structure containing options for grid manipulation (mainly
         ! reading and writing). The following fields are present:
+        ! - gridtype:       the type of grid that is considered. Only
+        !                   'plasma' is currently available. 
         ! - inputtype:      the type of inputfile. Can be 'b2fgmtry' 
         !                   or 'traduit'. Both are unstructured!
         ! - filepath:       file path indicating where the grid file
@@ -116,6 +125,8 @@ module goatmod_userinput
         ! is information that is not used by the grid deformation 
         ! module. 
 
+        ! Input filepaths and types
+        character(:), allocatable   :: gridtype 
         character(:), allocatable   :: inputtype
         character(:), allocatable   :: filepath 
 
@@ -335,7 +346,7 @@ module goatmod_userinput
 
         ! Default grid location /data/le/Examples/TCV/b2fgmtry_us_tcv
         options%filepath            = './Examples/TCV/b2fgmtry_us_tcv'
-    
+
         ! Default mappings
         allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
         allocate(options%facelabelmappingGG(8), options%facelabelmappingGD(8))
@@ -475,7 +486,16 @@ module goatmod_userinput
         field = 'GOAToptions.GDtoGA.facelabelsubfrom'
         call ExtractOptionValueInteger1D(fid, field, &
             options%facelabelsubfrom)
-        
+
+        ! Filepaths
+        field = 'gd.main.designoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%designoptionsfilepath)
+        field = 'gd.main.gridoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%gridoptionsfilepath)
+        field = 'gd.main.magneticfieldoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%magneticfieldoptionsfilepath)
+        field = 'gd.main.environmentoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%environmentoptionsfilepath)
 
         ! Housekeeping
         !=============
@@ -526,6 +546,10 @@ module goatmod_userinput
         
         ! Read options
         !=============
+        ! Gridtype
+        field = 'gd.grid.gridtype'
+        call ExtractOptionValueCharacter(fid, field, options%gridtype)
+
         ! Inputtype
         field = 'gd.grid.inputtype'
         call ExtractOptionValueCharacter(fid, field, options%inputtype)

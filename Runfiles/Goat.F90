@@ -51,13 +51,15 @@ program Goat
 
     ! Initialize
     !===========
-    filepath = './Examples/ITER/GOAToptions.dat'
+    filepath = './Examples/TCV/GOAToptions.dat'
 
     ! Read the user input
     !====================
     ! fileID should always be GOAToptions.dat
-    call goatoptions%Set(filepath)
-    print *, 'Reading goat options from file: ', goatoptions%filepath
+    goatoptions%inputfilepath = filepath 
+    print *, 'Reading goat options from file: ', goatoptions%inputfilepath
+    call goatoptions%Set()
+    
 
     ! Run driver
     !===========
@@ -66,7 +68,7 @@ program Goat
     case ('GD')
 
         ! Grid deformation only
-        !call GDDriver(goatoptions)
+        call GDDriver(goatoptions)
 
     case default 
 
