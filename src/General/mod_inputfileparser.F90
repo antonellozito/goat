@@ -167,11 +167,6 @@ module mod_inputfileparser
         ! Set logicals
         islegal = .false.
 
-        ! Deallocate if already allocated - can't know the size
-        if (allocated(val)) then 
-            deallocate(val) 
-        end if 
-
         ! Search
         !=======
         ! Get the value belonging to the key in character array format
@@ -185,6 +180,12 @@ module mod_inputfileparser
 
             ! Check
             if (islegal) then 
+
+                ! Deallocate if already allocated - can't know the size
+                if (allocated(val)) then 
+                    deallocate(val) 
+                end if 
+
                 ! Attribute
                 allocate(val(size(tempi)))
                 val = tempi
@@ -234,11 +235,6 @@ module mod_inputfileparser
         ! Set logicals
         islegal = .false.
 
-        ! Deallocate if already allocated - can't know the size
-        if (allocated(val)) then 
-            deallocate(val) 
-        end if 
-
         ! Search
         !=======
         ! Get the value belonging to the key in character array format
@@ -252,6 +248,12 @@ module mod_inputfileparser
 
             ! Check
             if (islegal) then 
+
+                ! Deallocate if already allocated - can't know the size
+                if (allocated(val)) then 
+                    deallocate(val) 
+                end if 
+
                 ! Attribute
                 allocate(val(size(tempi, 1), size(tempi, 2)))
                 val = tempi
@@ -358,11 +360,6 @@ module mod_inputfileparser
         ! Set logicals
         islegal = .false.
 
-        ! Deallocate if already allocated - can't know the size
-        if (allocated(val)) then 
-            deallocate(val) 
-        end if 
-
         ! Search
         !=======
         ! Get the value belonging to the key in character array format
@@ -376,6 +373,12 @@ module mod_inputfileparser
 
             ! Check
             if (islegal) then 
+
+                ! Deallocate if already allocated - can't know the size
+                if (allocated(val)) then 
+                    deallocate(val) 
+                end if 
+
                 ! Attribute
                 allocate(val(size(tempr)))
                 val = tempr
@@ -425,11 +428,6 @@ module mod_inputfileparser
         ! Set logicals
         islegal = .false.
 
-        ! Deallocate if already allocated - can't know the size
-        if (allocated(val)) then 
-            deallocate(val) 
-        end if 
-
         ! Search
         !=======
         ! Get the value belonging to the key in character array format
@@ -443,6 +441,12 @@ module mod_inputfileparser
 
             ! Check
             if (islegal) then 
+
+                ! Deallocate if already allocated - can't know the size
+                if (allocated(val)) then 
+                    deallocate(val) 
+                end if 
+
                 ! Attribute
                 allocate(val(size(tempr, 1), size(tempr, 2)))
                 val = tempr
