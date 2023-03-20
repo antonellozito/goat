@@ -196,9 +196,12 @@ subroutine ExtractGridData(grid, meth, gridoptions)
         ! every cell here, otherwise we print a warning), the 3nd and 
         ! 4th vertex are switched. Guard cells without guard vertices 
         ! are skipped (these should, in fact, be removed) 
+        if (any( (grid%cells%vertP(:, 2) .ne. 4) .and. (grid%cells%vertP(:,2) .ne. 2) )) then 
+            print *, 'non-classical grid, vertex reordering may be wrong'
+        end if 
         do i = 1, grid%cells%ntot
              if ((grid%cells%vertP(i,2) .ne. 4) .and. (grid%cells%vertP(i,2) .ne. 2))  then
-                print *, 'non-classical grid, vertex reordering may be wrong'
+                ! Do nothing
             else 
                 start = grid%cells%vertP(i,1)
                 nvert = grid%cells%vertP(i,2)
