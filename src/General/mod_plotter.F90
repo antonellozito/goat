@@ -105,6 +105,51 @@ module mod_plotter
 
     end subroutine
 
+    ! 2D quiverplot
+    subroutine Quiverplot2D(x, y, dx, dy, n, gnuplotoptions)
+
+        ! Description
+        !============
+        ! Plot a generic 2D quiver plot with arrows at the locations
+        ! (x, y) with x- and y-component sizes dx and dy. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        integer                             :: n, i, fu
+        real(R8), dimension(n)              :: x, y, dx, dy
+        character(*)                        :: gnuplotoptions
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'quiverplot2d')
+
+        ! Write the data file
+        !====================
+        ! Write vertex coordinates to file
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+    
+        do i = 1, n
+            if (isnan(x(i))) then 
+                ! Write blank line
+                write(fu, *)
+            else
+                ! Write coordinates
+                write (fu, *) x(i), y(i), dx(i), dy(i)
+            end if
+        end do
+    
+        close (fu)
+
+        ! Call plotter
+        !=============
+        call gnuplotexe(gnuplotoptions,trim(plotfile))
+
+    end subroutine
+
     ! Patchplot (filled polygons/curves)
     subroutine Patchplot2D(x, y, z, n, gnuplotoptions)
 
