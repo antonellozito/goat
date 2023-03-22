@@ -49,7 +49,7 @@ VERSION 1.00.00
 'gd.main.designoptionsfile'         './Examples/TCV/GOAToptions.dat' 
 'gd.main.gridoptionsfile'           './Examples/TCV/GOAToptions.dat' 
 'gd.main.magneticfieldoptionsfile'  './Examples/TCV/GOAToptions.dat' 
-'gd.main.numparamsfile'             './Examples/TCV/GOAToptions.dat' 
+'gd.main.environmentoptionsfile'    './Examples/TCV/GOAToptions.dat' 
 
 
 #-------------------------------------------------------------------------#
@@ -158,8 +158,8 @@ VERSION 1.00.00
 'gd.grid.maxvesseldist'     '1e-2'
 
 # Target plate definition
-'gd.grid.TP'                '[11 12]'
-'gd.grid.TPind'             '[1 2]'
+'gd.grid.TP'                '[11, 12]'
+'gd.grid.TPind'             '[1, 2]'
 
 # Structures to be excluded when constructing vessel (if empty, all are included)
 'gd.grid.exclude'           '[]'
