@@ -72,6 +72,10 @@
 ! vectors (indicating an empty polygon, which is not supported, see 
 ! note 1). This is checked for and an error will be thrown. 
 
+! Note 3: the intersection routines that are currently available can
+! cope with most polygon behavior, except for exactly collinear edges.
+! These will not be counted as intersections... 
+
 module mod_polygon
 
     ! Initialize
@@ -124,7 +128,9 @@ module mod_polygon
         procedure :: RemoveDuplicatePoints
         procedure :: IsClosedPolygon
         procedure :: IsSimplePolygon
+        procedure :: IsSelfIntersectingPolygon
         procedure :: Inpolygon
+        procedure :: SelfIntersections   => PolygonSelfIntersections
 
     end type 
 
@@ -139,7 +145,8 @@ module mod_polygon
 
     contains 
 
-        procedure :: Construct      => ConstructPolygonSet
+        procedure :: Construct          => ConstructPolygonSet
+        procedure :: SelfIntersections  => PolygonSetSelfIntersections
 
     end type 
 
@@ -170,6 +177,7 @@ module mod_polygon
     !                         PolygonSet routines                      !
     !------------------------------------------------------------------!
 
+    ! Construct the polygon set
     subroutine ConstructPolygonSet(polygonset, x, y)
 
         ! Description
@@ -261,6 +269,166 @@ module mod_polygon
 
     end subroutine
 
+    ! Compute polygon set self-intersections
+    subroutine PolygonSetSelfIntersections(polygonset, x, y, p1, p2, &
+        s1, s2)
+
+        ! Description
+        !============
+        ! Compute the self-intersections of a polygon set. Here, only
+        ! the self-intersections between different polygons of the set
+        ! are computed (so no self-intersections within a single 
+        ! polygon). If only a single polygon is present, no 
+        ! intersections can therefore be present. As output, the routine
+        ! returns the x, y coordinates of the intersections, the indices
+        ! of the polygons of these intersections, and the indices of the
+        ! segments in said polygons of these intersections. The routine
+        ! builds upon the PolygonIntersections routine for computing
+        ! the intersections of two polygons. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                    :: polygonset 
+        real(R8), allocatable, intent(out)      :: x(:), y(:)
+        integer(I8), allocatable, intent(out)   :: p1(:), p2(:), &
+            s1(:), s2(:)
+        
+        ! Auxiliary
+        integer(I8)                             :: ni, counter, sz, &
+            szold, szmult 
+        real(R8)                                :: xe1, ye1, xe2, ye2
+        real(R8), allocatable                   :: tempx(:), tempy(:), &
+            xi(:), yi(:) 
+        integer(I8), allocatable                :: temps1(:), &
+            temps2(:), si1(:), si2(:), tempp1(:), tempp2(:)
+
+        ! Loop
+        integer(I8)                             :: i, j 
+
+        ! Memory mgmt
+        integer(I8), allocatable                :: mgmti(:, :)
+        real(R8), allocatable                   :: mgmtr(:, :)
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (allocated(x)) then
+            deallocate(x) 
+        end if 
+        if (allocated(y)) then 
+            deallocate(y) 
+        end if
+        if (allocated(s1)) then 
+            deallocate(s1) 
+        end if
+        if (allocated(s2)) then 
+            deallocate(s2) 
+        end if
+        if (allocated(p1)) then 
+            deallocate(p1) 
+        end if
+        if (allocated(p2)) then 
+            deallocate(p2) 
+        end if
+
+        ! Associate
+        associate(&
+            np          => polygonset%np,       &
+            p           => polygonset%polygons)
+
+        ! Initialize
+        counter     = 0 ! intersection counter 
+        ni          = 0
+        szold       = 0
+        sz          = 2 ! initial size of intersection array
+        szmult      = 2 ! size multiplier 
+
+        ! Allocate
+        allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz), &
+            tempp1(sz), tempp2(sz))
+
+        ! Compute intersections
+        !======================
+        do i = 1, np-1  ! Loop over all polygons-1
+            do j = i+1, np ! Loop over remaining polygons
+                ! Compute intersections
+                call PolygonIntersections(p(i), p(j), xi, yi, si1, si2)
+
+                ! Check if intersections were found
+                ni = size(xi)
+                if (ni > 0) then 
+                    ! Memory MGMT
+                    if (counter + ni > sz) then 
+                        ! Store old size
+                        szold = sz
+
+                        ! Store old values
+                        allocate(mgmti(szold, 4), mgmtr(szold, 2))
+                        mgmti(:, 1) = temps1 
+                        mgmti(:, 2) = temps2   
+                        mgmti(:, 3) = tempp1 
+                        mgmti(:, 4) = tempp2
+                        mgmtr(:, 1) = tempx 
+                        mgmtr(:, 2) = tempy
+
+                        ! Adjust size
+                        do while (sz < counter+ni)
+                            sz = sz*szmult 
+                        end do
+
+                        ! Reallocate
+                        deallocate(tempx, tempy, temps1, temps2, &
+                            tempp1, tempp2) 
+                        allocate(tempx(sz), tempy(sz), temps1(sz), &
+                            temps2(sz), tempp1(sz), tempp2(sz))
+
+                        ! Add
+                        tempx(1:szold) = mgmtr(:, 1) 
+                        tempy(1:szold) = mgmtr(:, 2)
+                        temps1(1:szold) = mgmti(:, 1)
+                        temps2(1:szold) = mgmti(:, 2)
+                        tempp1(1:szold) = mgmti(:, 3)
+                        tempp2(1:szold) = mgmti(:, 4)
+
+                        ! Deallocate mgmt arrays
+                        deallocate(mgmti, mgmtr)
+                    end if 
+
+                    ! Add intersections
+                    tempx(counter+1:counter+ni) = xi 
+                    tempy(counter+1:counter+ni) = yi
+                    temps1(counter+1:counter+ni) = si1 
+                    temps2(counter+1:counter+ni) = si2
+                    tempp1(counter+1:counter+ni) = i 
+                    tempp2(counter+1:counter+ni) = j
+
+                    ! Update counter
+                    counter = counter + ni
+                end if 
+            end do  
+        end do
+
+        ! Add to output
+        allocate(x(counter), y(counter), s1(counter), s2(counter), &
+            p1(counter), p2(counter)) 
+        x = tempx(1:counter) 
+        y = tempy(1:counter) 
+        s1 = temps1(1:counter) 
+        s2 = temps2(1:counter) 
+        p1 = tempp1(1:counter)
+        p2 = tempp2(1:counter)
+
+        ! Housekeeping
+        !=============
+        end associate 
+
+        deallocate(tempx, tempy, temps1, temps2, tempp1, tempp2)
+
+
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                          Polygon routines                        !
     !------------------------------------------------------------------!
@@ -305,7 +473,7 @@ module mod_polygon
         call polygon%IsSimplePolygon()
 
         ! Check if the polygon self intersects
-        !call polygon%IsSelfIntersectingPolygon()
+        call polygon%IsSelfIntersectingPolygon()
 
 
     end subroutine
@@ -842,6 +1010,67 @@ module mod_polygon
 
 
     end subroutine
+
+    ! Self-intersections of a polygon
+    subroutine IsSelfIntersectingPolygon(polygon)
+
+        ! Description
+        !============
+        ! This routine sets the 'isselfintersecting' field by computing
+        ! whether any self intersections are present. Non-simple 
+        ! polygons are by definition self-intersecting, closed 
+        ! polygons are not. It is assumed all necessary metrics have been 
+        ! computed and that all other fields (issimple, isclosed) are 
+        ! up to date. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)               :: polygon 
+
+        ! Auxiliary
+        real(R8), allocatable           :: x(:), y(:) 
+        integer(I8), allocatable        :: s1(:), s2(:)
+
+        ! Loop
+
+        ! Initialize
+        !===========
+        polygon%selfintersecting = .false.  
+
+        ! Checks
+        !=======
+        ! Simple polygon?
+        if (.not. polygon%issimple) then 
+            polygon%selfintersecting = .true. 
+        else 
+            ! Need to check self intersections
+            call polygon%SelfIntersections(x, y, s1, s2)
+
+            if (size(x) > 0) then 
+                ! Self-intersections found, need to check 
+                if (size(x) > 1) then 
+                    polygon%selfintersecting = .true. 
+                else 
+                    ! Additional check on closure
+                    if (polygon%isclosed) then 
+                        if ( (s1(1) .ne. 1) .and. (s2(1) .ne. 1) ) then
+                            ! Something wrong here, this shouldn't be happening
+                            call PolygonErrorHandler('SelfIntersections: ' &
+                                // 'closed polygon with single ' &
+                                // 'intersection that is not on end ' &
+                                // 'points detected - chck input')
+                        end if 
+                        ! Otherwise, do nothing - closed polygons are 
+                        ! not considered self-intersecting
+                    else
+                        polygon%selfintersecting = .true. 
+                    end if 
+                end if
+            end if 
+        end if               
+
+    end subroutine
         
 
     !------------------------------------------------------------------!
@@ -1062,7 +1291,7 @@ module mod_polygon
     end subroutine
 
     ! Intersection between two segments
-    subroutine SegmentIntersecions(x, y, x11, y11, x12, y12, x21, y21, &
+    subroutine SegmentIntersections(x, y, x11, y11, x12, y12, x21, y21, &
         x22, y22)
 
         ! Description
@@ -1131,9 +1360,335 @@ module mod_polygon
     end subroutine
 
     ! Intersections between a segment and a polygon
-    !subroutine SegmentPolygonIntersections(x, y, x1, x2, xpe, ype)
+    subroutine SegmentPolygonIntersections(polygon, x1, y1, x2, y2, &
+        x, y, s)
 
-    !end subroutine
+        ! Description
+        !============
+        ! Compute the intersections between a segment and a polygon. The
+        ! segment must be given by two points, (x1, y1), (x2, y2). 
+        ! The output in x, y are the intersection coordinates. s 
+        ! contains a list (integer) of polygon segments where 
+        ! intersections where found. 
+        
+        ! Algorithm
+        !==========
+        ! The main idea is to loop over all segments of the polygon and
+        ! check for polygon edge whether it has an intersection with 
+        ! the segment. To compute intersections, the 
+        ! SegmentIntersections routine is used. To reduce computational 
+        ! cost, a simple check is made whether the encompassing boxes of
+        ! two edges overlap or not. If they don't, there can be no 
+        ! intersection. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT), intent(in)           :: polygon 
+        real(R8), intent(in)                    :: x1, y1, x2, y2 
+        real(R8), allocatable, intent(out)      :: x(:), y(:)  
+        integer(I8), allocatable, intent(out)   :: s(:)
+
+        ! Auxiliary
+        integer(I8)                         :: counter  
+        real(R8)                            :: xi, yi, xe1, ye1, xe2, ye2
+
+        integer(I8), allocatable            :: temps(:)
+        real(R8), allocatable               :: tempx(:), tempy(:)
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (allocated(x)) then 
+            deallocate(x) 
+        end if    
+        if (allocated(y)) then 
+            deallocate(y) 
+        end if          
+
+        ! Unpack polygon
+        associate( &
+            ne          => polygon%ne,      & 
+            edges       => polygon%edges,   & 
+            xp          => polygon%x,       &
+            yp          => polygon%y)
+
+        ! Initialize intersection counter
+        counter = 0
+
+        ! Allocate temporary arrays
+        allocate(tempx(ne), tempy(ne), temps(ne)) ! maximum ne intersections, to be trimmed later
+
+        ! Loop   
+        do i = 1, ne 
+            ! Get coordinates of next polygon edge
+            xe1 = xp(edges(i, 1))
+            ye1 = yp(edges(i, 1))
+            xe2 = xp(edges(i, 2))
+            ye2 = yp(edges(i, 2))
+
+            ! Check boxes
+            if (CheckEdgeOverlap(xe1, ye1, xe2, ye2, x1, y1, x2, y2)) then 
+                ! Edges overlap, compute intersection
+                call SegmentIntersections(xi, yi, xe1, ye1, xe2, ye2, &
+                    x1, y1, x2, y2)
+                
+                ! If intersection is found, add it
+                if (.not. isnan(xi)) then 
+                    ! Update counter
+                    counter = counter + 1
+                    tempx(counter) = xi 
+                    tempy(counter) = yi 
+                end if 
+            end if
+        end do  
+
+        ! Allocate and attribute
+        allocate(x(counter), y(counter), s(counter))
+        x = tempx(1:counter) 
+        y = tempy(1:counter)  
+
+        ! Housekeeping
+        !=============
+        end associate
+
+        deallocate(tempx, tempy)
+
+
+
+    end subroutine
+
+    ! Intersections of polygon with itself
+    subroutine PolygonSelfIntersections(polygon, x, y, s1, s2)
+
+        ! Description
+        !============
+        ! This routine computes the intersections of a polygon with 
+        ! itself. Hereto, we loop over all polygon edges and compute
+        ! intersections with all next edges.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT), intent(in)           :: polygon 
+        real(R8), allocatable, intent(out)      :: x(:), y(:)
+        integer(I8), allocatable, intent(out)   :: s1(:), s2(:)
+
+        ! Auxiliary
+        integer(I8)                             :: ni
+        real(R8), allocatable                   :: tempx(:), tempy(:)
+        integer(I8), allocatable                :: temps1(:), temps2(:)
+        logical, allocatable                    :: diffedge(:)
+        
+        ! Loop
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (allocated(x)) then
+            deallocate(x) 
+        end if 
+        if (allocated(y)) then 
+            deallocate(y) 
+        end if
+        if (allocated(s1)) then 
+            deallocate(s1) 
+        end if
+        if (allocated(s2)) then 
+            deallocate(s2) 
+        end if
+
+        ! Unpack
+        associate(&
+            xp      => polygon%x,       &
+            yp      => polygon%y,       &
+            edges   => polygon%edges,   &
+            ne      => polygon%ne)
+        
+
+        ! Compute intersections
+        !======================
+        ! Compute all intersections
+        call PolygonIntersections(polygon, polygon, tempx, tempy, &
+            temps1, temps2)
+        
+        ! Remove any intersections with twice the same edge
+        allocate(diffedge(size(tempx)))
+        diffedge = temps1 .ne. temps2 
+        ni = count(diffedge) 
+        allocate(x(ni), y(ni), s1(ni), s2(ni)) 
+        x = pack(tempx, diffedge)
+        y = pack(tempy, diffedge)
+        s1 = pack(temps1, diffedge)
+        s2 = pack(temps2, diffedge)
+        
+        ! Housekeeping
+        !=============
+        end associate 
+
+        deallocate(tempx, tempy, temps1, temps2, diffedge)
+         
+
+
+
+    end subroutine
+
+    ! Intersections between two polygons
+    subroutine PolygonIntersections(p1, p2, x, y, s1, s2)
+
+        ! Description
+        !============
+        ! This routine computes the intersections between two polygons.
+        ! It returns the coordinates of these intersections in the 
+        ! x, y arrays and the edge numbers in s1 and s2 for the first 
+        ! and second polygon, resp. 
+
+        ! Important: don't use this routine to compute
+        ! self-intersections! Do this with the dedicated 
+        ! PolygonSelfIntersections routine... 
+
+        ! Algorithm
+        !==========
+        ! We simply loop over all edges of p2 and call 
+        ! SegmentPolygonIntersections of p1 to compute the 
+        ! intersections. Since the number of intersections is a priori
+        ! unknown, and since the maximal amount of intersections may 
+        ! be very large (but usually very small), we dynamically grow 
+        ! the intersection storage arrays while computing intersections.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT), intent(in)           :: p1, p2
+        real(R8), allocatable, intent(out)      :: x(:), y(:)
+        integer(I8), allocatable, intent(out)   :: s1(:), s2(:)
+
+        ! Auxiliary
+        integer(I8)                             :: ni, counter, sz, &
+            szold, szmult 
+        real(R8)                                :: xe1, ye1, xe2, ye2
+        real(R8), allocatable                   :: tempx(:), tempy(:), &
+            xi(:), yi(:) 
+        integer(I8), allocatable                :: temps1(:), &
+            temps2(:), si(:)
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Memory mgmt
+        integer(I8), allocatable                :: mgmti(:, :)
+        real(R8), allocatable                   :: mgmtr(:, :)
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (allocated(x)) then
+            deallocate(x) 
+        end if 
+        if (allocated(y)) then 
+            deallocate(y) 
+        end if
+        if (allocated(s1)) then 
+            deallocate(s1) 
+        end if
+        if (allocated(s2)) then 
+            deallocate(s2) 
+        end if
+
+        ! Associate
+        associate(&
+            xp          => p2%x,        &
+            yp          => p2%y,        &
+            edges       => p2%edges,    &
+            ne          => p2%ne)
+
+        ! Initialize
+        counter     = 0 ! intersection counter 
+        ni          = 0
+        szold       = 0
+        sz          = 2 ! initial size of intersection array
+        szmult      = 2 ! size multiplier 
+
+        ! Allocate
+        allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz))
+
+        ! Compute intersections
+        !======================
+        ! Loop over p2
+        do i = 1, ne 
+            ! Get coordinates of next polygon edge
+            xe1 = xp(edges(i, 1))
+            ye1 = yp(edges(i, 1))
+            xe2 = xp(edges(i, 2))
+            ye2 = yp(edges(i, 2))
+
+            ! Compute intersections
+            call SegmentPolygonIntersections(p1, xe1, ye1, xe2, ye2, &
+                xi, yi, si)
+
+            ! Check if intersections were found
+            ni = size(xi)
+            if (ni > 0) then 
+                ! Memory MGMT
+                if (counter + ni > sz) then 
+                    ! Store old size
+                    szold = sz
+
+                    ! Store old values
+                    allocate(mgmti(szold, 2), mgmtr(szold, 2))
+                    mgmti(:, 1) = temps1 
+                    mgmti(:, 2) = temps2   
+                    mgmtr(:, 1) = tempx 
+                    mgmtr(:, 2) = tempy
+
+                    ! Adjust size
+                    do while (sz < counter+ni)
+                        sz = sz*szmult 
+                    end do
+
+                    ! Reallocate
+                    deallocate(tempx, tempy, temps1, temps2) 
+                    allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz))
+
+                    ! Add
+                    tempx(1:szold) = mgmtr(:, 1) 
+                    tempy(1:szold) = mgmtr(:, 2)
+                    temps1(1:szold) = mgmti(:, 1)
+                    temps2(1:szold) = mgmti(:, 2)
+
+                    ! Deallocate mgmt arrays
+                    deallocate(mgmti, mgmtr)
+                end if 
+
+                ! Add intersections
+                tempx(counter+1:counter+ni) = xi 
+                tempy(counter+1:counter+ni) = yi
+                temps1(counter+1:counter+ni) = si 
+                temps2(counter+1:counter+ni) = i
+
+                ! Update counter
+                counter = counter + ni
+            end if 
+        end do  
+
+        ! Add to output
+        allocate(x(counter), y(counter), s1(counter), s2(counter)) 
+        x = tempx(1:counter) 
+        y = tempy(1:counter) 
+        s1 = temps1(1:counter) 
+        s2 = temps2(1:counter) 
+
+        ! Housekeeping
+        !=============
+        end associate 
+
+        deallocate(tempx, tempy, temps1, temps2)
+
+
+    end subroutine
 
     ! Inpolygon routine
     subroutine Inpolygon(polygon, xq, yq, in)
@@ -1257,6 +1812,48 @@ module mod_polygon
 
     end subroutine 
 
+    ! Edge overlap checker
+    logical function CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, &
+        x22, y22) result(isoverlapping)
+
+        ! Description
+        !============
+        ! This function checks whether two edges 'overlap', in the 
+        ! sense that the boxes formed around these edges overlap. The 
+        ! boxes have edges parallel with the axes. 
+
+        ! Algorithm
+        !==========
+        ! For two boxes to not overlap, the common set of points of the 
+        ! x-interval of both boxes should be the empty set (or the same
+        ! for the y-interval). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)        :: x11, y11, x12, y12, x21, y21, &
+            x22, y22
+
+        ! Auxiliary
+
+        ! Loop
+
+        ! Check boxes
+        !============
+        ! Initialize
+        isoverlapping = .true. 
+
+        ! x-interval
+        if ( (max(x11, x12) < min(x21, x22)) .or. &
+            (max(x21, x22) < min(x11, x12)) ) then 
+            isoverlapping = .false. 
+        elseif ( (max(y11, y12) < min(y21, y22)) .or. &
+            (max(y21, y22) < min(y11, y12)) ) then 
+            isoverlapping = .false.
+        end if 
+
+    end function
+
     !------------------------------------------------------------------!
     !                                Tests                             !
     !------------------------------------------------------------------!
@@ -1291,10 +1888,10 @@ module mod_polygon
         !=====
         call ps%Construct(x, y)
 
-        !call Plot2DPolygon(ps%polygons(1)%x, ps%polygons(1)%y, size(ps%polygons(1)%x), '-p')
-        !call Quiverplot2D(ps%polygons(1)%ex, ps%polygons(1)%ey, &
-        !    ps%polygons(1)%nx, ps%polygons(1)%ny, &
-        !    size(ps%polygons(1)%ex), '-p')
+        call Plot2DPolygon(ps%polygons(1)%x, ps%polygons(1)%y, size(ps%polygons(1)%x), '-p')
+        call Quiverplot2D(ps%polygons(1)%ex, ps%polygons(1)%ey, &
+            ps%polygons(1)%nx, ps%polygons(1)%ny, &
+            size(ps%polygons(1)%ex), '-p')
 
         ! Set polygon
         !============
