@@ -21,7 +21,7 @@ VERSION 1.00.00
 'GOAToptions.GDtoGA.facelabelsubfrom'       '[-99, -25]'
 'GOAToptions.GDtoGA.facelabelsubto'         '[1, -21]'
 'GOAToptions.GDtoGA.facelabelmappingGG'     '[1, 2, 3, 4, 5, -21]'
-'GOAToptions.GDtoGA.facelabelmappingGD'     '[4, 4, 1, 1, 4, 2]'
+'GOAToptions.GDtoGA.facelabelmappingGD'     '[5, 5, 1, 2, 5, 3]'
 
 # Face label mappings between GG and GA (grid adaptation)
 'GOAToptions.GGtoGA.facelabelsubfrom'       '[-99, -25]'
@@ -46,10 +46,10 @@ VERSION 1.00.00
 'gd.main.export'            '1'
 
 # Filepaths for input files
-'gd.main.designoptionsfile'         'GOAToptions.dat' 
-'gd.main.gridoptionsfile'           'GOAToptions.dat' 
-'gd.main.magneticfieldoptionsfile'  'GOAToptions.dat' 
-'gd.main.numparamsfile'             'GOAToptions.dat' 
+'gd.main.designoptionsfile'         './Examples/ITER/GOAToptions.dat' 
+'gd.main.gridoptionsfile'           './Examples/ITER/GOAToptions.dat' 
+'gd.main.magneticfieldoptionsfile'  './Examples/ITER/GOAToptions.dat' 
+'gd.main.environmentoptionsfile'    './Examples/ITER/GOAToptions.dat' 
 
 
 #-------------------------------------------------------------------------#
@@ -99,14 +99,14 @@ VERSION 1.00.00
 'gd.design.ec.par.fluxfunction.fixfluxalignedtargets' 	'1'
 'gd.design.ec.par.fluxfunction.fixfarvesselflux' 		'1'
 'gd.design.ec.par.fluxfunction.doboxoverride' 			'1'
-'gd.design.ec.par.fluxfunction.includeboxx' 			'[4.7 5.3; 4 6]'
-'gd.design.ec.par.fluxfunction.includeboxy' 			'[4.4 4.8; -5 -3.6]'
+'gd.design.ec.par.fluxfunction.includeboxx' 			'[4.7, 5.3; 4, 6]'
+'gd.design.ec.par.fluxfunction.includeboxy' 			'[4.4, 4.8; -5, -3.6]'
 
 # Orthogonality constraint parameters 
 'gd.design.ec.par.orthogonality.checkperp'				'1'
 'gd.design.ec.par.orthogonality.epsperp' 				'0.2'
-'gd.design.ec.par.orthogonality.includeboxx' 			'[4 8.5; 5 6; 6 7.5]' 
-'gd.design.ec.par.orthogonality.includeboxy' 			'[-2 5; -3 -2; -2.5 -2]' 
+'gd.design.ec.par.orthogonality.includeboxx' 			'[4, 8.5; 5, 6; 6, 7.5]'
+'gd.design.ec.par.orthogonality.includeboxy' 			'[-2, 5; -3, -2; -2.5, -2]' 
 'gd.design.ec.par.orthogonality.excludeboxx' 			'[]' 
 'gd.design.ec.par.orthogonality.excludeboxy' 			'[]' 
 
@@ -143,10 +143,19 @@ VERSION 1.00.00
 # See SetGridOptions.m for the default settings.
 
 # Grid & vessel file paths
+'gd.grid.inputtype'         'traduit'
 'gd.grid.gridloaddir'       '.'
 'gd.grid.gridloadfile'      'traduit.out.b2'
+'gd.grid.gridfilepath'      './Examples/ITER/traduit.out.b2us'
 'gd.grid.vesselloaddir'     '.'
 'gd.grid.vesselloadfile'    'structure.dat'
+'gd.grid.vesselfilepath'    './Examples/ITER/structure.dat'
+
+# Face label transformations (same as the GDtoGA mapping)
+'gd.grid.facelabelsubfrom'       '[-99, -25]'
+'gd.grid.facelabelsubto'         '[1, -21]'
+'gd.grid.facelabelmappingGG'     '[1, 2, 3, 4, 5, -21]'
+'gd.grid.facelabelmappingGD'     '[5, 5, 1, 2, 5, 3]'
 
 # Vessel geometry & loading method
 'gd.grid.vesselloadmeth'    'read_structure'
@@ -160,7 +169,7 @@ VERSION 1.00.00
 'gd.grid.TPind'             '[1 2]'
 
 # Structures to be excluded when constructing vessel (if empty, all are included)
-'gd.grid.exclude'           '[1:8]'
+'gd.grid.exclude'           '[1, 2, 3, 4, 5, 6, 7, 8]'
 
 #-------------------------------------------------------------------------#
 #                          MAGNETIC FIELD OPTIONS                         #
@@ -173,6 +182,7 @@ VERSION 1.00.00
 # Loading directory & reading method
 'gd.mf.loaddir'             '.'
 'gd.mf.loadfile'            'rzpsi.dat'
+'gd.mf.filepath'            './Examples/ITER/rzpsi.dat'
 'gd.mf.readmeth'            'default'
 
 # Interpolation options
