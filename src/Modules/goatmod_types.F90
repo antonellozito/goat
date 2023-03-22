@@ -20,6 +20,7 @@ module goatmod_types
     ! Initialize
     !============
     use mod_precision
+    use mod_polygon
 
     ! The usual
     implicit none
@@ -505,6 +506,7 @@ module goatmod_types
         ! Structures
         integer(I4)                         :: nstructures = 0
         type(VesselStructureUDT), allocatable       :: structures(:)
+        type(PolygonSetUDT)                 :: polygonset 
 
         ! General vessel polygon
         integer(I8)                         :: np, nedges
