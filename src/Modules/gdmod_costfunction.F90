@@ -281,7 +281,7 @@ module gdmod_costfunction
 
         ! Cost function initialization
         subroutine InitializeCostfunctionINT(costfunction, grid, &
-            magneticField, environment)
+            magneticField, environment, options)
 
             ! Description
             !============
@@ -291,13 +291,14 @@ module gdmod_costfunction
             
             ! Import
             import :: CostfunctionGDUDT, GridUDT, MagneticFieldUDT, &
-                EnvironmentUDT
+                EnvironmentUDT, CostFunctionOptionsUDT
 
             ! Declare 
             class(CostfunctionGDUDT)        :: costfunction 
             type(GridUDT)                   :: grid
             type(MagneticFieldUDT)          :: magneticField 
             type(EnvironmentUDT)            :: environment
+            type(CostFunctionOptionsUDT)    :: options
 
         end subroutine
 
@@ -344,7 +345,7 @@ module gdmod_costfunction
 
     ! Initialization
     subroutine InitializeCostFunctionLR(costfunction, grid, &
-        magneticField, environment)
+        magneticField, environment, options)
 
         ! Description
         !============
@@ -362,6 +363,7 @@ module gdmod_costfunction
         type(GridUDT)                       :: grid
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
 
         ! Loop variables
         integer(I8)                         :: i, j
@@ -382,7 +384,7 @@ module gdmod_costfunction
         !===========
 
         ! Set the scaling constant
-        costfunction%lambda = 1e4 ! seems to agree well with most grids
+        costfunction%lambda = options%LR%lambda 
 
         ! Allocate
         call costfunction%Allocate(grid%vert%ntot, 4)
@@ -986,7 +988,7 @@ module gdmod_costfunction
 
     ! Initialization
     subroutine InitializeCostFunctionFAD(costfunction, grid, &
-        magneticField, environment)
+        magneticField, environment, options)
 
         ! Description
         !============
@@ -1009,6 +1011,7 @@ module gdmod_costfunction
         type(GridUDT)                       :: grid
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
         
         ! Loop variables
         integer(I8)                         :: i, j, k, vpc
@@ -1039,7 +1042,7 @@ module gdmod_costfunction
         ! Initialize
         !===========
         ! Set the scaling constant
-        costfunction%lambda = 1e-3 ! seems to agree well with most grids
+        costfunction%lambda = options%FAD%lambda
 
         ! Allocate (initialize too big)
         nvp = grid%vert%ntot*maxval(grid%vert%neigP(:,2)) ! maximal number of pairs
@@ -2421,7 +2424,7 @@ module gdmod_costfunction
 
     ! Initialization
     subroutine InitializeCostFunctionLR2(costfunction, grid, &
-        magneticField, environment)
+        magneticField, environment, options)
 
         ! Description
         !============
@@ -2438,14 +2441,15 @@ module gdmod_costfunction
         type(GridUDT)                       :: grid
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
         
         ! Initialize
         !===========
         call costfunction%cfv_lr%Initialize(grid, magneticField, &
-            environment)
+            environment, options)
 
         ! (Re)set the scaling constant
-        costfunction%cfv_lr%lambda = 1e4 ! seems to agree well with most grids
+        costfunction%cfv_lr%lambda = options%LR%lambda ! seems to agree well with most grids
 
     end subroutine
 
@@ -2606,7 +2610,7 @@ module gdmod_costfunction
 
     ! Initialization
     subroutine InitializeCostFunctionLRFAD(costfunction, grid, &
-        magneticField, environment)
+        magneticField, environment, options)
 
         ! Description
         !============
@@ -2623,13 +2627,14 @@ module gdmod_costfunction
         type(GridUDT)                       :: grid
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
         
         ! Initialize
         !===========
         call costfunction%cfv_lr%Initialize(grid, magneticField, &
-            environment)
+            environment, options)
         call costfunction%cfv_fad%Initialize(grid, magneticField, &
-            environment)
+            environment, options)
 
         ! (Re)set the scaling constant
         costfunction%cfv_lr%lambda = 1e4 ! seems to agree well with most grids

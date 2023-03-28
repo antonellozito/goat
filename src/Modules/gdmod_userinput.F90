@@ -96,6 +96,39 @@ module gdmod_userinput
 
     end type
 
+    ! Cost-function specific options
+    type, extends(OptionsUDT) :: CostFunctionOptionsLRUDT
+
+        ! Length ratio specific cost function options. 
+        ! Fields:
+        ! - lambda: cost function scaling constant
+        ! - 
+
+        real(R8)                    :: lambda 
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultCostFunctionOptionsLR 
+        procedure :: Read           => ReadCostFunctionOptionsLR
+
+    end type 
+
+    type, extends(OptionsUDT) :: CostFunctionOptionsFADUDT
+
+        ! Length ratio specific cost function options. 
+        ! Fields:
+        ! - lambda: cost function scaling constant
+        ! - 
+
+        real(R8)                    :: lambda 
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultCostFunctionOptionsFAD 
+        procedure :: Read           => ReadCostFunctionOptionsFAD
+
+    end type 
+
     ! Options for the cost function
     type, extends(OptionsUDT) :: CostFunctionOptionsUDT
 
@@ -103,11 +136,19 @@ module gdmod_userinput
         ! - type:   cost function type (e.g. LR_FAD, LR, LR2, ...) See 
         !           gdmod_costfunction to see which cost functions are 
         !           available
+        ! - LR      cost function options for the length ratio cost 
+        !           function. Used whenever the length ratio cost 
+        !           function (or one of its derived cost functions) is
+        !           used. 
+        ! - FAD     cost function options for face angle difference, 
+        !           analogous to LR.
 
         ! Notes: parameters for the cost function are type specific and 
         ! are therefore not defined here. They should be read in by 
         ! dedicated routines defined in gdmod_costfunction
-        character(:), allocatable   :: type 
+        character(:), allocatable       :: type 
+        type(CostFunctionOptionsLRUDT)  :: LR
+        type(CostFunctionOptionsFADUDT) :: FAD
 
     contains 
 
@@ -234,6 +275,47 @@ module gdmod_userinput
         ! Default options
         !================
         options%type        = 'LR_FAD' 
+        options%LR%inputfilepath = options%inputfilepath ! propagate filepath
+        options%FAD%inputfilepath = options%inputfilepath ! propagate filepath
+
+        ! Set cost function specific options
+        !===================================
+        call options%LR%Set()
+        call options%FAD%Set()
+
+    end subroutine
+
+    subroutine SetDefaultCostFunctionOptionsLR(options)
+
+        ! Description
+        !============
+        ! Set default cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsLRUDT) :: options 
+
+        ! Default options
+        !================
+        options%lambda = 1e0
+
+    end subroutine
+
+    subroutine SetDefaultCostFunctionOptionsFAD(options)
+
+        ! Description
+        !============
+        ! Set default cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsFADUDT) :: options 
+
+        ! Default options
+        !================
+        options%lambda = 1e0
 
     end subroutine
 
@@ -500,6 +582,106 @@ module gdmod_userinput
         ! Type
         field = 'gd.design.cfv.type'
         call ExtractOptionValueCharacter(fid, field, options%type)
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadCostFunctionOptionsLR(options)
+
+        ! Description
+        !============
+        ! Read in user-specified cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsLRUDT)   :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsLR: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsLR: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'gd.design.cfv.par.LR.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda) 
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadCostFunctionOptionsFAD(options)
+
+        ! Description
+        !============
+        ! Read in user-specified cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsFADUDT)   :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsFAD: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsFAD: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'gd.design.cfv.par.FAD.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda) 
         
         ! Housekeeping
         !=============

@@ -314,7 +314,8 @@ module gdmod_optimizationengine
 
         ! Initialize the cost function
         call problem%costfunction%Initialize(problem%grid, &
-            problem%magneticField, problem%environment)
+            problem%magneticField, problem%environment, &
+            problem%designoptions%costfunction)
 
         ! Constraints
         !============
