@@ -17,5 +17,6 @@ subroutine gdErrorHandler(msg)
     !===============
     ! Print
     print *, 'gd error: ', msg
+    stop 
 
 end subroutine
