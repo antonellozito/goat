@@ -1,10 +1,14 @@
-subroutine RunGridOptimization(grid, optimizationdriver, options)
+subroutine RunGridOptimization(grid, magneticField, environment, &
+    options)
     ! Description
     !============
-    ! Main driver for optimization-based grid deformation. This routine
-    ! is a wrapper where, depending on the options parsed in the input, 
-    ! the initialization is done and the actual optimization driver is
-    ! called. 
+    ! Driver for optimization-based grid deformation. It is assumed that
+    ! the initial given grid, magnetic field, and environment structure 
+    ! are properly initialized and set up. This routine additionally
+    ! sets up the optimization problem, for which options should be 
+    ! specified in the designoptions structure. Filepaths for the 
+    ! designoptions user input file should be present in 
+    ! options%designfilepath.
 
     ! Initialize
     !===========
@@ -23,12 +27,9 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
     type(GridUDT)                   :: grid
     type(MagneticFieldUDT)          :: magneticField
     type(OptimizationEngineGDUDT)   :: optimizationdriver
-    type(RunfileOptionsUDT)         :: options 
-    type(GridOptionsUDT)            :: gridoptions
+    type(GoatoptionsUDT)            :: options 
     type(DesignOptionsUDT)          :: designoptions
-    type(MagneticFieldOptionsUDT)   :: mfoptions
     ! type(NumOptionsUDT)             :: num
-    type(EnvironmentOptionsUDT)     :: environmentoptions
     type(EnvironmentUDT)            :: environment
 
     ! Debug
@@ -40,42 +41,16 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
     ! Set additional options
     !=======================
     ! Set paths from where options should be read
-    gridoptions%inputfilepath           = options%gridfilepath 
-    designoptions%inputfilepath         = options%designfilepath 
-    mfoptions%inputfilepath             = options%magneticfieldfilepath
-    environmentoptions%inputfilepath    = options%environmentfilepath
-    
-    ! Set grid options
-    call gridoptions%Set()
+    designoptions%inputfilepath = options%designoptionsfilepath
 
     ! Set optimization options
     call designoptions%Set()
 
     ! Set other numerical parameters
     !call SetNumOptions(num);
-    
-    ! Magnetic field 
-    call mfoptions%Set()
-
-    ! Environment
-    call environmentoptions%Set()
 
     ! Initialize
     !===========
-    ! Construct the initial grid
-    call ConstructGrid(grid, gridoptions)
-
-    ! Plot
-    if (makegridplots) then 
-        call PlotGridCells(grid, '-p')
-    end if
-
-    ! Construct the initial magnetic field
-    call ConstructMagneticField(magneticField, mfoptions)
-
-    ! Construct the environment
-    call ConstructEnvironment(environment, environmentoptions)
-
     ! Initialize the grid design problem (as an optimization problem)
     call ConstructGridDesignProblem(optimizationdriver, designoptions, &
         grid, magneticField, environment)
@@ -103,45 +78,8 @@ subroutine RunGridOptimization(grid, optimizationdriver, options)
     ! ... and unpack the solution
     !grid = optimizationdriver%grid
     
-    ! Do any post-processing if necessary
-
-    ! Debug plots
-    !============
-    ! Make some plots
-    if (makedebugplots) then
-        !allocate(xq(grid%vert%ntot))
-        !allocate(yq(grid%vert%ntot))
-        !allocate(vq(grid%vert%ntot))
-        !xq = grid%vert%x
-        !yq = grid%vert%y
-        
-        allocate(xqmf(magneticField%nR-2, magneticField%nZ-2))
-        allocate(yqmf(magneticField%nR-2, magneticField%nZ-2))
-        allocate(vqmf(magneticField%nR-2, magneticField%nZ-2))
-        allocate(xq((magneticField%nR-2)*(magneticField%nZ-2)))
-        allocate(yq((magneticField%nR-2)*(magneticField%nZ-2)))
-        allocate(vq((magneticField%nR-2)*(magneticField%nZ-2)))
-        xqmf(:,:) = spread(magneticField%R(2:magneticField%nR-1), 2, magneticField%nZ-2)
-        yqmf(:,:) = spread(magneticField%Z(2:magneticField%nZ-1), 1, magneticField%nR-2)
-        xq = reshape(xqmf, (/((magneticField%nR-2)*(magneticField%nZ-2))/))
-        yq = reshape(yqmf, (/((magneticField%nR-2)*(magneticField%nZ-2))/))
-    
-        call EvaluateBicubicSplineInterpolant(xq, yq, vq, magneticField%interp, '0', '0')
-        vqmf = reshape(vq, (/magneticField%nR-2, magneticField%nZ-2/))
-        call Plot2DStructuredField(magneticField%Psi, magneticField%R, magneticField%Z, magneticField%nR, magneticField%nZ, '-p')
-        print *, size(magneticField%Psi,1), size(magneticField%Psi, 2)
-        print *, size(vqmf,1), size(vqmf, 2)
-        print *, size(yqmf, 1), size(yqmf, 2)
-        print *, size(xq, 1), size(yq, 1), size(vq, 1)
-        call Plot2DStructuredField(vqmf, magneticField%R(2:magneticField%nR-1), &
-        magneticField%Z(2:magneticField%nZ-1), magneticField%nR-2, magneticField%nZ-2, '-p')
-
-        call Plot2DStructuredField(vqmf - magneticField%Psi(2:magneticField%nR-1,2:magneticField%nZ-1)&
-        , magneticField%R(2:magneticField%nR-1), &
-        magneticField%Z(2:magneticField%nZ-1), magneticField%nR-2, magneticField%nZ-2, '-p')
-        
-        ! call Plot2DUnstructuredField(vq, grid, 'v', '-p')
-    end if
+    ! Post-processing
+    !================
 
 
 
