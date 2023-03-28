@@ -409,6 +409,65 @@ module mod_polygon
             end do  
         end do
 
+        ! Compute polgon self-intersections
+        !==================================
+        do i = 1, np 
+            ! Compute intersections
+            call PolygonSelfIntersections(p(i), xi, yi, si1, si2)
+
+            ! Check if intersections were found
+            ni = size(xi)
+            if (ni > 0) then 
+                ! Memory MGMT
+                if (counter + ni > sz) then 
+                    ! Store old size
+                    szold = sz
+
+                    ! Store old values
+                    allocate(mgmti(szold, 4), mgmtr(szold, 2))
+                    mgmti(:, 1) = temps1 
+                    mgmti(:, 2) = temps2   
+                    mgmti(:, 3) = tempp1 
+                    mgmti(:, 4) = tempp2
+                    mgmtr(:, 1) = tempx 
+                    mgmtr(:, 2) = tempy
+
+                    ! Adjust size
+                    do while (sz < counter+ni)
+                        sz = sz*szmult 
+                    end do
+
+                    ! Reallocate
+                    deallocate(tempx, tempy, temps1, temps2, &
+                        tempp1, tempp2) 
+                    allocate(tempx(sz), tempy(sz), temps1(sz), &
+                        temps2(sz), tempp1(sz), tempp2(sz))
+
+                    ! Add
+                    tempx(1:szold) = mgmtr(:, 1) 
+                    tempy(1:szold) = mgmtr(:, 2)
+                    temps1(1:szold) = mgmti(:, 1)
+                    temps2(1:szold) = mgmti(:, 2)
+                    tempp1(1:szold) = mgmti(:, 3)
+                    tempp2(1:szold) = mgmti(:, 4)
+
+                    ! Deallocate mgmt arrays
+                    deallocate(mgmti, mgmtr)
+                end if 
+
+                ! Add intersections
+                tempx(counter+1:counter+ni) = xi 
+                tempy(counter+1:counter+ni) = yi
+                temps1(counter+1:counter+ni) = si1 
+                temps2(counter+1:counter+ni) = si2
+                tempp1(counter+1:counter+ni) = i 
+                tempp2(counter+1:counter+ni) = i
+
+                ! Update counter
+                counter = counter + ni
+            end if 
+        end do  
+
         ! Add to output
         allocate(x(counter), y(counter), s1(counter), s2(counter), &
             p1(counter), p2(counter)) 
