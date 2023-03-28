@@ -147,6 +147,7 @@ module mod_polygon
 
         procedure :: Construct          => ConstructPolygonSet
         procedure :: SelfIntersections  => PolygonSetSelfIntersections
+        procedure :: GetEdges           => GetPolygonSetEdges
 
     end type 
 
@@ -161,7 +162,6 @@ module mod_polygon
     interface Distance 
         module procedure Distance0D
         module procedure Distance1D
-        ! module procedure Distance2D
     end interface
 
 
@@ -275,16 +275,17 @@ module mod_polygon
 
         ! Description
         !============
-        ! Compute the self-intersections of a polygon set. Here, only
-        ! the self-intersections between different polygons of the set
-        ! are computed (so no self-intersections within a single 
-        ! polygon). If only a single polygon is present, no 
-        ! intersections can therefore be present. As output, the routine
+        ! Compute the self-intersections of a polygon set. Here, both
+        ! theintersections between different polygons of the set
+        ! and self-intersections of polygons are computed. 
+        ! As output, the routine
         ! returns the x, y coordinates of the intersections, the indices
         ! of the polygons of these intersections, and the indices of the
         ! segments in said polygons of these intersections. The routine
         ! builds upon the PolygonIntersections routine for computing
-        ! the intersections of two polygons. 
+        ! the intersections of two polygons, and the 
+        ! PolygonSelfIntersections routine for computing 
+        ! self-intersections of a single polygon
 
         ! Declare variables
         !==================
@@ -297,7 +298,6 @@ module mod_polygon
         ! Auxiliary
         integer(I8)                             :: ni, counter, sz, &
             szold, szmult 
-        real(R8)                                :: xe1, ye1, xe2, ye2
         real(R8), allocatable                   :: tempx(:), tempy(:), &
             xi(:), yi(:) 
         integer(I8), allocatable                :: temps1(:), &
@@ -348,8 +348,8 @@ module mod_polygon
         allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz), &
             tempp1(sz), tempp2(sz))
 
-        ! Compute intersections
-        !======================
+        ! Compute intersections between polygons
+        !=======================================
         do i = 1, np-1  ! Loop over all polygons-1
             do j = i+1, np ! Loop over remaining polygons
                 ! Compute intersections
@@ -485,6 +485,71 @@ module mod_polygon
         deallocate(tempx, tempy, temps1, temps2, tempp1, tempp2)
 
 
+
+    end subroutine
+
+    ! Get polygonset edges
+    subroutine GetPolygonSetEdges(polygonset, xe, ye)
+
+        ! Description
+        !============
+        ! Return the edge coordinates of the entire polygon set - useful
+        ! for bulk geometric operations such as normal computations etc.
+        ! It is assumed that the polygonset is fully up to date. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        real(R8), allocatable, intent(out)  :: xe(:, :), ye(:, :)
+
+        ! Auxiliary
+        integer(I8)                         :: ne, ce  
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Deallocate if already allocated
+        if (allocated(xe)) then 
+            deallocate(xe)
+        end if 
+        if (allocated(ye)) then 
+            deallocate(ye) 
+        end if 
+
+        ! Build edges
+        !============
+        ! Associate
+        associate( &
+            pol         => polygonset%polygons)
+        
+        ! Precompute the total number of edges
+        ne = 0
+        do i = 1, polygonset%np 
+            ne = ne + polygonset%polygons(i)%ne             
+        end do 
+
+        ! Allocate
+        allocate(xe(ne, 2), ye(ne, 2))
+
+        ! Loop and add
+        ce = 0 ! edge counter
+        do i = 1, polygonset%np 
+            ! Add coordinates
+            xe(ce+1:ce+pol(i)%ne, 1) = pol(i)%x(pol(i)%edges(:, 1))
+            xe(ce+1:ce+pol(i)%ne, 2) = pol(i)%x(pol(i)%edges(:, 2))
+            ye(ce+1:ce+pol(i)%ne, 1) = pol(i)%y(pol(i)%edges(:, 1))
+            ye(ce+1:ce+pol(i)%ne, 2) = pol(i)%y(pol(i)%edges(:, 2))
+
+            ! Update counter
+            ce = ce + pol(i)%ne 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
@@ -1307,8 +1372,8 @@ module mod_polygon
                 y = x 
             else 
                 ! Parallel lines, return nan
-            x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
-            y = x 
+                x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+                y = x 
             end if 
             return 
         end if 
@@ -1433,8 +1498,8 @@ module mod_polygon
         ! Compute intersection
         !=====================
         if (CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, x22, y22)) then 
-        call LineIntersections(x, y, x11, y11, x12, y12, x21, y21, &
-            x22, y22)
+            call LineIntersections(x, y, x11, y11, x12, y12, x21, y21, &
+                x22, y22)
         else 
             ! No overlap -> no intersections
             x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
@@ -1606,7 +1671,7 @@ module mod_polygon
         if (dotprod > 0) then 
             x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
             y = x 
-            return 
+            return
         end if 
     
         ! Check if intersection is on segment 2
@@ -1755,7 +1820,7 @@ module mod_polygon
         real(R8), allocatable                   :: tempx(:), tempy(:)
         integer(I8), allocatable                :: temps1(:), &
             temps2(:)
-        
+
         ! Loop
         integer(I8)                             :: i, j 
 
@@ -1791,7 +1856,7 @@ module mod_polygon
             allocate(x(0), y(0), s1(0), s2(0))
             return 
         end if
-        
+
         ! Allocate (too large, trim later)
         allocate(tempx(ne), tempy(ne), temps1(ne), temps2(ne))
 
@@ -1883,14 +1948,14 @@ module mod_polygon
             end if 
         end if 
             
-        
+
         ! Add to output
         allocate(x(counter), y(counter), s1(counter), s2(counter)) 
         x = tempx(1:counter) 
         y = tempy(1:counter) 
         s1 = temps1(1:counter) 
         s2 = temps2(1:counter) 
-        
+
         ! Housekeeping
         !=============
         end associate 
