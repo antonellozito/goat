@@ -1938,20 +1938,13 @@ module gdmod_constraints
             vessel      => environment%vessel  &
             )
 
-        ! Allocate
-        allocate(xe(vessel%nedges, 2), ye(vessel%nedges, 2))
-
         ! Construct boundary
         !===================
         ! Get vessel edges
-        xe(:,1) = vessel%x(vessel%edges(:, 1))
-        xe(:,2) = vessel%x(vessel%edges(:, 2))
-        ye(:,1) = vessel%y(vessel%edges(:, 1))
-        ye(:,2) = vessel%y(vessel%edges(:, 2))
+        call vessel%polygonset%GetEdges(xe, ye)
 
         ! Construct polygon description
-        call psf%Initialize(xe, ye, vessel%nedges, &
-            vessel%polygonstart, vessel%np)
+        call psf%Initialize(xe, ye, size(xe, 1))
 
         ! Visualize if desired
         if (debugplots) then 
