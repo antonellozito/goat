@@ -1136,6 +1136,8 @@ module gdmod_costfunction
                 ntvn = count(.not. isaligned)
                 if (ntvn .ne. 2) then 
                     ntvn = 0
+                    ! Allocate - to prevent deallocation errors downstream
+                    allocate(tvn(ntvn))
                 else
                     ! Allocate
                     allocate(tvn(ntvn))
