@@ -490,28 +490,17 @@ module goatmod_types
         ! - geom:       the vessel geometry being considered (character)
         ! - nstructures:number of sub-structures of the vessel
         ! - strcutures : nstructures-by-1 array of structures
-        
-        ! Coordinates
-        integer(I8)                         :: nv = 0
-        real(R8), allocatable               :: x(:), y(:)
 
         ! Target plates
         integer(I4)                         :: ntp = 0
         integer(I4), allocatable            :: allTPind(:)
         integer(I4), allocatable            :: TPind(:)
-        
-        ! Geometry
-        character(C128)                     :: geom
 
         ! Structures
         integer(I4)                         :: nstructures = 0
         type(VesselStructureUDT), allocatable       :: structures(:)
         type(PolygonSetUDT)                 :: polygonset 
 
-        ! General vessel polygon
-        integer(I8)                         :: np, nedges
-        integer(I8), allocatable            :: polygonstart(:)
-        integer(I8), allocatable            :: edges(:, :)
 
     end type
 
@@ -973,8 +962,6 @@ module goatmod_types
 
         ! Allocate
         !=========
-        deallocate(vessel%x)
-        deallocate(vessel%y)
         deallocate(vessel%TPind)
         deallocate(vessel%allTPind)
 

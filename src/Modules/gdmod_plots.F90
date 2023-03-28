@@ -687,7 +687,7 @@ module gdmod_plots
         ! Declare variables
         type(VesselUDT)                     :: vessel
         character(*)                        :: gnuplotoptions
-        integer(I8)                         :: i
+        integer(I8)                         :: i, j
         integer                             :: fu
 
         ! Initialize
@@ -701,22 +701,27 @@ module gdmod_plots
 
         ! Write the data file
         !====================
+        ! Associate
+        associate(pol   => vessel%polygonset%polygons)
+
         ! Loop over all polygon parts
-        do i = 1, vessel%nedges
+        do i = 1, vessel%polygonset%np
 
-            if (any(i == vessel%polygonstart)) then 
-                ! Write white line
-                write(fu, *)
-            end if
+            ! Loop over all edges of this polygon
+            do j = 1, pol(i)%ne+1
 
-            ! Write coordinates
-            write (fu, *) vessel%x(vessel%edges(i, 1)), vessel%y(vessel%edges(i, 1))
-            write (fu, *) vessel%x(vessel%edges(i, 2)), vessel%y(vessel%edges(i, 2))
+                ! Write coordinates
+                write (fu, *) pol(i)%x(pol(i)%vert(j)), pol(i)%y(pol(i)%vert(j))
+
+            end do 
 
             ! Insert white line
-            !write(fu, *)
+            write(fu, *)
 
         end do
+
+        ! End associate
+        end associate
     
         ! Close file
         close (fu)
