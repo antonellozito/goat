@@ -148,7 +148,7 @@ module PolygonShapeFunction
     !                       POLYGON SHAPE FUNCTIONS                    !
     !------------------------------------------------------------------!
     ! Constructor
-    subroutine InitializePolygonShapeFunction(psf, x, y, nc, sp, nsp)
+    subroutine InitializePolygonShapeFunction(psf, x, y, nc)
 
         ! Description
         !============
@@ -164,9 +164,8 @@ module PolygonShapeFunction
         !==================
         ! Arguments
         class(PolygonShapeFunctionUDT)      :: psf 
-        integer(I8), intent(in)             :: nc, nsp
+        integer(I8), intent(in)             :: nc
         real(R8), dimension(1:nc, 2)        :: x, y 
-        integer(I8), dimension(1:nsp)       :: sp    
 
         ! Auxiliary
         real(R8), allocatable               :: nxp(:), nyp(:), txp(:), &
@@ -180,7 +179,6 @@ module PolygonShapeFunction
         !===========
         ! Set some values
         psf%nc = nc
-        psf%nsp = nsp
 
         ! Allocate
         call psf%Allocate()
@@ -188,7 +186,6 @@ module PolygonShapeFunction
         ! Add
         psf%x = x 
         psf%y = y
-        psf%sp = sp
 
         ! Compute auxiliary quantities
         !=============================
@@ -496,9 +493,6 @@ module PolygonShapeFunction
         ! Coordinate arrays
         allocate(psf%x(psf%nc, 2))
         allocate(psf%y(psf%nc, 2))
-
-        ! Polygon start etc
-        allocate(psf%sp(psf%nsp))
 
         ! Polygon normals
         allocate(psf%nxp(psf%nc), psf%nyp(psf%nc))
