@@ -1123,9 +1123,9 @@ module gdmod_userinput
         field = 'gd.design.ec.par.orthogonality.includeboxy'
         call ExtractOptionValueReal2D(fid, field, options%includeboxy)
         field = 'gd.design.ec.par.orthogonality.excludeboxx'
-        call ExtractOptionValueReal2D(fid, field, options%includeboxx)
+        call ExtractOptionValueReal2D(fid, field, options%excludeboxx)
         field = 'gd.design.ec.par.orthogonality.excludeboxy'
-        call ExtractOptionValueReal2D(fid, field, options%includeboxy)
+        call ExtractOptionValueReal2D(fid, field, options%excludeboxy)
         
         ! Housekeeping
         !=============
