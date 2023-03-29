@@ -959,9 +959,11 @@ module gdmod_costfunction
 
         ! Deallocate
         !===========
-        deallocate(costfunction%vpairs)
-        deallocate(costfunction%b0)
-        deallocate(costfunction%wt)
+        if (allocated(costfunction%vpairs)) then 
+            deallocate(costfunction%vpairs)
+            deallocate(costfunction%b0)
+            deallocate(costfunction%wt)
+        end if
 
     end subroutine
 
@@ -2396,8 +2398,10 @@ module gdmod_costfunction
 
         ! Deallocate
         !===========
-        deallocate(costfunction%vpairs)
-        deallocate(costfunction%wt)
+        if (allocated(costfunction%vpairs)) then 
+            deallocate(costfunction%vpairs)
+            deallocate(costfunction%wt)
+        end if
 
     end subroutine
 

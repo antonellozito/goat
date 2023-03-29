@@ -43,8 +43,6 @@ subroutine ConstructGridDesignProblem(optimizationdriver, &
     ! State
     !======
     
-    
-
     call optimizationdriver%SetupOptimizationDriver()
 
     ! Associate in order to execute select type...

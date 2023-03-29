@@ -204,7 +204,6 @@ subroutine ReadTraduitUS(filespec,grid)
         ftdatai(grid%data%fluxdata%nFt, 3)-1
     
     ! Read ftCv, ftFc
-    print *, nftCv, nftFc
     allocate(ftCvdum(nftCv), ftFcdum(nftFc))
     call cfruin (filespec, nftCv, ftCvdum, 'ftCv')
     call cfruin (filespec, nftFc, ftFcdum, 'ftFc')
