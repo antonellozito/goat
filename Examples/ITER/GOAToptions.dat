@@ -103,7 +103,7 @@ VERSION 1.00.00
 'gd.design.ec.par.fluxfunction.includeboxy' 			'[4.4, 4.8; -5, -3.6]'
 
 # Orthogonality constraint parameters 
-'gd.design.ec.par.orthogonality.checkperp'				'1'
+'gd.design.ec.par.orthogonality.checkperp'				'0'
 'gd.design.ec.par.orthogonality.epsperp' 				'0.2'
 'gd.design.ec.par.orthogonality.includeboxx' 			'[4, 8.5; 5, 6; 6, 7.5]'
 'gd.design.ec.par.orthogonality.includeboxy' 			'[-2, 5; -3, -2; -2.5, -2]' 
@@ -120,6 +120,12 @@ VERSION 1.00.00
 # ITER, 	include: x: [4 8.5; 5 6; 6 7.5], 	y: [-2 5; -3 -2; -2.5 -2]
 
 # Edge length constraint parameters 
+'gd.design.ec.par.edgelengths.dovesseledges'    '1'
+'gd.design.ec.par.edgelengths.doTP'             '1'
+'gd.design.ec.par.edgelengths.doWG'             '1'
+'gd.design.ec.par.edgelengths.doxpointedges'    '1'
+'gd.design.ec.par.edgelengths.edgedistvessel'   '5e-3'
+'gd.design.ec.par.edgelengths.edgedistxpoint'   '5e-3'
 'gd.design.ec.par.edgelengths.edgetype' 		'BoundaryPerpendicular'
 'gd.design.ec.par.edgelengths.lengthcriterion'	'Predetermined'
 'gd.design.ec.par.edgelengths.length'			'1e-3'
@@ -165,8 +171,8 @@ VERSION 1.00.00
 'gd.grid.maxvesseldist'     '1e-2'
 
 # Target plate definition
-'gd.grid.TP'                '[11 12]'
-'gd.grid.TPind'             '[1 2]'
+'gd.grid.TP'                '[11, 12]'
+'gd.grid.TPind'             '[1, 2]'
 
 # Structures to be excluded when constructing vessel (if empty, all are included)
 'gd.grid.exclude'           '[1, 2, 3, 4, 5, 6, 7, 8]'
