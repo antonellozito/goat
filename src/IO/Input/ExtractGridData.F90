@@ -368,25 +368,25 @@ subroutine ExtractGridData(grid, meth, gridoptions)
         allocate(tfv(maxval(fluxdata%fluxsurfacefacesP(:,2),1),2))
 
         ! Loop
-        !do iFT = 1, fluxdata%nFs
-        !   ! Unpack
-        !    itf = fluxdata%fluxsurfacefacesP(iFT,1); ! start index
-        !    ntf = fluxdata%fluxsurfacefacesP(iFT,2); ! number of faces 
-       ! 
-       !     ! Extract faces
-        !    tf(1:ntf) = fluxdata%fluxsurfacefaces(itf:itf+ntf-1)
+        do iFT = 1, fluxdata%nFs
+           ! Unpack
+            itf = fluxdata%fluxsurfacefacesP(iFT,1); ! start index
+            ntf = fluxdata%fluxsurfacefacesP(iFT,2); ! number of faces 
+        
+            ! Extract faces
+            tf(1:ntf) = fluxdata%fluxsurfacefaces(itf:itf+ntf-1)
 
             ! Extract vertices of these faces
-        !    tfv(1:ntf,:) = grid%faces%vert(tf(1:ntf),:)
+            tfv(1:ntf,:) = grid%faces%vert(tf(1:ntf),:)
 
             ! Set the flux tube index
-        !    do j = 1, 2
-        !        do i = 1, ntf 
-        !            grid%data%fluxdata%fluxsurfaceID(tfv(i,j)) = iFT
-        !            grid%vert%fieldlineID(tfv(i,j)) = iFT
-        !        enddo
-        !    enddo
-        !enddo
+            do j = 1, 2
+                do i = 1, ntf 
+                    grid%data%fluxdata%fluxsurfaceID(tfv(i,j)) = iFT
+                    grid%vert%fieldlineID(tfv(i,j)) = iFT
+                enddo
+            enddo
+        enddo
 
         ! Deallocate
         deallocate(tf)

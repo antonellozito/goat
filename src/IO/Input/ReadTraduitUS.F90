@@ -24,7 +24,7 @@ subroutine ReadTraduitUS(filespec,grid)
     integer, intent(in)         :: filespec ! file specifier
     integer(I8)                 :: idum(0:9)    
     character(10)               :: b2fgmtryversion
-    integer(I8)                 :: nc,nf,nv ! total number of cells, faces, vertices
+    integer(I8)                 :: nc, nf, nv, nfsFc, nftCv, nftFc
 
     logical                     :: reachedeof
 
@@ -41,6 +41,7 @@ subroutine ReadTraduitUS(filespec,grid)
     real(R8), allocatable       :: facelistdummy(:) ! dummy array
     real(R8), allocatable       :: n2dummy(:) ! dummy array
     real(R8), allocatable       :: nxdummy(:) ! dummy array
+    integer(I8), allocatable    :: ftCvdum(:), ftFcdum(:), fsFcdum(:)
 
     real(R8), allocatable       :: vdata(:, :), cdata(:, :), &
         fsdata(:, :)
@@ -60,7 +61,7 @@ subroutine ReadTraduitUS(filespec,grid)
     call cfverr(filespec,b2fgmtryversion)
 
     ! Primary array dimensions
-    call cfruin (filespec,6,idum,'nCv,nFc,nVx,nCg,nFs,nFt')
+    call cfruin (filespec,6,idum,'nCi,nFc,nVx,nCg,nFs,nFt')
     nc = idum(0) ! note: only reading in actual cells, no guard cells
     nf = idum(1)
     nv = idum(2)
@@ -100,10 +101,13 @@ subroutine ReadTraduitUS(filespec,grid)
     allocate(ftdummy(grid%data%fluxdata%nFt))
 
     ! Read data for structured grid remapping (to be deleted in future)
-    call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
-    grid%data%sglegacy%nx = idum(0)
-    grid%data%sglegacy%ny = idum(1)
     call cfruin (filespec,1,grid%data%sglegacy%isClassicalGrid,'isClassicalGrid') 
+    if (grid%data%sglegacy%isClassicalGrid == 1) then 
+        call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
+        grid%data%sglegacy%nx = idum(0)
+        grid%data%sglegacy%ny = idum(1)
+    end if
+    
 
     ! Vertex data
     !------------
@@ -192,44 +196,66 @@ subroutine ReadTraduitUS(filespec,grid)
         ! Read 
         read(filespec, *) ftlist(i), ftdatai(i,:) ! apparently this works fine...
     end do
-    !call cfruin (filespec, nc, grid%data%fluxdata%fluxtubecells, 'ftCv')
-    !call cfruin (filespec, nf, grid%data%fluxdata%fluxtubefaces, 'ftFc')
+
+    ! Compute the number of ftCv and ftFc that are actually there
+    nftCv = ftdatai(grid%data%fluxdata%nFt, 2) + &
+        ftdatai(grid%data%fluxdata%nFt, 1)-1
+    nftFc = ftdatai(grid%data%fluxdata%nFt, 4) + &
+        ftdatai(grid%data%fluxdata%nFt, 3)-1
+    
+    ! Read ftCv, ftFc
+    print *, nftCv, nftFc
+    allocate(ftCvdum(nftCv), ftFcdum(nftFc))
+    call cfruin (filespec, nftCv, ftCvdum, 'ftCv')
+    call cfruin (filespec, nftFc, ftFcdum, 'ftFc')
+    
 
     ! Add to grid
-    !grid%data%fluxdata%fluxtubecellsP(ftlist, 1) = ftdatai(:, 1)
-    !grid%data%fluxdata%fluxtubecellsP(ftlist, 2) = ftdatai(:, 2)
-    !grid%data%fluxdata%fluxtubefacesP(ftlist, 1) = ftdatai(:, 3)
-    !grid%data%fluxdata%fluxtubefacesP(ftlist, 2) = ftdatai(:, 4)
-    !grid%data%regions%fluxtuberegID(ftlist) = ftdatai(:, 5)
+    grid%data%fluxdata%fluxtubecells(1:nftCv) = ftCvdum
+    grid%data%fluxdata%fluxtubefaces(1:nftFc) = ftFcdum
+    grid%data%fluxdata%fluxtubecellsP(ftlist, 1) = ftdatai(:, 1)
+    grid%data%fluxdata%fluxtubecellsP(ftlist, 2) = ftdatai(:, 2)
+    grid%data%fluxdata%fluxtubefacesP(ftlist, 1) = ftdatai(:, 3)
+    grid%data%fluxdata%fluxtubefacesP(ftlist, 2) = ftdatai(:, 4)
+    grid%data%regions%fluxtuberegID(ftlist) = ftdatai(:, 5)
 
     ! Flux surfaces
     !--------------
-    !allocate(fsdatai(grid%data%fluxdata%nFs, 2), &
-    !    fsdata(grid%data%fluxdata%nFs, 1), &
-    !    fslist(grid%data%fluxdata%nFs)) 
+    allocate(fsdatai(grid%data%fluxdata%nFs, 2), &
+        fsdata(grid%data%fluxdata%nFs, 1), &
+        fslist(grid%data%fluxdata%nFs)) 
 
     ! Skip the header
-    !call ReadSingleLine(filespec, chardummy, reachedeof)
-    !if (reachedeof) then 
-    !    call gdErrorHandler('ReadTraduitUS: reached EOF prematurely')
-    !end if 
+    call ReadSingleLine(filespec, chardummy, reachedeof)
+    if (reachedeof) then 
+        call gdErrorHandler('ReadTraduitUS: reached EOF prematurely')
+    end if 
 
     ! Read in data
-    !do i = 1, grid%data%fluxdata%nFs 
-    !    ! Read 
-    !    read(filespec, *) fslist(i), fsdatai(i,:), fsdata(i, :) ! apparently this works fine...
-    !end do
-    !call cfruin (filespec, nf,     grid%data%fluxdata%fluxsurfacefaces,  'fsFc')
+    do i = 1, grid%data%fluxdata%nFs 
+        ! Read 
+        read(filespec, *) fslist(i), fsdatai(i,:), fsdata(i, :) ! apparently this works fine...
+    end do
+
+    ! Compute the number of fsFc
+    nfsFc = fsdatai(grid%data%fluxdata%nFs, 2) + &
+        fsdatai(grid%data%fluxdata%nFs, 1)-1
+
+    ! Read fsFc
+    allocate(fsFcdum(nfsFc))
+    call cfruin (filespec, nfsFc, fsFcdum ,  'fsFc')
 
     ! Add to grid
-    !grid%data%fluxdata%fluxsurfacefacesP(fslist, 1) = fsdatai(:, 1)
-    !grid%data%fluxdata%fluxsurfacefacesP(fslist, 2) = fsdatai(:, 2)
+    grid%data%fluxdata%fluxsurfacefaces(1:nfsFc) = fsFcdum
+    grid%data%fluxdata%fluxsurfacefacesP(fslist, 1) = fsdatai(:, 1)
+    grid%data%fluxdata%fluxsurfacefacesP(fslist, 2) = fsdatai(:, 2)
     ! fsdata(:, 1) contains psi value of flux surfaces, to be read in in the future?
     
     ! Housekeeping
     !=============
-    !deallocate(vdata, cdata, fsdata, vlist, flist, clist, ftlist, &
-    !    fslist, cdatai1, cdatai2, fdatai, ftdatai, fsdatai)
+    deallocate(vdata, cdata, fsdata, vlist, flist, clist, ftlist, &
+        fslist, cdatai1, cdatai2, fdatai, ftdatai, fsdatai, ftCvdum, &
+        ftFcdum, fsFcdum)
     close(filespec)
 
 end subroutine
