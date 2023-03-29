@@ -497,8 +497,8 @@ module gdmod_utility_optimization
 
         ! Check if in box
         !================
-        in = ( (minx >= x) .and. (maxx <= x ) )
-        in = in .and. ( (miny >= y) .and. (maxy <= y ) )
+        in = ( (x >= minx) .and. (x <= maxx ) ) .and. &
+            ( (y >= miny) .and. (y <= maxy) )
 
     end function 
 
