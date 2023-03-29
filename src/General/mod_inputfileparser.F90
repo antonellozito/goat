@@ -823,12 +823,23 @@ module mod_inputfileparser
             end if 
         end do 
 
+        ! Check if only whitespace remains. In that case, an empty array
+        ! was specified
+        call CompareStringWithCharacter(tempc, ' ', templ)
+        if (all(templ)) then 
+            nval = 0
+        end if
+
         ! Read
         !=====
         ! Allocate
         allocate(intval(nval))
 
-        ! Read
+        ! Read (only if nonempty)
+        if (nval == 0) then 
+            islegal = .true.
+            return 
+        end if
         read (tempc, *, iostat=readstatus) intval
 
         ! Check if read succeeded
@@ -914,13 +925,6 @@ module mod_inputfileparser
         ncol = count(templ)/nrow + 1
         check = check .or. templ ! remove separators
 
-        ! Check remainder of division
-        remdivcheck = mod(count(templ), nrow)
-        if (remdivcheck .ne. 0) then 
-            ! Something wrong with input, return
-            return 
-        end if
-
         ! Trim the string
         check = .not. check 
         do i = 1, stringlength 
@@ -933,13 +937,35 @@ module mod_inputfileparser
             end if 
         end do 
 
+        ! Check if only whitespace remains. In that case, an empty array
+        ! was specified
+        call CompareStringWithCharacter(tempc, ' ', templ)
+        if (all(templ)) then 
+            nrow = 0
+            ncol = 0
+        end if
+
+        ! Check remainder of division
+        call CompareStringWithCharacter(stringval, rowsep, templ)
+        if (nrow > 0) then 
+            remdivcheck = mod(count(templ), nrow)
+            if (remdivcheck .ne. 0) then 
+                ! Something wrong with input, return
+                return 
+            end if
+        end if
+
         ! Read
         !=====
         ! Allocate
         allocate(intval(nrow, ncol))
         allocate(tempi(nrow*ncol))
 
-        ! Read
+        ! Read (only if nonempty)
+        if ( (nrow == 0) .or. (ncol == 0) ) then 
+            islegal = .true.
+            return 
+        end if
         read (tempc, *, iostat=readstatus) tempi
 
         ! Check if read succeeded
@@ -1131,12 +1157,23 @@ module mod_inputfileparser
             end if 
         end do 
 
+        ! Check if only whitespace remains. In that case, an empty array
+        ! was specified
+        call CompareStringWithCharacter(tempc, ' ', templ)
+        if (all(templ)) then 
+            nval = 0
+        end if
+
         ! Read
         !=====
         ! Allocate
         allocate(realval(nval))
 
-        ! Read
+        ! Read (only if nonempty)
+        if (nval == 0) then 
+            islegal = .true.
+            return 
+        end if
         read (tempc, *, iostat=readstatus) realval
 
         ! Check if read succeeded
@@ -1213,13 +1250,6 @@ module mod_inputfileparser
         ncol = count(templ)/nrow + 1
         check = check .or. templ ! remove separators
 
-        ! Check remainder of division
-        remdivcheck = mod(count(templ), nrow)
-        if (remdivcheck .ne. 0) then 
-            ! Something wrong with input, return
-            return 
-        end if
-
         ! Trim the string
         check = .not. check 
         do i = 1, stringlength 
@@ -1232,13 +1262,35 @@ module mod_inputfileparser
             end if 
         end do 
 
+        ! Check if only whitespace remains. In that case, an empty array
+        ! was specified
+        call CompareStringWithCharacter(tempc, ' ', templ)
+        if (all(templ)) then 
+            nrow = 0
+            ncol = 0
+        end if
+
+        ! Check remainder of division
+        call CompareStringWithCharacter(stringval, rowsep, templ)
+        if (nrow > 0) then 
+            remdivcheck = mod(count(templ), nrow)
+            if (remdivcheck .ne. 0) then 
+                ! Something wrong with input, return
+                return 
+            end if
+        end if
+
         ! Read
         !=====
         ! Allocate
         allocate(intval(nrow, ncol))
         allocate(tempr(nrow*ncol))
 
-        ! Read
+        ! Read (only if nonempty)
+        if ( (nrow == 0) .or. (ncol == 0) ) then 
+            islegal = .true.
+            return 
+        end if
         read (tempc, *, iostat=readstatus) tempr
 
         ! Check if read succeeded
@@ -1254,6 +1306,9 @@ module mod_inputfileparser
                     k = k + 1
                 end do 
             end do
+        else
+        print *, stringval
+        print *, check
         end if
 
     end subroutine
