@@ -38,6 +38,7 @@ module gdmod_constraints
     use gdmod_designvariables
     use gdmod_utility_optimization
     use gdmod_plots
+    use gdmod_userinput
     use PolygonShapeFunction
     use BicubicSplineInterpolant
     
@@ -364,7 +365,7 @@ module gdmod_constraints
 
         ! Constraint initialization
         subroutine InitializeConstraintsINT(constraints, grid, &
-            magneticField, environment, monitor)
+            magneticField, environment, monitor, options)
 
             ! Description
             !============
@@ -374,7 +375,8 @@ module gdmod_constraints
 
             ! Import
             import :: GenericConstraintsGDUDT, GridUDT, &
-                MagneticFieldUDT, EnvironmentUDT, ConstraintsMonitorUDT
+                MagneticFieldUDT, EnvironmentUDT, &
+                ConstraintsMonitorUDT, ConstraintOptionsUDT
 
             ! Declare
             class(GenericConstraintsGDUDT)      :: constraints 
@@ -382,6 +384,7 @@ module gdmod_constraints
             type(MagneticFieldUDT)              :: magneticField 
             type(EnvironmentUDT)                :: environment 
             type(ConstraintsMonitorUDT)         :: monitor
+            type(ConstraintOptionsUDT)          :: options
 
         end subroutine
 
@@ -486,7 +489,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialization
     subroutine InitializeConstraints(constraints, grid, magneticField, &
-        environment, constraintoptions)
+        environment, options)
 
         ! Description
         !============
@@ -501,7 +504,7 @@ module gdmod_constraints
         type(GridUDT)               :: grid 
         type(MagneticFieldUDT)      :: magneticField 
         type(EnvironmentUDT)        :: environment 
-        type(ConstraintOptionsUDT)  :: constraintoptions
+        type(ConstraintOptionsUDT)  :: options
         type(ConstraintsMonitorUDT) :: monitor
 
         ! Loop variables
@@ -516,11 +519,11 @@ module gdmod_constraints
         !=======================
         ! Equality constraints
         call constraints%eqcon%Initialize(grid, magneticField, &
-            environment, constraintoptions, monitor)
+            environment, options, monitor)
 
         ! Inequality constraints
         call constraints%ineqcon%Initialize(grid, magneticField, &
-            environment, constraintoptions, monitor)
+            environment, options, monitor)
 
     end subroutine
 
@@ -587,7 +590,7 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%xpoints%Initialize(grid, &
-                magneticField, environment, monitor)
+                magneticField, environment, monitor, constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -612,7 +615,7 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%boundaryfunction%Initialize(grid, &
-                magneticField, environment, monitor)
+                magneticField, environment, monitor, constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -636,7 +639,7 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%fluxfunction%Initialize(grid, &
-                magneticField, environment, monitor)
+                magneticField, environment, monitor, constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -659,7 +662,7 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%edgelengths%Initialize(grid, &
-                magneticField, environment, monitor)
+                magneticField, environment, monitor, constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -682,7 +685,7 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%orthogonality%Initialize(grid, &
-                magneticField, environment, monitor)
+                magneticField, environment, monitor, constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -1380,7 +1383,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialize
     subroutine InitializeFluxfunctionConstraints(constraints, grid, &
-        magneticField, environment, monitor)
+        magneticField, environment, monitor, options)
 
         ! Description
         !============
@@ -1437,16 +1440,18 @@ module gdmod_constraints
         type(MagneticFieldUDT)                  :: magneticField 
         type(EnvironmentUDT)                    :: environment 
         type(ConstraintsMonitorUDT)             :: monitor
+        type(ConstraintOptionsUDT)              :: options 
 
         ! Loop variables
         integer(I8)                 :: i
 
         ! Auxiliary variables
+        real(R8)                    :: tpsi, minx, maxx, miny, maxy
+
         integer(I8), allocatable    :: vert_tmp(:), vertID(:) 
         real(R8), allocatable       :: PsiD_tmp(:) 
         logical, allocatable        :: delind(:), mask(:)
-        real(R8)                    :: tpsi
-
+        
         ! Data
         logical                     :: fixfluxalignedtargets = .true. 
         logical                     :: fixfarvesselflux = .true. 
@@ -1475,7 +1480,8 @@ module gdmod_constraints
         associate(&
             vert    => grid%vert,       x       => grid%vert%x,     &
             y       => grid%vert%y,     cc      => monitor%eqvcc,   &
-            maxcc   => monitor%maxeqvcc)
+            maxcc   => monitor%maxeqvcc,                            &
+            opt     => options%ffoptions)
         
         ! Determine flux values to impose
         !================================
@@ -1507,16 +1513,29 @@ module gdmod_constraints
         end do
 
         ! Compensate for flux aligned targets?
-        if (fixfluxalignedtargets) then
+        if (opt%fixfluxalignedtargets == 1) then
             ! This is still to do
             print *, 'fix for flux aligned targets is not yet available'
         end if
 
         ! Fix flux values of vessel boundaries? 
-        if (fixfarvesselflux) then 
+        if (opt%fixfarvesselflux == 1) then 
             ! This is still to do
             print *, 'fix for vessel boundaries is not yet available'
         end if
+
+        ! Override the deletion vector
+        if (opt%doboxoverride == 1) then 
+            ! Override the deletion index
+            do i = 1, size(opt%includeboxx, 1)
+                maxx = maxval(opt%includeboxx(i, :))
+                minx = minval(opt%includeboxx(i, :))
+                maxy = maxval(opt%includeboxy(i ,:))
+                miny = minval(opt%includeboxy(i ,:))
+                where ( IsInBox(minx, maxx, miny, maxy, grid%vert%x, grid%vert%y) ) delind = .false.
+            end do
+        end if
+
 
         ! Set the deletion vector
         where(cc >= maxcc) delind = .true. ! don't constrain
@@ -1891,7 +1910,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialize
     subroutine InitializeBoundaryFunctionConstraints(constraints, &
-        grid, magneticField, environment, monitor)
+        grid, magneticField, environment, monitor, options)
 
         ! Description
         !============
@@ -1915,6 +1934,7 @@ module gdmod_constraints
         type(MagneticFieldUDT)                      :: magneticField 
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
+        type(ConstraintOptionsUDT)                  :: options
 
         ! Auxiliary
         real(R8), allocatable                       :: xe(:, :), &
@@ -2343,7 +2363,7 @@ module gdmod_constraints
 
     ! Initialize
     subroutine InitializeXPointConstraints(constraints, &
-        grid, magneticField, environment, monitor)
+        grid, magneticField, environment, monitor, options)
 
         ! Description
         !============
@@ -2359,6 +2379,7 @@ module gdmod_constraints
         type(MagneticFieldUDT)                      :: magneticField 
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
+        type(ConstraintOptionsUDT)                  :: options
 
         ! Auxiliary
         integer(I8)                                 :: nxpind
@@ -2712,7 +2733,7 @@ module gdmod_constraints
 
     ! Initialize
     subroutine InitializeEdgeLengthsConstraints(constraints, &
-        grid, magneticField, environment, monitor)
+        grid, magneticField, environment, monitor, options)
 
         ! Description
         !============
@@ -2752,6 +2773,7 @@ module gdmod_constraints
         type(MagneticFieldUDT)                      :: magneticField 
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
+        type(ConstraintOptionsUDT)                  :: options
 
         ! Auxiliary
         real(R8)                    :: edgedistvessel, edgedistxpoint
@@ -2782,17 +2804,18 @@ module gdmod_constraints
         associate(&
             vert        => grid%vert,           &
             vcc         => monitor%eqvcc,       &
-            maxvcc      => monitor%maxeqvcc)
+            maxvcc      => monitor%maxeqvcc,    &
+            opt         => options%eloptions)
 
         ! Do vessel edge lengths?
-        dovesseledges   = .true.
-        edgedistvessel  = 5e-3 ! desired edge length in [m]
-        doTP            = .true. ! do target plates? 
-        doWG            = .true. ! do wide grid boundaries?
+        dovesseledges   = (opt%dovesseledges == 1)
+        edgedistvessel  = opt%edgedistvessel ! desired edge length in [m]
+        doTP            = (opt%doTP == 1) ! do target plates? 
+        doWG            = (opt%doWG == 1) ! do wide grid boundaries?
 
         ! Do x-point edge lengths?
-        doxpointedges   = .false. 
-        edgedistxpoint  = 5e-3 ! desired edge length in [m]
+        doxpointedges   = (opt%doxpointedges == 1)
+        edgedistxpoint  = opt%edgedistxpoint ! desired edge length in [m]
 
         ! Determine edges
         !================
@@ -3329,7 +3352,7 @@ module gdmod_constraints
 
     ! Initialize
     subroutine InitializeOrthogonalityConstraints(constraints, &
-        grid, magneticField, environment, monitor)
+        grid, magneticField, environment, monitor, options)
 
         ! Description
         !============
@@ -3361,22 +3384,20 @@ module gdmod_constraints
         type(MagneticFieldUDT)                      :: magneticField 
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
+        type(ConstraintOptionsUDT)                  :: options
 
         ! Auxiliary
         integer(I8)                 :: nincludebox, nexcludebox, tv, &
             startindex, endindex, tID, nbID(1:2), vpc, tbv, tnbv, tf
         real(R8)                    :: tx, ty, tn, bx, by, bn, nb, dotprod, &
-            epsortho, epsperp
+            epsperp, maxx, minx, maxy, miny
         logical                     :: checkperp, isfaceperp, &
-            doincludebox, doexcludebox, debugplots 
+            debugplots 
         
         integer(I8), allocatable    :: cvertlist(:), temp(:), &
             northcon(:), maxnorthcon(:), tvn(:), vpairs(:, :)
 
-        real(R8), allocatable       :: includeboxlbx(:), &
-            includeboxubx(:), includeboxlby(:), includeboxuby(:), &
-            excludeboxubx(:), excludeboxlby(:), excludeboxuby(:), &
-            excludeboxlbx(:), Btx(:), Bty(:), xf(:), yf(:)
+        real(R8), allocatable       :: Btx(:), Bty(:), xf(:), yf(:)
 
         logical, allocatable        :: cvert(:), boxcheck(:), &
             movetoback(:), movetofront(:), ismarked(:), isconstrained(:), &
@@ -3396,43 +3417,23 @@ module gdmod_constraints
             vcc         => monitor%eqvcc,           &
             maxvcc      => monitor%maxeqvcc,        &
             x           => grid%vert%x,             &
-            y           => grid%vert%y)
+            y           => grid%vert%y,             &
+            opt         => options%orthoptions)
 
         ! Debug plots?
         debugplots = .false.
 
         ! Boxes for edges to be included?
-        doincludebox    = .true.
-        nincludebox     = 1 ! number of boxes
+        nincludebox     = size(opt%includeboxx, 1) ! number of boxes
 
         ! Boxes for edges to be excluded
-        doexcludebox    = .false. 
-        nexcludebox     = 1 ! number of boxes
+        nexcludebox     = size(opt%excludeboxx, 1) ! number of boxes
 
-        ! Tolerances (to be moved to input)
-        epsortho    = 0.1
-        epsperp     = 0.1 
+        ! Tolerances 
+        epsperp     = opt%epsperp
 
-        ! Check perpendicularity? (to be moved to input)
-        checkperp = .true.
-
-        ! Allocate
-        allocate(&
-            includeboxlbx(nincludebox), includeboxlby(nincludebox), &
-            includeboxubx(nincludebox), includeboxuby(nincludebox), &
-            excludeboxlbx(nexcludebox), excludeboxlby(nexcludebox), &
-            excludeboxubx(nexcludebox), excludeboxuby(nexcludebox))
-
-        ! Set the values of the boxes (to be read in in the future)
-        includeboxlbx(1:nincludebox) = [-1]
-        includeboxubx(1:nincludebox) = [1]
-        includeboxlby(1:nincludebox) = [-0.2]
-        includeboxuby(1:nincludebox) = [1]
-
-        excludeboxlbx(1:nexcludebox) = [-1]
-        excludeboxubx(1:nexcludebox) = [1]
-        excludeboxlby(1:nexcludebox) = [-1]
-        excludeboxuby(1:nexcludebox) = [1]
+        ! Check perpendicularity? 
+        checkperp = (opt%checkperp == 1)
 
         ! Determine edge vertices
         !========================
@@ -3454,27 +3455,25 @@ module gdmod_constraints
         maxnorthcon(:) = 2
         where (vert%BV) maxnorthcon = 1
 
-        if (doincludebox) then 
-            do i = 1, nincludebox ! include points in the box
-                boxcheck(:) = .false.
-                boxcheck = (vert%x >= includeboxlbx(i)) .and. &
-                    (vert%x <= includeboxubx(i)) .and. &
-                    (vert%y >= includeboxlby(i)) .and. &
-                    (vert%y <= includeboxuby(i))
-                cvert = cvert .or. boxcheck 
-            end do
-        end if 
+        ! Include?
+        do i = 1, nincludebox ! include points in the box
+            maxx = maxval(opt%includeboxx(i, :))
+            minx = minval(opt%includeboxx(i, :))
+            maxy = maxval(opt%includeboxy(i, :))
+            miny = minval(opt%includeboxy(i, :))
+            boxcheck = IsInBox(minx, maxx, miny, maxy, vert%x, vert%y)
+            cvert = cvert .or. boxcheck 
+        end do
 
-        if (doexcludebox) then 
-            do i = 1, nincludebox ! exclude points outside the box
-                boxcheck(:) = .false.
-                boxcheck = (vert%x >= includeboxlbx(i)) .and. &
-                    (vert%x <= includeboxubx(i)) .and. &
-                    (vert%y >= includeboxlby(i)) .and. &
-                    (vert%y <= includeboxuby(i))
-                where (boxcheck) cvert = .false.
-            end do
-        end if
+        ! Exclude?
+        do i = 1, nexcludebox ! exclude points outside the box
+            maxx = maxval(opt%excludeboxx(i, :))
+            minx = minval(opt%excludeboxx(i, :))
+            maxy = maxval(opt%excludeboxy(i, :))
+            miny = minval(opt%excludeboxy(i, :))
+            boxcheck = IsInBox(minx, maxx, miny, maxy, vert%x, vert%y)
+            where (boxcheck) cvert = .false.
+        end do
 
         ! Prioritize inner vertices (typically yields better results, 
         ! but may not be a general approach)
@@ -3574,7 +3573,7 @@ module gdmod_constraints
                     dotprod = tx*bx + ty*by 
 
                     ! Check 
-                    if (abs(dotprod) < epsortho) then 
+                    if (abs(dotprod) < epsperp) then 
                         isperp(j) = .true.
                     endif 
 
@@ -3737,9 +3736,7 @@ module gdmod_constraints
         ! Housekeeping
         !=============
         ! Deallocate
-        deallocate(includeboxlbx, includeboxlby, includeboxubx, &
-            includeboxuby, excludeboxlbx, excludeboxlby, excludeboxubx, &
-            excludeboxuby, Btx, Bty, cvert, boxcheck, vpairs)
+        deallocate(Btx, Bty, cvert, boxcheck, vpairs)
 
         ! Deassociate
         end associate

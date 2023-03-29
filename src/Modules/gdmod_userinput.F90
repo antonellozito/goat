@@ -157,6 +157,90 @@ module gdmod_userinput
 
     end type
 
+    ! Constraints-specific options
+    type, extends(OptionsUDT) :: BoundaryFunctionConOptionsUDT
+
+        ! Fields
+        ! - type:   type of boundary function to be used
+        ! - psitol: tolerance on psi values to include (only for some
+        !           options)
+
+        character(:), allocatable       :: type 
+        real(R8)                        :: psitol 
+    
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultBoundaryFunctionConOptions
+        procedure :: Read           => ReadBoundaryFunctionConOptions
+
+    end type
+
+    type, extends(OptionsUDT) :: FluxFunctionConOptionsUDT
+
+        ! Fields
+        ! - fixfarvesselflux:   fix flux values of nodes on far vessel
+        !                       parts?
+        ! - fixfluxalignedtargets:  fix flux values of target plate
+        !                           corners?
+        ! - doboxoverride:      apply flux function constraints anyway
+        !                       inside a certain box, overriding 
+        !                       possible prior exclusion
+        ! - includeboxx, includeboxy: coordinates of the box(es) 
+
+        integer(I8)                     :: fixfarvesselflux, &
+            fixfluxalignedtargets, doboxoverride 
+        real(R8), allocatable           :: includeboxx(:, :), &
+            includeboxy(:, :)
+    
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultFluxFunctionConOptions
+        procedure :: Read           => ReadFluxFunctionConOptions
+
+    end type
+
+    type, extends(OptionsUDT) :: OrthogonalityConOptionsUDT
+
+        ! Fields
+        ! - checkperp:          check if edges are perpendicular?
+        ! - epsperp:            tolerance on dot product
+        ! - includebox(x, y)    boxes for edge inclusion
+        ! - excludebox(x, y)    boxes for edge exclusion (applied after 
+        !                       inclusion) 
+
+        integer(I8)                 :: checkperp 
+        real(R8)                    :: epsperp 
+        real(R8), allocatable       :: includeboxx(:, :), &
+            includeboxy(:, :), excludeboxx(:, :), excludeboxy(:, :)
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultOrthogonalityConOptions
+        procedure :: Read           => ReadOrthogonalityConOptions
+
+    end type
+
+    type, extends(OptionsUDT) :: EdgelengthsConOptionsUDT
+
+        ! Fields
+        ! - dovesseledges:      set length for vessel edges?
+        ! - doTP:               consider target plates?
+        ! - doWG:               do wide grid vessel segments?
+        ! - edgedistvessel      desired distance
+        ! - doxpointedges:      set length for x-point edges?
+        ! - edgedistxpoint:     desired distance    
+
+        integer(I8)                 :: dovesseledges, doTP, doWG, &
+            doxpointedges 
+        real(R8)                    :: edgedistvessel, edgedistxpoint
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultEdgelengthsConOptions
+        procedure :: Read           => ReadEdgelengthsConOptions
+
+    end type
+
     ! Options for the constraints
     type, extends(OptionsUDT) :: ConstraintOptionsUDT
 
@@ -178,6 +262,13 @@ module gdmod_userinput
         ! Number of (continuous) constraints
         integer(I8)         :: neq ! number of equality constraints
         integer(I8)         :: nineq ! number of inequality constraints 
+
+        ! Constraint parameters
+        type(BoundaryFunctionConOptionsUDT)     :: bfoptions 
+        type(FluxFunctionConOptionsUDT)         :: ffoptions 
+        type(OrthogonalityConOptionsUDT)        :: orthoptions 
+        type(EdgelengthsConOptionsUDT)          :: eloptions
+        
 
     contains 
 
@@ -332,6 +423,7 @@ module gdmod_userinput
 
         ! Default options
         !================
+        ! General switches and numbers
         options%boundaryfunctions   = 1
         options%fluxfunction        = 1
         options%xpoints             = 1
@@ -343,7 +435,107 @@ module gdmod_userinput
         options%neq                 = 4
         options%nineq               = 0
 
+        ! Paths
+        options%bfoptions%inputfilepath = options%inputfilepath
+        options%ffoptions%inputfilepath = options%inputfilepath
+        options%orthoptions%inputfilepath = options%inputfilepath
+        options%eloptions%inputfilepath = options%inputfilepath
+
+        ! Constraint-specific options
+        !============================
+        call options%bfoptions%Set() 
+        call options%ffoptions%Set()
+        call options%orthoptions%Set()
+        call options%eloptions%Set()
+
     end subroutine
+
+    subroutine SetDefaultBoundaryFunctionConOptions(options)
+
+        ! Description
+        !============
+        ! Set default constraint options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(BoundaryFunctionConOptionsUDT) :: options 
+
+        ! Default options
+        !================
+        options%type        = 'polygon'
+        options%psitol      = 0 
+
+    end subroutine
+
+    subroutine SetDefaultFluxFunctionConOptions(options)
+
+        ! Description
+        !============
+        ! Set default constraint options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FluxFunctionConOptionsUDT) :: options 
+
+        ! Default options
+        !================
+        options%fixfarvesselflux = 1
+        options%fixfluxalignedtargets = 1
+        options%doboxoverride = 0
+        if (allocated(options%includeboxx)) then 
+            deallocate(options%includeboxx, options%includeboxy)
+        end if
+        allocate(options%includeboxx(0, 0), options%includeboxy(0, 0))
+
+    end subroutine 
+
+    subroutine SetDefaultOrthogonalityConOptions(options)
+
+        ! Description
+        !============
+        ! Set default constraint options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OrthogonalityConOptionsUDT) :: options 
+
+        ! Default options
+        !================
+        options%checkperp = 0 
+        options%epsperp = 0.2
+        if (allocated(options%includeboxx)) then 
+            deallocate(options%includeboxx, options%includeboxy, &
+                options%excludeboxx, options%excludeboxy)
+        end if
+        allocate(options%includeboxx(0, 0), options%includeboxy(0, 0), &
+            options%excludeboxx(0, 0), options%excludeboxy(0, 0))
+
+    end subroutine 
+
+    subroutine SetDefaultEdgelengthsConOptions(options)
+
+        ! Description
+        !============
+        ! Set default constraint options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(EdgelengthsConOptionsUDT) :: options 
+
+        ! Default options
+        !================
+        options%dovesseledges = 1
+        options%doTP = 1
+        options%doWG = 0
+        options%doxpointedges = 0
+        options%edgedistvessel = 1e-3
+        options%edgedistxpoint = 1e-3
+
+    end subroutine 
 
     subroutine SetExportOptions(options)
         
@@ -767,6 +959,232 @@ module gdmod_userinput
         if (options%linefolding == 1) then 
             options%nineq = options%nineq + 1
         end if
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadBoundaryFunctionConOptions(options)
+
+        ! Description
+        !============
+        ! Read in user-specified constraints options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(BoundaryFunctionConOptionsUDT)     :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadBoundaryFunctionConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadBoundaryFunctionConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        field = 'gd.design.ec.par.boundaryfunctions.shapemeth'
+        call ExtractOptionValueCharacter(fid, field, options%type)
+        field = 'gd.design.ec.par.boundaryfunctions.psitol'
+        call ExtractOptionValueReal0D(fid, field, options%psitol)
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadFluxFunctionConOptions(options)
+
+        ! Description
+        !============
+        ! Read in user-specified constraints options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FluxFunctionConOptionsUDT)     :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadFluxFunctionConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadFluxFunctionConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        field = 'gd.design.ec.par.fluxfunction.fixfluxalignedtargets'
+        call ExtractOptionValueInteger0D(fid, field, options%fixfluxalignedtargets)
+        field = 'gd.design.ec.par.fluxfunction.fixfarvesselflux'
+        call ExtractOptionValueInteger0D(fid, field, options%fixfarvesselflux)
+        field = 'gd.design.ec.par.fluxfunction.doboxoverride'
+        call ExtractOptionValueInteger0D(fid, field, options%doboxoverride)
+        field = 'gd.design.ec.par.fluxfunction.includeboxx'
+        call ExtractOptionValueReal2D(fid, field, options%includeboxx)
+        field = 'gd.design.ec.par.fluxfunction.includeboxy'
+        call ExtractOptionValueReal2D(fid, field, options%includeboxy)
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadOrthogonalityConOptions(options)
+
+        ! Description
+        !============
+        ! Read in user-specified constraints options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OrthogonalityConOptionsUDT)     :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadOrthogonalityConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadOrthogonalityConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        field = 'gd.design.ec.par.orthogonality.checkperp'
+        call ExtractOptionValueInteger0D(fid, field, options%checkperp)
+        field = 'gd.design.ec.par.orthogonality.epsperp'
+        call ExtractOptionValueReal0D(fid, field, options%epsperp)
+        field = 'gd.design.ec.par.orthogonality.includeboxx'
+        call ExtractOptionValueReal2D(fid, field, options%includeboxx)
+        field = 'gd.design.ec.par.orthogonality.includeboxy'
+        call ExtractOptionValueReal2D(fid, field, options%includeboxy)
+        field = 'gd.design.ec.par.orthogonality.excludeboxx'
+        call ExtractOptionValueReal2D(fid, field, options%includeboxx)
+        field = 'gd.design.ec.par.orthogonality.excludeboxy'
+        call ExtractOptionValueReal2D(fid, field, options%includeboxy)
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadEdgelengthsConOptions(options)
+
+        ! Description
+        !============
+        ! Read in user-specified constraints options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(EdgelengthsConOptionsUDT)     :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadEdgelengthsConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadEdgelengthsConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        field = 'gd.design.ec.par.edgelengths.dovesseledges'
+        call ExtractOptionValueInteger0D(fid, field, options%dovesseledges)
+        field = 'gd.design.ec.par.edgelengths.doxpointedges'
+        call ExtractOptionValueInteger0D(fid, field, options%doxpointedges)
+        field = 'gd.design.ec.par.edgelengths.doTP'
+        call ExtractOptionValueInteger0D(fid, field, options%doTP)
+        field = 'gd.design.ec.par.edgelengths.doWG'
+        call ExtractOptionValueInteger0D(fid, field, options%doWG)
+        field = 'gd.design.ec.par.edgelengths.edgedistvessel'
+        call ExtractOptionValueReal0D(fid, field, options%edgedistvessel)
+        field = 'gd.design.ec.par.edgelengths.edgedistxpoint'
+        call ExtractOptionValueReal0D(fid, field, options%edgedistxpoint)
         
         ! Housekeeping
         !=============

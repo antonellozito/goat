@@ -467,4 +467,39 @@ module gdmod_utility_optimization
 
     end subroutine
 
+    !------------------------------------------------------------------!
+    !                          Auxiliary functions                     !
+    !------------------------------------------------------------------!
+
+    ! Box checker 
+    function IsInBox(minx, maxx, miny, maxy, x, y) result(in) 
+
+        ! Description
+        !============
+        ! Simple box checker. x and by values of the box should be given
+        ! in maxx, maxy, ... , values should be dimension (:).
+        ! Results may vary when values are up to precision on the box, 
+        ! since this precision is not accounted for.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8)                    :: minx, maxx, miny, maxy
+        real(R8), allocatable, intent(in)       :: x(:), y(:)
+        logical, allocatable        :: in(:)
+
+        ! Auxiliary
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(in(size(x)))
+
+        ! Check if in box
+        !================
+        in = ( (minx >= x) .and. (maxx <= x ) )
+        in = in .and. ( (miny >= y) .and. (maxy <= y ) )
+
+    end function 
+
 end module
