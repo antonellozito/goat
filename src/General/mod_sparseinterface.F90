@@ -76,6 +76,12 @@ module mod_sparseinterface
         procedure :: SumColumnwiseFull
         procedure :: SumRowwiseFull
 
+        ! Multiplication (other than overloaded element-wise functions)
+        procedure :: MatrixVectorProduct
+
+        ! Transposition
+        procedure :: Transpose
+
         ! Housekeeping procedures
         procedure :: Allocate       => AllocateMySparse
         procedure :: Deallocate     => DeallocateMySparse
@@ -94,6 +100,14 @@ module mod_sparseinterface
     ! Overload the summation operator
     interface  operator(+)
         module procedure AddSparse
+    end interface
+
+    ! Overload the multiplication operator
+    interface operator(*)
+        module procedure MultiplyWithScalarLeft
+        module procedure MultiplyWithScalarRight
+        module procedure MultiplyWithVectorRowwiseLeft
+        module procedure MultiplyWithVectorRowwiseRight
     end interface
 
     contains
@@ -325,6 +339,124 @@ module mod_sparseinterface
 
     end function
 
+    ! Multiply with scalar
+    function MultiplyWithScalarRight(a, b) result(c) 
+
+        ! Description
+        !============
+        ! Multiply entire matrix with scalar
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(MySparseUDT), intent(in)       :: a
+        real(R8)                            :: b  
+        type(MysparseUDT)                   :: c 
+
+        ! Compute
+        !========
+        ! Initialize
+        c = a
+
+        ! Multiply
+        c%val = c%val*b
+
+    end function 
+
+    function MultiplyWithScalarLeft(a, b) result(c) 
+
+        ! Description
+        !============
+        ! Multiply entire matrix with scalar
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(MySparseUDT), intent(in)       :: b
+        real(R8)                            :: a 
+        type(MysparseUDT)                   :: c 
+
+        ! Compute
+        !========
+        ! Initialize
+        c = b
+
+        ! Multiply
+        c%val = c%val*a
+
+    end function 
+
+    ! Multiply element-wise with vector
+    function MultiplyWithVectorRowwiseRight(a, b) result(c) 
+
+        ! Description
+        !============
+        ! Do element-wise multiplication as Aij = Aij*bi
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(MySparseUDT), intent(in)       :: a 
+        real(R8), allocatable, intent(in)   :: b(:) 
+        type(MySparseUDT)                   :: c 
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (size(b) .ne. a%nrow) then 
+            ! Throw error
+            call gdErrorHandler('SparseMultiplication: incompatible dimensions')
+        end if 
+
+        ! Initialize output
+        c = a ! Sparsity pattern doesn't change
+
+        ! Loop
+        !=====
+        do i = 1, a%nval 
+            c%val(i) = a%val(i)*b(a%row(i))
+        end do
+
+    end function
+
+    function MultiplyWithVectorRowwiseLeft(a, b) result(c) 
+
+        ! Description
+        !============
+        ! Do element-wise multiplication as Bij = bi*Bij
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(MySparseUDT), intent(in)       :: b 
+        real(R8), allocatable, intent(in)   :: a(:) 
+        type(MySparseUDT)                   :: c 
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (size(a) .ne. b%nrow) then 
+            ! Throw error
+            call gdErrorHandler('SparseMultiplication: incompatible dimensions')
+        end if 
+
+        ! Initialize output
+        c = b ! Sparsity pattern doesn't change
+
+        ! Loop
+        !=====
+        do i = 1, b%nval 
+            c%val(i) = b%val(i)*a(b%row(i))
+        end do
+
+    end function
+
     ! Sum over columns (returns full)
     subroutine SumColumnwiseFull(mysparse, col)
 
@@ -432,6 +564,70 @@ module mod_sparseinterface
         end associate
 
     end subroutine
+
+    ! Transposition
+    function Transpose(a) result(b)
+
+        ! Description
+        !============
+        ! Transpose the matrix a
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT), intent(in) :: a 
+        type(MySparseUDT)             :: b 
+
+        ! Set
+        !====
+        b = a 
+        b%row = a%col 
+        b%col = a%row 
+
+    end function 
+
+    ! Matrix-vector multiplication
+    function MatrixVectorProduct(a, b) result(c) 
+
+        ! Description
+        !============
+        ! Compute the matrix-vector product c = A*b. C is a full vector
+        ! of same dimension as b
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT), intent(in)      :: a 
+        real(R8), intent(in)                :: b(:) 
+        real(R8), allocatable               :: c(:) 
+
+        ! Auxiliary
+        integer(I8)                         :: tr, tc
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (size(b) .ne. a%ncol) then 
+            print *, size(b), a%ncol
+            call gdErrorHandler('MatrixVectorProduct: incompatible dimensions')
+        end if 
+
+        ! Allocate
+        allocate(c(a%nrow))
+        c = 0
+
+        ! Compute
+        !========
+        do i = 1, a%nval 
+            tc = a%col(i)
+            tr = a%row(i)
+            c(tr) = c(tr) + b(tc)*a%val(i)
+        end do 
+
+    end function
 
     !------------------------------------------------------------------!
     !                           HOUSEKEEPING                           !
