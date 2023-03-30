@@ -920,7 +920,9 @@ module optmod_optimizationengine
         if (dogradient) then 
 
             ! Cost function contribution
-            gradL(1:size(gradJ)) = gradJ(:)
+            gradL(1:size(gradJ)) = gradJ(:) + &
+                gradG%MatrixVectorProduct(lambda) + &
+                gradH%MatrixVectorProduct(tmu)
 
             ! Equality constraints contribution
             gradL(size(gradJ)+1:size(G)) = G(:)
