@@ -69,3 +69,38 @@ def GetPolygonCoordinates(filepath):
     # Return values
     return vals[0:cc, 0:2]
 
+
+def GetVertexPairCoordinates(filepath):
+    # Description
+    #------------
+    # Read in a vertex pair format file where the vertices are stored in
+    # ID1, ID2, x1, y1, x2, y2 format. The values that are returned are
+    # in [x1, y1, x2, y2] format. Empty lines are skipped
+
+    # Read in vertex coordinates from the vertices.dat file
+    thisfile = open(filepath)
+
+    alllines = thisfile.readlines()
+
+    # Remove header
+    del alllines[0]
+    vals = np.zeros([len(alllines), 6])
+
+    # Read in vertex data
+    cc = 0
+
+    for i in alllines:
+        if i == '\n':  # empty string
+            # don't read
+            pass
+        else:
+            # Read
+            vals[cc, 0:6] = np.fromstring(i, dtype=float, count=6, sep=' ')
+
+        # Update counter
+        cc = cc + 1
+
+    # Return values
+    return vals[0:cc, 2:6]
+
+

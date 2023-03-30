@@ -19,6 +19,15 @@ plotter.PlotGridCells(datadir, 1)
 # Vertices constrained by boundary constraints
 plotter.PlotBoundaryConstraintVertices(datadir, 2)
 
+# Flux function
+plotter.PlotFluxfunctionConstraintVertices(datadir, 3)
+
+# X-points
+plotter.PlotXPointConstraintVertices(datadir, 4)
+
+# Orthogonality
+plotter.PlotOrthogonalityConstraintEdges(datadir, 5)
+
 # Show figures
 #-------------
 plotter.ShowFigures()

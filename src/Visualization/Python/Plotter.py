@@ -1,11 +1,9 @@
 # Main plotter class
 import matplotlib as mpl
-mpl.use('TkAgg')
+mpl.use('TkAgg') # set the gui backend for the cluster...
 from matplotlib import pyplot as plt
 import numpy as np
 import Datahandler as dh
-
-
 
 #==========================================================================#
 #                                                                          #
@@ -20,8 +18,12 @@ filesep = '/' # file separator
 # Paths & files
 #--------------
 # file where grid vertices are stored in [ID, x, y] format
-gridverticesfile = 'vertices.dat' # all grid vertices
+gridverticesfile = 'vertices_init.dat' # all grid vertices (initial coordinates)
 bndconverticesfile = 'con_bnd_vertices.dat' # vertices constrained by boundary constraints
+ffconverticesfile = 'con_ff_vertices.dat' # vertices constrained by flux function constraints
+xpconverticesfile = 'con_xp_vertices.dat' # vertices constrained as x-points
+elconvertexpairsfile = 'con_el_vertices.dat' # vertex pairs constrained for edge lengths
+orthconvertexpairsfile = 'con_orth_vertices.dat' # vertex pairs constrained for orthogonality
 
 # file where grid cells are stored in polygon format ([x, y] with blank
 # lines between polygons)
@@ -70,6 +72,37 @@ def PlotGridCells(dirpath, fignum):
 #                                Optimization                              #
 #--------------------------------------------------------------------------#
 
+def PlotFluxfunctionConstraintVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertices that have their flux values constrained. Vertices
+    # should be stored in ID, x, y format.
+
+    # Set filepaths
+    # Set the filepaths
+    vertfilepath = dirpath + filesep + gridverticesfile
+    fffilepath = dirpath + filesep + ffconverticesfile
+
+    # Get the data
+    vals = dh.GetVertexCoordinates(vertfilepath)
+    valscon = dh.GetVertexCoordinates(fffilepath)
+
+    # Plot the data
+    PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
+                 facecolors='none', label='Vertices')
+    PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='b',
+                 marker='+', label='Constrained vertices')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Flux function constraint vertices')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
 
 def PlotBoundaryConstraintVertices(dirpath, fignum):
     # Description
@@ -86,12 +119,12 @@ def PlotBoundaryConstraintVertices(dirpath, fignum):
 
     # Get the data
     vals = dh.GetVertexCoordinates(vertfilepath)
-    valsbnd = dh.GetVertexCoordinates(bndfilepath)
+    valscon = dh.GetVertexCoordinates(bndfilepath)
 
     # Plot the data
     PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
         facecolors='none', label='Vertices')
-    PlotPoints2D(valsbnd[:, 0], valsbnd[:, 1], fignum, color='b',
+    PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='b',
         marker='+', label='Constrained vertices')
 
     # Set axes
@@ -104,6 +137,100 @@ def PlotBoundaryConstraintVertices(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+
+def PlotXPointConstraintVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertices that are x-points and are constrained as such
+
+    # Set filepaths
+    # Set the filepaths
+    vertfilepath = dirpath + filesep + gridverticesfile
+    confilepath = dirpath + filesep + xpconverticesfile
+
+    # Get the data
+    vals = dh.GetVertexCoordinates(vertfilepath)
+    valscon = dh.GetVertexCoordinates(confilepath)
+
+    # Plot the data
+    PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
+                 facecolors='none', label='Vertices')
+    PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='b',
+                 marker='+', label='Constrained vertices')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('X-point constraint vertices')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+
+def PlotEdgelengthsConstraintEdges(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertex pairs that belong to the edgelengths.
+
+    # Set filepaths
+    # Set the filepaths
+    cellfilepath = dirpath + filesep + gridcellsfile
+    confilepath = dirpath + filesep + elconvertexpairsfile
+
+    # Get the data
+    vals = dh.GetPolygonCoordinates(cellfilepath)
+    valscon = dh.GetVertexPairCoordinates(confilepath)
+
+    # Plot the data
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r',
+        label='Grid faces')
+    PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
+        0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='b',
+        marker='+', label='Constrained edges')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Edge length constrained edges')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+
+def PlotOrthogonalityConstraintEdges(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertex pairs that belong to the edgelengths.
+
+    # Set filepaths
+    # Set the filepaths
+    cellfilepath = dirpath + filesep + gridcellsfile
+    confilepath = dirpath + filesep + orthconvertexpairsfile
+
+    # Get the data
+    vals = dh.GetPolygonCoordinates(cellfilepath)
+    valscon = dh.GetVertexPairCoordinates(confilepath)
+
+    # Plot the data
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r',
+        label='Grid faces')
+    PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
+        0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='b',
+        marker='o', label='Constrained edges')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Orthogonality constrained edges')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
 
 
 #==========================================================================#
