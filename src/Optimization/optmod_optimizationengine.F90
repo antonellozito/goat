@@ -712,9 +712,6 @@ module optmod_optimizationengine
             end if
 
             ! Update the design
-            !print *, dx(1), gradL(1)
-            !print *, maxval(abs(dx(1:nphi)))
-            !print *, maxloc(abs(dx(1:nphi)))
             call problem%UpdateDesign(solver%numKKT%rxfdesign*dx(1:nphi))
 
             ! Update lambda
@@ -730,6 +727,7 @@ module optmod_optimizationengine
             problem%monitor%G(:,itopt)      = G
             problem%monitor%H(:,itopt)      = H
             problem%monitor%convnorm(itopt) = convnorm
+            problem%monitor%rxf = solver%numKKT%rxf 
 
             ! Print the current iterate
             if (verbosity > 0) then 

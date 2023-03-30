@@ -69,7 +69,7 @@ module optmod_monitor
         !============
         ! See comments at beginning of module
         integer(I8)             :: maxitopt, itopt, nphi, neq, nineq
-        real(R8)                :: opttol
+        real(R8)                :: opttol, rxf
         real(R8), allocatable   :: J(:), L(:), G(:,:), H(:,:), convnorm(:) 
         real(R8), allocatable   :: dJ(:,:), dL(:,:), phi(:,:) 
 
@@ -118,8 +118,8 @@ module optmod_monitor
         print *, '!         Solving the grid deformation problem      !'
         print *, '!===================================================!'
         print *, 'Performing ', monitor%maxitopt, ' iterations'
-        print "(4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)" &
-            ,   'it  ',    'conv',    'tol', 'Gmax', 'Hmax'
+        print "(4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)" &
+            ,   'it  ',    'conv',    'tol', 'Gmax', 'Hmax', 'rxf'
 
     end subroutine
 
@@ -137,10 +137,10 @@ module optmod_monitor
 
         ! Print
         !======
-        print "(i8, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)", &
+        print "(i8, 4x, e12.6, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)", &
             monitor%itopt, monitor%convnorm(monitor%itopt), &
             monitor%opttol, maxval(abs(monitor%G(:,monitor%itopt))), &
-            maxval(abs(monitor%H(:,monitor%itopt)))
+            maxval(abs(monitor%H(:,monitor%itopt))), monitor%rxf
 
     end subroutine
 
