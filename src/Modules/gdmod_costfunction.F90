@@ -2641,8 +2641,8 @@ module gdmod_costfunction
             environment, options)
 
         ! (Re)set the scaling constant
-        costfunction%cfv_lr%lambda = 1e4 ! seems to agree well with most grids
-        costfunction%cfv_fad%lambda = 1e3
+        !costfunction%cfv_lr%lambda = 1e4 ! seems to agree well with most grids
+        !costfunction%cfv_fad%lambda = 1e3
 
     end subroutine
 
