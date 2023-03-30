@@ -15,6 +15,11 @@ inputfiles/*
 
 # ignore .dat files in plotter
 src/Visualization/*.dat
+src/Visualization/Plotdata/*.dat
+
+# ignore non-python files in Python directory
+src/Visualization/Python/_*
+src/Visualization/Python/*.pyc
 
 # ignore output files
 *.out
