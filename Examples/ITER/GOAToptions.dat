@@ -202,16 +202,16 @@ VERSION 1.00.00
 # See SetNumParams.m for the default settings
 
 # General optimization
-'gd.num.opt.itmax'                  '1000'
-'gd.num.opt.tol'                    '1e-6'
+'opt.num.itmax'                  '1000'
+'opt.num.tol'                    '1e-6'
 
 # KKT driver (see also GridKKTDriver.m)
 # Design relaxation factors
-'gd.num.KKTdriver.docfrelax'        '1'
-'gd.num.KKTdriver.rxf'              '1e1'
-'gd.num.KKTdriver.rxfdesign'        '0.5'
-'gd.num.KKTdriver.minrxf'           '1e-12'
-'gd.num.KKTdriver.rxfdec'           '0.90'
+'opt.num.docfrelax'        '1'
+'opt.num.rxf'              '1e1'
+'opt.num.rxfdesign'        '1'
+'opt.num.rxfmin'           '1e-12'
+'opt.num.rxfdec'           '0.90'
 
 # Equality constraint relaxation
 'gd.num.KKTdriver.doeqconrelax'     '0'
