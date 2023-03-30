@@ -34,7 +34,7 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
 
     ! Debug
     logical                             :: makedebugplots = .false.
-    logical                             :: makegridplots  = .true.
+    logical                             :: makegridplots  = .false.
     real(R8), allocatable               :: xq(:), yq(:), vq(:), &
         xqmf(:,:), yqmf(:,:), vqmf(:,:)
 

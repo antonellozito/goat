@@ -404,7 +404,9 @@ module mod_linearsolverinterface
         ! Compute the solution
         call UmfpackSolveDI(umfpack_a, Ap, Ai, Ax, sol_c, b, numeric, &
             control, info)
-        ! print *, info(1)
+        if (info(1) .ne. 0) then 
+            print *, 'Linear solver may not have converged, info: ', info(1)
+        end if
 
         ! Destroy symbolic
         call UmfpackFreeSymbolicDI(symbolic)
