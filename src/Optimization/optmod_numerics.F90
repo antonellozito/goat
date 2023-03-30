@@ -14,6 +14,8 @@ module optmod_numerics
     !============
     ! Load modules
     use mod_precision
+    use mod_readwrite
+    use mod_inputfileparser
 
     ! The usual
     implicit none
@@ -39,6 +41,10 @@ module optmod_numerics
         ! - tol:            tolerance to which the solver has to solve
         ! - maxit:          maximum number of iterations
         ! - verbosity:      verbosity level of printing
+        ! - inputfilepath:  filepath from which user-specified data 
+        !                   can be read in.
+
+        character(:), allocatable   :: inputfilepath
 
         real(R8)            :: tol 
         integer(I8)         :: maxit 
@@ -85,6 +91,7 @@ module optmod_numerics
 
         procedure :: SetDefaultNumParamsKKT => SetDefaultNumParamsKKTINT
         procedure :: InitializeNumParams => InitializeNumParamsKKTINT
+        procedure :: Read               => ReadNumKKTOptions
 
     end type
 
@@ -126,7 +133,7 @@ module optmod_numerics
         ! Set defaults
         !=============
         num%tol         = 1e-6
-        num%maxit       = 58
+        num%maxit       = 5
         num%verbosity   = 1
 
     end subroutine
@@ -183,10 +190,10 @@ module optmod_numerics
         call num%SetDefaultNumParams()
 
         ! Specifics for KKT numerics
-        num%rxf             = 1e5
-        num%rxfdesign       = 0.01
+        num%rxf             = 1e0
+        num%rxfdesign       = 1
         num%rxfdec          = 0.98
-        num%rxfmin          = 2e-3
+        num%rxfmin          = 2e-2
 
     end subroutine
 
@@ -212,7 +219,76 @@ module optmod_numerics
         call num%SetDefaultNumParamsKKT()
 
         ! Override with user settings (to be implemented)
+        call num%Read()
 
     end subroutine
+
+    ! Read user data
+    subroutine ReadNumKKTOptions(num)
+
+        ! Description
+        !============
+        ! Read in grid options from file. It is assumed that the 
+        ! filepath has been set correctly. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(NumKKTUDT)                 :: num 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=num%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadNumKKTOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadNumKKTOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! General
+        field = 'opt.num.itmax'
+        call ExtractOptionValueInteger0D(fid, field, num%maxit)
+        field = 'opt.num.verbosity'
+        call ExtractOptionValueInteger0D(fid, field, num%verbosity)
+        field = 'opt.num.tol'
+        call ExtractOptionValueReal0D(fid, field, num%tol)
+        
+        ! Relaxation factors
+        field = 'opt.num.rxf'
+        call ExtractOptionValueReal0D(fid, field, num%rxf)
+        field = 'opt.num.rxfdec'
+        call ExtractOptionValueReal0D(fid, field, num%rxfdec)
+        field = 'opt.num.rxfmin'
+        call ExtractOptionValueReal0D(fid, field, num%rxfmin)
+        field = 'opt.num.rxfdesign'
+        call ExtractOptionValueReal0D(fid, field, num%rxfdesign)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+
 
 end module

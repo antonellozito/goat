@@ -67,6 +67,7 @@ module optmod_optimizationengine
         ! this module. The only field that is added, is a monitor 
         ! structure to keep track of the progress of the algorithm. 
         ! (to be moved to the engine in the future)
+        character(:), allocatable                   :: inputfilepath
         type(OptimizationMonitorUDT)                :: monitor
 
     contains 
@@ -118,7 +119,7 @@ module optmod_optimizationengine
         ! Defines the optimization solver and its numerics. It should 
         ! have a generic 'solve' method which acts on the optimization
         ! problem
-
+        character(:), allocatable                   :: inputfilepath
         type(NumKKTUDT)         :: numKKT
 
     contains 
@@ -146,7 +147,10 @@ module optmod_optimizationengine
         ! Description
         !============
         ! The engine simply contains the problem and solver structures
-        ! (and in the future the monitor). 
+        ! (and in the future the monitor). Also contains a 
+        ! character array through which an input file can be specified
+        ! for reading in numerics.
+        character(:), allocatable                   :: inputfilepath
         class(OptimizationProblemUDT), allocatable  :: problem
         type(OptimizationSolverUDT)                 :: solver
 
@@ -449,9 +453,11 @@ module optmod_optimizationengine
         !call optimizationengine%SetupOptimizationDriver()
         
         ! Set up the problem
+        optimizationengine%problem%inputfilepath = optimizationengine%inputfilepath
         call optimizationengine%problem%Initialize()
 
         ! Set up the solver - now KKT
+        optimizationengine%solver%inputfilepath = optimizationengine%inputfilepath
         call optimizationengine%solver%InitializeKKTSolver()
 
         ! Solve
@@ -491,6 +497,7 @@ module optmod_optimizationengine
         ! Initialize
         !===========
         ! Numerics
+        solver%numKKT%inputfilepath = solver%inputfilepath
         call solver%numKKT%InitializeNumParams() 
 
     end subroutine

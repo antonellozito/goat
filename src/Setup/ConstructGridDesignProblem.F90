@@ -42,9 +42,9 @@ subroutine ConstructGridDesignProblem(optimizationdriver, &
 
     ! State
     !======
-    
+    optimizationdriver%inputfilepath = designoptions%inputfilepath
     call optimizationdriver%SetupOptimizationDriver()
-
+    
     ! Associate in order to execute select type...
     associate(thisproblem => optimizationdriver%problem) 
 
