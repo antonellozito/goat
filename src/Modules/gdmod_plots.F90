@@ -25,6 +25,13 @@
 ! figure is created - make sure not to call these in a loop in the main 
 ! code! 
 
+! Notes
+!======
+! Note 1: there is now also support for writing out files that can be
+! used to plot quantities with e.g. python scripts afterwards. These
+! are printed out to src/Visualization/Plotdata (and overwritten each 
+! time the program re-executes...) 
+
 module gdmod_plots
 
     ! Initialize
@@ -177,7 +184,7 @@ module gdmod_plots
     end subroutine
 
     !------------------------------------------------------------------!
-    !                              Grid plots                          !
+    !                                Grid                              !
     !------------------------------------------------------------------!
 
     ! Grid 
@@ -580,6 +587,10 @@ module gdmod_plots
     !                            Optimization                          !
     !------------------------------------------------------------------!
 
+    ! Data writing routines
+    !======================
+    ! Boundary constraint vertex indices and coordinates
+
     !------------------------------------------------------------------!
     !                               State                              !
     !------------------------------------------------------------------!
@@ -735,5 +746,176 @@ module gdmod_plots
     !------------------------------------------------------------------!
     !                         Auxiliary routines                       !
     !------------------------------------------------------------------!
+
+    ! Vertex writing routine
+    subroutine WriteVertexData(ID, x, y, filepath)
+
+        ! Description
+        !============
+        ! General vertex data writing routine. writes IDs, x, y
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), allocatable, intent(in)        :: ID(:)
+        real(R8), allocatable, intent(in)           :: x(:), y(:) 
+        integer                                     :: i, fu
+        character(:), allocatable, intent(in)       :: filepath 
+
+        ! Write
+        !======
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+            
+        ! Header
+        write (fu, *), 'ID, x, y'
+    
+        ! Data
+        do i = 1, size(ID)
+            write (fu, *) ID(i), x(i), y(i)
+        end do
+    
+        close (fu)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                          Writing routines                        !
+    !------------------------------------------------------------------!
+
+    ! Grid
+    !=====
+    ! Vertices
+    subroutine WriteGridVertices(grid)
+
+        ! Description
+        !============
+        ! Write grid nodes in the following format:
+        ! ID, x, y 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridUDT)                       :: grid
+        integer                             :: i, fu
+        integer(I8), allocatable            :: IDs(:)
+        integer(I8)                         :: k
+        character(:), allocatable           :: filepath
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'Plotdata/vertices')
+        filepath = datafile
+
+        ! Unpack
+        allocate(IDs(grid%vert%ntot))
+        IDs = [(k, k = 1, grid%vert%ntot)]
+
+        ! Write the data file
+        !====================
+        ! Write vertex coordinates to file
+        call WriteVertexData(IDs, grid%vert%x, grid%vert%y, filepath)
+        
+
+    end subroutine
+
+    ! Cell data
+    subroutine WriteGridCells(grid)
+
+        ! Description
+        !============
+        ! Write out coordinates of the vertices of the grid cells in 
+        ! 'polygon' format -> for easy plotting 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridUDT)                       :: grid
+        integer                             :: fu
+
+        integer(I8)                         :: i, j, nvpc, si
+        integer(I8), allocatable            :: tcv(:)
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile,datafile,'Plotdata/cells')
+
+        ! Write the data file
+        !====================
+        ! Write vertex coordinates to file
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+
+        ! Header
+        write(fu, *), 'x, y'
+    
+        ! Loop over all cells
+        do i = 1, grid%cells%ntot
+            ! Write vertex coordinates as ordened in the cell
+            si = grid%cells%vertP(i,1) ! start index
+            nvpc = grid%cells%vertP(i,2) ! number of vertices per cell
+
+            ! Allocate
+            allocate(tcv(nvpc))
+
+            ! Get the vertex indices of the current cell
+            tcv = grid%cells%vertlist(si:si+nvpc-1)
+            do j = 1, nvpc
+                ! Print
+                write (fu, *) grid%vert%x(tcv(j)), grid%vert%y(tcv(j))
+            end do 
+            write(fu, *) grid%vert%x(tcv(1)), grid%vert%y(tcv(1))
+            write(fu, *) ! leave blank line between each cell
+
+            ! Deallocate
+            deallocate(tcv)
+
+        end do
+    
+        close (fu)
+
+    end subroutine
+
+    ! Optimization
+    !=============
+    ! Constrained boundary vertices
+    subroutine WriteBoundaryConstraintVertices(grid, IDs)
+
+        ! Description
+        !============
+        ! Write grid nodes in the following format:
+        ! ID, x, y 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(gridUDT), intent(in)               :: grid 
+        integer(I8), allocatable, intent(in)    :: IDs(:) 
+        real(R8), allocatable                   :: x(:), y(:)
+        integer(I8)                             :: nIDs
+        character(:), allocatable           :: filepath
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile, datafile, 'Plotdata/con_bnd_vertices')
+        filepath = datafile 
+
+        ! Unpack
+        nIDs = size(IDs)
+        allocate(x(nIDs), y(nIDs))
+        x = grid%vert%x(IDs)
+        y = grid%vert%y(IDs)
+
+        ! Write the data file
+        !====================
+        call WriteVertexData(IDs, x, y, filepath)
+
+    end subroutine
     
 end module 
