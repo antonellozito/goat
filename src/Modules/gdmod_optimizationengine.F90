@@ -387,7 +387,7 @@ module gdmod_optimizationengine
         ! Loop variables
 
         ! Auxiliary variables 
-        logical                             :: dodebugplots
+        logical                             :: dodebugplots, dowriting
 
         ! Data
 
@@ -396,6 +396,7 @@ module gdmod_optimizationengine
         ! each optimization iteration!
         
         data dodebugplots /.false./ 
+        data dowriting  /.false./
 
         ! Update design
         !==============
@@ -407,6 +408,11 @@ module gdmod_optimizationengine
         if (dodebugplots) then
             ! Call grid visualization
             call PlotGridCells(problem%grid, '-p')
+        end if
+        if (dowriting) then 
+            ! Call grid vertex writing routine
+            call WriteGridVertices(problem%grid) 
+            call WriteGridCells(problem%grid)
         end if
 
     end subroutine

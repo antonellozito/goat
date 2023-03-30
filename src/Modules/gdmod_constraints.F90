@@ -2044,8 +2044,8 @@ module gdmod_constraints
         ! End associate
         end associate
 
-
-
+        ! Write datafile
+        call WriteBoundaryConstraintVertices(grid, constraints%vert)
 
     end subroutine
 

@@ -55,6 +55,9 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
     call ConstructGridDesignProblem(optimizationdriver, designoptions, &
         grid, magneticField, environment)
 
+    ! Write initial coordinates
+    call WriteGridVertices(grid)
+
     ! Solve
     !======
     ! Simply call the solver ... 
