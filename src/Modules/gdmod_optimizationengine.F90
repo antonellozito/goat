@@ -396,7 +396,7 @@ module gdmod_optimizationengine
         ! each optimization iteration!
         
         data dodebugplots /.false./ 
-        data dowriting  /.false./
+        data dowriting  /.true./
 
         ! Update design
         !==============
@@ -411,8 +411,8 @@ module gdmod_optimizationengine
         end if
         if (dowriting) then 
             ! Call grid vertex writing routine
-            call WriteGridVertices(problem%grid) 
-            call WriteGridCells(problem%grid)
+            call WriteGridVertices(problem%grid, 'vertices_iterate') 
+            call WriteGridCells(problem%grid, 'cells_iterate')
         end if
 
     end subroutine

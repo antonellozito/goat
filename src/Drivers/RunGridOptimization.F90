@@ -56,7 +56,7 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
         grid, magneticField, environment)
 
     ! Write initial coordinates
-    call WriteGridVertices(grid)
+    call WriteGridVertices(grid, 'vertices_init')
 
     ! Solve
     !======

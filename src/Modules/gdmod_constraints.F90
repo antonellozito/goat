@@ -1556,6 +1556,12 @@ module gdmod_constraints
         constraints%vert = pack(vert_tmp, (.not. delind))
         constraints%PsiD = pack(PsiD_tmp, (.not. delind))
 
+        ! Debugging info
+        !===============
+        ! Write datafile
+        call WriteFluxfunctionConstraintVertices(grid, &
+            constraints%vert)
+
         ! Housekeeping
         !=============
         ! End associate
@@ -1942,10 +1948,11 @@ module gdmod_constraints
         logical                                     :: debugplots
         integer(I8)                                 :: ic, nv 
         integer(I8), allocatable                    :: tv(:)
-        logical, allocatable                        :: mask(:)
+        logical, allocatable                        :: mask(:), &
+            isconstrained(:)
 
         ! Loop
-        integer(I8)                                 :: i 
+        integer(I8)                                 :: i, j 
 
         ! Data
         data debugplots /.false./
@@ -1957,6 +1964,11 @@ module gdmod_constraints
             psf         => constraints%psf,     &
             vessel      => environment%vessel  &
             )
+
+        ! Bookkeeping of constrained vertices (to prevent imposing 
+        ! constraint twice)
+        allocate(isconstrained(grid%vert%ntot))
+        isconstrained = .false. 
 
         ! Construct boundary
         !===================
@@ -1979,7 +1991,7 @@ module gdmod_constraints
         do i = 1, size(grid%bnd)
 
             ! Check if target plate - hard coded here... 
-            if (any(grid%bnd(i)%ID == [1, 2])) then 
+            if (any(grid%bnd(i)%ID == [1, 2, 5])) then 
 
                 ! Get the current vertices
                 allocate(tv(grid%bnd(i)%nvert))
@@ -1991,6 +2003,17 @@ module gdmod_constraints
                 
                 ! Check the monitor
                 where (monitor%eqvcc(tv) .ge. monitor%maxeqvcc) mask = .false.
+
+                ! Check if already constrained (will happen for nodes 
+                ! belonging to multiple boundaries or to boundaries that
+                ! are closed upon themselves)
+                do j = 1, size(tv)
+                    if (isconstrained(tv(j))) then 
+                        mask(j) = .false.
+                    else 
+                        isconstrained(tv(j)) = .true. 
+                    end if 
+                end do 
                 nv = count(mask)
 
                 ! Add these nodes
@@ -2008,9 +2031,10 @@ module gdmod_constraints
         allocate(constraints%vert(constraints%nvert))
 
         ! Add vertices
+        isconstrained = .false. 
         ic = 0
         do i = 1, size(grid%bnd)
-            if (any(grid%bnd(i)%ID == [1, 2])) then 
+            if (any(grid%bnd(i)%ID == [1, 2, 5])) then 
 
                 ! Get the current vertices
                 allocate(tv(grid%bnd(i)%nvert))
@@ -2022,6 +2046,17 @@ module gdmod_constraints
                 
                 ! Check the monitor
                 where (monitor%eqvcc(tv) .ge. monitor%maxeqvcc) mask = .false.
+
+                ! Check if already constrained (will happen for nodes 
+                ! belonging to multiple boundaries or to boundaries that
+                ! are closed upon themselves)
+                do j = 1, size(tv)
+                    if (isconstrained(tv(j))) then 
+                        mask(j) = .false.
+                    else 
+                        isconstrained(tv(j)) = .true. 
+                    end if 
+                end do 
                 nv = count(mask)
 
                 ! Add these nodes
@@ -2421,6 +2456,11 @@ module gdmod_constraints
         ! Monitor
         monitor%eqvcc(constraints%xpind) = &
             monitor%eqvcc(constraints%xpind) + 2
+
+        ! Debugging info
+        !===============
+        ! Write datafile
+        call WriteXPointConstraintVertices(grid, constraints%xpind)
 
     end subroutine
 
@@ -2928,6 +2968,12 @@ module gdmod_constraints
                     // ' have been included in the constraints')
             end if
         end do
+
+        ! Debugging info
+        !===============
+        ! Write datafile
+        call WriteEdgelengthsConstraintVertexPairs(grid, &
+            constraints%edgevert)
 
         ! Housekeeping
         !=============
@@ -3731,8 +3777,13 @@ module gdmod_constraints
             deallocate(xf, yf)
 
         end if
-        
 
+        ! Debugging info
+        !===============
+        ! Write datafile
+        call WriteOrthogonalityConstraintVertexPairs(grid, &
+            constraints%edgevert)
+        
         ! Housekeeping
         !=============
         ! Deallocate
