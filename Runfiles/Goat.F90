@@ -51,7 +51,7 @@ program Goat
 
     ! Initialize
     !===========
-    filepath = './Examples/TCV/GOAToptions.dat'
+    filepath = './Examples/ITER/GOAToptions.dat'
 
     ! Read the user input
     !====================
@@ -76,10 +76,6 @@ program Goat
         call gdErrorHandler('Goat: unknown driver option')
 
     end select 
-
-
-
-    
 
 end program Goat
                                     
