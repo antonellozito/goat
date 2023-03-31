@@ -1449,7 +1449,7 @@ module gdmod_constraints
         real(R8)                    :: tpsi, minx, maxx, miny, maxy
 
         integer(I8), allocatable    :: vert_tmp(:), vertID(:) 
-        real(R8), allocatable       :: PsiD_tmp(:) 
+        real(R8), allocatable       :: PsiD_tmp(:), temppsi(:) 
         logical, allocatable        :: delind(:), mask(:)
         
         ! Data
@@ -1463,7 +1463,7 @@ module gdmod_constraints
 
         ! Allocate temporary arrays
         allocate(vert_tmp(grid%vert%ntot))
-        allocate(PsiD_tmp(grid%vert%ntot))
+        allocate(PsiD_tmp(grid%vert%ntot), temppsi(grid%vert%ntot))
 
         ! Allocate auxiliary arrays
         allocate(mask(grid%vert%ntot))
@@ -1472,6 +1472,7 @@ module gdmod_constraints
 
         ! Initialize
         PsiD_tmp(:) = 0
+        temppsi(:) = 0
         mask(:) = .false.
         delind(:) = .false.
         vert_tmp = [(i, i = 1, grid%vert%ntot)]
@@ -1486,8 +1487,9 @@ module gdmod_constraints
         ! Determine flux values to impose
         !================================
         ! Evaluate flux at all nodes
-        call EvaluateBicubicSplineInterpolant(x, y, PsiD_tmp, &
+        call EvaluateBicubicSplineInterpolant(x, y, temppsi, &
             magneticField%interp, '0', '0')
+        PsiD_tmp = temppsi
 
         !call Plot2DUnstructuredField(PsiD_tmp, grid, 'v', '-p')
         !call PlotFluxSurfaces(grid, '-p')
@@ -1512,17 +1514,56 @@ module gdmod_constraints
 
         end do
 
+        ! Don't constrain vertices with no field line ID
+        where (vert%fieldlineID == 0) delind = .true.
+
         ! Compensate for flux aligned targets?
         if (opt%fixfluxalignedtargets == 1) then
-            ! This is still to do
-            print *, 'fix for flux aligned targets is not yet available'
+            ! Fix flux values of target plate end nodes to be exactly 
+            ! the flux value they have now. Can help when the average
+            ! flux value is inaccurate, but should typically not be 
+            ! required.
+
+            do i = 1, size(grid%bnd)
+                if (any(grid%bnd(i)%ID == [1, 2])) then
+                    PsiD_tmp(grid%bnd(i)%vert([1, grid%bnd(i)%nvert])) &
+                        = temppsi(grid%bnd(i)%vert([1, grid%bnd(i)%nvert]))
+                end if 
+            end do
         end if
 
-        ! Fix flux values of vessel boundaries? 
+        ! Fix flux values at target boundaries?
+        if (opt%fixtargetflux == 1) then 
+            ! Fix flux values of vessel vertices that have no ID (others
+            ! are already constrained before). 
+
+            do i = 1, size(grid%bnd) 
+                if (any(grid%bnd(i)%ID == [1, 2])) then 
+                    delind(grid%bnd(i)%vert) = .false.
+                end if 
+            end do
+        end if 
+
+        ! Fix flux values of vessel boundary vertices? 
         if (opt%fixfarvesselflux == 1) then 
-            ! This is still to do
-            print *, 'fix for vessel boundaries is not yet available'
+            ! Do fix flux function values of the nodes of the far vessel
+            ! boundaries to their own specific value. Often leads to 
+            ! easier to converge problems
+
+            do i = 1, size(grid%bnd)
+                if (grid%bnd(i)%ID == 5) then 
+                    delind(grid%bnd(i)%vert) = .false.
+                end if
+            end do
         end if
+
+        ! Reset flux function values of vessel nodes to original value
+        ! (non-averaged one)? 
+        !if (opt%resetvesselfluxvalues) then 
+            ! Reset the vessel flux values to the original value before
+            ! computing the average. This can help with vessel nodes
+            ! crossing each other due do bad flux function values. 
+        !end if 
 
         ! Override the deletion vector
         if (opt%doboxoverride == 1) then 

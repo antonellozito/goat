@@ -179,16 +179,18 @@ module gdmod_userinput
 
         ! Fields
         ! - fixfarvesselflux:   fix flux values of nodes on far vessel
-        !                       parts?
+        !                       parts that have no vertex ID?
         ! - fixfluxalignedtargets:  fix flux values of target plate
         !                           corners?
+        ! - fixtargetflux:      fix flux values of target vessel nodes
+        !                       that have no vertex ID?
         ! - doboxoverride:      apply flux function constraints anyway
         !                       inside a certain box, overriding 
         !                       possible prior exclusion
         ! - includeboxx, includeboxy: coordinates of the box(es) 
 
         integer(I8)                     :: fixfarvesselflux, &
-            fixfluxalignedtargets, doboxoverride 
+            fixfluxalignedtargets, doboxoverride, fixtargetflux 
         real(R8), allocatable           :: includeboxx(:, :), &
             includeboxy(:, :)
     
@@ -483,6 +485,7 @@ module gdmod_userinput
         !================
         options%fixfarvesselflux = 1
         options%fixfluxalignedtargets = 1
+        options%fixtargetflux = 1
         options%doboxoverride = 0
         if (allocated(options%includeboxx)) then 
             deallocate(options%includeboxx, options%includeboxy)
@@ -1061,6 +1064,8 @@ module gdmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%fixfluxalignedtargets)
         field = 'gd.design.ec.par.fluxfunction.fixfarvesselflux'
         call ExtractOptionValueInteger0D(fid, field, options%fixfarvesselflux)
+        field = 'gd.design.ec.par.fluxfunction.fixtargetflux'
+        call ExtractOptionValueInteger0D(fid, field, options%fixtargetflux)
         field = 'gd.design.ec.par.fluxfunction.doboxoverride'
         call ExtractOptionValueInteger0D(fid, field, options%doboxoverride)
         field = 'gd.design.ec.par.fluxfunction.includeboxx'
