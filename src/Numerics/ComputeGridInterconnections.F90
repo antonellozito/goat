@@ -706,7 +706,7 @@ subroutine ComputeGridInterconnections(grid)
             if ( (v%BV(i)) .and. (v%cellP(i,2) > 1) ) then
 
                 ! First, update vc - is now one-off
-                vc = vc - 1
+                ! vc = vc - 1
 
                 ! Sanity check
                 if (vc > v%neigP(i,2)) then
