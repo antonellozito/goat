@@ -74,7 +74,7 @@ def GetVertexPairCoordinates(filepath):
     # Description
     #------------
     # Read in a vertex pair format file where the vertices are stored in
-    # ID1, ID2, x1, y1, x2, y2 format. The values that are returned are
+    # ID1, ID2, x1, x2, y1, y2 format. The values that are returned are
     # in [x1, y1, x2, y2] format. Empty lines are skipped
 
     # Read in vertex coordinates from the vertices.dat file
@@ -82,9 +82,11 @@ def GetVertexPairCoordinates(filepath):
 
     alllines = thisfile.readlines()
 
-    # Remove header
+    # Retrieve sizes
+    dim = np.fromstring(alllines[1], dtype=float, sep=' ')
     del alllines[0]
-    vals = np.zeros([len(alllines), 6])
+    npoints = np.floor(len(dim)/3).astype(int)
+    vals = np.zeros([len(alllines), len(dim)])
 
     # Read in vertex data
     cc = 0
@@ -101,6 +103,10 @@ def GetVertexPairCoordinates(filepath):
         cc = cc + 1
 
     # Return values
-    return vals[0:cc, 2:6]
+    returnvec = np.zeros([2*npoints], dtype=int)
+    for i in np.arange(0, npoints, 1):
+        returnvec[2*i] = npoints
+        returnvec[2*i+1] = 2*npoints
+    return vals[0:cc, returnvec]
 
 
