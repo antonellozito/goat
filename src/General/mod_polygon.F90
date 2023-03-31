@@ -148,6 +148,7 @@ module mod_polygon
         procedure :: Construct          => ConstructPolygonSet
         procedure :: SelfIntersections  => PolygonSetSelfIntersections
         procedure :: GetEdges           => GetPolygonSetEdges
+        procedure :: WriteData          => WritePolygonSetData
 
     end type 
 
@@ -551,6 +552,81 @@ module mod_polygon
         !=============
         end associate
 
+    end subroutine
+
+    ! Write polygonset vertex data
+    subroutine WritePolygonSetData(polygonset, filepath)
+
+        ! Description
+        !============
+        ! This routine writes out the polygon vertex data in x, y format
+        ! for all polygons it contains. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                    :: polygonset 
+        character(:), allocatable,  intent(in)  :: filepath
+
+        ! Auxiliary
+        integer(I8)                             :: ndata 
+        real(R8)                                :: nan 
+        real(R8), allocatable                   :: tempx(:), tempy(:)
+
+        ! Loop
+        integer(I8)                             :: i, cc
+
+        ! Extract polygon data
+        !=====================
+        ! Unpack
+        associate( &
+            np          => polygonset%np,       &
+            pol         => polygonset%polygons)
+
+        ! Compute number of data entries
+        ndata = 0
+        do i = 1, np 
+            ! Vertices of polygon
+            ndata = ndata + pol(i)%ne+1
+        end do 
+        
+        ! Account for NaNs
+        ndata = ndata + np - 1
+
+        ! Allocate
+        allocate(tempx(ndata), tempy(ndata))
+
+        ! Loop
+        cc = 0
+        do i = 1, np 
+            ! Add coordinates
+            tempx(cc+1:cc+pol(i)%ne+1) = pol(i)%x(pol(i)%vert)
+            tempy(cc+1:cc+pol(i)%ne+1) = pol(i)%y(pol(i)%vert)
+
+            ! Update counter
+            cc = cc + pol(i)%ne + 1
+
+            ! Add NaN
+            if (i < np) then 
+                tempx(cc+1) = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+                tempy(cc+1) = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+
+                ! Update counter
+                cc = cc + 1
+            end if 
+
+        end do
+
+        ! Write
+        !======
+        call Write2DPolygonData(tempx, tempy, filepath)
+
+        ! Housekeeping
+        !=============
+        end associate 
+        deallocate(tempx, tempy)
+        
+        
     end subroutine
 
     !------------------------------------------------------------------!
@@ -2278,6 +2354,10 @@ module mod_polygon
         end if 
 
     end function
+
+    !------------------------------------------------------------------!
+    !                               Writing                            !
+    !------------------------------------------------------------------!
 
     !------------------------------------------------------------------!
     !                                Tests                             !
