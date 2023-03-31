@@ -882,6 +882,14 @@ module mod_polygon
 
         ! Construct vert
         !===============
+        ! Hedge for single edge polygon
+        if (ne == 1) then 
+            ! Sorted by default, return
+            vert(1) = edges(1, 1)
+            vert(2) = edges(1, 2)
+            return 
+        end if 
+
         ! Get the starting edge
         check(1) = edges(1, 1) == edges(2, 1)
         check(2) = edges(1, 1) == edges(2, 2)
@@ -966,25 +974,12 @@ module mod_polygon
 
         ! Checks
         !=======
-        if (size(polygon%edges, 1) > 1) then 
-            ! Polygon with multiple edges, need to check start and end
-
-            ! Start and end vertices
-            sv = polygon%edges(1, :)
-            ev = polygon%edges(polygon%ne, :)
-
-            ! Compare
-            nv = count(sv(1) == ev) + count(sv(2) == ev)
-
-            ! Set logical
-            polygon%isclosed = nv >= 1
-
+        ! Simply check start and end vertex
+        if (polygon%vert(1) == polygon%vert(polygon%ne+1)) then 
+            polygon%isclosed = .true. 
         else 
-            ! Polygon with a single edge -> false
-            polygon%isclosed = .false. 
-
+            polygon%isclosed = .false.
         end if 
-
 
     end subroutine
 
