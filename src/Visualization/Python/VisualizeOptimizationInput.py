@@ -14,6 +14,7 @@ datadir = '../Plotdata'
 # Plot the grid
 plotter.PlotGridCells(datadir, 1)
 plotter.PlotGridCellsIterate(datadir, 0)
+plotter.PlotVesselPolygon(datadir, -1)
 
 # Constraints
 #------------
@@ -28,6 +29,9 @@ plotter.PlotXPointConstraintVertices(datadir, 4)
 
 # Orthogonality
 plotter.PlotOrthogonalityConstraintEdges(datadir, 5)
+
+# Edge lengths
+plotter.PlotEdgelengthsConstraintEdges(datadir, 6)
 
 # Show figures
 #-------------

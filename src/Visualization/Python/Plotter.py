@@ -28,6 +28,7 @@ ffconverticesfile = 'con_ff_vertices.dat' # vertices constrained by flux functio
 xpconverticesfile = 'con_xp_vertices.dat' # vertices constrained as x-points
 elconvertexpairsfile = 'con_el_vertices.dat' # vertex pairs constrained for edge lengths
 orthconvertexpairsfile = 'con_orth_vertices.dat' # vertex pairs constrained for orthogonality
+vesselpolygonfile = 'vesselpolygon.dat'
 
 # file where grid cells are stored in polygon format ([x, y] with blank
 # lines between polygons)
@@ -54,16 +55,20 @@ def PlotGridCells(dirpath, fignum):
 
     # Get filepath
     filepath = dirpath + filesep + gridcellsfile
+    vesselfilepath = dirpath + filesep + vesselpolygonfile
 
     # Get data
     vals = dh.GetPolygonCoordinates(filepath)
+    vesselvals = dh.GetPolygonCoordinates(vesselfilepath)
 
     # Plot
     PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='',
         label='Grid cells')
+    PlotPolygons2D(vesselvals[:, 0], vesselvals[:, 1], fignum, color='b', marker='',
+        label='Vessel')
 
     # Set axes
-    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+    SetAxesLimits2D(plt.gca(), vesselvals[:, 0], vesselvals[:, 1])
 
     # Set title and other descriptors
     thisaxes = plt.gca()
@@ -291,6 +296,37 @@ def PlotOrthogonalityConstraintEdges(dirpath, fignum):
     # Set title and other descriptors
     thisaxes = plt.gca()
     thisaxes.set_title('Orthogonality constrained edges')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+
+#--------------------------------------------------------------------------#
+#                                 Vessel                                   #
+#--------------------------------------------------------------------------#
+
+def PlotVesselPolygon(dirpath, fignum):
+    # Description
+    # ------------
+    # Plot the grid cells once by reading in the grid cell polygon data as
+    # written out in the cells.dat file
+
+    # Get filepath
+    filepath = dirpath + filesep + vesselpolygonfile
+
+    # Get data
+    vals = dh.GetPolygonCoordinates(filepath)
+
+    # Plot
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='',
+                   label='Vessel polygon')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Vessel polygon')
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
