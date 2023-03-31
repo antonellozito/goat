@@ -4,6 +4,7 @@ mpl.use('TkAgg') # set the gui backend for the cluster...
 from matplotlib import pyplot as plt
 import numpy as np
 import Datahandler as dh
+import time
 
 #==========================================================================#
 #                                                                          #
@@ -14,6 +15,9 @@ import Datahandler as dh
 # Special characters
 #-------------------
 filesep = '/' # file separator
+
+# Enable gui events
+#------------------
 
 # Paths & files
 #--------------
@@ -27,7 +31,8 @@ orthconvertexpairsfile = 'con_orth_vertices.dat' # vertex pairs constrained for 
 
 # file where grid cells are stored in polygon format ([x, y] with blank
 # lines between polygons)
-gridcellsfile = 'cells.dat'
+gridcellsfile = 'cells_init.dat'
+gridcellsiteratefile = 'cells_iterate.dat'
 
 
 #==========================================================================#
@@ -66,6 +71,64 @@ def PlotGridCells(dirpath, fignum):
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
+
+def PlotGridCellsIterate(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the grid cells once by reading in the grid cell polygon data as
+    # written out in the cells.dat file
+
+    # Get filepath
+    filepath = dirpath + filesep + gridcellsiteratefile
+
+    # Get data
+    vals = dh.GetPolygonCoordinates(filepath)
+
+    # Plot
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='',
+        linewidth=0.1, label='Grid cells')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Grid cells')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+
+def MonitorGrid(datadir, num, pausetime, maxruntime):
+    # Description
+    #------------
+    # This routine makes a plot that is continuously updated.
+
+    # Time interval to replot [s]
+    starttime = time.time()
+
+    # Prepare for gui event loop
+    plt.ion()
+
+    # Plot the data
+    PlotGridCellsIterate(datadir, 1)
+    thisfig = plt.gcf()
+
+    # Loop until time has passed
+    while (time.time() - starttime <= maxruntime):
+        # Plot the data
+        PlotGridCellsIterate(datadir, 1)
+
+        # Draw
+        thisfig.canvas.draw()
+        thisfig.canvas.flush_events()
+
+        # Pause
+        time.sleep(pausetime)
+
+        # Clear figure
+        ClearCurrentAxes()
+
 
 
 #--------------------------------------------------------------------------#
@@ -268,9 +331,15 @@ def PlotPoints2D(x, y, fignum, **plotargs):
 #==========================================================================#
 
 
-def ShowFigures():
+def ShowFigures(*args, **kwargs):
     # Just a wrapper for plt.show()
-    plt.show()
+    plt.show(*args, **kwargs)
+
+
+def ClearCurrentAxes():
+    # Just a wrapper for plt.clf()
+    plt.clf()
+
 
 def SetAxesLimits2D(thisaxes, xdata, ydata):
     # Automatically set the axes limits based on the x and y figure data.

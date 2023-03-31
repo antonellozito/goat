@@ -13,6 +13,7 @@ datadir = '../Plotdata'
 #-------
 # Plot the grid
 plotter.PlotGridCells(datadir, 1)
+plotter.PlotGridCellsIterate(datadir, 0)
 
 # Constraints
 #------------
