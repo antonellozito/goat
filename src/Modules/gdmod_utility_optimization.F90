@@ -383,7 +383,7 @@ module gdmod_utility_optimization
         TPind(1:2) = [1, 2]
 
         ! Set other vessel boundary indices
-        WGind(1:1) = [6]
+        WGind(1:1) = [5]
 
         ! Loop over all boundaries
         !=========================

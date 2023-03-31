@@ -1600,8 +1600,10 @@ module gdmod_constraints
         ! Debugging info
         !===============
         ! Write datafile
-        call WriteFluxfunctionConstraintVertices(grid, &
-            constraints%vert)
+        if (options%writedata == 1) then 
+            call WriteFluxfunctionConstraintVertices(grid, &
+                constraints%vert)
+        end if 
 
         ! Housekeeping
         !=============
@@ -2121,7 +2123,9 @@ module gdmod_constraints
         end associate
 
         ! Write datafile
-        call WriteBoundaryConstraintVertices(grid, constraints%vert)
+        if (options%writedata == 1) then 
+            call WriteBoundaryConstraintVertices(grid, constraints%vert)
+        end if 
 
     end subroutine
 
@@ -2501,7 +2505,9 @@ module gdmod_constraints
         ! Debugging info
         !===============
         ! Write datafile
-        call WriteXPointConstraintVertices(grid, constraints%xpind)
+        if (options%writedata == 1) then 
+            call WriteXPointConstraintVertices(grid, constraints%xpind)
+        end if 
 
     end subroutine
 
@@ -3013,8 +3019,11 @@ module gdmod_constraints
         ! Debugging info
         !===============
         ! Write datafile
-        call WriteEdgelengthsConstraintVertexPairs(grid, &
+        if (options%writedata == 1) then 
+            call WriteEdgelengthsConstraintVertexPairs(grid, &
             constraints%edgevert)
+
+        end if 
 
         ! Housekeeping
         !=============
@@ -3822,8 +3831,10 @@ module gdmod_constraints
         ! Debugging info
         !===============
         ! Write datafile
-        call WriteOrthogonalityConstraintVertexPairs(grid, &
-            constraints%edgevert)
+        if (options%writedata == 1) then 
+            call WriteOrthogonalityConstraintVertexPairs(grid, &
+                constraints%edgevert)
+        end if 
         
         ! Housekeeping
         !=============

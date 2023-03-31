@@ -111,6 +111,9 @@ module gdmod_costfunction
         ! Evaluation
         procedure :: Evaluate               => EvaluateCostFunctionLR
 
+        ! Data output
+        procedure :: WriteData              => WriteCostFunctionDataLR
+
         ! Housekeeping
         procedure :: Allocate               => AllocateCostfunctionLR
         procedure :: Deallocate             => DeallocateCostFunctionLR
@@ -219,6 +222,9 @@ module gdmod_costfunction
 
         ! Evaluation
         procedure :: Evaluate               => EvaluateCostFunctionFAD
+
+        ! Data output
+        procedure :: WriteData              => WriteCostFunctionDataFAD
 
         ! Housekeeping
         procedure :: Allocate               => AllocateCostFunctionFAD
@@ -382,7 +388,6 @@ module gdmod_costfunction
         
         ! Initialize
         !===========
-
         ! Set the scaling constant
         costfunction%lambda = options%LR%lambda 
 
@@ -526,6 +531,11 @@ module gdmod_costfunction
         ! End associate
         end associate
 
+        ! Write data
+        !===========
+        if (options%writedata == 1) then 
+            call costfunction%WriteData(grid)
+        end if 
 
     end subroutine
 
@@ -924,6 +934,67 @@ module gdmod_costfunction
 
     end subroutine
 
+    ! Cost function data writing 
+    subroutine WriteCostFunctionDataLR(costfunction, grid)
+
+        ! Description
+        !============
+        ! Write out the cost function data for the LR cost function.
+        ! Here, this consists of the vertex pair data in IDn, xn, yn 
+        ! format
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionLRUDT)        :: costfunction 
+        type(GridUDT)                   :: grid
+
+        ! Auxiliary
+        integer(I8)                     :: ncol, nrow 
+
+        integer(I8), allocatable        :: IDn(:, :) 
+        real(R8), allocatable           :: xn(:, :), yn(:, :)
+        character(:), allocatable       :: filename 
+
+        ! Loop
+        integer(I8)                     :: j 
+
+        ! Initialize
+        !===========
+        ! Set filename
+        filename = 'Plotdata/costfunction_vertexpairs_LR'
+
+        ! Allocate
+        nrow = size(costfunction%vpairs, 1)
+        ncol = size(costfunction%vpairs, 2)
+        allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
+
+        ! Unpack
+        associate(&
+            vpairs      => costfunction%vpairs,         &
+            x           => grid%vert%x,                 &
+            y           => grid%vert%y)
+
+        ! Loop
+        do j = 1, ncol 
+            IDn(:, j) = vpairs(:, j) 
+            xn(:, j) = x(vpairs(:, j)) 
+            yn(:, j) = y(vpairs(:, j)) 
+        end do
+
+        ! Call writer
+        !============
+        call WriteVertexPairData(IDn, xn, yn, filename)
+
+        ! Housekeeping
+        !=============
+        end associate
+        deallocate(IDn, xn, yn)
+        
+
+
+    end subroutine
+
     ! Housekeeping
     subroutine AllocateCostFunctionLR(costfunction, nv, nvn)
 
@@ -1313,6 +1384,12 @@ module gdmod_costfunction
 
         ! End associate
         end associate
+
+        ! Write data
+        !===========
+        if (options%writedata == 1) then 
+            call costfunction%WriteData(grid) 
+        end if 
 
         ! Deallocate
         deallocate(tempvpairs, dx, dy, gxf, gyf, xv, yv, xf, &
@@ -2362,6 +2439,68 @@ module gdmod_costfunction
         ! Deassociate
         end associate
         
+
+    end subroutine
+
+    ! Cost function data writing 
+    subroutine WriteCostFunctionDataFAD(costfunction, grid)
+
+        ! Description
+        !============
+        ! Write out the cost function data for the FAD cost function.
+        ! Here, this consists of the vertex pair data in IDn, xn, yn 
+        ! format
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionFADUDT)       :: costfunction 
+        type(GridUDT)                   :: grid
+
+        ! Auxiliary
+        integer(I8)                     :: ncol 
+
+        integer(I8), allocatable        :: IDn(:, :) 
+        real(R8), allocatable           :: xn(:, :), yn(:, :)
+        character(:), allocatable       :: filename 
+
+        ! Loop
+        integer(I8)                     :: j
+
+        ! Initialize
+        !===========
+        ! Set filename
+        filename = 'Plotdata/costfunction_vertexpairs_FAD'
+
+        ! Unpack
+        associate(&
+            vpairs      => costfunction%vpairs,         &
+            nvpairs     => costfunction%nvpairs,        &
+            x           => grid%vert%x,                 &
+            y           => grid%vert%y)
+        
+        ! Allocate
+        ncol = size(vpairs, 2)
+        allocate(IDn(nvpairs, ncol), xn(nvpairs, ncol), &
+            yn(nvpairs, ncol))
+
+        ! Loop
+        do j = 1, ncol 
+            IDn(:, j) = vpairs(:, j) 
+            xn(:, j) = x(vpairs(:, j)) 
+            yn(:, j) = y(vpairs(:, j)) 
+        end do
+
+        ! Call writer
+        !============
+        call WriteVertexPairData(IDn, xn, yn, filename)
+
+        ! Housekeeping
+        !=============
+        end associate
+        deallocate(IDn, xn, yn)
+        
+
 
     end subroutine
 

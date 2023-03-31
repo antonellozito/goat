@@ -70,6 +70,8 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
         si(:, :), pi(:, :), ci(:)
     logical, allocatable        :: notfound(:)
 
+    character(:), allocatable   :: vesselpath
+
     ! Loop
 
     ! Initialize
@@ -125,6 +127,7 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
             ! topologically possible but is not allowed here)
             print *, 'polygon number (excluded polygons not accounted):'
             print *, i
+            print *, ps%polygons(i)%edges
             call gdErrorHandler('ConstructVesselPolygon: closed ' &
                 // 'polygon found that intersects with itself, check input')
 
@@ -454,18 +457,12 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
     yv = tempy(1:nvv)
     call vessel%polygonset%Construct(xv, yv)
 
+    ! Write data
+    vesselpath = 'Plotdata/vesselpolygon'
+    call vessel%polygonset%WriteData(vesselpath)
+
     ! Housekeeping
     !=============
     deallocate(xv, yv, indi, si, pi, ci, tempx, tempy) 
-    
-
-
-
-
-
-
-
-
-
 
 end subroutine

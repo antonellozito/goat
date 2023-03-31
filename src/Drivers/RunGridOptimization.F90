@@ -38,6 +38,8 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
     real(R8), allocatable               :: xq(:), yq(:), vq(:), &
         xqmf(:,:), yqmf(:,:), vqmf(:,:)
 
+    character(:), allocatable           :: vertpath, cellpath
+
     ! Set additional options
     !=======================
     ! Set paths from where options should be read
@@ -56,8 +58,10 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
         grid, magneticField, environment)
 
     ! Write initial coordinates
-    call WriteGridVertices(grid, 'vertices_init')
-    call WriteGridCells(grid, 'cells_init')
+    vertpath = 'vertices_init'
+    cellpath = 'cells_init'
+    call WriteGridVertices(grid, vertpath)
+    call WriteGridCells(grid, cellpath)
 
     ! Solve
     !======

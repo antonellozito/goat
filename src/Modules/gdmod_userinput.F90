@@ -88,6 +88,7 @@ module gdmod_userinput
         ! - type:   type of design variables. Currently, only 
         !           'coordinates' is available
         character(:), allocatable    :: type 
+        integer(I8)                  :: writedata
 
     contains 
 
@@ -102,9 +103,10 @@ module gdmod_userinput
         ! Length ratio specific cost function options. 
         ! Fields:
         ! - lambda: cost function scaling constant
-        ! - 
+        ! - writedata: write out cost function data for debugging
 
         real(R8)                    :: lambda 
+        integer(I8)                 :: writedata
 
     contains 
 
@@ -121,6 +123,7 @@ module gdmod_userinput
         ! - 
 
         real(R8)                    :: lambda 
+        integer(I8)                 :: writedata
 
     contains 
 
@@ -147,6 +150,7 @@ module gdmod_userinput
         ! are therefore not defined here. They should be read in by 
         ! dedicated routines defined in gdmod_costfunction
         character(:), allocatable       :: type 
+        integer(I8)                     :: writedata
         type(CostFunctionOptionsLRUDT)  :: LR
         type(CostFunctionOptionsFADUDT) :: FAD
 
@@ -265,6 +269,9 @@ module gdmod_userinput
         integer(I8)         :: neq ! number of equality constraints
         integer(I8)         :: nineq ! number of inequality constraints 
 
+        ! Data output
+        integer(I8)         :: writedata
+
         ! Constraint parameters
         type(BoundaryFunctionConOptionsUDT)     :: bfoptions 
         type(FluxFunctionConOptionsUDT)         :: ffoptions 
@@ -286,6 +293,8 @@ module gdmod_userinput
         type(CostFunctionOptionsUDT)       :: costfunction
         type(DesignVariableOptionsUDT)     :: variables
         type(ConstraintOptionsUDT)         :: constraints
+
+        integer(I8)                        :: writedata
 
     contains 
 
@@ -368,6 +377,7 @@ module gdmod_userinput
         ! Default options
         !================
         options%type        = 'LR_FAD' 
+        options%writedata   = 1
         options%LR%inputfilepath = options%inputfilepath ! propagate filepath
         options%FAD%inputfilepath = options%inputfilepath ! propagate filepath
 
@@ -391,6 +401,7 @@ module gdmod_userinput
 
         ! Default options
         !================
+        options%writedata = 1
         options%lambda = 1e0
 
     end subroutine
@@ -408,6 +419,7 @@ module gdmod_userinput
 
         ! Default options
         !================
+        options%writedata = 1
         options%lambda = 1e0
 
     end subroutine
@@ -436,6 +448,8 @@ module gdmod_userinput
 
         options%neq                 = 4
         options%nineq               = 0
+
+        options%writedata           = 1
 
         ! Paths
         options%bfoptions%inputfilepath = options%inputfilepath
@@ -610,6 +624,7 @@ module gdmod_userinput
         call options%variables%Set()
         call options%costfunction%Set() 
         call options%constraints%Set()
+        options%writedata = 1
 
     end subroutine
 
@@ -827,6 +842,10 @@ module gdmod_userinput
         ! Scaling constant
         field = 'gd.design.cfv.par.LR.lambda'
         call ExtractOptionValueReal0D(fid, field, options%lambda) 
+
+        ! Write data
+        field = 'gd.design.cfv.par.LR.writedata'
+        call ExtractOptionValueInteger0D(fid, field, options%writedata) 
         
         ! Housekeeping
         !=============
@@ -877,6 +896,10 @@ module gdmod_userinput
         ! Scaling constant
         field = 'gd.design.cfv.par.FAD.lambda'
         call ExtractOptionValueReal0D(fid, field, options%lambda) 
+
+        ! Write data
+        field = 'gd.design.cfv.par.FAD.writedata'
+        call ExtractOptionValueInteger0D(fid, field, options%writedata) 
         
         ! Housekeeping
         !=============
@@ -939,6 +962,10 @@ module gdmod_userinput
         ! Inequality constraints
         field = 'gd.design.inec.linefolding'
         call ExtractOptionValueInteger0D(fid, field, options%linefolding)
+
+        ! Data writing
+        field = 'gd.design.ec.writedata'
+        call ExtractOptionValueInteger0D(fid, field, options%writedata)
 
         ! Set number to the correct value
         options%neq     = 0
@@ -1239,7 +1266,10 @@ module gdmod_userinput
         
         ! Read options
         !=============
-        ! Do nothing for now...
+        ! Write data during optimization?
+        field = 'gd.design.writedata'
+        call ExtractOptionValueInteger0D(fid, field, options%writedata)
+
         
         ! Housekeeping
         !=============

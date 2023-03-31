@@ -747,73 +747,6 @@ module gdmod_plots
     !                         Auxiliary routines                       !
     !------------------------------------------------------------------!
 
-    ! Vertex writing routine
-    subroutine WriteVertexData(ID, x, y, filepath)
-
-        ! Description
-        !============
-        ! General vertex data writing routine. writes IDs, x, y
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        integer(I8), allocatable, intent(in)        :: ID(:)
-        real(R8), allocatable, intent(in)           :: x(:), y(:) 
-        integer                                     :: i, fu
-        character(:), allocatable, intent(in)       :: filepath 
-
-        ! Write
-        !======
-        open (action='write', file=trim(filepath), newunit=fu, &
-             status='replace')
-            
-        ! Header
-        write (fu, *) 'ID, x, y'
-    
-        ! Data
-        do i = 1, size(ID)
-            write (fu, *) ID(i), x(i), y(i)
-        end do
-    
-        close (fu)
-
-    end subroutine
-
-    ! Vertex pair writing routine
-    subroutine WriteVertexPairData(ID, x, y, filepath)
-
-        ! Description
-        !============
-        ! General vertex data writing routine. writes IDs, x, y in the 
-        ! format ID1, ID2, x1, y1, x2, y2
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        integer(I8), allocatable, intent(in)        :: ID(:, :)
-        real(R8), allocatable, intent(in)           :: x(:, :), y(:, :) 
-        integer                                     :: i, fu
-        character(:), allocatable, intent(in)       :: filepath 
-
-        ! Write
-        !======
-        open (action='write', file=trim(filepath), newunit=fu, &
-             status='replace')
-            
-        ! Header
-        write (fu, *) 'ID1, ID2, x1, y1, x2, y2'
-    
-        ! Data
-        do i = 1, size(ID, 1)
-            write (fu, *) ID(i, 1), ID(i, 2), x(i, 1), y(i, 1), &
-                x(i, 2), y(i, 2)
-        end do
-    
-        close (fu)
-
-    end subroutine
-
-
     !------------------------------------------------------------------!
     !                          Writing routines                        !
     !------------------------------------------------------------------!
@@ -832,18 +765,17 @@ module gdmod_plots
         implicit none
 
         ! Declare variables
-        type(GridUDT)                       :: grid
-        integer                             :: i, fu
-        integer(I8), allocatable            :: IDs(:)
-        integer(I8)                         :: k
-        character(:), allocatable           :: filepath
-        character(*), intent(in)            :: filename
+        type(GridUDT)                           :: grid
+        integer                                 :: i, fu
+        integer(I8), allocatable                :: IDs(:)
+        integer(I8)                             :: k
+        character(:), allocatable               :: filepath
+        character(:), allocatable, intent(in)   :: filename
 
         ! Initialize
         !===========
         ! Set the correct directories
-        call SetGnuplotNames(plotfile,datafile,'Plotdata/' // filename)
-        filepath = datafile
+        filepath = 'Plotdata/' // filename
 
         ! Unpack
         allocate(IDs(grid%vert%ntot))
@@ -936,13 +868,12 @@ module gdmod_plots
         integer(I8), allocatable, intent(in)    :: IDs(:) 
         real(R8), allocatable                   :: x(:), y(:)
         integer(I8)                             :: nIDs
-        character(:), allocatable           :: filepath
+        character(:), allocatable               :: filepath
 
         ! Initialize
         !===========
         ! Set the correct directories
-        call SetGnuplotNames(plotfile, datafile, 'Plotdata/con_ff_vertices')
-        filepath = datafile 
+        filepath = 'Plotdata/con_ff_vertices'
 
         ! Unpack
         nIDs = size(IDs)
@@ -977,8 +908,7 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        call SetGnuplotNames(plotfile, datafile, 'Plotdata/con_bnd_vertices')
-        filepath = datafile 
+        filepath = 'Plotdata/con_bnd_vertices' 
 
         ! Unpack
         nIDs = size(IDs)
@@ -1013,8 +943,7 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        call SetGnuplotNames(plotfile, datafile, 'Plotdata/con_xp_vertices')
-        filepath = datafile 
+        filepath = 'Plotdata/con_xp_vertices' 
 
         ! Unpack
         nIDs = size(IDs)
@@ -1049,8 +978,7 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        call SetGnuplotNames(plotfile, datafile, 'Plotdata/con_el_vertices')
-        filepath = datafile 
+        filepath = 'Plotdata/con_el_vertices' 
 
         ! Unpack
         nIDs = size(IDs, 1)
@@ -1087,12 +1015,10 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        call SetGnuplotNames(plotfile, datafile, 'Plotdata/con_orth_vertices')
-        filepath = datafile 
+        filepath = 'Plotdata/con_orth_vertices' 
 
         ! Unpack
         nIDs = size(IDs, 1)
-        print *, 'number of IDs:', nIDs
         allocate(x(nIDs, 2), y(nIDs, 2))
         x(:, 1) = grid%vert%x(IDs(:, 1))
         y(:, 1) = grid%vert%y(IDs(:, 1))

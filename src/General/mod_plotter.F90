@@ -41,8 +41,8 @@ module mod_plotter
     character(len=*), parameter     :: plotdir = './src/Visualization/'
 
     ! Define the (general) plot filename and data filename
-    character(C128)                 :: plotfile
-    character(C128)                 :: datafile
+    character(:), allocatable                 :: plotfile
+    character(:), allocatable                 :: datafile
 
     contains 
 
@@ -357,13 +357,137 @@ module mod_plotter
         implicit none
 
         ! Declare variables
-        character(C128)         :: plt
-        character(C128)         :: dat
+        character(:), allocatable       :: plt
+        character(:), allocatable       :: dat
         character(*)         :: funname
 
         ! Set output
         plt = trim(plotdir) // trim(funname) // '.plt'
         dat = trim(plotdir) // trim(funname) // '.dat'
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                          Writing routines                        !
+    !------------------------------------------------------------------!
+
+    ! Vertex writing routine
+    subroutine WriteVertexData(ID, x, y, filepath)
+
+        ! Description
+        !============
+        ! General vertex data writing routine. writes IDs, x, y
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), allocatable, intent(in)        :: ID(:)
+        real(R8), allocatable, intent(in)           :: x(:), y(:) 
+        integer                                     :: i, fu
+        character(:), allocatable, intent(in)       :: filepath 
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile, datafile, filepath)
+
+        ! Write
+        !======
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+            
+        ! Header
+        write (fu, *) 'ID, x, y ', 'nrow', size(ID, 1), 'ncol', 3
+    
+        ! Data
+        do i = 1, size(ID)
+            write (fu, *) ID(i), x(i), y(i)
+        end do
+    
+        close (fu)
+
+    end subroutine
+
+    ! Vertex pair writing routine
+    subroutine WriteVertexPairData(ID, x, y, filepath)
+
+        ! Description
+        !============
+        ! General vertex data writing routine. writes IDs, x, y in the 
+        ! format ID1, ID2, ... IDn, x1, x2, ... xn, y1, y2, ... yn
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), allocatable, intent(in)        :: ID(:, :)
+        real(R8), allocatable, intent(in)           :: x(:, :), y(:, :) 
+        integer                                     :: i, fu
+        character(:), allocatable, intent(in)       :: filepath 
+
+         ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile, datafile, filepath)
+
+        ! Write
+        !======
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+            
+        ! Header
+        write (fu, *) 'IDn, xn, yn ', 'nrow', size(ID, 1), 'ncol', 3*size(ID, 2)
+    
+        ! Data
+        do i = 1, size(ID, 1)
+            write (fu, *) ID(i, :), x(i, :), y(i, :)
+        end do
+    
+        close (fu)
+
+    end subroutine
+
+    ! Polygon writing routine
+    subroutine Write2DPolygonData(x, y, filepath)
+
+        ! Description
+        !============
+        ! General polygon data writing routine. writes x, y coordinates.
+        ! Data can contain NaNs - these are replaced by white lines, and
+        ! should be used to distinguish different polygons. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), allocatable, intent(in)           :: x(:), y(:) 
+        integer                                     :: i, fu
+        character(:), allocatable, intent(in)       :: filepath 
+
+
+        
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile, datafile, filepath)
+
+        ! Write
+        !======
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='replace')
+        print *, datafile
+            
+        ! Header
+        write (fu, *) 'x, y'
+    
+        ! Data
+        do i = 1, size(x)
+            if (isnan(x(i))) then 
+                write (fu, *)
+            else 
+                write (fu, *) x(i), y(i)
+            end if
+        end do
+    
+        close (fu)
 
     end subroutine
 
