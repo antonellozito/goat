@@ -15,11 +15,14 @@ include config.mk
 ## %=============
 # Linking
 ## gdrun			: Create executable for grid deformation
+goat: $(GOAT_TARGETS) goat.o
+	$(FC) -o goat *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
+
 gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
 	$(FC) -o gdrun *.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
 
-goat: $(GOAT_TARGETS) goat.o
-	$(FC) -o goat *.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
+
+# $(LFLAGS) $(LAPACKPATH) $(BLASPATH) $(OPENBLASPATH) $(UMFPACKPATH) $(AMDPATH) $(SSCONFIGPATH) $(CHOLMODPATH)
 
 ## % Runfiles
 ## %=========

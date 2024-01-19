@@ -15,9 +15,11 @@
 ## % Library paths
 ## %==============
 ## LAPACKPATH 			: LAPACK library path (user defined)
-LAPACKPATH = /data/leuven/320/vsc32061/lapack/lapack/liblapack.a
+LAPACKPATH = -llapack
+
 ## BLASPATH 			: BLAS library path (user defined)
-BLASPATH = /data/leuven/320/vsc32061/lapack/lapack/librefblas.a
+BLASPATH = -lblas
+
 ## UMFPACKPATH 			: UMFPACK library path (user defined)
 UMFPACKPATH = -lumfpack
 
@@ -37,7 +39,7 @@ GOAT_TARGETS = $(GDRUN_TARGETS)
 ## FC			: Compiler to be used
 FC = gfortran
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS = -c -Wall -O3
+CFLAGS = -c -g -Wall -O3 -fopenmp
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
@@ -48,7 +50,7 @@ CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
 ## % Linker
 ## %=======
 ## LFLAGS			: linking flags to be used (apart from libraries)
-LFLAGS =  
+LFLAGS_DEFAULT =  
 
 ## LFLAGS_DEBUG 	: linking flags for debugging
 LFLAGS_DEBUG = -pg -g
