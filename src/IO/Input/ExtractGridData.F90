@@ -48,7 +48,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
     integer(I8)                 :: itf, ntf, ngv, nbnd, nfpb, nseg, &
         nlabels 
     integer(I8), allocatable    :: tf(:), tfv(:,:), indgv(:), vdiff(:)
-    integer(I8), allocatable    :: gglabels(:), gdlabels(:), bndmapping(:,:), &
+    integer(I8), allocatable    :: gglabels(:), gdlabels(:), &
         sortindex(:), temparray(:,:), tempfaces(:), segstart(:)
 
     logical, allocatable        :: isghostvert(:), mask(:), &

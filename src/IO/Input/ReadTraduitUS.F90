@@ -22,7 +22,7 @@ subroutine ReadTraduitUS(filespec,grid)
     type(GridUDT)               :: grid
 
     integer, intent(in)         :: filespec ! file specifier
-    integer(I8)                 :: idum(0:9)    
+    integer(I8)                 :: idum(0:9), idum2(1)    
     character(10)               :: b2fgmtryversion
     integer(I8)                 :: nc, nf, nv, nfsFc, nftCv, nftFc
 
@@ -40,7 +40,6 @@ subroutine ReadTraduitUS(filespec,grid)
     real(R8), allocatable       :: fsdummyr(:) ! dummy array
     real(R8), allocatable       :: facelistdummy(:) ! dummy array
     real(R8), allocatable       :: n2dummy(:) ! dummy array
-    real(R8), allocatable       :: nxdummy(:) ! dummy array
     integer(I8), allocatable    :: ftCvdum(:), ftFcdum(:), fsFcdum(:)
 
     real(R8), allocatable       :: vdata(:, :), cdata(:, :), &
@@ -49,8 +48,6 @@ subroutine ReadTraduitUS(filespec,grid)
     integer(I8), allocatable    :: vlist(:), clist(:), &
         flist(:), ftlist(:), fslist(:), cdatai1(:, :), &
         fdatai(:, :), ftdatai(:, :), fsdatai(:, :), cdatai2(:, :)
-
-    integer(I8)                 :: n2, nx  ! legacy structured data
 
     ! Loop
     integer(I8)                 :: i
@@ -101,7 +98,8 @@ subroutine ReadTraduitUS(filespec,grid)
     allocate(ftdummy(grid%data%fluxdata%nFt))
 
     ! Read data for structured grid remapping (to be deleted in future)
-    call cfruin (filespec,1,grid%data%sglegacy%isClassicalGrid,'isClassicalGrid') 
+    call cfruin (filespec,1,idum2,'isClassicalGrid') 
+    grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4) ! cast to I4 type
     if (grid%data%sglegacy%isClassicalGrid == 1) then 
         call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
         grid%data%sglegacy%nx = idum(0)

@@ -33,14 +33,13 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     type(VesselOptionsUDT), intent(in)  :: vesseloptions
 
     ! Loop variables
-    integer(I8)                         :: i, k 
+    integer(I8)                         :: i
 
     ! Auxiliary variables 
     type(PolygonSetUDT)                 :: tempps 
-    integer(I8)                         :: pec, nc, netot, nv, thisne, &
-        nvp, cc, nexcl   
-    integer(I8), allocatable            :: polygonstarts(:), pe(:, :)
-    real(R8), allocatable               :: xv(:), yv(:), tempx(:), &
+    integer(I8)                         :: nvp, cc, nexcl   
+!    integer(I8), allocatable            :: polygonstarts(:)
+    real(R8), allocatable               :: tempx(:), &
         tempy(:)
 
     ! Plotting

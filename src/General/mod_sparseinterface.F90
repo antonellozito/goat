@@ -318,7 +318,7 @@ module mod_sparseinterface
         !=======
         ! Proper dimensions?
         if ( (a%nrow .ne. b%nrow) .or. (a%ncol .ne. b%ncol) ) then 
-            call gdErrorHandler('AddSparse: Incompatible matrix', &
+            call gdErrorHandler('AddSparse: Incompatible matrix' // &
              ' dimensions')
         end if 
 

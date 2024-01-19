@@ -279,7 +279,6 @@ module mod_plotter
         allocate(val(5*np))
 
         ! Loop over both coordinate directions
-        print *, 
         k = 1
         do i = 1, ny-1
             do j = 1, nx-1

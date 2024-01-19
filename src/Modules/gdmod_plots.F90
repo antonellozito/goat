@@ -642,7 +642,6 @@ module gdmod_plots
         Psi = magneticField%Psi
 
         ! Loop over both coordinate directions
-        print *, 
         k = 1
         do i = 1, magneticField%nZ-1
             do j = 1, magneticField%nR-1

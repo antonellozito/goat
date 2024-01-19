@@ -21,7 +21,7 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     type(GridUDT)               :: grid
 
     integer, intent(in)         :: filespec ! file specifier
-    integer(I8)                 :: idum(0:9)    
+    integer(I8)                 :: idum(0:9), idum2(1)    
     character(10)               :: b2fgmtryversion
     integer(I8)                 :: nc,nf,nv ! total number of cells, faces, vertices
 
@@ -36,8 +36,8 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     real(R8), allocatable       :: vdummyr(:,:) ! dummy array
     real(R8), allocatable       :: fsdummyr(:) ! dummy array
     real(R8), allocatable       :: facelistdummy(:) ! dummy array
-    real(R8), allocatable       :: n2dummy(:) ! dummy array
-    real(R8), allocatable       :: nxdummy(:) ! dummy array
+    integer(I8), allocatable       :: n2dummy(:) ! dummy array
+    integer(I8), allocatable       :: nxdummy(:) ! dummy array
 
     integer(I8)                 :: n2,nx  ! legacy structured data
     
@@ -48,9 +48,9 @@ subroutine ReadB2fgmtryUS(filespec,grid)
 
     ! Primary array dimensions
     call cfruin (filespec,7,idum,'nCi,nCg,nCv,nFc,nVx,nFs,nFt')
-    nc = idum(2)
-    nf = idum(3)
-    nv = idum(4)
+    nc = int(idum(2), I8) ! make sure to cast to correct type
+    nf = int(idum(3), I8)
+    nv = int(idum(4), I8)
 
     ! Add to grid
     grid%cells%ntot         = nc
@@ -83,7 +83,8 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     allocate(ftdummy(grid%data%fluxdata%nFt))
 
     ! Read data for structured grid remapping (to be deleted in future)
-    call cfruin (filespec,1,grid%data%sglegacy%isClassicalGrid,'isClassicalGrid') 
+    call cfruin (filespec,1,idum2,'isClassicalGrid')
+    grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4)
     call cfruin (filespec,3,idum,'nx,ny,nncut')
     grid%data%sglegacy%nx = idum(0)
     grid%data%sglegacy%ny = idum(1)
