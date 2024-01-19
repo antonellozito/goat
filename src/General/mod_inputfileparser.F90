@@ -277,7 +277,7 @@ module mod_inputfileparser
 
     end subroutine
 
-    ! Extract scalar integer
+    ! Extract scalar real
     subroutine ExtractOptionValueReal0D(fid, key, val)
 
         ! Description
@@ -334,7 +334,7 @@ module mod_inputfileparser
 
     end subroutine
 
-    ! Extract array integer
+    ! Extract array real
     subroutine ExtractOptionValueReal1D(fid, key, val)
 
         ! Description
@@ -399,7 +399,7 @@ module mod_inputfileparser
 
     end subroutine
 
-    ! Extract matrix integer
+    ! Extract matrix real
     subroutine ExtractOptionValueReal2D(fid, key, val)
 
         ! Description
@@ -501,6 +501,70 @@ module mod_inputfileparser
 
             ! Print
             print *, key, ' = ', val
+
+        else 
+
+            ! Print  
+            print *, key, ' = ', val, ' (default, could not find in file)'
+
+        end if
+
+    end subroutine
+
+    ! Extract scalar logical
+    subroutine ExtractOptionValueLogical0D(fid, key, val)
+
+        ! Description
+        !============
+        ! Main driver to extract scalar logical value from a formatted
+        ! .dat input file. It is assumed that the file has been opened 
+        ! and exists (its unit is then given by fid). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer, intent(in)                     :: fid
+        character(:), allocatable, intent(in)   :: key 
+        integer(I8)                             :: valint 
+
+        ! Auxiliary
+        logical                                 :: islegal, isfound, &
+            val
+        integer(I8)                             :: tempi 
+        character(:), allocatable               :: temp
+
+        ! Initialize
+        !===========
+        islegal = .false. 
+
+        ! Search
+        !=======
+        ! Get the value belonging to the key in character array format
+        call GetValueWithKey(fid, key, temp, isfound)
+
+        ! Check if it is found, otherwise exit
+        if (isfound) then 
+
+            ! Attribute
+            call ExtractIntegerFromString0D(temp, tempi, islegal)
+
+            ! Check
+            if (islegal) then 
+                ! Attribute
+                valint = tempi
+                if (valint .lt. 0) then 
+                    ! Value is true
+                    val = .true.
+                else 
+                    val = .false.
+                end if
+
+                ! Print
+                print *, key, ' = ', val
+            else 
+                ! Print
+                print *, key, ' = ', val, '(default, illegal value in file)'
+            end if 
 
         else 
 
