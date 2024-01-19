@@ -2,10 +2,8 @@ subroutine ReadTraduitUS(filespec,grid)
 
     ! Description
     !============
-    ! Read in the necessary grid data from a traduit.b2us file for the 
-    ! grid deformation module. This routine can serve as wrapper in the 
-    ! future to call the dedicated reading and writing routines 
-    ! present in b2mod_geo for example. 
+    ! Read in the necessary grid data from a traduit.out.b2us file.
+
 
     ! Initialize
     !===========
