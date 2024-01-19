@@ -7,7 +7,7 @@ import Plotter as plotter
 # which all the files reside has to be defined in 'datadir'
 
 # Data directory
-datadir = '../Plotdata'
+datadir = './src/Visualization/Plotdata'
 
 # Design
 #-------
