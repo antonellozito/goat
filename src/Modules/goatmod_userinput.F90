@@ -52,7 +52,7 @@ module goatmod_userinput
     end type 
 
     !------------------------------------------------------------------!
-    !                               Goat                               !
+    !                               GOAT                               !
     !------------------------------------------------------------------!
 
     ! General goat options
@@ -60,31 +60,165 @@ module goatmod_userinput
 
         ! Structure containing the options for goat. The following 
         ! fields are present:
-        ! - driver:     specify the driver to be used in the goat 
-        !               program (see Goat.F90 for the options)
-        ! - facelabelsubfrom:   labels in the original grid file to 
-        !                       replace by other files
-        ! - facelabelsubto:     replacement labels
 
-        character(:), allocatable   :: driver ! driver to be taken for goat
-        integer                     :: itmax 
-        character(:), allocatable   :: filepath ! file path to options file
+        ! General fields:
+        ! - debug: general debug plots on the goat level
+        ! - meth: goat running method. Currently, only 'GD' is supported
+        ! - readtype: type of grid input file to read. Can be 
+        ! 'traduitb2us' or b2fgmtry (also in unstructured variant)
+        ! - filepath: path towards the file where options are defined
+        ! - gdfilepath: path towards the file where options for grid 
+        ! deformation are defined
 
-        ! Mappings
-        integer(I8), allocatable    :: facelabelsubfrom(:) ! labels
+        ! Input filenames:
+        ! - readfile: grid input file to read
+        ! - strfile: structure.dat file to read
+        ! - mfloaddir: magnetic field directory
+        ! - mfloadfile: magnetic field file
+        ! - writedir: path where to write output traduit file
 
-        ! File paths
-        character(:), allocatable   :: gridoptionsfilepath 
-        character(:), allocatable   :: magneticfieldoptionsfilepath  
-        character(:), allocatable   :: environmentoptionsfilepath
-        character(:), allocatable   :: designoptionsfilepath 
+        ! Output options
+        ! - write_final: write final output
+        ! - write_traduitb2us: write unstructured traduit file
+        ! - write_b2agdat:  write final b2ag.dat file for use in b2ag
+        ! - write_Xpointdata: write out X-point data in traduit file
+        ! - write_OMPdata: write OMP data in traduit file
 
+        ! Case identification options
+        ! - vesselmode: set to true if the case is a vessel mode grid
+        ! - slab: true if slab grid
+        ! - artificial_slab: true if artificial slab
+
+        ! Face label mappings
+        ! - GAtoGDfacelabelmappingGG: labels as defined in grid
+        ! generator for interfacing between GA and GD
+        ! - GAtoGDfacelabelmappingGD: corresponding labels for GD (so 
+        ! first GG label is mapped to first GD label here)
+        ! - GAtoGDfacelabelsubfrom: substitution of this face label ... 
+        ! - GAtoGDfacelabelsubto: ... to this face label in GA to GD 
+        ! interface
+
+        ! - GGtoGAfacelabelmappingGG: idem above but for GG to GA 
+        ! - GGtoGAfacelabelmappingGA
+        ! - GGtoGAfacelabelsubfrom
+        ! - GGtoGAfacelabelsubto
+
+        ! Structure options
+        ! - TP: structure numbers that are target plates
+        ! - TPind: indices of target plates
+        ! - exclude: indices of structures in structure.dat that should 
+        ! be excluded when generating the bounding polygon
+
+        ! OMP and IMP definition
+        ! - OMP_r, OMP_z: R, Z coordinates that define the outer mid 
+        ! plane line segment
+        ! - IMP_r, IMP_z: R, Z coordinates that define the inner mid 
+        ! plane line segment
+
+        ! General
+        logical                     :: debug     
+        character(:), allocatable   :: meth 
+        character(:), allocatable   :: readtype
+        character(:), allocatable   :: filepath
+        character(:), allocatable   :: gdfilepath
+
+        ! Specify input filenames
+        character(:), allocatable   :: readfile
+        character(:), allocatable   :: strfile
+        character(:), allocatable   :: mfloaddir
+        character(:), allocatable   :: mfloadfile 
+        character(:), allocatable   :: writedir
+
+        ! Output options
+        logical                     :: write_final 
+        logical                     :: write_traduitb2us
+        logical                     :: write_b2agdat
+        logical                     :: write_Xpointdata 
+        logical                     :: write_OMPdata
+
+        ! Case identification options
+        logical                     :: vesselmode 
+        logical                     :: slab 
+        logical                     :: artificial_slab
+
+        ! Face label mappings
+        integer(I8), allocatable    :: GDtoGAfacelabelmappingGG(:)
+        integer(I8), allocatable    :: GDtoGAfacelabelmappingGD(:) 
+        integer(I8), allocatable    :: GDtoGAfacelabelsubfrom(:) 
+        integer(I8), allocatable    :: GDtoGAfacelabelsubto(:) 
+
+        integer(I8), allocatable    :: GGtoGAfacelabelmappingGG(:)
+        integer(I8), allocatable    :: GGtoGAfacelabelmappingGD(:) 
+        integer(I8), allocatable    :: GGtoGAfacelabelsubfrom(:) 
+        integer(I8), allocatable    :: GGtoGAfacelabelsubto(:) 
+
+        ! Structure options
+        integer(I8), allocatable    :: TP(:)
+        integer(I8), allocatable    :: TPind(:) 
+        integer(I8), allocatable    :: exclude(:)
+
+        ! OMP and IMP
+        real(R8), allocatable       :: OMP_r(:), OMP_z(:), IMP_r(:), &
+            IMP_z(:)
 
     contains
 
         ! Routines to manipulate the options
         procedure   :: Read             => ReadGoatOptions
         procedure   :: SetDefaults      => SetDefaultGoatOptions
+        
+
+    end type
+
+    !------------------------------------------------------------------!
+    !                          GRID DEFORMATION                        !
+    !------------------------------------------------------------------!
+
+    ! General grid deformation options
+    type, extends(OptionsUDT) :: GDoptionsUDT
+
+        ! Structure containing the options for the grid deformation part 
+        ! of GOAT. The following fields are present:
+
+        ! - runtype: type of run for grid deformation. currently, only 
+        ! 'optimize' is available, though may be extended in the future
+        ! - gridtype: only available options is plasma edge grid 
+        ! ('plasma')
+        ! - meth: only supported option is 'KKT', though augmented 
+        ! lagrangian is also available. Method to solve optimization 
+        ! problem when using 'optimize' as runtype
+
+        ! - designoptionsfile: file to read design options
+        ! - gridoptionsfile: similar to above, but for grid
+        ! - magneticfieldoptionsfile: for MF
+        ! - numparamsoptionsfile: for numerical parameters
+        ! - environmentoptionsfile: for other environment stuff
+
+        ! 
+        ! - driver:     specify the driver to be used in the goat 
+        !               program (see Goat.F90 for the options)
+        ! - facelabelsubfrom:   labels in the original grid file to 
+        !                       replace by other files
+        ! - facelabelsubto:     replacement labels
+
+        ! General deformation options
+        character(:), allocatable   :: runtype 
+        character(:), allocatable   :: gridtype 
+        character(:), allocatable   :: meth 
+        character(:), allocatable   :: filepath 
+
+        ! Files to read other options
+        character(:), allocatable   :: designoptionsfile 
+        character(:), allocatable   :: gridoptionsfile 
+        character(:), allocatable   :: magneticfieldoptionsfile 
+        character(:), allocatable   :: numparamsoptionsfile
+        character(:), allocatable   :: environmentoptionsfile
+
+    contains
+
+        ! Routines to manipulate the options
+        procedure   :: Read             => ReadGDOptions
+        procedure   :: SetDefaults      => SetDefaultGDOptions
         
 
     end type
@@ -313,21 +447,82 @@ module goatmod_userinput
         ! Declare variables
         !==================
         ! Arguments
-        class(GoatoptionsUDT)       :: options
-        character(:), allocatable   :: filepath
+        class(GoatoptionsUDT)       :: options        
         
-        ! Set default values
-        !===================
         ! Input file
-        options%filepath    = './Examples/TCV/GOAToptions.dat'
+        options%filepath    = './GOAToptions.dat'
 
-        ! Numerics
-        options%itmax       = 5
-        options%driver      = 'GD'
+        ! General
+        options%debug       = .false. 
+        options%meth        = 'GD'
+        options%readtype    = 'traduitb2us'
+        options%gdfilepath  = './GOAToptions.dat'
 
-        ! Mappings
-        allocate(options%facelabelsubfrom(0))
+        ! Specify input filenames
+        options%readfile    = './traduit.out.b2us'
+        options%strfile     = './structure.dat'
+        options%mfloaddir   = '.'
+        options%mfloadfile  = 'rzpsi.dat'
 
+        ! Output options
+        options%writedir            = 'traduit.out.b2us_smoothed'
+        options%write_final         = .true. 
+        options%write_traduitb2us   = .true.
+        options%write_b2agdat       = .true. 
+        options%write_Xpointdata    = .false. 
+        options%write_OMPdata       = .false. 
+
+        ! Case identification options
+        options%vesselmode          = .false. 
+        options%slab                = .false.
+        options%artificial_slab     = .false.
+        
+        ! Face label mappings
+        allocate(options%GDtoGAfacelabelmappingGG(0), &
+            options%GDtoGAfacelabelmappingGD(0), &
+            options%GDtoGAfacelabelsubfrom(0), &
+            options%GDtoGAfacelabelsubto(0), &
+            options%GGtoGAfacelabelmappingGG(0), &
+            options%GGtoGAfacelabelmappingGD(0), &
+            options%GGtoGAfacelabelsubfrom(0), &
+            options%GGtoGAfacelabelsubto(0))
+        
+        ! Structure options
+        allocate(options%TP(0), options%TPind(0), options%exclude(0))
+
+        ! OMP and IMP
+        allocate(options%OMP_r(1:2), options%OMP_z(1:2), &
+            options%IMP_r(1:2), options%IMP_z(1:2))
+        options%OMP_r   = (/0, 0/)
+        options%OMP_z   = (/0, 0/)
+        options%IMP_r   = (/0, 0/)
+        options%IMP_z   = (/0, 0/)
+
+    end subroutine
+
+    ! Grid deformation options routines
+    subroutine SetDefaultGDOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GDoptionsUDT)       :: options        
+        
+        ! Input file
+        options%filepath    = './GOAToptions.dat'
+
+        ! General
+        options%runtype     = 'optimize'
+        options%gridtype    = 'plasma'
+        options%meth        = 'KKT'
+
+        ! Files to read other options
+        options%designoptionsfile           = './GOAToptions.dat'
+        options%gridoptionsfile             = './GOAToptions.dat'
+        options%magneticfieldoptionsfile    = './GOAToptions.dat'
+        options%numparamsoptionsfile        = './GOAToptions.dat'
+        options%environmentoptionsfile      = './GOAToptions.dat'
+        
     end subroutine
 
     ! Grid option routines
@@ -451,6 +646,7 @@ module goatmod_userinput
         character(:), allocatable       :: thisline, field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
+        integer(I8)                     :: tempint
 
         ! Initialize
         !===========
@@ -474,29 +670,163 @@ module goatmod_userinput
         
         ! Read options
         !=============
-        ! Driver
-        field = 'GOAToptions.driver'
-        call ExtractOptionValueCharacter(fid, field, options%driver)
+        ! General
+        field = 'GOAToptions.debug'
+        call ExtractOptionValueLogical0D(fid, field, options%debug)
+        field = 'GOAToptions.meth'
+        call ExtractOptionValueCharacter(fid, field, options%meth)
+        field = 'GOAToptions.readtype'
+        call ExtractOptionValueCharacter(fid, field, options%readtype)
 
-        ! Max number of iterations
-        field = 'GOAToptions.itmax'
-        call ExtractOptionValueInteger0D(fid, field, options%itmax)
+        ! Input filenames
+        field = 'GOAToptions.readfile'
+        call ExtractOptionValueCharacter(fid, field, options%readfile)
+        field = 'GOAToptions.strfile'
+        call ExtractOptionValueCharacter(fid, field, options%strfile)
+        field = 'GOAToptions.mfloaddir'
+        call ExtractOptionValueCharacter(fid, field, options%mfloaddir)
+        field = 'GOAToptions.mfloadfile'
+        call ExtractOptionValueCharacter(fid, field, options%mfloadfile)
+        field = 'GOAToptions.GDfilepath'
+        call ExtractOptionValueCharacter(fid, field, options%gdfilepath)
 
-        ! Mappings
+        ! Output options
+        field = 'GOAToptions.writedir'
+        call ExtractOptionValueCharacter(fid, field, options%writedir)
+        field = 'GOAToptions.write_final'
+        call ExtractOptionValueLogical0D(fid, field, options%write_final)
+        field = 'GOAToptions.write_traduitb2us'
+        call ExtractOptionValueLogical0D(fid, field, options%write_traduitb2us)
+        field = 'GOAToptions.write_b2agdat'
+        call ExtractOptionValueLogical0D(fid, field, options%write_b2agdat)
+        field = 'GOAToptions.write_Xpointdata'
+        call ExtractOptionValueLogical0D(fid, field, options%write_Xpointdata)
+        field = 'GOAToptions.write_OMPdata'
+        call ExtractOptionValueLogical0D(fid, field, options%write_OMPdata)
+
+        ! Case identification options
+        field = 'GOAToptions.vesselmode'
+        call ExtractOptionValueLogical0D(fid, field, options%vesselmode)
+        field = 'GOAToptions.slab'
+        call ExtractOptionValueLogical0D(fid, field, options%slab)
+        field = 'GOAToptions.artificial_slab'
+        call ExtractOptionValueLogical0D(fid, field, options%artificial_slab)
+
+        ! Face label mappings
+        field = 'GOAToptions.GDtoGA.facelabelmappingGG'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GDtoGAfacelabelmappingGG)
+        field = 'GOAToptions.GDtoGA.facelabelmappingGD'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GDtoGAfacelabelmappingGD) 
         field = 'GOAToptions.GDtoGA.facelabelsubfrom'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%facelabelsubfrom)
+            options%GDtoGAfacelabelsubfrom)
+        field = 'GOAToptions.GDtoGA.facelabelsubto'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GDtoGAfacelabelsubto)
 
-        ! Filepaths
+        field = 'GOAToptions.GGtoGA.facelabelmappingGG'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelmappingGG)
+        field = 'GOAToptions.GGtoGA.facelabelmappingGD'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelmappingGD)
+        field = 'GOAToptions.GGtoGA.facelabelsubfrom'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelsubfrom)
+        field = 'GOAToptions.GGtoGA.facelabelsubto'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelsubto)
+
+        ! OMP and IMP
+        field = 'GOAToptions.OMP_r'
+        call ExtractOptionValueReal1D(fid, field, &
+            options%OMP_r)
+        field = 'GOAToptions.OMP_z'
+        call ExtractOptionValueReal1D(fid, field, &
+            options%OMP_z)
+        field = 'GOAToptions.IMP_r'
+        call ExtractOptionValueReal1D(fid, field, &
+            options%IMP_r)
+        field = 'GOAToptions.IMP_z'
+        call ExtractOptionValueReal1D(fid, field, &
+            options%IMP_z)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+
+    end subroutine
+
+    ! Grid deformation options reader
+    subroutine ReadGDOptions(options)
+
+        ! Description
+        !============
+        ! This routine reads in the grid deformation options from a file of which 
+        ! the full path should be given in options%inputfilepath. The default
+        ! options should have already been set at this point, as this 
+        ! routine will only overwrite options that are present in the 
+        ! user-specified options file. If no options file is present, 
+        ! nothing is read in and a message will be shown. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GDoptionsUDT)             :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: thisline, field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+        integer(I8)                     :: tempint
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadGDOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadGDOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! General
+        field = 'gd.main.runtype'
+        call ExtractOptionValueCharacter(fid, field, options%runtype)
+        field = 'gd.main.gridtype'
+        call ExtractOptionValueCharacter(fid, field, options%gridtype)
+        field = 'gd.main.meth'
+        call ExtractOptionValueCharacter(fid, field, options%meth)
+
+        ! Files to read other options
         field = 'gd.main.designoptionsfile'
-        call ExtractOptionValueCharacter(fid, field, options%designoptionsfilepath)
+        call ExtractOptionValueCharacter(fid, field, options%designoptionsfile)
         field = 'gd.main.gridoptionsfile'
-        call ExtractOptionValueCharacter(fid, field, options%gridoptionsfilepath)
+        call ExtractOptionValueCharacter(fid, field, options%gridoptionsfile)
         field = 'gd.main.magneticfieldoptionsfile'
-        call ExtractOptionValueCharacter(fid, field, options%magneticfieldoptionsfilepath)
+        call ExtractOptionValueCharacter(fid, field, options%magneticfieldoptionsfile)
+        field = 'gd.main.numparamsoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%numparamsoptionsfile)
         field = 'gd.main.environmentoptionsfile'
-        call ExtractOptionValueCharacter(fid, field, options%environmentoptionsfilepath)
-
+        call ExtractOptionValueCharacter(fid, field, options%environmentoptionsfile)
+        
         ! Housekeeping
         !=============
         ! Close the file
