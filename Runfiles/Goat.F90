@@ -51,7 +51,7 @@ program Goat
 
     ! Initialize
     !===========
-    filepath = './Examples/ITER/GOAToptions.dat'
+    filepath = './GOAToptions.dat'
 
     ! Read the user input
     !====================
@@ -63,7 +63,7 @@ program Goat
 
     ! Run driver
     !===========
-    select case (goatoptions%driver)
+    select case (goatoptions%meth)
 
     case ('GD')
 
