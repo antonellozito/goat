@@ -31,6 +31,7 @@
 !       * scalar reals (kind: R8)
 !       * arrays of reals (one- or two-dimensional) (kind: R8)
 !       * arrays of characters (one-dimensional, case-sensitive)
+!       * scalar logicals
 !   Here, the (arrays of) integers and scalars can be delimited by 
 !   square brackets (not required). Values in arrays should be 
 !   separated by commas and semicolons. The commas are used to separate 
@@ -69,6 +70,14 @@
 ! Note 5: the definition of delimiters etc and which characters are 
 ! used for those is given in the general module mod_specialchars. If 
 ! desired, one can change the definition there.
+
+! Note 6: arrays may be specified using the array constructor defined
+! by the 'veccon' symbol in mod_specialchars. For example, if veccon is 
+! the colon, then '1:10' would specify an array going from 1 to 10. Note 
+! that it is assumed that the increment is always one! To repeat a 
+! number, one can use the 'repeatchar' symbol from mod_specialchars. If 
+! this character is '*', then '5*10' would repeat the number 5 ten 
+! times. 
 
 module mod_inputfileparser
 
@@ -769,6 +778,18 @@ module mod_inputfileparser
             return 
         end if
 
+        ! Is there a vector constructor?
+        call CompareStringWithCharacter(stringval, veccon, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
+        ! Is there a repeater character?
+        call CompareStringWithCharacter(stringval, repeatchar, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
         ! Remove any square brackets if present
         call CompareStringWithCharacter(stringval, matstart, templ)
         check = check .or. templ 
@@ -825,14 +846,17 @@ module mod_inputfileparser
 
         ! Auxiliary
         integer(I8)                             :: stringlength, &
-            readstatus, nval
+            readstatus, nval, ntempval, tval, tempi 
+        integer(I8), allocatable                :: index(:), &
+            tempintval(:)
         logical                                 :: islegal ! My lord, is that legal?
         character(:), allocatable               :: tempc 
 
-        logical, allocatable                    :: check(:), templ(:)
+        logical, allocatable                    :: check(:), templ(:), &
+            isveccon(:), isarraystart(:), isrepchar(:), isrepstart(:)
 
         ! Loop
-        integer(I8)                             :: i, k
+        integer(I8)                             :: i, j, k
         
 
         ! Initialize
@@ -841,12 +865,18 @@ module mod_inputfileparser
         stringlength = len(stringval) 
 
         ! Allocate
-        allocate(check(stringlength), templ(stringlength))
+        allocate(check(stringlength), templ(stringlength), &
+            isveccon(stringlength), index(stringlength), & 
+            isrepchar(stringlength))
         allocate(character(stringlength) :: tempc)
 
         ! Initialize
         islegal     = .false. 
         check(:)    = .false. 
+        isveccon(:) = .false. 
+        isrepchar(:)    = .false.
+        index(:)        = 0
+        
 
         ! Checks
         !=======
@@ -875,12 +905,41 @@ module mod_inputfileparser
         ! Eliminate row delimiters 
         check = check .or. templ
 
+        ! Check for any vector constructor symbols
+        call CompareStringWithCharacter(stringval, veccon, isveccon)
+        nval = nval + count(isveccon) ! +1 already accounted for 
+
+        ! Eliminate vector constructors
+        check = check .or. isveccon
+
+        ! Check for any repeater symbols
+        call CompareStringWithCharacter(stringval, repeatchar, isrepchar)
+        nval = nval + count(isrepchar) ! +1 already accounted for
+
+        ! Eliminate repeater symbols
+        check = check .or. isrepchar
+
         ! Trim the string
         check = .not. check 
+        k = 0
         do i = 1, stringlength 
             if (check(i)) then 
                 ! Add
                 tempc(i:i) = stringval(i:i)
+
+                ! Checks for index
+                if (i > 1) then 
+                    ! Check if previous character was also a number. 
+                    ! Otherwise, increase k
+                    if (.not. check(i-1)) then 
+                        k = k + 1
+                    end if
+                else 
+                    ! First index, don't check previous
+                    k = k + 1
+                end if
+                index(i) = k
+
             else
                 ! Replace by whitespace
                 tempc(i:i) = ' ' 
@@ -897,19 +956,100 @@ module mod_inputfileparser
         ! Read
         !=====
         ! Allocate
-        allocate(intval(nval))
+        allocate(tempintval(nval))
 
         ! Read (only if nonempty)
         if (nval == 0) then 
             islegal = .true.
             return 
         end if
-        read (tempc, *, iostat=readstatus) intval
+        read (tempc, *, iostat=readstatus) tempintval
 
         ! Check if read succeeded
-        if (readstatus == 0) then 
-            islegal = .true. ! I'll make it legal
+        if (readstatus .ne. 0) then 
+            return 
         end if
+
+        ! Check if we need to execute vector constructors or repeaters
+        if (any(isveccon, 1) .or. any(isrepchar, 1)) then 
+            ! First, we extract which number are start/end of array
+            allocate(isarraystart(nval), isrepstart(nval))
+            
+            ! Initialize
+            isarraystart(:) = .false. 
+            isrepstart(:) = .false.
+
+            ! Loop over isveccon to determine which one(s) are start
+            do i = 2, stringlength-1 ! skip first and last entry - would/should be illegal
+                if (isveccon(i)) then 
+                    ! Check previous and next character (no whitespace allowed!)
+                    if ((index(i-1) == 0) .or. (index(i+1) ==0)) then
+                        ! Not allowed, return
+                        return 
+                    end if 
+
+                    ! Set previous to true
+                    isarraystart(index(i-1)) = .true.
+                elseif (isrepchar(i)) then 
+                    ! Check previous and next character (no whitespace allowed!)
+                    if ((index(i-1) == 0) .or. (index(i+1) ==0)) then
+                        ! Not allowed, return
+                        return 
+                    end if 
+
+                    ! Set previous to true
+                    isrepstart(index(i-1)) = .true.
+                end if
+
+            end do
+
+            ! Determine the actual number of values for intval
+            ntempval = nval
+            nval = 0
+            do i = 1, ntempval 
+                if (isarraystart(i)) then 
+                    ! Compute number of elements and add
+                    nval = nval + tempintval(i+1)-tempintval(i)+1
+                elseif (isrepstart(i)) then 
+                    ! Compute number of elements and add
+                    nval = nval + tempintval(i+1)
+                elseif (isrepstart(i-1) .or. isarraystart(i-1)) then 
+                    ! Skip addition, already added before
+                else
+                    ! Normal entry, +1
+                    nval = nval + 1
+                end if
+            end do 
+
+            ! Construct the final value vector
+            k = 0
+            allocate(intval(nval))
+            do i = 1, ntempval 
+                if (isarraystart(i)) then 
+                    ! Compute number of elements and add
+                    tempi = tempintval(i+1)-tempintval(i)+1
+                    intval(k+1:k+tempi) = [(j, j = tempintval(i), tempintval(i+1))]
+                    k = k + tempi
+                elseif (isrepstart(i)) then 
+                    ! Compute number of elements and add
+                    tempi = tempintval(i+1)
+                    intval(k+1:k+tempi) = tempintval(i)
+                    k = k + tempi
+                elseif (isrepstart(i-1) .or. isarraystart(i-1)) then 
+                    ! Skip addition, already added before
+                else
+                    ! Normal entry
+                    intval(k+1) = tempintval(i)
+                    k = k + 1
+                end if
+            end do 
+        else 
+            ! Set intval equal to tempintval
+            intval = tempintval 
+        end if
+
+        ! If we managed to get here, reading etc was successful
+        islegal = .true.
 
     end subroutine
 
@@ -926,6 +1066,8 @@ module mod_inputfileparser
         !   integer 
         ! - The amount of row and column separators are counted as this 
         !   yields the number of rows and columns
+        ! - Repeater characters and vector constructors are not yet 
+        ! supported
         !
         ! The logical islegal that is returned indicates whether a 
         ! correct value could be extracted (false if this is not the 
@@ -972,12 +1114,23 @@ module mod_inputfileparser
             return 
         end if
 
+        ! Is there a vector constructor?
+        call CompareStringWithCharacter(stringval, veccon, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
+        ! Is there a repeater character?
+        call CompareStringWithCharacter(stringval, repeatchar, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
         ! Remove any square brackets if present
         call CompareStringWithCharacter(stringval, matstart, templ)
         check = check .or. templ 
         call CompareStringWithCharacter(stringval, matend, templ)
         check = check .or. templ 
-        
 
         ! Count the amount of row delimiters to obtain number of rows
         call CompareStringWithCharacter(stringval, rowdel, templ)
@@ -1109,6 +1262,18 @@ module mod_inputfileparser
             return 
         end if
 
+        ! Is there a vector constructor?
+        call CompareStringWithCharacter(stringval, veccon, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
+        ! Is there a repeater character?
+        call CompareStringWithCharacter(stringval, repeatchar, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
         ! Remove any square brackets if present
         call CompareStringWithCharacter(stringval, matstart, templ)
         check = check .or. templ 
@@ -1152,6 +1317,8 @@ module mod_inputfileparser
         !   integer 
         ! - The amount of comma's are counted as this indicates the 
         !   number of elements of the vector.
+        ! - Repeater characters and vector constructors are not yet 
+        ! supported
         !
         ! The logical islegal that is returned indicates whether a 
         ! correct value could be extracted (false if this is not the 
@@ -1192,6 +1359,18 @@ module mod_inputfileparser
         !=======
         ! Is there a column separator? 
         call CompareStringWithCharacter(stringval, rowdel, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
+        ! Is there a vector constructor?
+        call CompareStringWithCharacter(stringval, veccon, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
+        ! Is there a repeater character?
+        call CompareStringWithCharacter(stringval, repeatchar, templ) 
         if (any(templ)) then 
             return 
         end if
@@ -1258,6 +1437,8 @@ module mod_inputfileparser
         !   present
         ! - The amount of row and column separators are counted as this 
         !   yields the number of rows and columns
+        ! - Repeater characters and vector constructors are not yet 
+        ! supported
         !
         ! The logical islegal that is returned indicates whether a 
         ! correct value could be extracted (false if this is not the 
@@ -1298,6 +1479,18 @@ module mod_inputfileparser
 
         ! Checks
         !=======
+        ! Is there a vector constructor?
+        call CompareStringWithCharacter(stringval, veccon, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
+        ! Is there a repeater character?
+        call CompareStringWithCharacter(stringval, repeatchar, templ) 
+        if (any(templ)) then 
+            return 
+        end if
+
         ! Remove any square brackets if present
         call CompareStringWithCharacter(stringval, matstart, templ)
         check = check .or. templ 
