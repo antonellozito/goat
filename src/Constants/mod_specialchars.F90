@@ -25,5 +25,7 @@ module mod_specialchars
     character, parameter   :: decpoint     = '.'
     character, parameter   :: rowsep       = ','
     character, parameter   :: rowdel       = ';'
+    character, parameter   :: veccon       = ':'
+    character, parameter   :: repeatchar   = '*'
 
 end module
