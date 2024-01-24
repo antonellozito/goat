@@ -1,4 +1,4 @@
-VERSION 1.00.00
+VERSION 1.00.00E-01
 #=========================================================================#
 #                                                                         #
 #                       GENERAL GOAT OPTIONS                              #
@@ -8,14 +8,13 @@ VERSION 1.00.00
 'GOAToptions.debug' '0'
 'GOAToptions.readfile'   'traduit.out.b2us'
 'GOAToptions.strfile'    'structure.dat'
-'GOAToptions.mfloaddir'  '.'
-'GOAToptions.mfloadfile' 'rzpsi.dat'
+'GOAToptions.magneticfieldfilepath' './rzpsi.dat'
 'GOAToptions.writedir'    'traduit.out.b2us_test'
 'GOAToptions.itmax' '5'
 'GOAToptions.vesselmode' '0'
 'GOAToptions.write_final' '1'
 'GOAToptions.meth'       'GD'
-'GOAToptions.readtype'   'traduitb2us'
+'GOAToptions.gridreadtype'   'traduitb2us'
 
 # Face label mappings between GG (grid generator) and GD (grid deformation)
 # See SetGOAToptions.m or InterfaceGAtoGD.m for a description of the GD 
