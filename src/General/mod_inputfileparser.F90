@@ -1571,6 +1571,13 @@ module mod_inputfileparser
     end subroutine
 
     ! Auxiliary routines
+    
+
+    !------------------------------------------------------------------!
+    !                       Basic string handling                      !
+    !------------------------------------------------------------------!
+
+    ! Compare string to character
     subroutine CompareStringWithCharacter(s, c, l) 
 
         ! Description
@@ -1607,6 +1614,296 @@ module mod_inputfileparser
                 l(i) = .true. 
             end if
         end do
+
+    end subroutine
+
+    ! Check which characters are numerical
+    subroutine IsCharacterNumerical(s, l)
+
+        ! Description
+        !============
+        ! This routine compares the characters  of a string s to 
+        ! determine which characters are numerical. Under numerical 
+        ! characters, we understand the numbers 0 to 9. Note that dots
+        ! are not included here! For full generalization, we do not hard
+        ! code the numerical characters here but assume they are defined 
+        ! in mod_specialchars as 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(:), allocatable, intent(in)   :: s 
+        logical, allocatable, intent(inout)     :: l(:)
+
+        ! Loop
+        integer(I8)                             :: i, j, ns
+
+        ! Initialize
+        !===========
+        ! Compute
+        ns = len(s)
+        
+        ! Allocate
+        if (allocated(l)) then  
+            deallocate(l) 
+            allocate(l(ns))
+        end if
+
+        ! Initialize
+        l(:) = .false.
+
+        ! Compare
+        !========
+        do i = 1, ns
+            do j = 1, len(numchar)
+                if (s(i:i) == numchar(j:j)) then 
+                    l(i) = .true. 
+                    exit ! no need to iterate further
+                end if
+            end do
+        end do
+
+    end subroutine
+
+    ! Read integers from general string 
+    subroutine ReadIntegersFromString(s, val, n)
+
+        ! Description
+        !============
+        ! This routine reads integers (in I8 format) from a string into 
+        ! an array of rank 1. n returns the number of elements in the 
+        ! array, which goes from 1:n (if no integers found, it is empty)
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(:), allocatable, intent(in)   :: s 
+        integer(I8), allocatable, intent(inout) :: val(:)
+
+        ! Auxiliary
+        logical, allocatable                    :: l(:)
+        character(:), allocatable               :: temps
+        integer(I8)                             :: ns 
+
+        ! Loop
+        integer(I8)                             :: i, n
+
+        ! Initialize
+        !===========
+        ! Set ns
+        ns = len(s)
+        n = 0
+
+        ! Deallocate if allocated
+        if (allocated(val)) then  
+            deallocate(val) 
+        end if
+
+        ! Hedge for empty string, return if that's the case
+        if (ns == 0) then 
+            allocate(val(ns))
+            return 
+        end if
+
+        ! Allocate
+        allocate(l(ns))
+        allocate(character(len(s)) :: temps)
+        temps = s 
+
+        ! Initialize
+        l(:) = .false.
+
+        ! Extract
+        !========
+        ! Check which characters are numerical
+        call IsCharacterNumerical(s, l)
+
+        ! Loop
+        n = 0
+        if (l(1)) then
+            ! Increment integer counter 
+            n = n + 1
+
+        end if 
+        do i = 2, ns
+            ! Check if current is numerical
+            if (l(i)) then 
+                ! Check if previous was not numerical - then increase 
+                ! counter
+                if (.not. l(i-1)) then 
+                    n = n + 1
+                end if
+            end if
+        end do
+
+        ! Set all non-numerical characters to whitespace
+        do i = 1, ns 
+            if (.not. l(i)) then 
+            temps(i:i) = ' '
+            end if
+        end do
+
+        ! Allocate and read
+        allocate(val(n))
+        read(temps, *) val
+
+    end subroutine
+
+    ! Read real values from general string 
+    subroutine ReadRealsFromString(s, val, n)
+
+        ! Description
+        !============
+        ! This routine reads reals (in R8 format) from a string into 
+        ! an array of rank 1. n returns the number of elements in the 
+        ! array, which goes from 1:n (if no integers found, it is empty)
+        ! Reals can have a decimal point or be in scientific format 
+        ! (see definition of expchar for supported exponent notation)
+
+        ! To deal with exponents in strings, we first read in all 
+        ! numbers regardless of 
+        
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(:), allocatable, intent(in)   :: s 
+        real(R8), allocatable, intent(inout)    :: val(:)
+
+        ! Auxiliary
+        logical, allocatable                    :: isnum(:), l(:), &
+            isdecchar(:), isexpchar(:), templ(:), isexp(:)
+        character(:), allocatable               :: temps
+        integer(I8)                             :: ns 
+
+        integer(I8), allocatable                :: indices(:)
+        real(R8), allocatable                   :: tempval(:)
+
+        ! Loop
+        integer(I8)                             :: i, n, tempn, k
+
+        ! Initialize
+        !===========
+        ! Set ns
+        ns = len(s)
+        n = 0
+
+        ! Deallocate if allocated
+        if (allocated(val)) then  
+            deallocate(val) 
+        end if
+
+        ! Hedge for empty string, return if that's the case
+        if (ns == 0) then 
+            allocate(val(ns))
+            return 
+        end if
+
+        ! Allocate
+        allocate(l(ns), isnum(ns), isdecchar(ns), templ(ns), &
+            isexpchar(ns), indices(ns))
+        allocate(character(len(s)) :: temps)
+        temps = s 
+
+        ! Initialize
+        l(:)            = .false.
+        isexpchar(:)    = .false. 
+        isdecchar(:)    = .false. 
+        templ(:)        = .false. 
+        indices(:)      = 0
+
+        ! Extract
+        !========
+        ! Check which characters are numerical
+        call IsCharacterNumerical(s, isnum)
+
+        ! Check which characters are decimal points
+        call CompareStringWithCharacter(s, decpoint, isdecchar)
+
+        ! Check which characters are exponent specifiers
+        do i = 1, len(expchar)
+            call CompareStringWithCharacter(s, expchar(i:i), templ)
+            isexpchar = isexpchar .or. templ 
+        end do 
+
+        ! Replace decimal points with actual point and set other non
+        ! numerical characters to whitespace
+        l = isdecchar .or. isnum .or. isexpchar 
+        do i = 1, ns
+            if (isdecchar(i)) then 
+                temps(i:i) = '.'
+            elseif (.not. isnum(i)) then 
+                temps(i:i) = ' '
+            end if  
+        end do
+
+        ! Loop
+        n = 0
+        if (l(1)) then
+            ! Increment integer counter 
+            n = n + 1
+
+            ! Set index
+            indices(1) = n 
+
+        end if 
+        do i = 2, ns
+            ! Check if current character is numerical
+            if (l(i)) then 
+                ! Check if previous was not numerical - then increase 
+                ! counter
+                if (.not. (isnum(i-1) .or. isdecchar(i-1))) then 
+                    n = n + 1
+                end if
+
+                ! Set index
+                indices(i) = n
+            end if
+        end do
+
+        ! Determine which entries are exponents
+        allocate(isexp(n))
+        isexp(:) = .false. 
+        do i = 1, ns
+            if (isexpchar(i)) then 
+                isexp(indices(i+1)) = .true.
+            end if
+        end do
+
+        ! Sanity check: first number can't be exponent
+        if (isexp(1)) then 
+            call gdErrorHandler('ReadRealsFromString: first character is exponent specifier, not supported')
+        end if
+
+        ! Allocate and read (exponents are read as separate numbers)
+        tempn = n
+        allocate(tempval(tempn))
+        read(temps, *) tempval
+
+        ! Account for exponents to get actual numbers
+        n = count(.not. isexp)
+        allocate(val(n))
+        k = 0
+        do i = 1, tempn 
+            ! Check value type
+            if (isexp(i)) then 
+                ! Adjust previous value with exponent
+                val(k-1) = val(k-1)*10**(tempval(i))
+            else
+                ! Increment k
+                k = k + 1
+
+                ! Just assign value
+                val(k) = tempval(i)
+            end if
+        end do
+
+        ! Housekeeping
+        !=============
+        deallocate(isnum, l, isdecchar, isexpchar, templ, isexp, &
+            temps, indices, tempval)
+        
+        
 
     end subroutine
 
