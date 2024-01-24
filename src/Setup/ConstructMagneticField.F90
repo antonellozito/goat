@@ -3,7 +3,9 @@ subroutine ConstructMagneticField(magneticField, mfoptions)
     ! Description
     !============
     ! Construct a representation of the magnetic field based on given
-    ! magnetic field flux data (or other data). 
+    ! magnetic field flux data (or other data). It is assumed that the 
+    ! basic magnetic field data is already available in the 
+    ! magneticField structure
 
     ! Notes
     !======
@@ -36,10 +38,10 @@ subroutine ConstructMagneticField(magneticField, mfoptions)
     ! Main program
     !=============
     ! Open the file containing the grid data
-    call cfopen(filespecifier, mfoptions%filepath,'old','un*formatted')
+    !call cfopen(filespecifier, mfoptions%filepath,'old','un*formatted')
 
     ! Read 
-    call ReadMagneticField(filespecifier, magneticField, mfoptions)
+    !call ReadMagneticField(filespecifier, magneticField, mfoptions)
 
     ! Construct interpolant representation
     call ConstructBicubicSplineInterpolant(magneticField%Psi, &

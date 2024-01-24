@@ -1,4 +1,4 @@
-subroutine ReadMagneticField(filespecifier, magneticField, mfoptions)
+subroutine ReadMagneticField(magneticField, mfoptions, filepath)
 
     ! Description
     !============
@@ -12,9 +12,9 @@ subroutine ReadMagneticField(filespecifier, magneticField, mfoptions)
     ! Initialize
     !===========
     ! Declare modules
-    use gdmod_types 
-    use gdmod_userinput
-
+    use goatmod_types 
+    use goatmod_userinput
+    
     ! The usual
     implicit none 
 
@@ -24,21 +24,33 @@ subroutine ReadMagneticField(filespecifier, magneticField, mfoptions)
     integer                         :: filespecifier
     type(MagneticFieldOptionsUDT)   :: mfoptions 
     type(MagneticFieldUDT)          :: magneticField
+    character(*)                    :: filepath
 
     ! Loop variables
 
     ! Auxiliary variables 
 
+    ! Data
+    data filespecifier /60/
 
     ! Main program
     !=============
+    ! Open the file
+    print *, 'reading magnetic field data from file: ' // filepath
+    open(unit = filespecifier, file = filepath)
+
     ! Check how to read the file
     select case(mfoptions%readmeth)
 
     case ('readrzpsi','default')
 
-        ! Read the rzpsi file using CARRE subroutines - wrapper here
+        ! Read in a classic rzpsi file 
         call Readrzpsi(filespecifier, magneticField)
+
+    case ('readequ')
+
+        ! Read the equ file using CARRE subroutines - wrapper here
+        call Readequ(filespecifier, magneticField)
 
     case default
 
@@ -46,6 +58,10 @@ subroutine ReadMagneticField(filespecifier, magneticField, mfoptions)
         call gdErrorHandler('ReadMagneticField: unknown reading method')
 
     end select
+
+    ! Housekeeping
+    !=============
+    close(filespecifier)
 
 
 end subroutine

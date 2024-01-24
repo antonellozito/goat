@@ -1,4 +1,4 @@
-subroutine ReadTraduitUS(filespec,grid)
+subroutine ReadTraduitUS(grid, filepath)
 
     ! Description
     !============
@@ -19,10 +19,11 @@ subroutine ReadTraduitUS(filespec,grid)
     ! Main variables
     type(GridUDT)               :: grid
 
-    integer, intent(in)         :: filespec ! file specifier
+    integer                     :: filespec
     integer(I8)                 :: idum(0:9), idum2(1)    
     character(10)               :: b2fgmtryversion
     integer(I8)                 :: nc, nf, nv, nfsFc, nftCv, nftFc
+    character(*)               :: filepath
 
     logical                     :: reachedeof
 
@@ -37,7 +38,6 @@ subroutine ReadTraduitUS(filespec,grid)
     real(R8), allocatable       :: vdummyr(:,:) ! dummy array
     real(R8), allocatable       :: fsdummyr(:) ! dummy array
     real(R8), allocatable       :: facelistdummy(:) ! dummy array
-    real(R8), allocatable       :: n2dummy(:) ! dummy array
     integer(I8), allocatable    :: ftCvdum(:), ftFcdum(:), fsFcdum(:)
 
     real(R8), allocatable       :: vdata(:, :), cdata(:, :), &
@@ -49,9 +49,16 @@ subroutine ReadTraduitUS(filespec,grid)
 
     ! Loop
     integer(I8)                 :: i
+
+    ! Data
+    data filespec /60/
     
     ! Read grid dimensions & allocate
     !================================
+    ! Open the file
+    print *, 'reading grid in traduit format from file: ' // filepath
+    open(unit = filespec, file = filepath)
+
     ! First, read the header with the version
     call cfverr(filespec,b2fgmtryversion)
 

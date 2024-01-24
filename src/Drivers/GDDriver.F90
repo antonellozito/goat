@@ -22,6 +22,9 @@ subroutine GDDriver(goatoptions)
     type(GridUDT)               :: grid 
     type(MagneticFieldUDT)      :: magneticField 
     type(EnvironmentUDT)        :: environment
+
+    ! Other options
+    type(GDoptionsUDT)          :: gdoptions
     
     ! Auxiliary
 
@@ -33,7 +36,7 @@ subroutine GDDriver(goatoptions)
     ! Run deformation
     !================
     call RunGridOptimization(grid, magneticField, environment, &
-        goatoptions)
+        gdoptions)
 
 
     

@@ -48,7 +48,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
     integer(I8)                 :: itf, ntf, ngv, nbnd, nfpb, nseg, &
         nlabels 
     integer(I8), allocatable    :: tf(:), tfv(:,:), indgv(:), vdiff(:)
-    integer(I8), allocatable    :: gglabels(:), gdlabels(:), &
+    integer(I8), allocatable    :: &
         sortindex(:), temparray(:,:), tempfaces(:), segstart(:)
 
     logical, allocatable        :: isghostvert(:), mask(:), &
@@ -81,6 +81,10 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
     ! Count number of ghost vertices
     ngv = count(isghostvert .eqv. .true.) ! total number of ghost vertices
+
+    ! Associate
+    associate(gglabels => gridoptions%facelabelmappingGG, &
+        gdlabels => gridoptions%facelabelmappingGD)
 
     ! Check method
     !=============
@@ -218,8 +222,9 @@ subroutine ExtractGridData(grid, meth, gridoptions)
         ! Extract boundaries
         !===================
         ! Get the supported mapping between boundary labels 
-        gglabels = gridoptions%facelabelmappingGG
-        gdlabels = gridoptions%facelabelmappingGD 
+        
+        !gglabels = gridoptions%facelabelmappingGG
+        !gdlabels = gridoptions%facelabelmappingGD 
 
         ! Substitute labels
         do i = 1, size(gridoptions%facelabelsubfrom)
@@ -354,6 +359,8 @@ subroutine ExtractGridData(grid, meth, gridoptions)
         ! Deallocate
         deallocate(isghostvert)
         deallocate(mask)
+
+        
 
     case ('traduit')
 
@@ -605,5 +612,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
         call gdErrorHandler('ExtractGridData: unknown method')
 
     end select 
+
+    end associate
 
 end subroutine
