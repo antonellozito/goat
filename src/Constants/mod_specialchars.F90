@@ -18,14 +18,16 @@ module mod_specialchars
     save
     public 
 
-    character, parameter   :: commentchar  = '#'
-    character, parameter   :: delimiter    = "'"
-    character, parameter   :: matstart     = '['
-    character, parameter   :: matend       = ']'
-    character, parameter   :: decpoint     = '.'
-    character, parameter   :: rowsep       = ','
-    character, parameter   :: rowdel       = ';'
-    character, parameter   :: veccon       = ':'
-    character, parameter   :: repeatchar   = '*'
+    character, parameter    :: commentchar  = '#'
+    character, parameter    :: delimiter    = "'"
+    character, parameter    :: matstart     = '['
+    character, parameter    :: matend       = ']'
+    character, parameter    :: decpoint     = '.'
+    character, parameter    :: rowsep       = ','
+    character, parameter    :: rowdel       = ';'
+    character, parameter    :: veccon       = ':'
+    character, parameter    :: repeatchar   = '*'
+    character(*), parameter :: numchar      = '0123456789+-'
+    character(*), parameter :: expchar      = 'eE'
 
 end module
