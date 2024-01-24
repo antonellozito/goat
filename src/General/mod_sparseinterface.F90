@@ -80,7 +80,7 @@ module mod_sparseinterface
         procedure :: MatrixVectorProduct
 
         ! Transposition
-        procedure :: Transpose
+        procedure :: Transpose      => Transp
 
         ! Housekeeping procedures
         procedure :: Allocate       => AllocateMySparse
@@ -566,7 +566,7 @@ module mod_sparseinterface
     end subroutine
 
     ! Transposition
-    function Transpose(a) result(b)
+    function Transp(a) result(b)
 
         ! Description
         !============

@@ -485,12 +485,6 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(OptimizationSolverUDT)                :: solver    
-    
-        ! Loop variables
-        integer(I8)                 :: itopt, maxit
-        
-        ! Auxiliary variables 
-        real(R8)                    :: rxf, rxfdesign, rxfdec, rxfmin 
 
         ! Data
 
@@ -551,10 +545,7 @@ module optmod_optimizationengine
 
         ! Solver & updates
         real(R8), allocatable       :: fullmat(:, :)
-        integer, allocatable        :: ipiv(:)
-        integer                     :: info
-        integer                     :: matdim 
-        double precision, allocatable :: fullmatrix(:,:), dx(:)
+        double precision, allocatable :: dx(:)
 
         ! Diagnostics
         logical                     :: checkgradients, checkhessians 
@@ -992,6 +983,12 @@ module optmod_optimizationengine
             k = k + gradH%nval 
 
         end if
+
+        ! A simple workaround to avoid unused dummy argument warnings 
+        ! during compilation
+        if (.false.) then 
+            print *, solver%inputfilepath
+        end if
         
     end subroutine
 
@@ -1276,7 +1273,7 @@ module optmod_optimizationengine
 
         ! Auxiliary
         integer(I8)                     :: nphi, neq, nineq
-        real(R8), allocatable           :: phiref(:), phi(:)
+        real(R8), allocatable           :: phiref(:)
 
         ! Cost function 
         real(R8)                    :: J 
@@ -1297,7 +1294,6 @@ module optmod_optimizationengine
         logical, allocatable        :: A(:), I(:) 
 
         ! Lagrangian 
-        real(R8)                    :: L 
         real(R8), allocatable       :: gradL(:)
         type(MySparseUDT)           :: hessL 
 
@@ -1592,7 +1588,7 @@ module optmod_optimizationengine
 
         ! Auxiliary
         integer(I8)                     :: nphi, neq, nineq
-        real(R8), allocatable           :: phiref(:), phi(:)
+        real(R8), allocatable           :: phiref(:)
 
         ! Equality constraints 
         real(R8), allocatable       :: G(:), lambda(:)

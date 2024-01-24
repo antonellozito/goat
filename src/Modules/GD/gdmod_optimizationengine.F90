@@ -412,6 +412,8 @@ module gdmod_optimizationengine
         end if
         if (problem%designoptions%writedata == 1) then 
             ! Call grid vertex writing routine
+            allocate(character(len('vertices_iterate')) :: vertpath)
+            allocate(character(len('cells_iterate')) :: cellpath)
             vertpath = 'vertices_iterate'
             cellpath = 'cells_iterate'
             call WriteGridVertices(problem%grid, vertpath) 

@@ -76,13 +76,18 @@ LFLAGS = $(LFLAGS_DEBUG)
 MAIN_RUNFILE = MainRunFileGridDeformation.F90
 
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
-GENERAL_FILES = $(wildcard src/General/*.F90)
+GENERAL_FILES = src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 $(wildcard src/General/*.F90)
 
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
 DRIVER_FILES = $(wildcard src/Drivers/*.F90)
 
 ## MODULE_FILES			: Module filenames (.F90, .F) - sequence matters
-MODULE_FILES =  $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F)
+MODULE_FILES =  $(wildcard src/Modules/Goat/*.F90)\
+    $(wildcard src/Modules/Auxiliary/*.F90)\
+    src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
+    src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
+    $(wildcard src/Modules/GD/*.F90) \
+    $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F)
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
 AUXILIARY_FILES = $(wildcard src/Auxiliary/*.F90)

@@ -1045,9 +1045,6 @@ module mod_polygon
         ! Arguments
         class(PolygonUDT)               :: polygon
 
-        ! Auxiliary
-        integer(I8)                     :: sv(1:2), ev(1:2), nv 
-
         ! Checks
         !=======
         ! Simply check start and end vertex
@@ -1087,9 +1084,6 @@ module mod_polygon
             temptn, tpx, tpy
 
         logical, allocatable                :: isin(:)
-
-        ! Loop
-        integer(I8)                         :: k 
 
         ! Initialize
         !===========

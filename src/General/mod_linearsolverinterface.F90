@@ -35,7 +35,7 @@ module mod_linearsolverinterface
     integer(c_int) :: umfpack_a = 0
     integer(c_int) :: umfpack_control = 20
     integer(c_int) :: umfpack_info = 90
-    integer(c_int) :: umfpack_prl = 1 ! printing level
+    ! integer(c_int) :: umfpack_prl = 1 ! printing level
 
     !==================================================================!
     !                                                                  !

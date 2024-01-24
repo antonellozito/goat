@@ -87,6 +87,10 @@ module mod_inputfileparser
     use mod_specialchars 
     use mod_readwrite 
 
+    implicit none 
+    save
+    public 
+
     contains 
 
     !------------------------------------------------------------------!
@@ -743,7 +747,7 @@ module mod_inputfileparser
         logical, allocatable                    :: check(:), templ(:)
 
         ! Loop
-        integer(I8)                             :: i, k
+        integer(I8)                             :: i
 
         ! Initialize
         !===========
@@ -846,7 +850,7 @@ module mod_inputfileparser
 
         ! Auxiliary
         integer(I8)                             :: stringlength, &
-            readstatus, nval, ntempval, tval, tempi 
+            readstatus, nval, ntempval, tempi 
         integer(I8), allocatable                :: index(:), &
             tempintval(:)
         logical                                 :: islegal ! My lord, is that legal?
@@ -1081,7 +1085,7 @@ module mod_inputfileparser
 
         ! Auxiliary
         integer(I8)                             :: stringlength, &
-            readstatus, nval, nrow, ncol, remdivcheck
+            readstatus, nrow, ncol, remdivcheck
         logical                                 :: islegal ! My lord, is that legal?
         character(:), allocatable               :: tempc 
 
@@ -1233,7 +1237,7 @@ module mod_inputfileparser
         logical, allocatable                    :: check(:), templ(:)
 
         ! Loop
-        integer(I8)                             :: i, k
+        integer(I8)                             :: i
 
         ! Initialize
         !===========
@@ -1339,7 +1343,7 @@ module mod_inputfileparser
         logical, allocatable                    :: check(:), templ(:)
 
         ! Loop
-        integer(I8)                             :: i, k
+        integer(I8)                             :: i
         
 
         ! Initialize
@@ -1452,7 +1456,7 @@ module mod_inputfileparser
 
         ! Auxiliary
         integer(I8)                             :: stringlength, &
-            readstatus, nval, nrow, ncol, remdivcheck
+            readstatus, nrow, ncol, remdivcheck
         logical                                 :: islegal ! My lord, is that legal?
         character(:), allocatable               :: tempc 
 

@@ -81,7 +81,7 @@ c      read(lun,8000) (zgr(i),i=1,nz)
       print *,'reading pfm...'
 c      read(lun,8000) ((pfm(i,j),i=1,nr),j=1,nz)
       read(lun,*) ((pfm(i,j),i=1,nr),j=1,nz)
- 8000 format(5(3x,e14.8))
+c     8000 format(5(3x,e14.8))
       iret=0
       return
 c-----------------------------------------------------

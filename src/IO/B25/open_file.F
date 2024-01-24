@@ -43,7 +43,7 @@ c
           write(*,'(a)') 'open_file: no SOLPSTOP set '
         else
           write(*,'(a,a)') 'open_file: SOLPSTOP = : ',
-     1	   solpstop(1:lnblnk(solpstop))
+     1   solpstop(1:lnblnk(solpstop))
         endif
         first=.false.
       endif

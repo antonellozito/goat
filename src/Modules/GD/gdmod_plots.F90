@@ -765,7 +765,6 @@ module gdmod_plots
 
         ! Declare variables
         type(GridUDT)                           :: grid
-        integer                                 :: i, fu
         integer(I8), allocatable                :: IDs(:)
         integer(I8)                             :: k
         character(:), allocatable               :: filepath
@@ -774,6 +773,7 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
+        allocate(character(len('Plotdata/' // filename)) :: filepath)
         filepath = 'Plotdata/' // filename
 
         ! Unpack
@@ -872,6 +872,7 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
+        allocate(character(len('Plotdata/con_ff_vertices')) :: filepath)
         filepath = 'Plotdata/con_ff_vertices'
 
         ! Unpack
@@ -907,6 +908,7 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
+        allocate(character(len('Plotdata/con_bnd_vertices')) :: filepath)
         filepath = 'Plotdata/con_bnd_vertices' 
 
         ! Unpack
@@ -942,6 +944,7 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
+        allocate(character(len('Plotdata/con_xp_vertices')) :: filepath)
         filepath = 'Plotdata/con_xp_vertices' 
 
         ! Unpack
@@ -977,6 +980,7 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
+        allocate(character(len('Plotdata/con_el_vertices')) :: filepath)
         filepath = 'Plotdata/con_el_vertices' 
 
         ! Unpack
@@ -1009,11 +1013,12 @@ module gdmod_plots
         integer(I8), allocatable, intent(in)    :: IDs(:, :) 
         real(R8), allocatable                   :: x(:, :), y(:, :)
         integer(I8)                             :: nIDs
-        character(:), allocatable               :: filepath
+        character(:), allocatable               :: filepath 
 
         ! Initialize
         !===========
-        ! Set the correct directories
+        ! Set path
+        allocate(character(len('Plotdata/con_orth_vertices')) :: filepath)
         filepath = 'Plotdata/con_orth_vertices' 
 
         ! Unpack

@@ -645,7 +645,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -713,7 +713,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -763,7 +763,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -813,7 +813,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -867,7 +867,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -921,7 +921,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -1010,7 +1010,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -1061,7 +1061,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -1120,7 +1120,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -1179,7 +1179,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -1240,7 +1240,7 @@ module gdmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 

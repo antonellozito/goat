@@ -1306,8 +1306,7 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)     :: designvariables 
 
         ! Loop
-        integer(I8)                     :: ic, ivg, ivh, k
-        integer(I8), allocatable        :: conindex(:)
+        integer(I8)                     :: ic, ivg, ivh
 
         ! Auxiliary
 
@@ -2196,7 +2195,6 @@ module gdmod_constraints
         ! Auxiliary variables
         real(R8), allocatable               :: dpsfdx(:), dpsfdy(:), &
             valxx(:), valxy(:), valyy(:)
-        integer(I8)                         :: ntv
         
         ! Initialize
         !===========
@@ -2578,9 +2576,7 @@ module gdmod_constraints
         integer(I8), allocatable            :: valindex(:), conindex(:)
 
         ! Auxiliary variables
-        real(R8), allocatable               :: dpsfdx(:), dpsfdy(:), &
-            valxx(:), valxy(:), valyy(:)
-        integer(I8)                         :: ntv
+        real(R8), allocatable               ::  valxx(:), valxy(:), valyy(:)
         
         ! Initialize
         !===========
@@ -3112,13 +3108,12 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)         :: designvariables 
 
         ! Loop variables
-        integer(I8)                         :: i, ic, ivg, ivh, k
+        integer(I8)                         :: ic, ivg, ivh, k
         integer(I8), allocatable            :: valindex(:), conindex(:)
 
         ! Auxiliary variables
         real(R8), allocatable               :: valxx(:), valxy(:), &
             valyy(:), xv1(:), xv2(:), yv1(:), yv2(:), dist(:)
-        integer(I8)                         :: ntv
         
         ! Initialize
         !===========
@@ -3485,7 +3480,7 @@ module gdmod_constraints
         ! Auxiliary
         integer(I8)                 :: nincludebox, nexcludebox, tv, &
             startindex, endindex, tID, nbID(1:2), vpc, tbv, tnbv, tf
-        real(R8)                    :: tx, ty, tn, bx, by, bn, nb, dotprod, &
+        real(R8)                    :: tx, ty, tn, bx, by, bn, dotprod, &
             epsperp, maxx, minx, maxy, miny
         logical                     :: checkperp, isfaceperp, &
             debugplots 
@@ -3882,7 +3877,7 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)         :: designvariables 
 
         ! Loop variables
-        integer(I8)                         :: i, ic, ivg, ivh, k
+        integer(I8)                         :: ic, ivg, ivh, k
         integer(I8), allocatable            :: valindex(:), conindex(:), &
             row(:), col(:)
 

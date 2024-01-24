@@ -238,7 +238,7 @@ module optmod_numerics
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 

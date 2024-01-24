@@ -64,18 +64,17 @@ module goatmod_userinput
         ! General fields:
         ! - debug: general debug plots on the goat level
         ! - meth: goat running method. Currently, only 'GD' is supported
-        ! - readtype: type of grid input file to read. Can be 
+        ! - gridreadtype: type of grid input file to read. Can be 
         ! 'traduitb2us' or b2fgmtry (also in unstructured variant)
         ! - filepath: path towards the file where options are defined
         ! - gdfilepath: path towards the file where options for grid 
         ! deformation are defined
 
         ! Input filenames:
-        ! - readfile: grid input file to read
-        ! - strfile: structure.dat file to read
-        ! - mfloaddir: magnetic field directory
-        ! - mfloadfile: magnetic field file
-        ! - writedir: path where to write output traduit file
+        ! - gridfilepath: file path to file with grid data (e.g. traduit.out.b2us file)
+        ! - structurefilepath: structure.dat file to read
+        ! - magneticfieldfilepath: magnetic field file to read
+        ! - writefilepath: path where to write output traduit file
 
         ! Output options
         ! - write_final: write final output
@@ -118,16 +117,15 @@ module goatmod_userinput
         ! General
         logical                     :: debug     
         character(:), allocatable   :: meth 
-        character(:), allocatable   :: readtype
+        character(:), allocatable   :: gridreadtype
         character(:), allocatable   :: filepath
-        character(:), allocatable   :: gdfilepath
+        character(:), allocatable   :: gdinputfilepath
 
         ! Specify input filenames
-        character(:), allocatable   :: readfile
-        character(:), allocatable   :: strfile
-        character(:), allocatable   :: mfloaddir
-        character(:), allocatable   :: mfloadfile 
-        character(:), allocatable   :: writedir
+        character(:), allocatable   :: gridfilepath
+        character(:), allocatable   :: structurefilepath
+        character(:), allocatable   :: magneticfieldfilepath
+        character(:), allocatable   :: writefilepath
 
         ! Output options
         logical                     :: write_final 
@@ -450,22 +448,21 @@ module goatmod_userinput
         class(GoatoptionsUDT)       :: options        
         
         ! Input file
-        options%filepath    = './GOAToptions.dat'
+        options%inputfilepath    = './GOAToptions.dat'
 
         ! General
-        options%debug       = .false. 
-        options%meth        = 'GD'
-        options%readtype    = 'traduitb2us'
-        options%gdfilepath  = './GOAToptions.dat'
+        options%debug           = .false. 
+        options%meth            = 'GD'
+        options%gridreadtype    = 'traduitb2us'
+        options%gdinputfilepath = './GOAToptions.dat'
 
         ! Specify input filenames
-        options%readfile    = './traduit.out.b2us'
-        options%strfile     = './structure.dat'
-        options%mfloaddir   = '.'
-        options%mfloadfile  = 'rzpsi.dat'
+        options%gridfilepath            = './traduit.out.b2us'
+        options%structurefilepath       = './structure.dat'
+        options%magneticfieldfilepath   = './rzpsi.dat'
 
         ! Output options
-        options%writedir            = 'traduit.out.b2us_smoothed'
+        options%writefilepath           = 'traduit.out.b2us_smoothed'
         options%write_final         = .true. 
         options%write_traduitb2us   = .true.
         options%write_b2agdat       = .true. 
@@ -643,10 +640,9 @@ module goatmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
-        integer(I8)                     :: tempint
 
         ! Initialize
         !===========
@@ -675,24 +671,22 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%debug)
         field = 'GOAToptions.meth'
         call ExtractOptionValueCharacter(fid, field, options%meth)
-        field = 'GOAToptions.readtype'
-        call ExtractOptionValueCharacter(fid, field, options%readtype)
+        field = 'GOAToptions.gridreadtype'
+        call ExtractOptionValueCharacter(fid, field, options%gridreadtype)
 
         ! Input filenames
-        field = 'GOAToptions.readfile'
-        call ExtractOptionValueCharacter(fid, field, options%readfile)
-        field = 'GOAToptions.strfile'
-        call ExtractOptionValueCharacter(fid, field, options%strfile)
-        field = 'GOAToptions.mfloaddir'
-        call ExtractOptionValueCharacter(fid, field, options%mfloaddir)
-        field = 'GOAToptions.mfloadfile'
-        call ExtractOptionValueCharacter(fid, field, options%mfloadfile)
-        field = 'GOAToptions.GDfilepath'
-        call ExtractOptionValueCharacter(fid, field, options%gdfilepath)
+        field = 'GOAToptions.gridfilepath'
+        call ExtractOptionValueCharacter(fid, field, options%gridfilepath)
+        field = 'GOAToptions.structurefilepath'
+        call ExtractOptionValueCharacter(fid, field, options%structurefilepath)
+        field = 'GOAToptions.magneticfieldfilepath'
+        call ExtractOptionValueCharacter(fid, field, options%magneticfieldfilepath)
+        field = 'GOAToptions.GDinputfilepath'
+        call ExtractOptionValueCharacter(fid, field, options%gdinputfilepath)
 
         ! Output options
-        field = 'GOAToptions.writedir'
-        call ExtractOptionValueCharacter(fid, field, options%writedir)
+        field = 'GOAToptions.writefilepath'
+        call ExtractOptionValueCharacter(fid, field, options%writefilepath)
         field = 'GOAToptions.write_final'
         call ExtractOptionValueLogical0D(fid, field, options%write_final)
         field = 'GOAToptions.write_traduitb2us'
@@ -780,10 +774,9 @@ module goatmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
-        integer(I8)                     :: tempint
 
         ! Initialize
         !===========
@@ -850,7 +843,7 @@ module goatmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -920,7 +913,7 @@ module goatmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -982,7 +975,7 @@ module goatmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field
+        character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -1050,8 +1043,6 @@ module goatmod_userinput
 
         ! Auxiliary
         integer                         :: openstatus 
-        character(:), allocatable       :: thisline, field, &
-            loaddir,loadfile
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 

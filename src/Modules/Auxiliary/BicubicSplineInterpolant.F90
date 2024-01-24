@@ -53,8 +53,8 @@ module BicubicSplineInterpolant
     ! Initialize
     !============
     ! Load modules
-    use gdmod_types
-    use gdmod_plots
+    use mod_precision 
+    use goatmod_types
 
     ! The usual
     implicit none

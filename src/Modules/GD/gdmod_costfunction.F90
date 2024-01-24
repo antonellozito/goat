@@ -962,6 +962,7 @@ module gdmod_costfunction
         ! Initialize
         !===========
         ! Set filename
+        allocate(character(len('Plotdata/costfunction_vertexpairs_LR')) :: filename)
         filename = 'Plotdata/costfunction_vertexpairs_LR'
 
         ! Allocate
@@ -1103,7 +1104,7 @@ module gdmod_costfunction
 
         real(R8), allocatable               :: bx(:), by(:), xv(:,:), &
             yv(:,:), xf(:,:), yf(:,:), gxf(:,:), gyf(:,:), dx(:,:), &
-            dy(:,:), dotprod(:,:), xplot(:), yplot(:)
+            dy(:,:), dotprod(:,:)
 
         logical, allocatable                :: cID(:), mask(:), &
             isaligned(:)
@@ -2470,6 +2471,7 @@ module gdmod_costfunction
         ! Initialize
         !===========
         ! Set filename
+        allocate(character(len('Plotdata/costfunction_vertexpairs_FAD')) :: filename)
         filename = 'Plotdata/costfunction_vertexpairs_FAD'
 
         ! Unpack

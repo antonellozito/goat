@@ -12,8 +12,8 @@ subroutine ConstructGrid(grid,gridoptions)
     ! Initialize
     !===========
     ! Declare modules
-    use gdmod_types
-    use gdmod_userinput
+    use goatmod_types
+    use goatmod_userinput
 
     ! The usual
     implicit none
@@ -54,7 +54,7 @@ subroutine ConstructGrid(grid,gridoptions)
             ! Extract the grid data structures
             call ExtractGridData(grid, 'b2fgmtry', gridoptions)
 
-        case ('traduit')
+        case ('traduitb2us')
 
             ! Unstructured format in the traduit style.
             ! Open the file containing the grid data

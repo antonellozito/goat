@@ -27,23 +27,20 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
     type(GridUDT)                   :: grid
     type(MagneticFieldUDT)          :: magneticField
     type(OptimizationEngineGDUDT)   :: optimizationdriver
-    type(GoatoptionsUDT)            :: options 
+    type(GDoptionsUDT)              :: options 
     type(DesignOptionsUDT)          :: designoptions
     ! type(NumOptionsUDT)             :: num
     type(EnvironmentUDT)            :: environment
 
     ! Debug
-    logical                             :: makedebugplots = .false.
     logical                             :: makegridplots  = .false.
-    real(R8), allocatable               :: xq(:), yq(:), vq(:), &
-        xqmf(:,:), yqmf(:,:), vqmf(:,:)
 
     character(:), allocatable           :: vertpath, cellpath
 
     ! Set additional options
     !=======================
     ! Set paths from where options should be read
-    designoptions%inputfilepath = options%designoptionsfilepath
+    designoptions%inputfilepath = options%designoptionsfile
 
     ! Set optimization options
     call designoptions%Set()
@@ -58,6 +55,8 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
         grid, magneticField, environment)
 
     ! Write initial coordinates
+    allocate(character(len('vertices_init')) :: vertpath)
+    allocate(character(len('cells_init')) :: cellpath)
     vertpath = 'vertices_init'
     cellpath = 'cells_init'
     call WriteGridVertices(grid, vertpath)

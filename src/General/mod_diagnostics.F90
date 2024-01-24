@@ -47,9 +47,7 @@ module mod_diagnostics
     ! The usual
     implicit none
     save
-    private
-    
-    public DiagnosticsFunctionUDT, FDcheckerUDT
+    public 
 
     !==================================================================!
     !                                                                  !
@@ -408,7 +406,7 @@ module mod_diagnostics
 
         ! Auxiliary
         real(R8)                    :: fref, fFW, fBW, &
-            gradC, reFW, reBW, reC
+            reFW, reBW, reC
         integer(I8)                 ::  indexFW(1), indexBW(1), indexC(1), index
         real(R8), allocatable       :: gradref(:), xref(:), xFW(:), &
             xBW(:), hesscolFW(:), hesscolBW(:), hesscolC(:), &
@@ -416,9 +414,6 @@ module mod_diagnostics
         type(MySparseUDT)           ::  hessref
 
         integer(I8)                 :: dimx, tv
-
-        ! Data
-        real(R8)                    :: macheps = 1e-15
 
         ! Dummy
         type(MySparseUDT)           :: dummyhess
@@ -596,6 +591,12 @@ module mod_diagnostics
             ,   'var ', 'step',    'gref ',    'gFW ', 'gBW ', 'gC ', &
             'reFW', 'reBW', 'reC '
 
+        ! A simple workaround to avoid unused dummy argument warnings 
+        ! during compilation
+        if (.false.) then 
+            print *, FDchecker%nvars
+        end if
+
     end subroutine
 
     ! Print Hessian header
@@ -619,6 +620,12 @@ module mod_diagnostics
             & 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)" &
             ,   'var ', 'step',    'href ',    'hFW ', 'hBW ', 'hC ', &
             'reFW', 'reBW', 'reC '
+
+        ! A simple workaround to avoid unused dummy argument warnings 
+        ! during compilation
+        if (.false.) then 
+            print *, FDchecker%nvars
+        end if
 
     end subroutine
 
@@ -644,11 +651,17 @@ module mod_diagnostics
          & 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)", &
             var, step, gref, gFW, gBW, gC, reFW, reBW, reC
 
+        ! A simple workaround to avoid unused dummy argument warnings 
+        ! during compilation
+        if (.false.) then 
+            print *, FDchecker%nvars
+        end if
+
     end subroutine
 
     ! Print Hessian iterate
     subroutine PrintHessianIterate(FDchecker, var, step, gref, gFW, &
-        gBW, gC, reFW, reBW, reC)
+            gBW, gC, reFW, reBW, reC)
 
         ! Description
         !============
@@ -667,6 +680,12 @@ module mod_diagnostics
         print "(i8, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2,&
          & 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)", &
             var, step, gref, gFW, gBW, gC, reFW, reBW, reC
+
+        ! A simple workaround to avoid unused dummy argument warnings 
+        ! during compilation
+        if (.false.) then 
+            print *, FDchecker%nvars
+        end if
 
     end subroutine
 
