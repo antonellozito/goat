@@ -44,7 +44,7 @@ subroutine Readrzpsi(filespecifier, magneticField)
     logical                     :: iseof = .false. 
 
     ! Debug
-    logical                     :: makedebugplots = .false.
+    logical                     :: makedebugplots = .true.
 
     ! Read R-coordinates
     !===================
@@ -112,8 +112,12 @@ subroutine Readrzpsi(filespecifier, magneticField)
         k = k + n
 
         ! Check exit conditions
-        if ( (k + n) == nr ) then 
+        if ( k == nr ) then 
+            ! Normal exit
             exit
+        elseif (index(thisline, 'z') .ne. 0) then 
+            ! Abnormal exit
+            call gdErrorHandler('Readrzpsi: encountered z-coordinates prematurely, probably less r-coordinate entries than nr')
         end if 
     end do 
 
@@ -183,8 +187,11 @@ subroutine Readrzpsi(filespecifier, magneticField)
         k = k + n
 
         ! Check exit conditions
-        if ( (k + n) == nz ) then 
+        if ( k == nz ) then 
             exit
+        elseif (index(thisline, 'psi') .ne. 0) then 
+            ! Abnormal exit
+            call gdErrorHandler('Readrzpsi: encountered psi values prematurely, probably less z-coordinate entries than nz')
         end if 
     end do 
 
@@ -215,7 +222,7 @@ subroutine Readrzpsi(filespecifier, magneticField)
     allocate(psi(nr, nz))
     allocate(psivec(nr*nz))
 
-    ! Read the R-coordinates line by line 
+    ! Read the psi values line by line 
     k = 0
     do while (.true.)
         ! Read next line
@@ -224,7 +231,7 @@ subroutine Readrzpsi(filespecifier, magneticField)
         ! Check if we reached the end of the file prematurely
         if (iseof) then 
             ! Throw error
-            call gdErrorHandler('Readrzpsi: could not find r-coordinates in rzpsi file')
+            call gdErrorHandler('Readrzpsi: could not find psi values in rzpsi file')
 
             ! Exit the loop
             exit 
@@ -246,7 +253,7 @@ subroutine Readrzpsi(filespecifier, magneticField)
         k = k + n
 
         ! Check exit conditions
-        if ( (k + n) == nr*nz ) then 
+        if ( k == nr*nz ) then 
             exit
         end if 
     end do 

@@ -1865,6 +1865,12 @@ module mod_inputfileparser
             end if
         end do
 
+        ! Hedge for no elements
+        if (n == 0) then 
+            allocate(val(n))
+            return
+        end if 
+
         ! Determine which entries are exponents
         allocate(isexp(n))
         isexp(:) = .false. 
@@ -1892,7 +1898,7 @@ module mod_inputfileparser
             ! Check value type
             if (isexp(i)) then 
                 ! Adjust previous value with exponent
-                val(k-1) = val(k-1)*10**(tempval(i))
+                val(k) = val(k)*10**(tempval(i))
             else
                 ! Increment k
                 k = k + 1
