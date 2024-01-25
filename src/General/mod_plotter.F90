@@ -38,7 +38,7 @@ module mod_plotter
     public 
 
     ! Define the (relative) file directory where the plot are located
-    character(len=*), parameter     :: plotdir = './src/Visualization/'
+    character(len=*), parameter     :: plotdir = './'
 
     ! Define the (general) plot filename and data filename
     character(:), allocatable                 :: plotfile
@@ -177,7 +177,7 @@ module mod_plotter
         !====================
         ! Write vertex coordinates to file
         open (action='write', file=trim(datafile), newunit=fu, &
-             status='replace')
+             status='unknown')
     
         do i = 1, n
             if (isnan(x(i))) then 
