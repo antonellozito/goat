@@ -393,7 +393,7 @@ module mod_plotter
         ! Write
         !======
         open (action='write', file=trim(datafile), newunit=fu, &
-             status='replace')
+             status='unknown')
             
         ! Header
         write (fu, *) 'ID, x, y ', 'nrow', size(ID, 1), 'ncol', 3
@@ -431,7 +431,7 @@ module mod_plotter
         ! Write
         !======
         open (action='write', file=trim(datafile), newunit=fu, &
-             status='replace')
+             status='unknown')
             
         ! Header
         write (fu, *) 'IDn, xn, yn ', 'nrow', size(ID, 1), 'ncol', 3*size(ID, 2)
@@ -471,7 +471,7 @@ module mod_plotter
         ! Write
         !======
         open (action='write', file=trim(datafile), newunit=fu, &
-             status='replace')
+             status='unknown')
         print *, datafile
             
         ! Header
