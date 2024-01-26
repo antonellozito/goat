@@ -1,57 +1,123 @@
-VERSION 1.00.00E-01
+VERSION 1.00.00
 #=========================================================================#
 #                                                                         #
 #                       GENERAL GOAT OPTIONS                              #
 #                                                                         #
 #=========================================================================#
-# See SetGOAToptions for a description of the options. 
-'GOAToptions.debug' '0'
-'GOAToptions.readfile'   'traduit.out.b2us'
-'GOAToptions.strfile'    'structure.dat'
-'GOAToptions.magneticfieldfilepath' './rzpsi.dat'
-'GOAToptions.writedir'    'traduit.out.b2us_test'
-'GOAToptions.itmax' '5'
-'GOAToptions.vesselmode' '0'
-'GOAToptions.write_final' '1'
-'GOAToptions.meth'       'GD'
-'GOAToptions.gridreadtype'   'traduitb2us'
+#-------------------------------------------------------------------------#
+#                          MAIN OPTIONS                                   #
+#-------------------------------------------------------------------------#
+# General options
+'goat.debug'                        '0'
+'goat.meth'                         'GD'
 
+# Input file locations 
+'goat.gridfilepath'                 'traduit.out.b2us'
+'goat.magneticfieldfilepath'        'rzpsi.dat'
+'goat.structurefilepath'            'structure.dat'
+'goat.GDinputfilepath'              'GOAToptions.dat'
+
+# Output file locations 
+'goat.writefilepath'                'traduit.out.b2us_smoothed'  
+
+# Output options 
+'goat.write_final'                  '1'
+'goat.write_traduitb2us'            '1'
+'goat.write_b2agdat'                '1'
+'goat.write_Xpointdata'             '0'
+'goat.write_OMPdata'                '0'
+
+# Switches to identify case
+'goat.vesselmode'                   '0'
+'goat.slab'                         '0'
+'goat.artificial_slab'              '0'
+
+#-------------------------------------------------------------------------#
+#                          INTERFACING OPTIONS                            #
+#-------------------------------------------------------------------------#
 # Face label mappings between GG (grid generator) and GD (grid deformation)
-# See SetGOAToptions.m or InterfaceGAtoGD.m for a description of the GD 
+# See Setgoat.m or InterfaceGAtoGD.m for a description of the GD 
 # face label mappings. 
-'GOAToptions.GDtoGA.facelabelsubfrom'       '[-99, -25]'
-'GOAToptions.GDtoGA.facelabelsubto'         '[1, -21]'
-#'GOAToptions.GDtoGA.facelabelmappingGG'     '[1, 2, -43, -42, -44, -23, -24, -21]'
-#'GOAToptions.GDtoGA.facelabelmappingGD'     '[1, 1, 3, 3, 3, 3, 3, 2]'
-'GOAToptions.GDtoGA.facelabelmappingGG'     '[1:23, 36:38, 25:27, 24, 28:35, 39:67, 68:70]'
-'GOAToptions.GDtoGA.facelabelmappingGD'     '[5*23, 1*3, 1*3, 4*38, 5*3]'
-# 'GOAToptions.GDtoGA.facelabelmappingGG'     '[1, 2, 36:38, 47:49, 36:103, 104:106]'
-# 'GOAToptions.GDtoGA.facelabelmappingGD'     '[5, 5, 1*3, 1*3, 4*68, 5*3]'
-
+'goat.GDtoGA.facelabelsubfrom'     '[-99, -25]'
+'goat.GDtoGA.facelabelsubto'       '[1, -21]'
+#'goat.GDtoGA.facelabelmappingGG'   '[1, 2, -43, -42, -44, -23, -24, -21]'
+#'goat.GDtoGA.facelabelmappingGD'   '[1, 1, 3, 3, 3, 3, 3, 2]'
+'goat.GDtoGA.facelabelmappingGG'  '[1:23, 36:38, 25:27, 24, 28:35, 39:67, 68:70]'
+'goat.GDtoGA.facelabelmappingGD'  '[5*23, 1*3, 1*3, 4*38, 5*3]'
+# 'goat.GDtoGA.facelabelmappingGG' '[1, 2, 36:38, 47:49, 36:103, 104:106]'
+# 'goat.GDtoGA.facelabelmappingGD' '[5, 5, 1*3, 1*3, 4*68, 5*3]'
 
 
 # Face label mappings between GG and GA (grid adaptation)
-'GOAToptions.GGtoGA.facelabelsubfrom'       '[-99, -25]'
-'GOAToptions.GGtoGA.facelabelsubto'         '[1, -21]'
-'GOAToptions.GGtoGA.facelabelmappingGG'     '[1, 2, -43, -42, -44, -23, -24, -21]'
-'GOAToptions.GGtoGA.facelabelmappingGA'     '[4, 5, 3, 3, 3, 3, 3, 2]'
+'goat.GGtoGA.facelabelsubfrom'   '[-99, -25]'
+'goat.GGtoGA.facelabelsubto'     '[1, -21]'
+'goat.GGtoGA.facelabelmappingGG' '[1, 2, -43, -42, -44, -23, -24, -21]'
+'goat.GGtoGA.facelabelmappingGD' '[4, 5, 3, 3, 3, 3, 3, 2]'
 
-# Structure
+#-------------------------------------------------------------------------#
+#                          GRID OPTIONS                                   #
+#-------------------------------------------------------------------------#
+# Read method 
+'goat.grid.readmeth'                'traduitb2us' 
+
+# Grid type
+'goat.grid.type'                    'plasma'
+
+#-------------------------------------------------------------------------#
+#                          MAGNETIC FIELD OPTIONS                         #
+#-------------------------------------------------------------------------#
+# Read method
+'goat.mf.readmeth'                  'rzpsi'
+
+# Interpolation options
+'goat.mf.interpC'                   '3'
+'goat.mf.interpM'                   '6'
+'goat.mf.interpmeth'                'uniformgrid'
+
+#-------------------------------------------------------------------------#
+#                          VESSEL STRUCTURE OPTIONS                       #
+#-------------------------------------------------------------------------#
+# Environment (including vessel etc) options 
+# Vessel geometry & reading method
+'goat.vessel.readmeth'          'read_structure'
+
+# Refinement options for vessel
+'goat.vessel.refinevessel'          '0'
+'goat.vessel.maxvesseldist'         '1e-2'
+
 # Target plate definition
-'GOAToptions.TP'                '[1 2]'
-'GOAToptions.TPind'             '[1 2]'
+'goat.vessel.TP'                    '[1 2]'
+'goat.vessel.TPind'                 '[1 2]'
 
 # Structures to be excluded when constructing vessel (if empty, all are included)
-'GOAToptions.exclude'           '[]'
+'goat.vessel.exclude'               '[]'
 
+# Vessel field description (similar to magnetic field interpolant, 
+# but for vessel - only used for vessel distance penalty, and if shape
+# method is the same, also used for boundary constraints)
+'goat.vessel.shapemeth'             'closedpolygon_smoothapproximation'
+'goat.vessel.resx'                  '100'
+'goat.vessel.resy'                  '100'
+'goat.vessel.offsetfracx'           '0.1'
+'goat.vessel.offsetfracy'           '0.1'
+'goat.vessel.interpC'               '3'
+'goat.vessel.interpM'               '6'
+
+# Target plate definition
+'goat.vessel.TP'                    '[1 2]'
+'goat.vessel.TPind'                 '[1 2]'
+
+#-------------------------------------------------------------------------#
+#                          ADDITIONAL DATA                                #
+#-------------------------------------------------------------------------#
 # OMP and IMP
-'GOAToptions.OMP_r'             '[1.8 2.4]'
-'GOAToptions.OMP_z'             '[0 0]'
-'GOAToptions.IMP_r'             '[0.65 2]'
-'GOAToptions.IMP_z'             '[0 0]'
+'goat.data.OMP_r'                '[1.8 2.4]'
+'goat.data.OMP_z'                '[0 0]'
+'goat.data.IMP_r'                '[0.65 2]'
+'goat.data.IMP_z'                '[0 0]'
 
-# RBtor
-'GOAToptions.data.RBtor'        '-4.496825999658907'
+# Data
+'goat.data.RBtor'                '-4.496825999658907'
 
 #=========================================================================#
 #                                                                         #
@@ -95,7 +161,7 @@ VERSION 1.00.00E-01
 'gd.design.savefinaldesign'     '1' # save final design (old files will be overwritten!)? 
 
 # Cost function
-'gd.design.cfv.type'        	'LR_FAD_PRPB_FA'
+'gd.design.cfv.type'        	'LR_FAD'
 
 # Cost function parameters 
 'gd.design.cfv.par.LR.lambda'		 		'1e-5'
@@ -114,7 +180,7 @@ VERSION 1.00.00E-01
 'gd.design.cfv.par.PRPB.weightsep'		    '10'
 
 # Design variables
-'gd.design.dv.type'         	'coordinates_desiredflux'
+'gd.design.dv.type'         	'coordinates'
 
 # Equality constraints
 'gd.design.ec.boundaryfunctions'    '1'
@@ -143,7 +209,6 @@ VERSION 1.00.00E-01
 'gd.design.ec.par.boundaryfunctions.C'                  '3'
 'gd.design.ec.par.boundaryfunctions.M'                  '6'
 
-
 # Flux function constraint parameters 
 'gd.design.ec.par.fluxfunction.fixfluxalignedtargets' 	'1'
 'gd.design.ec.par.fluxfunction.fixfarvesselflux' 		'1'
@@ -157,10 +222,10 @@ VERSION 1.00.00E-01
 'gd.design.ec.par.orthogonality.checkperp'				'1'
 'gd.design.ec.par.orthogonality.epsperp' 				'0.2'
 'gd.design.ec.par.orthogonality.includecutcellvert'     '1'
-'gd.design.ec.par.orthogonality.includeboxx' 			'[1 2.3]' 
-'gd.design.ec.par.orthogonality.includeboxy' 			'[-0.9 1.2]' 
-'gd.design.ec.par.orthogonality.excludeboxx' 			'[1.45 1.55]' 
-'gd.design.ec.par.orthogonality.excludeboxy' 			'[-0.95 -0.65]' 
+'gd.design.ec.par.orthogonality.includeboxx' 			'[1, 2.3]' 
+'gd.design.ec.par.orthogonality.includeboxy' 			'[-0.9, 1.2]' 
+'gd.design.ec.par.orthogonality.excludeboxx' 			'[1.45, 1.55]' 
+'gd.design.ec.par.orthogonality.excludeboxy' 			'[-0.95, -0.65]' 
 
 # Some decent bounding box values for different geometries 
 # TCV, 		include: x: [-1 2; 0.72 0.82 ], 	y:  [-0.2 2; -0.3 -0.2]
@@ -197,76 +262,21 @@ VERSION 1.00.00E-01
 'gd.design.inec.par.linefolding.smallnumber'    '1e-5'
 
 #-------------------------------------------------------------------------#
-#                          GRID OPTIONS                                   #
-#-------------------------------------------------------------------------#
-# See SetGridOptions.m for the default settings.
-
-# Grid & vessel file paths
-'gd.grid.gridloaddir'       '.'
-'gd.grid.gridloadfile'      'traduit.out.b2'
-'gd.grid.vesselloaddir'     '.'
-'gd.grid.vesselloadfile'    'structure.dat'
-
-# Vessel geometry & loading method
-'gd.grid.vesselloadmeth'    'read_structure'
-
-# Refinement options for vessel
-'gd.grid.refinevessel'      '0'
-'gd.grid.maxvesseldist'     '1e-2'
-
-# Target plate definition
-'gd.grid.TP'                '[1 2]'
-'gd.grid.TPind'             '[1 2]'
-
-# Structures to be excluded when constructing vessel (if empty, all are included)
-'gd.grid.exclude'           '[]'
-
-# Vessel field description (similar to magnetic field interpolant, 
-# but for vessel - only used for vessel distance penalty, and if shape
-# method is the same, also used for boundary constraints)
-'gd.grid.vesselshapemeth'          'closedpolygon_smoothapproximation'
-'gd.grid.vesselresx'               '100'
-'gd.grid.vesselresy'               '100'
-'gd.grid.vesseloffsetfracx'        '0.1'
-'gd.grid.vesseloffsetfracy'        '0.1'
-'gd.grid.vesselC'                  '3'
-'gd.grid.vesselM'                  '6'
-
-#-------------------------------------------------------------------------#
-#                          MAGNETIC FIELD OPTIONS                         #
-#-------------------------------------------------------------------------#
-# See SetMagneticFieldOptions.m for the default settings
-
-# Type
-'gd.mf.type'                'readpsi'
-
-# Loading directory & reading method
-'gd.mf.loaddir'             '.'
-'gd.mf.loadfile'            'rzpsi.dat'
-'gd.mf.readmeth'            'default'
-
-# Interpolation options
-'gd.mf.interpC'             '3'
-'gd.mf.interpM'             '6'
-'gd.mf.interpmeth'          'uniformgrid'
-
-
-#-------------------------------------------------------------------------#
 #                          NUMERICAL PARAMETERS                           #
 #-------------------------------------------------------------------------#
 # See SetNumParams.m for the default settings
 
 # General optimization
-'gd.num.opt.itmax'                  '450'
-'gd.num.opt.tol'                    '1e-10'
+'gd.opt.num.itmax'                  '450'
+'gd.opt.num.tol'                    '1e-10'
 
 # KKT driver (see also GridKKTDriver.m)
 # Design relaxation factors
-'gd.num.KKTdriver.docfrelax'        '1'
-'gd.num.KKTdriver.rxf'              '1e3'
-'gd.num.KKTdriver.rxfdesign'        '1'
-'gd.num.KKTdriver.minrxf'           '0e-1'
-'gd.num.KKTdriver.rxfdec'           '0.90'
+'gd.opt.num.docfrelax'              '1'
+'gd.opt.num.rxf'                    '1e3'
+'gd.opt.num.rxfdesign'              '1'
+'gd.opt.num.rxfmin'                 '0e-1'
+'gd.opt.num.rxfdec'                 '0.90'
 
 # Equality constraint relaxation
 'gd.num.KKTdriver.doeqconrelax'     '0'
