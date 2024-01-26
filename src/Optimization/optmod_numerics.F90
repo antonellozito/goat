@@ -43,8 +43,12 @@ module optmod_numerics
         ! - verbosity:      verbosity level of printing
         ! - inputfilepath:  filepath from which user-specified data 
         !                   can be read in.
+        ! - fieldprefix: all numerical options are read in assuming a 
+        ! format '<fieldprefix>opt.num.<field>'. Fieldprefix can be 
+        ! empty or given (default is empty)
 
         character(:), allocatable   :: inputfilepath
+        character(:), allocatable   :: fieldprefix
 
         real(R8)            :: tol 
         integer(I8)         :: maxit 
@@ -80,6 +84,9 @@ module optmod_numerics
         !           to reduce relaxation factor (0.98 works good in most
         !           cases)
         ! - rxfmin: minimal value of relaxation factor
+        ! - fieldprefix: all numerical options are read in assuming a 
+        ! format '<fieldprefix>opt.num.<field>'. Fieldprefix can be 
+        ! empty or given (default is empty)
 
         ! Relaxation factors
         real(R8)            :: rxf
@@ -265,21 +272,22 @@ module optmod_numerics
         ! Read options
         !=============
         ! General
-        field = 'opt.num.itmax'
+        print *, num%fieldprefix 
+        field = num%fieldprefix // 'opt.num.itmax'
         call ExtractOptionValueInteger0D(fid, field, num%maxit)
-        field = 'opt.num.verbosity'
+        field = num%fieldprefix // 'opt.num.verbosity'
         call ExtractOptionValueInteger0D(fid, field, num%verbosity)
-        field = 'opt.num.tol'
+        field = num%fieldprefix // 'opt.num.tol'
         call ExtractOptionValueReal0D(fid, field, num%tol)
         
         ! Relaxation factors
-        field = 'opt.num.rxf'
+        field = num%fieldprefix // 'opt.num.rxf'
         call ExtractOptionValueReal0D(fid, field, num%rxf)
-        field = 'opt.num.rxfdec'
+        field = num%fieldprefix // 'opt.num.rxfdec'
         call ExtractOptionValueReal0D(fid, field, num%rxfdec)
-        field = 'opt.num.rxfmin'
+        field = num%fieldprefix // 'opt.num.rxfmin'
         call ExtractOptionValueReal0D(fid, field, num%rxfmin)
-        field = 'opt.num.rxfdesign'
+        field = num%fieldprefix // 'opt.num.rxfdesign'
         call ExtractOptionValueReal0D(fid, field, num%rxfdesign)
 
         ! Housekeeping

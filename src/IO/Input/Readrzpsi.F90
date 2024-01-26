@@ -44,7 +44,7 @@ subroutine Readrzpsi(filespecifier, magneticField)
     logical                     :: iseof = .false. 
 
     ! Debug
-    logical                     :: makedebugplots = .true.
+    logical                     :: makedebugplots = .false.
 
     ! Read R-coordinates
     !===================

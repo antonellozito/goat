@@ -33,6 +33,10 @@ subroutine GDDriver(goatoptions)
     ! Read and extract data
     call ExtractGoatData(grid, magneticField, environment, goatoptions)
 
+    ! Set grid deformation options
+    gdoptions%inputfilepath = goatoptions%inputfilepath
+    call gdoptions%Set()
+
     ! Run deformation
     !================
     call RunGridOptimization(grid, magneticField, environment, &

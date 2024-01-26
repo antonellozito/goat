@@ -962,8 +962,8 @@ module gdmod_costfunction
         ! Initialize
         !===========
         ! Set filename
-        allocate(character(len('Plotdata/costfunction_vertexpairs_LR')) :: filename)
-        filename = 'Plotdata/costfunction_vertexpairs_LR'
+        allocate(character(len('costfunction_vertexpairs_LR')) :: filename)
+        filename = 'costfunction_vertexpairs_LR'
 
         ! Allocate
         nrow = size(costfunction%vpairs, 1)
@@ -2471,8 +2471,8 @@ module gdmod_costfunction
         ! Initialize
         !===========
         ! Set filename
-        allocate(character(len('Plotdata/costfunction_vertexpairs_FAD')) :: filename)
-        filename = 'Plotdata/costfunction_vertexpairs_FAD'
+        allocate(character(len('costfunction_vertexpairs_FAD')) :: filename)
+        filename = 'costfunction_vertexpairs_FAD'
 
         ! Unpack
         associate(&

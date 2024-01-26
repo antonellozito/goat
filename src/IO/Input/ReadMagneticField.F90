@@ -42,12 +42,12 @@ subroutine ReadMagneticField(magneticField, mfoptions, filepath)
     ! Check how to read the file
     select case(mfoptions%readmeth)
 
-    case ('readrzpsi','default')
+    case ('rzpsi','default')
 
         ! Read in a classic rzpsi file 
         call Readrzpsi(filespecifier, magneticField)
 
-    case ('readequ')
+    case ('equ')
 
         ! Read the equ file using CARRE subroutines - wrapper here
         call Readequ(filespecifier, magneticField)

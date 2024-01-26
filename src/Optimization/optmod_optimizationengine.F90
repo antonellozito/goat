@@ -120,6 +120,7 @@ module optmod_optimizationengine
         ! have a generic 'solve' method which acts on the optimization
         ! problem
         character(:), allocatable                   :: inputfilepath
+        character(:), allocatable                   :: inputfileprefix
         type(NumKKTUDT)         :: numKKT
 
     contains 
@@ -151,6 +152,7 @@ module optmod_optimizationengine
         ! character array through which an input file can be specified
         ! for reading in numerics.
         character(:), allocatable                   :: inputfilepath
+        character(:), allocatable                   :: inputfileprefix
         class(OptimizationProblemUDT), allocatable  :: problem
         type(OptimizationSolverUDT)                 :: solver
 
@@ -457,7 +459,9 @@ module optmod_optimizationengine
         call optimizationengine%problem%Initialize()
 
         ! Set up the solver - now KKT
+        print *, 'reading optimization engine input from file: ' // optimizationengine%inputfilepath
         optimizationengine%solver%inputfilepath = optimizationengine%inputfilepath
+        optimizationengine%solver%inputfileprefix = optimizationengine%inputfileprefix
         call optimizationengine%solver%InitializeKKTSolver()
 
         ! Solve
@@ -492,6 +496,8 @@ module optmod_optimizationengine
         !===========
         ! Numerics
         solver%numKKT%inputfilepath = solver%inputfilepath
+        solver%numKKT%fieldprefix = solver%inputfileprefix 
+        print *, solver%numKKT%fieldprefix
         call solver%numKKT%InitializeNumParams() 
 
     end subroutine
@@ -719,6 +725,7 @@ module optmod_optimizationengine
             problem%monitor%H(:,itopt)      = H
             problem%monitor%convnorm(itopt) = convnorm
             problem%monitor%rxf = solver%numKKT%rxf 
+            problem%monitor%maxdphi = maxval(dx(1:nphi))
 
             ! Print the current iterate
             if (verbosity > 0) then 

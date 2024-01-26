@@ -66,6 +66,8 @@ module goatmod_userinput
         ! - meth: goat running method. Currently, only 'GD' is supported
         ! - gridreadtype: type of grid input file to read. Can be 
         ! 'traduitb2us' or b2fgmtry (also in unstructured variant)
+        ! - magneticfieldreadtype: type of magnetic field input to read.
+        ! Can be 'rzpsi' or 'equ' for rzpsi.dat or equ.dat files.
         ! - filepath: path towards the file where options are defined
         ! - gdfilepath: path towards the file where options for grid 
         ! deformation are defined
@@ -117,7 +119,7 @@ module goatmod_userinput
         ! General
         logical                     :: debug     
         character(:), allocatable   :: meth 
-        character(:), allocatable   :: gridreadtype
+        character(:), allocatable   :: magneticfieldreadtype
         character(:), allocatable   :: filepath
         character(:), allocatable   :: gdinputfilepath
 
@@ -226,40 +228,16 @@ module goatmod_userinput
 
         ! Structure containing options for grid manipulation (mainly
         ! reading and writing). The following fields are present:
-        ! - gridtype:       the type of grid that is considered. Only
+        ! - type:       the type of grid that is considered. Only
         !                   'plasma' is currently available. 
-        ! - inputtype:      the type of inputfile. Can be 'b2fgmtry' 
+        ! - readmeth:       the type of inputfile. Can be 'b2fgmtry' 
         !                   or 'traduit'. Both are unstructured!
         ! - filepath:       file path indicating where the grid file
         !                   data is stored
-        ! - facelabelsubfrom/facelabelsubto: substitute the labels 
-        !                   in '..from' with the labels defined in 
-        !                   '..to'. This can be used to substitute some
-        !                   boundary labels with other labels if 
-        !                   desired. 
-        ! - facelabelmappingGG/facelabelmappingGD: 
-        !                   defines the mapping between the 
-        !                   face labels of the grid generator (GG) and 
-        !                   the face labels of the grid deformation (GD)
-        !                   see below for a mapping description 
-        !                   
-        ! Mapping description
-        !====================
-        ! GRID DEFORMATION            PHYSICAL MEANING
-        !
-        ! 1                           target plate (inner)
-        ! 2                           target plate (outer)
-        ! 3                           private flux
-        ! 4                           core boundary
-        ! 5                           outermost flux surf.
-        !
-        ! Note that information may be lost in this bndmapping, but this 
-        ! is information that is not used by the grid deformation 
-        ! module. 
 
         ! Input filepaths and types
-        character(:), allocatable   :: gridtype 
-        character(:), allocatable   :: inputtype
+        character(:), allocatable   :: type 
+        character(:), allocatable   :: readmeth 
         character(:), allocatable   :: filepath 
 
         ! Mappings
@@ -323,6 +301,18 @@ module goatmod_userinput
         ! - TPind:      target plate enumerators 
         ! - exclude:    list of structures in the vessel to be excluded
         !               from the vessel 
+        ! - shapemeth:  method used to represent (and possibly 
+        ! approximate) the shape of the vessel. 
+        ! - resx:       resolution in x-direction for shape rep
+        ! - resy:       resolution in y-direction for shape rep
+        ! - offsetfracx:    fractional offset to be taken from minimal 
+        ! and maximal x-value of original vessel polygon
+        ! - offsetfracy:    same as offsetfracx, but for y-direction
+        ! - interpC:    only used for interpolant based methods. Order
+        ! of interpolant
+        ! - interpM:    only used for interpolant based methods. Order 
+        ! used to approximate derivatives to construct interpolant 
+        ! function. 
 
         character(:), allocatable       :: readmeth
         character(:), allocatable       :: filepath
@@ -330,6 +320,11 @@ module goatmod_userinput
         real(R8)                        :: maxdist
         integer(I8)                     :: refine
         integer(I8), allocatable        :: TP(:), TPind(:), exclude(:)
+
+        ! Vessel representation options
+        character(:), allocatable       :: shapemeth 
+        integer(I8)                     :: resx, resy, interpC, interpM 
+        real(R8)                        :: offsetfracx, offsetfracy
 
     contains 
 
@@ -346,6 +341,7 @@ module goatmod_userinput
         ! or magnetic field. Currently empty. 
 
         character(:), allocatable   :: type
+        character(:), allocatable   :: filepath
         character(:), allocatable   :: vesselfilepath
 
     contains 
@@ -453,7 +449,6 @@ module goatmod_userinput
         ! General
         options%debug           = .false. 
         options%meth            = 'GD'
-        options%gridreadtype    = 'traduitb2us'
         options%gdinputfilepath = './GOAToptions.dat'
 
         ! Specify input filenames
@@ -462,7 +457,7 @@ module goatmod_userinput
         options%magneticfieldfilepath   = './rzpsi.dat'
 
         ! Output options
-        options%writefilepath           = 'traduit.out.b2us_smoothed'
+        options%writefilepath       = 'traduit.out.b2us_smoothed'
         options%write_final         = .true. 
         options%write_traduitb2us   = .true.
         options%write_b2agdat       = .true. 
@@ -490,10 +485,10 @@ module goatmod_userinput
         ! OMP and IMP
         allocate(options%OMP_r(1:2), options%OMP_z(1:2), &
             options%IMP_r(1:2), options%IMP_z(1:2))
-        options%OMP_r   = (/0, 0/)
-        options%OMP_z   = (/0, 0/)
-        options%IMP_r   = (/0, 0/)
-        options%IMP_z   = (/0, 0/)
+        options%OMP_r(:)   = 0
+        options%OMP_z(:)   = 0
+        options%IMP_r(:)   = 0
+        options%IMP_z(:)   = 0
 
     end subroutine
 
@@ -533,15 +528,15 @@ module goatmod_userinput
         class(GridOptionsUDT)        ::  options
 
         ! Default options
-        options%gridtype            = 'plasma'
-        options%inputtype           = 'b2fgmtry'
+        options%type                = 'plasma'
+        options%readmeth            = 'b2fgmtry'
 
-        ! Default grid location /data/le/Examples/TCV/b2fgmtry_us_tcv
-        options%filepath            = './Examples/TCV/b2fgmtry_us_tcv'
+        ! Default grid location
+        options%filepath            = 'traduit.out.b2us'
 
         ! Default mappings
         allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
-        allocate(options%facelabelmappingGG(8), options%facelabelmappingGD(8))
+        allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8))
         options%facelabelmappingGG = [-13, -34, -23, -24, -21, -42, -43, -44]
         options%facelabelmappingGD = [1, 2, 3,   3,   4,   5,   5,   5]
 
@@ -583,7 +578,7 @@ module goatmod_userinput
         !============
         ! Input
         options%readmeth    = 'read_structure'
-        options%filepath    = './Examples/TCV/structure_tcv.dat'
+        options%filepath    = './structure.dat'
 
         ! Refinement options
         options%refine      = 1
@@ -595,6 +590,17 @@ module goatmod_userinput
         allocate(options%exclude(0))
         options%TP      = [1, 2]
         options%TPind   = [1, 2]
+
+        ! Vessel shape representation
+        allocate(character(len('closedpolygon_smoothapproximation')) :: &
+            options%shapemeth)
+        options%shapemeth = 'closedpolygon_smoothapproximation'
+        options%resx            = 100
+        options%resy            = 100 
+        options%offsetfracx     = 0.1
+        options%offsetfracy     = 0.1
+        options%interpC         = 3
+        options%interpM         = 6
         
 
     end subroutine
@@ -614,6 +620,8 @@ module goatmod_userinput
         !============
         options%type = 'vessel'
         options%vesselfilepath = options%inputfilepath
+
+        ! Set data
 
     end subroutine
 
@@ -667,83 +675,81 @@ module goatmod_userinput
         ! Read options
         !=============
         ! General
-        field = 'GOAToptions.debug'
+        field = 'goat.debug'
         call ExtractOptionValueLogical0D(fid, field, options%debug)
-        field = 'GOAToptions.meth'
+        field = 'goat.meth'
         call ExtractOptionValueCharacter(fid, field, options%meth)
-        field = 'GOAToptions.gridreadtype'
-        call ExtractOptionValueCharacter(fid, field, options%gridreadtype)
 
         ! Input filenames
-        field = 'GOAToptions.gridfilepath'
+        field = 'goat.gridfilepath'
         call ExtractOptionValueCharacter(fid, field, options%gridfilepath)
-        field = 'GOAToptions.structurefilepath'
+        field = 'goat.structurefilepath'
         call ExtractOptionValueCharacter(fid, field, options%structurefilepath)
-        field = 'GOAToptions.magneticfieldfilepath'
+        field = 'goat.magneticfieldfilepath'
         call ExtractOptionValueCharacter(fid, field, options%magneticfieldfilepath)
-        field = 'GOAToptions.GDinputfilepath'
+        field = 'goat.GDinputfilepath'
         call ExtractOptionValueCharacter(fid, field, options%gdinputfilepath)
 
         ! Output options
-        field = 'GOAToptions.writefilepath'
+        field = 'goat.writefilepath'
         call ExtractOptionValueCharacter(fid, field, options%writefilepath)
-        field = 'GOAToptions.write_final'
+        field = 'goat.write_final'
         call ExtractOptionValueLogical0D(fid, field, options%write_final)
-        field = 'GOAToptions.write_traduitb2us'
+        field = 'goat.write_traduitb2us'
         call ExtractOptionValueLogical0D(fid, field, options%write_traduitb2us)
-        field = 'GOAToptions.write_b2agdat'
+        field = 'goat.write_b2agdat'
         call ExtractOptionValueLogical0D(fid, field, options%write_b2agdat)
-        field = 'GOAToptions.write_Xpointdata'
+        field = 'goat.write_Xpointdata'
         call ExtractOptionValueLogical0D(fid, field, options%write_Xpointdata)
-        field = 'GOAToptions.write_OMPdata'
+        field = 'goat.write_OMPdata'
         call ExtractOptionValueLogical0D(fid, field, options%write_OMPdata)
 
         ! Case identification options
-        field = 'GOAToptions.vesselmode'
+        field = 'goat.vesselmode'
         call ExtractOptionValueLogical0D(fid, field, options%vesselmode)
-        field = 'GOAToptions.slab'
+        field = 'goat.slab'
         call ExtractOptionValueLogical0D(fid, field, options%slab)
-        field = 'GOAToptions.artificial_slab'
+        field = 'goat.artificial_slab'
         call ExtractOptionValueLogical0D(fid, field, options%artificial_slab)
 
         ! Face label mappings
-        field = 'GOAToptions.GDtoGA.facelabelmappingGG'
+        field = 'goat.GDtoGA.facelabelmappingGG'
         call ExtractOptionValueInteger1D(fid, field, &
             options%GDtoGAfacelabelmappingGG)
-        field = 'GOAToptions.GDtoGA.facelabelmappingGD'
+        field = 'goat.GDtoGA.facelabelmappingGD'
         call ExtractOptionValueInteger1D(fid, field, &
             options%GDtoGAfacelabelmappingGD) 
-        field = 'GOAToptions.GDtoGA.facelabelsubfrom'
+        field = 'goat.GDtoGA.facelabelsubfrom'
         call ExtractOptionValueInteger1D(fid, field, &
             options%GDtoGAfacelabelsubfrom)
-        field = 'GOAToptions.GDtoGA.facelabelsubto'
+        field = 'goat.GDtoGA.facelabelsubto'
         call ExtractOptionValueInteger1D(fid, field, &
             options%GDtoGAfacelabelsubto)
 
-        field = 'GOAToptions.GGtoGA.facelabelmappingGG'
+        field = 'goat.GGtoGA.facelabelmappingGG'
         call ExtractOptionValueInteger1D(fid, field, &
             options%GGtoGAfacelabelmappingGG)
-        field = 'GOAToptions.GGtoGA.facelabelmappingGD'
+        field = 'goat.GGtoGA.facelabelmappingGD'
         call ExtractOptionValueInteger1D(fid, field, &
             options%GGtoGAfacelabelmappingGD)
-        field = 'GOAToptions.GGtoGA.facelabelsubfrom'
+        field = 'goat.GGtoGA.facelabelsubfrom'
         call ExtractOptionValueInteger1D(fid, field, &
             options%GGtoGAfacelabelsubfrom)
-        field = 'GOAToptions.GGtoGA.facelabelsubto'
+        field = 'goat.GGtoGA.facelabelsubto'
         call ExtractOptionValueInteger1D(fid, field, &
             options%GGtoGAfacelabelsubto)
 
         ! OMP and IMP
-        field = 'GOAToptions.OMP_r'
+        field = 'goat.OMP_r'
         call ExtractOptionValueReal1D(fid, field, &
             options%OMP_r)
-        field = 'GOAToptions.OMP_z'
+        field = 'goat.OMP_z'
         call ExtractOptionValueReal1D(fid, field, &
             options%OMP_z)
-        field = 'GOAToptions.IMP_r'
+        field = 'goat.IMP_r'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_r)
-        field = 'GOAToptions.IMP_z'
+        field = 'goat.IMP_z'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_z)
 
@@ -870,26 +876,12 @@ module goatmod_userinput
         ! Read options
         !=============
         ! Gridtype
-        field = 'gd.grid.gridtype'
-        call ExtractOptionValueCharacter(fid, field, options%gridtype)
+        field = 'goat.grid.type'
+        call ExtractOptionValueCharacter(fid, field, options%type)
 
-        ! Inputtype
-        field = 'gd.grid.inputtype'
-        call ExtractOptionValueCharacter(fid, field, options%inputtype)
-
-        ! Filepath
-        field = 'gd.grid.gridfilepath'
-        call ExtractOptionValueCharacter(fid, field, options%filepath)
-
-        ! Mappings
-        field = 'gd.grid.facelabelsubfrom'
-        call ExtractOptionValueInteger1D(fid, field, options%facelabelsubfrom)
-        field = 'gd.grid.facelabelsubto'
-        call ExtractOptionValueInteger1D(fid, field, options%facelabelsubto)
-        field = 'gd.grid.facelabelmappingGG'
-        call ExtractOptionValueInteger1D(fid, field, options%facelabelmappingGG)
-        field = 'gd.grid.facelabelmappingGD'
-        call ExtractOptionValueInteger1D(fid, field, options%facelabelmappingGD)
+        ! Reading method
+        field = 'goat.grid.readmeth'
+        call ExtractOptionValueCharacter(fid, field, options%readmeth)
 
         ! Housekeeping
         !=============
@@ -923,6 +915,7 @@ module goatmod_userinput
         reachedeof = .false. 
 
         ! Open the file, check if it exists
+        print *, options%inputfilepath
         open(unit=fid, file=options%inputfilepath, status='old', &
             iostat=openstatus)
 
@@ -940,17 +933,15 @@ module goatmod_userinput
         ! Read options
         !=============
         ! I/O
-        field = 'gd.mf.readmeth'
+        field = 'goat.mf.readmeth'
         call ExtractOptionValueCharacter(fid, field, options%readmeth)
-        field = 'gd.mf.filepath'
-        call ExtractOptionValueCharacter(fid, field, options%filepath)
 
         ! Interpolant
-        field = 'gd.mf.interpC'
+        field = 'goat.mf.interpC'
         call ExtractOptionValueInteger0D(fid, field, options%interpC)
-        field = 'gd.mf.interpM'
+        field = 'goat.mf.interpM'
         call ExtractOptionValueInteger0D(fid, field, options%interpM)
-        field = 'gd.mf.interpmeth'
+        field = 'goat.mf.interpmeth'
         call ExtractOptionValueCharacter(fid, field, options%interpmeth)
 
         ! Housekeeping
@@ -1002,24 +993,38 @@ module goatmod_userinput
         ! Read options
         !=============
         ! I/O
-        field = 'gd.grid.vesselloadmeth'
+        field = 'goat.vessel.readmeth'
         call ExtractOptionValueCharacter(fid, field, options%readmeth)
-        field = 'gd.grid.vesselfilepath'
-        call ExtractOptionValueCharacter(fid, field, options%filepath)
-        field = 'gd.grid.exclude'
+        field = 'goat.vessel.exclude'
         call ExtractOptionValueInteger1D(fid, field, options%exclude)
 
         ! Refinement
-        field = 'gd.grid.refinevessel'
+        field = 'goat.vessel.refinevessel'
         call ExtractOptionValueInteger0D(fid, field, options%refine)
-        field = 'gd.grid.maxvesseldist'
+        field = 'goat.vessel.maxvesseldist'
         call ExtractOptionValueReal0D(fid, field, options%maxdist)
         
         ! Target plates
-        field = 'gd.grid.TP'
+        field = 'goat.vessel.TP'
         call ExtractOptionValueInteger1D(fid, field, options%TP)
-        field = 'gd.grid.TPind'
+        field = 'goat.vessel.TPind'
         call ExtractOptionValueInteger1D(fid, field, options%TPind)
+
+        ! Shape representation options
+        field = 'goat.vessel.shapemeth'
+        call ExtractOptionValueCharacter(fid, field, options%shapemeth)
+        field = 'goat.vessel.resx'
+        call ExtractOptionValueInteger0D(fid, field, options%resx)
+        field = 'goat.vessel.resy'
+        call ExtractOptionValueInteger0D(fid, field, options%resy)
+        field = 'goat.vessel.interpC'
+        call ExtractOptionValueInteger0D(fid, field, options%interpC)
+        field = 'goat.vessel.interpM'
+        call ExtractOptionValueInteger0D(fid, field, options%interpM)
+        field = 'goat.vessel.offsetfracx'
+        call ExtractOptionValueReal0D(fid, field, options%offsetfracx)
+        field = 'goat.vessel.offsetfracy'
+        call ExtractOptionValueReal0D(fid, field, options%offsetfracy)
 
         ! Housekeeping
         !=============

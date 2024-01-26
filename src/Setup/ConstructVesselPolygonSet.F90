@@ -458,7 +458,7 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
     call vessel%polygonset%Construct(xv, yv)
 
     ! Write data
-    vesselpath = 'Plotdata/vesselpolygon'
+    vesselpath = 'vesselpolygon'
     call vessel%polygonset%WriteData(vesselpath)
 
     ! Housekeeping

@@ -43,6 +43,7 @@ subroutine ConstructGridDesignProblem(optimizationdriver, &
     ! State
     !======
     optimizationdriver%inputfilepath = designoptions%inputfilepath
+    optimizationdriver%inputfileprefix = 'gd.'
     call optimizationdriver%SetupOptimizationDriver()
     
     ! Associate in order to execute select type...

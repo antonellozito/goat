@@ -4,7 +4,7 @@ subroutine ConstructEnvironment(environment, environmentoptions)
     !============
     ! Construct the environment for the grid optimization. Here, all 
     ! other peripheral structures, vessel data, ... should be stored
-    ! that may be needed in the grid optimization (apart from the 
+    ! that may be needed in goat (apart from the 
     ! magnetic field, which, due to it's main role in the grid 
     ! generation, has it's own structure). It goes without saying that 
     ! this routine is heavily case dependent. 
@@ -16,8 +16,8 @@ subroutine ConstructEnvironment(environment, environmentoptions)
     ! Initialize
     !===========
     ! Declare modules
-    use gdmod_types 
-    use gdmod_userinput
+    use goatmod_types 
+    use goatmod_userinput
     use gdmod_plots
 
     ! The usual

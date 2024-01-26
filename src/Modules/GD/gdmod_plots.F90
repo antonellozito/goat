@@ -773,8 +773,8 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        allocate(character(len('Plotdata/' // filename)) :: filepath)
-        filepath = 'Plotdata/' // filename
+        allocate(character(len(filename)) :: filepath)
+        filepath = filename
 
         ! Unpack
         allocate(IDs(grid%vert%ntot))
@@ -811,7 +811,7 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        call SetGnuplotNames(plotfile,datafile,'Plotdata/' // filename)
+        call SetGnuplotNames(plotfile,datafile,filename)
 
         ! Write the data file
         !====================
@@ -872,8 +872,8 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        allocate(character(len('Plotdata/con_ff_vertices')) :: filepath)
-        filepath = 'Plotdata/con_ff_vertices'
+        allocate(character(len('con_ff_vertices')) :: filepath)
+        filepath = 'con_ff_vertices'
 
         ! Unpack
         nIDs = size(IDs)
@@ -908,8 +908,8 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        allocate(character(len('Plotdata/con_bnd_vertices')) :: filepath)
-        filepath = 'Plotdata/con_bnd_vertices' 
+        allocate(character(len('con_bnd_vertices')) :: filepath)
+        filepath = 'con_bnd_vertices' 
 
         ! Unpack
         nIDs = size(IDs)
@@ -944,8 +944,8 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        allocate(character(len('Plotdata/con_xp_vertices')) :: filepath)
-        filepath = 'Plotdata/con_xp_vertices' 
+        allocate(character(len('con_xp_vertices')) :: filepath)
+        filepath = 'con_xp_vertices' 
 
         ! Unpack
         nIDs = size(IDs)
@@ -980,8 +980,8 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set the correct directories
-        allocate(character(len('Plotdata/con_el_vertices')) :: filepath)
-        filepath = 'Plotdata/con_el_vertices' 
+        allocate(character(len('con_el_vertices')) :: filepath)
+        filepath = 'con_el_vertices' 
 
         ! Unpack
         nIDs = size(IDs, 1)
@@ -1018,8 +1018,8 @@ module gdmod_plots
         ! Initialize
         !===========
         ! Set path
-        allocate(character(len('Plotdata/con_orth_vertices')) :: filepath)
-        filepath = 'Plotdata/con_orth_vertices' 
+        allocate(character(len('con_orth_vertices')) :: filepath)
+        filepath = 'con_orth_vertices' 
 
         ! Unpack
         nIDs = size(IDs, 1)

@@ -19,7 +19,6 @@ subroutine ExtractGoatData(grid, magneticField, environment, options)
     type(MagneticFieldUDT)              :: magneticField 
     type(EnvironmentUDT)                :: environment 
     type(GoatoptionsUDT)                :: options 
-    type(GDoptionsUDT)                  :: gdoptions
 
     ! Auxiliary 
     type(GridOptionsUDT)                :: gridoptions
@@ -34,29 +33,23 @@ subroutine ExtractGoatData(grid, magneticField, environment, options)
     ! Initialize
     !===========
     ! Set the path - the same as for general goat options 
-    gdoptions%inputfilepath             = options%inputfilepath
     gridoptions%inputfilepath           = options%inputfilepath 
     environmentoptions%inputfilepath    = options%inputfilepath
-    mfoptions%inputfilepath             = options%magneticfieldfilepath 
+    mfoptions%inputfilepath             = options%inputfilepath 
     
     ! Set the options
-    call gdoptions%Set()
     call gridoptions%Set()
     call environmentoptions%Set()
     call mfoptions%Set()
 
-    ! Set input filepaths of other options
-    gdoptions%inputfilepath = options%gdinputfilepath
-
     ! Read data
     !==========
     ! Read grid
-    select case (options%gridreadtype)
+    select case (gridoptions%readmeth)
 
     case ('traduitb2us')
 
         ! Unstructured traduit file reading
-        print *, options%gridfilepath
         call ReadTraduitUS(grid, options%gridfilepath)
 
 

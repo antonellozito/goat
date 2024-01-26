@@ -32,17 +32,8 @@ subroutine ConstructMagneticField(magneticField, mfoptions)
     integer                             :: filespecifier
     type(BicubicSplineInterpolantUDT)   :: interp
 
-    ! Data
-    data filespecifier /60/
-
     ! Main program
     !=============
-    ! Open the file containing the grid data
-    !call cfopen(filespecifier, mfoptions%filepath,'old','un*formatted')
-
-    ! Read 
-    !call ReadMagneticField(filespecifier, magneticField, mfoptions)
-
     ! Construct interpolant representation
     call ConstructBicubicSplineInterpolant(magneticField%Psi, &
         magneticField%R, magneticField%Z, magneticField%nR, &
