@@ -565,7 +565,7 @@ module mod_inputfileparser
             if (islegal) then 
                 ! Attribute
                 valint = tempi
-                if (valint .lt. 0) then 
+                if (valint > 0) then 
                     ! Value is true
                     val = .true.
                 else 
@@ -965,6 +965,7 @@ module mod_inputfileparser
         ! Read (only if nonempty)
         if (nval == 0) then 
             islegal = .true.
+            allocate(intval(nval))
             return 
         end if
         read (tempc, *, iostat=readstatus) tempintval
