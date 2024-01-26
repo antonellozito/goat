@@ -4,6 +4,9 @@
 # ignore module files
 *.mod*
 
+# ignore .dat files
+*.dat
+
 # ignore build
 builds/*
 
