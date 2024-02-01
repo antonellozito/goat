@@ -11,7 +11,6 @@ subroutine Construct2DStructuredGrid(xgv, ygv, nx, ny, xg, yg)
     !===========
     ! Modules
     use mod_precision
-    use gdmod_types 
 
     ! The usual
     implicit none

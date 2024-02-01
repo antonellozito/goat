@@ -66,7 +66,7 @@ subroutine SortPolygonEdges(pein,ne,sortindex,ispolygonstart)
     ! Initialize
     !===========
     ! Modules
-    use gdmod_types
+    use mod_precision
 
     ! The usual
     implicit none

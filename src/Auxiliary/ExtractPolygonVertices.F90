@@ -37,7 +37,7 @@ subroutine ExtractPolygonVertices(pe,ne,pv)
     ! Initialize
     !===========
     ! Modules
-    use gdmod_types
+    use mod_precision
 
     ! The usual
     implicit none

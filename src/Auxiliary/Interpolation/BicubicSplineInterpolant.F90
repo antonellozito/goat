@@ -54,7 +54,6 @@ module BicubicSplineInterpolant
     !============
     ! Load modules
     use mod_precision 
-    use goatmod_types
 
     ! The usual
     implicit none
@@ -67,6 +66,32 @@ module BicubicSplineInterpolant
     
     !public ConstructBicubicSplineInterpolant
 
+    ! Bicubic spline interpolant
+    type BicubicSplineInterpolantUDT
+
+        ! Description
+        !============
+        ! Bicubic spline interpolation structure. Stores all necessary 
+        ! data to compute interpolated quantities (data has to be given
+        ! on a structured non-uniform grid) and their spatial 
+        ! derivatives (only in 2D)
+
+        ! Dimensions 
+        integer(I8)                 :: nx, ny ! number of points in x, y direction
+        integer(I8)                 :: nc ! number of 'cells' 
+
+        ! Coordinates
+        real(R8), allocatable       :: x(:), y(:) ! coordinate vectors
+
+        ! Interpolation coefficients
+        integer(I8), allocatable    :: cellindex(:) ! index of interpolant grid cells
+        real(R8), allocatable       :: a(:,:) ! actual coefficient matrix
+
+        ! Scaling constants of the interpolant
+        real(R8), allocatable       :: refx(:), refy(:), refdx(:), refdy(:) 
+
+    end type
+
     contains 
 
     !==================================================================!
@@ -74,6 +99,36 @@ module BicubicSplineInterpolant
     !                               ROUTINES                           !
     !                                                                  !
     !==================================================================!
+
+    ! Allocator
+    !==========
+    subroutine AllocateBicubicSplineInterpolant(interp)
+
+        ! Description
+        !============
+        ! Allocate the fields of the interpolant. It is assumed that nx
+        ! and ny are set correctly. 
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(BicubicSplineInterpolantUDT)   :: interp
+
+        ! Allocate
+        !=========
+        interp%nc = (interp%nx-1)*(interp%ny-1)
+        allocate(interp%x(interp%nx))
+        allocate(interp%y(interp%ny))
+        allocate(interp%a(interp%nc, 16))
+        allocate(interp%refx(interp%nc))
+        allocate(interp%refy(interp%nc))
+        allocate(interp%refdx(interp%nc))
+        allocate(interp%refdy(interp%nc))
+
+
+
+    end subroutine
 
     ! Constructor
     !============

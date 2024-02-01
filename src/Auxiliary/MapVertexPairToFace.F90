@@ -28,7 +28,7 @@ subroutine MapVertexPairToFace(v1,v2,fvert,nfvert,faceID)
     ! Initialize
     !===========
     ! Declare modules
-    use gdmod_types
+    use mod_precision
 
     ! The usual
     implicit none 
