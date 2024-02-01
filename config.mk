@@ -27,11 +27,14 @@ UMFPACKPATH = -lumfpack
 ## % Targets
 ## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Constants General Optimization Modules Auxiliary IO_b25  \
+GDRUN_TARGETS = Constants Auxiliary General Optimization Modules IO_b25  \
     IO_carre IO_output IO_input  Setup  Drivers Numerics
 
 ## GOAT_TARGETS             : Targets to be run for the full goat
 GOAT_TARGETS = $(GDRUN_TARGETS) 
+
+## TEST_TARGETS             : Targets to be run for goat tests
+TEST_TARGETS = $(GOAT_TARGETS) 
 
 ##
 ## % Compiler
@@ -77,20 +80,26 @@ MAIN_RUNFILE = MainRunFileGridDeformation.F90
 
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
 GENERAL_FILES = src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 $(wildcard src/General/*.F90)
+    
 
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
 DRIVER_FILES = $(wildcard src/Drivers/*.F90)
 
 ## MODULE_FILES			: Module filenames (.F90, .F) - sequence matters
-MODULE_FILES =  $(wildcard src/Modules/Goat/*.F90)\
-    $(wildcard src/Modules/Auxiliary/*.F90)\
+MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
     src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
     $(wildcard src/Modules/GD/*.F90) \
     $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F)
 
+
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
-AUXILIARY_FILES = $(wildcard src/Auxiliary/*.F90)
+AUXILIARY_FILES = src/Auxiliary/mod_plotter.F90 $(wildcard src/Auxiliary/*.F90) \
+    src/Auxiliary/Interpolation/Interpolant2D_auxiliaries.F90 \
+    src/Auxiliary/Interpolation/Interpolant2D.F90 \
+    src/Auxiliary/Interpolation/BicubicSplineInterpolant.F90 \
+    src/Auxiliary/Interpolation/StructuredInterpolant2D.F90 \
+    $(wildcard src/Auxiliary/Interpolation/*.F90)
 
 ## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
 B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)

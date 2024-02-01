@@ -18,6 +18,9 @@ include config.mk
 goat: $(GOAT_TARGETS) goat.o
 	$(FC) -o goat *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) 
 
+tests: $(TEST_TARGETS) tests.o 
+	$(FC) -o tests *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) 
+
 gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
 	$(FC) -o gdrun *.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
 
@@ -34,6 +37,10 @@ MainRunFileGridDeformation.o: Runfiles/MainRunFileGridDeformation.F90
 ## Goat.o 			: main run file goat
 goat.o: Runfiles/Goat.F90
 	$(FC) $(CFLAGS) Runfiles/Goat.F90 
+
+## Tests.o 			: all tests
+tests.o: Runfiles/Tests.F90 
+	$(FC) $(CFLAGS) Runfiles/Tests.F90 
 
 ##
 ## % Folder compilation targets
