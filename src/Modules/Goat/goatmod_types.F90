@@ -21,7 +21,7 @@ module goatmod_types
     !============
     use mod_precision
     use mod_polygon
-    use BicubicSplineInterpolant
+    use Interpolant
 
     ! The usual
     implicit none
@@ -411,7 +411,7 @@ module goatmod_types
         real(R8), allocatable       :: Psi(:,:)
         
         ! Interpolant
-        type(BicubicSplineInterpolantUDT)        :: interp
+        type(StructuredInterpolant2DUDT)    :: interp
 
     end type
 

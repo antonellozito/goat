@@ -15,7 +15,7 @@ subroutine ConstructMagneticField(magneticField, mfoptions)
     ! Declare modules
     use gdmod_types 
     use gdmod_userinput
-    use BicubicSplineInterpolant
+    use Interpolant
 
     ! The usual
     implicit none 
@@ -30,14 +30,14 @@ subroutine ConstructMagneticField(magneticField, mfoptions)
 
     ! Auxiliary variables 
     integer                             :: filespecifier
-    type(BicubicSplineInterpolantUDT)   :: interp
+    type(StructuredInterpolant2DUDT)    :: interp
 
     ! Main program
     !=============
     ! Construct interpolant representation
-    call ConstructBicubicSplineInterpolant(magneticField%Psi, &
-        magneticField%R, magneticField%Z, magneticField%nR, &
-        magneticField%nZ, interp)
+    call interp%SetParameters(mfoptions%interpmeth, mfoptions%interpC, &
+        mfoptions%interpM)
+    call interp%Construct(magneticField%R, magneticField%Z, magneticField%Psi)
 
     ! Add interpolant to the magnetic field
     magneticField%interp = interp

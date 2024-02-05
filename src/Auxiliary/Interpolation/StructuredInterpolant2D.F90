@@ -804,8 +804,8 @@ module StructuredInterpolant2D
         !==================
         ! Arguments
         class(StructuredInterpolant2DUDT)       :: interp 
-        real(R8), allocatable, intent(in)       :: xq(:), yq(:)
-        real(R8), allocatable, intent(out)      :: vq(:)
+        real(R8), intent(in)                    :: xq(:), yq(:)
+        real(R8), intent(out)                   :: vq(:)
         integer(I8), intent(in)                 :: derivx, derivy
 
         ! Auxiliary
@@ -822,18 +822,16 @@ module StructuredInterpolant2D
         ! Initialize
         !===========
         ! Check inputs
-        if ( (.not. allocated(xq)) .or. (.not. allocated(yq)) ) then 
-            call gdErrorHandler('EvaluateStructuredInterpolant2D: query points are not allocated')
-        end if 
         if (size(xq, 1) .ne. size(yq, 1)) then 
             call gdErrorHandler('EvaluateStructuredInterpolant2D: ' // &
             'query point coordinates xq and yq have dissimilar ' // &
             'dimensions, check input')
         end if 
-        if (allocated(vq)) then 
-            ! Deallocate just to be sure
-            deallocate(vq)
-        end if 
+        if (size(vq, 1) .ne. size(xq, 1)) then 
+            call gdErrorHandler('EvaluateStructuredInterpolant2D: ' // &
+            'query point values vq does not have the same dimensions ' // &
+            'as query point coordinates xq, yq, check input')
+        end if
 
         ! Initialize
         nq = size(xq, 1)
@@ -863,7 +861,7 @@ module StructuredInterpolant2D
         yqn = (yq - refy(ind))/refdy(ind)
 
         ! Evaluate and sum each term
-        allocate(vq(nq), term(nq))
+        allocate(term(nq))
         vq(:) = 0
 
         do i = derivx, n 

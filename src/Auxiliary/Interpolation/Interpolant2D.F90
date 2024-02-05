@@ -85,8 +85,8 @@ module Interpolant2D
         subroutine EvaluateINT(interp, xq, yq, derivx, derivy, vq)
             import :: GenericInterpolant2DUDT, R8, I8 
             class(GenericInterpolant2DUDT)      :: interp 
-            real(R8), allocatable, intent(in)   :: xq(:), yq(:)
-            real(R8), allocatable, intent(out)  :: vq(:)
+            real(R8), intent(in)                :: xq(:), yq(:)
+            real(R8), intent(out)               :: vq(:)
             integer(I8), intent(in)             :: derivx, derivy
         end subroutine  
         

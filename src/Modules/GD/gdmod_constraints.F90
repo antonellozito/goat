@@ -39,9 +39,7 @@ module gdmod_constraints
     use gdmod_utility_optimization
     use gdmod_plots
     use gdmod_userinput
-    use PolygonShapeFunction
-    use BicubicSplineInterpolant
-    
+    use PolygonShapeFunction    
 
     ! The usual
     implicit none
@@ -1428,7 +1426,6 @@ module gdmod_constraints
         ! Initialize
         !===========
         ! Modules
-        use BicubicSplineInterpolant
         use gdmod_plots
         
         ! Declare variables
@@ -1486,8 +1483,7 @@ module gdmod_constraints
         ! Determine flux values to impose
         !================================
         ! Evaluate flux at all nodes
-        call EvaluateBicubicSplineInterpolant(x, y, temppsi, &
-            magneticField%interp, '0', '0')
+        call magneticField%interp%Evaluate(x, y, 0, 0, temppsi)
         PsiD_tmp = temppsi
 
         !call Plot2DUnstructuredField(PsiD_tmp, grid, 'v', '-p')
@@ -1668,7 +1664,6 @@ module gdmod_constraints
         ! Initialize
         !===========
         ! Modules
-        use BicubicSplineInterpolant
         
         ! Declare variables
         !==================
@@ -1719,7 +1714,7 @@ module gdmod_constraints
             nc      => constraints%ncon,        &
             psiD    => constraints%PsiD,        &
             tv      => constraints%vert,        &
-            Psifun  => magneticField%interp,    & 
+            interp  => magneticField%interp,    & 
             x       => grid%vert%x,             & 
             y       => grid%vert%y              & 
             )
@@ -1735,8 +1730,7 @@ module gdmod_constraints
         psival(:) = 0
 
         ! Evaluate
-        call EvaluateBicubicSplineInterpolant(x(tv), y(tv), &
-            psival, Psifun, '0', '0')
+        call interp%Evaluate(x, y, 0, 0, psival)
         G(:) = psival - psiD
 
         ! Constraint gradient
@@ -1763,10 +1757,12 @@ module gdmod_constraints
                 allocate(valindex(ntv))
 
                 ! Compute the derivative values
-                call EvaluateBicubicSplineInterpolant(&
-                    x(tv), y(tv), dpsidx, Psifun, '1', '0')
-                call EvaluateBicubicSplineInterpolant(&
-                    x(tv), y(tv), dpsidy, Psifun, '0', '1')
+                call interp%Evaluate(x, y, 1, 0, dpsidx)
+                call interp%Evaluate(x, y, 0, 1, dpsidy)
+                !call EvaluateBicubicSplineInterpolant(&
+                !   x(tv), y(tv), dpsidx, Psifun, '1', '0')
+                !call EvaluateBicubicSplineInterpolant(&
+                !    x(tv), y(tv), dpsidy, Psifun, '0', '1')
 
                 ! x-contribution
                 !---------------
@@ -1847,12 +1843,15 @@ module gdmod_constraints
                 valxy(:) = 0
 
                 ! Compute contributions
-                call EvaluateBicubicSplineInterpolant(&
-                    x(tv), y(tv), valxx, Psifun, '2', '0')
-                call EvaluateBicubicSplineInterpolant(&
-                    x(tv), y(tv), valyy, Psifun, '0', '2')
-                call EvaluateBicubicSplineInterpolant(&
-                    x(tv), y(tv), valxy, Psifun, '1', '1') ! 
+                call interp%Evaluate(x(tv), y(tv), 2, 0, valxx)
+                call interp%Evaluate(x(tv), y(tv), 1, 1, valxy)
+                call interp%Evaluate(x(tv), y(tv), 0, 2, valyy)
+                !call EvaluateBicubicSplineInterpolant(&
+                !    x(tv), y(tv), valxx, Psifun, '2', '0')
+                !call EvaluateBicubicSplineInterpolant(&
+                !    x(tv), y(tv), valyy, Psifun, '0', '2')
+                !call EvaluateBicubicSplineInterpolant(&
+                !    x(tv), y(tv), valxy, Psifun, '1', '1') ! 
 
                 ! xx-contribution
                 !----------------
@@ -3530,10 +3529,12 @@ module gdmod_constraints
         !========================
         ! Compute magnetic field vector components Btx, Bty
         allocate(Btx(vert%ntot), Bty(vert%ntot))
-        call EvaluateBicubicSplineInterpolant(vert%x, vert%y, Btx, interp, &
-            '0', '1')
-        call EvaluateBicubicSplineInterpolant(vert%x, vert%y, Bty, interp, &
-            '1', '0')
+        call interp%Evaluate(x, y, 0, 1, Btx)
+        call interp%Evaluate(x, y, 1, 0, Bty)
+        !call EvaluateBicubicSplineInterpolant(vert%x, vert%y, Btx, interp, &
+        !    '0', '1')
+        !call EvaluateBicubicSplineInterpolant(vert%x, vert%y, Bty, interp, &
+        !    '1', '0')
         Btx = -Btx ! adjust sign 
 
         ! Determine which nodes to consider
@@ -3950,10 +3951,8 @@ module gdmod_constraints
         dy = yv(:, 2) - yv(:, 1)
         xf = 0.5*sum(xv, 2)
         yf = 0.5*sum(yv, 2) 
-        call EvaluateBicubicSplineInterpolant(xf, yf, gxf, &
-            interp, '0', '1')
-        call EvaluateBicubicSplineInterpolant(xf, yf, gyf, &
-            interp, '1', '0')
+        call interp%Evaluate(xf, yf, 0, 1, gxf)
+        call interp%Evaluate(xf, yf, 1, 0, gyf)
         gxf = -gxf ! take correct sign
 
         ! Evaluate
@@ -3981,14 +3980,10 @@ module gdmod_constraints
 
                 ! Precompute
                 allocate(gxxf(nc), gxyf(nc), gyxf(nc), gyyf(nc))
-                call EvaluateBicubicSplineInterpolant(xf, yf, gxxf, &
-                    interp, '1', '1')
-                call EvaluateBicubicSplineInterpolant(xf, yf, gxyf, &
-                    interp, '0', '2')
-                call EvaluateBicubicSplineInterpolant(xf, yf, gyxf, &
-                    interp, '1', '1')
-                call EvaluateBicubicSplineInterpolant(xf, yf, gyyf, &
-                    interp, '2', '0')
+                call interp%Evaluate(xf, yf, 1, 1, gxxf)
+                call interp%Evaluate(xf, yf, 0, 2, gxyf)
+                call interp%Evaluate(xf, yf, 1, 1, gyxf)
+                call interp%Evaluate(xf, yf, 2, 0, gyyf)
                 gxxf = -gxxf ! correct sign
                 gxyf = -gxyf ! correct sign
 
@@ -4104,22 +4099,31 @@ module gdmod_constraints
                 allocate(gxxxf(nc), gxyxf(nc), gyxxf(nc), gyyxf(nc), &
                     gxxyf(nc), gxyyf(nc), gyxyf(nc), gyyyf(nc))
 
-                call EvaluateBicubicSplineInterpolant(xf, yf, gxxxf, &
-                    interp, '2', '1')
-                call EvaluateBicubicSplineInterpolant(xf, yf, gxyxf, &
-                    interp, '1', '2')
-                call EvaluateBicubicSplineInterpolant(xf, yf, gyxxf, &
-                    interp, '2', '1')
-                call EvaluateBicubicSplineInterpolant(xf, yf, gyyxf, &
-                    interp, '3', '0') 
-                call EvaluateBicubicSplineInterpolant(xf, yf, gxxyf, &
-                    interp, '1', '2')
-                call EvaluateBicubicSplineInterpolant(xf, yf, gxyyf, &
-                    interp, '0', '3')
-                call EvaluateBicubicSplineInterpolant(xf, yf, gyxyf, &
-                    interp, '1', '2')
-                call EvaluateBicubicSplineInterpolant(xf, yf, gyyyf, &
-                    interp, '2', '1')
+                call interp%Evaluate(xf, yf, 2, 1, gxxxf)
+                call interp%Evaluate(xf, yf, 1, 2, gxyxf)
+                call interp%Evaluate(xf, yf, 2, 1, gyxxf)
+                call interp%Evaluate(xf, yf, 3, 0, gyyxf)
+                call interp%Evaluate(xf, yf, 1, 2, gxxyf)
+                call interp%Evaluate(xf, yf, 0, 3, gxyyf)
+                call interp%Evaluate(xf, yf, 1, 2, gyxyf)
+                call interp%Evaluate(xf, yf, 2, 1, gyyyf)
+
+                !call EvaluateBicubicSplineInterpolant(xf, yf, gxxxf, &
+                !    interp, '2', '1')
+                !call EvaluateBicubicSplineInterpolant(xf, yf, gxyxf, &
+                !    interp, '1', '2')
+                !call EvaluateBicubicSplineInterpolant(xf, yf, gyxxf, &
+                !    interp, '2', '1')
+                !call EvaluateBicubicSplineInterpolant(xf, yf, gyyxf, &
+                !    interp, '3', '0') 
+                !call EvaluateBicubicSplineInterpolant(xf, yf, gxxyf, &
+                !    interp, '1', '2')
+                !call EvaluateBicubicSplineInterpolant(xf, yf, gxyyf, &
+                !    interp, '0', '3')
+                !call EvaluateBicubicSplineInterpolant(xf, yf, gyxyf, &
+                !    interp, '1', '2')
+                !call EvaluateBicubicSplineInterpolant(xf, yf, gyyyf, &
+                !    interp, '2', '1')
                 gxxxf = -gxxxf 
                 gxyxf = -gxyxf 
                 gxxyf = -gxxyf 

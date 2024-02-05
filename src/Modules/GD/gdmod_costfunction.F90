@@ -360,7 +360,6 @@ module gdmod_costfunction
         ! length ratio cost function is initialized, which requires
 
         ! Modules
-        use BicubicSplineInterpolant
 
         ! Declare variables
         !==================
@@ -410,10 +409,12 @@ module gdmod_costfunction
         nvpairs(:) = 0
 
         ! Compute the magnetic field vectors at the vertex locations
-        call EvaluateBicubicSplineInterpolant(x, y, Btx, &
-            magneticField%interp, '0', '1') 
-        call EvaluateBicubicSplineInterpolant(x, y, Bty, &
-            magneticField%interp, '1', '0') 
+        call magneticField%interp%Evaluate(x, y, 0, 1, Btx)
+        call magneticField%interp%Evaluate(x, y, 1, 0, Bty)
+        !call EvaluateBicubicSplineInterpolant(x, y, Btx, &
+        !    magneticField%interp, '0', '1') 
+        !call EvaluateBicubicSplineInterpolant(x, y, Bty, &
+        !    magneticField%interp, '1', '0') 
         Btx = -Btx ! adjust sign: Btx = - dPsidy
 
         ! Compute desired length ratio
@@ -1076,7 +1077,6 @@ module gdmod_costfunction
 
         ! Modules
         !========
-        use BicubicSplineInterpolant
 
         ! Declare variables
         !==================
@@ -1125,10 +1125,12 @@ module gdmod_costfunction
 
         ! Compute magnetic field in grid points
         allocate(bx(grid%vert%ntot), by(grid%vert%ntot))
-        call EvaluateBicubicSplineInterpolant( &
-            grid%vert%x, grid%vert%y, bx, magneticField%interp, '0', '1')
-        call EvaluateBicubicSplineInterpolant( &
-            grid%vert%x, grid%vert%y, by, magneticField%interp, '1', '0')
+        call magneticField%interp%Evaluate(grid%vert%x, grid%vert%y, 0, 1, bx)
+        call magneticField%interp%Evaluate(grid%vert%x, grid%vert%y, 1, 0, by)
+        !call EvaluateBicubicSplineInterpolant( &
+        !    grid%vert%x, grid%vert%y, bx, magneticField%interp, '0', '1')
+        !call EvaluateBicubicSplineInterpolant( &
+        !    grid%vert%x, grid%vert%y, by, magneticField%interp, '1', '0')
         bx = -bx
 
         ! Associate some fields
@@ -1342,10 +1344,12 @@ module gdmod_costfunction
 
         ! Compute the vector perpendicular on the magnetic field vector
         do i = 1, 2
-            call EvaluateBicubicSplineInterpolant( &
-                xf(:,i), yf(:,i), gxf(:,i), magneticField%interp, '1', '0')
-            call EvaluateBicubicSplineInterpolant( &
-                xf(:,i), yf(:,i), gyf(:,i), magneticField%interp, '0', '1')
+            call magneticField%interp%Evaluate(xf(:, i), yf(:, i ), 1, 0, gxf(:, i))
+            call magneticField%interp%Evaluate(xf(:, i), yf(:, i ), 0, 1, gyf(:, i))
+            !call EvaluateBicubicSplineInterpolant( &
+            !    xf(:,i), yf(:,i), gxf(:,i), magneticField%interp, '1', '0')
+            !call EvaluateBicubicSplineInterpolant( &
+            !    xf(:,i), yf(:,i), gyf(:,i), magneticField%interp, '0', '1')
         end do
 
         ! Compute distances
@@ -1423,7 +1427,6 @@ module gdmod_costfunction
 
         ! Modules
         !========
-        use BicubicSplineInterpolant
 
         ! Declare variables
         !==================
@@ -1498,14 +1501,18 @@ module gdmod_costfunction
         yfv2 = 0.5*( yv(:, 3) + yv(:, 4) ) 
 
         ! Coordinate line vectors at face coordinates
-        call EvaluateBicubicSplineInterpolant(xfv1, yfv1, gxfv1, &
-            magneticField%interp, '1', '0')
-        call EvaluateBicubicSplineInterpolant(xfv2, yfv2, gxfv2, &
-            magneticField%interp, '1', '0')
-        call EvaluateBicubicSplineInterpolant(xfv1, yfv1, gyfv1, &
-            magneticField%interp, '0', '1')
-        call EvaluateBicubicSplineInterpolant(xfv2, yfv2, gyfv2, &
-            magneticField%interp, '0', '1')
+        call magneticField%interp%Evaluate(xfv1, yfv1, 1, 0, gxfv1)
+        call magneticField%interp%Evaluate(xfv2, yfv2, 1, 0, gxfv2)
+        call magneticField%interp%Evaluate(xfv1, yfv1, 0, 1, gyfv1)
+        call magneticField%interp%Evaluate(xfv2, yfv2, 0, 1, gyfv1)
+        !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, gxfv1, &
+        !  magneticField%interp, '1', '0')
+        !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, gxfv2, &
+        !    magneticField%interp, '1', '0')
+        !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, gyfv1, &
+        !    magneticField%interp, '0', '1')
+        !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, gyfv2, &
+        !    magneticField%interp, '0', '1')
         
         ! Face vectors
         dxv1 = xv(:, 2) - xv(:, 1)
@@ -1548,42 +1555,57 @@ module gdmod_costfunction
                     gyxyfv1(np), gyxyfv2(np), gyyyfv1(np), gyyyfv2(np))
 
                 ! Precompute gradient quantities
-                call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                    gxxfv1, magneticField%interp, '2', '0')
-                call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                    gxyfv1, magneticField%interp, '1', '1')
-                call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                    gyyfv1, magneticField%interp, '0', '2')
-                gyxfv1 = gxyfv1 ! symmetric, done for ease here
+                call magneticField%interp%Evaluate(xfv1, yfv1, 2, 0, gxxfv1)
+                call magneticField%interp%Evaluate(xfv1, yfv1, 1, 1, gxyfv1)
+                call magneticField%interp%Evaluate(xfv1, yfv1, 0, 2, gyyfv1)
+                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+                !    gxxfv1, magneticField%interp, '2', '0')
+                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+                !    gxyfv1, magneticField%interp, '1', '1')
+                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+                !    gyyfv1, magneticField%interp, '0', '2')
+                !gyxfv1 = gxyfv1 ! symmetric, done for ease here
 
-                call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                    gxxfv2, magneticField%interp, '2', '0')
-                call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                    gxyfv2, magneticField%interp, '1', '1')
-                call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                    gyyfv2, magneticField%interp, '0', '2')
+                call magneticField%interp%Evaluate(xfv2, yfv2, 2, 0, gxxfv2)
+                call magneticField%interp%Evaluate(xfv2, yfv2, 1, 1, gxyfv2)
+                call magneticField%interp%Evaluate(xfv2, yfv2, 0, 2, gyyfv2)
+                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+                !    gxxfv2, magneticField%interp, '2', '0')
+                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+                !    gxyfv2, magneticField%interp, '1', '1')
+                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+                !    gyyfv2, magneticField%interp, '0', '2')
                 gyxfv2 = gxyfv2 ! symmetric, done for ease here
 
                 ! Precompute hessian quantities
-                call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                    gxxxfv1, magneticField%interp, '3', '0')
-                call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                    gxxyfv1, magneticField%interp, '2', '1')
-                call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                    gxyyfv1, magneticField%interp, '1', '2')
-                call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                    gyyyfv1, magneticField%interp, '0', '3')
+                call magneticField%interp%Evaluate(xfv1, yfv1, 3, 0, gxxxfv1)
+                call magneticField%interp%Evaluate(xfv1, yfv1, 2, 1, gxxyfv1)
+                call magneticField%interp%Evaluate(xfv1, yfv1, 1, 2, gxyyfv1)
+                call magneticField%interp%Evaluate(xfv1, yfv1, 0, 3, gyyyfv1)
+
+                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+                !    gxxxfv1, magneticField%interp, '3', '0')
+                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+                !    gxxyfv1, magneticField%interp, '2', '1')
+                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+                !    gxyyfv1, magneticField%interp, '1', '2')
+                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+                !    gyyyfv1, magneticField%interp, '0', '3')
                 gyxyfv1 = gxyyfv1 ! symmetric, repeated for ease
                 gyxxfv1 = gxxyfv1 
 
-                call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                    gxxxfv2, magneticField%interp, '3', '0')
-                call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                    gxxyfv2, magneticField%interp, '2', '1')
-                call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                    gxyyfv2, magneticField%interp, '1', '2')
-                call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                    gyyyfv2, magneticField%interp, '0', '3')
+                call magneticField%interp%Evaluate(xfv2, yfv2, 3, 0, gxxxfv2)
+                call magneticField%interp%Evaluate(xfv2, yfv2, 2, 1, gxxyfv2)
+                call magneticField%interp%Evaluate(xfv2, yfv2, 1, 2, gxyyfv2)
+                call magneticField%interp%Evaluate(xfv2, yfv2, 0, 3, gyyyfv2)
+                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+                !    gxxxfv2, magneticField%interp, '3', '0')
+                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+                !    gxxyfv2, magneticField%interp, '2', '1')
+                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+                !    gxyyfv2, magneticField%interp, '1', '2')
+                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+                !    gyyyfv2, magneticField%interp, '0', '3')
                 gyxyfv2 = gxyyfv2 ! symmetric, repeated for ease
                 gyxxfv2 = gxxyfv2 
 
@@ -1603,20 +1625,28 @@ module gdmod_costfunction
                 gyxfv1(np), gyxfv2(np), gyyfv1(np), gyyfv2(np))
 
             ! Precompute gradient quantities
-            call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                gxxfv1, magneticField%interp, '2', '0')
-            call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                gxyfv1, magneticField%interp, '1', '1')
-            call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                gyyfv1, magneticField%interp, '0', '2')
+            call magneticField%interp%Evaluate(xfv1, yfv1, 2, 0, gxxfv1)
+            call magneticField%interp%Evaluate(xfv1, yfv1, 1, 1, gxyfv1)
+            call magneticField%interp%Evaluate(xfv1, yfv1, 0, 2, gyyfv1)
+
+            !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+            !    gxxfv1, magneticField%interp, '2', '0')
+            !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+            !    gxyfv1, magneticField%interp, '1', '1')
+            !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
+            !    gyyfv1, magneticField%interp, '0', '2')
             gyxfv1 = gxyfv1 ! symmetric, done for ease here
 
-            call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                gxxfv2, magneticField%interp, '2', '0')
-            call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                gxyfv2, magneticField%interp, '1', '1')
-            call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                gyyfv2, magneticField%interp, '0', '2')
+            call magneticField%interp%Evaluate(xfv2, yfv2, 2, 0, gxxfv2)
+            call magneticField%interp%Evaluate(xfv2, yfv2, 1, 1, gxyfv2)
+            call magneticField%interp%Evaluate(xfv2, yfv2, 0, 2, gyyfv2)
+
+            !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+            !    gxxfv2, magneticField%interp, '2', '0')
+            !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+            !    gxyfv2, magneticField%interp, '1', '1')
+            !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
+            !    gyyfv2, magneticField%interp, '0', '2')
             gyxfv2 = gxyfv2 ! symmetric, done for ease here
 
         end if
