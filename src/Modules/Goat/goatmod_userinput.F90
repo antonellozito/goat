@@ -99,10 +99,10 @@ module goatmod_userinput
         ! - GAtoGDfacelabelsubto: ... to this face label in GA to GD 
         ! interface
 
-        ! - GGtoGAfacelabelmappingGG: idem above but for GG to GA 
-        ! - GGtoGAfacelabelmappingGA
-        ! - GGtoGAfacelabelsubfrom
-        ! - GGtoGAfacelabelsubto
+        ! - GGtoGDfacelabelmappingGG: idem above but for GG to GD 
+        ! - GGtoGDfacelabelmappingGA
+        ! - GGtoGDfacelabelsubfrom
+        ! - GGtoGDfacelabelsubto
 
         ! Structure options
         ! - TP: structure numbers that are target plates
@@ -147,10 +147,10 @@ module goatmod_userinput
         integer(I8), allocatable    :: GDtoGAfacelabelsubfrom(:) 
         integer(I8), allocatable    :: GDtoGAfacelabelsubto(:) 
 
-        integer(I8), allocatable    :: GGtoGAfacelabelmappingGG(:)
-        integer(I8), allocatable    :: GGtoGAfacelabelmappingGD(:) 
-        integer(I8), allocatable    :: GGtoGAfacelabelsubfrom(:) 
-        integer(I8), allocatable    :: GGtoGAfacelabelsubto(:) 
+        integer(I8), allocatable    :: GGtoGDfacelabelmappingGG(:)
+        integer(I8), allocatable    :: GGtoGDfacelabelmappingGD(:) 
+        integer(I8), allocatable    :: GGtoGDfacelabelsubfrom(:) 
+        integer(I8), allocatable    :: GGtoGDfacelabelsubto(:) 
 
         ! Structure options
         integer(I8), allocatable    :: TP(:)
@@ -474,10 +474,10 @@ module goatmod_userinput
             options%GDtoGAfacelabelmappingGD(0), &
             options%GDtoGAfacelabelsubfrom(0), &
             options%GDtoGAfacelabelsubto(0), &
-            options%GGtoGAfacelabelmappingGG(0), &
-            options%GGtoGAfacelabelmappingGD(0), &
-            options%GGtoGAfacelabelsubfrom(0), &
-            options%GGtoGAfacelabelsubto(0))
+            options%GGtoGDfacelabelmappingGG(0), &
+            options%GGtoGDfacelabelmappingGD(0), &
+            options%GGtoGDfacelabelsubfrom(0), &
+            options%GGtoGDfacelabelsubto(0))
         
         ! Structure options
         allocate(options%TP(0), options%TPind(0), options%exclude(0))
@@ -726,18 +726,18 @@ module goatmod_userinput
         call ExtractOptionValueInteger1D(fid, field, &
             options%GDtoGAfacelabelsubto)
 
-        field = 'goat.GGtoGA.facelabelmappingGG'
+        field = 'goat.GGtoGD.facelabelmappingGG'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelmappingGG)
-        field = 'goat.GGtoGA.facelabelmappingGD'
+            options%GGtoGDfacelabelmappingGG)
+        field = 'goat.GGtoGD.facelabelmappingGD'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelmappingGD)
-        field = 'goat.GGtoGA.facelabelsubfrom'
+            options%GGtoGDfacelabelmappingGD)
+        field = 'goat.GGtoGD.facelabelsubfrom'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelsubfrom)
-        field = 'goat.GGtoGA.facelabelsubto'
+            options%GGtoGDfacelabelsubfrom)
+        field = 'goat.GGtoGD.facelabelsubto'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelsubto)
+            options%GGtoGDfacelabelsubto)
 
         ! OMP and IMP
         field = 'goat.OMP_r'

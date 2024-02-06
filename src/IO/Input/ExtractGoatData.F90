@@ -42,6 +42,12 @@ subroutine ExtractGoatData(grid, magneticField, environment, options)
     call environmentoptions%Set()
     call mfoptions%Set()
 
+    ! Reset label mappings for grid options
+    gridoptions%facelabelmappingGD      = options%GGtoGDfacelabelmappingGD
+    gridoptions%facelabelmappingGG      = options%GGtoGDfacelabelmappingGG
+    gridoptions%facelabelsubfrom        = options%GGtoGDfacelabelsubfrom
+    gridoptions%facelabelsubto          = options%GGtoGDfacelabelsubto
+
     ! Read data
     !==========
     ! Read grid
