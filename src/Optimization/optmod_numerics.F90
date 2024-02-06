@@ -93,6 +93,7 @@ module optmod_numerics
         real(R8)            :: rxfdec 
         real(R8)            :: rxfmin
         real(R8)            :: rxfdesign
+        logical             :: dolinesearch 
 
     contains 
 
@@ -201,6 +202,7 @@ module optmod_numerics
         num%rxfdesign       = 1
         num%rxfdec          = 0.98
         num%rxfmin          = 2e-2
+        num%dolinesearch    = .true.
 
     end subroutine
 

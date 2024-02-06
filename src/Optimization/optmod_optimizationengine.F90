@@ -139,6 +139,9 @@ module optmod_optimizationengine
         ! Relaxation of KKT system
         procedure :: RelaxKKTSystem
 
+        ! Step length computation
+        procedure :: ComputeStepLength
+
     end type
 
     ! Optimization engine
@@ -552,17 +555,20 @@ module optmod_optimizationengine
         ! Solver & updates
         real(R8), allocatable       :: fullmat(:, :)
         double precision, allocatable :: dx(:)
+        real(R8)                    :: alphals
+        integer(I8)                 :: flag
 
         ! Diagnostics
         logical                     :: checkgradients, checkhessians 
+
+        ! Timing
+        real                        :: t_it_s, t_it_e, &
+            t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e
 
         ! Data
 
         ! Temporary variables (to be deleted in the future)
         integer(I8)                 :: nphi, neq, nineq
-        real(R8)                    :: opttol
-
-            external dgesv
 
         ! Initialize & unpack
         !====================
@@ -574,10 +580,9 @@ module optmod_optimizationengine
         call solver%InitializeKKTSolver()
 
         ! Initialize the monitor - only temporary here
-        opttol = 1e-8
         call problem%GetProblemDimensions(nphi, neq, nineq)
         call problem%monitor%Initialize(solver%numKKT%maxit, nphi, neq,&
-            nineq, opttol)
+            nineq, solver%numKKT%tol)
 
         ! Cost function 
         allocate(gradJ(nphi))
@@ -630,12 +635,13 @@ module optmod_optimizationengine
         itopt = 1
         maxit = solver%numKKT%maxit
 
-        ! Unpack numerical options
-        rxf = solver%numKKT%rxf 
-        rxfdesign = solver%numKKT%rxfdesign 
-        rxfdec = solver%numKKT%rxfdec 
-        rxfmin = solver%numKKT%rxfmin 
-        verbosity = solver%numKKT%verbosity
+        ! Unpack 
+        associate(&
+            rxf         => solver%numKKT%rxf, &
+            rxfdesign   => solver%numKKT%rxfdesign, &
+            rxfdec      => solver%numKKT%rxfdec, &
+            rxfmin      => solver%numKKT%rxfmin, &
+            verbosity   => solver%numKKT%verbosity)
 
         ! Main loop
         !==========
@@ -651,6 +657,10 @@ module optmod_optimizationengine
 
         ! Loop
         do while ( (.not. converged) .and. (itopt <= maxit))
+
+            ! Start timing
+            call cpu_time(t_it_s)
+            call cpu_time(t_eval_s)
 
             ! Update the optimization problem 
             call problem%UpdateProblem()
@@ -691,6 +701,9 @@ module optmod_optimizationengine
             ! Check convergence
             call solver%CheckConvergenceKKT(gradL, converged, convnorm)
 
+            ! Timers
+            call cpu_time(t_eval_e)
+
             ! Solve 
             if (.not. converged) then 
 
@@ -701,30 +714,79 @@ module optmod_optimizationengine
                 !call SpyPlot(hessL%row, hessL%col, hessL%nval, '-p')
                 
                 ! Call the sparse solver
+                call cpu_time(t_linsolve_s)
                 call SolveSparseLinearSystemDI(hessL, -gradL, dx)
+                call cpu_time(t_linsolve_e)
 
             else
                 ! Don't solve again, already converged. Exit 
                 dx(:) = 0
             end if
 
+            ! Do linesearch?
+            alphals = 1
+            if (solver%numKKT%dolinesearch) then 
+                ! Compute the step length for the line search, don't 
+                ! apply relaxation using rxfdesign. Note: also the 
+                ! Lagrange multipliers may change!
+                call solver%ComputeStepLength(problem, dx, alphals, flag) ! dx is changed during linesearch
+
+                ! Check the linesearch output
+                if (flag == 0) then 
+                    ! All good
+
+                elseif (flag == -1) then 
+                    ! Non-descent direction, print message and skip remainder of iterate
+                    print *, 'non-descent direction, skipping update ' // &
+                        'and reattempt with damped Hessian'
+
+                    ! Set step to zero
+                    dx(:) = 0
+                    alphals = 0
+
+                    ! Add relaxation
+                    if (rxf > 0) then 
+                        rxf = 2*rxf 
+                    else
+                        ! Apparently no relaxation, add
+                        print *, 'No relaxation detected, adding relaxation'
+                        rxf = 1
+                        if (rxfdec > 0) then 
+                        else 
+                            rxfdec = 0.9
+                        end if 
+                    end if 
+                end if 
+
+            else
+                ! Directly update design without linesearch, apply the
+                ! relaxation using rxfdesign
+                dx(1:nphi) = rxfdesign*dx(1:nphi)
+            end if
+
             ! Update the design
-            call problem%UpdateDesign(solver%numKKT%rxfdesign*dx(1:nphi))
+            call problem%UpdateDesign(dx(1:nphi))
 
             ! Update lambda
             lambda(:) = lambda(:) + dx(nphi+1:nphi+neq)
+
+            ! Timers
+            call cpu_time(t_it_e)
 
             ! Update the monitor
             problem%monitor%itopt = itopt
 
             ! Update the monitor again
             problem%monitor%J(itopt)        = J
-            problem%monitor%dJ(:,itopt)     = gradJ
-            problem%monitor%dL(:,itopt)     = 0
-            problem%monitor%G(:,itopt)      = G
-            problem%monitor%H(:,itopt)      = H
+            problem%monitor%L(itopt)        = L
+            problem%monitor%G(itopt)        = maxval(abs(G))
+            problem%monitor%H(itopt)        = maxval(H)
+            problem%monitor%alpha(itopt)    = alphals
             problem%monitor%convnorm(itopt) = convnorm
-            problem%monitor%rxf = solver%numKKT%rxf 
+            problem%monitor%evaltime        = t_eval_e - t_eval_s
+            problem%monitor%ittime          = t_it_e - t_it_s 
+            problem%monitor%linsolvetime    = t_linsolve_e - t_linsolve_s
+            problem%monitor%rxf = rxf 
             problem%monitor%maxdphi = maxval(dx(1:nphi))
 
             ! Print the current iterate
@@ -738,14 +800,14 @@ module optmod_optimizationengine
             itopt = itopt+1
 
             ! Update the hessian relaxation factor
-            solver%numKKT%rxf = solver%numKKT%rxf*solver%numKKT%rxfdec
-            solver%numKKT%rxf = max(solver%numKKT%rxf, solver%numKKT%rxfmin)
+            rxf = rxf*rxfdec
+            rxf = max(rxf, rxfmin)
 
         end do
 
         ! Housekeeping
         deallocate(G, H, gradJ, lambda, mu)
-
+        end associate 
 
     end subroutine
 
@@ -1003,6 +1065,37 @@ module optmod_optimizationengine
     !subroutine EvaluateNCPfunction(ncp, A, I, gradncp, H, gradH, mu)
 
     !end subroutine
+    ! Step length computation
+    subroutine ComputeStepLength(solver, problem, dx, alpha, flag)
+
+        ! Description
+        !============
+        ! Compute the step length to take, given the step direction dx.
+        ! It is assumed that all necessary data etc can be derived from
+        ! the problem definition (e.g. dimensions of design variables).
+        ! The step length computation is typically done using a 
+        ! linesearch approach, depending on the numerics defined in the
+        ! solver object. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationProblemUDT)       :: problem 
+        real(R8), allocatable               :: dx(:)
+        real(R8)                            :: alpha
+        integer(I8)                         :: flag 
+        
+        ! Auxiliary
+
+        ! Initialize
+        !===========
+        ! Set flag 
+        flag = 0
+
+        
+
+    end subroutine
 
     !==================================================================!
     !                                                                  !
