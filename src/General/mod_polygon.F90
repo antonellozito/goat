@@ -585,6 +585,8 @@ module mod_polygon
         !=============================
         ! Initialize
         allocate(polygonarea(np), inpolygonmatrix(np, np))
+        polygonarea(:) = 0
+        inpolygonmatrix = .false.
 
         ! Compute area and nestedness
         do i = 1, np
@@ -722,6 +724,9 @@ module mod_polygon
                 call p(i)%Flip()
             end if 
         end do 
+
+        ! If we got here, everything worked fine. Set flag to zero
+        flag = 0
 
         ! Housekeeping
         !=============
@@ -1295,7 +1300,7 @@ module mod_polygon
             ne    => polygon%ne)
 
         ! Vertices
-        polygon%vert    = polygon%vert(nv:1:-1)
+        polygon%vert    = polygon%vert(ne+1:1:-1)
         polygon%edges   = polygon%edges(ne:1:-1, :)
         
         ! Edge centers

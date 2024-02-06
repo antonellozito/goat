@@ -1730,7 +1730,7 @@ module gdmod_constraints
         psival(:) = 0
 
         ! Evaluate
-        call interp%Evaluate(x, y, 0, 0, psival)
+        call interp%Evaluate(x(tv), y(tv), 0, 0, psival)
         G(:) = psival - psiD
 
         ! Constraint gradient
@@ -1751,14 +1751,14 @@ module gdmod_constraints
                 ! Allocate
                 jacG%nval = 2*ntv
                 call jacG%Allocate() 
-                allocate(dpsidx(designvariables%nphi))
-                allocate(dpsidy(designvariables%nphi))
+                allocate(dpsidx(ntv))
+                allocate(dpsidy(ntv))
                 allocate(conindex(ntv))
                 allocate(valindex(ntv))
 
                 ! Compute the derivative values
-                call interp%Evaluate(x, y, 1, 0, dpsidx)
-                call interp%Evaluate(x, y, 0, 1, dpsidy)
+                call interp%Evaluate(x(tv), y(tv), 1, 0, dpsidx)
+                call interp%Evaluate(x(tv), y(tv), 0, 1, dpsidy)
                 !call EvaluateBicubicSplineInterpolant(&
                 !   x(tv), y(tv), dpsidx, Psifun, '1', '0')
                 !call EvaluateBicubicSplineInterpolant(&
@@ -2032,7 +2032,7 @@ module gdmod_constraints
         do i = 1, size(grid%bnd)
 
             ! Check if target plate - hard coded here... 
-            if (any(grid%bnd(i)%ID == [1, 2, 5])) then 
+            if (any(grid%bnd(i)%ID == [1, 5])) then 
 
                 ! Get the current vertices
                 allocate(tv(grid%bnd(i)%nvert))
@@ -2075,7 +2075,7 @@ module gdmod_constraints
         isconstrained = .false. 
         ic = 0
         do i = 1, size(grid%bnd)
-            if (any(grid%bnd(i)%ID == [1, 2, 5])) then 
+            if (any(grid%bnd(i)%ID == [1, 5])) then 
 
                 ! Get the current vertices
                 allocate(tv(grid%bnd(i)%nvert))
