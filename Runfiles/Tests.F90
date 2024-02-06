@@ -101,7 +101,8 @@ module GOAT_tests
         ! Set evaluation points (avoid out of bounds)
         nq = 100
         nres = 6 ! number of results 
-        allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), vq(nq, nres))
+        allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), &
+            vq(nq, nres), temp(nq))
         call random_number(xq)
         call random_number(yq)
 
