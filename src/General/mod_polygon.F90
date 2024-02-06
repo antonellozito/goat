@@ -34,7 +34,7 @@
 !       nv, ne      number of unique polygon vertices (nv) and polygon 
 !                   edges (ne)
 !       x, y        vertex coordinates of the polygon (nv-by-1)
-!       edge        vertex pairs for each edge (ne-by-1, sorted in
+!       edges       vertex pairs for each edge (ne-by-1, sorted in
 !                   arbitrary direction)
 !       vert        vertex ordering of the polygon (ne+1-by-1), may contain
 !                   duplicates if the polygon is closed/non simple
@@ -130,6 +130,7 @@ module mod_polygon
         procedure :: IsSimplePolygon
         procedure :: IsSelfIntersectingPolygon
         procedure :: Inpolygon
+        procedure :: Flip           => FlipPolygon
         procedure :: SelfIntersections   => PolygonSelfIntersections
 
     end type 
@@ -149,6 +150,7 @@ module mod_polygon
         procedure :: SelfIntersections  => PolygonSetSelfIntersections
         procedure :: GetEdges           => GetPolygonSetEdges
         procedure :: WriteData          => WritePolygonSetData
+        procedure :: OrientNestedClosedPolygons
 
     end type 
 
@@ -484,6 +486,248 @@ module mod_polygon
         end associate 
 
         deallocate(tempx, tempy, temps1, temps2, tempp1, tempp2)
+
+
+
+    end subroutine
+
+    ! Orient nested closed polygons
+    subroutine OrientNestedClosedPolygons(polygonset, flag)
+
+        ! Description
+        !============
+        ! This routine checks first whether the polygon set consists of 
+        ! closed, (non-intersecting) nested polygons. If this is the 
+        ! case, the routine orients them as such that the interior of 
+        ! the domain is well defined.
+
+        ! This routine orients nested polygons such that the interior of the domain
+        ! is well defined. The initial orientation is such that the surface area
+        ! computed by integrating each line segment over the x-axis is positive.
+        ! Each nested polygon is then reoriented by changing the vertex order of
+        ! that polygon. 
+
+        ! Algorithm
+        !==========
+        ! To sort the polygons, we first determine which polygons are contained by
+        ! others and store this information in a connectivity matrix
+        ! 'inpolygonmatrix'. If the (i, j)th element is nonzero, this means that
+        ! the j-th polygon lies within the i-th polygon. Afterwards, we have the
+        ! following algorithm to determine the orientation:
+        !
+        ! 1) determine the initial orientation (this is taken equal to the sign of
+        ! the signed surface area of the polygon).
+        ! 2) For each polygon that does not have any parents, check if the
+        ! orientation matches the desired orientation. If not, change the sequence
+        ! of coordinates and related quantities (TPind etc)
+        ! 3) Mark these polygons as sorted and remove them as parents from any
+        ! other polygon (this can be done by modifying the inpolygonmatrix). Change
+        ! the sign of the desired orientation (this ensures a proper definition of
+        ! the interior of the domain)
+        ! 4) Repeat 2-3 until all polygons are found
+
+        ! Notes
+        !======
+        ! Note 1: this routine has not yet been thoroughly verified for 
+        ! multiple polygons - a warning is thrown 
+
+        ! Note 2: if the routine exits successfully, the output flag 
+        ! is equal to zero. If an exception occurs, it is larger than
+        ! zero, and typically a warning message will be printed. Some
+        ! flag meanings:
+        ! 0:    success
+        ! 1:    exit due to no polygons present in the set
+        ! 2:    intersecting closed polygons
+        ! 3:    coinciding closed polygons  
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)        :: polygonset 
+        integer(I8)                 :: flag
+
+        ! Auxiliary
+        integer(I8)                 :: orientation
+
+        real(R8), allocatable       :: polygonarea(:), ipx(:), ipy(:), &
+            yf(:), dx(:), jpx(:), jpy(:)   
+
+        logical, allocatable        :: inpolygonmatrix(:, :), jini(:), &
+            iinj(:), ispolygonfound(:), doflip(:), dopolyg(:)
+
+        ! Loop
+        integer(I8)                 :: i, j 
+
+        ! Initialize
+        !===========
+        ! Set flag (zero for success, > 0 for failure)
+        flag = 1
+
+        ! Associate
+        associate( &
+                np  => polygonset%np, &
+                p   => polygonset%polygons)
+
+        ! Check if multiple polygons are present
+        if (np > 1) then 
+            ! Issue warning
+            call PolygonWarningHandler('OrientNestedClosedPolygons: ' // &
+            'sorting part not yet verified for more than one vessel ' // &
+            'polygon, proceed with caution')
+        end if 
+
+        ! Exit in trivial cases
+        if (np == 0) then 
+            return 
+        end if 
+
+        ! Determine polygon nestedness
+        !=============================
+        ! Initialize
+        allocate(polygonarea(np), inpolygonmatrix(np, np))
+
+        ! Compute area and nestedness
+        do i = 1, np
+            ! Initialize
+            associate(&
+                nv      => p(i)%nv, &
+                ne      => p(i)%ne)
+
+            allocate(ipx(nv), ipy(nv), yf(ne), dx(ne))
+
+            ! Get current polygon coordinates
+            ipx = p(i)%x 
+            ipy = p(i)%y
+
+            ! Compute the surface area (basically integral over x with midpoint
+            ! rule)
+            yf = 0.5*(p(i)%y(1:nv-1) + p(i)%y(2:nv))
+            dx = (p(i)%x(2:nv) - p(i)%x(1:nv-1))
+            polygonarea(i) = sum(yf*dx)
+
+            ! Determine which polygons lie within this polygon or in which polygons
+            ! this polygon lies
+            do j = 1, np
+                ! Skip for same polygons
+                if (j == i) then 
+                    ! Skip
+                    cycle
+                end if
+
+                ! Initialize
+                associate(&
+                    nvj      => p(j)%nv)
+                allocate(jpx(nvj), jpy(nvj))
+
+                ! Get next polygon coordinates
+                jpx = p(j)%x
+                jpy = p(j)%y
+
+                ! Check if in polygon
+                call p(i)%inpolygon(jpx, jpy, jini)
+                call p(j)%inpolygon(ipx, ipy, iinj)
+
+                ! Sanity checks
+                if ((.not. all(jini) .and. (.not. all(.not. jini))) .or. &
+                     (.not. all(iinj) .and. (.not. all(.not. iinj))) ) then 
+                    ! Some polygons are only partly in another polygon. This would
+                    ! indicate intersections between closed polygons, which is not
+                    ! supported (and should in fact already be flagged above).
+                    ! Call warning handler and exit
+                    call PolygonWarningHandler(&
+                        'OrientNestedClosedPolygons: when sorting ' // &
+                        ' polygons, some polygons seem to ' // &
+                        'intersect. Returning...')
+                    flag = 2
+                    return 
+                end if
+                if (all(jini) .and. all(iinj)) then 
+                    ! Coinciding polygons - also not supported
+                    call PolygonWarningHandler(&
+                        'OrientNestedClosedPolygons: when sorting ' // &
+                        'polygons, detected coinciding polygons, ' // &
+                        'not supported. Returning...')
+                    flag = 3
+                    return 
+                end if
+
+                ! Add to matrix
+                if (all(jini)) then 
+                    inpolygonmatrix(i, j) = .true.
+                elseif (all(iinj)) then 
+                    inpolygonmatrix(j, i) = .true.
+                end if 
+
+                !    Housekeeping
+                end associate 
+                deallocate(jpx, jpy)
+            end do 
+
+            !    Housekeeping
+            end associate 
+            deallocate(ipx, ipy, yf, dx)
+        end do
+        
+        ! Check orientation
+        !==================
+        ! Initialize
+        allocate(ispolygonfound(np), doflip(np), dopolyg(np))
+        ispolygonfound(:)   = .false.
+        orientation         = 1
+        doflip(:)           = .false.
+
+        ! Loop
+        do while (.not. all(ispolygonfound)) 
+            ! Find the next overarching polygon
+            dopolyg(:) = .false. 
+            do i = 1, np
+                if (.not. ispolygonfound(i)) then 
+                    if (.not. any(inpolygonmatrix(:, i))) then  
+                        ! Polygon i does not lie in any other polygon
+                        dopolyg(i) = .true.
+                        ispolygonfound(i) = .true.
+                    end if
+                end if
+            end do
+            
+            ! Remove
+            do i = 1, np 
+                if (ispolygonfound(i)) then 
+                    inpolygonmatrix(i, :) = .false. 
+                end if 
+            end do 
+
+            ! Check orientation
+            do i = 1, np
+                if (dopolyg(i)) then 
+                    ! Check orientation
+                    if (polygonarea(i)*orientation < 0) then 
+                        ! If the signs differ, the expression is 
+                        ! negative and therefore the polygon should
+                        ! be flipped
+                        doflip(i) = .true.
+                    end if
+                end if
+            end do
+
+            ! Adjust orientation
+            orientation = -1*orientation;
+        end do 
+
+        ! Flip the polygon fields - sadly, no dynamic field naming is 
+        ! possible for UDTs in fortran AFAIK...
+        do i = 1, np
+            if (doflip(i)) then 
+                ! Flip
+                call p(i)%Flip()
+            end if 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+        
 
 
 
@@ -1025,6 +1269,51 @@ module mod_polygon
         end if 
 
         end associate 
+
+    end subroutine
+
+    ! Flipper
+    subroutine FlipPolygon(polygon)
+
+        ! Description
+        !============
+        ! This routine 'flips', i.e. changes the direction, of a polygon 
+        ! by changing the order of the vertices (not the vertex 
+        ! coordinates!). The metrics do not change, except for the sign 
+        ! of the normal and tangent vectors. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)       :: polygon 
+
+        ! Flip
+        !=====
+        ! Associate
+        associate( &
+            nv    => polygon%nv, &
+            ne    => polygon%ne)
+
+        ! Vertices
+        polygon%vert    = polygon%vert(nv:1:-1)
+        polygon%edges   = polygon%edges(ne:1:-1, :)
+        
+        ! Edge centers
+        polygon%ex      = polygon%ex(ne:1:-1)
+        polygon%ey      = polygon%ey(ne:1:-1)
+
+        ! Tangents and normals
+        polygon%tx      = -polygon%tx(ne:1:-1)
+        polygon%ty      = -polygon%ty(ne:1:-1)
+        polygon%tn      = polygon%tn(ne:1:-1)
+        polygon%nx      = -polygon%nx(ne:1:-1)
+        polygon%ny      = -polygon%ny(ne:1:-1)
+        polygon%nn      = polygon%nn(ne:1:-1)
+
+        ! Housekeeping
+        !=============
+        end associate 
+        
 
     end subroutine
 
