@@ -59,7 +59,7 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
 
     ! Auxiliary
     integer(I8)                 :: ni, nfinpol, thisp, firstpolygon, &
-        c1, c2, nvest, nvv, tempnv, nextp, sv, ev
+        c1, c2, nvest, nvv, tempnv, nextp, sv, ev, flag
     logical                     :: polygonnotfound, doflip  
     real(R8)                    :: nan, xs, ys, xe, ye 
 
@@ -426,9 +426,9 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
                 tempnv = ev - sv + 1 
                 if (doflip) then 
                     tempx(nvv+1:nvv+tempnv) = &
-                        ps%polygons(thisp)%x([(k, k = ev, sv, -1)])
+                        ps%polygons(thisp)%x(ev:sv:-1)
                     tempy(nvv+1:nvv+tempnv) = &
-                        ps%polygons(thisp)%y([(k, k = ev, sv, -1)])
+                        ps%polygons(thisp)%y(ev:sv:-1)
                 else 
                     tempx(nvv+1:nvv+tempnv) = ps%polygons(thisp)%x(ps%polygons(thisp)%vert(sv:ev))
                     tempy(nvv+1:nvv+tempnv) = ps%polygons(thisp)%y(ps%polygons(thisp)%vert(sv:ev))
@@ -456,6 +456,16 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
     xv = tempx(1:nvv)
     yv = tempy(1:nvv)
     call vessel%polygonset%Construct(xv, yv)
+
+    ! Test orientation
+    call vessel%polygonset%OrientNestedClosedPolygons(flag)
+
+    ! Check
+    if (flag .ne. 0) then  
+        ! Throw error
+        print *, 'flag: ', flag
+        call gdErrorHandler('ConstructVesselPolygon: could not orient polygons, OrientNestedClosedPolygons exited with flag above')
+    end if 
 
     ! Write data
     vesselpath = 'vesselpolygon'
