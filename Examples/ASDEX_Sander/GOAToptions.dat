@@ -276,7 +276,11 @@ VERSION 1.00.00
 'gd.opt.num.rxf'                    '1e3'
 'gd.opt.num.rxfdesign'              '1'
 'gd.opt.num.rxfmin'                 '0e-1'
-'gd.opt.num.rxfdec'                 '0.9'
+'gd.opt.num.rxfdec'                 '0.95'
+
+# Line search parameters 
+'gd.opt.num.ls.type'                'backtracking'
+'gd.opt.num.ls.meritfunction'       'l1'
 
 # Equality constraint relaxation
 'gd.num.KKTdriver.doeqconrelax'     '0'
