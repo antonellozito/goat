@@ -22,6 +22,7 @@ module GOAT_tests
     ! Subroutine to run all tests
     subroutine RunAllTests()
 
+        ! Interpolant testing
         call TestStructuredInterpolant2D()
 
     end subroutine

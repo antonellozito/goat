@@ -717,19 +717,19 @@ module gdmod_costfunction
 
         ! Compute hessian
         !================
+        ! Allocate the hessian (if not already done so)
+        if (.not. allocated(hessJ%row)) then
+            ! Allocate the sparse matrix
+            hessJ%nval = 36*sum(nvpairs) ! this should be exact and constant
+            call hessJ%Allocate()
+        end if
+
         if (dohessian) then
 
             ! Check the design variables
             select case (trim(designvariables%type))
 
             case ('coordinates')
-
-                ! Allocate the hessian (if not already done so)
-                if (.not. allocated(hessJ%row)) then
-                    ! Allocate the sparse matrix
-                    hessJ%nval = 36*sum(nvpairs) ! this should be exact and constant
-                    call hessJ%Allocate()
-                end if
 
                 ! Allocate auxiliary variables
                 allocate(row(9*sum(nvpairs)))
@@ -1750,19 +1750,18 @@ module gdmod_costfunction
 
         ! Compute hessian
         !================
+        ! Allocate the hessian (if not already done so)
+        if (.not. allocated(hessJ%row)) then
+            ! Allocate the sparse matrix
+            hessJ%nval = 64*np ! this should be exact and constant
+            call hessJ%Allocate()
+        end if
         if (dohessian) then
 
             ! Check the design variables
             select case (trim(designvariables%type))
 
             case ('coordinates')
-
-                ! Allocate the hessian (if not already done so)
-                if (.not. allocated(hessJ%row)) then
-                    ! Allocate the sparse matrix
-                    hessJ%nval = 64*np ! this should be exact and constant
-                    call hessJ%Allocate()
-                end if
 
                 ! Allocate auxiliary variables
                 allocate(row(16*np))

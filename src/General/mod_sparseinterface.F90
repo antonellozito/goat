@@ -652,9 +652,11 @@ module mod_sparseinterface
 
         ! Allocate
         !=========
-        allocate(mysparse%col(mysparse%nval))
-        allocate(mysparse%row(mysparse%nval))
-        allocate(mysparse%val(mysparse%nval))
+        if (.not. allocated(mysparse%col)) then 
+            allocate(mysparse%col(mysparse%nval))
+            allocate(mysparse%row(mysparse%nval))
+            allocate(mysparse%val(mysparse%nval))
+        end if 
 
     end subroutine
 

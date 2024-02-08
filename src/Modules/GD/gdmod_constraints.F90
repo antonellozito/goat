@@ -1703,6 +1703,14 @@ module gdmod_constraints
             call gdErrorHandler('Lambda should have the same size ' &
                 // 'as the constraint vector')
         end if
+        if (allocated(G)) then 
+            if (size(G, 1) .ne. constraints%ncon) then 
+                deallocate(G)
+                allocate(G(constraints%ncon))
+            end if 
+        else
+            allocate(G(constraints%ncon))
+        end if 
 
         ! Counters
         ic = 0 ! constraint counter (local)
@@ -1726,7 +1734,6 @@ module gdmod_constraints
 
         ! Allocate
         allocate(psival(nc))
-        allocate(G(nc))
         psival(:) = 0
 
         ! Evaluate
