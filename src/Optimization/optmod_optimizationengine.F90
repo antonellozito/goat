@@ -108,6 +108,10 @@ module optmod_optimizationengine
         procedure(EvaluateInequalityConstraintsINT), deferred :: &
             EvaluateInequalityConstraints
 
+        ! Merit function evaluation
+        procedure :: EvaluateMeritFunction
+        procedure :: EvaluateMeritFunctionL1
+
     end type
 
     ! Optimization solver
@@ -122,6 +126,7 @@ module optmod_optimizationengine
         character(:), allocatable                   :: inputfilepath
         character(:), allocatable                   :: inputfileprefix
         type(NumKKTUDT)         :: numKKT
+        type(numLSUDT)          :: numLS 
 
     contains 
 
@@ -476,6 +481,198 @@ module optmod_optimizationengine
     end subroutine
 
     !------------------------------------------------------------------!
+    !                       OPTIMIZATION PROBLEM                       !
+    !------------------------------------------------------------------!
+
+    ! Merit function wrapper
+    subroutine EvaluateMeritFunction(problem, f, DJf, dx, lambda, mu, &
+        doderiv, meritfunction, num)
+
+        ! Description
+        !============
+        ! Wrapper for merit function evaluation. It is assumed that all
+        ! data is given at the current (not updated) iterate, and that 
+        ! the next iterate is achieved by updating the design, lambda, 
+        ! and mu with dx. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemUDT)   :: problem 
+        real(R8)                        :: f, DJf
+        real(R8)                        :: dx(:)
+        real(R8), allocatable           :: lambda(:), mu(:)
+        logical                         :: doderiv 
+        character(*), intent(in)        :: meritfunction 
+        type(numLSUDT)                  :: num
+
+        ! Check which merit function to evaluate
+        select case (meritfunction) 
+
+        case ('l1')
+
+            call problem%EvaluateMeritFunctionL1(f, DJf, dx, lambda, &
+                mu, doderiv, num)
+
+        case default 
+
+            call gdErrorHandler('Unknown merit function type')
+
+        end select
+
+    end subroutine
+
+    ! L1 merit function
+    subroutine EvaluateMeritFunctionL1(problem, f, DJf, dx, lambda, mu, &
+        doderiv, num)
+
+        ! Description
+        !============
+        ! Evaluate the L1 merit function. This typically suffers from
+        ! Maratos effect in line searches, so this should be countered 
+        ! (e.g. with the second order correction). We assume that all
+        ! fields are already correctly updated (including lambda and mu)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemUDT)   :: problem 
+        real(R8)                        :: f, DJf
+        real(R8)                        :: dx(:)
+        real(R8), allocatable           :: lambda(:), mu(:), dl(:), dm(:)
+        logical                         :: doderiv 
+        type(numLSUDT)                  :: num
+
+        ! Auxiliary
+        logical                         :: dogradient, dohessian 
+        integer(I8)                     :: nphi, neq, nineq
+        real(R8)                        :: penfac, delta, sf, &
+            maxvalmu, maxvallambda, gnorm, hnorm
+
+        ! Cost function 
+        real(R8)                    :: J 
+        real(R8), allocatable       :: gradJ(:)
+        type(MySparseUDT)           :: hessJ 
+
+        ! Equality constraints 
+        real(R8), allocatable       :: G(:)
+        type(MySparseUDT)           :: gradG, hessG  
+
+        ! Inequality constraints 
+        logical, allocatable        :: A(:)
+        real(R8), allocatable       :: H(:)
+        type(MySparseUDT)           :: gradH, hessH
+
+        ! Initialize
+        !===========
+        ! Get problem dimensions
+        call problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Set scaling factor
+        sf = 1e-4
+
+        ! Extract lambda and mu updates
+        allocate(dl(neq), dm(nineq))
+        dl = dx(nphi+1:nphi+neq)
+        dm = dx(nphi+neq+1:nphi+neq+nineq)
+
+        ! Cost function 
+        allocate(gradJ(nphi))
+        J = 0
+        gradJ(:) = 0
+        hessJ%nrow = nphi 
+        hessJ%ncol = nphi 
+
+        ! Equality constraint 
+        allocate(G(neq))
+        G(:) = 0
+        gradG%nrow = nphi 
+        gradG%ncol = neq 
+        hessG%nrow = nphi 
+        hessG%ncol = nphi
+
+        ! Inequality constraint 
+        allocate(H(nineq), A(nineq))
+        H(:) = 0
+        A(:) = .false. 
+        gradH%nrow = nphi 
+        gradH%ncol = nineq 
+        hessH%nrow = nphi 
+        hessH%ncol = nphi
+
+        ! Compute delta
+        !==============
+        ! Check for maxima
+        maxvalmu        = 0
+        maxvallambda    = 0
+        if (nineq > 0) then 
+            maxvalmu = maxval(abs(mu + dm)) ! just in case the updates lead to negative mu
+        end if 
+        if (neq > 0) then 
+            maxvallambda = maxval(abs(lambda + dl)) 
+        end if 
+
+        ! Set constant
+        delta = 1e-4*(max(maxval(lambda + dl), maxval(mu + dm)))
+        if (delta <= 0) then 
+            ! Set default
+            delta = 1
+        end if
+
+        ! Compute cost function and constraints
+        !======================================
+        ! Check what we need to evaluate
+        dogradient  = .true.
+        dohessian   = .false.
+        if (.not. doderiv) then 
+            ! No gradients required
+            dogradient = .false.
+        end if 
+
+        ! Cost function
+        call problem%EvaluateCostFunction(J, gradJ, hessJ, dogradient, &
+            dohessian)
+
+        ! Equality constraints
+        call problem%EvaluateEqualityConstraints(G, gradG, hessG, &
+            dogradient, dohessian, lambda)
+
+        ! Inequality constraints
+        call problem%EvaluateInequalityConstraints(H, gradH, hessH, &
+            dogradient, dohessian, mu)
+
+        ! Compute merit function
+        !=======================
+        ! Compute penalty factor
+        penfac = max(maxvallambda, maxvalmu) + delta
+        
+        ! Compute L1 norm of constraints
+        gnorm = 0
+        hnorm = 0
+        if (neq > 0) then 
+            gnorm = sum(abs(G))
+        end if 
+        if (nineq > 0) then 
+            hnorm = sum(abs(pack(H, A)))
+        end if 
+
+        ! Compute values
+        f = J + penfac*(gnorm + hnorm)
+        if (doderiv) then 
+            if ((neq > 0) .or. (nineq > 0)) then 
+                DJf = sum(gradJ*dx(1:nphi)) - penfac*(gnorm + hnorm)
+            else 
+                ! Unconstrained value
+                DJf = sum(gradJ*dx(1:nphi))
+            end if 
+        end if 
+
+        ! Housekeeping
+        !=============
+
+    end subroutine
+    
+    !------------------------------------------------------------------!
     !                       OPTIMIZATION SOLVER                        !
     !------------------------------------------------------------------!
 
@@ -499,9 +696,11 @@ module optmod_optimizationengine
         !===========
         ! Numerics
         solver%numKKT%inputfilepath = solver%inputfilepath
-        solver%numKKT%fieldprefix = solver%inputfileprefix 
-        print *, solver%numKKT%fieldprefix
+        solver%numKKT%fieldprefix   = solver%inputfileprefix 
+        solver%numLS%inputfilepath  = solver%inputfilepath
+        solver%numLS%fieldprefix    = solver%inputfileprefix
         call solver%numKKT%InitializeNumParams() 
+        call solver%numLS%InitializeNumParams()
 
     end subroutine
 
@@ -525,10 +724,9 @@ module optmod_optimizationengine
         logical                     :: converged
         
         ! Auxiliary variables 
-        real(R8)                    :: rxf, rxfdesign, rxfdec, rxfmin, &
-            convnorm
+        real(R8)                    :: convnorm
         logical                     :: dogradient, dohessian 
-        
+
         ! Cost function 
         real(R8)                    :: J 
         real(R8), allocatable       :: gradJ(:)
@@ -725,17 +923,17 @@ module optmod_optimizationengine
 
             ! Do linesearch?
             alphals = 1
-            if (solver%numKKT%dolinesearch) then 
+            if (solver%numLS%dolinesearch) then 
                 ! Compute the step length for the line search, don't 
                 ! apply relaxation using rxfdesign. Note: also the 
                 ! Lagrange multipliers may change!
-                call solver%ComputeStepLength(problem, dx, alphals, flag) ! dx is changed during linesearch
+                call solver%ComputeStepLength(problem, dx, lambda, mu, alphals, flag) ! dx is changed during linesearch
 
                 ! Check the linesearch output
                 if (flag == 0) then 
                     ! All good
 
-                elseif (flag == -1) then 
+                elseif (flag == 1) then 
                     ! Non-descent direction, print message and skip remainder of iterate
                     print *, 'non-descent direction, skipping update ' // &
                         'and reattempt with damped Hessian'
@@ -758,6 +956,8 @@ module optmod_optimizationengine
                     end if 
                 end if 
 
+                ! Update lagrange multipliers using least-squares approach
+
             else
                 ! Directly update design without linesearch, apply the
                 ! relaxation using rxfdesign
@@ -767,9 +967,9 @@ module optmod_optimizationengine
             ! Update the design
             call problem%UpdateDesign(dx(1:nphi))
 
-            ! Update lambda
+            ! Update lagrange multipliers
             lambda(:) = lambda(:) + dx(nphi+1:nphi+neq)
-
+            
             ! Timers
             call cpu_time(t_it_e)
 
@@ -808,7 +1008,7 @@ module optmod_optimizationengine
         ! Housekeeping
         deallocate(G, H, gradJ, lambda, mu)
         end associate 
-
+        
     end subroutine
 
     ! KKT system relaxation
@@ -1066,7 +1266,7 @@ module optmod_optimizationengine
 
     !end subroutine
     ! Step length computation
-    subroutine ComputeStepLength(solver, problem, dx, alpha, flag)
+    subroutine ComputeStepLength(solver, problem, dx, lambda, mu, alpha, flag)
 
         ! Description
         !============
@@ -1077,23 +1277,148 @@ module optmod_optimizationengine
         ! linesearch approach, depending on the numerics defined in the
         ! solver object. 
 
+        ! The line search method should be defined in solver%numLS%type
+        ! and can be 'backtracking', 'wolfe', 'backtracking_soc'. The 
+        ! last one also applies a second-order correction. Note that 
+        ! no constraints are explicitly accounted for in this line 
+        ! search routine! Use an appropriate merit function for this
+        ! (see also the EvaluateMeritFunction subroutine)
+
         ! Declare variables
         !==================
         ! Arguments
         class(OptimizationSolverUDT)        :: solver 
         class(OptimizationProblemUDT)       :: problem 
-        real(R8), allocatable               :: dx(:)
+        real(R8), allocatable               :: dx(:), lambda(:), mu(:), dphi(:)
         real(R8)                            :: alpha
         integer(I8)                         :: flag 
         
         ! Auxiliary
+        logical                             :: conv, doderiv 
+        integer(I8)                         :: nphi, neq, nineq
+        real(R8)                            :: f0, DJf0, fk, DJfk
+
+        real(R8), allocatable               :: x0(:), x(:)
+
+        ! Loop
+        integer(I8)                         :: itls
 
         ! Initialize
         !===========
         ! Set flag 
         flag = 0
 
+        ! Set convergence parameters
+        conv = .false. 
+        itls = 0
+
+        ! Store initial design point
+        call problem%GetProblemDesignVariables(x0)
+
+        ! Get problem parameters
+        call problem%GetProblemDimensions(nphi, neq, nineq)
         
+        ! Unpack design update
+        allocate(dphi(nphi))
+        dphi = dx(1:nphi)
+
+        ! Associate
+        associate(&
+            numLS           => solver%numLS)
+        associate(&
+            maxit           => numLS%maxit, &
+            c1              => numLS%c1, &
+            c2              => numLS%c2, &
+            dec             => numLS%dec, &
+            inc             => numLS%inc, &
+            meritfunction   => numLS%meritfunction)
+
+        ! Descent check
+        !==============
+        ! Evaluate merit function and directional derivative
+        doderiv = .true. 
+        call problem%EvaluateMeritFunction(f0, DJf0, dx, lambda, mu, &
+            doderiv, meritfunction, numLS)
+
+        ! If no descent, exit with flag 1
+        if (DJf0 >= 0) then 
+            flag = 1
+            return 
+        end if 
+
+        ! Step length
+        !============
+        select case (numLS%type)
+
+        case ('backtracking')
+
+            ! Don't compute any derivatives
+            doderiv = .false.
+
+            ! Loop
+            do while ( (.not. conv) .and. (itls <= maxit) )
+            
+                ! Update current iterate
+                x = x0 + alpha*dphi
+
+                ! Update the design
+                call problem%UpdateDesign(alpha*dphi)
+
+                ! Update the problem
+                call problem%UpdateProblem()
+                
+                ! Calculate new cost function value
+                call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                    mu, doderiv, meritfunction, numLS)
+                
+                ! Check Armijo condition
+                if (fk < f0 + c1*alpha*DJf0) then 
+                    
+                    ! Sufficient decrease, terminate
+                    conv = .true.
+                    
+                else
+                    
+                    ! Decrease alpha
+                    alpha = dec*alpha
+                    
+                end if 
+                
+                ! Update counter
+                itls = itls + 1
+
+                ! De-update the design
+                call problem%UpdateDesign(x0-x)
+
+            end do
+            
+            ! Checks
+            if (itls-1 == maxit) then 
+                ! Print message, set flag
+                if (numLS%verbosity > 0) then 
+                    print *, 'linesearch did not converge'
+                end if 
+            end if 
+
+            
+
+        case ('wolfe')
+
+
+        case ('backtracking_soc')
+
+        case default
+
+            ! Unknown option, throw error
+            call gdErrorHandler('ComputeStepLength: unknown line search option: ' &
+                 // solver%numLS%type)
+
+        end select 
+
+        ! Housekeeping
+        !=============
+        end associate
+        end associate 
 
     end subroutine
 
