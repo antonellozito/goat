@@ -1284,6 +1284,10 @@ module optmod_optimizationengine
         ! search routine! Use an appropriate merit function for this
         ! (see also the EvaluateMeritFunction subroutine)
 
+        ! Modules
+        !========
+        use ieee_arithmetic
+
         ! Declare variables
         !==================
         ! Arguments
@@ -1296,9 +1300,11 @@ module optmod_optimizationengine
         ! Auxiliary
         logical                             :: conv, doderiv 
         integer(I8)                         :: nphi, neq, nineq
-        real(R8)                            :: f0, DJf0, fk, DJfk
+        real(R8)                            :: f0, DJf0, fk, DJfk, &
+            alpha_bot, alpha_top
 
         real(R8), allocatable               :: x0(:), x(:)
+        real                                :: inf 
 
         ! Loop
         integer(I8)                         :: itls
@@ -1311,6 +1317,9 @@ module optmod_optimizationengine
         ! Set convergence parameters
         conv = .false. 
         itls = 0
+
+        ! Set infinity
+        inf = ieee_value(inf, ieee_positive_inf)
 
         ! Store initial design point
         call problem%GetProblemDesignVariables(x0)
@@ -1399,10 +1408,75 @@ module optmod_optimizationengine
                     print *, 'linesearch did not converge'
                 end if 
             end if 
-
             
 
         case ('wolfe')
+
+            ! Compute derivatives
+            doderiv = .true. 
+
+            ! Bounds for alpha (hard coded here)
+            alpha_bot = 0
+            alpha_top = inf 
+
+            ! Loop
+            do while ( (.not. conv) .and. (itls <= maxit) )
+            
+                ! Update current iterate
+                x = x0 + alpha*dphi
+
+                ! Update the design
+                call problem%UpdateDesign(alpha*dphi)
+
+                ! Update the problem
+                call problem%UpdateProblem()
+                
+                ! Calculate new cost function value
+                call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                    mu, doderiv, meritfunction, numLS)
+                
+                ! Check Armijo & Wolfe conditions
+                if (fk > f0 + c1*alpha*DJf0) then 
+                    
+                    ! Decrease alpha
+                    alpha_top   = alpha 
+                    alpha       = dec*(alpha_top + alpha_bot)
+                    alpha = dec*alpha
+
+                elseif (DJfk < c2*DJf0) then 
+
+                    ! Increase alpha
+                    alpha_bot = alpha 
+                    if (itls < maxit) then 
+                        if (alpha_top == inf) then 
+                            alpha = inc*alpha_bot 
+                        else 
+                            alpha = dec*(alpha_top + alpha_bot) 
+                        end if 
+                    end if 
+                    
+                else 
+
+                    ! Sufficient decrease
+                    conv = .true. 
+                    
+                end if 
+                
+                ! Update counter
+                itls = itls + 1
+
+                ! De-update the design
+                call problem%UpdateDesign(x0-x)
+
+            end do
+            
+            ! Checks
+            if (itls-1 == maxit) then 
+                ! Print message, set flag
+                if (numLS%verbosity > 0) then 
+                    print *, 'linesearch did not converge'
+                end if 
+            end if 
 
 
         case ('backtracking_soc')
@@ -1414,6 +1488,9 @@ module optmod_optimizationengine
                  // solver%numLS%type)
 
         end select 
+
+        ! Apply step length to dphi
+        dx(1:nphi) = dx(1:nphi)*alpha
 
         ! Housekeeping
         !=============
