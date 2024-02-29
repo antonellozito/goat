@@ -125,6 +125,7 @@ module mod_sparseinterface
         module procedure MultiplyWithScalarRight
         module procedure MultiplyWithVectorRowwiseLeft
         module procedure MultiplyWithVectorRowwiseRight
+        module procedure MultiplySparseMatrices
     end interface
 
     contains
@@ -473,6 +474,135 @@ module mod_sparseinterface
         end do
 
     end function
+
+    ! Multiply two sparse matrices
+    function MultiplySparseMatrices(a, b) result(c) 
+
+        ! Description
+        !============
+        ! Multiply two sparse matrices. A very stupid and likely 
+        ! inefficient implementation which should by all means by 
+        ! replaced by a more powerful alternative in the future 
+        ! (e.g. interfacing with CHOLMOD or GraphBLAS of 
+        ! the SuiteSparse code suite)
+
+        ! The operation being done is:
+        ! 
+        !   c_ij = a_ik b_kj,
+        !
+        ! where summation of k is implied. a and b should have 
+        ! compatible dimensions
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(MySparseUDT), intent(in)           :: a, b
+        type(MySparseUDT)                       :: c 
+
+        ! Auxiliary
+        real(R8), allocatable                   :: val(:), tempval(:)
+        integer(I8), allocatable                :: row(:), temprow(:), &
+            col(:), tempcol(:)
+        integer(I8)                             :: grow, nv 
+        logical                                 :: doupdate
+
+        ! Loop
+        integer(I8)                             :: i, j, k, l
+
+        ! Initialize
+        !===========
+        ! Check if dimensions are compatible
+        if (a%ncol .ne. b%nrow) then 
+            call gdErrorHandler('MultiplySparseMatrices: dimensions are inconsistent')
+        end if 
+
+        ! Determine dimensions of c
+        c%nrow = a%nrow
+        c%ncol = b%ncol 
+
+        ! Check if one of the matrices is the zero matrix
+        if ( (a%nval == 0) .or. (b%nval == 0) ) then 
+            ! Return the zero matrix
+            c%nval = 0
+            call c%Allocate()
+            return 
+        end if 
+        
+        ! Compute
+        !========
+        ! Set value counter
+        nv = 1
+
+        ! Set grow factor
+        grow = 2 
+
+        ! Initialize
+        allocate(row(a%nval), col(a%nval), val(a%nval))
+        val(:) = 0
+
+        ! Loop
+        do i = 1, c%nrow 
+            do j = 1, c%ncol 
+                ! Initialize
+                doupdate = .false.
+
+                ! Update value counter
+                do k = 1, a%nval 
+                    if (a%row(k) == i) then 
+                        do l = 1, b%nval 
+                            if ( (b%col(l) == j) .and. (a%col(k) == b%row(l)) ) then 
+                                val(nv) = val(nv) + a%val(k)*b%val(l)
+                                doupdate = .true.
+                            end if 
+                        end do 
+                    end if 
+                end do
+                
+                ! Check if we need to update nv
+                if (doupdate) then 
+                    ! Set row and column indices of this value
+                    row(nv) = i
+                    col(nv) = j 
+
+                    ! Check if we need to extend
+                    if (nv+1 > size(val, 1)) then 
+                        ! Copy and extend
+                        allocate(temprow(nv), tempcol(nv), tempval(nv))
+                        temprow = row 
+                        tempcol = col 
+                        tempval = val
+                        
+                        deallocate(row, col, val)
+                        allocate(row(nv*grow), col(nv*grow), val(nv*grow))
+
+                        ! Set value
+                        row(1:nv) = temprow(1:nv)
+                        col(1:nv) = tempcol(1:nv)
+                        val(1:nv) = tempval(1:nv)
+
+                        ! Deallocate
+                        deallocate(temprow, tempcol, tempval)
+                    end if
+
+                    ! Update counter
+                    nv = nv + 1
+
+                end if 
+            end do 
+        end do 
+
+        ! Downdate
+        nv = nv - 1
+
+        ! Build c
+        c%nval = nv 
+        call c%Allocate()
+        c%row = row(1:nv)
+        c%col = col(1:nv)
+        c%val = val(1:nv)
+
+    end function 
+
     ! Delete rows
     function DeleteRowsLogical(a, b) result(c)
 
@@ -1002,7 +1132,7 @@ module mod_sparseinterface
         end if 
 
 
-    end function
+    end function 
 
     !------------------------------------------------------------------!
     !                           HOUSEKEEPING                           !
