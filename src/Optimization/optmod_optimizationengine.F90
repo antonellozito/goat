@@ -1299,7 +1299,7 @@ module optmod_optimizationengine
         
         ! Auxiliary
         logical                             :: conv, doderiv 
-        integer(I8)                         :: nphi, neq, nineq
+        integer(I8)                         :: nphi, neq, nineq, na
         real(R8)                            :: f0, DJf0, fk, DJfk, &
             alpha_bot, alpha_top
 
@@ -1308,6 +1308,13 @@ module optmod_optimizationengine
 
         ! Loop
         integer(I8)                         :: itls
+
+        ! Variables for second order correction
+        real(R8), allocatable               :: G(:), H(:), ck(:)
+        type(MySparseUDT)                   :: gradG, gradH, hessG, &
+            hessH, Ak  
+        logical                             :: dogradient, dohessian 
+        logical, allocatable                :: A(:)
 
         ! Initialize
         !===========
@@ -1330,6 +1337,19 @@ module optmod_optimizationengine
         ! Unpack design update
         allocate(dphi(nphi))
         dphi = dx(1:nphi)
+
+        ! Initialize second order correction variables
+        allocate(G(neq), H(nineq))
+        gradG%nrow = nphi 
+        gradG%ncol = neq 
+        hessG%nrow = nphi 
+        hessG%ncol = nphi
+        gradH%nrow = nphi 
+        gradH%ncol = nineq
+        hessH%nrow = nphi 
+        hessH%ncol = nphi
+        dogradient  = .true. 
+        dohessian   = .false.
 
         ! Associate
         associate(&
@@ -1480,6 +1500,75 @@ module optmod_optimizationengine
 
 
         case ('backtracking_soc')
+
+            ! Don't compute any derivatives
+            doderiv = .false.
+
+            ! Loop
+            do while ( (.not. conv) .and. (itls <= maxit) )
+            
+                ! Update current iterate
+                x = x0 + alpha*dphi
+
+                ! Update the design
+                call problem%UpdateDesign(alpha*dphi)
+
+                ! Update the problem
+                call problem%UpdateProblem()
+                
+                ! Calculate new cost function value
+                call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                    mu, doderiv, meritfunction, numLS)
+                
+                ! Check Armijo condition
+                if (fk < f0 + c1*alpha*DJf0) then 
+                    
+                    ! Sufficient decrease, terminate
+                    conv = .true.
+                    
+                else
+                    
+                    ! Try if we can get there by applying a second order
+                    ! correction
+
+                    ! Note: in Nocedal, this is only done if alpha = 1, but
+                    ! this seems to work better if we do it at each attempt. 
+
+                    ! Compute constraints & linearization
+                    call problem%EvaluateEqualityConstraints(G, gradG, &
+                        hessG, dogradient, dohessian, lambda)
+                    call problem%EvaluateInequalityConstraints(H, gradH, &
+                        hessH, dogradient, dohessian, mu)
+
+                    ! Compute active set
+                    A = H > 0
+                    na = count(A)
+
+                    ! Construct problem 
+                    allocate(ck(neq + na))
+                    ck = [G, pack(H, A)]
+                    Ak = gradG%Concatenate(gradH%DeleteColumns(.not. A), 2)
+                    
+                    ! Decrease alpha
+                    alpha = dec*alpha
+                    
+                end if 
+                
+                ! Update counter
+                itls = itls + 1
+
+                ! De-update the design
+                call problem%UpdateDesign(x0-x)
+
+            end do
+            
+            ! Checks
+            if (itls-1 == maxit) then 
+                ! Print message, set flag
+                if (numLS%verbosity > 0) then 
+                    print *, 'linesearch did not converge'
+                end if 
+            end if 
 
         case default
 
