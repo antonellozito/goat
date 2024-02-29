@@ -72,6 +72,15 @@ module mod_sparseinterface
         procedure :: ExtractColumnFull 
         procedure :: ExtractRowFull
 
+        ! Deletion routines
+        procedure :: DeleteRowsLogical 
+        procedure :: DeleteRowsInteger 
+        generic   :: DeleteRows     => DeleteRowsLogical, DeleteRowsInteger
+
+        procedure :: DeleteColumnsLogical 
+        procedure :: DeleteColumnsInteger 
+        generic   :: Deletecolumns  => DeleteColumnsLogical, DeleteColumnsInteger
+
         ! Summation routines
         procedure :: SumColumnwiseFull
         procedure :: SumRowwiseFull
@@ -81,6 +90,14 @@ module mod_sparseinterface
 
         ! Transposition
         procedure :: Transpose      => Transp
+
+        ! Concatenation
+        procedure :: Concatenate2
+        procedure :: ConcatenateN 
+        generic   :: Concatenate    => Concatenate2, ConcatenateN
+
+        ! Conversion
+        procedure :: ConvertToFull
 
         ! Housekeeping procedures
         procedure :: Allocate       => AllocateMySparse
@@ -456,6 +473,155 @@ module mod_sparseinterface
         end do
 
     end function
+    ! Delete rows
+    function DeleteRowsLogical(a, b) result(c)
+
+        ! Description
+        !============
+        ! Delete the rows of the matrix a that are true in the logical
+        ! vector b. b should have adequate dimensions. The matrix's row
+        ! dimension will be reduced by COUNT(b).
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        type(MySparseUDT)       :: c
+        logical, intent(in)     :: b(:) 
+
+        ! Auxiliary
+        logical, allocatable    :: reductionvec(:)
+
+        ! Initialize
+        !===========
+        ! Set output
+        c = a 
+
+        ! Check sizes
+        if (size(b, 1) .ne. a%nrow) then 
+            call gdErrorHandler('DeleteRowsLogical: deletion vector has improper dimensions')
+        end if 
+
+        ! Check if allocated
+        if (.not. allocated(a%row)) then 
+            call gdErrorHandler('DeleteRowsLogical: matrix is not allocated')
+        end if 
+
+        ! Delete
+        !=======
+        ! Adjust dimension
+        c%nrow = a%nrow - count(b)
+        c%ncol = a%ncol
+
+        ! Remove elements, if any
+        if (a%nval > 0) then 
+            
+            ! Determine elements to retain
+            reductionvec = .not. b(a%row)
+
+            ! Construct new matrix
+            c%nval  = count(reductionvec)
+            c%row   = pack(a%row, reductionvec)
+            c%col   = pack(a%col, reductionvec)
+
+        end if 
+
+    end function
+
+    function DeleteRowsInteger(a, b) result(c)
+
+        ! Description
+        !============
+        ! Same functionality as DeleteRowsLogical, but now the input
+        ! vector is an integer array. This routine converts the array
+        ! to a logical array (and performs some checks) and calls the
+        ! logical deletion routine afterwards. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        integer(I8), intent(in) :: b(:)
+        type(MySparseUDT)       :: c 
+
+        ! Auxiliary
+        logical, allocatable    :: bl(:)
+
+        ! Initialize
+        !===========
+        ! Check b
+        if ( (minval(b) < 1) .or. (maxval(b) > a%nrow ) ) then 
+            ! Out of bounds, throw error
+            call gdErrorHandler('DeleteRowsInteger: some values are out of bounds for deletion')
+        end if 
+
+        ! Construct logical
+        allocate(bl(a%nrow))
+        bl(b) = .true. 
+
+        ! Delete
+        !=======
+        c = a%DeleteRowsLogical(bl) 
+
+
+    end function 
+
+    ! Delete columns
+    function DeleteColumnsLogical(a, b) result(c)
+        
+        ! Description
+        !============
+        ! The same as rows, but now for columns. Here, we simply 
+        ! transpose the matrix first, call the row deleter, then 
+        ! transpose again. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        logical, intent(in)     :: b(:)
+        type(MySparseUDT)       :: c 
+
+        ! Delete
+        !=======
+        ! Transpose
+        c = a%Transpose()
+
+        ! Delete
+        c = c%DeleteRows(b)
+
+        ! Transpose again
+        c = c%Transpose()
+
+    end function
+
+    function DeleteColumnsInteger(a, b) result(c)
+        
+        ! Description
+        !============
+        ! The same as rows, but now for columns. Here, we simply 
+        ! transpose the matrix first, call the row deleter, then 
+        ! transpose again. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        integer(I8), intent(in) :: b(:)
+        type(MySparseUDT)       :: c 
+
+        ! Delete
+        !=======
+        ! Transpose
+        c = a%Transpose()
+
+        ! Delete
+        c = c%DeleteRows(b)
+
+        ! Transpose again
+        c = c%Transpose()
+
+    end function
 
     ! Sum over columns (returns full)
     subroutine SumColumnwiseFull(mysparse, col)
@@ -626,6 +792,215 @@ module mod_sparseinterface
             tr = a%row(i)
             c(tr) = c(tr) + b(tc)*a%val(i)
         end do 
+
+    end function
+
+    ! Concatenation, 2 sparse matrices
+    function Concatenate2(a, b, dim) result(c)
+
+        ! Description
+        !============
+        ! Concatenate two matrices a and b along dimension dim (can only
+        ! be 1 (row) and 2 (column)). Matrix a is always the first 
+        ! matrix, so basically this operation yields [a, b] in case of 
+        ! column-wise (dim = 2) concatenation, and [a; b] in case of 
+        ! rowwise concatenation
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT), intent(in)      :: a, b
+        type(MySparseUDT)                   :: c
+
+        ! Auxiliary
+        integer(I8), intent(in)             :: dim
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Checks
+        !=======
+        ! Are matrices allocated
+        if ( (.not. allocated(a%val)) .or.(.not. allocated(b%val)) ) then 
+            call gdErrorHandler('Concatenate2: matrices are not allocated')
+        end if 
+
+        ! Is the dimension legal
+        if ( (dim > 2) .or. (dim < 1) ) then 
+            call gdErrorHandler('Concatenate2: dimension argument must be either 1 or 2')
+        end if 
+
+        ! Concatenate
+        !============
+        if (dim == 1) then 
+            ! Concatenate rowwise, i.e. column dimension must be the same
+            if ( a%ncol .ne. b%ncol) then 
+                call gdErrorHandler('Concatenate2: cannot concatenate ' &
+                    // 'over row, column dimensions are inconsistent')
+            end if 
+
+            ! Set dimensions
+            c%ncol = a%ncol
+            c%nrow = a%nrow + b%nrow
+            c%nval = a%nval + b%nval 
+
+            ! Allocate
+            call c%Allocate()
+            
+            ! Concatenate
+            c%val = [a%val, b%val]
+            c%row = [a%row, b%row+a%nrow]
+            c%col = [a%col, b%col]
+
+        else
+            ! Concatenate columnwise, i.e. row dimension must be the same
+            if ( a%nrow .ne. b%nrow) then 
+                call gdErrorHandler('Concatenate2: cannot concatenate ' &
+                    // 'over column, row dimensions are inconsistent')
+            end if 
+
+            ! Set dimensions
+            c%nrow = a%nrow
+            c%ncol = a%ncol + b%ncol
+            c%nval = a%nval + b%nval 
+
+            ! Allocate
+            call c%Allocate()
+            
+            ! Concatenate
+            c%val = [a%val, b%val]
+            c%row = [a%row, b%row]
+            c%col = [a%col, b%col + a%ncol]
+
+        end if 
+
+
+    end function 
+
+    ! Concatenation, array of N sparse matrices
+    function ConcatenateN(b, a, dim) result(c)
+
+        ! Description
+        !============
+        ! Concatenate N matrices, which should be given in an array
+        ! as input. They are concatenated in the same sequence as they
+        ! appear in the array. Other functionality is like Concatenate2
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT), intent(in)      :: a(:)
+        class(MySparseUDT)                  :: b ! passed object must be scalar
+        type(MySparseUDT)                   :: c
+
+        ! Auxiliary
+        integer(I8), intent(in)             :: dim
+        integer(I8)                         :: n, nv, nr, nc
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Checks
+        !=======
+        ! Get the size
+        n = size(a, 1)
+
+        ! Check
+        if (n == 0) then 
+            ! Empty, return empty matrix
+            c%nrow = 0
+            c%ncol = 0
+            c%nval = 0
+            call c%Allocate()
+            return 
+        end if 
+
+        ! Are matrices allocated
+        do i = 1, n
+            if ( .not. allocated(a(i)%val) ) then 
+                call gdErrorHandler('ConcatenateN: matrices are not allocated')
+            end if 
+        end do 
+
+        ! Is the dimension legal
+        if ( (dim > 2) .or. (dim < 1) ) then 
+            call gdErrorHandler('ConcatenateN: dimension argument must be either 1 or 2')
+        end if 
+
+        ! Concatenate
+        !============
+        if (dim == 1) then 
+            ! Concatenate rowwise, i.e. column dimension must be the same
+            do i = 2, n
+                if ( a(1)%ncol .ne. a(i)%ncol) then 
+                    call gdErrorHandler('ConcatenateN: cannot concatenate ' &
+                        // 'over row, column dimensions are inconsistent')
+                end if 
+            end do 
+
+            ! Set dimensions
+            c%ncol = a(1)%ncol
+            c%nrow = 0
+            c%nval = 0
+            do i = 1, n
+                c%nrow = c%nrow + a(i)%nrow
+                c%nval = c%nval + a(i)%nval 
+            end do
+
+            ! Allocate
+            call c%Allocate()
+            
+            ! Concatenate
+            nv = 0
+            nr = 0
+            do i = 1, n 
+                ! Add
+                c%val(nv+1:nv+a(i)%nval) = a(i)%val
+                c%row(nv+1:nv+a(i)%nval) = a(i)%row + nr
+                c%col(nv+1:nv+a(i)%nval) = a(i)%col
+
+                ! Update counters
+                nr = nr + a(i)%nrow
+                nv = nv + a(i)%nval
+            end do
+
+        else
+            ! Concatenate columnwise, i.e. row dimension must be the same
+            do i = 2, n
+                if ( a(1)%nrow .ne. a(i)%nrow) then 
+                    call gdErrorHandler('ConcatenateN: cannot concatenate ' &
+                        // 'over column, row dimensions are inconsistent')
+                end if 
+            end do 
+
+            ! Set dimensions
+            c%nrow = a(1)%nrow
+            c%ncol = 0
+            c%nval = 0
+            do i = 1, n
+                c%ncol = c%ncol + a(i)%ncol
+                c%nval = c%nval + a(i)%nval 
+            end do
+
+            ! Allocate
+            call c%Allocate()
+            
+            ! Concatenate
+            nv = 0
+            nc = 0
+            do i = 1, n 
+                ! Add
+                c%val(nv+1:nv+a(i)%nval) = a(i)%val
+                c%row(nv+1:nv+a(i)%nval) = a(i)%row 
+                c%col(nv+1:nv+a(i)%nval) = a(i)%col + nc
+
+                ! Update counters
+                nc = nc + a(i)%ncol
+                nv = nv + a(i)%nval
+            end do
+
+        end if 
+
 
     end function
 
