@@ -23,12 +23,17 @@ BLASPATH = -lblas
 ## UMFPACKPATH 			: UMFPACK library path (user defined)
 UMFPACKPATH = -lumfpack
 
+## % Include paths
+## %==============
+## SUITESPARSEPATH      : SuiteSparse header file path
+SUITESPARSEPATH = /usr/include/suitesparse
+
 ##
 ## % Targets
 ## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
 GDRUN_TARGETS = Constants Auxiliary General Optimization Modules IO_b25  \
-    IO_carre IO_output IO_input  Setup  Drivers Numerics
+    IO_carre IO_output IO_input  Setup  Drivers Numerics Clayer
 
 ## GOAT_TARGETS             : Targets to be run for the full goat
 GOAT_TARGETS = $(GDRUN_TARGETS) 
@@ -36,13 +41,16 @@ GOAT_TARGETS = $(GDRUN_TARGETS)
 ## TEST_TARGETS             : Targets to be run for goat tests
 TEST_TARGETS = $(GOAT_TARGETS) 
 
+## CTEST_TARGETS            : Targets to be run to test C layer
+CTEST_TARGETS = Clayer
+
 ##
 ## % Compiler
 ## %=========
-## FC			: Compiler to be used
+## FC			: Compiler to be used for fortran
 FC = gfortran
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS = -c -g -Wall -O3 -fopenmp
+CFLAGS_DEF = -c -g -Wall -O0 
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
@@ -50,10 +58,13 @@ CFLAGS_DEBUG = -c -g -Wall -pg  -O0
 ## CFLAGS_OMP_DEBUG	: compiler flags for OpenMP and debugging
 CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
 
+## CC           : Compiler to be used for C
+CC = gcc 
+
 ## % Linker
 ## %=======
 ## LFLAGS			: linking flags to be used (apart from libraries)
-LFLAGS_DEFAULT =  
+LFLAGS_DEF =  
 
 ## LFLAGS_DEBUG 	: linking flags for debugging
 LFLAGS_DEBUG = -pg -g
@@ -67,10 +78,13 @@ LFLAGS_OMP_DEBUG = -pg -g -fopenmp
 # Set flags
 #==========
 # Set the CFLAGS
-CFLAGS = $(CFLAGS_DEBUG)
+CFLAGS = $(CFLAGS_DEF)
 
 # Set the linking flags
-LFLAGS = $(LFLAGS_DEBUG)
+LFLAGS = $(LFLAGS_DEF)
+
+# Set CFLAGS for C compiler
+CCFLAGS = $(CFLAGS_DEF) 
 
 ##
 ## % Files
@@ -124,3 +138,6 @@ OPTIMIZATION_FILES = $(wildcard src/Optimization/*.F90)
 
 ## CONSTANTS            : constants such as precision and special characters (.F90) - unsequenced
 CONSTANTS_FILES = $(wildcard src/Constants/*.F90)
+
+## Clayer               : c files for interfacing with other c code
+CLAYER_FILES    = $(wildcard src/Clayer/*.c)

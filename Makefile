@@ -16,13 +16,18 @@ include config.mk
 # Linking
 ## gdrun			: Create executable for grid deformation
 goat: $(GOAT_TARGETS) goat.o
-	$(FC) -o goat *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) 
+	$(FC) -o goat *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 
 tests: $(TEST_TARGETS) tests.o 
-	$(FC) -o tests *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) 
+	$(FC) -o tests *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 
 gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
 	$(FC) -o gdrun *.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
+
+testc: $(CTEST_TARGETS) testc.o 
+	$(CC) -o testc *.o -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
 
 
 # $(LFLAGS) $(LAPACKPATH) $(BLASPATH) $(OPENBLASPATH) $(UMFPACKPATH) $(AMDPATH) $(SSCONFIGPATH) $(CHOLMODPATH)
@@ -41,6 +46,10 @@ goat.o: Runfiles/Goat.F90
 ## Tests.o 			: all tests
 tests.o: Runfiles/Tests.F90 
 	$(FC) $(CFLAGS) Runfiles/Tests.F90 
+
+## Testc.o 			: C layer tests
+testc.o: Runfiles/Testc.c 
+	$(CC) $(CCFLAGS) Runfiles/Testc.c -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
 
 ##
 ## % Folder compilation targets
@@ -105,6 +114,11 @@ Optimization: $(OPTIMIZATION_FILES)
 	$(FC) $(CFLAGS) $^
 	touch Optimization
 
+## Clayer 				: compile C interlayer routines
+Clayer: $(CLAYER_FILES)
+	$(CC) $(CCFLAGS) $^ -I $(SUITESPARSEPATH) -I src/Clayer/Include
+	touch Clayer
+
 ##
 ## % Run commands
 ## %=============
@@ -131,6 +145,7 @@ clean:
 deepclean: 
 	rm *.o *.mod $(wildcard gdrun*); rm $(GDRUN_TARGETS); \
 	rm goat
+	rm tests
 	
 
 ## help			: print out documentation

@@ -9,6 +9,48 @@
 ! This is the main driver to run tests for several components/features 
 ! of the goat module. Different tests are available 
 
+module CSparseF 
+
+    use, intrinsic :: iso_c_binding
+
+    implicit none 
+    save 
+
+    type, bind(c) :: CSparseUDT 
+
+        type(c_ptr) :: row, col
+        type(c_ptr) :: val
+        integer(c_int) :: nrow, ncol, nval
+
+    end type 
+
+    interface 
+        function SpMMF(A, B) result(C) &
+            bind(c, name='SpMM')
+            use, intrinsic :: iso_c_binding
+            import :: CSparseUDT
+            type(CSparseUDT), intent(in), value :: A, B
+            type(CSparseUDT)                :: C
+        end function
+
+        function ConstructMyCSparseF(nrow, ncol, nval, row, col, val) result(A) &
+            bind(c, name='ConstructMyCSparse')
+            use, intrinsic :: iso_c_binding
+            import :: CSparseUDT
+            integer(c_int), intent(in)      :: row(*), col(*)
+            real(c_double), intent(in)      :: val(*)
+            integer(c_int), value           :: nrow, ncol, nval
+            type(CSparseUDT)    :: A
+        end function
+    end interface 
+
+    contains 
+
+    
+
+end module
+
+
 module GOAT_tests 
 
     implicit none
@@ -23,7 +65,8 @@ module GOAT_tests
     subroutine RunAllTests()
 
         ! Interpolant testing
-        call TestStructuredInterpolant2D()
+        !call TestStructuredInterpolant2D()
+        call TestCSparse()
 
     end subroutine
 
@@ -223,9 +266,65 @@ module GOAT_tests
 
     end subroutine 
 
-    
+    ! CSparse interface
+    subroutine TestCSparse()
+
+        ! Description
+        !============
+        ! Test some CSparse implementation
+        use CSparseF
+        use mod_sparseinterface
+
+        ! Declare variables
+        !==================
+        ! Auxiliary
+        type(CSparseUDT)   :: A, B
+        type(MySparseUDT)  :: C
+        real(c_double), allocatable     :: val(:)
+        integer(c_int), allocatable     :: row(:), col(:)
+        integer(c_int)                  :: nrow, ncol, nval 
+        real(c_double), pointer         :: valp(:)
+        integer(c_int), pointer         :: rowp(:), colp(:)
+
+        ! Create a sparse matrix
+        nrow = 8
+        ncol = 8
+        nval = 5
+        allocate(val(nval), row(nval), col(nval))
+        val = [0.23, 1.23, 2.5, 4.0, 5.0]
+        row = [1, 2, 3, 4, 5]
+        col = [1, 2, 3, 4, 5]
+
+        A = ConstructMyCSparseF(nrow, ncol, nval, row, col, val)
+
+        ! Multiply
+        B = SpMMF(A, A)
+
+        ! Assign to my sparse
+        C%nval = B%nval 
+        C%nrow = B%nrow 
+        C%ncol = B%ncol 
+        call C%Allocate()
+        
+        call c_f_pointer(B%val, valp, [B%nval])
+        
+        C%val = valp 
+        call c_f_pointer(B%row, rowp, [B%nval])
+        C%row = rowp 
+        call c_f_pointer(B%col, colp, [B%nval])
+        C%col = colp 
+
+        print *, C%row 
+        print *, C%col 
+        print *, C%val 
+
+
+    end subroutine
+
 
 end module 
+
+
 
 
 program Tests
