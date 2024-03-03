@@ -1,6 +1,8 @@
 # include <stdio.h>
+# include <stdlib.h>
 # include <cs.h>
 # include "clayer.h"
+# include <time.h> 
 
 /*
 Just a small test routine for compilation etc 
@@ -8,18 +10,29 @@ Just a small test routine for compilation etc
 main() 
 {
     /* Construct a matrix */
-    cs *T, *A, *B, *C, *thisCS; 
-    MyCSparse this, thismm;
-    int rows[]    = {1, 2, 3, 4, 5};
-    int cols[]    = {1, 2, 3, 4, 5};
-    double vals[] = {0.22, 1.23, 4.56, 4, 5.0}; 
+    srand(time(NULL));
+    cs *T, *B, *C, *thisCS, *A, *thismmCS; 
+    MyCSparse *this, *thismm;
+    int const nval = 500;
+    int rows[nval];
+    int cols[nval];
+    double vals[nval]; 
     int i;
     int ncol;
     int nz; 
     int p1, p2, length, p; 
+    int temp;
+
+
+    for(i = 0; i < nval; i++)
+    {
+        rows[i] = rand() % 1000;
+        cols[i] = rand() % 1000;
+        vals[i] = rand() % 1000;
+    }
 
     /* Allocate */
-    this = ConstructMyCSparse(10, 10, 5, rows, cols, vals);
+    this = ConstructMyCSparse(1000, 1000, nval, rows, cols, vals);
     //this.nrow = 10;
     //this.ncol = 10;
     //this.nval = 5;
@@ -27,19 +40,24 @@ main()
     //this.col = cols;
     //this.val = vals;
 
-    T = cs_spalloc(10, 10, 1, 1, 1);
+    T = cs_spalloc(1000, 1000, nval, 1, 1);
+    B = cs_spalloc(this->nrow, this->ncol, this->nval, 1, 1);
     thismm = SpMM(this, this);
+
+    thismmCS = ConvertMyCSparseToCS(thismm);
+    
+    cs_print(thismmCS, i);
 
 
 
     /* Add entries */
-    for (i = 0; i < 5; i++)
+    for (i = 0; i < nval; i++)
     {
         cs_entry(T, rows[i], cols[i], vals[i]);
     };
 
     /* Print */
-    cs_print(T, i);
+    //cs_print(T, i);
 
     /* Try some multiplications*/
     A = cs_compress(T); // convert to csc format for multiplication
@@ -63,7 +81,7 @@ main()
         }
 
     }
-    cs_print(C, i);
+    //cs_print(C, i);
 
 
 };

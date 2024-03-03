@@ -13,7 +13,10 @@ typedef struct MyCSparse
     int ncol;
     int nval;
 } MyCSparse;
-cs *ConvertMyCSparseToCS(MyCSparse);
-MyCSparse SpMM(const MyCSparse, const MyCSparse);
-MyCSparse ConstructMyCSparse(int, int, int, int [], int [], 
+cs *ConvertMyCSparseToCS(MyCSparse *);
+MyCSparse ParseTest(MyCSparse);
+MyCSparse *ParseTestP2(MyCSparse *);
+MyCSparse *SpMM(MyCSparse *, MyCSparse *);
+MyCSparse *ConstructMyCSparse(int, int, int, int [], int [], 
     double []);
+MyCSparse SpMMV(MyCSparse, MyCSparse);

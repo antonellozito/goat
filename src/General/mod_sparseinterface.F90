@@ -27,6 +27,7 @@ module mod_sparseinterface
     !============
     ! Load modules
     use mod_precision
+    use Clayer
 
     ! The usual
     implicit none
@@ -311,6 +312,63 @@ module mod_sparseinterface
 
     end subroutine
 
+    ! Conversion from CSparse to MySparse format
+    subroutine ConvertToMySparse(mysparsecs, mysparse)
+
+        ! Description
+        !============
+        ! Convert sparse matrix in CSparseUDT format to MySparseUDT 
+        ! format. It is assumed that the matrix is allocated. Note that
+        ! MySparseUDT expects rows and columns to start from one! 
+
+        ! Declare
+        !========
+        ! Arguments
+        type(MySparseUDT)               :: mysparse 
+        type(CSparseUDT)       :: mysparsecs 
+
+        ! Auxiliary
+        real(c_double), pointer         :: valp(:)
+        integer(c_int), pointer         :: rowp(:), colp(:)
+        type(MySparseUDT)               :: temp
+
+        ! Convert
+        !========
+        ! Associate
+        associate( &
+            nrow        => mysparsecs%nrow, &
+            ncol        => mysparsecs%ncol, &
+            nval        => mysparsecs%nval, &
+            row         => mysparsecs%row, &
+            col         => mysparsecs%col, &
+            val         => mysparsecs%val &
+        )
+
+        ! Initialize & allocate
+        temp%nval = nval 
+        temp%nrow = nrow 
+        temp%ncol = ncol 
+        call temp%Allocate()
+        
+        ! Extract row, col, val data from C pointers
+        call c_f_pointer(val, valp, [nval])
+        temp%val = valp 
+        call c_f_pointer(row, rowp, [nval])
+        temp%row = rowp 
+        temp%row = temp%row+1
+        call c_f_pointer(col, colp, [nval])
+        temp%col = colp 
+        temp%col = temp%col+1
+
+        ! Housekeeping
+        !=============
+        end associate
+        mysparse = temp
+
+    end subroutine 
+
+
+
     !------------------------------------------------------------------!
     !                            OPERATORS                             !
     !------------------------------------------------------------------!
@@ -477,6 +535,91 @@ module mod_sparseinterface
 
     ! Multiply two sparse matrices
     function MultiplySparseMatrices(a, b) result(c) 
+
+        ! Description
+        !============
+        ! Multiply two sparse matrices by calling the SpMM wrapper 
+        ! routine in the C layer that calls the CXSparse routine 
+        ! 'cs_multiply'. 
+
+        ! The operation being done is:
+        ! 
+        !   c_ij = a_ik b_kj,
+        !
+        ! where summation of k is implied. a and b should have 
+        ! compatible dimensions
+
+        ! Modules
+        !========
+        use Clayer
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(MySparseUDT), intent(in)           :: a, b
+        type(MySparseUDT)                       :: c 
+
+        ! Auxiliary
+        type(CSparseUDT), target                :: csaf, csbf, cscf
+        integer(c_int), allocatable, target     :: rowta(:), colta(:)
+        real(c_double), allocatable, target     :: valta(:)
+        integer(c_int), allocatable, target     :: rowtb(:), coltb(:)
+        real(c_double), allocatable, target     :: valtb(:)
+
+        ! Initialize
+        !===========
+        ! Check if dimensions are compatible
+        if (a%ncol .ne. b%nrow) then 
+            call gdErrorHandler('MultiplySparseMatrices: dimensions are inconsistent')
+        end if 
+
+        ! Determine dimensions of c
+        c%nrow = a%nrow
+        c%ncol = b%ncol 
+
+        ! Check if one of the matrices is the zero matrix
+        if ( (a%nval == 0) .or. (b%nval == 0) ) then 
+            ! Return the zero matrix
+            c%nval = 0
+            call c%Allocate()
+            return 
+        end if 
+
+        ! Multiply
+        !=========
+        ! First convert to CS format - note: it appears that setting
+        ! the correct c memory location is scope dependent (ore more 
+        ! precisely, if we do this in a subroutine, memory goes to shit)
+        ! That's why we do it here... 
+        rowta = a%row-1 
+        colta = a%col-1 
+        valta = a%val
+        csaf%row = c_loc(rowta)
+        csaf%col = c_loc(colta)
+        csaf%val = c_loc(valta)
+        csaf%nrow = a%nrow 
+        csaf%ncol = a%ncol 
+        csaf%nval = a%nval
+
+        rowtb = b%row-1 
+        coltb = b%col-1 
+        valtb = b%val
+        csbf%row = c_loc(rowtb)
+        csbf%col = c_loc(coltb)
+        csbf%val = c_loc(valtb)
+        csbf%nrow = b%nrow 
+        csbf%ncol = b%ncol 
+        csbf%nval = b%nval
+
+        cscf = SpMMF(csaf, csbf)
+        
+        ! Reconvert
+        call ConvertToMySparse(cscf, c)
+        
+    end function 
+
+    ! Multiply sparse matrices (old)
+    function MultiplySparseMatrices_deprecated(a, b) result(c) 
 
         ! Description
         !============

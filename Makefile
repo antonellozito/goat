@@ -119,6 +119,11 @@ Clayer: $(CLAYER_FILES)
 	$(CC) $(CCFLAGS) $^ -I $(SUITESPARSEPATH) -I src/Clayer/Include
 	touch Clayer
 
+## ClayerF 				: compile fortran modules in Clayer
+ClayerF: $(CLAYERF_FILES)
+	$(FC) $(CFLAGS) $^
+	touch ClayerF
+
 ##
 ## % Run commands
 ## %=============

@@ -9,48 +9,6 @@
 ! This is the main driver to run tests for several components/features 
 ! of the goat module. Different tests are available 
 
-module CSparseF 
-
-    use, intrinsic :: iso_c_binding
-
-    implicit none 
-    save 
-
-    type, bind(c) :: CSparseUDT 
-
-        type(c_ptr) :: row, col
-        type(c_ptr) :: val
-        integer(c_int) :: nrow, ncol, nval
-
-    end type 
-
-    interface 
-        function SpMMF(A, B) result(C) &
-            bind(c, name='SpMM')
-            use, intrinsic :: iso_c_binding
-            import :: CSparseUDT
-            type(CSparseUDT), intent(in), value :: A, B
-            type(CSparseUDT)                :: C
-        end function
-
-        function ConstructMyCSparseF(nrow, ncol, nval, row, col, val) result(A) &
-            bind(c, name='ConstructMyCSparse')
-            use, intrinsic :: iso_c_binding
-            import :: CSparseUDT
-            integer(c_int), intent(in)      :: row(*), col(*)
-            real(c_double), intent(in)      :: val(*)
-            integer(c_int), value           :: nrow, ncol, nval
-            type(CSparseUDT)    :: A
-        end function
-    end interface 
-
-    contains 
-
-    
-
-end module
-
-
 module GOAT_tests 
 
     implicit none
@@ -272,19 +230,21 @@ module GOAT_tests
         ! Description
         !============
         ! Test some CSparse implementation
-        use CSparseF
+        use Clayer
         use mod_sparseinterface
 
         ! Declare variables
         !==================
         ! Auxiliary
-        type(CSparseUDT)   :: A, B
-        type(MySparseUDT)  :: C
+        type(CSparseUDT)   :: A2, A3
+        type(MySparseUDT)  :: A, B, T, C, D, E, F
+        integer(I8)        :: n
         real(c_double), allocatable     :: val(:)
         integer(c_int), allocatable     :: row(:), col(:)
         integer(c_int)                  :: nrow, ncol, nval 
         real(c_double), pointer         :: valp(:)
-        integer(c_int), pointer         :: rowp(:), colp(:)
+        integer(c_int), pointer         :: rowp(:), colp(:), rowp2(:)
+        real(R8)                        :: t_start, t_end
 
         ! Create a sparse matrix
         nrow = 8
@@ -295,28 +255,94 @@ module GOAT_tests
         row = [1, 2, 3, 4, 5]
         col = [1, 2, 3, 4, 5]
 
-        A = ConstructMyCSparseF(nrow, ncol, nval, row, col, val)
+        A%nrow = nrow 
+        A%ncol = ncol 
+        A%nval = nval 
+        call A%Allocate()
+        A%row = row 
+        A%col = col 
+        A%val = val 
 
-        ! Multiply
-        B = SpMMF(A, A)
+        B = A*A 
 
-        ! Assign to my sparse
-        C%nval = B%nval 
-        C%nrow = B%nrow 
-        C%ncol = B%ncol 
-        call C%Allocate()
-        
-        call c_f_pointer(B%val, valp, [B%nval])
-        
-        C%val = valp 
-        call c_f_pointer(B%row, rowp, [B%nval])
-        C%row = rowp 
-        call c_f_pointer(B%col, colp, [B%nval])
-        C%col = colp 
+        print *, B%row 
+        print *, B%col 
+        print *, B%val 
 
-        print *, C%row 
-        print *, C%col 
-        print *, C%val 
+        ! Random sparse matrices
+        !=======================
+        ! Create
+        n = 200000
+        call CreateRandomSparseMatrix(D, 10000, 5000, n)
+        call CreateRandomSparseMatrix(E, 5000, 10000, n)
+
+        ! A = SpMMFBasic(D%nrow, D%ncol, D%nval, E%nrow, E%ncol, E%nval, D%row, D%col, D%val, E%row, E%col, E%val)
+        !call c_f_pointer(A%col, rowp, [A%nval])
+        !print *, rowp
+
+        !print *, D%row 
+        !print *, D%col 
+        !print *, D%val
+
+        ! Time and multiply
+        call cpu_time(t_start)
+        F = D*E 
+        call cpu_time(t_end)
+        print *, 'Time elapsed for multiplying matrices with ',  n, ' nonzeros: ', t_end-t_start 
+
+    end subroutine
+
+    subroutine CreateRandomSparseMatrix(A, nrow, ncol, nnz)
+
+        ! Description
+        !============
+        ! Create a random sparse matrix with number of rows equal to 
+        ! nrow (analogously ncol) and a number of nonzeros nnz. All is 
+        ! randomly generated using the built in function random_number.
+        ! The values are distributed over the interval [-1, 1]. 
+
+        ! Modules
+        !========
+        use mod_sparseinterface
+
+        ! Declare
+        !========
+        ! Arguments
+        type(MySparseUDT)       :: A 
+        integer(I8), intent(in) :: nrow, ncol, nnz 
+
+        ! Auxiliary
+        real(R8)                :: temp(1:nnz), val(1:nnz)
+        integer(I8)             :: row(1:nnz), col(1:nnz)
+
+        ! Test
+        !======
+        if (allocated(A%val)) then 
+            call A%Deallocate()
+        end if
+
+        ! Construct
+        !==========
+        ! Rows
+        call random_number(temp)
+        row = ceiling(temp*nrow)
+
+        ! Columns
+        call random_number(temp)
+        col = ceiling(temp*ncol)
+
+        ! Values
+        call random_number(temp)
+        val = temp*2-1 ! to have some zero and nonzero values
+
+        ! Assign
+        A%nrow = nrow 
+        A%ncol = ncol
+        A%nval = nnz 
+        A%row = row 
+        A%col = col 
+        A%val = val 
+
 
 
     end subroutine
