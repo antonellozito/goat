@@ -273,13 +273,13 @@ VERSION 1.00.00
 # KKT driver (see also GridKKTDriver.m)
 # Design relaxation factors
 'gd.opt.num.docfrelax'              '1'
-'gd.opt.num.rxf'                    '1e3'
+'gd.opt.num.rxf'                    '1e1'
 'gd.opt.num.rxfdesign'              '1'
 'gd.opt.num.rxfmin'                 '0e-1'
-'gd.opt.num.rxfdec'                 '0.95'
+'gd.opt.num.rxfdec'                 '0.90'
 
 # Line search parameters 
-'gd.opt.num.ls.type'                'backtracking'
+'gd.opt.num.ls.type'                'backtracking_soc'
 'gd.opt.num.ls.meritfunction'       'l1'
 
 # Equality constraint relaxation

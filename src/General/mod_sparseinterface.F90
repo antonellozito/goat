@@ -1022,6 +1022,8 @@ module mod_sparseinterface
         b = a 
         b%row = a%col 
         b%col = a%row 
+        b%nrow = a%ncol 
+        b%ncol = a%nrow
 
     end function 
 
