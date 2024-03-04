@@ -1,0 +1,505 @@
+!======================================================================!
+!                                                                      !
+!                               DOCUMENTATION                          !
+!                                                                      !
+!======================================================================!
+
+! Description
+!============
+! This module contains utility routines for the optimization modules of
+! the grid deformation framework. These routines include for example 
+! routines to compute faces on which orthogonality constraints should be
+! imposed, routines that allow to derive the vertices that are x-points,
+! and so on. In general, any routine that is necessary to set up the 
+! constraints/costfunction, but that is not needed anymore for the 
+! remainder of the code, can be added here. 
+
+module gdmod_utility_optimization
+
+    ! Initialize
+    !============
+    ! Load modules
+    !use mod_plotter
+    use gdmod_types
+    use gdmod_userinput 
+    !use, intrinsic :: ieee_arithmetic, only: IEEE_Value, IEEE_QUIET_NAN
+
+    ! The usual
+    implicit none
+    save
+    public 
+
+    contains 
+
+    !==================================================================!
+    !                                                                  !
+    !                               ROUTINES                           !
+    !                                                                  !
+    !==================================================================!
+
+    !------------------------------------------------------------------!
+    !                            Grid quantities                       !
+    !------------------------------------------------------------------!
+
+    ! Determination of X-point(s)
+    subroutine DetermineXPoints(xpind, nxpind, order, grid)
+
+        ! Description
+        !============
+        ! This routine determines the indices (and their number) based 
+        ! on the information given in the grid structure. Note that 
+        ! the location of the x-point should already be available 
+        ! through output of the grid generator, but we provide a routine 
+        ! here to recompute the location if it wasn't saved explicitly
+        ! in the grid structure. Additionally, we determine the order of
+        ! the x-point (see algorithm description below)
+
+        ! Algorithm
+        !==========
+        ! Basically, we simply check if a vertex has 4 or more 
+        ! neighbours with the same flux surface ID (which is non-zero)
+        ! as the current vertex. The order is then simply determined by 
+        ! the number of separatrix legs, i.e. 
+        !
+        !       o = n/2 - 1,
+        !
+        ! where n is the number of vertices with the same ID and o is 
+        ! the order. 
+
+        ! Initialize
+        !===========
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8)                         :: nxpind
+        integer(I8), allocatable            :: xpind(:), order(:)
+        type(GridUDT), intent(in)           :: grid
+
+        ! Loop variables
+        integer(I8)                         :: i
+
+        ! Auxiliary variables 
+        integer(I8)                         :: tfID, ncIDs
+        integer(I8), allocatable            :: temporder(:), &
+            tempxpind(:), tvn(:), tvnfID(:)
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            fID         => grid%vert%fieldlineID,   &
+            vert        => grid%vert)
+
+        ! Check allocation - shouldn't be the case as size unknown a 
+        ! priori
+        if (allocated(xpind)) then
+            ! Deallocate
+            deallocate(xpind)
+        end if
+        if (allocated(order)) then 
+            ! Deallocate
+            deallocate(order)
+        end if
+
+        ! Allocate temporary arrays (too big, trim later)
+        nxpind = 0
+        allocate(tempxpind(vert%ntot))
+        allocate(temporder(vert%ntot))
+
+        ! Determine x-points
+        !===================
+        ! Loop over all vertices
+        do i = 1, vert%ntot 
+            ! Get the current field line ID, skip if zero
+            tfID = fID(i)
+            if (tfID == 0) then
+                cycle ! skip rest of the loop for this index
+            end if
+
+            ! Get the vertex neighbours
+            allocate(tvn(vert%neigP(i, 2)))
+            tvn = vert%neiglist(vert%neigP(i, 1):&
+                (vert%neigP(i, 1) + vert%neigP(i, 2)-1))
+
+            ! Get their IDs
+            allocate(tvnfID(vert%neigP(i, 2)))
+            tvnfID = fID(tvn)
+
+            ! Get the number of common IDs
+            ncIDs = count(tvnfID == tfID)
+
+            ! If equal or larger than 4, add as x-point
+            if (ncIDs >= 4) then 
+                ! Check if it is a multiple of 2
+                if (modulo(ncIDs, 2) .ne. 0) then 
+                    ! Uneven number, throw error
+                    call gdErrorHandler('DetermineXPoints: '&
+                    // 'supposed x-point has uneven number' &
+                    // 'of vertices with same ID, check grid' &
+                    // ' consistency')
+                end if
+
+                ! Update the counter
+                nxpind = nxpind + 1
+
+                ! Add the x-point
+                tempxpind(nxpind) = i 
+
+                ! Compute the order
+                temporder(nxpind) = ncIDs/2 - 1
+
+            end if
+            
+            ! Deallocate
+            deallocate(tvn, tvnfID)
+
+        end do
+
+        ! Output
+        !=======
+        ! Allocate
+        allocate(xpind(nxpind), order(nxpind))
+
+        ! Set output
+        xpind = tempxpind(1:nxpind)
+        order = temporder(1:nxpind)
+
+        ! Housekeeping
+        !=============
+        ! Deallocate 
+        deallocate(tempxpind, temporder)
+
+        ! Deassociate
+        end associate
+
+
+    end subroutine
+
+    ! Determination of X-point edges that are aligned with flux 
+    ! surfaces
+    subroutine DetermineFluxAlignedXPointEdges(nxpointedges, &
+        xpointedges, grid)
+
+        ! Description
+        !============
+        ! This routine returns the edges (as vertex pairs) that have an
+        ! x-point and a neighbour of that x-point with the same flux 
+        ! surface ID. 
+
+        ! Algorithm
+        !==========
+        ! 1) Determine the x-points by calling the DetermineXPoints 
+        !   routine
+        ! 2) For each x-point, determine which of its vertex neighbours
+        !   has the same flux ID as the x-point. 
+
+        ! Notes
+        !======
+        ! Note 1: since the order and number of the xpoints are known, 
+        ! the total number of edges can be determined a priori. 
+
+        ! Initialize
+
+        ! Initialize
+        !===========
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8)                         :: nxpointedges
+        integer(I8), allocatable            :: xpointedges(:, :)
+        type(GridUDT), intent(in)           :: grid
+
+        ! Loop variables
+        integer(I8)                         :: i, ec 
+
+        ! Auxiliary variables 
+        integer(I8)                         :: ntvn, nxpind
+
+        integer(I8), allocatable            :: xpind(:), order(:), &
+            tvn(:)
+
+        logical, allocatable                :: isEqualID(:)
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert        => grid%vert)
+
+        ! Get x-points
+        call DetermineXPoints(xpind, nxpind, order, grid)
+
+        ! Compute number of edges
+        nxpointedges = sum(order*2 + 2)
+        
+        ! Allocate (soft)
+        if (allocated(xpointedges)) then 
+            print *, 'DetermineFluxAligneXPointEdges: ' &
+                // 'reallocating xpointedges'
+            deallocate(xpointedges)
+        end if
+        allocate(xpointedges(nxpointedges, 2))
+
+        ! Get x-point edges
+        !==================
+        ! Initialize edge counter
+        ec = 0
+
+        ! Loop over x-points
+        do i = 1, nxpind 
+            ! Get the number of neighbours
+            ntvn = vert%neigP(xpind(i), 2)
+
+            ! Get neighbours
+            allocate(tvn(ntvn))
+            tvn = vert%neiglist(vert%neigP(xpind(i), 1):&
+                vert%neigP(xpind(i), 1)+ntvn-1)
+            
+            ! Check which vertices have the same flux surface ID
+            allocate(isEqualID(ntvn))
+            isEqualID = vert%fieldlineID(xpind(i)) == &
+                vert%fieldlineID(tvn)
+            
+            ! Sanity check: should be equal amount as order*2 + 2
+            if (count(isEqualID) .ne. (2*order(i)+2) ) then 
+                ! Print vertex ID of current x-point
+                print *, 'X-point vertex ID: ', xpind(i)
+
+                ! Throw error
+                call gdErrorHandler('DetermineFluxAlignedXPointEdges:' &
+                    // 'inconsistent amount of edges detected for ' &
+                    // 'x-point with above mentioned vertex ID')
+                
+            end if
+
+            ! Add the edges
+            xpointedges(ec+1:ec+2*order(i)+2, 1) = xpind(i)
+            xpointedges(ec+1:ec+2*order(i)+2, 2) = pack(tvn, isEqualID)
+
+            ! Housekeeping
+            deallocate(tvn)
+        end do
+        
+
+        ! End associate
+         end associate 
+
+
+    end subroutine
+
+    ! Determination of vessel edges that are aligned with flux surfaces
+    subroutine DetermineFluxAlignedVesselEdges(nvesseledges, &
+        vesseledges, grid, doTP, doWG)
+
+        ! Description
+        !============
+        ! This routine returns the edges (as vertex pairs) that have one
+        ! vessel node and a node that has the same flux surface ID as 
+        ! the vessel node. Normally, this is one edge per edge that 
+        ! lies on the vessel. This routine's intended use is for the 
+        ! edge length constraints, where one may want to constrain the 
+        ! cell size near the target, which is effectively achieved by 
+        ! constraining the edge length. 
+        !
+        ! It is possible through the input argument logicals 'doTP' and 
+        ! 'doWG' to include (or not) the target plates and general wide 
+        ! grid (WG) boundaries as desired. 
+
+        ! Algorithm
+        !==========
+        ! The algorithm is pretty straightforward. 
+        ! First, we check which boundaries should be considered. For
+        ! each boundary, we loop over the vertices that belong to that 
+        ! boundary and determine which edge (if there is one) complies
+        ! to the criteria mentioned above (i.e. same flux surface ID). 
+
+        ! Notes
+        !======
+        ! Note 1: it is assumed that the target plate indices are either
+        ! 1 or 2 (1 for inner, 2 for outer, though doesn't really matter
+        ! here.)
+
+        ! Note 2: we explicitly check that any neighbour of a vertex is
+        ! not part of the current boundary as well. Otherwise, this 
+        ! could give issues in some pathological cases (e.g. single 
+        ! edge flux surfaces that start and end at the same boundary)
+
+        ! Initialize
+        !===========
+        ! The usual
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8)                         :: nvesseledges
+        integer(I8), allocatable            :: vesseledges(:, :)
+        logical, intent(in)                 :: doTP, doWG
+        type(GridUDT), intent(in)           :: grid
+
+        ! Loop variables
+        integer(I8)                         :: i, j
+
+        ! Auxiliary variables 
+        integer(I8)                         :: TPind(1:2), WGind(1:1), &
+            ntv, ntvn, ne
+
+        integer(I8), allocatable            :: tv(:), tvn(:), &
+            tempvesseledges(:, :)
+
+        logical                             :: condition
+
+        logical, allocatable                :: mask(:), &
+            isBndVertex(:), isEqualID(:)
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert        => grid%vert,   &
+            faces       => grid%faces,  &
+            bnd         => grid%bnd)
+
+        ! Allocate (too big, trim later)
+        allocate(tempvesseledges(faces%ntot, 2))
+        allocate(isBndVertex(vert%ntot))
+            
+        ! Initialize
+        nvesseledges = 0
+
+        ! Set target plate indices
+        TPind(1:2) = [1, 2]
+
+        ! Set other vessel boundary indices
+        WGind(1:1) = [5]
+
+        ! Loop over all boundaries
+        !=========================
+        do i = 1, size(bnd) 
+            ! Check if this boundary is a target plate or wide grid bnd
+            condition = any(bnd(i)%ID == TPind) .and. doTP
+            condition = condition .or. ( any(bnd(i)%ID == WGind) .and. doWG)
+            if (condition) then 
+                ! Get the vertices of this boundary
+                ntv = bnd(i)%nvert
+                allocate(tv(ntv))
+                tv = bnd(i)%vert 
+
+                ! Set these vertices as boundary vertices in order to 
+                ! exclude them in the edge determination
+                isBndVertex(:) = .false.
+                isBndVertex(tv) = .true.
+
+                ! For each vertex, get the neighbours
+                do j = 1, ntv
+                    ! Extract neighbours of this vertex
+                    ntvn = vert%neigP(tv(j), 2)
+                    allocate(tvn(ntvn))
+                    tvn = vert%neiglist(vert%neigP(tv(j), 1):vert%neigP(tv(j), 1)+ntvn-1)
+
+                    ! Initialize mask for inclusion
+                    allocate(mask(ntvn))
+                    mask(:) = .true.
+
+                    ! Don't include any vertices that are now boundary
+                    ! vertices
+                    where (isBndVertex(tvn)) mask = .false. 
+
+                    ! Don't include vertices that have a different field
+                    ! line ID
+                    allocate(isEqualID(ntvn))
+                    isEqualID = (vert%fieldlineID(tv(j)) == &
+                        vert%fieldlineID(tvn))
+                    where (.not. isEqualID) mask = .false. 
+
+                    ! Add to temporary edges
+                    ne = count(mask)
+                    tempvesseledges(nvesseledges+1:nvesseledges+ne, 1) = &
+                        tv(j)
+                    tempvesseledges(nvesseledges+1:nvesseledges+ne, 2) = &
+                        pack(tvn, mask)
+
+                    ! Update counter
+                    nvesseledges = nvesseledges + ne
+
+                    ! Housekeeping
+                    deallocate(tvn, mask, isEqualID)                    
+                end do
+
+                ! Deallocate
+                deallocate(tv)
+
+            end if
+            
+        end do
+
+        ! Assign output
+        !==============
+        ! Soft allocation
+        if (allocated(vesseledges)) then 
+            print *, 'DetermineVesselEdges: reallocating vessel edges'
+            deallocate(vesseledges)
+        end if
+        allocate(vesseledges(nvesseledges, 2))
+
+        ! Assign
+        vesseledges = tempvesseledges(1:nvesseledges, :)
+
+        ! Housekeeping
+        !=============
+        ! Deallocate
+        deallocate(isBndVertex, tempvesseledges)
+
+        ! End associate
+        end associate
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                          Auxiliary functions                     !
+    !------------------------------------------------------------------!
+
+    ! Box checker 
+    function IsInBox(minx, maxx, miny, maxy, x, y) result(in) 
+
+        ! Description
+        !============
+        ! Simple box checker. x and by values of the box should be given
+        ! in maxx, maxy, ... , values should be dimension (:).
+        ! Results may vary when values are up to precision on the box, 
+        ! since this precision is not accounted for.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8)                    :: minx, maxx, miny, maxy
+        real(R8), allocatable, intent(in)       :: x(:), y(:)
+        logical, allocatable        :: in(:)
+
+        ! Auxiliary
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(in(size(x)))
+
+        ! Check if in box
+        !================
+        in = ( (x >= minx) .and. (x <= maxx ) ) .and. &
+            ( (y >= miny) .and. (y <= maxy) )
+
+    end function 
+
+end module
