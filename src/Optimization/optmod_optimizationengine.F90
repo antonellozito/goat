@@ -1310,9 +1310,10 @@ module optmod_optimizationengine
         integer(I8)                         :: itls
 
         ! Variables for second order correction
-        real(R8), allocatable               :: G(:), H(:), ck(:)
+        real(R8), allocatable               :: G(:), H(:), ck(:), &
+            wkt(:), wk(:)
         type(MySparseUDT)                   :: gradG, gradH, hessG, &
-            hessH, Ak  
+            hessH, Ak, LSA  
         logical                             :: dogradient, dohessian 
         logical, allocatable                :: A(:)
 
@@ -1548,9 +1549,37 @@ module optmod_optimizationengine
                     allocate(ck(neq + na))
                     ck = [G, pack(H, A)]
                     Ak = gradG%Concatenate(gradH%DeleteColumns(.not. A), 2)
-                    
-                    ! Decrease alpha
-                    alpha = dec*alpha
+                    LSA = Ak%Transpose()*Ak
+
+                    ! Compute intermediate solution
+                    call SolveSparseLinearSystemDI(LSA, ck, wkt)
+
+                    ! Housekeeping
+                    deallocate(ck)
+
+                    ! Compute correction
+                    wk = MatrixVectorProduct(Ak, -wkt)
+
+                    ! Recompute cost function at step x0 + alpha*d + wk
+                    ! Note: the problem is already updated to x + alpha*d!
+                    x = x0 + alpha*dphi + wk ! update x to ensure proper downdate later
+                    call problem%UpdateDesign(wk)
+                    call problem%UpdateProblem()
+                    call problem%EvaluateMeritFunction(fk, DJfk, dx, &
+                        lambda, mu, doderiv, meritfunction, numLS)
+
+                    ! Check the Armijo condition again
+                    if (fk < f0 + c1*alpha*DJf0) then 
+
+                        ! Sufficient decrease, terminate
+                        conv = .true.
+
+                    else
+
+                        ! Decrease alpha
+                        alpha = dec*alpha
+
+                    end if 
                     
                 end if 
                 
