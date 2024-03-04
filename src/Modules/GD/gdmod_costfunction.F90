@@ -1564,7 +1564,7 @@ module gdmod_costfunction
                 !    gxyfv1, magneticField%interp, '1', '1')
                 !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
                 !    gyyfv1, magneticField%interp, '0', '2')
-                !gyxfv1 = gxyfv1 ! symmetric, done for ease here
+                gyxfv1 = gxyfv1 ! symmetric, done for ease here
 
                 call magneticField%interp%Evaluate(xfv2, yfv2, 2, 0, gxxfv2)
                 call magneticField%interp%Evaluate(xfv2, yfv2, 1, 1, gxyfv2)
