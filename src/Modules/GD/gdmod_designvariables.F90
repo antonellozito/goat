@@ -51,7 +51,7 @@ module gdmod_designvariables
     contains 
 
         ! Design initialization
-        procedure(InitializeINT), deferred  :: Initialize
+        procedure(InitializeINT), deferred      :: Initialize
 
         ! Design update
         procedure(UpdateDesignINT), deferred      :: UpdateDesign
@@ -81,6 +81,27 @@ module gdmod_designvariables
         procedure :: AllocateDesignCoordinates
         procedure :: DeallocateDesignCoordinates
         final :: DestroyDesignCoordinates
+
+    end type
+
+    ! Design variables for flux values
+    type, extends(DesignVariablesGDUDT) :: DesignVariablesFluxValuesUDT
+
+        ! Flux value indices
+        integer(I8), allocatable        :: psiind(:)
+
+    contains
+
+        ! Design initialization
+        procedure :: Initialize     => InitializeDesignFluxValues
+
+        ! Design update
+        procedure :: UpdateDesign   => UpdateDesignFluxValues
+
+        ! Housekeeping
+        procedure :: AllocateDesignFluxValues
+        procedure :: DeallocateDesignFluxValues
+        final :: DestroyDesignFluxValues
 
     end type
 
@@ -192,8 +213,6 @@ module gdmod_designvariables
         ! Allocate (specific routine for this design variable type)
         call designvariables%AllocateDesignCoordinates(grid)
 
-        print *, designvariables%nphi
-
         ! Set the design variables
         designvariables%phi(1:grid%vert%ntot) = grid%vert%x 
         designvariables%phi(grid%vert%ntot+1:designvariables%nphi) = &
@@ -297,5 +316,127 @@ module gdmod_designvariables
         call designvariables%Deallocate()
         
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                              Flux values                         !
+    !------------------------------------------------------------------!
+
+    ! Design initialization
+    subroutine InitializeDesignFluxValues(designvariables, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Initialize the design variables, which are in this case only 
+        ! the x and y coordinates. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesFluxValuesUDT)        :: designvariables
+        type(gridUDT), intent(in)                   :: grid 
+        type(MagneticFieldUDT), intent(in)          :: magneticField 
+        type(EnvironmentUDT), intent(in)            :: environment
+    
+        ! Loop variables
+        integer(I8)                                 :: i
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Set the type
+        designvariables%type = 'fluxvalues' 
+
+        ! Further initialization can only be done after initializing
+        ! the flux value constraints - see implementation under 
+        ! FinalizeInitialization routine of GD optimization problem type
+
+    end subroutine
+
+    ! Design update
+    subroutine UpdateDesignFluxValues(designvariables, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Void routine - no grid, magnetic field or environment 
+        ! parameters to be updated based on design variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesFluxValuesUDT)        :: designvariables
+        type(gridUDT), intent(inout)                :: grid 
+        type(MagneticFieldUDT), intent(inout)       :: magneticField 
+        type(EnvironmentUDT), intent(inout)         :: environment
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateDesignFluxValues(designvariables)
+
+        ! Description
+        !============
+        ! Allocate. Assumed that nphi is given. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesFluxValuesUDT)        :: designvariables 
+
+        ! Allocate
+        !=========
+        ! Call the parent allocation routine
+        call designvariables%Allocate()
+
+        ! Allocate others
+        allocate(designvariables%psiind(designvariables%nphi))
+
+    end subroutine
+
+    subroutine DeallocateDesignFluxValues(designvariables)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesFluxValuesUDT)        :: designvariables 
+
+        ! Allocate
+        !=========
+        ! Call the parent allocation routine
+        call designvariables%Deallocate()
+
+        ! Allocate the remaining fields, specific for this type
+        deallocate(designvariables%psiind)
+
+    end subroutine
+
+    subroutine DestroyDesignFluxValues(designvariables)
+
+        ! Description
+        !============
+        ! Destructor
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(DesignVariablesFluxValuesUDT) :: designvariables
+
+        ! Destroy
+        !========
+        call designvariables%Deallocate()
+        
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                       Coordinates & Flux values                  !
+    !------------------------------------------------------------------!
 
 end module

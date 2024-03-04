@@ -701,6 +701,10 @@ module gdmod_costfunction
                     end do 
                 end do
 
+            case ('desiredpsi')
+
+                ! No contributions
+
             case default
 
                 ! Not implemented, throw error
@@ -720,8 +724,19 @@ module gdmod_costfunction
         ! Allocate the hessian (if not already done so)
         if (.not. allocated(hessJ%row)) then
             ! Allocate the sparse matrix
-            hessJ%nval = 36*sum(nvpairs) ! this should be exact and constant
+            select case (trim(designvariables%type))
+
+            case ('coordinates')
+
+                hessJ%nval = 36*sum(nvpairs) ! this should be exact and constant
+
+            case ('desiredpsi')
+
+                hessJ%nval = 0
+
+            end select 
             call hessJ%Allocate()
+
         end if
 
         if (dohessian) then
@@ -918,6 +933,10 @@ module gdmod_costfunction
                 deallocate(valyx)
                 deallocate(valyy)
 
+            case ('desiredpsi')
+
+                ! No contributions
+
             case default
 
                 ! Not implemented, throw error
@@ -928,6 +947,8 @@ module gdmod_costfunction
             end select
 
         end if
+
+        
 
         ! Deassociate
         !============
@@ -1505,14 +1526,6 @@ module gdmod_costfunction
         call magneticField%interp%Evaluate(xfv2, yfv2, 1, 0, gxfv2)
         call magneticField%interp%Evaluate(xfv1, yfv1, 0, 1, gyfv1)
         call magneticField%interp%Evaluate(xfv2, yfv2, 0, 1, gyfv2)
-        !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, gxfv1, &
-        !  magneticField%interp, '1', '0')
-        !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, gxfv2, &
-        !    magneticField%interp, '1', '0')
-        !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, gyfv1, &
-        !    magneticField%interp, '0', '1')
-        !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, gyfv2, &
-        !    magneticField%interp, '0', '1')
         
         ! Face vectors
         dxv1 = xv(:, 2) - xv(:, 1)
@@ -1558,23 +1571,11 @@ module gdmod_costfunction
                 call magneticField%interp%Evaluate(xfv1, yfv1, 2, 0, gxxfv1)
                 call magneticField%interp%Evaluate(xfv1, yfv1, 1, 1, gxyfv1)
                 call magneticField%interp%Evaluate(xfv1, yfv1, 0, 2, gyyfv1)
-                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                !    gxxfv1, magneticField%interp, '2', '0')
-                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                !    gxyfv1, magneticField%interp, '1', '1')
-                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                !    gyyfv1, magneticField%interp, '0', '2')
                 gyxfv1 = gxyfv1 ! symmetric, done for ease here
 
                 call magneticField%interp%Evaluate(xfv2, yfv2, 2, 0, gxxfv2)
                 call magneticField%interp%Evaluate(xfv2, yfv2, 1, 1, gxyfv2)
                 call magneticField%interp%Evaluate(xfv2, yfv2, 0, 2, gyyfv2)
-                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                !    gxxfv2, magneticField%interp, '2', '0')
-                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                !    gxyfv2, magneticField%interp, '1', '1')
-                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                !    gyyfv2, magneticField%interp, '0', '2')
                 gyxfv2 = gxyfv2 ! symmetric, done for ease here
 
                 ! Precompute hessian quantities
@@ -1582,15 +1583,6 @@ module gdmod_costfunction
                 call magneticField%interp%Evaluate(xfv1, yfv1, 2, 1, gxxyfv1)
                 call magneticField%interp%Evaluate(xfv1, yfv1, 1, 2, gxyyfv1)
                 call magneticField%interp%Evaluate(xfv1, yfv1, 0, 3, gyyyfv1)
-
-                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                !    gxxxfv1, magneticField%interp, '3', '0')
-                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                !    gxxyfv1, magneticField%interp, '2', '1')
-                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                !    gxyyfv1, magneticField%interp, '1', '2')
-                !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-                !    gyyyfv1, magneticField%interp, '0', '3')
                 gyxyfv1 = gxyyfv1 ! symmetric, repeated for ease
                 gyxxfv1 = gxxyfv1 
 
@@ -1598,16 +1590,12 @@ module gdmod_costfunction
                 call magneticField%interp%Evaluate(xfv2, yfv2, 2, 1, gxxyfv2)
                 call magneticField%interp%Evaluate(xfv2, yfv2, 1, 2, gxyyfv2)
                 call magneticField%interp%Evaluate(xfv2, yfv2, 0, 3, gyyyfv2)
-                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                !    gxxxfv2, magneticField%interp, '3', '0')
-                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                !    gxxyfv2, magneticField%interp, '2', '1')
-                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                !    gxyyfv2, magneticField%interp, '1', '2')
-                !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-                !    gyyyfv2, magneticField%interp, '0', '3')
                 gyxyfv2 = gxyyfv2 ! symmetric, repeated for ease
                 gyxxfv2 = gxxyfv2 
+
+            case ('desiredpsi')
+
+                ! Do nothing
 
             case default
 
@@ -1620,34 +1608,30 @@ module gdmod_costfunction
 
         elseif (dogradient) then
 
-            ! Allocate
-            allocate(gxxfv1(np), gxxfv2(np), gxyfv1(np), gxyfv2(np), &
-                gyxfv1(np), gyxfv2(np), gyyfv1(np), gyyfv2(np))
+            select case (trim(designvariables%type))
 
-            ! Precompute gradient quantities
-            call magneticField%interp%Evaluate(xfv1, yfv1, 2, 0, gxxfv1)
-            call magneticField%interp%Evaluate(xfv1, yfv1, 1, 1, gxyfv1)
-            call magneticField%interp%Evaluate(xfv1, yfv1, 0, 2, gyyfv1)
+            case ('coordinates')
 
-            !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-            !    gxxfv1, magneticField%interp, '2', '0')
-            !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-            !    gxyfv1, magneticField%interp, '1', '1')
-            !call EvaluateBicubicSplineInterpolant(xfv1, yfv1, &
-            !    gyyfv1, magneticField%interp, '0', '2')
-            gyxfv1 = gxyfv1 ! symmetric, done for ease here
+                ! Allocate
+                allocate(gxxfv1(np), gxxfv2(np), gxyfv1(np), gxyfv2(np), &
+                    gyxfv1(np), gyxfv2(np), gyyfv1(np), gyyfv2(np))
 
-            call magneticField%interp%Evaluate(xfv2, yfv2, 2, 0, gxxfv2)
-            call magneticField%interp%Evaluate(xfv2, yfv2, 1, 1, gxyfv2)
-            call magneticField%interp%Evaluate(xfv2, yfv2, 0, 2, gyyfv2)
+                ! Precompute gradient quantities
+                call magneticField%interp%Evaluate(xfv1, yfv1, 2, 0, gxxfv1)
+                call magneticField%interp%Evaluate(xfv1, yfv1, 1, 1, gxyfv1)
+                call magneticField%interp%Evaluate(xfv1, yfv1, 0, 2, gyyfv1)
+                gyxfv1 = gxyfv1 ! symmetric, done for ease here
 
-            !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-            !    gxxfv2, magneticField%interp, '2', '0')
-            !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-            !    gxyfv2, magneticField%interp, '1', '1')
-            !call EvaluateBicubicSplineInterpolant(xfv2, yfv2, &
-            !    gyyfv2, magneticField%interp, '0', '2')
-            gyxfv2 = gxyfv2 ! symmetric, done for ease here
+                call magneticField%interp%Evaluate(xfv2, yfv2, 2, 0, gxxfv2)
+                call magneticField%interp%Evaluate(xfv2, yfv2, 1, 1, gxyfv2)
+                call magneticField%interp%Evaluate(xfv2, yfv2, 0, 2, gyyfv2)
+                gyxfv2 = gxyfv2 ! symmetric, done for ease here
+
+            case ('desiredpsi')
+
+                ! Do nothing
+
+            end select
 
         end if
 
@@ -1734,6 +1718,10 @@ module gdmod_costfunction
                     
                 end do
 
+            case ('desiredpsi')
+
+                ! No contributions
+
             case default
 
                 ! Not implemented, throw error
@@ -1753,9 +1741,20 @@ module gdmod_costfunction
         ! Allocate the hessian (if not already done so)
         if (.not. allocated(hessJ%row)) then
             ! Allocate the sparse matrix
-            hessJ%nval = 64*np ! this should be exact and constant
+            select case (trim(designvariables%type))
+
+            case ('coordinates')
+
+                hessJ%nval = 64*np ! this should be exact and constant
+
+            case ('desiredpsi')
+
+                hessJ%nval = 0
+
+            end select
             call hessJ%Allocate()
         end if
+
         if (dohessian) then
 
             ! Check the design variables
@@ -2446,6 +2445,10 @@ module gdmod_costfunction
                     gxyyfv1 , gxyyfv2 , gyxxfv1 , gyxxfv2 , &
                     gyxyfv1 , gyxyfv2 , gyyyfv1 , gyyyfv2 )
 
+            case ('desiredpsi')
+
+                ! Do nothing
+
             case default
 
                 ! Not implemented, throw error
@@ -2457,14 +2460,21 @@ module gdmod_costfunction
 
         elseif (dogradient) then
 
-            ! Deallocate
-            deallocate(gxxfv1 , gxxfv2 , gxyfv1 , gxyfv2 , &
-                gyxfv1 , gyxfv2 , gyyfv1 , gyyfv2 )
+            select case (trim(designvariables%type))
+
+            case ('coordinates')
+
+                ! Deallocate
+                deallocate(gxxfv1 , gxxfv2 , gxyfv1 , gxyfv2 , &
+                    gyxfv1 , gyxfv2 , gyyfv1 , gyyfv2 )
+
+            case ('desiredpsi')
+
+                ! Do nothing
+
+            end select
 
         end if
-
-        
-
 
         ! Deassociate
         end associate
