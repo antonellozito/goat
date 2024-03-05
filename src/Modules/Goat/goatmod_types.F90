@@ -74,7 +74,7 @@ module goatmod_types
         !                   cellP, but for neiglist.     
 
         ! Coordinates
-        real(R8), allocatable               :: x(:),y(:) 
+        real(R8), allocatable               :: x(:), y(:) 
 
         ! Logicals and indices
         logical, allocatable                :: BV(:)
@@ -82,16 +82,16 @@ module goatmod_types
         integer(I8)                         :: ntot = 0
 
         integer(I8), allocatable            :: faceP(:,:)
-        integer(I8), allocatable            :: facelist(:)
-        integer(I8)                         :: nfacelist = 0
+        integer(I8), allocatable            :: face(:)
+        integer(I8)                         :: nface = 0
 
         integer(I8), allocatable            :: cellP(:,:)
-        integer(I8), allocatable            :: celllist(:)
-        integer(I8)                         :: ncelllist = 0
+        integer(I8), allocatable            :: cell(:)
+        integer(I8)                         :: ncell = 0
 
         integer(I8), allocatable            :: neigP(:,:)
-        integer(I8), allocatable            :: neiglist(:)
-        integer(I8)                         :: nneiglist = 0
+        integer(I8), allocatable            :: neig(:)
+        integer(I8)                         :: nneig = 0
 
     end type
 
@@ -104,15 +104,22 @@ module goatmod_types
         ! - ntot            : total number of faces
         ! - vert            : set of (two) vertices belonging to that 
         !                   face
+        ! - cell            : list of cell neighbours (max 2)
+        ! - cellP           : pointer for list of cell neighbours
         ! - neig            : cell neighbours of face
         ! - BF              : logical index that is true if the face
         !                   is a boundary face
 
         ! Logicals and indices
         integer(I8), allocatable            :: vert(:,:)
-        integer(I8), allocatable            :: neig(:,:)
+
+        integer(I8), allocatable            :: cell(:)
+        integer(I8), allocatable            :: cellP(:, :)
+        integer(I8)                         :: ncell = 0
+
         integer(I8)                         :: ntot = 0
         logical, allocatable                :: BF(:)
+
     end type
 
     ! Cell structure
@@ -126,26 +133,26 @@ module goatmod_types
         !                   column the starting index and in the second
         !                   column the number of vertices of the cell 
         !                   (for querying the vertices of the cell
-        !                   stored in cells%vertlist)            
-        ! - vertlist        : list of cell vertices, to be queried as 
-        !                   cells%vertlist(cells%vertP(i,1):
+        !                   stored in cells%vert)            
+        ! - vert            : list of cell vertices, to be queried as 
+        !                   cells%vert(cells%vertP(i,1):
         !                   cells%vertP(i,1)+cells%vertP(i,2)-1) 
-        ! - nvertlist       : length of vertlist
+        ! - nvert          : length of vert
         ! - faceP           : similar to vertP, but for faces
-        ! - facelist        : similar to vertlist, but for faces
-        ! - nfacelist       : similar to nvertlist, but for faces
+        ! - face            : similar to vert, but for faces
+        ! - nface          : similar to nvert, but for faces
         ! - GC              : ntot-by-1 logical vector indicating if the
         !                   cell is a guard cell
 
 
         ! Logicals and indices
         integer(I8), allocatable            :: vertP(:,:)
-        integer(I8), allocatable            :: vertlist(:)
-        integer(I8)                         :: nvertlist = 0
+        integer(I8), allocatable            :: vert(:)
+        integer(I8)                         :: nvert = 0
 
         integer(I8), allocatable            :: faceP(:,:)
-        integer(I8), allocatable            :: facelist(:)
-        integer(I8)                         :: nfacelist = 0
+        integer(I8), allocatable            :: face(:)
+        integer(I8)                         :: nface = 0
 
         logical, allocatable                :: GC(:)
 
@@ -161,8 +168,8 @@ module goatmod_types
         ! - nvert:                      total number of vertices
         ! - vert:                       all vertices belonging to that 
         !                               boundary
-        ! - nfaces:                     total number of faces 
-        ! - faces:                      all face indices 
+        ! - nface:                      total number of faces 
+        ! - face:                       all face indices 
         ! - ID:                         boundary ID (see below) that 
         !                               identifies the boundary type.
         ! 
@@ -194,8 +201,8 @@ module goatmod_types
         integer(I8), allocatable            :: vert(:)   
 
         ! Boundary faces
-        integer(I8)                         :: nfaces = 0
-        integer(I8), allocatable            :: faces(:)             
+        integer(I8)                         :: nface = 0
+        integer(I8), allocatable            :: face(:)             
         
         ! Boundary ID
         integer(I8)                         :: ID
@@ -275,9 +282,9 @@ module goatmod_types
         ! belongs to which grid region. 
         ! Fields:
         !
-        ! - cellregID           : grid%cells%ntot-by-1 array containing
+        ! - cellregID           : grid%cell%ntot-by-1 array containing
         !                       the region IDs for each cell
-        ! - faceregID           : grid%faces%ntot-by-1 array containing
+        ! - faceregID           : grid%face%ntot-by-1 array containing
         !                       the region IDs for each face
         ! - fluxtuberegID       : fluxdata%nFt-by-1 array containing 
         !                       the region IDs for each flux tube
@@ -352,8 +359,8 @@ module goatmod_types
         ! Fields:
         !
         ! - vert            : see type definition for description
-        ! - faces           
-        ! - cells
+        ! - face           
+        ! - cell
         ! - data
         ! - bnd
         !
@@ -363,10 +370,10 @@ module goatmod_types
         type(VertexUDT)                     :: vert
 
         ! Faces
-        type(FaceUDT)                       :: faces
+        type(FaceUDT)                       :: face
 
         ! Cells
-        type(CellUDT)                       :: cells
+        type(CellUDT)                       :: cell
 
         ! Additional data
         type(GridDataUDT)                   :: data
@@ -541,10 +548,10 @@ module goatmod_types
         call AllocateVertices(grid%vert)
         
         ! Allocate face data
-        call AllocateFaces(grid%faces)
+        call AllocateFaces(grid%face)
 
         ! Allocate cell data
-        call AllocateCells(grid%cells)
+        call AllocateCells(grid%cell)
 
         ! Allocate other data structures
         call AllocateGridData(grid%data,grid)
@@ -583,16 +590,20 @@ module goatmod_types
 
         ! Face data
         allocate(vert%faceP(vert%ntot,2))
-        allocate(vert%facelist(vert%nfacelist)) 
+        !allocate(vert%face(vert%nface)) 
 
         ! Cell data
         allocate(vert%cellP(vert%ntot,2))
-        allocate(vert%celllist(vert%ncelllist))
+        !allocate(vert%cell(vert%ncell))
+
+        ! Neighbour data
+        allocate(vert%neigP(vert%ntot, 2))
+        !allocate(vert%neig(vert%nneig))
 
     end subroutine
 
     ! Face substructure
-    subroutine AllocateFaces(faces)
+    subroutine AllocateFaces(face)
 
         ! Description
         !============
@@ -601,23 +612,30 @@ module goatmod_types
         !
         ! - ntot        : total number of faces
 
+        ! Note: the cell structure cannot be allocated a priori - see 
+        ! ComputeGridInterconnections
+
 
         ! The usual
         implicit none
 
         ! Declare variables
-        type(FaceUDT)       :: faces
+        type(FaceUDT)       :: face
 
         ! Allocate
         !=========
-        allocate(faces%vert(faces%ntot,2))
-        allocate(faces%neig(faces%ntot,2)) 
-        allocate(faces%BF(faces%ntot))
+        ! Vertices
+        allocate(face%vert(face%ntot,2))
+
+        ! Cells
+        allocate(face%cellP(face%ntot,2)) 
+        ! allocate(face%cell(face%ncell))
+        allocate(face%BF(face%ntot))
 
     end subroutine
 
     ! Cell substruture
-    subroutine AllocateCells(cells)
+    subroutine AllocateCells(cell)
 
         ! Description
         !============
@@ -625,33 +643,33 @@ module goatmod_types
         ! following scalar fields have to be present:
         !
         ! - ntot        : total number of cells
-        ! - nvertlist   : length of cells%vertlist
-        ! - nfacelist   : length of cells%facelist
+        ! - nvert       : length of cells%vert
+        ! - nfacelist   : length of cells%face
         ! 
         ! The following fields are allocated: 
 
-        ! Note: roughly the same conventions on data structures
+        ! Note: roughly the same conventions on data structures. fields
+        ! 
 
 
         ! The usual
         implicit none
 
         ! Declare variables
-        type(CellUDT)       :: cells
+        type(CellUDT)       :: cell
 
         ! Allocate
         !=========
         ! Guard cells
-        allocate(cells%GC(cells%ntot))
+        allocate(cell%GC(cell%ntot))
+
         ! Vertex values
-        allocate(cells%vertP(cells%ntot,2))
-        allocate(cells%vertlist(cells%nvertlist)) 
+        allocate(cell%vertP(cell%ntot,2))
+        allocate(cell%vert(cell%nvert)) 
 
         ! Face values
-        allocate(cells%faceP(cells%ntot,2))
-        allocate(cells%facelist(cells%nfacelist))
-
-        
+        allocate(cell%faceP(cell%ntot,2))
+        allocate(cell%face(cell%nface))
 
     end subroutine
 
@@ -663,7 +681,7 @@ module goatmod_types
         ! Allocate the boundary fields. It is assumed that the following
         ! fields are present:
         !
-        ! - nfaces:         number of boundary faces
+        ! - nface:          number of boundary faces
         !
         ! Note: the amount of vertices is per definition the amount of
         ! faces plus one, also for closed boundaries. In the latter 
@@ -681,8 +699,8 @@ module goatmod_types
 
         ! Allocate
         !=========
-        bnd%nvert = bnd%nfaces+1
-        allocate(bnd%faces(bnd%nfaces))
+        bnd%nvert = bnd%nface+1
+        allocate(bnd%face(bnd%nface))
         allocate(bnd%vert(bnd%nvert))
         
 
@@ -726,8 +744,8 @@ module goatmod_types
         !
         ! - nFs
         ! - nFt
-        ! - grid%cells%ntot
-        ! - grid%faces%ntot
+        ! - grid%cell%ntot
+        ! - grid%face%ntot
 
         ! The usual
         implicit none
@@ -740,14 +758,14 @@ module goatmod_types
         !=========
         ! Flux tube data
         allocate(fluxdata%fluxtubecellsP(fluxdata%nFt,2))
-        allocate(fluxdata%fluxtubecells(grid%cells%ntot)) 
+        allocate(fluxdata%fluxtubecells(grid%cell%ntot)) 
         allocate(fluxdata%fluxtubefacesP(fluxdata%nFt,2))
-        allocate(fluxdata%fluxtubefaces(grid%faces%ntot)) 
-        allocate(fluxdata%cellfluxtubeID(grid%cells%ntot))
+        allocate(fluxdata%fluxtubefaces(grid%face%ntot)) 
+        allocate(fluxdata%cellfluxtubeID(grid%cell%ntot))
 
         ! Flux surface data
         allocate(fluxdata%fluxsurfacefacesP(fluxdata%nFs,2))
-        allocate(fluxdata%fluxsurfacefaces(grid%faces%ntot))
+        allocate(fluxdata%fluxsurfacefaces(grid%face%ntot))
         allocate(fluxdata%fluxsurfaceID(grid%vert%ntot))
 
     end subroutine
@@ -760,8 +778,8 @@ module goatmod_types
         ! Allocat the region data grid substructure. The following 
         ! fields should be present:
         !
-        ! - grid%cells%ntot
-        ! - grid%faces%ntot
+        ! - grid%cell%ntot
+        ! - grid%face%ntot
         ! - grid%data%fluxdata%nFt
 
         ! The usual
@@ -773,11 +791,11 @@ module goatmod_types
 
         ! Allocate
         !=========
-        allocate(regions%cellregID(grid%cells%ntot))
-        allocate(regions%faceregID(grid%faces%ntot))
+        allocate(regions%cellregID(grid%cell%ntot))
+        allocate(regions%faceregID(grid%face%ntot))
         allocate(regions%fluxtuberegID(grid%data%fluxdata%nFt))
-        allocate(regions%facelabel(grid%faces%ntot))
-        allocate(regions%celllabel(grid%cells%ntot))
+        allocate(regions%facelabel(grid%face%ntot))
+        allocate(regions%celllabel(grid%cell%ntot))
 
     end subroutine
 
@@ -806,13 +824,95 @@ module goatmod_types
 
         ! Face data
         deallocate(vert%faceP)
-        deallocate(vert%facelist) 
+        deallocate(vert%face) 
 
         ! Cell data
         deallocate(vert%cellP)
-        deallocate(vert%celllist)
+        deallocate(vert%cell)
+
+        ! Neighbour data
+        deallocate(vert%neigP)
+        deallocate(vert%neig)
 
     end subroutine
+
+    ! Basic operations
+    !=================
+    ! Get cells of a vertex
+    function GetVertCell(vert, i) result(res)
+        integer(I8)                 :: i 
+        type(VertexUDT)             :: vert 
+        integer(I8), allocatable    :: res(:)
+        res = vert%cell(vert%cellP(i, 1):(vert%cellP(i, 1) + vert%cellP(i, 2) - 1))
+    end function
+
+    ! Get faces of a vertex
+    function GetVertFace(vert, i) result(res)
+        integer(I8)                 :: i 
+        type(VertexUDT)             :: vert 
+        integer(I8), allocatable    :: res(:)
+        res = vert%face(vert%faceP(i, 1):(vert%faceP(i, 1) + vert%faceP(i, 2) - 1))
+    end function
+
+    ! Get neig of a vertex
+    function GetVertNeig(vert, i) result(res)
+        integer(I8)                 :: i 
+        type(VertexUDT)             :: vert 
+        integer(I8), allocatable    :: res(:)
+        res = vert%neig(vert%neigP(i, 1):(vert%neigP(i, 1) + vert%neigP(i, 2) - 1))
+    end function
+
+    ! Get cells of a face
+    function GetFaceCell(face, i) result(res)
+        integer(I8)                 :: i 
+        type(FaceUDT)               :: face 
+        integer(I8), allocatable    :: res(:)
+        res = face%cell(face%cellP(i, 1):(face%cellP(i, 1) + face%cellP(i, 2) - 1))
+    end function
+
+    ! Get faces of a cell
+    function GetCellFace(cell, i) result(res)
+        integer(I8)                 :: i 
+        type(CellUDT)               :: cell 
+        integer(I8), allocatable    :: res(:)
+        res = cell%face(cell%faceP(i, 1):(cell%faceP(i, 1) + cell%faceP(i, 2) - 1))
+    end function
+
+    ! Get vertices of a cell
+    function GetCellVert(cell, i) result(res)
+        integer(I8)                 :: i 
+        type(CellUDT)               :: cell 
+        integer(I8), allocatable    :: res(:)
+        res = cell%vert(cell%vertP(i, 1):(cell%vertP(i, 1) + cell%vertP(i, 2) - 1))
+    end function
+
+    ! Get faces of a flux surface
+    function GetFSFace(fd, i) result(res)
+        integer(I8)                 :: i 
+        type(FluxDataUDT)           :: fd 
+        integer(I8), allocatable    :: res(:)
+        res = fd%fluxsurfacefaces(fd%fluxsurfacefacesP(i, 1):&
+            (fd%fluxsurfacefacesP(i, 1) + fd%fluxsurfacefacesP(i, 2) - 1))
+    end function
+
+    ! Get cells of a flux tube
+    function GetFTCell(fd, i) result(res)
+        integer(I8)                 :: i 
+        type(FluxDataUDT)           :: fd 
+        integer(I8), allocatable    :: res(:)
+        res = fd%fluxtubecells(fd%fluxtubecellsP(i, 1):&
+            (fd%fluxtubecellsP(i, 1) + fd%fluxtubecellsP(i, 2) - 1))
+    end function
+
+    ! Get faces of a flux tube
+    function GetFTFace(fd, i) result(res)
+        integer(I8)                 :: i 
+        type(FluxDataUDT)           :: fd 
+        integer(I8), allocatable    :: res(:)
+        res = fd%fluxtubefaces(fd%fluxtubefacesP(i, 1):&
+            (fd%fluxtubefacesP(i, 1) + fd%fluxtubefacesP(i, 2) - 1))
+    end function
+
 
     !------------------------------------------------------------------!
     !                             Numerics                             !
