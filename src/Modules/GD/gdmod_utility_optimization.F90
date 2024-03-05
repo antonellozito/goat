@@ -123,7 +123,7 @@ module gdmod_utility_optimization
 
             ! Get the vertex neighbours
             allocate(tvn(vert%neigP(i, 2)))
-            tvn = vert%neiglist(vert%neigP(i, 1):&
+            tvn = vert%neig(vert%neigP(i, 1):&
                 (vert%neigP(i, 1) + vert%neigP(i, 2)-1))
 
             ! Get their IDs
@@ -262,7 +262,7 @@ module gdmod_utility_optimization
 
             ! Get neighbours
             allocate(tvn(ntvn))
-            tvn = vert%neiglist(vert%neigP(xpind(i), 1):&
+            tvn = vert%neig(vert%neigP(xpind(i), 1):&
                 vert%neigP(xpind(i), 1)+ntvn-1)
             
             ! Check which vertices have the same flux surface ID
@@ -369,7 +369,7 @@ module gdmod_utility_optimization
         ! Associate
         associate(&
             vert        => grid%vert,   &
-            faces       => grid%faces,  &
+            faces       => grid%face,  &
             bnd         => grid%bnd)
 
         ! Allocate (too big, trim later)
@@ -407,7 +407,7 @@ module gdmod_utility_optimization
                     ! Extract neighbours of this vertex
                     ntvn = vert%neigP(tv(j), 2)
                     allocate(tvn(ntvn))
-                    tvn = vert%neiglist(vert%neigP(tv(j), 1):vert%neigP(tv(j), 1)+ntvn-1)
+                    tvn = vert%neig(vert%neigP(tv(j), 1):vert%neigP(tv(j), 1)+ntvn-1)
 
                     ! Initialize mask for inclusion
                     allocate(mask(ntvn))

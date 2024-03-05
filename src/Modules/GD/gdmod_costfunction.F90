@@ -433,7 +433,7 @@ module gdmod_costfunction
             ! Get the vertex neighbours of this vertex
             sp = vert%neigP(i, 1)
             ep = vert%neigP(i, 1) + vert%neigP(i, 2)-1
-            temptvn = vert%neiglist(sp:ep)
+            temptvn = vert%neig(sp:ep)
             
             ! Get the ID of the coordinate line
             tID = vert%fieldlineID(i)
@@ -1162,7 +1162,7 @@ module gdmod_costfunction
             allocate(cID(ntemptvn))
 
             ! Get the vertex neighbours of this vertex
-            temptvn = vert%neiglist(& 
+            temptvn = vert%neig(& 
                 vert%neigP(i, 1):vert%neigP(i, 1)+vert%neigP(i, 2)-1)
             
             ! Get the ID of the coordinate line
