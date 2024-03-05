@@ -3593,7 +3593,7 @@ module gdmod_constraints
 
             ! Get the neighbours
             allocate(tvn(vert%neigP(tv, 2)))
-            tvn = vert%neiglist(vert%neigP(tv, 1):vert%neigP(tv, 1)+vert%neigP(tv, 2)-1)
+            tvn = vert%neig(vert%neigP(tv, 1):vert%neigP(tv, 1)+vert%neigP(tv, 2)-1)
 
             ! Check if any are not marked
             if (any(.not. ismarked(tvn))) then
@@ -3629,12 +3629,12 @@ module gdmod_constraints
         deallocate(movetoback, movetofront)
         
         ! Initialize   
-        allocate(isconstrained(grid%faces%ntot))
+        allocate(isconstrained(grid%face%ntot))
         isconstrained(:) = .false.
 
         ! Loop 
         vpc = 0 ! face counter
-        allocate(vpairs(grid%faces%ntot, 2))! allocate too big, trim later
+        allocate(vpairs(grid%face%ntot, 2))! allocate too big, trim later
 
         do i = 1, size(cvertlist, 1)
             ! Get the current vertex
@@ -3642,7 +3642,7 @@ module gdmod_constraints
 
             ! Get the neighbours of this vertex
             allocate(tvn(vert%neigP(tv, 2)))
-            tvn = vert%neiglist(vert%neigP(tv, 1):vert%neigP(tv, 1)+vert%neigP(tv, 2)-1)
+            tvn = vert%neig(vert%neigP(tv, 1):vert%neigP(tv, 1)+vert%neigP(tv, 2)-1)
 
             ! Get the fieldline ID 
             tID = vert%fieldlineID(tv)
@@ -3728,8 +3728,8 @@ module gdmod_constraints
             ! Constrain each pair 
             do j = 1, size(tvn, 1)
                 ! Get the face 
-                call MapVertexPairToFace(tv, tvn(j), grid%faces%vert, &
-                    grid%faces%ntot, tf)
+                call MapVertexPairToFace(tv, tvn(j), grid%face%vert, &
+                    grid%face%ntot, tf)
 
                 ! Check initial perpendicularity
                 isfaceperp = .true.

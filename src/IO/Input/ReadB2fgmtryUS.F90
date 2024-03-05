@@ -27,7 +27,7 @@ subroutine ReadB2fgmtryUS(filespec,grid)
 
     character(120)              :: chardummy   ! dummy array
     integer(I8), allocatable    :: cdummy(:,:) ! dummy array
-    integer(I8), allocatable    :: fdummy(:,:) ! dummy array
+    integer(I8), allocatable    :: fdummy(:,:), fdummy2(:, :) ! dummy array
     integer(I8), allocatable    :: vdummy(:,:) ! dummy array
     integer(I8), allocatable    :: ftdummy(:) ! dummy array
 
@@ -35,7 +35,7 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     real(R8), allocatable       :: fdummyr(:,:) ! dummy array
     real(R8), allocatable       :: vdummyr(:,:) ! dummy array
     real(R8), allocatable       :: fsdummyr(:) ! dummy array
-    real(R8), allocatable       :: facelistdummy(:) ! dummy array
+    real(R8), allocatable       :: facedummy(:) ! dummy array
     integer(I8), allocatable       :: n2dummy(:) ! dummy array
     integer(I8), allocatable       :: nxdummy(:) ! dummy array
 
@@ -53,8 +53,8 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     nv = int(idum(4), I8)
 
     ! Add to grid
-    grid%cells%ntot         = nc
-    grid%faces%ntot         = nf
+    grid%cell%ntot         = nc
+    grid%face%ntot         = nf
     grid%vert%ntot          = nv
     grid%data%fluxdata%nFs  = idum(5)
     grid%data%fluxdata%nFt  = idum(6)
@@ -63,10 +63,10 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     call cfruin (filespec,5,idum,'nCmxVx,nCmxFc,nVmxCv,nVmxFc,nCmxNv')
 
     ! Add to grid
-    grid%cells%nvertlist = idum(0)
-    grid%cells%nfacelist = idum(1)
-    grid%vert%ncelllist  = idum(2)
-    grid%vert%nfacelist  = idum(3)
+    grid%cell%nvert = idum(0)
+    grid%cell%nface = idum(1)
+    grid%vert%ncell  = idum(2)
+    grid%vert%nface  = idum(3)
 
     ! Allocate grid
     call AllocateGrid(grid)
@@ -79,7 +79,7 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     allocate(fdummyr(nf,4))
     allocate(vdummyr(nv,4))
     allocate(fsdummyr(grid%data%fluxdata%nFs))
-    allocate(facelistdummy(grid%cells%nfacelist))
+    allocate(facedummy(grid%cell%nface))
     allocate(ftdummy(grid%data%fluxdata%nFt))
 
     ! Read data for structured grid remapping (to be deleted in future)
@@ -94,16 +94,17 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     call cfruin (filespec,1,idum, 'isymm')
 
     ! Add grid mapping data
-    call cfruin (filespec, nc*2,    grid%cells%faceP, 'cvFcP')
-    call cfruin (filespec, grid%cells%nfacelist, grid%cells%facelist,  'cvFc')
-    call cfruin (filespec, nf*2,    grid%faces%neig,  'fcCv')
-    call cfruin (filespec, nf*2,    grid%faces%vert,  'fcVx')
-    call cfruin (filespec, nc*2,    grid%cells%vertP, 'cvVxP')
-    call cfruin (filespec, grid%cells%nvertlist, grid%cells%vertlist,  'cvVx')
+    allocate(fdummy2(nf, 2))
+    call cfruin (filespec, nc*2,    grid%cell%faceP, 'cvFcP')
+    call cfruin (filespec, grid%cell%nface, grid%cell%face,  'cvFc')
+    call cfruin (filespec, nf*2,    fdummy2,  'fcCv')
+    call cfruin (filespec, nf*2,    grid%face%vert,  'fcVx')
+    call cfruin (filespec, nc*2,    grid%cell%vertP, 'cvVxP')
+    call cfruin (filespec, grid%cell%nvert, grid%cell%vert,  'cvVx')
     call cfruin (filespec, nv*2,     grid%vert%faceP, 'vxFcP')
-    call cfruin (filespec, grid%vert%nfacelist,  grid%vert%facelist,  'vxFc')
+    call cfruin (filespec, grid%vert%nface,  grid%vert%face,  'vxFc')
     call cfruin (filespec, nv*2,     grid%vert%cellP, 'vxCvP')
-    call cfruin (filespec, grid%vert%ncelllist,  grid%vert%celllist,  'vxCv')
+    call cfruin (filespec, grid%vert%ncell,  grid%vert%cell,  'vxCv')
     call cfruin (filespec, grid%data%fluxdata%nFt*2,   grid%data%fluxdata%fluxtubecellsP, 'ftCvP')
     call cfruin (filespec, nc,     grid%data%fluxdata%fluxtubecells,  'ftCv')
     call cfruin (filespec, grid%data%fluxdata%nFt*2,   grid%data%fluxdata%fluxtubefacesP, 'ftFcP')
@@ -114,8 +115,9 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     call cfruin (filespec, nf,     grid%data%regions%faceregID, 'fcReg')
     call cfruin (filespec, nc,     grid%data%regions%cellregID, 'cvReg')
     call cfruin (filespec, grid%data%fluxdata%nFt,     grid%data%regions%fluxtuberegID, 'ftReg')
-    call cfrure (filespec, grid%cells%nfacelist,  facelistdummy,'intcellP') ! not used
-    call cfrure (filespec, grid%cells%nfacelist,  facelistdummy,'intcellR') ! not used
+    call cfrure (filespec, grid%cell%nface,  facedummy,'intcellP') ! not used
+    call cfrure (filespec, grid%cell%nface,  facedummy,'intcellR') ! not used
+    deallocate(fdummy2)
 
     ! Add additional data from underlying structured grid (to be removed)
     n2 = 0

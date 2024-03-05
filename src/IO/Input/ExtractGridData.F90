@@ -54,7 +54,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
     logical, allocatable        :: isghostvert(:), mask(:), &
                                 ispolygonstart(:)
 
-    integer(I8), allocatable    :: facevec(:) ! simply 1:grid%faces%ntot
+    integer(I8), allocatable    :: facevec(:) ! simply 1:grid%face%ntot
     integer(I8)                 :: start, nvert, tv(1:4), newv(1:4), &
         segend
 
@@ -74,8 +74,8 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
     ! Loop
     do j = 1, 2
-        do i = 1, grid%faces%ntot
-            isghostvert(grid%faces%vert(i,j)) = .false.
+        do i = 1, grid%face%ntot
+            isghostvert(grid%face%vert(i,j)) = .false.
         enddo
     enddo
 
@@ -112,7 +112,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
             tf(1:ntf) = fluxdata%fluxsurfacefaces(itf:itf+ntf-1)
 
             ! Extract vertices of these faces
-            tfv(1:ntf,:) = grid%faces%vert(tf(1:ntf),:)
+            tfv(1:ntf,:) = grid%face%vert(tf(1:ntf),:)
 
             ! Set the flux tube index
             do j = 1, 2
@@ -164,10 +164,10 @@ subroutine ExtractGridData(grid, meth, gridoptions)
             do  i = 1, ngv
                 ! Check if any faces and cells actually contain this 
                 ! vertex, if so -> throw error
-                if (any(grid%faces%vert == indgv(i))) then
+                if (any(grid%face%vert == indgv(i))) then
                     call gdErrorHandler('Ghost vertex detected yet present in face vertices')
                 end if
-                if (any(grid%faces%vert == indgv(i))) then
+                if (any(grid%face%vert == indgv(i))) then
                     call gdErrorHandler('Ghost vertex detected yet present in cell vertices')
                 end if
 
@@ -179,12 +179,12 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
             ! Adjust cell and faces
             do j = 1, 2
-                grid%faces%vert(:,j) = grid%faces%vert(:,j) &
-                    - vdiff(grid%faces%vert(:,j))
+                grid%face%vert(:,j) = grid%face%vert(:,j) &
+                    - vdiff(grid%face%vert(:,j))
             end do
 
-            grid%cells%vertlist = grid%cells%vertlist & 
-                - vdiff(grid%cells%vertlist)
+            grid%cell%vert = grid%cell%vert & 
+                - vdiff(grid%cell%vert)
 
             ! Add the vertex structure
             grid%vert = newverts
@@ -202,20 +202,20 @@ subroutine ExtractGridData(grid, meth, gridoptions)
         ! every cell here, otherwise we print a warning), the 3nd and 
         ! 4th vertex are switched. Guard cells without guard vertices 
         ! are skipped (these should, in fact, be removed) 
-        if (any( (grid%cells%vertP(:, 2) .ne. 4) .and. (grid%cells%vertP(:,2) .ne. 2) )) then 
+        if (any( (grid%cell%vertP(:, 2) .ne. 4) .and. (grid%cell%vertP(:,2) .ne. 2) )) then 
             print *, 'non-classical grid, vertex reordering may be wrong'
         end if 
-        do i = 1, grid%cells%ntot
-             if ((grid%cells%vertP(i,2) .ne. 4) .and. (grid%cells%vertP(i,2) .ne. 2))  then
+        do i = 1, grid%cell%ntot
+             if ((grid%cell%vertP(i,2) .ne. 4) .and. (grid%cell%vertP(i,2) .ne. 2))  then
                 ! Do nothing
             else 
-                start = grid%cells%vertP(i,1)
-                nvert = grid%cells%vertP(i,2)
-                tv = grid%cells%vertlist(start:start+nvert)
+                start = grid%cell%vertP(i,1)
+                nvert = grid%cell%vertP(i,2)
+                tv = grid%cell%vert(start:start+nvert)
                 newv = tv 
                 newv(3) = tv(4)
                 newv(4) = tv(3)
-                grid%cells%vertlist(start:start+nvert) = newv
+                grid%cell%vert(start:start+nvert) = newv
             end if
         end do
 
@@ -234,9 +234,9 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
         ! Loop over all face labels (not regions here!) to precompute
         ! number of grid boundaries (can be more/less)
-        allocate(mask(grid%faces%ntot))
-        allocate(facevec(grid%faces%ntot))
-        facevec(:) = (/(i, i=1,grid%faces%ntot,1)/)
+        allocate(mask(grid%face%ntot))
+        allocate(facevec(grid%face%ntot))
+        facevec(:) = (/(i, i=1,grid%face%ntot,1)/)
         nlabels = size(gglabels) 
         nbnd = 0 ! number of boundaries
         do il = 1, nlabels 
@@ -258,7 +258,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
             allocate(sortindex(nfpb))
             allocate(ispolygonstart(nfpb))
             allocate(temparray(nfpb, 2))
-            temparray(:, :) = grid%faces%vert(tempfaces, :)
+            temparray(:, :) = grid%face%vert(tempfaces, :)
             call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart)
             nbnd = nbnd + count(ispolygonstart)
 
@@ -288,7 +288,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
                 tempfaces(nfpb), temparray(nfpb,2))
 
             tempfaces = pack(facevec, mask)
-            temparray(:,:) = grid%faces%vert(tempfaces, :)
+            temparray(:,:) = grid%face%vert(tempfaces, :)
             call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart)
             tempfaces = tempfaces(sortindex)
             
@@ -309,18 +309,18 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
                 ! Add the boundary ID
                 grid%bnd(ib)%ID = gdlabels(il)
-                grid%bnd(ib)%nfaces = segend-segstart(j)+1
+                grid%bnd(ib)%nface = segend-segstart(j)+1
 
                 ! Allocate this boundary
                 call AllocateBnd(grid%bnd(ib))
 
                 ! Add faces (already sorted before)
-                grid%bnd(ib)%faces(:) = tempfaces(segstart(j):segend)
+                grid%bnd(ib)%face(:) = tempfaces(segstart(j):segend)
 
                 ! Extract vertices
                 call ExtractPolygonVertices( & 
-                    grid%faces%vert(grid%bnd(ib)%faces,:), &
-                    grid%bnd(ib)%nfaces, grid%bnd(ib)%vert)
+                    grid%face%vert(grid%bnd(ib)%face,:), &
+                    grid%bnd(ib)%nface, grid%bnd(ib)%vert)
             end do 
 
             ! Deallocate
@@ -384,7 +384,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
             tf(1:ntf) = fluxdata%fluxsurfacefaces(itf:itf+ntf-1)
 
             ! Extract vertices of these faces
-            tfv(1:ntf,:) = grid%faces%vert(tf(1:ntf),:)
+            tfv(1:ntf,:) = grid%face%vert(tf(1:ntf),:)
 
             ! Set the flux tube index
             do j = 1, 2
@@ -436,10 +436,10 @@ subroutine ExtractGridData(grid, meth, gridoptions)
             do  i = 1, ngv
                 ! Check if any faces and cells actually contain this 
                 ! vertex, if so -> throw error
-                if (any(grid%faces%vert == indgv(i))) then
+                if (any(grid%face%vert == indgv(i))) then
                     call gdErrorHandler('Ghost vertex detected yet present in face vertices')
                 end if
-                if (any(grid%faces%vert == indgv(i))) then
+                if (any(grid%face%vert == indgv(i))) then
                     call gdErrorHandler('Ghost vertex detected yet present in cell vertices')
                 end if
 
@@ -451,12 +451,12 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
             ! Adjust cell and faces
             do j = 1, 2
-                grid%faces%vert(:,j) = grid%faces%vert(:,j) &
-                    - vdiff(grid%faces%vert(:,j))
+                grid%face%vert(:,j) = grid%face%vert(:,j) &
+                    - vdiff(grid%face%vert(:,j))
             end do
 
-            grid%cells%vertlist = grid%cells%vertlist & 
-                - vdiff(grid%cells%vertlist)
+            grid%cell%vert = grid%cell%vert & 
+                - vdiff(grid%cell%vert)
 
             ! Add the vertex structure
             grid%vert = newverts
@@ -480,9 +480,9 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
         ! Loop over all face labels (not regions here!) to precompute
         ! number of grid boundaries (can be more/less)
-        allocate(mask(grid%faces%ntot))
-        allocate(facevec(grid%faces%ntot))
-        facevec(:) = (/(i, i=1,grid%faces%ntot,1)/)
+        allocate(mask(grid%face%ntot))
+        allocate(facevec(grid%face%ntot))
+        facevec(:) = (/(i, i=1,grid%face%ntot,1)/)
         nlabels = size(gglabels) 
         nbnd = 0 ! number of boundaries
         do il = 1, nlabels 
@@ -504,7 +504,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
             allocate(sortindex(nfpb))
             allocate(ispolygonstart(nfpb))
             allocate(temparray(nfpb, 2))
-            temparray(:, :) = grid%faces%vert(tempfaces, :)
+            temparray(:, :) = grid%face%vert(tempfaces, :)
             call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart)
             nbnd = nbnd + count(ispolygonstart)
 
@@ -534,7 +534,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
                 tempfaces(nfpb), temparray(nfpb,2))
 
             tempfaces = pack(facevec, mask)
-            temparray(:,:) = grid%faces%vert(tempfaces, :)
+            temparray(:,:) = grid%face%vert(tempfaces, :)
             call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart)
             tempfaces = tempfaces(sortindex)
             
@@ -555,18 +555,18 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
                 ! Add the boundary ID
                 grid%bnd(ib)%ID = gdlabels(il)
-                grid%bnd(ib)%nfaces = segend-segstart(j)+1
+                grid%bnd(ib)%nface = segend-segstart(j)+1
 
                 ! Allocate this boundary
                 call AllocateBnd(grid%bnd(ib))
 
                 ! Add faces (already sorted before)
-                grid%bnd(ib)%faces(:) = tempfaces(segstart(j):segend)
+                grid%bnd(ib)%face(:) = tempfaces(segstart(j):segend)
 
                 ! Extract vertices
                 call ExtractPolygonVertices( & 
-                    grid%faces%vert(grid%bnd(ib)%faces,:), &
-                    grid%bnd(ib)%nfaces, grid%bnd(ib)%vert)
+                    grid%face%vert(grid%bnd(ib)%face,:), &
+                    grid%bnd(ib)%nface, grid%bnd(ib)%vert)
             end do 
 
             ! Deallocate
