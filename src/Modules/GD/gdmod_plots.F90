@@ -65,7 +65,7 @@ module gdmod_plots
         ! Description
         !============
         ! Plot a cell-centered 2D field. The field should be a nc-by-1 
-        ! array (with nc the number of cells in grid%cells). This 
+        ! array (with nc the number of cells in grid%cell). This 
         ! routine calls the Patchplot2D routine to do the plotting. 
 
         ! The usual
@@ -102,7 +102,7 @@ module gdmod_plots
             ! Cell based quantities
 
             ! Length of xp, yp
-            np = sum(grid%cells%vertP(:,2)) + grid%cells%ntot
+            np = sum(grid%cell%vertP(:,2)) + grid%cell%ntot
 
             ! Allocate
             allocate(xp(np))
@@ -111,11 +111,11 @@ module gdmod_plots
 
             ! Loop over all cells
             ind = 1
-            do k = 1, grid%cells%ntot
+            do k = 1, grid%cell%ntot
                 ! Loop over all vertices of the current cell
-                do j = 1, grid%cells%vertP(k,2)
+                do j = 1, grid%cell%vertP(k,2)
                     ! Add the coordinates and value
-                    vertind = grid%cells%vertP(k,1)+j-1
+                    vertind = grid%cell%vertP(k,1)+j-1
                     xp(ind) = grid%vert%x(vertind)
                     yp(ind) = grid%vert%y(vertind)
                     val(ind) = field(k)
@@ -138,7 +138,7 @@ module gdmod_plots
             ! Vertex based quantities (still plotted per cell)
 
             ! Length of xp, yp
-            np = sum(grid%cells%vertP(:,2)) + grid%cells%ntot
+            np = sum(grid%cell%vertP(:,2)) + grid%cell%ntot
 
             ! Allocate
             allocate(xp(np))
@@ -147,11 +147,11 @@ module gdmod_plots
 
             ! Loop over all cells
             ind = 1
-            do k = 1, grid%cells%ntot
+            do k = 1, grid%cell%ntot
                 ! Loop over all vertices of the current cell
-                do j = 1, grid%cells%vertP(k,2)
+                do j = 1, grid%cell%vertP(k,2)
                     ! Add the coordinates and value
-                    vertind = grid%cells%vertlist(grid%cells%vertP(k,1)+j-1)
+                    vertind = grid%cell%vert(grid%cell%vertP(k,1)+j-1)
                     xp(ind) = grid%vert%x(vertind)
                     yp(ind) = grid%vert%y(vertind)
                     val(ind) = field(vertind)
@@ -257,16 +257,16 @@ module gdmod_plots
              status='replace')
     
         ! Loop over all cells
-        do i = 1, grid%cells%ntot
+        do i = 1, grid%cell%ntot
             ! Write vertex coordinates as ordened in the cell
-            si = grid%cells%vertP(i,1) ! start index
-            nvpc = grid%cells%vertP(i,2) ! number of vertices per cell
+            si = grid%cell%vertP(i,1) ! start index
+            nvpc = grid%cell%vertP(i,2) ! number of vertices per cell
 
             ! Allocate
             allocate(tcv(nvpc))
 
             ! Get the vertex indices of the current cell
-            tcv = grid%cells%vertlist(si:si+nvpc-1)
+            tcv = grid%cell%vert(si:si+nvpc-1)
             do j = 1, nvpc
                 ! Print
                 write (fu, *) grid%vert%x(tcv(j)), grid%vert%y(tcv(j))
@@ -316,12 +316,12 @@ module gdmod_plots
              status='replace')
     
         ! Loop over all faces
-        do i = 1, grid%faces%ntot
+        do i = 1, grid%face%ntot
             ! Write vertex coordinates of the face
-            write(fu, *) grid%vert%x(grid%faces%vert(i,1)), &
-                grid%vert%y(grid%faces%vert(i,1))
-            write(fu, *) grid%vert%x(grid%faces%vert(i,2)), &
-                grid%vert%y(grid%faces%vert(i,2))
+            write(fu, *) grid%vert%x(grid%face%vert(i,1)), &
+                grid%vert%y(grid%face%vert(i,1))
+            write(fu, *) grid%vert%x(grid%face%vert(i,2)), &
+                grid%vert%y(grid%face%vert(i,2))
             write(fu, *) ! blank line
 
         end do
@@ -406,15 +406,15 @@ module gdmod_plots
         nb = size(grid%bnd)
 
         ! Allocate
-        allocate(fx(grid%faces%ntot))
-        allocate(fy(grid%faces%ntot))
-        allocate(mask(grid%faces%ntot))
+        allocate(fx(grid%face%ntot))
+        allocate(fy(grid%face%ntot))
+        allocate(mask(grid%face%ntot))
 
         ! Compute coordinates
-        fx(:) = (grid%vert%x(grid%faces%vert(:,1)) & 
-            + grid%vert%x(grid%faces%vert(:,2)))*0.5
-        fy(:) = (grid%vert%y(grid%faces%vert(:,1)) & 
-            + grid%vert%y(grid%faces%vert(:,2)))*0.5
+        fx(:) = (grid%vert%x(grid%face%vert(:,1)) & 
+            + grid%vert%x(grid%face%vert(:,2)))*0.5
+        fy(:) = (grid%vert%y(grid%face%vert(:,1)) & 
+            + grid%vert%y(grid%face%vert(:,2)))*0.5
 
         ! Write vertex coordinates and their surface indices to file
         open (action='write', file=trim(datafile), newunit=fu, &
@@ -422,15 +422,15 @@ module gdmod_plots
     
         do i = 1, nb
             ! Get all faces 
-            tnf = size(grid%bnd(i)%faces)
+            tnf = size(grid%bnd(i)%face)
 
             ! Allocate coordinate vectors, add coordinates
             allocate(tfx(tnf))
             allocate(tfy(tnf))
             print *, tnf 
 
-            tfx = fx(grid%bnd(i)%faces)
-            tfy = fy(grid%bnd(i)%faces)
+            tfx = fx(grid%bnd(i)%face)
+            tfy = fy(grid%bnd(i)%face)
 
             ! Write
             do j = 1, tnf
@@ -487,15 +487,15 @@ module gdmod_plots
         nl = size(labels)
 
         ! Allocate
-        allocate(fx(grid%faces%ntot))
-        allocate(fy(grid%faces%ntot))
-        allocate(mask(grid%faces%ntot))
+        allocate(fx(grid%face%ntot))
+        allocate(fy(grid%face%ntot))
+        allocate(mask(grid%face%ntot))
 
         ! Compute coordinates
-        fx(:) = (grid%vert%x(grid%faces%vert(:,1)) & 
-            + grid%vert%x(grid%faces%vert(:,2)))*0.5
-        fy(:) = (grid%vert%y(grid%faces%vert(:,1)) & 
-            + grid%vert%y(grid%faces%vert(:,2)))*0.5
+        fx(:) = (grid%vert%x(grid%face%vert(:,1)) & 
+            + grid%vert%x(grid%face%vert(:,2)))*0.5
+        fy(:) = (grid%vert%y(grid%face%vert(:,1)) & 
+            + grid%vert%y(grid%face%vert(:,2)))*0.5
 
         ! Write vertex coordinates and their surface indices to file
         open (action='write', file=trim(datafile), newunit=fu, &
@@ -823,16 +823,16 @@ module gdmod_plots
         write(fu, *) 'x, y'
     
         ! Loop over all cells
-        do i = 1, grid%cells%ntot
+        do i = 1, grid%cell%ntot
             ! Write vertex coordinates as ordened in the cell
-            si = grid%cells%vertP(i,1) ! start index
-            nvpc = grid%cells%vertP(i,2) ! number of vertices per cell
+            si = grid%cell%vertP(i,1) ! start index
+            nvpc = grid%cell%vertP(i,2) ! number of vertices per cell
 
             ! Allocate
             allocate(tcv(nvpc))
 
             ! Get the vertex indices of the current cell
-            tcv = grid%cells%vertlist(si:si+nvpc-1)
+            tcv = grid%cell%vert(si:si+nvpc-1)
             do j = 1, nvpc
                 ! Print
                 write (fu, *) grid%vert%x(tcv(j)), grid%vert%y(tcv(j))

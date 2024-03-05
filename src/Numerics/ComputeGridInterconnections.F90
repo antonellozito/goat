@@ -8,7 +8,7 @@ subroutine ComputeGridInterconnections(grid)
     !
     ! Vertices: ntot, BV
     ! Faces: ntot, vert
-    ! Cells: ntot, vertP, vertlist, nvertlist 
+    ! Cells: ntot, vertP, vert, nvert 
     !   
     ! All other fields are recomputed based on this basic 
     ! interconnection data.             
@@ -56,25 +56,23 @@ subroutine ComputeGridInterconnections(grid)
     type(FaceUDT)               :: f
     type(CellUDT)               :: c
 
-    integer(I8)                 :: nc, nv, nf, sp, ep, tcs, thiscell, nvc
-    integer(I8), allocatable    :: fcount(:), vcount(:), tv(:)
-    integer(I8), allocatable    :: localID(:)
-    integer(I8), allocatable    :: fc(:)
-    integer(I8), allocatable    :: fn(:), allvertcells(:), allfv(:)
-    integer(I8), allocatable    :: tcf2(:)
-    integer(I8)                 :: ntv, tf, ind, tfv(1:2), tc, tcn, ncf
-    integer(I8)                 :: nextcell, tcf, vc, ntcf2, nb1, nb2
+    integer(I8)                 :: nc, nv, nf, sp, ep, tcs, thiscell, &
+        nvc, ntv, tf, ind, tfv(1:2), tc, tcn, ncf, nextcell, tcf, vc, &
+        ntcf2, nb1, nb2, nfc, fcc
+    integer(I8), allocatable    :: fcount(:), vcount(:), tv(:), &
+        tempfcell(:, :), localID(:), fc(:), fn(:), allvertcells(:), &
+        allfv(:), tcf2(:), nb(:), vcc(:), indv(:)
 
     logical, allocatable        :: cellfound(:), allfvind(:)
-    logical                     :: startcellnotfound, allnotfound
-    logical                     :: accountforGC
+    logical                     :: startcellnotfound, allnotfound, &
+        accountforGC
 
     ! Unpack & initialize
     !==================
     ! Data structures 
     v = grid%vert
-    f = grid%faces
-    c = grid%cells 
+    f = grid%face
+    c = grid%cell 
 
     ! Checks
     if (size(f%vert,2) /= 2) then
@@ -98,19 +96,33 @@ subroutine ComputeGridInterconnections(grid)
     ! Face neighbours, vertex cells, cell faces
     !==========================================
     ! Check allocation
-    if (allocated(c%facelist)) then
+    if (allocated(c%face)) then
         ! Print out warning
-        print *, 'ComputeGridInterconnections: recomputing cells%facelist'
+        print *, 'ComputeGridInterconnections: recomputing cell%face'
 
         ! Deallocate
-        deallocate(c%facelist)
+        deallocate(c%face)
     end if
-    if (allocated(v%celllist)) then 
+    if (allocated(v%cell)) then 
         ! print out warning
-        print *, 'ComputeGridInterconnections: recomputing vert%celllist'
+        print *, 'ComputeGridInterconnections: recomputing vert%cell'
 
         ! Deallocate
-        deallocate(v%celllist)
+        deallocate(v%cell)
+    end if
+    if (allocated(f%cell)) then 
+        ! Print out warning
+        print *, 'ComputeGridInterconnections: recomputing face%cell'
+
+        ! Deallocate
+        deallocate(f%cell)
+    end if
+    if (allocated(v%cell)) then 
+        ! Print out warning
+        print *, 'ComputeGridInterconnections: recomputing vert%cell'
+
+        ! Deallocate
+        deallocate(v%cell)
     end if
 
     ! Check which cells are guard cells
@@ -152,11 +164,11 @@ subroutine ComputeGridInterconnections(grid)
 
     end do
 
-    ! Compute the total faces in cells%facelist
-    c%nfacelist = sum(c%faceP(:,2)) 
+    ! Compute the total faces in cells%face
+    c%nface = sum(c%faceP(:,2)) 
 
     ! Allocate
-    allocate(c%facelist(c%nfacelist))
+    allocate(c%face(c%nface))
 
     ! Make the pointer list for vertex cell neighbours
     v%cellP(:,:) = 0
@@ -168,7 +180,7 @@ subroutine ComputeGridInterconnections(grid)
         allocate(tv(ntv))
 
         ! Get the vertices of the current cell
-        tv = c%vertlist(c%vertP(i,1):(c%vertP(i,1)+ntv-1))
+        tv = c%vert(c%vertP(i,1):(c%vertP(i,1)+ntv-1))
 
         ! Update the counter
         v%cellP(tv,2) = v%cellP(tv,2)+1
@@ -178,11 +190,11 @@ subroutine ComputeGridInterconnections(grid)
 
     end do
 
-    ! Compute the total number of cells in vert%celllist
-    v%ncelllist = sum(v%cellP(:,2))
+    ! Compute the total number of cells in vert%cell
+    v%ncell = sum(v%cellP(:,2))
 
     ! Allocate
-    allocate(v%celllist(v%ncelllist))
+    allocate(v%cell(v%ncell))
 
     ! Construct the pointer
     v%cellP(1,1) = 1
@@ -190,19 +202,15 @@ subroutine ComputeGridInterconnections(grid)
         v%cellP(i,1) = v%cellP(i-1,1) + v%cellP(i-1,2)
     end do
 
-    ! Set vertex celllist and cell facelist and face neighbours
+    ! Set vertex cell and cell face and face neighbours
     fcount(:) = 1
     vcount(:) = 1
-    f%neig(:, :) = 0 ! initialize
+    allocate(tempfcell(f%ntot, 2))
+    tempfcell(:, :) = 0
     do i = 1, nc ! loop over all cells
-        ! Get the number of vertices of this cell
+        ! Get vertices of this cell
+        tv = GetCellVert(c, i)
         ntv = c%vertP(i,2)
-
-        ! Allocate
-        allocate(tv(ntv))
-
-        ! Get the vertices of the current cell
-        tv(:) = c%vertlist(c%vertP(i,1):(c%vertP(i,1)+ntv-1))
 
         ! Loop over all vertices
         do j = 1, ntv
@@ -231,14 +239,14 @@ subroutine ComputeGridInterconnections(grid)
                     ! Sanity check
                     if (fcount(tf) > 2) then
                         print *, 'face ID: ', tf
-                        print *, 'neighbours: ', f%neig(tf,:), i
+                        print *, 'neighbours: ', tempfcell(tf,:), i
                         call gdErrorHandler(& 
                         'ComputeGridInterconnections: too many ' &
                             // 'neighbours for this face')
                     end if
 
                 
-                    f%neig(tf,fcount(tf)) = i
+                    tempfcell(tf,fcount(tf)) = i
 
                     ! Update fcount
                     fcount(tf) = fcount(tf)+1
@@ -246,10 +254,10 @@ subroutine ComputeGridInterconnections(grid)
 
                 ! Add the current cell to the j'th vertex
                 ind = v%cellP(tv(j),1) + vcount(tv(j)) - 1
-                if (ind > v%ncelllist) then
+                if (ind > v%ncell) then
                     call gdErrorHandler('unknown error')
                 end if
-                v%celllist(ind) = i
+                v%cell(ind) = i
 
                 ! Update vcount
                 vcount(tv(j)) = vcount(tv(j))+1
@@ -257,10 +265,10 @@ subroutine ComputeGridInterconnections(grid)
                 ! Add cell face
                 if (.not. ((j > 1) .and. c%GC(i))) then ! hedge for guard cells
                     ind = c%faceP(i,1) + j - 1
-                    if (ind > c%nfacelist) then
+                    if (ind > c%nface) then
                         call gdErrorHandler('unknown error')
                     end if
-                    c%facelist(ind) = tf
+                    c%face(ind) = tf
                 end if
             end if
 
@@ -271,9 +279,26 @@ subroutine ComputeGridInterconnections(grid)
 
     end do
 
-    ! Deallocate
-    deallocate(fcount, vcount)
+    ! Construct cell arrays for faces and vertices
+    fcount = fcount-1
+    f%cellP(:, 2) = fcount 
+    f%cellP(1, 1) = 1
+    f%ncell = sum(f%cellP(:, 2))
+    allocate(f%cell(f%ncell))
+    fcc = 0
+    nfc = fcount(1)
+    f%cell(fcc+1:fcc+nfc) = tempfcell(1, 1:nfc)
+    fcc = fcc + nfc
+    do i = 2, f%ntot
+        f%cellP(i, 1) = f%cellP(i-1, 2) + f%cellP(i-1, 1)
+        nfc = fcount(i)
+        f%cell(fcc+1:fcc+nfc) = tempfcell(i, 1:nfc)
+        fcc = fcc + nfc
+    end do
 
+    ! Housekeeping
+    deallocate(vcount, fcount)
+    
     ! Logicals
     !=========
     ! Based on the interconnections computed above, the logical indices
@@ -288,8 +313,18 @@ subroutine ComputeGridInterconnections(grid)
     do i = 1, f%ntot
 
         ! Get face neighbours
-        nb1 = f%neig(i, 1)
-        nb2 = f%neig(i, 2)
+        nb  = GetFaceCell(f, i)
+        if (size(nb, 1) == 1) then 
+            nb1 = nb(1)
+            nb2 = 0
+        elseif (size(nb, 1) == 2) then   
+            nb1 = nb(1)
+            nb2 = nb(2)
+        else 
+            ! This shouldn't happen
+            call gdErrorHandler('More than two cells detected as face neighbours, check grid interconnection')
+        end if 
+        !deallocate(nb)
 
         ! Sanity checks
         if ( (nb1 == 0) .or. (accountforGC .and. (nb2 == 0)) ) then 
@@ -342,13 +377,13 @@ subroutine ComputeGridInterconnections(grid)
     end do
 
     ! Check the neiglist allocation
-    v%nneiglist = sum(v%neigP(:,2))
-    if (allocated(v%neiglist)) then 
+    f%ncell = sum(v%neigP(:,2))
+    if (allocated(v%neig)) then 
         ! This shouldn't be the case, but we hedge for it. Reallocate
-        deallocate(v%neiglist)
-        allocate(v%neiglist(v%nneiglist))
+        deallocate(v%neig)
+        allocate(v%neig(f%ncell))
     else
-        allocate(v%neiglist(v%nneiglist))
+        allocate(v%neig(f%ncell))
     end if
 
     ! Compute the neiglist
@@ -360,15 +395,34 @@ subroutine ComputeGridInterconnections(grid)
 
         ! Add the neighbours
         sp = v%neigP(tfv(1),1) + vcount(tfv(1))
-        v%neiglist(sp) = tfv(2)
+        v%neig(sp) = tfv(2)
         sp = v%neigP(tfv(2),1) + vcount(tfv(2))
-        v%neiglist(sp) = tfv(1)
+        v%neig(sp) = tfv(1)
 
         ! Update counter
         vcount(tfv) = vcount(tfv) + 1
 
     end do
     deallocate(vcount)
+
+    ! Compute vertex faces
+    do i = 1, f%ntot
+        v%faceP(f%vert(i, :), 2) = v%faceP(f%vert(i, :), 2) + 1;
+    end do
+    v%nface = sum(v%faceP(:, 2))
+    v%faceP(1, 1) = 1
+    do i = 2, f%ntot 
+        v%faceP(i, 1) = v%faceP(i-1, 1) + v%faceP(i-1, 2)
+    end do 
+    allocate(v%face(v%nface), vcc(v%ntot)) 
+    vcc(:) = 0
+    do i = 1, f%ntot
+        tfv = f%vert(i, :)
+        indv = vcc(tfv) + v%faceP(tfv, 1)
+        v%face(indv) = i
+        vcc(tfv) = vcc(tfv) + 1
+    end do 
+
 
     ! Sort vertex neighbours and vertex cells
     !========================================
@@ -396,7 +450,7 @@ subroutine ComputeGridInterconnections(grid)
 
         ! Account for guard cells, if any
         if (accountforGC) then 
-            tcs = tcs + count(c%GC(v%celllist(v%cellP(i, 1):v%cellP(i, 2)+v%cellP(i, 1)-1)))
+            tcs = tcs + count(c%GC(v%cell(v%cellP(i, 1):v%cellP(i, 2)+v%cellP(i, 1)-1)))
         end if
 
         ! Check
@@ -438,7 +492,7 @@ subroutine ComputeGridInterconnections(grid)
         cellfound(:) = .false.
         sp = v%cellP(i,1)
         ep = v%cellP(i,1) + nvc-1
-        allvertcells = v%celllist(sp:ep)
+        allvertcells = v%cell(sp:ep)
 
         tcf = 0
         do j = 1, tcs
@@ -450,7 +504,7 @@ subroutine ComputeGridInterconnections(grid)
                 ! Internal cell, simply take the first cell, since only 
                 ! one sequence
                 sp = v%cellP(i,1)
-                thiscell = v%celllist(sp)
+                thiscell = v%cell(sp)
 
 
                 ! Update 
@@ -477,10 +531,11 @@ subroutine ComputeGridInterconnections(grid)
                     ! Get the faces of the current cell
                     ! tc = allremcells(m) ! current cell
                     tc = allvertcells(m)
-                    sp = c%faceP(tc,1)
-                    ep = c%faceP(tc,1) + c%faceP(tc,2) - 1 
-                    allocate(fc(c%faceP(tc,2)))
-                    fc = c%facelist(sp:ep)
+                    fc = GetCellFace(c, tc)
+                    !sp = c%faceP(tc,1)
+                    !ep = c%faceP(tc,1) + c%faceP(tc,2) - 1 
+                    !allocate(fc(c%faceP(tc,2)))
+                    !fc = c%face(sp:ep)
 
                     ! Check how many common faces there are with faces
                     ! of the other remaining cells
@@ -496,7 +551,7 @@ subroutine ComputeGridInterconnections(grid)
                         sp = c%faceP(tcn,1)
                         ep = c%faceP(tcn,1) + c%faceP(tcn,2) - 1 
                         allocate(fn(c%faceP(tcn,2)))
-                        fn = c%facelist(sp:ep)
+                        fn = c%face(sp:ep)
 
                         ! Count how many faces they have in common
                         do q = 1, c%faceP(tc,2)
@@ -519,7 +574,7 @@ subroutine ComputeGridInterconnections(grid)
 
                         ! Set current cell
                         sp = v%cellP(i,1) + m - 1
-                        thiscell = v%celllist(sp)
+                        thiscell = v%cell(sp)
 
                         ! Update logicals
                         ! cellfound(thislocalID(m)) = .true.
@@ -568,7 +623,7 @@ subroutine ComputeGridInterconnections(grid)
                 allocate(fc(c%faceP(thiscell,2)))
                 sp = c%faceP(thiscell, 1)
                 ep = sp + c%faceP(thiscell,2)-1
-                fc = c%facelist(sp:ep)
+                fc = c%face(sp:ep)
 
                 ! Take the next cell
                 if (cellfound(k)) then
@@ -584,7 +639,7 @@ subroutine ComputeGridInterconnections(grid)
                 allocate(fn(c%faceP(nextcell,2)))
                 sp = c%faceP(nextcell, 1)
                 ep = sp + c%faceP(nextcell,2)-1
-                fn = c%facelist(sp:ep)
+                fn = c%face(sp:ep)
 
                 ! Check for common faces - should only be one
                 ncf = 0
@@ -646,14 +701,14 @@ subroutine ComputeGridInterconnections(grid)
                         ! if the current cell is not a guard cell
                         
                         sp = v%cellP(i,1)
-                        v%celllist(sp) = thiscell 
+                        v%cell(sp) = thiscell 
                         if (.not. c%GC(thiscell)) then
                             sp = v%neigP(i,1)
                             tfv = f%vert(tcf2(1),:)
                             if (tfv(1) == i) then
-                                v%neiglist(sp) = tfv(2)
+                                v%neig(sp) = tfv(2)
                             else
-                                v%neiglist(sp) = tfv(1)
+                                v%neig(sp) = tfv(1)
                             end if
 
                             ! Update vc
@@ -669,13 +724,13 @@ subroutine ComputeGridInterconnections(grid)
 
                     ! Add the cell and vertex neighbour
                     sp = v%cellP(i,1) + vc
-                    v%celllist(sp) = nextcell
+                    v%cell(sp) = nextcell
                     sp = v%neigP(i,1) + vc
                     tfv = f%vert(tcf,:)
                     if (tfv(1) == i) then 
-                        v%neiglist(sp) = tfv(2)
+                        v%neig(sp) = tfv(2)
                     else
-                        v%neiglist(sp) = tfv(1)
+                        v%neig(sp) = tfv(1)
                     end if
 
                     ! Update counter
@@ -721,7 +776,7 @@ subroutine ComputeGridInterconnections(grid)
                 allocate(fc(c%faceP(thiscell,2)))
                 sp = c%faceP(thiscell, 1)
                 ep = sp + c%faceP(thiscell,2)-1
-                fc = c%facelist(sp:ep)
+                fc = c%face(sp:ep)
 
                 ! Add the vertex neighbour
                 if (c%GC(thiscell)) then
@@ -753,9 +808,9 @@ subroutine ComputeGridInterconnections(grid)
                 sp = v%neigP(i,1) + vc
                 tfv = f%vert(tcf2(1),:)
                 if (tfv(1) == i) then
-                    v%neiglist(sp) = tfv(2)
+                    v%neig(sp) = tfv(2)
                 else
-                    v%neiglist(sp) = tfv(1)
+                    v%neig(sp) = tfv(1)
                 end if
 
                 ! Housekeeping
@@ -781,17 +836,17 @@ subroutine ComputeGridInterconnections(grid)
     end do
 
     !do i = 1, v%ntot 
-    !    print *, i, v%BV(i), v%neiglist(v%neigP(i,1):v%neigP(i,1)+v%neigP(i,2)-1)
+    !    print *, i, v%BV(i), v%neig(v%neigP(i,1):v%neigP(i,1)+v%neigP(i,2)-1)
     !end do
     !    do i = 1, v%ntot 
-    !    print *, i, v%BV(i), v%celllist(v%cellP(i,1):v%cellP(i,1)+v%cellP(i,2)-1)
+    !    print *, i, v%BV(i), v%cell(v%cellP(i,1):v%cellP(i,1)+v%cellP(i,2)-1)
     !end do
     
 
     ! Add to grid
     !============
-    grid%cells   = c 
-    grid%faces   = f 
+    grid%cell   = c 
+    grid%face   = f 
     grid%vert    = v
 
 
