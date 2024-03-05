@@ -69,8 +69,8 @@ subroutine ReadTraduitUS(grid, filepath)
     nv = idum(2)
 
     ! Add to grid
-    grid%cells%ntot         = nc
-    grid%faces%ntot         = nf
+    grid%cell%ntot         = nc
+    grid%face%ntot         = nf
     grid%vert%ntot          = nv
     grid%data%fluxdata%nFs  = idum(4)
     grid%data%fluxdata%nFt  = idum(5)
@@ -79,10 +79,10 @@ subroutine ReadTraduitUS(grid, filepath)
     call cfruin (filespec,5,idum,'nCmxVx,nCmxFc,nFmxCv,nVmxCv,nVmxFc')
 
     ! Add to grid
-    grid%cells%nvertlist = idum(0)
-    grid%cells%nfacelist = idum(1)
-    grid%vert%ncelllist  = idum(3)
-    grid%vert%nfacelist  = idum(4)
+    grid%cell%nvert = idum(0)
+    grid%cell%nface = idum(1)
+    grid%vert%ncell  = idum(3)
+    grid%vert%nface  = idum(4)
 
     ! Allocate grid
     call AllocateGrid(grid)
@@ -99,7 +99,7 @@ subroutine ReadTraduitUS(grid, filepath)
     allocate(fdummyr(nf,4))
     allocate(vdummyr(nv,4))
     allocate(fsdummyr(grid%data%fluxdata%nFs))
-    allocate(facelistdummy(grid%cells%nfacelist))
+    allocate(facelistdummy(grid%cell%nface))
     allocate(ftdummy(grid%data%fluxdata%nFt))
 
     ! Read data for structured grid remapping (to be deleted in future)
@@ -151,14 +151,14 @@ subroutine ReadTraduitUS(grid, filepath)
     end do 
 
     ! Add to grid
-    grid%cells%vertP(clist, 1)          = cdatai1(:, 1)
-    grid%cells%vertP(clist, 2)          = cdatai1(:, 2)
+    grid%cell%vertP(clist, 1)          = cdatai1(:, 1)
+    grid%cell%vertP(clist, 2)          = cdatai1(:, 2)
     grid%data%regions%cellregID(clist)  = cdatai2(:, 2)
     grid%data%fluxdata%cellfluxtubeID   = cdatai2(:, 3)
 
     ! Cell vertices and faces
-    call cfruin (filespec, grid%cells%nvertlist, grid%cells%vertlist,  'cvVx')
-    call cfruin (filespec, grid%cells%nfacelist, grid%cells%facelist,  'cvFc')
+    call cfruin (filespec, grid%cell%nvert, grid%cell%vert,  'cvVx')
+    call cfruin (filespec, grid%cell%nface, grid%cell%face,  'cvFc')
 
     ! Faces
     !------
@@ -177,8 +177,8 @@ subroutine ReadTraduitUS(grid, filepath)
     end do 
 
     ! Add to grid
-    grid%faces%vert(flist, 1)           = fdatai(:, 1)
-    grid%faces%vert(flist, 2)           = fdatai(:, 2)
+    grid%face%vert(flist, 1)           = fdatai(:, 1)
+    grid%face%vert(flist, 2)           = fdatai(:, 2)
     grid%data%regions%facelabel(flist)  = fdatai(:, 3)
     grid%data%regions%faceregID(flist)  = fdatai(:, 4) 
     ! fdatai(:, 5) indicates whether face is aligned - to be used in future? 
