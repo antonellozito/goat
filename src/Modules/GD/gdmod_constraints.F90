@@ -52,6 +52,27 @@ module gdmod_constraints
     !                                                                  !
     !==================================================================!
 
+    ! Auxiliary types
+    !================
+    ! Structures for flux surface constraints
+    type :: FFCStructureUDT
+        
+        ! Description
+        !============
+        ! UDT to contain flux surface data for constraint evaluation. 
+        ! Decoupled from grid description to increase modularity. 
+        ! Fields:
+        !   - nID   : number of vertices (or vertex IDs) present in the 
+        !           flux surface
+        !   - ID    : vertex ID array (1D array of size nID)
+        !   - PsiD  : desired psi value for this flux surface
+
+        integer(I8)                     :: nID
+        integer(I8), allocatable        :: ID(:)
+        real(R8)                        :: PsiD 
+
+    end type
+
     ! Abstract types
     !===============
     ! Generic constraint type
@@ -84,17 +105,36 @@ module gdmod_constraints
         !============
         ! Flux function constraints. Fixes the flux function values 
         ! for a set of desired nodes. The following fields are added:
-        ! - vert:       the vertices to consider (1 constraint per 
-        !               entry of this array, so ncon-by-1 dimension)
-        ! - PsiD:       Desired psi value of each vertex (ncon-by-1)
-        ! - ncon:       (inherited) number of constraints 
+        ! - fixedpoints:    specifies which non-flux surface points
+        !                   should have fixed psi value
+        ! - specialpoints:  specifies which points should have a fixed
+        !                   flux value that is equal to another point.
+        !                   the first point in the ID field of this 
+        !                   structure is the flux value that is used 
+        !                   to fix the other points to. Useful for 
+        !                   separatrices etc of which the flux value
+        !                   is a priori unknown (e.g. due to 'grad' 
+        !                   type of X-point constraints)
+        ! - fluxsurfaces    specifies which vertices belong to a flux
+        !                   surface. This is the classical alignment 
+        !                   constraint.
+        ! - tangencypoints  specifies which points should be treated as
+        !                   tangency points. These get an additional 
+        !                   constraint, namely that the normal on the 
+        !                   vessel boundary should be perpendicular to 
+        !                   the magnetic field vector. 
+        ! - ncon:           (inherited) total number of constraints 
 
         ! No other routines than the standard initialization, evaluation
         ! and destruction routines are implemented nor needed. 
 
         ! Fields: 
-        integer(I8), allocatable        :: vert(:)
-        real(R8), allocatable           :: PsiD(:)
+        type(FFCStructureUDT), allocatable  :: fixedpoints(:)
+        type(FFCStructureUDT), allocatable  :: specialpoints(:)
+        type(FFCStructureUDT), allocatable  :: fluxsurfaces(:)
+        type(FFCStructureUDT), allocatable  :: tangencypoints(:)
+        integer(I8)                         :: nfixedpoints, &
+            nspecialpoints, nfluxsurfaces, ntangencypoints
 
     contains
 
@@ -108,6 +148,7 @@ module gdmod_constraints
         final :: DestroyFluxfunctionConstraints
 
     end type
+    
 
     ! Boundary function constraints
     type, extends(GenericConstraintsGDUDT) :: BoundaryFunctionConstraintsUDT 
@@ -363,7 +404,8 @@ module gdmod_constraints
 
         ! Constraint initialization
         subroutine InitializeConstraintsINT(constraints, grid, &
-            magneticField, environment, monitor, options)
+            magneticField, environment, monitor, designvariables, &
+            options)
 
             ! Description
             !============
@@ -374,7 +416,8 @@ module gdmod_constraints
             ! Import
             import :: GenericConstraintsGDUDT, GridUDT, &
                 MagneticFieldUDT, EnvironmentUDT, &
-                ConstraintsMonitorUDT, ConstraintOptionsUDT
+                ConstraintsMonitorUDT, ConstraintOptionsUDT, &
+                DesignVariablesGDUDT
 
             ! Declare
             class(GenericConstraintsGDUDT)      :: constraints 
@@ -383,6 +426,7 @@ module gdmod_constraints
             type(EnvironmentUDT)                :: environment 
             type(ConstraintsMonitorUDT)         :: monitor
             type(ConstraintOptionsUDT)          :: options
+            class(DesignVariablesGDUDT)         :: designvariables
 
         end subroutine
 
@@ -487,7 +531,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialization
     subroutine InitializeConstraints(constraints, grid, magneticField, &
-        environment, options)
+        environment, designvariables, options)
 
         ! Description
         !============
@@ -504,6 +548,7 @@ module gdmod_constraints
         type(EnvironmentUDT)        :: environment 
         type(ConstraintOptionsUDT)  :: options
         type(ConstraintsMonitorUDT) :: monitor
+        class(DesignVariablesGDUDT) :: designvariables
 
         ! Loop variables
 
@@ -517,11 +562,11 @@ module gdmod_constraints
         !=======================
         ! Equality constraints
         call constraints%eqcon%Initialize(grid, magneticField, &
-            environment, options, monitor)
+            environment, options, designvariables, monitor)
 
         ! Inequality constraints
         call constraints%ineqcon%Initialize(grid, magneticField, &
-            environment, options, monitor)
+            environment, options, designvariables, monitor)
 
     end subroutine
 
@@ -555,7 +600,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialization
     subroutine InitializeEqCon(constraints, grid, magneticField, &
-        environment, constraintoptions, monitor)
+        environment, constraintoptions, designvariables, monitor)
 
         ! Description
         !============
@@ -571,6 +616,7 @@ module gdmod_constraints
         type(EnvironmentUDT)        :: environment 
         type(ConstraintOptionsUDT)  :: constraintoptions
         type(ConstraintsMonitorUDT) :: monitor
+        class(DesignVariablesGDUDT) :: designvariables
 
         ! Loop variables
 
@@ -588,7 +634,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%xpoints%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -613,7 +660,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%boundaryfunction%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -637,7 +685,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%fluxfunction%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -660,7 +709,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%edgelengths%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -683,7 +733,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%orthogonality%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -1248,7 +1299,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialization
     subroutine InitializeIneqCon(constraints, grid, magneticField, &
-        environment, constraintoptions, monitor)
+        environment, constraintoptions, designvariables, monitor)
 
         ! Description
         !============
@@ -1264,6 +1315,7 @@ module gdmod_constraints
         type(EnvironmentUDT)        :: environment 
         type(ConstraintOptionsUDT)  :: constraintoptions
         type(ConstraintsMonitorUDT) :: monitor
+        class(DesignVariablesGDUDT)  :: designvariables
 
         ! Loop variables
 
@@ -1380,7 +1432,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialize
     subroutine InitializeFluxfunctionConstraints(constraints, grid, &
-        magneticField, environment, monitor, options)
+        magneticField, environment, monitor, designvariables, options)
 
         ! Description
         !============
@@ -1392,8 +1444,35 @@ module gdmod_constraints
         ! psi values by averaging the current psi values of the vertices
         ! that lie on a flux surface. This hedges a bit for 
         ! discretization errors originating from the re-interpretation 
-        ! of the magnetic field data as a bicubic spline interpolant 
-        ! (here) instead of a linear interpolant in the grid generator. 
+        ! of the magnetic field data as an interpolant here
+        ! instead of a linear interpolant in the grid generator. 
+
+        ! There are several different 'flavours' on how these 
+        ! constraints can be imposed. For classical flux surfaces, all
+        ! data is stored in the structure 'fluxsurfaces'. Separatrices 
+        ! are dealt with using the 'special points', where the first 
+        ! point is the X-point, and the flux values of the other points
+        ! are equated to this one. 'tangencypoints' specifies which 
+        ! points have a magnetic field vector that should be (at the 
+        ! solution) tangential to the vessel boundary vector. One should
+        ! be careful with this constraint - a solution may not exist! 
+        ! Different treatment options are therefore available through
+        ! the option 'tangencypointtreatment':
+        !   - 'tangencypoint': classic tangency point constraint. 
+        !   If the design variables are only coordinates, then the  
+        !   tangency points are considered as special points, since
+        !   the additional constraint fixes its position, similar to 
+        !   X-points. If not, we can additionally impose aligment. 
+        !   Combined with the boundary constraints, this triplet fixes
+        !   the coordinates and flux values
+        !   - 'align': treat as a vertex of a classical flux surface. 
+        !   One should be careful as this may lead to constraint 
+        !   singularity (at an intermediate point or solution, the 
+        !   vessel boundary constraints and flux value constraint may be 
+        !   collinear)
+        !   - 'noconstraint': no additional flux surface constraint is 
+        !   imposed. This may lead to local non-alignment of the 
+        !   adjacent faces, but may stabilize the problem.
 
         ! Notes
         !======
@@ -1418,7 +1497,8 @@ module gdmod_constraints
         ! However, this gives issues in some cases where the targets are
         ! nearly flux-aligned. To avoid this, set the logical 
         ! 'fixfluxalignedtargets' to true. This is the recommended 
-        ! default value. 
+        ! default value for narrow grids. For wide grids, this should be
+        ! false.  
 
         ! Note 5: it is assumed that the grid contains the flux surface
         ! data and that the flux surfaces are numbered from 1 to nFs
@@ -1437,20 +1517,22 @@ module gdmod_constraints
         type(EnvironmentUDT)                    :: environment 
         type(ConstraintsMonitorUDT)             :: monitor
         type(ConstraintOptionsUDT)              :: options 
+        class(DesignVariablesGDUDT)              :: designvariables
 
         ! Loop variables
         integer(I8)                 :: i
 
         ! Auxiliary variables
         real(R8)                    :: tpsi, minx, maxx, miny, maxy
-
-        integer(I8), allocatable    :: vert_tmp(:), vertID(:) 
         real(R8), allocatable       :: PsiD_tmp(:), temppsi(:) 
-        logical, allocatable        :: delind(:), mask(:)
+
+        integer(I8)                 :: nxpind, ntpind
+        integer(I8), allocatable    :: vert_tmp(:), vertID(:), &
+            order(:), xpind(:), type(:), order(:)
         
-        ! Data
-        logical                     :: fixfluxalignedtargets = .true. 
-        logical                     :: fixfarvesselflux = .true. 
+        logical                     :: fixxp, fixfluxalignedtargets, &
+            fixfarvesselflux, fixallvesselvertices
+        logical, allocatable        :: delind(:), mask(:)
 
         ! Initialize
         !===========
@@ -1468,18 +1550,43 @@ module gdmod_constraints
 
         ! Initialize
         PsiD_tmp(:) = 0
-        temppsi(:) = 0
-        mask(:) = .false.
-        delind(:) = .false.
-        vert_tmp = [(i, i = 1, grid%vert%ntot)]
+        temppsi(:)  = 0
+        mask(:)     = .false.
+        delind(:)   = .false.
+        vert_tmp    = [(i, i = 1, grid%vert%ntot)]
 
         ! Associate
         associate(&
             vert    => grid%vert,       x       => grid%vert%x,     &
             y       => grid%vert%y,     cc      => monitor%eqvcc,   &
             maxcc   => monitor%maxeqvcc,                            &
-            opt     => options%ffoptions)
-        
+            opt     => options%ffoptions,                           &
+            fixfluxalignedtargets   => opt%fixfluxalignedtargets,   &
+            fixfarvesselflux        => opt%fixfarvesselflux,        &
+            fixallvesselvertices    => opt%fixallvesselvertices     &
+            )
+
+        ! Check options
+        select case (designvariables%type)
+
+        case ('coordinates_desiredflux')
+
+            ! Don't explicitly fix x-point
+            fixxp = .false.
+
+        case default 
+
+            ! Fix x-point
+            fixxp = .true. 
+
+        end select
+
+        ! Extract x-point indices
+        call DetermineXPoints(xpind, nxpind, order, grid)
+
+        ! Extract tangency point indices
+        call DetermineTangencyPoints(tpind, ntpind, type, grid)
+
         ! Determine flux values to impose
         !================================
         ! Evaluate flux at all nodes
@@ -1964,7 +2071,8 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialize
     subroutine InitializeBoundaryFunctionConstraints(constraints, &
-        grid, magneticField, environment, monitor, options)
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
 
         ! Description
         !============
@@ -1989,6 +2097,7 @@ module gdmod_constraints
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
         type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                   :: designvariables
 
         ! Auxiliary
         real(R8), allocatable                       :: xe(:, :), &
@@ -2447,7 +2556,8 @@ module gdmod_constraints
 
     ! Initialize
     subroutine InitializeXPointConstraints(constraints, &
-        grid, magneticField, environment, monitor, options)
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
 
         ! Description
         !============
@@ -2464,6 +2574,7 @@ module gdmod_constraints
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
         type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                   :: designvariables
 
         ! Auxiliary
         integer(I8)                                 :: nxpind
@@ -2822,7 +2933,8 @@ module gdmod_constraints
 
     ! Initialize
     subroutine InitializeEdgeLengthsConstraints(constraints, &
-        grid, magneticField, environment, monitor, options)
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
 
         ! Description
         !============
@@ -2863,6 +2975,7 @@ module gdmod_constraints
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
         type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                   :: designvariables
 
         ! Auxiliary
         real(R8)                    :: edgedistvessel, edgedistxpoint
@@ -3449,7 +3562,8 @@ module gdmod_constraints
 
     ! Initialize
     subroutine InitializeOrthogonalityConstraints(constraints, &
-        grid, magneticField, environment, monitor, options)
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
 
         ! Description
         !============
@@ -3482,6 +3596,7 @@ module gdmod_constraints
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
         type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                   :: designvariables
 
         ! Auxiliary
         integer(I8)                 :: nincludebox, nexcludebox, tv, &

@@ -297,6 +297,86 @@ module gdmod_utility_optimization
 
     end subroutine
 
+    ! Determination of tangency points
+    subroutine DetermineTangencyPoints(tpind, ntpind, type, grid)
+
+        ! Description
+        !============
+        ! Determine the tangency points in the grid based on the grid
+        ! topology. A tangency point is assumed to adhere to the 
+        ! following criteria:
+        ! 
+        !   - Vertex lies on boundary
+        !   - Vertex lies on a flux surface
+        !   - Vertex has two vertex neighbours that have the same 
+        !   flux surface ID
+        !
+        !   OR
+        !
+        !   - Vertex is a boundary vertex with unique flux surface ID
+        !   - Vertex has only neighbours with non-zero flux surface ID
+        !   that is the same for all vertices
+        !
+        ! Note that both definitions are required to capture all 
+        ! tangency points, but that possibly only the first type
+        ! of tangency points is important.
+
+        ! Declare
+        !========
+        ! Arguments
+        integer(I8)                     :: ntpind
+        integer(I8), allocatable        :: tpind(:), type(:)
+        type(GridUDT)                   :: grid 
+
+        ! Auxiliary 
+        integer(I8), allocatable        :: tv(:)
+        logical, allocatable            :: istpID(:), isvesselvertex(:), &
+            isvesselface(:)
+
+        ! Loop
+        integer(I8)                     :: i 
+
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert        => grid%vert,   &
+            ID          => grid%vert%fieldlineID & 
+            )
+
+        ! Initialize
+        istpID(:) = .false.
+
+        ! Check
+        if (allocated(tpind)) then 
+            deallocate(tpind)
+        end if 
+        if (allocated(type)) then 
+            deallocate(type)
+        end if 
+
+        ! First type
+        !===========
+        ! Get vertices that lie on a flux surface and that are vessel
+        ! vertices
+        call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
+        tv = pack([(i, i=1, vert%ntot)], (isvesselvertex .and. (ID .ne. 0)))
+
+        ! Check vertex neighbours
+        do i = 1, size(tv, 1)
+            ! Get neighbours
+            !tvneig = grid%vert%n
+        end do
+
+
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
     ! Determination of vessel edges that are aligned with flux surfaces
     subroutine DetermineFluxAlignedVesselEdges(nvesseledges, &
         vesseledges, grid, doTP, doWG)
@@ -463,6 +543,84 @@ module gdmod_utility_optimization
         deallocate(isBndVertex, tempvesseledges)
 
         ! End associate
+        end associate
+
+    end subroutine
+
+    ! Determine which vertices lie on the vessel 
+    subroutine DetermineVesselVertices(isvesselvertex, isvesselface, grid)
+
+        ! Description
+        !============
+        ! Determine which vertices lie on vessel boundaries. This is
+        ! checked by the boundary identifiers. The following vessel
+        ! boundaries are considered:
+        ! - target plates (TP)
+        ! - far vessel boundaries (V)
+        ! The boolean 'isvesselvertex' and 'isvesselface' are returned
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        logical, allocatable            :: isvesselvertex(:), &
+            isvesselface(:)
+        type(GridUDT)                   :: grid 
+
+        ! Auxiliary
+        integer(I8), allocatable        :: bffaces(:)
+
+        ! Loop
+        integer(I8)                     :: ib, i
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            bnd     => grid%bnd & 
+            )
+        
+        ! Initialize
+        if (allocated(isvesselface)) then 
+            deallocate(isvesselface)
+        end if 
+        if (allocated(isvesselvertex)) then 
+            deallocate(isvesselvertex)
+        end if 
+        allocate(isvesselface(grid%faces%ntot), &
+            isvesselvertex(grid%vert%ntot))
+        isvesselface(:)     = .false.
+        isvesselvertex(:)   = .false.
+        
+        ! Vertices
+        !=========
+        do ib =  1, size(bnd)
+            ! Check if boundary belongs to vessel boundaries
+            select case (bnd(ib)%ID) 
+                
+            case (1, 4)
+
+                isvesselvertex(bnd(ib)%vert) = .true.
+
+            case default 
+
+            end select
+        end do 
+
+        ! Faces
+        !======
+        ! Determine boundary faces
+        bffaces = pack([(i, i=1,grid%faces%ntot)], grid%faces%BF)
+
+        ! Check which boundary faces have two boundary vertices as
+        ! determined above
+        do i = 1, size(bffaces, 1)
+            if (all(isvesselvertex(grid%faces%vert(bffaces(i), :)))) then 
+                isvesselface(i) = .true.
+            end if 
+        end do 
+        
+        ! Housekeeping
+        !=============
         end associate
 
     end subroutine
