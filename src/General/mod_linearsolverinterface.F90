@@ -329,7 +329,7 @@ module mod_linearsolverinterface
     end subroutine
 
     ! The sparse solver 
-    subroutine SolveSparseLinearSystemDI(A, b, sol)
+    subroutine SolveSparseLinearSystemDI(A, b, sol, flag)
 
         ! Description
         !============
@@ -355,6 +355,7 @@ module mod_linearsolverinterface
 
         ! Auxiliary 
         integer(c_int), allocatable     :: Ap(:), Ai(:), Map(:)
+        integer(I8)                     :: flag
         real(c_double), allocatable     :: Ax(:)
 
         real(c_double), allocatable         :: sol_c(:)
@@ -418,6 +419,13 @@ module mod_linearsolverinterface
         !=============
         ! Cast solution
         sol = sol_c 
+
+        ! Cast flag
+        flag = nint(info(1))
+
+        ! Reconstruct A
+        A%col = A%col + 1
+        A%row = A%row + 1
 
         ! Deallocate
         deallocate(Ap, Ai, Ax, Map, sol_c)
