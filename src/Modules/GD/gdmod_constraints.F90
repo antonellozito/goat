@@ -146,6 +146,8 @@ module gdmod_constraints
         procedure :: Evaluate       => EvaluateFluxfunctionConstraints
         procedure :: EvaluateDerivativesCoordinates     => &
             EvaluateCoordinatesDerivativesFluxFunctionConstraints
+        procedure :: EvaluateDerivativesFlux            => &
+            EvaluateFluxDerivativesFluxFunctionConstraints
 
         ! Data
         procedure :: WriteData      => WriteDataFluxfunctionConstraints
@@ -179,6 +181,10 @@ module gdmod_constraints
         
         ! Evaluation
         procedure :: Evaluate   => EvaluateBoundaryFunctionConstraints
+        procedure :: EvaluateDerivativesCoordinates     => &
+            EvaluateCoordinatesDerivativesBoundaryFunctionConstraints
+        procedure :: EvaluateDerivativesFlux            => &
+            EvaluateFluxDerivativesBoundaryFunctionConstraints
     
     end type
 
@@ -2217,6 +2223,11 @@ module gdmod_constraints
 
         case ('desiredflux')
 
+            call constraints%EvaluateDerivativesFlux(gradG, hessG, &
+                dogradient, dohessian, lambda)
+
+        case ('coordinates_desiredflux')
+
         case default 
 
             call gdErrorHandler('EvaluateFluxfunctionConstraints: unknown design variable type')
@@ -2240,6 +2251,10 @@ module gdmod_constraints
         ! This routine evaluates the gradient and hessian w.r.t. the 
         ! grid coordinates. It is assumed that the number of rows and 
         ! columns is already computed before. 
+
+        ! Note: the derivatives are computed as if the coordinates are 
+        ! the only design variables. Any reordering/adjustment of column
+        ! or row indices should be done afterwards. 
 
         ! Declare variables
         !==================
@@ -2586,11 +2601,68 @@ module gdmod_constraints
     end subroutine
 
     ! Gradient & Hessian computation, psi values
-    !subroutine EvaluateCoordinatesDerivativesFluxFunctionPsi(&
-    !    constraints, gradG, hessG, dogradient, dohessian, designvariables, &
-    !    lambda)
+    subroutine EvaluateFluxDerivativesFluxFunctionConstraints(&
+        constraints, gradG, hessG, dogradient, dohessian, &
+        lambda)
 
-    !end subroutine
+        ! Description
+        !============
+        ! This routine evaluates the gradient and hessian w.r.t. the 
+        ! desired flux values. It is assumed that the number of rows and 
+        ! columns is already computed before. 
+
+        ! Note: the derivatives are computed as if the coordinates are 
+        ! the only design variables. Any reordering/adjustment of column
+        ! or row indices should be done afterwards. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FluxfunctionConstraintsUDT)       :: constraints 
+        type(MySparseUDT)                       :: gradG, hessG 
+        logical, intent(in)                     :: dogradient, dohessian
+        real(R8),  intent(in)                   :: lambda(*)
+
+        ! Auxiliary
+        type(MySparseUDT)                       :: jacG
+
+        ! Loop
+        integer(I8)                             :: k, ic
+
+        ! Compute
+        !========
+        ! Derivatives are simply equal to minus one, just need to 
+        ! correctly determine columns and rows. 
+        ! Jacobian
+        jacG%nval = constraints%nfluxsurfaces
+        call jacG%Allocate()
+
+        ! Columns are design variables for Jacobian, so simply 1 to 
+        ! number of flux surfaces
+        jacG%col = [(k, k = 1, constraints%nfluxsurfaces)]
+
+        ! Rows are constraint indices - flux function constraints are 
+        ! evaluated last
+        ic = constraints%nfpcon + constraints%ntpcon + constraints%nspcon
+        jacG%row = [(k, k = ic+1, ic+constraints%nfscon)]
+
+        ! Values are just one
+        jacG%val(:) = 1
+
+        ! Compute gradient
+        !=================
+        gradG%val = jacG%val 
+        gradG%row = jacG%col 
+        gradG%col = jacG%row 
+        gradG%nval = jacG%nval 
+
+        ! Hessian
+        !========
+        ! Simply zero
+        hessG%nval = 0
+        call hessG%Allocate()
+
+    end subroutine
 
     ! Data output
     subroutine WriteDataFluxfunctionConstraints(constraints, grid)
@@ -3066,188 +3138,245 @@ module gdmod_constraints
         ! Evaluate
         call psf%Evaluate(x(tv), y(tv), G, '0', '0') 
 
-        ! Constraint gradient
-        !====================
-        if (dogradient) then 
-            ! Initialize
-            jacG%nrow = nc 
-            jacG%ncol = designvariables%nphi
+        ! Derivatives
+        !============
+        ! Set row and column sizes
+        gradG%nrow = designvariables%nphi
+        gradG%ncol = constraints%ncon
+        hessG%nrow = designvariables%nphi
+        hessG%ncol = designvariables%nphi
 
-            ! Check design variables
-            select case(designvariables%type)
+        ! Check which gradient to compute
+        select case (designvariables%type)
 
-            case ('coordinates')
+        case ('coordinates')
 
-                ! Order in jacobian: first x, then y. Has as many 
-                ! non-zero elements as there are design variables. 
+            call constraints%EvaluateDerivativesCoordinates(gradG, &
+                hessG, grid, dogradient, dohessian, lambda)
 
-                ! Allocate
-                jacG%nval = 2*ntv
-                call jacG%Allocate() 
-                allocate(dpsfdx(ntv))
-                allocate(dpsfdy(ntv))
-                allocate(conindex(ntv))
-                allocate(valindex(ntv))
+        case ('desiredflux')
 
-                ! Compute the derivative values
-                call psf%Evaluate(x(tv), y(tv), dpsfdx, '1', '0')
-                call psf%Evaluate(x(tv), y(tv), dpsfdy, '0', '1')
+            call constraints%EvaluateDerivativesFlux(gradG, hessG)
 
-                ! x-contribution
-                !---------------
-                ! Build indices
-                conindex = [(k, k = ic+1, ic+ntv)]
-                valindex = [(k, k = ivg+1, ivg+ntv)]
+        case default 
 
-                ! Add values
-                jacG%row(valindex) = conindex  
-                jacG%col(valindex) = tv
-                jacG%val(valindex) = dpsfdx 
-
-                ! y-contribution
-                !---------------
-                ! Build indices
-                ivg = ivg + ntv
-                valindex = valindex + ntv
-
-                ! Add values
-                jacG%row(valindex) = conindex 
-                jacG%col(valindex) = tv + grid%vert%ntot 
-                jacG%val(valindex) = dpsfdy 
-
-                ! Build gradient
-                gradG%nrow = jacG%ncol 
-                gradG%ncol = jacG%nrow 
-                gradG%nval = jacG%nval 
-                
-                call gradG%Allocate()
-                gradG%row = jacG%col 
-                gradG%col = jacG%row
-                gradG%val = jacG%val
-
-                ! Housekeeping
-                call jacG%Deallocate()
-
-            case default
-
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
-
-            end select
-
-        end if
-
-        ! Constraint hessian
-        !===================
-        if (dohessian) then 
-
-            ! Initialize
-            hessG%nrow = designvariables%nphi 
-            hessG%ncol = designvariables%nphi 
-
-            ! Check design variables
-            select case(designvariables%type)
-
-            case ('coordinates')
+            call gdErrorHandler('EvaluateBoundaryFunctionConstraints: unknown design variable type')
             
-                ! Allocate
-                hessG%nval = 4*ntv
-                if (.not. allocated(valindex)) then
-                    allocate(valindex(ntv))
-                end if
-                if (.not. allocated(conindex)) then 
-                    allocate(conindex(ntv))
-                end if 
-                if (.not. allocated(hessG%val)) then
-                    call hessG%Allocate()
-                end if
-                allocate(valxx(ntv))
-                allocate(valxy(ntv))
-                allocate(valyy(ntv))
+        end select
 
-                ! Initialize
-                valxx(:) = 0
-                valyy(:) = 0
-                valxy(:) = 0
+        ! Housekeeping
+        !=============
+        end associate
 
-                ! Compute contributions
-                call psf%Evaluate(x(tv), y(tv), valxx, '2', '0')
-                call psf%Evaluate(x(tv), y(tv), valyy, '0', '2')
-                call psf%Evaluate(x(tv), y(tv), valxy, '1', '1')
+    end subroutine
 
-                ! xx-contribution
-                !----------------
-                k = 1
-                ! Build indices
-                valindex = [(k, k = ivh+1, ivh+ntv)] 
+    ! Derivatives, coordinates
+    subroutine EvaluateCoordinatesDerivativesBoundaryFunctionConstraints(&
+        constraints, gradG, hessG, grid, dogradient, dohessian, lambda)
 
-                ! Add values
-                hessG%row(valindex) = tv 
-                hessG%col(valindex) = tv 
-                hessG%val(valindex) = valxx*lambda ! element-wise mult. 
-                
-                ! xy-contribution
-                !----------------
-                ! Build indices
-                ivh = ivh + ntv
-                valindex = valindex + ntv
+        ! Description
+        !============
+        ! This routine evaluates the gradient and hessian w.r.t. the 
+        ! grid coordinates. It is assumed that the number of rows and 
+        ! columns is already computed before. 
 
-                ! Add values
-                hessG%row(valindex) = tv
-                hessG%col(valindex) = tv + grid%vert%ntot 
-                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+        ! Note: the derivatives are computed as if the coordinates are 
+        ! the only design variables. Any reordering/adjustment of column
+        ! or row indices should be done afterwards. 
 
-                ! yx-contribution
-                !----------------
-                ! symmetric with xy
-                ! Build indices
-                ivh = ivh + ntv
-                valindex = valindex + ntv 
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(BoundaryFunctionConstraintsUDT)   :: constraints 
+        real(R8), allocatable, intent(in)   :: lambda(:)
+        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(GridUDT), intent(in)           :: grid 
+        logical, intent(in)                 :: dogradient, dohessian
 
-                ! Add values
-                hessG%row(valindex) = tv + grid%vert%ntot 
-                hessG%col(valindex) = tv 
-                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+        ! Loop variables
+        integer(I8)                         :: ic, ivg, ivh, k
+        integer(I8), allocatable            :: valindex(:), conindex(:)
 
-                ! yy-contribution
-                !----------------
-                ! Build indices
-                ivh = ivh + ntv
-                valindex = valindex + ntv
+        ! Auxiliary variables
+        real(R8), allocatable               :: dpsfdx(:), dpsfdy(:), &
+            valxx(:), valxy(:), valyy(:)
 
-                ! Add values
-                hessG%row(valindex) = tv + grid%vert%ntot 
-                hessG%col(valindex) = tv + grid%vert%ntot 
-                hessG%val(valindex) = valyy*lambda ! element-wise mult. 
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            nc      => constraints%ncon,        &
+            psf     => constraints%psf,         &
+            tv      => constraints%vert,        &
+            ntv     => constraints%nvert,       &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
 
-            case default
+        ! Counters
+        ic = 0 ! constraint counter (local)
+        ivg = 0 ! value index for gradient
+        ivh = 0 ! value index for hessian
 
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
+        ! Derivatives
+        !============
+        ! Gradient
+        if (dogradient) then 
+            ! Allocate
+            jacG%nval = 2*ntv
+            call jacG%Allocate() 
+            allocate(dpsfdx(ntv))
+            allocate(dpsfdy(ntv))
+            allocate(conindex(ntv))
+            allocate(valindex(ntv))
 
-            end select
+            ! Compute the derivative values
+            call psf%Evaluate(x(tv), y(tv), dpsfdx, '1', '0')
+            call psf%Evaluate(x(tv), y(tv), dpsfdy, '0', '1')
+
+            ! x-contribution
+            !---------------
+            ! Build indices
+            conindex = [(k, k = ic+1, ic+ntv)]
+            valindex = [(k, k = ivg+1, ivg+ntv)]
+
+            ! Add values
+            jacG%row(valindex) = conindex  
+            jacG%col(valindex) = tv
+            jacG%val(valindex) = dpsfdx 
+
+            ! y-contribution
+            !---------------
+            ! Build indices
+            ivg = ivg + ntv
+            valindex = valindex + ntv
+
+            ! Add values
+            jacG%row(valindex) = conindex 
+            jacG%col(valindex) = tv + grid%vert%ntot 
+            jacG%val(valindex) = dpsfdy 
+
+            ! Build gradient
+            gradG%nval = jacG%nval 
+            
+            call gradG%Allocate()
+            gradG%row = jacG%col 
+            gradG%col = jacG%row
+            gradG%val = jacG%val
+
+            ! Housekeeping
+            call jacG%Deallocate()
+        end if 
+
+        ! Hessian
+        if (dohessian) then 
+            
+            ! Allocate
+            hessG%nval = 4*ntv
+            if (.not. allocated(valindex)) then
+                allocate(valindex(ntv))
+            end if
+            if (.not. allocated(conindex)) then 
+                allocate(conindex(ntv))
+            end if 
+            if (.not. allocated(hessG%val)) then
+                call hessG%Allocate()
+            end if
+            allocate(valxx(ntv))
+            allocate(valxy(ntv))
+            allocate(valyy(ntv))
+
+            ! Initialize
+            valxx(:) = 0
+            valyy(:) = 0
+            valxy(:) = 0
+
+            ! Compute contributions
+            call psf%Evaluate(x(tv), y(tv), valxx, '2', '0')
+            call psf%Evaluate(x(tv), y(tv), valyy, '0', '2')
+            call psf%Evaluate(x(tv), y(tv), valxy, '1', '1')
+
+            ! xx-contribution
+            !----------------
+            k = 1
+            ! Build indices
+            valindex = [(k, k = ivh+1, ivh+ntv)] 
+
+            ! Add values
+            hessG%row(valindex) = tv 
+            hessG%col(valindex) = tv 
+            hessG%val(valindex) = valxx*lambda ! element-wise mult. 
+            
+            ! xy-contribution
+            !----------------
+            ! Build indices
+            ivh = ivh + ntv
+            valindex = valindex + ntv
+
+            ! Add values
+            hessG%row(valindex) = tv
+            hessG%col(valindex) = tv + grid%vert%ntot 
+            hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+
+            ! yx-contribution
+            !----------------
+            ! symmetric with xy
+            ! Build indices
+            ivh = ivh + ntv
+            valindex = valindex + ntv 
+
+            ! Add values
+            hessG%row(valindex) = tv + grid%vert%ntot 
+            hessG%col(valindex) = tv 
+            hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+
+            ! yy-contribution
+            !----------------
+            ! Build indices
+            ivh = ivh + ntv
+            valindex = valindex + ntv
+
+            ! Add values
+            hessG%row(valindex) = tv + grid%vert%ntot 
+            hessG%col(valindex) = tv + grid%vert%ntot 
+            hessG%val(valindex) = valyy*lambda ! element-wise mult. 
 
         end if
         
         ! Housekeeping
         !=============
-        ! End associate
         end associate
 
-        ! Deallocate
+    end subroutine 
 
-        if (dogradient) then 
-            deallocate(dpsfdx, dpsfdy, valindex, conindex)
-        end if 
+    ! Derivatives, flux
+    subroutine EvaluateFluxDerivativesBoundaryFunctionConstraints(&
+        constraints, gradG, hessG)
 
-        if (dohessian) then 
-            if (allocated(valindex)) then 
-                deallocate(valindex, conindex)
-            end if 
-            deallocate(valxx, valxy, valyy)
-        end if
+        ! Description
+        !============
+        ! This routine evaluates the gradient and hessian w.r.t. the 
+        ! grid coordinates. It is assumed that the number of rows and 
+        ! columns is already computed before. 
+
+        ! Note: the derivatives are computed as if the coordinates are 
+        ! the only design variables. Any reordering/adjustment of column
+        ! or row indices should be done afterwards. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(BoundaryFunctionConstraintsUDT)       :: constraints
+        type(MySparseUDT)                           :: gradG, hessG
+
+        ! Set values
+        !===========
+        ! Simply zero, no dependencies
+        gradG%nval = 0
+        call gradG%Allocate() 
+
+        hessG%nval = 0
+        call hessG%Allocate()
 
     end subroutine
 
