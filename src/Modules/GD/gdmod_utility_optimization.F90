@@ -298,7 +298,7 @@ module gdmod_utility_optimization
     end subroutine
 
     ! Determination of tangency points
-    subroutine DetermineTangencyPoints(tpind, ntpind, type, grid)
+    subroutine DetermineTangencyPoints(tpind, ntpind, tptype, grid)
 
         ! Description
         !============
@@ -325,13 +325,14 @@ module gdmod_utility_optimization
         !========
         ! Arguments
         integer(I8)                     :: ntpind
-        integer(I8), allocatable        :: tpind(:), type(:)
+        integer(I8), allocatable        :: tpind(:), tptype(:)
         type(GridUDT)                   :: grid 
 
         ! Auxiliary 
-        integer(I8), allocatable        :: tv(:)
+        integer(I8), allocatable        :: tv(:), tvneig(:), &
+            tvneigID(:)
         logical, allocatable            :: istpID(:), isvesselvertex(:), &
-            isvesselface(:)
+            isvesselface(:), isuniqueID(:), tvec(:)
 
         ! Loop
         integer(I8)                     :: i 
@@ -346,15 +347,20 @@ module gdmod_utility_optimization
             )
 
         ! Initialize
+        allocate(istpID(grid%vert%ntot))
         istpID(:) = .false.
 
         ! Check
         if (allocated(tpind)) then 
             deallocate(tpind)
         end if 
-        if (allocated(type)) then 
-            deallocate(type)
+        if (allocated(tptype)) then 
+            deallocate(tptype)
         end if 
+        
+        ! Allocate
+        allocate(tptype(grid%vert%ntot))
+        tptype(:) = 0
 
         ! First type
         !===========
@@ -366,10 +372,48 @@ module gdmod_utility_optimization
         ! Check vertex neighbours
         do i = 1, size(tv, 1)
             ! Get neighbours
-            !tvneig = grid%vert%n
+            tvneig = GetVertNeig(vert, tv(i))
+
+            ! Check
+            tvneigID = ID(tvneig)
+            if (count(tvneigID == ID(tv(i))) == 2) then 
+                istpID(tv(i)) = .true.
+                tptype(tv(i)) = 1
+            end if 
         end do
 
+        ! Second type
+        !============
+        ! Initialize
+        allocate(isuniqueID(vert%ntot), tvec(vert%ntot))
+        isuniqueID(:) = .false.
+        do i = 1, maxval(ID)
+            tvec = ID == i 
+            if (count(tvec) == 1) then 
+                where (tvec) isuniqueID = .true.
+            end if 
+        end do
+        tv = pack([(i, i=1, vert%ntot)], isvesselvertex .and. (isuniqueID .or. ID == 0))
 
+        ! Check vertex neighbours
+        do i = 1, size(tv, 1)
+            ! Get neighbours
+            tvneig = GetVertNeig(vert, i)
+
+            ! Check
+            tvneigID = ID(tvneig)
+            if (all(tvneigID == tvneigID(1) .and. (tvneigID(1) .ne. ID(tv(i))))) then 
+                istpID(tv(i)) = .true.
+                tptype(tv(i)) = 2
+            end if  
+        end do
+
+        ! Set tpind
+        !==========
+        ntpind = count(istpID)
+        tpind = pack([(i, i = 1, vert%ntot)], istpID)
+        tptype = pack(tptype, istpID)
+    
 
         ! Housekeeping
         !=============
@@ -586,7 +630,7 @@ module gdmod_utility_optimization
         if (allocated(isvesselvertex)) then 
             deallocate(isvesselvertex)
         end if 
-        allocate(isvesselface(grid%faces%ntot), &
+        allocate(isvesselface(grid%face%ntot), &
             isvesselvertex(grid%vert%ntot))
         isvesselface(:)     = .false.
         isvesselvertex(:)   = .false.
@@ -597,7 +641,7 @@ module gdmod_utility_optimization
             ! Check if boundary belongs to vessel boundaries
             select case (bnd(ib)%ID) 
                 
-            case (1, 4)
+            case (1, 5)
 
                 isvesselvertex(bnd(ib)%vert) = .true.
 
@@ -609,12 +653,12 @@ module gdmod_utility_optimization
         ! Faces
         !======
         ! Determine boundary faces
-        bffaces = pack([(i, i=1,grid%faces%ntot)], grid%faces%BF)
+        bffaces = pack([(i, i=1,grid%face%ntot)], grid%face%BF)
 
         ! Check which boundary faces have two boundary vertices as
         ! determined above
         do i = 1, size(bffaces, 1)
-            if (all(isvesselvertex(grid%faces%vert(bffaces(i), :)))) then 
+            if (all(isvesselvertex(grid%face%vert(bffaces(i), :)))) then 
                 isvesselface(i) = .true.
             end if 
         end do 

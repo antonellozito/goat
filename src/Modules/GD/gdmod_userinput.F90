@@ -194,9 +194,11 @@ module gdmod_userinput
         ! - includeboxx, includeboxy: coordinates of the box(es) 
 
         integer(I8)                     :: fixfarvesselflux, &
-            fixfluxalignedtargets, doboxoverride, fixtargetflux 
+            fixfluxalignedtargets, doboxoverride, fixtargetflux, &
+            fixallvesselvertices 
         real(R8), allocatable           :: includeboxx(:, :), &
             includeboxy(:, :)
+        character(:), allocatable          :: tangencypointtreatment
     
     contains 
 
@@ -500,7 +502,9 @@ module gdmod_userinput
         options%fixfarvesselflux = 1
         options%fixfluxalignedtargets = 1
         options%fixtargetflux = 1
+        options%fixallvesselvertices = 1
         options%doboxoverride = 0
+        options%tangencypointtreatment = 'tangencypoint'
         if (allocated(options%includeboxx)) then 
             deallocate(options%includeboxx, options%includeboxy)
         end if
@@ -1093,6 +1097,10 @@ module gdmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%fixfarvesselflux)
         field = 'gd.design.ec.par.fluxfunction.fixtargetflux'
         call ExtractOptionValueInteger0D(fid, field, options%fixtargetflux)
+        field = 'gd.design.ec.par.fluxfunction.fixallvesselvertices'
+        call ExtractOptionValueInteger0D(fid, field, options%fixallvesselvertices)
+        field = 'gd.design.ec.par.fluxfunction.tangencypointtreatment'
+        call ExtractOptionValueCharacter(fid, field, options%tangencypointtreatment)
         field = 'gd.design.ec.par.fluxfunction.doboxoverride'
         call ExtractOptionValueInteger0D(fid, field, options%doboxoverride)
         field = 'gd.design.ec.par.fluxfunction.includeboxx'

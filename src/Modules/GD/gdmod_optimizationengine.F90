@@ -330,7 +330,7 @@ module gdmod_optimizationengine
         ! constraints are set in its own initialization. 
         call problem%constraints%Initialize(problem%grid, &
             problem%magneticField, problem%environment, & 
-            problem%designoptions%constraints)
+            problem%designvariables, problem%designoptions%constraints)
 
         ! 
         !=================
@@ -360,6 +360,9 @@ module gdmod_optimizationengine
         class(OptimizationProblemGDUDT)     :: problem 
 
         ! Auxiliary
+
+        ! Loop
+        integer(I8)                         :: i
 
         ! Initialize
         !===========
@@ -394,8 +397,9 @@ module gdmod_optimizationengine
             end if
 
             ! Allocate & assign
-            designvariables%nphi    = constraints%eqcon%fluxfunction%ncon
-            designvariables%phi     = constraints%eqcon%fluxfunction%PsiD
+            designvariables%nphi = size(constraints%eqcon%fluxfunction%fluxsurfaces, 1)
+            allocate(designvariables%phi(designvariables%nphi))
+            designvariables%phi = constraints%eqcon%fluxfunction%fluxsurfaces%PsiD
 
         class default
 
@@ -461,7 +465,7 @@ module gdmod_optimizationengine
         type is (DesignVariablesFluxValuesUDT)
 
             ! Update the flux function constraints
-            constraints%eqcon%fluxfunction%PsiD = designvariables%phi
+            constraints%eqcon%fluxfunction%fluxsurfaces%PsiD = designvariables%phi
 
         class default 
 
