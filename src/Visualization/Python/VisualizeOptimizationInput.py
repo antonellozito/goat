@@ -7,7 +7,7 @@ import Plotter as plotter
 # which all the files reside has to be defined in 'datadir'
 
 # Data directory
-datadir = './src/Visualization/Plotdata'
+datadir = './goatf/Examples/ASDEX_Sander'
 
 # Design
 #-------
@@ -19,19 +19,36 @@ plotter.PlotVesselPolygon(datadir, -1)
 # Constraints
 #------------
 # Vertices constrained by boundary constraints
-plotter.PlotBoundaryConstraintVertices(datadir, 2)
+try:
+    plotter.PlotBoundaryConstraintVertices(datadir, 2)
+except:
+    # don't do anything
+    print("could not plot boundary constraint vertices")
 
 # Flux function
-plotter.PlotFluxfunctionConstraintVertices(datadir, 3)
+try:
+    plotter.PlotFluxfunctionConstraintVertices(datadir, 3)
+except:
+    print("could not plot flux function constraint vertices")
+
 
 # X-points
-plotter.PlotXPointConstraintVertices(datadir, 4)
+try: 
+    plotter.PlotXPointConstraintVertices(datadir, 4)
+except:
+    print("could not plot xpoint constraint vertices")
 
 # Orthogonality
-plotter.PlotOrthogonalityConstraintEdges(datadir, 5)
+try: 
+    plotter.PlotOrthogonalityConstraintEdges(datadir, 5)
+except: 
+    print("could not plot orthogonality constraint vertices")
 
 # Edge lengths
-plotter.PlotEdgelengthsConstraintEdges(datadir, 6)
+try: 
+    plotter.PlotEdgelengthsConstraintEdges(datadir, 6)
+except: 
+    print("could not plot edge length constraint vertices")
 
 # Show figures
 #-------------
