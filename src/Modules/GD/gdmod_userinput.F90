@@ -207,6 +207,22 @@ module gdmod_userinput
 
     end type
 
+    type, extends(OptionsUDT) :: XPointConOptionsUDT
+
+        ! Only one type: 'meth'. Can be 'loc' or 'grad'. If set to 'loc',
+        ! the X-point(s) will be constrained to their initial coordinates.
+        ! If set to 'grad', gradient = 0 constraints are imposed and the
+        ! X-point can move.
+
+        character(:), allocatable   :: meth 
+
+    contains
+
+        procedure   :: SetDefaults  => SetDefaultXPointConOptions
+        procedure   :: Read         => ReadXPointConOptions
+
+    end type
+
     type, extends(OptionsUDT) :: OrthogonalityConOptionsUDT
 
         ! Fields
@@ -279,6 +295,7 @@ module gdmod_userinput
         type(FluxFunctionConOptionsUDT)         :: ffoptions 
         type(OrthogonalityConOptionsUDT)        :: orthoptions 
         type(EdgelengthsConOptionsUDT)          :: eloptions
+        type(XPointConOptionsUDT)               :: xpoptions
         
 
     contains 
@@ -458,6 +475,7 @@ module gdmod_userinput
         options%ffoptions%inputfilepath = options%inputfilepath
         options%orthoptions%inputfilepath = options%inputfilepath
         options%eloptions%inputfilepath = options%inputfilepath
+        options%xpoptions%inputfilepath = options%inputfilepath
 
         ! Constraint-specific options
         !============================
@@ -465,6 +483,7 @@ module gdmod_userinput
         call options%ffoptions%Set()
         call options%orthoptions%Set()
         call options%eloptions%Set()
+        call options%xpoptions%Set()
 
     end subroutine
 
@@ -511,6 +530,23 @@ module gdmod_userinput
         allocate(options%includeboxx(0, 0), options%includeboxy(0, 0))
 
     end subroutine 
+
+    subroutine SetDefaultXPointConOptions(options)
+
+        ! Description
+        !============
+        ! Set default x point constraint options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(XPointConOptionsUDT)  :: options 
+
+        ! Default options
+        !================
+        options%meth = 'loc'
+
+    end subroutine
 
     subroutine SetDefaultOrthogonalityConOptions(options)
 
@@ -1112,6 +1148,50 @@ module gdmod_userinput
         !=============
         ! Close the file
         close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadXPointConOptions(options)
+
+        ! Description
+        !============
+        ! Read x-point constraint options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(XPointConOptionsUDT)  :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadXPointConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadXPointConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        field = 'gd.design.ec.par.xpoints.meth'
+        call ExtractOptionValueCharacter(fid, field, options%meth)
 
     end subroutine
 

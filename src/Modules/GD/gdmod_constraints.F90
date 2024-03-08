@@ -194,13 +194,17 @@ module gdmod_constraints
         ! Description
         !============
         ! X-point constraints. Constrains the location of the x-point by 
-        ! fixing the initial x-point coordinates (or, perhaps in the
-        ! future, look at where the gradient of the flux function 
-        ! vanishes). The following fields are added:
+        ! fixing the initial x-point coordinates or look at where the 
+        ! gradient of the flux function vanishes. 
+        ! The following fields are added:
         !
         ! - xpind:      the x-point vertex IDs 
         ! - nxpind:     the total number of x-points    
         ! - locx/y:     x and y coordinate locations of the x-points
+        ! - meth:       method to contrain x-point. Can be 'loc' or 
+        !               'grad'. In case of 'loc', the location is fixed
+        !               based on locx/locy. Otherwise, gradient = 0 
+        !               conditions are imposed. 
     
         ! Note 1: the initial x-point location and x-point vertices
         ! are determined by the initial grid. The x-point indices are 
@@ -212,6 +216,7 @@ module gdmod_constraints
         integer(I8)                         :: nxpind 
         real(R8), allocatable               :: locx(:)
         real(R8), allocatable               :: locy(:)
+        character(:), allocatable           :: meth
 
     contains
 
@@ -220,6 +225,8 @@ module gdmod_constraints
         
         ! Evaluation
         procedure :: Evaluate   => EvaluateXPointConstraints
+        procedure :: EvaluateCoordinatesDerivative &
+            => EvaluateCoordinatesDerivativeXPointConstraints
     
     end type
 
@@ -3151,6 +3158,7 @@ module gdmod_constraints
 
         case ('coordinates')
 
+            ! Call dedicated routine
             call constraints%EvaluateDerivativesCoordinates(gradG, &
                 hessG, grid, dogradient, dohessian, lambda)
 
@@ -3431,6 +3439,9 @@ module gdmod_constraints
         mask(:) = .false. 
         where (monitor%eqvcc(xpind) <= monitor%maxeqvcc-2) mask = .true.
 
+        ! Set method
+        constraints%meth = options%xpoptions%meth
+
         ! Allocate and assign
         constraints%nxpind = count(mask)
         allocate(constraints%xpind(count(mask)))
@@ -3465,7 +3476,7 @@ module gdmod_constraints
 
         ! Description
         !============
-        ! Evaluate the X-point constraints
+        ! Evaluate the X-point constraints (if location based) as:
         ! 
         !       G(2*i-1) = (x_i - x_i0)**2 + (x_i - x_i0) = 0
         !       G(2*i)   = (y_i - y_i0)**2 + (y_i - y_i0) = 0
@@ -3490,6 +3501,10 @@ module gdmod_constraints
         ! Therefore, the multiplication Hjk,i lambda_i is equal to:
         !
         !       Hjk,i lambda_i = 2 * lambda_i 
+
+        ! For gradient based constraints, we simply set dpsidx, dpsidy 
+        ! to zero. Note that we require 3rd order derivatives then for
+        ! hessian computation. 
 
         ! Notes
         !======
@@ -3525,7 +3540,8 @@ module gdmod_constraints
         integer(I8), allocatable            :: valindex(:), conindex(:)
 
         ! Auxiliary variables
-        real(R8), allocatable               ::  valxx(:), valxy(:), valyy(:)
+        real(R8), allocatable               ::  valxx(:), valxy(:), &
+            valyy(:), xpx(:), xpy(:), dpsidx(:), dpsidy(:)
         
         ! Initialize
         !===========
@@ -3577,25 +3593,143 @@ module gdmod_constraints
             end if
         end if
 
+        ! Precompute some values if necessary
+        select case (trim(constraints%meth))
+
+        case ('loc')
+
+            ! Nothing to compute
+
+        case ('grad')
+
+            ! Extract x-point locations
+            xpx = grid%vert%x(constraints%xpind)
+            xpy = grid%vert%y(constraints%xpind)
+
+            ! Compute local magnetic field
+            allocate(dpsidx(ntv), dpsidy(ntv))
+            call magneticField%interp%Evaluate(xpx, xpy, 1, 0, dpsidx)
+            call magneticField%interp%Evaluate(xpx, xpy, 0, 1, dpsidy)
+
+        case default 
+
+            call gdErrorHandler('Unknown method to impose X-point constraints, choose "loc" or "grad"')
+
+        end select
+
         ! Evaluate
-        do i = 1, ntv
-            G(2*i-1) = ( x(tv(i)) - locx(i) )**2 + ( x(tv(i)) - locx(i) )
-            G(2*i)   = ( y(tv(i)) - locy(i) )**2 + ( y(tv(i)) - locy(i) )
-        end do
+        select case (trim(constraints%meth))
 
-        ! Constraint gradient
+        case ('loc')
+
+            ! Location based
+            do i = 1, ntv
+                G(2*i-1) = ( x(tv(i)) - locx(i) )**2 + ( x(tv(i)) - locx(i) )
+                G(2*i)   = ( y(tv(i)) - locy(i) )**2 + ( y(tv(i)) - locy(i) )
+            end do
+
+        case ('grad')
+
+            ! Gradient based
+            G(ic+1:ic+ntv) = dpsidx 
+            ic = ic + ntv 
+            G(ic+1:ic+ntv) = dpsidy 
+
+        end select
+
+        ! Derivatives
         !====================
-        if (dogradient) then 
-            ! Initialize
-            jacG%nrow = nc 
-            jacG%ncol = designvariables%nphi
+        ! Initialize
+        gradG%nrow = designvariables%nphi 
+        gradG%ncol = constraints%ncon 
+        hessG%nrow = designvariables%nphi 
+        hessG%ncol = designvariables%nphi 
 
-            ! Check design variables
-            select case(designvariables%type)
+        ! Check which derivatives to compute
+        select case (trim(designvariables%type))
 
-            case ('coordinates')
+        case ('coordinates')
 
-                ! Order in jacobian: first x, then y. 
+            call constraints%EvaluateCoordinatesDerivative(gradG, hessG, &
+                dogradient, dohessian, lambda, grid, magneticField, xpx, xpy)
+
+        case ('desiredflux')
+
+            ! No contributions
+            gradG%nval = 0
+            call gradG%Allocate()
+
+
+        case default 
+
+            call gdErrorHandler('Unknown design variable type in X-point constraint evaluation')
+
+        end select 
+        
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateCoordinatesDerivativeXPointConstraints(&
+        constraints, gradG, hessG, dogradient, dohessian, lambda, &
+        grid, magneticField, xpx, xpy)
+
+        ! Description
+        !============
+        ! Evaluate derivatives w.r.t. coordinates (design variable 
+        ! indices are 'local', meaning we assume the coordinates are
+        ! the only design variables)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(XPointConstraintsUDT)         :: constraints
+        type(MySparseUDT)                   :: gradG, hessG, jacG 
+        logical, intent(in)                 :: dogradient, dohessian
+        real(R8), allocatable, intent(in)   :: lambda(:)
+        type(MagneticFieldUDT)              :: magneticField 
+        type(GridUDT), intent(in)           :: grid
+        real(R8), intent(in)                :: xpx(:), xpy(:)  
+
+        ! Loop variables
+        integer(I8)                         :: i, ic, ivg, ivh, k
+        integer(I8), allocatable            :: valindex(:), conindex(:)
+        
+        ! Auxiliary variables
+        real(R8), allocatable               ::  valxx(:), valxy(:), &
+            valyy(:), dpsidx(:), dpsidy(:), d2psidx2(:), d2psidxdy(:), &
+            d2psidy2(:), d3psidx3(:), d3psidx2dy(:), d3psidxdy2(:), &
+            d3psidy3(:)
+
+        ! Initialize
+        !===========
+        associate(&
+            nc      => constraints%ncon,        &
+            tv      => constraints%xpind,       &
+            ntv     => constraints%nxpind,      &
+            locx    => constraints%locx,        &
+            locy    => constraints%locy,         &
+            x       => grid%vert%x,             &
+            y       => grid%vert%y              &
+            )
+
+        ! Counters
+        ivg = 0
+        ivh = 0
+        ic = 0
+
+        ! Check case
+        !===========
+        select case (trim(constraints%meth))
+
+        case ('loc')
+
+            ! Gradient
+            if (dogradient) then 
 
                 ! Allocate
                 jacG%nval = 2*ntv
@@ -3639,29 +3773,11 @@ module gdmod_constraints
                 ! Housekeeping
                 call jacG%Deallocate()
 
-            case default
+            end if 
 
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
+            ! Hessian
+            if (dohessian) then 
 
-            end select
-
-        end if
-
-        ! Constraint hessian
-        !===================
-        if (dohessian) then 
-
-            ! Initialize
-            hessG%nrow = designvariables%nphi 
-            hessG%ncol = designvariables%nphi 
-
-            ! Check design variables
-            select case(designvariables%type)
-
-            case ('coordinates')
-            
                 ! Allocate
                 hessG%nval = 4*ntv
                 if (.not. allocated(valindex)) then
@@ -3729,33 +3845,185 @@ module gdmod_constraints
                 hessG%col(valindex) = tv + grid%vert%ntot 
                 hessG%val(valindex) = valyy*lambda(conindex) ! element-wise mult. 
 
-            case default
+            end if 
 
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
+        case ('grad')
 
-            end select
+            ! Gradient
+            if (dogradient) then 
 
-        end if
-        
+                ! Allocate
+                jacG%nval = 4*ntv
+                call jacG%Allocate() 
+                allocate(conindex(ntv))
+                allocate(valindex(ntv))
+                allocate(d2psidx2(ntv), d2psidxdy(ntv), d2psidy2(ntv))
+
+                ! Evaluate
+                call magneticField%interp%Evaluate(xpx, xpy, 2, 0, d2psidx2)
+                call magneticField%interp%Evaluate(xpx, xpy, 1, 1, d2psidxdy)
+                call magneticField%interp%Evaluate(xpx, xpy, 0, 2, d2psidy2)
+
+                ! x-constraints
+                !--------------
+                ! Build indices
+                conindex = [(k, k = ic+1, ic+ntv)]
+                valindex = [(k, k = ivg+1, ivg+ntv)]
+
+                ! Add values
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = tv
+                jacG%val(valindex) = d2psidx2
+                ivg = ivg + ntv 
+
+                valindex = valindex + ntv 
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = tv + grid%vert%ntot
+                jacG%val(valindex) = d2psidxdy
+                ivg = ivg + ntv
+
+                ! Update counter
+                ic = ic + ntv
+
+                ! y-constraints
+                !--------------
+                ! Build indices
+                conindex = [(k, k = ic+1, ic+ntv)]
+
+                ! Add values
+                valindex = valindex + ntv
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = tv
+                jacG%val(valindex) = d2psidxdy 
+                ivg = ivg + ntv 
+
+                valindex = valindex + ntv
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = tv + grid%vert%ntot
+                jacG%val(valindex) = d2psidy2 
+                ivg = ivg + ntv 
+
+                ! Build gradient
+                !===============
+                gradG%nval = jacG%nval 
+                
+                call gradG%Allocate()
+                gradG%row = jacG%col 
+                gradG%col = jacG%row
+                gradG%val = jacG%val
+
+                ! Housekeeping
+                call jacG%Deallocate()
+
+            end if 
+
+            ! Hessian
+            ic = 0
+            if (dohessian) then 
+
+                ! Allocate
+                hessG%nval = 8*ntv
+                if (.not. allocated(valindex)) then
+                    allocate(valindex(ntv))
+                end if
+                if (.not. allocated(conindex)) then 
+                    allocate(conindex(ntv))
+                end if 
+                if (.not. allocated(hessG%val)) then
+                    call hessG%Allocate()
+                end if
+                allocate(valxx(ntv))
+                allocate(valxy(ntv))
+                allocate(valyy(ntv))
+                allocate(d3psidx3(ntv), d3psidx2dy(ntv), d3psidxdy2(ntv), &
+                    d3psidy3(ntv))
+
+                ! Compute
+                call magneticField%interp%Evaluate(xpx, xpy, 3, 0, d3psidx3)
+                call magneticField%interp%Evaluate(xpx, xpy, 2, 1, d3psidx2dy)
+                call magneticField%interp%Evaluate(xpx, xpy, 1, 2, d3psidxdy2)
+                call magneticField%interp%Evaluate(xpx, xpy, 0, 3, d3psidy3)
+
+                ! x-constraint
+                !-------------
+                ! Set index
+                conindex = [(k, k = ic+1, ic+ntv)]
+
+                ! xx
+                valindex = [(k, k = ivh+1, ivh+ntv)]
+                hessG%row(valindex) = tv 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = d3psidx3*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! xy
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv 
+                hessG%col(valindex) = tv + grid%vert%ntot 
+                hessG%val(valindex) = d3psidx2dy*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! yx 
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = d3psidx2dy*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! yy
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv + grid%vert%ntot
+                hessG%val(valindex) = d3psidxdy2*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! Update counter
+                ic = ic + ntv
+
+                ! y-constraint
+                !-------------
+                ! Set index
+                conindex = [(k, k = ic+1, ic+ntv)]
+
+                ! xx
+                valindex = [(k, k = ivh+1, ivh+ntv)]
+                hessG%row(valindex) = tv 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = d3psidx2dy*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! xy
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv 
+                hessG%col(valindex) = tv + grid%vert%ntot 
+                hessG%val(valindex) = d3psidxdy2*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! yx 
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = d3psidxdy2*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! yy
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv + grid%vert%ntot
+                hessG%val(valindex) = d3psidy3*lambda(conindex)
+                ivh = ivh + ntv 
+                
+            end if
+
+        case default 
+
+            call gdErrorHandler('Unknown method for imposing X-point constraints')
+
+        end select
+
         ! Housekeeping
         !=============
-        ! End associate
         end associate
-
-        ! Deallocate
-
-        if (dogradient) then 
-            deallocate(valindex, conindex)
-        end if 
-
-        if (dohessian) then 
-            if (allocated(valindex)) then 
-                deallocate(valindex, conindex)
-            end if 
-            deallocate(valxx, valxy, valyy)
-        end if
 
     end subroutine
 
