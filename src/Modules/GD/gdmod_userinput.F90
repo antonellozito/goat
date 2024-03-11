@@ -136,6 +136,23 @@ module gdmod_userinput
 
     end type 
 
+    type, extends(OptionsUDT)   :: CostFunctionOptionsFAUDT 
+
+        ! Face angle cost function options.
+        ! Fields:
+        ! - lambda: cost function scaling constant
+        ! - writedata: write out cost function data 
+
+        real(R8)                    :: lambda 
+        integer(I8)                 :: writedata
+
+    contains
+
+        procedure :: SetDefaults    => SetDefaultCostFunctionOptionsFA
+        procedure :: Read           => ReadCostFunctionOptionsFA
+
+    end type
+
     ! Options for the cost function
     type, extends(OptionsUDT) :: CostFunctionOptionsUDT
 
@@ -157,6 +174,7 @@ module gdmod_userinput
         integer(I8)                     :: writedata
         type(CostFunctionOptionsLRUDT)  :: LR
         type(CostFunctionOptionsFADUDT) :: FAD
+        type(CostfunctionOptionsFAUDT)  :: FA
 
     contains 
 
@@ -401,13 +419,15 @@ module gdmod_userinput
         !================
         options%type        = 'LR_FAD' 
         options%writedata   = 1
-        options%LR%inputfilepath = options%inputfilepath ! propagate filepath
-        options%FAD%inputfilepath = options%inputfilepath ! propagate filepath
+        options%LR%inputfilepath    = options%inputfilepath ! propagate filepath
+        options%FAD%inputfilepath   = options%inputfilepath ! propagate filepath
+        options%FA%inputfilepath    = options%inputfilepath
 
         ! Set cost function specific options
         !===================================
         call options%LR%Set()
         call options%FAD%Set()
+        call options%FA%Set()
 
     end subroutine
 
@@ -441,6 +461,24 @@ module gdmod_userinput
         !==================
         ! Arguments
         class(CostFunctionOptionsFADUDT) :: options 
+
+        ! Default options
+        !================
+        options%writedata = 1
+        options%lambda = 1e0
+
+    end subroutine
+
+    subroutine SetDefaultCostFunctionOptionsFA(options)
+
+        ! Description
+        !============
+        ! Set default cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsFAUDT) :: options 
 
         ! Default options
         !================
@@ -949,6 +987,60 @@ module gdmod_userinput
 
         ! Write data
         field = 'gd.design.cfv.par.FAD.writedata'
+        call ExtractOptionValueInteger0D(fid, field, options%writedata) 
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadCostFunctionOptionsFA(options)
+
+        ! Description
+        !============
+        ! Read in user-specified cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsFAUDT)   :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsFA: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsFA: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'gd.design.cfv.par.FA.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda) 
+
+        ! Write data
+        field = 'gd.design.cfv.par.FA.writedata'
         call ExtractOptionValueInteger0D(fid, field, options%writedata) 
         
         ! Housekeeping

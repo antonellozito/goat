@@ -236,6 +236,55 @@ module gdmod_costfunction
 
     end type
 
+    ! Face angle cost function
+    type, extends(CostfunctionGDUDT)    :: CostFunctionFAUDT 
+
+        ! Description
+        !============
+        ! This cost function penalizes the angle of non-aligned faces
+        ! w.r.t the magnetic field  (orthogonality is promoted). This 
+        ! can be useful when orthogonality constraints are not possible
+        ! to apply, but one still wants faces as orthogonal as possible,
+        ! relative to other cost function contributions of course. Only
+        ! faces that have:
+        ! - a different vertex ID for each vertex (can be zero, but not twice zero)
+        ! - at most one vessel vertex (i.e. the face is not a vessel face)
+        ! are included in the cost function. Each contribution is stored
+        ! as a vertex pair that is used for evaluation later on. 
+
+        ! Notes:
+        !=======
+        ! Note 1: this cost function can work perfectly in combination
+        ! with the FAD cost function: then strong face angle differences
+        ! but also strong non-orthogonality is prevented. Using only the
+        ! FA cost function will not necessarily lead to better FAD, 
+        ! though it may help a bit. 
+
+        ! Fields
+        real(R8)                    :: lambda ! scaling constant
+        real(R8), allocatable       :: wt(:) ! weight 
+        integer(I8), allocatable    :: vpairs(:, :) ! vertex pairs
+        integer(I8)                 :: nvpairs ! total number of vertex pairs
+
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionFA
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionFA
+
+        ! Data output
+        procedure :: WriteData              => WriteCostFunctionDataFA
+
+        ! Housekeeping
+        procedure :: Allocate               => AllocateCostFunctionFA
+        procedure :: Deallocate             => DeallocateCostFunctionFA
+        final :: DestroyCostFunctionFA
+
+    end type
+
     ! LRFAD cost function
     type, extends(CostfunctionGDUDT) :: CostfunctionLRFADUDT
 
@@ -2674,6 +2723,420 @@ module gdmod_costfunction
         !==================
         ! Arguments
         type(CostfunctionFADUDT)       :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%Deallocate()
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                             FACE ANGLE                           !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionFA(costfunction, grid, &
+        magneticField, environment, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. Here, the 
+        ! length ratio cost function is initialized, which requires
+
+        ! Modules
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFAUDT)            :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
+
+        ! Loop variables
+        integer(I8)                         :: i, j
+
+        ! Auxiliary variables
+        integer(I8)                         :: nvpairs
+        integer(I8), allocatable            :: vpairs(:, :), tv(:), &
+            tID(:) 
+
+        real(R8), allocatable               :: wt(:), xv(:, :), &
+            yv(:, :), dx(:), dy(:), gxf(:), gyf(:), dp(:), xf(:), yf(:)
+
+        logical, allocatable                :: isvesselvertex(:), &
+            isvesselface(:)
+
+        ! Data
+        
+        ! Initialize
+        !===========
+        ! Set the scaling constant
+        costfunction%lambda = options%FA%lambda
+
+        ! Initialize temporary arrays (too big for now, trim later)
+        allocate(vpairs(grid%face%ntot, 2), wt(grid%face%ntot))
+        wt(:) = 1
+
+        ! Initialize counter
+        nvpairs = 0
+
+        ! Associate
+        associate(&
+            face        => grid%face,   &
+            x           => grid%vert%x, &
+            y           => grid%vert%y, &
+            fieldlineID => grid%vert%fieldlineID)
+
+        ! Determine vertex pairs
+        !=======================
+        ! Check which faces are on vessel
+        call DetermineVesselVertices(isvesselvertex, isvesselface, &
+            grid)
+
+        ! Loop
+        do i = 1, face%ntot
+            ! Skip if vessel face
+            if (isvesselface(i)) then 
+                cycle 
+            end if
+
+            ! Get vertices
+            tv = face%vert(i, :)
+
+            ! Get fieldline ID
+            tID = fieldlineID(tv)
+
+            ! Check if the face can be added
+            if (tID(1) /= tID(2) ) then 
+                ! Update counter
+                nvpairs = nvpairs + 1
+
+                ! Add pair
+                vpairs(nvpairs, :) = tv 
+            end if
+        end do
+
+        ! Allocate and add
+        call costfunction%Allocate(nvpairs)
+        costfunction%vpairs = vpairs(1:nvpairs, :)
+        costfunction%wt     = wt(1:nvpairs)
+
+        ! Check orientation
+        !==================
+        ! Flip vertex pairs if dotproduct is smaller than zero
+        allocate(xv(nvpairs, 2), yv(nvpairs, 2))
+        do i = 1, 2
+            xv(:, i) = x(costfunction%vpairs(:, i))
+            yv(:, i) = y(costfunction%vpairs(:, i))
+        end do
+        dx = xv(:, 2) - xv(:, 1)
+        dy = yv(:, 2) - yv(:, 1)
+        xf = 0.5*(xv(:, 1) + xv(:, 2))
+        yf = 0.5*(yv(:, 1) + yv(:, 2))
+        call magneticField%interp%Evaluate(xf, yf, 1, 0, gxf)
+        call magneticField%interp%Evaluate(xf, yf, 0, 1, gyf)
+        dp = dx*gxf + dy*gyf 
+        do i = 1, nvpairs
+            if (dp(i) < 0) then 
+                ! flip
+                costfunction%vpairs(i, :) = costfunction%vpairs(i, 2:1:-1)
+            end if
+        end do 
+
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+        ! Write data
+        !===========
+        if (options%writedata == 1) then 
+            call costfunction%WriteData(grid)
+        end if 
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionFA(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. The 
+        ! cost function penalizes the angle between the magnetic field 
+        ! and the face normal. It is assumed that the optimal angle is
+        ! zero. 
+
+        ! Notes:
+        !=======
+        ! Note 1: for ease, we compute the dot product between the 
+        ! tangent and the magnetic field normal, which somewhat boils 
+        ! down to the same thing. 
+
+        ! Note 2: we could simplify the cost function expression by 
+        ! penalizing the dot product instead of the actual angle. 
+        ! However, in the future one may desire to have a non-zero 
+        ! desired angle, which is now easily adjusted by adding a 
+        ! desired theta value. Anyway, this implementation may be 
+        ! improved. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFAUDT)        :: costfunction 
+        real(R8)                        :: J
+        real(R8), allocatable           :: gradJ(:) 
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i, k, cc 
+
+        ! Auxiliary
+        integer(I8)                     :: v1, v2, v3
+        integer(I8), allocatable        :: row(:), col(:) 
+
+        real(R8)                        :: x1, x2, x3, y1, y2, y3, wti, &
+            b0i, dx1, dx2, dy1, dy2, d1, d2, rat
+        real(R8), allocatable           :: valxx(:),  valxy(:), &
+            valyx(:), valyy(:), xv(:, :), yv(:, :), xfv(:), yfv(:), &
+            gxfv(:), gyfv(:), dxv(:), dyv(:), dpv(:), cpv(:), ratv(:), &
+            thetav(:), gxxfv(:), gxyfv(:), gyxfv(:), gyyfv(:), &
+            gxxxfv(:), gxxyfv(:), gxyyfv(:), gyxxfv(:), gyxyfv(:), &
+            gyyyfv(:)
+                                        
+        ! Associate
+        !==========
+        associate(&
+            vert    => grid%vert, &
+            vpairs  => costfunction%vpairs, &
+            nvpairs => costfunction%nvpairs, &
+            x       => grid%vert%x, &
+            y       => grid%vert%y, &
+            lambda  => costfunction%lambda, &
+            wt      => costfunction%wt)
+
+        ! Initialize
+        !===========
+        ! Cost function
+        J = 0
+
+        ! Gradient
+        gradJ(:) = 0
+
+        ! Precompute
+        !===========
+        ! Coordinates
+        allocate(xv(nvpairs, 2), yv(nvpairs, 2))
+        do i = 1, 2
+            xv(:, i) = x(vpairs(:, i))
+            yv(:, i) = y(vpairs(:, i))
+        end do
+        xfv = 0.5*(xv(:, 1) + xv(:, 2))
+        yfv = 0.5*(yv(:, 1) + yv(:, 2))
+
+        ! Magnetic field
+        call magneticField%interp%Evaluate(xfv, yfv, 1, 0, gxfv)
+        call magneticField%interp%Evaluate(xfv, yfv, 0, 1, gyfv)
+
+        ! Face vectors
+        dxv = xv(:, 2) - xv(:, 1)
+        dyv = yv(:, 2) - yv(:, 1)
+
+        dpv = dxv*gxfv + dyv*gyfv
+        cpv = dxv*gyfv - dyv*gxfv 
+
+        ratv = cpv/dpv 
+        thetav = atan(ratv)
+
+        ! Compute cost function
+        !======================
+        ! Compute
+        J = sum(0.5*wt*thetav**2)
+
+        ! Scale
+        J = lambda*J
+
+        ! Compute derivatives
+        !====================
+        select case (designvariables%type) 
+
+        case ('coordinates', 'coordinates_desiredflux') ! no flux contributions
+
+            ! Initialize
+            if (.not. allocated(hessJ%row)) then 
+                ! Allocate
+                hessJ%nval = 16*nvpairs 
+                call hessJ%Allocate()
+
+            end if 
+            
+            ! Precompute
+            if (dogradient .or. dohessian) then 
+                ! Magnetic field vector derivatives
+                call magneticField%interp%Evaluate(xfv, yfv, 2, 0, gxxfv)
+                call magneticField%interp%Evaluate(xfv, yfv, 1, 1, gxyfv)
+                call magneticField%interp%Evaluate(xfv, yfv, 0, 2, gxxfv)
+                gyxfv = gxyfv ! symmetric, for ease
+
+            end if
+            if (dohessian) then 
+                ! Additional derivatives
+                call magneticField%interp%Evaluate(xfv, yfv, 3, 0, gxxxfv)
+                call magneticField%interp%Evaluate(xfv, yfv, 2, 1, gxxyfv)
+                call magneticField%interp%Evaluate(xfv, yfv, 1, 2, gxyyfv)
+                call magneticField%interp%Evaluate(xfv, yfv, 0, 3, gyyyfv)
+                gyxxfv = gxxyfv 
+                gyxyfv = gxyyfv 
+            end if 
+
+            ! Loop over all pairs
+            do i = 1, nvpairs
+                associate(&
+                    wti         => wt(i) &
+                )
+                ! Unpack
+
+                end associate 
+
+
+            end do
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('design variable type "' // designvariables%type &
+                // '" not yet implemented for face angle cost function')
+
+        end select
+
+       
+        ! Deassociate
+        !============
+        end associate
+
+    end subroutine
+
+    ! Cost function data writing 
+    subroutine WriteCostFunctionDataFA(costfunction, grid)
+
+        ! Description
+        !============
+        ! Write out the cost function data for the LR cost function.
+        ! Here, this consists of the vertex pair data in IDn, xn, yn 
+        ! format
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionFAUDT)        :: costfunction 
+        type(GridUDT)                   :: grid
+
+        ! Auxiliary
+        integer(I8)                     :: ncol, nrow 
+
+        integer(I8), allocatable        :: IDn(:, :) 
+        real(R8), allocatable           :: xn(:, :), yn(:, :)
+        character(:), allocatable       :: filename 
+
+        ! Loop
+        integer(I8)                     :: j 
+
+        ! Initialize
+        !===========
+        ! Set filename
+        allocate(character(len('costfunction_vertexpairs_FA')) :: filename)
+        filename = 'costfunction_vertexpairs_FA'
+
+        ! Allocate
+        nrow = size(costfunction%vpairs, 1)
+        ncol = size(costfunction%vpairs, 2)
+        allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
+
+        ! Unpack
+        associate(&
+            vpairs      => costfunction%vpairs,         &
+            x           => grid%vert%x,                 &
+            y           => grid%vert%y)
+
+        ! Loop
+        do j = 1, ncol 
+            IDn(:, j) = vpairs(:, j) 
+            xn(:, j) = x(vpairs(:, j)) 
+            yn(:, j) = y(vpairs(:, j)) 
+        end do
+
+        ! Call writer
+        !============
+        call WriteVertexPairData(IDn, xn, yn, filename)
+
+        ! Housekeeping
+        !=============
+        end associate
+        deallocate(IDn, xn, yn)
+        
+
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionFA(costfunction, nvp)
+
+        ! Description
+        !============
+        ! Allocate, assumed that costfunction%nvpairs is given
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFAUDT)        :: costfunction
+        integer(I8)                     :: nvp
+
+        ! Allocate
+        !=========
+        allocate(costfunction%vpairs(nvp, 2))
+        allocate(costfunction%wt(nvp))
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionFA(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFAUDT)        :: costfunction
+
+        ! Deallocate
+        !===========
+        if (allocated(costfunction%vpairs)) then 
+            deallocate(costfunction%vpairs)
+            deallocate(costfunction%wt)
+        end if
+
+    end subroutine
+
+    subroutine DestroyCostFunctionFA(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionFAUDT)        :: costfunction
 
         ! Destroy
         !========
