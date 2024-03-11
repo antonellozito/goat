@@ -45,6 +45,7 @@ module gdmod_costfunction
         ! Defines the basic cost function structure for the grid 
         ! deformation. The following general fields are added: 
         ! - J:          The cost function value (scalar)
+        ! - type:       the cost function type (string)
 
         ! The following routines should be implemented for these cost
         ! functions (see also the interface below for a description of
@@ -53,7 +54,10 @@ module gdmod_costfunction
         ! - Evaluate
 
         ! Cost function value
-        real(R8)        :: J 
+        real(R8)                        :: J 
+
+        ! Cost function type
+        character(:), allocatable       :: type
 
     contains
 
@@ -308,7 +312,7 @@ module gdmod_costfunction
         !======
 
         ! Fields
-        type(CostfunctionLRUDT)     :: cfv_lr
+        type(CostfunctionLRUDT2)    :: cfv_lr
         type(CostFunctionFADUDT)    :: cfv_fad
 
     contains
@@ -323,6 +327,45 @@ module gdmod_costfunction
         procedure :: Allocate           => AllocateCostFunctionLRFAD
         procedure :: Deallocate         => DeallocateCostFunctionLRFAD
         final :: DestroyCostFunctionLRFAD
+
+    end type
+
+        ! Cost function with all possible contributions
+    type, extends(CostfunctionGDUDT) :: CostfunctionGeneralUDT
+
+        ! Description
+        !============
+        ! Cost function that accounts for all possible combinations of 
+        ! length ratio(s), angles, differences, ... The inclusion of a 
+        ! cost function value is determined based on the value of the 
+        ! scaling coefficient lambda. If this is zero or negative, the 
+        ! contribution is not included. One should beware that if the 
+        ! lambda values are not properly set in the input file, 
+        ! contributions may be unexpectedly included since the default
+        ! value for these contributions is non-zero. If no contributions
+        ! would be included, the system is likely underdetermined, 
+        ! leading to NaNs/divergence of the solver. 
+
+        ! Fields
+        type(CostfunctionLRUDT2)        :: cfv_lr
+        type(CostFunctionFADUDT)        :: cfv_fad
+        type(CostFunctionFAUDT)         :: cfv_fa
+
+        ! Switches
+        logical                         :: doLR, doFA, doFAD
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize         => InitializeCostfunctionGeneral
+
+        ! Evaluation
+        procedure :: Evaluate           => EvaluateCostFunctionGeneral
+
+        ! Housekeeping
+        procedure :: Allocate           => AllocateCostFunctionGeneral
+        procedure :: Deallocate         => DeallocateCostFunctionGeneral
+        final :: DestroyCostFunctionGeneral
 
     end type
 
@@ -3496,6 +3539,228 @@ module gdmod_costfunction
 
     end subroutine
 
+    !------------------------------------------------------------------!
+    !                             GENERAL                              !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionGeneral(costfunction, grid, &
+        magneticField, environment, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. 
+
+        ! Simply call the initialization of the original lenght ratio
+        ! cost function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionGeneralUDT)       :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
+        
+        ! Initialize
+        !===========
+        ! Set evaluation switches
+        costfunction%doLR   = .false.
+        costfunction%doFAD  = .false.
+        costfunction%doFA   = .false.
+
+        ! Check based on cost function type
+        select case (costfunction%type)
+
+        case ('LR_FAD')
+
+            ! Set lambda of other contributions 
+            options%FA%lambda = -1
+            
+        case ('LR_FAD_FA')
+
+            ! Set lambda of other contributions
+
+        case ('general')
+
+            ! Include all contributions
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('Unknown cost function type')
+
+        end select
+
+        ! Initialize if necessary
+        if (options%LR%lambda > 0) then
+            costfunction%doLR = .true.
+            call costfunction%cfv_lr%Initialize(grid, magneticField, &
+                environment, options)
+        end if 
+        if (options%FAD%lambda > 0) then 
+            costfunction%doFAD = .true.
+            call costfunction%cfv_fad%Initialize(grid, magneticField, &
+                environment, options)
+        end if 
+        if (options%FA%lambda > 0) then 
+            costfunction%doFA = .true.
+            call costfunction%cfv_fa%Initialize(grid, magneticField, &
+                environment, options)
+        end if
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionGeneral(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, we simply call the same cost function twice, but switch
+        ! the order of the indices and recompute the bias. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionGeneralUDT)       :: costfunction
+        real(R8)                        :: J, Jtemp
+        real(R8), allocatable           :: gradJ(:), gradJtemp(:)
+        type(MySparseUDT)               :: hessJ, hessJtemp
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+
+        ! Auxiliary
+                                        
+        ! Initialize
+        !===========
+        ! Cost function
+        J = 0
+        Jtemp = 0
+
+        ! Gradient
+        gradJ(:) = 0
+        allocate(gradJtemp(size(gradJ)))
+
+        ! Hessian
+        hessJtemp%nrow = hessJ%nrow 
+        hessJtemp%ncol = hessJ%ncol 
+
+        ! Compute cost function
+        !======================
+        ! Length ratio
+        if (costfunction%doLR) then 
+            ! Compute
+            call costfunction%cfv_lr%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, grid, magneticField, environment, dogradient, &
+                dohessian, designvariables)
+            
+            ! Add
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+        end if 
+        
+        ! Face angle difference
+        if (costfunction%doFAD) then 
+            ! Compute
+            call costfunction%cfv_fad%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, grid, magneticField, environment, dogradient, &
+                dohessian, designvariables)
+
+            ! Add
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+        end if 
+
+        ! Face angle
+        if (costfunction%doFA) then 
+            ! Compute
+            call costfunction%cfv_fa%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, grid, magneticField, environment, dogradient, &
+                dohessian, designvariables)
+
+            ! Add
+                J       = J + Jtemp 
+                gradJ   = gradJ + gradJtemp
+                hessJ   = hessJ + hessJtemp
+        end if 
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJtemp)
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionGeneral(costfunction)
+
+        ! Description
+        !============
+        ! Dummy function, nothing to be done here
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionGeneralUDT)       :: costfunction
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionGeneral(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionGeneralUDT)       :: costfunction
+
+        ! Deallocate
+        !===========
+        call costfunction%cfv_lr%Deallocate()
+        call costfunction%cfv_fad%Deallocate()
+        call costfunction%cfv_fa%Deallocate()
+
+    end subroutine
+
+    subroutine DestroyCostFunctionGeneral(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionGeneralUDT)       :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%cfv_lr%Deallocate()
+        call costfunction%cfv_fad%Deallocate()
+
+    end subroutine
     
 
 end module

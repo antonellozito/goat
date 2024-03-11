@@ -304,23 +304,44 @@ module gdmod_optimizationengine
             ! Allocate
             allocate(CostFunctionLRUDT::problem%costfunction)
 
+            ! Set type
+            problem%costfunction%type = 'LR'
+
         case ('lengthratio2')
 
             ! Allocate
             allocate(CostFunctionLRUDT2::problem%costfunction)
+
+            ! Set type
+            problem%costfunction%type = 'LR2'
 
         case ('FAD')
 
             ! Allocate
             allocate(CostfunctionFADUDT::problem%costfunction)
 
+            ! Set type
+            problem%costfunction%type = 'FAD'
+
         case ('LR_FAD')
 
             ! Allocate
             allocate(CostfunctionLRFADUDT::problem%costfunction)
 
+            ! Set type
+            problem%costfunction%type = 'LR_FAD'
+
+        case ('general', 'LR_FAD_FA')
+
+            ! Allocate
+            allocate(CostfunctionGeneralUDT::problem%costfunction)
+
+            ! Set type
+            problem%costfunction%type = problem%designoptions%costfunction%type
+
         case default
             
+            ! Throw error
             call gdErrorHandler('Unknown cost function type')
 
         end select
