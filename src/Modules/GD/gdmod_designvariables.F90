@@ -105,6 +105,26 @@ module gdmod_designvariables
 
     end type
 
+    ! Design variables, combined coordinates and flux
+    type, extends(DesignVariablesGDUDT) :: DesignVariablesCoordinatesFluxUDT
+
+        ! Coordinate & flux indices
+        integer(I8), allocatable        :: xind(:), yind(:), psiind(:) 
+
+    contains
+
+        ! Design initialization
+        procedure :: Initialize     => InitializeDesignCoordinatesFlux
+
+        ! Design update
+        procedure :: UpdateDesign   => UpdateDesignCoordinatesFlux
+
+        ! Housekeeping
+        procedure :: DeallocateDesignCoordinatesFlux
+        final :: DestroyDesignCoordinatesFlux
+    
+    end type
+
     !==================================================================!
     !                                                                  !
     !                            INTERFACES                            !
@@ -438,5 +458,114 @@ module gdmod_designvariables
     !------------------------------------------------------------------!
     !                       Coordinates & Flux values                  !
     !------------------------------------------------------------------!
+
+    ! Design initialization
+    subroutine InitializeDesignCoordinatesFlux(designvariables, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Initialize the design variables, which are in this case only 
+        ! the x and y coordinates. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesCoordinatesFluxUDT)    :: designvariables
+        type(gridUDT), intent(in)                   :: grid 
+        type(MagneticFieldUDT), intent(in)          :: magneticField 
+        type(EnvironmentUDT), intent(in)            :: environment
+    
+        ! Loop variables
+        integer(I8)                                 :: i
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Set the type
+        designvariables%type = 'coordinates_desiredflux' 
+
+        ! All other initialization is deferred until after the problem
+        ! initialization, since the amount of design variables etc 
+        ! depends on the number of flux surface constraints
+        
+
+    end subroutine
+
+    ! Design update
+    subroutine UpdateDesignCoordinatesFlux(designvariables, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Update the design coordinates according to the phi values. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesCoordinatesFluxUDT)    :: designvariables
+        type(gridUDT), intent(inout)                :: grid 
+        type(MagneticFieldUDT), intent(inout)       :: magneticField 
+        type(EnvironmentUDT), intent(inout)         :: environment
+    
+        ! Loop variables
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Update
+        !=======
+        ! Grid coordinates
+        grid%vert%x = designvariables%phi(designvariables%xind)
+        grid%vert%y = designvariables%phi(designvariables%yind)
+        
+        ! Flux values should be updated in constraints...
+
+    end subroutine
+
+    subroutine DeallocateDesignCoordinatesFlux(designvariables)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DesignVariablesCoordinatesFluxUDT)        :: designvariables 
+
+        ! Allocate
+        !=========
+        ! Call the parent allocation routine
+        call designvariables%Deallocate()
+
+        ! Allocate the remaining fields, specific for this type
+        deallocate(designvariables%xind)
+        deallocate(designvariables%yind)
+        deallocate(designvariables%psiind)
+
+    end subroutine
+
+    subroutine DestroyDesignCoordinatesFlux(designvariables)
+
+        ! Description
+        !============
+        ! Destructor
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(DesignVariablesCoordinatesFluxUDT) :: designvariables
+
+        ! Destroy
+        !========
+        call designvariables%Deallocate()
+        
+    end subroutine
+
 
 end module
