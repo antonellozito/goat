@@ -653,13 +653,14 @@ module gdmod_utility_optimization
         ! Faces
         !======
         ! Determine boundary faces
+        allocate(bffaces(count(grid%face%BF)))
         bffaces = pack([(i, i=1,grid%face%ntot)], grid%face%BF)
 
         ! Check which boundary faces have two boundary vertices as
         ! determined above
         do i = 1, size(bffaces, 1)
             if (all(isvesselvertex(grid%face%vert(bffaces(i), :)))) then 
-                isvesselface(i) = .true.
+                isvesselface(bffaces(i)) = .true.
             end if 
         end do 
         
