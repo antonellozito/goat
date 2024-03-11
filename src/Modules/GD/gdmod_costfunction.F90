@@ -20,6 +20,7 @@ module gdmod_costfunction
     use mod_sparseinterface
     use gdmod_types 
     use gdmod_designvariables
+    use gdmod_utility_optimization
     use optmod_costfunction
     use gdmod_plots
 
@@ -99,6 +100,8 @@ module gdmod_costfunction
 
         ! Fields
         real(R8)                    :: lambda ! scaling constant
+        real(R8)                    :: eta ! length scale to prevent NaN/Inf
+        logical                     :: dovessel ! include vessel edges in cost function?
         real(R8), allocatable       :: b0(:) ! desired length ratio per vertex
         real(R8), allocatable       :: wt(:) ! weight factor per vertex
         integer(I8), allocatable    :: vpairs(:, :), nvpairs(:) ! vertex pairs
@@ -375,20 +378,28 @@ module gdmod_costfunction
 
         ! Auxiliary variables
         integer                             :: sgn2, sgn3
-        integer(I8)                         :: sp, ep, tID, v2, v3
+        integer(I8)                         :: sp, ep, tID, v2, v3, tv
         real(R8)                            :: Btx2, Btx3, Bty2, Bty3, &
             dx2, dy2, dx3, dy3
 
-        integer(I8), allocatable            :: tvn(:), temptvn(:)
+        integer(I8), allocatable            :: tvn(:), temptvn(:), &
+            vesselvert(:), tvf(:), tvfv(:, :)
         real(R8), allocatable               :: Btx(:), Bty(:)
-        logical, allocatable                :: cID(:)
+        logical, allocatable                :: cID(:), isvesselvertex(:), &
+            isvesselface(:)
 
         ! Data
         
         ! Initialize
         !===========
         ! Set the scaling constant
-        costfunction%lambda = options%LR%lambda 
+        costfunction%lambda = options%LR%lambda
+        
+        ! Set the small length parameter eta
+        costfunction%eta    = options%LR%eta
+
+        ! Check if we need to include vessel edges
+        costfunction%dovessel   = options%LR%dovessel
 
         ! Allocate
         call costfunction%Allocate(grid%vert%ntot, 4)
@@ -399,7 +410,8 @@ module gdmod_costfunction
         associate(vert => grid%vert, x => grid%vert%x, y => grid%vert%y, &
             b0 => costfunction%b0, wt => costfunction%wt, &
             nvpairs => costfunction%nvpairs, &
-            vpairs => costfunction%vpairs)
+            vpairs => costfunction%vpairs, &
+            dovessel => costfunction%dovessel)
 
         ! Set the initial weighting factors
         wt(:) = 1
@@ -411,10 +423,6 @@ module gdmod_costfunction
         ! Compute the magnetic field vectors at the vertex locations
         call magneticField%interp%Evaluate(x, y, 0, 1, Btx)
         call magneticField%interp%Evaluate(x, y, 1, 0, Bty)
-        !call EvaluateBicubicSplineInterpolant(x, y, Btx, &
-        !    magneticField%interp, '0', '1') 
-        !call EvaluateBicubicSplineInterpolant(x, y, Bty, &
-        !    magneticField%interp, '1', '0') 
         Btx = -Btx ! adjust sign: Btx = - dPsidy
 
         ! Compute desired length ratio
@@ -431,6 +439,7 @@ module gdmod_costfunction
             allocate(cID(vert%neigP(i, 2)))
 
             ! Get the vertex neighbours of this vertex
+            temptvn = GetvertNeig(vert, i)
             sp = vert%neigP(i, 1)
             ep = vert%neigP(i, 1) + vert%neigP(i, 2)-1
             temptvn = vert%neig(sp:ep)
@@ -439,7 +448,12 @@ module gdmod_costfunction
             tID = vert%fieldlineID(i)
             
             ! Check which vertices have the same ID
-            cID = (tID == vert%fieldlineID(temptvn))
+            if (tID /= 0) then 
+                cID = (tID == vert%fieldlineID(temptvn))
+            else
+                ! Determine later
+                cID(:) = .true. 
+            end if
             
             ! Extract
             allocate(tvn(count(cID)))
@@ -451,80 +465,133 @@ module gdmod_costfunction
                 nvpairs(i) = (size(tvn)/2)
                 
                 ! If multiple pairs, loop
-                do j = 1, nvpairs(i)
-                    ! Normally, multiple pairs only occur at x-points, and,
-                    ! since the coordinates are sorted, the corresponding
-                    ! pairs should be tvn(j) and tvn(j+nvpairs(i))
+                if(tID /= 0) then 
+                    do j = 1, nvpairs(i)
+                        ! Normally, multiple pairs only occur at x-points, and,
+                        ! since the coordinates are sorted, the corresponding
+                        ! pairs should be tvn(j) and tvn(j+nvpairs(i))
+                        
+                        ! Get vertices
+                        v2 = tvn(j)
+                        v3 = tvn(j+nvpairs(i))
                     
-                    ! Get vertices
-                    v2 = tvn(j)
-                    v3 = tvn(j+nvpairs(i))
-                   
-                   ! Get vectors
-                    dx2 = x(v2) - x(i); dy2 = y(v2) - y(i)
-                    dx3 = x(v3) - x(i); dy3 = y(v3) - y(i)
-                    
-                    ! Compute weight
-                    wt(i) = wt(i) + &
-                        1/(dx2**2 + dy2**2) + 1/(dx3**2 + dy3**2)
-                    
-                    ! Check if we're dealing with an x-point
-                    if (nvpairs(i) > 1) then
-                        ! Here, the gradient *should* vanish. For now, we
-                        ! cope with this by setting the desired ratio to 1,
-                        ! such that it does not matter which length is
-                        ! considered first.
-                        b0(i) = 1
-                        sgn2 = -1
-                        wt(i) = 0
-                    else
-                        ! Evaluate sign of dot product of magnetic field
-                        ! coordinates with vector
-                        Btx2 = 0.5*(Btx(i) + Btx(v2))
-                        Bty2 = 0.5*(Bty(i) + Bty(v2))
-                        Btx3 = 0.5*(Btx(i) + Btx(v3))
-                        Bty3 = 0.5*(Bty(i) + Bty(v3))
-                        if ( (dx2*Btx2 + dy2*Bty2) < 0 ) then 
+                    ! Get vectors
+                        dx2 = x(v2) - x(i); dy2 = y(v2) - y(i)
+                        dx3 = x(v3) - x(i); dy3 = y(v3) - y(i)
+                        
+                        ! Check if we're dealing with an x-point
+                        if (nvpairs(i) > 1) then
+                            ! Here, the gradient *should* vanish. For now, we
+                            ! cope with this by setting the desired ratio to 1,
+                            ! such that it does not matter which length is
+                            ! considered first.
+                            b0(i) = 1
                             sgn2 = -1
-                        else 
-                            sgn2 = 1
-                        end if
-                        if ( (dx3*Btx3 + dy3*Bty3) < 0 ) then 
-                            sgn3 = -1
-                        else 
-                            sgn3 = 1
+                            wt(i) = 0
+                        else
+                            ! Evaluate sign of dot product of magnetic field
+                            ! coordinates with vector
+                            Btx2 = 0.5*(Btx(i) + Btx(v2))
+                            Bty2 = 0.5*(Bty(i) + Bty(v2))
+                            Btx3 = 0.5*(Btx(i) + Btx(v3))
+                            Bty3 = 0.5*(Bty(i) + Bty(v3))
+                            if ( (dx2*Btx2 + dy2*Bty2) < 0 ) then 
+                                sgn2 = -1
+                            else 
+                                sgn2 = 1
+                            end if
+                            if ( (dx3*Btx3 + dy3*Bty3) < 0 ) then 
+                                sgn3 = -1
+                            else 
+                                sgn3 = 1
+                            end if
+                            
+                            ! Consistency check: normally, one positive and one
+                            ! negative sign
+                            if ( ((sgn2 < 0) .and. (sgn3 < 0)) &
+                                .or. ((sgn2 > 0) .and. (sgn3 > 0)) ) then
+                                ! Most likely we're near an x-point here, so
+                                ! the magnetic field is off. Ignore these
+                                ! vertices
+                                
+                                b0(i) = 1
+                                wt(i) = 0
+                                sgn2 = -1
+                            
+                            end if
                         end if
                         
-                        ! Consistency check: normally, one positive and one
-                        ! negative sign
-                        if ( ((sgn2 < 0) .and. (sgn3 < 0)) &
-                            .or. ((sgn2 > 0) .and. (sgn3 > 0)) ) then
-                            ! Most likely we're near an x-point here, so
-                            ! the magnetic field is off. Ignore these
-                            ! vertices
-                            
-                            b0(i) = 1
-                            wt(i) = 0
-                            sgn2 = -1
-                           
+                        ! Add vertices in the direction along the coordinate
+                        ! line
+                        if (sgn2 < 0) then
+                            vpairs(i,2*j-1:2*j) = (/v2, v3/)
+                        else
+                            vpairs(i,2*j-1:2*j) = (/v3, v2/)
                         end if
-                    end if
+                        
+                    end do
+                else
+                    ! Vertex without fieldline ID - don't include. 
+                    ! It is assumed that these vertices only appear on 
+                    ! the boundary, and these vertices are considered
+                    ! later on if vessel edges are considered.
                     
-                    ! Add vertices in the direction along the coordinate
-                    ! line
-                    if (sgn2 < 0) then
-                        vpairs(i,2*j-1:2*j) = (/v2, v3/)
-                    else
-                        vpairs(i,2*j-1:2*j) = (/v3, v2/)
-                    end if
-                    
-                end do
+
+                end if
             end if
 
             ! Housekeeping
             deallocate(tvn, temptvn, cID)
 
         end do
+
+        ! Include vessel vertices?
+        if (dovessel) then 
+            ! Get all vessel vertices
+            call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
+            allocate(vesselvert(count(isvesselvertex)))
+            vesselvert = pack([(i, i=1, grid%vert%ntot)], isvesselvertex)
+
+            ! Overwrite potential other vertex pairs (ordering doesn't 
+            ! matter because we set bias to one anyway)
+            do i = 1, size(vesselvert, 1)
+                ! Unpack
+                tv = vesselvert(i)
+
+                ! Get the faces of this vertex
+                tvf = GetVertFace(vert, tv)
+
+                ! Check
+                if (count(isvesselface(tvf)) == 2) then
+                    ! Get the other two vertices
+                    allocate(tvfv(2, 2))
+                    tvfv = grid%face%vert(pack(tvf, isvesselface(tvf)), :)
+                    allocate(tvn(count(tvfv /= tv)))
+                    tvn = pack(tvfv, tvfv /= tv)
+
+                    ! Check
+                    if (size(tvn, 1) /= 2) then 
+                        ! Shouldn't happen, throw error
+                        call gdErrorHandler('InitializeCostFunctionLR: ' // &
+                            'unknown error, something seems wrong in grid interconnection')
+                    end if 
+
+                    ! Add
+                    vpairs(tv, 1:2) = tvn
+                    b0(tv) = 1
+                    nvpairs(tv) = 1 
+
+                    ! Deallocate 
+                    deallocate(tvfv, tvf, tvn)
+                end if 
+
+            end do
+
+            ! Housekeeping
+            deallocate(vesselvert)
+
+
+        end if 
 
         ! Housekeeping
         deallocate(Btx, Bty)
@@ -558,6 +625,15 @@ module gdmod_costfunction
         ! not actually be better in terms of computational time, but 
         ! may lead to shorter and hence better maintainable code. 
 
+        ! Note: we've added a relaxation term in the denominator (so for
+        ! d2) to prevent NaN/Inf behavior when points coincide. This does
+        ! lead to higher gradients, but ensure differentiability. Additionally,
+        ! if the parameter in the denominator, eta, is relatively large 
+        ! compared to d2, the obtained ratio will (perhaps strongly) differ
+        ! from the desired one locally. However, if chosen too small, the 
+        ! gradient may become extremely large leading to difficult to solve
+        ! subproblems
+
         ! Declare variables
         !==================
         ! Arguments
@@ -576,8 +652,8 @@ module gdmod_costfunction
 
         ! Auxiliary
         integer(I8)                     :: v1, v2, v3
-        real(R8)                        :: x1, x2, x3, y1, y2, y3
-        real(R8)                        :: dx1, dx2, dy1, dy2, d1, d2
+        real(R8)                        :: x1, x2, x3, y1, y2, y3, wti, b0i
+        real(R8)                        :: dx1, dx2, dy1, dy2, d1, d2, rat
         integer(I8), allocatable        :: row(:), col(:) 
         real(R8), allocatable           :: valxx(:),  valxy(:), &
                                         valyx(:), valyy(:)
@@ -591,7 +667,9 @@ module gdmod_costfunction
             b0      => costfunction%b0, &
             x       => grid%vert%x, &
             y       => grid%vert%y, &
-            lambda  => costfunction%lambda )
+            lambda  => costfunction%lambda, &
+            wt      => costfunction%wt, &
+            eta     => costfunction%eta )
 
         ! Initialize
         !===========
@@ -634,7 +712,7 @@ module gdmod_costfunction
                 d2 = sqrt(dx2**2 + dy2**2)
 
                 ! Compute cost function contribution
-                J = J + 0.5*(d1/d2 - b0(i))**2
+                J = J + 0.5*wt(i)*(d1/(d2 + eta) - b0(i))**2
 
             end do 
         end do
@@ -649,12 +727,16 @@ module gdmod_costfunction
             ! Check the design variables
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 ! Loop over all vertices
                 do i = 1, vert%ntot
                     ! Set the current vertex
                     v1 = i 
+
+                    ! Unpack
+                    wti = wt(i)
+                    b0i = b0(i)
 
                     ! Loop over all vertex pairs of this vertex
                     do k = 1, nvpairs(i)
@@ -681,29 +763,28 @@ module gdmod_costfunction
                         d1 = sqrt(dx1**2 + dy1**2)
                         d2 = sqrt(dx2**2 + dy2**2)
 
+                        ! Compute ratio
+                        rat = d1/(d2 + eta)
+
                         ! Compute cost function contribution
                         gradJ(v1) = gradJ(v1) + & 
-                            (b0(i) - d1/d2) * &
-                            (dx1/(d1*d2) - (d1*dx2)/d2**3)
+                            wti*(b0i - rat)*(dx1/(d1*(d2 + eta)) - &
+                            (dx2*rat)/(d2*(d2 + eta))) ! x1
                         gradJ(v2) = gradJ(v2) + &
-                            -(dx1*(b0(i) - d1/d2))/(d1*d2)
+                            -(dx1*wti*(b0i - rat))/(d1*(d2 + eta)) ! x2
                         gradJ(v3) = gradJ(v3) + &
-                            (d1*dx2*(b0(i) - d1/d2))/d2**3
+                            (dx2*rat*wti*(b0i - rat))/(d2*(d2 + eta)) ! x3
                         
                         gradJ(v1+vert%ntot) = gradJ(v1+vert%ntot) + &
-                            (b0(i) - d1/d2) * &
-                            (dy1/(d1*d2) - (d1*dy2)/d2**3)
+                            wti*(b0i - rat)*(dy1/(d1*(d2 + eta)) &
+                            - (dy2*rat)/(d2*(d2 + eta))) ! y1
                         gradJ(v2+vert%ntot) = gradJ(v2+vert%ntot) + &
-                            -(dy1*(b0(i) - d1/d2))/(d1*d2)
+                            -(dy1*wti*(b0i - rat))/(d1*(d2 + eta)) ! y2
                         gradJ(v3+vert%ntot) = gradJ(v3+vert%ntot) + &
-                            (d1*dy2*(b0(i) - d1/d2))/d2**3
+                            (dy2*rat*wti*(b0i - rat))/(d2*(d2 + eta)) ! y3
 
                     end do 
                 end do
-
-            case ('desiredpsi')
-
-                ! No contributions
 
             case default
 
@@ -744,7 +825,7 @@ module gdmod_costfunction
             ! Check the design variables
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 ! Allocate auxiliary variables
                 allocate(row(9*sum(nvpairs)))
@@ -761,6 +842,10 @@ module gdmod_costfunction
                 do i = 1, vert%ntot
                     ! Set the current vertex
                     v1 = i 
+
+                    ! Unpack
+                    b0i = b0(i)
+                    wti = wt(i)
 
                     ! Loop over all vertex pairs of this vertex
                     do k = 1, nvpairs(i)
@@ -787,53 +872,69 @@ module gdmod_costfunction
                         d1 = sqrt(dx1**2 + dy1**2)
                         d2 = sqrt(dx2**2 + dy2**2)
 
+                        ! Compute ratio
+                        rat = d1/(d2 + eta) 
+
                         ! Compute Hessian contributions - ordened per
                         ! vertex pair (e.g. v1, v1), split up in xx, xy,
                         ! yx, yy. 
 
                         ! d2J/dx1**2, d2J/dy1**2, d2J/dx1dy1, d2J/dy1dx1
                         row(cc) = v1; col(cc) = v1
-                        valxx(cc) = (b0(i) - d1/d2) & 
-                            * (d1/d2**3 - 1/(d1*d2) - & 
-                            (3*d1*dx2**2)/d2**5 + dx1**2/(d1**3*d2) & 
-                            + (2*dx1*dx2)/(d1*d2**3)) + (dx1/(d1*d2) & 
-                            - (d1*dx2)/d2**3)**2
-                        valyy(cc) = (b0(i) - d1/d2) &
-                            * (d1/d2**3 - 1/(d1*d2) - & 
-                            (3*d1*dy2**2)/d2**5 + dy1**2/(d1**3*d2) & 
-                            + (2*dy1*dy2)/(d1*d2**3)) + & 
-                            (dy1/(d1*d2) - (d1*dy2)/d2**3)**2
-                        valxy(cc) = (b0(i) - d1/d2) & 
-                            *((dx1*dy1)/(d1**3*d2) - & 
-                            (3*d1*dx2*dy2)/d2**5 + & 
-                            (dx1*dy2)/(d1*d2**3) + & 
-                            (dx2*dy1)/(d1*d2**3)) + (dx1/(d1*d2) & 
-                            - (d1*dx2)/d2**3)*(dy1/(d1*d2) &
-                            - (d1*dy2)/d2**3)
+                        valxx(cc) = wti*(dx1/(d1*(d2 + eta)) - &
+                            (dx2*rat)/(d2*(d2 + eta)))**2 - &
+                            wti*(b0i - rat)*(1/(d1*(d2 + eta)) - &
+                            rat/(d2*(d2 + eta)) - &
+                            dx1**2/(d1**3*(d2 + eta)) + &
+                            (2*dx2**2*rat)/(d2**2*(d2 + eta)**2) + &
+                            (dx2**2*rat)/(d2**3*(d2 + eta)) - &
+                            (2*dx1*dx2)/(d1*d2*(d2 + eta)**2)) ! x1x1
+
+                        valyy(cc) = wti*(dy1/(d1*(d2 + eta)) - &
+                            (dy2*rat)/(d2*(d2 + eta)))**2 - &
+                            wti*(b0i - rat)*(1/(d1*(d2 + eta)) &
+                            - rat/(d2*(d2 + eta)) - &
+                            dy1**2/(d1**3*(d2 + eta)) + &
+                            (2*dy2**2*rat)/(d2**2*(d2 + eta)**2) + &
+                            (dy2**2*rat)/(d2**3*(d2 + eta)) - &
+                            (2*dy1*dy2)/(d1*d2*(d2 + eta)**2)) !y1y1
+
+                        valxy(cc) = wti*(b0i - rat)*&
+                            ((dx1*dy1)/(d1**3*(d2 + eta)) + &
+                            (dx1*dy2)/(d1*d2*(d2 + eta)**2) + &
+                            (dx2*dy1)/(d1*d2*(d2 + eta)**2) - &
+                            (2*dx2*dy2*rat)/(d2**2*(d2 + eta)**2) - &
+                            (dx2*dy2*rat)/(d2**3*(d2 + eta))) + &
+                            wti*(dx1/(d1*(d2 + eta)) - &
+                            (dx2*rat)/(d2*(d2 + eta)))*&
+                            (dy1/(d1*(d2 + eta)) - &
+                            (dy2*rat)/(d2*(d2 + eta))) !x1y1
+
                         valyx(cc) = valxy(cc)
                         cc = cc+1
                         
                         ! d2J/dx1dx2, d2J/dy1dy2, d2J/dx1dy2, d2J/dy1dx2
                         row(cc) = v1; col(cc) = v2
-                        valxx(cc) = - (b0(i) - d1/d2) &
-                            * (dx1**2/(d1**3*d2) - 1/(d1*d2) + & 
-                            (dx1*dx2)/(d1*d2**3)) - (dx1*(dx1/(d1*d2) - & 
-                            (d1*dx2)/d2**3))/(d1*d2) !x1x2
-                        valyy(cc) = - (b0(i) - d1/d2)&
-                            *(dy1**2/(d1**3*d2) - 1/(d1*d2) &
-                            + (dy1*dy2)/(d1*d2**3)) - &
-                            (dy1*(dy1/(d1*d2) - &
-                            (d1*dy2)/d2**3))/(d1*d2) !y1y2
-                        valxy(cc) = - (b0(i) - d1/d2)&
-                            *((dx1*dy1)/(d1**3*d2) + &
-                            (dx2*dy1)/(d1*d2**3)) - &
-                            (dy1*(dx1/(d1*d2) - &
-                            (d1*dx2)/d2**3))/(d1*d2) !x1y2
-                        valyx(cc) = - (b0(i) - d1/d2) &
-                            *((dx1*dy1)/(d1**3*d2) + &
-                            (dx1*dy2)/(d1*d2**3)) - &
-                            (dx1*(dy1/(d1*d2) - &
-                            (d1*dy2)/d2**3))/(d1*d2) !y1x2
+                        valxx(cc) = - wti*(b0i - rat)*&
+                            (dx1**2/(d1**3*(d2 + eta)) - &
+                            1/(d1*(d2 + eta)) + &
+                            (dx1*dx2)/(d1*d2*(d2 + eta)**2)) - &
+                            (dx1*wti*(dx1/(d1*(d2 + eta)) - &
+                            (dx2*rat)/(d2*(d2 + eta))))/(d1*(d2 + eta)) !x1x2
+                        valyy(cc) = - wti*(b0i - rat)*&
+                            (dy1**2/(d1**3*(d2 + eta)) - &
+                            1/(d1*(d2 + eta)) + (dy1*dy2)&
+                            /(d1*d2*(d2 + eta)**2)) - &
+                            (dy1*wti*(dy1/(d1*(d2 + eta)) - &
+                            (dy2*rat)/(d2*(d2 + eta))))/(d1*(d2 + eta)) !y1y2
+                        valxy(cc) = - wti*((dx1*dy1)/(d1**3*(d2 + eta)) &
+                            + (dx2*dy1)/(d1*d2*(d2 + eta)**2))*(b0i - rat) &
+                            - (dy1*wti*(dx1/(d1*(d2 + eta)) - &
+                            (dx2*rat)/(d2*(d2 + eta))))/(d1*(d2 + eta)) !x1y2
+                        valyx(cc) = - wti*((dx1*dy1)/(d1**3*(d2 + eta)) &
+                            + (dx1*dy2)/(d1*d2*(d2 + eta)**2))*(b0i - rat) &
+                            - (dx1*wti*(dy1/(d1*(d2 + eta)) &
+                            - (dy2*rat)/(d2*(d2 + eta))))/(d1*(d2 + eta)) !y1x2
                         cc = cc+1
                         
                         row(cc) = v2; col(cc) = v1
@@ -844,36 +945,42 @@ module gdmod_costfunction
                         cc = cc+1
                         
                         row(cc) = v2; col(cc) = v2
-                        valxx(cc) = dx1**2/(d1**2*d2**2) - &
-                            (b0(i) - d1/d2)/(d1*d2) + &
-                            (dx1**2*(b0(i) - d1/d2))/(d1**3*d2)
-                        valyy(cc) = dy1**2/(d1**2*d2**2) - &
-                            (b0(i) - d1/d2)/(d1*d2) + &
-                            (dy1**2*(b0(i) - d1/d2))/(d1**3*d2)
-                        valxy(cc) = (dx1*dy1)/(d1**2*d2**2) &
-                            + (dx1*dy1*(b0(i) - d1/d2))/(d1**3*d2)
+                        valxx(cc) = (dx1**2*wti)/(d1**2*(d2 + eta)**2) &
+                            - (wti*(b0i - rat))/(d1*(d2 + eta)) &
+                            + (dx1**2*wti*(b0i - rat))/(d1**3*(d2 + eta)) ! x2x2
+                        valyy(cc) = (dy1**2*wti)/(d1**2*(d2 + eta)**2) &
+                            - (wti*(b0i - rat))/(d1*(d2 + eta)) &
+                            + (dy1**2*wti*(b0i - rat))/(d1**3*(d2 + eta)) ! y2y2
+                        valxy(cc) = (dx1*dy1*wti)/(d1**2*(d2 + eta)**2) &
+                            + (dx1*dy1*wti*(b0i - rat))/(d1**3*(d2 + eta)) !x2y2
                         valyx(cc) = valxy(cc)
                         cc = cc+1
                         
                         row(cc) = v1; col(cc) = v3
-                        valxx(cc) = (d1*dx2*(dx1/(d1*d2) - &
-                            (d1*dx2)/d2**3))/d2**3 - &
-                            (b0(i) - d1/d2)*(d1/d2**3 - &
-                            (3*d1*dx2**2)/d2**5 + (dx1*dx2)/(d1*d2**3))
-                        valyy(cc) = (d1*dy2*(dy1/(d1*d2) - &
-                            (d1*dy2)/d2**3))/d2**3 - &
-                            (b0(i) - d1/d2)*(d1/d2**3 - &
-                            (3*d1*dy2**2)/d2**5 + (dy1*dy2)/(d1*d2**3))
-                        valxy(cc) = (b0(i) - d1/d2) &
-                            *((3*d1*dx2*dy2)/d2**5 - &
-                            (dx1*dy2)/(d1*d2**3)) + &
-                            (d1*dy2*(dx1/(d1*d2) - &
-                            (d1*dx2)/d2**3))/d2**3
-                        valyx(cc) = (b0(i) - d1/d2)&
-                            *((3*d1*dx2*dy2)/d2**5 - &
-                            (dx2*dy1)/(d1*d2**3)) + &
-                            (d1*dx2*(dy1/(d1*d2) - &
-                            (d1*dy2)/d2**3))/d2**3
+                        valxx(cc) = (dx2*rat*wti*(dx1/(d1*(d2 + eta)) - &
+                            (dx2*rat)/(d2*(d2 + eta))))/(d2*(d2 + eta)) &
+                            - wti*(b0i - rat)*(rat/(d2*(d2 + eta)) &
+                            - (2*dx2**2*rat)/(d2**2*(d2 + eta)**2) &
+                            - (dx2**2*rat)/(d2**3*(d2 + eta)) &
+                            + (dx1*dx2)/(d1*d2*(d2 + eta)**2)) !x1x3
+                        valyy(cc) = (dy2*rat*wti*(dy1/(d1*(d2 + eta)) &
+                            - (dy2*rat)/(d2*(d2 + eta))))/(d2*(d2 + eta)) &
+                            - wti*(b0i - rat)*(rat/(d2*(d2 + eta)) &
+                            - (2*dy2**2*rat)/(d2**2*(d2 + eta)**2) &
+                            - (dy2**2*rat)/(d2**3*(d2 + eta)) &
+                            + (dy1*dy2)/(d1*d2*(d2 + eta)**2)) !y1y3
+                        valxy(cc) = wti*(b0i - rat)*&
+                            ((2*dx2*dy2*rat)/(d2**2*(d2 + eta)**2) &
+                            - (dx1*dy2)/(d1*d2*(d2 + eta)**2) &
+                            + (dx2*dy2*rat)/(d2**3*(d2 + eta))) &
+                            + (dy2*rat*wti*(dx1/(d1*(d2 + eta)) &
+                            - (dx2*rat)/(d2*(d2 + eta))))/(d2*(d2 + eta)) !x1y3
+                        valyx(cc) = wti*(b0i - rat)*&
+                            ((2*dx2*dy2*rat)/(d2**2*(d2 + eta)**2) &
+                            - (dx2*dy1)/(d1*d2*(d2 + eta)**2) &
+                            + (dx2*dy2*rat)/(d2**3*(d2 + eta))) &
+                            + (dx2*rat*wti*(dy1/(d1*(d2 + eta)) &
+                            - (dy2*rat)/(d2*(d2 + eta))))/(d2*(d2 + eta)) !y1x3
                         cc = cc+1
                         
                         row(cc) = v3; col(cc) = v1
@@ -884,14 +991,14 @@ module gdmod_costfunction
                         cc = cc+1
                         
                         row(cc) = v2; col(cc) = v3
-                        valxx(cc) = (dx1*dx2*(b0(i) - d1/d2)) &
-                            /(d1*d2**3) - (dx1*dx2)/d2**4
-                        valyy(cc) = (dy1*dy2*(b0(i) - d1/d2)) &
-                            /(d1*d2**3) - (dy1*dy2)/d2**4
-                        valxy(cc) = (dx1*dy2*(b0(i) - d1/d2)) &
-                            /(d1*d2**3) - (dx1*dy2)/d2**4
-                        valyx(cc) = (dx2*dy1*(b0(i) - d1/d2)) &
-                            /(d1*d2**3) - (dx2*dy1)/d2**4
+                        valxx(cc) = (dx1*dx2*wti*(b0i - rat))/&
+                            (d1*d2*(d2 + eta)**2) - (dx1*dx2*wti)/(d2*(d2 + eta)**3) !x2x3
+                        valyy(cc) = (dy1*dy2*wti*(b0i - rat))/(d1*d2*(d2 + eta)**2) &
+                            - (dy1*dy2*wti)/(d2*(d2 + eta)**3) !y2y3
+                        valxy(cc) = (dx1*dy2*wti*(b0i - rat))/(d1*d2*(d2 + eta)**2) &
+                            - (dx1*dy2*wti)/(d2*(d2 + eta)**3) !x2y3
+                        valyx(cc) = (dx2*dy1*wti*(b0i - rat))/(d1*d2*(d2 + eta)**2) &
+                            - (dx2*dy1*wti)/(d2*(d2 + eta)**3) !y2x3
                         cc = cc+1
                         
                         row(cc) = v3; col(cc) = v2
@@ -902,15 +1009,17 @@ module gdmod_costfunction
                         cc = cc+1
                         
                         row(cc) = v3; col(cc) = v3
-                        valxx(cc) = (dx2**2*(dx1**2 + dy1**2))/d2**6 &
-                            + (d1*(b0(i) - d1/d2))/d2**3 - &
-                            (3*d1*dx2**2*(b0(i) - d1/d2))/d2**5
-                        valyy(cc) = (dy2**2*(dx1**2 + dy1**2))/d2**6 &
-                            + (d1*(b0(i) - d1/d2))/d2**3 - &
-                            (3*d1*dy2**2*(b0(i) - d1/d2))/d2**5
-                        valxy(cc) = (dx2*dy2*(dx1**2 + dy1**2)) &
-                            /d2**6 - (3*d1*dx2*dy2*(b0(i) - d1/d2)) &
-                            /d2**5
+                        valxx(cc) = (rat*wti*(b0i - rat))/(d2*(d2 + eta)) &
+                            + (dx2**2*wti*(dx1**2 + dy1**2))/(d2**2*(d2 + eta)**4) &
+                            - (2*dx2**2*rat*wti*(b0i - rat))/(d2**2*(d2 + eta)**2) &
+                            - (dx2**2*rat*wti*(b0i - rat))/(d2**3*(d2 + eta)) !x3x3
+                        valyy(cc) = (rat*wti*(b0i - rat))/(d2*(d2 + eta)) &
+                            + (dy2**2*wti*(dx1**2 + dy1**2))/(d2**2*(d2 + eta)**4) &
+                            - (2*dy2**2*rat*wti*(b0i - rat))/(d2**2*(d2 + eta)**2) &
+                            - (dy2**2*rat*wti*(b0i - rat))/(d2**3*(d2 + eta)) !y3y3
+                        valxy(cc) = (dx2*dy2*wti*(dx1**2 + dy1**2))/(d2**2*(d2 + eta)**4) &
+                            - (2*dx2*dy2*rat*wti*(b0i - rat))/(d2**2*(d2 + eta)**2) &
+                            - (dx2*dy2*rat*wti*(b0i - rat))/(d2**3*(d2 + eta)) !x3y3
                         valyx(cc) = valxy(cc)
                         cc = cc+1
 
@@ -933,9 +1042,6 @@ module gdmod_costfunction
                 deallocate(valyx)
                 deallocate(valyy)
 
-            case ('desiredpsi')
-
-                ! No contributions
 
             case default
 
@@ -1557,7 +1663,7 @@ module gdmod_costfunction
 
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 ! Allocate
                 allocate(gxxfv1(np), gxxfv2(np), gxyfv1(np), gxyfv2(np), &
@@ -1593,10 +1699,6 @@ module gdmod_costfunction
                 gyxyfv2 = gxyyfv2 ! symmetric, repeated for ease
                 gyxxfv2 = gxxyfv2 
 
-            case ('desiredpsi')
-
-                ! Do nothing
-
             case default
 
                 ! Not implemented, throw error
@@ -1610,7 +1712,7 @@ module gdmod_costfunction
 
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 ! Allocate
                 allocate(gxxfv1(np), gxxfv2(np), gxyfv1(np), gxyfv2(np), &
@@ -1627,10 +1729,6 @@ module gdmod_costfunction
                 call magneticField%interp%Evaluate(xfv2, yfv2, 0, 2, gyyfv2)
                 gyxfv2 = gxyfv2 ! symmetric, done for ease here
 
-            case ('desiredpsi')
-
-                ! Do nothing
-
             end select
 
         end if
@@ -1642,7 +1740,7 @@ module gdmod_costfunction
             ! Check the design variables
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 ! Loop over all pairs
                 do i = 1, np
@@ -1718,10 +1816,6 @@ module gdmod_costfunction
                     
                 end do
 
-            case ('desiredpsi')
-
-                ! No contributions
-
             case default
 
                 ! Not implemented, throw error
@@ -1743,16 +1837,13 @@ module gdmod_costfunction
             ! Allocate the sparse matrix
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 hessJ%nval = 64*np ! this should be exact and constant
 
-            case ('desiredpsi')
-
-                hessJ%nval = 0
-
             end select
             call hessJ%Allocate()
+
         end if
 
         if (dohessian) then
@@ -1760,7 +1851,7 @@ module gdmod_costfunction
             ! Check the design variables
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 ! Allocate auxiliary variables
                 allocate(row(16*np))
@@ -2435,7 +2526,7 @@ module gdmod_costfunction
 
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 ! Deallocate
                 deallocate(gxxfv1 , gxxfv2 , gxyfv1 , gxyfv2 , &
@@ -2444,10 +2535,6 @@ module gdmod_costfunction
                     gxxyfv2 , gxyxfv1 , gxyxfv2 , &
                     gxyyfv1 , gxyyfv2 , gyxxfv1 , gyxxfv2 , &
                     gyxyfv1 , gyxyfv2 , gyyyfv1 , gyyyfv2 )
-
-            case ('desiredpsi')
-
-                ! Do nothing
 
             case default
 
@@ -2462,15 +2549,11 @@ module gdmod_costfunction
 
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 ! Deallocate
                 deallocate(gxxfv1 , gxxfv2 , gxyfv1 , gxyfv2 , &
                     gyxfv1 , gyxfv2 , gyyfv1 , gyyfv2 )
-
-            case ('desiredpsi')
-
-                ! Do nothing
 
             end select
 

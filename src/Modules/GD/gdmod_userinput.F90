@@ -103,10 +103,14 @@ module gdmod_userinput
         ! Length ratio specific cost function options. 
         ! Fields:
         ! - lambda: cost function scaling constant
+        ! - eta: length scale for cost function denominator
         ! - writedata: write out cost function data for debugging
+        ! - dovessel: include vessel edges into cost function?
 
         real(R8)                    :: lambda 
+        real(R8)                    :: eta
         integer(I8)                 :: writedata
+        logical                     :: dovessel
 
     contains 
 
@@ -422,6 +426,8 @@ module gdmod_userinput
         !================
         options%writedata = 1
         options%lambda = 1e0
+        options%eta = 1e-5 ! in coordinate units
+        options%dovessel = .false.
 
     end subroutine
 
@@ -882,6 +888,10 @@ module gdmod_userinput
         ! Scaling constant
         field = 'gd.design.cfv.par.LR.lambda'
         call ExtractOptionValueReal0D(fid, field, options%lambda) 
+        field = 'gd.design.cfv.par.LR.eta'
+        call ExtractOptionValueReal0D(fid, field, options%eta) 
+        field = 'gd.design.cfv.par.LR.dovesseledges'
+        call ExtractOptionValueLogical0D(fid, field, options%dovessel) 
 
         ! Write data
         field = 'gd.design.cfv.par.LR.writedata'

@@ -2063,7 +2063,8 @@ module gdmod_constraints
         class(FluxfunctionConstraintsUDT)   :: constraints 
         real(R8), allocatable               :: G(:) 
         real(R8), allocatable               :: lambda(:)
-        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(MySparseUDT)                   :: hessG, gradG, jacG, &
+            hessG_coord, gradG_coord, hessG_flux, gradG_flux 
         type(GridUDT)                       :: grid 
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
@@ -2228,12 +2229,33 @@ module gdmod_constraints
                 hessG, dogradient, dohessian, lambda, psival, dpsidx, &
                 dpsidy, d2psidx2, d2psidxdy, d2psidy2)
 
-        case ('desiredflux')
+        case ('coordinates_desiredflux')
 
-            call constraints%EvaluateDerivativesFlux(gradG, hessG, &
+            ! Coordinate contribution
+            gradG_coord%nrow = designvariables%nphi
+            gradG_coord%ncol = constraints%ncon
+            hessG_coord%nrow = designvariables%nphi
+            hessG_coord%ncol = designvariables%nphi   
+            call constraints%EvaluateDerivativesCoordinates(grid, gradG_coord, &
+                hessG_coord, dogradient, dohessian, lambda, psival, dpsidx, &
+                dpsidy, d2psidx2, d2psidxdy, d2psidy2)
+
+            ! Flux contribution
+            gradG_flux%nrow = designvariables%nphi
+            gradG_flux%ncol = constraints%ncon
+            hessG_flux%nrow = designvariables%nphi
+            hessG_flux%ncol = designvariables%nphi
+            call constraints%EvaluateDerivativesFlux(gradG_flux, hessG_flux, &
                 dogradient, dohessian, lambda)
 
-        case ('coordinates_desiredflux')
+            ! Update flux contribution design variable indices
+            gradG_flux%row = gradG%row + 2*grid%vert%ntot 
+            hessG_flux%row = hessG_flux%row + 2*grid%vert%ntot
+            hessG_flux%col = hessG_flux%col + 2*grid%vert%ntot  
+
+            ! Combine
+            gradG = gradG_coord + gradG_flux 
+            hessG = hessG_coord + hessG_flux
 
         case default 
 
@@ -3156,15 +3178,11 @@ module gdmod_constraints
         ! Check which gradient to compute
         select case (designvariables%type)
 
-        case ('coordinates')
+        case ('coordinates', 'coordinates_desiredflux')
 
-            ! Call dedicated routine
+            ! Call dedicated routine - no flux contributions
             call constraints%EvaluateDerivativesCoordinates(gradG, &
                 hessG, grid, dogradient, dohessian, lambda)
-
-        case ('desiredflux')
-
-            call constraints%EvaluateDerivativesFlux(gradG, hessG)
 
         case default 
 
@@ -3648,17 +3666,11 @@ module gdmod_constraints
         ! Check which derivatives to compute
         select case (trim(designvariables%type))
 
-        case ('coordinates')
+        case ('coordinates', 'coordinates_desiredflux')
 
+            ! Only coordinate contributions, no flux contribution
             call constraints%EvaluateCoordinatesDerivative(gradG, hessG, &
                 dogradient, dohessian, lambda, grid, magneticField, xpx, xpy)
-
-        case ('desiredflux')
-
-            ! No contributions
-            gradG%nval = 0
-            call gradG%Allocate()
-
 
         case default 
 
@@ -4404,7 +4416,7 @@ module gdmod_constraints
             ! Check design variables
             select case(designvariables%type)
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux') ! no flux contributions anyway
 
                 ! Order in jacobian: first x, then y. 
 
@@ -5190,7 +5202,7 @@ module gdmod_constraints
             ! Check design variables
             select case(designvariables%type)
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux') ! no flux contributions
 
                 ! Order in jacobian: first x, then y. 
 
