@@ -752,9 +752,10 @@ module optmod_optimizationengine
 
         ! Solver & updates
         real(R8), allocatable       :: fullmat(:, :)
-        double precision, allocatable :: dx(:)
+        double precision, allocatable :: dx(:), dxl(:)
         real(R8)                    :: alphals
-        integer(I8)                 :: flag
+        integer(I8)                 :: flag, flagls
+        type(MySparseUDT)           :: hessLJ
 
         ! Diagnostics
         logical                     :: checkgradients, checkhessians 
@@ -865,10 +866,10 @@ module optmod_optimizationengine
 
             ! Check gradients & hessians if needed
             if (checkgradients .or. checkhessians) then 
-                call CheckCostFunctionLinearization(problem, &
-                    checkgradients, checkhessians)
-                call CheckLagrangianLinearization(problem, solver, lambda, & 
-                    mu, checkgradients, checkhessians)
+                !call CheckCostFunctionLinearization(problem, &
+                !    checkgradients, checkhessians)
+                !call CheckLagrangianLinearization(problem, solver, lambda, & 
+                !    mu, checkgradients, checkhessians)
                 call CheckEqconLinearization(problem, lambda, &
                     checkgradients, checkhessians)
             end if
@@ -913,7 +914,7 @@ module optmod_optimizationengine
                 
                 ! Call the sparse solver
                 call cpu_time(t_linsolve_s)
-                call SolveSparseLinearSystemDI(hessL, -gradL, dx)
+                call SolveSparseLinearSystemDI(hessL, -gradL, dx, flag)
                 call cpu_time(t_linsolve_e)
 
             else
@@ -927,16 +928,30 @@ module optmod_optimizationengine
                 ! Compute the step length for the line search, don't 
                 ! apply relaxation using rxfdesign. Note: also the 
                 ! Lagrange multipliers may change!
-                call solver%ComputeStepLength(problem, dx, lambda, mu, alphals, flag) ! dx is changed during linesearch
+                if (flag == 0) then 
+
+                    call solver%ComputeStepLength(problem, dx, lambda, mu, alphals, flagls) ! dx is changed during linesearch
+                else 
+                    ! Something wrong during linear solver, try with relaxation
+                    flagls = 1
+                end if 
 
                 ! Check the linesearch output
-                if (flag == 0) then 
+                if (flagls == 0) then 
                     ! All good
 
-                elseif (flag == 1) then 
+                elseif (flagls == 1) then 
                     ! Non-descent direction, print message and skip remainder of iterate
-                    print *, 'non-descent direction, skipping update ' // &
-                        'and reattempt with damped Hessian'
+                    if (flag /= 0) then 
+                        print *, 'step direction computation not succeeded, ' // &
+                            'reattempting with damped Hessian'
+
+                    else
+
+                        print *, 'non-descent direction, skipping update ' // &
+                            'and reattempt with damped Hessian'
+
+                    end if 
 
                     ! Set step to zero
                     dx(:) = 0
@@ -957,6 +972,15 @@ module optmod_optimizationengine
                 end if 
 
                 ! Update lagrange multipliers using least-squares approach
+                hessLJ = hessJ + hessG ! not including inequality constraints for now
+                allocate(dxl(neq))
+                call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
+                    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
+                    dxl, flag)
+                dxl = -dxl
+                dx(nphi+1:nphi+neq) = dxl
+                deallocate(dxl)
+                
 
             else
                 ! Directly update design without linesearch, apply the
@@ -1316,6 +1340,7 @@ module optmod_optimizationengine
             hessH, Ak, LSA  
         logical                             :: dogradient, dohessian 
         logical, allocatable                :: A(:)
+        integer(I8)                         :: flag2
 
         ! Initialize
         !===========
@@ -1552,7 +1577,13 @@ module optmod_optimizationengine
                     LSA = Ak%Transpose()*Ak
 
                     ! Compute intermediate solution
-                    call SolveSparseLinearSystemDI(LSA, ck, wkt)
+                    call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
+
+                    ! Check if it converged, otherwise skip update
+                    if (flag2 /= 0) then 
+                        print *, 'linesearch backtracking_soc: could not converge problem, skipping soc update'
+                        wkt(:) = 0
+                    end if 
 
                     ! Housekeeping
                     deallocate(ck)
@@ -2105,12 +2136,12 @@ module optmod_optimizationengine
         ! Set the constraints to check
         neqID =  1
         allocate(eqID(neqID))
-        eqID = [902] !  some random numbers for now
+        eqID = [105] !  some random numbers for now
 
         ! Set the design variables to check
         nvars = 5
         allocate(vars(nvars))
-        vars = [1, 1+860, 860, 3+860, 1720] ! some random variables for now
+        vars = [641, 1+860, 860, 3+860, 1720] ! some random variables for now
 
         ! Sanity checks
         if (any(eqID > neq)) then

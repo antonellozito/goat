@@ -91,6 +91,9 @@ module gdmod_optimizationengine
 
         ! Additional routines
         !====================
+        ! Initialization finalizer to account for cross-design/cfv/con
+        ! initialization requirements
+        procedure :: FinalizeInitialization  
 
     end type 
 
@@ -267,8 +270,18 @@ module gdmod_optimizationengine
         case ('coordinates')
 
             ! Only coordinates
-            
             allocate(DesignVariablesCoordinatesUDT::problem%designvariables)
+
+        case ('desiredflux')
+
+            ! Only flux values
+            allocate(DesignVariablesFluxValuesUDT::problem%designvariables)
+
+        case ('coordinates_desiredflux')
+
+            ! Both coordinates and desired flux
+            allocate(DesignVariablesCoordinatesFluxUDT::problem%designvariables)
+            
 
         case default
 
@@ -323,8 +336,98 @@ module gdmod_optimizationengine
         ! constraints are set in its own initialization. 
         call problem%constraints%Initialize(problem%grid, &
             problem%magneticField, problem%environment, & 
-            problem%designoptions%constraints)
+            problem%designvariables, problem%designoptions%constraints)
 
+        ! 
+        !=================
+        ! Initialize design variables further for constraint/cfv 
+        ! dependent fields
+        call problem%FinalizeInitialization()
+
+
+    end subroutine
+
+    ! Finalize the problem initialization
+    subroutine FinalizeInitialization(problem)
+
+        ! Description
+        !============
+        ! This routine further initializes the optimization problem 
+        ! after specific routines for initializing the design variables,
+        ! constraints, and cost function have been called. As such, 
+        ! interdependencies between these objects can be accounted for.
+        ! For example, the amount of design variables for the 
+        ! 'fluxvalue' (desired psi) type of design variables depends 
+        ! on the number of flux function constraints. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+
+        ! Auxiliary
+
+        ! Loop
+        integer(I8)                         :: i
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            nv                  => problem%grid%vert%ntot,      &
+            x                   => problem%grid%vert%x,         &
+            y                   => problem%grid%vert%y,         &
+            npsi                => problem%constraints%eqcon%fluxfunction%nfluxsurfaces, &
+            designvariables     => problem%designvariables,     &
+            constraints         => problem%constraints,         &
+            costfunction        => problem%costfunction         &
+        )
+
+        ! Update design
+        !==============
+        select type(designvariables)
+
+        type is (DesignVariablesCoordinatesUDT)
+
+            ! Nothing else to do here
+
+        type is (DesignVariablesCoordinatesFluxUDT)
+
+            ! Check
+            if (.not. constraints%eqcon%dofluxfunction) then 
+                ! Throw error - can't update if no constraints
+                call gdErrorHandler('FinalizeInitialization: flux ' // &
+                    'function constraints are not active and shoul be ' //&
+                    ' for desiredpsi type design variables')
+            end if 
+
+            ! Need to initialize psi values further based on constraints
+            if (allocated(designvariables%phi)) then 
+                deallocate(designvariables%phi)
+            end if
+
+            ! Construct indices
+            designvariables%xind = [(i, i = 1, nv)]
+            designvariables%yind = [(i, i = nv+1, 2*nv)]
+            designvariables%psiind = [(i, i = 2*nv+1, 2*nv+npsi)]
+
+            ! Allocate & assign
+            designvariables%nphi = npsi + 2*nv
+            allocate(designvariables%phi(designvariables%nphi))
+            designvariables%phi(designvariables%xind) = x
+            designvariables%phi(designvariables%yind) = y
+            designvariables%phi(designvariables%psiind) = constraints%eqcon%fluxfunction%fluxsurfaces%PsiD
+            
+        class default
+
+            ! Throw error - unknown design variable type
+            call gdErrorHandler('FinalizeInitialization: unknown design variable type')
+
+        end select 
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
@@ -350,16 +453,52 @@ module gdmod_optimizationengine
         class(OptimizationProblemGDUDT)     :: problem 
 
         ! Loop variables
+        integer(I8)                         :: i
 
         ! Auxiliary variables 
 
         ! Data
 
+        ! Initialize
+        !===========
+        ! Associate to use select type
+        associate(&
+            designvariables     => problem%designvariables, &
+            constraints         => problem%constraints,     &
+            grid                => problem%grid,            &
+            magneticField       => problem%magneticField,   &
+            environment         => problem%environment      &
+            )
+
         ! Update design
         !==============
         ! Simply call the update routine from the design variables
-        call problem%designvariables%UpdateDesign(problem%grid, &
-            problem%magneticField, problem%environment)
+        call designvariables%UpdateDesign(grid, magneticField, &
+            environment)
+
+        ! Update other fields
+        !====================
+        ! Actually this should be migrated to a different routine? E.G.
+        ! UpdateConstraints or something? 
+        select type (designvariables)
+
+        type is (DesignVariablesCoordinatesFluxUDT)
+
+            ! Update the flux function constraints - coordinates should
+            ! be done already in UpdateDesign
+            do i = 1, constraints%eqcon%fluxfunction%nfluxsurfaces
+                constraints%eqcon%fluxfunction%fluxsurfaces(i)%PsiD = designvariables%phi(designvariables%psiind(i))
+            end do
+        
+        class default 
+
+            ! Do nothing
+
+        end select
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
@@ -547,6 +686,8 @@ module gdmod_optimizationengine
             dogradient, dohessian, problem%designvariables, mu)
 
     end subroutine
+
+    
 
 
 end module

@@ -52,6 +52,27 @@ module gdmod_constraints
     !                                                                  !
     !==================================================================!
 
+    ! Auxiliary types
+    !================
+    ! Structures for flux surface constraints
+    type :: FFCStructureUDT
+        
+        ! Description
+        !============
+        ! UDT to contain flux surface data for constraint evaluation. 
+        ! Decoupled from grid description to increase modularity. 
+        ! Fields:
+        !   - nID   : number of vertices (or vertex IDs) present in the 
+        !           flux surface
+        !   - ID    : vertex ID array (1D array of size nID)
+        !   - PsiD  : desired psi value for this flux surface
+
+        integer(I8)                     :: nID
+        integer(I8), allocatable        :: ID(:)
+        real(R8)                        :: PsiD 
+
+    end type
+
     ! Abstract types
     !===============
     ! Generic constraint type
@@ -84,17 +105,37 @@ module gdmod_constraints
         !============
         ! Flux function constraints. Fixes the flux function values 
         ! for a set of desired nodes. The following fields are added:
-        ! - vert:       the vertices to consider (1 constraint per 
-        !               entry of this array, so ncon-by-1 dimension)
-        ! - PsiD:       Desired psi value of each vertex (ncon-by-1)
-        ! - ncon:       (inherited) number of constraints 
+        ! - fixedpoints:    specifies which non-flux surface points
+        !                   should have fixed psi value
+        ! - specialpoints:  specifies which points should have a fixed
+        !                   flux value that is equal to another point.
+        !                   the first point in the ID field of this 
+        !                   structure is the flux value that is used 
+        !                   to fix the other points to. Useful for 
+        !                   separatrices etc of which the flux value
+        !                   is a priori unknown (e.g. due to 'grad' 
+        !                   type of X-point constraints)
+        ! - fluxsurfaces    specifies which vertices belong to a flux
+        !                   surface. This is the classical alignment 
+        !                   constraint.
+        ! - tangencypoints  specifies which points should be treated as
+        !                   tangency points. These get an additional 
+        !                   constraint, namely that the normal on the 
+        !                   vessel boundary should be perpendicular to 
+        !                   the magnetic field vector. 
+        ! - ncon:           (inherited) total number of constraints 
 
         ! No other routines than the standard initialization, evaluation
         ! and destruction routines are implemented nor needed. 
 
         ! Fields: 
-        integer(I8), allocatable        :: vert(:)
-        real(R8), allocatable           :: PsiD(:)
+        type(FFCStructureUDT), allocatable  :: fixedpoints(:)
+        type(FFCStructureUDT), allocatable  :: specialpoints(:)
+        type(FFCStructureUDT), allocatable  :: fluxsurfaces(:)
+        type(FFCStructureUDT), allocatable  :: tangencypoints(:)
+        integer(I8)                         :: nfixedpoints, &
+            nspecialpoints, nfluxsurfaces, ntangencypoints, nspcon, &
+            nfscon, ntpcon, nfpcon
 
     contains
 
@@ -103,11 +144,19 @@ module gdmod_constraints
 
         ! Evaluation
         procedure :: Evaluate       => EvaluateFluxfunctionConstraints
+        procedure :: EvaluateDerivativesCoordinates     => &
+            EvaluateCoordinatesDerivativesFluxFunctionConstraints
+        procedure :: EvaluateDerivativesFlux            => &
+            EvaluateFluxDerivativesFluxFunctionConstraints
+
+        ! Data
+        procedure :: WriteData      => WriteDataFluxfunctionConstraints
 
         ! Destructor
         final :: DestroyFluxfunctionConstraints
 
     end type
+    
 
     ! Boundary function constraints
     type, extends(GenericConstraintsGDUDT) :: BoundaryFunctionConstraintsUDT 
@@ -132,6 +181,10 @@ module gdmod_constraints
         
         ! Evaluation
         procedure :: Evaluate   => EvaluateBoundaryFunctionConstraints
+        procedure :: EvaluateDerivativesCoordinates     => &
+            EvaluateCoordinatesDerivativesBoundaryFunctionConstraints
+        procedure :: EvaluateDerivativesFlux            => &
+            EvaluateFluxDerivativesBoundaryFunctionConstraints
     
     end type
 
@@ -141,13 +194,17 @@ module gdmod_constraints
         ! Description
         !============
         ! X-point constraints. Constrains the location of the x-point by 
-        ! fixing the initial x-point coordinates (or, perhaps in the
-        ! future, look at where the gradient of the flux function 
-        ! vanishes). The following fields are added:
+        ! fixing the initial x-point coordinates or look at where the 
+        ! gradient of the flux function vanishes. 
+        ! The following fields are added:
         !
         ! - xpind:      the x-point vertex IDs 
         ! - nxpind:     the total number of x-points    
         ! - locx/y:     x and y coordinate locations of the x-points
+        ! - meth:       method to contrain x-point. Can be 'loc' or 
+        !               'grad'. In case of 'loc', the location is fixed
+        !               based on locx/locy. Otherwise, gradient = 0 
+        !               conditions are imposed. 
     
         ! Note 1: the initial x-point location and x-point vertices
         ! are determined by the initial grid. The x-point indices are 
@@ -159,6 +216,7 @@ module gdmod_constraints
         integer(I8)                         :: nxpind 
         real(R8), allocatable               :: locx(:)
         real(R8), allocatable               :: locy(:)
+        character(:), allocatable           :: meth
 
     contains
 
@@ -167,6 +225,8 @@ module gdmod_constraints
         
         ! Evaluation
         procedure :: Evaluate   => EvaluateXPointConstraints
+        procedure :: EvaluateCoordinatesDerivative &
+            => EvaluateCoordinatesDerivativeXPointConstraints
     
     end type
 
@@ -338,7 +398,7 @@ module gdmod_constraints
 
         ! Fields:
         integer(I8), allocatable           :: eqvcc(:), ineqvcc(:)
-        integer(I8)                        :: maxeqvcc, maxineqvcc 
+        integer(I8), allocatable           :: maxeqvcc(:), maxineqvcc(:) 
         
     contains 
 
@@ -363,7 +423,8 @@ module gdmod_constraints
 
         ! Constraint initialization
         subroutine InitializeConstraintsINT(constraints, grid, &
-            magneticField, environment, monitor, options)
+            magneticField, environment, monitor, designvariables, &
+            options)
 
             ! Description
             !============
@@ -374,7 +435,8 @@ module gdmod_constraints
             ! Import
             import :: GenericConstraintsGDUDT, GridUDT, &
                 MagneticFieldUDT, EnvironmentUDT, &
-                ConstraintsMonitorUDT, ConstraintOptionsUDT
+                ConstraintsMonitorUDT, ConstraintOptionsUDT, &
+                DesignVariablesGDUDT
 
             ! Declare
             class(GenericConstraintsGDUDT)      :: constraints 
@@ -383,6 +445,7 @@ module gdmod_constraints
             type(EnvironmentUDT)                :: environment 
             type(ConstraintsMonitorUDT)         :: monitor
             type(ConstraintOptionsUDT)          :: options
+            class(DesignVariablesGDUDT)         :: designvariables
 
         end subroutine
 
@@ -450,17 +513,15 @@ module gdmod_constraints
 
         ! Initialize
         !===========
-        ! Set the maximal number of constraints
-        monitor%maxeqvcc = 2 ! for most cases this is fine
-        monitor%maxineqvcc = 1000 ! a stupid large number - can impose any number
-
         ! Allocate
-        allocate(monitor%eqvcc(grid%vert%ntot))
-        allocate(monitor%ineqvcc(grid%vert%ntot))
+        allocate(monitor%eqvcc(grid%vert%ntot), monitor%maxeqvcc(grid%vert%ntot))
+        allocate(monitor%ineqvcc(grid%vert%ntot), monitor%maxineqvcc(grid%vert%ntot))
 
         ! Initialize
-        monitor%eqvcc(:)    = 0
-        monitor%ineqvcc(:)  = 0
+        monitor%eqvcc(:)        = 0
+        monitor%ineqvcc(:)      = 0
+        monitor%maxeqvcc(:)     = 2 ! for most cases this is fine
+        monitor%maxineqvcc(:)   = 1000 ! a stupid large number - can impose any number
 
     end subroutine
 
@@ -487,7 +548,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialization
     subroutine InitializeConstraints(constraints, grid, magneticField, &
-        environment, options)
+        environment, designvariables, options)
 
         ! Description
         !============
@@ -504,6 +565,7 @@ module gdmod_constraints
         type(EnvironmentUDT)        :: environment 
         type(ConstraintOptionsUDT)  :: options
         type(ConstraintsMonitorUDT) :: monitor
+        class(DesignVariablesGDUDT) :: designvariables
 
         ! Loop variables
 
@@ -517,11 +579,11 @@ module gdmod_constraints
         !=======================
         ! Equality constraints
         call constraints%eqcon%Initialize(grid, magneticField, &
-            environment, options, monitor)
+            environment, options, designvariables, monitor)
 
         ! Inequality constraints
         call constraints%ineqcon%Initialize(grid, magneticField, &
-            environment, options, monitor)
+            environment, options, designvariables, monitor)
 
     end subroutine
 
@@ -555,7 +617,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialization
     subroutine InitializeEqCon(constraints, grid, magneticField, &
-        environment, constraintoptions, monitor)
+        environment, constraintoptions, designvariables, monitor)
 
         ! Description
         !============
@@ -571,6 +633,7 @@ module gdmod_constraints
         type(EnvironmentUDT)        :: environment 
         type(ConstraintOptionsUDT)  :: constraintoptions
         type(ConstraintsMonitorUDT) :: monitor
+        class(DesignVariablesGDUDT) :: designvariables
 
         ! Loop variables
 
@@ -588,7 +651,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%xpoints%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -613,7 +677,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%boundaryfunction%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -637,7 +702,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%fluxfunction%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -660,7 +726,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%edgelengths%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -683,7 +750,8 @@ module gdmod_constraints
 
             ! Initialize
             call constraints%orthogonality%Initialize(grid, &
-                magneticField, environment, monitor, constraintoptions)
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
 
             ! Add constraints number
             constraints%neqcon = constraints%neqcon + &
@@ -1248,7 +1316,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialization
     subroutine InitializeIneqCon(constraints, grid, magneticField, &
-        environment, constraintoptions, monitor)
+        environment, constraintoptions, designvariables, monitor)
 
         ! Description
         !============
@@ -1264,6 +1332,7 @@ module gdmod_constraints
         type(EnvironmentUDT)        :: environment 
         type(ConstraintOptionsUDT)  :: constraintoptions
         type(ConstraintsMonitorUDT) :: monitor
+        class(DesignVariablesGDUDT)  :: designvariables
 
         ! Loop variables
 
@@ -1380,7 +1449,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialize
     subroutine InitializeFluxfunctionConstraints(constraints, grid, &
-        magneticField, environment, monitor, options)
+        magneticField, environment, monitor, designvariables, options)
 
         ! Description
         !============
@@ -1392,8 +1461,35 @@ module gdmod_constraints
         ! psi values by averaging the current psi values of the vertices
         ! that lie on a flux surface. This hedges a bit for 
         ! discretization errors originating from the re-interpretation 
-        ! of the magnetic field data as a bicubic spline interpolant 
-        ! (here) instead of a linear interpolant in the grid generator. 
+        ! of the magnetic field data as an interpolant here
+        ! instead of a linear interpolant in the grid generator. 
+
+        ! There are several different 'flavours' on how these 
+        ! constraints can be imposed. For classical flux surfaces, all
+        ! data is stored in the structure 'fluxsurfaces'. Separatrices 
+        ! are dealt with using the 'special points', where the first 
+        ! point is the X-point, and the flux values of the other points
+        ! are equated to this one. 'tangencypoints' specifies which 
+        ! points have a magnetic field vector that should be (at the 
+        ! solution) tangential to the vessel boundary vector. One should
+        ! be careful with this constraint - a solution may not exist! 
+        ! Different treatment options are therefore available through
+        ! the option 'tangencypointtreatment':
+        !   - 'tangencypoint': classic tangency point constraint. 
+        !   If the design variables are only coordinates, then the  
+        !   tangency points are considered as special points, since
+        !   the additional constraint fixes its position, similar to 
+        !   X-points. If not, we can additionally impose aligment. 
+        !   Combined with the boundary constraints, this triplet fixes
+        !   the coordinates and flux values
+        !   - 'align': treat as a vertex of a classical flux surface. 
+        !   One should be careful as this may lead to constraint 
+        !   singularity (at an intermediate point or solution, the 
+        !   vessel boundary constraints and flux value constraint may be 
+        !   collinear)
+        !   - 'noconstraint': no additional flux surface constraint is 
+        !   imposed. This may lead to local non-alignment of the 
+        !   adjacent faces, but may stabilize the problem.
 
         ! Notes
         !======
@@ -1418,7 +1514,8 @@ module gdmod_constraints
         ! However, this gives issues in some cases where the targets are
         ! nearly flux-aligned. To avoid this, set the logical 
         ! 'fixfluxalignedtargets' to true. This is the recommended 
-        ! default value. 
+        ! default value for narrow grids. For wide grids, this should be
+        ! false.  
 
         ! Note 5: it is assumed that the grid contains the flux surface
         ! data and that the flux surfaces are numbered from 1 to nFs
@@ -1427,6 +1524,7 @@ module gdmod_constraints
         !===========
         ! Modules
         use gdmod_plots
+        implicit none
         
         ! Declare variables
         !==================
@@ -1437,182 +1535,476 @@ module gdmod_constraints
         type(EnvironmentUDT)                    :: environment 
         type(ConstraintsMonitorUDT)             :: monitor
         type(ConstraintOptionsUDT)              :: options 
+        class(DesignVariablesGDUDT)              :: designvariables
 
         ! Loop variables
-        integer(I8)                 :: i
+        integer(I8)                 :: i, k
 
         ! Auxiliary variables
-        real(R8)                    :: tpsi, minx, maxx, miny, maxy
+        real(R8)                    :: tpsi
+        real(R8), allocatable       :: PsiD_tmp(:), temppsi(:), &
+            boxx(:, :), boxy(:, :) 
 
-        integer(I8), allocatable    :: vert_tmp(:), vertID(:) 
-        real(R8), allocatable       :: PsiD_tmp(:), temppsi(:) 
-        logical, allocatable        :: delind(:), mask(:)
+        integer(I8)                 :: nxpind, ntpind, nfsIDs, nspc
+        integer(I8), allocatable    :: vert_tmp(:), vertID(:), &
+            order(:), xpind(:), tptype(:), fsxpind(:), fstpind(:), &
+            allIDs(:), fsIDs(:), vID(:), tpind(:), tv(:), tvID(:)
         
-        ! Data
-        logical                     :: fixfluxalignedtargets = .true. 
-        logical                     :: fixfarvesselflux = .true. 
+        logical                     :: fixxp, fixtp
+        logical, allocatable        :: delind(:), mask(:), isdouble(:), &
+            isxp(:), isconstrainedv(:), isvesselvertex(:), &
+            isvesselface(:), isfixedpoint(:), includev(:), istp(:), &
+            isfsxp(:), isfstp(:)
 
         ! Initialize
         !===========
         ! Number of constraints
         constraints%ncon = 0
 
-        ! Allocate temporary arrays
-        allocate(vert_tmp(grid%vert%ntot))
-        allocate(PsiD_tmp(grid%vert%ntot), temppsi(grid%vert%ntot))
-
-        ! Allocate auxiliary arrays
-        allocate(mask(grid%vert%ntot))
-        allocate(delind(grid%vert%ntot))
-        allocate(vertID(grid%vert%ntot))
-
-        ! Initialize
-        PsiD_tmp(:) = 0
-        temppsi(:) = 0
-        mask(:) = .false.
-        delind(:) = .false.
-        vert_tmp = [(i, i = 1, grid%vert%ntot)]
-
         ! Associate
         associate(&
             vert    => grid%vert,       x       => grid%vert%x,     &
             y       => grid%vert%y,     cc      => monitor%eqvcc,   &
+            nv      => grid%vert%ntot,                              &
             maxcc   => monitor%maxeqvcc,                            &
-            opt     => options%ffoptions)
-        
-        ! Determine flux values to impose
-        !================================
-        ! Evaluate flux at all nodes
-        call magneticField%interp%Evaluate(x, y, 0, 0, temppsi)
-        PsiD_tmp = temppsi
+            opt     => options%ffoptions,                           &
+            fieldlineID             => grid%vert%fieldlineID,       &
+            fixfluxalignedtargets   => options%ffoptions%fixfluxalignedtargets, &
+            fixfarvesselflux        => options%ffoptions%fixfarvesselflux,      &
+            fixallvesselvertices    => options%ffoptions%fixallvesselvertices,  &
+            doboxoverride           => options%ffoptions%doboxoverride,         &
+            nsp                     => constraints%nspecialpoints,  &
+            nspcon                  => constraints%nspcon,          &
+            nfs                     => constraints%nfluxsurfaces,   &
+            nfscon                  => constraints%nfscon,          &
+            nfp                     => constraints%nfixedpoints,    &
+            nfpcon                  => constraints%nfpcon,          &
+            ntp                     => constraints%ntangencypoints, &
+            ntpcon                  => constraints%ntpcon           &
+            )
 
-        !call Plot2DUnstructuredField(PsiD_tmp, grid, 'v', '-p')
-        !call PlotFluxSurfaces(grid, '-p')
+        ! Allocate 
+        allocate(vert_tmp(nv),PsiD_tmp(nv), &
+            temppsi(nv), mask(nv), delind(nv), &
+            vertID(nv), istp(nv), &
+            isconstrainedv(nv), isfixedpoint(nv))
+
+        ! Initialize
+        PsiD_tmp(:) = 0
+        temppsi(:)  = 0
+        mask(:)     = .false.
+        vID = [(i, i = 1, nv)]
+        vert_tmp    = vID
+        nfsIDs = maxval(vert%fieldlineID) 
+        allIDs = [(i, i = 1, nfsIDs)]
+        isconstrainedv(:) = .false.
+        isfixedpoint(:) = .false.
+
+        nsp = 0
+        ntp = 0
+
+        ! Evaluate 
+        call magneticField%interp%Evaluate(x, y, 0, 0, PsiD_tmp)
+
+        ! Check options
+        select case (designvariables%type)
+
+        case ('coordinates_desiredflux')
+
+            ! Don't explicitly fix x-point
+            fixxp = .false.
+
+        case default 
+
+            ! Fix x-point
+            fixxp = .true. 
+
+        end select
+
+        ! Extract x-point indices
+        call DetermineXPoints(xpind, nxpind, order, grid)
+        allocate(isxp(nv))
+        isxp(:)     = .false.
+        isxp(xpind) = .true.
+
+        ! Extract tangency point indices
+        call DetermineTangencyPoints(tpind, ntpind, tptype, grid)
+        istp(:)     = .false.
+        istp(tpind) = .true.
+
+        ! Check how to treat tangency points
+        fixtp = .false.
+        select case (opt%tangencypointtreatment)
+
+        case ('tangencypoint')
+        
+            ! Check how many constraints there are
+            do i = 1, ntpind
+                
+                if (cc(tpind(i)) < maxcc(tpind(i))) then 
+                    ! Update counter
+                    ntp = ntp + 1
+                end if
+            end do
+
+            ! Impose true tangency point constraints
+            allocate(constraints%tangencypoints(ntp))
+            do i = 1, ntpind
+                if (cc(tpind(i)) < maxcc(tpind(i))) then 
+                    ! Impose
+                    constraints%tangencypoints(i)%ID = tpind(i)
+                    constraints%tangencypoints(i)%nID = 1
+
+                    ! Update constraint counter
+                    cc(tpind(i)) = cc(tpind(i)) + 1
+                end if 
+            end do
+
+            ! Check design variables
+            select case (designvariables%type)
+
+            case ('coordinates_desiredflux')
+
+                ! Also impose aligment constraints
+                istp(:) = .false. 
+
+            case default 
+                
+                ! Treat as special point
+                fixtp = .true.
+
+            end select
+
+        case ('align')
+
+            ! classic alignment, don't do anything and set istp to false
+            ntp = 0
+            allocate(constraints%tangencypoints(ntp))
+            istp(:) = .false. 
+
+        case ('noconstraint')
+
+            ! Do not constrain, not even with aligment -> istp is still true
+            ntp = 0
+            allocate(constraints%tangencypoints(ntp))
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('InitializeConstraintParameters: unknown option for tangency points')
+
+        end select
+
+        ! Special points
+        !===============
+        ! Get flux surfaces - assumed each X-point has its own surface, 
+        ! so connected double null not yet supported
+        
+        ! Get IDs of x-point and tangency point flux surfaces
+        fsxpind = fieldlineID(xpind)
+        fstpind = fieldlineID(tpind)
+        allocate(isfsxp(nfsIDs), isfstp(nfsIDs))
+        isfsxp(:) = .false.
+        isfstp(:) = .false. 
+        isfsxp(fsxpind) = .true.
+        isfstp(fstpind) = .true.
+
+        ! Check for doubles in x-point flux surfaces
+        allocate(isdouble(nxpind))
+        isdouble(:) = .false.
+        do i = 1, nxpind
+            if (isdouble(i)) then 
+                call gdErrorHandler('InitializeConstraintParametersFluxFunction: ' //&
+                    ' x-points with same flux surface ID detected, not supported')
+            end if
+            isdouble(i) = .true.
+        end do
+        deallocate(isdouble)
+
+        ! Check for doubles in tangency point flux surfaces
+        allocate(isdouble(ntpind))
+        isdouble(:) = .false.
+        do i = 1, ntpind
+            if (isdouble(i)) then 
+                call gdErrorHandler('InitializeConstraintParametersFluxFunction: ' //&
+                    ' tangency points with same flux surface ID detected, not supported')
+            end if
+            isdouble(i) = .true.
+        end do
+        deallocate(isdouble)
+
+        ! Exclude separatrices and/or tangency point flux surfaces?
+        if (fixxp .and. fixtp) then 
+            ! Exclude 
+            allocate(fsIDs(count(.not. (isfsxp .or. isfstp))))
+            fsIDs = pack(allIDs, (.not. (isfsxp .or. isfstp)))
+        elseif (fixxp) then 
+            allocate(fsIDs(count(.not. isfsxp)))
+            fsIDs = pack(allIDs, (.not. isfsxp))
+        elseif (fixtp) then 
+            allocate(fsIDs(count(.not. isfstp)))
+            fsIDs = pack(allIDs, (.not. isfstp))
+        else
+            fsIDs = allIDs
+        end if 
+
+        ! Determine total number of special points 
+        if (fixxp) then 
+            nsp = nsp + nxpind 
+        end if 
+        if (fixtp) then 
+            ! Only type one tangency points are special points!
+            nsp = nsp + count(tptype == 1) 
+        end if 
+
+        ! Allocate
+        allocate(constraints%specialpoints(nsp))
+        ! Loop over all X-points
+        nspc = 0
+        if (fixxp) then 
+            ! Update number of special points 
+            do i = 1, nxpind
+
+                ! Update counter
+                nspc = nspc + 1
+            
+                ! Add all vertices on this flux surface (xp first)
+                allocate(tv(count(fieldlineID == fsxpind(i))))
+                tv = pack(vID, fieldlineID == fsxpind(i))
+                constraints%specialpoints(nspc)%ID = [xpind(i), pack(tv, tv .ne. xpind(i))]
+                constraints%specialpoints(nspc)%nID = size(constraints%specialpoints(nspc)%ID, 1)
+                isconstrainedv(tv) = .true.
+                cc(tv) = cc(tv) + 1
+                deallocate(tv)
+
+            end do 
+        end if 
+
+        ! Loop over all tangency points
+        if (fixtp) then 
+            do i = 1, ntpind
+                if (tptype(i) == 1) then 
+                    ! Update counter
+                    nspc = nspc + 1
+                    
+                    ! Add all vertices on this flux surface (tp first)
+                    allocate(tv(count(fieldlineID == fstpind(i))))
+                    tv = pack(vID, fieldlineID == fstpind(i))
+                    constraints%specialpoints(nspc)%ID = [xpind(i), pack(tv, tv .ne. tpind(i))]
+                    constraints%specialpoints(nspc)%nID = size(constraints%specialpoints(nspc)%ID, 1)
+                    isconstrainedv(tv) = .true.
+                    cc(tv) = cc(tv) + 1
+                    deallocate(tv)
+                    
+                end if 
+            end do 
+        end if
+
+        ! Fixed points
+        !=============
+        ! Initialize
+        mask(:) = .false.
+        isfixedpoint(:) = .false.
+
+        ! Constrain all vessel vertices?
+        if (fixallvesselvertices == 1) then 
+            do i = 1, size(grid%bnd, 1)
+                select case (grid%bnd(i)%ID)
+
+                case (1, 5)
+
+                    ! Get boundary vertices
+                    tv = grid%bnd(i)%vert 
+
+                    ! Set mask
+                    mask(tv) = .true. 
+                    mask = mask .and. .not. ( (cc >= maxcc) .or. (istp))
+                    where (mask) isfixedpoint = .true.
+                    deallocate(tv)
+
+                case default 
+
+                    ! Do nothing
+
+                end select
+    
+            end do
+        end if 
+
+        ! Constrain the endpoints of target plates to their own flux
+        ! values, in order to avoid shitty behaviour when having
+        ! targets that are nearly flux aligned.
+        if (fixfluxalignedtargets == 1) then 
+            do i = 1, size(grid%bnd, 1)
+                select case (grid%bnd(i)%ID)
+
+                case (1)
+
+                    ! Get the end vertices
+                    tv = grid%Bnd(i)%vert([1, size(grid%Bnd(i)%vert, 1)])
+                    
+                    ! Delete vertices that can't be constrained or are
+                    ! constrained already
+                    mask(tv) = .true. 
+                    where (isconstrainedv .or. (cc >= maxcc ) .or. istp) mask = .false. 
+                    where (mask) isfixedpoint = .true.
+                    deallocate(tv)
+
+                case default
+
+                    ! Do nothing
+
+                end select
+            end do
+        end if 
+
+        ! Constrain the points on the vessel outermost boundary, if it
+        ! exists. The points are only constrained if there exists a
+        ! non-boundary vertex that is a neighbour of the current
+        ! vertex and which has the same flux line ID as the current
+        ! vertex, which should be nonzero. Otherwise, the flux value is
+        ! NOT constrained.
+        if (fixfarvesselflux == 1) then 
+            do i = 1, size(grid%bnd, 1)
+                select case (grid%bnd(i)%ID)
+
+                case default 
+
+                    ! Do nothing
+
+                case (5)
+
+                    ! Get the vertices
+                    tv = grid%Bnd(i)%vert
+                    mask(tv) = .true.
+                    deallocate(tv)
+                    
+                    ! Delete vertices that can't be constrained or are
+                    ! constrained already
+                    where ( (cc >= maxcc) .or. (isconstrainedv) .or. (istp)) mask = .false.
+                    
+                end select
+            end do
+        end if 
+
+        ! Override if desired - include vertices that have not been
+        ! constrained as fixed points
+        if (options%ffoptions%doboxoverride == 1) then 
+            ! Determine which points are already constrained - these
+            ! are all points occuring in fixed points, vpairs, and
+            ! x-points.
+            allocate(includev(nv))
+            includev(:) = .false.
+            boxx = options%ffoptions%includeboxx
+            boxy = options%ffoptions%includeboxy
+            if (size(boxx, 1) > 0) then
+                ! Loop over all boxes to include
+                do k = 1, size(boxx, 1)
+                    where ((vert%x > boxx(k, 1)) .and. (vert%x < boxx(k, 2)) &
+                        .and. (vert%y > boxy(k, 1)) .and. (vert%y < boxy(k, 2))) &
+                        includev = .true.
+                end do 
+            end if
+            
+            ! Add points that have not yet been constrained
+            where (isconstrainedv .or. (cc >= maxcc)) includev = .false.
+            where (includev) mask = .true. 
+            
+        end if
+        
+        ! Add fixed points
+        if (count(mask) > 0) then 
+            allocate(tv(count(mask)))
+            tv = pack(vID, mask)
+            nfp = size(tv, 1)
+            allocate(constraints%fixedpoints(nfp))
+            do i = 1, nfp
+                ! Add as fixed point
+                allocate(constraints%fixedpoints(i)%ID(1))
+                constraints%fixedpoints(i)%ID(1) = tv(i)
+                constraints%fixedpoints(i)%PsiD = PsiD_tmp(tv(i))
+                constraints%fixedpoints(i)%nID = 1
+            end do
+
+            ! Update counter
+            isconstrainedv(tv) = .true.
+            cc(tv) = cc(tv) + 1
+
+            ! Deallocate
+            deallocate(tv)
+        end if 
+
+        ! Classical flux surfaces
+        !========================
+        ! Initialize
+        nfs = size(fsIDs, 1)
+        allocate(constraints%fluxsurfaces(nfs))
+
+        ! Determine vessel vertices (for initial PsiD later on)
+        call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
 
         ! Loop over all the flux surfaces to compute desired flux
-        do i = 1, grid%data%fluxdata%nFs
+        do i = 1, nfs
+
             ! Get all vertices with this ID
-            mask(:) = (vert%fieldlineID == i)
+            mask(:) = (vert%fieldlineID == fsIDs(i))
 
             ! Get the flux values
-            if (any(pack(vert%BV,mask))) then 
+            if (any(pack(isvesselvertex, mask))) then 
                 ! Average only over boundary vertices
-                tpsi = sum(pack(PsiD_tmp, (mask .and. vert%BV))) & 
-                    /count((mask .and. vert%BV))
+                tpsi = sum(pack(PsiD_tmp, (mask .and. isvesselvertex))) & 
+                    /count((mask .and. isvesselvertex))
             else
                 ! Average over all vertices
                 tpsi = sum(pack(PsiD_tmp, mask))/count(mask)
             end if
 
-            ! Adjust PsiD
-            where(mask) PsiD_tmp = tpsi 
+            ! Add value to flux surface
+            constraints%fluxsurfaces(i)%PsiD    = tpsi
+
+            ! Check which IDs can be added and add them
+            mask = mask .and. (  ( (.not. isconstrainedv) .or. &
+                (.not. cc >= maxcc) ) .or. ( isxp .or. istp ) ) ! keep x-points and tps
+            
+            ! Add
+            allocate(constraints%fluxsurfaces(i)%ID(count(mask)))
+            constraints%fluxsurfaces(i)%ID      = pack(vID, mask)
+            constraints%fluxsurfaces(i)%nID     = size(constraints%fluxsurfaces(i)%ID, 1)
+            constraints%fluxsurfaces(i)%PsiD    = tpsi
+
+            ! Update counter
+            cc(constraints%fluxsurfaces(i)%ID) = cc(constraints%fluxsurfaces(i)%ID) + 1
+            isconstrainedv(constraints%fluxsurfaces(i)%ID) = .true.
 
         end do
 
-        ! Don't constrain vertices with no field line ID
-        where (vert%fieldlineID == 0) delind = .true.
-
-        ! Compensate for flux aligned targets?
-        if (opt%fixfluxalignedtargets == 1) then
-            ! Fix flux values of target plate end nodes to be exactly 
-            ! the flux value they have now. Can help when the average
-            ! flux value is inaccurate, but should typically not be 
-            ! required.
-
-            do i = 1, size(grid%bnd)
-                if (any(grid%bnd(i)%ID == [1, 2])) then
-                    PsiD_tmp(grid%bnd(i)%vert([1, grid%bnd(i)%nvert])) &
-                        = temppsi(grid%bnd(i)%vert([1, grid%bnd(i)%nvert]))
-                end if 
-            end do
-        end if
-
-        ! Fix flux values at target boundaries?
-        if (opt%fixtargetflux == 1) then 
-            ! Fix flux values of vessel vertices that have no ID (others
-            ! are already constrained before). 
-
-            do i = 1, size(grid%bnd) 
-                if (any(grid%bnd(i)%ID == [1, 2])) then 
-                    delind(grid%bnd(i)%vert) = .false.
-                end if 
-            end do
-        end if 
-
-        ! Fix flux values of vessel boundary vertices? 
-        if (opt%fixfarvesselflux == 1) then 
-            ! Do fix flux function values of the nodes of the far vessel
-            ! boundaries to their own specific value. Often leads to 
-            ! easier to converge problems
-
-            do i = 1, size(grid%bnd)
-                if (grid%bnd(i)%ID == 5) then 
-                    delind(grid%bnd(i)%vert) = .false.
-                end if
-            end do
-        end if
-
-        ! Reset flux function values of vessel nodes to original value
-        ! (non-averaged one)? 
-        !if (opt%resetvesselfluxvalues) then 
-            ! Reset the vessel flux values to the original value before
-            ! computing the average. This can help with vessel nodes
-            ! crossing each other due do bad flux function values. 
-        !end if 
-
-        ! Override the deletion vector
-        if (opt%doboxoverride == 1) then 
-            ! Override the deletion index
-            do i = 1, size(opt%includeboxx, 1)
-                maxx = maxval(opt%includeboxx(i, :))
-                minx = minval(opt%includeboxx(i, :))
-                maxy = maxval(opt%includeboxy(i ,:))
-                miny = minval(opt%includeboxy(i ,:))
-                where ( IsInBox(minx, maxx, miny, maxy, grid%vert%x, grid%vert%y) ) delind = .false.
-            end do
-        end if
-
-
-        ! Set the deletion vector
-        where(cc >= maxcc) delind = .true. ! don't constrain
-
-        ! Update monitor
-        !===============
-        where (.not. delind) cc = cc + 1
-
-        ! Allocate and assign
-        !====================
-        ! Allocate
-        constraints%ncon = count( .not. delind)
-        allocate(constraints%vert(constraints%ncon))
-        allocate(constraints%PsiD(constraints%ncon))
-
-        ! Assign
-        !=======
-        constraints%vert = pack(vert_tmp, (.not. delind))
-        constraints%PsiD = pack(PsiD_tmp, (.not. delind))
-
+        ! Compute total number of constraints
+        !====================================
+        constraints%ncon = nfp + ntp
+        nfscon = 0
+        nspcon = 0
+        nfpcon = nfp 
+        ntpcon = ntp
+        do i = 1, nfs 
+            constraints%ncon = constraints%ncon + constraints%fluxsurfaces(i)%nID 
+            nfscon = nfscon + constraints%fluxsurfaces(i)%nID
+        end do
+        do i = 1, nsp
+            constraints%ncon = constraints%ncon + constraints%specialpoints(i)%nID-1 
+            nspcon = nspcon + constraints%specialpoints(i)%nID-1
+        end do
+        
         ! Debugging info
         !===============
         ! Write datafile
         if (options%writedata == 1) then 
-            call WriteFluxfunctionConstraintVertices(grid, &
-                constraints%vert)
+            call constraints%WriteData(grid)
         end if 
 
         ! Housekeeping
         !=============
         ! End associate
         end associate
-
-        ! Deallocate temporary arrays
-        deallocate(vert_tmp)
-        deallocate(PsiD_tmp)
-
-        ! Deallocate auxiliary arrays
-        deallocate(mask)
-        deallocate(delind)
-        deallocate(vertID)
         
     end subroutine
 
@@ -1671,7 +2063,8 @@ module gdmod_constraints
         class(FluxfunctionConstraintsUDT)   :: constraints 
         real(R8), allocatable               :: G(:) 
         real(R8), allocatable               :: lambda(:)
-        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(MySparseUDT)                   :: hessG, gradG, jacG, &
+            hessG_coord, gradG_coord, hessG_flux, gradG_flux 
         type(GridUDT)                       :: grid 
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
@@ -1679,13 +2072,15 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)         :: designvariables                
 
         ! Loop variables
-        integer(I8)                         :: ic, ivg, ivh, k
+        integer(I8)                         :: ic, ivg, ivh, k, i
         integer(I8), allocatable            :: valindex(:), conindex(:)
 
         ! Auxiliary variables
         real(R8), allocatable               :: psival(:), dpsidx(:), &
-            dpsidy(:), valxx(:), valxy(:), valyy(:)
-        integer(I8)                         :: ntv
+            dpsidy(:), valxx(:), valxy(:), valyy(:), d2psidx2(:), &
+            d2psidxdy(:), d2psidy2(:)
+        integer(I8)                         :: ntv, nvg, nvh, spID, nc
+        integer(I8), allocatable            :: tvID(:)
 
         ! Data
 
@@ -1719,220 +2114,751 @@ module gdmod_constraints
 
         ! Associate
         associate(&
-            nc      => constraints%ncon,        &
-            psiD    => constraints%PsiD,        &
-            tv      => constraints%vert,        &
+            nv      => grid%vert%ntot,          &
+            specialpoints           => constraints%specialpoints,   &
+            nsp                     => constraints%nspecialpoints,  &
+            fluxsurfaces            => constraints%fluxsurfaces,    &
+            nfs                     => constraints%nfluxsurfaces,   &
+            fixedpoints             => constraints%fixedpoints,     &
+            nfp                     => constraints%nfixedpoints,    &
+            tangencypoints          => constraints%tangencypoints,  &
+            ntp                     => constraints%ntangencypoints, &
             interp  => magneticField%interp,    & 
             x       => grid%vert%x,             & 
             y       => grid%vert%y              & 
             )
 
-        ! Constraint value
-        !=================
-        ! Initialize
-        ntv = size(tv)
+        ! Pre-evaluate some data
+        allocate(psival(nv))
+        call magneticField%interp%Evaluate(x, y, 0, 0, psival)
 
-        ! Allocate
-        allocate(psival(nc))
-        psival(:) = 0
+        if (dogradient) then 
+            ! Allocate
+            allocate(dpsidx(nv), dpsidy(nv))
+
+            ! Precompute
+            call magneticField%interp%Evaluate(x, y, 1, 0, dpsidx)
+            call magneticField%interp%Evaluate(x, y, 0, 1, dpsidy)
+        end if 
+
+        if (dohessian) then 
+            ! Allocate
+            allocate(d2psidx2(nv), d2psidxdy(nv), d2psidy2(nv))
+
+            ! Precompute
+            call magneticField%interp%Evaluate(x, y, 2, 0, d2psidx2)
+            call magneticField%interp%Evaluate(x, y, 1, 1, d2psidxdy)
+            call magneticField%interp%Evaluate(x, y, 0, 2, d2psidy2)
+        end if 
+
+        if (ntp > 0) then 
+            ! Compute vessel boundary derivatives etc as well
+            ! For now, call error
+            call gdErrorHandler('Tangency points not yet implemented')
+        end if 
 
         ! Evaluate
-        call interp%Evaluate(x(tv), y(tv), 0, 0, psival)
-        G(:) = psival - psiD
+        !=========
+        ic = 0
+        ! Special points
+        do i = 1, nsp
+            ! Unpack
+            nc = specialpoints(i)%nID-1
+            spID = specialpoints(i)%ID(1)
+            tvID = specialpoints(i)%ID(2:specialpoints(i)%nID)
 
-        ! Constraint gradient
-        !====================
-        if (dogradient) then 
-            ! Initialize
-            jacG%nrow = nc 
-            jacG%ncol = designvariables%nphi
+            ! Evaluate
+            G(ic+1:ic+nc) = psival(tvID) - psival(spID)
 
-            ! Check design variables
-            select case(designvariables%type)
+            ! Update
+            ic = ic + nc
+        end do 
 
-            case ('coordinates')
+        ! Tangency points
+        do i = 1, ntp
+            ! Unpack
+            nc = tangencypoints(i)%nID
+            tvID = tangencypoints(i)%ID
 
-                ! Order in jacobian: first x, then y. Has as many 
-                ! non-zero elements as there are design variables. 
+            ! Evaluate
 
-                ! Allocate
-                jacG%nval = 2*ntv
-                call jacG%Allocate() 
-                allocate(dpsidx(ntv))
-                allocate(dpsidy(ntv))
-                allocate(conindex(ntv))
-                allocate(valindex(ntv))
+            ! Update
+            ic = ic + nc
+        end do
 
-                ! Compute the derivative values
-                call interp%Evaluate(x(tv), y(tv), 1, 0, dpsidx)
-                call interp%Evaluate(x(tv), y(tv), 0, 1, dpsidy)
-                !call EvaluateBicubicSplineInterpolant(&
-                !   x(tv), y(tv), dpsidx, Psifun, '1', '0')
-                !call EvaluateBicubicSplineInterpolant(&
-                !    x(tv), y(tv), dpsidy, Psifun, '0', '1')
+        ! Fixed points
+        do i = 1, nfp 
+            ! Unpack
+            nc = fixedpoints(i)%nID 
+            tvID = fixedpoints(i)%ID 
 
-                ! x-contribution
-                !---------------
-                ! Build indices
-                conindex = [(k, k = ic+1, ic+ntv)]
-                valindex = [(k, k = ivg+1, ivg+ntv)]
+            ! Evaluate
+            G(ic+1:ic+nc) = psival(tvID) - fixedpoints(i)%PsiD
 
-                ! Add values
-                jacG%row(valindex) = conindex  
-                jacG%col(valindex) = tv
-                jacG%val(valindex) = dpsidx 
+            ! Update
+            ic = ic + nc
+        end do
 
-                ! y-contribution
-                !---------------
-                ! Build indices
-                ivg = ivg + ntv
-                valindex = valindex + ntv
+        ! Flux surfaces
+        do i = 1, nfs
+            ! Unpack
+            nc = fluxsurfaces(i)%nID 
+            tvID = fluxsurfaces(i)%ID 
 
-                ! Add values
-                jacG%row(valindex) = conindex 
-                jacG%col(valindex) = tv + grid%vert%ntot 
-                jacG%val(valindex) = dpsidy 
+            ! Evaluate
+            G(ic+1:ic+nc) = psival(tvID) - fluxsurfaces(i)%PsiD 
 
-                ! Build gradient
-                gradG%nrow = jacG%ncol 
-                gradG%ncol = jacG%nrow 
-                gradG%nval = jacG%nval 
-                
-                call gradG%Allocate()
-                gradG%row = jacG%col 
-                gradG%col = jacG%row
-                gradG%val = jacG%val
+            ! Update
+            ic = ic + nc
+        end do
 
-                ! Housekeeping
-                call jacG%Deallocate()
+        ! Derivatives
+        !============
+        ! Set row and column sizes
+        gradG%nrow = designvariables%nphi
+        gradG%ncol = constraints%ncon
+        hessG%nrow = designvariables%nphi
+        hessG%ncol = designvariables%nphi
 
-            case default
+        ! Check which gradient to compute
+        select case (designvariables%type)
 
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
-
-            end select
-
-        end if
-
-        ! Constraint hessian
-        !===================
-        if (dohessian) then 
-
-            ! Initialize
-            hessG%nrow = designvariables%nphi 
-            hessG%ncol = designvariables%nphi 
-
-            ! Check design variables
-            select case(designvariables%type)
-
-            case ('coordinates')
+        case ('coordinates')
             
-                ! Allocate
-                hessG%nval = 4*ntv
-                if (.not. allocated(valindex)) then
-                    allocate(valindex(ntv))
-                end if
-                if (.not. allocated(conindex)) then 
-                    allocate(conindex(ntv))
-                end if 
-                if (.not. allocated(hessG%val)) then
-                    call hessG%Allocate()
-                end if
-                allocate(valxx(ntv))
-                allocate(valxy(ntv))
-                allocate(valyy(ntv))
+            call constraints%EvaluateDerivativesCoordinates(grid, gradG, &
+                hessG, dogradient, dohessian, lambda, psival, dpsidx, &
+                dpsidy, d2psidx2, d2psidxdy, d2psidy2)
 
-                ! Initialize
-                valxx(:) = 0
-                valyy(:) = 0
-                valxy(:) = 0
+        case ('coordinates_desiredflux')
 
-                ! Compute contributions
-                call interp%Evaluate(x(tv), y(tv), 2, 0, valxx)
-                call interp%Evaluate(x(tv), y(tv), 1, 1, valxy)
-                call interp%Evaluate(x(tv), y(tv), 0, 2, valyy)
-                !call EvaluateBicubicSplineInterpolant(&
-                !    x(tv), y(tv), valxx, Psifun, '2', '0')
-                !call EvaluateBicubicSplineInterpolant(&
-                !    x(tv), y(tv), valyy, Psifun, '0', '2')
-                !call EvaluateBicubicSplineInterpolant(&
-                !    x(tv), y(tv), valxy, Psifun, '1', '1') ! 
+            ! Coordinate contribution
+            gradG_coord%nrow = designvariables%nphi
+            gradG_coord%ncol = constraints%ncon
+            hessG_coord%nrow = designvariables%nphi
+            hessG_coord%ncol = designvariables%nphi   
+            call constraints%EvaluateDerivativesCoordinates(grid, gradG_coord, &
+                hessG_coord, dogradient, dohessian, lambda, psival, dpsidx, &
+                dpsidy, d2psidx2, d2psidxdy, d2psidy2)
 
-                ! xx-contribution
-                !----------------
-                k = 1
-                ! Build indices
-                valindex = [(k, k = ivh+1, ivh+ntv)] 
+            ! Flux contribution
+            gradG_flux%nrow = designvariables%nphi
+            gradG_flux%ncol = constraints%ncon
+            hessG_flux%nrow = designvariables%nphi
+            hessG_flux%ncol = designvariables%nphi
+            call constraints%EvaluateDerivativesFlux(gradG_flux, hessG_flux, &
+                dogradient, dohessian, lambda)
 
-                ! Add values
-                hessG%row(valindex) = tv 
-                hessG%col(valindex) = tv 
-                hessG%val(valindex) = valxx*lambda ! element-wise mult. 
-                
-                ! xy-contribution
-                !----------------
-                ! Build indices
-                ivh = ivh + ntv
-                valindex = valindex + ntv
+            ! Update flux contribution design variable indices
+            gradG_flux%row = gradG_flux%row + 2*grid%vert%ntot 
+            hessG_flux%row = hessG_flux%row + 2*grid%vert%ntot
+            hessG_flux%col = hessG_flux%col + 2*grid%vert%ntot  
 
-                ! Add values
-                hessG%row(valindex) = tv
-                hessG%col(valindex) = tv + grid%vert%ntot 
-                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+            ! Combine
+            gradG = gradG_coord + gradG_flux 
+            hessG = hessG_coord + hessG_flux
 
-                ! yx-contribution
-                !----------------
-                ! symmetric with xy
-                ! Build indices
-                ivh = ivh + ntv
-                valindex = valindex + ntv 
+        case default 
 
-                ! Add values
-                hessG%row(valindex) = tv + grid%vert%ntot 
-                hessG%col(valindex) = tv 
-                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
-
-                ! yy-contribution
-                !----------------
-                ! Build indices
-                ivh = ivh + ntv
-                valindex = valindex + ntv
-
-                ! Add values
-                hessG%row(valindex) = tv + grid%vert%ntot 
-                hessG%col(valindex) = tv + grid%vert%ntot 
-                hessG%val(valindex) = valyy*lambda ! element-wise mult. 
-
-            case default
-
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
-
-            end select
-
-        end if
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: unknown design variable type')
+            
+        end select
 
         ! Housekeeping
         !=============
         ! End associate
         end associate
 
-        ! Deallocate
-        deallocate(psival)
+    end subroutine
 
-        if (dogradient) then 
-            deallocate(dpsidx, dpsidy, valindex, conindex)
+    ! Gradient & Hessian computation, coordinates
+    subroutine EvaluateCoordinatesDerivativesFluxFunctionConstraints(&
+        constraints, grid, gradG, hessG, dogradient, dohessian, &
+        lambda, psival, dpsidx, dpsidy, d2psidx2, d2psidxdy, d2psidy2)
+
+        ! Description
+        !============
+        ! This routine evaluates the gradient and hessian w.r.t. the 
+        ! grid coordinates. It is assumed that the number of rows and 
+        ! columns is already computed before. 
+
+        ! Note: the derivatives are computed as if the coordinates are 
+        ! the only design variables. Any reordering/adjustment of column
+        ! or row indices should be done afterwards. 
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(FluxfunctionConstraintsUDT)   :: constraints 
+        real(R8), dimension(:), intent(in)  :: lambda(*), psival(*), &
+            dpsidx(*), dpsidy(*), d2psidx2(*), d2psidxdy(*), d2psidy2(*) 
+        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(GridUDT), intent(in)           :: grid 
+        logical                             :: dogradient, dohessian
+
+        ! Loop variables
+        integer(I8)                         :: ic, ivg, ivh, k, i
+        integer(I8), allocatable            :: valindex(:), conindex(:)
+
+        ! Auxiliary variables
+        integer(I8)                         :: ntv, nvg, nvh, spID, nc
+        integer(I8), allocatable            :: tvID(:)
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            nv      => grid%vert%ntot,          &
+            specialpoints           => constraints%specialpoints,   &
+            nsp                     => constraints%nspecialpoints,  &
+            fluxsurfaces            => constraints%fluxsurfaces,    &
+            nfs                     => constraints%nfluxsurfaces,   &
+            fixedpoints             => constraints%fixedpoints,     &
+            nfp                     => constraints%nfixedpoints,    &
+            tangencypoints          => constraints%tangencypoints,  &
+            ntp                     => constraints%ntangencypoints, &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
+
+        ! Counters
+        ic = 0
+        ivg = 0
+        ivh = 0
+
+        ! Check allocation
+        ! Precompute number of entries for jacobians/hessian
+        if (dogradient .or. dohessian) then 
+            ! Compute number of jacobian and hessian values
+            nvg = 0
+            nvh = 0
+
+            ! Special point contributions
+            do i = 1, nsp
+                ! Gradient: 4 entries per non-special point 
+                nvg = nvg + 4*(specialpoints(i)%nID-1)
+
+                ! Hessian: 8 entries per non-special point (but 
+                ! distributed over valxx, valxy etc)
+                nvh = nvh + 8*(specialpoints(i)%nID-1)
+            end do
+
+            ! Fixed point contributions
+            do i = 1, nfp 
+                ! Gradient: 2 entries per fixed point
+                nvg = nvg + 2*fixedpoints(i)%nID 
+
+                ! Hessian: 4 entries per fixed point
+                nvh = nvh + 4*fixedpoints(i)%nID 
+            end do
+
+            ! Tangency point contributions
+            do i = 1, ntp 
+                ! Gradient: 2 entries per tangency point
+                nvg = nvg + 2*tangencypoints(i)%nID
+
+                ! Hessian: 4 entries per tangency point
+                nvh = nvh + 4*tangencypoints(i)%nID 
+            end do 
+
+            ! Flux surface contributions
+            do i = 1, nfs 
+                ! Gradient: 2 entries per contribution
+                nvg = nvg + 2*fluxsurfaces(i)%nID
+
+                ! Hessian: 4 entires per contribution
+                nvh = nvh + 4*fluxsurfaces(i)%nID 
+            end do
+
+            if (.not. allocated(jacG%row)) then 
+                jacG%nval = nvg 
+                call jacG%Allocate()
+            end if
+            if (.not. allocated(hessG%row)) then 
+                hessG%nval = nvh 
+                call hessG%Allocate()
+            end if 
+        else
+            ! Nothing to compute
+            if (.not. allocated(jacG%row)) then 
+                jacG%nval = 0 
+                call jacG%Allocate()
+            end if
+            if (.not. allocated(hessG%row)) then 
+                hessG%nval = 0 
+                call hessG%Allocate()
+            end if 
         end if 
 
-        if (dohessian) then 
-            if (allocated(valindex)) then 
-                deallocate(valindex, conindex)
+        ! Special points
+        !===============
+        do i = 1, nsp
+            ! Unpack
+            nc = specialpoints(i)%nID-1
+            spID = specialpoints(i)%ID(1)
+            tvID = specialpoints(i)%ID(2:specialpoints(i)%nID)
+            conindex = [(k, k = ic+1, ic+nc)]
+
+            ! Gradient
+            if (dogradient) then 
+                ! x
+                valindex = [(k, k = ivg+1, ivg+nc)]
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = tvID 
+                jacG%val(valindex) = dpsidx(tvID) 
+                ivg = ivg + nc 
+                
+                valindex = valindex + nc 
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = spID 
+                jacG%val(valindex) = -dpsidx(spID) 
+                ivg = ivg + nc 
+
+                ! y
+                valindex = [(k, k = ivg+1, ivg+nc)]
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = tvID + grid%vert%ntot
+                jacG%val(valindex) = dpsidy(tvID) 
+                ivg = ivg + nc 
+                
+                valindex = valindex + nc 
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = spID + grid%vert%ntot
+                jacG%val(valindex) = -dpsidy(spID) 
+                ivg = ivg + nc 
+
+            end if
+
+            ! Hessian
+            if (dohessian) then 
+                ! xx 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID
+                hessG%col(valindex) = tvID 
+                hessG%val(valindex) = d2psidx2(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = spID
+                hessG%col(valindex) = spID 
+                hessG%val(valindex) = -d2psidx2(spID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! xy 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID
+                hessG%col(valindex) = tvID + grid%vert%ntot
+                hessG%val(valindex) = d2psidxdy(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = spID
+                hessG%col(valindex) = spID + grid%vert%ntot
+                hessG%val(valindex) = -d2psidxdy(spID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! yx 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID + grid%vert%ntot
+                hessG%col(valindex) = tvID 
+                hessG%val(valindex) = d2psidxdy(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = spID + grid%vert%ntot
+                hessG%col(valindex) = spID 
+                hessG%val(valindex) = -d2psidxdy(spID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! yy 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID + grid%vert%ntot
+                hessG%col(valindex) = tvID + grid%vert%ntot
+                hessG%val(valindex) = d2psidy2(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = spID + grid%vert%ntot
+                hessG%col(valindex) = spID + grid%vert%ntot
+                hessG%val(valindex) = -d2psidy2(spID)*lambda(conindex)
+                ivh = ivh + nc 
+
             end if 
-            deallocate(valxx, valxy, valyy)
-        end if
+
+            ! Update counter
+            ic = ic + nc
+        end do 
+
+        ! Tangency points
+        !================
+        ! Not yet implemented
+
+        ! Fixed points
+        !=============
+        do i = 1, nfp
+            ! Unpack
+            nc = fixedpoints(i)%nID 
+            tvID = fixedpoints(i)%ID 
+            conindex = [(k, k = ic+1, ic+nc)]
+
+            ! Gradient
+            if (dogradient) then 
+                ! x
+                valindex = [(k, k = ivg+1, ivg+nc)]
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = tvID 
+                jacG%val(valindex) = dpsidx(tvID)
+                ivg = ivg + nc
+
+                ! y
+                valindex = [(k, k = ivg+1, ivg+nc)]
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = tvID + grid%vert%ntot
+                jacG%val(valindex) = dpsidy(tvID) 
+                ivg = ivg + nc 
+            end if
+
+            ! Hessian
+            if (dohessian) then 
+                ! xx
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID
+                hessG%col(valindex) = tvID 
+                hessG%val(valindex) = d2psidx2(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! xy 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID
+                hessG%col(valindex) = tvID + grid%vert%ntot
+                hessG%val(valindex) = d2psidxdy(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! yx 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID + grid%vert%ntot
+                hessG%col(valindex) = tvID 
+                hessG%val(valindex) = d2psidxdy(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! yy 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID + grid%vert%ntot
+                hessG%col(valindex) = tvID + grid%vert%ntot
+                hessG%val(valindex) = d2psidy2(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+            end if
+
+            ! Update counter
+            ic = ic + nc
+        end do
+
+        ! Flux surfaces
+        !==============
+        do i = 1, nfs 
+            ! Unpack
+            nc = fluxsurfaces(i)%nID 
+            tvID = fluxsurfaces(i)%ID 
+            conindex = [(k, k = ic+1, ic+nc)]
+
+            ! Gradient
+            if (dogradient) then 
+                ! x
+                valindex = [(k, k = ivg+1, ivg+nc)]
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = tvID 
+                jacG%val(valindex) = dpsidx(tvID)
+                ivg = ivg + nc
+
+                ! y
+                valindex = [(k, k = ivg+1, ivg+nc)]
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = tvID + grid%vert%ntot
+                jacG%val(valindex) = dpsidy(tvID) 
+                ivg = ivg + nc 
+            end if
+
+            ! Hessian
+            if (dohessian) then 
+                ! xx
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID
+                hessG%col(valindex) = tvID 
+                hessG%val(valindex) = d2psidx2(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! xy 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID
+                hessG%col(valindex) = tvID + grid%vert%ntot
+                hessG%val(valindex) = d2psidxdy(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! yx 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID + grid%vert%ntot
+                hessG%col(valindex) = tvID 
+                hessG%val(valindex) = d2psidxdy(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! yy 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID + grid%vert%ntot
+                hessG%col(valindex) = tvID + grid%vert%ntot
+                hessG%val(valindex) = d2psidy2(tvID)*lambda(conindex)
+                ivh = ivh + nc 
+
+            end if
+
+            ! Update counter
+            ic = ic + nc
+
+        end do
+
+
+        ! Transpose
+        !==========
+        gradG%row = jacG%col 
+        gradG%col = jacG%row 
+        gradG%val = jacG%val
+        gradG%nval = jacG%nval
+
+        ! Housekeeping
+        end associate
+
+
+    end subroutine
+
+    ! Gradient & Hessian computation, psi values
+    subroutine EvaluateFluxDerivativesFluxFunctionConstraints(&
+        constraints, gradG, hessG, dogradient, dohessian, &
+        lambda)
+
+        ! Description
+        !============
+        ! This routine evaluates the gradient and hessian w.r.t. the 
+        ! desired flux values. It is assumed that the number of rows and 
+        ! columns is already computed before. 
+
+        ! Note: the derivatives are computed as if the coordinates are 
+        ! the only design variables. Any reordering/adjustment of column
+        ! or row indices should be done afterwards. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FluxfunctionConstraintsUDT)       :: constraints 
+        type(MySparseUDT)                       :: gradG, hessG 
+        logical, intent(in)                     :: dogradient, dohessian
+        real(R8),  intent(in)                   :: lambda(*)
+
+        ! Auxiliary
+        type(MySparseUDT)                       :: jacG
+        integer(I8)                             :: nc
+
+        ! Loop
+        integer(I8)                             :: i, k, ic
+
+        ! Compute
+        !========
+        ! Derivatives are simply equal to minus one, just need to 
+        ! correctly determine columns and rows. 
+        ! Jacobian
+        jacG%nval = constraints%nfscon
+        call jacG%Allocate()
+
+        ! Columns are design variables for Jacobian, so simply equal 
+        ! to flux function constraint index (locally)
+        ic = 0
+        do i = 1, constraints%nfluxsurfaces
+            ! Get number of constraints
+            nc = constraints%fluxsurfaces(i)%nID 
+
+            ! Set
+            jacG%col(ic+1:ic+nc) = i 
+
+            ! Update
+            ic = ic + nc
+        end do
+
+        ! Rows are constraint indices - flux function constraints are 
+        ! evaluated last
+        ic = constraints%nfpcon + constraints%ntpcon + constraints%nspcon
+        jacG%row = [(k, k = ic+1, ic+constraints%nfscon)]
+
+        ! Values are just one
+        jacG%val(:) = -1
+
+        ! Compute gradient
+        !=================
+        gradG%val = jacG%val 
+        gradG%row = jacG%col 
+        gradG%col = jacG%row 
+        gradG%nval = jacG%nval 
+
+        ! Hessian
+        !========
+        ! Simply zero
+        hessG%nval = 0
+        call hessG%Allocate()
+
+    end subroutine
+
+    ! Data output
+    subroutine WriteDataFluxfunctionConstraints(constraints, grid)
+
+        ! Description
+        !============
+        ! Write grid nodes in the following format:
+        ! ID, x, y 
+        ! Different files are written for special vertices, fixed
+        ! vertices, flux surface vertices, and tangency points
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(gridUDT), intent(in)                       :: grid 
+        class(FluxfunctionConstraintsUDT)               :: constraints
+        real(R8), allocatable                           :: x(:), y(:)
+        integer(I8)                                     :: nIDs, nIDsfs, &
+            counter, i
+        integer(I8), allocatable                        :: IDs(:), IDsfs(:)
+        character(:), allocatable                       :: filepath, &
+            thispath
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        allocate(character(len('con_ff_vertices')) :: filepath)
+        filepath = 'con_ff_vertices'
+
+        ! Associate
+        associate(&
+            nsp             => constraints%nspecialpoints,  &
+            sp              => constraints%specialpoints,   &
+            ntp             => constraints%ntangencypoints, &
+            tp              => constraints%tangencypoints,  &
+            nfp             => constraints%nfixedpoints,    &
+            fp              => constraints%fixedpoints,     &
+            nfs             => constraints%nfluxsurfaces,   &
+            fs              => constraints%fluxsurfaces     &
+            )
+
+        ! Special points
+        !===============
+        ! Extract IDs of special points only 
+        nIDs    = nsp 
+        nIDsfs  = 0 ! %already compute how much special points we will have
+        allocate(IDs(nIDs), x(nIDs), y(nIDs))
+        do i = 1, nsp
+            IDs(i) = sp(i)%ID(1)
+            nIDsfs = nIDsfs + sp(i)%nID-1
+        end do
+        x = grid%vert%x(IDs)
+        y = grid%vert%y(IDs)
+
+        ! Write
+        thispath = filepath // '_sp'
+        call WriteVertexData(IDs, x, y, thispath)
+
+        ! Deallocate
+        deallocate(x ,y, IDs)
+
+        ! Extract IDs of flux surface vertices with special points (but without those points)
+        allocate(IDs(nIDsfs), x(nIDsfs),y(nIDsfs))
+        counter = 0
+        do i = 1, nsp
+            ! Get number of IDs
+            nIDs = sp(i)%nID
+
+            ! Add coordinates
+            IDs(counter+1:counter+nIDs-1) = sp(i)%ID(2:nIDs)
+            x(counter+1:counter+nIDs-1) = grid%vert%x(sp(i)%ID(2:nIDs))
+            y(counter+1:counter+nIDs-1) = grid%vert%y(sp(i)%ID(2:nIDs))
+
+            ! Update counter
+            counter = counter + nIDs-1
+        end do
+
+        ! Write
+        thispath = filepath // '_spfs'
+        call WriteVertexData(IDs, x, y, thispath)
+        
+        ! Deallocate
+        deallocate(x ,y, IDs)
+
+        ! Fixed points
+        !=============
+        ! Extract IDs
+        nIDs    = nfp 
+        allocate(IDs(nIDs), x(nIDs), y(nIDs))
+        do i = 1, nfp
+            IDs(i) = fp(i)%ID(1)
+        end do
+        x = grid%vert%x(IDs)
+        y = grid%vert%y(IDs)
+
+        ! Write
+        thispath = filepath // '_fp'
+        call WriteVertexData(IDs, x, y, thispath)
+
+        ! Deallocate
+        deallocate(x, y, IDs)
+
+        ! Tangency points
+        !================
+        ! Extract IDs
+        nIDs    = ntp 
+        allocate(IDs(nIDs), x(nIDs), y(nIDs))
+        do i = 1, ntp
+            IDs(i) = tp(i)%ID(1)
+        end do
+        x = grid%vert%x(IDs)
+        y = grid%vert%y(IDs)
+
+        ! Write
+        thispath = filepath // '_tp'
+        call WriteVertexData(IDs, x, y, thispath)
+
+        ! Deallocate
+        deallocate(x ,y, IDs)
+
+        ! Flux surfaces
+        !==============
+        ! Compute total number of points
+        nIDs    = 0 
+        do i = 1, nfs
+            nIDs = nIDs + fs(i)%nID
+        end do
+        allocate(IDs(nIDs), x(nIDs), y(nIDs))
+
+        ! Set points
+        counter = 0
+        do i = 1, nfs
+            ! Get number of IDs
+            nIDs = fs(i)%nID
+
+            ! Add coordinates
+            IDs(counter+1:counter+nIDs) = fs(i)%ID
+            x(counter+1:counter+nIDs) = grid%vert%x(fs(i)%ID)
+            y(counter+1:counter+nIDs) = grid%vert%y(fs(i)%ID)
+
+            ! Update counter
+            counter = counter + nIDs
+        end do
+
+
+        ! Write
+        thispath = filepath // '_fs'
+        call WriteVertexData(IDs, x, y, thispath)
+
+        ! Deallocate
+        deallocate(x ,y, IDs)
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
@@ -1950,21 +2876,18 @@ module gdmod_constraints
 
         ! Destroy
         !========
-        if (allocated(constraints%vert)) then
-            deallocate(constraints%vert)
-        end if
-        if (allocated(constraints%PsiD)) then
-            deallocate(constraints%PsiD)
-        end if
 
     end subroutine
+
+
 
     !------------------------------------------------------------------!
     !                         BOUNDARY FUNCTION                        !
     !------------------------------------------------------------------!
     ! Initialize
     subroutine InitializeBoundaryFunctionConstraints(constraints, &
-        grid, magneticField, environment, monitor, options)
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
 
         ! Description
         !============
@@ -1989,6 +2912,7 @@ module gdmod_constraints
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
         type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                   :: designvariables
 
         ! Auxiliary
         real(R8), allocatable                       :: xe(:, :), &
@@ -2254,188 +3178,242 @@ module gdmod_constraints
         ! Evaluate
         call psf%Evaluate(x(tv), y(tv), G, '0', '0') 
 
-        ! Constraint gradient
-        !====================
-        if (dogradient) then 
-            ! Initialize
-            jacG%nrow = nc 
-            jacG%ncol = designvariables%nphi
+        ! Derivatives
+        !============
+        ! Set row and column sizes
+        gradG%nrow = designvariables%nphi
+        gradG%ncol = constraints%ncon
+        hessG%nrow = designvariables%nphi
+        hessG%ncol = designvariables%nphi
 
-            ! Check design variables
-            select case(designvariables%type)
+        ! Check which gradient to compute
+        select case (designvariables%type)
 
-            case ('coordinates')
+        case ('coordinates', 'coordinates_desiredflux')
 
-                ! Order in jacobian: first x, then y. Has as many 
-                ! non-zero elements as there are design variables. 
+            ! Call dedicated routine - no flux contributions
+            call constraints%EvaluateDerivativesCoordinates(gradG, &
+                hessG, grid, dogradient, dohessian, lambda)
 
-                ! Allocate
-                jacG%nval = 2*ntv
-                call jacG%Allocate() 
-                allocate(dpsfdx(ntv))
-                allocate(dpsfdy(ntv))
-                allocate(conindex(ntv))
-                allocate(valindex(ntv))
+        case default 
 
-                ! Compute the derivative values
-                call psf%Evaluate(x(tv), y(tv), dpsfdx, '1', '0')
-                call psf%Evaluate(x(tv), y(tv), dpsfdy, '0', '1')
-
-                ! x-contribution
-                !---------------
-                ! Build indices
-                conindex = [(k, k = ic+1, ic+ntv)]
-                valindex = [(k, k = ivg+1, ivg+ntv)]
-
-                ! Add values
-                jacG%row(valindex) = conindex  
-                jacG%col(valindex) = tv
-                jacG%val(valindex) = dpsfdx 
-
-                ! y-contribution
-                !---------------
-                ! Build indices
-                ivg = ivg + ntv
-                valindex = valindex + ntv
-
-                ! Add values
-                jacG%row(valindex) = conindex 
-                jacG%col(valindex) = tv + grid%vert%ntot 
-                jacG%val(valindex) = dpsfdy 
-
-                ! Build gradient
-                gradG%nrow = jacG%ncol 
-                gradG%ncol = jacG%nrow 
-                gradG%nval = jacG%nval 
-                
-                call gradG%Allocate()
-                gradG%row = jacG%col 
-                gradG%col = jacG%row
-                gradG%val = jacG%val
-
-                ! Housekeeping
-                call jacG%Deallocate()
-
-            case default
-
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
-
-            end select
-
-        end if
-
-        ! Constraint hessian
-        !===================
-        if (dohessian) then 
-
-            ! Initialize
-            hessG%nrow = designvariables%nphi 
-            hessG%ncol = designvariables%nphi 
-
-            ! Check design variables
-            select case(designvariables%type)
-
-            case ('coordinates')
+            call gdErrorHandler('EvaluateBoundaryFunctionConstraints: unknown design variable type')
             
-                ! Allocate
-                hessG%nval = 4*ntv
-                if (.not. allocated(valindex)) then
-                    allocate(valindex(ntv))
-                end if
-                if (.not. allocated(conindex)) then 
-                    allocate(conindex(ntv))
-                end if 
-                if (.not. allocated(hessG%val)) then
-                    call hessG%Allocate()
-                end if
-                allocate(valxx(ntv))
-                allocate(valxy(ntv))
-                allocate(valyy(ntv))
+        end select
 
-                ! Initialize
-                valxx(:) = 0
-                valyy(:) = 0
-                valxy(:) = 0
+        ! Housekeeping
+        !=============
+        end associate
 
-                ! Compute contributions
-                call psf%Evaluate(x(tv), y(tv), valxx, '2', '0')
-                call psf%Evaluate(x(tv), y(tv), valyy, '0', '2')
-                call psf%Evaluate(x(tv), y(tv), valxy, '1', '1')
+    end subroutine
 
-                ! xx-contribution
-                !----------------
-                k = 1
-                ! Build indices
-                valindex = [(k, k = ivh+1, ivh+ntv)] 
+    ! Derivatives, coordinates
+    subroutine EvaluateCoordinatesDerivativesBoundaryFunctionConstraints(&
+        constraints, gradG, hessG, grid, dogradient, dohessian, lambda)
 
-                ! Add values
-                hessG%row(valindex) = tv 
-                hessG%col(valindex) = tv 
-                hessG%val(valindex) = valxx*lambda ! element-wise mult. 
-                
-                ! xy-contribution
-                !----------------
-                ! Build indices
-                ivh = ivh + ntv
-                valindex = valindex + ntv
+        ! Description
+        !============
+        ! This routine evaluates the gradient and hessian w.r.t. the 
+        ! grid coordinates. It is assumed that the number of rows and 
+        ! columns is already computed before. 
 
-                ! Add values
-                hessG%row(valindex) = tv
-                hessG%col(valindex) = tv + grid%vert%ntot 
-                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+        ! Note: the derivatives are computed as if the coordinates are 
+        ! the only design variables. Any reordering/adjustment of column
+        ! or row indices should be done afterwards. 
 
-                ! yx-contribution
-                !----------------
-                ! symmetric with xy
-                ! Build indices
-                ivh = ivh + ntv
-                valindex = valindex + ntv 
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(BoundaryFunctionConstraintsUDT)   :: constraints 
+        real(R8), allocatable, intent(in)   :: lambda(:)
+        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(GridUDT), intent(in)           :: grid 
+        logical, intent(in)                 :: dogradient, dohessian
 
-                ! Add values
-                hessG%row(valindex) = tv + grid%vert%ntot 
-                hessG%col(valindex) = tv 
-                hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+        ! Loop variables
+        integer(I8)                         :: ic, ivg, ivh, k
+        integer(I8), allocatable            :: valindex(:), conindex(:)
 
-                ! yy-contribution
-                !----------------
-                ! Build indices
-                ivh = ivh + ntv
-                valindex = valindex + ntv
+        ! Auxiliary variables
+        real(R8), allocatable               :: dpsfdx(:), dpsfdy(:), &
+            valxx(:), valxy(:), valyy(:)
 
-                ! Add values
-                hessG%row(valindex) = tv + grid%vert%ntot 
-                hessG%col(valindex) = tv + grid%vert%ntot 
-                hessG%val(valindex) = valyy*lambda ! element-wise mult. 
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            nc      => constraints%ncon,        &
+            psf     => constraints%psf,         &
+            tv      => constraints%vert,        &
+            ntv     => constraints%nvert,       &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
 
-            case default
+        ! Counters
+        ic = 0 ! constraint counter (local)
+        ivg = 0 ! value index for gradient
+        ivh = 0 ! value index for hessian
 
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
+        ! Derivatives
+        !============
+        ! Gradient
+        if (dogradient) then 
+            ! Allocate
+            jacG%nval = 2*ntv
+            call jacG%Allocate() 
+            allocate(dpsfdx(ntv))
+            allocate(dpsfdy(ntv))
+            allocate(conindex(ntv))
+            allocate(valindex(ntv))
 
-            end select
+            ! Compute the derivative values
+            call psf%Evaluate(x(tv), y(tv), dpsfdx, '1', '0')
+            call psf%Evaluate(x(tv), y(tv), dpsfdy, '0', '1')
+
+            ! x-contribution
+            !---------------
+            ! Build indices
+            conindex = [(k, k = ic+1, ic+ntv)]
+            valindex = [(k, k = ivg+1, ivg+ntv)]
+
+            ! Add values
+            jacG%row(valindex) = conindex  
+            jacG%col(valindex) = tv
+            jacG%val(valindex) = dpsfdx 
+
+            ! y-contribution
+            !---------------
+            ! Build indices
+            ivg = ivg + ntv
+            valindex = valindex + ntv
+
+            ! Add values
+            jacG%row(valindex) = conindex 
+            jacG%col(valindex) = tv + grid%vert%ntot 
+            jacG%val(valindex) = dpsfdy 
+
+            ! Build gradient
+            gradG%nval = jacG%nval 
+            
+            call gradG%Allocate()
+            gradG%row = jacG%col 
+            gradG%col = jacG%row
+            gradG%val = jacG%val
+
+            ! Housekeeping
+            call jacG%Deallocate()
+        end if 
+
+        ! Hessian
+        if (dohessian) then 
+            
+            ! Allocate
+            hessG%nval = 4*ntv
+            if (.not. allocated(valindex)) then
+                allocate(valindex(ntv))
+            end if
+            if (.not. allocated(conindex)) then 
+                allocate(conindex(ntv))
+            end if 
+            if (.not. allocated(hessG%val)) then
+                call hessG%Allocate()
+            end if
+            allocate(valxx(ntv))
+            allocate(valxy(ntv))
+            allocate(valyy(ntv))
+
+            ! Initialize
+            valxx(:) = 0
+            valyy(:) = 0
+            valxy(:) = 0
+
+            ! Compute contributions
+            call psf%Evaluate(x(tv), y(tv), valxx, '2', '0')
+            call psf%Evaluate(x(tv), y(tv), valyy, '0', '2')
+            call psf%Evaluate(x(tv), y(tv), valxy, '1', '1')
+
+            ! xx-contribution
+            !----------------
+            k = 1
+            ! Build indices
+            valindex = [(k, k = ivh+1, ivh+ntv)] 
+
+            ! Add values
+            hessG%row(valindex) = tv 
+            hessG%col(valindex) = tv 
+            hessG%val(valindex) = valxx*lambda ! element-wise mult. 
+            
+            ! xy-contribution
+            !----------------
+            ! Build indices
+            ivh = ivh + ntv
+            valindex = valindex + ntv
+
+            ! Add values
+            hessG%row(valindex) = tv
+            hessG%col(valindex) = tv + grid%vert%ntot 
+            hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+
+            ! yx-contribution
+            !----------------
+            ! symmetric with xy
+            ! Build indices
+            ivh = ivh + ntv
+            valindex = valindex + ntv 
+
+            ! Add values
+            hessG%row(valindex) = tv + grid%vert%ntot 
+            hessG%col(valindex) = tv 
+            hessG%val(valindex) = valxy*lambda ! element-wise mult. 
+
+            ! yy-contribution
+            !----------------
+            ! Build indices
+            ivh = ivh + ntv
+            valindex = valindex + ntv
+
+            ! Add values
+            hessG%row(valindex) = tv + grid%vert%ntot 
+            hessG%col(valindex) = tv + grid%vert%ntot 
+            hessG%val(valindex) = valyy*lambda ! element-wise mult. 
 
         end if
         
         ! Housekeeping
         !=============
-        ! End associate
         end associate
 
-        ! Deallocate
+    end subroutine 
 
-        if (dogradient) then 
-            deallocate(dpsfdx, dpsfdy, valindex, conindex)
-        end if 
+    ! Derivatives, flux
+    subroutine EvaluateFluxDerivativesBoundaryFunctionConstraints(&
+        constraints, gradG, hessG)
 
-        if (dohessian) then 
-            if (allocated(valindex)) then 
-                deallocate(valindex, conindex)
-            end if 
-            deallocate(valxx, valxy, valyy)
-        end if
+        ! Description
+        !============
+        ! This routine evaluates the gradient and hessian w.r.t. the 
+        ! grid coordinates. It is assumed that the number of rows and 
+        ! columns is already computed before. 
+
+        ! Note: the derivatives are computed as if the coordinates are 
+        ! the only design variables. Any reordering/adjustment of column
+        ! or row indices should be done afterwards. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(BoundaryFunctionConstraintsUDT)       :: constraints
+        type(MySparseUDT)                           :: gradG, hessG
+
+        ! Set values
+        !===========
+        ! Simply zero, no dependencies
+        gradG%nval = 0
+        call gradG%Allocate() 
+
+        hessG%nval = 0
+        call hessG%Allocate()
 
     end subroutine
 
@@ -2447,7 +3425,8 @@ module gdmod_constraints
 
     ! Initialize
     subroutine InitializeXPointConstraints(constraints, &
-        grid, magneticField, environment, monitor, options)
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
 
         ! Description
         !============
@@ -2464,6 +3443,7 @@ module gdmod_constraints
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
         type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                   :: designvariables
 
         ! Auxiliary
         integer(I8)                                 :: nxpind
@@ -2487,6 +3467,9 @@ module gdmod_constraints
         ! Check which x-points are not yet constrained
         mask(:) = .false. 
         where (monitor%eqvcc(xpind) <= monitor%maxeqvcc-2) mask = .true.
+
+        ! Set method
+        constraints%meth = options%xpoptions%meth
 
         ! Allocate and assign
         constraints%nxpind = count(mask)
@@ -2522,7 +3505,7 @@ module gdmod_constraints
 
         ! Description
         !============
-        ! Evaluate the X-point constraints
+        ! Evaluate the X-point constraints (if location based) as:
         ! 
         !       G(2*i-1) = (x_i - x_i0)**2 + (x_i - x_i0) = 0
         !       G(2*i)   = (y_i - y_i0)**2 + (y_i - y_i0) = 0
@@ -2547,6 +3530,10 @@ module gdmod_constraints
         ! Therefore, the multiplication Hjk,i lambda_i is equal to:
         !
         !       Hjk,i lambda_i = 2 * lambda_i 
+
+        ! For gradient based constraints, we simply set dpsidx, dpsidy 
+        ! to zero. Note that we require 3rd order derivatives then for
+        ! hessian computation. 
 
         ! Notes
         !======
@@ -2582,7 +3569,8 @@ module gdmod_constraints
         integer(I8), allocatable            :: valindex(:), conindex(:)
 
         ! Auxiliary variables
-        real(R8), allocatable               ::  valxx(:), valxy(:), valyy(:)
+        real(R8), allocatable               ::  valxx(:), valxy(:), &
+            valyy(:), xpx(:), xpy(:), dpsidx(:), dpsidy(:)
         
         ! Initialize
         !===========
@@ -2634,25 +3622,137 @@ module gdmod_constraints
             end if
         end if
 
+        ! Precompute some values if necessary
+        select case (trim(constraints%meth))
+
+        case ('loc')
+
+            ! Nothing to compute
+
+        case ('grad')
+
+            ! Extract x-point locations
+            xpx = grid%vert%x(constraints%xpind)
+            xpy = grid%vert%y(constraints%xpind)
+
+            ! Compute local magnetic field
+            allocate(dpsidx(ntv), dpsidy(ntv))
+            call magneticField%interp%Evaluate(xpx, xpy, 1, 0, dpsidx)
+            call magneticField%interp%Evaluate(xpx, xpy, 0, 1, dpsidy)
+
+        case default 
+
+            call gdErrorHandler('Unknown method to impose X-point constraints, choose "loc" or "grad"')
+
+        end select
+
         ! Evaluate
-        do i = 1, ntv
-            G(2*i-1) = ( x(tv(i)) - locx(i) )**2 + ( x(tv(i)) - locx(i) )
-            G(2*i)   = ( y(tv(i)) - locy(i) )**2 + ( y(tv(i)) - locy(i) )
-        end do
+        select case (trim(constraints%meth))
 
-        ! Constraint gradient
+        case ('loc')
+
+            ! Location based
+            do i = 1, ntv
+                G(2*i-1) = ( x(tv(i)) - locx(i) )**2 + ( x(tv(i)) - locx(i) )
+                G(2*i)   = ( y(tv(i)) - locy(i) )**2 + ( y(tv(i)) - locy(i) )
+            end do
+
+        case ('grad')
+
+            ! Gradient based
+            G(ic+1:ic+ntv) = dpsidx 
+            ic = ic + ntv 
+            G(ic+1:ic+ntv) = dpsidy 
+
+        end select
+
+        ! Derivatives
         !====================
-        if (dogradient) then 
-            ! Initialize
-            jacG%nrow = nc 
-            jacG%ncol = designvariables%nphi
+        ! Initialize
+        gradG%nrow = designvariables%nphi 
+        gradG%ncol = constraints%ncon 
+        hessG%nrow = designvariables%nphi 
+        hessG%ncol = designvariables%nphi 
 
-            ! Check design variables
-            select case(designvariables%type)
+        ! Check which derivatives to compute
+        select case (trim(designvariables%type))
 
-            case ('coordinates')
+        case ('coordinates', 'coordinates_desiredflux')
 
-                ! Order in jacobian: first x, then y. 
+            ! Only coordinate contributions, no flux contribution
+            call constraints%EvaluateCoordinatesDerivative(gradG, hessG, &
+                dogradient, dohessian, lambda, grid, magneticField, xpx, xpy)
+
+        case default 
+
+            call gdErrorHandler('Unknown design variable type in X-point constraint evaluation')
+
+        end select 
+        
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateCoordinatesDerivativeXPointConstraints(&
+        constraints, gradG, hessG, dogradient, dohessian, lambda, &
+        grid, magneticField, xpx, xpy)
+
+        ! Description
+        !============
+        ! Evaluate derivatives w.r.t. coordinates (design variable 
+        ! indices are 'local', meaning we assume the coordinates are
+        ! the only design variables)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(XPointConstraintsUDT)         :: constraints
+        type(MySparseUDT)                   :: gradG, hessG, jacG 
+        logical, intent(in)                 :: dogradient, dohessian
+        real(R8), allocatable, intent(in)   :: lambda(:)
+        type(MagneticFieldUDT)              :: magneticField 
+        type(GridUDT), intent(in)           :: grid
+        real(R8), intent(in)                :: xpx(:), xpy(:)  
+
+        ! Loop variables
+        integer(I8)                         :: i, ic, ivg, ivh, k
+        integer(I8), allocatable            :: valindex(:), conindex(:)
+        
+        ! Auxiliary variables
+        real(R8), allocatable               ::  valxx(:), valxy(:), &
+            valyy(:), dpsidx(:), dpsidy(:), d2psidx2(:), d2psidxdy(:), &
+            d2psidy2(:), d3psidx3(:), d3psidx2dy(:), d3psidxdy2(:), &
+            d3psidy3(:)
+
+        ! Initialize
+        !===========
+        associate(&
+            nc      => constraints%ncon,        &
+            tv      => constraints%xpind,       &
+            ntv     => constraints%nxpind,      &
+            locx    => constraints%locx,        &
+            locy    => constraints%locy,         &
+            x       => grid%vert%x,             &
+            y       => grid%vert%y              &
+            )
+
+        ! Counters
+        ivg = 0
+        ivh = 0
+        ic = 0
+
+        ! Check case
+        !===========
+        select case (trim(constraints%meth))
+
+        case ('loc')
+
+            ! Gradient
+            if (dogradient) then 
 
                 ! Allocate
                 jacG%nval = 2*ntv
@@ -2696,29 +3796,11 @@ module gdmod_constraints
                 ! Housekeeping
                 call jacG%Deallocate()
 
-            case default
+            end if 
 
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
+            ! Hessian
+            if (dohessian) then 
 
-            end select
-
-        end if
-
-        ! Constraint hessian
-        !===================
-        if (dohessian) then 
-
-            ! Initialize
-            hessG%nrow = designvariables%nphi 
-            hessG%ncol = designvariables%nphi 
-
-            ! Check design variables
-            select case(designvariables%type)
-
-            case ('coordinates')
-            
                 ! Allocate
                 hessG%nval = 4*ntv
                 if (.not. allocated(valindex)) then
@@ -2786,33 +3868,185 @@ module gdmod_constraints
                 hessG%col(valindex) = tv + grid%vert%ntot 
                 hessG%val(valindex) = valyy*lambda(conindex) ! element-wise mult. 
 
-            case default
+            end if 
 
-                ! Unknown, throw error
-                call gdErrorHandler('Gradient not implemented for ' &
-                    // 'this type of design variable')
+        case ('grad')
 
-            end select
+            ! Gradient
+            if (dogradient) then 
 
-        end if
-        
+                ! Allocate
+                jacG%nval = 4*ntv
+                call jacG%Allocate() 
+                allocate(conindex(ntv))
+                allocate(valindex(ntv))
+                allocate(d2psidx2(ntv), d2psidxdy(ntv), d2psidy2(ntv))
+
+                ! Evaluate
+                call magneticField%interp%Evaluate(xpx, xpy, 2, 0, d2psidx2)
+                call magneticField%interp%Evaluate(xpx, xpy, 1, 1, d2psidxdy)
+                call magneticField%interp%Evaluate(xpx, xpy, 0, 2, d2psidy2)
+
+                ! x-constraints
+                !--------------
+                ! Build indices
+                conindex = [(k, k = ic+1, ic+ntv)]
+                valindex = [(k, k = ivg+1, ivg+ntv)]
+
+                ! Add values
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = tv
+                jacG%val(valindex) = d2psidx2
+                ivg = ivg + ntv 
+
+                valindex = valindex + ntv 
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = tv + grid%vert%ntot
+                jacG%val(valindex) = d2psidxdy
+                ivg = ivg + ntv
+
+                ! Update counter
+                ic = ic + ntv
+
+                ! y-constraints
+                !--------------
+                ! Build indices
+                conindex = [(k, k = ic+1, ic+ntv)]
+
+                ! Add values
+                valindex = valindex + ntv
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = tv
+                jacG%val(valindex) = d2psidxdy 
+                ivg = ivg + ntv 
+
+                valindex = valindex + ntv
+                jacG%row(valindex) = conindex 
+                jacG%col(valindex) = tv + grid%vert%ntot
+                jacG%val(valindex) = d2psidy2 
+                ivg = ivg + ntv 
+
+                ! Build gradient
+                !===============
+                gradG%nval = jacG%nval 
+                
+                call gradG%Allocate()
+                gradG%row = jacG%col 
+                gradG%col = jacG%row
+                gradG%val = jacG%val
+
+                ! Housekeeping
+                call jacG%Deallocate()
+
+            end if 
+
+            ! Hessian
+            ic = 0
+            if (dohessian) then 
+
+                ! Allocate
+                hessG%nval = 8*ntv
+                if (.not. allocated(valindex)) then
+                    allocate(valindex(ntv))
+                end if
+                if (.not. allocated(conindex)) then 
+                    allocate(conindex(ntv))
+                end if 
+                if (.not. allocated(hessG%val)) then
+                    call hessG%Allocate()
+                end if
+                allocate(valxx(ntv))
+                allocate(valxy(ntv))
+                allocate(valyy(ntv))
+                allocate(d3psidx3(ntv), d3psidx2dy(ntv), d3psidxdy2(ntv), &
+                    d3psidy3(ntv))
+
+                ! Compute
+                call magneticField%interp%Evaluate(xpx, xpy, 3, 0, d3psidx3)
+                call magneticField%interp%Evaluate(xpx, xpy, 2, 1, d3psidx2dy)
+                call magneticField%interp%Evaluate(xpx, xpy, 1, 2, d3psidxdy2)
+                call magneticField%interp%Evaluate(xpx, xpy, 0, 3, d3psidy3)
+
+                ! x-constraint
+                !-------------
+                ! Set index
+                conindex = [(k, k = ic+1, ic+ntv)]
+
+                ! xx
+                valindex = [(k, k = ivh+1, ivh+ntv)]
+                hessG%row(valindex) = tv 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = d3psidx3*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! xy
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv 
+                hessG%col(valindex) = tv + grid%vert%ntot 
+                hessG%val(valindex) = d3psidx2dy*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! yx 
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = d3psidx2dy*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! yy
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv + grid%vert%ntot
+                hessG%val(valindex) = d3psidxdy2*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! Update counter
+                ic = ic + ntv
+
+                ! y-constraint
+                !-------------
+                ! Set index
+                conindex = [(k, k = ic+1, ic+ntv)]
+
+                ! xx
+                valindex = [(k, k = ivh+1, ivh+ntv)]
+                hessG%row(valindex) = tv 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = d3psidx2dy*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! xy
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv 
+                hessG%col(valindex) = tv + grid%vert%ntot 
+                hessG%val(valindex) = d3psidxdy2*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! yx 
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv 
+                hessG%val(valindex) = d3psidxdy2*lambda(conindex)
+                ivh = ivh + ntv 
+
+                ! yy
+                valindex = valindex + ntv 
+                hessG%row(valindex) = tv + grid%vert%ntot 
+                hessG%col(valindex) = tv + grid%vert%ntot
+                hessG%val(valindex) = d3psidy3*lambda(conindex)
+                ivh = ivh + ntv 
+                
+            end if
+
+        case default 
+
+            call gdErrorHandler('Unknown method for imposing X-point constraints')
+
+        end select
+
         ! Housekeeping
         !=============
-        ! End associate
         end associate
-
-        ! Deallocate
-
-        if (dogradient) then 
-            deallocate(valindex, conindex)
-        end if 
-
-        if (dohessian) then 
-            if (allocated(valindex)) then 
-                deallocate(valindex, conindex)
-            end if 
-            deallocate(valxx, valxy, valyy)
-        end if
 
     end subroutine
 
@@ -2822,7 +4056,8 @@ module gdmod_constraints
 
     ! Initialize
     subroutine InitializeEdgeLengthsConstraints(constraints, &
-        grid, magneticField, environment, monitor, options)
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
 
         ! Description
         !============
@@ -2863,6 +4098,7 @@ module gdmod_constraints
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
         type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                   :: designvariables
 
         ! Auxiliary
         real(R8)                    :: edgedistvessel, edgedistxpoint
@@ -2918,8 +4154,8 @@ module gdmod_constraints
             ! Check for these edges whether they can be constrained
             allocate(dovesseledgecon(nvesseledges))
             dovesseledgecon(:) = .true.
-            where ( (vcc(tempvesseledges(:, 1)) >= maxvcc) .and. &
-                (vcc(tempvesseledges(:, 2)) >= maxvcc)) &
+            where ( (vcc(tempvesseledges(:, 1)) >= maxvcc(tempvesseledges(:, 1))) .and. &
+                (vcc(tempvesseledges(:, 2)) >= maxvcc(tempvesseledges(:, 2)))) &
                 dovesseledgecon = .false.
 
             ! Recompute edges
@@ -2945,8 +4181,8 @@ module gdmod_constraints
             ! Check for these edges whether they can be constrained
             allocate(doxpointedgecon(nxpointedges))
             doxpointedgecon(:) = .true.
-            where ( (vcc(tempxpointedges(:, 1)) >= maxvcc) .and. &
-                (vcc(tempxpointedges(:, 2)) >= maxvcc)) &
+            where ( (vcc(tempxpointedges(:, 1)) >= maxvcc(tempxpointedges(:, 1))) .and. &
+                (vcc(tempxpointedges(:, 2)) >= maxvcc(tempxpointedges(:, 2)))) &
                 doxpointedgecon = .false.
 
             ! Recompute edges
@@ -2996,16 +4232,16 @@ module gdmod_constraints
             ev = constraints%edgevert(i, 1:2)
 
             ! Update counter
-            if (vert%BV(ev(1)) .and. (vcc(ev(1)) < maxvcc)) then 
+            if (vert%BV(ev(1)) .and. (vcc(ev(1)) < maxvcc(ev(1)))) then 
                 ! Assign to boundary vertex
                 vcc(ev(1)) = vcc(ev(1)) + 1
-            elseif (vert%BV(ev(2)) .and. (vcc(ev(2)) < maxvcc)) then 
+            elseif (vert%BV(ev(2)) .and. (vcc(ev(2)) < maxvcc(ev(2)))) then 
                 ! Assign to boundary vertex
                 vcc(ev(2)) = vcc(ev(2)) + 1
-            elseif (vcc(ev(1)) <= maxvcc) then 
+            elseif (vcc(ev(1)) <= maxvcc(ev(1))) then 
                 ! Assign to first vertex, no boundary vertex
                 vcc(ev(1)) = vcc(ev(1)) + 1
-            elseif (vcc(ev(2)) <= maxvcc) then 
+            elseif (vcc(ev(2)) <= maxvcc(ev(2))) then 
                 ! Assign to first vertex, no boundary vertex
                 vcc(ev(2)) = vcc(ev(2)) + 1
             else
@@ -3191,7 +4427,7 @@ module gdmod_constraints
             ! Check design variables
             select case(designvariables%type)
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux') ! no flux contributions anyway
 
                 ! Order in jacobian: first x, then y. 
 
@@ -3288,7 +4524,7 @@ module gdmod_constraints
             ! Check design variables
             select case(designvariables%type)
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
             
                 ! Allocate
                 hessG%nval = 8*nc 
@@ -3449,7 +4685,8 @@ module gdmod_constraints
 
     ! Initialize
     subroutine InitializeOrthogonalityConstraints(constraints, &
-        grid, magneticField, environment, monitor, options)
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
 
         ! Description
         !============
@@ -3482,6 +4719,7 @@ module gdmod_constraints
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
         type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                   :: designvariables
 
         ! Auxiliary
         integer(I8)                 :: nincludebox, nexcludebox, tv, &
@@ -3761,7 +4999,7 @@ module gdmod_constraints
                 ! Check if there is a boundary vertex in this edge which 
                 ! already has been constrained. 
                 if ( (.not. isconstrained(tf)) & ! should not be constrained
-                    .and. ( (vcc(tvn(j)) < maxvcc) .or. (vcc(tv) < maxvcc) ) & ! a vertex has less than 2 constraints already imposed
+                    .and. ( (vcc(tvn(j)) < maxvcc(tvn(j))) .or. (vcc(tv) < maxvcc(tv)) ) & ! a vertex has less than 2 constraints already imposed
                     .and. ( (.not. vert%BV(tvn(j))) .or. (.not. vert%BV(tv))) & ! at least one is an internal vertex
                     .and. ( isfaceperp ) & ! the face is initially almost orthogonal 
                     .and. ( ( northcon(tvn(j)) < maxnorthcon(tvn(j)) ) .and. ( northcon(tv) < maxnorthcon(tv) ) ) &
@@ -3783,13 +5021,13 @@ module gdmod_constraints
 
                         ! Check if we can add the constraint there
                         if ( ( northcon(tbv) < maxnorthcon(tbv) ) &
-                            .and. vcc(tbv) < maxvcc ) then 
+                            .and. vcc(tbv) < maxvcc(tbv) ) then 
                             vcc(tbv) = vcc(tbv) + 1 
                         else
                             vcc(tnbv) = vcc(tnbv) + 1 
                         end if
                     else
-                        if ( vcc(tv) < maxvcc ) then 
+                        if ( vcc(tv) < maxvcc(tv) ) then 
                             vcc(tv) = vcc(tv) + 1
                         else
                             vcc(tvn(j)) = vcc(tvn(j)) +  1
@@ -3975,7 +5213,7 @@ module gdmod_constraints
             ! Check design variables
             select case(designvariables%type)
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux') ! no flux contributions
 
                 ! Order in jacobian: first x, then y. 
 
@@ -4081,7 +5319,7 @@ module gdmod_constraints
             ! Check design variables
             select case(designvariables%type)
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
             
                 ! Initialize
                 !===========

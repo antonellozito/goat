@@ -180,7 +180,7 @@ VERSION 1.00.00
 'gd.design.cfv.par.PRPB.weightsep'		    '10'
 
 # Design variables
-'gd.design.dv.type'         	'coordinates'
+'gd.design.dv.type'         	'coordinates_desiredflux'
 
 # Equality constraints
 'gd.design.ec.boundaryfunctions'    '1'
@@ -217,6 +217,9 @@ VERSION 1.00.00
 'gd.design.ec.par.fluxfunction.doboxoverride' 			'0'
 'gd.design.ec.par.fluxfunction.includeboxx' 			'[]'
 'gd.design.ec.par.fluxfunction.includeboxy' 			'[]'
+
+# X-points 
+'gd.design.ec.par.xpoints.meth'                         'grad'
 
 # Orthogonality constraint parameters 
 'gd.design.ec.par.orthogonality.checkperp'				'1'

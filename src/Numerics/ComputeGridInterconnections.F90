@@ -411,7 +411,7 @@ subroutine ComputeGridInterconnections(grid)
     end do
     v%nface = sum(v%faceP(:, 2))
     v%faceP(1, 1) = 1
-    do i = 2, f%ntot 
+    do i = 2, v%ntot 
         v%faceP(i, 1) = v%faceP(i-1, 1) + v%faceP(i-1, 2)
     end do 
     allocate(v%face(v%nface), vcc(v%ntot)) 

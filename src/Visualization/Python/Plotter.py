@@ -25,6 +25,7 @@ filesep = '/' # file separator
 gridverticesfile = 'vertices_init.dat' # all grid vertices (initial coordinates)
 bndconverticesfile = 'con_bnd_vertices.dat' # vertices constrained by boundary constraints
 ffconverticesfile = 'con_ff_vertices.dat' # vertices constrained by flux function constraints
+ffconverticesfilestem = 'con_ff_vertices_'
 xpconverticesfile = 'con_xp_vertices.dat' # vertices constrained as x-points
 elconvertexpairsfile = 'con_el_vertices.dat' # vertex pairs constrained for edge lengths
 orthconvertexpairsfile = 'con_orth_vertices.dat' # vertex pairs constrained for orthogonality
@@ -121,18 +122,21 @@ def MonitorGrid(datadir, num, pausetime, maxruntime):
 
     # Loop until time has passed
     while (time.time() - starttime <= maxruntime):
-        # Plot the data
-        PlotGridCellsIterate(datadir, 1)
+        try: 
+            # Plot the data
+            PlotGridCellsIterate(datadir, 1)
 
-        # Draw
-        thisfig.canvas.draw()
-        thisfig.canvas.flush_events()
+            # Draw
+            thisfig.canvas.draw()
+            thisfig.canvas.flush_events()
 
-        # Pause
-        time.sleep(pausetime)
+            # Pause
+            time.sleep(pausetime)
 
-        # Clear figure
-        ClearCurrentAxes()
+            # Clear figure
+            ClearCurrentAxes()
+        except: 
+            time.sleep(pausetime)
 
 
 
@@ -149,17 +153,48 @@ def PlotFluxfunctionConstraintVertices(dirpath, fignum):
     # Set filepaths
     # Set the filepaths
     vertfilepath = dirpath + filesep + gridverticesfile
-    fffilepath = dirpath + filesep + ffconverticesfile
+    fffilepath = dirpath + filesep + ffconverticesfilestem
 
-    # Get the data
+    # Get the grid data
     vals = dh.GetVertexCoordinates(vertfilepath)
-    valscon = dh.GetVertexCoordinates(fffilepath)
-
-    # Plot the data
     PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
-                 facecolors='none', label='Vertices')
-    PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='b',
-                 marker='+', label='Constrained vertices')
+        facecolors='none', label='Vertices')
+
+    # Special points
+    try: 
+        valscon = dh.GetVertexCoordinates(fffilepath+'sp.dat')
+        PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='m',
+                 marker='*', label='Special vertices')
+        valscon = dh.GetVertexCoordinates(fffilepath+'spfs.dat')
+        PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='m',
+                 marker='+', label='Special flux surface vertices')
+    except:
+        print('could not print special points of flux function constraints')
+
+    # Tangency points
+    try: 
+        valscon = dh.GetVertexCoordinates(fffilepath+'tp.dat')
+        PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='m',
+                 marker='s', label='Tangency points')
+    except:
+        print('could not print tangency points of flux function constraints')
+
+    # Fixed points
+    try: 
+        valscon = dh.GetVertexCoordinates(fffilepath+'fp.dat')
+        PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='g',
+                 marker='*', label='Fixed points')
+    except:
+        print('could not print fixed points of flux function constraints')
+
+    # Flux surfaces
+    try: 
+        valscon = dh.GetVertexCoordinates(fffilepath+'fs.dat')
+        PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='b',
+                 marker='+', label='Flux surfaces')
+    except:
+        print('could not print flux surface points of flux function constraints')
+    
 
     # Set axes
     SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])

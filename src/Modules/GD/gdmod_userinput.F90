@@ -103,10 +103,14 @@ module gdmod_userinput
         ! Length ratio specific cost function options. 
         ! Fields:
         ! - lambda: cost function scaling constant
+        ! - eta: length scale for cost function denominator
         ! - writedata: write out cost function data for debugging
+        ! - dovessel: include vessel edges into cost function?
 
         real(R8)                    :: lambda 
+        real(R8)                    :: eta
         integer(I8)                 :: writedata
+        logical                     :: dovessel
 
     contains 
 
@@ -194,14 +198,32 @@ module gdmod_userinput
         ! - includeboxx, includeboxy: coordinates of the box(es) 
 
         integer(I8)                     :: fixfarvesselflux, &
-            fixfluxalignedtargets, doboxoverride, fixtargetflux 
+            fixfluxalignedtargets, doboxoverride, fixtargetflux, &
+            fixallvesselvertices 
         real(R8), allocatable           :: includeboxx(:, :), &
             includeboxy(:, :)
+        character(:), allocatable          :: tangencypointtreatment
     
     contains 
 
         procedure :: SetDefaults    => SetDefaultFluxFunctionConOptions
         procedure :: Read           => ReadFluxFunctionConOptions
+
+    end type
+
+    type, extends(OptionsUDT) :: XPointConOptionsUDT
+
+        ! Only one type: 'meth'. Can be 'loc' or 'grad'. If set to 'loc',
+        ! the X-point(s) will be constrained to their initial coordinates.
+        ! If set to 'grad', gradient = 0 constraints are imposed and the
+        ! X-point can move.
+
+        character(:), allocatable   :: meth 
+
+    contains
+
+        procedure   :: SetDefaults  => SetDefaultXPointConOptions
+        procedure   :: Read         => ReadXPointConOptions
 
     end type
 
@@ -277,6 +299,7 @@ module gdmod_userinput
         type(FluxFunctionConOptionsUDT)         :: ffoptions 
         type(OrthogonalityConOptionsUDT)        :: orthoptions 
         type(EdgelengthsConOptionsUDT)          :: eloptions
+        type(XPointConOptionsUDT)               :: xpoptions
         
 
     contains 
@@ -403,6 +426,8 @@ module gdmod_userinput
         !================
         options%writedata = 1
         options%lambda = 1e0
+        options%eta = 1e-5 ! in coordinate units
+        options%dovessel = .false.
 
     end subroutine
 
@@ -456,6 +481,7 @@ module gdmod_userinput
         options%ffoptions%inputfilepath = options%inputfilepath
         options%orthoptions%inputfilepath = options%inputfilepath
         options%eloptions%inputfilepath = options%inputfilepath
+        options%xpoptions%inputfilepath = options%inputfilepath
 
         ! Constraint-specific options
         !============================
@@ -463,6 +489,7 @@ module gdmod_userinput
         call options%ffoptions%Set()
         call options%orthoptions%Set()
         call options%eloptions%Set()
+        call options%xpoptions%Set()
 
     end subroutine
 
@@ -500,13 +527,32 @@ module gdmod_userinput
         options%fixfarvesselflux = 1
         options%fixfluxalignedtargets = 1
         options%fixtargetflux = 1
+        options%fixallvesselvertices = 1
         options%doboxoverride = 0
+        options%tangencypointtreatment = 'tangencypoint'
         if (allocated(options%includeboxx)) then 
             deallocate(options%includeboxx, options%includeboxy)
         end if
         allocate(options%includeboxx(0, 0), options%includeboxy(0, 0))
 
     end subroutine 
+
+    subroutine SetDefaultXPointConOptions(options)
+
+        ! Description
+        !============
+        ! Set default x point constraint options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(XPointConOptionsUDT)  :: options 
+
+        ! Default options
+        !================
+        options%meth = 'loc'
+
+    end subroutine
 
     subroutine SetDefaultOrthogonalityConOptions(options)
 
@@ -842,6 +888,10 @@ module gdmod_userinput
         ! Scaling constant
         field = 'gd.design.cfv.par.LR.lambda'
         call ExtractOptionValueReal0D(fid, field, options%lambda) 
+        field = 'gd.design.cfv.par.LR.eta'
+        call ExtractOptionValueReal0D(fid, field, options%eta) 
+        field = 'gd.design.cfv.par.LR.dovesseledges'
+        call ExtractOptionValueLogical0D(fid, field, options%dovessel) 
 
         ! Write data
         field = 'gd.design.cfv.par.LR.writedata'
@@ -1093,6 +1143,10 @@ module gdmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%fixfarvesselflux)
         field = 'gd.design.ec.par.fluxfunction.fixtargetflux'
         call ExtractOptionValueInteger0D(fid, field, options%fixtargetflux)
+        field = 'gd.design.ec.par.fluxfunction.fixallvesselvertices'
+        call ExtractOptionValueInteger0D(fid, field, options%fixallvesselvertices)
+        field = 'gd.design.ec.par.fluxfunction.tangencypointtreatment'
+        call ExtractOptionValueCharacter(fid, field, options%tangencypointtreatment)
         field = 'gd.design.ec.par.fluxfunction.doboxoverride'
         call ExtractOptionValueInteger0D(fid, field, options%doboxoverride)
         field = 'gd.design.ec.par.fluxfunction.includeboxx'
@@ -1104,6 +1158,50 @@ module gdmod_userinput
         !=============
         ! Close the file
         close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadXPointConOptions(options)
+
+        ! Description
+        !============
+        ! Read x-point constraint options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(XPointConOptionsUDT)  :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadXPointConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadXPointConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        field = 'gd.design.ec.par.xpoints.meth'
+        call ExtractOptionValueCharacter(fid, field, options%meth)
 
     end subroutine
 

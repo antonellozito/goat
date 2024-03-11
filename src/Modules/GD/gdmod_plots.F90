@@ -851,41 +851,6 @@ module gdmod_plots
 
     ! Optimization
     !=============
-    ! Constrained fluxfunction vertices
-    subroutine WriteFluxfunctionConstraintVertices(grid, IDs)
-
-        ! Description
-        !============
-        ! Write grid nodes in the following format:
-        ! ID, x, y 
-
-        ! The usual
-        implicit none
-
-        ! Declare variables
-        type(gridUDT), intent(in)               :: grid 
-        integer(I8), allocatable, intent(in)    :: IDs(:) 
-        real(R8), allocatable                   :: x(:), y(:)
-        integer(I8)                             :: nIDs
-        character(:), allocatable               :: filepath
-
-        ! Initialize
-        !===========
-        ! Set the correct directories
-        allocate(character(len('con_ff_vertices')) :: filepath)
-        filepath = 'con_ff_vertices'
-
-        ! Unpack
-        nIDs = size(IDs)
-        allocate(x(nIDs), y(nIDs))
-        x = grid%vert%x(IDs)
-        y = grid%vert%y(IDs)
-
-        ! Write the data file
-        !====================
-        call WriteVertexData(IDs, x, y, filepath)
-
-    end subroutine
 
     ! Constrained boundary vertices
     subroutine WriteBoundaryConstraintVertices(grid, IDs)
