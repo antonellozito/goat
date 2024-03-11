@@ -2249,7 +2249,7 @@ module gdmod_constraints
                 dogradient, dohessian, lambda)
 
             ! Update flux contribution design variable indices
-            gradG_flux%row = gradG%row + 2*grid%vert%ntot 
+            gradG_flux%row = gradG_flux%row + 2*grid%vert%ntot 
             hessG_flux%row = hessG_flux%row + 2*grid%vert%ntot
             hessG_flux%col = hessG_flux%col + 2*grid%vert%ntot  
 
@@ -2654,21 +2654,32 @@ module gdmod_constraints
 
         ! Auxiliary
         type(MySparseUDT)                       :: jacG
+        integer(I8)                             :: nc
 
         ! Loop
-        integer(I8)                             :: k, ic
+        integer(I8)                             :: i, k, ic
 
         ! Compute
         !========
         ! Derivatives are simply equal to minus one, just need to 
         ! correctly determine columns and rows. 
         ! Jacobian
-        jacG%nval = constraints%nfluxsurfaces
+        jacG%nval = constraints%nfscon
         call jacG%Allocate()
 
-        ! Columns are design variables for Jacobian, so simply 1 to 
-        ! number of flux surfaces
-        jacG%col = [(k, k = 1, constraints%nfluxsurfaces)]
+        ! Columns are design variables for Jacobian, so simply equal 
+        ! to flux function constraint index (locally)
+        ic = 0
+        do i = 1, constraints%nfluxsurfaces
+            ! Get number of constraints
+            nc = constraints%fluxsurfaces(i)%nID 
+
+            ! Set
+            jacG%col(ic+1:ic+nc) = i 
+
+            ! Update
+            ic = ic + nc
+        end do
 
         ! Rows are constraint indices - flux function constraints are 
         ! evaluated last
@@ -2676,7 +2687,7 @@ module gdmod_constraints
         jacG%row = [(k, k = ic+1, ic+constraints%nfscon)]
 
         ! Values are just one
-        jacG%val(:) = 1
+        jacG%val(:) = -1
 
         ! Compute gradient
         !=================
@@ -4513,7 +4524,7 @@ module gdmod_constraints
             ! Check design variables
             select case(designvariables%type)
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
             
                 ! Allocate
                 hessG%nval = 8*nc 
@@ -5308,7 +5319,7 @@ module gdmod_constraints
             ! Check design variables
             select case(designvariables%type)
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
             
                 ! Initialize
                 !===========

@@ -807,13 +807,9 @@ module gdmod_costfunction
             ! Allocate the sparse matrix
             select case (trim(designvariables%type))
 
-            case ('coordinates')
+            case ('coordinates', 'coordinates_desiredflux')
 
                 hessJ%nval = 36*sum(nvpairs) ! this should be exact and constant
-
-            case ('desiredpsi')
-
-                hessJ%nval = 0
 
             end select 
             call hessJ%Allocate()
