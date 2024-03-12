@@ -2802,7 +2802,6 @@ module gdmod_costfunction
         integer(I8)                         :: i, j
 
         ! Auxiliary variables
-        integer(I8)                         :: nvpairs
         integer(I8), allocatable            :: vpairs(:, :), tv(:), &
             tID(:) 
 
@@ -2823,15 +2822,16 @@ module gdmod_costfunction
         allocate(vpairs(grid%face%ntot, 2), wt(grid%face%ntot))
         wt(:) = 1
 
-        ! Initialize counter
-        nvpairs = 0
-
         ! Associate
         associate(&
             face        => grid%face,   &
             x           => grid%vert%x, &
             y           => grid%vert%y, &
-            fieldlineID => grid%vert%fieldlineID)
+            fieldlineID => grid%vert%fieldlineID,   &
+            nvpairs     => costfunction%nvpairs)
+
+        ! Initialize counter
+        nvpairs = 0
 
         ! Determine vertex pairs
         !=======================
@@ -2870,7 +2870,7 @@ module gdmod_costfunction
         ! Check orientation
         !==================
         ! Flip vertex pairs if dotproduct is smaller than zero
-        allocate(xv(nvpairs, 2), yv(nvpairs, 2))
+        allocate(xv(nvpairs, 2), yv(nvpairs, 2), gxf(nvpairs), gyf(nvpairs))
         do i = 1, 2
             xv(:, i) = x(costfunction%vpairs(:, i))
             yv(:, i) = y(costfunction%vpairs(:, i))
@@ -2947,8 +2947,9 @@ module gdmod_costfunction
         integer(I8)                     :: v1, v2, v3
         integer(I8), allocatable        :: row(:), col(:) 
 
-        real(R8)                        :: x1, x2, x3, y1, y2, y3, wti, &
-            b0i, dx1, dx2, dy1, dy2, d1, d2, rat
+        real(R8)                        :: wti, gxf, gyf, dx, dy, dp, cp, &
+            rat, theta, gxxf, gxyf, gyxf, gyyf, gxxxf, gxxyf, gxyyf, &
+            gyxxf, gyxyf, gyyyf, gxyxf, gyyxf
         real(R8), allocatable           :: valxx(:),  valxy(:), &
             valyx(:), valyy(:), xv(:, :), yv(:, :), xfv(:), yfv(:), &
             gxfv(:), gyfv(:), dxv(:), dyv(:), dpv(:), cpv(:), ratv(:), &
@@ -2964,6 +2965,7 @@ module gdmod_costfunction
             nvpairs => costfunction%nvpairs, &
             x       => grid%vert%x, &
             y       => grid%vert%y, &
+            nv      => grid%vert%ntot, &
             lambda  => costfunction%lambda, &
             wt      => costfunction%wt)
 
@@ -2978,7 +2980,7 @@ module gdmod_costfunction
         ! Precompute
         !===========
         ! Coordinates
-        allocate(xv(nvpairs, 2), yv(nvpairs, 2))
+        allocate(xv(nvpairs, 2), yv(nvpairs, 2), gxfv(nvpairs), gyfv(nvpairs))
         do i = 1, 2
             xv(:, i) = x(vpairs(:, i))
             yv(:, i) = y(vpairs(:, i))
@@ -3025,33 +3027,279 @@ module gdmod_costfunction
             ! Precompute
             if (dogradient .or. dohessian) then 
                 ! Magnetic field vector derivatives
+                allocate(gxxfv(nvpairs), gxyfv(nvpairs), gyyfv(nvpairs))
                 call magneticField%interp%Evaluate(xfv, yfv, 2, 0, gxxfv)
                 call magneticField%interp%Evaluate(xfv, yfv, 1, 1, gxyfv)
-                call magneticField%interp%Evaluate(xfv, yfv, 0, 2, gxxfv)
+                call magneticField%interp%Evaluate(xfv, yfv, 0, 2, gyyfv)
                 gyxfv = gxyfv ! symmetric, for ease
 
             end if
             if (dohessian) then 
                 ! Additional derivatives
+                allocate(gxxxfv(nvpairs), gxxyfv(nvpairs), &
+                    gxyyfv(nvpairs), gyyyfv(nvpairs))
                 call magneticField%interp%Evaluate(xfv, yfv, 3, 0, gxxxfv)
                 call magneticField%interp%Evaluate(xfv, yfv, 2, 1, gxxyfv)
                 call magneticField%interp%Evaluate(xfv, yfv, 1, 2, gxyyfv)
                 call magneticField%interp%Evaluate(xfv, yfv, 0, 3, gyyyfv)
                 gyxxfv = gxxyfv 
                 gyxyfv = gxyyfv 
+
+                ! Allocate local variables
+                allocate(valxx(4*nvpairs), valxy(4*nvpairs), &
+                    valyx(4*nvpairs), valyy(4*nvpairs), row(4*nvpairs), &
+                    col(4*nvpairs))
+                
             end if 
 
-            ! Loop over all pairs
-            do i = 1, nvpairs
-                associate(&
-                    wti         => wt(i) &
-                )
-                ! Unpack
+            ! Gradient
+            if (dogradient) then 
+                do i = 1, nvpairs
+                    ! Unpack
+                    wti     = wt(i)
+                    gxf     = gxfv(i)
+                    gyf     = gyfv(i)
+                    dx      = dxv(i)
+                    dy      = dyv(i)
+                    dp      = dpv(i)
+                    cp      = cpv(i)
+                    rat     = ratv(i)
+                    theta   = thetav(i)
+                    gxxf    = gxxfv(i)
+                    gxyf    = gxyfv(i)
+                    gyxf    = gyxfv(i)
+                    gyyf    = gyyfv(i)
 
-                end associate 
+                    ! Evaluate gradient
+                    gradJ(vpairs(i, 1)) = gradJ(vpairs(i, 1)) + &
+                        -(theta*wti*((gyf - 0.5*dx*gyxf + 0.5*dy*gxxf)/dp &
+                        + (rat*(0.5*dx*gxxf - gxf + 0.5*dy*gyxf))/dp))/(rat**2 + 1) !x1
+                    gradJ(vpairs(i, 2)) = gradJ(vpairs(i, 2)) + &
+                        (theta*wti*((gyf + 0.5*dx*gyxf - 0.5*dy*gxxf)/dp &
+                        - (rat*(gxf + 0.5*dx*gxxf + 0.5*dy*gyxf))/dp))/(rat**2 + 1) ! x2
 
+                    gradJ(vpairs(i,1)+nv) = gradJ(vpairs(i,1)+nv) + &
+                        (theta*wti*((gxf + 0.5*dx*gyyf - 0.5*dy*gxyf)/dp &
+                        - (rat*(0.5*dx*gxyf - gyf + 0.5*dy*gyyf))/dp))/(rat**2 + 1) !y1
+                    gradJ(vpairs(i,2)+nv) = gradJ(vpairs(i,2)+nv) + &
+                        -(theta*wti*((gxf - 0.5*dx*gyyf + 0.5*dy*gxyf)/dp &
+                        + (rat*(gyf + 0.5*dx*gxyf + 0.5*dy*gyyf))/dp))/(rat**2 + 1) !y2
 
-            end do
+                end do
+            end if 
+
+            ! Scale
+            gradJ = lambda*gradJ
+
+            ! Hessian
+            if (dohessian) then 
+                ! Initialize
+                cc = 1
+                do i = 1, nvpairs
+                    ! Unpack
+                    wti     = wt(i)
+                    gxf     = gxfv(i)
+                    gyf     = gyfv(i)
+                    dx      = dxv(i)
+                    dy      = dyv(i)
+                    dp      = dpv(i)
+                    cp      = cpv(i)
+                    rat     = ratv(i)
+                    theta   = thetav(i)
+                    gxxf    = gxxfv(i)
+                    gxyf    = gxyfv(i)
+                    gyxf    = gyxfv(i)
+                    gyyf    = gyyfv(i)
+
+                    gxxxf = gxxxfv(i)
+                    gxyxf = gxxyfv(i)
+                    gxyyf = gxyyfv(i)
+                    gyxxf = gyxxfv(i)
+                    gyyxf = gyxyfv(i)
+                    gyyyf = gyyyfv(i)
+
+                    ! v1 v1
+                    row(cc) = vpairs(i, 1)  
+                    col(cc) = vpairs(i, 1) 
+                    valxx(cc) = (wti*((gyf - 0.5*dx*gyxf + 0.5*dy*gxxf)/dp &
+                        + (rat*(0.5*dx*gxxf - gxf + 0.5*dy*gyxf))/dp)**2) &
+                        /(rat **2 + 1) **2 - (theta*wti*((1.0*gyxf - &
+                        0.25*dx*gyxxf + 0.25*dy*gxxxf)/dp - (2*(gyf &
+                        - 0.5*dx*gyxf + 0.5*dy*gxxf)*(0.5*dx*gxxf &
+                        - gxf + 0.5*dy*gyxf))/dp **2 + (rat*(0.25*dx*gxxxf &
+                        - 1.0*gxxf + 0.25*dy*gyxxf))/dp - (2*rat*(0.5*dx*gxxf &
+                        - gxf + 0.5*dy*gyxf) **2)/dp **2))/(rat **2 + 1) &
+                        - (theta*wti*((2*rat*(gyf - 0.5*dx*gyxf + 0.5*dy*gxxf))/dp &
+                        + (2*rat **2*(0.5*dx*gxxf - gxf + 0.5*dy*gyxf))/dp)*((gyf &
+                        - 0.5*dx*gyxf + 0.5*dy*gxxf)/dp + (rat*(0.5*dx*gxxf &
+                        - gxf + 0.5*dy*gyxf))/dp))/(rat **2 + 1) **2  !x1x1
+                    valxy(cc) = (theta*wti*((0.5*gxxf - 0.5*gyyf &
+                        + 0.25*dx*gyyxf - 0.25*dy*gxyxf)/dp - ((gxf &
+                        + 0.5*dx*gyyf - 0.5*dy*gxyf)*(0.5*dx*gxxf &
+                        - gxf + 0.5*dy*gyxf))/dp **2 + ((gyf - 0.5*dx*gyxf &
+                        + 0.5*dy*gxxf)*(0.5*dx*gxyf - gyf + 0.5*dy*gyyf))/dp**2 &
+                        + (rat*(0.5*gxyf + 0.5*gyxf - 0.25*dx*gxyxf &
+                        - 0.25*dy*gyyxf))/dp + (2*rat*(0.5*dx*gxxf &
+                        - gxf + 0.5*dy*gyxf)*(0.5*dx*gxyf - gyf &
+                        + 0.5*dy*gyyf))/dp **2))/(rat **2 + 1) &
+                        - (wti*((gyf - 0.5*dx*gyxf + 0.5*dy*gxxf)/dp &
+                        + (rat*(0.5*dx*gxxf - gxf + 0.5*dy*gyxf))/dp)&
+                        *((gxf + 0.5*dx*gyyf - 0.5*dy*gxyf)/dp &
+                        - (rat*(0.5*dx*gxyf - gyf + 0.5*dy*gyyf))/dp))&
+                        /(rat **2 + 1) **2 + (theta*wti*((2*rat*(gxf &
+                        + 0.5*dx*gyyf - 0.5*dy*gxyf))/dp - (2*rat**2*&
+                        (0.5*dx*gxyf - gyf + 0.5*dy*gyyf))/dp)*((gyf &
+                        - 0.5*dx*gyxf + 0.5*dy*gxxf)/dp + &
+                        (rat*(0.5*dx*gxxf - gxf + 0.5*dy*gyxf))/dp))&
+                        /(rat **2 + 1) **2  !x1y1
+                    valyx(cc) = valxy(cc)  !y1x1
+                    valyy(cc) = (wti*((gxf + 0.5*dx*gyyf - 0.5*dy*gxyf)/dp &
+                        - (rat*(0.5*dx*gxyf - gyf + 0.5*dy*gyyf))/dp) **2)&
+                        /(rat **2 + 1) **2 + (theta*wti*((1.0*gxyf &
+                        + 0.25*dx*gyyyf - 0.25*dy*gxyyf)/dp &
+                        - (2*(gxf + 0.5*dx*gyyf - 0.5*dy*gxyf)&
+                        *(0.5*dx*gxyf - gyf + 0.5*dy*gyyf))/dp **2 &
+                        - (rat*(0.25*dx*gxyyf - 1.0*gyyf + 0.25*dy*gyyyf))/dp &
+                        + (2*rat*(0.5*dx*gxyf - gyf + 0.5*dy*gyyf)**2)/dp**2))&
+                        /(rat **2 + 1) - (theta*wti*((2*rat*(gxf + 0.5*dx*gyyf &
+                        - 0.5*dy*gxyf))/dp - (2*rat **2*(0.5*dx*gxyf &
+                        - gyf + 0.5*dy*gyyf))/dp)*((gxf + 0.5*dx*gyyf &
+                        - 0.5*dy*gxyf)/dp - (rat*(0.5*dx*gxyf - gyf &
+                        + 0.5*dy*gyyf))/dp))/(rat **2 + 1) **2  !y1y1
+                    cc = cc+1 
+                    
+                    ! v1 v2
+                    row(cc) = vpairs(i, 1)  
+                    col(cc) = vpairs(i, 2) 
+                    valxx(cc) = (theta*wti*((0.25*dx*gyxxf - 0.25*dy*gxxxf)/dp &
+                        + ((gxf + 0.5*dx*gxxf + 0.5*dy*gyxf)*(gyf - 0.5*dx*gyxf &
+                        + 0.5*dy*gxxf))/dp **2 - ((gyf + 0.5*dx*gyxf &
+                        - 0.5*dy*gxxf)*(0.5*dx*gxxf - gxf + 0.5*dy*gyxf))/dp **2 &
+                        - (rat*(0.25*dx*gxxxf + 0.25*dy*gyxxf))/dp + (2*rat*(gxf &
+                        + 0.5*dx*gxxf + 0.5*dy*gyxf)*(0.5*dx*gxxf - gxf &
+                        + 0.5*dy*gyxf))/dp **2))/(rat **2 + 1) - (wti*((gyf &
+                        + 0.5*dx*gyxf - 0.5*dy*gxxf)/dp - (rat*(gxf &
+                        + 0.5*dx*gxxf + 0.5*dy*gyxf))/dp)*((gyf - 0.5*dx*gyxf &
+                        + 0.5*dy*gxxf)/dp + (rat*(0.5*dx*gxxf - gxf &
+                        + 0.5*dy*gyxf))/dp))/(rat **2 + 1) **2 &
+                        + (theta*wti*((2*rat*(gyf + 0.5*dx*gyxf - 0.5*dy*gxxf))/dp &
+                        - (2*rat **2*(gxf + 0.5*dx*gxxf + 0.5*dy*gyxf))/dp)*((gyf &
+                        - 0.5*dx*gyxf + 0.5*dy*gxxf)/dp + (rat*(0.5*dx*gxxf - gxf &
+                        + 0.5*dy*gyxf))/dp))/(rat **2 + 1) **2  !x1x2
+                    valxy(cc) = (wti*((gxf - 0.5*dx*gyyf + 0.5*dy*gxyf)/dp &
+                        + (rat*(gyf + 0.5*dx*gxyf + 0.5*dy*gyyf))/dp)*((gyf &
+                        - 0.5*dx*gyxf + 0.5*dy*gxxf)/dp + (rat*(0.5*dx*gxxf &
+                        - gxf + 0.5*dy*gyxf))/dp))/(rat **2 + 1) **2 &
+                        + (theta*wti*(((gyf - 0.5*dx*gyxf + 0.5*dy*gxxf)*(gyf &
+                        + 0.5*dx*gxyf + 0.5*dy*gyyf))/dp **2 - (0.5*gxxf &
+                        + 0.5*gyyf - 0.25*dx*gyyxf + 0.25*dy*gxyxf)/dp &
+                        + ((gxf - 0.5*dx*gyyf + 0.5*dy*gxyf)*(0.5*dx*gxxf &
+                        - gxf + 0.5*dy*gyxf))/dp **2 - (rat*(0.5*gyxf - 0.5*gxyf &
+                        + 0.25*dx*gxyxf + 0.25*dy*gyyxf))/dp + (2*rat*(gyf &
+                        + 0.5*dx*gxyf + 0.5*dy*gyyf)*(0.5*dx*gxxf - gxf &
+                        + 0.5*dy*gyxf))/dp **2))/(rat **2 + 1) &
+                        - (theta*wti*((2*rat*(gxf - 0.5*dx*gyyf + 0.5*dy*gxyf))/dp &
+                        + (2*rat **2*(gyf + 0.5*dx*gxyf + 0.5*dy*gyyf))/dp)&
+                        *((gyf - 0.5*dx*gyxf + 0.5*dy*gxxf)/dp + (rat*(0.5*dx*gxxf &
+                        - gxf + 0.5*dy*gyxf))/dp))/(rat **2 + 1) **2  !x1y2
+                    valyx(cc) = (wti*((gyf + 0.5*dx*gyxf - 0.5*dy*gxxf)/dp &
+                        - (rat*(gxf + 0.5*dx*gxxf + 0.5*dy*gyxf))/dp)*((gxf &
+                        + 0.5*dx*gyyf - 0.5*dy*gxyf)/dp - (rat*(0.5*dx*gxyf &
+                        - gyf + 0.5*dy*gyyf))/dp))/(rat **2 + 1) **2 &
+                        - (theta*wti*(((gxf + 0.5*dx*gxxf + 0.5*dy*gyxf)*(gxf &
+                        + 0.5*dx*gyyf - 0.5*dy*gxyf))/dp **2 - (0.5*gxxf &
+                        + 0.5*gyyf + 0.25*dx*gyyxf - 0.25*dy*gxyxf)/dp &
+                        + ((gyf + 0.5*dx*gyxf - 0.5*dy*gxxf)*(0.5*dx*gxyf &
+                        - gyf + 0.5*dy*gyyf))/dp **2 + (rat*(0.5*gxyf - 0.5*gyxf &
+                        + 0.25*dx*gxyxf + 0.25*dy*gyyxf))/dp - (2*rat*(gxf &
+                        + 0.5*dx*gxxf + 0.5*dy*gyxf)*(0.5*dx*gxyf - gyf &
+                        + 0.5*dy*gyyf))/dp **2))/(rat **2 + 1) &
+                        - (theta*wti*((2*rat*(gyf + 0.5*dx*gyxf - 0.5*dy*gxxf))/dp &
+                        - (2*rat **2*(gxf + 0.5*dx*gxxf + 0.5*dy*gyxf))/dp)*((gxf &
+                        + 0.5*dx*gyyf - 0.5*dy*gxyf)/dp - (rat*(0.5*dx*gxyf - gyf &
+                        + 0.5*dy*gyyf))/dp))/(rat **2 + 1) **2  !y1x2
+                    valyy(cc) = (theta*wti*((0.25*dx*gyyyf - 0.25*dy*gxyyf)/dp &
+                        - ((gxf + 0.5*dx*gyyf - 0.5*dy*gxyf)*(gyf + 0.5*dx*gxyf &
+                        + 0.5*dy*gyyf))/dp **2 + ((gxf - 0.5*dx*gyyf &
+                        + 0.5*dy*gxyf)*(0.5*dx*gxyf - gyf + 0.5*dy*gyyf))/dp **2 &
+                        - (rat*(0.25*dx*gxyyf + 0.25*dy*gyyyf))/dp &
+                        + (2*rat*(gyf + 0.5*dx*gxyf + 0.5*dy*gyyf)*(0.5*dx*gxyf &
+                        - gyf + 0.5*dy*gyyf))/dp **2))/(rat **2 + 1) &
+                        - (wti*((gxf - 0.5*dx*gyyf + 0.5*dy*gxyf)/dp + (rat*(gyf &
+                        + 0.5*dx*gxyf + 0.5*dy*gyyf))/dp)*((gxf + 0.5*dx*gyyf &
+                        - 0.5*dy*gxyf)/dp - (rat*(0.5*dx*gxyf - gyf &
+                        + 0.5*dy*gyyf))/dp))/(rat **2 + 1) **2 &
+                        + (theta*wti*((2*rat*(gxf - 0.5*dx*gyyf &
+                        + 0.5*dy*gxyf))/dp + (2*rat **2*(gyf + 0.5*dx*gxyf &
+                        + 0.5*dy*gyyf))/dp)*((gxf + 0.5*dx*gyyf - 0.5*dy*gxyf)/dp &
+                        - (rat*(0.5*dx*gxyf - gyf + 0.5*dy*gyyf))/dp))&
+                        /(rat **2 + 1) **2  !y1y2
+                    cc = cc+1 
+                    
+                    ! v2 v1
+                    row(cc) = vpairs(i,2)  
+                    col(cc) = vpairs(i,1) 
+                    valxx(cc) = valxx(cc-1)  ! x2x1
+                    valxy(cc) = valyx(cc-1)  !x2y1
+                    valyx(cc) = valxy(cc-1)  !y2x1
+                    valyy(cc) = valyy(cc-1)  !y2y1
+                    cc = cc+1 
+                    
+                    ! v2 v2
+                    row(cc) = vpairs(i,2)  
+                    col(cc) = vpairs(i,2) 
+                    valxx(cc) = (wti*((gyf + 0.5*dx*gyxf - 0.5*dy*gxxf)/dp &
+                        - (rat*(gxf + 0.5*dx*gxxf + 0.5*dy*gyxf))/dp) **2)/(rat **2 &
+                        + 1) **2 + (theta*wti*((1.0*gyxf + 0.25*dx*gyxxf &
+                        - 0.25*dy*gxxxf)/dp - (2*(gxf + 0.5*dx*gxxf &
+                        + 0.5*dy*gyxf)*(gyf + 0.5*dx*gyxf - 0.5*dy*gxxf))/dp **2 &
+                        + (2*rat*(gxf + 0.5*dx*gxxf + 0.5*dy*gyxf) **2)/dp **2 &
+                        - (rat*(1.0*gxxf + 0.25*dx*gxxxf + 0.25*dy*gyxxf))/dp))&
+                        /(rat **2 + 1) - (theta*wti*((2*rat*(gyf + 0.5*dx*gyxf &
+                        - 0.5*dy*gxxf))/dp - (2*rat **2*(gxf + 0.5*dx*gxxf &
+                        + 0.5*dy*gyxf))/dp)*((gyf + 0.5*dx*gyxf - 0.5*dy*gxxf)/dp &
+                        - (rat*(gxf + 0.5*dx*gxxf + 0.5*dy*gyxf))/dp))/(rat **2 + 1) **2  !x2x2
+                    valxy(cc) = (theta*wti*((2*rat*(gxf - 0.5*dx*gyyf + 0.5*dy*gxyf))/dp &
+                        + (2*rat **2*(gyf + 0.5*dx*gxyf + 0.5*dy*gyyf))/dp)&
+                        *((gyf + 0.5*dx*gyxf - 0.5*dy*gxxf)/dp - (rat*(gxf &
+                        + 0.5*dx*gxxf + 0.5*dy*gyxf))/dp))/(rat **2 + 1) **2 &
+                        - (wti*((gyf + 0.5*dx*gyxf - 0.5*dy*gxxf)/dp &
+                        - (rat*(gxf + 0.5*dx*gxxf + 0.5*dy*gyxf))/dp)*((gxf &
+                        - 0.5*dx*gyyf + 0.5*dy*gxyf)/dp + (rat*(gyf + 0.5*dx*gxyf &
+                        + 0.5*dy*gyyf))/dp))/(rat **2 + 1) **2 &
+                        - (theta*wti*((0.5*gxxf - 0.5*gyyf - 0.25*dx*gyyxf &
+                        + 0.25*dy*gxyxf)/dp - ((gxf + 0.5*dx*gxxf + 0.5*dy*gyxf)&
+                        *(gxf - 0.5*dx*gyyf + 0.5*dy*gxyf))/dp **2 &
+                        + ((gyf + 0.5*dx*gyxf - 0.5*dy*gxxf)*(gyf + 0.5*dx*gxyf &
+                        + 0.5*dy*gyyf))/dp **2 + (rat*(0.5*gxyf + 0.5*gyxf &
+                        + 0.25*dx*gxyxf + 0.25*dy*gyyxf))/dp - (2*rat*(gxf &
+                        + 0.5*dx*gxxf + 0.5*dy*gyxf)*(gyf + 0.5*dx*gxyf &
+                        + 0.5*dy*gyyf))/dp **2))/(rat **2 + 1)  !x2y2
+                    valyx(cc) = valxy(cc)  !y2x2
+                    valyy(cc) = (wti*((gxf - 0.5*dx*gyyf + 0.5*dy*gxyf)/dp + &
+                        (rat*(gyf + 0.5*dx*gxyf + 0.5*dy*gyyf))/dp) **2)/(rat **2 + 1) **2 &
+                        - (theta*wti*((1.0*gxyf - 0.25*dx*gyyyf + 0.25*dy*gxyyf)/dp &
+                        - (2*(gxf - 0.5*dx*gyyf + 0.5*dy*gxyf)*(gyf + 0.5*dx*gxyf &
+                        + 0.5*dy*gyyf))/dp **2 - (2*rat*(gyf + 0.5*dx*gxyf &
+                        + 0.5*dy*gyyf) **2)/dp **2 + (rat*(1.0*gyyf + 0.25*dx*gxyyf &
+                        + 0.25*dy*gyyyf))/dp))/(rat **2 + 1) &
+                        - (theta*wti*((2*rat*(gxf - 0.5*dx*gyyf + 0.5*dy*gxyf))/dp &
+                        + (2*rat **2*(gyf + 0.5*dx*gxyf + 0.5*dy*gyyf))/dp)&
+                        *((gxf - 0.5*dx*gyyf + 0.5*dy*gxyf)/dp + (rat*(gyf &
+                        + 0.5*dx*gxyf + 0.5*dy*gyyf))/dp))/(rat **2 + 1) **2  !y2y2
+                    cc = cc+1 
+
+                end do
+
+                ! Build full hessian
+                hessJ%row = [row, row, row+vert%ntot, row+vert%ntot]
+                hessJ%col = [col, col+vert%ntot, col, col+vert%ntot]
+                hessJ%val = [valxx, valxy, valyx, valyy]
+
+                ! Scale
+                hessJ%val = lambda*hessJ%val
+
+            end if 
 
         case default 
 
@@ -3663,6 +3911,18 @@ module gdmod_costfunction
         ! Hessian
         hessJtemp%nrow = hessJ%nrow 
         hessJtemp%ncol = hessJ%ncol 
+        
+        ! Allocate initially to avoid errors 
+        if (.not. allocated(hessJ%row)) then 
+            hessJ%nval = 0
+            call hessJ%Allocate()
+        else 
+            ! Reset hessian
+            call hessJ%Deallocate()
+            hessJ%nval = 0
+            call hessJ%Allocate()
+        end if 
+            
 
         ! Compute cost function
         !======================
@@ -3677,6 +3937,9 @@ module gdmod_costfunction
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
         end if 
         
         ! Face angle difference
@@ -3690,6 +3953,9 @@ module gdmod_costfunction
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
         end if 
 
         ! Face angle
@@ -3700,9 +3966,12 @@ module gdmod_costfunction
                 dohessian, designvariables)
 
             ! Add
-                J       = J + Jtemp 
-                gradJ   = gradJ + gradJtemp
-                hessJ   = hessJ + hessJtemp
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
         end if 
 
         ! Housekeeping
