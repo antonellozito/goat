@@ -331,7 +331,23 @@ module gdmod_optimizationengine
             ! Set type
             problem%costfunction%type = 'LR_FAD'
 
-        case ('general', 'LR_FAD_FA')
+        case ('PRPB')
+
+            ! Allocate
+            allocate(CostfunctionPRPBUDT::problem%costfunction)
+
+            ! Set type
+            problem%costfunction%type = 'PRPB'
+            
+        case ('PRPB2')
+
+            ! Allocate
+            allocate(CostfunctionPRPB2UDT::problem%costfunction)
+
+            ! Set type
+            problem%costfunction%type = 'PRPB2'
+
+        case ('general', 'LR_FAD_FA', 'LR_FAD_PRPB', 'LR_FAD_PRPB_FA')
 
             ! Allocate
             allocate(CostfunctionGeneralUDT::problem%costfunction)
@@ -439,12 +455,45 @@ module gdmod_optimizationengine
             designvariables%phi(designvariables%yind) = y
             designvariables%phi(designvariables%psiind) = constraints%eqcon%fluxfunction%fluxsurfaces%PsiD
             
+            ! Set flux surface IDs
+            designvariables%fsID = constraints%eqcon%fluxfunction%fluxsurfaces%fsID
+
         class default
 
             ! Throw error - unknown design variable type
             call gdErrorHandler('FinalizeInitialization: unknown design variable type')
 
         end select 
+
+        ! Update cost function
+        !=====================
+        select type (costfunction)
+
+        type is (CostfunctionPRPBUDT)
+
+            ! Call initializer
+            call costfunction%FinalizeInitialization(designvariables, &
+                problem%grid, problem%magneticField, problem%environment)
+
+        type is (CostfunctionPRPB2UDT)
+
+            ! Call initializer
+            call costfunction%FinalizeInitialization(designvariables, &
+            problem%grid, problem%magneticField, problem%environment)
+
+        type is (CostfunctionGeneralUDT)
+
+            ! Check
+            if (costfunction%doPRPB) then 
+                call costfunction%cfv_prpb%FinalizeInitialization(designvariables, &
+                    problem%grid, problem%magneticField, problem%environment)
+            end if
+
+        class default 
+
+            ! Do nothing
+
+        end select
 
         ! Housekeeping
         !=============

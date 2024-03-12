@@ -289,6 +289,81 @@ module gdmod_costfunction
 
     end type
 
+    ! Psi ratio, psi based
+    type, extends(CostfunctionGDUDT)    :: CostfunctionPRPBUDT 
+
+        ! Description
+        !============
+        ! This cost function penalizes differences in flux value 
+        ! between adjacent flux surfaces. It acts immediately upon the
+        ! desired psi values of the flux function constraints, and can
+        ! therefore obviously only be included if these constraints are
+        ! active. 
+
+        ! The format is very much alike the length ratio cost function. 
+        ! Likewise, one best uses the PRPB2 cost function to avoid any
+        ! length effects.
+
+        ! Fields
+        real(R8)                        :: lambda ! scaling constant
+        real(R8), allocatable           :: wt(:) ! weigths 
+        real(R8), allocatable           :: b0(:) ! desired bias
+        integer(I8), allocatable        :: psipairs(:, :) ! pairs of psi values
+        integer(I8)                     :: npsipairs ! number of psi value pairs
+
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionPRPB
+        procedure :: FinalizeInitialization => &
+            FinalizeInitializationCostFunctionPRPB
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionPRPB
+
+        ! Data output
+        procedure :: WriteData              => WriteCostFunctionDataPRPB
+
+        ! Housekeeping
+        procedure :: Allocate               => AllocateCostFunctionPRPB
+        procedure :: Deallocate             => DeallocateCostFunctionPRPB
+        final :: DestroyCostFunctionPRPB
+    end type
+
+    ! Psi ratio, psi based 2 (analogous to LR2)
+    type, extends(CostfunctionGDUDT)    :: CostfunctionPRPB2UDT 
+
+        ! Description
+        !============
+        ! This cost function simply wraps around the PRPB cost function
+        ! and symmetrizes it, similar to the lengthratio2 cost function,
+        ! to prevent size effects. All real implementation is in the 
+        ! PRPB cost function definition.
+
+        ! Fields
+        type(CostfunctionPRPBUDT)       :: cfv_prpb
+
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionPRPB2
+        procedure :: FinalizeInitialization => &
+            FinalizeInitializationCostFunctionPRPB2
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionPRPB2
+
+        ! Data output
+        procedure :: WriteData              => WriteCostFunctionDataPRPB2
+
+        ! Housekeeping
+        procedure :: Allocate               => AllocateCostFunctionPRPB2
+        procedure :: Deallocate             => DeallocateCostFunctionPRPB2
+        final :: DestroyCostFunctionPRPB2
+    end type
+
     ! LRFAD cost function
     type, extends(CostfunctionGDUDT) :: CostfunctionLRFADUDT
 
@@ -350,9 +425,10 @@ module gdmod_costfunction
         type(CostfunctionLRUDT2)        :: cfv_lr
         type(CostFunctionFADUDT)        :: cfv_fad
         type(CostFunctionFAUDT)         :: cfv_fa
+        type(CostfunctionPRPB2UDT)      :: cfv_prpb
 
         ! Switches
-        logical                         :: doLR, doFA, doFAD
+        logical                         :: doLR, doFA, doFAD, doPRPB
 
     contains 
 
@@ -2871,6 +2947,7 @@ module gdmod_costfunction
         !==================
         ! Flip vertex pairs if dotproduct is smaller than zero
         allocate(xv(nvpairs, 2), yv(nvpairs, 2), gxf(nvpairs), gyf(nvpairs))
+        allocate(dy(nvpairs), dx(nvpairs))
         do i = 1, 2
             xv(:, i) = x(costfunction%vpairs(:, i))
             yv(:, i) = y(costfunction%vpairs(:, i))
@@ -2981,6 +3058,8 @@ module gdmod_costfunction
         !===========
         ! Coordinates
         allocate(xv(nvpairs, 2), yv(nvpairs, 2), gxfv(nvpairs), gyfv(nvpairs))
+        allocate(dxv(nvpairs), dyv(nvpairs), dpv(nvpairs), cpv(nvpairs), &
+            ratv(nvpairs), thetav(nvpairs))
         do i = 1, 2
             xv(:, i) = x(vpairs(:, i))
             yv(:, i) = y(vpairs(:, i))
@@ -3622,6 +3701,844 @@ module gdmod_costfunction
     end subroutine
 
     !------------------------------------------------------------------!
+    !                       PSI RATIO, PSI BASED                       !
+    !------------------------------------------------------------------!
+
+    ! Initialization (somewhat dummy)
+    subroutine InitializeCostFunctionPRPB(costfunction, grid, &
+        magneticField, environment, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. This 
+        ! function is actually a dummy function, since the 
+        ! initialization can only be done after the constraints have 
+        ! been set up. Therefore, no real implementation is provided 
+        ! here. The true initialization is done in 
+        ! FinalizeInitializationCostFunctionPRPB, which is specific 
+        ! for this cost function and should be called in the 
+        ! GD optimization engine after initializing the constraints 
+        ! etc. 
+
+        ! Note: the only thing set here, is the scaling constant...
+
+        ! Modules
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPBUDT)          :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
+
+        ! Loop variables
+        integer(I8)                         :: i, j
+
+        ! Auxiliary variables
+        integer                             :: sgn2, sgn3
+        integer(I8)                         :: sp, ep, tID, v2, v3, tv
+        real(R8)                            :: Btx2, Btx3, Bty2, Bty3, &
+            dx2, dy2, dx3, dy3
+
+        integer(I8), allocatable            :: tvn(:), temptvn(:), &
+            vesselvert(:), tvf(:), tvfv(:, :)
+        real(R8), allocatable               :: Btx(:), Bty(:)
+        logical, allocatable                :: cID(:), isvesselvertex(:), &
+            isvesselface(:)
+
+        ! Data
+        
+        ! Initialize
+        !===========
+        ! Set the scaling constant
+        costfunction%lambda = options%PRPB%lambda
+        
+    end subroutine
+
+    ! True cost function initialization
+    subroutine FinalizeInitializationCostFunctionPRPB(costfunction, &
+        designvariables, grid, magneticField, environment)
+
+        ! Description
+        !============
+        ! This is the actual initialization for the PRPB cost function.
+        ! Here, we check whether the design variables are compatible 
+        ! with the cost function. 
+
+        ! Declare
+        !========
+        ! Arguments
+        class(CostfunctionPRPBUDT)      :: costfunction
+        class(DesignVariablesGDUDT)     :: designvariables
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField
+        type(EnvironmentUDT)            :: environment
+
+        ! Auxiliary
+        integer(I8)                     :: nfsID, nxpind, tID
+        integer(I8), allocatable        :: map2fsind(:), fsID(:), &
+            xpind(:), order(:), psipairs(:, :), tvn(:), fsIDcounter(:), &
+            tvnID(:)
+
+        real(R8), allocatable           :: fsPsi(:), b0v(:), wtv(:), &
+            wtp(:), b0p(:), thispsival(:, :), sgn1(:), sgn2(:)
+
+        logical, allocatable            :: mask(:), doflip(:)
+
+        ! Loop
+        integer(I8)                     :: npp, i, j
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            x               => grid%vert%x,             &
+            y               => grid%vert%y,             &
+            nv              => grid%vert%ntot,            &
+            fieldlineID     => grid%vert%fieldlineID    &
+            )
+
+        ! Get psi values
+        select type (designvariables)
+
+        type is (DesignVariablesCoordinatesUDT) 
+
+            ! Throw error
+            call gdErrorHandler('PRPB cost function cannot be used for ' // &
+                ' design variable type "coordinates"')
+
+        type is (DesignVariablesCoordinatesFluxUDT) 
+
+            ! Get psi values and indices of flux surfaces
+            fsPsi   = designvariables%phi(designvariables%psiind)
+            fsID    = designvariables%fsID
+            
+
+        class default 
+
+            ! Throw error
+            call gdErrorHandler('PRPB cost function: unknown design variable type')
+
+        end select
+
+        ! Construct mapping
+        nfsID = size(fsID, 1)
+        allocate(map2fsind(maxval(fsID)))
+        do i = 1, nfsID
+            map2fsind(fsID(i)) = i 
+        end do 
+
+        ! Initialize fsID counter
+        allocate(fsIDcounter(maxval(fsID)))
+
+        ! Compute desired distribution (currently uniform and unity)
+        allocate(b0v(nv))
+        b0v = 1
+
+        ! Set desired bias to one at separatrix nodes
+        call DetermineXPoints(xpind, nxpind, order, grid)
+        do i = 1, nxpind 
+            where (fieldlineID == fieldlineID(xpind(i))) b0v = 1
+        end do
+
+        ! Set the desired weights (currently uniform and unity)
+        allocate(wtv(nv))
+        wtv = 1
+
+        ! Initialize pairs too big
+        allocate(psipairs(nv, 3))
+        wtp = wtv 
+        b0p = b0v 
+
+        ! Set counter
+        npp = 0
+
+        ! Determine pairs
+        !================
+        ! Loop over all vertices
+        do i = 1, nv
+            ! Get vertex neighbours
+            tvn = GetVertNeig(grid%vert, i)
+
+            ! Get the ID of the coordinate line
+            tID = fieldlineID(i)
+
+            ! Check which vertices have a different ID (no zeros 
+            ! allowed) 
+            if ((tID /= 0) .and. (any(tID == fsID)) ) then 
+                ! Get vertices with different ID
+                mask = (fieldlineID(tvn) /= tID) .and. (fieldlineID(tvn) /= 0)
+                allocate(tvnID(count(mask)))
+                tvnID = pack(fieldlineID(tvn), mask)
+
+                ! Check if only two unique flux surface IDs remain
+                fsIDcounter = 0
+                do j = 1, size(tvnID, 1)
+                    fsIDcounter(tvnID(j)) = fsIDcounter(tvnID(j)) + 1
+                end do
+                if ( (maxval(fsIDcounter) < 2) .and. (count(fsIDcounter > 0) == 2)) then 
+                    ! Update counter
+                    npp = npp + 1
+
+                    ! Add
+                    psipairs(npp, :) = [tID, pack(fsIDcounter, fsIDcounter > 0)]
+                    wtp(npp) = wtv(i)
+                    b0p(npp) = b0v(i)
+                    
+                end if 
+            end if 
+        end do
+
+        ! Map psi pairs to local indices and get current psi values
+        allocate(thispsival(npp, 3))
+        do i = 1, 3
+            psipairs(:, i)      = map2fsind(psipairs(:, i))
+            thispsival(:, i)    = fsPsi(psipairs(:, i))
+        end do
+
+        ! Check and switch
+        sgn1 = thispsival(:, 1) - thispsival(:, 2)
+        sgn2 = thispsival(:, 3) - thispsival(:, 1)
+        if (any(sgn1*sgn2 < 0)) then 
+            ! Shouldn't happen, throw error
+            call gdErrorHandler('Something wrong with initial psi values')
+        end if 
+        doflip = (sgn1 < 0) .and. (sgn2 < 0)
+        do i = 1, npp
+            if (doflip(i)) then 
+                psipairs(i, :) = psipairs(i, [1, 3, 2])
+            end if 
+        end do 
+
+        ! Add to cost function
+        costfunction%b0         = b0p(1:npp)
+        costfunction%wt         = wtp(1:npp)
+        costfunction%psipairs   = psipairs(1:npp, :)
+        costfunction%npsipairs  = npp
+        
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionPRPB(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPBUDT)      :: costfunction
+        real(R8)                        :: J
+        real(R8), allocatable           :: gradJ(:) 
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i, k, cc 
+
+        ! Auxiliary
+        integer(I8)                     :: v1, v2, v3
+        integer(I8), allocatable        :: row(:), col(:), psiind(:)
+
+        real(R8)                        :: x1, x2, x3, y1, y2, y3, wti, &
+            b0i, dx1, dx2, dy1, dy2, d1, d2, rat, psi1, psi2, psi3
+        real(R8), allocatable           ::  psi(:), psipairsval(:, :), &
+            d1v(:), d2v(:), valpp(:) 
+                            
+        ! Associate
+        !==========
+        associate(&
+            vert        => grid%vert, &
+            psipairs    => costfunction%psipairs, &
+            npsipairs   => costfunction%npsipairs, &
+            b0          => costfunction%b0, &
+            x           => grid%vert%x, &
+            y           => grid%vert%y, &
+            lambda      => costfunction%lambda, &
+            wt          => costfunction%wt)
+
+        ! Initialize
+        !===========
+        ! Cost function
+        J = 0
+
+        ! Gradient
+        gradJ(:) = 0
+
+        ! Compute cost function
+        !======================
+        ! Precompute
+        select type (designvariables)
+
+        type is (DesignVariablesCoordinatesFluxUDT)
+
+            ! Get psi values
+            psiind = designvariables%psiind
+            Psi = designvariables%phi(psiind) 
+            
+        class default
+
+            ! Throw error
+            call gdErrorHandler('EvaluateCostFunctionPRPB: incompatible design variable type')
+
+        end select
+
+        ! Psi values
+        allocate(psipairsval(npsipairs, 3))
+        do i = 1, 3
+            psipairsval(:, i) = psi(psipairs(:, i))
+        end do
+
+        ! Cost function contribution
+        d1v = psipairsval(:, 1) - psipairsval(:, 2)
+        d2v = psipairsval(:, 3) - psipairsval(:, 1)
+        J = J + sum(wt*(d1v/d2v - b0)**2)
+
+        ! Scale
+        J = lambda*J
+
+        ! Compute gradient
+        !=================
+        if (dogradient) then 
+
+            ! Check the design variables
+            select case (trim(designvariables%type))
+
+            case ('coordinates_desiredflux')
+
+                ! Only flux value contributions
+                do i = 1, npsipairs 
+                    ! Unpack
+                    psi1    = psipairsval(i, 1)
+                    psi2    = psipairsval(i, 2)
+                    psi3    = psipairsval(i, 3)
+                    d1      = d1v(i)
+                    d2      = d2v(i)
+                    wti     = wt(i)
+                    b0i     = b0(i)
+
+                    ! Get indices
+                    v1      = psiind(psipairs(i, 1))
+                    v2      = psiind(psipairs(i, 2))
+                    v3      = psiind(psipairs(i, 3))
+
+                    ! Compute gradient contribution
+                    gradJ(v1) = gradJ(v1) + &
+                        -wti*(b0i - d1/d2)*(d1/d2**2 + 1/d2) !psi1
+                    gradJ(v2) = gradJ(v2) + &
+                        (wti*(b0i - d1/d2))/d2 !psi2
+                    gradJ(v3) = gradJ(v3) + &
+                        (d1*wti*(b0i - d1/d2))/d2**2 !psi3
+
+                end do
+
+            case default
+
+                ! Not implemented, throw error
+                call gdErrorHandler('EvaluateCostFunctionLR: gradient' &
+                    // ' not yet implemented for this design variable' &
+                    // ' type')
+
+            end select
+
+            ! Scale
+            gradJ = lambda*gradJ
+
+        end if
+
+        ! Compute hessian
+        !================
+        ! Allocate the hessian (if not already done so)
+        if (.not. allocated(hessJ%row)) then
+            ! Allocate the sparse matrix
+            select case (trim(designvariables%type))
+
+            case ('coordinates_desiredflux')
+
+                hessJ%nval = 9*npsipairs ! this should be exact and constant
+                allocate(valpp(hessJ%nval))
+
+            end select 
+            call hessJ%Allocate()
+
+        end if
+
+        if (dohessian) then
+            
+            ! Initialize counter
+            cc = 1
+
+            ! Check the design variables
+            select case (trim(designvariables%type))
+
+            case ('coordinates_desiredflux')
+
+                ! Only flux value contributions
+                do i = 1, npsipairs 
+                    ! Unpack
+                    psi1    = psipairsval(i, 1)
+                    psi2    = psipairsval(i, 2)
+                    psi3    = psipairsval(i, 3)
+                    d1      = d1v(i)
+                    d2      = d2v(i)
+                    wti     = wt(i)
+                    b0i     = b0(i)
+
+                    ! Get indices
+                    v1      = psiind(psipairs(i, 1))
+                    v2      = psiind(psipairs(i, 2))
+                    v3      = psiind(psipairs(i, 3))
+
+                    ! Compute hessian contributions
+                    row(cc) = v1
+                    col(cc) = v1
+                    valpp(cc) = wti*(d1/d2**2 + 1/d2)**2 &
+                        - wti*((2*d1)/d2**3 + 2/d2**2)*(b0i - d1/d2) !psi1psi1
+                    cc = cc+1
+                    
+                    row(cc) = v1
+                    col(cc) = v2
+                    valpp(cc) = (wti*(b0i - d1/d2))/d2**2 &
+                        - (wti*(d1/d2**2 + 1/d2))/d2 !psi1psi2
+                    cc = cc+1
+                    
+                    row(cc) = v2
+                    col(cc) = v1
+                    valpp(cc) = valpp(cc-1) !psi2psi1
+                    cc = cc+1
+                    
+                    row(cc) = v2
+                    col(cc) = v2
+                    valpp(cc) = wti/d2**2 !psi2psi2
+                    cc = cc+1
+                    
+                    row(cc) = v1
+                    col(cc) = v3
+                    valpp(cc) = wti*(b0i - d1/d2)*((2*d1)/d2**3 + 1/d2**2) &
+                        - (d1*wti*(d1/d2**2 + 1/d2))/d2**2 !psi1psi3
+                    cc = cc+1
+                    
+                    row(cc) = v3
+                    col(cc) = v1
+                    valpp(cc) = valpp(cc-1)
+                    cc = cc+1
+                    
+                    row(cc) = v2
+                    col(cc) = v3
+                    valpp(cc) = (d1*wti)/d2**3 - (wti*(b0i - d1/d2))/d2**2 !psi2psi3
+                    cc = cc+1
+                    
+                    row(cc) = v3
+                    col(cc) = v2
+                    valpp(cc) = valpp(cc-1)
+                    cc = cc+1
+                    
+                    row(cc) = v3
+                    col(cc) = v3
+                    valpp(cc) = (d1**2*wti)/d2**4 &
+                        - (2*d1*wti*(b0i - d1/d2))/d2**3 !psi3psi3
+                    cc = cc+1
+
+                end do
+
+                ! Scale
+                valpp = lambda*valpp
+
+                ! Construct hessian contributions
+                hessJ%val = valpp 
+                hessJ%col = col 
+                hesSJ%row = row
+                
+            case default
+
+                ! Not implemented, throw error
+                call gdErrorHandler('EvaluateCostFunctionLR: hessian' &
+                    // ' not yet implemented for this design variable' &
+                    // ' type')
+
+            end select
+
+        end if
+
+        ! Deassociate
+        !============
+        end associate
+
+    end subroutine
+
+    ! Cost function data writing 
+    subroutine WriteCostFunctionDataPRPB(costfunction, grid)
+
+        ! Description
+        !============
+        ! Write out the cost function data for the LR cost function.
+        ! Here, this consists of the vertex pair data in IDn, xn, yn 
+        ! format
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPBUDT)      :: costfunction
+        type(GridUDT)                   :: grid
+
+        ! Auxiliary
+        integer(I8)                     :: ncol, nrow 
+
+        integer(I8), allocatable        :: IDn(:, :) 
+        real(R8), allocatable           :: xn(:, :), yn(:, :)
+        character(:), allocatable       :: filename 
+
+        ! Loop
+        integer(I8)                     :: j 
+
+        ! Initialize
+        !===========
+        ! Set filename
+        allocate(character(len('costfunction_psipairs_PRPB')) :: filename)
+        filename = 'costfunction_psipairs_PRPB'
+
+        ! Allocate
+        nrow = size(costfunction%psipairs, 1)
+        ncol = size(costfunction%psipairs, 2)
+        allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
+
+        ! Unpack
+        associate(&
+            vpairs      => costfunction%psipairs,         &
+            x           => grid%vert%x,                 &
+            y           => grid%vert%y)
+
+        ! Loop
+        do j = 1, ncol 
+            IDn(:, j) = vpairs(:, j) 
+            xn(:, j) = x(vpairs(:, j)) 
+            yn(:, j) = y(vpairs(:, j)) 
+        end do
+
+        ! Call writer
+        !============
+        call WriteVertexPairData(IDn, xn, yn, filename)
+
+        ! Housekeeping
+        !=============
+        end associate
+        deallocate(IDn, xn, yn)
+        
+
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionPRPB(costfunction, npp)
+
+        ! Description
+        !============
+        ! Allocate, assumed that costfunction%nvpairs is given
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPBUDT)      :: costfunction
+        integer(I8)                     :: npp
+
+        ! Allocate
+        !=========
+        allocate(costfunction%psipairs(npp, 3))
+        allocate(costfunction%b0(npp))
+        allocate(costfunction%wt(npp))
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionPRPB(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPBUDT)      :: costfunction
+
+        ! Deallocate
+        !===========
+        if (allocated(costfunction%psipairs)) then 
+            deallocate(costfunction%psipairs)
+            deallocate(costfunction%b0)
+            deallocate(costfunction%wt)
+        end if
+
+    end subroutine
+
+    subroutine DestroyCostFunctionPRPB(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionPRPBUDT)      :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%Deallocate()
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                       PSI RATIO, PSI BASED 2                     !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionPRPB2(costfunction, grid, &
+        magneticField, environment, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. 
+
+        ! Simply call the initialization of the original lenght ratio
+        ! cost function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPB2UDT)         :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
+        
+        ! Initialize
+        !===========
+        call costfunction%cfv_prpb%Initialize(grid, magneticField, &
+            environment, options)
+
+        ! (Re)set the scaling constant
+        costfunction%cfv_prpb%lambda = options%PRPB%lambda
+
+    end subroutine
+
+    ! True initialization
+    subroutine FinalizeInitializationCostFunctionPRPB2(costfunction, &
+        designvariables, grid, magneticField, environment)
+
+        ! Description
+        !============
+        ! This is the actual initialization for the PRPB cost function.
+        ! Here, we check whether the design variables are compatible 
+        ! with the cost function. 
+
+        ! Declare
+        !========
+        ! Arguments
+        class(CostfunctionPRPB2UDT)     :: costfunction
+        class(DesignVariablesGDUDT)     :: designvariables
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField
+        type(EnvironmentUDT)            :: environment
+
+        ! Call subroutine
+        !================
+        call costfunction%cfv_prpb%FinalizeInitialization(designvariables, &
+            grid, magneticField, environment)
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionPRPB2(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, we simply call the same cost function twice, but switch
+        ! the order of the indices and recompute the bias. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPB2UDT)     :: costfunction
+        real(R8)                        :: J, J1, J2
+        real(R8), allocatable           :: gradJ(:), gradJ1(:), &
+            gradJ2(:) 
+        type(MySparseUDT)               :: hessJ, hessJ1, hessJ2 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i
+
+        ! Auxiliary
+        integer(I8), allocatable        :: tempvpairs(:,:)
+        real(R8), allocatable           :: tempb0(:) 
+                                        
+        ! Initialize
+        !===========
+        ! Store original vertex pairs and bias
+        allocate(tempvpairs, source=costfunction%cfv_prpb%psipairs)
+        allocate(tempb0, source=costfunction%cfv_prpb%b0)
+        tempvpairs = costfunction%cfv_prpb%psipairs 
+        tempb0  = costfunction%cfv_prpb%b0
+         
+        ! Cost function
+        J = 0
+        J1 = 0
+        J2 = 0
+
+        ! Gradient
+        gradJ(:) = 0
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+
+        ! Hessian
+        hessJ1%nrow = hessJ%nrow 
+        hessJ2%nrow = hessJ%nrow 
+        hessJ1%ncol = hessJ%ncol 
+        hessJ2%ncol = hessJ%ncol 
+
+        ! Compute cost function
+        !======================
+        ! First contribution
+        call costfunction%cfv_prpb%Evaluate(J1, gradJ1, &
+            hessJ1, grid, magneticField, environment, dogradient, &
+            dohessian, designvariables)
+        
+        ! Adjust vertex pairs and bias
+        costfunction%cfv_prpb%psipairs(:, :) = tempvpairs(:, [1, 3, 2])
+        costfunction%cfv_prpb%b0(:) = 1/tempb0
+
+        ! Second contribution
+        call costfunction%cfv_prpb%Evaluate(J2, gradJ2, &
+            hessJ2, grid, magneticField, environment, dogradient, &
+            dohessian, designvariables)
+
+        ! Reset vertex pairs and bias
+        costfunction%cfv_prpb%b0(:) = tempb0
+        costfunction%cfv_prpb%psipairs(:, :) = tempvpairs
+
+        ! Add
+        J = J1 + J2 
+        gradJ = gradJ1 + gradJ2
+        hessJ = hessJ1 + hessJ2
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJ1, gradJ2)
+
+    end subroutine
+
+    ! Data writing
+    subroutine WriteCostFunctionDataPRPB2(costfunction, grid)
+
+        ! Description
+        !============
+        ! This routine calls the data writer of the PRPB cost function
+
+        ! Declare
+        !========
+        ! Arguments
+        class(CostfunctionPRPB2UDT)     :: costfunction
+        type(GridUDT)                   :: grid 
+
+        ! Call
+        !=====
+        call costfunction%cfv_prpb%WriteData(grid)
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionPRPB2(costfunction, npp)
+
+        ! Description
+        !============
+        ! Allocate, assumed that costfunction%nvpairs is given
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPB2UDT)     :: costfunction
+        integer(I8)                     :: npp
+
+        ! Allocate
+        !=========
+        call costfunction%cfv_prpb%Allocate(npp)
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionPRPB2(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPB2UDT)     :: costfunction
+
+        ! Deallocate
+        !===========
+        call costfunction%cfv_prpb%Deallocate()
+
+    end subroutine
+
+    subroutine DestroyCostFunctionPRPB2(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionPRPB2UDT)     :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%cfv_prpb%Deallocate()
+
+    end subroutine
+
+    !------------------------------------------------------------------!
     !                             LR-FAD                               !
     !------------------------------------------------------------------!
 
@@ -3787,6 +4704,9 @@ module gdmod_costfunction
 
     end subroutine
 
+    
+
+
     !------------------------------------------------------------------!
     !                             GENERAL                              !
     !------------------------------------------------------------------!
@@ -3818,6 +4738,7 @@ module gdmod_costfunction
         costfunction%doLR   = .false.
         costfunction%doFAD  = .false.
         costfunction%doFA   = .false.
+        costfunction%doPRPB = .false. 
 
         ! Check based on cost function type
         select case (costfunction%type)
@@ -3826,8 +4747,19 @@ module gdmod_costfunction
 
             ! Set lambda of other contributions 
             options%FA%lambda = -1
+            options%PRPB%lambda = -1
             
         case ('LR_FAD_FA')
+
+            ! Set lambda of other contributions
+            options%PRPB%lambda = -1
+
+        case ('LR_FAD_PRPB')
+
+            ! Set lambda of other contributions
+            options%FA%lambda = -1
+
+        case ('LR_FAD_PRPB_FA')
 
             ! Set lambda of other contributions
 
@@ -3856,6 +4788,11 @@ module gdmod_costfunction
         if (options%FA%lambda > 0) then 
             costfunction%doFA = .true.
             call costfunction%cfv_fa%Initialize(grid, magneticField, &
+                environment, options)
+        end if
+        if (options%PRPB%lambda > 0) then 
+            costfunction%doFA = .true.
+            call costfunction%cfv_prpb%Initialize(grid, magneticField, &
                 environment, options)
         end if
 
@@ -3974,6 +4911,22 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
         end if 
 
+        ! Psi ratio, psi based
+        if (costfunction%doPRPB) then 
+            ! Compute
+            call costfunction%cfv_prpb%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, grid, magneticField, environment, dogradient, &
+                dohessian, designvariables)
+
+            ! Add
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+        end if 
+
         ! Housekeeping
         !=============
         deallocate(gradJtemp)
@@ -4010,6 +4963,7 @@ module gdmod_costfunction
         call costfunction%cfv_lr%Deallocate()
         call costfunction%cfv_fad%Deallocate()
         call costfunction%cfv_fa%Deallocate()
+        call costfunction%cfv_prpb%Deallocate()
 
     end subroutine
 
@@ -4028,6 +4982,8 @@ module gdmod_costfunction
         !========
         call costfunction%cfv_lr%Deallocate()
         call costfunction%cfv_fad%Deallocate()
+        call costfunction%cfv_fa%Deallocate()
+        call costfunction%cfv_prpb%Deallocate()
 
     end subroutine
     
