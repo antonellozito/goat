@@ -29,7 +29,6 @@ subroutine ConstructMagneticField(magneticField, mfoptions)
     ! Loop variables
 
     ! Auxiliary variables 
-    integer                             :: filespecifier
     type(StructuredInterpolant2DUDT)    :: interp
 
     ! Main program

@@ -20,7 +20,6 @@ const int nr2, const int nc2, const int nv2, int *r1, int *c1, double *v1, int *
     MyCSparse *A, *B;
     int i, p1, p2, p;
     MyCSparse C; 
-    size_t colsize; 
 
     /* Construct */
     A = ConstructMyCSparse(nr1, nc1, nv1, r1, c1, v1);
@@ -45,7 +44,6 @@ const int nr2, const int nc2, const int nv2, int *r1, int *c1, double *v1, int *
     C.col = (int*) calloc(C.nval, sizeof(int));
     C.val = csC->x;
     C.row = csC->i; 
-    colsize = C.nval;
     C.col = (int*) calloc(C.nval, sizeof(int));
     
     for (i = 0; i < C.ncol; i++)

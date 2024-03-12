@@ -362,7 +362,6 @@ module gdmod_designvariables
         type(EnvironmentUDT), intent(in)            :: environment
     
         ! Loop variables
-        integer(I8)                                 :: i
 
         ! Auxiliary variables 
 

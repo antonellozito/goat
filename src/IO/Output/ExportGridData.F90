@@ -19,6 +19,7 @@ subroutine ExportGridData(grid,options)
     type(ExportOptionsUDT)     :: options
     character(128)             :: errmsg
     
+    ! Suppress some warnings
 
     ! Export
     !=======

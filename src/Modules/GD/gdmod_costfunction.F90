@@ -2875,7 +2875,7 @@ module gdmod_costfunction
         type(CostFunctionOptionsUDT)        :: options
 
         ! Loop variables
-        integer(I8)                         :: i, j
+        integer(I8)                         :: i
 
         ! Auxiliary variables
         integer(I8), allocatable            :: vpairs(:, :), tv(:), &
@@ -3018,15 +3018,14 @@ module gdmod_costfunction
         class(DesignVariablesGDUDT)     :: designvariables
 
         ! Loop variables
-        integer(I8)                     :: i, k, cc 
+        integer(I8)                     :: i, cc 
 
         ! Auxiliary
-        integer(I8)                     :: v1, v2, v3
         integer(I8), allocatable        :: row(:), col(:) 
 
         real(R8)                        :: wti, gxf, gyf, dx, dy, dp, cp, &
-            rat, theta, gxxf, gxyf, gyxf, gyyf, gxxxf, gxxyf, gxyyf, &
-            gyxxf, gyxyf, gyyyf, gxyxf, gyyxf
+            rat, theta, gxxf, gxyf, gyxf, gyyf, gxxxf, gxyyf, &
+            gyxxf, gyyyf, gyyxf, gxyxf
         real(R8), allocatable           :: valxx(:),  valxy(:), &
             valyx(:), valyy(:), xv(:, :), yv(:, :), xfv(:), yfv(:), &
             gxfv(:), gyfv(:), dxv(:), dyv(:), dpv(:), cpv(:), ratv(:), &
@@ -3735,19 +3734,8 @@ module gdmod_costfunction
         type(CostFunctionOptionsUDT)        :: options
 
         ! Loop variables
-        integer(I8)                         :: i, j
 
         ! Auxiliary variables
-        integer                             :: sgn2, sgn3
-        integer(I8)                         :: sp, ep, tID, v2, v3, tv
-        real(R8)                            :: Btx2, Btx3, Bty2, Bty3, &
-            dx2, dy2, dx3, dy3
-
-        integer(I8), allocatable            :: tvn(:), temptvn(:), &
-            vesselvert(:), tvf(:), tvfv(:, :)
-        real(R8), allocatable               :: Btx(:), Bty(:)
-        logical, allocatable                :: cID(:), isvesselvertex(:), &
-            isvesselface(:)
 
         ! Data
         
@@ -3813,6 +3801,8 @@ module gdmod_costfunction
         type is (DesignVariablesCoordinatesFluxUDT) 
 
             ! Get psi values and indices of flux surfaces
+            allocate(fsPsi(size(designvariables%psiind)))
+            allocate(fsID(size(fsPsi)))
             fsPsi   = designvariables%phi(designvariables%psiind)
             fsID    = designvariables%fsID
             
@@ -3849,7 +3839,7 @@ module gdmod_costfunction
         wtv = 1
 
         ! Initialize pairs too big
-        allocate(psipairs(nv, 3))
+        allocate(psipairs(nv, 3), wtp(size(wtv)), b0p(size(b0v)))
         wtp = wtv 
         b0p = b0v 
 
@@ -3957,14 +3947,14 @@ module gdmod_costfunction
         class(DesignVariablesGDUDT)     :: designvariables
 
         ! Loop variables
-        integer(I8)                     :: i, k, cc 
+        integer(I8)                     :: i, cc 
 
         ! Auxiliary
         integer(I8)                     :: v1, v2, v3
         integer(I8), allocatable        :: row(:), col(:), psiind(:)
 
-        real(R8)                        :: x1, x2, x3, y1, y2, y3, wti, &
-            b0i, dx1, dx2, dy1, dy2, d1, d2, rat, psi1, psi2, psi3
+        real(R8)                        :: wti, &
+            b0i, d1, d2, psi1, psi2, psi3
         real(R8), allocatable           ::  psi(:), psipairsval(:, :), &
             d1v(:), d2v(:), valpp(:) 
                             
@@ -3996,6 +3986,8 @@ module gdmod_costfunction
         type is (DesignVariablesCoordinatesFluxUDT)
 
             ! Get psi values
+            allocate(psiind(size(designvariables%psiind)))
+            allocate(psi(size(psiind)))
             psiind = designvariables%psiind
             Psi = designvariables%phi(psiind) 
             
@@ -4007,7 +3999,7 @@ module gdmod_costfunction
         end select
 
         ! Psi values
-        allocate(psipairsval(npsipairs, 3))
+        allocate(psipairsval(npsipairs, 3), d1v(npsipairs), d2v(npsipairs))
         do i = 1, 3
             psipairsval(:, i) = psi(psipairs(:, i))
         end do
@@ -4406,7 +4398,6 @@ module gdmod_costfunction
         class(DesignVariablesGDUDT)     :: designvariables
 
         ! Loop variables
-        integer(I8)                     :: i
 
         ! Auxiliary
         integer(I8), allocatable        :: tempvpairs(:,:)

@@ -50,7 +50,7 @@ CTEST_TARGETS = Clayer
 ## FC			: Compiler to be used for fortran
 FC = gfortran
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS_DEF = -c -g -Wall -O0 
+CFLAGS_DEF = -c -g -Wall -O0 -Wno-unused-dummy-argument
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
@@ -60,6 +60,8 @@ CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
 
 ## CC           : Compiler to be used for C
 CC = gcc 
+
+CCFLAGS_DEF = -c -g -Wall -O0
 
 ## % Linker
 ## %=======
@@ -84,7 +86,7 @@ CFLAGS = $(CFLAGS_DEF)
 LFLAGS = $(LFLAGS_DEF)
 
 # Set CFLAGS for C compiler
-CCFLAGS = $(CFLAGS_DEF) 
+CCFLAGS = $(CCFLAGS_DEF) 
 
 ##
 ## % Files
