@@ -3769,7 +3769,7 @@ module gdmod_costfunction
         integer(I8)                     :: nfsID, nxpind, tID
         integer(I8), allocatable        :: map2fsind(:), fsID(:), &
             xpind(:), order(:), psipairs(:, :), tvn(:), fsIDcounter(:), &
-            tvnID(:)
+            tvnID(:), allfsIDs(:)
 
         real(R8), allocatable           :: fsPsi(:), b0v(:), wtv(:), &
             wtp(:), b0p(:), thispsival(:, :), sgn1(:), sgn2(:)
@@ -3777,7 +3777,7 @@ module gdmod_costfunction
         logical, allocatable            :: mask(:), doflip(:)
 
         ! Loop
-        integer(I8)                     :: npp, i, j
+        integer(I8)                     :: npp, i, j, k
 
         ! Initialize
         !===========
@@ -3816,6 +3816,7 @@ module gdmod_costfunction
 
         ! Construct mapping
         nfsID = size(fsID, 1)
+        allfsIDs = [(k, k = 1, maxval(fsID))]
         allocate(map2fsind(maxval(fsID)))
         do i = 1, nfsID
             map2fsind(fsID(i)) = i 
@@ -3874,19 +3875,22 @@ module gdmod_costfunction
                     npp = npp + 1
 
                     ! Add
-                    psipairs(npp, :) = [tID, pack(fsIDcounter, fsIDcounter > 0)]
+                    psipairs(npp, :) = [tID, pack(allfsIDs, fsIDcounter > 0)]
                     wtp(npp) = wtv(i)
                     b0p(npp) = b0v(i)
-                    
+
                 end if 
+
+                ! Housekeeping
+                deallocate(tvnID)
             end if 
         end do
 
         ! Map psi pairs to local indices and get current psi values
         allocate(thispsival(npp, 3))
         do i = 1, 3
-            psipairs(:, i)      = map2fsind(psipairs(:, i))
-            thispsival(:, i)    = fsPsi(psipairs(:, i))
+            psipairs(1:npp, i)      = map2fsind(psipairs(1:npp, i))
+            thispsival(1:npp, i)    = fsPsi(psipairs(1:npp, i))
         end do
 
         ! Check and switch
@@ -4007,7 +4011,7 @@ module gdmod_costfunction
         ! Cost function contribution
         d1v = psipairsval(:, 1) - psipairsval(:, 2)
         d2v = psipairsval(:, 3) - psipairsval(:, 1)
-        J = J + sum(wt*(d1v/d2v - b0)**2)
+        J = J + 0.5*sum(wt*(d1v/d2v - b0)**2)
 
         ! Scale
         J = lambda*J
@@ -4072,6 +4076,7 @@ module gdmod_costfunction
 
                 hessJ%nval = 9*npsipairs ! this should be exact and constant
                 allocate(valpp(hessJ%nval))
+                allocate(row(hessJ%nval), col(hessJ%nval))
 
             end select 
             call hessJ%Allocate()
@@ -4782,7 +4787,7 @@ module gdmod_costfunction
                 environment, options)
         end if
         if (options%PRPB%lambda > 0) then 
-            costfunction%doFA = .true.
+            costfunction%doPRPB = .true.
             call costfunction%cfv_prpb%Initialize(grid, magneticField, &
                 environment, options)
         end if
