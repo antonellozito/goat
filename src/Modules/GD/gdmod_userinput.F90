@@ -119,6 +119,32 @@ module gdmod_userinput
 
     end type 
 
+    type, extends(OptionsUDT) :: CostFunctionOptionsLRradUDT
+
+        ! Length ratio specific cost function options. 
+        ! Fields:
+        ! - lambda: cost function scaling constant
+        ! - eta: length scale for cost function denominator
+        ! - writedata: write out cost function data for debugging
+        ! - includecutcellfaces: include cut cell faces in the cost 
+        !   function
+        ! - excludedomainfaces: exclude all faces that lie strictly in 
+        !   the domain (i.e. only faces with at least one boundary 
+        !   vertex are considered)
+
+        real(R8)                    :: lambda 
+        real(R8)                    :: eta
+        integer(I8)                 :: writedata
+        logical                     :: includecutcellfaces, &
+            excludedomainfaces
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultCostFunctionOptionsLRrad 
+        procedure :: Read           => ReadCostFunctionOptionsLRrad
+
+    end type
+
     type, extends(OptionsUDT) :: CostFunctionOptionsFADUDT
 
         ! Length ratio specific cost function options. 
@@ -193,6 +219,7 @@ module gdmod_userinput
         type(CostFunctionOptionsFADUDT)     :: FAD
         type(CostfunctionOptionsFAUDT)      :: FA
         type(CostfunctionOptionsPRPBUDT)    :: PRPB
+        type(CostfunctionOptionsLRradUDT)   :: LRrad
 
     contains 
 
@@ -441,6 +468,7 @@ module gdmod_userinput
         options%FAD%inputfilepath   = options%inputfilepath ! propagate filepath
         options%FA%inputfilepath    = options%inputfilepath
         options%PRPB%inputfilepath  = options%inputfilepath
+        options%LRrad%inputfilepath = options%inputfilepath
 
         ! Set cost function specific options
         !===================================
@@ -448,6 +476,7 @@ module gdmod_userinput
         call options%FAD%Set()
         call options%FA%Set()
         call options%PRPB%Set()
+        call options%LRrad%Set()
 
     end subroutine
 
@@ -468,6 +497,27 @@ module gdmod_userinput
         options%lambda = 1e0
         options%eta = 1e-5 ! in coordinate units
         options%dovessel = .false.
+
+    end subroutine
+
+    subroutine SetDefaultCostFunctionOptionsLRrad(options)
+
+        ! Description
+        !============
+        ! Set default cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsLRradUDT) :: options 
+
+        ! Default options
+        !================
+        options%writedata           = 1
+        options%lambda              = 1e0
+        options%eta                 = 1e-5 ! in coordinate units
+        options%includecutcellfaces = .true.
+        options%excludedomainfaces  = .true.
 
     end subroutine
 
@@ -968,6 +1018,66 @@ module gdmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%eta) 
         field = 'gd.design.cfv.par.LR.dovesseledges'
         call ExtractOptionValueLogical0D(fid, field, options%dovessel) 
+
+        ! Write data
+        field = 'gd.design.cfv.par.LR.writedata'
+        call ExtractOptionValueInteger0D(fid, field, options%writedata) 
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadCostFunctionOptionsLRrad(options)
+
+        ! Description
+        !============
+        ! Read in user-specified cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsLRradUDT)   :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsLRrad: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsLRrad: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'gd.design.cfv.par.LRrad.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda) 
+        field = 'gd.design.cfv.par.LRrad.eta'
+        call ExtractOptionValueReal0D(fid, field, options%eta) 
+        field = 'gd.design.cfv.par.LRrad.includecutcellfaces'
+        call ExtractOptionValueLogical0D(fid, field, options%includecutcellfaces) 
+        field = 'gd.design.cfv.par.LRrad.excludedomainfaces'
+        call ExtractOptionValueLogical0D(fid, field, options%excludedomainfaces) 
 
         ! Write data
         field = 'gd.design.cfv.par.LR.writedata'

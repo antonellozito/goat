@@ -128,6 +128,26 @@ module gdmod_costfunction
 
     end type
 
+    ! Length ratio cost function, radial
+    type, extends(CostfunctionLRUDT) :: CostfunctionLRradUDT 
+
+        ! Description
+        !============
+        ! Length ratio cost function, fully analogous to LR cost
+        ! function, but different initialization routine. Therefore, 
+        ! extends directly the CostfunctionLRUDT type.
+
+        ! No additional fields needed
+    contains
+
+        ! Initialization to be overwritten
+        procedure :: Initialize         => InitializeCostfunctionLRrad
+
+        ! Data writing to be overwritten
+        procedure :: WriteData          => WriteCostFunctionDataLRrad
+
+    end type
+
     ! Length ratio 2 cost function
     type, extends(CostfunctionGDUDT) :: CostfunctionLRUDT2 
 
@@ -172,6 +192,32 @@ module gdmod_costfunction
         procedure :: Allocate               => AllocateCostFunctionLR2
         procedure :: Deallocate             => DeallocateCostFunctionLR2
         final :: DestroyCostFunctionLR2
+
+    end type
+
+    ! Length ratio, radial 2 cost function
+    type, extends(CostfunctionGDUDT) :: CostfunctionLRrad2UDT 
+
+        ! Description
+        !============
+        ! Cost function based on the length ratio in radial direction.
+        ! Similar to LR2, but now for radial length ratio. 
+
+        ! Fields
+        type(CostfunctionLRradUDT)     :: cfv_lrrad
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionLRrad2
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionLRrad2
+
+        ! Housekeeping
+        procedure :: Allocate               => AllocateCostFunctionLRrad2
+        procedure :: Deallocate             => DeallocateCostFunctionLRrad2
+        final :: DestroyCostFunctionLRrad2
 
     end type
 
@@ -426,9 +472,11 @@ module gdmod_costfunction
         type(CostFunctionFADUDT)        :: cfv_fad
         type(CostFunctionFAUDT)         :: cfv_fa
         type(CostfunctionPRPB2UDT)      :: cfv_prpb
+        type(CostfunctionLRrad2UDT)     :: cfv_lrrad
 
         ! Switches
-        logical                         :: doLR, doFA, doFAD, doPRPB
+        logical                         :: doLR, doFA, doFAD, doPRPB, &
+            doLRrad
 
     contains 
 
@@ -1345,6 +1393,365 @@ module gdmod_costfunction
         ! Destroy
         !========
         call costfunction%Deallocate()
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                        LENGTH RATIO, RADIAL                      !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionLRrad(costfunction, grid, &
+        magneticField, environment, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. Here, the 
+        ! length ratio cost function is initialized, which requires
+
+        ! Modules
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRradUDT)         :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
+
+        ! Loop variables
+        integer(I8)                         :: i, j
+
+        ! Auxiliary variables
+        integer                             :: sgn2, sgn3
+        integer(I8)                         :: sp, ep, tID, v2, v3, tv, &
+            tempID(1:2)
+        real(R8)                            :: Btx2, Btx3, Bty2, Bty3, &
+            dx2, dy2, dx3, dy3
+
+        integer(I8), allocatable            :: tvn(:), temptvn(:), &
+            vesselvert(:), tvf(:), tvfv(:, :), tvnID(:)
+        real(R8), allocatable               :: Btx(:), Bty(:)
+
+        logical                             :: includecutcellfaces, &
+            excludedomainfaces
+        logical, allocatable                :: cID(:), isvesselvertex(:), &
+            isvesselface(:)
+
+        ! Data
+        
+        ! Initialize
+        !===========
+        ! Set the scaling constant
+        costfunction%lambda = options%LRrad%lambda
+        
+        ! Set the small length parameter eta
+        costfunction%eta    = options%LRrad%eta
+
+        ! Include cut cell faces?
+        includecutcellfaces = options%LRrad%includecutcellfaces 
+
+        ! Exclude domain faces?
+        excludedomainfaces  = options%LRrad%excludedomainfaces
+
+        ! Allocate
+        call costfunction%Allocate(grid%vert%ntot, 4)
+        allocate(Btx(grid%vert%ntot))
+        allocate(Bty(grid%vert%ntot))
+
+        ! Associate some fields
+        associate(vert => grid%vert, x => grid%vert%x, y => grid%vert%y, &
+            b0 => costfunction%b0, wt => costfunction%wt, &
+            nvpairs => costfunction%nvpairs, &
+            vpairs => costfunction%vpairs, &
+            dovessel => costfunction%dovessel)
+
+        ! Set the initial weighting factors
+        wt(:) = 1
+
+        ! Initialize
+        vpairs(:, :) = 0
+        nvpairs(:) = 0
+
+        ! Compute the magnetic field vectors at the vertex locations
+        call magneticField%interp%Evaluate(x, y, 0, 1, Btx)
+        call magneticField%interp%Evaluate(x, y, 1, 0, Bty)
+        Btx = -Btx ! adjust sign: Btx = - dPsidy
+
+        ! Compute desired length ratio
+        !=============================
+        ! This has to be replaced with an actual computation based on 
+        ! the magnetic field... Right now, simply ones
+        b0(:) = 1
+
+        ! Compute the vertex pairs
+        !=========================
+        do i = 1, grid%vert%ntot 
+            ! Housekeeping
+            allocate(tvn(vert%neigP(i, 2)))
+            allocate(cID(vert%neigP(i, 2)))
+
+            ! Get the vertex neighbours of this vertex
+            tvn = GetvertNeig(vert, i)
+            sp = vert%neigP(i, 1)
+            ep = vert%neigP(i, 1) + vert%neigP(i, 2)-1
+            tvn = vert%neig(sp:ep)
+            
+            ! Get the ID of the coordinate line
+            tID = vert%fieldlineID(i)
+            tvnID = vert%fieldlineID(tvn)
+            
+            ! Assemble
+            if ( (size(tvn) > 0) .and. (tID /= 0)) then
+                ! Vertices with different ID?
+                if (includecutcellfaces) then 
+                    ! Zeros allowed if boundary vertex
+                    cID = ( (tID /= tvnID) .and. ( (tvnID /= 0) .or. (vert%BV(tvn))) )
+                else 
+                    ! No zeros allowed
+                    cID = ( (tID /= tvnID) .and. (tvnID /= 0) )
+                end if
+
+                ! Are two vertices remaining?
+                if (count(cID) == 2) then 
+                    ! Do both vertices have a different ID?
+                    tempID = pack(tvnID, cID)
+                    if (tempID(1) == tempID(2)) then 
+                        ! Don't include
+                        cID = .false. 
+                    elseif ( (.not. any(tempID == 0)) .and. excludedomainfaces) then 
+                        ! Don't include
+                        cID = .false.
+                    end if
+                else
+                    ! Skip
+                    cID = .false.
+                end if
+            else
+                ! Determine later
+                if (allocated(cID)) then 
+                    deallocate(cID)
+                end if
+                allocate(cID(size(tvnID)))
+                cID = .true.
+            end if
+            
+            ! Extract
+            allocate(temptvn(count(cID)))
+            temptvn = pack(tvn, cID)
+            tvn = temptvn
+
+            ! Assemble
+            if (size(tvn) > 0) then 
+
+                ! Update counter
+                nvpairs(i) = (size(tvn)/2)
+
+                if ((tID /= 0) .and. (.not. vert%BV(i))) then ! regular vertex with fieldline ID
+                    do j = 1, nvpairs(i)
+                        
+                        ! Normally, multiple pairs only occur at x-points, and,
+                        ! since the coordinates are sorted, the corresponding
+                        ! pairs should be tvn(j) and tvn(j+nvpairs(i))
+                        
+                        ! Get vertices
+                        v2 = tvn(j)
+                        v3 = tvn(j+nvpairs(i))
+                    
+                        ! Get vectors
+                        dx2 = x(v2) - x(i); dy2 = y(v2) - y(i)
+                        dx3 = x(v3) - x(i); dy3 = y(v3) - y(i)
+                        
+                        ! Check if we're dealing with an x-point
+                        if (nvpairs(i) > 1) then
+                            ! Here, the gradient *should* vanish. For now, we
+                            ! cope with this by setting the desired ratio to 1,
+                            ! such that it does not matter which length is
+                            ! considered first.
+                            b0(i) = 1
+                            sgn2 = -1
+                            wt(i) = 0
+                        else
+                            ! Evaluate sign of dot product of magnetic field
+                            ! coordinates with vector
+                            Btx2 = 0.5*(Btx(i) + Btx(v2))
+                            Bty2 = 0.5*(Bty(i) + Bty(v2))
+                            Btx3 = 0.5*(Btx(i) + Btx(v3))
+                            Bty3 = 0.5*(Bty(i) + Bty(v3))
+                            if ( (dx2*Btx2 + dy2*Bty2) < 0 ) then 
+                                sgn2 = -1
+                            else 
+                                sgn2 = 1
+                            end if
+                            if ( (dx3*Btx3 + dy3*Bty3) < 0 ) then 
+                                sgn3 = -1
+                            else 
+                                sgn3 = 1
+                            end if
+                            
+                            ! Consistency check: normally, one positive and one
+                            ! negative sign
+                            if ( ((sgn2 < 0) .and. (sgn3 < 0)) &
+                                .or. ((sgn2 > 0) .and. (sgn3 > 0)) ) then
+                                ! Most likely we're near an x-point here, so
+                                ! the magnetic field is off. Ignore these
+                                ! vertices
+                                
+                                b0(i) = 1
+                                wt(i) = 0
+                                sgn2 = -1
+                            
+                            end if
+                        end if
+                        
+                        ! Add vertices in the direction along the coordinate
+                        ! line
+                        if (sgn2 < 0) then
+                            vpairs(i,2*j-1:2*j) = (/v2, v3/)
+                        else
+                            vpairs(i,2*j-1:2*j) = (/v3, v2/)
+                        end if
+                        
+                    end do
+                else
+                    ! Vertex without fieldline ID - don't include. 
+                    ! It is assumed that these vertices only appear on 
+                    ! the boundary, and these vertices are considered
+                    ! later on if vessel edges are considered.
+                    nvpairs(i)  = 0
+                    wt(i)       = 0
+
+                end if
+            end if
+
+            ! Housekeeping
+            deallocate(tvn, temptvn, cID)
+
+        end do
+
+        ! Include vessel vertices?
+        if (dovessel) then 
+            ! Get all vessel vertices
+            call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
+            allocate(vesselvert(count(isvesselvertex)))
+            vesselvert = pack([(i, i=1, grid%vert%ntot)], isvesselvertex)
+
+            ! Overwrite potential other vertex pairs (ordering doesn't 
+            ! matter because we set bias to one anyway)
+            do i = 1, size(vesselvert, 1)
+                ! Unpack
+                tv = vesselvert(i)
+
+                ! Get the faces of this vertex
+                tvf = GetVertFace(vert, tv)
+
+                ! Check
+                if (count(isvesselface(tvf)) == 2) then
+                    ! Get the other two vertices
+                    allocate(tvfv(2, 2))
+                    tvfv = grid%face%vert(pack(tvf, isvesselface(tvf)), :)
+                    allocate(tvn(count(tvfv /= tv)))
+                    tvn = pack(tvfv, tvfv /= tv)
+
+                    ! Check
+                    if (size(tvn, 1) /= 2) then 
+                        ! Shouldn't happen, throw error
+                        call gdErrorHandler('InitializeCostFunctionLR: ' // &
+                            'unknown error, something seems wrong in grid interconnection')
+                    end if 
+
+                    ! Add
+                    vpairs(tv, 1:2) = tvn
+                    b0(tv) = 1
+                    nvpairs(tv) = 1 
+
+                    ! Deallocate 
+                    deallocate(tvfv, tvf, tvn)
+                end if 
+
+            end do
+
+            ! Housekeeping
+            deallocate(vesselvert)
+
+
+        end if 
+
+        ! Housekeeping
+        deallocate(Btx, Bty)
+
+        ! End associate
+        end associate
+
+        ! Write data
+        !===========
+        if (options%writedata == 1) then 
+            call costfunction%WriteData(grid)
+        end if 
+
+    end subroutine
+
+    ! Cost function data writing 
+    subroutine WriteCostFunctionDataLRrad(costfunction, grid)
+
+        ! Description
+        !============
+        ! Write out the cost function data for the LR cost function.
+        ! Here, this consists of the vertex pair data in IDn, xn, yn 
+        ! format
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionLRradUDT)     :: costfunction 
+        type(GridUDT)                   :: grid
+
+        ! Auxiliary
+        integer(I8)                     :: ncol, nrow 
+
+        integer(I8), allocatable        :: IDn(:, :) 
+        real(R8), allocatable           :: xn(:, :), yn(:, :)
+        character(:), allocatable       :: filename 
+
+        ! Loop
+        integer(I8)                     :: j 
+
+        ! Initialize
+        !===========
+        ! Set filename
+        allocate(character(len('costfunction_vertexpairs_LRrad')) :: filename)
+        filename = 'costfunction_vertexpairs_LRrad'
+
+        ! Allocate
+        nrow = size(costfunction%vpairs, 1)
+        ncol = size(costfunction%vpairs, 2)
+        allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
+
+        ! Unpack
+        associate(&
+            vpairs      => costfunction%vpairs,         &
+            x           => grid%vert%x,                 &
+            y           => grid%vert%y)
+
+        ! Loop
+        do j = 1, ncol 
+            IDn(:, j) = vpairs(:, j) 
+            xn(:, j) = x(vpairs(:, j)) 
+            yn(:, j) = y(vpairs(:, j)) 
+        end do
+
+        ! Call writer
+        !============
+        call WriteVertexPairData(IDn, xn, yn, filename)
+
+        ! Housekeeping
+        !=============
+        end associate
+        deallocate(IDn, xn, yn)
+        
+
 
     end subroutine
 
@@ -3700,6 +4107,193 @@ module gdmod_costfunction
     end subroutine
 
     !------------------------------------------------------------------!
+    !                       LENGTH RATIO, RADIAL 2                     !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionLRrad2(costfunction, grid, &
+        magneticField, environment, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. 
+
+        ! Simply call the initialization of the original lenght ratio
+        ! cost function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRrad2UDT)           :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
+        
+        ! Initialize
+        !===========
+        call costfunction%cfv_lrrad%Initialize(grid, magneticField, &
+            environment, options)
+
+        ! (Re)set the scaling constant
+        costfunction%cfv_lrrad%lambda = options%LRrad%lambda ! seems to agree well with most grids
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionLRrad2(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, we simply call the same cost function twice, but switch
+        ! the order of the indices and recompute the bias. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRrad2UDT)    :: costfunction 
+        real(R8)                        :: J, J1, J2
+        real(R8), allocatable           :: gradJ(:), gradJ1(:), &
+            gradJ2(:) 
+        type(MySparseUDT)               :: hessJ, hessJ1, hessJ2 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i
+
+        ! Auxiliary
+        integer(I8), allocatable        :: tempvpairs(:,:)
+        real(R8), allocatable           :: tempb0(:) 
+                                        
+        ! Initialize
+        !===========
+        ! Store original vertex pairs and bias
+        allocate(tempvpairs, source=costfunction%cfv_lrrad%vpairs)
+        allocate(tempb0, source=costfunction%cfv_lrrad%b0)
+        tempvpairs = costfunction%cfv_lrrad%vpairs 
+        tempb0  = costfunction%cfv_lrrad%b0
+         
+        ! Cost function
+        J = 0
+        J1 = 0
+        J2 = 0
+
+        ! Gradient
+        gradJ(:) = 0
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+
+        ! Hessian
+        hessJ1%nrow = hessJ%nrow 
+        hessJ2%nrow = hessJ%nrow 
+        hessJ1%ncol = hessJ%ncol 
+        hessJ2%ncol = hessJ%ncol 
+
+        ! Compute cost function
+        !======================
+        ! First contribution
+        call costfunction%cfv_lrrad%Evaluate(J1, gradJ1, &
+            hessJ1, grid, magneticField, environment, dogradient, &
+            dohessian, designvariables)
+        
+        ! Adjust vertex pairs and bias
+        do i = 1, maxval(costfunction%cfv_lrrad%nvpairs)
+            costfunction%cfv_lrrad%vpairs(:, 2*i-1) = tempvpairs(:, 2*i)
+            costfunction%cfv_lrrad%vpairs(:, 2*i) = tempvpairs(:, 2*i-1)
+        end do
+        costfunction%cfv_lrrad%b0(:) = 1/tempb0
+
+        ! Second contribution
+        call costfunction%cfv_lrrad%Evaluate(J2, gradJ2, &
+            hessJ2, grid, magneticField, environment, dogradient, &
+            dohessian, designvariables)
+
+        ! Reset vertex pairs and bias
+        costfunction%cfv_lrrad%b0(:) = tempb0
+        costfunction%cfv_lrrad%vpairs(:,:) = tempvpairs
+
+        ! Add
+        J = J1 + J2 
+        gradJ = gradJ1 + gradJ2
+        hessJ = hessJ1 + hessJ2
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJ1, gradJ2)
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionLRrad2(costfunction, nv, nvn)
+
+        ! Description
+        !============
+        ! Allocate, assumed that costfunction%nvpairs is given
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRrad2UDT)    :: costfunction
+        integer(I8)                     :: nv, nvn
+
+        ! Allocate
+        !=========
+        call costfunction%cfv_lrrad%Allocate(nv, nvn)
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionLRrad2(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRrad2UDT)       :: costfunction
+
+        ! Deallocate
+        !===========
+        call costfunction%cfv_lrrad%Deallocate()
+
+    end subroutine
+
+    subroutine DestroyCostFunctionLRrad2(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionLRrad2UDT)       :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%cfv_lrrad%Deallocate()
+
+    end subroutine
+
+
+    !------------------------------------------------------------------!
     !                       PSI RATIO, PSI BASED                       !
     !------------------------------------------------------------------!
 
@@ -4700,9 +5294,6 @@ module gdmod_costfunction
 
     end subroutine
 
-    
-
-
     !------------------------------------------------------------------!
     !                             GENERAL                              !
     !------------------------------------------------------------------!
@@ -4731,10 +5322,11 @@ module gdmod_costfunction
         ! Initialize
         !===========
         ! Set evaluation switches
-        costfunction%doLR   = .false.
-        costfunction%doFAD  = .false.
-        costfunction%doFA   = .false.
-        costfunction%doPRPB = .false. 
+        costfunction%doLR       = .false.
+        costfunction%doFAD      = .false.
+        costfunction%doFA       = .false.
+        costfunction%doPRPB     = .false. 
+        costfunction%doLRrad    = .false.
 
         ! Check based on cost function type
         select case (costfunction%type)
@@ -4742,20 +5334,33 @@ module gdmod_costfunction
         case ('LR_FAD')
 
             ! Set lambda of other contributions 
-            options%FA%lambda = -1
-            options%PRPB%lambda = -1
+            options%FA%lambda       = -1
+            options%PRPB%lambda     = -1
+            options%LRrad%lambda    = -1
             
         case ('LR_FAD_FA')
 
             ! Set lambda of other contributions
-            options%PRPB%lambda = -1
+            options%PRPB%lambda     = -1
+            options%LRrad%lambda    = -1
 
         case ('LR_FAD_PRPB')
 
             ! Set lambda of other contributions
-            options%FA%lambda = -1
+            options%FA%lambda       = -1
+            options%LRrad%lambda    = -1
 
         case ('LR_FAD_PRPB_FA')
+
+            ! Set lambda of other contributions
+            options%LRrad%lambda    = -1
+
+        case ('LR_FAD_PRPB_LRrad')
+
+            ! Set lambda of other contributions
+            options%FA%lambda    = -1
+
+        case ('LR_FAD_PRPB_LRrad_FA')
 
             ! Set lambda of other contributions
 
@@ -4789,6 +5394,11 @@ module gdmod_costfunction
         if (options%PRPB%lambda > 0) then 
             costfunction%doPRPB = .true.
             call costfunction%cfv_prpb%Initialize(grid, magneticField, &
+                environment, options)
+        end if
+        if (options%LRrad%lambda > 0) then 
+            costfunction%doLRrad = .true.
+            call costfunction%cfv_lrrad%Initialize(grid, magneticField, &
                 environment, options)
         end if
 
@@ -4923,6 +5533,22 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
         end if 
 
+        ! Length ratio, radial
+        if (costfunction%doLRrad) then 
+            ! Compute
+            call costfunction%cfv_lrrad%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, grid, magneticField, environment, dogradient, &
+                dohessian, designvariables)
+
+            ! Add
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+        end if 
+
         ! Housekeeping
         !=============
         deallocate(gradJtemp)
@@ -4960,6 +5586,7 @@ module gdmod_costfunction
         call costfunction%cfv_fad%Deallocate()
         call costfunction%cfv_fa%Deallocate()
         call costfunction%cfv_prpb%Deallocate()
+        call costfunction%cfv_lrrad%Deallocate()
 
     end subroutine
 
@@ -4980,6 +5607,7 @@ module gdmod_costfunction
         call costfunction%cfv_fad%Deallocate()
         call costfunction%cfv_fa%Deallocate()
         call costfunction%cfv_prpb%Deallocate()
+        call costfunction%cfv_lrrad%Deallocate()
 
     end subroutine
     

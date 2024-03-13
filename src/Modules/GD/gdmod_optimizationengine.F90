@@ -347,7 +347,8 @@ module gdmod_optimizationengine
             ! Set type
             problem%costfunction%type = 'PRPB2'
 
-        case ('general', 'LR_FAD_FA', 'LR_FAD_PRPB', 'LR_FAD_PRPB_FA')
+        case ('general', 'LR_FAD_FA', 'LR_FAD_PRPB', 'LR_FAD_PRPB_FA', &
+            'LR_FAD_PRPB_LRrad', 'LR_FAD_PRPB_LRrad_FA')
 
             ! Allocate
             allocate(CostfunctionGeneralUDT::problem%costfunction)
