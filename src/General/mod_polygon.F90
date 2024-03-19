@@ -1644,6 +1644,8 @@ module mod_polygon
         call polygon%Inpolygon(tpx, tpy, isin)
         where (.not. isin) nx = -nx 
         where (.not. isin) ny = -ny
+        where (.not. isin) tx = -tx 
+        where (.not. isin) ty = -ty
 
 
         end associate
@@ -2765,7 +2767,7 @@ module mod_polygon
             do j = 1, np-1
                 if (xcross(j) < 0) then 
                     ! x-coordinate of intersection
-                    xi = xp(j) + yp(j)*(xp(j+1) - xp(j))/(yp(j+1) - yp(j))
+                    xi = xp(j) + yp(j)*(xp(j+1) - xp(j))/(yp(j) - yp(j+1))
 
                     if (xi > 0) then 
                         if (yp(j) <0) then 
@@ -2774,7 +2776,7 @@ module mod_polygon
                             w(i) = w(i) - 2 
                         end if 
                     end if 
-                elseif ( (yp(j) == 0) .and. (xp(j+1) > 0) ) then
+                elseif ( (yp(j) == 0) .and. (xp(j) > 0) ) then
                     if ( (yp(j+1) > 0) ) then 
                         w(i) = w(i) + 1
                     else 
