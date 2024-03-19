@@ -30,6 +30,7 @@ module mod_linearsolverinterface
     ! Public routines
     public TestUMFPACK !  tester
     public SolveSparseLinearSystemDI ! Sparse system solver
+    public SolveDenseLinearSystemDI ! dense system solver
 
     ! UMFPACK variables - hard coded here...
     integer(c_int) :: umfpack_a = 0
@@ -429,6 +430,58 @@ module mod_linearsolverinterface
 
         ! Deallocate
         deallocate(Ap, Ai, Ax, Map, sol_c)
+
+    end subroutine
+
+    ! The dense solver
+    subroutine SolveDenseLinearSystemDI(A, b, sol, flag)
+
+        ! Description
+        !============
+        ! Solve (small) dense linear systems. We rely on LAPACK to 
+        ! compute the solution
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)    :: A(:, :)
+        real(R8), intent(in)    :: b(:)
+        real(R8), intent(out)   :: sol(size(b))
+        integer(I8)             :: flag 
+
+        ! Auxiliary
+        integer(I8), allocatable        :: ipiv(:)
+        integer                         :: neq, info
+        double precision, allocatable   :: rhs(:), lhs(:, :)
+
+        ! Initialize
+        !===========
+        ! Check dimensions
+        neq = size(b)
+        if ( (size(A, 1) /= neq) .or. (size(A, 2) /= neq)) then 
+            ! Incompatible sizes
+            call gdErrorHandler('SolveDenseLinearSystemDI: incompatible size of A w.r.t. b')
+        end if 
+
+        ! Set solver data
+        allocate(rhs(neq), lhs(neq, neq))
+        rhs = b
+        lhs = A
+        flag = 0
+
+        ! Call the solver (make sure input is in right format!)
+        allocate(ipiv(neq))
+        call dgesv(neq, 1, lhs, neq, ipiv, rhs, neq, info)
+
+        ! Check if converged
+        if (info .ne. 0) then
+            ! Not converged 
+            flag = 1
+            print *, 'dgesv could not converge, info: ', info 
+        end if
+
+        ! Set solution
+        sol = rhs
 
     end subroutine
 

@@ -149,6 +149,9 @@ module mod_polygon
         procedure :: Construct          => ConstructPolygonSet
         procedure :: SelfIntersections  => PolygonSetSelfIntersections
         procedure :: GetEdges           => GetPolygonSetEdges
+        procedure :: GetNormals         => GetPolygonSetNormals
+        procedure :: GetTangents        => GetPolygonSetTangents
+        procedure :: GetPoints          => GetPolygonSetPoints
         procedure :: WriteData          => WritePolygonSetData
         procedure :: OrientNestedClosedPolygons
 
@@ -802,6 +805,209 @@ module mod_polygon
         end associate
 
     end subroutine
+
+    ! Get polygonset tangents (not normalized)
+    subroutine GetPolygonSetTangents(polygonset, tx, ty, tn)
+
+        ! Description
+        !============
+        ! Return the edge tangents of the entire polygon set - useful
+        ! for bulk geometric operations such as normal computations etc.
+        ! It is assumed that the polygonset is fully up to date. 
+        ! Note that the tangents are not normalized, hence we return 
+        ! the tangent length in tn 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        real(R8), allocatable, intent(out)  :: tx(:), ty(:), tn(:)
+
+        ! Auxiliary
+        integer(I8)                         :: ne, ce  
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Deallocate if already allocated
+        if (allocated(tx)) then 
+            deallocate(tx)
+        end if 
+        if (allocated(ty)) then 
+            deallocate(ty) 
+        end if 
+        if (allocated(tn)) then 
+            deallocate(tn) 
+        end if
+
+        ! Build edges
+        !============
+        ! Associate
+        associate( &
+            pol         => polygonset%polygons)
+        
+        ! Precompute the total number of edges
+        ne = 0
+        do i = 1, polygonset%np 
+            ne = ne + polygonset%polygons(i)%ne             
+        end do 
+
+        ! Allocate
+        allocate(tx(ne), ty(ne), tn(ne))
+
+        ! Loop and add
+        ce = 0 ! edge counter
+        do i = 1, polygonset%np 
+            ! Add coordinates
+            tx(ce+1:ce+pol(i)%ne)   = pol(i)%tx 
+            ty(ce+1:ce+pol(i)%ne)   = pol(i)%ty 
+            tn(ce+1:ce+pol(i)%ne)   = pol(i)%tn 
+
+            ! Update counter
+            ce = ce + pol(i)%ne 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Get polygonset normals (not normalized)
+    subroutine GetPolygonSetNormals(polygonset, nx, ny, nn)
+
+        ! Description
+        !============
+        ! Return the edge normals of the entire polygon set - useful
+        ! for bulk geometric operations such as normal computations etc.
+        ! It is assumed that the polygonset is fully up to date. 
+        ! Note that the normals are not normalized, hence we return 
+        ! the normal length in nn 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        real(R8), allocatable, intent(out)  :: nx(:), ny(:), nn(:)
+
+        ! Auxiliary
+        integer(I8)                         :: ne, ce  
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Deallocate if already allocated
+        if (allocated(nx)) then 
+            deallocate(nx)
+        end if 
+        if (allocated(ny)) then 
+            deallocate(ny) 
+        end if 
+        if (allocated(nn)) then 
+            deallocate(nn) 
+        end if
+
+        ! Build edges
+        !============
+        ! Associate
+        associate( &
+            pol         => polygonset%polygons)
+        
+        ! Precompute the total number of edges
+        ne = 0
+        do i = 1, polygonset%np 
+            ne = ne + polygonset%polygons(i)%ne             
+        end do 
+
+        ! Allocate
+        allocate(nx(ne), ny(ne), nn(ne))
+
+        ! Loop and add
+        ce = 0 ! edge counter
+        do i = 1, polygonset%np 
+            ! Add coordinates
+            nx(ce+1:ce+pol(i)%ne)   = pol(i)%nx 
+            ny(ce+1:ce+pol(i)%ne)   = pol(i)%ny 
+            nn(ce+1:ce+pol(i)%ne)   = pol(i)%nn 
+
+            ! Update counter
+            ce = ce + pol(i)%ne 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Get polygonset points 
+    subroutine GetPolygonSetPoints(polygonset, xp, yp)
+
+        ! Description
+        !============
+        ! Return all coordinates of the points in an unspecified order.
+        ! The points should in principle be unique. Useful for 
+        ! operations that only considers the points and not the edges
+        ! of the polygon in any particular order. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        real(R8), allocatable, intent(out)  :: xp(:), yp(:)
+
+        ! Auxiliary
+        integer(I8)                         :: nv, cp  
+
+        ! Loop
+        integer(I8)                         :: i, ce
+
+        ! Initialize
+        !===========
+        ! Deallocate if already allocated
+        if (allocated(xp)) then 
+            deallocate(xp)
+        end if 
+        if (allocated(yp)) then 
+            deallocate(yp) 
+        end if 
+
+        ! Build points
+        !=============
+        ! Associate
+        associate( &
+            pol         => polygonset%polygons)
+        
+        ! Precompute the total number of points
+        nv = 0
+        do i = 1, polygonset%np 
+            nv = nv + polygonset%polygons(i)%nv             
+        end do 
+
+        ! Allocate
+        allocate(xp(nv), yp(nv))
+
+        ! Loop and add
+        ce = 0 ! edge counter
+        do i = 1, polygonset%np 
+            ! Add coordinates
+            xp(ce+1:ce+pol(i)%nv)   = pol(i)%x 
+            yp(ce+1:ce+pol(i)%nv)   = pol(i)%y 
+
+            ! Update counter
+            cp = cp + pol(i)%nv 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
 
     ! Write polygonset vertex data
     subroutine WritePolygonSetData(polygonset, filepath)

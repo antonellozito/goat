@@ -22,6 +22,7 @@ module goatmod_types
     use mod_precision
     use mod_polygon
     use Interpolant
+    use PolygonShapeFunction
 
     ! The usual
     implicit none
@@ -483,6 +484,9 @@ module goatmod_types
         integer(I4)                         :: nstructures = 0
         type(VesselStructureUDT), allocatable       :: structures(:)
         type(PolygonSetUDT)                 :: polygonset 
+        
+        ! Shape function
+        class(PolygonShapeFunctionUDT), allocatable     :: psf
 
 
     end type

@@ -11,6 +11,7 @@
 
 module GOAT_tests 
 
+    use, intrinsic :: ieee_arithmetic
     implicit none
     save 
 
@@ -24,7 +25,8 @@ module GOAT_tests
 
         ! Interpolant testing
         !call TestStructuredInterpolant2D()
-        call TestCSparse()
+        !call TestCSparse()
+        call TestPLF2D
 
     end subroutine
 
@@ -291,6 +293,90 @@ module GOAT_tests
         print *, 'Time elapsed for multiplying matrices with ',  n, ' nonzeros: ', t_end-t_start 
 
     end subroutine
+
+    ! Polygon Levelset functions
+    subroutine TestPLF2D()
+
+        ! Description
+        !============
+        ! Test whether the polygon level set routines are correctly set
+        ! up. Here, we just write out some plot data to be compared...
+
+        ! The usual
+        use PolygonLevelsetFunction2D
+        use mod_polygon
+
+        ! Declare variables
+        !==================
+        ! Arguments
+
+        ! Auxiliary
+        class(PolygonLevelsetFunction2DUDT), allocatable    :: plfg, &
+            plfce, plfca
+
+        type(PLF2DGeneralOptionsUDT)                :: optionsg 
+        type(PLF2DClosedExactOptionsUDT)            :: optionsce
+        type(PLF2DClosedApproximationOptionsUDT)    :: optionsca 
+
+        type(PolygonSetUDT)         :: psg, psce, psca
+
+        real(R8)                    :: NaN 
+        real(R8), allocatable       :: xg(:), yg(:), zg(:), xcps(:), &
+            ycps(:), zcps(:), xncp(:), yncp(:), zncp(:)
+
+        ! Loop
+
+        ! Initialize
+        !===========
+        ! Set NaN
+        NaN = ieee_value(NaN, ieee_quiet_nan)
+
+        ! Construct
+        !==========
+        ! Construct general polygon set
+        xg = [1, 1, 2, 4, -1]
+        yg = [0, 2, 2, 1, 0]
+        call psg%Construct(xg, yg)
+
+
+        ! Construct simple closed polygon set
+        xcps = [1, 1, 2, 4, 1]
+        ycps = [0, 2, 2, 1, 0]
+        call psce%Construct(xcps, ycps)
+
+        ! Construct nested closed polygon set
+        xncp = [1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.75, 0.75, 0.25, 0.25, 0.75 ]
+        yncp = [0.0 , 1.0, 1.0, 0.0, 0.0, 0.0, 0.25, 0.75, 0.75, 0.25, 0.25 ]
+        xncp(6) = NaN 
+        yncp(6) = NaN
+        call psca%Construct(xncp, yncp)
+
+        ! Set plf options (only for ca)
+        optionsca%C         = 3
+        optionsca%M         = 6
+        optionsca%meth      = 'uniformgrid'
+        optionsca%offsetx   = 0.1
+        optionsca%offsety   = 0.1
+        optionsca%resx      = 400
+        optionsca%resy      = 400
+        optionsca%optionsClosedExact = optionsce
+
+        ! Construct PLFs
+        call InitializePolygonLevelsetFunction2D(plfg, psg, optionsg)
+        call InitializePolygonLevelsetFunction2D(plfce, psce, optionsce)
+        call InitializePolygonLevelsetFunction2D(plfca, psca, optionsca)
+
+        ! Visualize
+        call plfg%Visualize('generalplf')
+        call plfce%Visualize('closedexactplf')
+        call plfca%Visualize('closedapproximation')
+
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                           Auxiliary                              !
+    !------------------------------------------------------------------!
 
     subroutine CreateRandomSparseMatrix(A, nrow, ncol, nnz)
 

@@ -366,6 +366,38 @@ def PlotVesselPolygon(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+#--------------------------------------------------------------------------#
+#                               2D surface plots                           #
+#--------------------------------------------------------------------------#
+    
+# Wrappers 
+def Plot2DSurfaceData(filepath, fignum):
+    # Description
+    #------------
+    # Read and plot 2D data as patchplot
+
+    # Read
+    data = dh.GetGeneral2DSurfacedata(filepath)
+
+    # Plot
+    PlotGeneral2DSurface(data[:, 0], data[:, 1], data[:, 2], fignum)
+
+def Plot2DSurfaceDataContourf(filepath, fignum, **plotargs):
+    # Description
+    #------------
+    # Read and plot 2D data with filled contours
+
+    # Read
+    data = dh.GetGeneral2DSurfaceData(filepath)
+
+    # Plot
+    PlotGeneral2DContourf(data[:, 0], data[:, 1], data[:, 2], fignum, **plotargs)
+
+    # Add colorbar
+
+
+
+    
 
 #==========================================================================#
 #                                                                          #
@@ -393,6 +425,24 @@ def PlotPoints2D(x, y, fignum, **plotargs):
     # Set the current figure
     plt.figure(fignum)
     plt.scatter(x, y, **plotargs)
+    plt.draw()
+
+def PlotGeneral2DSurface(x, y, z, fignum, **plotargs):
+    # General z = f(x, y) surface plotter - may be expensive since
+    # a triangulation is created under the hood. 
+
+    # Set the current figure
+    plt.figure(fignum)
+    plt.tripcolor(x, y, z, **plotargs)
+    plt.draw()
+
+def PlotGeneral2DContourf(x, y, z, fignum, **plotargs):
+    # Same as PlotGeneral2DSurface, but now we plot filled contours
+    
+    # Set the current figure
+    fig = plt.figure(fignum)
+    CS = plt.tricontourf(x, y, z, **plotargs)
+    cbar = fig.colorbar(CS)
     plt.draw()
 
 #==========================================================================#
