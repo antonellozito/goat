@@ -389,8 +389,8 @@ module PolygonLevelsetFunction2D
         ! Construct a 2D grid
         !====================
         ! Set mesh size
-        nx = 100
-        ny = 100
+        nx = 200
+        ny = 400
 
         ! Allocate
         allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny), &
@@ -406,8 +406,8 @@ module PolygonLevelsetFunction2D
         dx = (xmax - xmin) 
         dy = (ymax - ymin)
         
-        offsetx = 0.05*dx 
-        offsety = 0.05*dy 
+        offsetx = 0.0*dx 
+        offsety = 0.0*dy 
 
         dxgv = (dx + 2*offsetx)/nx 
         dygv = (dy + 2*offsety)/ny 
@@ -760,7 +760,7 @@ module PolygonLevelsetFunction2D
             nxpv(:, :), nypv(:, :), theta0(:), crossprod(:)
 
         ! Loop
-        integer(I8)                                 :: i, ce
+        integer(I8)                                 :: i, ce, ce2
 
         ! Initialize
         !===========
@@ -782,17 +782,18 @@ module PolygonLevelsetFunction2D
         ! Compute additional data
         !========================
         ! Get edge data
-        call ps%GetEdges(xe, ye)
-        call ps%GetNormals(nx, ny, nn)
+        call ps%GetEdges(xe, ye) ! may still change
+        call ps%GetNormals(nx, ny, nn) ! may still change
         call ps%GetTangents(tx, ty, tn)
-        call ps%GetPoints(xp, yp) ! may still change
+        !call ps%GetPoints(xp, yp) ! may still change
 
         ! Allocate
-        np = size(xp, 1)
-        allocate(nxpv(np, 2), nypv(np, 2))
+        np = (size(xe, 1)+1)*ps%np
+        allocate(nxpv(np, 2), nypv(np, 2), xp(np), yp(np))
 
         ! Compute vertex regions
         ce = 0
+        ce2 = 0
         do i = 1, ps%np 
             ! Normally, since each polygon is closed and non-intersecting,
             ! the first and last vertex will be the same and no 
@@ -802,27 +803,35 @@ module PolygonLevelsetFunction2D
             ne = pol(i)%ne 
 
             ! Coordinates
-            tempx = pol(i)%x(pol(i)%vert(1:ne))
-            tempy = pol(i)%y(pol(i)%vert(1:ne))
+            tempx = pol(i)%x(pol(i)%vert)
+            tempy = pol(i)%y(pol(i)%vert)
 
             ! Normals
-            allocate(tempnx(ne, 2), tempny(ne, 2))
-            tempnx(:, 1) = pol(i)%nx/pol(i)%nn 
-            tempnx(:, 2) = [pol(i)%nx(ne)/pol(i)%nn(ne), &
-                pol(i)%nx(1:ne-1)/pol(i)%nn(1:ne-1)]
+            allocate(tempnx(ne+1, 2), tempny(ne+1, 2))
 
-            tempny(:, 1) = pol(i)%ny/pol(i)%nn 
-            tempny(:, 2) = [pol(i)%ny(ne)/pol(i)%nn(ne), &
+            tempnx(1:ne, 2) = pol(i)%nx/pol(i)%nn 
+            tempnx(1:ne, 1) = [pol(i)%nx(ne)/pol(i)%nn(ne), &
+                pol(i)%nx(1:ne-1)/pol(i)%nn(1:ne-1)]
+            tempnx(ne+1, 1:2) = [pol(i)%nx(1)/pol(i)%nn(1), pol(i)%nx(ne)/pol(i)%nn(ne)]
+
+            tempny(1:ne, 2) = pol(i)%ny/pol(i)%nn 
+            tempny(1:ne, 1) = [pol(i)%ny(ne)/pol(i)%nn(ne), &
                 pol(i)%ny(1:ne-1)/pol(i)%nn(1:ne-1)]
+            tempny(ne+1, 1:2) = [pol(i)%ny(1)/pol(i)%nn(1), pol(i)%ny(ne)/pol(i)%nn(ne)]
+
 
             ! Add
-            xp(ce+1:ce+ne) = tempx 
-            yp(ce+1:ce+ne) = tempy 
-            nxpv(ce+1:ce+ne, :) = tempnx 
-            nypv(ce+1:ce+ne, :) = tempny 
+            xp(ce+1:ce+ne+1) = tempx 
+            yp(ce+1:ce+ne+1) = tempy 
+            nxpv(ce+1:ce+ne+1, :) = tempnx ! normals should be oriented outwards already
+            nypv(ce+1:ce+ne+1, :) = tempny 
+            nx(ce2+1:ce2+ne) = pol(i)%nx/pol(i)%nn 
+            ny(ce2+1:ce2+ne) = pol(i)%ny/pol(i)%nn 
+            tn(ce2+1:ce2+ne) = pol(i)%nn 
 
             ! Update counter
-            ce = ce + ne
+            ce = ce + ne + 1
+            ce2 = ce2 + ne
 
             ! Housekeeping
             deallocate(tempnx, tempny)
@@ -833,7 +842,6 @@ module PolygonLevelsetFunction2D
 
         ! Compute cross product
         crossprod = nxpv(:, 2)*nypv(:, 1) - nxpv(:, 1)*nypv(:, 2)
-        where (crossprod == 0) crossprod =  1 ! doesn't matter
 
         ! Compute angles
         theta0 = atan2(nxpv(:, 2)*nypv(:, 1) - nxpv(:, 1)*nypv(:, 2), &
@@ -845,8 +853,8 @@ module PolygonLevelsetFunction2D
         plf%yp  = yp
         plf%xf  = 0.5*( xe(:, 1) + xe(:, 2) )
         plf%yf  = 0.5*( ye(:, 1) + ye(:, 2) )
-        plf%nxp = nx/nn ! normalize
-        plf%nyp = ny/nn
+        plf%nxp = nx 
+        plf%nyp = ny
         plf%tnp = tn 
         plf%nxpv    = nxpv 
         plf%nypv    = nypv
@@ -963,7 +971,7 @@ module PolygonLevelsetFunction2D
             vx = (xqr - xf)
             vy = (yqr - yf)
             dvn = (vx*nxp + vy*nyp)
-            tvn = vx*nyp - vy*nxp; ! distance in tangential direction
+            tvn = vx*nyp - vy*nxp ! distance in tangential direction
             
             ! Check in which regions the query points lie
             ! Vertex regions
@@ -980,7 +988,7 @@ module PolygonLevelsetFunction2D
             distedge = dvn
             distvert = sign(myones, crossprod)*sqrt((xp - xqr)**2 + (yp - yqr)**2)
             where (.not. onedge) distedge = inf 
-            where (.not. isinvert) distedge = inf 
+            where (.not. isinvert) distvert = inf 
             
             ! Compute minimal distance
             indmine = minloc(abs(distedge), 1)
