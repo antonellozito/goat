@@ -321,8 +321,8 @@ module GOAT_tests
         type(PolygonSetUDT)         :: psg, psce, psca
 
         real(R8)                    :: NaN 
-        real(R8), allocatable       :: xg(:), yg(:), zg(:), xcps(:), &
-            ycps(:), zcps(:), xncp(:), yncp(:), zncp(:)
+        real(R8), allocatable       :: xg(:), yg(:), xcps(:), &
+            ycps(:), xncp(:), yncp(:)
 
         ! Loop
 
@@ -331,32 +331,37 @@ module GOAT_tests
         ! Set NaN
         NaN = ieee_value(NaN, ieee_quiet_nan)
 
+        ! Coordinates
+        xg = [1, 1, 2, 4, -1]
+        yg = [0, 2, 2, 1, 0]
+
+        xcps = [1, 1, 2, 4, 1]
+        ycps = [0, 2, 2, 1, 0]
+
+        xncp = [1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.75, 0.75, 0.25, 0.25, 0.75 ]
+        yncp = [0.0 , 1.0, 1.0, 0.0, 0.0, 0.0, 0.25, 0.75, 0.75, 0.25, 0.25 ]
+
+        xncp(6) = NaN 
+        yncp(6) = NaN
+
         ! Construct
         !==========
         ! Construct general polygon set
-        xg = [1, 1, 2, 4, -1]
-        yg = [0, 2, 2, 1, 0]
         call psg%Construct(xg, yg)
 
 
         ! Construct simple closed polygon set
-        xcps = [1, 1, 2, 4, 1]
-        ycps = [0, 2, 2, 1, 0]
         call psce%Construct(xcps, ycps)
 
         ! Construct nested closed polygon set
-        xncp = [1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.75, 0.75, 0.25, 0.25, 0.75 ]
-        yncp = [0.0 , 1.0, 1.0, 0.0, 0.0, 0.0, 0.25, 0.75, 0.75, 0.25, 0.25 ]
-        xncp(6) = NaN 
-        yncp(6) = NaN
         call psca%Construct(xncp, yncp)
 
         ! Set plf options (only for ca)
         optionsca%C         = 3
         optionsca%M         = 6
         optionsca%meth      = 'uniformgrid'
-        optionsca%offsetx   = 0.1
-        optionsca%offsety   = 0.1
+        optionsca%offsetx   = 1
+        optionsca%offsety   = 1
         optionsca%resx      = 400
         optionsca%resy      = 400
         optionsca%optionsClosedExact = optionsce
@@ -369,7 +374,7 @@ module GOAT_tests
         ! Visualize
         call plfg%Visualize('generalplf')
         call plfce%Visualize('closedexactplf')
-        call plfca%Visualize('closedapproximation')
+        call plfca%Visualize('closedapproximationplf')
 
 
     end subroutine
