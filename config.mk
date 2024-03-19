@@ -115,7 +115,7 @@ AUXILIARY_FILES = src/Auxiliary/mod_plotter.F90 $(wildcard src/Auxiliary/*.F90) 
     src/Auxiliary/Interpolation/Interpolant2D.F90 \
     src/Auxiliary/Interpolation/BicubicSplineInterpolant.F90 \
     src/Auxiliary/Interpolation/StructuredInterpolant2D.F90 \
-    $(wildcard src/Auxiliary/Interpolation/*.F90)
+    $(wildcard src/Auxiliary/Interpolation/*.F90) 
 
 ## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
 B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)
@@ -139,7 +139,7 @@ NUMERICS_FILES = $(wildcard src/Numerics/*.F90)
 OPTIMIZATION_FILES = $(wildcard src/Optimization/*.F90)
 
 ## CONSTANTS            : constants such as precision and special characters (.F90) - unsequenced
-CONSTANTS_FILES = $(wildcard src/Constants/*.F90)
+CONSTANTS_FILES = src/Constants/mod_precision.F90 $(wildcard src/Constants/*.F90)
 
 ## Clayer               : c files for interfacing with other c code
 CLAYER_FILES    = $(wildcard src/Clayer/*.c)
