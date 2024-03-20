@@ -52,6 +52,9 @@ module DistributionFunction
         ! Evaluation
         procedure(EvaluateDistributionFunctionINT), deferred :: Evaluate   
 
+        ! Visualization 
+        procedure   :: Visualize    => VisualizeDistributionFunction
+
     end type
 
     ! Regular distance function
@@ -191,6 +194,57 @@ module DistributionFunction
     !==================================================================!
 
     !------------------------------------------------------------------!
+    !                               GENERAL                            !
+    !------------------------------------------------------------------!
+
+    ! Visualization
+    subroutine VisualizeDistributionFunction(distribution, &
+        xrange, yrange, resx, resy, savefilepath)
+
+        ! Description
+        !============
+        ! Visualize the distribution function by evaluating it on a 
+        ! structured 2D mesh. Coordinates and values are written out 
+        ! in z = f(x, y) format, which can be used later on for post-
+        ! processing
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DistributionFunctionUDT)  :: distribution 
+        real(R8), intent(in)            :: xrange(1:2), yrange(1:2)
+        integer(I8), intent(in)         :: resx, resy 
+        character(*), intent(in)        :: savefilepath 
+
+        ! Auxiliary
+        real(R8)                        :: dx, dy 
+        real(R8), allocatable           :: xgv(:), ygv(:), xg(:), &
+            yg(:), vg(:)
+
+        ! Loop
+        integer(I8)                     :: k 
+
+        ! Initialize
+        !===========
+        ! Construct gridding vectors
+        dx = maxval(xrange) - minval(xrange)
+        dy = maxval(yrange) - minval(yrange)
+        xgv = [(k, k = 0, resx)]*dx/resx + minval(xrange)
+        ygv = [(k, k = 0, resy)]*dy/resy + minval(yrange)
+
+        ! Construct grid
+        allocate(xg((resx+1)*(resy+1)), yg((resx+1)*(resy+1)), vg((resx+1)*(resy+1)))
+        call Construct2DStructuredGrid(xgv, ygv, resx+1, resy+1, xg, yg)
+
+        ! Evaluate
+        call distribution%Evaluate(xg, yg, vg)
+
+        ! Write data
+        call Write3DCoordinateData(xg, yg, vg, savefilepath)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
     !                         DISTANCE FUNCTION                        !
     !------------------------------------------------------------------!
 
@@ -307,7 +361,7 @@ module DistributionFunction
 
         real(R8)                                        :: tempd
         real(R8), allocatable                           :: xa(:), &
-            ya(:), nxa(:), nya(:), d(:), b(:), bval(:), A(:, :), &
+            ya(:), nxa(:), nya(:), b(:), bval(:), A(:, :), &
             tnxa(:), tnya(:), tnna(:), sol(:), dFdx(:), dFdy(:)
 
         ! Loop
@@ -318,8 +372,8 @@ module DistributionFunction
         ! Data
         distribution%F  = interp 
         distribution%PS = ps
-        distribution%a0 = val0
-        distribution%b0 = valinf 
+        distribution%b0 = val0
+        distribution%a0 = valinf 
         distribution%d0 = decaylength
         distribution%meth = trim(meth)
 
@@ -358,7 +412,7 @@ module DistributionFunction
         end do 
 
         ! Allocate
-        allocate(xa(na), ya(na), nxa(na), nya(na), d(na), bval(na), &
+        allocate(xa(na), ya(na), nxa(na), nya(na), bval(na), &
             b(na), A(na, na))
 
         ! Determine
@@ -431,7 +485,7 @@ module DistributionFunction
         distribution%ya     = ya 
         distribution%nxa    = nxa 
         distribution%nya    = nya 
-        distribution%d      = d
+        distribution%d      = spread(d0, 1, size(xa))
         distribution%coef   = sol 
         distribution%dp = - (-dFdy*nxa + dFdx*nya)
 
@@ -485,6 +539,7 @@ module DistributionFunction
 
         ! Evaluate
         !=========
+        v = 0
         select case (distribution%meth) 
 
         case ('unsigned')
@@ -494,7 +549,7 @@ module DistributionFunction
                 d = sqrt( (x - xa(i))**2 + (y - ya(i))**2)
 
                 ! Value
-                v = v + b0*exp(-d/d0(i))
+                v = v + b0(i)*exp(-d/d0(i))
             end do
 
         case ('signed')
@@ -504,7 +559,7 @@ module DistributionFunction
                 d = sqrt( (x - xa(i))**2 + (y - ya(i))**2)
 
                 ! Value
-                v = v + b0*(sign(myone, dp(i)))*exp(-d/d0(i))
+                v = v + b0(i)*(sign(myone, dp(i)))*exp(-d/d0(i))
             end do
 
         case default
@@ -512,6 +567,8 @@ module DistributionFunction
             call gdErrorHandler('Unknown method')
 
         end select
+
+        v = a0 - v
 
         ! Housekeeping
         !=============
