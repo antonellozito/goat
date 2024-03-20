@@ -107,8 +107,13 @@ module gdmod_userinput
         ! - writedata: write out cost function data for debugging
         ! - dovessel: include vessel edges into cost function?
 
+        ! There are also options for the desired bias distribution:
+        ! - lengthparam: decay length
+        ! - biasatvessel: desired bias at the vessel 
+        ! The desired bias far away from the vessel is assumed to be one. 
+
         real(R8)                    :: lambda 
-        real(R8)                    :: eta
+        real(R8)                    :: eta, lengthparam, biasatvessel
         integer(I8)                 :: writedata
         logical                     :: dovessel
 
@@ -497,6 +502,8 @@ module gdmod_userinput
         options%lambda = 1e0
         options%eta = 1e-5 ! in coordinate units
         options%dovessel = .false.
+        options%lengthparam = 0.1 ! in coordinate units
+        options%biasatvessel = 1
 
     end subroutine
 
@@ -1018,6 +1025,12 @@ module gdmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%eta) 
         field = 'gd.design.cfv.par.LR.dovesseledges'
         call ExtractOptionValueLogical0D(fid, field, options%dovessel) 
+        field = 'gd.design.cfv.par.LR.biasatvessel'
+        call ExtractOptionValueReal0D(fid, field, options%biasatvessel)
+        field = 'gd.design.cfv.par.LR.lengthparam'
+        call ExtractOptionValueReal0D(fid, field, options%lengthparam)  
+        field = 'gd.design.cfv.par.LR.eta'
+        call ExtractOptionValueReal0D(fid, field, options%eta) 
 
         ! Write data
         field = 'gd.design.cfv.par.LR.writedata'

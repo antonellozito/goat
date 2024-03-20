@@ -23,6 +23,7 @@ module gdmod_costfunction
     use gdmod_utility_optimization
     use optmod_costfunction
     use gdmod_plots
+    use DistributionFunction
 
     ! The usual
     implicit none
@@ -593,10 +594,12 @@ module gdmod_costfunction
         integer(I8)                         :: i, j
 
         ! Auxiliary variables
+        type(Polygonset2DFieldDistanceDFUDT)    :: dfbias
+
         integer                             :: sgn2, sgn3
         integer(I8)                         :: sp, ep, tID, v2, v3, tv
         real(R8)                            :: Btx2, Btx3, Bty2, Bty3, &
-            dx2, dy2, dx3, dy3
+            dx2, dy2, dx3, dy3, a0
 
         integer(I8), allocatable            :: tvn(:), temptvn(:), &
             vesselvert(:), tvf(:), tvfv(:, :)
@@ -643,9 +646,22 @@ module gdmod_costfunction
 
         ! Compute desired length ratio
         !=============================
-        ! This has to be replaced with an actual computation based on 
-        ! the magnetic field... Right now, simply ones
-        b0(:) = 1
+        ! Desired bias far away from vessel (set to one)
+        a0 = 1
+
+        ! Construct
+        call dfbias%Initialize(magneticField%interp, &
+            environment%vessel%polygonset, options%LR%biasatvessel, a0, &
+            options%LR%lengthparam, 'unsigned')
+        
+        ! Evaluate
+        call dfbias%Evaluate(x, y, b0)
+
+        ! Visualize
+        call dfbias%Visualize([minval(x), maxval(x)], [minval(y), maxval(y)], 100, 100, 'costfunctionLR_desiredbias')
+
+        ! Write
+        !call Write3DCoordinateData(x, y, b0, 'costfunctionLR_desiredbias')
 
         ! Compute the vertex pairs
         !=========================
