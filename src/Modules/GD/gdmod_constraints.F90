@@ -2083,7 +2083,10 @@ module gdmod_constraints
 
         ! Auxiliary variables
         real(R8), allocatable               :: psival(:), dpsidx(:), &
-            dpsidy(:), d2psidx2(:), d2psidxdy(:), d2psidy2(:)
+            dpsidy(:), d2psidx2(:), d2psidxdy(:), d2psidy2(:), &
+            dVdx(:), dVdy(:), d2Vdx2(:), d2Vdxdy(:), d2Vdy2(:), &
+            d3Vdx3(:), d3Vdx2dy(:), d3Vdxdy2(:), d3Vdy3(:), &
+            d3psidx3(:), d3psidx2dy(:), d3psidxdy2(:), d3psidy3(:)
         integer(I8)                         :: spID, nc
         integer(I8), allocatable            :: tvID(:)
 
@@ -2119,7 +2122,8 @@ module gdmod_constraints
 
         ! Associate
         associate(&
-            nv      => grid%vert%ntot,          &
+            plf     => environment%vessel%plfvessel,                &
+            nv      => grid%vert%ntot,                              &
             specialpoints           => constraints%specialpoints,   &
             nsp                     => constraints%nspecialpoints,  &
             fluxsurfaces            => constraints%fluxsurfaces,    &
@@ -2136,6 +2140,57 @@ module gdmod_constraints
         ! Pre-evaluate some data
         allocate(psival(nv))
         call magneticField%interp%Evaluate(x, y, 0, 0, psival)
+
+        if (ntp > 0) then 
+            ! Evaluate vessel shape derivatives
+            allocate(dVdx(nv), dVdy(nv))
+            call plf%Evaluate(x, y, 1, 0, dVdx)
+            call plf%Evaluate(x, y, 0, 1, dVdy)
+
+            if (.not. dogradient) then 
+                ! Allocate
+                allocate(dpsidx(nv), dpsidy(nv))
+
+                ! Precompute
+                call magneticField%interp%Evaluate(x, y, 1, 0, dpsidx)
+                call magneticField%interp%Evaluate(x, y, 0, 1, dpsidy)
+            end if 
+            if ( (.not. dohessian) .and. dogradient) then 
+                ! Allocate
+                allocate(d2psidx2(nv), d2psidxdy(nv), d2psidy2(nv))
+
+                ! Precompute
+                call magneticField%interp%Evaluate(x, y, 2, 0, d2psidx2)
+                call magneticField%interp%Evaluate(x, y, 1, 1, d2psidxdy)
+                call magneticField%interp%Evaluate(x, y, 0, 2, d2psidy2)
+            end if
+
+            ! Evaluate additional derivatives
+            if (dogradient) then 
+                allocate(d2Vdx2(nv), d2Vdxdy(nv), d2Vdy2(nv))
+                call plf%Evaluate(x, y, 2, 0, d2Vdx2)
+                call plf%Evaluate(x, y, 1, 1, d2Vdxdy)
+                call plf%Evaluate(x, y, 0, 2, d2Vdy2)
+            end if 
+            if (dohessian) then 
+                ! Allocate
+                allocate(d3psidx3(nv), d3psidx2dy(nv), d3psidxdy2(nv), &
+                    d3psidy3(nv), d3Vdx3(nv), d3Vdx2dy(nv), d3Vdxdy2(nv), &
+                    d3Vdy3(nv))
+
+                ! Precompute
+                call magneticField%interp%Evaluate(x, y, 3, 0, d3psidx3)
+                call magneticField%interp%Evaluate(x, y, 2, 1, d3psidx2dy)
+                call magneticField%interp%Evaluate(x, y, 1, 2, d3psidxdy2)
+                call magneticField%interp%Evaluate(x, y, 0, 3, d3psidy3)
+
+                call plf%Evaluate(x, y, 3, 0, d3Vdx3)
+                call plf%Evaluate(x, y, 2, 1, d3Vdx2dy)
+                call plf%Evaluate(x, y, 1, 2, d3Vdxdy2)
+                call plf%Evaluate(x, y, 0, 3, d3Vdy3)
+            end if
+        end if 
+
 
         if (dogradient) then 
             ! Allocate
@@ -2186,6 +2241,7 @@ module gdmod_constraints
             tvID = tangencypoints(i)%ID
 
             ! Evaluate
+            G(ic+1:ic+nc) = -dpsidx(tvID)*dVdy(tvID) + dpsidy(tvID)*dVdx(tvID)
 
             ! Update
             ic = ic + nc
@@ -2232,7 +2288,9 @@ module gdmod_constraints
             
             call constraints%EvaluateDerivativesCoordinates(grid, gradG, &
                 hessG, dogradient, dohessian, lambda, psival, dpsidx, &
-                dpsidy, d2psidx2, d2psidxdy, d2psidy2)
+                dpsidy, d2psidx2, d2psidxdy, d2psidy2, d3psidx3, &
+                d3psidx2dy, d3psidxdy2, d3psidy3, dVdx, dVdy, d2Vdx2, &
+                d2Vdxdy, d2Vdy2, d3Vdx3, d3Vdx2dy, d3Vdxdy2, d3Vdy3)
 
         case ('coordinates_desiredflux')
 
@@ -2243,7 +2301,9 @@ module gdmod_constraints
             hessG_coord%ncol = designvariables%nphi   
             call constraints%EvaluateDerivativesCoordinates(grid, gradG_coord, &
                 hessG_coord, dogradient, dohessian, lambda, psival, dpsidx, &
-                dpsidy, d2psidx2, d2psidxdy, d2psidy2)
+                dpsidy, d2psidx2, d2psidxdy, d2psidy2, d3psidx3, &
+                d3psidx2dy, d3psidxdy2, d3psidy3, dVdx, dVdy, d2Vdx2, &
+                d2Vdxdy, d2Vdy2, d3Vdx3, d3Vdx2dy, d3Vdxdy2, d3Vdy3)
 
             ! Flux contribution
             gradG_flux%nrow = designvariables%nphi
@@ -2278,7 +2338,9 @@ module gdmod_constraints
     ! Gradient & Hessian computation, coordinates
     subroutine EvaluateCoordinatesDerivativesFluxFunctionConstraints(&
         constraints, grid, gradG, hessG, dogradient, dohessian, &
-        lambda, psival, dpsidx, dpsidy, d2psidx2, d2psidxdy, d2psidy2)
+        lambda, psival, dpsidx, dpsidy, d2psidx2, d2psidxdy, d2psidy2, &
+        d3psidx3, d3psidx2dy, d3psidxdy2, d3psidy3, dVdx, dVdy, &
+        d2Vdx2, d2Vdxdy, d2Vdy2, d3Vdx3, d3Vdx2dy, d3Vdxdy2, d3Vdy3)
 
         ! Description
         !============
@@ -2295,7 +2357,10 @@ module gdmod_constraints
         ! Arguments 
         class(FluxfunctionConstraintsUDT)   :: constraints 
         real(R8), dimension(:), intent(in)  :: lambda(*), psival(*), &
-            dpsidx(*), dpsidy(*), d2psidx2(*), d2psidxdy(*), d2psidy2(*) 
+            dpsidx(*), dpsidy(*), d2psidx2(*), d2psidxdy(*), d2psidy2(*), &
+            d3psidx3(*), d3psidx2dy(*), d3psidxdy2(*), d3psidy3(*), &
+            dVdx(*), dVdy(*), d2Vdx2(*), d2Vdxdy(*), d2Vdy2(*), &
+            d3Vdx3(*), d3Vdx2dy(*), d3Vdxdy2(*), d3Vdy3(*) 
         type(MySparseUDT)                   :: hessG, gradG, jacG 
         type(GridUDT), intent(in)           :: grid 
         logical                             :: dogradient, dohessian
@@ -2496,6 +2561,84 @@ module gdmod_constraints
         ! Tangency points
         !================
         ! Not yet implemented
+        do i = 1, ntp
+            ! Unpack
+            nc = tangencypoints(i)%nID 
+            tvID = tangencypoints(i)%ID 
+            conindex = [(k, k = ic+1, ic+nc)]
+
+            ! Gradient
+            if (dogradient) then 
+                ! x
+                valindex = [(k, k = ivg+1, ivg+nc)]
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = tvID 
+                jacG%val(valindex) = -d2psidx2(tvID)*dVdy(tvID) - &
+                    dpsidx(tvID)*d2Vdxdy(tvID) + d2psidxdy(tvID)*dVdx(tvID) &
+                    + dpsidy(tvID)*d2Vdx2(tvID)
+                ivg = ivg + nc
+
+                ! y
+                valindex = [(k, k = ivg+1, ivg+nc)]
+                jacG%row(valindex) = conindex
+                jacG%col(valindex) = tvID + grid%vert%ntot
+                jacG%val(valindex) = -d2psidxdy(tvID)*dVdy(tvID) - &
+                    dpsidx(tvID)*d2Vdy2(tvID) + d2psidy2(tvID)*dVdx(tvID) &
+                    + dpsidy(tvID)*d2Vdxdy(tvID)
+                ivg = ivg + nc 
+            end if
+
+            ! Hessian
+            if (dohessian) then 
+                ! xx
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID
+                hessG%col(valindex) = tvID 
+                hessG%val(valindex) = (-d3psidx3(tvID)*dVdy(tvID) &
+                    - d2psidx2(tvID)*d2Vdxdy(tvID) - d2psidx2(tvID)*d2Vdxdy(tvID) &
+                    - dpsidx(tvID)*d3Vdx2dy(tvID) + d3psidx2dy(tvID)*dVdx(tvID) &
+                    + d2psidxdy(tvID)*d2Vdx2(tvID) + d2psidxdy(tvID)*d2Vdx2(tvID) &
+                    + dpsidy(tvID)*d3Vdx3(tvID))*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! xy 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID
+                hessG%col(valindex) = tvID + grid%vert%ntot
+                hessG%val(valindex) = (-d3psidx2dy(tvID)*dVdy(tvID) &
+                    - d2psidx2(tvID)*d2Vdy2(tvID) - d2psidxdy(tvID)*d2Vdxdy(tvID) &
+                    - dpsidx(tvID)*d3Vdxdy2(tvID) + d3psidxdy2(tvID)*dVdx(tvID) &
+                    + d2psidxdy(tvID)*d2Vdxdy(tvID) + d2psidy2(tvID)*d2Vdx2(tvID) &
+                    + dpsidy(tvID)*d3Vdx2dy(tvID))*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! yx 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID + grid%vert%ntot
+                hessG%col(valindex) = tvID 
+                hessG%val(valindex) = (-d3psidx2dy(tvID)*dVdy(tvID) &
+                    - d2psidx2(tvID)*d2Vdy2(tvID) - d2psidxdy(tvID)*d2Vdxdy(tvID) &
+                    - dpsidx(tvID)*d3Vdxdy2(tvID) + d3psidxdy2(tvID)*dVdx(tvID) &
+                    + d2psidxdy(tvID)*d2Vdxdy(tvID) + d2psidy2(tvID)*d2Vdx2(tvID) &
+                    + dpsidy(tvID)*d3Vdx2dy(tvID))*lambda(conindex)
+                ivh = ivh + nc 
+
+                ! yy 
+                valindex = [(k, k = ivh+1, ivh+nc)]
+                hessG%row(valindex) = tvID + grid%vert%ntot
+                hessG%col(valindex) = tvID + grid%vert%ntot
+                hessG%val(valindex) = (-d3psidxdy2(tvID)*dVdy(tvID) &
+                    - d2psidxdy(tvID)*d2Vdy2(tvID) - d2psidxdy(tvID)*d2Vdy2(tvID) &
+                    - dpsidx(tvID)*d3Vdy3(tvID) + d3psidy3(tvID)*dVdx(tvID) &
+                    + d2psidy2(tvID)*d2Vdxdy(tvID) + d2psidy2(tvID)*d2Vdxdy(tvID) &
+                    + dpsidy(tvID)*d3Vdxdy2(tvID))*lambda(conindex)
+                ivh = ivh + nc 
+
+            end if
+
+            ! Update counter
+            ic = ic + nc
+        end do
 
         ! Fixed points
         !=============
