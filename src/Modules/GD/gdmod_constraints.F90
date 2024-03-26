@@ -39,7 +39,7 @@ module gdmod_constraints
     use gdmod_utility_optimization
     use gdmod_plots
     use gdmod_userinput
-    use PolygonShapeFunction    
+    use PolygonLevelsetFunction2D
 
     ! The usual
     implicit none
@@ -172,7 +172,7 @@ module gdmod_constraints
         ! 'vertID' array (number of vertices given in nvertID)
 
         ! Fields: 
-        type(PolygonShapeFunctionUDT)       :: psf 
+        class(PolygonLevelsetFunction2DUDT), allocatable    :: plf
         integer(I8), allocatable            :: vert(:)
         integer(I8)                         :: nvert 
 
@@ -2920,8 +2920,6 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)                   :: designvariables
 
         ! Auxiliary
-        real(R8), allocatable                       :: xe(:, :), &
-            ye(:, :)
         logical                                     :: debugplots
         integer(I8)                                 :: ic, nv 
         integer(I8), allocatable                    :: tv(:)
@@ -2938,7 +2936,6 @@ module gdmod_constraints
         !===========
         ! Associate
         associate(&
-            psf         => constraints%psf,     &
             vessel      => environment%vessel  &
             )
 
@@ -2949,16 +2946,11 @@ module gdmod_constraints
 
         ! Construct boundary
         !===================
-        ! Get vessel edges
-        call vessel%polygonset%GetEdges(xe, ye)
+        ! Should already be constructed in vessel - assign
+        constraints%plf = vessel%plfvessel
 
-        ! Construct polygon description
-        call psf%Initialize(xe, ye, size(xe, 1))
-
-        ! Visualize if desired
-        if (debugplots) then 
-            call psf%Visualize()
-        end if 
+        ! Visualize 
+        call constraints%plf%Visualize('constraints_boundary_plf')
 
         ! Set the constraints
         !====================
@@ -3151,7 +3143,7 @@ module gdmod_constraints
         ! Associate
         associate(&
             nc      => constraints%ncon,        &
-            psf     => constraints%psf,         &
+            plf     => constraints%plf,         &
             tv      => constraints%vert,        &
             ntv     => constraints%nvert,       &
             x       => grid%vert%x,             & 
@@ -3178,7 +3170,7 @@ module gdmod_constraints
         end if
 
         ! Evaluate
-        call psf%Evaluate(x(tv), y(tv), G, '0', '0') 
+        call plf%Evaluate(x(tv), y(tv), 0, 0, G) 
 
         ! Derivatives
         !============
@@ -3245,7 +3237,7 @@ module gdmod_constraints
         ! Associate
         associate(&
             nc      => constraints%ncon,        &
-            psf     => constraints%psf,         &
+            plf     => constraints%plf,         &
             tv      => constraints%vert,        &
             ntv     => constraints%nvert,       &
             x       => grid%vert%x,             & 
@@ -3270,8 +3262,8 @@ module gdmod_constraints
             allocate(valindex(ntv))
 
             ! Compute the derivative values
-            call psf%Evaluate(x(tv), y(tv), dpsfdx, '1', '0')
-            call psf%Evaluate(x(tv), y(tv), dpsfdy, '0', '1')
+            call plf%Evaluate(x(tv), y(tv), 1, 0, dpsfdx)
+            call plf%Evaluate(x(tv), y(tv), 0, 1, dpsfdy)
 
             ! x-contribution
             !---------------
@@ -3331,9 +3323,9 @@ module gdmod_constraints
             valxy(:) = 0
 
             ! Compute contributions
-            call psf%Evaluate(x(tv), y(tv), valxx, '2', '0')
-            call psf%Evaluate(x(tv), y(tv), valyy, '0', '2')
-            call psf%Evaluate(x(tv), y(tv), valxy, '1', '1')
+            call plf%Evaluate(x(tv), y(tv), 2, 0, valxx)
+            call plf%Evaluate(x(tv), y(tv), 0, 2, valyy)
+            call plf%Evaluate(x(tv), y(tv), 1, 1, valxy)
 
             ! xx-contribution
             !----------------
