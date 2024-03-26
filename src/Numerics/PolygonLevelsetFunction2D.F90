@@ -119,12 +119,13 @@ module PolygonLevelsetFunction2D
     type, extends(PLF2DOptionsUDT)  :: PLF2DClosedApproximationOptionsUDT
 
         ! Fields
-        ! Options for closed exact representation (none for now)
+        ! Options for closed approximation representation 
         type(PLF2DClosedExactOptionsUDT) :: optionsClosedExact
 
         ! Interpolation options
-        real(R8)        :: offsetx, offsety 
-        integer(I8)     :: resx, resy, C, M 
+        real(R8)                    :: offsetx, offsety 
+        real(R8), allocatable       :: xrange(:), yrange(:) ! determines extent of interpolant
+        integer(I8)                 :: resx, resy, C, M 
         character(:), allocatable   :: meth 
 
     contains 
@@ -757,7 +758,8 @@ module PolygonLevelsetFunction2D
         real(R8), allocatable                       :: xe(:, :), &
             ye(:, :), nx(:), ny(:), nn(:), tx(:), ty(:), tn(:), xp(:), &
             yp(:), tempx(:), tempy(:), tempnx(:, :), tempny(:, :), &
-            nxpv(:, :), nypv(:, :), theta0(:), crossprod(:)
+            nxpv(:, :), nypv(:, :), theta0(:), crossprod(:), tnxp(:), &
+            tnyp(:), tnn(:), xf(:), yf(:)
 
         ! Loop
         integer(I8)                                 :: i, ce, ce2
@@ -788,8 +790,9 @@ module PolygonLevelsetFunction2D
         !call ps%GetPoints(xp, yp) ! may still change
 
         ! Allocate
-        np = (size(xe, 1)+1)*ps%np
-        allocate(nxpv(np, 2), nypv(np, 2), xp(np), yp(np))
+        np = (size(xe, 1))+ps%np
+        allocate(nxpv(np, 2), nypv(np, 2), xp(np), yp(np), &
+            xf(size(xe, 1)),  yf(size(xe, 1)))
 
         ! Compute vertex regions
         ce = 0
@@ -809,15 +812,28 @@ module PolygonLevelsetFunction2D
             ! Normals
             allocate(tempnx(ne+1, 2), tempny(ne+1, 2))
 
-            tempnx(1:ne, 2) = pol(i)%nx/pol(i)%nn 
-            tempnx(1:ne, 1) = [pol(i)%nx(ne)/pol(i)%nn(ne), &
-                pol(i)%nx(1:ne-1)/pol(i)%nn(1:ne-1)]
-            tempnx(ne+1, 1:2) = [pol(i)%nx(1)/pol(i)%nn(1), pol(i)%nx(ne)/pol(i)%nn(ne)]
+            tnxp = -(tempy(2:ne+1) - tempy(1:ne))
+            tnyp = (tempx(2:ne+1) - tempx(1:ne))
+            tnn = sqrt(tnxp**2 + tnyp**2)
+            tnxp = tnxp/tnn 
+            tnyp = tnyp/tnn
 
-            tempny(1:ne, 2) = pol(i)%ny/pol(i)%nn 
-            tempny(1:ne, 1) = [pol(i)%ny(ne)/pol(i)%nn(ne), &
-                pol(i)%ny(1:ne-1)/pol(i)%nn(1:ne-1)]
-            tempny(ne+1, 1:2) = [pol(i)%ny(1)/pol(i)%nn(1), pol(i)%ny(ne)/pol(i)%nn(ne)]
+            tempnx(:, 1) = [tnxp(ne), tnxp]
+            tempnx(:, 2) = [tnxp, tnxp(1)]
+            tempny(:, 1) = [tnyp(ne), tnyp]
+            tempny(:, 2) = [tnyp, tnyp(1)]
+
+
+
+            !tempnx(1:ne, 2) = pol(i)%nx/pol(i)%nn 
+            !tempnx(1:ne, 1) = [pol(i)%nx(ne)/pol(i)%nn(ne), &
+            !    pol(i)%nx(1:ne-1)/pol(i)%nn(1:ne-1)]
+            !tempnx(ne+1, 1:2) = [pol(i)%nx(1)/pol(i)%nn(1), pol(i)%nx(ne)/pol(i)%nn(ne)]
+
+            !tempny(1:ne, 2) = pol(i)%ny/pol(i)%nn 
+            !tempny(1:ne, 1) = [pol(i)%ny(ne)/pol(i)%nn(ne), &
+            !    pol(i)%ny(1:ne-1)/pol(i)%nn(1:ne-1)]
+            !tempny(ne+1, 1:2) = [pol(i)%ny(1)/pol(i)%nn(1), pol(i)%ny(ne)/pol(i)%nn(ne)]
 
 
             ! Add
@@ -825,9 +841,11 @@ module PolygonLevelsetFunction2D
             yp(ce+1:ce+ne+1) = tempy 
             nxpv(ce+1:ce+ne+1, :) = tempnx ! normals should be oriented outwards already
             nypv(ce+1:ce+ne+1, :) = tempny 
-            nx(ce2+1:ce2+ne) = pol(i)%nx/pol(i)%nn 
-            ny(ce2+1:ce2+ne) = pol(i)%ny/pol(i)%nn 
-            tn(ce2+1:ce2+ne) = pol(i)%nn 
+            nx(ce2+1:ce2+ne) = tnxp !pol(i)%nx/pol(i)%nn 
+            ny(ce2+1:ce2+ne) = tnyp! pol(i)%ny/pol(i)%nn 
+            tn(ce2+1:ce2+ne) = pol(i)%nn
+            xf(ce2+1:ce2+ne) = 0.5*(tempx(1:ne) + tempx(2:ne+1)) 
+            yf(ce2+1:ce2+ne) = 0.5*(tempy(1:ne) + tempy(2:ne+1)) 
 
             ! Update counter
             ce = ce + ne + 1
@@ -851,8 +869,8 @@ module PolygonLevelsetFunction2D
         ! Add to plf
         plf%xp  = xp 
         plf%yp  = yp
-        plf%xf  = 0.5*( xe(:, 1) + xe(:, 2) )
-        plf%yf  = 0.5*( ye(:, 1) + ye(:, 2) )
+        plf%xf  = xf
+        plf%yf  = yf
         plf%nxp = nx 
         plf%nyp = ny
         plf%tnp = tn 
@@ -1151,6 +1169,24 @@ module PolygonLevelsetFunction2D
         call InitializePolygonLevelsetFunction2D(plfe, ps, &
             plf%options%optionsClosedExact)
 
+        ! Check interpolant range
+        if (allocated(plf%options%xrange)) then 
+            if (size(plf%options%xrange, 1) < 2) then 
+                ! Set to default
+                deallocate(plf%options%xrange)
+                plf%options%xrange = xp
+            end if 
+            if (size(plf%options%yrange, 1) < 2) then 
+                ! Set to default
+                deallocate(plf%options%yrange)
+                plf%options%yrange = yp
+            end if 
+        else
+            ! Set to xp, yp
+            plf%options%xrange = xp 
+            plf%options%yrange = yp
+        end if
+
         ! Evaluate exact representation
         !==============================
         ! Set dimensions of vertices (assumed resx, resy are number of 
@@ -1162,10 +1198,10 @@ module PolygonLevelsetFunction2D
         allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny), vg(nx*ny))
 
         ! Get polygon extent
-        minx = minval(xp) 
-        maxx = maxval(xp)
-        miny = minval(yp) 
-        maxy = maxval(yp)
+        minx = minval(plf%options%xrange) 
+        maxx = maxval(plf%options%xrange)
+        miny = minval(plf%options%yrange) 
+        maxy = maxval(plf%options%yrange)
         dx = maxx - minx 
         dy = maxy - miny
 
