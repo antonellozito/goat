@@ -3345,7 +3345,7 @@ module gdmod_costfunction
         costfunction%lambda = options%FA%lambda
 
         ! Initialize temporary arrays (too big for now, trim later)
-        allocate(vpairs(grid%face%ntot, 2), wt(grid%face%ntot))
+        allocate(vpairs(grid%face%ntot, 2))
 
         ! Associate
         associate(&
@@ -3423,6 +3423,7 @@ module gdmod_costfunction
             options%FA%decaylength, 'unsigned')
 
         ! Evaluate
+        allocate(wt(nvpairs))
         call dfwt%Evaluate(xf, yf, wt)
 
         ! Visualize

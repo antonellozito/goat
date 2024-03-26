@@ -86,8 +86,8 @@ VERSION 1.00.00
 'goat.vessel.maxvesseldist'         '1e-2'
 
 # Target plate definition
-'goat.vessel.TP'                    '[1 2]'
-'goat.vessel.TPind'                 '[1 2]'
+'goat.vessel.TP'                    '[1, 2]'
+'goat.vessel.TPind'                 '[1, 2]'
 
 # Structures to be excluded when constructing vessel (if empty, all are included)
 'goat.vessel.exclude'               '[]'
@@ -95,17 +95,13 @@ VERSION 1.00.00
 # Vessel field description (similar to magnetic field interpolant, 
 # but for vessel - only used for vessel distance penalty, and if shape
 # method is the same, also used for boundary constraints)
-'goat.vessel.shapemeth'             'closedpolygon_smoothapproximation'
+'goat.vessel.shapemeth'             'closedpolygon_exact'
 'goat.vessel.resx'                  '100'
 'goat.vessel.resy'                  '100'
 'goat.vessel.offsetfracx'           '0.1'
 'goat.vessel.offsetfracy'           '0.1'
 'goat.vessel.interpC'               '3'
 'goat.vessel.interpM'               '6'
-
-# Target plate definition
-'goat.vessel.TP'                    '[1 2]'
-'goat.vessel.TPind'                 '[1 2]'
 
 #-------------------------------------------------------------------------#
 #                          ADDITIONAL DATA                                #
@@ -161,23 +157,31 @@ VERSION 1.00.00
 'gd.design.savefinaldesign'     '1' # save final design (old files will be overwritten!)? 
 
 # Cost function
-'gd.design.cfv.type'        	'LR_FAD'
+'gd.design.cfv.type'        	'LR_FAD_PRPB_LRrad_FA'
 
 # Cost function parameters 
 'gd.design.cfv.par.LR.lambda'		 		'1e-5'
 'gd.design.cfv.par.LR.biasatvessel' 		'1.1'
-'gd.design.cfv.par.LR.lengthparam'			'0.3'
+'gd.design.cfv.par.LR.lengthparam'			'0.1'
 'gd.design.cfv.par.LR.linefoldingpenfac'    '0'
 'gd.design.cfv.par.LR.dovesseledges'        '1'
 'gd.design.cfv.par.LR.minedgelength'        '1e-5'
 'gd.design.cfv.par.LRrad.lambda'            '1e-5'
 'gd.design.cfv.par.FAD.lambda'		 		'1e-5'
+'gd.design.cfv.par.FAD.weightatvessel'       '0.1'
+'gd.design.cfv.par.FAD.weightatinf'          '1'
+'gd.design.cfv.par.FAD.decaylength'          '0.5'
+'gd.design.cfv.par.FA.weightatvessel'       '0.1'
+'gd.design.cfv.par.FA.weightatinf'          '1'
+'gd.design.cfv.par.FA.decaylength'          '0.1'
+'gd.design.cfv.par.FA.lambda'		 		'1e-5'
 'gd.design.cfv.par.PRPB.lambda'		 		'1e-5'
-'gd.design.cfv.par.PRPB.lengthparam'		'0.05'
-'gd.design.cfv.par.PRPB.biassep'		    '1.1'
-'gd.design.cfv.par.PRPB.biasinf'		    '1.0'
-'gd.design.cfv.par.PRPB.weightlengthparam'	'0.05'
-'gd.design.cfv.par.PRPB.weightsep'		    '10'
+'gd.design.cfv.par.PRPB.biasdecaylength'	'0.05'
+'gd.design.cfv.par.PRPB.biasatsep'		    '1.1'
+'gd.design.cfv.par.PRPB.biasatinf'		    '1.0'
+'gd.design.cfv.par.PRPB.weightdecaylength'	'0.05'
+'gd.design.cfv.par.PRPB.weightatsep'	    '10'
+'gd.design.cfv.par.PRPB.weightatinf'        '1'
 
 # Design variables
 'gd.design.dv.type'         	'coordinates_desiredflux'

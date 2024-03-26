@@ -827,8 +827,8 @@ module optmod_optimizationengine
         allocate(fullmat(hessL%nrow, hessL%ncol))
 
         ! Diagnostics
-        checkgradients  = .true. ! check gradients in each iteration?
-        checkhessians   = .true. ! check hessians in each iteration?
+        checkgradients  = .false. ! check gradients in each iteration?
+        checkhessians   = .false. ! check hessians in each iteration?
 
         ! Initialize counter(s)
         itopt = 1

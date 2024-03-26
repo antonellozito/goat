@@ -395,6 +395,19 @@ def Plot2DSurfaceDataContourf(filepath, fignum, **plotargs):
 
     # Add colorbar
 
+def Plot2DSurfaceDataContour(filepath, fignum, **plotargs):
+    # Description
+    #------------
+    # Read and plot 2D data with filled contours
+
+    # Read
+    data = dh.GetGeneral2DSurfaceData(filepath)
+
+    # Plot
+    PlotGeneral2DContour(data[:, 0], data[:, 1], data[:, 2], fignum, **plotargs)
+
+    # Add colorbar
+
 
 
     
@@ -417,6 +430,15 @@ def PlotPolygons2D(x, y, fignum, **plotargs):
     # Plot the data as a polygon plot
     plt.plot(x, y, **plotargs)
     plt.draw()
+
+def PlotPolygonData(filepath, fignum, **plotargs):
+    # Read data
+    data = dh.GetPolygonCoordinates(filepath)
+
+    # Plot
+    plt.figure(fignum)
+    plt.plot(data[:, 0], data[:, 1], **plotargs)
+
 
 
 def PlotPoints2D(x, y, fignum, **plotargs):
@@ -442,6 +464,15 @@ def PlotGeneral2DContourf(x, y, z, fignum, **plotargs):
     # Set the current figure
     fig = plt.figure(fignum)
     CS = plt.tricontourf(x, y, z, **plotargs)
+    cbar = fig.colorbar(CS)
+    plt.draw()
+
+def PlotGeneral2DContour(x, y, z, fignum, **plotargs):
+    # Same as PlotGeneral2DSurface, but now we plot filled contours
+    
+    # Set the current figure
+    fig = plt.figure(fignum)
+    CS = plt.tricontour(x, y, z, **plotargs)
     cbar = fig.colorbar(CS)
     plt.draw()
 
