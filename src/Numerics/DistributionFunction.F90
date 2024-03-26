@@ -303,6 +303,7 @@ module DistributionFunction
         ! Construct gridding vectors
         dx = maxval(xrange) - minval(xrange)
         dy = maxval(yrange) - minval(yrange)
+        allocate(xgv(resx+1), ygv(resy+1))
         xgv = [(k, k = 0, resx)]*dx/resx + minval(xrange)
         ygv = [(k, k = 0, resy)]*dy/resy + minval(yrange)
 
@@ -1037,16 +1038,14 @@ module DistributionFunction
 
         ! Auxiliary
         integer(I8)                                     :: flag, na
-        integer(I8), allocatable                        :: valindex(:) 
 
         real(R8), parameter                             :: myone = 1
         real(R8)                                        :: tempd
-        real(R8), allocatable                           :: xa(:), &
-            ya(:), nxa(:), nya(:), d(:), b(:), bval(:), A(:, :), &
-           sol(:), fval(:)
+        real(R8), allocatable                           :: d(:), b(:), &
+            bval(:), A(:, :), sol(:), fval(:)
 
         ! Loop
-        integer(I8)                                     :: i, j, k, cc
+        integer(I8)                                     :: i, j
 
         ! Set fields
         !===========
@@ -1077,15 +1076,14 @@ module DistributionFunction
         ! Construct attractor function
         !=============================
         ! Determine number of attractor points
-        na = size(xa, 1)
+        na = size(xp, 1)
 
         ! Allocate
-        allocate(xa(na), ya(na), nxa(na), nya(na), d(na), bval(na), &
-            b(na), A(na, na))
+        allocate(d(na), bval(na), b(na), A(na, na))
 
         ! Field values
         allocate(fval(na))
-        call distribution%F%Evaluate(xa, ya, 0, 0, fval)
+        call distribution%F%Evaluate(xp, yp, 0, 0, fval)
 
         distribution%fval = fval 
 
@@ -1159,7 +1157,8 @@ module DistributionFunction
         associate(&
             F       => distribution%F,      &
             a0      => distribution%a0,     & 
-            b0      => distribution%coef,   & 
+            c       => distribution%coef,   & 
+            b0      => distribution%b0,     & 
             d0      => distribution%d0,     &
             xa      => distribution%xa,     &
             ya      => distribution%ya,     &
@@ -1169,6 +1168,7 @@ module DistributionFunction
         ! Evaluate
         !=========
         ! Evaluate field values in coordinates
+        v = 0
         call F%Evaluate(x, y, 0, 0, fv)
         select case (distribution%meth) 
 
@@ -1179,7 +1179,7 @@ module DistributionFunction
                 d = (fv - fval(i))
 
                 ! Value
-                v = v + b0*exp(-abs(d)/d0)
+                v = v + c(i)*exp(-abs(d)/d0)
             end do
 
         case ('signed')
@@ -1189,7 +1189,7 @@ module DistributionFunction
                 d = (fv - fval(i))
 
                 ! Value
-                v = v + b0*(sign(myone, d))*exp(-abs(d)/d0)
+                v = v + c(i)*(sign(myone, d))*exp(-abs(d)/d0)
             end do
 
         case default
@@ -1197,6 +1197,9 @@ module DistributionFunction
             call gdErrorHandler('Unknown method')
 
         end select
+
+        ! Add constant component
+        v = v + b0
 
         ! Housekeeping
         !=============

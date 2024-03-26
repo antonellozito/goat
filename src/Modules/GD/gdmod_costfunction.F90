@@ -595,8 +595,6 @@ module gdmod_costfunction
 
         ! Auxiliary variables
         type(StructuredPLF2DDistanceDFUDT)  :: dfbias
-        type(PolygonSetUDT)                 :: targetps
-        type(StructuredInterpolant2DUDT)    :: targetinterp
 
         integer                             :: sgn2, sgn3
         integer(I8)                         :: sp, ep, tID, v2, v3, tv
@@ -2108,6 +2106,7 @@ module gdmod_costfunction
             options%FAD%decaylength, 'unsigned')
 
         ! Evaluate
+        allocate(wt(size(xv, 1)))
         call dfwt%Evaluate(xv(:, 1), yv(:, 1), wt)
 
         ! Visualize
@@ -4428,8 +4427,7 @@ module gdmod_costfunction
             tvnID(:), allfsIDs(:), tvID(:)
 
         real(R8), allocatable           :: fsPsi(:), b0v(:), wtv(:), &
-            wtp(:), b0p(:), thispsival(:, :), sgn1(:), sgn2(:), xp(:), &
-            yp(:)
+            wtp(:), b0p(:), thispsival(:, :), sgn1(:), sgn2(:)
 
         logical, allocatable            :: mask(:), doflip(:), &
             issepvert(:)
@@ -4487,7 +4485,9 @@ module gdmod_costfunction
         !==============================
         ! Get all separatrix vertices
         call DetermineXPoints(xpind, nxpind, order, grid)
+        
         allocate(issepvert(grid%vert%ntot))
+        issepvert = .false.
         do i = 1, nxpind 
             where (fieldlineID == fieldlineID(xpind(i))) issepvert = .true.
         end do 
@@ -4503,6 +4503,7 @@ module gdmod_costfunction
             options%PRPB%weightdecaylength, 'unsigned')
 
         ! Evaluate
+        allocate(b0v(size(x, 1)), wtv(size(x, 1)))
         call dfbias%Evaluate(x, y, b0v)
         call dfwt%Evaluate(x, y, wtv)
 

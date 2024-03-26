@@ -1248,11 +1248,11 @@ module gdmod_userinput
 
         
         ! Weight distribution options
-        field = 'gd.design.cfv.par.FAD.weightatinf'
+        field = 'gd.design.cfv.par.FA.weightatinf'
         call ExtractOptionValueReal0D(fid, field, options%weightatinf)
-        field = 'gd.design.cfv.par.FAD.weightatvessel'
+        field = 'gd.design.cfv.par.FA.weightatvessel'
         call ExtractOptionValueReal0D(fid, field, options%weightatvessel)
-        field = 'gd.design.cfv.par.FAD.decaylength'
+        field = 'gd.design.cfv.par.FA.decaylength'
         call ExtractOptionValueReal0D(fid, field, options%decaylength)
 
         ! Write data

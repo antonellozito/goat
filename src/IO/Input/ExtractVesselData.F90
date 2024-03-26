@@ -50,7 +50,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     type(PolygonSetUDT)                 :: tempps 
     type(PolygonUDT)                    :: temppol
     integer(I8)                         :: nvp, cc, nexcl, nTP, tne   
-    integer(I8), allocatable            :: tv(:), tv2(:)
+    integer(I8), allocatable            :: tv(:)
     real(R8), allocatable               :: tempx(:), &
         tempy(:), tx(:), ty(:), xp(:), yp(:), tvx(:), tvy(:), tnxp(:), &
         tnyp(:), tnnp(:), tnx(:), tny(:), tnn(:)
