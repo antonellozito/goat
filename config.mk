@@ -110,7 +110,9 @@ MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
 
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
-AUXILIARY_FILES = src/Auxiliary/mod_plotter.F90 $(wildcard src/Auxiliary/*.F90) \
+AUXILIARY_FILES = src/Auxiliary/mod_plotter.F90 \
+    src/Auxiliary/Construct2DStructuredGrid.F90 \
+    $(wildcard src/Auxiliary/*.F90) \
     src/Auxiliary/Interpolation/Interpolant2D_auxiliaries.F90 \
     src/Auxiliary/Interpolation/Interpolant2D.F90 \
     src/Auxiliary/Interpolation/BicubicSplineInterpolant.F90 \
@@ -133,7 +135,7 @@ OUTPUT_FILES = $(wildcard src/IO/Output/*.F90)
 SETUP_FILES = $(wildcard src/Setup/*.F90)
 
 ## NUMERICS_FILES 		: numeric file generation names (.F90) - unsequenced
-NUMERICS_FILES = $(wildcard src/Numerics/*.F90)
+NUMERICS_FILES = src/Numerics/PolygonLevelsetFunction2D.F90 $(wildcard src/Numerics/*.F90)
 
 ## OPTIMIZATION 		: optimization file generation names (.F90) - unsequenced
 OPTIMIZATION_FILES = $(wildcard src/Optimization/*.F90)

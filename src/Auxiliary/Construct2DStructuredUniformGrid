@@ -1,0 +1,62 @@
+subroutine Construct2DStructuredUniformGrid(xrange, yrange, nx, ny, &
+    offsetx, offsety, xg, yg)
+
+    ! Description
+    !============ 
+    ! This routine returns the grid coordinates (in vector form!) of a
+    ! 2D structured uniform grid. The extent of the grid is determined
+    ! by the minimal and maximal values in xrange and yrange and by the
+    ! offsets offsetx and offsety. The latter are relative offsets 
+    ! compared to the initial length and width of the domain. 
+
+    ! Initialize
+    !===========
+    ! Modules
+    use mod_precision
+
+    ! The usual
+    implicit none
+
+    ! Declare variables
+    !==================
+    ! Arguments
+    real(R8), intent(in)                :: xrange(:), yrange(:), &
+        offsetx, offsety
+    integer(I8), intent(in)             :: nx, ny 
+    real(R8), intent(out)               :: xg(1:nx*ny), yg(1:nx*ny)
+
+    ! Auxiliary
+    real(R8), intent(in)                :: xgv(1:nx), ygv(1:ny)
+
+    ! Loop
+    integer(I8)                         :: k 
+
+    ! Compute gridding vectors
+    !=========================
+    ! Compute domain extent
+    maxx = maxval(xrange)
+    minx = minval(xrange)
+    maxy = maxval(yrange)
+    miny = minval(yrange)
+    dx   = maxx - minx 
+    dy   = maxy - miny 
+
+    ! Extend using offset
+    maxx = maxx + offsetx*dx 
+    minx = minx - offsetx*dx 
+    maxy = maxy + offsety*dy 
+    miny = miny - offsety*dy 
+
+    ! Recompute extent
+    dx   = maxx - minx 
+    dy   = maxy - miny
+
+    ! Construct gridding vectors
+    xgv = [(k, k = 0, nx-1)]*dx/(nx-1) + minx 
+    ygv = [(k, k = 0, ny-1)]*dy/(ny-1) + miny 
+
+    ! Compute grid
+    !=============
+    call Construct2DStructuredGrid(xgv, ygv, nx, ny, xg, yg)
+
+end subroutine
