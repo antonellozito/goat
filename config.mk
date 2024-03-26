@@ -32,8 +32,8 @@ SUITESPARSEPATH = /usr/include/suitesparse
 ## % Targets
 ## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Clayer ClayerF Constants Auxiliary General Optimization Modules IO_b25  \
-    IO_carre IO_output IO_input  Setup  Drivers Numerics 
+GDRUN_TARGETS = Clayer ClayerF Constants Auxiliary General Numerics Optimization Modules IO_b25  \
+    IO_carre IO_output IO_input  Setup  Drivers 
 
 ## GOAT_TARGETS             : Targets to be run for the full goat
 GOAT_TARGETS = $(GDRUN_TARGETS) 
@@ -50,7 +50,7 @@ CTEST_TARGETS = Clayer
 ## FC			: Compiler to be used for fortran
 FC = gfortran
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS_DEF = -c -g -Wall -O0 
+CFLAGS_DEF = -c -g -Wall -O0 -Wno-unused-dummy-argument
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
@@ -60,6 +60,8 @@ CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
 
 ## CC           : Compiler to be used for C
 CC = gcc 
+
+CCFLAGS_DEF = -c -g -Wall -O0
 
 ## % Linker
 ## %=======
@@ -84,7 +86,7 @@ CFLAGS = $(CFLAGS_DEF)
 LFLAGS = $(LFLAGS_DEF)
 
 # Set CFLAGS for C compiler
-CCFLAGS = $(CFLAGS_DEF) 
+CCFLAGS = $(CCFLAGS_DEF) 
 
 ##
 ## % Files
@@ -108,12 +110,14 @@ MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
 
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
-AUXILIARY_FILES = src/Auxiliary/mod_plotter.F90 $(wildcard src/Auxiliary/*.F90) \
+AUXILIARY_FILES = src/Auxiliary/mod_plotter.F90 \
+    src/Auxiliary/Construct2DStructuredGrid.F90 \
+    $(wildcard src/Auxiliary/*.F90) \
     src/Auxiliary/Interpolation/Interpolant2D_auxiliaries.F90 \
     src/Auxiliary/Interpolation/Interpolant2D.F90 \
     src/Auxiliary/Interpolation/BicubicSplineInterpolant.F90 \
     src/Auxiliary/Interpolation/StructuredInterpolant2D.F90 \
-    $(wildcard src/Auxiliary/Interpolation/*.F90)
+    $(wildcard src/Auxiliary/Interpolation/*.F90) 
 
 ## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
 B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)
@@ -131,13 +135,13 @@ OUTPUT_FILES = $(wildcard src/IO/Output/*.F90)
 SETUP_FILES = $(wildcard src/Setup/*.F90)
 
 ## NUMERICS_FILES 		: numeric file generation names (.F90) - unsequenced
-NUMERICS_FILES = $(wildcard src/Numerics/*.F90)
+NUMERICS_FILES = src/Numerics/PolygonLevelsetFunction2D.F90 $(wildcard src/Numerics/*.F90)
 
 ## OPTIMIZATION 		: optimization file generation names (.F90) - unsequenced
 OPTIMIZATION_FILES = $(wildcard src/Optimization/*.F90)
 
 ## CONSTANTS            : constants such as precision and special characters (.F90) - unsequenced
-CONSTANTS_FILES = $(wildcard src/Constants/*.F90)
+CONSTANTS_FILES = src/Constants/mod_precision.F90 $(wildcard src/Constants/*.F90)
 
 ## Clayer               : c files for interfacing with other c code
 CLAYER_FILES    = $(wildcard src/Clayer/*.c)

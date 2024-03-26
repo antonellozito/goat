@@ -66,8 +66,10 @@ module gdmod_constraints
         !           flux surface
         !   - ID    : vertex ID array (1D array of size nID)
         !   - PsiD  : desired psi value for this flux surface
+        !   - fsID  : (optional) flux surface ID of flux surface that 
+        !           the structure belongs to (scalar)
 
-        integer(I8)                     :: nID
+        integer(I8)                     :: nID, fsID
         integer(I8), allocatable        :: ID(:)
         real(R8)                        :: PsiD 
 
@@ -1548,7 +1550,7 @@ module gdmod_constraints
         integer(I8)                 :: nxpind, ntpind, nfsIDs, nspc
         integer(I8), allocatable    :: vert_tmp(:), vertID(:), &
             order(:), xpind(:), tptype(:), fsxpind(:), fstpind(:), &
-            allIDs(:), fsIDs(:), vID(:), tpind(:), tv(:), tvID(:)
+            allIDs(:), fsIDs(:), vID(:), tpind(:), tv(:)
         
         logical                     :: fixxp, fixtp
         logical, allocatable        :: delind(:), mask(:), isdouble(:), &
@@ -1654,6 +1656,7 @@ module gdmod_constraints
                     ! Impose
                     constraints%tangencypoints(i)%ID = tpind(i)
                     constraints%tangencypoints(i)%nID = 1
+                    constraints%tangencypoints(i)%fsID = fieldlineID(tpind(i))
 
                     ! Update constraint counter
                     cc(tpind(i)) = cc(tpind(i)) + 1
@@ -1773,6 +1776,7 @@ module gdmod_constraints
                 tv = pack(vID, fieldlineID == fsxpind(i))
                 constraints%specialpoints(nspc)%ID = [xpind(i), pack(tv, tv .ne. xpind(i))]
                 constraints%specialpoints(nspc)%nID = size(constraints%specialpoints(nspc)%ID, 1)
+                constraints%specialpoints(nspc)%fsID = fsxpind(i)
                 isconstrainedv(tv) = .true.
                 cc(tv) = cc(tv) + 1
                 deallocate(tv)
@@ -1792,6 +1796,7 @@ module gdmod_constraints
                     tv = pack(vID, fieldlineID == fstpind(i))
                     constraints%specialpoints(nspc)%ID = [xpind(i), pack(tv, tv .ne. tpind(i))]
                     constraints%specialpoints(nspc)%nID = size(constraints%specialpoints(nspc)%ID, 1)
+                    constraints%specialpoints(nspc)%fsID = fstpind(i)
                     isconstrainedv(tv) = .true.
                     cc(tv) = cc(tv) + 1
                     deallocate(tv)
@@ -1924,6 +1929,7 @@ module gdmod_constraints
                 constraints%fixedpoints(i)%ID(1) = tv(i)
                 constraints%fixedpoints(i)%PsiD = PsiD_tmp(tv(i))
                 constraints%fixedpoints(i)%nID = 1
+                constraints%fixedpoints(i)%fsID = fieldlineID(tv(i))
             end do
 
             ! Update counter
@@ -1971,6 +1977,7 @@ module gdmod_constraints
             constraints%fluxsurfaces(i)%ID      = pack(vID, mask)
             constraints%fluxsurfaces(i)%nID     = size(constraints%fluxsurfaces(i)%ID, 1)
             constraints%fluxsurfaces(i)%PsiD    = tpsi
+            constraints%fluxsurfaces(i)%fsID    = fsIDs(i)
 
             ! Update counter
             cc(constraints%fluxsurfaces(i)%ID) = cc(constraints%fluxsurfaces(i)%ID) + 1
@@ -2063,7 +2070,7 @@ module gdmod_constraints
         class(FluxfunctionConstraintsUDT)   :: constraints 
         real(R8), allocatable               :: G(:) 
         real(R8), allocatable               :: lambda(:)
-        type(MySparseUDT)                   :: hessG, gradG, jacG, &
+        type(MySparseUDT)                   :: hessG, gradG, &
             hessG_coord, gradG_coord, hessG_flux, gradG_flux 
         type(GridUDT)                       :: grid 
         type(MagneticFieldUDT)              :: magneticField 
@@ -2072,14 +2079,12 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)         :: designvariables                
 
         ! Loop variables
-        integer(I8)                         :: ic, ivg, ivh, k, i
-        integer(I8), allocatable            :: valindex(:), conindex(:)
+        integer(I8)                         :: ic, ivg, ivh, i
 
         ! Auxiliary variables
         real(R8), allocatable               :: psival(:), dpsidx(:), &
-            dpsidy(:), valxx(:), valxy(:), valyy(:), d2psidx2(:), &
-            d2psidxdy(:), d2psidy2(:)
-        integer(I8)                         :: ntv, nvg, nvh, spID, nc
+            dpsidy(:), d2psidx2(:), d2psidxdy(:), d2psidy2(:)
+        integer(I8)                         :: spID, nc
         integer(I8), allocatable            :: tvID(:)
 
         ! Data
@@ -2300,7 +2305,7 @@ module gdmod_constraints
         integer(I8), allocatable            :: valindex(:), conindex(:)
 
         ! Auxiliary variables
-        integer(I8)                         :: ntv, nvg, nvh, spID, nc
+        integer(I8)                         :: nvg, nvh, spID, nc
         integer(I8), allocatable            :: tvID(:)
 
         ! Initialize
@@ -2723,7 +2728,7 @@ module gdmod_constraints
         real(R8), allocatable                           :: x(:), y(:)
         integer(I8)                                     :: nIDs, nIDsfs, &
             counter, i
-        integer(I8), allocatable                        :: IDs(:), IDsfs(:)
+        integer(I8), allocatable                        :: IDs(:)
         character(:), allocatable                       :: filepath, &
             thispath
 
@@ -3111,7 +3116,7 @@ module gdmod_constraints
         class(BoundaryFunctionConstraintsUDT)   :: constraints 
         real(R8), allocatable               :: G(:) 
         real(R8), allocatable               :: lambda(:)
-        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(MySparseUDT)                   :: hessG, gradG 
         type(GridUDT)                       :: grid 
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
@@ -3119,12 +3124,9 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)         :: designvariables 
 
         ! Loop variables
-        integer(I8)                         :: ic, ivg, ivh, k
-        integer(I8), allocatable            :: valindex(:), conindex(:)
+        integer(I8)                         :: ic, ivg, ivh
 
         ! Auxiliary variables
-        real(R8), allocatable               :: dpsfdx(:), dpsfdy(:), &
-            valxx(:), valxy(:), valyy(:)
         
         ! Initialize
         !===========
@@ -3557,7 +3559,7 @@ module gdmod_constraints
         class(XPointConstraintsUDT)         :: constraints 
         real(R8), allocatable               :: G(:) 
         real(R8), allocatable               :: lambda(:)
-        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(MySparseUDT)                   :: hessG, gradG 
         type(GridUDT)                       :: grid 
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
@@ -3565,12 +3567,11 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)         :: designvariables 
 
         ! Loop variables
-        integer(I8)                         :: i, ic, ivg, ivh, k
-        integer(I8), allocatable            :: valindex(:), conindex(:)
+        integer(I8)                         :: i, ic, ivg, ivh
 
         ! Auxiliary variables
-        real(R8), allocatable               ::  valxx(:), valxy(:), &
-            valyy(:), xpx(:), xpy(:), dpsidx(:), dpsidy(:)
+        real(R8), allocatable               :: xpx(:), xpy(:), &
+            dpsidx(:), dpsidy(:)
         
         ! Initialize
         !===========
@@ -3719,12 +3720,12 @@ module gdmod_constraints
         real(R8), intent(in)                :: xpx(:), xpy(:)  
 
         ! Loop variables
-        integer(I8)                         :: i, ic, ivg, ivh, k
+        integer(I8)                         :: ic, ivg, ivh, k
         integer(I8), allocatable            :: valindex(:), conindex(:)
         
         ! Auxiliary variables
         real(R8), allocatable               ::  valxx(:), valxy(:), &
-            valyy(:), dpsidx(:), dpsidy(:), d2psidx2(:), d2psidxdy(:), &
+            valyy(:), d2psidx2(:), d2psidxdy(:), &
             d2psidy2(:), d3psidx3(:), d3psidx2dy(:), d3psidxdy2(:), &
             d3psidy3(:)
 

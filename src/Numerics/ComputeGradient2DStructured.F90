@@ -16,7 +16,7 @@ subroutine ComputeGradient2DStructured(v, xg, yg, nx, ny, vx, vy)
     ! Initialize
     !===========
     ! Declare modules
-    use gdmod_types 
+    use mod_precision 
 
     ! The usual
     implicit none 

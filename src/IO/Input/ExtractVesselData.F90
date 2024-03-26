@@ -13,6 +13,16 @@ subroutine ExtractVesselData(vessel, vesseloptions)
 
     ! Notes
     !======
+    ! Note 1: (20/03/2024) Added a separate polygon representation 
+    ! for each target structure. Each structure that has to be a target
+    ! should be identified by the field 'TP' in the vesseloptions 
+    ! structure. Each integer i corresponds to the i-th vessel structure
+    ! present in vessel%structures. Given that the aim of this 
+    ! additional structure is to easily determine distributions etc
+    ! around these structures, we artifically close the polygon (if not
+    ! already closed), since this allows more types of distribution
+    ! functions to be used. Note that self-intersecting polygons are not 
+    ! allowed for targets and will cause an error. 
 
     ! Initialize
     !===========
@@ -21,6 +31,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     use gdmod_userinput
     use gdmod_interfaces
     use gdmod_plots
+    use PolygonLevelsetFunction2D
     use, intrinsic :: ieee_arithmetic, only: IEEE_Value, IEEE_QUIET_NAN
 
     ! The usual
@@ -37,10 +48,14 @@ subroutine ExtractVesselData(vessel, vesseloptions)
 
     ! Auxiliary variables 
     type(PolygonSetUDT)                 :: tempps 
-    integer(I8)                         :: nvp, cc, nexcl   
-!    integer(I8), allocatable            :: polygonstarts(:)
+    type(PolygonUDT)                    :: temppol
+    integer(I8)                         :: nvp, cc, nexcl, nTP, tne   
+    integer(I8), allocatable            :: tv(:)
     real(R8), allocatable               :: tempx(:), &
-        tempy(:)
+        tempy(:), tx(:), ty(:), xp(:), yp(:), tvx(:), tvy(:), tnxp(:), &
+        tnyp(:), tnnp(:), tnx(:), tny(:), tnn(:)
+
+    class(PLF2DOptionsUDT), allocatable :: plfoptions
 
     ! Plotting
 
@@ -96,6 +111,149 @@ subroutine ExtractVesselData(vessel, vesseloptions)
 
     ! Construct vessel polygon set 
     call ConstructVesselPolygonSet(vessel, vesseloptions, tempps)
+
+    ! Target polygon representation
+    !==============================
+    ! Check how many targets there are
+    nTP = size(vesseloptions%TP)
+
+    ! If there are targets, check that TP does not exceed the number of
+    ! structures
+    if (nTP > 0) then 
+        if (any(vesseloptions%TP > nvs)) then 
+            ! Throw error
+            call gdErrorHandler('ExtractVesselData: some target plate ' // &
+                'indices are larger than number of vessel structures, ' // &
+                'check input')
+        end if
+    end if
+
+    ! Allocate
+    allocate(vessel%targetpolygons(nTP))
+
+    ! Construct polygons
+    do i = 1, nTP
+
+        ! Construct test polygon
+        call temppol%Construct(vs(vesseloptions%TP(i))%x, vs(vesseloptions%TP(i))%y)
+
+        ! Check
+        if (temppol%selfintersecting) then 
+            ! Throw error
+            call gdErrorHandler('ExtractVesselData: target polygon is self intersecting, not supported')
+        end if 
+
+        ! Check if we need to close the polygon
+        if (.not. temppol%isclosed) then 
+            ! Display
+            print *, 'ExtractVesselData: closing target polygon with vessel structure ID: ', vesseloptions%TP(i) 
+
+            ! Get points in vertex order
+            tne = temppol%ne 
+            tv = temppol%vert 
+            tvx = temppol%x(tv)
+            tvy = temppol%y(tv)
+
+            ! Compute normals in points
+            tnx = -(tvy(2:tne+1) - tvy(1:tne))
+            tny = (tvx(2:tne+1) - tvx(1:tne))
+            tnn = sqrt(tnx**2 + tny**2)
+            tnx = tnx/tnn 
+            tny = tny/tnn
+            tnxp = [tnx(1), 0.5*(tnx(1:tne-1)+tnx(2:tne)), tnx(tne)]
+            tnyp = [tny(1), 0.5*(tny(1:tne-1)+tny(2:tne)), tny(tne)]
+            tnnp = sqrt(tnxp**2 + tnyp**2)
+            tnxp = tnxp/tnnp 
+            tnyp = tnyp/tnnp 
+
+            ! Shift the points slightly 
+            tx = [tvx, tvx(size(tv)-1:1:-1)+1e-5*tnxp(size(tv)-1:1:-1), tvx(1)]
+            ty = [tvy, tvy(size(tv)-1:1:-1)+1e-5*tnyp(size(tv)-1:1:-1), tvy(1)]
+
+            call Write2DPolygonData(tx, ty, 'testpolyg')
+
+            ! Close the polygon
+            !tv2 = [tv, tv(size(tv)-1:1:-1)]
+
+            ! Get new coordinates
+            !tx = temppol%x(tv2)
+            !ty = temppol%y(tv2)
+
+            ! Construct the polygon
+            call temppol%Deallocate()
+            call temppol%Construct(tx, ty)
+
+        end if 
+
+        ! Assign
+        vessel%targetpolygons(i) = temppol
+
+        ! Deallocate test polygon
+        call temppol%Deallocate()
+
+
+    end do 
+
+    ! Construct target polygonset
+    call vessel%targetps%Construct(vessel%targetpolygons)
+
+    ! Construct polygon representations
+    !==================================
+    ! Check how to construct
+    select case (trim(vesseloptions%shapemeth))
+
+    case ('polygon')
+
+        ! Exact polygon representation
+        allocate(PLF2DGeneralOptionsUDT::plfoptions)
+
+        ! Set options (nothing to do here)
+
+    case ('closedpolygon_exact')
+
+        ! Exact representation of closed polygon
+        allocate(PLF2DClosedExactOptionsUDT::plfoptions)
+
+        ! Set options (nothing to do here)
+
+    case ('closedpolygon_smoothapproximation')
+
+        ! Approximate representation of closed polygon
+        allocate(PLF2DClosedApproximationOptionsUDT::plfoptions)
+
+        ! Set options
+        select type (plfoptions)
+
+        type is (PLF2DClosedApproximationOptionsUDT) 
+
+            ! Interpolation settings
+            plfoptions%meth = 'uniformgrid'
+            plfoptions%resx = vesseloptions%resx
+            plfoptions%resy = vesseloptions%resy
+            plfoptions%offsetx = vesseloptions%offsetfracx
+            plfoptions%offsety = vesseloptions%offsetfracy
+            plfoptions%C = vesseloptions%interpC
+            plfoptions%M = vesseloptions%interpM
+
+            if (size(plfoptions%xrange, 1) < 2) then 
+                ! Reset
+                call vessel%polygonset%GetPoints(xp, yp)
+                plfoptions%xrange = xp 
+                plfoptions%yrange = yp
+            end if
+
+        end select
+
+    case default 
+
+        ! Throw error
+        call gdErrorHandler('ExtractVesselData: vessel shapemeth not implemented')
+
+    end select
+
+    ! Construct
+    call InitializePolygonLevelsetFunction2D(vessel%plfvessel, vessel%polygonset, plfoptions)
+    call InitializePolygonLevelsetFunction2D(vessel%plftarget, vessel%targetps, plfoptions)
 
     end associate 
 

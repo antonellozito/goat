@@ -109,7 +109,10 @@ module gdmod_designvariables
     type, extends(DesignVariablesGDUDT) :: DesignVariablesCoordinatesFluxUDT
 
         ! Coordinate & flux indices
-        integer(I8), allocatable        :: xind(:), yind(:), psiind(:) 
+        integer(I8), allocatable        :: xind(:), yind(:), psiind(:)
+        
+        ! Flux surface identifiers
+        integer(I8), allocatable        :: fsID(:)
 
     contains
 
@@ -359,7 +362,6 @@ module gdmod_designvariables
         type(EnvironmentUDT), intent(in)            :: environment
     
         ! Loop variables
-        integer(I8)                                 :: i
 
         ! Auxiliary variables 
 
@@ -475,9 +477,6 @@ module gdmod_designvariables
         type(gridUDT), intent(in)                   :: grid 
         type(MagneticFieldUDT), intent(in)          :: magneticField 
         type(EnvironmentUDT), intent(in)            :: environment
-    
-        ! Loop variables
-        integer(I8)                                 :: i
 
         ! Auxiliary variables 
 

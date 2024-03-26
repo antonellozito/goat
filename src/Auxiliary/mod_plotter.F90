@@ -459,7 +459,7 @@ module mod_plotter
         ! Arguments
         real(R8), allocatable, intent(in)           :: x(:), y(:) 
         integer                                     :: i, fu
-        character(:), allocatable, intent(in)       :: filepath 
+        character(*),  intent(in)       :: filepath 
 
 
         
@@ -484,6 +484,71 @@ module mod_plotter
             else 
                 write (fu, *) x(i), y(i)
             end if
+        end do
+    
+        close (fu)
+
+    end subroutine
+
+    ! Simple vertex coordinate writing, 2D
+    subroutine Write2DCoordinateData(x, y, filepath)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)                        :: x(:), y(:) 
+        integer                                     :: i, fu
+        character(:), allocatable, intent(in)       :: filepath 
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile, datafile, filepath)
+
+        ! Write
+        !======
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='unknown')
+        print *, datafile
+            
+        ! Header
+        write (fu, *) 'x, y'
+    
+        ! Data
+        do i = 1, size(x)
+            write (fu, *) x(i), y(i)
+        end do
+    
+        close (fu)
+
+    end subroutine
+
+    ! Simple vertex coordinate writing, 3D (e.g. for surface data)
+    subroutine Write3DCoordinateData(x, y, z, filepath)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)                        :: x(:), y(:), z(:) 
+        integer                                     :: i, fu
+        character(*), intent(in)                    :: filepath 
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile, datafile, filepath)
+
+        ! Write
+        !======
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='unknown')
+            
+        ! Header
+        write (fu, *) 'x, y, z'
+    
+        ! Data
+        do i = 1, size(x)
+            write (fu, *) x(i), y(i), z(i)
         end do
     
         close (fu)

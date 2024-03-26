@@ -146,9 +146,15 @@ module mod_polygon
 
     contains 
 
-        procedure :: Construct          => ConstructPolygonSet
+        procedure, private  :: ConstructPolygonSetCoordinates
+        procedure, private  :: ConstructPolygonSetFromPolygons
+        generic :: Construct        => ConstructPolygonSetCoordinates, &
+            ConstructPolygonSetFromPolygons
         procedure :: SelfIntersections  => PolygonSetSelfIntersections
         procedure :: GetEdges           => GetPolygonSetEdges
+        procedure :: GetNormals         => GetPolygonSetNormals
+        procedure :: GetTangents        => GetPolygonSetTangents
+        procedure :: GetPoints          => GetPolygonSetPoints
         procedure :: WriteData          => WritePolygonSetData
         procedure :: OrientNestedClosedPolygons
 
@@ -181,7 +187,7 @@ module mod_polygon
     !------------------------------------------------------------------!
 
     ! Construct the polygon set
-    subroutine ConstructPolygonSet(polygonset, x, y)
+    subroutine ConstructPolygonSetCoordinates(polygonset, x, y)
 
         ! Description
         !============
@@ -269,6 +275,30 @@ module mod_polygon
         ! Housekeeping
         !=============
         deallocate(startind, endind, nvpp, nanloc)
+
+    end subroutine
+
+    ! Construct starting from array of polygons
+    subroutine ConstructPolygonSetFromPolygons(polygonset, polygons)
+
+        ! Description
+        !============
+        ! Construct the set starting from already initialized polygons.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        type(PolygonUDT), intent(in)        :: polygons(:)
+    
+        ! Simply add polygons
+        !====================
+        ! Set number
+        polygonset%np = size(polygons, 1)
+
+        ! Assign
+        polygonset%polygons = polygons
+
 
     end subroutine
 
@@ -547,7 +577,7 @@ module mod_polygon
         integer(I8)                 :: flag
 
         ! Auxiliary
-        integer(I8)                 :: orientation
+        integer(I8)                 :: orientation, nv
 
         real(R8), allocatable       :: polygonarea(:), ipx(:), ipy(:), &
             yf(:), dx(:), jpx(:), jpy(:)   
@@ -592,19 +622,19 @@ module mod_polygon
         do i = 1, np
             ! Initialize
             associate(&
-                nv      => p(i)%nv, &
                 ne      => p(i)%ne)
+            nv = ne+1
 
             allocate(ipx(nv), ipy(nv), yf(ne), dx(ne))
 
             ! Get current polygon coordinates
-            ipx = p(i)%x 
-            ipy = p(i)%y
+            ipx = p(i)%x(p(i)%vert) 
+            ipy = p(i)%y(p(i)%vert) 
 
             ! Compute the surface area (basically integral over x with midpoint
             ! rule)
-            yf = 0.5*(p(i)%y(1:nv-1) + p(i)%y(2:nv))
-            dx = (p(i)%x(2:nv) - p(i)%x(1:nv-1))
+            yf = 0.5*(p(i)%y(p(i)%vert(1:ne)) + p(i)%y(p(i)%vert(2:ne+1)))
+            dx = (p(i)%x(p(i)%vert(2:ne+1)) - p(i)%x(p(i)%vert(1:ne)))
             polygonarea(i) = sum(yf*dx)
 
             ! Determine which polygons lie within this polygon or in which polygons
@@ -802,6 +832,209 @@ module mod_polygon
         end associate
 
     end subroutine
+
+    ! Get polygonset tangents (not normalized)
+    subroutine GetPolygonSetTangents(polygonset, tx, ty, tn)
+
+        ! Description
+        !============
+        ! Return the edge tangents of the entire polygon set - useful
+        ! for bulk geometric operations such as normal computations etc.
+        ! It is assumed that the polygonset is fully up to date. 
+        ! Note that the tangents are not normalized, hence we return 
+        ! the tangent length in tn 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        real(R8), allocatable, intent(out)  :: tx(:), ty(:), tn(:)
+
+        ! Auxiliary
+        integer(I8)                         :: ne, ce  
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Deallocate if already allocated
+        if (allocated(tx)) then 
+            deallocate(tx)
+        end if 
+        if (allocated(ty)) then 
+            deallocate(ty) 
+        end if 
+        if (allocated(tn)) then 
+            deallocate(tn) 
+        end if
+
+        ! Build edges
+        !============
+        ! Associate
+        associate( &
+            pol         => polygonset%polygons)
+        
+        ! Precompute the total number of edges
+        ne = 0
+        do i = 1, polygonset%np 
+            ne = ne + polygonset%polygons(i)%ne             
+        end do 
+
+        ! Allocate
+        allocate(tx(ne), ty(ne), tn(ne))
+
+        ! Loop and add
+        ce = 0 ! edge counter
+        do i = 1, polygonset%np 
+            ! Add coordinates
+            tx(ce+1:ce+pol(i)%ne)   = pol(i)%tx 
+            ty(ce+1:ce+pol(i)%ne)   = pol(i)%ty 
+            tn(ce+1:ce+pol(i)%ne)   = pol(i)%tn 
+
+            ! Update counter
+            ce = ce + pol(i)%ne 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Get polygonset normals (not normalized)
+    subroutine GetPolygonSetNormals(polygonset, nx, ny, nn)
+
+        ! Description
+        !============
+        ! Return the edge normals of the entire polygon set - useful
+        ! for bulk geometric operations such as normal computations etc.
+        ! It is assumed that the polygonset is fully up to date. 
+        ! Note that the normals are not normalized, hence we return 
+        ! the normal length in nn 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        real(R8), allocatable, intent(out)  :: nx(:), ny(:), nn(:)
+
+        ! Auxiliary
+        integer(I8)                         :: ne, ce  
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Deallocate if already allocated
+        if (allocated(nx)) then 
+            deallocate(nx)
+        end if 
+        if (allocated(ny)) then 
+            deallocate(ny) 
+        end if 
+        if (allocated(nn)) then 
+            deallocate(nn) 
+        end if
+
+        ! Build edges
+        !============
+        ! Associate
+        associate( &
+            pol         => polygonset%polygons)
+        
+        ! Precompute the total number of edges
+        ne = 0
+        do i = 1, polygonset%np 
+            ne = ne + polygonset%polygons(i)%ne             
+        end do 
+
+        ! Allocate
+        allocate(nx(ne), ny(ne), nn(ne))
+
+        ! Loop and add
+        ce = 0 ! edge counter
+        do i = 1, polygonset%np 
+            ! Add coordinates
+            nx(ce+1:ce+pol(i)%ne)   = pol(i)%nx 
+            ny(ce+1:ce+pol(i)%ne)   = pol(i)%ny 
+            nn(ce+1:ce+pol(i)%ne)   = pol(i)%nn 
+
+            ! Update counter
+            ce = ce + pol(i)%ne 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Get polygonset points 
+    subroutine GetPolygonSetPoints(polygonset, xp, yp)
+
+        ! Description
+        !============
+        ! Return all coordinates of the points in an unspecified order.
+        ! The points should in principle be unique. Useful for 
+        ! operations that only considers the points and not the edges
+        ! of the polygon in any particular order. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        real(R8), allocatable, intent(out)  :: xp(:), yp(:)
+
+        ! Auxiliary
+        integer(I8)                         :: nv, cp  
+
+        ! Loop
+        integer(I8)                         :: i, ce
+
+        ! Initialize
+        !===========
+        ! Deallocate if already allocated
+        if (allocated(xp)) then 
+            deallocate(xp)
+        end if 
+        if (allocated(yp)) then 
+            deallocate(yp) 
+        end if 
+
+        ! Build points
+        !=============
+        ! Associate
+        associate( &
+            pol         => polygonset%polygons)
+        
+        ! Precompute the total number of points
+        nv = 0
+        do i = 1, polygonset%np 
+            nv = nv + polygonset%polygons(i)%nv             
+        end do 
+
+        ! Allocate
+        allocate(xp(nv), yp(nv))
+
+        ! Loop and add
+        ce = 0 ! edge counter
+        do i = 1, polygonset%np 
+            ! Add coordinates
+            xp(ce+1:ce+pol(i)%nv)   = pol(i)%x 
+            yp(ce+1:ce+pol(i)%nv)   = pol(i)%y 
+
+            ! Update counter
+            cp = cp + pol(i)%nv 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
 
     ! Write polygonset vertex data
     subroutine WritePolygonSetData(polygonset, filepath)
@@ -1438,6 +1671,8 @@ module mod_polygon
         call polygon%Inpolygon(tpx, tpy, isin)
         where (.not. isin) nx = -nx 
         where (.not. isin) ny = -ny
+        where (.not. isin) tx = -tx 
+        where (.not. isin) ty = -ty
 
 
         end associate
@@ -2559,7 +2794,7 @@ module mod_polygon
             do j = 1, np-1
                 if (xcross(j) < 0) then 
                     ! x-coordinate of intersection
-                    xi = xp(j) + yp(j)*(xp(j+1) - xp(j))/(yp(j+1) - yp(j))
+                    xi = xp(j) + yp(j)*(xp(j+1) - xp(j))/(yp(j) - yp(j+1))
 
                     if (xi > 0) then 
                         if (yp(j) <0) then 
@@ -2568,7 +2803,7 @@ module mod_polygon
                             w(i) = w(i) - 2 
                         end if 
                     end if 
-                elseif ( (yp(j) == 0) .and. (xp(j+1) > 0) ) then
+                elseif ( (yp(j) == 0) .and. (xp(j) > 0) ) then
                     if ( (yp(j+1) > 0) ) then 
                         w(i) = w(i) + 1
                     else 

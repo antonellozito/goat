@@ -720,7 +720,7 @@ module optmod_optimizationengine
         class(OptimizationProblemUDT)               :: problem
     
         ! Loop variables
-        integer(I8)                 :: itopt, maxit, verbosity
+        integer(I8)                 :: itopt, maxit
         logical                     :: converged
         
         ! Auxiliary variables 
@@ -827,8 +827,8 @@ module optmod_optimizationengine
         allocate(fullmat(hessL%nrow, hessL%ncol))
 
         ! Diagnostics
-        checkgradients  = .false. ! check gradients in each iteration?
-        checkhessians   = .false. ! check hessians in each iteration?
+        checkgradients  = .true. ! check gradients in each iteration?
+        checkhessians   = .true. ! check hessians in each iteration?
 
         ! Initialize counter(s)
         itopt = 1
@@ -866,12 +866,12 @@ module optmod_optimizationengine
 
             ! Check gradients & hessians if needed
             if (checkgradients .or. checkhessians) then 
-                !call CheckCostFunctionLinearization(problem, &
-                !    checkgradients, checkhessians)
-                !call CheckLagrangianLinearization(problem, solver, lambda, & 
-                !    mu, checkgradients, checkhessians)
-                call CheckEqconLinearization(problem, lambda, &
+                call CheckCostFunctionLinearization(problem, &
                     checkgradients, checkhessians)
+                call CheckLagrangianLinearization(problem, solver, lambda, & 
+                    mu, checkgradients, checkhessians)
+                !call CheckEqconLinearization(problem, lambda, &
+                !    checkgradients, checkhessians)
             end if
 
             ! Evaluate cost function

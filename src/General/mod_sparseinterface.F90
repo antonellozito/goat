@@ -1091,7 +1091,6 @@ module mod_sparseinterface
         integer(I8), intent(in)             :: dim
 
         ! Loop
-        integer(I8)                         :: i 
 
         ! Checks
         !=======

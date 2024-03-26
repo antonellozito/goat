@@ -107,8 +107,13 @@ module gdmod_userinput
         ! - writedata: write out cost function data for debugging
         ! - dovessel: include vessel edges into cost function?
 
+        ! There are also options for the desired bias distribution:
+        ! - lengthparam: decay length
+        ! - biasatvessel: desired bias at the vessel 
+        ! The desired bias far away from the vessel is assumed to be one. 
+
         real(R8)                    :: lambda 
-        real(R8)                    :: eta
+        real(R8)                    :: eta, lengthparam, biasatvessel
         integer(I8)                 :: writedata
         logical                     :: dovessel
 
@@ -119,6 +124,32 @@ module gdmod_userinput
 
     end type 
 
+    type, extends(OptionsUDT) :: CostFunctionOptionsLRradUDT
+
+        ! Length ratio specific cost function options. 
+        ! Fields:
+        ! - lambda: cost function scaling constant
+        ! - eta: length scale for cost function denominator
+        ! - writedata: write out cost function data for debugging
+        ! - includecutcellfaces: include cut cell faces in the cost 
+        !   function
+        ! - excludedomainfaces: exclude all faces that lie strictly in 
+        !   the domain (i.e. only faces with at least one boundary 
+        !   vertex are considered)
+
+        real(R8)                    :: lambda 
+        real(R8)                    :: eta
+        integer(I8)                 :: writedata
+        logical                     :: includecutcellfaces, &
+            excludedomainfaces
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultCostFunctionOptionsLRrad 
+        procedure :: Read           => ReadCostFunctionOptionsLRrad
+
+    end type
+
     type, extends(OptionsUDT) :: CostFunctionOptionsFADUDT
 
         ! Length ratio specific cost function options. 
@@ -126,7 +157,14 @@ module gdmod_userinput
         ! - lambda: cost function scaling constant
         ! - 
 
-        real(R8)                    :: lambda 
+        ! Options for weight distribution:
+        ! - weightatinf:    weight very far way from vessel
+        ! - weightatvessel: weight at vessel boundary
+        ! - decaylength:    characteristic decay length over which the
+        !                   weight decays from vessel to infinity value
+
+        real(R8)                    :: lambda, weightatinf, &
+            weightatvessel, decaylength
         integer(I8)                 :: writedata
 
     contains 
@@ -135,6 +173,52 @@ module gdmod_userinput
         procedure :: Read           => ReadCostFunctionOptionsFAD
 
     end type 
+
+    type, extends(OptionsUDT)   :: CostFunctionOptionsFAUDT 
+
+        ! Face angle cost function options.
+        ! Fields:
+        ! - lambda: cost function scaling constant
+        ! - writedata: write out cost function data
+    
+        ! Options for weight distribution:
+        ! - weightatinf:    weight very far way from vessel
+        ! - weightatvessel: weight at vessel boundary
+        ! - decaylength:    characteristic decay length over which the
+        !                   weight decays from vessel to infinity value
+
+        real(R8)                    :: lambda, weightatinf, &
+            weightatvessel, decaylength
+        integer(I8)                 :: writedata
+
+    contains
+
+        procedure :: SetDefaults    => SetDefaultCostFunctionOptionsFA
+        procedure :: Read           => ReadCostFunctionOptionsFA
+
+    end type
+
+    type, extends(OptionsUDT)   :: CostFunctionOptionsPRPBUDT 
+
+        ! Psi ratio, psi based cost function options.
+        ! Fields:
+        ! - lambda: cost function scaling constant
+        ! - writedata: write out cost function data 
+
+        ! Standard distribution options for desired bias and weight
+
+        real(R8)                    :: lambda, biasatsep, &
+            biasatinf, biasdecaylength, weightatsep, weightatinf, &
+            weightdecaylength
+        integer(I8)                 :: writedata
+
+
+    contains
+
+        procedure :: SetDefaults    => SetDefaultCostFunctionOptionsPRPB
+        procedure :: Read           => ReadCostFunctionOptionsPRPB
+
+    end type
 
     ! Options for the cost function
     type, extends(OptionsUDT) :: CostFunctionOptionsUDT
@@ -153,10 +237,13 @@ module gdmod_userinput
         ! Notes: parameters for the cost function are type specific and 
         ! are therefore not defined here. They should be read in by 
         ! dedicated routines defined in gdmod_costfunction
-        character(:), allocatable       :: type 
-        integer(I8)                     :: writedata
-        type(CostFunctionOptionsLRUDT)  :: LR
-        type(CostFunctionOptionsFADUDT) :: FAD
+        character(:), allocatable           :: type 
+        integer(I8)                         :: writedata
+        type(CostFunctionOptionsLRUDT)      :: LR
+        type(CostFunctionOptionsFADUDT)     :: FAD
+        type(CostfunctionOptionsFAUDT)      :: FA
+        type(CostfunctionOptionsPRPBUDT)    :: PRPB
+        type(CostfunctionOptionsLRradUDT)   :: LRrad
 
     contains 
 
@@ -401,13 +488,19 @@ module gdmod_userinput
         !================
         options%type        = 'LR_FAD' 
         options%writedata   = 1
-        options%LR%inputfilepath = options%inputfilepath ! propagate filepath
-        options%FAD%inputfilepath = options%inputfilepath ! propagate filepath
+        options%LR%inputfilepath    = options%inputfilepath ! propagate filepath
+        options%FAD%inputfilepath   = options%inputfilepath ! propagate filepath
+        options%FA%inputfilepath    = options%inputfilepath
+        options%PRPB%inputfilepath  = options%inputfilepath
+        options%LRrad%inputfilepath = options%inputfilepath
 
         ! Set cost function specific options
         !===================================
         call options%LR%Set()
         call options%FAD%Set()
+        call options%FA%Set()
+        call options%PRPB%Set()
+        call options%LRrad%Set()
 
     end subroutine
 
@@ -428,6 +521,29 @@ module gdmod_userinput
         options%lambda = 1e0
         options%eta = 1e-5 ! in coordinate units
         options%dovessel = .false.
+        options%lengthparam = 0.1 ! in coordinate units
+        options%biasatvessel = 1
+
+    end subroutine
+
+    subroutine SetDefaultCostFunctionOptionsLRrad(options)
+
+        ! Description
+        !============
+        ! Set default cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsLRradUDT) :: options 
+
+        ! Default options
+        !================
+        options%writedata           = 1
+        options%lambda              = 1e0
+        options%eta                 = 1e-5 ! in coordinate units
+        options%includecutcellfaces = .true.
+        options%excludedomainfaces  = .true.
 
     end subroutine
 
@@ -444,8 +560,63 @@ module gdmod_userinput
 
         ! Default options
         !================
+        ! Standard options
         options%writedata = 1
         options%lambda = 1e0
+
+        ! Distribution options (weights)
+        options%weightatvessel  = 1
+        options%weightatinf     = 1
+        options%decaylength     = 1
+
+    end subroutine
+
+    subroutine SetDefaultCostFunctionOptionsFA(options)
+
+        ! Description
+        !============
+        ! Set default cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsFAUDT) :: options 
+
+        ! Default options
+        !================
+        options%writedata = 1
+        options%lambda = 1e0
+        
+        ! Distribution options (weights)
+        options%weightatvessel  = 1
+        options%weightatinf     = 1
+        options%decaylength     = 1
+
+    end subroutine
+
+    subroutine SetDefaultCostFunctionOptionsPRPB(options)
+
+        ! Description
+        !============
+        ! Set default cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsPRPBUDT) :: options 
+
+        ! Default options
+        !================
+        options%writedata = 1
+        options%lambda = 1e0
+
+        options%weightatsep = 1
+        options%weightatinf = 1
+        options%weightdecaylength = 0.1 
+
+        options%biasatsep = 1
+        options%biasatinf = 1
+        options%biasdecaylength = 0.1
 
     end subroutine
 
@@ -892,6 +1063,72 @@ module gdmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%eta) 
         field = 'gd.design.cfv.par.LR.dovesseledges'
         call ExtractOptionValueLogical0D(fid, field, options%dovessel) 
+        field = 'gd.design.cfv.par.LR.biasatvessel'
+        call ExtractOptionValueReal0D(fid, field, options%biasatvessel)
+        field = 'gd.design.cfv.par.LR.lengthparam'
+        call ExtractOptionValueReal0D(fid, field, options%lengthparam)  
+        field = 'gd.design.cfv.par.LR.eta'
+        call ExtractOptionValueReal0D(fid, field, options%eta) 
+
+        ! Write data
+        field = 'gd.design.cfv.par.LR.writedata'
+        call ExtractOptionValueInteger0D(fid, field, options%writedata) 
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadCostFunctionOptionsLRrad(options)
+
+        ! Description
+        !============
+        ! Read in user-specified cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsLRradUDT)   :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsLRrad: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsLRrad: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'gd.design.cfv.par.LRrad.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda) 
+        field = 'gd.design.cfv.par.LRrad.eta'
+        call ExtractOptionValueReal0D(fid, field, options%eta) 
+        field = 'gd.design.cfv.par.LRrad.includecutcellfaces'
+        call ExtractOptionValueLogical0D(fid, field, options%includecutcellfaces) 
+        field = 'gd.design.cfv.par.LRrad.excludedomainfaces'
+        call ExtractOptionValueLogical0D(fid, field, options%excludedomainfaces) 
 
         ! Write data
         field = 'gd.design.cfv.par.LR.writedata'
@@ -947,8 +1184,150 @@ module gdmod_userinput
         field = 'gd.design.cfv.par.FAD.lambda'
         call ExtractOptionValueReal0D(fid, field, options%lambda) 
 
+        ! Weight distribution options
+        field = 'gd.design.cfv.par.FAD.weightatinf'
+        call ExtractOptionValueReal0D(fid, field, options%weightatinf)
+        field = 'gd.design.cfv.par.FAD.weightatvessel'
+        call ExtractOptionValueReal0D(fid, field, options%weightatvessel)
+        field = 'gd.design.cfv.par.FAD.decaylength'
+        call ExtractOptionValueReal0D(fid, field, options%decaylength)
+
         ! Write data
         field = 'gd.design.cfv.par.FAD.writedata'
+        call ExtractOptionValueInteger0D(fid, field, options%writedata) 
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadCostFunctionOptionsFA(options)
+
+        ! Description
+        !============
+        ! Read in user-specified cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsFAUDT)   :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsFA: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsFA: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'gd.design.cfv.par.FA.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda) 
+
+        
+        ! Weight distribution options
+        field = 'gd.design.cfv.par.FA.weightatinf'
+        call ExtractOptionValueReal0D(fid, field, options%weightatinf)
+        field = 'gd.design.cfv.par.FA.weightatvessel'
+        call ExtractOptionValueReal0D(fid, field, options%weightatvessel)
+        field = 'gd.design.cfv.par.FA.decaylength'
+        call ExtractOptionValueReal0D(fid, field, options%decaylength)
+
+        ! Write data
+        field = 'gd.design.cfv.par.FA.writedata'
+        call ExtractOptionValueInteger0D(fid, field, options%writedata) 
+        
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadCostFunctionOptionsPRPB(options)
+
+        ! Description
+        !============
+        ! Read in user-specified cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsPRPBUDT)   :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsPRPB: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsPRPB: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'gd.design.cfv.par.PRPB.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda) 
+
+
+        ! Weight distribution options
+        field = 'gd.design.cfv.par.PRPB.weightatinf'
+        call ExtractOptionValueReal0D(fid, field, options%weightatinf)
+        field = 'gd.design.cfv.par.PRPB.weightatsep'
+        call ExtractOptionValueReal0D(fid, field, options%weightatsep)
+        field = 'gd.design.cfv.par.PRPB.weightdecaylength'
+        call ExtractOptionValueReal0D(fid, field, options%weightdecaylength)
+
+        ! Weight distribution options
+        field = 'gd.design.cfv.par.PRPB.biasatinf'
+        call ExtractOptionValueReal0D(fid, field, options%biasatinf)
+        field = 'gd.design.cfv.par.PRPB.biasatsep'
+        call ExtractOptionValueReal0D(fid, field, options%biasatsep)
+        field = 'gd.design.cfv.par.PRPB.biasdecaylength'
+        call ExtractOptionValueReal0D(fid, field, options%biasdecaylength)
+
+        ! Write data
+        field = 'gd.design.cfv.par.PRPB.writedata'
         call ExtractOptionValueInteger0D(fid, field, options%writedata) 
         
         ! Housekeeping

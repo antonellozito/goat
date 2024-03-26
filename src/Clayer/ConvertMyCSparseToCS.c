@@ -5,7 +5,7 @@ cs *ConvertMyCSparseToCS(MyCSparse *A)
 {
     /* Define variables*/
     cs *B;
-    int i, j; 
+    int i; 
 
     /* Allocate */
     B = cs_spalloc(A->nrow, A->ncol, A->nval, 1, 1);

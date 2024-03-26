@@ -109,4 +109,36 @@ def GetVertexPairCoordinates(filepath):
         returnvec[2*i+1] = 2*npoints
     return vals[0:cc, returnvec]
 
+def GetGeneral2DSurfaceData(filepath):
+    # Description
+    #------------
+    # Read in x, y, z data where x and y are assumed to be spatial 
+    # coordinates and z is some field. Blank lines are allowed but 
+    # skipped. It is assumed that the first line is a header. 
+
+    # Read in vertex coordinates from the file
+    thisfile = open(filepath)
+
+    alllines = thisfile.readlines()
+
+    # Remove header
+    del alllines[0]
+    vals = np.zeros([len(alllines), 3])
+
+    # Read in vertex data
+    cc = 0
+
+    for i in alllines:
+        if i == '\n':  # empty string
+            pass
+            # Don't read in
+        else:
+            # Read
+            vals[cc, 0:3] = np.fromstring(i, dtype=float, count=3, sep=' ')
+            cc = cc + 1
+
+    # Return values
+    return vals[0:cc, 0:3]
+
+
 

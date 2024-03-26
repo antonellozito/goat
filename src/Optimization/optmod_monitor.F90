@@ -118,6 +118,7 @@ module optmod_monitor
 
         ! Print
         !======
+        allocate(myformat, source='')
         myformat = repeat('4x, a4, 4x,', 9)
         print *, '!===================================================!'
         print *, '!         Solving the grid deformation problem      !'
@@ -149,6 +150,7 @@ module optmod_monitor
 
         ! Print
         !======
+        allocate(myformat, source='')
         myformat = repeat('es10.4, 4x, ', 12)
         print '(i8, 4x, ' // myformat // '4x)', &
             monitor%itopt, monitor%convnorm(itopt), monitor%maxdphi, &

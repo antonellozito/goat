@@ -313,6 +313,9 @@ module goatmod_userinput
         ! - interpM:    only used for interpolant based methods. Order 
         ! used to approximate derivatives to construct interpolant 
         ! function. 
+        ! - xrange, yrange: only used for interpolant based methods. 
+        ! Sets range over which interpolant can be evaluated (range is 
+        ! determined by max and min value in array, may be overwritten))
 
         character(:), allocatable       :: readmeth
         character(:), allocatable       :: filepath
@@ -325,6 +328,7 @@ module goatmod_userinput
         character(:), allocatable       :: shapemeth 
         integer(I8)                     :: resx, resy, interpC, interpM 
         real(R8)                        :: offsetfracx, offsetfracy
+        real(R8), allocatable           :: xrange(:), yrange(:)
 
     contains 
 
@@ -588,6 +592,7 @@ module goatmod_userinput
         allocate(options%TP(2))
         allocate(options%TPind(2))
         allocate(options%exclude(0))
+        allocate(options%xrange(0), options%yrange(0))
         options%TP      = [1, 2]
         options%TPind   = [1, 2]
 
@@ -601,6 +606,7 @@ module goatmod_userinput
         options%offsetfracy     = 0.1
         options%interpC         = 3
         options%interpM         = 6
+        
         
 
     end subroutine
@@ -1025,6 +1031,10 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%offsetfracx)
         field = 'goat.vessel.offsetfracy'
         call ExtractOptionValueReal0D(fid, field, options%offsetfracy)
+        field = 'goat.vessel.xrange'
+        call ExtractOptionValueReal1D(fid, field, options%xrange)
+        field = 'goat.vessel.yrange'
+        call ExtractOptionValueReal1D(fid, field, options%yrange)
 
         ! Housekeeping
         !=============

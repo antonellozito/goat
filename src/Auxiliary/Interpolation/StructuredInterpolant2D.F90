@@ -244,7 +244,6 @@ module StructuredInterpolant2D
         ! Linear solver variables (dummies basically)
         integer(I8), allocatable            :: ipiv(:)
         integer                             :: info
-        integer                             :: neq
 
         ! Parameters
         real(R8), parameter                     :: tol = 1e-8
