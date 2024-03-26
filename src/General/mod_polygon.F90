@@ -146,7 +146,10 @@ module mod_polygon
 
     contains 
 
-        procedure :: Construct          => ConstructPolygonSet
+        procedure, private  :: ConstructPolygonSetCoordinates
+        procedure, private  :: ConstructPolygonSetFromPolygons
+        generic :: Construct        => ConstructPolygonSetCoordinates, &
+            ConstructPolygonSetFromPolygons
         procedure :: SelfIntersections  => PolygonSetSelfIntersections
         procedure :: GetEdges           => GetPolygonSetEdges
         procedure :: GetNormals         => GetPolygonSetNormals
@@ -184,7 +187,7 @@ module mod_polygon
     !------------------------------------------------------------------!
 
     ! Construct the polygon set
-    subroutine ConstructPolygonSet(polygonset, x, y)
+    subroutine ConstructPolygonSetCoordinates(polygonset, x, y)
 
         ! Description
         !============
@@ -272,6 +275,30 @@ module mod_polygon
         ! Housekeeping
         !=============
         deallocate(startind, endind, nvpp, nanloc)
+
+    end subroutine
+
+    ! Construct starting from array of polygons
+    subroutine ConstructPolygonSetFromPolygons(polygonset, polygons)
+
+        ! Description
+        !============
+        ! Construct the set starting from already initialized polygons.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        type(PolygonUDT), intent(in)        :: polygons(:)
+    
+        ! Simply add polygons
+        !====================
+        ! Set number
+        polygonset%np = size(polygons, 1)
+
+        ! Assign
+        polygonset%polygons = polygons
+
 
     end subroutine
 
@@ -550,7 +577,7 @@ module mod_polygon
         integer(I8)                 :: flag
 
         ! Auxiliary
-        integer(I8)                 :: orientation
+        integer(I8)                 :: orientation, nv
 
         real(R8), allocatable       :: polygonarea(:), ipx(:), ipy(:), &
             yf(:), dx(:), jpx(:), jpy(:)   
@@ -595,19 +622,19 @@ module mod_polygon
         do i = 1, np
             ! Initialize
             associate(&
-                nv      => p(i)%nv, &
                 ne      => p(i)%ne)
+            nv = ne+1
 
             allocate(ipx(nv), ipy(nv), yf(ne), dx(ne))
 
             ! Get current polygon coordinates
-            ipx = p(i)%x 
-            ipy = p(i)%y
+            ipx = p(i)%x(p(i)%vert) 
+            ipy = p(i)%y(p(i)%vert) 
 
             ! Compute the surface area (basically integral over x with midpoint
             ! rule)
-            yf = 0.5*(p(i)%y(1:nv-1) + p(i)%y(2:nv))
-            dx = (p(i)%x(2:nv) - p(i)%x(1:nv-1))
+            yf = 0.5*(p(i)%y(p(i)%vert(1:ne)) + p(i)%y(p(i)%vert(2:ne+1)))
+            dx = (p(i)%x(p(i)%vert(2:ne+1)) - p(i)%x(p(i)%vert(1:ne)))
             polygonarea(i) = sum(yf*dx)
 
             ! Determine which polygons lie within this polygon or in which polygons
