@@ -474,20 +474,23 @@ module gdmod_optimizationengine
 
             ! Call initializer
             call costfunction%FinalizeInitialization(designvariables, &
-                problem%grid, problem%magneticField, problem%environment)
+                problem%grid, problem%magneticField, problem%environment, &
+                problem%designoptions%costfunction)
 
         type is (CostfunctionPRPB2UDT)
 
             ! Call initializer
             call costfunction%FinalizeInitialization(designvariables, &
-            problem%grid, problem%magneticField, problem%environment)
+            problem%grid, problem%magneticField, problem%environment, &
+            problem%designoptions%costfunction)
 
         type is (CostfunctionGeneralUDT)
 
             ! Check
             if (costfunction%doPRPB) then 
                 call costfunction%cfv_prpb%FinalizeInitialization(designvariables, &
-                    problem%grid, problem%magneticField, problem%environment)
+                    problem%grid, problem%magneticField, problem%environment, &
+                    problem%designoptions%costfunction)
             end if
 
         class default 

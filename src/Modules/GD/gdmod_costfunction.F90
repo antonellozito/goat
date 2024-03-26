@@ -594,7 +594,9 @@ module gdmod_costfunction
         integer(I8)                         :: i, j
 
         ! Auxiliary variables
-        type(Polygonset2DFieldDistanceDFUDT)    :: dfbias
+        type(StructuredPLF2DDistanceDFUDT)  :: dfbias
+        type(PolygonSetUDT)                 :: targetps
+        type(StructuredInterpolant2DUDT)    :: targetinterp
 
         integer                             :: sgn2, sgn3
         integer(I8)                         :: sp, ep, tID, v2, v3, tv
@@ -649,15 +651,23 @@ module gdmod_costfunction
         ! Desired bias far away from vessel (set to one)
         a0 = 1
 
+        ! Construct polygon set based on target plates only
+        !call targetps%Construct(environment%vessel%targetpolygons)
+
+        ! Construct interpolant
+        !call targetinterp%SetParameters('uniformgrid', 3, 6)
+        !call targetinterp%Construct()
+
         ! Construct
         call dfbias%Initialize(magneticField%interp, &
-            environment%vessel%polygonset, options%LR%biasatvessel, a0, &
-            options%LR%lengthparam, 'unsigned')
+            environment%vessel%plftarget, environment%vessel%plfvessel, options%LR%biasatvessel, a0, &
+            options%LR%lengthparam, 'signed')
         
         ! Evaluate
         call dfbias%Evaluate(x, y, b0)
 
         ! Visualize
+        call environment%vessel%plftarget%Visualize('costfunctionLR_vesselcontours')
         call dfbias%Visualize([minval(x), maxval(x)], [minval(y), maxval(y)], 100, 100, 'costfunctionLR_desiredbias')
 
         ! Write
@@ -1805,6 +1815,8 @@ module gdmod_costfunction
         integer(I8)                         :: i, j, k, vpc
 
         ! Auxiliary variables
+        type(StructuredPLF2DDistanceDFUDT)  :: dfwt
+
         integer(I8)                         :: tID, vp1(1:2), &
             vp2(1:2), ntvn, ntemptvn, nvp
 
@@ -1818,7 +1830,7 @@ module gdmod_costfunction
 
         real(R8), allocatable               :: bx(:), by(:), xv(:,:), &
             yv(:,:), xf(:,:), yf(:,:), gxf(:,:), gyf(:,:), dx(:,:), &
-            dy(:,:), dotprod(:,:)
+            dy(:,:), dotprod(:,:), wt(:)
 
         logical, allocatable                :: cID(:), mask(:), &
             isaligned(:)
@@ -2087,11 +2099,26 @@ module gdmod_costfunction
             deallocate(reverse)
         end do
 
+        ! Determine weigths
+        !==================
+        ! Initialize (magnetic field as dummy since unsigned anyway)
+        call dfwt%Initialize(magneticField%interp, &
+            environment%vessel%plfvessel, environment%vessel%plfvessel, &
+            options%FAD%weightatvessel, options%FAD%weightatinf, &
+            options%FAD%decaylength, 'unsigned')
+
+        ! Evaluate
+        call dfwt%Evaluate(xv(:, 1), yv(:, 1), wt)
+
+        ! Visualize
+        call dfwt%Visualize([minval(x), maxval(x)], &
+            [minval(y), maxval(y)], 100, 100, 'costfunctionFAD_weights')
+
         ! Assign to cost function
         !========================
         costfunction%vpairs = vpairs(1:vpc,:)
         costfunction%nvpairs = vpc 
-        costfunction%wt(:) = 1
+        costfunction%wt = wt
 
         ! Visualize? 
         !allocate(xplot(size(xf)), yplot(size(yf)))
@@ -3301,6 +3328,7 @@ module gdmod_costfunction
         integer(I8)                         :: i
 
         ! Auxiliary variables
+        type(StructuredPLF2DDistanceDFUDT)  :: dfwt
         integer(I8), allocatable            :: vpairs(:, :), tv(:), &
             tID(:) 
 
@@ -3319,7 +3347,6 @@ module gdmod_costfunction
 
         ! Initialize temporary arrays (too big for now, trim later)
         allocate(vpairs(grid%face%ntot, 2), wt(grid%face%ntot))
-        wt(:) = 1
 
         ! Associate
         associate(&
@@ -3364,7 +3391,6 @@ module gdmod_costfunction
         ! Allocate and add
         call costfunction%Allocate(nvpairs)
         costfunction%vpairs = vpairs(1:nvpairs, :)
-        costfunction%wt     = wt(1:nvpairs)
 
         ! Check orientation
         !==================
@@ -3388,6 +3414,24 @@ module gdmod_costfunction
                 costfunction%vpairs(i, :) = costfunction%vpairs(i, 2:1:-1)
             end if
         end do 
+
+        ! Determine weigths
+        !==================
+        ! Initialize (magnetic field as dummy since unsigned anyway)
+        call dfwt%Initialize(magneticField%interp, &
+            environment%vessel%plfvessel, environment%vessel%plfvessel, &
+            options%FA%weightatvessel, options%FA%weightatinf, &
+            options%FA%decaylength, 'unsigned')
+
+        ! Evaluate
+        call dfwt%Evaluate(xf, yf, wt)
+
+        ! Visualize
+        call dfwt%Visualize([minval(x), maxval(x)], &
+            [minval(y), maxval(y)], 100, 100, 'costfunctionFA_weights')
+
+        ! Add
+        costfunction%wt = wt
 
         ! Housekeeping
         !=============
@@ -4358,7 +4402,7 @@ module gdmod_costfunction
 
     ! True cost function initialization
     subroutine FinalizeInitializationCostFunctionPRPB(costfunction, &
-        designvariables, grid, magneticField, environment)
+        designvariables, grid, magneticField, environment, options)
 
         ! Description
         !============
@@ -4374,17 +4418,21 @@ module gdmod_costfunction
         type(GridUDT)                   :: grid 
         type(MagneticFieldUDT)          :: magneticField
         type(EnvironmentUDT)            :: environment
+        type(CostFunctionOptionsUDT)    :: options
 
         ! Auxiliary
+        type(Coordinates1DFieldDistanceDFUDT)    :: dfbias, dfwt
         integer(I8)                     :: nfsID, nxpind, tID
         integer(I8), allocatable        :: map2fsind(:), fsID(:), &
             xpind(:), order(:), psipairs(:, :), tvn(:), fsIDcounter(:), &
-            tvnID(:), allfsIDs(:)
+            tvnID(:), allfsIDs(:), tvID(:)
 
         real(R8), allocatable           :: fsPsi(:), b0v(:), wtv(:), &
-            wtp(:), b0p(:), thispsival(:, :), sgn1(:), sgn2(:)
+            wtp(:), b0p(:), thispsival(:, :), sgn1(:), sgn2(:), xp(:), &
+            yp(:)
 
-        logical, allocatable            :: mask(:), doflip(:)
+        logical, allocatable            :: mask(:), doflip(:), &
+            issepvert(:)
 
         ! Loop
         integer(I8)                     :: npp, i, j, k
@@ -4435,19 +4483,39 @@ module gdmod_costfunction
         ! Initialize fsID counter
         allocate(fsIDcounter(maxval(fsID)))
 
-        ! Compute desired distribution (currently uniform and unity)
-        allocate(b0v(nv))
-        b0v = 1
+        ! Compute desired distributions
+        !==============================
+        ! Get all separatrix vertices
+        call DetermineXPoints(xpind, nxpind, order, grid)
+        allocate(issepvert(grid%vert%ntot))
+        do i = 1, nxpind 
+            where (fieldlineID == fieldlineID(xpind(i))) issepvert = .true.
+        end do 
+        allocate(tvID(count(issepvert)))
+        tvID = pack([(k, k = 1, grid%vert%ntot)], issepvert)
+
+        ! Initialize distributions
+        call dfbias%Initialize(magneticField%interp, x(tvID), y(tvID), &
+            options%PRPB%biasatsep, options%PRPB%biasatinf, &
+            options%PRPB%biasdecaylength, 'signed')
+        call dfwt%Initialize(magneticField%interp, x(tvID), y(tvID), &
+            options%PRPB%weightatsep, options%PRPB%weightatinf, &
+            options%PRPB%weightdecaylength, 'unsigned')
+
+        ! Evaluate
+        call dfbias%Evaluate(x, y, b0v)
+        call dfwt%Evaluate(x, y, wtv)
+
+        ! Visualize
+        call dfbias%Visualize([minval(x), maxval(x)], [minval(y), maxval(y)], &
+            100, 100, 'costfunctionPRPB_desiredbias')
+        call dfwt%Visualize([minval(x), maxval(x)], [minval(y), maxval(y)], &
+            100, 100, 'costfunctionPRPB_weight')
 
         ! Set desired bias to one at separatrix nodes
-        call DetermineXPoints(xpind, nxpind, order, grid)
         do i = 1, nxpind 
             where (fieldlineID == fieldlineID(xpind(i))) b0v = 1
         end do
-
-        ! Set the desired weights (currently uniform and unity)
-        allocate(wtv(nv))
-        wtv = 1
 
         ! Initialize pairs too big
         allocate(psipairs(nv, 3), wtp(size(wtv)), b0p(size(b0v)))
@@ -4954,7 +5022,7 @@ module gdmod_costfunction
 
     ! True initialization
     subroutine FinalizeInitializationCostFunctionPRPB2(costfunction, &
-        designvariables, grid, magneticField, environment)
+        designvariables, grid, magneticField, environment, options)
 
         ! Description
         !============
@@ -4970,11 +5038,12 @@ module gdmod_costfunction
         type(GridUDT)                   :: grid 
         type(MagneticFieldUDT)          :: magneticField
         type(EnvironmentUDT)            :: environment
+        type(CostfunctionOptionsUDT)    :: options
 
         ! Call subroutine
         !================
         call costfunction%cfv_prpb%FinalizeInitialization(designvariables, &
-            grid, magneticField, environment)
+            grid, magneticField, environment, options)
 
     end subroutine
 

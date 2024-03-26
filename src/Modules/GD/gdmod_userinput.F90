@@ -157,7 +157,14 @@ module gdmod_userinput
         ! - lambda: cost function scaling constant
         ! - 
 
-        real(R8)                    :: lambda 
+        ! Options for weight distribution:
+        ! - weightatinf:    weight very far way from vessel
+        ! - weightatvessel: weight at vessel boundary
+        ! - decaylength:    characteristic decay length over which the
+        !                   weight decays from vessel to infinity value
+
+        real(R8)                    :: lambda, weightatinf, &
+            weightatvessel, decaylength
         integer(I8)                 :: writedata
 
     contains 
@@ -172,9 +179,16 @@ module gdmod_userinput
         ! Face angle cost function options.
         ! Fields:
         ! - lambda: cost function scaling constant
-        ! - writedata: write out cost function data 
+        ! - writedata: write out cost function data
+    
+        ! Options for weight distribution:
+        ! - weightatinf:    weight very far way from vessel
+        ! - weightatvessel: weight at vessel boundary
+        ! - decaylength:    characteristic decay length over which the
+        !                   weight decays from vessel to infinity value
 
-        real(R8)                    :: lambda 
+        real(R8)                    :: lambda, weightatinf, &
+            weightatvessel, decaylength
         integer(I8)                 :: writedata
 
     contains
@@ -191,8 +205,13 @@ module gdmod_userinput
         ! - lambda: cost function scaling constant
         ! - writedata: write out cost function data 
 
-        real(R8)                    :: lambda 
+        ! Standard distribution options for desired bias and weight
+
+        real(R8)                    :: lambda, biasatsep, &
+            biasatinf, biasdecaylength, weightatsep, weightatinf, &
+            weightdecaylength
         integer(I8)                 :: writedata
+
 
     contains
 
@@ -541,8 +560,14 @@ module gdmod_userinput
 
         ! Default options
         !================
+        ! Standard options
         options%writedata = 1
         options%lambda = 1e0
+
+        ! Distribution options (weights)
+        options%weightatvessel  = 1
+        options%weightatinf     = 1
+        options%decaylength     = 1
 
     end subroutine
 
@@ -561,6 +586,11 @@ module gdmod_userinput
         !================
         options%writedata = 1
         options%lambda = 1e0
+        
+        ! Distribution options (weights)
+        options%weightatvessel  = 1
+        options%weightatinf     = 1
+        options%decaylength     = 1
 
     end subroutine
 
@@ -579,6 +609,14 @@ module gdmod_userinput
         !================
         options%writedata = 1
         options%lambda = 1e0
+
+        options%weightatsep = 1
+        options%weightatinf = 1
+        options%weightdecaylength = 0.1 
+
+        options%biasatsep = 1
+        options%biasatinf = 1
+        options%biasdecaylength = 0.1
 
     end subroutine
 
@@ -1146,6 +1184,14 @@ module gdmod_userinput
         field = 'gd.design.cfv.par.FAD.lambda'
         call ExtractOptionValueReal0D(fid, field, options%lambda) 
 
+        ! Weight distribution options
+        field = 'gd.design.cfv.par.FAD.weightatinf'
+        call ExtractOptionValueReal0D(fid, field, options%weightatinf)
+        field = 'gd.design.cfv.par.FAD.weightatvessel'
+        call ExtractOptionValueReal0D(fid, field, options%weightatvessel)
+        field = 'gd.design.cfv.par.FAD.decaylength'
+        call ExtractOptionValueReal0D(fid, field, options%decaylength)
+
         ! Write data
         field = 'gd.design.cfv.par.FAD.writedata'
         call ExtractOptionValueInteger0D(fid, field, options%writedata) 
@@ -1200,6 +1246,15 @@ module gdmod_userinput
         field = 'gd.design.cfv.par.FA.lambda'
         call ExtractOptionValueReal0D(fid, field, options%lambda) 
 
+        
+        ! Weight distribution options
+        field = 'gd.design.cfv.par.FAD.weightatinf'
+        call ExtractOptionValueReal0D(fid, field, options%weightatinf)
+        field = 'gd.design.cfv.par.FAD.weightatvessel'
+        call ExtractOptionValueReal0D(fid, field, options%weightatvessel)
+        field = 'gd.design.cfv.par.FAD.decaylength'
+        call ExtractOptionValueReal0D(fid, field, options%decaylength)
+
         ! Write data
         field = 'gd.design.cfv.par.FA.writedata'
         call ExtractOptionValueInteger0D(fid, field, options%writedata) 
@@ -1253,6 +1308,23 @@ module gdmod_userinput
         ! Scaling constant
         field = 'gd.design.cfv.par.PRPB.lambda'
         call ExtractOptionValueReal0D(fid, field, options%lambda) 
+
+
+        ! Weight distribution options
+        field = 'gd.design.cfv.par.PRPB.weightatinf'
+        call ExtractOptionValueReal0D(fid, field, options%weightatinf)
+        field = 'gd.design.cfv.par.PRPB.weightatsep'
+        call ExtractOptionValueReal0D(fid, field, options%weightatsep)
+        field = 'gd.design.cfv.par.PRPB.weightdecaylength'
+        call ExtractOptionValueReal0D(fid, field, options%weightdecaylength)
+
+        ! Weight distribution options
+        field = 'gd.design.cfv.par.PRPB.biasatinf'
+        call ExtractOptionValueReal0D(fid, field, options%biasatinf)
+        field = 'gd.design.cfv.par.PRPB.biasatsep'
+        call ExtractOptionValueReal0D(fid, field, options%biasatsep)
+        field = 'gd.design.cfv.par.PRPB.biasdecaylength'
+        call ExtractOptionValueReal0D(fid, field, options%biasdecaylength)
 
         ! Write data
         field = 'gd.design.cfv.par.PRPB.writedata'
