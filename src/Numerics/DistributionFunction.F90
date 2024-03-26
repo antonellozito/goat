@@ -19,6 +19,7 @@ module DistributionFunction
     use Interpolant
     use mod_linearsolverinterface
     use mod_polygon
+    use PolygonLevelsetFunction2D
 
     ! The usual
     implicit none 
@@ -88,6 +89,41 @@ module DistributionFunction
         procedure :: Evaluate       => EvaluateStructured2DDistanceDF
 
     end type
+
+    type, extends(DistributionFunctionUDT)  :: StructuredPLF2DDistanceDFUDT 
+
+        ! Description
+        !============
+        ! Distance function based on a 2D structured interpolant 
+        ! function F, which is assumed to yield the distance w.r.t. some 
+        ! quantity. Can, for example, be an interpolant of the vessel
+        ! boundary function or something alike. The function being 
+        ! evaluated is: 
+        !
+        !   d = a0*dp*exp(-|F(x, y)|/d0) + (1-dp*exp(-|F(x, y)|/d0))*b0,
+        !
+        ! Where a0 is the desired value at the vessel boundary, b0 is
+        ! the asymptotic value for |F(x, y)| -> infinity, and d0 is a decay
+        ! length (in [m]). dp is the dot product between the normal of V 
+        ! and the tangent of F
+        
+
+        ! Fields:
+        type(StructuredInterpolant2DUDT)                    :: F
+        class(PolygonLevelsetFunction2DUDT), allocatable    :: Vd, Vn
+        real(R8)                                :: a0, b0, d0
+        character(:), allocatable               :: meth
+
+    contains 
+
+        ! Initialization routine
+        procedure :: Initialize     => InitializeStructuredPLF2DDistanceDF
+
+        ! Evaluation
+        procedure :: Evaluate       => EvaluateStructuredPLF2DDistanceDF
+
+    end type
+
 
     ! Polygonset and field based, 2D
     type, extends(DistributionFunctionUDT) :: Polygonset2DFieldDistanceDFUDT
@@ -162,6 +198,44 @@ module DistributionFunction
 
         ! Evaluation
         procedure :: Evaluate       => EvaluatePolygonset1DFieldDistanceDF
+
+    end type
+
+    ! Coordinates, 1D
+    type, extends(DistributionFunctionUDT)  :: Coordinates1DFieldDistanceDFUDT
+        
+        ! Description
+        !============
+        ! Similar distance function as the 2D equivalent above, but now
+        ! we construct a distribution for 1D values and use only the
+        ! value of the 2D interpolant. Useful for distance to certain 
+        ! psi values for example. Do note that it is a scalar field, yet
+        ! it is evaluated in two dimensions. Analogous to the 2D 
+        ! type, one can use 'meth' to have an asymmetric ('signed') or
+        ! symmetric ('unsigned') distribution. 
+
+        ! Note: a0 is now the desired value at the polygonset vertices. 
+        ! Furthermore, the polygon does not have to be closed whatsoever
+        ! - we simply determine the psi values at the polygon nodes     
+        ! and construct attractors to those values. Likewise, b0 is the 
+        ! desired distribution value far way from these locations. 
+
+        ! Fields:
+        type(StructuredInterpolant2DUDT)        :: F  ! field
+        real(R8)                                :: b0, a0, d0
+
+        real(R8), allocatable                   :: xa(:), ya(:), &
+            coef(:), fval(:)
+
+        character(:), allocatable               :: meth
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize     => InitializeCoordinates1DFieldDistanceDF
+
+        ! Evaluation
+        procedure :: Evaluate       => EvaluateCoordinates1DFieldDistanceDF
 
     end type
 
@@ -328,6 +402,133 @@ module DistributionFunction
     end subroutine
 
     !------------------------------------------------------------------!
+    !                       DISTANCE PLF FUNCTION                      !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeStructuredPLF2DDistanceDF(distribution, F, Vd, &
+        Vn, val0, valinf, decaylength, meth)
+
+        ! Description
+        !============
+        ! Initialization routine. The F and V structured interpolants
+        ! must be initialized and correctly set up. The argument 'val0'
+        ! is the value that the function achieves where the interpolant
+        ! is (approximately) zero, the value 'valinf' is achieved at 
+        ! regions where the interpolant approaches +-infinity. 
+        ! 'decaylength' is a decay length of how fast val0 transitions 
+        ! to valinf. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredPLF2DDistanceDFUDT)             :: distribution 
+        type(StructuredInterpolant2DUDT), intent(in)    :: F
+        class(PolygonLevelsetFunction2DUDT), intent(in) :: Vd, Vn 
+        real(R8), intent(in)                            :: val0, valinf, &
+            decaylength
+        character(*), intent(in)                        :: meth
+
+        ! Check
+        !======
+        ! Check if the method is either 'signed' or 'unsigned'
+        if ((meth /= 'signed') .and. (meth /= 'unsigned')) then 
+            ! Throw error
+            call gdErrorHandler('InitializeStructuredPLF2DDistanceDF: ' // &
+                'meth should be either "signed" or "unsigned" ')
+        end if 
+
+        ! Set fields
+        !===========
+        distribution%F  = F
+        distribution%Vd = Vd
+        distribution%Vn = Vn 
+        distribution%a0 = val0
+        distribution%b0 = valinf 
+        distribution%d0 = decaylength
+        distribution%meth = meth 
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateStructuredPLF2DDistanceDF(distribution, x, y, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredPLF2DDistanceDFUDT) :: distribution 
+        real(R8), intent(in)                :: x(:), y(:)
+        real(R8), intent(out)               :: v(size(x))
+
+        ! Auxiliary
+        real(R8)                            :: d(size(x)), &
+            dVdx(size(x)), dVdy(size(x)), dFdx(size(x)), dFdy(size(x)), &
+            dp(size(x)), myones(size(x))
+
+        ! Initialize
+        !===========
+        ! set
+        myones = 1
+
+        ! Check sizes
+        if ( (size(v) /= size(x)) .or. (size(x) /= size(y))) then 
+            ! Throw error
+            call gdErrorHandler('EvaluateStructured2DDistanceDF: incompatible sizes in input')
+        end if 
+
+        ! Associate
+        associate(&
+            a0      => distribution%a0,     & 
+            b0      => distribution%b0,     & 
+            d0      => distribution%d0,     & 
+            Vd      => distribution%Vd,     & 
+            Vn      => distribution%Vn,     & 
+            F       => distribution%F       & 
+        )
+
+        ! Evaluate
+        !=========
+        ! Distance 
+        call Vd%Evaluate(x, y, 0, 0, d)
+        
+        
+        ! Dot product
+        select case (distribution%meth)
+
+        case ('signed')
+
+            ! Normal
+            call Vn%Evaluate(x, y, 1, 0, dVdx)
+            call Vn%Evaluate(x, y, 0, 1, dVdy)
+
+            ! Vector field
+            call F%Evaluate(x, y, 1, 0, dFdx)
+            call F%Evaluate(x, y, 0, 1, dFdy)
+
+            ! Dot product
+            dp = -dVdx*dFdy + dVdy*dFdx 
+
+        case ('unsigned')
+
+            dp = spread(1, 1, size(x, 1))
+
+        end select 
+
+        ! Value
+        v = a0*sign(myones, dp)*exp(-abs(d)/d0) + b0*(1 - sign(myones, dp)*exp(-abs(d)/d0))
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
+    !------------------------------------------------------------------!
     !                      POLYGONSET & 2D FIELD                       !
     !------------------------------------------------------------------!
 
@@ -418,18 +619,29 @@ module DistributionFunction
         ! Determine
         cc = 0
         do i = 1, ps%np 
+            ! Associate
+            associate(  ne  => ps%polygons(i)%ne, &
+                        nx  => ps%polygons(i)%nx, &
+                        ny  => ps%polygons(i)%ny, &
+                        nn  => ps%polygons(i)%nn, &
+                        nv  => ps%polygons(i)%nv, & 
+                        edges    => ps%polygons(i)%edges)
             ! Get point indices
-            valindex = [(k, k = cc+1, cc+ps%polygons(i)%nv)]
+            valindex = [(k, k = cc+1, cc+nv)]
 
             ! Set points
             xa(valindex) = ps%polygons(i)%x
             ya(valindex) = ps%polygons(i)%y
 
             ! Determine normal in points
-            allocate(tnxa(ps%polygons(i)%nv), tnya(ps%polygons(i)%nv))
-            do j = 1, 2 
-                tnxa = tnxa + ps%polygons(i)%nx/ps%polygons(i)%nn 
-                tnya = tnya + ps%polygons(i)%ny/ps%polygons(i)%nn
+            allocate(tnxa(nv), tnya(nv))
+            tnxa = 0
+            tnya = 0
+            do j = 1, 2
+                do k = 1, ne 
+                    tnxa(edges(k, j)) = tnxa(edges(k, j)) + 0.5*nx(k)/nn(k)
+                    tnya(edges(k, j)) = tnya(edges(k, j)) + 0.5*ny(k)/nn(k)
+                end do 
             end do
 
             ! Rescale
@@ -446,6 +658,9 @@ module DistributionFunction
 
             ! Update counter
             cc = cc + ps%polygons(i)%nv
+
+            ! End asoociation
+            end associate
         end do
 
         ! Construct rhs to compute attractor coefficients
@@ -487,7 +702,7 @@ module DistributionFunction
         distribution%nya    = nya 
         distribution%d      = spread(d0, 1, size(xa))
         distribution%coef   = sol 
-        distribution%dp = - (-dFdy*nxa + dFdx*nya)
+        distribution%dp = -(-dFdy*nxa + dFdx*nya)
 
         ! Housekeeping
         !=============
@@ -791,7 +1006,204 @@ module DistributionFunction
         end associate
 
 
-    end subroutine 
+    end subroutine
+    
+    !------------------------------------------------------------------!
+    !                      COORDINATES & FIELD, 1D                     !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCoordinates1DFieldDistanceDF(distribution, interp, &
+        xp, yp, val0, valinf, decaylength, meth)
+
+        ! Description
+        !============
+        ! Initialization routine. The 'interp' structured interpolant
+        ! must be initialized and correctly set up. The argument 'val0'
+        ! is the value that the function achieves where the interpolant
+        ! is (approximately) zero, the value 'valinf' is achieved at 
+        ! regions where the interpolant approaches +-infinity. 
+        ! 'decaylength' is a decay length of how fast val0 transitions 
+        ! to valinf. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Coordinates1DFieldDistanceDFUDT)           :: distribution 
+        type(StructuredInterpolant2DUDT), intent(in)    :: interp 
+        real(R8), intent(in)                            :: val0, valinf, &
+            decaylength, xp(:), yp(:)
+        character(*), intent(in)                        :: meth
+
+        ! Auxiliary
+        integer(I8)                                     :: flag, na
+        integer(I8), allocatable                        :: valindex(:) 
+
+        real(R8), parameter                             :: myone = 1
+        real(R8)                                        :: tempd
+        real(R8), allocatable                           :: xa(:), &
+            ya(:), nxa(:), nya(:), d(:), b(:), bval(:), A(:, :), &
+           sol(:), fval(:)
+
+        ! Loop
+        integer(I8)                                     :: i, j, k, cc
+
+        ! Set fields
+        !===========
+        ! Data
+        distribution%F  = interp 
+        distribution%xa = xp 
+        distribution%ya = yp
+        distribution%a0 = val0
+        distribution%b0 = valinf 
+        distribution%d0 = decaylength
+        distribution%meth = trim(meth)
+
+        ! Associate
+        associate(&
+            a0      => distribution%a0,     &
+            b0      => distribution%b0,     &
+            d0      => distribution%d0)
+
+        ! Check
+        !======
+        ! Check if the method is either 'signed' or 'unsigned'
+        if ((meth /= 'signed') .and. (meth /= 'unsigned')) then 
+            ! Throw error
+            call gdErrorHandler('PolygonsetField2DDistanceDF: ' // &
+                'meth should be either "signed" or "unsigned" ')
+        end if 
+
+        ! Construct attractor function
+        !=============================
+        ! Determine number of attractor points
+        na = size(xa, 1)
+
+        ! Allocate
+        allocate(xa(na), ya(na), nxa(na), nya(na), d(na), bval(na), &
+            b(na), A(na, na))
+
+        ! Field values
+        allocate(fval(na))
+        call distribution%F%Evaluate(xa, ya, 0, 0, fval)
+
+        distribution%fval = fval 
+
+        ! Construct rhs to compute attractor coefficients
+        b = a0 - b0
+
+        ! Compute lhs to compute attractor coefficients
+        A = 0
+        do j = 1, na
+            do i = 1, na
+                if (i /= 0) then 
+                    tempd = abs(fval(i) - fval(j))
+                    A(i, j) = sign(myone, fval(i)-fval(j))*exp(-tempd/d0)
+                else 
+                    A(i, j) = 1
+                end if 
+            end do 
+        end do
+
+        ! Call solver
+        allocate(sol(size(b)))
+        call SolveDenseLinearSystemDI(A, b, sol, flag)
+        if (flag /= 0) then
+            ! Call error
+            call gdErrorHandler('InitializeCoordinates1DDistanceDF: ' // &
+                'could not determine attractor function coefficients ' // &
+                'due to non-converging linear solver')
+        end if 
+
+        ! Add
+        !====
+        distribution%fval   = fval
+        distribution%coef   = sol 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateCoordinates1DFieldDistanceDF(distribution, x, y, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Coordinates1DFieldDistanceDFUDT)   :: distribution 
+        real(R8), intent(in)                    :: x(:), y(:)
+        real(R8), intent(out)                   :: v(size(x))
+
+        ! Auxiliary
+        real(R8), parameter                     :: myone = 1
+        real(R8)                                :: fv(size(x)), d(size(x))
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Check sizes
+        if ( (size(v) /= size(x)) .or. (size(x) /= size(y))) then 
+            ! Throw error
+            call gdErrorHandler('EvaluatePolygonsetField2DDistanceDF: incompatible sizes in input')
+        end if 
+
+        ! Associate
+        associate(&
+            F       => distribution%F,      &
+            a0      => distribution%a0,     & 
+            b0      => distribution%coef,   & 
+            d0      => distribution%d0,     &
+            xa      => distribution%xa,     &
+            ya      => distribution%ya,     &
+            fval    => distribution%fval    &
+        )
+
+        ! Evaluate
+        !=========
+        ! Evaluate field values in coordinates
+        call F%Evaluate(x, y, 0, 0, fv)
+        select case (distribution%meth) 
+
+        case ('unsigned')
+
+            do i = 1, size(xa)
+                ! Distance 
+                d = (fv - fval(i))
+
+                ! Value
+                v = v + b0*exp(-abs(d)/d0)
+            end do
+
+        case ('signed')
+
+            do i = 1, size(xa)
+                ! Distance 
+                d = (fv - fval(i))
+
+                ! Value
+                v = v + b0*(sign(myone, d))*exp(-abs(d)/d0)
+            end do
+
+        case default
+
+            call gdErrorHandler('Unknown method')
+
+        end select
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
 
 
 
