@@ -23,6 +23,7 @@ module goatmod_types
     use mod_polygon
     use Interpolant
     use PolygonShapeFunction
+    use PolygonLevelsetFunction2D
 
     ! The usual
     implicit none
@@ -473,7 +474,9 @@ module goatmod_types
         ! - allTPind:   a list (ntp-by-1) of all target plate indices
         ! - geom:       the vessel geometry being considered (character)
         ! - nstructures:number of sub-structures of the vessel
-        ! - strcutures : nstructures-by-1 array of structures
+        ! - structures : nstructures-by-1 array of structures
+        ! - targetpolygons:     closed polygon representation of each 
+        !                       vessel target plate
 
         ! Target plates
         integer(I4)                         :: ntp = 0
@@ -483,10 +486,13 @@ module goatmod_types
         ! Structures
         integer(I4)                         :: nstructures = 0
         type(VesselStructureUDT), allocatable       :: structures(:)
-        type(PolygonSetUDT)                 :: polygonset 
+        type(PolygonSetUDT)                 :: polygonset, targetps 
+        type(PolygonUDT), allocatable       :: targetpolygons(:)
         
         ! Shape function
         class(PolygonShapeFunctionUDT), allocatable     :: psf
+        class(PolygonLevelsetFunction2DUDT), allocatable   :: plfvessel, &
+            plftarget
 
 
     end type
