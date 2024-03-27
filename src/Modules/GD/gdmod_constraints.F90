@@ -1604,6 +1604,8 @@ module gdmod_constraints
 
         nsp = 0
         ntp = 0
+        nfp = 0
+        nfs = 0
 
         ! Evaluate 
         call magneticField%interp%Evaluate(x, y, 0, 0, PsiD_tmp)
