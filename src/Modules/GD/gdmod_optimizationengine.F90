@@ -406,7 +406,7 @@ module gdmod_optimizationengine
         ! Auxiliary
 
         ! Loop
-        integer(I8)                         :: i
+        integer(I8)                         :: i, j
 
         ! Initialize
         !===========
@@ -498,6 +498,31 @@ module gdmod_optimizationengine
             ! Do nothing
 
         end select
+
+        ! Update constraints
+        !===================
+        ! Fixed flux values constraints
+        if (constraints%eqcon%dofixedfluxvalues) then 
+
+            ! Determine design variable indices for easier use later on
+            select type (designvariables)
+
+            type is (DesignVariablesCoordinatesFluxUDT) 
+
+                do i = 1, size(constraints%eqcon%fixedfluxvalues%fsind, 1)
+                    do j = 1, size(designvariables%psiind, 1)
+                        if (constraints%eqcon%fixedfluxvalues%fsind(i) == designvariables%fsID(j)) then 
+                            constraints%eqcon%fixedfluxvalues%psiind(i) = designvariables%psiind(j)
+                        end if 
+                    end do
+                end do 
+
+            class default
+            
+                call gdErrorHandler('FinalizeInitialization: fixed flux value constraint ' //&
+                    'requires coordinates_desiredflux design variables' )
+            end select
+        end if 
 
         ! Housekeeping
         !=============
