@@ -356,6 +356,29 @@ module gdmod_userinput
 
     end type
 
+    type, extends(OptionsUDT) :: FixedFluxvaluesConOptionsUDT
+
+        ! Description
+        !============
+        ! Options for flux value constraints. 
+        ! - Fixcoreflux:    fix flux value of core boundary flux surface
+        ! - Fixcorefluxmeth: method to fix (either 'auto' or 'manual')
+        ! - corefluxval     : value(s) at which to fix the core flux 
+        !                   value in the case of the 'manual' method
+        ! - outer flux: similar to core flux
+
+
+        logical                     :: fixcoreflux, fixouterflux
+        character(:), allocatable   :: fixcorefluxmeth, fixouterfluxmeth
+        real(R8), allocatable       :: corefluxval(:), outerfluxval(:)
+
+    contains
+    
+        procedure :: SetDefaults    => SetDefaultFixedFluxvaluesConOptions
+        procedure :: Read           => ReadFixedFluxvaluesConOptions
+
+    end type
+
     ! Options for the constraints
     type, extends(OptionsUDT) :: ConstraintOptionsUDT
 
@@ -370,6 +393,7 @@ module gdmod_userinput
         integer(I8)         :: xpoints ! impose x-point location
         integer(I8)         :: edgelengths ! impose edge length cons
         integer(I8)         :: orthogonality 
+        integer(I8)         :: fixedfluxvalues 
 
         ! Fields for inequality constraints
         integer             :: linefolding ! prevent flux line folding
@@ -387,7 +411,7 @@ module gdmod_userinput
         type(OrthogonalityConOptionsUDT)        :: orthoptions 
         type(EdgelengthsConOptionsUDT)          :: eloptions
         type(XPointConOptionsUDT)               :: xpoptions
-        
+        type(FixedFluxvaluesConOptionsUDT)      :: ffvoptions
 
     contains 
 
@@ -639,10 +663,11 @@ module gdmod_userinput
         options%xpoints             = 1
         options%edgelengths         = 0
         options%orthogonality       = 1
+        options%fixedfluxvalues     = 1
 
         options%linefolding         = 0
 
-        options%neq                 = 4
+        options%neq                 = 5
         options%nineq               = 0
 
         options%writedata           = 1
@@ -653,6 +678,7 @@ module gdmod_userinput
         options%orthoptions%inputfilepath = options%inputfilepath
         options%eloptions%inputfilepath = options%inputfilepath
         options%xpoptions%inputfilepath = options%inputfilepath
+        options%ffvoptions%inputfilepath = options%inputfilepath 
 
         ! Constraint-specific options
         !============================
@@ -661,6 +687,7 @@ module gdmod_userinput
         call options%orthoptions%Set()
         call options%eloptions%Set()
         call options%xpoptions%Set()
+        call options%ffvoptions%Set()
 
     end subroutine
 
@@ -770,6 +797,25 @@ module gdmod_userinput
         options%edgedistxpoint = 1e-3
 
     end subroutine 
+
+    subroutine SetDefaultFixedFluxvaluesConOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FixedFluxvaluesConOptionsUDT)     :: options 
+
+        ! Set defaults
+        !=============
+        options%fixcoreflux         = .true. 
+        options%fixouterflux        = .true. 
+        options%fixcorefluxmeth     = 'auto'
+        options%fixouterfluxmeth    = 'auto'
+        if (.not. allocated(options%corefluxval)) then 
+            allocate(options%corefluxval(0), options%outerfluxval(0))
+        end if 
+
+    end subroutine
 
     subroutine SetExportOptions(options)
         
@@ -1387,6 +1433,8 @@ module gdmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%edgelengths)
         field = 'gd.design.ec.orthogonality'
         call ExtractOptionValueInteger0D(fid, field, options%orthogonality)
+        field = 'gd.design.ec.fixedfluxvalues'
+        call ExtractOptionValueInteger0D(fid, field, options%fixedfluxvalues)
 
         ! Inequality constraints
         field = 'gd.design.inec.linefolding'
@@ -1412,6 +1460,9 @@ module gdmod_userinput
             options%neq = options%neq + 1
         end if
         if (options%orthogonality == 1) then 
+            options%neq = options%neq + 1
+        end if
+        if (options%fixedfluxvalues == 1) then 
             options%neq = options%neq + 1
         end if
 
@@ -1695,6 +1746,62 @@ module gdmod_userinput
         field = 'gd.design.ec.par.edgelengths.edgedistxpoint'
         call ExtractOptionValueReal0D(fid, field, options%edgedistxpoint)
         
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadFixedFluxvaluesConOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FixedFluxvaluesConOptionsUDT)     :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadFixedFluxvaluesConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadFixedFluxvaluesConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        field = 'gd.design.ec.par.fixedfluxvalues.fixcoreflux'
+        call ExtractOptionValueLogical0D(fid, field, options%fixcoreflux)
+        field = 'gd.design.ec.par.fixedfluxvalues.fixouterflux'
+        call ExtractOptionValueLogical0D(fid, field, options%fixouterflux)
+        field = 'gd.design.ec.par.fixedfluxvalues.fixcorefluxmeth'
+        call ExtractOptionValueCharacter(fid, field, options%fixcorefluxmeth)
+        field = 'gd.design.ec.par.fixedfluxvalues.fixouterfluxmeth'
+        call ExtractOptionValueCharacter(fid, field, options%fixouterfluxmeth)
+        field = 'gd.design.ec.par.fixedfluxvalues.corefluxval'
+        call ExtractOptionValueReal1D(fid, field, options%corefluxval)
+        field = 'gd.design.ec.par.fixedfluxvalues.outerfluxval'
+        call ExtractOptionValueReal1D(fid, field, options%outerfluxval)
+        
+
         ! Housekeeping
         !=============
         ! Close the file

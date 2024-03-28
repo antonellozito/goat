@@ -1236,6 +1236,8 @@ module goatmod_types
     
             ! Get face neighbours
             nb  = GetFaceCell(f, i)
+            nb1 = 0 ! Initialize to be sure
+            nb2 = 0
             if (size(nb, 1) == 1) then 
                 nb1 = nb(1)
                 nb2 = 0

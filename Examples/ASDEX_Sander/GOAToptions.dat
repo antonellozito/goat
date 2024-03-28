@@ -214,8 +214,8 @@ VERSION 1.00.00
 'gd.design.ec.par.boundaryfunctions.M'                  '6'
 
 # Flux function constraint parameters 
-'gd.design.ec.par.fluxfunction.fixfluxalignedtargets' 	'1'
-'gd.design.ec.par.fluxfunction.fixfarvesselflux' 		'1'
+'gd.design.ec.par.fluxfunction.fixfluxalignedtargets' 	'0'
+'gd.design.ec.par.fluxfunction.fixfarvesselflux' 		'0'
 'gd.design.ec.par.fluxfunction.fsvertexbased' 		    '1'
 'gd.design.ec.par.fluxfunction.fixallvesselvertices' 	'0'
 'gd.design.ec.par.fluxfunction.doboxoverride' 			'0'

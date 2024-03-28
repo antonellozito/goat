@@ -291,6 +291,38 @@ module gdmod_constraints
     
     end type
 
+    ! Fixed flux value constraints
+    type, extends(GenericConstraintsGDUDT)  :: FixedFluxvaluesConstraintsUDT 
+
+        ! Description
+        !============
+        ! Constraints to fix flux values explicitly. Only applicable 
+        ! if the design variables include the flux values. The following
+        ! fields are specified:
+        !
+        ! - fsind       : indices of which flux surfaces are constrained
+        ! - psiind      : indices of corresponding psi value design 
+        !               variable for each constraint
+        ! - psid        : desired flux value of these flux surfaces
+        !
+        ! The options (see gdmod_userinput) allow to specify either 
+        ! automatically or manually the flux values at which core and
+        ! outer flux surface(s) should be fixed. 
+
+        integer(I8), allocatable    :: fsind(:), psiind(:)
+        real(R8), allocatable       :: psid(:)
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize => InitializeFixedFluxvaluesConstraints
+            
+        ! Evaluation
+        procedure :: Evaluate   => EvaluateFixedFluxvaluesConstraints
+
+
+    end type
+
     ! Overarching types
     !==================
     ! Equality constraints
@@ -311,12 +343,14 @@ module gdmod_constraints
         logical                             :: doxpoints = .false.
         logical                             :: doedgelengths = .false.
         logical                             :: doorthogonality = .false.
+        logical                             :: dofixedfluxvalues = .false.
 
         type(FluxfunctionConstraintsUDT)    :: fluxfunction 
         type(BoundaryFunctionConstraintsUDT):: boundaryfunction
         type(XPointConstraintsUDT)          :: xpoints
         type(EdgeLengthsConstraintsUDT)     :: edgelengths
         type(OrthogonalityConstraintsUDT)   :: orthogonality
+        type(FixedFluxvaluesConstraintsUDT) :: fixedfluxvalues
 
     contains
 
@@ -493,7 +527,7 @@ module gdmod_constraints
     !------------------------------------------------------------------!
     ! Initialization
     subroutine InitializeMonitor(monitor, grid, magneticField, &
-        environment)
+        environment, designvariables)
 
         ! Description
         !============
@@ -508,6 +542,7 @@ module gdmod_constraints
         type(GridUDT)                       :: grid 
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment
+        class(DesignVariablesGDUDT)         :: designvariables
 
         ! Loop variables
 
@@ -524,6 +559,17 @@ module gdmod_constraints
         monitor%ineqvcc(:)      = 0
         monitor%maxeqvcc(:)     = 2 ! for most cases this is fine
         monitor%maxineqvcc(:)   = 1000 ! a stupid large number - can impose any number
+
+        ! Check
+        select type (designvariables)
+
+        type is (DesignVariablesCoordinatesFluxUDT)
+
+            monitor%maxeqvcc(:) = 3 
+
+        class default
+
+        end select
 
     end subroutine
 
@@ -575,7 +621,7 @@ module gdmod_constraints
 
         ! Initialize monitor
         !===================
-        call monitor%Initialize(grid, magneticField, environment)
+        call monitor%Initialize(grid, magneticField, environment, designvariables)
 
         ! Initialize constraints
         !=======================
@@ -769,6 +815,30 @@ module gdmod_constraints
 
         end if
 
+        ! Fixed flux values
+        if (constraintoptions%fixedfluxvalues == 1) then 
+            ! Set the logical
+            constraints%dofixedfluxvalues = .true.
+
+            ! Initialize
+            call constraints%fixedfluxvalues%Initialize(grid, &
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
+
+            ! Add constraints number
+            constraints%neqcon = constraints%neqcon + &
+                constraints%fixedfluxvalues%ncon 
+
+            ! Print
+            print *, 'number of fixed flux value constraints: ', &
+                constraints%fixedfluxvalues%ncon
+
+        else
+            ! Set to false, don't initialize
+            constraints%dofixedfluxvalues = .false.
+
+        end if
+
         
 
     end subroutine
@@ -817,6 +887,9 @@ module gdmod_constraints
 
         real(R8), allocatable           :: G_orth(:), lambda_orth(:)
         type(MySparseUDT)               :: gradG_orth, hessG_orth
+
+        real(R8), allocatable           :: G_ffv(:), lambda_ffv(:)
+        type(MySparseUDT)               :: gradG_ffv, hessG_ffv
 
         ! Initialize
         !===========
@@ -1021,6 +1094,45 @@ module gdmod_constraints
 
         end if
 
+        ! Fixed flux values constraints
+        !------------------------------
+        if (constraints%dofixedfluxvalues) then 
+            ! Construct the constraint index
+            allocate(conindex(constraints%fixedfluxvalues%ncon))
+            conindex = [(k, k = ic+1, ic+constraints%fixedfluxvalues%ncon)]
+
+            ! Allocate & initialize
+            allocate(lambda_orth(constraints%fixedfluxvalues%ncon))
+            lambda_ffv = lambda(conindex)
+
+            ! Call the evaluation routine
+            call constraints%fixedfluxvalues%Evaluate(G_ffv, &
+                gradG_ffv, hessG_ffv, &
+                grid, magneticField, environment, dogradient, &
+                dohessian, designvariables, &
+                lambda_ffv)
+
+            ! Assign
+            G(conindex) = G_ffv
+
+            ! Update the gradient column indices
+            if (dogradient) then 
+                ! For easier concatenation later on
+                gradG_ffv%col = gradG_ffv%col + ic
+
+            end if
+
+            ! Update the constraint counter
+            ic = ic + constraints%fixedfluxvalues%ncon
+
+            ! Housekeeping
+            deallocate(conindex, lambda_ffv) 
+            if (allocated(G_ffv)) then
+                deallocate(G_ffv)
+            end if
+
+        end if
+
 
         ! Concatenate gradient
         !=====================
@@ -1052,6 +1164,9 @@ module gdmod_constraints
                 end if 
                 if (constraints%doorthogonality) then 
                     gradG%nval = gradG%nval + gradG_orth%nval  
+                end if 
+                if (constraints%dofixedfluxvalues) then 
+                    gradG%nval = gradG%nval + gradG_ffv%nval  
                 end if 
 
                 ! Allocate
@@ -1163,6 +1278,26 @@ module gdmod_constraints
 
             end if
 
+            ! Fixed flux values
+            if (constraints%dofixedfluxvalues) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%fixedfluxvalues%ncon, &
+                    nval    => gradG_ffv%nval)
+
+                ! Add values
+                gradG%row(ivg+1:ivg+nval) = gradG_ffv%row 
+                gradG%col(ivg+1:ivg+nval) = gradG_ffv%col
+                gradG%val(ivg+1:ivg+nval) = gradG_ffv%val
+
+                ! Update counter
+                ivg = ivg + nval 
+
+                ! End associate
+                end associate
+
+            end if
+
         end if
 
         ! Concatenate the hessian
@@ -1195,6 +1330,9 @@ module gdmod_constraints
                 end if 
                 if (constraints%doorthogonality) then 
                     hessG%nval = hessG%nval + hessG_orth%nval  
+                end if 
+                if (constraints%dofixedfluxvalues) then 
+                    hessG%nval = hessG%nval + hessG_ffv%nval  
                 end if 
                 
                 ! Allocate
@@ -1298,6 +1436,26 @@ module gdmod_constraints
                 hessG%row(ivh+1:ivh+nval) = hessG_orth%row 
                 hessG%col(ivh+1:ivh+nval) = hessG_orth%col
                 hessG%val(ivh+1:ivh+nval) = hessG_orth%val
+
+                ! Update counter
+                ivh = ivh + nval 
+
+                ! End associate
+                end associate
+
+            end if
+
+            ! Orthogonality
+            if (constraints%dofixedfluxvalues) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%fixedfluxvalues%ncon, &
+                    nval    => hessG_ffv%nval)
+
+                ! Add values
+                hessG%row(ivh+1:ivh+nval) = hessG_ffv%row 
+                hessG%col(ivh+1:ivh+nval) = hessG_ffv%col
+                hessG%val(ivh+1:ivh+nval) = hessG_ffv%val
 
                 ! Update counter
                 ivh = ivh + nval 
@@ -1604,6 +1762,8 @@ module gdmod_constraints
 
         nsp = 0
         ntp = 0
+        nfp = 0
+        nfs = 0
 
         ! Evaluate 
         call magneticField%interp%Evaluate(x, y, 0, 0, PsiD_tmp)
@@ -5595,6 +5755,512 @@ module gdmod_constraints
         end if
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                         FIXED FLUX VALUES                        !
+    !------------------------------------------------------------------!
+
+    ! Initialize
+    subroutine InitializeFixedFluxvaluesConstraints(constraints, &
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
+
+        ! Description
+        !============
+        ! Initialize the fixed flux value constraints. These constraints 
+        ! comprise constraints on the core flux and constraints on the 
+        ! outermost flux surfaces.
+
+        ! Notes
+        !======
+        ! Note 1: the design variable indices, psiind, are only 
+        ! allocated here but determined later when finalizing the 
+        ! optimization problem (see FinalizeInitialization in the 
+        ! gdmod_optimizationengine module)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FixedFluxvaluesConstraintsUDT)        :: constraints
+        type(GridUDT)                               :: grid 
+        type(MagneticFieldUDT)                      :: magneticField 
+        type(EnvironmentUDT)                        :: environment 
+        type(ConstraintsMonitorUDT)                 :: monitor
+        type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                 :: designvariables
+
+        ! Auxiliary
+        integer(I8)                     :: nfs, ntfsIDs, nfsv, ncfs
+        integer(I8), allocatable        :: allIDs(:), fsind(:), &
+            tvID(:), tfsIDs(:)
+
+        logical                         :: dowarning
+        logical, allocatable            :: doesIDoccur(:), &
+            hasbeenfound(:), isvesselvertex(:), isvesselface(:)
+
+        real(R8), allocatable           :: psid(:), psi(:)
+
+        ! Loop
+        integer(I8)                     :: i, j, k, fscc
+
+        ! Checks
+        !=======
+        ! Are the design variable compatible?
+        select case (designvariables%type)
+
+        case ('coordinates_desiredflux')
+
+            ! All good
+
+        case default
+
+            ! All bad
+            call gdErrorHandler('InitializeFixedFluxvaluesConstraints: design variable type is incompatible')
+
+        end select
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            maxccv          => monitor%maxeqvcc,        &
+            ccv             => monitor%eqvcc,           &
+            x               => grid%vert%x,             &
+            y               => grid%vert%y,             &
+            fieldlineID     => grid%vert%fieldlineID,   &
+            docoreflux      => options%ffvoptions%fixcoreflux,  &
+            doouterflux     => options%ffvoptions%fixouterflux  & 
+            )
+
+        ! Allocate
+        nfs = maxval(fieldlineID) ! should provide upper bound
+        allIDs = [(k, k = 1, nfs)]
+        fscc = 0 ! flux surface counter 
+        allocate(fsind(nfs), doesIDoccur(nfs), psid(nfs), &
+            hasbeenfound(nfs), psi(grid%vert%ntot))
+        hasbeenfound = .false. 
+
+        ! Core flux 
+        !==========
+        if (docoreflux) then 
+            ! Determine core flux surface ID(s)
+            do i = 1, size(grid%Bnd, 1)
+                if (grid%Bnd(i)%ID == 2) then ! core boundary ID hard coded here...
+
+                    ! Get the fieldline IDs of these vertices
+                    tvID = fieldlineID(grid%Bnd(i)%vert)
+
+                    ! Check which ones occur
+                    doesIDoccur = .false.
+                    doesIDoccur(tvID) = .true. 
+
+                    ! Extract IDs
+                    ntfsIDs = count(doesIDoccur .and. (.not. hasbeenfound))
+                    allocate(tfsIDs(ntfsIDs))
+                    tfsIDs = pack(allIDs, doesIDoccur .and. (.not. hasbeenfound))
+
+                    ! Add
+                    fsind(fscc+1:fscc+ntfsIDs) = tfsIDs 
+                    hasbeenfound(tfsIDs) = .true.
+
+                    ! Update counter
+                    fscc = fscc + ntfsIDs 
+
+                    ! Housekeeping
+                    deallocate(tfsIDs)
+                end if
+            end do 
+
+            ! Determine flux value
+            select case (options%ffvoptions%fixcorefluxmeth)
+
+            case ('auto')
+
+                ! Precompute flux values
+                call magneticField%interp%Evaluate(x, y, 0, 0, psi)
+
+                ! Determine flux value as mean of current flux values
+                do i = 1, fscc 
+                    nfsv = 0
+                    do j = 1, grid%vert%ntot
+                        if (fieldlineID(j) == fsind(i)) then 
+
+                            ! Compute
+                            psid(i) = psid(i) + psi(j)
+                            nfsv = nfsv + 1
+
+                        end if 
+                    end do
+
+                    ! Check
+                    if (nfsv == 0) then 
+                        ! No vertices found, throw error
+                        print *, 'core flux surface ID: ', fsind(i)
+                        call gdErrorHandler('InitializeFixedFluxvaluesConstraints: ' // &
+                            'no vertices found for core flux surface ID')
+                    end if 
+
+                    ! Average
+                    psid(i) = psid(i)/nfsv 
+
+                end do
+
+            case ('manual')
+
+                ! Need to specify as much core values are there are 
+                ! flux surfaces
+                if (size(options%ffvoptions%corefluxval, 1) /= fscc) then 
+                    print *, 'number of core flux surfaces: ', fscc
+                    print *, 'field line IDs of core flux surfaces: ', fsind(1:fscc)
+                    call gdErrorHandler('InitializeFixedFluxvaluesConstraints: ' // &
+                        'need to specify the amount of core flux surface values mentioned above')
+                end if 
+
+                ! Add
+                psid(1:fscc) = options%ffvoptions%corefluxval 
+
+            case default 
+
+                ! Throw error
+                call gdErrorHandler('InitializeFixedFluxvaluesConstraints: ' // &
+                    'unknown method to determine flux values for core')
+
+            end select
+
+        end if 
+
+        ! Store number of core flux surfaces
+        ncfs = fscc 
+
+        ! Outer flux 
+        !===========
+        if (doouterflux) then 
+            ! Determine outer flux surface ID(s)
+            do i = 1, size(grid%Bnd, 1)
+                if (any([grid%Bnd(i)%ID == [3]])) then ! outer boundary ID hard coded here...
+
+                    ! Get the fieldline IDs of these vertices
+                    tvID = fieldlineID(grid%Bnd(i)%vert)
+
+                    ! Check which ones occur
+                    doesIDoccur = .false.
+                    doesIDoccur(tvID) = .true. 
+
+                    ! Extract IDs
+                    ntfsIDs = count(doesIDoccur .and. (.not. hasbeenfound))
+                    allocate(tfsIDs(ntfsIDs))
+                    tfsIDs = pack(allIDs, doesIDoccur .and. (.not. hasbeenfound))
+
+                    ! Add
+                    fsind(fscc+1:fscc+ntfsIDs) = tfsIDs 
+                    hasbeenfound(tfsIDs) = .true. 
+
+                    ! Update counter
+                    fscc = fscc + ntfsIDs 
+
+                    ! Housekeeping
+                    deallocate(tfsIDs)
+                end if
+            end do 
+
+            ! Determine flux value
+            select case (options%ffvoptions%fixouterfluxmeth)
+
+            case ('auto')
+
+                ! Precompute flux values
+                call magneticField%interp%Evaluate(x, y, 0, 0, psi)
+
+                ! Precompute vessel vertices
+                call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
+
+                ! Determine flux value as mean of current flux values
+                do i = ncfs+1, fscc 
+                    nfsv = 0
+                    do j = 1, grid%vert%ntot
+                        if ( (fieldlineID(j) == fsind(i)) .and. (isvesselvertex(j))) then 
+
+                            ! Compute
+                            psid(i) = psid(i) + psi(j)
+                            nfsv = nfsv + 1
+
+                        end if 
+                    end do
+
+                    if (nfsv == 0) then 
+                        ! No vertices found, throw error
+                        print *, 'outer flux surface ID: ', fsind(i)
+                        call gdErrorHandler('InitializeFixedFluxvaluesConstraints: ' // &
+                            'no boundary vertices found for outer flux surface ID')
+                    end if 
+
+                    ! Average
+                    psid(i) = psid(i)/nfsv 
+
+                end do
+
+            case ('manual')
+
+                ! Need to specify as much core values are there are 
+                ! flux surfaces
+                if (size(options%ffvoptions%outerfluxval, 1) /= fscc) then 
+                    print *, 'number of outer flux surfaces: ', fscc-ncfs
+                    print *, 'field line IDs of core flux surfaces: ', fsind(ncfs+1:fscc)
+                    call gdErrorHandler('InitializeFixedFluxvaluesConstraints: ' // &
+                        'need to specify the amount of outer flux surface values mentioned above')
+                end if 
+
+                ! Add
+                psid(ncfs+1:fscc) = options%ffvoptions%outerfluxval 
+
+            case default 
+
+                ! Throw error
+                call gdErrorHandler('InitializeFixedFluxvaluesConstraints: ' // &
+                    'unknown method to determine flux values for outer flux')
+
+            end select
+
+        end if 
+
+        ! Update constraint counter and issue warning if necessary
+        dowarning  = .false.
+        do i = 1, grid%vert%ntot
+            if (any(fieldlineID(i) == fsind(1:fscc))) then 
+                ccv(i) = ccv(i) + 1
+                if (ccv(i) > maxccv(i)) then 
+                    dowarning = .true.
+                end if 
+            end if 
+        end do 
+
+        if (dowarning) then 
+            print *, 'InitializeFixedFluxvaluesConstraints: by imposing ' // &
+                'fixed psi value, some vertices may be overly constrained!'
+        end if
+        ! Add
+        !====
+        constraints%psid = psid(1:fscc)
+        constraints%fsind = fsind(1:fscc)
+        constraints%ncon = fscc
+        allocate(constraints%psiind(fscc))
+        constraints%psiind = 0
+
+        ! Housekeeping
+        !=============
+        end associate
+
+        
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateFixedFluxvaluesConstraints(constraints, G, gradG, & 
+        hessG, grid, magneticField, environment, dogradient, &
+        dohessian, designvariables, lambda)
+
+        ! Description
+        !============
+        ! The flux value constraints are evaluated per flux surface 
+        ! index. 
+
+
+        ! Notes
+        !======
+        
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(FixedFluxvaluesConstraintsUDT)    :: constraints 
+        real(R8), allocatable               :: G(:) 
+        real(R8), allocatable               :: lambda(:)
+        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(GridUDT)                       :: grid 
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        logical                             :: dogradient, dohessian
+        class(DesignVariablesGDUDT)         :: designvariables 
+
+        ! Loop variables
+        integer(I8)                         :: ic, ivg, ivh, k
+        integer(I8), allocatable            :: valindex(:), conindex(:), &
+            psiind(:)
+
+        ! Auxiliary variables
+        
+        ! Initialize
+        !===========
+        ! Checks
+        if ( (.not. allocated(lambda)) .and. dohessian) then
+            ! Throw error
+            call gdErrorHandler('When evaluating the hessian vector' &
+                // ' multiplication, lambda must be given')
+        end if
+
+        if (size(lambda) .ne. constraints%ncon) then
+            ! Lambda should have the same size as the constraints
+            call gdErrorHandler('Lambda should have the same size ' &
+                // 'as the constraint vector')
+        end if
+
+        ! Counters
+        ic = 0 ! constraint counter (local)
+        ivg = 0 ! value index for gradient
+        ivh = 0 ! value index for hessian
+
+        ! Associate
+        associate(&
+            interp  => magneticField%interp,    &
+            nc      => constraints%ncon,        &
+            vert    => grid%vert,               &
+            nv      => grid%vert%ntot,          &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
+
+        ! Unpack
+        select type (designvariables)
+
+        type is (DesignVariablesCoordinatesFluxUDT)
+
+            ! Unpack
+            psiind = designvariables%psiind
+
+        class default
+
+            ! Throw error
+            call gdErrorHandler('EvaluateFixedFluxvaluesConstraints: ' // &
+                'design variable type should be coordinates_desiredflux')
+
+        end select
+
+        ! Constraint value
+        !=================
+        ! Allocate
+        if (.not. allocated(G)) then 
+            allocate(G(nc))
+        else
+            if (size(G) .ne. nc) then 
+
+                ! Print a warning and reallocate
+                print *, 'EvaluateFixedFluxvaluesConstraints: ' &
+                    // 'Wrong dimension of G, reallocating'
+                
+                ! Deallocate and reallocate
+                deallocate(G)
+                allocate(G(nc))
+
+            end if
+        end if
+
+        ! Compute
+        G = designvariables%phi(constraints%psiind) - constraints%psid
+
+        ! Constraint gradient
+        !====================
+        if (dogradient) then 
+            ! Initialize
+            jacG%nrow = nc 
+            jacG%ncol = designvariables%nphi
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates_desiredflux') ! only flux contributions
+
+                ! Order in jacobian: first x, then y. 
+
+                ! Allocate
+                jacG%nval = nc
+                call jacG%Allocate() 
+                allocate(conindex(nc))
+                allocate(valindex(nc))
+
+                ! Build constraint indices
+                conindex = [(k, k = ic+1, ic+nc)]
+
+                ! psi-contribution
+                !---------------
+                ! Build indices for xv1
+                valindex = [(k, k = ivg+1, ivg+nc)]
+
+                ! Add values
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = constraints%psiind
+                jacG%val(valindex) = 1
+
+                ! Update counters
+                ivg = ivg + nc
+
+                ! Build gradient
+                !---------------
+                gradG%nrow = jacG%ncol 
+                gradG%ncol = jacG%nrow 
+                gradG%nval = jacG%nval 
+                
+                call gradG%Allocate()
+                gradG%row = jacG%col 
+                gradG%col = jacG%row
+                gradG%val = jacG%val
+
+                ! Housekeeping
+                call jacG%Deallocate()
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+
+        ! Constraint hessian
+        !===================
+        if (dohessian) then 
+
+            ! Initialize
+            ic = 0
+            hessG%nrow = designvariables%nphi 
+            hessG%ncol = designvariables%nphi 
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates_desiredflux') ! only flux, but no contributions
+            
+                ! Initialize
+                !===========
+                ! Allocate
+                hessG%nval = 0
+                if (.not. allocated(valindex)) then
+                    allocate(valindex(nc))
+                end if
+                if (.not. allocated(conindex)) then 
+                    allocate(conindex(nc))
+                end if 
+                if (.not. allocated(hessG%val)) then
+                    call hessG%Allocate()
+                end if
+                
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+        
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+    end subroutine
+
 
 
 end module
