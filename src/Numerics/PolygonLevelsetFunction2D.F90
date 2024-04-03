@@ -669,7 +669,7 @@ module PolygonLevelsetFunction2D
             ! Throw error, these derivatives should anyway not be necessary...
             call gdErrorHandler('Derivatives are of too high order, cannot compute')
         end if
-            
+        allocate(derivxc, derivyc, deriv, source=' ')
         derivxc = ' ' 
         derivyc = ' ' 
         write(derivxc, '(I0)') derivx 
@@ -967,6 +967,7 @@ module PolygonLevelsetFunction2D
             ! Throw error, these derivatives should anyway not be necessary...
             call gdErrorHandler('Derivatives are of too high order, cannot compute')
         end if
+        allocate(derivxc, derivyc, deriv, source=' ')
         derivxc = ' ' 
         derivyc = ' ' 
         write(derivxc, '(I0)') derivx 
