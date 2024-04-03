@@ -127,6 +127,7 @@ module optmod_optimizationengine
         character(:), allocatable                   :: inputfileprefix
         type(NumKKTUDT)         :: numKKT
         type(numLSUDT)          :: numLS 
+        type(NumNCPUDT)         :: numNCP
 
     contains 
 
@@ -140,6 +141,9 @@ module optmod_optimizationengine
 
         ! Lagrangian evaluation
         procedure :: EvaluateLagrangian
+
+        ! Setup of correction equation
+        procedure :: SetupCorrectionEquation
 
         ! Relaxation of KKT system
         procedure :: RelaxKKTSystem
@@ -699,8 +703,11 @@ module optmod_optimizationengine
         solver%numKKT%fieldprefix   = solver%inputfileprefix 
         solver%numLS%inputfilepath  = solver%inputfilepath
         solver%numLS%fieldprefix    = solver%inputfileprefix
+        solver%numNCP%inputfilepath = solver%inputfilepath
+        solver%numNCP%fieldprefix   = solver%inputfileprefix
         call solver%numKKT%InitializeNumParams() 
         call solver%numLS%InitializeNumParams()
+        call solver%numNCP%InitializeNumParams()
 
     end subroutine
 
@@ -742,7 +749,7 @@ module optmod_optimizationengine
 
         ! nonlinear complementarity function
         real(R8), allocatable       :: ncp(:) 
-        type(MySparseUDT)           :: gradncp
+        type(MySparseUDT)           :: gradncpphi, gradncpmu
         logical, allocatable        :: A(:), I(:) 
 
         ! Lagrangian 
@@ -753,9 +760,10 @@ module optmod_optimizationengine
         ! Solver & updates
         real(R8), allocatable       :: fullmat(:, :)
         double precision, allocatable :: dx(:), dxl(:)
+        real(R8), allocatable       :: rhs(:)
         real(R8)                    :: alphals
         integer(I8)                 :: flag, flagls
-        type(MySparseUDT)           :: hessLJ
+        type(MySparseUDT)           :: hessLJ, lhs
 
         ! Diagnostics
         logical                     :: checkgradients, checkhessians 
@@ -810,8 +818,10 @@ module optmod_optimizationengine
 
         ! NCP function
         allocate(ncp(nineq), A(nineq), I(nineq))
-        gradncp%nrow = nphi 
-        gradncp%ncol = nineq
+        gradncpphi%nrow = nphi 
+        gradncpphi%ncol = nineq
+        gradncpmu%nrow = nineq 
+        gradncpmu%ncol = nineq
         A(:) = .false.
         I(:) = .not. A
 
@@ -824,7 +834,10 @@ module optmod_optimizationengine
 
         ! Solver
         allocate(dx(hessL%nrow))
+        allocate(rhs(hessl%nrow))
         allocate(fullmat(hessL%nrow, hessL%ncol))
+        dx = 0
+        rhs = 0
 
         ! Diagnostics
         checkgradients  = .false. ! check gradients in each iteration?
@@ -887,8 +900,8 @@ module optmod_optimizationengine
                 hessH, dogradient, dohessian, mu)
 
             ! Evaluate the nonlinear complementarity function 
-            !call solver%EvaluateNCPfunction(ncp, A, I, gradncp, &
-            !    H, gradH, mu)
+            call EvaluateNCPfunction(ncp, A, I, gradncpphi, gradncpmu, &
+                H, gradH, mu, solver%numNCP, dogradient)
 
             ! Evaluate the Lagrangian
             call solver%EvaluateLagrangian(L, gradL, hessL, &
@@ -906,15 +919,22 @@ module optmod_optimizationengine
             ! Solve 
             if (.not. converged) then 
 
+                ! Set up correction equation
+                call solver%SetupCorrectionEquation(lhs, rhs, &
+                    gradJ, hessJ, &
+                    G, gradG, hessG, lambda, &
+                    H, gradH, hessH, mu, A, &
+                    ncp, gradncpphi, gradncpmu)
+
                 ! Relax
-                call solver%RelaxKKTSystem(hessL, nphi, neq, nineq)
+                call solver%RelaxKKTSystem(lhs, nphi, neq, nineq)
 
                 !print *, 'hessian size: ', hessL%nrow, hessL%ncol
                 !call SpyPlot(hessL%row, hessL%col, hessL%nval, '-p')
                 
                 ! Call the sparse solver
                 call cpu_time(t_linsolve_s)
-                call SolveSparseLinearSystemDI(hessL, -gradL, dx, flag)
+                call SolveSparseLinearSystemDI(lhs, rhs, dx, flag)
                 call cpu_time(t_linsolve_e)
 
             else
@@ -992,7 +1012,8 @@ module optmod_optimizationengine
             call problem%UpdateDesign(dx(1:nphi))
 
             ! Update lagrange multipliers
-            lambda(:) = lambda(:) + dx(nphi+1:nphi+neq)
+            lambda  = lambda + dx(nphi+1:nphi+neq)
+            mu      = mu + dx(nphi+neq+1:nphi+neq+nineq)
             
             ! Timers
             call cpu_time(t_it_e)
@@ -1169,6 +1190,14 @@ module optmod_optimizationengine
         ! and mu * dHdphi2 is given, the latter one accounting for the
         ! activeness of the constraints. 
 
+        ! Notes
+        !======
+        ! Note 1: it is assumed that the hessian and gradient of the
+        ! inequality constrains are correctly adjusted for activeness
+        ! of the constraints! To be sure, mu is copied into a local 
+        ! variable and set to zero where A is false. For the Lagrangian
+        ! gradient, also the values where A is false are set to zero. 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -1188,13 +1217,19 @@ module optmod_optimizationengine
         integer(I8)                         :: k 
 
         ! Auxiliary variables
-        real(R8), allocatable               :: tmu(:)
+        real(R8), allocatable               :: tmu(:), tH(:)
                                         
         ! Compute Lagrangian
         !===================
-        ! For ease: set mu(.not. A) equal to zero
-        allocate(tmu(size(mu)))
-        where (.not. A) tmu = 0
+        ! To be sure: set mu(.not. A) equal to zero
+        allocate(tmu(size(mu)), tH(size(H)))
+        tmu = mu 
+        tH = H 
+        where (.not. A) 
+            tmu = 0
+            tH = 0
+        end where
+       
         L = J + sum(lambda * G) + sum(tmu * H)
 
         ! Compute gradient
@@ -1210,7 +1245,7 @@ module optmod_optimizationengine
             gradL(size(gradJ)+1:size(G)) = G(:)
 
             ! Inequality constraints contribution
-            gradL(size(gradJ)+size(G)+1:size(gradL)) = H(:)
+            gradL(size(gradJ)+size(G)+1:size(gradL)) = tH(:)
 
         end if 
 
@@ -1286,9 +1321,160 @@ module optmod_optimizationengine
     end subroutine
 
     ! Nonlinear complementarity function 
-    !subroutine EvaluateNCPfunction(ncp, A, I, gradncp, H, gradH, mu)
+    subroutine EvaluateNCPfunction(ncp, A, I, gradncpphi, gradncpmu, H, &
+        gradH, mu, num, dogradient)
 
-    !end subroutine
+        ! Description
+        !============
+        ! NonlinearComplementarityFunction returns the nonlinear complementarity
+        ! (problem)
+        ! function and its derivatives with respect to the consistency and internal
+        ! variables evaluated at the current state. The nonlinear complementarity
+        ! function is used to enforce the complementarity condition, mu >= 0,
+        ! in combination with the inequality constraints, h <= 0, i.e. mu*h = 0. For
+        ! numerical reasons, this is relaxed to the following ncp:
+        !
+        !       ncp = max(alpha*h + mu,0) - mu = 0,
+        !
+        ! where mu is the lagrange multiplier, and alpha an arbitrarily yet
+        ! strictly positive constant. Clearly, this function is not continuous, and
+        ! its linearization depends on the outcome of the max operator. Therefore,
+        ! the active and inactive sets are determined (active if mu + alpha*h >
+        ! 0).
+
+        ! Input
+        !======
+        ! - h:          inequality constraint values at the current design point
+        !               (nh-by-1)
+        ! - mu:         current estimated value of the lagrange multipliers
+        !               (nh-by-1)
+        ! - alpha:      strictly positive constant (scalar)
+        ! - gradh:      (required if more than 3 output arguments) gradient of the
+        !               inequality constraint values at the current design point
+        !               (nh-by-nphi)
+
+        ! Output
+        !=======
+        ! - ncp:        the residuals of the ncp function, i.e.
+        !               max(alpha*f + lambda,0) - lambda evaluated at the current
+        !               iterate (nh-by-1)
+        ! - gradncp:    structure containing linearization of the ncp function with
+        !               respect to the design and lagrange multipliers lambda and
+        !               mu (the second one is always the zero matrix).
+        ! - A,I:        the active (A) and inactive (I) sets.
+
+        ! Notes
+        !======
+        ! Note 1: different implementations of the ncp function are available, yet
+        ! the 'max' one is recommended. Should be set in SetNumParams, otherwise
+        ! default 'max' is set.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)                :: H(:), mu(:)
+        logical                             :: dogradient
+        logical, intent(inout)              :: A(size(H, 1)), &
+            I(size(H, 1))
+        type(MySparseUDT), intent(in)       :: gradH 
+        type(MySparseUDT), intent(inout)    :: gradncpphi, gradncpmu 
+        real(R8), intent(out)               :: ncp(size(H, 1))
+        type(NumNCPUDT), intent(in)         :: num
+
+        ! Auxiliary
+        real(R8)                            :: temp(size(H, 1), 2)
+
+        integer(I8)                         :: nh
+
+        ! Loop
+        integer(I8)                         :: k
+
+        ! Initialize
+        !===========
+        nh = size(H, 1)
+
+        ! Ncp function value
+        !===================
+        select case (num%ncpfun)
+            
+        case ('max')
+            ! Based on maximal value
+            temp(:, 1) = num%alpha*H + mu
+            temp(:, 2) = 0  
+            ncp = maxval(temp, 2) - mu
+            
+            ! Active and inactive sets
+            A = (num%alpha*H + mu) >= 0
+            I = .not. A
+            
+        case ('FB')
+
+            ! Based on non-smooth Fischer-Burmeister function
+            ncp = -(sqrt(H**2 + mu**2) - mu + H);
+            
+            ! Active and inactive sets
+            A = .true. ! not required
+            I = .false.
+            
+        case ('FBsmooth')
+
+            ! Based on smoothed Fischer-Burmeister function
+            ncp = -(sqrt((H)**2 + mu**2 + 2*num%alpha) - mu + (H));
+            
+            ! Active and inactive sets
+            A = .true. ! not required
+            I = .false.
+            
+        case default
+            
+            call gdErrorHandler('NonlinearComplementarityFunction: unknown ncp function')
+            
+        end select
+
+
+        ! Ncp function derivative
+        !========================
+        if (dogradient) then 
+
+            ! Initialize
+            gradncpphi = gradH 
+            gradncpmu%nrow = nh
+            gradncpmu%ncol = nh
+            gradncpmu%nval = nh ! diagonal matrix basically
+            call gradncpmu%Allocate()
+            gradncpmu%row = [(k, k = 1, nh)]
+            gradncpmu%col = [(k, k = 1, nh)]
+            
+            select case (num%ncpfun)
+                
+            case ('max')
+
+                ! Adjust values
+                where (A(gradncpphi%col)) 
+                    gradncpphi%val = num%alpha*gradH%val 
+                    gradncpmu%val = 0
+                elsewhere 
+                    gradncpphi%val = 0
+                    gradncpmu%val = -1
+                end where
+                
+            case ('FB')
+                
+                call gdErrorHandler('derivative not yet implemented')
+                
+            case ('FBsmooth')
+                
+                call gdErrorHandler('derivative not yet implemented')
+
+            case default
+                
+                ! Error thrown above
+            end select
+
+        end if
+
+    end subroutine
+
     ! Step length computation
     subroutine ComputeStepLength(solver, problem, dx, lambda, mu, alpha, flag)
 
@@ -1645,6 +1831,124 @@ module optmod_optimizationengine
         !=============
         end associate
         end associate 
+
+    end subroutine
+
+    ! Correction equation setup
+    subroutine SetupCorrectionEquation(solver, lhs, rhs, &
+        gradJ, hessJ, G, gradG, hessG, lambda, H, gradH, hessH, mu, A, &
+        ncp, gradncpphi, gradncpmu)
+
+        ! Description
+        !============
+        ! This routine sets up the correction equation where lhs is a
+        ! sparse matrix and rhs the residual vector. The system of 
+        ! equations is assumed to be the KKT system where the 
+        ! inequality constraints are replaced by the ncp function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverUDT)        :: solver 
+
+        real(R8), intent(inout)             :: rhs(:) 
+        type(MySparseUDT), intent(inout)    :: lhs 
+
+        real(R8), intent(in)                :: G(:), H(:), mu(:), &
+                                            lambda(:), gradJ(:), ncp(:)
+        type(MySparseUDT), intent(in)       :: hessJ, gradG, hessG, &
+                                            gradH, hessH, gradncpphi, &
+                                            gradncpmu
+        logical, intent(in)                 :: A(:)
+
+        ! Loop variables
+        integer(I8)                         :: k 
+
+        ! Auxiliary variables
+        real(R8), allocatable               :: tmu(:)
+
+        ! Set up rhs
+        !===========
+        if (.not. allocated(tmu)) then 
+            allocate(tmu, source=mu)
+        end if
+        tmu = mu
+        where (.not. A) tmu = 0
+        rhs = -[gradJ + gradG%MatrixVectorProduct(lambda) + &
+            gradH%MatrixVectorProduct(tmu), G, ncp]
+
+        ! Set up lhs
+        !===========
+        ! Dimensions
+        lhs%nrow = size(rhs, 1)
+        lhs%ncol = size(rhs, 1)
+        lhs%nval = hessJ%nval + hessG%nval + hessH%nval + 2*gradG%nval &
+            + 2*gradncpphi%nval + gradncpmu%nval
+        if (.not. allocated(lhs%val)) then 
+            call lhs%Allocate()
+        end if 
+
+        ! dLdpsi2
+        !--------
+        ! Initialize
+        k = 0
+
+        ! Cost function contribution
+        lhs%val(k+1:k+hessJ%nval) = hessJ%val
+        lhs%row(k+1:k+hessJ%nval) = hessJ%row 
+        lhs%col(k+1:k+hessJ%nval) = hessJ%col 
+        k = k + hessJ%nval 
+
+        ! Equality constraints contribution
+        lhs%val(k+1:k+hessG%nval) = hessG%val
+        lhs%row(k+1:k+hessG%nval) = hessG%row 
+        lhs%col(k+1:k+hessG%nval) = hessG%col 
+        k = k + hessG%nval 
+
+        ! Inequality constraints contribution
+        lhs%val(k+1:k+hessH%nval) = hessH%val
+        lhs%row(k+1:k+hessH%nval) = hessH%row 
+        lhs%col(k+1:k+hessH%nval) = hessH%col 
+        k = k + hessH%nval 
+
+        ! dLdlambdadphi
+        !--------------
+        lhs%val(k+1:k+gradG%nval) = gradG%val 
+        lhs%row(k+1:k+gradG%nval) = gradG%row
+        lhs%col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+        k = k + gradG%nval 
+
+        ! dLdphidlambda 
+        !--------------
+        lhs%val(k+1:k+gradG%nval) = gradG%val 
+        lhs%row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+        lhs%col(k+1:k+gradG%nval) = gradG%row  
+        k = k + gradG%nval 
+
+        ! dLdmudphi
+        !----------
+        lhs%val(k+1:k+gradncpphi%nval) = gradncpphi%val 
+        lhs%row(k+1:k+gradncpphi%nval) = gradncpphi%row
+        lhs%col(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
+        k = k + gradncpphi%nval 
+
+        ! dLdphidmu
+        !----------
+        lhs%val(k+1:k+gradncpphi%nval) = gradncpphi%val 
+        lhs%row(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
+        lhs%col(k+1:k+gradncpphi%nval) = gradncpphi%row
+        k = k + gradncpphi%nval 
+
+        ! dLdmudmu
+        !----------
+        lhs%val(k+1:k+gradncpmu%nval) = gradncpmu%val 
+        lhs%row(k+1:k+gradncpmu%nval) = gradncpmu%col + hessJ%nrow + gradG%ncol
+        lhs%col(k+1:k+gradncpmu%nval) = gradncpmu%row + hessJ%nrow + gradG%ncol
+        k = k + gradncpmu%nval 
+
+
+        
+
 
     end subroutine
 
