@@ -40,6 +40,7 @@ module gdmod_constraints
     use gdmod_plots
     use gdmod_userinput
     use PolygonLevelsetFunction2D
+    use, intrinsic :: ieee_arithmetic
 
     ! The usual
     implicit none
@@ -323,6 +324,50 @@ module gdmod_constraints
 
     end type
 
+    ! Linefolding constraints
+    type, extends(GenericConstraintsGDUDT)  :: LinefoldingConstraintsUDT 
+
+        ! Description
+        !============
+        ! Constraints to prevent overlapping coordinate lines and cells.
+        ! There are three 'types' that can be used: 'poloidal', 'radial'
+        ! and 'vessel'. Each has a different coordinate direction along
+        ! which folding may not occur. This coordinate direction is 
+        ! given by the interpolant representation of the magnetic field
+        ! and vessel levelset. Since line folding is prevented by 
+        ! imposing conditions to the inner product of the face tangent
+        ! and coordinate vector, a small number has to be added to 
+        ! prevent coinciding vertices etc. This number should be 
+        ! sufficiently small (e.g. three orders of magnitude smaller 
+        ! than the smallest feature in the grid or something). 
+        ! Additionally, the constraints are ill-defined if both 
+        ! derivatives of the polygon levelset function are zero (e.g. at 
+        ! magnetic field extrema). To hedge for this, there is a field 
+        ! 'fieldtol' that specifies the absolute tolerance on the field
+        ! vector under which the constraint is deactivated. 
+
+        ! Options basically
+        real(R8)                    :: smallnumber, fieldtol
+
+        ! Fields
+        integer(I8)                 :: nvpairspol, nvpairsrad, &
+            nvpairsves
+        integer(I8), allocatable    :: vpairspol(:, :), vpairsrad(:, :), &
+            vpairsves(:, :)
+        real(R8), allocatable       :: signvecpol(:), signvecrad(:), &
+            signvecves(:)
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize => InitializeLinefoldingConstraints
+            
+        ! Evaluation
+        procedure :: Evaluate   => EvaluateLinefoldingConstraints
+
+
+    end type
+
     ! Overarching types
     !==================
     ! Equality constraints
@@ -367,6 +412,11 @@ module gdmod_constraints
 
         ! Total number of inequality constraints
         integer(I8)             :: nineqcon = 0
+
+        ! Constraint switches
+        logical                             :: dolinefolding = .false.
+
+        type(LinefoldingConstraintsUDT)      :: linefolding
 
     contains
 
@@ -1345,7 +1395,7 @@ module gdmod_constraints
             ! Initialize counter
             ivh = 0
 
-            ! Boundary function
+            ! X-points
             if (constraints%doxpoints) then 
                 ! Associate 
                 associate(&
@@ -1505,6 +1555,32 @@ module gdmod_constraints
         !=======================
         constraints%nineqcon = 0
 
+        ! Linefolding
+        if (constraintoptions%linefolding == 1) then 
+
+            ! Set the logical
+            constraints%dolinefolding = .true.
+
+            ! Initialize
+            call constraints%linefolding%Initialize(grid, &
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
+
+            ! Add constraints number
+            constraints%nineqcon = constraints%nineqcon + &
+                constraints%linefolding%ncon 
+
+            ! Print
+            print *, 'number of linefolding constraints: ', &
+                constraints%linefolding%ncon
+
+
+        else
+            ! Set to false, don't initialize
+            constraints%dolinefolding = .false.
+
+        end if
+
     end subroutine
 
     ! Constraint evaluation
@@ -1533,17 +1609,59 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)     :: designvariables 
 
         ! Loop
-        integer(I8)                     :: ic, ivg, ivh
+        integer(I8)                     :: ic, ivg, ivh, k
+        integer(I8), allocatable        :: conindex(:)
 
         ! Auxiliary
+        real(R8), allocatable           :: G_lf(:), lambda_lf(:)
+        type(MySparseUDT)               :: gradG_lf, hessG_lf
 
         ! Initialize
         !===========
         ! Set the constraint counter
         ic = 0
 
-        ! Initialize
-        G(:) = 0
+        ! Constraint values
+        !==================
+
+        ! Linefolding constraints
+        !------------------------
+        if (constraints%dolinefolding) then 
+            ! Construct the constraint index
+            allocate(conindex(constraints%linefolding%ncon))
+            conindex = [(k, k = ic+1, ic+constraints%linefolding%ncon)]
+
+            ! Allocate & initialize
+            allocate(lambda_lf(constraints%linefolding%ncon))
+            lambda_lf = lambda(conindex)
+
+            ! Call the evaluation routine
+            call constraints%linefolding%Evaluate(G_lf, &
+                gradG_lf, hessG_lf, &
+                grid, magneticField, environment, dogradient, &
+                dohessian, designvariables, &
+                lambda_lf)
+
+            ! Assign
+            G(conindex) = G_lf
+
+            ! Update the gradient column indices
+            if (dogradient) then 
+                ! For easier concatenation later on
+                gradG_lf%col = gradG_lf%col + ic
+
+            end if
+
+            ! Update the constraint counter
+            ic = ic + constraints%linefolding%ncon
+
+            ! Housekeeping
+            deallocate(conindex, lambda_lf) 
+            if (allocated(G_lf)) then
+                deallocate(G_lf)
+            end if
+
+        end if
     
         ! Concatenate gradient
         !=====================
@@ -1561,6 +1679,10 @@ module gdmod_constraints
                 gradG%nval = 0
 
                 ! Add values of each constraint, if used
+                ! Linefolding
+                if (constraints%dolinefolding) then 
+                    gradG%nval = gradG%nval + gradG_lf%nval 
+                end if
 
                 ! Allocate
                 call gradG%Allocate()
@@ -1570,6 +1692,27 @@ module gdmod_constraints
             !------------------
             ! Initialize counter
             ivg = 0
+
+            ! Linefolding
+            if (constraints%dolinefolding) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%linefolding%ncon, &
+                    nval    => gradG_lf%nval)
+
+                ! Add values
+                gradG%row(ivg+1:ivg+nval) = gradG_lf%row 
+                gradG%col(ivg+1:ivg+nval) = gradG_lf%col
+                gradG%val(ivg+1:ivg+nval) = gradG_lf%val
+
+                ! Update counter
+                ivg = ivg + nval 
+
+                ! End associate
+                end associate
+
+            end if
+
             
         end if
 
@@ -1589,6 +1732,9 @@ module gdmod_constraints
                 hessG%nval = 0
 
                 ! Add values of each constraint, if used
+                if (constraints%dolinefolding) then 
+                    hessG%nval = hessG%nval + hessG_lf%nval  
+                end if 
 
                 ! Allocate
                 call hessG%Allocate()
@@ -1598,6 +1744,26 @@ module gdmod_constraints
             !------------------
             ! Initialize counter
             ivh = 0
+
+            ! Linefolding
+            if (constraints%dolinefolding) then 
+                ! Associate 
+                associate(&
+                    nc      => constraints%linefolding%ncon, &
+                    nval    => hessG_lf%nval)
+
+                ! Add values
+                hessG%row(ivh+1:ivh+nval) = hessG_lf%row 
+                hessG%col(ivh+1:ivh+nval) = hessG_lf%col
+                hessG%val(ivh+1:ivh+nval) = hessG_lf%val
+
+                ! Update counter
+                ivh = ivh + nval 
+
+                ! End associate
+                end associate
+
+            end if
 
         end if
 
@@ -6123,6 +6289,7 @@ module gdmod_constraints
         type is (DesignVariablesCoordinatesFluxUDT)
 
             ! Unpack
+            allocate(psiind, source=designvariables%psiind)
             psiind = designvariables%psiind
 
         class default
@@ -6261,6 +6428,894 @@ module gdmod_constraints
 
     end subroutine
 
+    !------------------------------------------------------------------!
+    !                      LINE FOLDING CONSTRAINTS                    !
+    !------------------------------------------------------------------!
 
+    ! Initialize
+    subroutine InitializeLinefoldingConstraints(constraints, &
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
+
+        ! Description
+        !============
+        ! Initialize the line folding constraints. There are three 
+        ! line folding 'types': poloidal, radial, and vessel. Each of 
+        ! these depends on a different coordinate field: poloidal is 
+        ! simply the poloidal magnetic field vector, radial a direction
+        ! perpendicular in the 2D plane, and vessel is the coordinate
+        ! direction that follows vessel contours. 
+
+        ! Notes
+        !======
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(LinefoldingConstraintsUDT)            :: constraints
+        type(GridUDT)                               :: grid 
+        type(MagneticFieldUDT)                      :: magneticField 
+        type(EnvironmentUDT)                        :: environment 
+        type(ConstraintsMonitorUDT)                 :: monitor
+        type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                 :: designvariables
+
+        ! Auxiliary
+        integer(I8)                                 :: nvpairspol, &
+            nvpairsrad, nvpairsves 
+        integer(I8), allocatable                    :: &
+            vpairspol(:, :), vpairsrad(:, :), vpairsves(:, :), tvID(:), &
+            tv(:)
+
+        logical, allocatable                        :: isvesselvertex(:), &
+            isvesselface(:)
+
+        real(R8), allocatable                       :: xf(:), yf(:), &
+            xv(:, :), yv(:, :), gx(:), gy(:), myones(:), dx(:), dy(:), &
+            dotprod(:), signvecpol(:), signvecrad(:), signvecves(:)
+
+        ! Loop
+        integer(I8)                                 :: i, j
+
+        ! Checks
+        !=======
+        ! Are the design variable compatible?
+        select case (designvariables%type)
+
+        case ('coordinates_desiredflux')
+
+            ! All good
+
+        case default
+
+            ! All bad
+            call gdErrorHandler('InitializeFixedFluxvaluesConstraints: design variable type is incompatible')
+
+        end select
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            maxccv          => monitor%maxeqvcc,        &
+            ccv             => monitor%eqvcc,           &
+            vert            => grid%vert,               &
+            face            => grid%face,               &
+            x               => grid%vert%x,             &
+            y               => grid%vert%y,             &
+            fieldlineID     => grid%vert%fieldlineID    &
+            )
+
+        ! Determine vessel faces
+        call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
+
+        ! Determine poloidal pairs
+        !=========================
+        nvpairspol = 0
+        allocate(vpairspol(face%ntot, 2))
+        vpairspol = 0
+        if (options%lfoptions%poloidal) then 
+            do i = 1, face%ntot 
+                ! Skip vessel faces
+                if (isvesselface(i)) then 
+                    cycle 
+                end if 
+
+                ! Get vertices
+                tv = face%vert(i, :)
+
+                ! Get IDs
+                tvID = fieldlineID(tv)
+
+                ! If zero or not the same, continue
+                if (any(tvID == 0)) then 
+                    cycle 
+                end if 
+                if (tvID(1) /= tvID(2)) then 
+                    cycle 
+                end if 
+
+                ! Add vertex pair
+                nvpairspol = nvpairspol + 1
+                vpairspol(nvpairspol, :) = tv(1:2)
+
+            end do
+        end if 
+
+        ! Trim
+        vpairspol = vpairspol(1:nvpairspol, :)
+
+        ! Determine radial pairs
+        !=======================
+        nvpairsrad = 0
+        allocate(vpairsrad(face%ntot, 2))
+        vpairsrad = 0
+        if (options%lfoptions%radial) then 
+            do i = 1, face%ntot 
+                ! Skip vessel faces
+                if (isvesselface(i)) then 
+                    cycle 
+                end if 
+                
+                ! Get vertices
+                tv = face%vert(i, :)
+
+                ! Get IDs
+                tvID = fieldlineID(tv)
+
+                ! If zero or the same, continue
+                if (any(tvID == 0)) then 
+                    cycle 
+                end if 
+                if (tvID(1) == tvID(2)) then 
+                    cycle 
+                end if 
+
+                ! Add vertex pair
+                nvpairsrad = nvpairsrad + 1
+                vpairsrad(nvpairsrad, :) = tv(1:2)
+            end do
+        end if
+
+        ! Trim
+        vpairsrad = vpairsrad(1:nvpairsrad, :)
+
+        ! Determine vessel pairs
+        !=======================
+        nvpairsves = 0
+        allocate(vpairsves(face%ntot, 2))
+        vpairsves = 0
+        if (options%lfoptions%vessel) then 
+            do i = 1, face%ntot 
+                ! Take only vessel faces
+                if (.not. isvesselface(i)) then 
+                    cycle 
+                end if 
+                
+                ! Get vertices
+                tv = face%vert(i, :)
+
+                ! Get IDs
+                tvID = fieldlineID(tv)
+
+                ! At least one vertex should have zero ID
+                if (.not. any(tvID == 0)) then 
+                    cycle 
+                end if 
+
+                ! Add vertex pair
+                nvpairsves = nvpairsves + 1
+                vpairsves(nvpairsves, :) = tv(1:2)
+            end do
+        end if 
+
+        ! Trim
+        vpairsves = vpairsves(1:nvpairsves, :)
+
+        ! Check orientation
+        !==================
+        ! Poloidal
+        !---------
+        ! Allocate
+        allocate(xv(nvpairspol, 2), yv(nvpairspol, 2), gx(nvpairspol), &
+            gy(nvpairspol), myones(nvpairspol))
+        myones = 1
+
+        ! Compute coordinates and vectors
+        do j = 1, 2
+            xv(:, j) = x(vpairspol(:, j))
+            yv(:, j) = y(vpairspol(:, j))
+        end do 
+        dx = xv(:, 2) - xv(:, 1)
+        dy = yv(:, 2) - yv(:, 1)
+        xf = 0.5*(xv(:, 1) + xv(:, 2))
+        yf = 0.5*(yv(:, 1) + yv(:, 2))
+        call magneticField%interp%Evaluate(xf, yf, 1, 0, gx)
+        call magneticField%interp%Evaluate(xf, yf, 0, 1, gy)
+
+        ! Evaluate dot product and save sign
+        dotprod = -gy*dx + gx*dy 
+        signvecpol = sign(myones, dotprod)
+
+        ! Housekeeping
+        deallocate(xv, yv, gx, gy, myones)
+
+        ! Radial
+        !-------
+        ! Allocate
+        allocate(xv(nvpairsrad, 2), yv(nvpairsrad, 2), gx(nvpairsrad), &
+            gy(nvpairsrad), myones(nvpairsrad))
+        myones = 1
+
+        ! Compute coordinates and vectors
+        do j = 1, 2
+            xv(:, j) = x(vpairsrad(:, j))
+            yv(:, j) = y(vpairsrad(:, j))
+        end do 
+        dx = xv(:, 2) - xv(:, 1)
+        dy = yv(:, 2) - yv(:, 1)
+        xf = 0.5*(xv(:, 1) + xv(:, 2))
+        yf = 0.5*(yv(:, 1) + yv(:, 2))
+        call magneticField%interp%Evaluate(xf, yf, 1, 0, gx)
+        call magneticField%interp%Evaluate(xf, yf, 0, 1, gy)
+
+        ! Evaluate dot product and save sign
+        dotprod = gx*dx + gy*dy 
+        signvecrad = sign(myones, dotprod)
+
+        ! Housekeeping
+        deallocate(xv, yv, gx, gy, myones)
+
+        ! Vessel
+        !-------
+        ! Allocate
+        allocate(xv(nvpairsves, 2), yv(nvpairsves, 2), gx(nvpairsves), &
+            gy(nvpairsves), myones(nvpairsves))
+        myones = 1
+
+        ! Compute coordinates and vectors
+        do j = 1, 2
+            xv(:, j) = x(vpairsves(:, j))
+            yv(:, j) = y(vpairsves(:, j))
+        end do 
+        dx = xv(:, 2) - xv(:, 1)
+        dy = yv(:, 2) - yv(:, 1)
+        xf = 0.5*(xv(:, 1) + xv(:, 2))
+        yf = 0.5*(yv(:, 1) + yv(:, 2))
+        call environment%vessel%plfvessel%Evaluate(xf, yf, 1, 0, gx)
+        call environment%vessel%plfvessel%Evaluate(xf, yf, 0, 1, gy)
+
+        ! Evaluate dot product and save sign
+        dotprod = -gy*dx + gx*dy 
+        signvecves = sign(myones, dotprod)
+
+        ! Housekeeping
+        deallocate(xv, yv, gx, gy, myones)
+
+        ! Add
+        !----
+        constraints%vpairspol   = vpairspol 
+        constraints%vpairsrad   = vpairsrad 
+        constraints%vpairsves   = vpairsves
+
+        constraints%nvpairspol  = nvpairspol 
+        constraints%nvpairsrad  = nvpairsrad 
+        constraints%nvpairsves  = nvpairsves
+
+        constraints%signvecpol  = signvecpol
+        constraints%signvecrad  = signvecrad
+        constraints%signvecves  = signvecves
+
+        constraints%ncon        = nvpairspol + nvpairsrad + nvpairsves
+
+
+        ! Housekeeping
+        !=============
+        end associate
+
+        
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateLinefoldingConstraints(constraints, G, gradG, & 
+        hessG, grid, magneticField, environment, dogradient, &
+        dohessian, designvariables, lambda)
+
+        ! Description
+        !============
+        ! Evaluate the line folding constraints. These constraints are formulated
+        ! as follows per face considered:
+        !
+        !           H(i) = -sign(dotprod(B, v)*signvec + tol <= 0.
+        !
+        ! Here, B is the (magnetic) field that defines the coordinate line
+        ! direction, 'signvec' is a predetermined multiplier, v is the vector
+        ! from the first point to the second of the vertex pairs considered, vx and
+        ! vy are the x- and y-components of this vector, and tol is a constant and
+        ! small number that prevents vertex coincidence (and, if alignement
+        ! constraints are imposed, a measure of the minimal distance along the
+        ! coordinate line). This formulation of the constraint has the following
+        ! advantages:
+        ! - the gradient w.r.t. the coordinates exists always, even if vertices
+        ! coincide (vx = vy = 0).
+        ! - vertices are projected along the correct direction when the constraint
+        ! is violated
+        !
+        ! The following downsides require caution:
+        ! - if the (magnetic) field exhibits nulls, the constraint cannot be
+        ! properly imposed. This is checked and hedged for (i.e. the constraint is
+        ! simply set to be inactive...). Warnings will be issued.
+        ! - We need to hedge to prevent imposing the same constraint multiple
+        ! times (see below) to prevent infeasible subproblems
+        ! - We need to assume that the initial signvec vector is properly chosen,
+        ! otherwise this constraint will enforce linefolding. This typically
+        ! requires proper initial knowledge of the grid.
+        ! - The tolerance should be chosen appropriately to the grid dimensions and
+        ! should not interfere with other constraints.
+
+        ! Notes
+        !======
+        
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(LinefoldingConstraintsUDT)    :: constraints 
+        real(R8), allocatable               :: G(:) 
+        real(R8), allocatable               :: lambda(:)
+        type(MySparseUDT)                   :: hessG, gradG, jacG 
+        type(GridUDT)                       :: grid 
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        logical                             :: dogradient, dohessian
+        class(DesignVariablesGDUDT)         :: designvariables 
+
+        ! Auxiliary
+        integer(I8)                             :: nvpairs
+
+        real(R8), allocatable, dimension(:, :)  :: xvp, yvp, xvr, yvr, &
+            xvv, yvv 
+        real(R8), allocatable, dimension(:)     :: xfp, yfp, dxp, dyp, &
+            gxp, gyp, xfr, yfr, dxr, dyr, gxr, gyr, xfv, yfv, dxv, dyv, &
+            gxv, gyv, gxxp, gxxr, gxxv, gxyp, gxyr, gxyv, gyxp, gyxr, &
+            gyxv, gyyp, gyyr, gyyv, gxx, gxy, gyx, gyy, gxxx, gxxy, &
+            gxyx, gyxx, gxyy, gyxy, gyyx, gyyy, gxxxp, gxxyp, &
+            gxyxp, gyxxp, gxyyp, gyxyp, gyyxp, gyyyp, gxxxr, gxxyr, &
+            gxyxr, gyxxr, gxyyr, gyxyr, gyyxr, gyyyr, gxxxv, gxxyv, &
+            gxyxv, gyxxv, gxyyv, gyxyv, gyyxv, gyyyv, xf, yf, dx, dy, &
+            gx, gy, signvec
+
+        ! Loop variables
+        integer(I8)                         :: ic, ivg, ivh, j, k
+        integer(I8), allocatable            :: valindex(:), conindex(:), &
+            vpairs(:, :)
+        
+        ! Initialize
+        !===========
+        ! Checks
+        if ( (.not. allocated(lambda)) .and. dohessian) then
+            ! Throw error
+            call gdErrorHandler('When evaluating the hessian vector' &
+                // ' multiplication, lambda must be given')
+        end if
+
+        if (size(lambda) .ne. constraints%ncon) then
+            ! Lambda should have the same size as the constraints
+            call gdErrorHandler('Lambda should have the same size ' &
+                // 'as the constraint vector')
+        end if
+
+        ! Counters
+        ic = 0 ! constraint counter (local)
+        ivg = 0 ! value index for gradient
+        ivh = 0 ! value index for hessian
+
+        ! Associate
+        associate(&
+            signvecpol      => constraints%signvecpol,  &
+            signvecrad      => constraints%signvecrad,  &
+            signvecves      => constraints%signvecves,  &
+            vpairspol       => constraints%vpairspol,   &
+            vpairsrad       => constraints%vpairsrad,   &
+            vpairsves       => constraints%vpairsves,   &
+            nvpairspol      => constraints%nvpairspol,  &
+            nvpairsrad      => constraints%nvpairsrad,  &
+            nvpairsves      => constraints%nvpairsves,  &
+            tol             => constraints%smallnumber, &
+            nc      => constraints%ncon,        &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
+
+        ! Allocate
+        if (.not. allocated(G)) then 
+            allocate(G(nc))
+        else
+            if (size(G) .ne. nc) then 
+
+                ! Print a warning and reallocate
+                print *, 'EvaluateLinefoldingConstraints: ' &
+                    // 'Wrong dimension of G, reallocating'
+                
+                ! Deallocate and reallocate
+                deallocate(G)
+                allocate(G(nc))
+
+            end if
+        end if
+
+
+        ! Constraint value
+        !=================
+        ! Precompute
+        !-----------
+        ! Allocate
+        allocate(xvp(nvpairspol, 2), yvp(nvpairspol, 2), &
+            xfp(nvpairspol), yfp(nvpairspol), dxp(nvpairspol), &
+            dyp(nvpairspol), gxp(nvpairspol), gyp(nvpairspol))
+        allocate(xvr(nvpairsrad, 2), yvr(nvpairsrad, 2), &
+            xfr(nvpairsrad), yfr(nvpairsrad), dxr(nvpairsrad), &
+            dyr(nvpairsrad), gxr(nvpairsrad), gyr(nvpairsrad))
+        allocate(xvv(nvpairsves, 2), yvv(nvpairsves, 2), &
+            xfv(nvpairsves), yfv(nvpairsves), dxv(nvpairsves), &
+            dyv(nvpairsves), gxv(nvpairsves), gyv(nvpairsves))
+
+        ! Poloidal
+        !---------
+        ! Precompute
+        do j = 1, 2
+            xvp(:, j) = x(vpairspol(:, j))
+            yvp(:, j) = y(vpairspol(:, j))
+        end do
+        dxp = xvp(:, 2) - xvp(:, 1)
+        dyp = yvp(:, 2) - yvp(:, 1)
+        xfp = 0.5*(xvp(:, 1) + xvp(:, 2))
+        yfp = 0.5*(yvp(:, 1) + yvp(:, 2))
+        call magneticField%interp%Evaluate(xfp, yfp, 1, 0, gyp)
+        call magneticField%interp%Evaluate(xfp, yfp, 0, 1, gxp)
+        gxp = -gxp
+
+        ! Evaluate
+        G(ic+1:ic+nvpairspol) = -signvecpol*(gxp*dxp + gyp*dyp) + tol
+
+        ! Update counter
+        ic = ic + nvpairspol 
+
+        ! Radial
+        !-------
+        ! Precompute
+        do j = 1, 2
+            xvr(:, j) = x(vpairsrad(:, j))
+            yvr(:, j) = y(vpairsrad(:, j))
+        end do
+        dxr = xvr(:, 2) - xvr(:, 1)
+        dyr = yvr(:, 2) - yvr(:, 1)
+        xfr = 0.5*(xvr(:, 1) + xvr(:, 2))
+        yfr = 0.5*(yvr(:, 1) + yvr(:, 2))
+        call magneticField%interp%Evaluate(xfr, yfr, 1, 0, gxr)
+        call magneticField%interp%Evaluate(xfr, yfr, 0, 1, gyr)
+
+        ! Evaluate
+        G(ic+1:ic+nvpairsrad) = -signvecrad*(gxr*dxr + gyr*dyr) + tol
+
+        ! Update counter
+        ic = ic + nvpairsrad 
+
+        ! Vessel
+        !-------
+        ! Precompute
+        do j = 1, 2
+            xvv(:, j) = x(vpairsves(:, j))
+            yvv(:, j) = y(vpairsves(:, j))
+        end do
+        dxv = xvv(:, 2) - xvv(:, 1)
+        dyv = yvv(:, 2) - yvv(:, 1)
+        xfv = 0.5*(xvv(:, 1) + xvv(:, 2))
+        yfv = 0.5*(yvv(:, 1) + yvv(:, 2))
+        call environment%vessel%plfvessel%Evaluate(xfv, yfv, 1, 0, gyv)
+        call environment%vessel%plfvessel%Evaluate(xfv, yfv, 0, 1, gxv)
+        gxv = -gxv
+
+        ! Evaluate
+        G(ic+1:ic+nvpairsves) = -signvecves*(gxv*dxv + gyv*dyv) + tol
+
+        ! Update counter
+        ic = ic + nvpairsves 
+
+        ! Constraint gradient
+        !====================
+        ! Reset counter
+        ic = 0
+
+        ! Precompute
+        if (dohessian .or. dogradient) then 
+
+            ! Poloidal
+            !---------
+            ! Allocate
+            allocate(gxxp(nvpairspol), gxyp(nvpairspol), &
+            gyxp(nvpairspol), gyyp(nvpairspol))
+
+            ! Precompute
+            call magneticField%interp%Evaluate(xfp, yfp, 1, 1, gxxp)
+            call magneticField%interp%Evaluate(xfp, yfp, 0, 2, gxyp)
+            call magneticField%interp%Evaluate(xfp, yfp, 2, 0, gyxp)
+            call magneticField%interp%Evaluate(xfp, yfp, 1, 1, gyyp)
+            gxxp = -gxxp 
+            gxyp = -gxyp
+
+            ! Radial
+            !-------
+            ! Allocate
+            allocate(gxxr(nvpairsrad), gxyr(nvpairsrad), &
+            gyxr(nvpairsrad), gyyr(nvpairsrad))
+
+            ! Precompute
+            call magneticField%interp%Evaluate(xfr, yfr, 2, 0, gxxr)
+            call magneticField%interp%Evaluate(xfr, yfr, 1, 1, gxyr)
+            call magneticField%interp%Evaluate(xfr, yfr, 1, 1, gyxr)
+            call magneticField%interp%Evaluate(xfr, yfr, 0, 2, gyyr)
+
+            ! Vessel
+            !-------
+            ! Allocate
+            allocate(gxxv(nvpairsves), gxyv(nvpairsves), &
+            gyxv(nvpairsves), gyyv(nvpairsves))
+
+            ! Precompute
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 1, 1, gxxv)
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 0, 2, gxyv)
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 2, 0, gyxv)
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 1, 1, gyyv)
+            gxxv = -gxxv 
+            gxyv = -gxyv
+
+            ! Concatenate
+            !------------
+            gxx = [gxxp, gxxr, gxxv]
+            gxy = [gxyp, gxyr, gxyv]
+            gyx = [gyxp, gyxr, gyxv]
+            gyy = [gyyp, gyyr, gyyv]
+            gx = [gxp, gxr, gxv]
+            gy = [gyp, gyr, gyv]
+
+            xf = [xfp, xfr, xfv]
+            yf = [yfp, yfr, yfv]
+            dx = [dxp, dxr, dxv]
+            dy = [dyp, dyr, dyv]
+
+            nvpairs = nvpairspol + nvpairsrad + nvpairsves 
+            allocate(vpairs(nvpairs, 2))
+            do j = 1, 2
+                vpairs(:, j) = [vpairspol(:, j), vpairsrad(:, j), vpairsves(:, j)]
+            end do
+            signvec = [signvecpol, signvecrad, signvecves]
+
+        end if
+
+        if (dogradient) then 
+            ! Initialize
+            jacG%nrow = nc 
+            jacG%ncol = designvariables%nphi
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates', 'coordinates_desiredflux') ! no flux contributions
+
+                ! Order in jacobian: first x, then y. 
+
+                ! Allocate
+                jacG%nval = 4*nc ! 4 contributions per constraint 
+                call jacG%Allocate() 
+                allocate(conindex(nc))
+                allocate(valindex(nc))
+
+                ! Build constraint indices
+                conindex = [(k, k = ic+1, ic+nc)]
+
+                ! Add values
+                valindex = [(k, k = ivg+1, ivg+nc)]
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = vpairs(:, 1)
+                jacG%val(valindex) = -signvec*(-gx + 0.5*dx*gxx + 0.5*dy*gyx) ! x1
+                ivg = ivg + nc
+
+                valindex = valindex + nc
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = vpairs(:, 1) + grid%vert%ntot
+                jacG%val(valindex) = -signvec*(-gy + 0.5*dx*gxy + 0.5*dy*gyy) !y1
+                ivg = ivg + nc
+
+                valindex = valindex + nc
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = vpairs(:, 2)
+                jacG%val(valindex) = -signvec*(gx + 0.5*dx*gxx + 0.5*dy*gyx) ! x2
+                ivg = ivg + nc
+
+                valindex = valindex + nc
+                jacG%row(valindex) = conindex  
+                jacG%col(valindex) = vpairs(:, 2) + grid%vert%ntot
+                jacG%val(valindex) = -signvec*(gy + 0.5*dy*gyy + 0.5*dx*gxy) !y2
+                ivg = ivg + nc
+
+                if (any(.not. ieee_is_finite(jacG%val))) then 
+                    print *, 'infinity detected'
+                end if
+
+                ! Update
+                ic = ic + nc                
+
+                ! Build gradient
+                !---------------
+                gradG%nrow = jacG%ncol 
+                gradG%ncol = jacG%nrow 
+                gradG%nval = jacG%nval 
+                
+                call gradG%Allocate()
+                gradG%row = jacG%col 
+                gradG%col = jacG%row
+                gradG%val = jacG%val
+
+                ! Housekeeping
+                call jacG%Deallocate()
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+
+        ! Constraint hessian
+        !===================
+        ! Reset counter
+        ic = 0 
+        if (dohessian) then 
+
+            ! Initialize
+            ic = 0
+            hessG%nrow = designvariables%nphi 
+            hessG%ncol = designvariables%nphi 
+
+            ! Precompute
+            !===========
+            ! Poloidal
+            !---------
+            ! Allocate
+            allocate(gxxxp(nvpairspol), gxyxp(nvpairspol), &
+                gyxxp(nvpairspol), gyyxp(nvpairspol), gxxyp(nvpairspol), &
+                gxyyp(nvpairspol), gyxyp(nvpairspol), gyyyp(nvpairspol))
+
+            ! Precompute
+            call magneticField%interp%Evaluate(xfp, yfp, 2, 1, gxxxp)
+            call magneticField%interp%Evaluate(xfp, yfp, 1, 2, gxyxp)
+            call magneticField%interp%Evaluate(xfp, yfp, 3, 0, gyxxp)
+            call magneticField%interp%Evaluate(xfp, yfp, 2, 1, gyyxp)
+
+            call magneticField%interp%Evaluate(xfp, yfp, 1, 2, gxxyp)
+            call magneticField%interp%Evaluate(xfp, yfp, 0, 3, gxyyp)
+            call magneticField%interp%Evaluate(xfp, yfp, 2, 1, gyxyp)
+            call magneticField%interp%Evaluate(xfp, yfp, 1, 2, gyyyp)
+
+            gxxxp = -gxxxp 
+            gxyxp = -gxyxp
+            gxxyp = -gxxyp 
+            gxyyp = -gxyyp
+
+            ! Radial
+            !-------
+            ! Allocate
+            allocate(gxxxr(nvpairsrad), gxyxr(nvpairsrad), &
+                gyxxr(nvpairsrad), gyyxr(nvpairsrad), gxxyr(nvpairsrad), &
+                gxyyr(nvpairsrad), gyxyr(nvpairsrad), gyyyr(nvpairsrad))
+
+            ! Precompute
+            call magneticField%interp%Evaluate(xfr, yfr, 3, 0, gxxxr)
+            call magneticField%interp%Evaluate(xfr, yfr, 2, 1, gxyxr)
+            call magneticField%interp%Evaluate(xfr, yfr, 2, 1, gyxxr)
+            call magneticField%interp%Evaluate(xfr, yfr, 1, 2, gyyxr)
+
+            call magneticField%interp%Evaluate(xfr, yfr, 2, 1, gxxyr)
+            call magneticField%interp%Evaluate(xfr, yfr, 1, 2, gxyyr)
+            call magneticField%interp%Evaluate(xfr, yfr, 1, 2, gyxyr)
+            call magneticField%interp%Evaluate(xfr, yfr, 0, 3, gyyyr)
+
+            ! Vessel
+            !-------
+            ! Allocate
+            allocate(gxxxv(nvpairsves), gxyxv(nvpairsves), &
+                gyxxv(nvpairsves), gyyxv(nvpairsves), gxxyv(nvpairsves), &
+                gxyyv(nvpairsves), gyxyv(nvpairsves), gyyyv(nvpairsves))
+
+            ! Precompute
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 2, 1, gxxxv)
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 1, 2, gxyxv)
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 3, 0, gyxxv)
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 2, 1, gyyxv)
+
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 1, 2, gxxyv)
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 0, 3, gxyyv)
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 2, 1, gyxyv)
+            call environment%vessel%plfvessel%Evaluate(xfv, yfv, 1, 2, gyyyv)
+
+            gxxxv = -gxxxv 
+            gxyxv = -gxyxv
+            gxxyv = -gxxyv 
+            gxyyv = -gxyyv
+
+            ! Concatenate
+            !------------
+            gxxx = [gxxxp, gxxxr, gxxxv]
+            gxyx = [gxyxp, gxyxr, gxyxv]
+            gyxx = [gyxxp, gyxxr, gyxxv]
+            gyyx = [gyyxp, gyyxr, gyyxv]
+
+            gxxy = [gxxyp, gxxyr, gxxyv]
+            gxyy = [gxyyp, gxyyr, gxyyv]
+            gyxy = [gyxyp, gyxyr, gyxyv]
+            gyyy = [gyyyp, gyyyr, gyyyv]
+
+            ! Check design variables
+            select case(designvariables%type)
+
+            case ('coordinates', 'coordinates_desiredflux') ! no flux, only coordinates
+            
+                ! Initialize
+                !===========
+                ! Allocate
+                hessG%nval = 16*nc
+                if (.not. allocated(valindex)) then
+                    allocate(valindex(nc))
+                end if
+                if (.not. allocated(conindex)) then 
+                    allocate(conindex(nc))
+                end if 
+                if (.not. allocated(hessG%val)) then
+                    call hessG%Allocate()
+                end if
+
+                ! Concatenate to reduce lines of code...
+
+
+                ! Poloidal
+                !---------
+                ! Build constraint indices
+                conindex = [(k, k = ic+1, ic+nc)]
+
+                ! Add values
+                ! x1x1
+                valindex = [(k, k = ivh+1, ivh+nvpairs)]
+                hessG%row(valindex) = vpairs(:, 1)  
+                hessG%col(valindex) = vpairs(:, 1)
+                hessG%val(valindex) = -signvec*(0.25*dx*gxxx - 1.0*gxx + 0.25*dy*gyxx)*lambda(conindex) ! x1x1
+                ivh = ivh + nvpairs
+
+                ! x1y1
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 1)  
+                hessG%col(valindex) = vpairs(:, 1) + grid%vert%ntot
+                hessG%val(valindex) = -signvec*(0.25*dx*gxyx - 0.5*gyx - 0.5*gxy + 0.25*dy*gyyx)*lambda(conindex) ! x1y1
+                ivh = ivh + nvpairs
+
+                ! y1x1
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 1) + grid%vert%ntot
+                hessG%col(valindex) = vpairs(:, 1) 
+                hessG%val(valindex) = -signvec*(0.25*dx*gxyx - 0.5*gyx - 0.5*gxy + 0.25*dy*gyyx)*lambda(conindex) ! x1y1
+                ivh = ivh + nvpairs
+
+                ! y1y1
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 1) + grid%vert%ntot
+                hessG%col(valindex) = vpairs(:, 1) + grid%vert%ntot
+                hessG%val(valindex) = -signvec*(0.25*dx*gxyy - 1.0*gyy + 0.25*dy*gyyy)*lambda(conindex) ! y1y1
+                ivh = ivh + nvpairs
+
+                ! x1x2
+                valindex = [(k, k = ivh+1, ivh+nvpairs)]
+                hessG%row(valindex) = vpairs(:, 1)  
+                hessG%col(valindex) = vpairs(:, 2)
+                hessG%val(valindex) = -signvec*(0.25*dx*gxxx + 0.25*dy*gyxx)*lambda(conindex) ! x1x2
+                ivh = ivh + nvpairs
+
+                ! x1y2
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 1)  
+                hessG%col(valindex) = vpairs(:, 2) + grid%vert%ntot
+                hessG%val(valindex) = -signvec*(0.5*gyx - 0.5*gxy + 0.25*dx*gxyx + 0.25*dy*gyyx)*lambda(conindex) ! x1y2
+                ivh = ivh + nvpairs
+
+                ! y1x2
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 1) + grid%vert%ntot
+                hessG%col(valindex) = vpairs(:, 2) 
+                hessG%val(valindex) = -signvec*(0.5*gxy - 0.5*gyx + 0.25*dx*gxyx + 0.25*dy*gyyx)*lambda(conindex) ! y1x2
+                ivh = ivh + nvpairs
+
+                ! y1y2
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 1) + grid%vert%ntot
+                hessG%col(valindex) = vpairs(:, 2) + grid%vert%ntot
+                hessG%val(valindex) = -signvec*(0.25*dx*gxyy + 0.25*dy*gyyy)*lambda(conindex) ! y1y2
+                ivh = ivh + nvpairs
+
+                ! x2x1
+                valindex = [(k, k = ivh+1, ivh+nvpairs)]
+                hessG%row(valindex) = vpairs(:, 2)  
+                hessG%col(valindex) = vpairs(:, 1)
+                hessG%val(valindex) = -signvec*(0.25*dx*gxxx + 0.25*dy*gyxx)*lambda(conindex) ! x1x2
+                ivh = ivh + nvpairs
+
+                ! x2y1
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 2)  
+                hessG%col(valindex) = vpairs(:, 1) + grid%vert%ntot
+                hessG%val(valindex) = -signvec*(0.5*gxy - 0.5*gyx + 0.25*dx*gxyx + 0.25*dy*gyyx)*lambda(conindex) ! y1x2
+                ivh = ivh + nvpairs
+
+                ! y2x1
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 2) + grid%vert%ntot
+                hessG%col(valindex) = vpairs(:, 1) 
+                hessG%val(valindex) = -signvec*(0.5*gyx - 0.5*gxy + 0.25*dx*gxyx + 0.25*dy*gyyx)*lambda(conindex) ! x1y2
+                ivh = ivh + nvpairs
+
+                ! y2y1
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 2) + grid%vert%ntot
+                hessG%col(valindex) = vpairs(:, 1) + grid%vert%ntot
+                hessG%val(valindex) = -signvec*(0.25*dx*gxyy + 0.25*dy*gyyy)*lambda(conindex) ! y1y2
+                ivh = ivh + nvpairs
+
+                ! x2x2
+                valindex = [(k, k = ivh+1, ivh+nvpairs)]
+                hessG%row(valindex) = vpairs(:, 2)  
+                hessG%col(valindex) = vpairs(:, 2)
+                hessG%val(valindex) = -signvec*(1.0*gxx + 0.25*dx*gxxx + 0.25*dy*gyxx)*lambda(conindex) ! x2x2
+                ivh = ivh + nvpairs
+
+                ! x2y2
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 2)  
+                hessG%col(valindex) = vpairs(:, 2) + grid%vert%ntot
+                hessG%val(valindex) = -signvec*(0.5*gxy + 0.5*gyx + 0.25*dx*gxyx + 0.25*dy*gyyx)*lambda(conindex) ! x2y2
+                ivh = ivh + nvpairs
+
+                ! y2x2
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 2) + grid%vert%ntot
+                hessG%col(valindex) = vpairs(:, 2) 
+                hessG%val(valindex) = -signvec*(0.5*gxy + 0.5*gyx + 0.25*dx*gxyx + 0.25*dy*gyyx)*lambda(conindex) ! x2y2
+                ivh = ivh + nvpairs
+
+                ! y2y2
+                valindex = valindex + nvpairs 
+                hessG%row(valindex) = vpairs(:, 2) + grid%vert%ntot
+                hessG%col(valindex) = vpairs(:, 2) + grid%vert%ntot
+                hessG%val(valindex) = -signvec*(1.0*gyy + 0.25*dx*gxyy + 0.25*dy*gyyy)*lambda(conindex) ! y2y2
+                ivh = ivh + nvpairs
+
+                ! Update
+                ic = ic + nvpairs             
+
+            case default
+
+                ! Unknown, throw error
+                call gdErrorHandler('Gradient not implemented for ' &
+                    // 'this type of design variable')
+
+            end select
+
+        end if
+        
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+    end subroutine
 
 end module
