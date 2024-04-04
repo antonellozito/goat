@@ -7038,10 +7038,6 @@ module gdmod_constraints
                 jacG%val(valindex) = -signvec*(gy + 0.5*dy*gyy + 0.5*dx*gxy) !y2
                 ivg = ivg + nc
 
-                if (any(.not. ieee_is_finite(jacG%val))) then 
-                    print *, 'infinity detected'
-                end if
-
                 ! Update
                 ic = ic + nc                
 
