@@ -165,7 +165,7 @@ VERSION 1.00.00
 'gd.design.cfv.par.LR.lengthparam'			'0.1'
 'gd.design.cfv.par.LR.linefoldingpenfac'    '0'
 'gd.design.cfv.par.LR.dovesseledges'        '1'
-'gd.design.cfv.par.LR.minedgelength'        '1e-5'
+'gd.design.cfv.par.LR.minedgelength'        '1e-4'
 'gd.design.cfv.par.LRrad.lambda'            '1e-5'
 'gd.design.cfv.par.FAD.lambda'		 		'1e-5'
 'gd.design.cfv.par.FAD.weightatvessel'       '0.1'
@@ -280,7 +280,7 @@ VERSION 1.00.00
 # KKT driver (see also GridKKTDriver.m)
 # Design relaxation factors
 'gd.opt.num.docfrelax'              '1'
-'gd.opt.num.rxf'                    '1e1'
+'gd.opt.num.rxf'                    '1e-1'
 'gd.opt.num.rxfdesign'              '1'
 'gd.opt.num.rxfmin'                 '0e-1'
 'gd.opt.num.rxfdec'                 '0.90'
