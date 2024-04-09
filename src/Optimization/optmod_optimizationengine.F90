@@ -29,6 +29,7 @@ module optmod_optimizationengine
     !============
     ! Load modules
     use mod_precision
+    use mod_constants
     use mod_sparseinterface
     use mod_diagnostics
     use mod_linearsolverinterface
@@ -524,6 +525,12 @@ module optmod_optimizationengine
 
         end select
 
+        ! Check if the result is NaN or inf - in that case, return inf
+        if ( (.not. ieee_is_finite(f)) .or. (ieee_is_nan(f)) ) then 
+            ! Set to infinity
+            f = posinfval_R8()
+        end if 
+
     end subroutine
 
     ! L1 merit function
@@ -727,7 +734,7 @@ module optmod_optimizationengine
         class(OptimizationProblemUDT)               :: problem
     
         ! Loop variables
-        integer(I8)                 :: itopt, maxit
+        integer(I8)                 :: itopt, maxit, k
         logical                     :: converged
         
         ! Auxiliary variables 
@@ -759,11 +766,14 @@ module optmod_optimizationengine
 
         ! Solver & updates
         real(R8), allocatable       :: fullmat(:, :)
-        double precision, allocatable :: dx(:), dxl(:)
+        double precision, allocatable :: dx(:), dxl(:), dxl2(:)
         real(R8), allocatable       :: rhs(:)
         real(R8)                    :: alphals
         integer(I8)                 :: flag, flagls
-        type(MySparseUDT)           :: hessLJ, lhs
+        integer(I8), allocatable    :: phiind(:), eqconind(:), &
+            ineqconind(:), activeineqconind(:), inactiveineqconind(:)
+        type(MySparseUDT)           :: hessLJ, lhs, hessLL, hessLM, &
+            hessLC
 
         ! Diagnostics
         logical                     :: checkgradients, checkhessians 
@@ -838,6 +848,10 @@ module optmod_optimizationengine
         allocate(fullmat(hessL%nrow, hessL%ncol))
         dx = 0
         rhs = 0
+        allocate(phiind(nphi), eqconind(neq), ineqconind(nineq))
+        phiind = [(k, k = 1, nphi)]
+        eqconind = [(k, k = nphi+1, nphi+neq)]
+        ineqconind = [(k, k = nphi+neq+1, nphi+neq+nineq)]
 
         ! Diagnostics
         checkgradients  = .false. ! check gradients in each iteration?
@@ -930,7 +944,7 @@ module optmod_optimizationengine
                 call solver%RelaxKKTSystem(lhs, nphi, neq, nineq)
 
                 !print *, 'hessian size: ', hessL%nrow, hessL%ncol
-                !call SpyPlot(hessL%row, hessL%col, hessL%nval, '-p')
+                !call SpyPlot(lhs%row, lhs%col, lhs%nval, '-p')
                 
                 ! Call the sparse solver
                 call cpu_time(t_linsolve_s)
@@ -992,14 +1006,29 @@ module optmod_optimizationengine
                 end if 
 
                 ! Update lagrange multipliers using least-squares approach
-                hessLJ = hessJ + hessG ! not including inequality constraints for now
-                allocate(dxl(neq))
-                call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
-                    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
+                ! for active constraints
+                allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
+                activeineqconind = pack(ineqconind, A)
+                inactiveineqconind = pack(ineqconind, I)
+                hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
+                hessLJ = hessLJ%DeleteRows(inactiveineqconind)
+                hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
+                hessLC = hessLC%DeleteRows(inactiveineqconind)
+                allocate(dxl(neq + count(A)))
+                !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
+                !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
+                !    dxl2, flag)
+                !dxl2 = -dxl2
+                call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
+                    MatrixVectorProduct(hessLC%Transpose(), &
+                    (rhs([phiind, eqconind, activeineqconind]) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
                     dxl, flag)
-                dxl = -dxl
-                dx(nphi+1:nphi+neq) = dxl
-                deallocate(dxl)
+
+                !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
+                
+                dx(nphi+1:nphi+neq) = dxl(1:neq)
+                dx(activeineqconind) = dxl(neq+1:neq+count(A))
+                deallocate(dxl, activeineqconind, inactiveineqconind)
                 
 
             else
@@ -1014,6 +1043,9 @@ module optmod_optimizationengine
             ! Update lagrange multipliers
             lambda  = lambda + dx(nphi+1:nphi+neq)
             mu      = mu + dx(nphi+neq+1:nphi+neq+nineq)
+
+            ! Set mu of non-active constraints to zero
+            where (.not. A) mu = 0
             
             ! Timers
             call cpu_time(t_it_e)
@@ -1762,28 +1794,31 @@ module optmod_optimizationengine
                     Ak = gradG%Concatenate(gradH%DeleteColumns(.not. A), 2)
                     LSA = Ak%Transpose()*Ak
 
-                    ! Compute intermediate solution
-                    call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
+                    ! Check if constraints are bounded, otherwise skip
+                    if (all(ieee_is_finite(ck))) then
+                        ! Compute correction step
+                        call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
 
-                    ! Check if it converged, otherwise skip update
-                    if (flag2 /= 0) then 
-                        print *, 'linesearch backtracking_soc: could not converge problem, skipping soc update'
-                        wkt(:) = 0
+                        ! Check if it converged, otherwise skip update
+                        if (flag2 /= 0) then 
+                            print *, 'linesearch backtracking_soc: could not converge problem, skipping soc update'
+                            wkt(:) = 0
+                        end if 
+
+                        ! Compute correction
+                        wk = MatrixVectorProduct(Ak, -wkt)
+
+                        ! Recompute cost function at step x0 + alpha*d + wk
+                        ! Note: the problem is already updated to x + alpha*d!
+                        x = x0 + alpha*dphi + wk ! update x to ensure proper downdate later
+                        call problem%UpdateDesign(wk)
+                        call problem%UpdateProblem()
+                        call problem%EvaluateMeritFunction(fk, DJfk, dx, &
+                            lambda, mu, doderiv, meritfunction, numLS)
                     end if 
 
                     ! Housekeeping
                     deallocate(ck)
-
-                    ! Compute correction
-                    wk = MatrixVectorProduct(Ak, -wkt)
-
-                    ! Recompute cost function at step x0 + alpha*d + wk
-                    ! Note: the problem is already updated to x + alpha*d!
-                    x = x0 + alpha*dphi + wk ! update x to ensure proper downdate later
-                    call problem%UpdateDesign(wk)
-                    call problem%UpdateProblem()
-                    call problem%EvaluateMeritFunction(fk, DJfk, dx, &
-                        lambda, mu, doderiv, meritfunction, numLS)
 
                     ! Check the Armijo condition again
                     if (fk < f0 + c1*alpha*DJf0) then 
@@ -1914,7 +1949,7 @@ module optmod_optimizationengine
         ! dLdlambdadphi
         !--------------
         lhs%val(k+1:k+gradG%nval) = gradG%val 
-        lhs%row(k+1:k+gradG%nval) = gradG%row
+        lhs%row(k+1:k+gradG%nval) = gradG%row 
         lhs%col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
         k = k + gradG%nval 
 
