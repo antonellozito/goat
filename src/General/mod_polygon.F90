@@ -33,7 +33,11 @@
 !
 !       nv, ne      number of unique polygon vertices (nv) and polygon 
 !                   edges (ne)
+!       nl          number of labels
 !       x, y        vertex coordinates of the polygon (nv-by-1)
+!       labels      labels for each (x, y) pair. Can be provided in the
+!                   initialization (if not, default is nv-by-1 zero 
+!                   array, but can be nv-by-nl)
 !       edges       vertex pairs for each edge (ne-by-1, sorted in
 !                   arbitrary direction)
 !       vert        vertex ordering of the polygon (ne+1-by-1), may contain
@@ -106,12 +110,12 @@ module mod_polygon
         ! The general polygon type, see documentation of this module for
         ! the fields and procedures. 
 
-        integer(I8)                 :: nv, ne
+        integer(I8)                 :: nv, ne, nl
 
         logical                     :: isclosed, selfintersecting, &
             issimple
 
-        integer(I8), allocatable    :: edges(:, :), vert(:)
+        integer(I8), allocatable    :: edges(:, :), vert(:), labels(:, :)
 
         real(R8), allocatable       :: x(:), y(:), ex(:), ey(:), &
             tx(:), ty(:), tn(:), nx(:), ny(:), nn(:)
@@ -121,7 +125,9 @@ module mod_polygon
 
         procedure :: Allocate       => AllocatePolygon
         procedure :: Deallocate     => DeallocatePolygon
-        procedure :: Construct      => ConstructPolygon
+        procedure, private  :: ConstructPolygon 
+        procedure, private  :: ConstructPolygonNolabels
+        generic   :: Construct      => ConstructPolygon, ConstructPolygonNolabels
         procedure :: Initialize     => InitializePolygon 
         procedure :: ComputeMetrics => ComputePolygonMetrics
         procedure :: SetVert        => SetPolygonVertices
@@ -148,8 +154,9 @@ module mod_polygon
 
         procedure, private  :: ConstructPolygonSetCoordinates
         procedure, private  :: ConstructPolygonSetFromPolygons
+        procedure, private  :: ConstructPolygonSetFromEdges
         generic :: Construct        => ConstructPolygonSetCoordinates, &
-            ConstructPolygonSetFromPolygons
+            ConstructPolygonSetFromPolygons, ConstructPolygonSetFromEdges
         procedure :: SelfIntersections  => PolygonSetSelfIntersections
         procedure :: GetEdges           => GetPolygonSetEdges
         procedure :: GetNormals         => GetPolygonSetNormals
@@ -299,6 +306,94 @@ module mod_polygon
         ! Assign
         polygonset%polygons = polygons
 
+
+    end subroutine
+
+    ! Construct starting from unsorted array of edges
+    subroutine ConstructPolygonSetFromEdges(polygonset, edges, x, y)
+
+        ! Description
+        !============
+        ! Construct a set of polygons starting from an unsorted set of
+        ! edges. These edges cannot contain NaNs. x, y are coordinate 
+        ! vectors that should be indexable using the edge indices. 
+        ! The vertex indices of the edges will be stored as labels in 
+        ! the polygon structure.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)        :: polygonset 
+        integer(I8), intent(in)     :: edges(:, :)
+        real(R8), intent(in)        :: x(:), y(:)
+
+        ! Auxiliary
+        integer(I8)                 :: ne, np, tempne
+        integer(I8), allocatable    :: sortindex(:), sortededges(:, :), &
+            tempedges(:, :), tempvert(:), ps(:), pe(:), &
+            templabels(:, :)
+
+        logical, allocatable        :: ispolygonstart(:)
+
+        ! Loop
+        integer(I8)                 :: i, k
+
+        ! Initialize
+        !===========
+        ! Check edge dimensions
+        if (size(edges, 2) /= 2) then 
+            call gdErrorHandler('ConstructPolygonSetFromEdges: ' // &
+                'edges should be ne-by-2 array')
+        end if 
+
+        ! Unpack
+        ne = size(edges, 1)
+
+        ! Allocate
+        allocate(sortindex(ne), ispolygonstart(ne))
+
+        ! Extract polygon edges
+        !======================
+        ! Sort
+        call SortPolygonEdges(edges, ne, sortindex, ispolygonstart)
+        allocate(sortededges, source=edges)
+        sortededges = edges(sortindex, :)
+
+        ! Get number of polygons
+        np = count(ispolygonstart)
+
+        ! Construct polygon set
+        !======================
+        ! Allocate
+        polygonset%np = np 
+        allocate(polygonset%polygons(np))
+
+        ! Construct polygon start and end indices
+        allocate(ps(np), pe(np))
+        ps = pack([(k, k = 1, ne)], ispolygonstart)
+        pe = [ps(2:ne), ne]
+
+        ! Construct polygons
+        do i = 1, np
+            ! Get polygon edges
+            tempne = pe(i) - ps(i) + 1
+            tempedges = edges(ps(i):pe(i), :)
+
+            ! Get polygon vertices
+            allocate(tempvert(tempne+1))
+            call ExtractPolygonVertices(tempedges, tempne, &
+                tempvert)
+
+            ! Set labels as vertex indices
+            allocate(templabels(tempne+1, 1))
+            templabels(:, 1) = tempvert
+
+            ! Construct polygon
+            call polygonset%polygons(i)%Construct(x(tempvert), &
+                y(tempvert), templabels)
+        end do
+
+        
 
     end subroutine
 
@@ -1116,7 +1211,7 @@ module mod_polygon
     !------------------------------------------------------------------!
 
     ! Constructor
-    subroutine ConstructPolygon(polygon, x, y) 
+    subroutine ConstructPolygon(polygon, x, y, labels) 
 
         ! Description
         !============
@@ -1128,7 +1223,8 @@ module mod_polygon
         !==================
         ! Arguments
         class(PolygonUDT)                       :: polygon 
-        real(R8), allocatable, intent(in)       :: x(:), y(:) 
+        real(R8), intent(in)                    :: x(:), y(:)
+        integer(I8), intent(in)                 :: labels(:, :) 
 
         ! Auxiliary
 
@@ -1137,7 +1233,7 @@ module mod_polygon
         ! Construct
         !==========
         ! Set coordinates & initialize vertices etc
-        call polygon%Initialize(x, y)
+        call polygon%Initialize(x, y, labels)
 
         ! Check for duplicate points, remove
         call polygon%RemoveDuplicatePoints()
@@ -1160,6 +1256,31 @@ module mod_polygon
 
     end subroutine
 
+    ! Constructor, without labels
+    subroutine ConstructPolygonNolabels(polygon, x, y)
+
+        ! Description
+        !============
+        ! Wrapper for construction without labels. Labels are simply
+        ! initialized to a zero array 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)           :: polygon 
+        real(R8), intent(in)        :: x(:), y(:)
+
+        ! Auxiliary
+        integer(I8), allocatable    :: labels(:, :)
+
+        ! Construct
+        !==========
+        allocate(labels(size(x, 1), 1))
+        labels = 0
+        call polygon%Construct(x, y, labels)
+
+    end subroutine
+
     ! Allocator
     subroutine AllocatePolygon(polygon)
 
@@ -1176,12 +1297,13 @@ module mod_polygon
 
         ! Allocate
         !=========
-        associate(nv => polygon%nv, ne => polygon%ne)
+        associate(nv => polygon%nv, ne => polygon%ne, nl => polygon%nl)
 
         allocate(polygon%x(nv), polygon%y(nv), polygon%vert(ne+1), &
             polygon%edges(ne, 2), polygon%ex(ne), polygon%ey(ne), &
             polygon%tx(ne), polygon%ty(ne), polygon%tn(ne), &
-            polygon%nx(ne), polygon%ny(ne), polygon%nn(ne))
+            polygon%nx(ne), polygon%ny(ne), polygon%nn(ne), &
+            polygon%labels(nv, nl))
 
         end associate
 
@@ -1205,13 +1327,14 @@ module mod_polygon
         deallocate(polygon%x, polygon%y, polygon%vert, &
             polygon%edges, polygon%ex, polygon%ey, &
             polygon%tx, polygon%ty, polygon%tn, &
-            polygon%nx, polygon%ny, polygon%nn)
+            polygon%nx, polygon%ny, polygon%nn, &
+            polygon%labels)
 
 
     end subroutine
 
     ! Initialization
-    subroutine InitializePolygon(polygon, x, y)
+    subroutine InitializePolygon(polygon, x, y, labels)
 
         ! Description
         !============
@@ -1224,7 +1347,8 @@ module mod_polygon
         !==================
         ! Arguments
         class(PolygonUDT)                   :: polygon 
-        real(R8), allocatable, intent(in)   :: x(:), y(:)
+        real(R8), intent(in)                :: x(:), y(:)
+        integer(I8), intent(in)             :: labels(:, :)
 
         ! Auxiliary
 
@@ -1236,6 +1360,7 @@ module mod_polygon
         ! Sizes
         polygon%nv = size(x)
         polygon%ne = polygon%nv - 1
+        polygon%nl = size(labels, 2)
 
         ! Allocate
         call polygon%Allocate()
@@ -1247,6 +1372,9 @@ module mod_polygon
         ! Set edges
         polygon%edges(:, 1) = [(k, k = 1, polygon%nv-1)]
         polygon%edges(:, 2) = [(k, k = 2, polygon%nv)]
+
+        ! Set labels (currently following x, y)
+        polygon%labels = labels
 
 
     end subroutine
@@ -1265,7 +1393,7 @@ module mod_polygon
 
         ! Input
         !------
-        ! - polygon:        polygon structure with the x, y, vert fields
+        ! - polygon:        polygon structure with the x, y, vert, labels fields
 
         ! Output
         !-------
@@ -1298,8 +1426,9 @@ module mod_polygon
 
         real(R8), allocatable       :: tempx(:), tempy(:)
 
+        integer(I8)                 :: nlabels
         integer(I8), allocatable    :: mapping(:), tempedge(:, :), &
-            diffindex(:)
+            diffindex(:), templabels(:, :)
 
         logical, allocatable        :: keepvertex(:), keepedges(:)
 
@@ -1321,6 +1450,7 @@ module mod_polygon
         mapping(:) = [(k, k = 1, nv)]
         keepvertex(:) = .true.
         diffindex(:) = 0
+        nlabels = size(polygon%labels, 2)
         
         ! Loop over all points but one 
         do i = 1, nv-1 
@@ -1375,11 +1505,15 @@ module mod_polygon
 
         ! Rebuild the polygon
         allocate(tempedge(count(keepedges), 2), &
-            tempx(count(keepvertex)), tempy(count(keepvertex)))
+            tempx(count(keepvertex)), tempy(count(keepvertex)), &
+            templabels(count(keepvertex), nlabels))
         tempedge(:, 1) = pack(polygon%edges(:, 1), keepedges)
         tempedge(:, 2) = pack(polygon%edges(:, 2), keepedges)
         tempx = pack(polygon%x, keepvertex)
         tempy = pack(polygon%y, keepvertex)
+        do i = 1, nlabels
+            templabels(:, i) = pack(polygon%labels(:, i), keepvertex)
+        end do
 
         call polygon%Deallocate() 
         polygon%nv = count(keepvertex)
@@ -1388,11 +1522,12 @@ module mod_polygon
         polygon%edges = tempedge 
         polygon%x = tempx 
         polygon%y = tempy
+        polygon%labels = templabels
 
         ! Housekeeping
         !=============
         deallocate(tempedge, tempx, tempy, diffindex, keepvertex, &
-            keepedges)
+            keepedges, templabels)
 
 
     end subroutine
@@ -1407,7 +1542,7 @@ module mod_polygon
         ! in the polygon%vert field. Note that the size of this field
         ! is not necessarily equal to the size of polygon%x! This is 
         ! because multiple points can occur multiple times in the
-        ! polygon. 
+        ! polygon. Note that labels still follow the x, y sequence
 
         ! It is assumed that the polygon has been properly initialized
         ! and that any duplicate points have been removed (will work 
@@ -1836,6 +1971,402 @@ module mod_polygon
         ! Print 
         print *, 'Warning: PolygonWarningHandler: ', msg 
 
+    end subroutine
+
+    ! Polygon edge sorter
+    subroutine SortPolygonEdges(pein, ne, sortindex, ispolygonstart)
+
+        ! Description
+        !============
+        ! This routine sorts the edges of a simply polygon. The definition
+        ! that is used here for simple polygon demands that the polygon 
+        ! either closes perfectly on itself, or is a non-branching polygon 
+        ! (i.e. each vertex only has maximal two edges). This is checked 
+        ! during the routine execution when determining the polygon edges. 
+        ! Multiple open and closed polygons are supported. The logical 
+        ! 'ispolygonstart' indicates which of the (sorted!) edges is the 
+        ! start of a new polygon. 
+    
+        ! Arguments
+        !==========
+        !
+        ! - pein:           (input) ne-by-2 array of vertex indices that has
+        !                   to be sorted. 
+        ! - ne:             (input) number of edges (integer)
+        ! - sortindex:      (output) index that contains the sequence of 
+        !                   sorted polygon edge indices, i.e. 
+        !                   pein(sortindex,:) should sort the edges.
+        ! - ispolygonstart: (output) ne-by-1 logical of which the i'th
+        !                   element is true if sortindex(i) is the start 
+        !                   index of a new polygon. The edges of this 
+        !                   polygon are all edges between this true value 
+        !                   and the next. 
+    
+        ! Algorithm
+        !==========
+        !
+        ! 0)    Initialize and allocate
+        ! 1)    Find a starting vertex:
+        !
+        !       Take a vertex, check how many times it occurs.
+        ! 
+        !       If one: 
+        !       start vertex found, go to 2). Else, repeat 1). If no
+        !       vertex found (and has not errored meanwhile), only closed
+        !       polygons are left.
+        !       Take any vertex as starting vertex, go to 2)
+        !
+        !       If two:
+        !       inner vertex found of a polygon, repeat 1) for the next
+        !       vertex.
+        !
+        !       If more than two:
+        !       throw error: this indicates branching and is not yet 
+        !       supported.
+        !        
+        ! 2)    Find the edges of the current polygon. 
+        !
+        !       2.1)    Find the edge that contains the current vertex which 
+        !               initially is the starting vertex and which has not
+        !               yet been sorted. If no edges meet this criterion,
+        !               exit the loop and go to 3). If one edge is found,
+        !               go to 2.2). If multiple edges are found, throw error
+        !               (this should be impossible though and would indicate
+        !               a bug in the code)
+        !       2.2)    For the next edge, find the other vertex and set it 
+        !               to the current vertex. Go to 2.1)
+    
+        ! 3)    Update data structures, and check if any edges remain. If 
+        !       yes, go to 1), if no, exit the routine and return. 
+    
+        ! Initialize
+        !===========
+        ! The usual
+        implicit none
+    
+        ! Declare variables
+        !==================
+        ! Input
+        integer(I8), dimension(ne,1:2)  :: pein ! polygon edges 
+        integer                         :: ne
+        
+        ! Output
+        integer(I8), dimension(ne)      :: sortindex 
+        logical, dimension(ne)          :: ispolygonstart
+    
+        ! Mixed
+    
+        ! Loop
+        logical                 :: allfound, startfound, polygonfound
+        integer(I8)             :: i, k, spind
+    
+        ! Auxiliary
+        integer(I8)                 :: nv, nremedges, nextremedge, &
+                                    tc1, tc2
+    
+        logical, allocatable        :: isedgesorted(:), isremedgesorted(:), &
+                                    mask(:)
+    
+        integer(I8), allocatable    :: remedges(:,:), edgeID(:), &
+                                    remedgeID(:), temparray(:)
+    
+        ! Main program
+        !=============
+        ! Check
+        if (size(pein,2) /= 2) then
+            ! Throw error
+            call gdErrorHandler('SortPolygonEdges: input argument pein should be a ne-by-2 integer array')
+    
+        end if
+    
+        ! Initialize
+        allocate(isedgesorted(ne)) ! logical to indicate if edge has been sorted
+        allocate(edgeID(ne))
+    
+        ispolygonstart(:) = .false.
+        isedgesorted(:) = .false.
+        edgeID(:) = (/ (i, i=1,ne,1) /)
+        allfound = .false. ! while loop variable
+        spind = 1 ! sorted polygon index
+    
+        ! Loop
+        do while (allfound .eqv. .false.)
+            ! Set the polygon starting index
+            ispolygonstart(spind) = .true.
+    
+            ! Allocate inner loop variables
+            nremedges = count(isedgesorted .eqv. .false.)
+            allocate(remedges(nremedges,2))
+            allocate(remedgeID(nremedges))
+            allocate(isremedgesorted(nremedges))
+            allocate(mask(nremedges))
+    
+            ! Get the remaining edges
+            remedges(:,1) = pack(pein(:,1), (isedgesorted .eqv. .false.))
+            remedges(:,2) = pack(pein(:,2), (isedgesorted .eqv. .false.))
+            remedgeID(:) = pack(edgeID, (isedgesorted .eqv. .false.))
+            isremedgesorted(:) = .false.
+    
+            ! Find a starting vertex
+            startfound = .false. 
+            k = 1
+            do while ((startfound .eqv. .false.) .and. (k <= nremedges))
+                ! Count how many times the current edge vertices occur
+                tc1 = count(remedges(:,1) == remedges(k,1)) & 
+                    + count(remedges(:,2) == remedges(k,1))
+                tc2 = count(remedges(:,1) == remedges(k,2)) & 
+                    + count(remedges(:,2) == remedges(k,2))
+    
+                ! Check & add
+                if (tc1 == 1) then
+                    ! Found a start vertex
+                    startfound = .true.
+                    nv = remedges(k,2) ! next vertex
+    
+                    ! Add the current edge
+                    sortindex(spind) = remedgeID(k)
+    
+                    ! Set edge as sorted
+                    isremedgesorted(k) = .true.
+    
+                    ! Update indices
+                    k = k+1
+                    spind = spind+1
+                else if (tc2 == 1) then
+                    ! Found a start vertex
+                    startfound = .true.
+                    nv = remedges(k,1) ! next vertex
+    
+                    ! Add the current edge
+                    sortindex(spind) = remedgeID(k)
+    
+                    ! Set edge as sorted
+                    isremedgesorted(k) = .true.
+    
+                    ! Update counters
+                    k = k+1
+                    spind = spind+1
+                else if ((tc1 > 2) .or. (tc2 > 2)) then
+                    ! Polygon branches, throw error
+                    call gdErrorHandler('SortPolygonEdges: branching polygon detected, not supported')
+                else
+                    ! Next edge, update counter
+                    k = k+1
+                end if
+            end do
+    
+            ! Hedge for closed polygon(s)
+            if (startfound .eqv. .false.) then
+                ! No start index found, yet edges remain -> has to be closed
+                ! polygon. Simply take the first vertex of the first edge
+                startfound = .true.
+                nv = remedges(1,2)
+    
+                ! Add the current edge
+                sortindex(spind) = remedgeID(1)
+    
+                ! Set edge as sorted
+                isremedgesorted(1) = .true.
+    
+                ! Update counters
+                spind = spind+1
+            end if
+    
+            ! Find the edges of this polygon
+            polygonfound = .false.
+            do while (polygonfound .eqv. .false.)
+                ! The next edge has the current vertex and is not yet found.
+                mask(:) = (isremedgesorted .eqv. .false.) ! first requirement
+                mask = mask .and. & 
+                    ((remedges(:,1) == nv) .or. (remedges(:,2) == nv)) ! second requirement
+                
+                ! Check if this is the final edge
+                if (count(mask) == 0) then
+                    ! All edges were found, exit
+                    polygonfound = .true. 
+                else if (count(mask) > 1) then
+                    ! Unknown error, call error handler
+                    call gdErrorHandler('SortPolygonEdges: branching polygon detected, not supported')
+                else
+                    ! Get the next edge
+                    allocate(temparray(1)) ! avoid rank conflicts
+                    temparray = pack((/ (i, i=1,nremedges,1) /),mask)
+                    nextremedge = temparray(1)
+    
+                    ! Add edge
+                    sortindex(spind) = remedgeID(nextremedge)
+    
+                    ! Set edge as sorted
+                    isremedgesorted(nextremedge) = .true.
+    
+                    ! Get next vertex
+                    if (remedges(nextremedge,1) == nv) then
+                        nv = remedges(nextremedge,2)
+                    else
+                        nv = remedges(nextremedge,1)
+                    end if
+                    
+                    ! Update counters
+                    spind = spind+1
+    
+                    ! Deallocate
+                    deallocate(temparray)
+                end if 
+            end do
+    
+            ! Update logicals
+            isedgesorted(pack(remedgeID,isremedgesorted)) = .true. 
+    
+            ! Check if all edges have been found
+            if (spind == ne+1) then ! one ahead due to updating rule here
+                allfound = .true.
+            end if
+    
+            ! Deallocate inner loop variables
+            deallocate(remedges)
+            deallocate(remedgeID)
+            deallocate(isremedgesorted)
+            deallocate(mask)
+    
+        end do
+    
+    end subroutine
+
+    ! Vertex extractor from sorted edges
+    subroutine ExtractPolygonVertices(pe, ne, pv)
+
+        ! Description
+        !===========
+        ! This routine extracts the vertices of a polygon from a set of 
+        ! sorted polygon edges which are given by their vertex IDs in the 
+        ! 'pe' (polygon edges) ne-by-2 array. Only single polygons (can be 
+        ! closed or open) are supported, i.e. no branching or multiple 
+        ! polygons. This is checked for during the routine. 
+    
+        ! Arguments
+        !==========
+        !
+        ! - pe:             (input) ne-by-2 array of vertex indices that has
+        !                   to be sorted. 
+        ! - ne:             (input) number of edges (integer)
+        ! - pv:             (output) ne+1-by-1 array of polygon vertices
+    
+        ! Algorithm
+        !==========
+        ! 0)    Initialize & check
+        ! 1)    Take the first edge
+        !
+        ! 2)    Check which vertex is the start vertex by comparing with the 
+        !       vertices of the next edge. Set this as the next vertex. 
+        !       If (the vertex is not found) then
+        !           throw error
+        !       else 
+        !           add the current vertex
+        !           set the other vertex as the next vertex
+        !       end if
+        !
+        ! 3)    for the remaining edges, repeat 2) but with the start vertex
+        !       equal to the next vertex. If the last vertex is reached, add 
+        !       the remaining vertex. 
+    
+        ! Declare variables
+        !==================
+        ! Input
+        integer(I8), dimension(ne,1:2)  :: pe ! polygon edges 
+        integer                         :: ne
+        
+        ! Output
+        integer(I8), dimension(ne+1)    :: pv
+    
+        ! Mixed
+    
+        ! Loop
+        integer(I8)                     :: k, cvind, nv
+    
+        ! Auxiliary
+        logical, dimension(1:4)         :: check
+    
+        ! Main program
+        !=============
+        ! Check
+        if (size(pe,2) /= 2) then
+            ! Throw error
+            call gdErrorHandler('ExtractPolygonVertices: input argument pe should be a ne-by-2 integer array')
+    
+        end if
+    
+        ! Initialize
+        check(:) = .false. 
+        k = 1
+    
+        ! Hedge for the trivial case of one edge
+        if (ne == 1) then 
+            ! Check 
+            if (pe(1,1) == pe(1,2)) then 
+                call gdErrorHandler('ExtractPolygonVertices: starting polygon edge vertices are the same - check input')
+            else
+                pv(1:2) = pe(1,1:2)
+            end if 
+    
+            ! Exit routine
+            return 
+        end if
+    
+        ! Get the starting vertex & do check on polygon
+        check(1) = pe(1,1) == pe(2,1)
+        check(2) = pe(1,1) == pe(2,2)
+        check(3) = pe(1,2) == pe(2,1)
+        check(4) = pe(1,2) == pe(2,2)
+        if ( (check(1) .and. (.not. any(check(2:4))) ) .or. &
+             (check(2) .and. (.not. any(check((/1, 3, 4/)))) ) ) then 
+            ! Second vertex is starting vertex
+            cvind = 2
+        else if ( (check(4) .and. (.not. any(check(1:3))) ) .or. &
+            (check(3) .and. (.not. any(check((/1, 2, 4/)))) ) ) then 
+            ! First vertex is starting vertex
+                cvind = 1
+        else 
+            ! Something wrong with input - throw error
+            print *, pe(1,:)
+            print *, pe(2,:)
+            call gdErrorHandler('ExtractPolygonVertices: something wrong with input - please check input polygon')
+        end if
+    
+        ! Loop
+        do while (k < ne)
+            ! Get the current vertex, add it to the polygon vertices
+            pv(k) = pe(k,cvind)
+    
+            ! Get the next vertex
+            if (cvind == 1) then
+                nv = pe(k,2)
+            else
+                nv = pe(k,1)
+            end if 
+    
+            ! Update cvind
+            if (nv == pe(k+1,1)) then
+                cvind = 1
+            else if (nv == pe(k+1,2)) then
+                cvind = 2
+            else
+                ! Throw error, next edge does not contain the vertex
+                call gdErrorHandler('ExtractPolygonVertices: could not find next edge - please check input polygon')
+            end if
+    
+            ! Update counter
+            k = k+1
+    
+        end do
+    
+        ! Add last vertices
+        pv(k) = pe(ne,cvind)
+        if (cvind == 1) then
+            pv(k+1) = pe(ne,2)
+        else
+            pv(k+1) = pe(ne,1)
+        end if
+    
     end subroutine
 
     !------------------------------------------------------------------!
