@@ -105,8 +105,8 @@ def GetVertexPairCoordinates(filepath):
     # Return values
     returnvec = np.zeros([2*npoints], dtype=int)
     for i in np.arange(0, npoints, 1):
-        returnvec[2*i] = npoints
-        returnvec[2*i+1] = 2*npoints
+        returnvec[2*i] = npoints + i 
+        returnvec[2*i+1] = 2*npoints + i 
     return vals[0:cc, returnvec]
 
 def GetGeneral2DSurfaceData(filepath):
