@@ -1006,6 +1006,10 @@ module gdmod_costfunction
                         ! Compute ratio
                         rat = d1/(d2 + eta)
 
+                        if ( (d1 <= 0) .or. (d2 <= 0)) then 
+                            print *, 'zero distance detected in LR cost function'
+                        end if 
+
                         ! Compute cost function contribution
                         gradJ(v1) = gradJ(v1) + & 
                             wti*(b0i - rat)*(dx1/(d1*(d2 + eta)) - &
@@ -5568,6 +5572,10 @@ module gdmod_costfunction
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
 
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for LR'
+            end if
+
             ! Deallocate
             call hessJtemp%Deallocate()
         end if 
@@ -5583,6 +5591,10 @@ module gdmod_costfunction
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for FAD'
+            end if
 
             ! Deallocate
             call hessJtemp%Deallocate()
@@ -5600,6 +5612,10 @@ module gdmod_costfunction
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
 
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for FA'
+            end if
+
             ! Deallocate
             call hessJtemp%Deallocate()
         end if 
@@ -5616,6 +5632,10 @@ module gdmod_costfunction
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
 
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for PRPB'
+            end if
+
             ! Deallocate
             call hessJtemp%Deallocate()
         end if 
@@ -5631,6 +5651,10 @@ module gdmod_costfunction
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for LRrad'
+            end if
 
             ! Deallocate
             call hessJtemp%Deallocate()
