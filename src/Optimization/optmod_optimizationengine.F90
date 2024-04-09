@@ -256,6 +256,37 @@ module optmod_optimizationengine
 
     end type
 
+    ! Ineqcon for diagnostics
+    type, extends(DiagnosticsFunctionUDT) :: DFIneqconUDT 
+
+        ! Description
+        !============
+        ! Function type for evaluating and checking the cost function.
+        class(OptimizationProblemUDT), allocatable      :: problem 
+
+        ! Lagrange multipliers
+        real(R8), allocatable, dimension(:)             :: mu
+        
+        ! Inequality constraint ID
+        integer(I8)                                     :: ineqID
+
+        ! Indicator to multiply with mu
+        logical                                         :: multmu
+
+
+    contains 
+
+        ! Evaluation procedure
+        procedure :: Evaluate       => EvaluateDFIneqcon
+
+        ! Dimension getter
+        procedure :: GetDimensions  => GetProblemDimensionsIneqcon
+
+        ! Argument getter
+        procedure :: GetArguments   => GetProblemArgumentsIneqcon
+
+    end type
+
 
     !==================================================================!
     !                                                                  !
@@ -766,14 +797,13 @@ module optmod_optimizationengine
 
         ! Solver & updates
         real(R8), allocatable       :: fullmat(:, :)
-        double precision, allocatable :: dx(:), dxl(:), dxl2(:)
+        double precision, allocatable :: dx(:), dxl(:)
         real(R8), allocatable       :: rhs(:)
         real(R8)                    :: alphals
         integer(I8)                 :: flag, flagls
         integer(I8), allocatable    :: phiind(:), eqconind(:), &
             ineqconind(:), activeineqconind(:), inactiveineqconind(:)
-        type(MySparseUDT)           :: hessLJ, lhs, hessLL, hessLM, &
-            hessLC
+        type(MySparseUDT)           :: hessLJ, lhs, hessLC
 
         ! Diagnostics
         logical                     :: checkgradients, checkhessians 
@@ -893,12 +923,14 @@ module optmod_optimizationengine
 
             ! Check gradients & hessians if needed
             if (checkgradients .or. checkhessians) then 
-                call CheckCostFunctionLinearization(problem, &
-                    checkgradients, checkhessians)
-                call CheckLagrangianLinearization(problem, solver, lambda, & 
-                    mu, checkgradients, checkhessians)
+                !call CheckCostFunctionLinearization(problem, &
+                !    checkgradients, checkhessians)
+                !call CheckLagrangianLinearization(problem, solver, lambda, & 
+                !    mu, checkgradients, checkhessians)
                 !call CheckEqconLinearization(problem, lambda, &
                 !    checkgradients, checkhessians)
+                call CheckIneqconLinearization(problem, lambda, &
+                    checkgradients, checkhessians)
             end if
 
             ! Evaluate cost function
@@ -1007,6 +1039,7 @@ module optmod_optimizationengine
 
                 ! Update lagrange multipliers using least-squares approach
                 ! for active constraints
+                if ( (flag == 0) .and. (flagls == 0)) then 
                 allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
                 activeineqconind = pack(ineqconind, A)
                 inactiveineqconind = pack(ineqconind, I)
@@ -1029,6 +1062,7 @@ module optmod_optimizationengine
                 dx(nphi+1:nphi+neq) = dxl(1:neq)
                 dx(activeineqconind) = dxl(neq+1:neq+count(A))
                 deallocate(dxl, activeineqconind, inactiveineqconind)
+                end if 
                 
 
             else
@@ -1484,9 +1518,12 @@ module optmod_optimizationengine
                 ! Adjust values
                 where (A(gradncpphi%col)) 
                     gradncpphi%val = num%alpha*gradH%val 
-                    gradncpmu%val = 0
                 elsewhere 
                     gradncpphi%val = 0
+                end where
+                where (A) 
+                    gradncpmu%val = 0
+                elsewhere 
                     gradncpmu%val = -1
                 end where
                 
@@ -2664,6 +2701,265 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(DFEQconUDT)               :: fun 
+        real(R8), allocatable           :: x(:)
+
+        ! Auxiliary
+        real(R8), allocatable           :: phi(:)
+        integer(I8)                     :: nphi, neq, nineq
+
+        ! Get dimensions
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Allocate
+        allocate(phi(nphi))
+
+        ! Get design variables
+        call fun%problem%GetProblemDesignVariables(phi)
+
+        ! Set arguments
+        x = phi
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                      INEQUALITY CONSTRAINTS                      !
+    !------------------------------------------------------------------!
+    ! Stand-alone driver 
+    subroutine CheckIneqconLinearization(problem, mu, checkgradient, &
+        checkhessian)
+
+        ! Description
+        !============
+        ! This routine compares the gradient computed by finite
+        ! differences with the actual gradient computation by 
+        ! using the mod_diagnostics module. The errors are printed to
+        ! the terminal. Here, since there are often multiple,
+        ! constraints, we also need to specify which constraints to 
+        ! check and to loop over. Note that, since we only have a 
+        ! general routine to evaluate the constraints as abstraction is 
+        ! made, the computational cost of doing this scales with the 
+        ! computational cost of computing *all* the constraints, i.e. 
+        ! we compute the values for all constraints and afterwards 
+        ! extract the ones we need. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemUDT)       :: problem 
+        logical                             :: checkgradient, &
+            checkhessian
+
+        ! Auxiliary
+        type(FDcheckerUDT)                  :: FDchecker 
+
+        integer(I8)                         :: nvars 
+        integer(I8), allocatable            :: vars(:)
+
+        integer(I8)                         :: nineq, nineqID, nphi, neq  
+        integer(I8), allocatable            :: ineqID(:)
+
+        real(R8), allocatable               :: mu(:)
+
+        ! Loop
+        integer(I8)                         :: i
+        
+
+        ! Initialize
+        !===========
+        ! Get the problem dimensions
+        call problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Set the constraints to check
+        nineqID =  1
+        allocate(ineqID(nineqID))
+        ineqID = [1022] !  some random numbers for now
+
+        ! Set the design variables to check
+        vars = [915, 1045] ! some random variables for now
+        nvars = size(vars, 1)
+
+        ! Sanity checks
+        if (any(ineqID > nineq)) then
+            ! Throw error
+            call gdErrorHandler('Constraint indices exceed the number &
+                & of constraints!')
+        end if
+        if (any(vars > nphi)) then
+            ! Throw error
+            call gdErrorHandler('Design indices exceed the number &
+                & of design variables!')
+        end if
+
+
+        ! Initialize checker 
+        call FDchecker%Initialize(nvars, vars)
+        allocate(DFIneqconUDT::FDchecker%fun)
+
+        ! Associate
+        associate(&
+            fun         => FDchecker%fun)
+        
+        ! Initialize checker functino
+        select type(fun)
+
+        type is (DFIneqconUDT)
+
+            ! Set the problem
+            fun%problem = problem
+            allocate(fun%mu(nineq))
+            fun%mu = mu
+
+            ! Compute errors
+            !===============
+            ! Loop over all constraints
+            do i = 1, nineqID
+                ! Set the correct ID
+                fun%ineqID = ineqID(i)
+
+                ! Print
+                print *, '============================================'
+                print *, 'Checking inequality constraint number: ', ineqID(i)
+                print *, '============================================'
+
+                ! Check
+                if (checkgradient) then 
+                    ! Don't do mu multiplication
+                    fun%multmu = .false.
+                    call FDchecker%CheckGradient()
+                end if
+                if (checkhessian) then 
+                    ! Do mu multiplication
+                    fun%multmu = .true.
+                    call FDchecker%CheckHessian()
+                end if
+            end do
+
+        end select
+
+        ! End associate
+        end associate
+
+        ! Deallocate
+        deallocate(vars, ineqID)
+
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateDFIneqcon(fun, x, f, df, d2f, dogradient, &
+        dohessian)
+
+        ! Description
+        !============
+        ! Evaluate the equality cons by first updating the design and
+        ! then computing the constraint values. Afterwards, the correct
+        ! constraint is unpacked. 
+
+        ! Notes
+        !======
+        ! When checking the hessian-vector product, one must make sure 
+        ! that only the contributions of the current constraint that is
+        ! to be checked are taken into account. To this end, all lambda
+        ! values, except the one of the current constraint, are set to
+        ! zero. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFIneqconUDT)             :: fun 
+        real(R8), allocatable           :: x(:), df(:)
+        real(R8)                        :: f
+        type(MySparseUDT)               :: d2f 
+        logical                         :: dogradient, dohessian
+
+        ! Auxiliary
+        integer(I8)                     :: nphi, neq, nineq
+        real(R8), allocatable           :: phiref(:)
+
+        ! Equality constraints 
+        real(R8), allocatable       :: H(:), mu(:)
+        type(MySparseUDT)           :: gradH, hessH  
+        
+
+        ! Initialize
+        !===========
+        ! Dimensions
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Equality constraint 
+        allocate(H(nineq), mu(nineq))
+        H(:) = 0
+        mu(:) = 0 ! Important! 
+        mu(fun%ineqID) = fun%mu(fun%ineqID) ! only keep the current mu
+        gradH%nrow = nphi 
+        gradH%ncol = neq 
+        hessH%nrow = nphi 
+        hessH%ncol = nphi
+
+        ! Update design
+        !==============
+        ! Allocate
+        allocate(phiref(nphi))
+
+        ! Get current design variables
+        call fun%problem%GetProblemDesignVariables(phiref)
+
+        ! Update with dx 
+        call fun%problem%UpdateDesign(x - phiref)
+
+        ! Update the optimization problem 
+        call fun%problem%UpdateProblem()
+
+        ! Evaluate the equality constraints
+        call fun%problem%EvaluateInequalityConstraints(H, gradH, &
+            d2f, dogradient, dohessian, mu)
+
+        ! Extract the correct constraint
+        f = H(fun%ineqID)
+        if (dogradient) then
+            call gradH%ExtractColumnFull(df, fun%ineqID)
+
+            ! Check if we need to multiply with lambda - e.g. when 
+            ! computing FD for hessian
+            if (fun%multmu) then
+                df = df*mu(fun%ineqID)
+            end if
+
+        end if
+
+    end subroutine
+
+    ! Dimension getter
+    subroutine GetProblemDimensionsIneqcon(fun, dimx)
+
+        ! Description
+        !============
+        ! Get lagrangian dimensions
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFIneqconUDT)             :: fun 
+        integer(I8)                     :: dimx, neq, nineq, nphi
+
+        ! Get dimensions
+        !===============
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+        dimx = nphi
+
+    end subroutine
+
+    ! Arguments getter
+    subroutine GetProblemArgumentsIneqcon(fun, x)
+
+        ! Description
+        !============
+        ! Get lagrangian arguments
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFIneqconUDT)             :: fun 
         real(R8), allocatable           :: x(:)
 
         ! Auxiliary
