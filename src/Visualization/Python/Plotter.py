@@ -439,6 +439,17 @@ def PlotPolygonData(filepath, fignum, **plotargs):
     plt.figure(fignum)
     plt.plot(data[:, 0], data[:, 1], **plotargs)
 
+def PlotVertexPairsData2D(filepath, fignum, **plotargs):
+    # Read data
+    data = dh.GetVertexPairCoordinates(filepath)
+
+    # Compute faces
+    xf = 0.5*(data[:, 0] + data[:, 2])
+    yf = 0.5*(data[:, 1] + data[:, 3])
+
+    # Plot
+    PlotPoints2D(xf, yf, fignum, **plotargs)
+
 
 
 def PlotPoints2D(x, y, fignum, **plotargs):

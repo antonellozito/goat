@@ -356,6 +356,7 @@ module gdmod_userinput
 
     end type
 
+    ! Fixed flux values
     type, extends(OptionsUDT) :: FixedFluxvaluesConOptionsUDT
 
         ! Description
@@ -379,6 +380,28 @@ module gdmod_userinput
 
     end type
 
+    ! Line folding
+    type, extends(OptionsUDT) :: LinefoldingConOptionsUDT
+
+        ! Description
+        !============
+        ! Options for line folding constraints. 
+        ! - poloidal:       prevent poloidal line folding
+        ! - radial:         prevent radial linefolding
+        ! - vessel:         prevent linefolding for edges on vessel
+        ! - fieldtol:       tolerance on field vector magnitude
+
+
+        logical                     :: poloidal, radial, vessel
+        real(R8)                    :: smallnumber, fieldtol
+
+    contains
+    
+        procedure :: SetDefaults    => SetDefaultLinefoldingConOptions
+        procedure :: Read           => ReadLinefoldingConOptions
+
+    end type
+
     ! Options for the constraints
     type, extends(OptionsUDT) :: ConstraintOptionsUDT
 
@@ -396,7 +419,7 @@ module gdmod_userinput
         integer(I8)         :: fixedfluxvalues 
 
         ! Fields for inequality constraints
-        integer             :: linefolding ! prevent flux line folding
+        integer(I8)         :: linefolding ! prevent flux line folding
 
         ! Number of (continuous) constraints
         integer(I8)         :: neq ! number of equality constraints
@@ -412,6 +435,7 @@ module gdmod_userinput
         type(EdgelengthsConOptionsUDT)          :: eloptions
         type(XPointConOptionsUDT)               :: xpoptions
         type(FixedFluxvaluesConOptionsUDT)      :: ffvoptions
+        type(LinefoldingConOptionsUDT)          :: lfoptions
 
     contains 
 
@@ -673,12 +697,13 @@ module gdmod_userinput
         options%writedata           = 1
 
         ! Paths
-        options%bfoptions%inputfilepath = options%inputfilepath
-        options%ffoptions%inputfilepath = options%inputfilepath
-        options%orthoptions%inputfilepath = options%inputfilepath
-        options%eloptions%inputfilepath = options%inputfilepath
-        options%xpoptions%inputfilepath = options%inputfilepath
-        options%ffvoptions%inputfilepath = options%inputfilepath 
+        options%bfoptions%inputfilepath     = options%inputfilepath
+        options%ffoptions%inputfilepath     = options%inputfilepath
+        options%orthoptions%inputfilepath   = options%inputfilepath
+        options%eloptions%inputfilepath     = options%inputfilepath
+        options%xpoptions%inputfilepath     = options%inputfilepath
+        options%ffvoptions%inputfilepath    = options%inputfilepath 
+        options%lfoptions%inputfilepath     = options%inputfilepath
 
         ! Constraint-specific options
         !============================
@@ -688,6 +713,7 @@ module gdmod_userinput
         call options%eloptions%Set()
         call options%xpoptions%Set()
         call options%ffvoptions%Set()
+        call options%lfoptions%Set()
 
     end subroutine
 
@@ -814,6 +840,23 @@ module gdmod_userinput
         if (.not. allocated(options%corefluxval)) then 
             allocate(options%corefluxval(0), options%outerfluxval(0))
         end if 
+
+    end subroutine
+
+    subroutine SetDefaultLinefoldingConOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(LinefoldingConOptionsUDT)     :: options 
+
+        ! Set defaults
+        !=============
+        options%poloidal    = .true. 
+        options%radial      = .true. 
+        options%vessel      = .true.
+        options%smallnumber = 1e-6
+        options%fieldtol    = 1e-10
 
     end subroutine
 
@@ -1800,6 +1843,60 @@ module gdmod_userinput
         call ExtractOptionValueReal1D(fid, field, options%corefluxval)
         field = 'gd.design.ec.par.fixedfluxvalues.outerfluxval'
         call ExtractOptionValueReal1D(fid, field, options%outerfluxval)
+        
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadLinefoldingConOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(LinefoldingConOptionsUDT)     :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadLinefoldingConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadLinefoldingConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        field = 'gd.design.ec.par.linefolding.poloidal'
+        call ExtractOptionValueLogical0D(fid, field, options%poloidal)
+        field = 'gd.design.ec.par.linefolding.radial'
+        call ExtractOptionValueLogical0D(fid, field, options%radial)
+        field = 'gd.design.ec.par.linefolding.vessel'
+        call ExtractOptionValueLogical0D(fid, field, options%vessel)
+        field = 'gd.design.ec.par.linefolding.smallnumber'
+        call ExtractOptionValueReal0D(fid, field, options%smallnumber)
+        field = 'gd.design.ec.par.linefolding.fieldtol'
+        call ExtractOptionValueReal0D(fid, field, options%fieldtol)
         
 
         ! Housekeeping

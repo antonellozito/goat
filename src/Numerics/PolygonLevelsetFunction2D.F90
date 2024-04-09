@@ -669,7 +669,7 @@ module PolygonLevelsetFunction2D
             ! Throw error, these derivatives should anyway not be necessary...
             call gdErrorHandler('Derivatives are of too high order, cannot compute')
         end if
-            
+        allocate(derivxc, derivyc, deriv, source=' ')
         derivxc = ' ' 
         derivyc = ' ' 
         write(derivxc, '(I0)') derivx 
@@ -864,7 +864,7 @@ module PolygonLevelsetFunction2D
         ! Compute angles
         theta0 = atan2(nxpv(:, 2)*nypv(:, 1) - nxpv(:, 1)*nypv(:, 2), &
             nxpv(:, 1)*nxpv(:, 2) + nypv(:, 1)*nypv(:, 2))
-        where (theta0 < 0) theta0 = theta0 + 2*pi         
+        where (theta0 < 0) theta0 = theta0 + 2*pi_R8         
         
         ! Add to plf
         plf%xp  = xp 
@@ -967,6 +967,7 @@ module PolygonLevelsetFunction2D
             ! Throw error, these derivatives should anyway not be necessary...
             call gdErrorHandler('Derivatives are of too high order, cannot compute')
         end if
+        allocate(derivxc, derivyc, deriv, source=' ')
         derivxc = ' ' 
         derivyc = ' ' 
         write(derivxc, '(I0)') derivx 
@@ -996,7 +997,7 @@ module PolygonLevelsetFunction2D
             dx = xqr - xp
             dy = yqr - yp
             theta = atan2(dx*nypv(:, 1) - dy*nxpv(:, 1), dx*nxpv(:, 1) + dy*nypv(:, 1))
-            where (theta < 0) theta = theta + 2*pi
+            where (theta < 0) theta = theta + 2*pi_R8
             isinvert = theta < theta0
             
             ! Edge regions

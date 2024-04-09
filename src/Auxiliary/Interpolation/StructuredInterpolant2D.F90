@@ -62,6 +62,7 @@ module StructuredInterpolant2D
     ! Load modules
     use Interpolant2D_auxiliaries
     use Interpolant2D
+    use mod_constants
 
     implicit none
     save
@@ -811,7 +812,7 @@ module StructuredInterpolant2D
         integer(I8)                             :: nq
         real(R8)                                :: prefac
 
-        integer(I8), allocatable                :: ind(:) 
+        integer(I8), allocatable                :: ind(:), ind_orig(:) 
         real(R8), allocatable                   :: xqn(:), yqn(:), &
             term(:), thisA(:, :)
 
@@ -850,6 +851,11 @@ module StructuredInterpolant2D
         ! Get cell index of query point
         call GetIndex(xq, yq, xv, yv, ind)
 
+        ! Set zero indices temporarily to one (set to NaN later)
+        allocate(ind_orig, source=ind)
+        ind_orig = ind
+        where (ind == 0) ind = 1
+
         ! Extract
         allocate(thisA(size(ind, 1), size(A, 2)))
         thisA = A(ind, :)
@@ -879,6 +885,9 @@ module StructuredInterpolant2D
 
         ! Scale
         vq = vq/( (refdx(ind))**derivx * (refdy(ind))**derivy)
+
+        ! Set zero indices to NaN
+        where (ind_orig == 0) vq = nanval_R8()
 
         ! Housekeeping
         !=============

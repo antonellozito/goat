@@ -140,6 +140,33 @@ module optmod_numerics
 
     end type
 
+    ! Nonlinear complementarity problem numerics
+    type :: NumNCPUDT 
+
+        ! Description
+        !============
+        ! Numerics structure for ncp function. Not extended from 
+        ! general numerics type, because does not need those fields. 
+        ! Two fields are present, alpha and ncpfun. The latter determines
+        ! which type of nonlinear complementarity problem function is
+        ! taken (can be 'max', 'FB' (Fisher-Burmeister), or 'FBsmooth').
+        ! The first is a numerical parameter that is used for the 'max'
+        ! and 'FBsmooth' ncpfun options. 
+
+        ! Fields
+        real(R8)                    :: alpha 
+        character(:), allocatable   :: ncpfun 
+        character(:), allocatable   :: inputfilepath
+        character(:), allocatable   :: fieldprefix
+
+    contains
+
+        procedure :: SetDefaultNumParams => SetDefaultNumParamsNCP
+        procedure :: InitializeNumParams => InitializeNumParamsNCP
+        procedure :: Read                => ReadNumNCPOptions
+
+    end type
+
     !==================================================================!
     !                                                                  !
     !                            INTERFACES                            !
@@ -469,6 +496,115 @@ module optmod_numerics
         call ExtractOptionValueReal0D(fid, field, num%mfpenfactol)
         field = num%fieldprefix // 'opt.num.ls.mf.penfacdef'
         call ExtractOptionValueReal0D(fid, field, num%mfpenfacdef)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                        NCP FUNCTION OPTIONS                      !
+    !------------------------------------------------------------------!
+    ! Set the KKT numerical parameters
+    subroutine SetDefaultNumParamsNCP(num)
+
+        ! Description
+        !============
+        ! Set default numerical parameters tol, itmax, verbosity
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(NumNCPUDT)            :: num
+    
+        ! Loop variables
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Set defaults
+        !=============
+        num%alpha = 1
+        num%ncpfun = 'max'
+
+    end subroutine
+
+    ! Initialize the numerics
+    subroutine InitializeNumParamsNCP(num)
+
+        ! Description
+        !============
+        ! Initialize the general numerical parameters
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(NumNCPUDT)            :: num
+    
+        ! Loop variables
+
+        ! Auxiliary variables 
+
+        ! Data
+
+        ! Set defaults 
+        call num%SetDefaultNumParams()
+
+        ! Override with user settings (to be implemented)
+        call num%Read()
+
+    end subroutine
+
+    ! Read user data
+    subroutine ReadNumNCPOptions(num)
+
+        ! Description
+        !============
+        ! Read in grid options from file. It is assumed that the 
+        ! filepath has been set correctly. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(NumNCPUDT)                 :: num 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=num%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadNumNCPOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadNumNCPOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! General
+        print *, num%fieldprefix 
+        field = num%fieldprefix // 'opt.num.ncp.ncpfun'
+        call ExtractOptionValueCharacter(fid, field, num%ncpfun)
+        field = num%fieldprefix // 'opt.num.ncp.alpha'
+        call ExtractOptionValueReal0D(fid, field, num%alpha)
 
         ! Housekeeping
         !=============

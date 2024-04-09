@@ -421,7 +421,7 @@ module mod_plotter
         integer(I8), allocatable, intent(in)        :: ID(:, :)
         real(R8), allocatable, intent(in)           :: x(:, :), y(:, :) 
         integer                                     :: i, fu
-        character(:), allocatable, intent(in)       :: filepath 
+        character(*), intent(in)                    :: filepath 
 
          ! Initialize
         !===========

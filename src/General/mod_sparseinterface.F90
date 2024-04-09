@@ -137,6 +137,10 @@ module mod_sparseinterface
     !                                                                  !
     !==================================================================!
 
+    !------------------------------------------------------------------!
+    !                          CONSTRUCTORS                            !
+    !------------------------------------------------------------------!
+
     ! Constructor
     subroutine InitializeMySparse(mysparse, nrow, ncol, nval)
 
@@ -166,6 +170,29 @@ module mod_sparseinterface
         call mysparse%Allocate()
 
     end subroutine
+
+    ! Zeros constructor
+    function SpZeros(nrow, ncol) result(a)
+
+        ! Description
+        !============
+        ! Create zero sparse matrix with dimensions nrow and ncol. 
+        ! Basically empty sparse matrix. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)     :: nrow, ncol 
+        type(MySparseUDT)           :: a 
+
+        ! Construct
+        !==========
+        a%nrow = nrow 
+        a%ncol = ncol 
+        a%nval = 0 
+        call a%Allocate()
+
+    end function
 
     !------------------------------------------------------------------!
     !                         DATA CONVERSION                          !
@@ -763,13 +790,16 @@ module mod_sparseinterface
         logical, intent(in)     :: b(:) 
 
         ! Auxiliary
-        logical, allocatable    :: reductionvec(:)
+        logical, allocatable        :: reductionvec(:)
+
+        integer(I8)                 :: shift
+        integer(I8), allocatable    :: shiftvec(:)
+
+        ! Loop
+        integer(I8)                 :: i 
 
         ! Initialize
         !===========
-        ! Set output
-        c = a 
-
         ! Check sizes
         if (size(b, 1) .ne. a%nrow) then 
             call gdErrorHandler('DeleteRowsLogical: deletion vector has improper dimensions')
@@ -794,8 +824,21 @@ module mod_sparseinterface
 
             ! Construct new matrix
             c%nval  = count(reductionvec)
+            call c%Allocate()
             c%row   = pack(a%row, reductionvec)
             c%col   = pack(a%col, reductionvec)
+            c%val   = pack(a%val, reductionvec)
+
+            ! Adjust row indices
+            shift = 0
+            allocate(shiftvec(a%nrow))
+            do i = 1, a%nrow 
+                if (b(i)) then 
+                    shift = shift + 1
+                end if
+                shiftvec(i) = shift 
+            end do 
+            c%row = c%row - shiftvec(c%row)
 
         end if 
 
@@ -830,6 +873,7 @@ module mod_sparseinterface
 
         ! Construct logical
         allocate(bl(a%nrow))
+        bl = .false.
         bl(b) = .true. 
 
         ! Delete

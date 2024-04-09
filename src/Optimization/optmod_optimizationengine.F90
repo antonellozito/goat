@@ -29,6 +29,7 @@ module optmod_optimizationengine
     !============
     ! Load modules
     use mod_precision
+    use mod_constants
     use mod_sparseinterface
     use mod_diagnostics
     use mod_linearsolverinterface
@@ -127,6 +128,7 @@ module optmod_optimizationengine
         character(:), allocatable                   :: inputfileprefix
         type(NumKKTUDT)         :: numKKT
         type(numLSUDT)          :: numLS 
+        type(NumNCPUDT)         :: numNCP
 
     contains 
 
@@ -140,6 +142,9 @@ module optmod_optimizationengine
 
         ! Lagrangian evaluation
         procedure :: EvaluateLagrangian
+
+        ! Setup of correction equation
+        procedure :: SetupCorrectionEquation
 
         ! Relaxation of KKT system
         procedure :: RelaxKKTSystem
@@ -248,6 +253,37 @@ module optmod_optimizationengine
 
         ! Argument getter
         procedure :: GetArguments   => GetProblemArgumentsEqcon
+
+    end type
+
+    ! Ineqcon for diagnostics
+    type, extends(DiagnosticsFunctionUDT) :: DFIneqconUDT 
+
+        ! Description
+        !============
+        ! Function type for evaluating and checking the cost function.
+        class(OptimizationProblemUDT), allocatable      :: problem 
+
+        ! Lagrange multipliers
+        real(R8), allocatable, dimension(:)             :: mu
+        
+        ! Inequality constraint ID
+        integer(I8)                                     :: ineqID
+
+        ! Indicator to multiply with mu
+        logical                                         :: multmu
+
+
+    contains 
+
+        ! Evaluation procedure
+        procedure :: Evaluate       => EvaluateDFIneqcon
+
+        ! Dimension getter
+        procedure :: GetDimensions  => GetProblemDimensionsIneqcon
+
+        ! Argument getter
+        procedure :: GetArguments   => GetProblemArgumentsIneqcon
 
     end type
 
@@ -520,6 +556,12 @@ module optmod_optimizationengine
 
         end select
 
+        ! Check if the result is NaN or inf - in that case, return inf
+        if ( (.not. ieee_is_finite(f)) .or. (ieee_is_nan(f)) ) then 
+            ! Set to infinity
+            f = posinfval_R8()
+        end if 
+
     end subroutine
 
     ! L1 merit function
@@ -699,8 +741,11 @@ module optmod_optimizationengine
         solver%numKKT%fieldprefix   = solver%inputfileprefix 
         solver%numLS%inputfilepath  = solver%inputfilepath
         solver%numLS%fieldprefix    = solver%inputfileprefix
+        solver%numNCP%inputfilepath = solver%inputfilepath
+        solver%numNCP%fieldprefix   = solver%inputfileprefix
         call solver%numKKT%InitializeNumParams() 
         call solver%numLS%InitializeNumParams()
+        call solver%numNCP%InitializeNumParams()
 
     end subroutine
 
@@ -720,7 +765,7 @@ module optmod_optimizationengine
         class(OptimizationProblemUDT)               :: problem
     
         ! Loop variables
-        integer(I8)                 :: itopt, maxit
+        integer(I8)                 :: itopt, maxit, k
         logical                     :: converged
         
         ! Auxiliary variables 
@@ -742,7 +787,7 @@ module optmod_optimizationengine
 
         ! nonlinear complementarity function
         real(R8), allocatable       :: ncp(:) 
-        type(MySparseUDT)           :: gradncp
+        type(MySparseUDT)           :: gradncpphi, gradncpmu
         logical, allocatable        :: A(:), I(:) 
 
         ! Lagrangian 
@@ -753,9 +798,12 @@ module optmod_optimizationengine
         ! Solver & updates
         real(R8), allocatable       :: fullmat(:, :)
         double precision, allocatable :: dx(:), dxl(:)
+        real(R8), allocatable       :: rhs(:)
         real(R8)                    :: alphals
         integer(I8)                 :: flag, flagls
-        type(MySparseUDT)           :: hessLJ
+        integer(I8), allocatable    :: phiind(:), eqconind(:), &
+            ineqconind(:), activeineqconind(:), inactiveineqconind(:)
+        type(MySparseUDT)           :: hessLJ, lhs, hessLC
 
         ! Diagnostics
         logical                     :: checkgradients, checkhessians 
@@ -810,8 +858,10 @@ module optmod_optimizationengine
 
         ! NCP function
         allocate(ncp(nineq), A(nineq), I(nineq))
-        gradncp%nrow = nphi 
-        gradncp%ncol = nineq
+        gradncpphi%nrow = nphi 
+        gradncpphi%ncol = nineq
+        gradncpmu%nrow = nineq 
+        gradncpmu%ncol = nineq
         A(:) = .false.
         I(:) = .not. A
 
@@ -824,7 +874,14 @@ module optmod_optimizationengine
 
         ! Solver
         allocate(dx(hessL%nrow))
+        allocate(rhs(hessl%nrow))
         allocate(fullmat(hessL%nrow, hessL%ncol))
+        dx = 0
+        rhs = 0
+        allocate(phiind(nphi), eqconind(neq), ineqconind(nineq))
+        phiind = [(k, k = 1, nphi)]
+        eqconind = [(k, k = nphi+1, nphi+neq)]
+        ineqconind = [(k, k = nphi+neq+1, nphi+neq+nineq)]
 
         ! Diagnostics
         checkgradients  = .false. ! check gradients in each iteration?
@@ -866,12 +923,14 @@ module optmod_optimizationengine
 
             ! Check gradients & hessians if needed
             if (checkgradients .or. checkhessians) then 
-                call CheckCostFunctionLinearization(problem, &
-                    checkgradients, checkhessians)
-                call CheckLagrangianLinearization(problem, solver, lambda, & 
-                    mu, checkgradients, checkhessians)
+                !call CheckCostFunctionLinearization(problem, &
+                !    checkgradients, checkhessians)
+                !call CheckLagrangianLinearization(problem, solver, lambda, & 
+                !    mu, checkgradients, checkhessians)
                 !call CheckEqconLinearization(problem, lambda, &
                 !    checkgradients, checkhessians)
+                call CheckIneqconLinearization(problem, lambda, &
+                    checkgradients, checkhessians)
             end if
 
             ! Evaluate cost function
@@ -887,8 +946,8 @@ module optmod_optimizationengine
                 hessH, dogradient, dohessian, mu)
 
             ! Evaluate the nonlinear complementarity function 
-            !call solver%EvaluateNCPfunction(ncp, A, I, gradncp, &
-            !    H, gradH, mu)
+            call EvaluateNCPfunction(ncp, A, I, gradncpphi, gradncpmu, &
+                H, gradH, mu, solver%numNCP, dogradient)
 
             ! Evaluate the Lagrangian
             call solver%EvaluateLagrangian(L, gradL, hessL, &
@@ -906,15 +965,22 @@ module optmod_optimizationengine
             ! Solve 
             if (.not. converged) then 
 
+                ! Set up correction equation
+                call solver%SetupCorrectionEquation(lhs, rhs, &
+                    gradJ, hessJ, &
+                    G, gradG, hessG, lambda, &
+                    H, gradH, hessH, mu, A, &
+                    ncp, gradncpphi, gradncpmu)
+
                 ! Relax
-                call solver%RelaxKKTSystem(hessL, nphi, neq, nineq)
+                call solver%RelaxKKTSystem(lhs, nphi, neq, nineq)
 
                 !print *, 'hessian size: ', hessL%nrow, hessL%ncol
-                !call SpyPlot(hessL%row, hessL%col, hessL%nval, '-p')
+                !call SpyPlot(lhs%row, lhs%col, lhs%nval, '-p')
                 
                 ! Call the sparse solver
                 call cpu_time(t_linsolve_s)
-                call SolveSparseLinearSystemDI(hessL, -gradL, dx, flag)
+                call SolveSparseLinearSystemDI(lhs, rhs, dx, flag)
                 call cpu_time(t_linsolve_e)
 
             else
@@ -972,14 +1038,31 @@ module optmod_optimizationengine
                 end if 
 
                 ! Update lagrange multipliers using least-squares approach
-                hessLJ = hessJ + hessG ! not including inequality constraints for now
-                allocate(dxl(neq))
-                call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
-                    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
+                ! for active constraints
+                if ( (flag == 0) .and. (flagls == 0)) then 
+                allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
+                activeineqconind = pack(ineqconind, A)
+                inactiveineqconind = pack(ineqconind, I)
+                hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
+                hessLJ = hessLJ%DeleteRows(inactiveineqconind)
+                hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
+                hessLC = hessLC%DeleteRows(inactiveineqconind)
+                allocate(dxl(neq + count(A)))
+                !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
+                !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
+                !    dxl2, flag)
+                !dxl2 = -dxl2
+                call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
+                    MatrixVectorProduct(hessLC%Transpose(), &
+                    (rhs([phiind, eqconind, activeineqconind]) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
                     dxl, flag)
-                dxl = -dxl
-                dx(nphi+1:nphi+neq) = dxl
-                deallocate(dxl)
+
+                !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
+                
+                dx(nphi+1:nphi+neq) = dxl(1:neq)
+                dx(activeineqconind) = dxl(neq+1:neq+count(A))
+                deallocate(dxl, activeineqconind, inactiveineqconind)
+                end if 
                 
 
             else
@@ -992,7 +1075,11 @@ module optmod_optimizationengine
             call problem%UpdateDesign(dx(1:nphi))
 
             ! Update lagrange multipliers
-            lambda(:) = lambda(:) + dx(nphi+1:nphi+neq)
+            lambda  = lambda + dx(nphi+1:nphi+neq)
+            mu      = mu + dx(nphi+neq+1:nphi+neq+nineq)
+
+            ! Set mu of non-active constraints to zero
+            where (.not. A) mu = 0
             
             ! Timers
             call cpu_time(t_it_e)
@@ -1169,6 +1256,14 @@ module optmod_optimizationengine
         ! and mu * dHdphi2 is given, the latter one accounting for the
         ! activeness of the constraints. 
 
+        ! Notes
+        !======
+        ! Note 1: it is assumed that the hessian and gradient of the
+        ! inequality constrains are correctly adjusted for activeness
+        ! of the constraints! To be sure, mu is copied into a local 
+        ! variable and set to zero where A is false. For the Lagrangian
+        ! gradient, also the values where A is false are set to zero. 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -1188,13 +1283,19 @@ module optmod_optimizationengine
         integer(I8)                         :: k 
 
         ! Auxiliary variables
-        real(R8), allocatable               :: tmu(:)
+        real(R8), allocatable               :: tmu(:), tH(:)
                                         
         ! Compute Lagrangian
         !===================
-        ! For ease: set mu(.not. A) equal to zero
-        allocate(tmu(size(mu)))
-        where (.not. A) tmu = 0
+        ! To be sure: set mu(.not. A) equal to zero
+        allocate(tmu(size(mu)), tH(size(H)))
+        tmu = mu 
+        tH = H 
+        where (.not. A) 
+            tmu = 0
+            tH = 0
+        end where
+       
         L = J + sum(lambda * G) + sum(tmu * H)
 
         ! Compute gradient
@@ -1210,7 +1311,7 @@ module optmod_optimizationengine
             gradL(size(gradJ)+1:size(G)) = G(:)
 
             ! Inequality constraints contribution
-            gradL(size(gradJ)+size(G)+1:size(gradL)) = H(:)
+            gradL(size(gradJ)+size(G)+1:size(gradL)) = tH(:)
 
         end if 
 
@@ -1286,9 +1387,163 @@ module optmod_optimizationengine
     end subroutine
 
     ! Nonlinear complementarity function 
-    !subroutine EvaluateNCPfunction(ncp, A, I, gradncp, H, gradH, mu)
+    subroutine EvaluateNCPfunction(ncp, A, I, gradncpphi, gradncpmu, H, &
+        gradH, mu, num, dogradient)
 
-    !end subroutine
+        ! Description
+        !============
+        ! NonlinearComplementarityFunction returns the nonlinear complementarity
+        ! (problem)
+        ! function and its derivatives with respect to the consistency and internal
+        ! variables evaluated at the current state. The nonlinear complementarity
+        ! function is used to enforce the complementarity condition, mu >= 0,
+        ! in combination with the inequality constraints, h <= 0, i.e. mu*h = 0. For
+        ! numerical reasons, this is relaxed to the following ncp:
+        !
+        !       ncp = max(alpha*h + mu,0) - mu = 0,
+        !
+        ! where mu is the lagrange multiplier, and alpha an arbitrarily yet
+        ! strictly positive constant. Clearly, this function is not continuous, and
+        ! its linearization depends on the outcome of the max operator. Therefore,
+        ! the active and inactive sets are determined (active if mu + alpha*h >
+        ! 0).
+
+        ! Input
+        !======
+        ! - h:          inequality constraint values at the current design point
+        !               (nh-by-1)
+        ! - mu:         current estimated value of the lagrange multipliers
+        !               (nh-by-1)
+        ! - alpha:      strictly positive constant (scalar)
+        ! - gradh:      (required if more than 3 output arguments) gradient of the
+        !               inequality constraint values at the current design point
+        !               (nh-by-nphi)
+
+        ! Output
+        !=======
+        ! - ncp:        the residuals of the ncp function, i.e.
+        !               max(alpha*f + lambda,0) - lambda evaluated at the current
+        !               iterate (nh-by-1)
+        ! - gradncp:    structure containing linearization of the ncp function with
+        !               respect to the design and lagrange multipliers lambda and
+        !               mu (the second one is always the zero matrix).
+        ! - A,I:        the active (A) and inactive (I) sets.
+
+        ! Notes
+        !======
+        ! Note 1: different implementations of the ncp function are available, yet
+        ! the 'max' one is recommended. Should be set in SetNumParams, otherwise
+        ! default 'max' is set.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)                :: H(:), mu(:)
+        logical                             :: dogradient
+        logical, intent(inout)              :: A(size(H, 1)), &
+            I(size(H, 1))
+        type(MySparseUDT), intent(in)       :: gradH 
+        type(MySparseUDT), intent(inout)    :: gradncpphi, gradncpmu 
+        real(R8), intent(out)               :: ncp(size(H, 1))
+        type(NumNCPUDT), intent(in)         :: num
+
+        ! Auxiliary
+        real(R8)                            :: temp(size(H, 1), 2)
+
+        integer(I8)                         :: nh
+
+        ! Loop
+        integer(I8)                         :: k
+
+        ! Initialize
+        !===========
+        nh = size(H, 1)
+
+        ! Ncp function value
+        !===================
+        select case (num%ncpfun)
+            
+        case ('max')
+            ! Based on maximal value
+            temp(:, 1) = num%alpha*H + mu
+            temp(:, 2) = 0  
+            ncp = maxval(temp, 2) - mu
+            
+            ! Active and inactive sets
+            A = (num%alpha*H + mu) >= 0
+            I = .not. A
+            
+        case ('FB')
+
+            ! Based on non-smooth Fischer-Burmeister function
+            ncp = -(sqrt(H**2 + mu**2) - mu + H);
+            
+            ! Active and inactive sets
+            A = .true. ! not required
+            I = .false.
+            
+        case ('FBsmooth')
+
+            ! Based on smoothed Fischer-Burmeister function
+            ncp = -(sqrt((H)**2 + mu**2 + 2*num%alpha) - mu + (H));
+            
+            ! Active and inactive sets
+            A = .true. ! not required
+            I = .false.
+            
+        case default
+            
+            call gdErrorHandler('NonlinearComplementarityFunction: unknown ncp function')
+            
+        end select
+
+
+        ! Ncp function derivative
+        !========================
+        if (dogradient) then 
+
+            ! Initialize
+            gradncpphi = gradH 
+            gradncpmu%nrow = nh
+            gradncpmu%ncol = nh
+            gradncpmu%nval = nh ! diagonal matrix basically
+            call gradncpmu%Allocate()
+            gradncpmu%row = [(k, k = 1, nh)]
+            gradncpmu%col = [(k, k = 1, nh)]
+            
+            select case (num%ncpfun)
+                
+            case ('max')
+
+                ! Adjust values
+                where (A(gradncpphi%col)) 
+                    gradncpphi%val = num%alpha*gradH%val 
+                elsewhere 
+                    gradncpphi%val = 0
+                end where
+                where (A) 
+                    gradncpmu%val = 0
+                elsewhere 
+                    gradncpmu%val = -1
+                end where
+                
+            case ('FB')
+                
+                call gdErrorHandler('derivative not yet implemented')
+                
+            case ('FBsmooth')
+                
+                call gdErrorHandler('derivative not yet implemented')
+
+            case default
+                
+                ! Error thrown above
+            end select
+
+        end if
+
+    end subroutine
+
     ! Step length computation
     subroutine ComputeStepLength(solver, problem, dx, lambda, mu, alpha, flag)
 
@@ -1576,28 +1831,31 @@ module optmod_optimizationengine
                     Ak = gradG%Concatenate(gradH%DeleteColumns(.not. A), 2)
                     LSA = Ak%Transpose()*Ak
 
-                    ! Compute intermediate solution
-                    call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
+                    ! Check if constraints are bounded, otherwise skip
+                    if (all(ieee_is_finite(ck))) then
+                        ! Compute correction step
+                        call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
 
-                    ! Check if it converged, otherwise skip update
-                    if (flag2 /= 0) then 
-                        print *, 'linesearch backtracking_soc: could not converge problem, skipping soc update'
-                        wkt(:) = 0
+                        ! Check if it converged, otherwise skip update
+                        if (flag2 /= 0) then 
+                            print *, 'linesearch backtracking_soc: could not converge problem, skipping soc update'
+                            wkt(:) = 0
+                        end if 
+
+                        ! Compute correction
+                        wk = MatrixVectorProduct(Ak, -wkt)
+
+                        ! Recompute cost function at step x0 + alpha*d + wk
+                        ! Note: the problem is already updated to x + alpha*d!
+                        x = x0 + alpha*dphi + wk ! update x to ensure proper downdate later
+                        call problem%UpdateDesign(wk)
+                        call problem%UpdateProblem()
+                        call problem%EvaluateMeritFunction(fk, DJfk, dx, &
+                            lambda, mu, doderiv, meritfunction, numLS)
                     end if 
 
                     ! Housekeeping
                     deallocate(ck)
-
-                    ! Compute correction
-                    wk = MatrixVectorProduct(Ak, -wkt)
-
-                    ! Recompute cost function at step x0 + alpha*d + wk
-                    ! Note: the problem is already updated to x + alpha*d!
-                    x = x0 + alpha*dphi + wk ! update x to ensure proper downdate later
-                    call problem%UpdateDesign(wk)
-                    call problem%UpdateProblem()
-                    call problem%EvaluateMeritFunction(fk, DJfk, dx, &
-                        lambda, mu, doderiv, meritfunction, numLS)
 
                     ! Check the Armijo condition again
                     if (fk < f0 + c1*alpha*DJf0) then 
@@ -1645,6 +1903,124 @@ module optmod_optimizationengine
         !=============
         end associate
         end associate 
+
+    end subroutine
+
+    ! Correction equation setup
+    subroutine SetupCorrectionEquation(solver, lhs, rhs, &
+        gradJ, hessJ, G, gradG, hessG, lambda, H, gradH, hessH, mu, A, &
+        ncp, gradncpphi, gradncpmu)
+
+        ! Description
+        !============
+        ! This routine sets up the correction equation where lhs is a
+        ! sparse matrix and rhs the residual vector. The system of 
+        ! equations is assumed to be the KKT system where the 
+        ! inequality constraints are replaced by the ncp function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverUDT)        :: solver 
+
+        real(R8), intent(inout)             :: rhs(:) 
+        type(MySparseUDT), intent(inout)    :: lhs 
+
+        real(R8), intent(in)                :: G(:), H(:), mu(:), &
+                                            lambda(:), gradJ(:), ncp(:)
+        type(MySparseUDT), intent(in)       :: hessJ, gradG, hessG, &
+                                            gradH, hessH, gradncpphi, &
+                                            gradncpmu
+        logical, intent(in)                 :: A(:)
+
+        ! Loop variables
+        integer(I8)                         :: k 
+
+        ! Auxiliary variables
+        real(R8), allocatable               :: tmu(:)
+
+        ! Set up rhs
+        !===========
+        if (.not. allocated(tmu)) then 
+            allocate(tmu, source=mu)
+        end if
+        tmu = mu
+        where (.not. A) tmu = 0
+        rhs = -[gradJ + gradG%MatrixVectorProduct(lambda) + &
+            gradH%MatrixVectorProduct(tmu), G, ncp]
+
+        ! Set up lhs
+        !===========
+        ! Dimensions
+        lhs%nrow = size(rhs, 1)
+        lhs%ncol = size(rhs, 1)
+        lhs%nval = hessJ%nval + hessG%nval + hessH%nval + 2*gradG%nval &
+            + 2*gradncpphi%nval + gradncpmu%nval
+        if (.not. allocated(lhs%val)) then 
+            call lhs%Allocate()
+        end if 
+
+        ! dLdpsi2
+        !--------
+        ! Initialize
+        k = 0
+
+        ! Cost function contribution
+        lhs%val(k+1:k+hessJ%nval) = hessJ%val
+        lhs%row(k+1:k+hessJ%nval) = hessJ%row 
+        lhs%col(k+1:k+hessJ%nval) = hessJ%col 
+        k = k + hessJ%nval 
+
+        ! Equality constraints contribution
+        lhs%val(k+1:k+hessG%nval) = hessG%val
+        lhs%row(k+1:k+hessG%nval) = hessG%row 
+        lhs%col(k+1:k+hessG%nval) = hessG%col 
+        k = k + hessG%nval 
+
+        ! Inequality constraints contribution
+        lhs%val(k+1:k+hessH%nval) = hessH%val
+        lhs%row(k+1:k+hessH%nval) = hessH%row 
+        lhs%col(k+1:k+hessH%nval) = hessH%col 
+        k = k + hessH%nval 
+
+        ! dLdlambdadphi
+        !--------------
+        lhs%val(k+1:k+gradG%nval) = gradG%val 
+        lhs%row(k+1:k+gradG%nval) = gradG%row 
+        lhs%col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+        k = k + gradG%nval 
+
+        ! dLdphidlambda 
+        !--------------
+        lhs%val(k+1:k+gradG%nval) = gradG%val 
+        lhs%row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+        lhs%col(k+1:k+gradG%nval) = gradG%row  
+        k = k + gradG%nval 
+
+        ! dLdmudphi
+        !----------
+        lhs%val(k+1:k+gradncpphi%nval) = gradncpphi%val 
+        lhs%row(k+1:k+gradncpphi%nval) = gradncpphi%row
+        lhs%col(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
+        k = k + gradncpphi%nval 
+
+        ! dLdphidmu
+        !----------
+        lhs%val(k+1:k+gradncpphi%nval) = gradncpphi%val 
+        lhs%row(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
+        lhs%col(k+1:k+gradncpphi%nval) = gradncpphi%row
+        k = k + gradncpphi%nval 
+
+        ! dLdmudmu
+        !----------
+        lhs%val(k+1:k+gradncpmu%nval) = gradncpmu%val 
+        lhs%row(k+1:k+gradncpmu%nval) = gradncpmu%col + hessJ%nrow + gradG%ncol
+        lhs%col(k+1:k+gradncpmu%nval) = gradncpmu%row + hessJ%nrow + gradG%ncol
+        k = k + gradncpmu%nval 
+
+
+        
+
 
     end subroutine
 
@@ -2325,6 +2701,265 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(DFEQconUDT)               :: fun 
+        real(R8), allocatable           :: x(:)
+
+        ! Auxiliary
+        real(R8), allocatable           :: phi(:)
+        integer(I8)                     :: nphi, neq, nineq
+
+        ! Get dimensions
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Allocate
+        allocate(phi(nphi))
+
+        ! Get design variables
+        call fun%problem%GetProblemDesignVariables(phi)
+
+        ! Set arguments
+        x = phi
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                      INEQUALITY CONSTRAINTS                      !
+    !------------------------------------------------------------------!
+    ! Stand-alone driver 
+    subroutine CheckIneqconLinearization(problem, mu, checkgradient, &
+        checkhessian)
+
+        ! Description
+        !============
+        ! This routine compares the gradient computed by finite
+        ! differences with the actual gradient computation by 
+        ! using the mod_diagnostics module. The errors are printed to
+        ! the terminal. Here, since there are often multiple,
+        ! constraints, we also need to specify which constraints to 
+        ! check and to loop over. Note that, since we only have a 
+        ! general routine to evaluate the constraints as abstraction is 
+        ! made, the computational cost of doing this scales with the 
+        ! computational cost of computing *all* the constraints, i.e. 
+        ! we compute the values for all constraints and afterwards 
+        ! extract the ones we need. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemUDT)       :: problem 
+        logical                             :: checkgradient, &
+            checkhessian
+
+        ! Auxiliary
+        type(FDcheckerUDT)                  :: FDchecker 
+
+        integer(I8)                         :: nvars 
+        integer(I8), allocatable            :: vars(:)
+
+        integer(I8)                         :: nineq, nineqID, nphi, neq  
+        integer(I8), allocatable            :: ineqID(:)
+
+        real(R8), allocatable               :: mu(:)
+
+        ! Loop
+        integer(I8)                         :: i
+        
+
+        ! Initialize
+        !===========
+        ! Get the problem dimensions
+        call problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Set the constraints to check
+        nineqID =  1
+        allocate(ineqID(nineqID))
+        ineqID = [1022] !  some random numbers for now
+
+        ! Set the design variables to check
+        vars = [915, 1045] ! some random variables for now
+        nvars = size(vars, 1)
+
+        ! Sanity checks
+        if (any(ineqID > nineq)) then
+            ! Throw error
+            call gdErrorHandler('Constraint indices exceed the number &
+                & of constraints!')
+        end if
+        if (any(vars > nphi)) then
+            ! Throw error
+            call gdErrorHandler('Design indices exceed the number &
+                & of design variables!')
+        end if
+
+
+        ! Initialize checker 
+        call FDchecker%Initialize(nvars, vars)
+        allocate(DFIneqconUDT::FDchecker%fun)
+
+        ! Associate
+        associate(&
+            fun         => FDchecker%fun)
+        
+        ! Initialize checker functino
+        select type(fun)
+
+        type is (DFIneqconUDT)
+
+            ! Set the problem
+            fun%problem = problem
+            allocate(fun%mu(nineq))
+            fun%mu = mu
+
+            ! Compute errors
+            !===============
+            ! Loop over all constraints
+            do i = 1, nineqID
+                ! Set the correct ID
+                fun%ineqID = ineqID(i)
+
+                ! Print
+                print *, '============================================'
+                print *, 'Checking inequality constraint number: ', ineqID(i)
+                print *, '============================================'
+
+                ! Check
+                if (checkgradient) then 
+                    ! Don't do mu multiplication
+                    fun%multmu = .false.
+                    call FDchecker%CheckGradient()
+                end if
+                if (checkhessian) then 
+                    ! Do mu multiplication
+                    fun%multmu = .true.
+                    call FDchecker%CheckHessian()
+                end if
+            end do
+
+        end select
+
+        ! End associate
+        end associate
+
+        ! Deallocate
+        deallocate(vars, ineqID)
+
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateDFIneqcon(fun, x, f, df, d2f, dogradient, &
+        dohessian)
+
+        ! Description
+        !============
+        ! Evaluate the equality cons by first updating the design and
+        ! then computing the constraint values. Afterwards, the correct
+        ! constraint is unpacked. 
+
+        ! Notes
+        !======
+        ! When checking the hessian-vector product, one must make sure 
+        ! that only the contributions of the current constraint that is
+        ! to be checked are taken into account. To this end, all lambda
+        ! values, except the one of the current constraint, are set to
+        ! zero. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFIneqconUDT)             :: fun 
+        real(R8), allocatable           :: x(:), df(:)
+        real(R8)                        :: f
+        type(MySparseUDT)               :: d2f 
+        logical                         :: dogradient, dohessian
+
+        ! Auxiliary
+        integer(I8)                     :: nphi, neq, nineq
+        real(R8), allocatable           :: phiref(:)
+
+        ! Equality constraints 
+        real(R8), allocatable       :: H(:), mu(:)
+        type(MySparseUDT)           :: gradH, hessH  
+        
+
+        ! Initialize
+        !===========
+        ! Dimensions
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Equality constraint 
+        allocate(H(nineq), mu(nineq))
+        H(:) = 0
+        mu(:) = 0 ! Important! 
+        mu(fun%ineqID) = fun%mu(fun%ineqID) ! only keep the current mu
+        gradH%nrow = nphi 
+        gradH%ncol = neq 
+        hessH%nrow = nphi 
+        hessH%ncol = nphi
+
+        ! Update design
+        !==============
+        ! Allocate
+        allocate(phiref(nphi))
+
+        ! Get current design variables
+        call fun%problem%GetProblemDesignVariables(phiref)
+
+        ! Update with dx 
+        call fun%problem%UpdateDesign(x - phiref)
+
+        ! Update the optimization problem 
+        call fun%problem%UpdateProblem()
+
+        ! Evaluate the equality constraints
+        call fun%problem%EvaluateInequalityConstraints(H, gradH, &
+            d2f, dogradient, dohessian, mu)
+
+        ! Extract the correct constraint
+        f = H(fun%ineqID)
+        if (dogradient) then
+            call gradH%ExtractColumnFull(df, fun%ineqID)
+
+            ! Check if we need to multiply with lambda - e.g. when 
+            ! computing FD for hessian
+            if (fun%multmu) then
+                df = df*mu(fun%ineqID)
+            end if
+
+        end if
+
+    end subroutine
+
+    ! Dimension getter
+    subroutine GetProblemDimensionsIneqcon(fun, dimx)
+
+        ! Description
+        !============
+        ! Get lagrangian dimensions
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFIneqconUDT)             :: fun 
+        integer(I8)                     :: dimx, neq, nineq, nphi
+
+        ! Get dimensions
+        !===============
+        call fun%problem%GetProblemDimensions(nphi, neq, nineq)
+        dimx = nphi
+
+    end subroutine
+
+    ! Arguments getter
+    subroutine GetProblemArgumentsIneqcon(fun, x)
+
+        ! Description
+        !============
+        ! Get lagrangian arguments
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DFIneqconUDT)             :: fun 
         real(R8), allocatable           :: x(:)
 
         ! Auxiliary
