@@ -76,6 +76,35 @@ module gdmod_constraints
 
     end type
 
+    ! Structure for keeping track of degrees of freedom
+    type :: DOFGStructureUDT 
+        
+        ! Description
+        !============
+        ! UDT that contains information (for one degree of freedom group) of 
+        ! how many degrees of freedom there are (in the 'dofs' field)
+        ! and to which constraints (in the 'cons' field) they can be 
+        ! attributed. Additionally has the 'vert' field, which is only
+        ! used for debugging/visualization/diagnostics. 
+
+        integer(I8)                 :: dofs
+        integer(I8), allocatable    :: cons(:), vert(:)
+
+    end type
+
+    ! Structure to keep track of (in)equality constraints 
+    type :: CGStructureUDT 
+        
+        ! Description
+        !============
+        ! UDT that contains information (for one constraint) of 
+        ! which dof groups (in 'dofgroups') can be used to which the 
+        ! (in)equality constraint can be attributed to.
+
+        integer(I8), allocatable    :: dofgroups(:)
+
+    end type
+
     ! Abstract types
     !===============
     ! Generic constraint type
@@ -277,10 +306,13 @@ module gdmod_constraints
         !
         ! - nedges:     (scalar) total number of edges to constrain
         ! - edgevert:   (nedges-by-2) edge vertex IDs 
+        ! - radiallines: polygon set with radial lines built from the 
+        !               edges
 
         ! Fields: 
         integer(I8), allocatable            :: edgevert(:, :)
         integer(I8)                         :: nedges
+        type(PolygonSetUDT)                 :: radiallines
 
     contains
 
@@ -5517,6 +5549,9 @@ module gdmod_constraints
         allocate(constraints%edgevert(constraints%nedges, 2))
         constraints%edgevert = vpairs(1:vpc, :)
 
+        ! Construct radial lines
+        call constraints%radiallines%Construct(constraints%edgevert, vert%x, vert%y)
+
         ! Visualize
         if (debugplots) then 
 
@@ -6495,6 +6530,9 @@ module gdmod_constraints
 
         ! Initialize
         !===========
+        ! Set constants
+        constraints%smallnumber = options%lfoptions%smallnumber
+
         ! Associate
         associate(&
             maxccv          => monitor%maxeqvcc,        &
@@ -6637,6 +6675,9 @@ module gdmod_constraints
         dotprod = -gy*dx + gx*dy 
         signvecpol = sign(myones, dotprod)
 
+        ! Write
+        call WriteVertexPairData(vpairspol, xv, yv, 'con_lf_vpairspol')
+
         ! Housekeeping
         deallocate(xv, yv, gx, gy, myones)
 
@@ -6663,6 +6704,9 @@ module gdmod_constraints
         dotprod = gx*dx + gy*dy 
         signvecrad = sign(myones, dotprod)
 
+        ! Write
+        call WriteVertexPairData(vpairsrad, xv, yv, 'con_lf_vpairsrad')
+
         ! Housekeeping
         deallocate(xv, yv, gx, gy, myones)
 
@@ -6688,6 +6732,9 @@ module gdmod_constraints
         ! Evaluate dot product and save sign
         dotprod = -gy*dx + gx*dy 
         signvecves = sign(myones, dotprod)
+
+        ! Write
+        call WriteVertexPairData(vpairsves, xv, yv, 'con_lf_vpairsves')
 
         ! Housekeeping
         deallocate(xv, yv, gx, gy, myones)
@@ -7313,5 +7360,7 @@ module gdmod_constraints
         end associate
 
     end subroutine
+
+    
 
 end module
