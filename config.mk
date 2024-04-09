@@ -147,4 +147,4 @@ CONSTANTS_FILES = src/Constants/mod_precision.F90 $(wildcard src/Constants/*.F90
 CLAYER_FILES    = $(wildcard src/Clayer/*.c)
 
 ## ClayerF              : fortran files for interfacing with other c code
-CLAYERF_FILES    = $(wildcard src/Clayer/*.F90)
+CLAYERF_FILES    =  src/Clayer/CSparseF.F90 src/Clayer/Clayer.F90
