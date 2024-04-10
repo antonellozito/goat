@@ -73,7 +73,7 @@ module optmod_monitor
         real(R8)                :: opttol, rxf, maxdphi
         real(R8), allocatable   :: J(:), L(:), G(:), H(:), convnorm(:), &
             alpha(:) 
-        real                    :: evaltime, ittime, linsolvetime
+        real(R8)                :: evaltime, ittime, linsolvetime
 
     contains
 

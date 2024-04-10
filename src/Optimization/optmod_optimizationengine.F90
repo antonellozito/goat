@@ -30,6 +30,7 @@ module optmod_optimizationengine
     ! Load modules
     use mod_precision
     use mod_constants
+    use mod_utility
     use mod_sparseinterface
     use mod_diagnostics
     use mod_linearsolverinterface
@@ -809,7 +810,7 @@ module optmod_optimizationengine
         logical                     :: checkgradients, checkhessians 
 
         ! Timing
-        real                        :: t_it_s, t_it_e, &
+        real(R8)                    :: t_it_s, t_it_e, &
             t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e
 
         ! Data
@@ -915,8 +916,8 @@ module optmod_optimizationengine
         do while ( (.not. converged) .and. (itopt <= maxit))
 
             ! Start timing
-            call cpu_time(t_it_s)
-            call cpu_time(t_eval_s)
+            call wall_time(t_it_s)
+            call wall_time(t_eval_s)
 
             ! Update the optimization problem 
             call problem%UpdateProblem()
@@ -960,7 +961,7 @@ module optmod_optimizationengine
             call solver%CheckConvergenceKKT(gradL, converged, convnorm)
 
             ! Timers
-            call cpu_time(t_eval_e)
+            call wall_time(t_eval_e)
 
             ! Solve 
             if (.not. converged) then 
@@ -979,9 +980,9 @@ module optmod_optimizationengine
                 !call SpyPlot(lhs%row, lhs%col, lhs%nval, '-p')
                 
                 ! Call the sparse solver
-                call cpu_time(t_linsolve_s)
+                call wall_time(t_linsolve_s)
                 call SolveSparseLinearSystemDI(lhs, rhs, dx, flag)
-                call cpu_time(t_linsolve_e)
+                call wall_time(t_linsolve_e)
 
             else
                 ! Don't solve again, already converged. Exit 
@@ -1082,7 +1083,7 @@ module optmod_optimizationengine
             where (.not. A) mu = 0
             
             ! Timers
-            call cpu_time(t_it_e)
+            call wall_time(t_it_e)
 
             ! Update the monitor
             problem%monitor%itopt = itopt
