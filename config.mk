@@ -15,10 +15,10 @@
 ## % Library paths
 ## %==============
 ## LAPACKPATH 			: LAPACK library path (user defined)
-LAPACKPATH = -llapack
+LAPACKPATH = -lopenblas
 
 ## BLASPATH 			: BLAS library path (user defined)
-BLASPATH = -lblas
+BLASPATH = -lopenblas
 
 ## UMFPACKPATH 			: UMFPACK library path (user defined)
 UMFPACKPATH = -lumfpack
