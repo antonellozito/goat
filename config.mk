@@ -138,7 +138,9 @@ SETUP_FILES = $(wildcard src/Setup/*.F90)
 NUMERICS_FILES = src/Numerics/PolygonLevelsetFunction2D.F90 $(wildcard src/Numerics/*.F90)
 
 ## OPTIMIZATION 		: optimization file generation names (.F90) - unsequenced
-OPTIMIZATION_FILES = $(wildcard src/Optimization/*.F90)
+OPTIMIZATION_FILES = src/Optimization/optmod_designvariables.F90 src/Optimization/optmod_costfunction.F90 \
+    src/Optimization/optmod_constraints.F90 src/Optimization/optmod_monitor.F90 \
+    src/Optimization/optmod_numerics.F90 $(wildcard src/Optimization/*.F90)
 
 ## CONSTANTS            : constants such as precision and special characters (.F90) - unsequenced
 CONSTANTS_FILES = src/Constants/mod_precision.F90 $(wildcard src/Constants/*.F90)
