@@ -228,8 +228,8 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
         ! Substitute labels
         do i = 1, size(gridoptions%facelabelsubfrom)
-            where (grid%data%regions%facelabel == gridoptions%facelabelsubfrom(i)) &
-                grid%data%regions%facelabel = gridoptions%facelabelsubto(i)
+            where (grid%face%label == gridoptions%facelabelsubfrom(i)) &
+                grid%face%label = gridoptions%facelabelsubto(i)
         end do
 
         ! Loop over all face labels (not regions here!) to precompute
@@ -241,7 +241,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
         nbnd = 0 ! number of boundaries
         do il = 1, nlabels 
             ! Get the faces of this boundary
-            mask(:) = grid%data%regions%facelabel == gglabels(il);
+            mask(:) = grid%face%label == gglabels(il);
             nfpb = count(mask)
 
             ! Check
@@ -274,7 +274,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
             
 
             ! Get the faces of this boundary
-            mask(:) = grid%data%regions%facelabel == gglabels(il);
+            mask(:) = grid%face%label == gglabels(il);
             nfpb = count(mask)
 
             ! Check
@@ -474,8 +474,8 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
         ! Substitute labels
         do i = 1, size(gridoptions%facelabelsubfrom)
-            where (grid%data%regions%facelabel == gridoptions%facelabelsubfrom(i)) &
-                grid%data%regions%facelabel = gridoptions%facelabelsubto(i)
+            where (grid%face%label == gridoptions%facelabelsubfrom(i)) &
+                grid%face%label = gridoptions%facelabelsubto(i)
         end do
 
         ! Loop over all face labels (not regions here!) to precompute
@@ -487,7 +487,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
         nbnd = 0 ! number of boundaries
         do il = 1, nlabels 
             ! Get the faces of this boundary
-            mask(:) = grid%data%regions%facelabel == gglabels(il);
+            mask(:) = grid%face%label == gglabels(il);
             nfpb = count(mask)
 
             ! Check
@@ -520,7 +520,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
             
 
             ! Get the faces of this boundary
-            mask(:) = grid%data%regions%facelabel == gglabels(il);
+            mask(:) = grid%face%label == gglabels(il);
             nfpb = count(mask)
 
             ! Check

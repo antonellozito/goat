@@ -42,6 +42,13 @@ subroutine GDDriver(goatoptions)
     call RunGridOptimization(grid, magneticField, environment, &
         gdoptions)
 
+    ! Write data
+    !===========
+    ! Grid data
+    call WriteGOAT(goatoptions, grid)
+
+    ! b2ag file
+    !call Writeb2agdat(goatoptions, grid)
 
     
 
