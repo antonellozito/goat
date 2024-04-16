@@ -228,14 +228,14 @@ subroutine WriteGOAT(goatoptions, grid)
     end do
 
     tempstring = repeat(' ', 1000)
-    write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', size(ftcell, 1), 'ftCv'
+    write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', ftcellP(nft, 1)+ftcellP(nft, 2)-1, 'ftCv'
     fmt = repeat(' ', 1000)
     write(fmt, *) '(', 12, '(', Ifm, '))'
-    write(fu, fmt) ftcell 
-    write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', size(ftface, 1), 'ftFc'
+    write(fu, fmt) ftcell(1:ftcellP(nft, 1)+ftcellP(nft, 2)-1) 
+    write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', ftfaceP(nft, 1)+ftfaceP(nft, 2)-1, 'ftFc'
     fmt = repeat(' ', 1000)
     write(fmt, *) '(', 12, '(', Ifm, '))'  
-    write(fu, fmt) ftface
+    write(fu, fmt) ftface(1:ftfaceP(nft, 1)+ftfaceP(nft, 2)-1)
 
     ! Flux surface information
     tempstring = '*cf: fs fsFcP(:,1) fsFcP(:,2) fsPsi'
@@ -246,10 +246,10 @@ subroutine WriteGOAT(goatoptions, grid)
     end do
 
     tempstring = repeat(' ', 1000)
-    write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', size(fsface, 1), 'fsFc'
+    write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', fsfaceP(nfs, 1)+fsfaceP(nfs, 2)-1, 'fsFc'
     fmt = repeat(' ', 1000)
     write(fmt, *) '(', 12, '(', Ifm, '))'  
-    write(fu, fmt) fsface
+    write(fu, fmt) fsface(1:fsfaceP(nfs, 1)+fsfaceP(nfs, 2)-1)
 
 
 
