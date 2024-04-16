@@ -31,6 +31,7 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     integer(I8), allocatable    :: vdummy(:,:) ! dummy array
     integer(I8), allocatable    :: ftdummy(:) ! dummy array
 
+    real(R8), allocatable       :: fcQalf(:, :) ! to reconstruct aligned faces
     real(R8), allocatable       :: cdummyr(:,:) ! dummy array
     real(R8), allocatable       :: fdummyr(:,:) ! dummy array
     real(R8), allocatable       :: vdummyr(:,:) ! dummy array
@@ -85,6 +86,7 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     allocate(fsdummyr(grid%data%fluxdata%nFs))
     allocate(facedummy(grid%cell%nface))
     allocate(ftdummy(grid%data%fluxdata%nFt))
+    allocate(fcQalf(nf, 2))
 
     ! Read data for structured grid remapping (to be deleted in future)
     call cfruin (filespec,1,idum2,'isClassicalGrid')
@@ -156,15 +158,24 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     call cfrure (filespec, nc*2, cdummyr(:,1:2), 'cvQgam')
     call cfrure (filespec, nc,   cdummyr(:,1),  'cvVol')
 
-    ! face quantities - ignore all
+    ! face quantities - ignore all except fcQalf
     call cfrure (filespec, nf*4, fdummyr(:,1:4),   'fcBb')
     call cfrure (filespec, nf,   fdummyr(:,1),    'fcS')
     call cfrure (filespec, nf*2, fdummyr(:,1:2),   'fcHc')
     call cfrure (filespec, nf,   fdummyr(:,1),   'fcHt')
     call cfrure (filespec, nf*2, fdummyr(:,1:2), 'fcQgam')
-    call cfrure (filespec, nf*2, fdummyr(:,1:2), 'fcQalf')
+    call cfrure (filespec, nf*2, fcQalf, 'fcQalf')
     call cfrure (filespec, nf*2, fdummyr(:,1:2), 'fcQbet')
     call cfrure (filespec, nf,   fdummyr(:,1),  'fcPbs')
+
+    ! Determine aligned faces as those faces with cos(alpha) = 0
+    ! But do it with a very small tolerance to avoid numerical garbage
+    where (fcQalf(:, 1) < 1e-10) 
+        grid%face%aligned = 1
+    elsewhere
+        grid%face%aligned = 0
+    end where
+
 
         ! vertex quantities - only keep coordinates
     call cfrure (filespec, nv*4, vdummyr(:,1:4),   'vxBb')
