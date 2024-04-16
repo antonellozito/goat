@@ -6,6 +6,13 @@ subroutine WriteGOAT(goatoptions, grid)
     ! specified in the goatoptions structure. The format is an 
     ! unstructured traduit.out.b2us file 
 
+    ! Note: the format madness that you will find in this file is due to
+    ! the overly pedantic read/write routines of SOLPS, which fail if 
+    ! you dare to even add/remove a single whitespace. If, hopefully
+    ! somewhere in the near future, this would get revision, one can
+    ! get rid of all the 'fmt' business and just put 'write(fu, *)' 
+    ! probably everywhere. 
+
     ! Modules
     !========
     use goatmod_types
@@ -108,13 +115,13 @@ subroutine WriteGOAT(goatoptions, grid)
     ! General grid information
     tempstring = '*cf:    int                6    nCi,nFc,nVx,nCg,nFs,nFt'
     write(fu, '(a)' ) tempstring
-    fmt = '('//repeat(Ifm //',' //spacefm, 6)//')'
+    fmt = '(6'//Ifm//')'
     write(fu, fmt) nc, nf, nv, ngc, nfs, nft
 
     tempstring = '*cf:    int                5    nCmxVx,nCmxFc,nFmxCv,nVmxCv,nVmxFc'
     write(fu, '(a)' ) tempstring
 
-    fmt = '('//repeat(Ifm //',' //spacefm, 5)//')'
+    fmt = '(5'//Ifm//')'
     write(fu, fmt) ncellvert, ncellface, nFmxCv, nvertcell, nvertface 
     tempstring = '*cf:    int                1    isClassicalGrid'
     write(fu, '(a)' ) tempstring
@@ -125,8 +132,8 @@ subroutine WriteGOAT(goatoptions, grid)
     if (isClassicalGrid == 1) then 
         tempstring = '*cf:    int                3    nx,ny,nncut'
         write(fu, '(a)' ) tempstring
-        fmt = '('//repeat(Ifm //',' //spacefm, 3)//')'
-        write(fu, fmt) isClassicalGrid, sgnx, sgny, sgncut
+        fmt = '(3'//Ifm//')'
+        write(fu, fmt) sgnx, sgny, sgncut
     end if 
 
     ! X-point(s) information
@@ -141,7 +148,7 @@ subroutine WriteGOAT(goatoptions, grid)
     if (goatoptions%write_OMPdata) then 
         tempstring = '*cf:    int                4    ncvOMP,ncvIMP,nfcOMP,nfcIMP'
         write(fu, '(a)' ) tempstring
-        fmt = '('//repeat(Ifm //',' //spacefm, 4)//')'
+        fmt = '(4'//Ifm//')'
         write(fu, fmt) ncvOMP, ncvIMP, nfcOMP, nfcIMP 
     end if 
 
@@ -149,13 +156,13 @@ subroutine WriteGOAT(goatoptions, grid)
     if (goatoptions%write_Xpointdata) then 
         tempstring = repeat(' ', 1000)
         write(tempstring, '(a)') '*cf:    int                ', nX, '    Xpoint(s)'
-        fmt = '('//repeat(Ifm //',' //spacefm, nX)//')'
+        fmt = '('//repeat(Ifm, nX)//')'
         write(fu, fmt) trim(tempstring), Xpoint
     end if
 
     tempstring = '*cf: Vx vxX vxY vxPsi vxBx vxBy vxFfbz'
     write(fu, '(a)' ) tempstring 
-    fmt = '('//Ifm// ','// spacefm // ',' //repeat(Rfm //',' //spacefm, 6)//')'
+    fmt = '('//Ifm// ',' //repeat(Rfm, 6)//')'
     do i = 1, nv 
         write(fu, fmt) i, xv(i), yv(i), psiv(i), Bxv(i), Byv(i), ffbzv(i)
     end do
@@ -171,22 +178,22 @@ subroutine WriteGOAT(goatoptions, grid)
             psic(i), bpc(i), btc(i), flagc(i), regc(i), cellft(i)
     end do
     fmt = repeat(' ', 1000)
-    write(fmt, *) '(', ncellvert, '(', Ifm, ',', spacefm, '))'
+    write(fmt, *) '(', 12, '(', Ifm, '))'
     write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', ncellvert, 'cvVx'
     write(fu, fmt) cellvert
 
     fmt = repeat(' ', 1000)
-    write(fmt, *) '(', ncellface, '(', Ifm, ',', spacefm, '))'
+    write(fmt, *) '(', 12, '(', Ifm, '))'
     write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', ncellface, 'cvFc'
     write(fu, fmt) cellface
 
     if (goatoptions%write_OMPdata) then 
         fmt = repeat(' ', 1000)
         write(fu, '(2a8,i12,4x,a5)') '*cf:    ','int     ', ncvOMP, 'cvOMP'
-        write(fmt, *) '(', ncvOMP, '(', Ifm, ',', spacefm, '))'
+        write(fmt, *) '(', 12, '(', Ifm, '))'
         write(fu, fmt) cvOMP
         write(fu, '(2a8,i12,4x,a5)') '*cf:    ','int     ', ncvIMP, 'cvIMP'
-        write(fmt, *) '(', ncvOMP, '(', Ifm, ',', spacefm, '))'
+        write(fmt, *) '(', 12, '(', Ifm, '))'
         write(fu, fmt) cvIMP
     end if 
 
@@ -203,18 +210,18 @@ subroutine WriteGOAT(goatoptions, grid)
         tempstring = repeat(' ', 1000)
         write(fu, '(2a8,i12,4x,a5)') '*cf:    ','int     ', nfcOMP, 'fcOMP'
         fmt = repeat(' ', 1000)
-        write(fmt, *) '(', nfcOMP, '(', Ifm, ',', spacefm, '))'
+        write(fmt, *) '(', 12, '(', Ifm, '))'
         write(fu, fmt) fcOMP
         write(fu, '(2a8,i12,4x,a5)') '*cf:    ','int     ', nfcIMP, 'fcIMP'
         fmt = repeat(' ', 1000)
-        write(fmt, *) '(', nfcIMP, '(', Ifm, ',', spacefm, '))'
+        write(fmt, *) '(', 12, '(', Ifm, '))'
         write(fu, fmt) fcIMP
     end if
 
     ! Flux tube information
     tempstring = '*cf: ft ftCvP(:,1) ftCvP(:,2) ftFcP(:,1) ftFcP(:,2) ftReg'
     write(fu, '(a)' ) tempstring
-    fmt = '('//repeat(Ifm //',' //spacefm, 6) //')'
+    fmt = '('//repeat(Ifm,  6) //')'
     do i = 1, nft
           write(fu, fmt) i, ftcellP(i, 1), ftcellP(i, 2), ftfaceP(i, 1), &
              ftfaceP(i, 2), ftreg(i)
@@ -223,17 +230,17 @@ subroutine WriteGOAT(goatoptions, grid)
     tempstring = repeat(' ', 1000)
     write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', size(ftcell, 1), 'ftCv'
     fmt = repeat(' ', 1000)
-    write(fmt, *) '(', size(ftcell, 1), '(', Ifm, ',', spacefm, '))'
+    write(fmt, *) '(', 12, '(', Ifm, '))'
     write(fu, fmt) ftcell 
     write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', size(ftface, 1), 'ftFc'
     fmt = repeat(' ', 1000)
-    write(fmt, *) '(', size(ftface, 1), '(', Ifm, ',', spacefm, '))'  
+    write(fmt, *) '(', 12, '(', Ifm, '))'  
     write(fu, fmt) ftface
 
     ! Flux surface information
     tempstring = '*cf: fs fsFcP(:,1) fsFcP(:,2) fsPsi'
     write(fu, '(a)' ) tempstring
-    fmt = '('//repeat(Ifm //',' //spacefm, 4) //')'
+    fmt = '('//repeat(Ifm, 4) //')'
     do i = 1, nfs
           write(fu, *) i, fsfaceP(i, 1), fsfaceP(i, 2), fspsi(i)
     end do
@@ -241,7 +248,7 @@ subroutine WriteGOAT(goatoptions, grid)
     tempstring = repeat(' ', 1000)
     write(fu, '(2a8,i12,4x,a4)') '*cf:    ','int     ', size(fsface, 1), 'fsFc'
     fmt = repeat(' ', 1000)
-    write(fmt, *) '(', size(fsface, 1), '(', Ifm, ',', spacefm, '))'  
+    write(fmt, *) '(', 12, '(', Ifm, '))'  
     write(fu, fmt) fsface
 
 
