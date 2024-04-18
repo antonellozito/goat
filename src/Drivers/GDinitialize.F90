@@ -23,19 +23,10 @@ subroutine GDinitialize(inputfilepath, grid, magneticField, &
     type(GoatoptionsUDT), intent(out)       :: goatoptions
     type(GDoptionsUDT), intent(out)         :: gdoptions
 
-    ! Auxiliary
-    character(:), allocatable               :: filepath
-
-    ! Initialize
-    !===========
-    ! GOAToptions
-    allocate(character(len('./GOAToptions.dat')) :: filepath)
-    filepath = './GOAToptions.dat'
-
     ! Read the user input
     !====================
     ! fileID should always be GOAToptions.dat
-    goatoptions%inputfilepath = filepath 
+    goatoptions%inputfilepath = inputfilepath 
     print *, 'Reading goat options from file: ', goatoptions%inputfilepath
     call goatoptions%Set()
 
