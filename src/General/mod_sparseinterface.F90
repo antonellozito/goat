@@ -815,6 +815,7 @@ module mod_sparseinterface
         ! Adjust dimension
         c%nrow = a%nrow - count(b)
         c%ncol = a%ncol
+        c%nval = a%nval 
 
         ! Remove elements, if any
         if (a%nval > 0) then 
@@ -839,7 +840,10 @@ module mod_sparseinterface
                 shiftvec(i) = shift 
             end do 
             c%row = c%row - shiftvec(c%row)
-
+        else
+            ! Still need to allocate!
+            c%nval = 0
+            call c%Allocate()
         end if 
 
     end function

@@ -2497,26 +2497,26 @@ module gdmod_constraints
 
         ! Pre-evaluate some data
         allocate(psival(nv))
+        allocate(d3psidx3(nv), d3psidx2dy(nv), d3psidxdy2(nv), &
+            d3psidy3(nv), d3Vdx3(nv), d3Vdx2dy(nv), d3Vdxdy2(nv), d3Vdy3(nv))
+        allocate(d2Vdx2(nv), d2Vdxdy(nv), d2Vdy2(nv))
+        allocate(d2psidx2(nv), d2psidxdy(nv), d2psidy2(nv))
+        allocate(dpsidx(nv), dpsidy(nv))
+        allocate(dVdx(nv), dVdy(nv))
+
         call magneticField%interp%Evaluate(x, y, 0, 0, psival)
 
         if (ntp > 0) then 
             ! Evaluate vessel shape derivatives
-            allocate(dVdx(nv), dVdy(nv))
             call plf%Evaluate(x, y, 1, 0, dVdx)
             call plf%Evaluate(x, y, 0, 1, dVdy)
 
             if (.not. dogradient) then 
-                ! Allocate
-                allocate(dpsidx(nv), dpsidy(nv))
-
                 ! Precompute
                 call magneticField%interp%Evaluate(x, y, 1, 0, dpsidx)
                 call magneticField%interp%Evaluate(x, y, 0, 1, dpsidy)
             end if 
             if ( (.not. dohessian) .and. dogradient) then 
-                ! Allocate
-                allocate(d2psidx2(nv), d2psidxdy(nv), d2psidy2(nv))
-
                 ! Precompute
                 call magneticField%interp%Evaluate(x, y, 2, 0, d2psidx2)
                 call magneticField%interp%Evaluate(x, y, 1, 1, d2psidxdy)
@@ -2525,17 +2525,11 @@ module gdmod_constraints
 
             ! Evaluate additional derivatives
             if (dogradient) then 
-                allocate(d2Vdx2(nv), d2Vdxdy(nv), d2Vdy2(nv))
                 call plf%Evaluate(x, y, 2, 0, d2Vdx2)
                 call plf%Evaluate(x, y, 1, 1, d2Vdxdy)
                 call plf%Evaluate(x, y, 0, 2, d2Vdy2)
             end if 
-            if (dohessian) then 
-                ! Allocate
-                allocate(d3psidx3(nv), d3psidx2dy(nv), d3psidxdy2(nv), &
-                    d3psidy3(nv), d3Vdx3(nv), d3Vdx2dy(nv), d3Vdxdy2(nv), &
-                    d3Vdy3(nv))
-
+            if (dohessian) then                 
                 ! Precompute
                 call magneticField%interp%Evaluate(x, y, 3, 0, d3psidx3)
                 call magneticField%interp%Evaluate(x, y, 2, 1, d3psidx2dy)
@@ -2551,18 +2545,12 @@ module gdmod_constraints
 
 
         if (dogradient) then 
-            ! Allocate
-            allocate(dpsidx(nv), dpsidy(nv))
-
             ! Precompute
             call magneticField%interp%Evaluate(x, y, 1, 0, dpsidx)
             call magneticField%interp%Evaluate(x, y, 0, 1, dpsidy)
         end if 
 
         if (dohessian) then 
-            ! Allocate
-            allocate(d2psidx2(nv), d2psidxdy(nv), d2psidy2(nv))
-
             ! Precompute
             call magneticField%interp%Evaluate(x, y, 2, 0, d2psidx2)
             call magneticField%interp%Evaluate(x, y, 1, 1, d2psidxdy)
@@ -3472,7 +3460,7 @@ module gdmod_constraints
                 mask(:) = .true.
                 
                 ! Check the monitor
-                where (monitor%eqvcc(tv) .ge. monitor%maxeqvcc) mask = .false.
+                where (monitor%eqvcc(tv) .ge. monitor%maxeqvcc(tv)) mask = .false.
 
                 ! Check if already constrained (will happen for nodes 
                 ! belonging to multiple boundaries or to boundaries that
@@ -3515,7 +3503,7 @@ module gdmod_constraints
                 mask(:) = .true.
                 
                 ! Check the monitor
-                where (monitor%eqvcc(tv) .ge. monitor%maxeqvcc) mask = .false.
+                where (monitor%eqvcc(tv) .ge. monitor%maxeqvcc(tv)) mask = .false.
 
                 ! Check if already constrained (will happen for nodes 
                 ! belonging to multiple boundaries or to boundaries that
@@ -3961,7 +3949,7 @@ module gdmod_constraints
 
         ! Check which x-points are not yet constrained
         mask(:) = .false. 
-        where (monitor%eqvcc(xpind) <= monitor%maxeqvcc-2) mask = .true.
+        where (monitor%eqvcc(xpind) <= monitor%maxeqvcc(xpind)-2) mask = .true.
 
         ! Set method
         constraints%meth = options%xpoptions%meth

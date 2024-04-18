@@ -395,7 +395,7 @@ module goatmod_userinput
     !------------------------------------------------------------------!
 
     ! Main option setter
-    subroutine SetOptions(options)
+    recursive subroutine SetOptions(options)
 
         ! Description
         !============

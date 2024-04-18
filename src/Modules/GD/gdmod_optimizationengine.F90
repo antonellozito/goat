@@ -1328,6 +1328,9 @@ module gdmod_optimizationengine
 
         ! Attribute constraints to groups
         !--------------------------------
+        do i = 1, size(dofgroups)
+            allocate(dofgroups(i)%cons(0))
+        end do
         do i = 1, cc
             do j = 1, size(congroups(i)%dofgroups)
                 gID = congroups(i)%dofgroups(j)
