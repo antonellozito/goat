@@ -19,7 +19,7 @@ VERSION 1.00.00
 'goat.GDinputfilepath'              'GOAToptions.dat'
 
 # Output file locations 
-'goat.writefilepath'                'traduit.out.b2us_smoothed'  
+'goat.writefilepath'                'traduit.out.b2us_smoothed2'  
 
 # Output options 
 'goat.write_final'                  '1'
@@ -291,7 +291,7 @@ VERSION 1.00.00
 # See SetNumParams.m for the default settings
 
 # General optimization
-'gd.opt.num.itmax'                  '0'
+'gd.opt.num.itmax'                  '10'
 'gd.opt.num.tol'                    '1e-10'
 
 # KKT driver (see also GridKKTDriver.m)
