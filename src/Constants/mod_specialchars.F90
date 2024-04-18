@@ -27,6 +27,7 @@ module mod_specialchars
     character, parameter    :: rowdel       = ';'
     character, parameter    :: veccon       = ':'
     character, parameter    :: repeatchar   = '*'
+    character, parameter    :: filesepchar  = '/' ! assumed linux system
     character(*), parameter :: numchar      = '0123456789+-'
     character(*), parameter :: expchar      = 'eE'
 
