@@ -73,10 +73,13 @@ module goatmod_types
         !                   by-1)
         ! - nneiglist       : dimension of neiglist (scalar)
         ! - neigP           : ntot-by-2 array, analogous to faceP and 
-        !                   cellP, but for neiglist.     
+        !                   cellP, but for neiglist.
+        ! - psi             : psi values at vertex locations    
+        ! - bx, by          : magnetic field vector at vertex locations  
+        ! - ffbz            : ???
 
         ! Coordinates
-        real(R8), allocatable               :: x(:), y(:) 
+        real(R8), allocatable               :: x(:), y(:)
 
         ! Logicals and indices
         logical, allocatable                :: BV(:)
@@ -95,6 +98,9 @@ module goatmod_types
         integer(I8), allocatable            :: neig(:)
         integer(I8)                         :: nneig = 0
 
+        ! Other data
+        real(R8), allocatable, dimension(:) :: bx, by, psi, ffbz 
+
     end type
 
     ! Face structure
@@ -111,11 +117,16 @@ module goatmod_types
         ! - neig            : cell neighbours of face
         ! - BF              : logical index that is true if the face
         !                   is a boundary face
+        ! - label           : face labels
+        ! - reg             : face regions
+        ! - aligned         : integer that is 1 if the face is aligned
+
 
         ! Logicals and indices
         integer(I8), allocatable            :: vert(:,:)
 
-        integer(I8), allocatable            :: cell(:)
+        integer(I8), allocatable            :: cell(:), label(:), &
+            reg(:), aligned(:)
         integer(I8), allocatable            :: cellP(:, :)
         integer(I8)                         :: ncell = 0
 
@@ -158,7 +169,11 @@ module goatmod_types
 
         logical, allocatable                :: GC(:)
 
-        integer(I8)                         :: ntot = 0                      
+        integer(I8)                         :: ntot = 0, ngc
+        
+        real(R8), allocatable, dimension(:) :: psi, bp, bt, x, y
+        integer(I8), allocatable, dimension(:)  :: cflags(:), reg(:), &
+            ft(:)
     end type
 
     ! Boundary structure
@@ -245,8 +260,6 @@ module goatmod_types
         ! - fluxtubefaces   : nFv(number of faces)-by-1 array containing 
         !                   the face numbers that correspond to flux 
         !                   tubes. 
-        ! - cellfluxtubeID  : nCv(number of cells)-by-1 array containing
-        !                   the flux tube number (ID) for each cell. 
         ! - fluxsurfacefacesP  : nFs-by-2 array where the first index 
         !                   is the start index in the fluxsurfacefaces
         !                   array, and the second the amount of faces of
@@ -266,12 +279,13 @@ module goatmod_types
         integer(I8), allocatable            :: fluxtubecells(:)
         integer(I8), allocatable            :: fluxtubefacesP(:,:)
         integer(I8), allocatable            :: fluxtubefaces(:)
-        integer(I8), allocatable            :: cellfluxtubeID(:)
 
         ! Arrays, flux surface data
         integer(I8), allocatable            :: fluxsurfacefacesP(:,:)
         integer(I8), allocatable            :: fluxsurfacefaces(:)
         integer(I8), allocatable            :: fluxsurfaceID(:)
+        real(R8), allocatable               :: fluxsurfacepsi(:)
+
 
     end type
 
@@ -284,19 +298,11 @@ module goatmod_types
         ! belongs to which grid region. 
         ! Fields:
         !
-        ! - cellregID           : grid%cell%ntot-by-1 array containing
-        !                       the region IDs for each cell
-        ! - faceregID           : grid%face%ntot-by-1 array containing
-        !                       the region IDs for each face
         ! - fluxtuberegID       : fluxdata%nFt-by-1 array containing 
         !                       the region IDs for each flux tube
 
         ! Arrays
-        integer(I8), allocatable            :: cellregID(:)
-        integer(I8), allocatable            :: faceregID(:)
         integer(I8), allocatable            :: fluxtuberegID(:)
-        integer(I8), allocatable            :: facelabel(:)
-        integer(I8), allocatable            :: celllabel(:)
 
     end type
 
@@ -316,9 +322,10 @@ module goatmod_types
         !                           structured grid
         ! - nx, ny                  : dimensions of the original 
         !                           structured grid
+        ! - nncut                   : number of cuts
 
         ! Logicals & scalars
-        integer(I8)             :: nx, ny
+        integer(I8)             :: nx, ny, nncut
         integer(I4)             :: isClassicalGrid
 
     end type
@@ -339,6 +346,12 @@ module goatmod_types
         !                       flux tube data, flux surfaces, ... 
         ! - regions             : UDT with all data to which region
         !                       cells, faces, ... belong
+        ! - sglegacy            : data from legacy structured grids
+        ! - OMPcell, OMPface    : cells and faces belonging to outer mid
+        !                       plane
+        ! - IMPcell, IMPface    : same, but inner mid plane
+        ! - xpointID            : array containing all X-point vertex IDs
+        ! - nxp                 : number of x-points
 
         ! Flux data
         type(FluxDataUDT)           :: fluxdata
@@ -348,6 +361,16 @@ module goatmod_types
 
         ! Legacy data of structured grid
         type(StructuredGridDataUDT) :: sglegacy
+
+        ! OMP & IMP
+        integer(I8), allocatable, dimension(:)  :: OMPcell, OMPface, &
+            IMPcell, IMPface
+        integer(I8)                             :: nOMPcell, nOMPface, &
+            nIMPcell, nIMPface
+
+        ! X-point(s)
+        integer(I8), allocatable                :: xpointID(:)
+        integer(I8)                             :: nxp
 
     end type
 
@@ -597,6 +620,8 @@ module goatmod_types
         allocate(vert%y(vert%ntot))
         allocate(vert%BV(vert%ntot))
         allocate(vert%fieldlineID(vert%ntot))
+        allocate(vert%bx(vert%ntot), vert%by(vert%ntot), &
+            vert%ffbz(vert%ntot), vert%psi(vert%ntot))
 
         ! Face data
         allocate(vert%faceP(vert%ntot,2))
@@ -642,6 +667,10 @@ module goatmod_types
         ! allocate(face%cell(face%ncell))
         allocate(face%BF(face%ntot))
 
+        ! Other
+        allocate(face%aligned(face%ntot), face%label(face%ntot), &
+            face%reg(face%ntot))
+
     end subroutine
 
     ! Cell substruture
@@ -680,6 +709,11 @@ module goatmod_types
         ! Face values
         allocate(cell%faceP(cell%ntot,2))
         allocate(cell%face(cell%nface))
+
+        ! Others
+        allocate(cell%psi(cell%ntot), cell%bp(cell%ntot), &
+            cell%bt(cell%ntot), cell%x(cell%ntot), cell%y(cell%ntot), &
+            cell%cflags(cell%ntot), cell%reg(cell%ntot), cell%ft(cell%ntot))
 
     end subroutine
 
@@ -771,12 +805,12 @@ module goatmod_types
         allocate(fluxdata%fluxtubecells(grid%cell%ntot)) 
         allocate(fluxdata%fluxtubefacesP(fluxdata%nFt,2))
         allocate(fluxdata%fluxtubefaces(grid%face%ntot)) 
-        allocate(fluxdata%cellfluxtubeID(grid%cell%ntot))
 
         ! Flux surface data
         allocate(fluxdata%fluxsurfacefacesP(fluxdata%nFs,2))
         allocate(fluxdata%fluxsurfacefaces(grid%face%ntot))
         allocate(fluxdata%fluxsurfaceID(grid%vert%ntot))
+        allocate(fluxdata%fluxsurfacepsi(fluxdata%nFs))
 
     end subroutine
 
@@ -801,11 +835,7 @@ module goatmod_types
 
         ! Allocate
         !=========
-        allocate(regions%cellregID(grid%cell%ntot))
-        allocate(regions%faceregID(grid%face%ntot))
         allocate(regions%fluxtuberegID(grid%data%fluxdata%nFt))
-        allocate(regions%facelabel(grid%face%ntot))
-        allocate(regions%celllabel(grid%cell%ntot))
 
     end subroutine
 

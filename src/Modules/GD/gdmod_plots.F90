@@ -503,7 +503,7 @@ module gdmod_plots
     
         do i = 1, nl
             ! Get all faces with this label
-            mask = grid%data%regions%facelabel == labels(i)
+            mask = grid%face%label == labels(i)
             tnf = count(mask)
 
             ! Allocate coordinate vectors, add coordinates

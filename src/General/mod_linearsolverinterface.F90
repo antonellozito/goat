@@ -369,6 +369,18 @@ module mod_linearsolverinterface
 
         ! Data
 
+        ! Check
+        !======
+        ! Empty matrix?
+        if ((a%nrow == 0) .or. (a%ncol == 0)) then
+            if (allocated(sol)) then  
+                deallocate(sol)
+            end if 
+            allocate(sol(0))
+            flag = 0
+            return 
+        end if
+
         ! Convert to CCS
         !===============
         ! First, convert the row and column indices to zero based 
@@ -382,6 +394,8 @@ module mod_linearsolverinterface
         allocate(Ax(A%nval))
         allocate(Map(A%nval))
         allocate(sol_c(A%nrow))
+
+        
 
         ! Call converter
         call UmfpackTriplet2ColDI(A%nrow, A%ncol, A%nval, A%row, &

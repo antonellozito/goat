@@ -775,7 +775,7 @@ module gdmod_costfunction
                     ! It is assumed that these vertices only appear on 
                     ! the boundary, and these vertices are considered
                     ! later on if vessel edges are considered.
-                    
+                    nvpairs(i) = 0
 
                 end if
             end if
@@ -1341,14 +1341,17 @@ module gdmod_costfunction
         ! Unpack
         associate(&
             vpairs      => costfunction%vpairs,         &
+            nvpairs     => costfunction%nvpairs,        &
             x           => grid%vert%x,                 &
             y           => grid%vert%y)
 
         ! Loop
-        do j = 1, ncol 
-            IDn(:, j) = vpairs(:, j) 
-            xn(:, j) = x(vpairs(:, j)) 
-            yn(:, j) = y(vpairs(:, j)) 
+        xn = 0
+        yn = 0
+        do j = 1, nrow 
+            IDn(j, :) = vpairs(j, :) 
+            xn(j, 1:2*nvpairs(j)) = x(vpairs(j, 1:2*nvpairs(j)))
+            yn(j, 1:2*nvpairs(j)) = y(vpairs(j, 1:2*nvpairs(j)))
         end do
 
         ! Call writer
@@ -1760,14 +1763,17 @@ module gdmod_costfunction
         ! Unpack
         associate(&
             vpairs      => costfunction%vpairs,         &
+            nvpairs     => costfunction%nvpairs,        &
             x           => grid%vert%x,                 &
             y           => grid%vert%y)
 
         ! Loop
-        do j = 1, ncol 
-            IDn(:, j) = vpairs(:, j) 
-            xn(:, j) = x(vpairs(:, j)) 
-            yn(:, j) = y(vpairs(:, j)) 
+        xn = 0
+        yn = 0
+        do j = 1, nrow 
+            IDn(j, :) = vpairs(j, :) 
+            xn(j, 1:2*nvpairs(j)) = x(vpairs(j, 1:2*nvpairs(j)))
+            yn(j, 1:2*nvpairs(j)) = y(vpairs(j, 1:2*nvpairs(j)))
         end do
 
         ! Call writer

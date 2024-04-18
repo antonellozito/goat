@@ -1,4 +1,4 @@
-subroutine ReadB2fgmtryUS(filespec,grid)
+subroutine ReadB2fgmtryUS(grid, filepath)
 
     ! Description
     !============
@@ -20,17 +20,18 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     ! Main variables
     type(GridUDT)               :: grid
 
-    integer, intent(in)         :: filespec ! file specifier
-    integer(I8)                 :: idum(0:9), idum2(1)    
+    character(*), intent(in)    :: filepath
+    integer(I8)                 :: idum(0:9), idum2(1), filespec   
     character(10)               :: b2fgmtryversion
     integer(I8)                 :: nc,nf,nv ! total number of cells, faces, vertices
 
     character(120)              :: chardummy   ! dummy array
-    integer(I8), allocatable    :: cdummy(:,:) ! dummy array
+    integer(I8), allocatable    :: cdummy(:,:), cdummy2(:) ! dummy array
     integer(I8), allocatable    :: fdummy(:,:), fdummy2(:, :) ! dummy array
     integer(I8), allocatable    :: vdummy(:,:) ! dummy array
     integer(I8), allocatable    :: ftdummy(:) ! dummy array
 
+    real(R8), allocatable       :: fcQalf(:, :) ! to reconstruct aligned faces
     real(R8), allocatable       :: cdummyr(:,:) ! dummy array
     real(R8), allocatable       :: fdummyr(:,:) ! dummy array
     real(R8), allocatable       :: vdummyr(:,:) ! dummy array
@@ -43,6 +44,10 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     
     ! Read 
     !=====
+    ! Open the file
+    print *, 'reading grid in b2gmtry_us format from file: ' // filepath
+    open(unit = filespec, file = filepath)
+
     ! First, read the header with the version
     call cfverr(filespec,b2fgmtryversion)
 
@@ -72,7 +77,7 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     call AllocateGrid(grid)
 
     ! Allocate dumies
-    allocate(cdummy(nc,4))
+    allocate(cdummy(nc,4), cdummy2(nc))
     allocate(fdummy(nf,4))
     allocate(vdummy(nv,4))
     allocate(cdummyr(nc,4))
@@ -81,13 +86,15 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     allocate(fsdummyr(grid%data%fluxdata%nFs))
     allocate(facedummy(grid%cell%nface))
     allocate(ftdummy(grid%data%fluxdata%nFt))
+    allocate(fcQalf(nf, 2))
 
     ! Read data for structured grid remapping (to be deleted in future)
     call cfruin (filespec,1,idum2,'isClassicalGrid')
     grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4)
     call cfruin (filespec,3,idum,'nx,ny,nncut')
-    grid%data%sglegacy%nx = idum(0)
-    grid%data%sglegacy%ny = idum(1)
+    grid%data%sglegacy%nx       = idum(0)
+    grid%data%sglegacy%ny       = idum(1)
+    grid%data%sglegacy%nncut = idum(2)
     
     ! Read data that is not used
     call cfruch (filespec,120,chardummy,'label')
@@ -109,11 +116,11 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     call cfruin (filespec, nc,     grid%data%fluxdata%fluxtubecells,  'ftCv')
     call cfruin (filespec, grid%data%fluxdata%nFt*2,   grid%data%fluxdata%fluxtubefacesP, 'ftFcP')
     call cfruin (filespec, nf,     grid%data%fluxdata%fluxtubefaces,  'ftFc')
-    call cfruin (filespec, nc,     grid%data%fluxdata%cellfluxtubeID,  'cvFt')   
+    call cfruin (filespec, nc,     grid%cell%ft,  'cvFt')   
     call cfruin (filespec, grid%data%fluxdata%nFs*2,   grid%data%fluxdata%fluxsurfacefacesP, 'fsFcP')
     call cfruin (filespec, nf,     grid%data%fluxdata%fluxsurfacefaces,  'fsFc')
-    call cfruin (filespec, nf,     grid%data%regions%faceregID, 'fcReg')
-    call cfruin (filespec, nc,     grid%data%regions%cellregID, 'cvReg')
+    call cfruin (filespec, nf,     grid%face%reg, 'fcReg')
+    call cfruin (filespec, nc,     grid%cell%reg, 'cvReg')
     call cfruin (filespec, grid%data%fluxdata%nFt,     grid%data%regions%fluxtuberegID, 'ftReg')
     call cfrure (filespec, grid%cell%nface,  facedummy,'intcellP') ! not used
     call cfrure (filespec, grid%cell%nface,  facedummy,'intcellR') ! not used
@@ -135,8 +142,8 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     call cfruin (filespec, nx, nxdummy, 'icornVx')
 
     ! Read some labels, ignore
-    call cfruin (filespec, nf, grid%data%regions%facelabel,'fcLbl')
-    call cfruin (filespec, nc, grid%data%regions%celllabel,'cvLbl')
+    call cfruin (filespec, nf, grid%face%label,'fcLbl')
+    call cfruin (filespec, nc, cdummy,'cvLbl')
     call cfruin (filespec, grid%data%fluxdata%nFt, ftdummy,'ftLbl')
 
     ! Add geometry data
@@ -151,15 +158,24 @@ subroutine ReadB2fgmtryUS(filespec,grid)
     call cfrure (filespec, nc*2, cdummyr(:,1:2), 'cvQgam')
     call cfrure (filespec, nc,   cdummyr(:,1),  'cvVol')
 
-    ! face quantities - ignore all
+    ! face quantities - ignore all except fcQalf
     call cfrure (filespec, nf*4, fdummyr(:,1:4),   'fcBb')
     call cfrure (filespec, nf,   fdummyr(:,1),    'fcS')
     call cfrure (filespec, nf*2, fdummyr(:,1:2),   'fcHc')
     call cfrure (filespec, nf,   fdummyr(:,1),   'fcHt')
     call cfrure (filespec, nf*2, fdummyr(:,1:2), 'fcQgam')
-    call cfrure (filespec, nf*2, fdummyr(:,1:2), 'fcQalf')
+    call cfrure (filespec, nf*2, fcQalf, 'fcQalf')
     call cfrure (filespec, nf*2, fdummyr(:,1:2), 'fcQbet')
     call cfrure (filespec, nf,   fdummyr(:,1),  'fcPbs')
+
+    ! Determine aligned faces as those faces with cos(alpha) = 0
+    ! But do it with a very small tolerance to avoid numerical garbage
+    where (fcQalf(:, 1) < 1e-10) 
+        grid%face%aligned = 1
+    elsewhere
+        grid%face%aligned = 0
+    end where
+
 
         ! vertex quantities - only keep coordinates
     call cfrure (filespec, nv*4, vdummyr(:,1:4),   'vxBb')
@@ -170,6 +186,12 @@ subroutine ReadB2fgmtryUS(filespec,grid)
 
     ! flux surface quantities
     call cfrure (filespec, nc,   cdummyr(:,1), 'cvConn')
-    call cfrure (filespec, grid%data%fluxdata%nFs,   fsdummyr,  'fsPsi')
+    call cfrure (filespec, grid%data%fluxdata%nFs,   &
+        grid%data%fluxdata%fluxsurfacepsi, 'fsPsi')
+
+    ! Housekeeping
+    !=============
+    ! Close file
+    close(filespec)
 
 end subroutine

@@ -1887,15 +1887,15 @@ module gdmod_userinput
         
         ! Read options
         !=============
-        field = 'gd.design.ec.par.linefolding.poloidal'
+        field = 'gd.design.inec.par.linefolding.poloidal'
         call ExtractOptionValueLogical0D(fid, field, options%poloidal)
-        field = 'gd.design.ec.par.linefolding.radial'
+        field = 'gd.design.inec.par.linefolding.radial'
         call ExtractOptionValueLogical0D(fid, field, options%radial)
-        field = 'gd.design.ec.par.linefolding.vessel'
+        field = 'gd.design.inec.par.linefolding.vessel'
         call ExtractOptionValueLogical0D(fid, field, options%vessel)
-        field = 'gd.design.ec.par.linefolding.smallnumber'
+        field = 'gd.design.inec.par.linefolding.smallnumber'
         call ExtractOptionValueReal0D(fid, field, options%smallnumber)
-        field = 'gd.design.ec.par.linefolding.fieldtol'
+        field = 'gd.design.inec.par.linefolding.fieldtol'
         call ExtractOptionValueReal0D(fid, field, options%fieldtol)
         
 

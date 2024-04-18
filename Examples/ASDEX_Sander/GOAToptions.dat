@@ -12,13 +12,14 @@ VERSION 1.00.00
 'goat.meth'                         'GD'
 
 # Input file locations 
+#'goat.gridfilepath'                 'traduit.out.b2us_smoothed'
 'goat.gridfilepath'                 'traduit.out.b2us'
 'goat.magneticfieldfilepath'        'rzpsi.dat'
 'goat.structurefilepath'            'structure.dat'
 'goat.GDinputfilepath'              'GOAToptions.dat'
 
 # Output file locations 
-'goat.writefilepath'                'traduit.out.b2us_smoothed'  
+'goat.writefilepath'                'traduit.out.b2us_smoothed2'  
 
 # Output options 
 'goat.write_final'                  '1'
@@ -31,6 +32,12 @@ VERSION 1.00.00
 'goat.vesselmode'                   '0'
 'goat.slab'                         '0'
 'goat.artificial_slab'              '0'
+
+# OMP/IMP
+'goat.OMP_r'                        '[0, 0]'
+'goat.OMP_z'                        '[0, 0]'
+'goat.IMP_r'                        '[0, 0]'
+'goat.IMP_z'                        '[0, 0]'
 
 #-------------------------------------------------------------------------#
 #                          INTERFACING OPTIONS                            #
@@ -107,10 +114,10 @@ VERSION 1.00.00
 #                          ADDITIONAL DATA                                #
 #-------------------------------------------------------------------------#
 # OMP and IMP
-'goat.data.OMP_r'                '[1.8 2.4]'
-'goat.data.OMP_z'                '[0 0]'
-'goat.data.IMP_r'                '[0.65 2]'
-'goat.data.IMP_z'                '[0 0]'
+'goat.data.OMPr'                '[1.8 2.4]'
+'goat.data.OMPz'                '[0 0]'
+'goat.data.IMPr'                '[0.65 2]'
+'goat.data.IMPz'                '[0 0]'
 
 # Data
 'goat.data.RBtor'                '-4.496825999658907'
@@ -166,7 +173,10 @@ VERSION 1.00.00
 'gd.design.cfv.par.LR.linefoldingpenfac'    '0'
 'gd.design.cfv.par.LR.dovesseledges'        '1'
 'gd.design.cfv.par.LR.minedgelength'        '1e-4'
+'gd.design.cfv.par.LR.eta'                  '1e-5'
 'gd.design.cfv.par.LRrad.lambda'            '1e-5'
+'gd.design.cfv.par.LRrad.includecutcellfaces'   '1'
+'gd.design.cfv.par.LRrad.excludedomainfaces'    '1'
 'gd.design.cfv.par.FAD.lambda'		 		'1e-5'
 'gd.design.cfv.par.FAD.weightatvessel'       '0.1'
 'gd.design.cfv.par.FAD.weightatinf'          '1'
@@ -216,8 +226,10 @@ VERSION 1.00.00
 # Flux function constraint parameters 
 'gd.design.ec.par.fluxfunction.fixfluxalignedtargets' 	'0'
 'gd.design.ec.par.fluxfunction.fixfarvesselflux' 		'0'
+'gd.design.ec.par.fluxfunction.fixtargetflux' 		    '0'
 'gd.design.ec.par.fluxfunction.fsvertexbased' 		    '1'
 'gd.design.ec.par.fluxfunction.fixallvesselvertices' 	'0'
+'gd.design.ec.par.fluxfunction.tangencypointtreatment'  'tangencypoint'
 'gd.design.ec.par.fluxfunction.doboxoverride' 			'0'
 'gd.design.ec.par.fluxfunction.includeboxx' 			'[]'
 'gd.design.ec.par.fluxfunction.includeboxy' 			'[]'
@@ -244,9 +256,10 @@ VERSION 1.00.00
 # ITER, 	include: x: [4 8.5; 5 6; 6 7.5], 	y: [-2 5; -3 -2; -2.5 -2]
 
 # Edge length constraint parameters 
-'gd.design.ec.par.edgelengths.edgetype' 		'BoundaryPerpendicular'
-'gd.design.ec.par.edgelengths.lengthcriterion'	'Predetermined'
-'gd.design.ec.par.edgelengths.length'			'1e-3'
+'gd.design.ec.par.edgelengths.dovesseledges'    '1'
+'gd.design.ec.par.edgelengths.doxpointedges'    '0'
+'gd.design.ec.par.edgelengths.edgedistvessel'   '1e-3'
+'gd.design.ec.par.edgelengths.edgedistxpoint'   '1e-3'
 
 # Edge length ratio constraint parameters 
 'gd.design.ec.par.lengthratio.biasatvessel' 	'0.9'
@@ -254,9 +267,10 @@ VERSION 1.00.00
 # Flux value constraints
 'gd.design.ec.par.fixedfluxvalues.fixcoreflux'      '1'
 'gd.design.ec.par.fixedfluxvalues.fixcorefluxmeth'  'auto'
-'gd.design.ec.par.fixedfluxvalues.coreflux'         '0.2'
+'gd.design.ec.par.fixedfluxvalues.corefluxval'      '0.2'
 'gd.design.ec.par.fixedfluxvalues.fixouterflux'     '1'
 'gd.design.ec.par.fixedfluxvalues.fixouterfluxmeth' 'auto'
+'gd.design.ec.par.fixedfluxvalues.outerfluxval'     '0.2'
 
 # Convexity constraints
 'gd.design.inec.par.convexity.excludebndpairs' 	'1'
@@ -267,6 +281,9 @@ VERSION 1.00.00
 
 # Linefolding constraints
 'gd.design.inec.par.linefolding.smallnumber'    '1e-5'
+'gd.design.inec.par.linefolding.poloidal'       '1'
+'gd.design.inec.par.linefolding.radial'         '1'
+'gd.design.inec.par.linefolding.vessel'         '1'
 
 #-------------------------------------------------------------------------#
 #                          NUMERICAL PARAMETERS                           #
@@ -274,7 +291,7 @@ VERSION 1.00.00
 # See SetNumParams.m for the default settings
 
 # General optimization
-'gd.opt.num.itmax'                  '450'
+'gd.opt.num.itmax'                  '10'
 'gd.opt.num.tol'                    '1e-10'
 
 # KKT driver (see also GridKKTDriver.m)
@@ -288,6 +305,17 @@ VERSION 1.00.00
 # Line search parameters 
 'gd.opt.num.ls.type'                'backtracking_soc'
 'gd.opt.num.ls.meritfunction'       'l1'
+
+'gd.opt.num.ls.dolinesearch'        '1'
+'gd.opt.num.ls.itmax'               '8'
+'gd.opt.num.ls.dec'                 '0.5'
+'gd.opt.num.ls.inc'                 '2'
+'gd.opt.num.ls.c1'                  '1e-4'
+'gd.opt.num.ls.c2'                  '0.9'
+
+'gd.opt.num.ls.mf.delta'            '1e-4'
+'gd.opt.num.ls.mf.penfactol'        '1e-12'
+'gd.opt.num.ls.mf.penfacdef'        '1'
 
 # Equality constraint relaxation
 'gd.num.KKTdriver.doeqconrelax'     '0'

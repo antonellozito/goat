@@ -395,7 +395,7 @@ module goatmod_userinput
     !------------------------------------------------------------------!
 
     ! Main option setter
-    subroutine SetOptions(options)
+    recursive subroutine SetOptions(options)
 
         ! Description
         !============
@@ -746,16 +746,16 @@ module goatmod_userinput
             options%GGtoGDfacelabelsubto)
 
         ! OMP and IMP
-        field = 'goat.OMP_r'
+        field = 'goat.OMPr'
         call ExtractOptionValueReal1D(fid, field, &
             options%OMP_r)
-        field = 'goat.OMP_z'
+        field = 'goat.OMPz'
         call ExtractOptionValueReal1D(fid, field, &
             options%OMP_z)
-        field = 'goat.IMP_r'
+        field = 'goat.IMPr'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_r)
-        field = 'goat.IMP_z'
+        field = 'goat.IMPz'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_z)
 

@@ -2078,6 +2078,11 @@ module mod_polygon
             call gdErrorHandler('SortPolygonEdges: input argument pein should be a ne-by-2 integer array')
     
         end if
+
+        if (size(pein, 1) == 0) then 
+            ! Simply return, already sorted
+            return
+        end if
     
         ! Initialize
         allocate(isedgesorted(ne)) ! logical to indicate if edge has been sorted

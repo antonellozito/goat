@@ -58,6 +58,10 @@ subroutine ExtractGoatData(grid, magneticField, environment, options)
         ! Unstructured traduit file reading
         call ReadTraduitUS(grid, options%gridfilepath)
 
+    case ('b2fgmtry_us')
+
+        ! Structured traduit file reading
+        call ReadB2fgmtryUS(grid, options%gridfilepath)
 
     case default
 

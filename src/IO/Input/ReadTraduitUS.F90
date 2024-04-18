@@ -58,6 +58,7 @@ subroutine ReadTraduitUS(grid, filepath)
     ! Open the file
     print *, 'reading grid in traduit format from file: ' // filepath
     open(unit = filespec, file = filepath)
+    rewind(filespec)
 
     ! First, read the header with the version
     call cfverr(filespec,b2fgmtryversion)
@@ -153,8 +154,8 @@ subroutine ReadTraduitUS(grid, filepath)
     ! Add to grid
     grid%cell%vertP(clist, 1)          = cdatai1(:, 1)
     grid%cell%vertP(clist, 2)          = cdatai1(:, 2)
-    grid%data%regions%cellregID(clist)  = cdatai2(:, 2)
-    grid%data%fluxdata%cellfluxtubeID   = cdatai2(:, 3)
+    grid%cell%reg(clist)               = cdatai2(:, 2)
+    grid%cell%ft(clist)                = cdatai2(:, 3)
 
     ! Cell vertices and faces
     call cfruin (filespec, grid%cell%nvert, grid%cell%vert,  'cvVx')
@@ -177,11 +178,11 @@ subroutine ReadTraduitUS(grid, filepath)
     end do 
 
     ! Add to grid
-    grid%face%vert(flist, 1)           = fdatai(:, 1)
-    grid%face%vert(flist, 2)           = fdatai(:, 2)
-    grid%data%regions%facelabel(flist)  = fdatai(:, 3)
-    grid%data%regions%faceregID(flist)  = fdatai(:, 4) 
-    ! fdatai(:, 5) indicates whether face is aligned - to be used in future? 
+    grid%face%vert(flist, 1)            = fdatai(:, 1)
+    grid%face%vert(flist, 2)            = fdatai(:, 2)
+    grid%face%label(flist)              = fdatai(:, 3)
+    grid%face%reg(flist)                = fdatai(:, 4)
+    grid%face%aligned                   = fdatai(:, 5) 
 
     ! Flux tubes
     !-----------
@@ -251,6 +252,7 @@ subroutine ReadTraduitUS(grid, filepath)
     grid%data%fluxdata%fluxsurfacefaces(1:nfsFc) = fsFcdum
     grid%data%fluxdata%fluxsurfacefacesP(fslist, 1) = fsdatai(:, 1)
     grid%data%fluxdata%fluxsurfacefacesP(fslist, 2) = fsdatai(:, 2)
+    grid%data%fluxdata%fluxsurfacepsi(fslist)       = fsdata(:, 1)
     ! fsdata(:, 1) contains psi value of flux surfaces, to be read in in the future?
     
     ! Housekeeping

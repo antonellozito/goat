@@ -38,6 +38,9 @@ GDRUN_TARGETS = Clayer ClayerF Constants Auxiliary General Numerics Optimization
 ## GOAT_TARGETS             : Targets to be run for the full goat
 GOAT_TARGETS = $(GDRUN_TARGETS) 
 
+## GOATTRANSLATOR_TARGETS   : Targets to be run for the goat input file translator
+GOATTRANSLATOR_TARGETS = Clayer ClayerF Constants Auxiliary General Numerics
+
 ## TEST_TARGETS             : Targets to be run for goat tests
 TEST_TARGETS = $(GOAT_TARGETS) 
 
@@ -50,11 +53,11 @@ CTEST_TARGETS = Clayer
 ## FC			: Compiler to be used for fortran
 FC = gfortran
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS_DEF = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized
+CFLAGS_DEF = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized 
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
-CFLAGS_DEBUG = -c -g -Wall -pg  -O0 
+CFLAGS_DEBUG = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all
 ## CFLAGS_OMP_DEBUG	: compiler flags for OpenMP and debugging
 CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
 
@@ -66,7 +69,7 @@ CCFLAGS_DEF = -c -g -Wall -O0
 ## % Linker
 ## %=======
 ## LFLAGS			: linking flags to be used (apart from libraries)
-LFLAGS_DEF =  
+LFLAGS_DEF =   -fcheck=all
 
 ## LFLAGS_DEBUG 	: linking flags for debugging
 LFLAGS_DEBUG = -pg -g

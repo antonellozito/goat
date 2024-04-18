@@ -14,9 +14,17 @@ include config.mk
 ## % Main targets
 ## %=============
 # Linking
-## gdrun			: Create executable for grid deformation
+## goat			: Create executable for goat
+## tests		: Create executable for tests
+## testc 		: Create executable for tests of C layer
+## goattranslator: Create executable for GOAToptions file translator
+
 goat: $(GOAT_TARGETS) goat.o
 	$(FC) -o goat *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+	-I $(SUITESPARSEPATH) -I src/Clayer/Include
+
+goattranslator: $(GOATTRANSLATOR_TARGETS) goattranslator.o 
+	$(FC) -o goattranslator *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 
 tests: $(TEST_TARGETS) tests.o 
@@ -29,8 +37,6 @@ gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
 testc: $(CTEST_TARGETS) testc.o 
 	$(CC) -o testc *.o -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
 
-
-# $(LFLAGS) $(LAPACKPATH) $(BLASPATH) $(OPENBLASPATH) $(UMFPACKPATH) $(AMDPATH) $(SSCONFIGPATH) $(CHOLMODPATH)
 
 ## % Runfiles
 ## %=========
@@ -50,6 +56,10 @@ tests.o: Runfiles/Tests.F90
 ## Testc.o 			: C layer tests
 testc.o: Runfiles/Testc.c 
 	$(CC) $(CCFLAGS) Runfiles/Testc.c -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
+
+## goattranslator.o	: translator
+goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
+	$(FC) $(CFLAGS) Runfiles/TranslateGOAToptionsFile.F90 
 
 ##
 ## % Folder compilation targets
@@ -137,12 +147,11 @@ gd:
 ##
 ## % Auxiliary targets
 ## %==================
-## clean			: clean by removing *.o and executables 
+## clean			: clean by removing *.o 
 # Cleanup
 .PHONY: clean
 clean: 
 	rm *.o $(wildcard gdrun*); rm $(GDRUN_TARGETS); \
-	rm goat
 
 ## deepclean			: clean by removing *.o, *.mod, and executables
 # Cleanup
@@ -151,6 +160,13 @@ deepclean:
 	rm *.o *.mod $(wildcard gdrun*); rm $(GDRUN_TARGETS); \
 	rm goat
 	rm tests
+	rm goattranslator
+	rm testc
+
+## cleanexeo			: clean o-files of executables
+.PHONY: cleanexeo
+cleanexeo:	
+	rm Goat.o; rm Tests.o; rm Testc.o; rm TranslateGOAToptionsFile.o
 	
 
 ## help			: print out documentation

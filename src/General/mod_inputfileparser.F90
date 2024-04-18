@@ -91,6 +91,19 @@ module mod_inputfileparser
     save
     public 
 
+    ! String array object
+    type :: StringUDT
+
+        ! Description
+        !============
+        ! Alternative to 'character(len=..), allocatable :: string(:)', 
+        ! which requires the same length for all strings. Simply has one
+        ! field, which is 'val'. 
+
+        character(:), allocatable   :: val 
+
+    end type
+
     contains 
 
     !------------------------------------------------------------------!

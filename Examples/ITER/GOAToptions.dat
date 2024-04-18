@@ -5,29 +5,44 @@ VERSION 1.00.00
 #                                                                         #
 #=========================================================================#
 # See SetGOAToptions for a description of the options. 
-'GOAToptions.driver'     'GD'
-'GOAToptions.vis'        '0'
-'GOAToptions.debug'      '0'
-'GOAToptions.readfile'   'traduit.out.b2'
-'GOAToptions.strfile'    'structure.dat'
-'GOAToptions.mfloaddir'  '.'
-'GOAToptions.mfloadfile' 'rzpsi.dat'
-'GOAToptions.writedir    'traduit.out.b2us1'
+'GOAToptions.vis' '0'
+'goat.debug'    '0'
+'goat.grid.readmeth'    'traduitb2us'
+'goat.gridfilepath'    'traduit.out.b2us'
+'goat.structurefilepath'    'structure.dat'
+'goat.writefilepath'    'traduit.out.b2us_test'
 'GOAToptions.itmax' '5'
+'goat.write_final'    '1'
+'goat.meth'    'GD'
 
 # Face label mappings between GG (grid generator) and GD (grid deformation)
 # See SetGOAToptions.m or InterfaceGAtoGD.m for a description of the GD 
 # face label mappings. 
-'GOAToptions.GDtoGA.facelabelsubfrom'       '[-99, -25]'
-'GOAToptions.GDtoGA.facelabelsubto'         '[1, -21]'
-'GOAToptions.GDtoGA.facelabelmappingGG'     '[1, 2, 3, 4, 5, -21]'
-'GOAToptions.GDtoGA.facelabelmappingGD'     '[5, 5, 1, 2, 5, 3]'
+'goat.GGtoGD.facelabelsubfrom'    '[]'
+'goat.GGtoGD.facelabelsubto'    '[]'
+# For grid generated with GOAT
+#'goat.GGtoGD.facelabelmappingGG'    '[1:31, 43:45, 36:37, 32:35, 38:42, 46:89, 90:92, 93:95]'
+#'goat.GGtoGD.facelabelmappingGD'    '[5*ones(1, 31), ones(1, 3), ones(1, 2), 4*ones(1,4), 4*ones(1,5), 4*ones(1, 44), 5*ones(1, 3), 2*ones(1, 3)]'
+# For grid generated with CARRE2
+'goat.GGtoGD.facelabelmappingGG'    '[1, 2, 3, 4, 5, -21]'
+'goat.GGtoGD.facelabelmappingGD'    '[4, 4, 1, 1, 4, 2]'
 
 # Face label mappings between GG and GA (grid adaptation)
-'GOAToptions.GGtoGA.facelabelsubfrom'       '[-99, -25]'
-'GOAToptions.GGtoGA.facelabelsubto'         '[1, -21]'
-'GOAToptions.GGtoGA.facelabelmappingGG'     '[1, 2, 3, 4, 5, -21]'
-'GOAToptions.GGtoGA.facelabelmappingGA'     '[1, 1, 4, 5, 1, 2]'
+'goat.GGtoGA.facelabelsubfrom'    '[-99, -25]'
+'goat.GGtoGA.facelabelsubto'    '[1, -21]'
+'goat.GGtoGA.facelabelmappingGG'    '[1, 2, 3, 4, 5, -21]'
+'goat.GGtoGA.facelabelmappingGA'    '[1, 1, 4, 5, 1, 2]'
+
+# Structure
+# Target plate definition
+'GOAToptions.TP'                '[11 12]'
+'GOAToptions.TPind'             '[1 2]'
+
+# Structures to be excluded when constructing vessel (if empty, all are included)
+'GOAToptions.exclude'           '[1:8]'
+
+# Data
+'goat.data.RBtor'    '-32.8600001667600'
 
 #=========================================================================#
 #                                                                         #
@@ -46,10 +61,16 @@ VERSION 1.00.00
 'gd.main.export'            '1'
 
 # Filepaths for input files
-'gd.main.designoptionsfile'         './Examples/ITER/GOAToptions.dat' 
-'gd.main.gridoptionsfile'           './Examples/ITER/GOAToptions.dat' 
-'gd.main.magneticfieldoptionsfile'  './Examples/ITER/GOAToptions.dat' 
-'gd.main.environmentoptionsfile'    './Examples/ITER/GOAToptions.dat' 
+'gd.main.designoptionsfile'         'GOAToptions.dat' 
+'gd.main.gridoptionsfile'           'GOAToptions.dat' 
+'gd.main.magneticfieldoptionsfile'  'GOAToptions.dat' 
+'gd.main.numparamsfile'             'GOAToptions.dat' 
+
+# Saving/loading
+'gd.main.init.saveinitnum'          '1' 
+'gd.main.init.savefinalnum'         '1'
+'gd.main.init.loadsavednum'         '0'
+'gd.main.init.newsavednum'          '1'
 
 
 #-------------------------------------------------------------------------#
@@ -59,62 +80,86 @@ VERSION 1.00.00
 
 # General 
 'gd.design.debugplots'			'1'
-'gd.design.writedata'           '1'
+'gd.design.restart'             '0' # restart from previous design (old or new)
+'gd.design.startfromnewdesign'  '1' # '1' if start from already optimized design, '0' if from initial design 
+'gd.design.saveinitdesign'      '1' # save initial design (old files will be overwritten!)?
+'gd.design.savefinaldesign'     '1' # save final design (old files will be overwritten!)? 
+
 
 # Cost function
-'gd.design.cfv.type'        	'LR_FAD'
+'gd.design.cfv.type'        	'LR_FAD_PRPB_LRrad_FA'
 
 # Cost function parameters 
-'gd.design.cfv.par.LR.lambda'		 		'1e-3'
-'gd.design.cfv.par.LR.biasatvessel' 		'1.1'
+'gd.design.cfv.par.LR.lambda'		 		'1e-5'
+'gd.design.cfv.par.LR.biasatvessel' 		        '1.1'
 'gd.design.cfv.par.LR.lengthparam'			'3'
-'gd.design.cfv.par.LR.linefoldingpenfac'    '0'
-'gd.design.cfv.par.LR.minedgelength'        '1e-4'
-'gd.design.cfv.par.LR.writedata'            '1'
-'gd.design.cfv.par.FAD.lambda'		 		'1e-1'
-'gd.design.cfv.par.FAD.writedata'		 	'1'
+'gd.design.cfv.par.LR.linefoldingpenfac'                '100'
+'gd.design.cfv.par.LR.minedgelength'                    '1e-4'
+'gd.design.cfv.par.LR.dovesseledges'                    '1'
+'gd.design.cfv.par.LR.eta'                    '1e-5'
+'gd.design.cfv.par.LRrad.lambda'            '1e-5'
+'gd.design.cfv.par.FAD.lambda'		 		'1e-5'
+'gd.design.cfv.par.FA.lambda'		 		'1e-5'
+'gd.design.cfv.par.PRPB.lambda'		 		'1e-5'
+'gd.design.cfv.par.PRPB.biasdecaylength'    '0.1'
+'gd.design.cfv.par.PRPB.biasatsep'    '1.1'
+'gd.design.cfv.par.PRPB.biasatinf'    '1.0'
+'gd.design.cfv.par.PRPB.weightdecaylength'    '0.05'
+'gd.design.cfv.par.PRPB.weightatsep'    '10'
 
 # Design variables
-'gd.design.dv.type'         	'coordinates'
+'gd.design.dv.type'         	'coordinates_desiredflux'
 
 # Equality constraints
-'gd.design.ec.writedata'             '1'
-
 'gd.design.ec.boundaryfunctions'    '1'
 'gd.design.ec.fluxfunction'         '1'
 'gd.design.ec.xpoints'              '1'
 'gd.design.ec.edgelengths'          '1'
 'gd.design.ec.lengthratio'          '0'
 'gd.design.ec.orthogonality'        '1'
+'gd.design.ec.fixedfluxvalues'      '1'
 
 # Inequality constraints
 'gd.design.inec.convexity' 			'0'
 'gd.design.inec.region' 			'0'
-'gd.design.inec.linefolding'        '1'
+'gd.design.inec.linefolding'                    '1'
 
 # Orthogonality and alignment tolerances 
 'gd.design.ec.par.epsalignment' 	'0.1'
 'gd.design.ec.par.epsortho' 		'1e-3'
 
 # Boundary function constraint parameters
-'gd.design.ec.par.boundaryfunctions.shapemeth' 			'polygon'
+'gd.design.ec.par.boundaryfunctions.shapemeth' 			'closedpolygon_smoothapproximation'
 'gd.design.ec.par.boundaryfunctions.psitol' 			'10'
+'gd.design.ec.par.boundaryfunctions.resx'               '600'
+'gd.design.ec.par.boundaryfunctions.resy'               '400'
+'gd.design.ec.par.boundaryfunctions.offsetfracx'        '0.1'
+'gd.design.ec.par.boundaryfunctions.offsetfracy'        '0.1'
+'gd.design.ec.par.boundaryfunctions.C'                  '3'
+'gd.design.ec.par.boundaryfunctions.M'                  '6'
+
+# X-point constraints
+'gd.design.ec.par.xpoints.meth'                         'grad'
 
 # Flux function constraint parameters 
-'gd.design.ec.par.fluxfunction.fixfluxalignedtargets' 	'1'
+'gd.design.ec.par.fluxfunction.fixfluxalignedtargets' 	'0'
 'gd.design.ec.par.fluxfunction.fixfarvesselflux' 		'0'
-'gd.design.ec.par.fluxfunction.doboxoverride' 			'1'
-'gd.design.ec.par.fluxfunction.fixtargetflux'           '1'
-'gd.design.ec.par.fluxfunction.includeboxx' 			'[4.7, 5.3; 4, 6; 5.8, 8]'
-'gd.design.ec.par.fluxfunction.includeboxy' 			'[4.4, 4.8; -5, -3.6; -3.6, -2.0]'
+'gd.design.ec.par.fluxfunction.doboxoverride' 			'0'
+'gd.design.ec.par.fluxfunction.fsvertexbased' 		    '1'
+'gd.design.ec.par.fluxfunction.fixallvesselvertices' 	'0'
+'gd.design.ec.par.fluxfunction.tangencypointtreatment'  'tangencypoint'
+'gd.design.ec.par.fluxfunction.includeboxx' 			'[4.7 5.3; 4 6]'
+'gd.design.ec.par.fluxfunction.includeboxy' 			'[4.4 4.8; -5 -3.6]'
 
 # Orthogonality constraint parameters 
 'gd.design.ec.par.orthogonality.checkperp'				'0'
 'gd.design.ec.par.orthogonality.epsperp' 				'0.2'
-'gd.design.ec.par.orthogonality.includeboxx' 			'[4, 8.5; 5, 6; 6, 7.5]'
-'gd.design.ec.par.orthogonality.includeboxy' 			'[-2, 5; -3, -2; -2.5, -2]' 
-'gd.design.ec.par.orthogonality.excludeboxx' 			'[]' 
-'gd.design.ec.par.orthogonality.excludeboxy' 			'[]' 
+'gd.design.ec.par.orthogonality.includecutcellvert'     '1'
+'gd.design.ec.par.orthogonality.includeboxx' 			'[]' 
+'gd.design.ec.par.orthogonality.includeboxy' 			'[]' 
+'gd.design.ec.par.orthogonality.excludeboxx' 			'[4.6 4.9]' 
+'gd.design.ec.par.orthogonality.excludeboxy' 			'[4.3 4.7]' 
+'gd.design.ec.par.orthogonality.facelabels'             '[]'
 
 # Some decent bounding box values for different geometries 
 # TCV, 		include: x: [-1 2; 0.72 0.82 ], 	y:  [-0.2 2; -0.3 -0.2]
@@ -126,18 +171,19 @@ VERSION 1.00.00
 # ITER, 	include: x: [4 8.5; 5 6; 6 7.5], 	y: [-2 5; -3 -2; -2.5 -2]
 
 # Edge length constraint parameters 
-'gd.design.ec.par.edgelengths.dovesseledges'    '1'
-'gd.design.ec.par.edgelengths.doTP'             '1'
-'gd.design.ec.par.edgelengths.doWG'             '0'
-'gd.design.ec.par.edgelengths.doxpointedges'    '1'
-'gd.design.ec.par.edgelengths.edgedistvessel'   '5e-3'
-'gd.design.ec.par.edgelengths.edgedistxpoint'   '5e-2'
 'gd.design.ec.par.edgelengths.edgetype' 		'BoundaryPerpendicular'
 'gd.design.ec.par.edgelengths.lengthcriterion'	'Predetermined'
-'gd.design.ec.par.edgelengths.length'			'1e-3'
+'gd.design.ec.par.edgelengths.length'			'2e-2'
 
 # Edge length ratio constraint parameters 
 'gd.design.ec.par.lengthratio.biasatvessel' 	'0.9'
+
+# Flux value constraints
+'gd.design.ec.par.fixedfluxvalues.fixcoreflux'      '1'
+'gd.design.ec.par.fixedfluxvalues.fixcorefluxmeth'  'auto'
+'gd.design.ec.par.fixedfluxvalues.corefluxval'    '0.2'
+'gd.design.ec.par.fixedfluxvalues.fixouterflux'     '0'
+'gd.design.ec.par.fixedfluxvalues.fixouterfluxmeth' 'auto'
 
 # Convexity constraints
 'gd.design.inec.par.convexity.excludebndpairs' 	'1'
@@ -148,6 +194,9 @@ VERSION 1.00.00
 
 # Linefolding constraints
 'gd.design.inec.par.linefolding.smallnumber'    '1e-6'
+'gd.design.inec.par.linefolding.poloidal'       '1'
+'gd.design.inec.par.linefolding.radial'         '1'
+'gd.design.inec.par.linefolding.vessel'         '1'
 
 #-------------------------------------------------------------------------#
 #                          GRID OPTIONS                                   #
@@ -155,33 +204,31 @@ VERSION 1.00.00
 # See SetGridOptions.m for the default settings.
 
 # Grid & vessel file paths
-'gd.grid.inputtype'         'traduit'
-'gd.grid.gridloaddir'       '.'
-'gd.grid.gridloadfile'      'traduit.out.b2'
-'gd.grid.gridfilepath'      './Examples/ITER/traduit.out.b2us'
-'gd.grid.vesselloaddir'     '.'
-'gd.grid.vesselloadfile'    'structure.dat'
-'gd.grid.vesselfilepath'    './Examples/ITER/structure.dat'
-
-# Face label transformations (same as the GDtoGA mapping)
-'gd.grid.facelabelsubfrom'       '[-99, -25]'
-'gd.grid.facelabelsubto'         '[1, -21]'
-'gd.grid.facelabelmappingGG'     '[1, 2, 3, 4, 5, -21]'
-'gd.grid.facelabelmappingGD'     '[5, 5, 1, 2, 5, 3]'
 
 # Vessel geometry & loading method
-'gd.grid.vesselloadmeth'    'read_structure'
+'goat.vessel.readmeth'    'read_structure'
 
 # Refinement options for vessel
-'gd.grid.refinevessel'      '1'
-'gd.grid.maxvesseldist'     '1e-2'
+'goat.vessel.refinevessel'    '0'
+'goat.vessel.maxvesseldist'    '1e-2'
 
 # Target plate definition
-'gd.grid.TP'                '[11, 12]'
-'gd.grid.TPind'             '[1, 2]'
+'goat.vessel.TP'    '[11 12]'
+'goat.vessel.TPind'    '[1 2]'
 
 # Structures to be excluded when constructing vessel (if empty, all are included)
-'gd.grid.exclude'           '[1, 2, 3, 4, 5, 6, 7, 8]'
+'goat.vessel.exclude'    '[1:8]'
+
+# Vessel field description (similar to magnetic field interpolant, 
+# but for vessel - only used for vessel distance penalty, and if shape
+# method is the same, also used for boundary constraints)
+'goat.vessel.shapemeth'    'closedpolygon_smoothapproximation'
+'goat.vessel.resx'    '600'
+'goat.vessel.resy'    '400'
+'goat.vessel.offsetfracx'    '0.1'
+'goat.vessel.offsetfracy'    '0.1'
+'goat.vessel.interpC'    '3'
+'goat.vessel.interpM'    '6'
 
 #-------------------------------------------------------------------------#
 #                          MAGNETIC FIELD OPTIONS                         #
@@ -192,15 +239,12 @@ VERSION 1.00.00
 'gd.mf.type'                'readpsi'
 
 # Loading directory & reading method
-'gd.mf.loaddir'             '.'
-'gd.mf.loadfile'            'rzpsi.dat'
-'gd.mf.filepath'            './Examples/ITER/rzpsi.dat'
-'gd.mf.readmeth'            'default'
+'goat.mf.readmeth'    'default'
 
 # Interpolation options
-'gd.mf.interpC'             '3'
-'gd.mf.interpM'             '6'
-'gd.mf.interpmeth'          'uniformgrid'
+'goat.mf.interpC'    '1'
+'goat.mf.interpM'    '6'
+'goat.mf.interpmeth'    'uniformgrid'
 
 #-------------------------------------------------------------------------#
 #                          NUMERICAL PARAMETERS                           #
@@ -208,37 +252,41 @@ VERSION 1.00.00
 # See SetNumParams.m for the default settings
 
 # General optimization
-'opt.num.itmax'                  '1000'
-'opt.num.tol'                    '1e-6'
+'gd.opt.num.itmax'    '1000'
+'gd.opt.num.tol'    '1e-10'
 
 # KKT driver (see also GridKKTDriver.m)
 # Design relaxation factors
-'opt.num.docfrelax'        '1'
-'opt.num.rxf'              '1e1'
-'opt.num.rxfdesign'        '1'
-'opt.num.rxfmin'           '1e-12'
-'opt.num.rxfdec'           '0.90'
+'gd.opt.num.docfrelax'    '1'
+'gd.opt.num.rxf'    '1e1'
+'gd.opt.num.rxfdesign'    '1'
+'gd.opt.num.rxfmin'    '1e-12'
+'gd.opt.num.rxfdec'    '0.95'
 
 # Equality constraint relaxation
-'gd.num.KKTdriver.doeqconrelax'     '0'
-'gd.num.KKTdriver.rxfeqcon'         '1e2'
-'gd.num.KKTdriver.minrxfeqcon'      '1'
-'gd.num.KKTdriver.rxfeqcondec'      '0.98'
+'gd.num.KKTdriver.doeqconrelax'    '0'
+'gd.num.KKTdriver.rxfeqcon'    '1e2'
+'gd.num.KKTdriver.minrxfeqcon'    '1'
+'gd.num.KKTdriver.rxfeqcondec'    '0.98'
 
 # Inequality constraint relaxation
-'gd.num.KKTdriver.doineqconrelax'   '0'
-'gd.num.KKTdriver.rxfineqcon'       '1e2'
+'gd.num.KKTdriver.doineqconrelax'    '0'
+'gd.num.KKTdriver.rxfineqcon'    '1e2'
 'gd.num.KKTdriver.minrxfineqcon'    '1'
 'gd.num.KKTdriver.rxfineqcondec'    '0.98'
 
 # Other options
-'gd.num.KKTdriver.dovisualization'  '1'
-'gd.num.KKTdriver.makevideo'        '0'
-'gd.num.KKTdriver.stabilize'        '0'
+'gd.num.KKTdriver.dovisualization'    '1'
+'gd.num.KKTdriver.makevideo'    '1'
+'gd.num.KKTdriver.stabilize'    '0'
+'gd.num.KKTdriver.doconhess'    '1'
 
 # KKT system solver (see also SolveLinearizedKKT.m)
-'gd.num.KKTsolver'                  'direct'
+'gd.num.KKTsolver'    'direct'
 
+# KKT system linesearch options
+'gd.opt.num.ls.dolinesearch'    '1'
+'gd.opt.num.ls.itmax'    '8'
 
 #=========================================================================#
 #                                                                         #
@@ -254,32 +302,38 @@ VERSION 1.00.00
 
 # GA operation options
 'GAoptions.rem_small_trias' '1'
-'GAoptions.stacked_trias'   '1'
+'GAoptions.stacked_trias'   '0'
+'GAoptions.stacked_trias_checkAR' '1'
+'GAoptions.stacked_trias_maxAR' '10'
+'GAoptions.merge_stacked_trias' '0'
+'GAoptions.merge_stacked_trias_angle_threshold' '5'
 'GAoptions.bunch_tria'      '0'
 'GAoptions.bunch_pent'      '0'
 'GAoptions.BLG'             '0'
 'GAoptions.BLG_n_layers'    '1'
-'GAoptions.splitting'       '1'
-'GAoptions.merging'         '1'
-'GAoptions.pents_to_tria'   '1'
+'GAoptions.splitting'       '0'
+'GAoptions.merging'         '0'
+'GAoptions.pents_to_tria'   '0'
 'GAoptions.merging2'        '0'
+'GAoptions.rem_stickout_trias' '0'
+
 
 # Splitting options
 'GAoptions.no_pents'         '1'
 'GAoptions.splittype'        'rad'
-'GAoptions.n_split'          '5'
+'GAoptions.n_split'          '10'
 'GAoptions.typeT'            'cutcell'
-'GAoptions.rad_type'         'h_rad'
-'GAoptions.pol_type'         'trias'
+'GAoptions.rad_type'         'farSOL'
+'GAoptions.pol_type'         'trias_farSOL'
 'GAoptions.dist_function_threshold_split' '0.9'
 
 # Merging options
 'GAoptions.no_hex'           '1'
-'GAoptions.merg_crit'        'h_pol'
+'GAoptions.merg_crit'        'bias'
 'GAoptions.n_merg'           '100'
-'GAoptions.dist_function_threshold_merge' '0.6'
-'GAoptions.merg_crit2'       'h_rad_core'
-'GAoptions.n_merg2'          '20'
+'GAoptions.dist_function_threshold_merge' '0.8'
+'GAoptions.merg_crit2'       'h_pol'
+'GAoptions.n_merg2'          '50'
 
 # Pentagon allowance
 'GAoptions.no_pents_area_merge' '0'
@@ -296,3 +350,90 @@ VERSION 1.00.00
 'GAoptions.dist_type'               'target_single_null'
 'GAoptions.d_char_type'             'min_Xpoint_dist'
 'GAoptions.plt_dist_func'           '0'
+
+#=========================================================================#
+#                                                                         #
+#                         GRID GENERATION                                 #
+#                                                                         #
+#=========================================================================#
+# Grid and magnetic field options are set through the standard grid 
+# deformation options thereof. Here, only grid generation specific options
+# are set. 
+
+#-------------------------------------------------------------------------#
+#                         TOPOLOGICAL MESH OPTIONS                        #
+#-------------------------------------------------------------------------#
+# Magnetic field: tracing & resolution (description is determined by GD options)
+'gg.tm.field.resx'              '600'
+'gg.tm.field.resy'              '400'
+'gg.tm.field.donewton'          '1'
+'gg.tm.fieldtol'                '1e-8'
+
+# Vessel contour tracing (vessel description is determined by GD options)
+'gg.tm.vessel.resx'             '1200'
+'gg.tm.vessel.resy'             '1200'
+'gg.tm.vessel.donewton'         '0'
+
+# Core boundary and region treatment
+'gg.tm.addcoreboundaries'       '1'
+'gg.tm.cbnd.frac'               '0.1'
+'gg.tm.removecoreregions'       '1'
+
+#-------------------------------------------------------------------------#
+#                         VERTEX DISTRIBUTION OPTIONS                     #
+#-------------------------------------------------------------------------#
+# Post-processing options
+'gg.vd.removefluxsurfaces'              '1' # Remove too narrow flux surfaces
+'gg.vd.removenarrowboundarytriangles'   '1' # Remove too narrow triangles at boundary and replace by cut cells
+
+# Contour resolution 
+'gg.vd.contouring.resx'         '100'
+'gg.vd.contouring.resy'         '200'
+
+# Distribution of flux surfaces (radial)
+'gg.vd.rd.type'                         'densitybased'
+
+# Distribution of vertices on flux surfaces (poloidal)
+'gg.vd.pd.type'                         'refinementbased'
+
+# Options for uniform distribution
+'gg.vd.pd.distribution.facelength'      '4e-2';
+
+'gg.vd.rd.distribution.fieldwidth'      '4e-3';
+
+# Options for density based distribution
+'gg.vd.pd.distribution.type'            'vessel_bnd_weight';
+'gg.vd.pd.distribution.lengthparam'     '0.01';
+'gg.vd.pd.distribution.densityatvessel' '5';
+'gg.vd.pd.distribution.densityatinf'    '5';
+'gg.vd.pd.distribution.points.x'        '[5     4.2 5.6 4.4 4.2 5.5 5.55 4.3]';
+'gg.vd.pd.distribution.points.y'        '[-3.4 -3.8 -3.5 -3 -4 -4.4 -4 -3.4]';
+'gg.vd.pd.distribution.points.d'        '1.5*[0.2 0.2 0.2 0.2 0.2 0.2 0.2 0.2]';
+'gg.vd.pd.distribution.points.val'      '0.5*[25 100 100 100 100 100 100 100]';
+
+
+'gg.vd.rd.distribution.type'            'magneticfield_separatrix_psi_weight';
+'gg.vd.rd.distribution.lengthparam'     '1';
+'gg.vd.rd.distribution.densityatseparatrix' '8';
+'gg.vd.rd.distribution.densityatinf'    '3';
+
+# Options for remove flux surfaces
+'gg.vd.rfs.mark.psitol'                 '0'
+'gg.vd.rfs.mark.psirattol'              '2e-1'
+'gg.vd.rfs.debugplots'                  '0'
+
+# Options for remove narrow boundary triangles
+'gg.vd.rnbt.mark.criterion'             'angle'
+'gg.vd.rnbt.mark.minangle'              '1'
+
+# Options to remove small faces
+'gg.vd.rf.criterion'                    'facelength_radial_bnd'
+'gg.vd.rf.minlength'                    '2e-3'
+'gg.vd.rf.debugplots'                   '0'
+
+
+
+'goat.magneticfieldfilepath'    './rzpsi.dat'
+'goat.gridfilepath'    './traduit.out.b2'
+'goat.structurefilepath'    './structure.dat'
+'goat.magneticfieldfilepath'    './rzpsi.dat'

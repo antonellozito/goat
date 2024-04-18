@@ -876,7 +876,6 @@ module optmod_optimizationengine
         ! Solver
         allocate(dx(hessL%nrow))
         allocate(rhs(hessl%nrow))
-        allocate(fullmat(hessL%nrow, hessL%ncol))
         dx = 0
         rhs = 0
         allocate(phiind(nphi), eqconind(neq), ineqconind(nineq))
@@ -1309,7 +1308,7 @@ module optmod_optimizationengine
                 gradH%MatrixVectorProduct(tmu)
 
             ! Equality constraints contribution
-            gradL(size(gradJ)+1:size(G)) = G(:)
+            gradL(size(gradJ)+1:size(G)+size(gradJ)) = G(:)
 
             ! Inequality constraints contribution
             gradL(size(gradJ)+size(G)+1:size(gradL)) = tH(:)

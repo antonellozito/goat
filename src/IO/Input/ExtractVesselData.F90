@@ -44,7 +44,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     type(VesselOptionsUDT), intent(in)  :: vesseloptions
 
     ! Loop variables
-    integer(I8)                         :: i
+    integer(I8)                         :: i, status
 
     ! Auxiliary variables 
     type(PolygonSetUDT)                 :: tempps 
@@ -219,7 +219,8 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     case ('closedpolygon_smoothapproximation')
 
         ! Approximate representation of closed polygon
-        allocate(PLF2DClosedApproximationOptionsUDT::plfoptions)
+        allocate(PLF2DClosedApproximationOptionsUDT::plfoptions, stat=status)
+
 
         ! Set options
         select type (plfoptions)
@@ -234,6 +235,8 @@ subroutine ExtractVesselData(vessel, vesseloptions)
             plfoptions%offsety = vesseloptions%offsetfracy
             plfoptions%C = vesseloptions%interpC
             plfoptions%M = vesseloptions%interpM
+            plfoptions%xrange = vesseloptions%xrange
+            plfoptions%yrange = vesseloptions%yrange
 
             if (size(plfoptions%xrange, 1) < 2) then 
                 ! Reset
