@@ -1,5 +1,4 @@
-subroutine GDinitialize(inputfilepath, grid, magneticField, &
-    environment, goatoptions, gdoptions)
+subroutine GDinitialize(inputfilepath, optimizationdriver)
 
     ! Description
     !============
@@ -10,18 +9,21 @@ subroutine GDinitialize(inputfilepath, grid, magneticField, &
     !================
     use goatmod_types
     use goatmod_userinput
+    use gdmod_optimizationengine
 
     implicit none 
 
     ! Declare variables
     !==================
     ! Arguments
-    character(*), intent(in)                :: inputfilepath 
-    type(GridUDT), intent(out)              :: grid 
-    type(MagneticFieldUDT), intent(out)     :: magneticField 
-    type(EnvironmentUDT), intent(out)       :: environment
-    type(GoatoptionsUDT), intent(out)       :: goatoptions
-    type(GDoptionsUDT), intent(out)         :: gdoptions
+    character(*), intent(in)                    :: inputfilepath 
+    type(OptimizationEngineGDUDT), intent(out)  :: optimizationdriver
+    type(GridUDT)                               :: grid 
+    type(MagneticFieldUDT)                      :: magneticField 
+    type(EnvironmentUDT)                        :: environment
+    type(GoatoptionsUDT)                        :: goatoptions
+    type(GDoptionsUDT)                          :: gdoptions
+    type(DesignOptionsUDT)                      :: designoptions
 
     ! Read the user input
     !====================
@@ -36,6 +38,20 @@ subroutine GDinitialize(inputfilepath, grid, magneticField, &
     ! Set grid deformation options
     gdoptions%inputfilepath = goatoptions%inputfilepath
     call gdoptions%Set()
+
+    ! Set additional options
+    !=======================
+    ! Set paths from where options should be read
+    designoptions%inputfilepath = gdoptions%designoptionsfile
+
+    ! Set optimization options
+    call designoptions%Set()
+
+    ! Initialize
+    !===========
+    ! Initialize the grid design problem (as an optimization problem)
+    call ConstructGridDesignProblem(optimizationdriver, designoptions, &
+        grid, magneticField, environment)
 
 
 end subroutine
