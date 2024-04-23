@@ -80,6 +80,9 @@ module gdmod_optimizationengine
         ! Problem update
         procedure :: UpdateProblem          => UpdateProblemGD
 
+        ! Problem parameter update
+        procedure :: UpdateProblemParameters    => UpdateProblemParametersGD
+
         ! Cost function evaluation
         procedure :: EvaluateCostFunction   => EvaluateCostFunctionGD
 
@@ -675,6 +678,107 @@ module gdmod_optimizationengine
             call WriteGridVertices(problem%grid, vertpath) 
             call WriteGridCells(problem%grid, cellpath)
         end if
+
+    end subroutine
+
+    ! Problem parameters update
+    subroutine UpdateProblemParametersGD(problem, values, updatemeth)
+
+        ! Description
+        !============
+        ! Update the problem parameters (magnetic field &
+        ! environment) and related cost function and constraint 
+        ! parameters (design variables shouldn't change, as they are
+        ! part of the problem definition and not a parameter of the 
+        ! problem). Some examples of parameters:
+        !
+        ! - the shape of the vessel
+        ! - the magnetic field (though topology shouldn't change!)
+        ! 
+        ! The following update methodes are currently implemented:
+        !
+        ! - vesselcoordinates: update vessel coordinates. Here, the 
+        !   values are first all x-coordinates, then all y-coordinates,
+        !   i.e. (x(i), y(i+np)) where np is the number of points forms
+        !   the coordinates of the i-th point. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        real(R8), intent(in)                :: values(:)
+        character(*), intent(in)            :: updatemeth 
+
+        ! Auxiliary
+        logical                             :: upconbnd, upconlf
+
+        integer(I8)                         :: np
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (size(values, 1) == 0) then 
+            ! Nothing to do here
+            return 
+        end if 
+
+        ! Associate
+        associate(&
+            grid            => problem%grid,            &
+            magneticField   => problem%magneticField,   &
+            environment     => problem%environment)
+
+        ! Set initial switches to update cost function and constraints
+        upconbnd    = .false. 
+        upconlf     = .false.
+
+        ! Update parameters
+        !==================
+        select case(trim(updatemeth))
+
+        case ('vesselcoordinates')
+
+            ! Update vessel coordinates
+            np = size(values, 1)/2
+            if (2*np /= size(values, 1)) then 
+                ! This shouldn't happen
+                call gdErrorHandler('UpdateProblemParameters: uneven number of coordinates detected, check input')
+            end if 
+            call problem%environment%vessel%UpdateVesselCoordinates(values(1:np), values(np+1:2*np))
+
+            ! Select which constraints/cost function contributions to 
+            ! update
+            upconbnd    = .true. 
+            upconlf     = .true.
+
+        case default
+
+            ! Case not implemented, throw error
+            call gdErrorHandler('UpdateProblemParameters: unknown updatemeth: "' // &
+                trim(updatemeth) // '", exiting...')
+
+        end select
+
+        ! Update cost function
+        !=====================
+
+        ! Update constraints
+        !===================
+        ! Boundary function constraints
+        if (upconbnd .and. problem%constraints%eqcon%doboundaryfunction) then 
+            call problem%constraints%eqcon%boundaryfunction%Update(grid, &
+                magneticField, environment)
+        end if 
+
+        ! Linefolding constraints
+        if (upconlf .and. problem%constraints%ineqcon%dolinefolding) then 
+            call problem%constraints%ineqcon%linefolding%Update(grid, &
+                magneticField, environment)
+        end if
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
