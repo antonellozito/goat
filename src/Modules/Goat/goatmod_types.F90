@@ -517,6 +517,10 @@ module goatmod_types
         class(PolygonLevelsetFunction2DUDT), allocatable   :: plfvessel, &
             plftarget
 
+    contains 
+
+        ! Update vessel description using coordinates
+        procedure :: UpdateVesselCoordinates
 
     end type
 
@@ -531,7 +535,13 @@ module goatmod_types
         ! related to the grid or the magnetic field. Currently, only
         ! the vessel structure is stored here. 
 
+        ! Note: the routine to set up the vessel is currently a 
+        ! standalone routine. Should we include it here as a 
+        ! method of the vessel structure?
+
         type(VesselUDT)                 :: vessel
+
+    contains
 
     end type
     
@@ -1910,6 +1920,86 @@ module goatmod_types
         !=========
         deallocate(vessel%TPind)
         deallocate(vessel%allTPind)
+
+    end subroutine
+
+    ! Updating (assumed already initialised)
+    subroutine UpdateVesselCoordinates(vessel, xv, yv)
+
+        ! Description
+        !============
+        ! This routine updates the vessel coordinates and all other 
+        ! dependent structures according to the new vessel coordinates
+        ! given by the xv, yv pairs. It is assumed that xv, yv has an 
+        ! equal number of entries as there are vertices in the vessel
+        ! polygon structure. 
+
+        ! Notes
+        !======
+        ! Note 1: the targets are NOT updated yet!
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselUDT)                :: vessel 
+        real(R8), intent(in)            :: xv(:), yv(:)
+
+        ! Auxiliary
+        integer(I8)                     :: flag, npv, npvtot
+        character(:), allocatable       :: vesselpath 
+
+        ! Loop 
+        integer(I8)                     :: i, k 
+
+        ! Check
+        !======
+        npvtot = 0
+        do i = 1, vessel%polygonset%np 
+            npvtot = npvtot + vessel%polygonset%polygons(i)%nv 
+        end do
+        if ( (npvtot /= size(xv, 1)) .or. (size(xv, 1) /= size(yv, 1)) ) then 
+            ! Incompatible dimensions
+            call gdErrorHandler('UpdateVesselCoordinates: incompatible ' // &
+                'dimensions of new coordinates and original vessel polygon')
+        end if 
+
+        ! Adjust coordinates
+        !===================
+        ! Vessel polygon vertices
+        k = 0
+        do i = 1, vessel%polygonset%np
+            ! Get number of vertices of this polygon
+            npv = vessel%polygonset%polygons(i)%nv 
+
+            ! Assign
+            call vessel%polygonset%polygons(i)%Construct(&
+                xv(k+1:k+npv), yv(k+1:k+npv), vessel%polygonset%polygons(i)%labels)
+            
+            ! Update counter
+            k = k + npv 
+        end do
+
+        ! Reconstruct polygonset (just in case, shouldn't be necessary)
+        call vessel%polygonset%Construct(vessel%polygonset%polygons)
+
+        ! Test orientation
+        call vessel%polygonset%OrientNestedClosedPolygons(flag)
+
+        ! Check
+        if (flag .ne. 0) then  
+            ! Throw error
+            print *, 'flag: ', flag
+            call gdErrorHandler('UpdateVesselCoordinates: could not orient ' // &
+                'polygons, OrientNestedClosedPolygons exited with flag above')
+        end if 
+
+        ! Write data
+        vesselpath = 'vesselpolygon'
+        call vessel%polygonset%WriteData(vesselpath)
+
+        ! Adjust vessel description
+        !==========================
+        call vessel%plfvessel%Initialize(vessel%polygonset)
 
     end subroutine
     
