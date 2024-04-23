@@ -797,7 +797,6 @@ module optmod_optimizationengine
         type(MySparseUDT)           :: hessL 
 
         ! Solver & updates
-        real(R8), allocatable       :: fullmat(:, :)
         double precision, allocatable :: dx(:), dxl(:)
         real(R8), allocatable       :: rhs(:)
         real(R8)                    :: alphals
@@ -824,7 +823,7 @@ module optmod_optimizationengine
         dogradient  = .true. 
         dohessian   = .true. 
 
-        ! Initialize the solver
+        ! Initialize the solver 
         call solver%InitializeKKTSolver()
 
         ! Initialize the monitor - only temporary here

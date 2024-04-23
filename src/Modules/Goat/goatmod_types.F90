@@ -1093,6 +1093,7 @@ module goatmod_types
         end if 
     
         ! Make the pointer list for cell faces
+        c%faceP = 0
         c%faceP(1,1) = 1
         if (c%GC(1)) then 
             ! Only one face
@@ -1101,7 +1102,6 @@ module goatmod_types
             ! Same amount of faces as vertices 
             c%faceP(1,2) = c%vertP(1,2) 
         end if
-        
     
         do i = 2, nc
             ! Pointer
@@ -1121,9 +1121,10 @@ module goatmod_types
     
         ! Allocate
         allocate(c%face(c%nface))
+        c%face = 0
     
         ! Make the pointer list for vertex cell neighbours
-        v%cellP(:,:) = 0
+        v%cellP = 0
         do i = 1, nc
             ! Get the number of vertices of the current cell
             ntv = c%vertP(i,2)
@@ -1147,6 +1148,7 @@ module goatmod_types
     
         ! Allocate
         allocate(v%cell(v%ncell))
+        v%cell = 0
     
         ! Construct the pointer
         v%cellP(1,1) = 1
@@ -1155,10 +1157,10 @@ module goatmod_types
         end do
     
         ! Set vertex cell and cell face and face neighbours
-        fcount(:) = 1
-        vcount(:) = 1
+        fcount = 1
+        vcount = 1
         allocate(tempfcell(f%ntot, 2))
-        tempfcell(:, :) = 0
+        tempfcell = 0
         do i = 1, nc ! loop over all cells
             ! Get vertices of this cell
             tv = GetCellVert(c, i)
@@ -1314,7 +1316,7 @@ module goatmod_types
         end if
     
         ! Compute how much neighbours each vertex has by looping over faces
-        v%neigP(:,:) = 0
+        v%neigP = 0
         do i = 1, f%ntot
             ! Get face vertices
             tfv = f%vert(i,:)
@@ -1339,10 +1341,11 @@ module goatmod_types
         else
             allocate(v%neig(f%ncell))
         end if
+        v%neig = 0
     
         ! Compute the neiglist
         allocate(vcount(v%ntot))
-        vcount(:) = 0
+        vcount = 0
         do i = 1, f%ntot
             ! Get the face vertices
             tfv = f%vert(i,:)
@@ -1360,6 +1363,7 @@ module goatmod_types
         deallocate(vcount)
     
         ! Compute vertex faces
+        v%faceP = 0
         do i = 1, f%ntot
             v%faceP(f%vert(i, :), 2) = v%faceP(f%vert(i, :), 2) + 1;
         end do

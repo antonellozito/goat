@@ -24,13 +24,13 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
     implicit none
 
     ! Declare variables
-    type(GridUDT)                   :: grid
-    type(MagneticFieldUDT)          :: magneticField
-    type(OptimizationEngineGDUDT)   :: optimizationdriver
-    type(GDoptionsUDT)              :: options 
-    type(DesignOptionsUDT)          :: designoptions
+    type(GridUDT)                       :: grid
+    type(MagneticFieldUDT)              :: magneticField
+    type(OptimizationEngineGDUDT)       :: optimizationdriver
+    type(GDoptionsUDT), intent(in)      :: options 
+    type(DesignOptionsUDT)              :: designoptions
     ! type(NumOptionsUDT)             :: num
-    type(EnvironmentUDT)            :: environment
+    type(EnvironmentUDT)                :: environment
 
     ! Debug
     logical                             :: makegridplots  = .false.
@@ -77,6 +77,9 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
         if (makegridplots) then 
             call PlotGridCells(problem%grid, '-p')
         end if 
+
+        ! Unpack solution
+        grid = problem%grid
 
     end select
 

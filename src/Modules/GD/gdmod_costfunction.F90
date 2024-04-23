@@ -1457,19 +1457,18 @@ module gdmod_costfunction
 
         ! Auxiliary variables
         integer                             :: sgn2, sgn3
-        integer(I8)                         :: sp, ep, tID, v2, v3, tv, &
+        integer(I8)                         :: sp, ep, tID, v2, v3, &
             tempID(1:2)
         real(R8)                            :: Btx2, Btx3, Bty2, Bty3, &
             dx2, dy2, dx3, dy3
 
         integer(I8), allocatable            :: tvn(:), temptvn(:), &
-            vesselvert(:), tvf(:), tvfv(:, :), tvnID(:)
+            tvnID(:)
         real(R8), allocatable               :: Btx(:), Bty(:)
 
         logical                             :: includecutcellfaces, &
             excludedomainfaces
-        logical, allocatable                :: cID(:), isvesselvertex(:), &
-            isvesselface(:)
+        logical, allocatable                :: cID(:)
 
         ! Data
         
@@ -1496,15 +1495,14 @@ module gdmod_costfunction
         associate(vert => grid%vert, x => grid%vert%x, y => grid%vert%y, &
             b0 => costfunction%b0, wt => costfunction%wt, &
             nvpairs => costfunction%nvpairs, &
-            vpairs => costfunction%vpairs, &
-            dovessel => costfunction%dovessel)
+            vpairs => costfunction%vpairs)
 
         ! Set the initial weighting factors
-        wt(:) = 1
+        wt = 1
 
         ! Initialize
-        vpairs(:, :) = 0
-        nvpairs(:) = 0
+        vpairs = 0
+        nvpairs = 0
 
         ! Compute the magnetic field vectors at the vertex locations
         call magneticField%interp%Evaluate(x, y, 0, 1, Btx)
@@ -1515,7 +1513,7 @@ module gdmod_costfunction
         !=============================
         ! This has to be replaced with an actual computation based on 
         ! the magnetic field... Right now, simply ones
-        b0(:) = 1
+        b0 = 1
 
         ! Compute the vertex pairs
         !=========================
@@ -1661,54 +1659,6 @@ module gdmod_costfunction
             deallocate(tvn, temptvn, cID)
 
         end do
-
-        ! Include vessel vertices?
-        if (dovessel) then 
-            ! Get all vessel vertices
-            call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
-            allocate(vesselvert(count(isvesselvertex)))
-            vesselvert = pack([(i, i=1, grid%vert%ntot)], isvesselvertex)
-
-            ! Overwrite potential other vertex pairs (ordering doesn't 
-            ! matter because we set bias to one anyway)
-            do i = 1, size(vesselvert, 1)
-                ! Unpack
-                tv = vesselvert(i)
-
-                ! Get the faces of this vertex
-                tvf = GetVertFace(vert, tv)
-
-                ! Check
-                if (count(isvesselface(tvf)) == 2) then
-                    ! Get the other two vertices
-                    allocate(tvfv(2, 2))
-                    tvfv = grid%face%vert(pack(tvf, isvesselface(tvf)), :)
-                    allocate(tvn(count(tvfv /= tv)))
-                    tvn = pack(tvfv, tvfv /= tv)
-
-                    ! Check
-                    if (size(tvn, 1) /= 2) then 
-                        ! Shouldn't happen, throw error
-                        call gdErrorHandler('InitializeCostFunctionLR: ' // &
-                            'unknown error, something seems wrong in grid interconnection')
-                    end if 
-
-                    ! Add
-                    vpairs(tv, 1:2) = tvn
-                    b0(tv) = 1
-                    nvpairs(tv) = 1 
-
-                    ! Deallocate 
-                    deallocate(tvfv, tvf, tvn)
-                end if 
-
-            end do
-
-            ! Housekeeping
-            deallocate(vesselvert)
-
-
-        end if 
 
         ! Housekeeping
         deallocate(Btx, Bty)
