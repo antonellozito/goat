@@ -19,7 +19,7 @@ subroutine GDtestdriver(goatoptions)
     
     ! Auxiliary
     real(R8)                        :: dist, angle
-    real(R8), allocatable           :: xv(:), yv(:)
+    real(R8), allocatable           :: xv(:), yv(:), dx(:), dy(:)
 
     integer(I8)                     :: nv, incr 
 
@@ -32,9 +32,9 @@ subroutine GDtestdriver(goatoptions)
     ! Initialize
     !===========
     ! Set distance to move vessel vertices
-    dist = 1e-2
-    angle = pi_R8/4
-    incr = 10
+    dist = 1e-1
+    angle = 0.0*pi_R8/4
+    incr = 100
 
     ! Set up optimization problem
     call GDinitialize(goatoptions%inputfilepath, optimizationdriver)
@@ -56,7 +56,7 @@ subroutine GDtestdriver(goatoptions)
 
         ! Extract
         cc = 0
-        allocate(xv(nv), yv(nv))
+        allocate(xv(nv), yv(nv), dx(nv), dy(nv))
         do i = 1, vessel%polygonset%np 
             xv(cc+1:cc+vessel%polygonset%polygons(i)%nv) = vessel%polygonset%polygons(i)%x
             yv(cc+1:cc+vessel%polygonset%polygons(i)%nv) = vessel%polygonset%polygons(i)%y
@@ -83,15 +83,21 @@ subroutine GDtestdriver(goatoptions)
     type is (OptimizationProblemGDUDT)
 
         do i = 1, incr 
+            ! Print
+            print *, '================================================='
+            print *, '          vessel geometry iteration ', i 
+            print *, '================================================='
             ! Update geometry
-            xv = xv + dist*cos(angle)*(1/incr)
-            yv = yv + dist*sin(angle)*(1/incr)
+            dx = dist*cos(angle)*(real(1, kind=R8)/real(incr, kind=R8))
+            dy = dist*sin(angle)*(real(1, kind=R8)/real(incr, kind=R8))
+            xv = xv + dx 
+            yv = yv + dy
 
             ! Update vessel description
             call problem%UpdateProblemParameters([xv, yv], 'vesselcoordinates')
 
             ! Solve for new geomeatry
-            call optimizationdriver%solver%SolveOptimizationProblemKKT(optimizationdriver%problem)
+            call optimizationdriver%solver%SolveOptimizationProblemKKT(problem)
 
             ! Write solution
             write(tempstring, '(I0.4, a)') i, trim(orig_writefilepath) 
