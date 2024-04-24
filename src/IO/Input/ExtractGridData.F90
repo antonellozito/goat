@@ -85,6 +85,10 @@ subroutine ExtractGridData(grid, meth, gridoptions)
     ! Associate
     associate(gglabels => gridoptions%facelabelmappingGG, &
         gdlabels => gridoptions%facelabelmappingGD)
+    
+    ! Initialize
+    grid%vert%fieldlineID = 0
+    grid%data%fluxdata%fluxsurfaceID = 0
 
     ! Check method
     !=============

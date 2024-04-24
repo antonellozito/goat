@@ -217,6 +217,9 @@ module gdmod_constraints
             EvaluateCoordinatesDerivativesBoundaryFunctionConstraints
         procedure :: EvaluateDerivativesFlux            => &
             EvaluateFluxDerivativesBoundaryFunctionConstraints
+
+        ! Update
+        procedure :: Update     => UpdateBoundaryFunctionConstraints
     
     end type
 
@@ -396,6 +399,9 @@ module gdmod_constraints
             
         ! Evaluation
         procedure :: Evaluate   => EvaluateLinefoldingConstraints
+
+        ! Update
+        procedure :: Update     => UpdateLinefoldingConstraints
 
 
     end type
@@ -3406,7 +3412,7 @@ module gdmod_constraints
         type(EnvironmentUDT)                        :: environment 
         type(ConstraintsMonitorUDT)                 :: monitor
         type(ConstraintOptionsUDT)                  :: options
-        class(DesignVariablesGDUDT)                   :: designvariables
+        class(DesignVariablesGDUDT)                 :: designvariables
 
         ! Auxiliary
         logical                                     :: debugplots
@@ -3687,6 +3693,38 @@ module gdmod_constraints
         ! Housekeeping
         !=============
         end associate
+
+    end subroutine
+
+    ! Updateing
+    subroutine UpdateBoundaryFunctionConstraints(constraints, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Update the boundary function description according to the 
+        ! given grid, magnetic field and environment. Can be used to 
+        ! update constraint parameters after external updating of these
+        ! quantities (e.g. when doing shape optimization, vessel will
+        ! change etc). 
+
+        ! Note: only boundary description here is updated. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(BoundaryFunctionConstraintsUDT)       :: constraints
+        type(GridUDT), intent(in)                   :: grid 
+        type(MagneticFieldUDT), intent(in)          :: magneticField
+        type(EnvironmentUDT), intent(in)            :: environment
+
+        ! Construct boundary
+        !===================
+        ! Should already be constructed in vessel - assign
+        constraints%plf = environment%vessel%plfvessel
+
+        ! Visualize 
+        call constraints%plf%Visualize('constraints_boundary_plf')
 
     end subroutine
 
@@ -7346,6 +7384,33 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+    end subroutine
+
+    ! Update
+    subroutine UpdateLinefoldingConstraints(constraints, grid, &
+        magneticField, environment)
+
+        ! Description
+        !============
+        ! Update the linefolding constraints description according to the 
+        ! given grid, magnetic field and environment. Can be used to 
+        ! update constraint parameters after external updating of these
+        ! quantities (e.g. when doing shape optimization, vessel will
+        ! change etc). 
+
+        ! Note: nothing has to be updated here (yet), since environment
+        ! etc should be updated elsewhere and are parsed to the 
+        ! constraint directly
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(LinefoldingConstraintsUDT)            :: constraints
+        type(GridUDT), intent(in)                   :: grid 
+        type(MagneticFieldUDT), intent(in)          :: magneticField
+        type(EnvironmentUDT), intent(in)            :: environment
+
 
     end subroutine
 

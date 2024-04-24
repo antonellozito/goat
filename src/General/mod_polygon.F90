@@ -1299,6 +1299,12 @@ module mod_polygon
         !=========
         associate(nv => polygon%nv, ne => polygon%ne, nl => polygon%nl)
 
+        ! Check
+        if (allocated(polygon%x)) then 
+            ! Deallocate
+            call polygon%Deallocate()
+        end if 
+
         allocate(polygon%x(nv), polygon%y(nv), polygon%vert(ne+1), &
             polygon%edges(ne, 2), polygon%ex(ne), polygon%ey(ne), &
             polygon%tx(ne), polygon%ty(ne), polygon%tn(ne), &

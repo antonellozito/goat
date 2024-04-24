@@ -71,6 +71,10 @@ program Goat
         ! Grid deformation only
         call GDDriver(goatoptions)
 
+    case ('GDtest')
+
+        call GDtestdriver(goatoptions)
+
     case default 
 
         ! Call error handler

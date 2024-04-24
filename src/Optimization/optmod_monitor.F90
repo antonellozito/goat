@@ -205,6 +205,12 @@ module optmod_monitor
         ! Arguments
         class(OptimizationMonitorUDT)        :: monitor 
 
+        ! Check
+        !======
+        if (allocated(monitor%J)) then 
+            call monitor%Deallocate()
+        end if 
+
         ! Allocate
         !=========
         ! Cost function & Lagrangian
