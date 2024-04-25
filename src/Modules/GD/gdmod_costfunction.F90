@@ -63,10 +63,13 @@ module gdmod_costfunction
     contains
 
         ! Cost function initialization
-        procedure(InitializeCostfunctionINT), deferred :: Initialize
+        procedure(InitializeCostfunctionINT), deferred      :: Initialize
 
         ! Cost function evaluation
-        procedure(EvaluateCostFunctionINT), deferred :: Evaluate
+        procedure(EvaluateCostFunctionINT), deferred        :: Evaluate
+
+        ! Cost function derivative evaluation (for external optimization)
+        procedure(EvaluateCostFunctionDiffINT), deferred    :: EvaluateDiff
 
     end type
 
@@ -119,6 +122,9 @@ module gdmod_costfunction
         ! Evaluation
         procedure :: Evaluate               => EvaluateCostFunctionLR
 
+        ! Derivative evaluation
+        procedure :: EvaluateDiff           => EvaluateCostFunctionDiffLR
+
         ! Data output
         procedure :: WriteData              => WriteCostFunctionDataLR
 
@@ -143,6 +149,9 @@ module gdmod_costfunction
 
         ! Initialization to be overwritten
         procedure :: Initialize         => InitializeCostfunctionLRrad
+
+        ! Derivative evaluation
+        procedure :: EvaluateDiff       => EvaluateCostFunctionDiffLRrad
 
         ! Data writing to be overwritten
         procedure :: WriteData          => WriteCostFunctionDataLRrad
@@ -189,6 +198,9 @@ module gdmod_costfunction
         ! Evaluation
         procedure :: Evaluate               => EvaluateCostFunctionLR2
 
+        ! Derivative evaluation
+        procedure :: EvaluateDiff           => EvaluateCostFunctionDiffLR2
+
         ! Housekeeping
         procedure :: Allocate               => AllocateCostFunctionLR2
         procedure :: Deallocate             => DeallocateCostFunctionLR2
@@ -214,6 +226,9 @@ module gdmod_costfunction
 
         ! Evaluation
         procedure :: Evaluate               => EvaluateCostFunctionLRrad2
+
+        ! Derivative evaluation
+        procedure :: EvaluateDiff           => EvaluateCostFunctionDiffLRrad2
 
         ! Housekeeping
         procedure :: Allocate               => AllocateCostFunctionLRrad2
@@ -277,6 +292,9 @@ module gdmod_costfunction
         ! Evaluation
         procedure :: Evaluate               => EvaluateCostFunctionFAD
 
+        ! Derivative evaluation
+        procedure :: EvaluateDiff           => EvaluateCostFunctionDiffFAD
+
         ! Data output
         procedure :: WriteData              => WriteCostFunctionDataFAD
 
@@ -326,6 +344,9 @@ module gdmod_costfunction
         ! Evaluation
         procedure :: Evaluate               => EvaluateCostFunctionFA
 
+        ! Derivative evaluation
+        procedure :: EvaluateDiff           => EvaluateCostFunctionDiffFA
+
         ! Data output
         procedure :: WriteData              => WriteCostFunctionDataFA
 
@@ -369,6 +390,9 @@ module gdmod_costfunction
         ! Evaluation
         procedure :: Evaluate               => EvaluateCostFunctionPRPB
 
+        ! Derivative evaluation
+        procedure :: EvaluateDiff           => EvaluateCostFunctionDiffPRPB
+
         ! Data output
         procedure :: WriteData              => WriteCostFunctionDataPRPB
 
@@ -401,6 +425,9 @@ module gdmod_costfunction
 
         ! Evaluation
         procedure :: Evaluate               => EvaluateCostFunctionPRPB2
+
+        ! Derivative evaluation
+        procedure :: EvaluateDiff           => EvaluateCostFunctionDiffPRPB2
 
         ! Data output
         procedure :: WriteData              => WriteCostFunctionDataPRPB2
@@ -445,6 +472,9 @@ module gdmod_costfunction
         ! Evaluation
         procedure :: Evaluate           => EvaluateCostFunctionLRFAD
 
+        ! Derivative evaluation
+        procedure :: EvaluateDiff           => EvaluateCostFunctionDiffLRFAD
+
         ! Housekeeping
         procedure :: Allocate           => AllocateCostFunctionLRFAD
         procedure :: Deallocate         => DeallocateCostFunctionLRFAD
@@ -452,7 +482,7 @@ module gdmod_costfunction
 
     end type
 
-        ! Cost function with all possible contributions
+    ! Cost function with all possible contributions
     type, extends(CostfunctionGDUDT) :: CostfunctionGeneralUDT
 
         ! Description
@@ -486,6 +516,9 @@ module gdmod_costfunction
 
         ! Evaluation
         procedure :: Evaluate           => EvaluateCostFunctionGeneral
+
+        ! Derivative evaluation
+        procedure :: EvaluateDiff           => EvaluateCostFunctionDiffGeneral
 
         ! Housekeeping
         procedure :: Allocate           => AllocateCostFunctionGeneral
@@ -551,6 +584,33 @@ module gdmod_costfunction
             type(MagneticFieldUDT)          :: magneticField 
             type(EnvironmentUDT)            :: environment 
             logical                         :: dogradient, dohessian
+            class(DesignVariablesGDUDT)     :: designvariables
+
+        end subroutine
+
+        ! Cost function derivative evaluation
+        subroutine EvaluateCostFunctionDiffINT(costfunction, vartype, values, &
+            gradJ, hessJ, grid, magneticField, environment, &
+            designvariables)
+
+            ! Description
+            !============
+            ! Main routine to evaluate the cost function
+            ! derivatives w.r.t. other, non-design variables
+
+            ! Import
+            import :: CostfunctionGDUDT, MySparseUDT, GridUDT, R8, &
+                MagneticFieldUDT, EnvironmentUDT, DesignVariablesGDUDT
+            
+            ! Declare
+            class(CostfunctionGDUDT)        :: costfunction 
+            character(*), intent(in)        :: vartype
+            real(R8), intent(in)            :: values(:)
+            real(R8), allocatable           :: gradJ(:)
+            type(MySparseUDT)               :: hessJ 
+            type(GridUDT)                   :: grid 
+            type(MagneticFieldUDT)          :: magneticField 
+            type(EnvironmentUDT)            :: environment 
             class(DesignVariablesGDUDT)     :: designvariables
 
         end subroutine
@@ -1302,6 +1362,58 @@ module gdmod_costfunction
 
     end subroutine
 
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffLR(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function derivatives w.r.t. non-design 
+        ! variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRUDT)        :: costfunction 
+        character(*), intent(in)        :: vartype
+        real(R8), allocatable           :: gradJ(:)
+        real(R8), intent(in)            :: values(:)
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Initialize
+        !===========
+        ! Check allocation & initialization
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+
+        ! Compute
+        !========
+        select case (trim(vartype))
+
+        case ('vesselcoordinates')
+
+            ! Vessel coordinates - no contributions (assumed weights are
+            ! not updated)
+            hessJ = SpZeros(designvariables%nphi, size(values, 1))
+            
+
+        case default
+
+            call gdErrorHandler('EvaluatecostFunctionDiffLR: ' // &
+                'unknown variable type: ' // vartype)
+
+        end select
+
+
+    end subroutine
+
     ! Cost function data writing 
     subroutine WriteCostFunctionDataLR(costfunction, grid)
 
@@ -1735,6 +1847,58 @@ module gdmod_costfunction
         end associate
         deallocate(IDn, xn, yn)
         
+
+
+    end subroutine
+
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffLRrad(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function derivatives w.r.t. non-design 
+        ! variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRradUDT)     :: costfunction 
+        character(*), intent(in)        :: vartype
+        real(R8), allocatable           :: gradJ(:)
+        real(R8), intent(in)            :: values(:)
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Initialize
+        !===========
+        ! Check allocation & initialization
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+
+        ! Compute
+        !========
+        select case (trim(vartype))
+
+        case ('vesselcoordinates')
+
+            ! Vessel coordinates - no contributions (assumed weights are
+            ! not updated)
+            hessJ = SpZeros(designvariables%nphi, size(values, 1))
+            
+
+        case default
+
+            call gdErrorHandler('EvaluatecostFunctionDiffLRrad: ' // &
+                'unknown variable type: ' // vartype)
+
+        end select
 
 
     end subroutine
@@ -3138,6 +3302,58 @@ module gdmod_costfunction
 
     end subroutine
 
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffFAD(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function derivatives w.r.t. non-design 
+        ! variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFADUDT)       :: costfunction 
+        character(*), intent(in)        :: vartype
+        real(R8), allocatable           :: gradJ(:)
+        real(R8), intent(in)            :: values(:)
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Initialize
+        !===========
+        ! Check allocation & initialization
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+
+        ! Compute
+        !========
+        select case (trim(vartype))
+
+        case ('vesselcoordinates')
+
+            ! Vessel coordinates - no contributions (assumed weights are
+            ! not updated)
+            hessJ = SpZeros(designvariables%nphi, size(values, 1))
+            
+
+        case default
+
+            call gdErrorHandler('EvaluatecostFunctionDiffFAD: ' // &
+                'unknown variable type: ' // vartype)
+
+        end select
+
+
+    end subroutine
+
     ! Cost function data writing 
     subroutine WriteCostFunctionDataFAD(costfunction, grid)
 
@@ -3821,6 +4037,57 @@ module gdmod_costfunction
 
     end subroutine
 
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffFA(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function derivatives w.r.t. non-design 
+        ! variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionFAUDT)        :: costfunction 
+        character(*), intent(in)        :: vartype
+        real(R8), allocatable           :: gradJ(:)
+        real(R8), intent(in)            :: values(:)
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+        ! Initialize
+        !===========
+        ! Check allocation & initialization
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+
+        ! Compute
+        !========
+        select case (trim(vartype))
+
+        case ('vesselcoordinates')
+
+            ! Vessel coordinates - no contributions (assumed weights are
+            ! not updated)
+            hessJ = SpZeros(designvariables%nphi, size(values, 1))
+            
+
+        case default
+
+            call gdErrorHandler('EvaluatecostFunctionDiffFA: ' // &
+                'unknown variable type: ' // vartype)
+
+        end select
+
+
+    end subroutine
+
     ! Cost function data writing 
     subroutine WriteCostFunctionDataFA(costfunction, grid)
 
@@ -4073,6 +4340,93 @@ module gdmod_costfunction
 
     end subroutine
 
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffLR2(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function derivatives w.r.t. non-design 
+        ! variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRUDT2)       :: costfunction 
+        real(R8), allocatable           :: gradJ(:), gradJ1(:), &
+            gradJ2(:) 
+        type(MySparseUDT)               :: hessJ, hessJ1, hessJ2 
+        real(R8), intent(in)            :: values(:)
+        character(*), intent(in)        :: vartype
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i
+
+        ! Auxiliary
+        integer(I8), allocatable        :: tempvpairs(:,:)
+        real(R8), allocatable           :: tempb0(:) 
+                                        
+        ! Initialize
+        !===========
+        ! Store original vertex pairs and bias
+        allocate(tempvpairs, source=costfunction%cfv_lr%vpairs)
+        allocate(tempb0, source=costfunction%cfv_lr%b0)
+        tempvpairs = costfunction%cfv_lr%vpairs 
+        tempb0  = costfunction%cfv_lr%b0
+
+        ! Gradient
+        ! Check allocation & initialization
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+
+        ! Hessian
+        hessJ1%nrow = hessJ%nrow 
+        hessJ2%nrow = hessJ%nrow 
+        hessJ1%ncol = hessJ%ncol 
+        hessJ2%ncol = hessJ%ncol 
+
+        ! Compute cost function
+        !======================
+        ! First contribution
+        call costfunction%cfv_lr%EvaluateDiff(vartype, &
+            values, gradJ1, hessJ1, grid, magneticField, environment, &
+            designvariables)
+        
+        ! Adjust vertex pairs and bias
+        do i = 1, maxval(costfunction%cfv_lr%nvpairs)
+            costfunction%cfv_lr%vpairs(:, 2*i-1) = tempvpairs(:, 2*i)
+            costfunction%cfv_lr%vpairs(:, 2*i) = tempvpairs(:, 2*i-1)
+        end do
+        costfunction%cfv_lr%b0(:) = 1/tempb0
+
+        ! Second contribution
+        call costfunction%cfv_lr%EvaluateDiff(vartype, &
+            values, gradJ2, hessJ2, grid, magneticField, environment, &
+            designvariables)
+
+        ! Reset vertex pairs and bias
+        costfunction%cfv_lr%b0(:) = tempb0
+        costfunction%cfv_lr%vpairs(:,:) = tempvpairs
+
+        ! Add
+        gradJ = gradJ1 + gradJ2
+        hessJ = hessJ1 + hessJ2
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJ1, gradJ2)
+
+
+    end subroutine
+
     ! Housekeeping
     subroutine AllocateCostFunctionLR2(costfunction, nv, nvn)
 
@@ -4256,6 +4610,93 @@ module gdmod_costfunction
         ! Housekeeping
         !=============
         deallocate(gradJ1, gradJ2)
+
+    end subroutine
+
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffLRrad2(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function derivatives w.r.t. non-design 
+        ! variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRrad2UDT)    :: costfunction 
+        real(R8), allocatable           :: gradJ(:), gradJ1(:), &
+            gradJ2(:) 
+        type(MySparseUDT)               :: hessJ, hessJ1, hessJ2 
+        real(R8), intent(in)            :: values(:)
+        character(*), intent(in)        :: vartype
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+        integer(I8)                     :: i
+
+        ! Auxiliary
+        integer(I8), allocatable        :: tempvpairs(:,:)
+        real(R8), allocatable           :: tempb0(:) 
+                                        
+        ! Initialize
+        !===========
+        ! Store original vertex pairs and bias
+        allocate(tempvpairs, source=costfunction%cfv_lrrad%vpairs)
+        allocate(tempb0, source=costfunction%cfv_lrrad%b0)
+        tempvpairs = costfunction%cfv_lrrad%vpairs 
+        tempb0  = costfunction%cfv_lrrad%b0
+
+        ! Gradient
+        ! Check allocation & initialization
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+
+        ! Hessian
+        hessJ1%nrow = hessJ%nrow 
+        hessJ2%nrow = hessJ%nrow 
+        hessJ1%ncol = hessJ%ncol 
+        hessJ2%ncol = hessJ%ncol 
+
+        ! Compute cost function
+        !======================
+        ! First contribution
+        call costfunction%cfv_lrrad%EvaluateDiff(vartype, &
+            values, gradJ1, hessJ1, grid, magneticField, environment, &
+            designvariables)
+        
+        ! Adjust vertex pairs and bias
+        do i = 1, maxval(costfunction%cfv_lrrad%nvpairs)
+            costfunction%cfv_lrrad%vpairs(:, 2*i-1) = tempvpairs(:, 2*i)
+            costfunction%cfv_lrrad%vpairs(:, 2*i) = tempvpairs(:, 2*i-1)
+        end do
+        costfunction%cfv_lrrad%b0(:) = 1/tempb0
+
+        ! Second contribution
+        call costfunction%cfv_lrrad%EvaluateDiff(vartype, &
+            values, gradJ2, hessJ2, grid, magneticField, environment, &
+            designvariables)
+
+        ! Reset vertex pairs and bias
+        costfunction%cfv_lrrad%b0(:) = tempb0
+        costfunction%cfv_lrrad%vpairs(:,:) = tempvpairs
+
+        ! Add
+        gradJ = gradJ1 + gradJ2
+        hessJ = hessJ1 + hessJ2
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJ1, gradJ2)
+
 
     end subroutine
 
@@ -4826,6 +5267,58 @@ module gdmod_costfunction
 
     end subroutine
 
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffPRPB(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function derivatives w.r.t. non-design 
+        ! variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPBUDT)      :: costfunction 
+        character(*), intent(in)        :: vartype
+        real(R8), allocatable           :: gradJ(:)
+        real(R8), intent(in)            :: values(:)
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Initialize
+        !===========
+        ! Check allocation & initialization
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+
+        ! Compute
+        !========
+        select case (trim(vartype))
+
+        case ('vesselcoordinates')
+
+            ! Vessel coordinates - no contributions (assumed weights are
+            ! not updated)
+            hessJ = SpZeros(designvariables%nphi, size(values, 1))
+            
+
+        case default
+
+            call gdErrorHandler('EvaluatecostFunctionDiffPRPB: ' // &
+                'unknown variable type: ' // vartype)
+
+        end select
+
+
+    end subroutine
+
     ! Cost function data writing 
     subroutine WriteCostFunctionDataPRPB(costfunction, grid)
 
@@ -5103,6 +5596,91 @@ module gdmod_costfunction
 
     end subroutine
 
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffPRPB2(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function derivatives w.r.t. non-design 
+        ! variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionPRPB2UDT)     :: costfunction
+        real(R8), allocatable           :: gradJ(:), gradJ1(:), &
+            gradJ2(:) 
+        type(MySparseUDT)               :: hessJ, hessJ1, hessJ2 
+        real(R8), intent(in)            :: values(:)
+        character(*), intent(in)        :: vartype
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+
+        ! Auxiliary
+        integer(I8), allocatable        :: tempvpairs(:,:)
+        real(R8), allocatable           :: tempb0(:) 
+                                        
+        ! Initialize
+        !===========
+        ! Store original vertex pairs and bias
+        allocate(tempvpairs, source=costfunction%cfv_prpb%psipairs)
+        allocate(tempb0, source=costfunction%cfv_prpb%b0)
+        tempvpairs = costfunction%cfv_prpb%psipairs 
+        tempb0  = costfunction%cfv_prpb%b0
+
+        ! Gradient
+        ! Initialize
+        !===========
+        ! Check allocation & initialization
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+
+        ! Hessian
+        hessJ1%nrow = hessJ%nrow 
+        hessJ2%nrow = hessJ%nrow 
+        hessJ1%ncol = hessJ%ncol 
+        hessJ2%ncol = hessJ%ncol 
+
+        ! Compute cost function
+        !======================
+        ! First contribution
+        call costfunction%cfv_prpb%EvaluateDiff(vartype, &
+            values, gradJ1, hessJ1, grid, magneticField, environment, &
+            designvariables)
+            
+        ! Adjust vertex pairs and bias
+        costfunction%cfv_prpb%psipairs(:, :) = tempvpairs(:, [1, 3, 2])
+        costfunction%cfv_prpb%b0(:) = 1/tempb0
+
+        ! Second contribution
+        call costfunction%cfv_prpb%EvaluateDiff(vartype, &
+            values, gradJ2, hessJ2, grid, magneticField, environment, &
+            designvariables)
+
+        ! Reset vertex pairs and bias
+        costfunction%cfv_prpb%b0(:) = tempb0
+        costfunction%cfv_prpb%psipairs(:, :) = tempvpairs
+
+        ! Add
+        gradJ = gradJ1 + gradJ2
+        hessJ = hessJ1 + hessJ2
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJ1, gradJ2)
+
+
+    end subroutine
+
     ! Data writing
     subroutine WriteCostFunctionDataPRPB2(costfunction, grid)
 
@@ -5282,6 +5860,81 @@ module gdmod_costfunction
 
         ! Add
         J = J1 + J2 
+        gradJ = gradJ1 + gradJ2
+        hessJ = hessJ1 + hessJ2
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJ1, gradJ2)
+
+    end subroutine
+
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffLRFAD(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, we simply call the same cost function twice, but switch
+        ! the order of the indices and recompute the bias. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLRFADUDT)     :: costfunction
+        real(R8), allocatable           :: gradJ(:), gradJ1(:), &
+            gradJ2(:) 
+        type(MySparseUDT)               :: hessJ, hessJ1, hessJ2 
+        real(R8), intent(in)            :: values(:)
+        character(*), intent(in)        :: vartype
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop variables
+
+        ! Auxiliary
+                                        
+        ! Initialize
+        !===========
+        ! Gradient
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+
+        ! Hessian
+        hessJ1%nrow = hessJ%nrow 
+        hessJ2%nrow = hessJ%nrow 
+        hessJ1%ncol = hessJ%ncol 
+        hessJ2%ncol = hessJ%ncol 
+
+        ! Compute cost function
+        !======================
+        ! First contribution
+        call costfunction%cfv_lr%EvaluateDiff(vartype, &
+            values, gradJ1, hessJ1, grid, magneticField, environment, &
+            designvariables)
+        
+        ! Second contribution
+        call costfunction%cfv_fad%EvaluateDiff(vartype, &
+            values, gradJ2, hessJ2, grid, magneticField, environment, &
+            designvariables)
+
+        ! Add
         gradJ = gradJ1 + gradJ2
         hessJ = hessJ1 + hessJ2
 
@@ -5605,6 +6258,172 @@ module gdmod_costfunction
 
             ! Add
             J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for LRrad'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+        end if 
+
+        ! Housekeeping
+        !=============
+        deallocate(gradJtemp)
+
+    end subroutine
+
+    ! Cost function derivative evaluation
+    subroutine EvaluateCostFunctionDiffGeneral(costfunction, vartype, &
+        values, gradJ, hessJ, grid, magneticField, environment, &
+        designvariables)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, we simply call the same cost function twice, but switch
+        ! the order of the indices and recompute the bias. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionGeneralUDT)   :: costfunction
+        real(R8), allocatable           :: gradJ(:), gradJtemp(:)
+        real(R8), intent(in)            :: values(:)
+        type(MySparseUDT)               :: hessJ, hessJtemp
+        character(*), intent(in)        :: vartype
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+        ! Loop variables
+
+        ! Auxiliary
+                                        
+        ! Initialize
+        !===========
+
+        ! Gradient
+        if (.not. allocated(gradJ)) then 
+            allocate(gradJ(size(values)))
+        end if 
+        gradJ = 0
+        allocate(gradJtemp(size(gradJ)))
+        gradJtemp = 0
+
+        ! Hessian
+        hessJtemp%nrow = hessJ%nrow 
+        hessJtemp%ncol = hessJ%ncol 
+        
+        ! Allocate initially to avoid errors 
+        if (.not. allocated(hessJ%row)) then 
+            hessJ%nval = 0
+            call hessJ%Allocate()
+        else 
+            ! Reset hessian
+            call hessJ%Deallocate()
+            hessJ%nval = 0
+            call hessJ%Allocate()
+        end if 
+            
+
+        ! Compute cost function
+        !======================
+        ! Length ratio
+        if (costfunction%doLR) then 
+            ! Compute
+            call costfunction%cfv_lr%EvaluateDiff(vartype, &
+                values, gradJtemp, hessJtemp, grid, magneticField, environment, &
+                designvariables)
+            
+            ! Add
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for LR'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+        end if 
+        
+        ! Face angle difference
+        if (costfunction%doFAD) then 
+            ! Compute
+            call costfunction%cfv_fad%EvaluateDiff(vartype, &
+                values, gradJtemp, hessJtemp, grid, magneticField, environment, &
+                designvariables)
+
+            ! Add
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for FAD'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+        end if 
+
+        ! Face angle
+        if (costfunction%doFA) then 
+            ! Compute
+            call costfunction%cfv_fa%EvaluateDiff(vartype, &
+                values, gradJtemp, hessJtemp, grid, magneticField, environment, &
+                designvariables)
+
+            ! Add
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for FA'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+        end if 
+
+        ! Psi ratio, psi based
+        if (costfunction%doPRPB) then 
+            ! Compute
+            call costfunction%cfv_prpb%EvaluateDiff(vartype, &
+                values, gradJtemp, hessJtemp, grid, magneticField, environment, &
+                designvariables)
+
+            ! Add
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for PRPB'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+        end if 
+
+        ! Length ratio, radial
+        if (costfunction%doLRrad) then 
+            ! Compute
+            call costfunction%cfv_lrrad%EvaluateDiff(vartype, &
+                values, gradJtemp, hessJtemp, grid, magneticField, environment, &
+                designvariables)
+
+            ! Add
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
 

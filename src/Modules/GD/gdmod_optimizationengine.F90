@@ -106,6 +106,12 @@ module gdmod_optimizationengine
         ! Inequality constraint deactivator
         procedure :: DeactivateInequalityConstraints
 
+        ! Linearizations
+        !===============
+        procedure :: EvaluateJacobian       => EvaluateJacobianGD
+        procedure :: EvaluateJacobianGDCoordinates
+        procedure :: EvaluateJacobianGDVesselcoordinates
+
     end type 
 
     ! Optimization engine
@@ -1769,6 +1775,262 @@ module gdmod_optimizationengine
         !=============
         end associate
                
+
+    end subroutine
+
+    ! Derivative calculation wrapper
+    subroutine EvaluateJacobianGD(problem, var, values, jac)
+
+        ! Description
+        !============
+        ! This routine computes the Jacobian of the optimization problem
+        ! with respect to some predefined variable. Note that it is 
+        ! assumed that all fields of the problem are up to date. The 
+        ! variable(s) to differentiate to should be specified by the
+        ! string 'var'. The Jacobian is returned in a sparse matrix 
+        ! format and contains the linearization of the optimization 
+        ! problem residuals w.r.t. the chosen variables. 
+
+        ! Notes
+        !======
+        ! Note 1: this routine is a wrapper routine for specific 
+        ! derivation computations which are defined in separate 
+        ! routines. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        character(*), intent(in)            :: var 
+        real(R8), intent(in)                :: values(:)
+        type(MySparseUDT), intent(out)      :: jac 
+
+        ! Compute
+        !========
+        ! Check the variable name and call differentiation routine
+        select case (var)
+
+        case ('coordinates')
+
+            ! Differentiate w.r.t. coordinates of the grid (x, y)
+            call problem%EvaluateJacobianGDCoordinates(jac)
+
+        case ('vesselcoordinates')
+
+            ! Differentiate w.r.t. vessel coordinates
+            call problem%EvaluateJacobianGDVesselcoordinates(values, jac)
+
+        case default 
+
+            ! Throw error, not implemented
+            call gdErrorHandler('ComputeJacobianGD: variable not implemented')
+
+        end select
+
+
+    end subroutine
+
+    ! Derivative calculation w.r.t. coordinates
+    subroutine EvaluateJacobianGDCoordinates(problem, jac)
+
+        ! Description
+        !============
+        ! Evaluate the Jacobian of the optimization problem w.r.t. the 
+        ! grid coordinates. This is done by calling the cost function, 
+        ! constraint, and other evaluation routines. Then, only columns
+        ! that correspond to coordinates are retained from the 
+        ! computed linearization. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        type(MySparseUDT), intent(inout)    :: jac 
+
+        ! Auxiliary
+        ! Cost function 
+        real(R8)                    :: J 
+        real(R8), allocatable       :: gradJ(:)
+        type(MySparseUDT)           :: hessJ 
+
+        ! Equality constraints 
+        real(R8), allocatable       :: G(:), lambda(:) 
+        type(MySparseUDT)           :: gradG, hessG  
+
+        ! Inequality constraints 
+        real(R8), allocatable       :: H(:)
+        type(MySparseUDT)           :: gradH, hessH   
+
+        ! Lagrangian 
+        real(R8)                    :: L 
+        real(R8), allocatable       :: gradL(:)
+        type(MySparseUDT)           :: hessL 
+
+        ! Logicals
+        logical                     :: dogradient, dohessian
+        logical, allocatable        :: tempind(:)
+
+        ! Other
+        integer(I8)                 :: nphi, neq, nineq
+        integer(I8), allocatable    :: cind(:)
+
+        ! Initialize
+        !===========
+        ! Get problem dimensions
+        call problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Linearization
+        jac%nrow = nphi+neq+nineq 
+        jac%ncol = 2*problem%grid%vert%ntot
+
+        ! Cost function 
+        allocate(gradJ(nphi))
+        J = 0
+        gradJ(:) = 0
+        hessJ%nrow = nphi 
+        hessJ%ncol = nphi 
+
+        ! Equality constraint 
+        allocate(G(neq))
+        G(:) = 0
+        gradG%nrow = nphi 
+        gradG%ncol = neq 
+        hessG%nrow = nphi 
+        hessG%ncol = nphi
+
+        ! Inequality constraint 
+        allocate(H(nineq))
+        H(:) = 0
+        gradH%nrow = nphi 
+        gradH%ncol = nineq 
+        hessH%nrow = nphi 
+        hessH%ncol = nphi
+
+        ! Lagrangian 
+        allocate(gradL(nphi + neq + nineq))
+        hessL%nrow = nphi + neq + nineq
+        hessL%ncol = nphi + neq + nineq
+        L = 0
+        gradL(:) = 0
+
+        ! Set logicals
+        dogradient  = .true. 
+        dohessian   = .true.
+
+        ! Associate
+        associate(& 
+            lambda          =>      problem%lambda, &
+            mu              =>      problem%mu, &
+            A               =>      problem%A)
+
+        ! Evaluate
+        !=========
+        ! Update the optimization problem 
+        call problem%UpdateProblem()
+
+        ! Evaluate cost function
+        call problem%EvaluateCostFunction(J, gradJ, & 
+            hessJ, dogradient, dohessian)
+        
+        ! Evaluate the equality constraints
+        call problem%EvaluateEqualityConstraints(G, gradG, &
+            hessG, dogradient, dohessian, problem%lambda)
+        
+        ! Evaluate the inequality constraints
+        call problem%EvaluateInequalityConstraints(H, gradH, &
+            hessH, dogradient, dohessian, problem%mu)
+
+        ! Evaluate the Lagrangian
+        call problem%EvaluateLagrangian(L, gradL, hessL, &
+            J, gradJ, hessJ, &
+            G, gradG, hessG, problem%lambda, &
+            H, gradH, hessH, problem%mu, problem%A, &
+            dogradient, dohessian)
+
+        ! Extract linearization
+        !======================
+        ! Get coordinate indices
+        associate(designvariables  =>   problem%designvariables)
+        select type (designvariables)
+
+        type is (DesignVariablesCoordinatesUDT)
+
+            cind = [designvariables%xind, designvariables%yind]
+
+        type is (DesignVariablesCoordinatesFluxUDT)
+
+            cind = [designvariables%xind, designvariables%yind]
+
+        class default
+
+        call gdErrorHandler('EvaluateJacobianGDCoordinates: design variable type not implemented')
+
+        end select
+        end associate
+
+        ! Extract linearization
+        allocate(tempind(nphi+neq+nineq))
+        tempind = .false.
+        tempind(cind) = .true.
+        jac = hessL%DeleteColumns(tempind)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
+    ! Derivative calculation w.r.t. vessel coordinates
+    subroutine EvaluateJacobianGDVesselcoordinates(problem, values, jac)
+
+        ! Description
+        !============
+        ! Evaluate the jacobian of the optimization problem with 
+        ! respect to the vessel polygon coordinates xv, yv. It is 
+        ! assumed that the vessel polygon and its fields are up to date,
+        ! and that the optimization problem is also fully solved and
+        ! up to date. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        real(R8), intent(in)                :: values(:)
+        type(MySparseUDT)                   :: jac
+
+        ! Auxiliary
+        real(R8), allocatable               :: gradJ(:)
+        type(MySparseUDT)                   :: hessJ
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            lambda      =>      problem%lambda, &
+            mu          =>      problem%mu,     &
+            A           =>      problem%A,      &
+            grid        =>      problem%grid,   &
+            magneticField   =>  problem%magneticField,  &
+            environment     =>  problem%environment,    &
+            designvariables =>  problem%designvariables)
+        
+        ! Evaluate
+        !=========
+        ! Cost function (gradient) sensitivities
+        call problem%costfunction%EvaluateDiff('vesselcoordinates', &
+            values, gradJ, hessJ, grid, magneticField, environment, designvariables)
+
+        ! lambda*gradG and G sensitivities 
+        call problem%constraints%eqcon%EvaluateDiff('vesselcoordinates', &
+            values, gradJ, hessJ, grid, magneticField, environment, designvariables)
+
+        ! mu*gradH and H sensitivities
+        !call problem%constraints%ineqcon%DEvaluate('vesselcoordinates', gradH, hessH, mu, A)
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
