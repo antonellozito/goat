@@ -69,8 +69,14 @@ module optmod_optimizationengine
         ! this module. The only field that is added, is a monitor 
         ! structure to keep track of the progress of the algorithm. 
         ! (to be moved to the engine in the future)
+
+        ! Note: additionally, we store the lagrange multipliers of
+        ! equality and inequality constraints, and the active set
         character(:), allocatable                   :: inputfilepath
         type(OptimizationMonitorUDT)                :: monitor
+
+        real(R8), allocatable                       :: lambda(:), mu(:)
+        logical, allocatable                        :: A(:)
 
     contains 
 
@@ -114,6 +120,9 @@ module optmod_optimizationengine
         procedure :: EvaluateMeritFunction
         procedure :: EvaluateMeritFunctionL1
 
+        ! Lagrangian evaluation
+        procedure :: EvaluateLagrangian
+
     end type
 
     ! Optimization solver
@@ -140,9 +149,6 @@ module optmod_optimizationengine
 
         ! Convergence checking
         procedure :: CheckConvergenceKKT 
-
-        ! Lagrangian evaluation
-        procedure :: EvaluateLagrangian
 
         ! Setup of correction equation
         procedure :: SetupCorrectionEquation
@@ -826,6 +832,9 @@ module optmod_optimizationengine
         ! Initialize the solver 
         call solver%InitializeKKTSolver()
 
+        ! Initialize problem
+        allocate(problem%lambda(neq), problem%mu(nineq), problem%A(nineq))
+
         ! Initialize the monitor - only temporary here
         call problem%GetProblemDimensions(nphi, neq, nineq)
         call problem%monitor%Initialize(solver%numKKT%maxit, nphi, neq,&
@@ -949,7 +958,7 @@ module optmod_optimizationengine
                 H, gradH, mu, solver%numNCP, dogradient)
 
             ! Evaluate the Lagrangian
-            call solver%EvaluateLagrangian(L, gradL, hessL, &
+            call problem%EvaluateLagrangian(L, gradL, hessL, &
                 J, gradJ, hessJ, &
                 G, gradG, hessG, lambda, &
                 H, gradH, hessH, mu, A, &
@@ -1079,6 +1088,11 @@ module optmod_optimizationengine
 
             ! Set mu of non-active constraints to zero
             where (.not. A) mu = 0
+
+            ! Update problem multipliers
+            problem%lambda  = lambda 
+            problem%mu      = mu 
+            problem%A       = A
             
             ! Timers
             call wall_time(t_it_e)
@@ -1216,7 +1230,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! Lagrangian 
-    subroutine EvaluateLagrangian(solver, L, gradL, hessL, J, gradJ, &
+    subroutine EvaluateLagrangian(problem, L, gradL, hessL, J, gradJ, &
         hessJ, G, gradG, hessG, lambda, H, gradH, hessH, mu, A, &
         dogradient, dohessian)
 
@@ -1266,7 +1280,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationProblemUDT)       :: problem 
 
         real(R8), intent(inout)             :: L, gradL(:) 
         type(MySparseUDT), intent(inout)    :: hessL 
@@ -1377,12 +1391,6 @@ module optmod_optimizationengine
 
         end if
 
-        ! A simple workaround to avoid unused dummy argument warnings 
-        ! during compilation
-        if (.false.) then 
-            print *, solver%inputfilepath
-        end if
-        
     end subroutine
 
     ! Nonlinear complementarity function 
@@ -2399,7 +2407,7 @@ module optmod_optimizationengine
         !    H, gradH, mu)
 
         ! Evaluate the Lagrangian
-        call fun%solver%EvaluateLagrangian(f, df, d2f, &
+        call fun%problem%EvaluateLagrangian(f, df, d2f, &
             J, gradJ, hessJ, &
             G, gradG, hessG, fun%lambda, &
             H, gradH, hessH, fun%mu, A, &
