@@ -82,6 +82,15 @@ module mod_sparseinterface
         procedure :: DeleteColumnsInteger 
         generic   :: Deletecolumns  => DeleteColumnsLogical, DeleteColumnsInteger
 
+        ! Setting zero values
+        procedure :: SetZeroRowsLogical
+        procedure :: SetZeroRowsInteger
+        generic   :: SetZeroRows     => SetZeroRowsLogical, SetZeroRowsInteger 
+
+        procedure :: SetZeroColumnsLogical
+        procedure :: SetZeroColumnsInteger
+        generic   :: SetZeroColumns     => SetZeroColumnsLogical, SetZeroColumnsInteger 
+
         ! Summation routines
         procedure :: SumColumnwiseFull
         procedure :: SumRowwiseFull
@@ -938,6 +947,161 @@ module mod_sparseinterface
 
         ! Delete
         c = c%DeleteRows(b)
+
+        ! Transpose again
+        c = c%Transpose()
+
+    end function
+
+    ! Delete rows
+    function SetZeroRowsLogical(a, b) result(c)
+
+        ! Description
+        !============
+        ! Delete the rows of the matrix a that are true in the logical
+        ! vector b. b should have adequate dimensions. The matrix's 
+        ! dimensions will be the same, so elements are simply set to zero
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        type(MySparseUDT)       :: c
+        logical, intent(in)     :: b(:) 
+
+        ! Auxiliary
+        logical, allocatable        :: reductionvec(:)
+
+        ! Initialize
+        !===========
+        ! Check sizes
+        if (size(b, 1) .ne. a%nrow) then 
+            call gdErrorHandler('DeleteRowsLogical: deletion vector has improper dimensions')
+        end if 
+
+        ! Check if allocated
+        if (.not. allocated(a%row)) then 
+            call gdErrorHandler('DeleteRowsLogical: matrix is not allocated')
+        end if 
+
+        ! Delete
+        !=======
+        ! Adjust dimension
+        c%nrow = a%nrow 
+        c%ncol = a%ncol
+        c%nval = a%nval 
+
+        ! Remove elements, if any
+        if (a%nval > 0) then 
+            
+            ! Determine elements to retain
+            reductionvec = .not. b(a%row)
+
+            ! Construct new matrix
+            c%nval  = count(reductionvec)
+            call c%Allocate()
+            c%row   = pack(a%row, reductionvec)
+            c%col   = pack(a%col, reductionvec)
+            c%val   = pack(a%val, reductionvec)
+
+        else
+            ! Still need to allocate!
+            c%nval = 0
+            call c%Allocate()
+        end if 
+
+    end function
+
+    function SetZeroRowsInteger(a, b) result(c)
+
+        ! Description
+        !============
+        ! Same functionality as DeleteRowsLogical, but now the input
+        ! vector is an integer array. This routine converts the array
+        ! to a logical array (and performs some checks) and calls the
+        ! logical deletion routine afterwards. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        integer(I8), intent(in) :: b(:)
+        type(MySparseUDT)       :: c 
+
+        ! Auxiliary
+        logical, allocatable    :: bl(:)
+
+        ! Initialize
+        !===========
+        ! Check b
+        if ( (minval(b) < 1) .or. (maxval(b) > a%nrow ) ) then 
+            ! Out of bounds, throw error
+            call gdErrorHandler('DeleteRowsInteger: some values are out of bounds for deletion')
+        end if 
+
+        ! Construct logical
+        allocate(bl(a%nrow))
+        bl = .false.
+        bl(b) = .true. 
+
+        ! Delete
+        !=======
+        c = a%SetZeroRowsLogical(bl) 
+
+
+    end function 
+
+    ! Delete columns
+    function SetZeroColumnsLogical(a, b) result(c)
+        
+        ! Description
+        !============
+        ! The same as rows, but now for columns. Here, we simply 
+        ! transpose the matrix first, call the row deleter, then 
+        ! transpose again. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        logical, intent(in)     :: b(:)
+        type(MySparseUDT)       :: c 
+
+        ! Delete
+        !=======
+        ! Transpose
+        c = a%Transpose()
+
+        ! Delete
+        c = c%SetZeroRows(b)
+
+        ! Transpose again
+        c = c%Transpose()
+
+    end function
+
+    function SetZeroColumnsInteger(a, b) result(c)
+        
+        ! Description
+        !============
+        ! The same as rows, but now for columns. Here, we simply 
+        ! transpose the matrix first, call the row deleter, then 
+        ! transpose again. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        integer(I8), intent(in) :: b(:)
+        type(MySparseUDT)       :: c 
+
+        ! Delete
+        !=======
+        ! Transpose
+        c = a%Transpose()
+
+        ! Delete
+        c = c%SetZeroRows(b)
 
         ! Transpose again
         c = c%Transpose()
