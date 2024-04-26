@@ -126,6 +126,9 @@ module gdmod_constraints
         ! Evaluation
         procedure(EvaluateConstraintsINT), deferred :: Evaluate
 
+        ! Derivative evaluation
+        procedure(EvaluateConstraintsDiffINT), deferred :: EvaluateDiff
+
     end type
 
     ! Specific constraint types
@@ -181,6 +184,9 @@ module gdmod_constraints
         procedure :: EvaluateDerivativesFlux            => &
             EvaluateFluxDerivativesFluxFunctionConstraints
 
+        ! Derivative evaluation
+        procedure :: EvaluateDiff => EvaluateFluxfunctionConstraintsDiff
+
         ! Data
         procedure :: WriteData      => WriteDataFluxfunctionConstraints
 
@@ -217,6 +223,9 @@ module gdmod_constraints
             EvaluateCoordinatesDerivativesBoundaryFunctionConstraints
         procedure :: EvaluateDerivativesFlux            => &
             EvaluateFluxDerivativesBoundaryFunctionConstraints
+
+        ! Derivative evaluation
+        procedure :: EvaluateDiff => EvaluateBoundaryFunctionConstraintsDiff
 
         ! Update
         procedure :: Update     => UpdateBoundaryFunctionConstraints
@@ -262,6 +271,9 @@ module gdmod_constraints
         procedure :: Evaluate   => EvaluateXPointConstraints
         procedure :: EvaluateCoordinatesDerivative &
             => EvaluateCoordinatesDerivativeXPointConstraints
+
+        ! Derivative evaluation
+        procedure :: EvaluateDiff => EvaluateXPointConstraintsDiff
     
     end type
 
@@ -291,6 +303,9 @@ module gdmod_constraints
         
         ! Evaluation
         procedure :: Evaluate   => EvaluateEdgeLengthsConstraints
+
+        ! Derivative evaluation
+        procedure :: EvaluateDiff => EvaluateEdgeLengthsConstraintsDiff
     
     end type
 
@@ -324,6 +339,9 @@ module gdmod_constraints
         
         ! Evaluation
         procedure :: Evaluate   => EvaluateOrthogonalityConstraints
+
+        ! Derivative evaluation
+        procedure :: EvaluateDiff => EvaluateOrthogonalityConstraintsDiff
     
     end type
 
@@ -352,6 +370,9 @@ module gdmod_constraints
 
         ! Initialization
         procedure :: Initialize => InitializeFixedFluxvaluesConstraints
+
+        ! Derivative evaluation
+        procedure :: EvaluateDiff => EvaluateFixedFluxvaluesConstraintsDiff
             
         ! Evaluation
         procedure :: Evaluate   => EvaluateFixedFluxvaluesConstraints
@@ -400,6 +421,9 @@ module gdmod_constraints
         ! Evaluation
         procedure :: Evaluate   => EvaluateLinefoldingConstraints
 
+        ! Derivative evaluation
+        procedure :: EvaluateDiff => EvaluateLineFoldingConstraintsDiff
+
         ! Update
         procedure :: Update     => UpdateLinefoldingConstraints
 
@@ -443,6 +467,9 @@ module gdmod_constraints
         ! Procedure to evaluate constraints
         procedure :: Evaluate           => EvaluateEqCon
 
+        ! Procedure to evaluate derivatives
+        procedure :: EvaluateDiff       => EvaluateEqConDiff
+
     end type 
 
     ! Inequality constraints
@@ -463,6 +490,9 @@ module gdmod_constraints
 
         ! Constraints evaluation
         procedure :: Evaluate           => EvaluateIneqCon
+
+        ! Procedure to evaluate derivatives
+        procedure :: EvaluateDiff       => EvaluateIneqConDiff
 
     end type
 
@@ -596,6 +626,33 @@ module gdmod_constraints
             type(MagneticFieldUDT)          :: magneticField 
             type(EnvironmentUDT)            :: environment 
             logical                         :: dogradient, dohessian
+            class(DesignVariablesGDUDT)     :: designvariables
+
+        end subroutine
+
+        ! Constraint derivative evaluation
+        subroutine EvaluateConstraintsDiffINT(constraints, var, values, &
+            jacG, hessG, grid, magneticField, environment, &
+            designvariables, lambda)
+
+            ! Description
+            !============
+            ! This reoutine serves as a general evaluation routine for 
+            ! a generic grid deformation constraint. 
+
+            ! Import
+            import :: GenericConstraintsGDUDT, MySparseUDT, GridUDT, &
+                R8, MagneticFieldUDT, EnvironmentUDT, & 
+                DesignVariablesGDUDT
+            
+            ! Declare
+            class(GenericConstraintsGDUDT)  :: constraints 
+            character(*), intent(in)        :: var
+            real(R8), intent(in)            :: lambda(:), values(:)
+            type(MySparseUDT)               :: hessG, jacG 
+            type(GridUDT)                   :: grid 
+            type(MagneticFieldUDT)          :: magneticField 
+            type(EnvironmentUDT)            :: environment 
             class(DesignVariablesGDUDT)     :: designvariables
 
         end subroutine
@@ -1558,6 +1615,172 @@ module gdmod_constraints
 
     end subroutine
 
+    ! Constraint derivative evaluation
+    subroutine EvaluateEqConDiff(constraints, var, values, jacG, hessG, &
+        grid, magneticField, environment, designvariables, lambda)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(EqConGDUDT)               :: constraints 
+        character(*), intent(in)        :: var
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop
+        integer(I8)                     :: ic, k
+        integer(I8), allocatable        :: conindex(:)
+
+        ! Auxiliary
+        type(MySparseUDT)               :: jacG_flux, hessG_flux
+
+        type(MySparseUDT)               :: jacG_bnd, hessG_bnd
+
+        type(MySparseUDT)               :: jacG_xp, hessG_xp
+
+        type(MySparseUDT)               :: jacG_el, hessG_el
+
+        type(MySparseUDT)               :: jacG_orth, hessG_orth
+
+        type(MySparseUDT)               :: jacG_ffv, hessG_ffv
+
+        ! Initialize
+        !===========
+        ! Set the constraint counter
+        ic = 0
+
+        ! Initialize hessG and jacG
+        jacG  = SpZeros(0, size(values, 1)) ! gradient contributions are concatenated
+        hessG = SpZeros(designvariables%nphi, size(values, 1)) ! hessian contributions are summed
+
+        ! Constraint values
+        !==================
+
+        ! X-point constraints
+        !--------------------
+        if (constraints%doxpoints) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%xpoints%ncon)]
+
+            ! Call the evaluation routine
+            call constraints%xpoints%EvaluateDiff(var, values, &
+                jacG_xp, hessG_xp, grid, magneticField, environment, &
+                designvariables, lambda(conindex))
+
+            ! Concatenate & add
+            jacG = jacG%Concatenate(jacG_xp, 1)
+            hessG = hessG + hessG_xp
+
+            ! Update the constraint counter
+            ic = ic + constraints%xpoints%ncon
+
+        end if
+
+        ! Boundary function constraints
+        !------------------------------
+        if (constraints%doboundaryfunction) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%boundaryfunction%ncon)]
+
+            ! Call the evaluation routine
+            call constraints%boundaryfunction%EvaluateDiff(var, values, &
+                jacG_bnd, hessG_bnd, grid, magneticField, environment, &
+                designvariables, lambda(conindex))
+
+            ! Concatenate & add
+            jacG = jacG%Concatenate(jacG_bnd, 1)
+            hessG = hessG + hessG_bnd
+
+            ! Update the constraint counter
+            ic = ic + constraints%boundaryfunction%ncon
+
+        end if
+
+        ! Flux function constraints
+        !--------------------------
+        if (constraints%dofluxfunction) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%fluxfunction%ncon)]
+
+            ! Call the evaluation routine
+            call constraints%fluxfunction%EvaluateDiff(var, values, &
+                jacG_flux, hessG_flux, grid, magneticField, environment, &
+                designvariables, lambda(conindex))
+
+            ! Concatenate & add
+            jacG = jacG%Concatenate(jacG_flux, 1)
+            hessG = hessG + hessG_flux
+
+            ! Update the constraint counter
+            ic = ic + constraints%fluxfunction%ncon
+
+        end if
+
+        ! Edge lengths constraints
+        !-------------------------
+        if (constraints%doedgelengths) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%edgelengths%ncon)]
+
+            ! Call the evaluation routine
+            call constraints%edgelengths%EvaluateDiff(var, values, &
+                jacG_el, hessG_el, grid, magneticField, environment, &
+                designvariables, lambda(conindex))
+
+            ! Concatenate & add
+            jacG = jacG%Concatenate(jacG_el, 1)
+            hessG = hessG + hessG_el
+
+            ! Update the constraint counter
+            ic = ic + constraints%edgelengths%ncon
+
+        end if
+
+        ! Orthogonality constraints
+        !--------------------------
+        if (constraints%doorthogonality) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%orthogonality%ncon)]
+
+            ! Call the evaluation routine
+            call constraints%orthogonality%EvaluateDiff(var, values, &
+                jacG_orth, hessG_orth, grid, magneticField, environment, &
+                designvariables, lambda(conindex))
+
+            ! Concatenate & add
+            jacG = jacG%Concatenate(jacG_orth, 1)
+            hessG = hessG + hessG_orth
+
+            ! Update the constraint counter
+            ic = ic + constraints%orthogonality%ncon
+
+        end if
+
+        ! Fixed flux values constraints
+        !------------------------------
+        if (constraints%dofixedfluxvalues) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%fixedfluxvalues%ncon)]
+
+            ! Call the evaluation routine
+            call constraints%fixedfluxvalues%EvaluateDiff(var, values, &
+                jacG_ffv, hessG_ffv, grid, magneticField, environment, &
+                designvariables, lambda(conindex))
+
+            ! Concatenate & add
+            jacG = jacG%Concatenate(jacG_ffv, 1)
+            hessG = hessG + hessG_ffv
+
+            ! Update the constraint counter
+            ic = ic + constraints%fixedfluxvalues%ncon
+
+        end if
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                          INEQUALITY CONSTRAINTS                  !
@@ -1805,6 +2028,63 @@ module gdmod_constraints
 
         end if
 
+
+    end subroutine
+
+    ! Constraint derivative evaluation
+    subroutine EvaluateIneqConDiff(constraints, var, values, jacG, hessG, &
+        grid, magneticField, environment, designvariables, mu)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IneqConGDUDT)             :: constraints 
+        character(*), intent(in)        :: var
+        real(R8), intent(in)            :: mu(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Loop
+        integer(I8)                     :: ic, k
+        integer(I8), allocatable        :: conindex(:)
+
+        ! Auxiliary
+        type(MySparseUDT)               :: jacG_lf, hessG_lf
+
+        ! Initialize
+        !===========
+        ! Set the constraint counter
+        ic = 0
+
+        ! Initialize hessG and jacG
+        jacG  = SpZeros(0, size(values, 1)) ! gradient contributions are concatenated
+        hessG = SpZeros(designvariables%nphi, size(values, 1)) ! hessian contributions are summed
+
+
+        ! Linefolding constraints
+        !------------------------
+        if (constraints%dolinefolding) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%linefolding%ncon)]
+
+
+            ! Call the evaluation routine
+            call constraints%linefolding%EvaluateDiff(var, values, &
+                jacG_lf, hessG_lf, grid, magneticField, environment, &
+                designvariables, mu(conindex))
+
+            ! Concatenate & add
+            jacG = jacG%Concatenate(jacG_lf, 1)
+            hessG = hessG + hessG_lf
+
+
+            ! Update the constraint counter
+            ic = ic + constraints%linefolding%ncon
+
+        end if
 
     end subroutine
 
@@ -2684,6 +2964,42 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateFluxFunctionConstraintsDiff(constraints, var, values, &
+        jacG, hessG, grid, magneticField, environment, designvariables, lambda)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FluxFunctionConstraintsUDT)   :: constraints 
+        character(*), intent(in)        :: var
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Compute
+        !========
+        select case (var)
+
+        case ('vesselcoordinates')
+
+            ! No dependencies
+            jacG    = SpZeros(constraints%ncon, size(values, 1))
+            hessG   = SpZeros(constraints%ncon, size(values, 1))
+
+        case default 
+
+            ! Unknown
+            call gdErrorHandler('EvaluateFluxFunctionConstraintsDiff: ' // &
+                'unknown variable: ' // var)
+
+        end select
 
     end subroutine
 
@@ -3696,6 +4012,42 @@ module gdmod_constraints
 
     end subroutine
 
+    ! Derivative evaluation
+    subroutine EvaluateBoundaryFunctionConstraintsDiff(constraints, var, values, &
+        jacG, hessG, grid, magneticField, environment, designvariables, lambda)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(BoundaryFunctionConstraintsUDT)       :: constraints 
+        character(*), intent(in)        :: var
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Compute
+        !========
+        select case (var)
+
+        case ('vesselcoordinates')
+
+            ! No dependencies
+            jacG = SpZeros(constraints%ncon, size(values, 1))
+            hessG = SpZeros(constraints%ncon, size(values, 1))
+
+        case default 
+
+            ! Unknown
+            call gdErrorHandler('EvaluateBoundaryFunctionConstraintsDiff: ' // &
+                'unknown variable: ' // var)
+
+        end select
+
+    end subroutine
+
     ! Updateing
     subroutine UpdateBoundaryFunctionConstraints(constraints, grid, &
         magneticField, environment)
@@ -4214,6 +4566,42 @@ module gdmod_constraints
         ! End associate
         end associate
 
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateXPointConstraintsDiff(constraints, var, values, &
+        jacG, hessG, grid, magneticField, environment, designvariables, lambda)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(XPointConstraintsUDT)     :: constraints 
+        character(*), intent(in)        :: var
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Compute
+        !========
+        select case (var)
+
+        case ('vesselcoordinates')
+
+            ! No dependencies
+            jacG = SpZeros(constraints%ncon, size(values, 1))
+            hessG = SpZeros(constraints%ncon, size(values, 1))
+
+        case default 
+
+            ! Unknown
+            call gdErrorHandler('EvaluateXPointConstraintsDiff: ' // &
+                'unknown variable: ' // var)
+
+        end select
+        
     end subroutine
 
     ! Derivative evaluation
@@ -5199,6 +5587,42 @@ module gdmod_constraints
 
     end subroutine
 
+    ! Derivative evaluation
+    subroutine EvaluateEdgeLengthsConstraintsDiff(constraints, var, values, &
+        jacG, hessG, grid, magneticField, environment, designvariables, lambda)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(EdgeLengthsConstraintsUDT)    :: constraints 
+        character(*), intent(in)        :: var
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Compute
+        !========
+        select case (var)
+
+        case ('vesselcoordinates')
+
+            ! No dependencies
+            jacG = SpZeros(constraints%ncon, size(values, 1))
+            hessG = SpZeros(constraints%ncon, size(values, 1))
+
+        case default 
+
+            ! Unknown
+            call gdErrorHandler('EvaluateEdgeLengthsConstraintsDiff: ' // &
+                'unknown variable: ' // var)
+
+        end select
+        
+    end subroutine
+
     !------------------------------------------------------------------!
     !                           ORTHOGONALITY                          !
     !------------------------------------------------------------------!
@@ -5983,6 +6407,42 @@ module gdmod_constraints
 
     end subroutine
 
+    ! Derivative evaluation
+    subroutine EvaluateOrthogonalityConstraintsDiff(constraints, var, values, &
+        jacG, hessG, grid, magneticField, environment, designvariables, lambda)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OrthogonalityConstraintsUDT)  :: constraints 
+        character(*), intent(in)        :: var
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Compute
+        !========
+        select case (var)
+
+        case ('vesselcoordinates')
+
+            ! No dependencies
+            jacG = SpZeros(constraints%ncon, size(values, 1))
+            hessG = SpZeros(constraints%ncon, size(values, 1))
+
+        case default 
+
+            ! Unknown
+            call gdErrorHandler('EvaluateOrthogonalityConstraintsDiff: ' // &
+                'unknown variable: ' // var)
+
+        end select
+        
+    end subroutine
+
     !------------------------------------------------------------------!
     !                         FIXED FLUX VALUES                        !
     !------------------------------------------------------------------!
@@ -6487,6 +6947,42 @@ module gdmod_constraints
         ! End associate
         end associate
 
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateFixedFluxvaluesConstraintsDiff(constraints, var, values, &
+        jacG, hessG, grid, magneticField, environment, designvariables, lambda)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FixedFluxvaluesConstraintsUDT)    :: constraints 
+        character(*), intent(in)        :: var
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Compute
+        !========
+        select case (var)
+
+        case ('vesselcoordinates')
+
+            ! No dependencies
+            jacG = SpZeros(constraints%ncon, size(values, 1))
+            hessG = SpZeros(constraints%ncon, size(values, 1))
+
+        case default 
+
+            ! Unknown
+            call gdErrorHandler('EvaluateFixedFluxvaluesConstraintsDiff: ' // &
+                'unknown variable: ' // var)
+
+        end select
+        
     end subroutine
 
     !------------------------------------------------------------------!
@@ -7385,6 +7881,42 @@ module gdmod_constraints
         ! End associate
         end associate
 
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateLinefoldingConstraintsDiff(constraints, var, values, &
+        jacG, hessG, grid, magneticField, environment, designvariables, lambda)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(LinefoldingConstraintsUDT)    :: constraints 
+        character(*), intent(in)        :: var
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Compute
+        !========
+        select case (var)
+
+        case ('vesselcoordinates')
+
+            ! No dependencies
+            jacG = SpZeros(constraints%ncon, size(values, 1))
+            hessG = SpZeros(constraints%ncon, size(values, 1))
+
+        case default 
+
+            ! Unknown
+            call gdErrorHandler('EvaluateLinefoldingConstraintsDiff: ' // &
+                'unknown variable: ' // var)
+
+        end select
+        
     end subroutine
 
     ! Update

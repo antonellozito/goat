@@ -1854,7 +1854,7 @@ module gdmod_optimizationengine
         type(MySparseUDT)           :: hessJ 
 
         ! Equality constraints 
-        real(R8), allocatable       :: G(:), lambda(:) 
+        real(R8), allocatable       :: G(:)
         type(MySparseUDT)           :: gradG, hessG  
 
         ! Inequality constraints 
@@ -2001,7 +2001,8 @@ module gdmod_optimizationengine
 
         ! Auxiliary
         real(R8), allocatable               :: gradJ(:)
-        type(MySparseUDT)                   :: hessJ
+        type(MySparseUDT)                   :: hessJ, jacG, jacH, &
+            hessG, hessH 
 
         ! Initialize
         !===========
@@ -2023,10 +2024,13 @@ module gdmod_optimizationengine
 
         ! lambda*gradG and G sensitivities 
         call problem%constraints%eqcon%EvaluateDiff('vesselcoordinates', &
-            values, gradJ, hessJ, grid, magneticField, environment, designvariables)
+            values, jacG, hessG, grid, magneticField, environment, &
+            designvariables, lambda)
 
         ! mu*gradH and H sensitivities
-        !call problem%constraints%ineqcon%DEvaluate('vesselcoordinates', gradH, hessH, mu, A)
+        call problem%constraints%ineqcon%EvaluateDiff('vesselcoordinates', &
+            values, jacH, hessH, grid, magneticField, environment, &
+            designvariables, mu)
 
         ! Housekeeping
         !=============
