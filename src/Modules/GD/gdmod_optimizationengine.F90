@@ -2032,6 +2032,22 @@ module gdmod_optimizationengine
             values, jacH, hessH, grid, magneticField, environment, &
             designvariables, mu)
 
+        ! Extract
+        !========
+        ! Full linearization of residuals should be:
+        ! [hess + hessG + hessH, jacG, jacH] (nphi+neq+nineq-by-nvalues)
+        jac = SpZeros(0, size(values, 1))
+
+        ! 'Cost function' contribution
+        jac = jac%Concatenate(hessJ + hessG + hessH, 1)
+
+        ! Equality constraint contribution
+        jac = jac%Concatenate(jacG, 1)
+
+        ! Inequality constraint contributions (need to set zero for inactive constraints)
+        jacH = jacH%SetZeroRows(.not. A)
+        jac = jac%Concatenate(jacH, 1)
+
         ! Housekeeping
         !=============
         end associate
