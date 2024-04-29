@@ -2000,9 +2000,13 @@ module gdmod_optimizationengine
         type(MySparseUDT)                   :: jac
 
         ! Auxiliary
-        real(R8), allocatable               :: gradJ(:)
-        type(MySparseUDT)                   :: hessJ, jacG, jacH, &
-            hessG, hessH 
+        logical                             :: dogradient, dohessian
+        real(R8)                            :: J
+        real(R8), allocatable               :: gradJ(:), G(:), H(:), &
+            dJdvar(:)
+        type(MySparseUDT)                   :: hessJ, gradG, gradH, &
+            hessG, hessH, dgradJdvar, dGdvar, dgradGdvar, dHdvar, &
+            dgradHdvar
 
         ! Initialize
         !===========
@@ -2018,19 +2022,23 @@ module gdmod_optimizationengine
         
         ! Evaluate
         !=========
+        ! We don't need hessian evaluation w.r.t. coordinates
+        dogradient  = .true. 
+        dohessian   = .false.
         ! Cost function (gradient) sensitivities
-        call problem%costfunction%EvaluateDiff('vesselcoordinates', &
-            values, gradJ, hessJ, grid, magneticField, environment, designvariables)
+        call problem%costfunction%Evaluate(J, gradJ, hessJ, grid, &
+            magneticField, environment, dogradient, dohessian, &
+            designvariables, 'vesselcoordinates', values, dJdvar, dgradJdvar)
 
         ! lambda*gradG and G sensitivities 
-        call problem%constraints%eqcon%EvaluateDiff('vesselcoordinates', &
-            values, jacG, hessG, grid, magneticField, environment, &
-            designvariables, lambda)
+        call problem%constraints%eqcon%Evaluate(G, gradG, hessG, grid, &
+            magneticField, environment, dogradient, dohessian, &
+            designvariables, lambda, 'vesselcoordinates', values, dGdvar, dgradGdvar)
 
         ! mu*gradH and H sensitivities
-        call problem%constraints%ineqcon%EvaluateDiff('vesselcoordinates', &
-            values, jacH, hessH, grid, magneticField, environment, &
-            designvariables, mu)
+        call problem%constraints%ineqcon%Evaluate(H, gradH, hessH, grid, &
+            magneticField, environment, dogradient, dohessian, &
+            designvariables, mu, 'vesselcoordinates', values, dHdvar, dgradHdvar)
 
         ! Extract
         !========
@@ -2039,14 +2047,14 @@ module gdmod_optimizationengine
         jac = SpZeros(0, size(values, 1))
 
         ! 'Cost function' contribution
-        jac = jac%Concatenate(hessJ + hessG + hessH, 1)
+        jac = jac%Concatenate(dgradJdvar + dgradGdvar + dgradHdvar, 1)
 
         ! Equality constraint contribution
-        jac = jac%Concatenate(jacG, 1)
+        jac = jac%Concatenate(dGdvar, 1)
 
         ! Inequality constraint contributions (need to set zero for inactive constraints)
-        jacH = jacH%SetZeroRows(.not. A)
-        jac = jac%Concatenate(jacH, 1)
+        dHdvar = dHdvar%SetZeroRows(.not. A)
+        jac = jac%Concatenate(dHdvar, 1)
 
         ! Housekeeping
         !=============
