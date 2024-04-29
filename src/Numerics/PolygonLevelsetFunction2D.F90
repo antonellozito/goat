@@ -37,6 +37,7 @@ module PolygonLevelsetFunction2D
     use mod_plotter
     use Interpolant
     use mod_polygon
+    use mod_sparseinterface
 
     ! The usual
     implicit none
@@ -88,6 +89,9 @@ module PolygonLevelsetFunction2D
 
         ! Evaluation
         procedure(EvaluatePLF2DINT), deferred       :: Evaluate 
+
+        ! Derivative evaluation
+        procedure(EvaluateDiffPLF2DINT), deferred   :: EvaluateDiff
 
         ! Visualization
         procedure   :: Visualize        => VisualizePolygonLevelsetFunction2D
@@ -201,6 +205,9 @@ module PolygonLevelsetFunction2D
         ! Evaluate
         procedure :: Evaluate       => EvaluatePLF2DGeneral
 
+        ! Evaluate derivatives
+        procedure :: EvaluateDiff   => EvaluateDiffPLF2DGeneral
+
     end type
 
     ! Closed exact representation
@@ -230,6 +237,9 @@ module PolygonLevelsetFunction2D
         ! Evaluate
         procedure :: Evaluate       => EvaluatePLF2DClosedExact
 
+        ! Evaluate derivatives
+        procedure :: EvaluateDiff   => EvaluateDiffPLF2DClosedExact
+
     end type
 
     ! Closed approximate representation
@@ -249,6 +259,9 @@ module PolygonLevelsetFunction2D
 
         ! Evaluation
         procedure :: Evaluate       => EvaluatePLF2DClosedApproximation
+
+        ! Evaluate derivatives
+        procedure :: EvaluateDiff   => EvaluateDiffPLF2DClosedApproximation
 
     end type
 
@@ -278,6 +291,19 @@ module PolygonLevelsetFunction2D
             real(R8), intent(in)                    :: xq(:), yq(:)
             real(R8), intent(out)                   :: vq(size(xq))
             integer(I8), intent(in)                 :: derivx, derivy
+
+        end subroutine
+
+        ! Derivative evaluation
+        subroutine EvaluateDiffPLF2DINT(plf, xq, yq, derivx, derivy, &
+            var, values, jacg)
+
+            import :: PolygonLevelsetFunction2DUDT, R8, I8, MySparseUDT
+            class(PolygonLevelsetFunction2DUDT)     :: plf 
+            real(R8), intent(in)                    :: xq(:), yq(:), values(:)
+            character(*), intent(in)                :: var 
+            integer(I8), intent(in)                 :: derivx, derivy
+            type(MySparseUDT), intent(out)          :: jacvq
 
         end subroutine
 
@@ -735,6 +761,27 @@ module PolygonLevelsetFunction2D
 
     end subroutine
 
+    ! Derivative evaluation
+    subroutine EvaluateDiffPLF2DGeneral(plf, xq, yq, derivx, derivy, &
+        var, values, jacg)
+
+        ! Description
+        !============
+        ! Evaluate the derivative w.r.t. the variable type defined by 
+        ! 'var' with given values in 'values'. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonLevelsetFunction2GeneralUDT)     :: plf 
+        real(R8), intent(in)                    :: xq(:), yq(:), values(:)
+        character(*), intent(in)                :: var 
+        integer(I8), intent(in)                 :: derivx, derivy
+        type(MySparseUDT), intent(out)          :: jacvq
+
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                         PLF CLOSED EXACT                         !
     !------------------------------------------------------------------!
@@ -1128,6 +1175,42 @@ module PolygonLevelsetFunction2D
 
     end subroutine
 
+    ! Derivative evaluation
+    subroutine EvaluateDiffPLF2DClosedExact(plf, xq, yq, derivx, derivy, &
+        var, values, jacg)
+
+        ! Description
+        !============
+        ! Evaluate the derivative w.r.t. the variable type defined by 
+        ! 'var' with given values in 'values'. 
+
+        ! Declare variables
+        !==================
+        class(PolygonLevelsetFunction2ClosedExactUDT)     :: plf 
+        real(R8), intent(in)                    :: xq(:), yq(:), values(:)
+        character(*), intent(in)                :: var 
+        integer(I8), intent(in)                 :: derivx, derivy
+        type(MySparseUDT), intent(out)          :: jacvq
+
+        ! Compute derivatives
+        !====================
+        select case (trim(var))
+
+        case ('polygonsetcoordinates')
+
+            ! Differentiatevalues w.r.t. polygonset coordinates
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('EvaluateDiffPLF2DClosedExact: ' // & 
+                'unknown variable type')
+
+        end select
+
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                     PLF CLOSED APPROXIMATION                     !
     !------------------------------------------------------------------!
@@ -1257,6 +1340,26 @@ module PolygonLevelsetFunction2D
         !=================
         call plf%interp%Evaluate(xq, yq, derivx, derivy, vq)
  
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateDiffPLF2DClosedApproximation(plf, xq, yq, derivx, derivy, &
+        var, values, jacg)
+
+        ! Description
+        !============
+        ! Evaluate the derivative w.r.t. the variable type defined by 
+        ! 'var' with given values in 'values'. 
+
+        ! Declare variables
+        !==================
+        class(PolygonLevelsetFunction2ClosedApproximationUDT)     :: plf 
+        real(R8), intent(in)                    :: xq(:), yq(:), values(:)
+        character(*), intent(in)                :: var 
+        integer(I8), intent(in)                 :: derivx, derivy
+        type(MySparseUDT), intent(out)          :: jacvq
+
+
     end subroutine
 
 

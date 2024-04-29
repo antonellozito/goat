@@ -223,6 +223,7 @@ module gdmod_constraints
             EvaluateCoordinatesDerivativesBoundaryFunctionConstraints
         procedure :: EvaluateDerivativesFlux            => &
             EvaluateFluxDerivativesBoundaryFunctionConstraints
+        procedure :: EvaluateVesselcoordinatesDerivativesBoundaryFunctionConstraints
 
         ! Derivative evaluation
         procedure :: EvaluateDiff => EvaluateBoundaryFunctionConstraintsDiff
@@ -626,33 +627,6 @@ module gdmod_constraints
             type(MagneticFieldUDT)          :: magneticField 
             type(EnvironmentUDT)            :: environment 
             logical                         :: dogradient, dohessian
-            class(DesignVariablesGDUDT)     :: designvariables
-
-        end subroutine
-
-        ! Constraint derivative evaluation
-        subroutine EvaluateConstraintsDiffINT(constraints, var, values, &
-            jacG, hessG, grid, magneticField, environment, &
-            designvariables, lambda)
-
-            ! Description
-            !============
-            ! This reoutine serves as a general evaluation routine for 
-            ! a generic grid deformation constraint. 
-
-            ! Import
-            import :: GenericConstraintsGDUDT, MySparseUDT, GridUDT, &
-                R8, MagneticFieldUDT, EnvironmentUDT, & 
-                DesignVariablesGDUDT
-            
-            ! Declare
-            class(GenericConstraintsGDUDT)  :: constraints 
-            character(*), intent(in)        :: var
-            real(R8), intent(in)            :: lambda(:), values(:)
-            type(MySparseUDT)               :: hessG, jacG 
-            type(GridUDT)                   :: grid 
-            type(MagneticFieldUDT)          :: magneticField 
-            type(EnvironmentUDT)            :: environment 
             class(DesignVariablesGDUDT)     :: designvariables
 
         end subroutine
@@ -4034,9 +4008,10 @@ module gdmod_constraints
 
         case ('vesselcoordinates')
 
-            ! No dependencies
-            jacG = SpZeros(constraints%ncon, size(values, 1))
-            hessG = SpZeros(constraints%ncon, size(values, 1))
+            ! Call dedicated subroutine
+            call EvaluateVesselcoordinatesDerivativesBoundaryFunctionConstraints(&
+                values, jacG, hessG, grid, magneticField, &
+                environment, designvariables, lambda)
 
         case default 
 
@@ -4287,6 +4262,54 @@ module gdmod_constraints
 
         hessG%nval = 0
         call hessG%Allocate()
+
+    end subroutine
+
+    ! Derivatives, vessel coordinates
+    subroutine EvaluateVesselcoordinatesDerivativesBoundaryFunctionConstraints(&
+        constraints, values, jacG, hessG, grid, magneticField, &
+        environment, designvariables, lambda)
+
+        ! Description
+        !============
+        ! Evaluate the jacobian (not gradient) of the constraints with
+        ! respect to the vessel coordinates. Also add the linearization
+        ! of the 'lambda*gradG' term as the 'hessian'. It is assumed that
+        ! all fields are up to date.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(BoundaryFunctionConstraintsUDT)       :: constraints 
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            nc      => constraints%ncon,        &
+            plf     => constraints%plf,         &
+            tv      => constraints%vert,        &
+            ntv     => constraints%nvert,       &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
+
+        ! Compute jacG
+        !=============
+        ! Simply call differentiation of plf w.r.t. polygonset coordinates 
+        call plf%EvaluateDiff(x(tv), y(tv), 0, 0, jacG, &
+            'polygonsetcoordinates')
+
+        ! Housekeeping
+        !=============
+        end associate
+
 
     end subroutine
 
