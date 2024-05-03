@@ -624,7 +624,7 @@ module mod_sparseinterface
         ! Multiply
         !=========
         ! First convert to CS format - note: it appears that setting
-        ! the correct c memory location is scope dependent (ore more 
+        ! the correct c memory location is scope dependent (or more 
         ! precisely, if we do this in a subroutine, memory goes to shit)
         ! That's why we do it here... 
         rowta = a%row-1 
@@ -1513,11 +1513,21 @@ module mod_sparseinterface
 
         ! Allocate
         !=========
-        if (.not. allocated(mysparse%col)) then 
-            allocate(mysparse%col(mysparse%nval))
-            allocate(mysparse%row(mysparse%nval))
-            allocate(mysparse%val(mysparse%nval))
+        ! Check allocation status
+        if (allocated(mysparse%col)) then 
+            deallocate(mysparse%col)
         end if 
+        if (allocated(mysparse%row)) then 
+            deallocate(mysparse%row)
+        end if 
+        if (allocated(mysparse%val)) then 
+            deallocate(mysparse%val)
+        end if
+
+        ! Allocate
+        allocate(mysparse%col(mysparse%nval))
+        allocate(mysparse%row(mysparse%nval))
+        allocate(mysparse%val(mysparse%nval))
 
     end subroutine
 
