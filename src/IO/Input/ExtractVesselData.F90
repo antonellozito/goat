@@ -240,7 +240,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
 
             if (size(plfoptions%xrange, 1) < 2) then 
                 ! Reset
-                call vessel%polygonset%GetPoints(xp, yp)
+                call vessel%polygonset%GetVertices(xp, yp)
                 plfoptions%xrange = xp 
                 plfoptions%yrange = yp
             end if
