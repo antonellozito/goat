@@ -138,6 +138,10 @@ module mod_sparseinterface
         module procedure MultiplySparseMatrices
     end interface
 
+    interface ConstructMySparse
+        module procedure ConstructMySparseTriplet
+    end interface
+
     contains
 
     !==================================================================!
@@ -150,7 +154,7 @@ module mod_sparseinterface
     !                          CONSTRUCTORS                            !
     !------------------------------------------------------------------!
 
-    ! Constructor
+    ! Initialization
     subroutine InitializeMySparse(mysparse, nrow, ncol, nval)
 
         ! Description
@@ -179,6 +183,33 @@ module mod_sparseinterface
         call mysparse%Allocate()
 
     end subroutine
+
+    ! Constructor
+    function ConstructMySparseTriplet(row, col, val, nrow, ncol) result(sp)
+
+        ! Description
+        !============
+        ! This function constructs a sparse matrix for a given set of 
+        ! row, column, and value triplets, and for given number of 
+        ! rows and columns. 
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)             :: row(:), col(:), nrow, ncol 
+        real(R8), intent(in)                :: val(:)
+        type(MySparseUDT)                   :: sp 
+
+        ! Construct
+        !==========
+        sp%row = row 
+        sp%col = col 
+        sp%val = val 
+        sp%nrow = nrow 
+        sp%ncol = ncol 
+        sp%nval = size(val, 1)
+
+    end function
 
     ! Zeros constructor
     function SpZeros(nrow, ncol) result(a)
@@ -292,6 +323,11 @@ module mod_sparseinterface
         ! Extract
         !========
         ! Allocate
+        if (allocated(col)) then 
+            if (size(col, 1) /= mysparse%nrow) then 
+                deallocate(col)
+            end if 
+        end if 
         if (.not. allocated(col)) then 
             allocate(col(mysparse%nrow))
         end if
