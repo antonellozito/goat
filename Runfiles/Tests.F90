@@ -321,7 +321,7 @@ module GOAT_tests
 
         type(PolygonSetUDT)         :: psg, psce, psca
 
-        type(MySparseUDT)           :: dplfgdvar
+        type(MySparseUDT)           :: dplfgdvar, dplfcedvar
 
         integer(I8)                 :: nvaluesg, nxm, nym
         integer(I8), allocatable    :: varind(:)
@@ -387,6 +387,8 @@ module GOAT_tests
 
         ! Test derivatives w.r.t. polygonset coordinates
         !===============================================
+        ! General plf
+        !------------
         ! Set finite differences & values
         d = [1e-8, 1e-6, 1e-4, 1e-2]
         varind = [1, 6, 2, 7, 3, 8, 4, 9, 5, 10]
@@ -415,7 +417,7 @@ module GOAT_tests
         ! Evaluate implemented derivatives
         call plfg%Evaluate(xq, yq, &
             0, 0, vqg, 'polygonsetcoordinates', valuesg, dplfgdvar)
-
+        
         ! Compute finite differences (crude)
         print *, 'Evaluating FD for general polygonset (variable: polygonsetcoordinates)'
         
@@ -440,7 +442,7 @@ module GOAT_tests
 
                 ! Compute
                 call plfg%Evaluate(xq, yq, 0, 0, vqgFW)
-                dvqFW = (vqgFW - vqg)/d(i)
+                dvqFW = (vqgFW - vqg)/(d(i))
 
                 ! Backward
                 !---------
@@ -455,7 +457,7 @@ module GOAT_tests
 
                 ! Compute
                 call plfg%Evaluate(xq, yq, 0, 0, vqgBW)
-                dvqBW = (vqgBW - vqg)/d(i)
+                dvqBW = (vqgBW - vqg)/(-d(i))
 
                 ! Compute errors
                 !---------------
@@ -482,6 +484,111 @@ module GOAT_tests
 
             end do
         end do
+
+        ! Housekeeping
+        deallocate(xq, yq, vqg, vqgFW, vqgBW)
+
+        ! Closed exact
+        !-------------
+        ! Set finite differences & values
+        d = [1e-8, 1e-6, 1e-4, 1e-2]
+        varind = [1, 5, 2, 6, 3, 7, 4, 8]
+
+        ! Extract polygonset coordinates
+        call plfce%ps%GetVertices(xp, yp)
+        nvaluesg = size(xp, 1)
+        valuesg = [xp, yp]
+
+        ! Create a meshgrid for polygon evaluation, limited by polygon
+        ! extent
+        nxm = 3
+        nym = 3
+        allocate(xq(nxm*nym), yq(nxm*nym), vqg(nxm*nym), vqgFW(nxm*nym), &
+            vqgBW(nxm*nym))
+        maxxm = maxval(xp)+1
+        minxm = minval(xp)-1
+        maxym = maxval(yp)+1
+        minym = minval(yp)-1
+        
+        xgv = [(i, i = 0, nxm-1)]*(1./real(nxm-1, kind=R8))*(maxxm - minxm) + minxm 
+        ygv = [(i, i = 0, nym-1)]*(1./real(nym-1, kind=R8))*(maxym - minym) + minym 
+
+        call Construct2DStructuredGrid(xgv, ygv, nxm, nym, xq, yq)
+
+        ! Evaluate implemented derivatives
+        call plfce%Evaluate(xq, yq, &
+            0, 0, vqg, 'polygonsetcoordinates', valuesg, dplfcedvar)
+
+        ! Compute finite differences (crude)
+        print *, 'Evaluating FD for closed exact polygonset (variable: polygonsetcoordinates)'
+        
+        do j = 1, size(varind)
+            ! Output
+            print *, 'variable: ', varind(j)
+            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call dplfcedvar%ExtractColumnFull(dvqg, varind(j))
+            do i = 1, size(d)
+                ! Forward
+                !--------
+                ! Update values
+                valuesg(varind(j)) = valuesg(varind(j)) + d(i)
+
+                ! Update polygonset coordinates
+                call plfce%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+                ! Reconstruct the levelset function
+                call plfce%Initialize(plfce%ps)
+
+                ! Compute
+                call plfce%Evaluate(xq, yq, 0, 0, vqgFW)
+                dvqFW = (vqgFW - vqg)/d(i)
+
+                ! Backward
+                !---------
+                ! Update values
+                valuesg(varind(j)) = valuesg(varind(j)) - 2*d(i) ! 2*d to compensate for previous + d
+
+                ! Update polygonset coordinates
+                call plfce%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+                ! Reconstruct the levelset function
+                call plfce%Initialize(plfce%ps)
+
+                ! Compute
+                call plfce%Evaluate(xq, yq, 0, 0, vqgBW)
+                dvqBW = (vqgBW - vqg)/(-d(i))
+
+                ! Compute errors
+                !---------------
+                eabsFW = abs(dvqg - dvqFW)
+                eabsBW = abs(dvqg - dvqBW)
+                eabsC = abs(dvqG - 0.5*(dvqFW + dvqBW))
+                erelFW = eabsFW/dvqg 
+                erelBW = eabsBW/dvqg 
+                erelC = eabsC/dvqg 
+            
+
+                ! Print out information
+                print *, d(i), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(erelFW), maxval(erelBW), &
+                    maxval(erelC), maxloc(erelC)
+
+                ! Update
+                !-------
+                ! Downdate values
+                valuesg(varind(j)) = valuesg(varind(j)) + d(i) ! + d to compensate for - d
+            
+                ! Update polygonset coordinates (no need to update plf)
+                call plfce%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+            end do
+        end do
+
+        ! Housekeeping
+        deallocate(xq, yq, vqg, vqgFW, vqgBW, xp, yp)
+
 
 
     end subroutine
