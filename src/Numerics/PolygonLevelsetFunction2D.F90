@@ -221,7 +221,8 @@ module PolygonLevelsetFunction2D
         type(PLF2DClosedExactOptionsUDT)    :: options
         real(R8), allocatable               :: xp(:), yp(:), xf(:), &
             yf(:), nxp(:), nyp(:), tnp(:), nxpv(:, :), &
-            nypv(:, :), crossprod(:), thetav(:)
+            nypv(:, :), crossprod(:), thetav(:), xp1(:), xp2(:), &
+            yp1(:), yp2(:)
 
     contains 
 
@@ -946,7 +947,8 @@ module PolygonLevelsetFunction2D
             ye(:, :), nx(:), ny(:), nn(:), tx(:), ty(:), tn(:), xp(:), &
             yp(:), tempx(:), tempy(:), tempnx(:, :), tempny(:, :), &
             nxpv(:, :), nypv(:, :), theta0(:), crossprod(:), tnxp(:), &
-            tnyp(:), tnn(:), xf(:), yf(:)
+            tnyp(:), tnn(:), xf(:), yf(:), xp1(:), yp1(:), xp2(:), &
+            yp2(:), txp1(:), typ1(:), txp2(:), typ2(:)
 
         ! Loop
         integer(I8)                                 :: i, ce, ce2
@@ -979,7 +981,8 @@ module PolygonLevelsetFunction2D
         ! Allocate
         np = (size(xe, 1))+ps%np
         allocate(nxpv(np, 2), nypv(np, 2), xp(np), yp(np), &
-            xf(size(xe, 1)),  yf(size(xe, 1)))
+            xf(size(xe, 1)), yf(size(xe, 1)), xp1(size(xe, 1)),  &
+            yp1(size(xe, 1)), xp2(size(xe, 1)), yp2(size(xe, 1)))
 
         ! Compute vertex regions
         ce = 0
@@ -996,11 +999,16 @@ module PolygonLevelsetFunction2D
             tempx = pol(i)%x(pol(i)%vert)
             tempy = pol(i)%y(pol(i)%vert)
 
+            txp1 = tempx(1:ne)
+            txp2 = tempx(2:ne+1)
+            typ1 = tempy(1:ne)
+            typ2 = tempy(2:ne+1)
+
             ! Normals
             allocate(tempnx(ne+1, 2), tempny(ne+1, 2))
 
-            tnxp = -(tempy(2:ne+1) - tempy(1:ne))
-            tnyp = (tempx(2:ne+1) - tempx(1:ne))
+            tnxp = -(typ2 - typ1)
+            tnyp = (txp2 - txp1)
             tnn = sqrt(tnxp**2 + tnyp**2)
             tnxp = tnxp/tnn 
             tnyp = tnyp/tnn
@@ -1033,6 +1041,10 @@ module PolygonLevelsetFunction2D
             tn(ce2+1:ce2+ne) = pol(i)%nn
             xf(ce2+1:ce2+ne) = 0.5*(tempx(1:ne) + tempx(2:ne+1)) 
             yf(ce2+1:ce2+ne) = 0.5*(tempy(1:ne) + tempy(2:ne+1)) 
+            xp1(ce2+1:ce2+ne) = txp1
+            xp2(ce2+1:ce2+ne) = txp2
+            yp1(ce2+1:ce2+ne) = typ1
+            yp2(ce2+1:ce2+ne) = typ2
 
             ! Update counter
             ce = ce + ne + 1
@@ -1054,13 +1066,17 @@ module PolygonLevelsetFunction2D
         where (theta0 < 0) theta0 = theta0 + 2*pi_R8         
         
         ! Add to plf
-        plf%xp  = xp 
-        plf%yp  = yp
-        plf%xf  = xf
-        plf%yf  = yf
-        plf%nxp = nx 
-        plf%nyp = ny
-        plf%tnp = tn 
+        plf%xp      = xp 
+        plf%yp      = yp
+        plf%xp1     = xp1 
+        plf%yp1     = yp1
+        plf%xp2     = xp2 
+        plf%yp2     = yp2
+        plf%xf      = xf
+        plf%yf      = yf
+        plf%nxp     = nx 
+        plf%nyp     = ny
+        plf%tnp     = tn 
         plf%nxpv    = nxpv 
         plf%nypv    = nypv
         plf%thetav  = theta0 
@@ -1108,13 +1124,13 @@ module PolygonLevelsetFunction2D
         type(MySparseUDT)                       :: dplfdvar
 
         ! Auxiliary
-        character(:), allocatable                   :: deriv, derivxc, &
+        character(:), allocatable               :: deriv, derivxc, &
             derivyc
 
-        integer(I8)                             :: nq, np, &
-            indmine, indminv, indmin
+        integer(I8)                             :: nq, np, npe, &
+            indmine, indminv, indmin, nval, ne, npsc
         integer(I8), allocatable                :: eind(:), vind(:), &
-            minind(:)
+            minind(:), psvert(:), psedges(:, :)
 
         real(R8)                                :: inf, signe, signv, &
             fv, fe, xqr, yqr, totsign(1:2)
@@ -1122,14 +1138,16 @@ module PolygonLevelsetFunction2D
         real(R8), allocatable                   :: myones(:), dvn(:), &
             tdistvert(:), tcrossprod(:), vx(:), vy(:), tvn(:), &
             dx(:), dy(:), theta(:), distedge(:), distvert(:), &
-            val(:)
+            val(:), tvx(:), tvy(:), ttxp(:), ttyp(:), tnxp(:), &
+            tnyp(:), dfdxp1(:), dfdxp2(:), dfdyp1(:), dfdyp2(:), &
+            dfdxp(:), dfdyp(:)
         
 
         logical, allocatable                    :: isinvert(:), &
             onedge(:), te(:), tv(:)
 
         ! Loop
-        integer(I8)                             :: iq
+        integer(I8)                             :: i, iq, ccv, cce
 
         ! Data
         inf = ieee_value(inf, ieee_positive_inf)
@@ -1157,6 +1175,10 @@ module PolygonLevelsetFunction2D
         associate(&
             xp      => plf%xp,      &
             yp      => plf%yp,      &
+            xp1     => plf%xp1,     &
+            xp2     => plf%xp2,     &
+            yp1     => plf%yp1,     &
+            yp2     => plf%yp2,     &
             nxp     => plf%nxp,     &
             nyp     => plf%nyp,     &
             nxpv    => plf%nxpv,    &
@@ -1169,8 +1191,50 @@ module PolygonLevelsetFunction2D
             )
 
         ! Get sizes
+        npe = size(xp1, 1)
         np = size(xp, 1)
         nq = size(xq, 1)
+
+        ! Check if derivatives are implemented
+        nval = size(values, 1)
+        select case(var)
+
+        case ('no')
+
+            ! All good
+
+        case ('polygonsetcoordinates')
+
+            ! Initialize basic quantities
+            npsc = nval/2 ! nval should be even
+
+            ! Initialize mapping
+            allocate(psvert(np), psedges(npe, 2))
+            ccv = 0
+            cce = 0
+            do i = 1, plf%ps%np 
+                ! Add
+                ne = plf%ps%polygons(i)%ne 
+                psvert(ccv+1:ccv+ne+1) = plf%ps%polygons(i)%vert 
+                psedges(cce+1:cce+ne, 1) = plf%ps%polygons(i)%vert(1:ne)
+                psedges(cce+1:cce+ne, 2) = plf%ps%polygons(i)%vert(2:ne+1)
+
+                ! Update counters
+                ccv = ccv + ne + 1
+                cce = cce + ne
+            end do
+
+            ! Initialize derivative structure (note: number values 
+            ! depends, initialized later)
+            dplfdvar%ncol = nval
+            dplfdvar%nrow = size(vq, 1)
+            
+        case default
+
+            ! All bad
+            call gdErrorHandler('EvaluatePLF2DGeneral: variable not implemented')
+
+        end select
         
         ! Allocate and initialize
         allocate(eind(nq), vind(nq), minind(nq), tdistvert(nq), &
@@ -1252,6 +1316,78 @@ module PolygonLevelsetFunction2D
             ! Function value
             vq = val
             
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case ('polygonsetcoordinates')
+
+                ! Derivatives w.r.t. polygon set coordinates
+
+                ! Precompute values
+                tvx = (xq - xf(eind))
+                tvy = (yq - yf(eind))
+                ttxp = (xp2(eind) - xp1(eind))
+                ttyp = (yp2(eind) - yp1(eind))
+                tnxp = nxp(eind)
+                tnyp = nyp(eind)
+                if (allocated(myones)) then 
+                    deallocate(myones)
+                end if 
+                allocate(myones(nq))
+                myones = 1
+            
+                te = minind == 1
+                tv = minind == 2
+
+                ! Compute derivatives w.r.t. edge coordinates
+                allocate(dfdxp1(nq), dfdxp2(nq), dfdyp1(nq), &
+                    dfdyp2(nq), dfdxp(nq), dfdyp(nq))
+                where (te)
+                    dfdxp1 = (ttxp**2*tvy)/(ttxp**2 + ttyp**2)**(1.5) - &
+                        tvy/(ttxp**2 + ttyp**2)**(0.5) - tnxp*0.5 - &
+                        (ttxp*ttyp*tvx)/(ttxp**2 + ttyp**2)**(1.5) ! xp1
+                    dfdxp2 = tvy/(ttxp**2 + ttyp**2)**(0.5) - tnxp*0.5 - &
+                        (ttxp**2*tvy)/(ttxp**2 + ttyp**2)**(1.5) + &
+                        (ttxp*ttyp*tvx)/(ttxp**2 + ttyp**2)**(1.5) ! xp2
+                    dfdyp1 = tvx/(ttxp**2 + ttyp**2)**(0.5) - tnyp*0.5 - &
+                        (ttyp**2*tvx)/(ttxp**2 + ttyp**2)**(1.5) + &
+                        (ttxp*ttyp*tvy)/(ttxp**2 + ttyp**2)**(1.5) ! yp1
+                    dfdyp2 = (ttyp**2*tvx)/(ttxp**2 + ttyp**2)**(1.5) - &
+                        tvx/(ttxp**2 + ttyp**2)**(0.5) - tnyp*0.5 - &
+                        (ttxp*ttyp*tvy)/(ttxp**2 + ttyp**2)**(1.5) ! yp2
+                elsewhere
+                    dfdxp1 = 0
+                    dfdyp1 = 0
+                    dfdxp2 = 0
+                    dfdyp2 = 0
+                end where
+
+                where (tv)
+                    dfdxp = sign(myones, tcrossprod)*(xp(vind) - xq)/(tdistvert)
+                    dfdyp = sign(myones, tcrossprod)*(yp(vind) - yq)/(tdistvert)
+                elsewhere 
+                    dfdxp = 0
+                    dfdyp = 0
+                end where
+
+                ! Compute derivatives w.r.t. polygon set coordinates
+                dplfdvar%col = [pack(psedges(eind, 1), te), pack(psedges(eind, 2), te), &
+                    pack(psedges(eind, 1), te)+npsc, pack(psedges(eind, 2), te)+npsc, &
+                    pack(psvert(vind), tv), pack(psvert(vind), tv)+npsc]
+                dplfdvar%row = [reshape(spread(pack([(i, i = 1, nq)], te), 2, 4), [4*count(te)]), &
+                    reshape(spread(pack([(i, i = 1, nq)], tv), 2, 4), [2*count(tv)])]
+                dplfdvar%val = [pack(dfdxp1, te), pack(dfdxp2, te), &
+                    pack(dfdyp1, te), pack(dfdyp2, te), &
+                    pack(dfdxp, tv), pack(dfdyp, tv)]
+                dplfdvar%nval = size(dplfdvar%val, 1)
+
+            end select
+
         case ('10')
             
             ! First order derivative w.r.t. xq
@@ -1267,7 +1403,71 @@ module PolygonLevelsetFunction2D
                     vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(xp(vind(iq)) - xq(iq))
                 end if
             end do 
-            
+
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case ('polygonsetcoordinates')
+
+                ! Derivatives w.r.t. polygon set coordinates
+
+                ! Precompute values
+                tvx = (xq - xf(eind))
+                tvy = (yq - yf(eind))
+                ttxp = (xp2(eind) - xp1(eind))
+                ttyp = (yp2(eind) - yp1(eind))
+                tnxp = nxp(eind)
+                tnyp = nyp(eind)
+                if (allocated(myones)) then 
+                    deallocate(myones)
+                end if 
+                allocate(myones(nq))
+                myones = 1
+
+                te = minind == 1
+                tv = minind == 2
+
+                ! Compute derivatives w.r.t. edge coordinates
+                allocate(dfdxp1(nq), dfdxp2(nq), dfdyp1(nq), &
+                    dfdyp2(nq), dfdxp(nq), dfdyp(nq))
+                where (te)
+                    dfdxp1 = -(ttxp*ttyp)/(ttxp**2 + ttyp**2)**(1.5) ! xqxp1
+                    dfdxp2 = (ttxp*ttyp)/(ttxp**2 + ttyp**2)**(1.5) ! xqxp2
+                    dfdyp1 = 1.0/(ttxp**2 + ttyp**2)**(0.5) - ttyp**2/(ttxp**2 + ttyp**2)**(1.5) ! xqyp1
+                    dfdyp2 = ttyp**2/(ttxp**2 + ttyp**2)**(1.5) - 1.0/(ttxp**2 + ttyp**2)**(0.5) ! xqyp2
+                elsewhere
+                    dfdxp1 = 0
+                    dfdyp1 = 0
+                    dfdxp2 = 0
+                    dfdyp2 = 0
+                end where
+
+                where (tv)
+                    dfdxp = (sign(myones, tcrossprod)*(xp(vind) - xq)**2)/(2*tdistvert**3) - sign(myones, tcrossprod)/tdistvert ! xqxp
+                    dfdyp = (sign(myones, tcrossprod)*(xp(vind) - xq)*(yp(vind) - yq))/(tdistvert**3) ! xqyp
+                elsewhere 
+                    dfdxp = 0
+                    dfdyp = 0
+                end where
+
+                ! Compute derivatives w.r.t. polygon set coordinates
+                dplfdvar%col = [pack(psedges(eind, 1), te), pack(psedges(eind, 2), te), &
+                    pack(psedges(eind, 1), te)+npsc, pack(psedges(eind, 2), te)+npsc, &
+                    pack(psvert(vind), tv), pack(psvert(vind), tv)+npsc]
+                    dplfdvar%row = [reshape(spread(pack([(i, i = 1, nq)], te), 2, 4), [4*count(te)]), &
+                    reshape(spread(pack([(i, i = 1, nq)], tv), 2, 4), [2*count(tv)])]
+                dplfdvar%val = [pack(dfdxp1, te), pack(dfdxp2, te), &
+                    pack(dfdyp1, te), pack(dfdyp2, te), &
+                    pack(dfdxp, tv), pack(dfdyp, tv)]
+                dplfdvar%nval = size(dplfdvar%val, 1)
+
+            end select
+        
         case ('01')
             
             ! First order derivative w.r.t. yq
@@ -1284,7 +1484,86 @@ module PolygonLevelsetFunction2D
                 end if
             end do 
 
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case ('polygonsetcoordinates')
+
+                ! Derivatives w.r.t. polygon set coordinates
+
+                ! Precompute values
+                tvx = (xq - xf(eind))
+                tvy = (yq - yf(eind))
+                ttxp = (xp2(eind) - xp1(eind))
+                ttyp = (yp2(eind) - yp1(eind))
+                tnxp = nxp(eind)
+                tnyp = nyp(eind)
+                if (allocated(myones)) then 
+                    deallocate(myones)
+                end if 
+                allocate(myones(nq))
+                myones = 1
+
+                te = minind == 1
+                tv = minind == 2
+
+                ! Compute derivatives w.r.t. edge coordinates
+                allocate(dfdxp1(nq), dfdxp2(nq), dfdyp1(nq), &
+                    dfdyp2(nq), dfdxp(nq), dfdyp(nq))
+                where (te)
+                    dfdxp1 = ttxp**2/(ttxp**2 + ttyp**2)**(1.5) - 1.0/(ttxp**2 + ttyp**2)**(0.5) ! yqxp1
+                    dfdxp2 = 1.0/(ttxp**2 + ttyp**2)**(0.5) - ttxp**2/(ttxp**2 + ttyp**2)**(1.5) ! yqxp2
+                    dfdyp1 = (ttxp*ttyp)/(ttxp**2 + ttyp**2)**(1.5) ! yqyp1
+                    dfdyp2 = -(ttxp*ttyp)/(ttxp**2 + ttyp**2)**(1.5) ! yqyp2
+                elsewhere
+                    dfdxp1 = 0
+                    dfdyp1 = 0
+                    dfdxp2 = 0
+                    dfdyp2 = 0
+                end where
+
+                where (tv)
+                    dfdxp = (sign(myones, tcrossprod)*(xp(vind) - xq)*(yp(vind) - yq))/(tdistvert**3) ! yqxp
+                    dfdyp = (sign(myones, tcrossprod)*(yp(vind) - yq)**2)/(2*tdistvert**3) - sign(myones, tcrossprod)/tdistvert ! yqyp
+                elsewhere 
+                    dfdxp = 0
+                    dfdyp = 0
+                end where
+
+                ! Compute derivatives w.r.t. polygon set coordinates
+                dplfdvar%col = [pack(psedges(eind, 1), te), pack(psedges(eind, 2), te), &
+                    pack(psedges(eind, 1), te)+npsc, pack(psedges(eind, 2), te)+npsc, &
+                    pack(psvert(vind), tv), pack(psvert(vind), tv)+npsc]
+                dplfdvar%row = [reshape(spread(pack([(i, i = 1, nq)], te), 2, 4), [4*count(te)]), &
+                    reshape(spread(pack([(i, i = 1, nq)], tv), 2, 4), [2*count(tv)])]
+                dplfdvar%val = [pack(dfdxp1, te), pack(dfdxp2, te), &
+                    pack(dfdyp1, te), pack(dfdyp2, te), &
+                    pack(dfdxp, tv), pack(dfdyp, tv)]
+                dplfdvar%nval = size(dplfdvar%val, 1)
+
+            end select
+
         case ('20')
+
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case default
+
+                ! Not implemented
+                call gdErrorHandler('EvaluatePLF2DClosedExact: derivatives not implemented')
+
+            end select
             
             ! Second order derivative w.r.t. xq, xq
             vq = 0
@@ -1312,6 +1591,21 @@ module PolygonLevelsetFunction2D
                     *(xp(vind(iq)) - xq(iq))*(yp(vind(iq)) - xq(iq))
                 end if
             end do 
+
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case default
+
+                ! Not implemented
+                call gdErrorHandler('EvaluatePLF2DClosedExact: derivatives not implemented')
+
+            end select
             
         case ('02')
             
@@ -1328,6 +1622,20 @@ module PolygonLevelsetFunction2D
                 end if
             end do 
 
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case default
+
+                ! Not implemented
+                call gdErrorHandler('EvaluatePLF2DClosedExact: derivatives not implemented')
+
+            end select
             
         case default
 
@@ -1339,6 +1647,11 @@ module PolygonLevelsetFunction2D
         ! Housekeeping
         !=============
         end associate
+        
+        ! Optional arguments
+        if (present(dplfdvarin)) then 
+            dplfdvarin = dplfdvar 
+        end if
 
     end subroutine
 
