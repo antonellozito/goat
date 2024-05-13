@@ -17,6 +17,7 @@ module Interpolant2D
     !============
     ! Load modules
     use mod_precision
+    use mod_sparseinterface
 
     !==================================================================!
     !                                                                  !
@@ -83,7 +84,7 @@ module Interpolant2D
 
         ! Evaluator
         subroutine EvaluateINT(interp, xq, yq, derivx, derivy, vq)
-            import :: GenericInterpolant2DUDT, R8, I8 
+            import :: GenericInterpolant2DUDT, R8, I8
             class(GenericInterpolant2DUDT)      :: interp 
             real(R8), intent(in)                :: xq(:), yq(:)
             real(R8), intent(out)               :: vq(:)
