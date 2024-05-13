@@ -252,6 +252,9 @@ module PolygonLevelsetFunction2D
         ! Evaluation
         procedure :: Evaluate       => EvaluatePLF2DClosedApproximation
 
+        ! Grid construction
+        procedure :: ConstructGrid  => ConstructGridPLF2DClosedApproximation
+
     end type
 
     
@@ -1677,26 +1680,188 @@ module PolygonLevelsetFunction2D
         class(PolygonLevelsetFunction2DUDT), allocatable :: plfe
 
         integer(I8)                         :: nx, ny
-
-        real(R8)                            :: minx, maxx, miny, maxy, &
-            dx, dy
-        real(R8), allocatable               :: xp(:), yp(:), xg(:), &
-            yg(:), xgv(:), ygv(:), vg(:), vg2D(:, :)
-
-        ! Loop
-        integer(I8)                         :: k
+        real(R8), allocatable               :: xg(:), yg(:), vg(:), &
+            vg2D(:, :), xgv(:), ygv(:)
 
         ! Initialize
         !===========
         ! Add polygonset structure
         plf%ps = ps 
 
-        ! Get polygon vertices for later
-        call ps%GetVertices(xp, yp)
-
         ! Construct closed exact levelset function
         call InitializePolygonLevelsetFunction2D(plfe, ps, &
             plf%options%optionsClosedExact)
+
+        ! Construct 2D evaluation grid
+        call plf%ConstructGrid(xg, yg, xgv, ygv, nx, ny)
+
+        ! Evaluate exact representation
+        allocate(vg(nx*ny))
+        call plfe%Evaluate(xg, yg, 0, 0, vg)
+
+        ! Reshape
+        vg2D = reshape(vg, (/nx, ny/))
+
+        ! Build polygon representation
+        !=============================
+        ! Construct
+        call plf%interp%SetParameters(plf%options%meth, plf%options%C, plf%options%M)
+        call plf%interp%Construct(xgv, ygv, vg2D)
+        
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluatePLF2DClosedApproximation(plf, xq, yq, derivx, &
+        derivy, vq, varin, valuesin, dplfdvarin)
+
+        ! Description
+        !============
+        ! Evaluate - simply call interpolant routine if no derivatives 
+        ! need to be evaluate. Otherwise, if derivatives are needed, we
+        ! apply the chain rule as follows:
+        !
+        !   dplf/dvar = dvq/db db/dvar
+        !
+        ! where dvq/db is the linearization of the interpolation routine
+        ! w.r.t. the initial sample values 'b', and db/dvar the linearization
+        ! of the initial sample values w.r.t. the desired variable. 
+        ! Note that dvq/db is given by the interpolant as dvq/da da/db, 
+        ! where da/db is the inverse of the system matrix used to 
+        ! determine the interpolation weights a. db/dvar is the 
+        ! linearization of the underlying closed exact polygon levelset
+        ! function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonLevelsetFunction2DClosedApproximationUDT)  :: plf 
+        real(R8), intent(in)            :: xq(:), yq(:)
+        integer(I8), intent(in)         :: derivx, derivy
+        real(R8), intent(out)           :: vq(size(xq))
+
+        ! Optional arguments
+        character(*), intent(in), optional      :: varin 
+        real(R8), intent(in), optional          :: valuesin(:)
+        type(MySparseUDT), optional             :: dplfdvarin
+
+        character(:), allocatable               :: var 
+        real(R8), allocatable                   :: values(:)
+        type(MySparseUDT)                       :: dplfdvar
+
+        ! Auxiliary
+        class(PolygonLevelsetFunction2DUDT), allocatable :: plfe
+        type(MySparseUDT)                       :: dinterpda, dadvqinit, &
+             dvqinitdval
+        integer(I8)                             :: nx, ny
+        real(R8), allocatable                   :: xg(:), &
+            yg(:), vg(:), vg2D(:, :), xgv(:), ygv(:)
+
+        ! Check input
+        !============
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if
+        if (present(dplfdvarin)) then 
+            dplfdvar = dplfdvarin 
+        end if 
+
+
+        ! Call interpolant
+        !=================
+        ! Evaluate values
+        call plf%interp%Evaluate(xq, yq, derivx, derivy, vq)
+
+
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives
+            
+
+        case ('polygonsetcoordinates')
+
+            ! Only w.r.t. vessel coordinates. Need to differentiate 
+            ! initialization and interpolation routines
+
+            ! Construct closed exact levelset function
+            call InitializePolygonLevelsetFunction2D(plfe, plf%ps, &
+                plf%options%optionsClosedExact)
+
+            ! Construct 2D evaluation grid
+            call plf%ConstructGrid(xg, yg, xgv, ygv, nx, ny)
+
+            ! Evaluate exact representation and its derivatives
+            allocate(vg(size(xg, 1)*size(yg, 1)))
+            call plfe%Evaluate(xg, yg, 0, 0, vg, 'polygonsetcoordinates', &
+                values, dvqinitdval)
+
+            ! Reshape
+            vg2D = reshape(vg, (/nx, ny/))
+
+            ! Differentiate interpolant coefficient w.r.t. input values
+            call plf%interp%EvaluateDiffCoef2Val(xgv, ygv, vg2D, dadvqinit)
+            ! Construct
+            !call plf%interp%Construct(xgv, ygv, vg2D)
+
+            ! Differentiate interpolant results w.r.t. coefficients
+            call plf%interp%EvaluateDiffInterp2Coef(xq, yq, derivx, derivy, vq, &
+                dinterpda)
+
+            ! Construct total derivative
+            dplfdvar = dinterpda*dadvqinit*dvqinitdval
+
+        case default
+            
+            ! Throw error
+            call gdErrorHandler('EvaluatePLF2DClosedApproximation: ' // & 
+                ' variable not implemented')
+
+        end select
+
+        if (present(dplfdvarin)) then 
+            dplfdvarin = dplfdvar 
+        end if
+ 
+    end subroutine
+
+    ! Grid construction
+    subroutine ConstructGridPLF2DClosedApproximation(plf, xg, yg, xgv, &
+        ygv, nx, ny)
+
+        ! Description
+        !============
+        ! Routine to create a 2D structured mesh for the closed 
+        ! approximation plf function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonLevelsetFunction2DClosedApproximationUDT)  :: plf 
+        real(R8), intent(out), allocatable      :: xg(:), yg(:), &
+            xgv(:), ygv(:)
+        integer(I8), intent(out)                :: nx, ny
+
+        ! Auxiliary
+        real(R8)                            :: minx, maxx, miny, maxy, &
+            dx, dy
+        real(R8), allocatable               :: xp(:), yp(:)
+
+        ! Loop
+        integer(I8)                         :: k
+
+        ! Initialize
+        !===========
+        ! Get polygon vertices 
+        call plf%ps%GetVertices(xp, yp)
 
         ! Check interpolant range
         if (allocated(plf%options%xrange)) then 
@@ -1724,7 +1889,7 @@ module PolygonLevelsetFunction2D
         ny = plf%options%resy + 1
 
         ! Allocate
-        allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny), vg(nx*ny))
+        allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny))
 
         ! Get polygon extent
         minx = minval(plf%options%xrange) 
@@ -1750,68 +1915,6 @@ module PolygonLevelsetFunction2D
         
         call Construct2DStructuredGrid(xgv, ygv, nx, ny, xg, yg)
 
-        ! Evaluate exact representation
-        call plfe%Evaluate(xg, yg, 0, 0, vg)
-
-        ! Reshape
-        vg2D = reshape(vg, (/nx, ny/))
-
-        ! Build polygon representation
-        !=============================
-        ! Construct
-        call plf%interp%SetParameters(plf%options%meth, plf%options%C, plf%options%M)
-        call plf%interp%Construct(xgv, ygv, vg2D)
-        
-
-    end subroutine
-
-    ! Evaluation
-    subroutine EvaluatePLF2DClosedApproximation(plf, xq, yq, derivx, &
-        derivy, vq, varin, valuesin, dplfdvarin)
-
-        ! Description
-        !============
-        ! Evaluate - simply call interpolant routine
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(PolygonLevelsetFunction2DClosedApproximationUDT)  :: plf 
-        real(R8), intent(in)            :: xq(:), yq(:)
-        integer(I8), intent(in)         :: derivx, derivy
-        real(R8), intent(out)           :: vq(size(xq))
-
-        ! Optional arguments
-        character(*), intent(in), optional      :: varin 
-        real(R8), intent(in), optional          :: valuesin(:)
-        type(MySparseUDT), optional             :: dplfdvarin
-
-        character(:), allocatable               :: var 
-        real(R8), allocatable                   :: values(:)
-        type(MySparseUDT)                       :: dplfdvar
-
-        ! Check input
-        !============
-        if (present(varin)) then 
-            var = varin 
-        else
-            var = 'no'
-        end if 
-        if (present(valuesin)) then 
-            values = valuesin 
-        else
-            allocate(values(0))
-        end if
-        if (present(dplfdvarin)) then 
-            dplfdvar = dplfdvarin 
-        end if 
-
-
-        ! Call interpolant
-        !=================
-        !call plf%interp%Evaluate(xq, yq, derivx, derivy, vq, var, values, &
-        !    dplfdvar)
- 
     end subroutine
 
 
