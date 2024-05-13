@@ -32,7 +32,7 @@ SUITESPARSEPATH = /usr/include/suitesparse
 ## % Targets
 ## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Clayer ClayerF Constants Auxiliary General Numerics Optimization Modules IO_b25  \
+GDRUN_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
     IO_carre IO_output IO_input  Setup  Drivers 
 
 ## GOAT_TARGETS             : Targets to be run for the full goat
@@ -98,7 +98,7 @@ CCFLAGS = $(CCFLAGS_DEF)
 MAIN_RUNFILE = MainRunFileGridDeformation.F90
 
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
-GENERAL_FILES = src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 $(wildcard src/General/*.F90)
+GENERAL_FILES = src/General/mod_plotter.F90 src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 $(wildcard src/General/*.F90)
     
 
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
@@ -113,8 +113,7 @@ MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
 
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
-AUXILIARY_FILES = src/Auxiliary/mod_plotter.F90 \
-    src/Auxiliary/Construct2DStructuredGrid.F90 \
+AUXILIARY_FILES = src/Auxiliary/Construct2DStructuredGrid.F90 \
     $(wildcard src/Auxiliary/*.F90) \
     src/Auxiliary/Interpolation/Interpolant2D_auxiliaries.F90 \
     src/Auxiliary/Interpolation/Interpolant2D.F90 \
