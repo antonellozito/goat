@@ -24,9 +24,9 @@ module GOAT_tests
     subroutine RunAllTests()
 
         ! Interpolant testing
-        !call TestStructuredInterpolant2D()
+        call TestStructuredInterpolant2D()
         !call TestCSparse()
-        call TestPLF2D
+        !call TestPLF2D
 
     end subroutine
 
@@ -63,6 +63,7 @@ module GOAT_tests
         ! Modules
         !========
         use Interpolant
+        use mod_sparseinterface
 
         implicit none
         save 
@@ -75,15 +76,23 @@ module GOAT_tests
 
         ! Auxiliary
         type(StructuredInterpolant2DUDT)    :: interp
+        type(MySparseUDT)                   :: jacvq, jaca
 
-        integer(I8)                         :: nx, ny, nq, nres
+        integer(I8)                         :: nx, ny, nq, nres, &
+            derivx, derivy
         real(R8)                            :: Lx, Ly
 
         character(:), allocatable           :: meth 
-        integer(I8), allocatable            :: reshuffle(:)
+        integer(I8), allocatable            :: reshuffle(:), aind(:), &
+            vind(:)
         real(R8), allocatable               :: xgv(:), ygv(:), &
             v(:, :), a(:), vq(:, :), xq(:), yq(:), vqan(:, :), &
-            dv(:, :), temp(:), relerr(:)
+            dv(:, :), temp(:), relerr(:), vvals(:), avals(:), d(:), &
+            ainit(:), vqeval(:), tempvals(:, :)
+
+        real(R8), allocatable, dimension(:) :: vqFW, vqBW, dvqdaFW, &
+            dvqdaBW, dvqdaC, eabsFW, eabsBW, eabsC, &
+            erelFW, erelBW, erelC, dvqda
 
         ! Loop
         integer(I8)                         :: i, j, k 
@@ -94,8 +103,8 @@ module GOAT_tests
         call DisplayTestStart('TestStructuredInterpolant2D')
 
         ! Build structured grid
-        nx = 100 ! number of cells, not vertices!
-        ny = 200
+        nx = 10 ! number of cells, not vertices!
+        ny = 10
         Lx = 10
         Ly = 5 
         allocate(xgv(nx+1), ygv(ny+1), v(nx+1, ny+1))
@@ -103,18 +112,19 @@ module GOAT_tests
         ygv = Ly*[(k, k=0, ny)]/ny
 
         ! Set evaluation points (avoid out of bounds)
-        nq = 100
-        nres = 6 ! number of results 
-        allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), &
-            vq(nq, nres), temp(nq))
-        call random_number(xq)
-        call random_number(yq)
-
-        !nq = 2
+        !nq = 10000
         !nres = 6 ! number of results 
-        !allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), vq(nq, nres))
-        !xq = [0.12, 0.999]
-        !yq = [0.16, 0.999]
+        !allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), &
+        !    vq(nq, nres), temp(nq), vqeval(nq), vqFW(nq), vqBW(nq))
+        !call random_number(xq)
+        !call random_number(yq)
+
+        nq = 2
+        nres = 6 ! number of results 
+        allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), vq(nq, nres), &
+            temp(nq), vqeval(nq), vqFW(nq), vqBW(nq))
+        xq = [0.12, 0.999]
+        yq = [0.16, 0.999]
         
         xq = xq*Lx
         yq = yq*Ly
@@ -135,6 +145,9 @@ module GOAT_tests
         call interp%SetParameters(meth, 3, 6)
         call interp%Construct(xgv, ygv, v)
 
+
+        ! Test evaluation
+        !----------------
         ! Test1: evaluate the interpolant at some query points and 
         ! evaluate the analytic solution
         vqan(:, 1) = a(1) + a(2)*xq + a(3)*yq ! field value
@@ -163,6 +176,146 @@ module GOAT_tests
         ! Print
         print *, 'test case     f     dfdx    dfdy    d2fdx2      d2fdxdy     d2fdy2      '
         print *, 'Linear field test case', relerr(reshuffle)
+
+        ! Test derivatives
+        !-----------------
+        ! Set fixed evaluation points to know in which cell we need to check
+        ! (otherwise extremely likely to have zero derivatives everywhere)
+        deallocate(xq, yq, vq, vqan, dv, temp, vqeval, vqFW, vqBW)
+        nq = 2
+        nres = 6 ! number of results 
+        allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), vq(nq, nres), &
+            temp(nq), vqeval(nq), vqFW(nq), vqBW(nq))
+        xq = [0.12, 0.999]
+        yq = [0.16, 0.999]
+        
+        xq = xq*Lx
+        yq = yq*Ly
+
+        ! Set derivatives
+        derivx = 0
+        derivy = 0
+
+        ! Print
+        print *, 'Partial derivatives, derivtype: values w.r.t. interpolant coefficients'
+        
+        ! Derivatives w.r.t. coefficients and initial values. Compare to FD
+        call interp%EvaluateDiffInterp2Coef(xq, yq, derivx, derivy, vqeval, jaca)
+
+        ! Compare with FD
+        avals = reshape(interp%a, [size(interp%a, 1)*size(interp%a, 2)])
+
+        ! Indices to test all coefficients in certain cell
+        !aind = [(k, k = 12, 12+(size(interp%a, 2)-1)*nx*ny, nx*ny)] ![(k, k = 1, (nx+1)*(ny+1))]
+        
+        ! Indices to test only a couple of derivatives
+        aind = [12, 12 + nx*ny, 12+2*nx*ny]
+
+        d = [1e-8, 1e-6, 1e-4, 1e-2] 
+        
+        do i = 1, size(aind, 1)
+            ! Output
+            print *, 'variable: ', aind(i)
+            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call jaca%ExtractColumnFull(dvqda, aind(i))
+
+            ! Loop over fd steps
+            do j = 1, size(d, 1) 
+                ! Forward difference
+                avals(aind(i)) = avals(aind(i)) + d(j)
+                interp%a = reshape(avals, [size(interp%a, 1), size(interp%a, 2)])
+                call interp%Evaluate(xq, yq, derivx, derivy, vqFW)
+                dvqdaFW = (vqFW - vqeval)/d(j)
+
+                ! Backward difference
+                avals(aind(i)) = avals(aind(i)) - 2*d(j)
+                interp%a = reshape(avals, [size(interp%a, 1), size(interp%a, 2)])
+                call interp%Evaluate(xq, yq, derivx, derivy, vqBW)
+                dvqdaBW = (vqBW - vqeval)/(-d(j))
+
+                ! Central difference
+                dvqdaC = 0.5*(dvqdaFW + dvqdaBW)
+
+                ! Reset value
+                avals(aind(i)) = avals(aind(i)) + d(j)
+                interp%a = reshape(avals, [size(interp%a, 1), size(interp%a, 2)])
+
+                ! Errors
+                eabsFW = abs(dvqda - dvqdaFW)
+                eabsBW = abs(dvqda - dvqdaBW)
+                eabsC = abs(dvqda - 0.5*(dvqdaFW + dvqdaBW))
+                erelFW = eabsFW/dvqda 
+                erelBW = eabsBW/dvqda 
+                erelC = eabsC/dvqda 
+
+                ! Print out information
+                print *, d(j), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(erelFW), maxval(erelBW), &
+                    maxval(erelC), maxloc(erelC)
+
+            end do
+        end do
+
+        ! Test derivatives
+        !-----------------
+        ! Print
+        print *, 'Partial derivatives, derivtype: values w.r.t. interpolant coefficients'
+        
+        ! Derivatives w.r.t. coefficients and initial values. Compare to FD
+        call interp%EvaluateDiffCoef2Val(xgv, ygv, v, jacvq)
+
+        ! Compare with FD
+        vvals = reshape(v, [(nx+1)*(ny+1)]) 
+        ainit = reshape(interp%a, [size(interp%a)])
+        vind = [1, nx + 1, 2, 2+ nx]
+        d = [1e-8, 1e-6, 1e-4, 1e-2] 
+        
+        do i = 1, size(vind, 1)
+            ! Output
+            print *, 'variable: ', vind(i)
+            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call jacvq%ExtractColumnFull(dvqda, vind(i))
+
+            ! Loop over fd steps
+            do j = 1, size(d, 1) 
+                ! Forward difference
+                vvals(vind(i)) = vvals(vind(i)) + d(j)
+                tempvals = reshape(vvals, [nx+1, ny+1])
+                call interp%Construct(xgv, ygv, tempvals)
+                dvqdaFW = (reshape(interp%a, [size(interp%a)]) - ainit)/d(j)
+
+                ! Backward difference
+                vvals(vind(i)) = vvals(vind(i)) - 2*d(j)
+                tempvals = reshape(vvals, [nx+1, ny+1])
+                call interp%Construct(xgv, ygv, tempvals)
+                dvqdaBW = (reshape(interp%a, [size(interp%a)]) - ainit)/(-d(j))
+
+                ! Central difference
+                dvqdaC = 0.5*(dvqdaFW + dvqdaBW)
+
+                ! Reset value
+                vvals(vind(i)) = vvals(vind(i)) + d(j)
+
+                ! Errors
+                eabsFW = abs(dvqda - dvqdaFW)
+                eabsBW = abs(dvqda - dvqdaBW)
+                eabsC = abs(dvqda - 0.5*(dvqdaFW + dvqdaBW))
+                erelFW = eabsFW/dvqda 
+                erelBW = eabsBW/dvqda 
+                erelC = eabsC/dvqda 
+
+                ! Print out information
+                print *, d(j), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(erelFW), maxval(erelBW), &
+                    maxval(erelC), maxloc(erelC)
+
+            end do
+        end do
+        
 
         ! Housekeeping
         deallocate(a)
