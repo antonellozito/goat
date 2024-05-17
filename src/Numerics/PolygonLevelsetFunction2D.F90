@@ -1758,6 +1758,7 @@ module PolygonLevelsetFunction2D
         integer(I8)                             :: nx, ny
         real(R8), allocatable                   :: xg(:), &
             yg(:), vg(:), vg2D(:, :), xgv(:), ygv(:)
+        logical                                 :: domemoryfriendly
 
         ! Check input
         !============
@@ -1774,6 +1775,9 @@ module PolygonLevelsetFunction2D
         if (present(dplfdvarin)) then 
             dplfdvar = dplfdvarin 
         end if 
+
+        ! Set memory friendly option default to true
+        domemoryfriendly = .true. 
 
 
         ! Call interpolant
@@ -1809,22 +1813,30 @@ module PolygonLevelsetFunction2D
             ! Reshape
             vg2D = reshape(vg, (/nx, ny/))
 
-            ! Differentiate interpolant coefficient w.r.t. input values
-            !call plf%interp%EvaluateDiffCoef2Val(xgv, ygv, vg2D, dadvqinit)
-            ! Construct
-            !call plf%interp%Construct(xgv, ygv, vg2D)
+            ! Compute derivative
+            if (domemoryfriendly) then 
+                ! Differentiate interpolated values w.r.t. input values (memory friendly)
+                call plf%interp%EvaluateDiffInterp2Val(xq, yq, derivx, derivy, dvqdvqinit)
 
-            ! Differentiate interpolant results w.r.t. coefficients
-            !call plf%interp%EvaluateDiffInterp2Coef(xq, yq, derivx, derivy, vq, &
-            !   dinterpda)
-            
-               call plf%interp%EvaluateDiffInterp2Val(xq, yq, derivx, derivy, dvqdvqinit)
+                ! Construct total derivative
+                dplfdvar = dvqdvqinit*dvqinitdval
 
-            ! Construct total derivative
-            !dplfdvar = dinterpda*dadvqinit
-            !dplfdvar = dplfdvar*dvqinitdval
-            
-               dplfdvar = dvqdvqinit*dvqinitdval
+            else
+                ! Memory unfriendly alternative
+                ! Differentiate interpolant coefficient w.r.t. input values
+                call plf%interp%EvaluateDiffCoef2Val(xgv, ygv, vg2D, dadvqinit)
+                
+                ! Construct
+                call plf%interp%Construct(xgv, ygv, vg2D)
+
+                ! Differentiate interpolant results w.r.t. coefficients
+                call plf%interp%EvaluateDiffInterp2Coef(xq, yq, derivx, derivy, vq, &
+                dinterpda)
+
+                ! Construct total derivative
+                dplfdvar = dinterpda*dadvqinit
+                dplfdvar = dplfdvar*dvqinitdval
+            end if 
 
         case default
             

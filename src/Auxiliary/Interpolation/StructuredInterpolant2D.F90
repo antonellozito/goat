@@ -970,7 +970,6 @@ module StructuredInterpolant2D
             ii, jj, kk, ll, derivind, derivcount, nterms, cc1, cc2, cc
 
         ! Linear solver variables (dummies basically)
-        integer(I8), allocatable            :: ipiv(:)
         integer                             :: info
 
         ! Parameters
@@ -1624,7 +1623,7 @@ module StructuredInterpolant2D
         type(MySparseUDT)                       :: dvqda
 
         ! Auxiliary
-        integer(I8)                             :: nq, nvals
+        integer(I8)                             :: nq
         real(R8)                                :: prefac
 
         integer(I8), allocatable                :: ind(:), ind_orig(:), &
@@ -1783,7 +1782,7 @@ module StructuredInterpolant2D
         integer(I8), allocatable, dimension(:)  :: row, col, stencil, &
             ix, iy, ic, ix_orig, iy_orig, ic_orig, xstencil, ystencil, &
             valindx, valindy, xstencil0, ystencil0
-        integer(I8), allocatable, dimension(:, :)   :: temprow, tempcol, &
+        integer(I8), allocatable, dimension(:, :)   :: tempcol, &
             tempvertind, vertind, tvID
             
         real(R8)                                :: xqn, yqn, dxmean, &
@@ -2293,7 +2292,7 @@ module StructuredInterpolant2D
            
 
         ! Auxiliary
-        integer(I8)                             :: flag, dx, dy, info, &
+        integer(I8)                             :: dx, dy, info, &
             nterms
         integer(I8), intent(out), allocatable   :: xstencil(:), ystencil(:)
 
