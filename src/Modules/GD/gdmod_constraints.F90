@@ -972,7 +972,7 @@ module gdmod_constraints
         type(MySparseUDT)                   :: dGdvar, dgradGdvar
 
         ! Loop
-        integer(I8)                     :: ic, ivg, ivh, k
+        integer(I8)                     :: ic, k
         integer(I8), allocatable        :: conindex(:)
 
         ! Auxiliary
@@ -2175,7 +2175,7 @@ module gdmod_constraints
             allocate(values(0))
         end if 
         if (present(dGdvarin)) then 
-            dGdvar = dGdvarin 
+            dGdvar = dGdvarin
         end if 
         if (present(dgradGdvarin)) then 
             dgradGdvar = dgradGdvarin 
@@ -2429,6 +2429,14 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 
@@ -3490,8 +3498,8 @@ module gdmod_constraints
 
             ! Call dedicated routine - no flux contributions
             call constraints%EvaluateDerivativesCoordinates(gradG, &
-                hessG, grid, dogradient, dohessian, lambda, var, values, &
-                dgradGdvar)
+                hessG, grid, dogradient, dohessian, lambda, designvariables, &
+                var, values, dgradGdvar)
 
         case default 
 
@@ -3502,6 +3510,14 @@ module gdmod_constraints
         ! Housekeeping
         !=============
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 
@@ -3540,7 +3556,7 @@ module gdmod_constraints
     ! Derivatives, coordinates
     subroutine EvaluateCoordinatesDerivativesBoundaryFunctionConstraints(&
         constraints, gradG, hessG, grid, dogradient, dohessian, lambda, &
-        var, values, dgradGdvar)
+        designvariables, var, values, dgradGdvar)
 
         ! Description
         !============
@@ -3556,6 +3572,7 @@ module gdmod_constraints
         !==================
         ! Arguments 
         class(BoundaryFunctionConstraintsUDT)   :: constraints 
+        class(DesignvariablesGDUDT)         :: designvariables
         real(R8), allocatable, intent(in)   :: lambda(:)
         type(MySparseUDT)                   :: hessG, gradG, jacG 
         type(GridUDT), intent(in)           :: grid 
@@ -3571,8 +3588,8 @@ module gdmod_constraints
 
         character(:), allocatable           :: var
         real(R8), allocatable               :: values(:)
-        type(MySparseUDT)                   :: dGdvar, dgradGdvar, &
-            dpsfdxdvar, dpsfdydvar
+        type(MySparseUDT)                   :: dgradGdvar, &
+            dpsfdxdvar, dpsfdydvar, tempderivx, tempderivy
 
         ! Initialize
         !===========
@@ -3663,8 +3680,17 @@ module gdmod_constraints
             ! Derivatives
             !------------
             ! Full product between lambda and linearization
-            dgradGdvar = lambda*dpsfdxdvar
-            dgradGdvar = dgradGdvar%Concatenate(lambda*dpsfdydvar, 1)
+            tempderivx = lambda*dpsfdxdvar ! only local derivative, since rows go 1:ntv
+            tempderivy = lambda*dpsfdydvar 
+
+            ! Expand
+            tempderivx%nrow = designvariables%nphi
+            tempderivx%row = tv(tempderivx%row) 
+            tempderivy%nrow = designvariables%nphi
+            tempderivy%row = tv(tempderivy%row) + grid%vert%ntot
+
+            ! Add
+            dgradGdvar = tempderivx + tempderivy
 
             ! Housekeeping
             call jacG%Deallocate()
@@ -4012,6 +4038,8 @@ module gdmod_constraints
         end if 
         if (present(dgradGdvarin)) then 
             dgradGdvar = dgradGdvarin 
+        else
+            dgradGdvarin = SpZeros(0, 0)
         end if 
 
         ! Checks
@@ -4026,6 +4054,28 @@ module gdmod_constraints
             call gdErrorHandler('Lambda should have the same size ' &
                 // 'as the constraint vector')
         end if
+
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
 
         ! Counters
         ic = 0 ! constraint counter (local)
@@ -4133,6 +4183,14 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 
@@ -4840,6 +4898,28 @@ module gdmod_constraints
                 // 'as the constraint vector')
         end if
 
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
+
         ! Counters
         ic = 0 ! constraint counter (local)
         ivg = 0 ! value index for gradient
@@ -5133,7 +5213,6 @@ module gdmod_constraints
         end associate
 
         ! Deallocate
-
         if (dogradient) then 
             deallocate(valindex, conindex)
         end if 
@@ -5143,6 +5222,14 @@ module gdmod_constraints
                 deallocate(valindex, conindex)
             end if 
             deallocate(valxx, valxy, valyy)
+        end if
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
         end if
 
     end subroutine
@@ -5633,6 +5720,8 @@ module gdmod_constraints
         end if 
         if (present(dgradGdvarin)) then 
             dgradGdvar = dgradGdvarin 
+        else
+            dgradGdvarin = SpZeros(0, 0)
         end if 
 
         ! Checks
@@ -6334,6 +6423,28 @@ module gdmod_constraints
                 // 'as the constraint vector')
         end if
 
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
+
         ! Counters
         ic = 0 ! constraint counter (local)
         ivg = 0 ! value index for gradient
@@ -6491,6 +6602,14 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 
@@ -6909,7 +7028,28 @@ module gdmod_constraints
             call gdErrorHandler('Lambda should have the same size ' &
                 // 'as the constraint vector')
         end if
+        
+        ! Check derivative computation
+        select case (var)
 
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
         ! Counters
         ic = 0 ! constraint counter (local)
         ivg = 0 ! value index for gradient
@@ -7417,6 +7557,14 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 
