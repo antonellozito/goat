@@ -18,6 +18,11 @@ module Interpolant2D_auxiliaries
 
     implicit none
 
+    interface GetIndex 
+        module procedure GetLinearIndex
+        module procedure GetMatrixIndices
+    end interface
+
     contains 
 
     ! Factorial computation
@@ -51,7 +56,7 @@ module Interpolant2D_auxiliaries
     end function 
 
     ! Binner (index retriever), 2D
-    subroutine GetIndex(xq, yq, x, y, ind)
+    subroutine GetLinearIndex(xq, yq, x, y, ind)
 
         ! Description
         !============
@@ -102,6 +107,62 @@ module Interpolant2D_auxiliaries
                 ! Out of bounds, put index to zero
                 ind(k) = 0
             end if
+            
+        end do
+
+    end subroutine
+
+    subroutine GetMatrixIndices(xq, yq, x, y, ix, iy)
+
+        ! Description
+        !============
+        ! Determine in which 'bin' or cell the query points lie. A point
+        ! lies in the k = i + (j-1)*(nx - 1) bin if the following holds:
+        !
+        !    x(i) <= xq < x(i+1) (for i = 1:nx-1)
+        !    y(j) <= yq < y(i+1) (for j = 1:ny-1)
+        !
+        ! Points that are outside of the domain will get a zero value 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)                    :: xq(:), yq(:), x(:), y(:)
+        integer(I8), allocatable, intent(out)   :: ix(:), iy(:)
+
+        ! Loop variables
+        integer(I8)                         :: k, indx, indy
+
+        ! Auxiliary variables 
+        integer(I8)                         :: nq, nx, ny
+
+        ! Compute indices
+        !================
+        ! Check
+        if (allocated(ix)) then 
+            deallocate(ix)
+        end if
+        if (allocated(iy)) then 
+            deallocate(iy)
+        end if
+        allocate(ix(size(xq, 1)), iy(size(xq, 1)))
+
+        ! Compute sizes
+        nq = size(xq, 1)
+        nx = size(x, 1)
+        ny = size(y, 1)
+
+        ! Loop over all query points
+        do k = 1, nq
+            ! Get the bin index for x
+            call GetBinIndex(xq(k), x, nx, indx)
+
+            ! Get the bin index for y
+            call GetBinIndex(yq(k), y, ny, indy)
+
+            ! Add to output
+            ix(k) = indx 
+            iy(k) = indy
             
         end do
 
