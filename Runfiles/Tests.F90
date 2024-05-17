@@ -252,8 +252,8 @@ module GOAT_tests
 
                 ! Print out information
                 print *, d(j), maxval(eabsFW), maxval(eabsBW), &
-                    maxval(eabsC), maxval(erelFW), maxval(erelBW), &
-                    maxval(erelC), maxloc(erelC)
+                    maxval(eabsC), maxval(abs(erelFW)), maxval(abs(erelBW)), &
+                    maxval(abs(erelC)), maxloc(abs(erelC))
 
             end do
         end do
@@ -310,12 +310,84 @@ module GOAT_tests
 
                 ! Print out information
                 print *, d(j), maxval(eabsFW), maxval(eabsBW), &
-                    maxval(eabsC), maxval(erelFW), maxval(erelBW), &
-                    maxval(erelC), maxloc(erelC)
+                    maxval(eabsC), maxval(abs(erelFW)), maxval(abs(erelBW)), &
+                    maxval(abs(erelC)), maxloc(abs(erelC))
+
 
             end do
         end do
         
+        ! Test derivatives
+        !-----------------
+        ! Print
+        print *, 'Partial derivatives, derivtype: values w.r.t. initial values coefficients'
+        
+        ! Set derivatives
+        derivx = 0
+        derivy = 0
+
+        ! Compute values
+        do i = 1, nx+1
+            do j = 1, ny+1
+                v(i, j) = sin(xgv(i))*sin(ygv(j))
+            end do 
+        end do
+
+        ! Derivatives w.r.t. coefficients and initial values. Compare to FD
+        call interp%Construct(xgv, ygv, v)
+        call interp%Evaluate(xq, yq, derivx, derivy, vqeval)
+        call interp%EvaluateDiffInterp2Val(xq, yq, derivx, derivy, jacvq)
+
+        ! Compare with FD
+        vvals = reshape(v, [(nx+1)*(ny+1)]) 
+        vind = [1, nx + 1, 2, 2+ nx]
+        d = [1e-8, 1e-6, 1e-4, 1e-2] 
+        
+        do i = 1, size(vind, 1)
+            ! Output
+            print *, 'variable: ', vind(i)
+            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call jacvq%ExtractColumnFull(dvqda, vind(i))
+
+            ! Loop over fd steps
+            do j = 1, size(d, 1) 
+                ! Forward difference
+                vvals(vind(i)) = vvals(vind(i)) + d(j)
+                tempvals = reshape(vvals, [nx+1, ny+1])
+                call interp%Construct(xgv, ygv, tempvals)
+                call interp%Evaluate(xq, yq, derivx, derivy, vqFW)
+                dvqdaFW = (vqFW - vqeval)/(d(j))
+
+                ! Backward difference
+                vvals(vind(i)) = vvals(vind(i)) - 2*d(j)
+                tempvals = reshape(vvals, [nx+1, ny+1])
+                call interp%Construct(xgv, ygv, tempvals)
+                call interp%Evaluate(xq, yq, derivx, derivy, vqBW)
+                dvqdaBW = (vqBW - vqeval)/(-d(j))
+
+                ! Central difference
+                dvqdaC = 0.5*(dvqdaFW + dvqdaBW)
+
+                ! Reset value
+                vvals(vind(i)) = vvals(vind(i)) + d(j)
+
+                ! Errors
+                eabsFW = abs(dvqda - dvqdaFW)
+                eabsBW = abs(dvqda - dvqdaBW)
+                eabsC = abs(dvqda - 0.5*(dvqdaFW + dvqdaBW))
+                erelFW = eabsFW/dvqda 
+                erelBW = eabsBW/dvqda 
+                erelC = eabsC/dvqda 
+
+                ! Print out information
+                print *, d(j), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(abs(erelFW)), maxval(abs(erelBW)), &
+                    maxval(abs(erelC)), maxloc(abs(erelC))
+
+            end do
+        end do
 
         ! Housekeeping
         deallocate(a)
@@ -476,7 +548,7 @@ module GOAT_tests
 
         type(MySparseUDT)           :: dplfgdvar, dplfcedvar, dplfcadvar
 
-        integer(I8)                 :: nvaluesg, nxm, nym
+        integer(I8)                 :: nvaluesg, nxm, nym, derivx, derivy
         integer(I8), allocatable    :: varind(:)
 
         real(R8)                            :: NaN, maxxm, minxm, maxym, &
@@ -484,7 +556,7 @@ module GOAT_tests
         real(R8), allocatable, dimension(:) :: xg, yg, xcps, &
             ycps, xncp, yncp, d, xp, yp, valuesg, vqg, xq, yq, xgv, ygv, &
             vqgFW, vqgBW, dvqFW, dvqBW, dvqC, eabsFW, eabsBW, eabsC, &
-            erelFW, erelBW, erelC, dvqg
+            erelFW, erelBW, erelC, dvqg, eabsdir, ereldir
 
         ! Loop
         integer(I8)                         :: i, j
@@ -513,10 +585,12 @@ module GOAT_tests
         call psg%Construct(xg, yg)
 
         ! Construct simple closed polygon set
-        call psce%Construct(xcps, ycps)
+        !call psce%Construct(xcps, ycps)
+        call psce%Construct(xncp, yncp)
 
         ! Construct nested closed polygon set
         call psca%Construct(xncp, yncp)
+        !call psca%Construct(xcps, ycps)
 
         ! Set plf options (only for ca)
         optionsca%C         = 3
@@ -524,8 +598,8 @@ module GOAT_tests
         optionsca%meth      = 'uniformgrid'
         optionsca%offsetx   = 1
         optionsca%offsety   = 1
-        optionsca%resx      = 50
-        optionsca%resy      = 50
+        optionsca%resx      = 20
+        optionsca%resy      = 10
         optionsca%optionsClosedExact = optionsce
 
         ! Construct PLFs
@@ -577,7 +651,7 @@ module GOAT_tests
         do j = 1, size(varind)
             ! Output
             print *, 'variable: ', varind(j)
-            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            print *, '| step size | eabsdir | eabsFW | eabsBW | eabsC | ereldir | erelFW | erelBW | erelC | indrelC |'
             
             ! Extract value of implemented derivative
             call dplfgdvar%ExtractColumnFull(dvqg, varind(j))
@@ -620,11 +694,17 @@ module GOAT_tests
                 erelFW = eabsFW/dvqg 
                 erelBW = eabsBW/dvqg 
                 erelC = eabsC/dvqg 
+                eabsdir = eabsFW 
+                ereldir = eabsFW/dvqg
+                where (eabsFW > eabsBW)
+                    eabsdir = eabsBW 
+                    ereldir = eabsBW/dvqg
+                end where
             
 
                 ! Print out information
-                print *, d(i), maxval(eabsFW), maxval(eabsBW), &
-                    maxval(eabsC), maxval(erelFW), maxval(erelBW), &
+                print *, d(i), maxval(eabsdir), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(ereldir), maxval(erelFW), maxval(erelBW), &
                     maxval(erelC), maxloc(erelC)
 
                 ! Update
@@ -645,6 +725,10 @@ module GOAT_tests
 
         ! Closed exact
         !-------------
+        ! Set derivatives
+        derivx = 0
+        derivy = 0
+
         ! Set finite differences & values
         d = [1e-8, 1e-6, 1e-4, 1e-2]
         varind = [1, 5, 2, 6, 3, 7, 4, 8]
@@ -656,14 +740,14 @@ module GOAT_tests
 
         ! Create a meshgrid for polygon evaluation, limited by polygon
         ! extent
-        nxm = 3
-        nym = 3
+        nxm = 33
+        nym = 33
         allocate(xq(nxm*nym), yq(nxm*nym), vqg(nxm*nym), vqgFW(nxm*nym), &
             vqgBW(nxm*nym))
-        maxxm = maxval(xp)+1
-        minxm = minval(xp)-1
-        maxym = maxval(yp)+1
-        minym = minval(yp)-1
+        maxxm = maxval(xp)+0.1
+        minxm = minval(xp)-0.1
+        maxym = maxval(yp)+0.1
+        minym = minval(yp)-0.1
         
         xgv = [(i, i = 0, nxm-1)]*(1./real(nxm-1, kind=R8))*(maxxm - minxm) + minxm 
         ygv = [(i, i = 0, nym-1)]*(1./real(nym-1, kind=R8))*(maxym - minym) + minym 
@@ -672,7 +756,7 @@ module GOAT_tests
 
         ! Evaluate implemented derivatives
         call plfce%Evaluate(xq, yq, &
-            0, 0, vqg, 'polygonsetcoordinates', valuesg, dplfcedvar)
+            derivx, derivy, vqg, 'polygonsetcoordinates', valuesg, dplfcedvar)
 
         ! Compute finite differences (crude)
         print *, 'Evaluating FD for closed exact polygonset (variable: polygonsetcoordinates)'
@@ -680,7 +764,7 @@ module GOAT_tests
         do j = 1, size(varind)
             ! Output
             print *, 'variable: ', varind(j)
-            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            print *, '| step size | eabsdir | eabsFW | eabsBW | eabsC | ereldir | erelFW | erelBW | erelC | indrelC |'
             
             ! Extract value of implemented derivative
             call dplfcedvar%ExtractColumnFull(dvqg, varind(j))
@@ -697,7 +781,7 @@ module GOAT_tests
                 call plfce%Initialize(plfce%ps)
 
                 ! Compute
-                call plfce%Evaluate(xq, yq, 0, 0, vqgFW)
+                call plfce%Evaluate(xq, yq, derivx, derivy, vqgFW)
                 dvqFW = (vqgFW - vqg)/d(i)
 
                 ! Backward
@@ -712,7 +796,7 @@ module GOAT_tests
                 call plfce%Initialize(plfce%ps)
 
                 ! Compute
-                call plfce%Evaluate(xq, yq, 0, 0, vqgBW)
+                call plfce%Evaluate(xq, yq, derivx, derivy, vqgBW)
                 dvqBW = (vqgBW - vqg)/(-d(i))
 
                 ! Compute errors
@@ -720,15 +804,23 @@ module GOAT_tests
                 eabsFW = abs(dvqg - dvqFW)
                 eabsBW = abs(dvqg - dvqBW)
                 eabsC = abs(dvqG - 0.5*(dvqFW + dvqBW))
+                eabsdir = eabsFW 
+                ereldir = eabsFW/dvqg
+                where (eabsFW > eabsBW)
+                    eabsdir = eabsBW 
+                    ereldir = eabsBW/dvqg
+                end where
+                
                 erelFW = eabsFW/dvqg 
                 erelBW = eabsBW/dvqg 
                 erelC = eabsC/dvqg 
             
 
                 ! Print out information
-                print *, d(i), maxval(eabsFW), maxval(eabsBW), &
-                    maxval(eabsC), maxval(erelFW), maxval(erelBW), &
-                    maxval(erelC), maxloc(erelC)
+                print *, d(i), maxval(eabsdir), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(abs(ereldir)), maxval(abs(erelFW)), &
+                    maxval(abs(erelBW)), maxval(abs(erelC)), maxloc(abs(erelC))
+
 
                 ! Update
                 !-------
@@ -746,8 +838,13 @@ module GOAT_tests
 
         ! Closed approximation
         !---------------------
+        ! Set derivatives
+        derivx = 0
+        derivy = 0
+
         ! Set finite differences & values
         d = [1e-8, 1e-6, 1e-4, 1e-2]
+        !varind = [1, 5, 2, 6, 3, 7, 4, 8]
         varind = [1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15, 8, 16]
 
         ! Extract polygonset coordinates
@@ -757,8 +854,8 @@ module GOAT_tests
 
         ! Create a meshgrid for polygon evaluation, limited by polygon
         ! extent
-        nxm = 100
-        nym = 100
+        nxm = 6
+        nym = 6
         allocate(xq(nxm*nym), yq(nxm*nym), vqg(nxm*nym), vqgFW(nxm*nym), &
             vqgBW(nxm*nym))
         maxxm = maxval(xp)+0.1
@@ -773,7 +870,7 @@ module GOAT_tests
 
         ! Evaluate implemented derivatives
         call plfca%Evaluate(xq, yq, &
-            0, 0, vqg, 'polygonsetcoordinates', valuesg, dplfcadvar)
+            derivx, derivy, vqg, 'polygonsetcoordinates', valuesg, dplfcadvar)
 
         ! Compute finite differences (crude)
         print *, 'Evaluating FD for closed approximation polygonset (variable: polygonsetcoordinates)'
@@ -781,7 +878,7 @@ module GOAT_tests
         do j = 1, size(varind)
             ! Output
             print *, 'variable: ', varind(j)
-            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            print *, '| step size | eabsdir | eabsFW | eabsBW | eabsC | ereldir | erelFW | erelBW | erelC | indrelC |'
             
             ! Extract value of implemented derivative
             call dplfcadvar%ExtractColumnFull(dvqg, varind(j))
@@ -798,7 +895,7 @@ module GOAT_tests
                 call plfca%Initialize(plfca%ps)
 
                 ! Compute
-                call plfca%Evaluate(xq, yq, 0, 0, vqgFW)
+                call plfca%Evaluate(xq, yq, derivx, derivy, vqgFW)
                 dvqFW = (vqgFW - vqg)/d(i)
 
                 ! Backward
@@ -813,7 +910,7 @@ module GOAT_tests
                 call plfca%Initialize(plfca%ps)
 
                 ! Compute
-                call plfca%Evaluate(xq, yq, 0, 0, vqgBW)
+                call plfca%Evaluate(xq, yq, derivx, derivy, vqgBW)
                 dvqBW = (vqgBW - vqg)/(-d(i))
 
                 ! Compute errors
@@ -824,12 +921,18 @@ module GOAT_tests
                 erelFW = eabsFW/dvqg 
                 erelBW = eabsBW/dvqg 
                 erelC = eabsC/dvqg 
+                eabsdir = eabsFW 
+                ereldir = eabsFW/dvqg
             
+                where (eabsFW > eabsBW)
+                    eabsdir = eabsBW 
+                    ereldir = eabsBW/dvqg
+                end where
 
                 ! Print out information
-                print *, d(i), maxval(eabsFW), maxval(eabsBW), &
-                    maxval(eabsC), maxval(erelFW), maxval(erelBW), &
-                    maxval(erelC), maxloc(erelC)
+                print *, d(i), maxval(eabsdir), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(ereldir), maxval(abs(erelFW)), maxval(abs(erelBW)), &
+                    maxval(abs(erelC)), maxloc(abs(erelC))
 
                 ! Update
                 !-------
