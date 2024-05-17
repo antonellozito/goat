@@ -777,12 +777,12 @@ module mod_polygon
                 p   => polygonset%polygons)
 
         ! Check if multiple polygons are present
-        if (np > 1) then 
-            ! Issue warning
-            call PolygonWarningHandler('OrientNestedClosedPolygons: ' // &
-            'sorting part not yet verified for more than one vessel ' // &
-            'polygon, proceed with caution')
-        end if 
+        !if (np > 1) then 
+        !    ! Issue warning
+        !    call PolygonWarningHandler('OrientNestedClosedPolygons: ' // &
+        !    'sorting part not yet verified for more than one vessel ' // &
+        !    'polygon, proceed with caution')
+        !end if 
 
         ! Exit in trivial cases
         if (np == 0) then 
