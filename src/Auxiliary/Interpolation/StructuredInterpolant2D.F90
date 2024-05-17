@@ -113,6 +113,8 @@ module StructuredInterpolant2D
         ! Derivatives
         procedure :: EvaluateDiffCoef2Val     => EvaluateCoefficientDerivativesUniformStructured
         procedure :: EvaluateDiffInterp2Coef  => EvaluateInterpolantDerivativesUniformStructured
+        procedure :: EvaluateDiffInterp2Val   => EvaluateDerivativesVq2VinitUniformStructured
+
         ! Deallocate
         procedure :: Deallocate => DeallocateStructuredInterpolant2D
 
@@ -691,10 +693,10 @@ module StructuredInterpolant2D
                         vecind = l*(C + 1) + k
 
                         ! Compute
-                        vec(1+vecind*4) = fvals(i, j, termind+1);
-                        vec(2+vecind*4) = fvals(i+1, j, termind+1);
-                        vec(3+vecind*4) = fvals(i+1, j+1, termind+1);
-                        vec(4+vecind*4) = fvals(i, j+1, termind+1);
+                        vec(1+vecind*4) = fvals(i, j, termind+1)
+                        vec(2+vecind*4) = fvals(i+1, j, termind+1)
+                        vec(3+vecind*4) = fvals(i+1, j+1, termind+1)
+                        vec(4+vecind*4) = fvals(i, j+1, termind+1)
                     end do 
                 end do 
 
@@ -1723,6 +1725,646 @@ module StructuredInterpolant2D
         !=============
         deallocate(xqn, yqn, term, ind)
         end associate
+
+    end subroutine
+
+    ! Derivatives of query values w.r.t. initial values
+    subroutine EvaluateDerivativesVq2VinitUniformStructured(&
+        interp, xq, yq, derivx, derivy, dvqdv)
+
+        ! Description
+        !============
+        ! Routine that directly evaluates the derivative (jacobian) of 
+        ! the values queried on points xq, yq (vq) w.r.t. the initial
+        ! values used to set up the interpolant v (in structured format)
+        ! In theory this can be computed by multiplying the derivatives
+        ! dvqda*dadv obtained by other subroutines, but dadv is typically
+        ! (very) memory-intensive. Here, we exploit the fact that
+        ! we can compute the derivative contributions for each point 
+        ! separately, since it only depends on the interpolant cell in 
+        ! which the point lies. The number of entries in dvqdv should 
+        ! therefore be nq*na. Since na is small (< 100) and constant,
+        ! the number of non-zeros only scales with nq.  Since:
+        !
+        !       vq = sum_i sum_j a_ij(b(v)) xq^i yq^j 
+        !       a_k = (A^-1 b(v))_(k, :)
+        !       b(v) = B^-1 v 
+        !
+        ! we have that 
+        !
+        !       dvqdv = sum_i sum_j (A^-1)_(k, :) B^-1 xq^i yq^j  
+        !
+        ! Since A is the same for each cell, A^-1 can be inverted once. 
+        ! B is the same in the bulk of the domain for each cell, 
+        ! but varies for most vertices near the edges of the domain. 
+        ! For these edges, B^-1 is recomputed from scratch. Given that 
+        ! most query points will likely lie within the domain, this 
+        ! additional cost should be small. 
+
+        ! The algorithm proceeds as follows:
+        ! 0) The necessary 'state' variables are reconstructed (
+        ! sampling grid on which v was evaluated, A^-1, B^-1 for bulk
+        ! vertices, ...)
+        ! 1) For each query point, A^-1*B^-1 is computed and added to the
+        ! linearization matrix 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredInterpolant2DUDT)       :: interp 
+        real(R8), intent(in)                    :: xq(:), yq(:)
+        integer(I8), intent(in)                 :: derivx, derivy
+        type(MySparseUDT), intent(out)          :: dvqdv
+
+        ! Auxiliary
+        integer(I8)                             :: nq, nxv, nyv, na, &
+            ixlb, ixub, iylb, iyub, nterms, flag, nvals, info, termind, &
+            vecind
+        integer(I8), allocatable, dimension(:)  :: row, col, stencil, &
+            ix, iy, ic, ix_orig, iy_orig, ic_orig, xstencil, ystencil, &
+            valindx, valindy, xstencil0, ystencil0
+        integer(I8), allocatable, dimension(:, :)   :: temprow, tempcol, &
+            tempvertind, vertind, tvID
+            
+        real(R8)                                :: xqn, yqn, dxmean, &
+            dymean, tempfac
+        real(R8), allocatable, dimension(:)     :: val, &
+            eiga, prefac, allfactorials, tempb, sol
+        real(R8), allocatable, dimension(:, :)  :: temp, tempval, A, &
+            Ainv, B, Binv, Binvbulk
+
+        logical, allocatable                    :: inbulk(:, :)
+
+        ! Loop
+        integer(I8)                             :: i, j, k, l, indder, &
+            derivind, ii, jj, cc, iq
+
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            refx        => interp%refx,     &
+            refy        => interp%refy,     &
+            refdx       => interp%refdx,    &
+            refdy       => interp%refdy,    &
+            M           => interp%M,        &
+            C           => interp%C,        &
+            xgv         => interp%xgv,      &
+            ygv         => interp%ygv,      &
+            n           => interp%n         &
+            )
+
+        ! Compute dimensions
+        nq = size(xq)
+        nxv = size(interp%xgv)
+        nyv = size(interp%ygv)
+        na = size(interp%a, 2)
+        nvals = (M+2)**2
+
+        ! Initialize linearization
+        allocate(row(nq*nvals), col(nq*nvals), val(nq*nvals))
+        
+        ! Compute preliminaries
+        !======================
+        ! Determine stencil for derivative approximation in vertices
+        allocate(stencil(M+1))
+        if (mod(M, 2) == 0) then 
+            ! Even
+            do i = 0, M
+                stencil(i+1) = i-M/2
+            end do
+        else 
+            ! Uneven
+            do i = 0, M
+                stencil(i+1) = i-(M+1)/2
+            end do
+        end if
+
+        ! Set boundary indices
+        ixlb = abs(stencil(1)) + 1
+        ixub = nxv - abs(stencil(M+1)) 
+        iylb = abs(stencil(1)) + 1
+        iyub = nyv - abs(stencil(M+1)) 
+
+        ! Determine some fixed values
+        dxmean = sum(xgv(2:nxv) - xgv(1:nxv-1))/(nxv-1)
+        dymean = sum(ygv(2:nyv) - ygv(1:nyv-1))/(nyv-1)
+
+        ! Initialize temporary variables
+        allocate(tempval(M+2, M+2), tempcol(M+2, M+2), tempvertind(M+2, M+2), &
+            temp(M+1, M+1))
+
+        ! Initialize basis function arrays
+        allocate(eiga((n+1)**2), allfactorials((n+1)**2))
+
+        ! Determine which points lie in the bulk of the domain
+        allocate(inbulk(size(xgv), size(ygv)))
+        inbulk = .false. 
+        inbulk(ixlb:ixub, iylb:iyub) = .true. 
+
+        ! Determine vertex index
+        vertind = reshape([(i, i = 1, nxv*nyv)], [nxv, nyv])
+
+        ! Determine factorial prefactors
+        allfactorials = 0
+        do i = derivx, n 
+            do j = derivy, n 
+                ! Compute
+                indder = j*(n+1) + i + 1
+                allfactorials(indder) = real(MyFactorial(i), kind=R8)/&
+                    real(MyFactorial(i-derivx), kind = R8)*&
+                    real(MyFactorial(j), kind=R8)/real(MyFactorial(j-derivy), kind = R8)
+            end do
+        end do
+        
+        ! Determine A^-1
+        !---------------
+        nterms = (2*(C+1))**2
+        allocate(A(nterms, nterms), tempb(nterms))
+        A       = 0 
+        Ainv    = A 
+        tempb   = 0 ! doesn't matter
+        sol     = tempb
+
+        ! Loop over all derivatives
+        derivind = 0
+        do j = 0, C 
+            do i = 0, C
+                ! Construct coefficients of the derivative of this 
+                ! polynomial
+                do l = j, 2*(C+1)-1
+                    do k = i, 2*(C+1)-1
+                        ! Factorial prefactor
+                        tempfac = real(MyFactorial(l), kind=R8)/real(MyFactorial(l-j), kind = R8)*&
+                            real(MyFactorial(k), kind=R8)/real(MyFactorial(k-i), kind = R8)
+                        
+                        ! Index of the term
+                        termind = l*(2*(C+1)) + k + 1
+        
+                        ! Contribution of each point
+                        A(1+4*derivind, termind) = tempfac*0**(k - i)*0**(l - j);
+                        A(2+4*derivind, termind) = tempfac*1**(k - i)*0**(l - j);
+                        A(3+4*derivind, termind) = tempfac*1**(k - i)*1**(l - j);
+                        A(4+4*derivind, termind) = tempfac*0**(k - i)*1**(l - j);
+                    end do
+                end do
+
+                ! Update counter
+                derivind = derivind + 1
+            end do
+        end do
+
+        ! Compute A^-1 
+        call SolveDenseLinearSystemDI(A, tempb, sol, flag, Ainv)
+        deallocate(A, tempb, sol)
+
+        ! Determine B^-1 in the bulk of the domain
+        !-----------------------------------------
+        ! Initialize
+        nterms = (M + 1)**2
+        allocate(A(nterms, nterms), tempb(nterms), sol(nterms))
+        tempb   = 0
+        sol     = 0
+        Binvbulk = A
+        
+        ! Loop to compute 'weights' of coefficients
+        xstencil = stencil 
+        ystencil = stencil 
+        k = 1
+        do j = 1, M+1
+            do i = 1, M+1
+                ! Compute coefficient matrix entry
+                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []);
+                l = 1
+                do jj = 0, M
+                    do ii = 0, M
+                        A(k, l) = xstencil(i)**ii * ystencil(j)**jj
+                        l = l + 1
+                    end do 
+                end do
+
+                ! Update
+                k = k + 1
+            end do
+        end do
+
+        ! Invert
+        call SolveDenseLinearSystemDI(A, tempb, sol, info, Binvbulk)
+        
+        ! Compute prefactor
+        allocate(prefac((M+1)**2))
+        k = 1
+        do j = 0, M
+            do i = 0, M 
+                ! Compute
+                prefac(k) = real(int(MyFactorial(i)*MyFactorial(j), kind=I16), kind=R8) & 
+                    /(dxmean**i * dymean**j)
+
+                ! Update counter
+                k = k + 1
+            end do
+        end do
+
+        ! Determine cell indices in matrix and linear format
+        call GetIndex(xq, yq, xgv, ygv, ix, iy)
+        call GetIndex(xq, yq, xgv, ygv, ic) 
+
+        ! Hedge for out of bounds
+        ic_orig = ic 
+        ix_orig = ix 
+        iy_orig = iy 
+        where (ic == 0) ic = 1
+        where (ix == 0) ix = 1
+        where (iy == 0) iy = 1
+        
+
+        ! Compute linearization
+        !======================
+        ! Loop over all query points
+        cc = 0
+        nterms = (2*(C+1))**2
+        allocate(tvID(M+2, M+2))
+        do iq = 1, nq
+
+            ! Initialize 
+            !-----------
+            ! Values
+            tempval = 0
+            tvID = 0
+
+            ! Normalized coordinates
+            xqn = (xq(iq) - refx(ic(iq)))/refdx(ic(iq))
+            yqn = (yq(iq) - refy(ic(iq)))/refdy(ic(iq))
+
+            ! Shape function vector 
+            eiga = 0
+            k = 1
+            do i = derivx, n 
+                do j = derivy, n
+                    indder = j*(n+1) + i + 1
+                    eiga(indder) = allfactorials(indder)* &
+                        (xqn)**(i - derivx)*yqn**(j - derivy)
+                end do
+            end do
+
+            ! Contribution of vertex (ix, iy)
+            !--------------------------------
+            ! Determine B^-1
+            if (inbulk(ix(iq), iy(iq))) then 
+                ! Just reuse bulk inverse
+                Binv = Binvbulk 
+                xstencil = stencil + ix(iq)
+                ystencil = stencil + iy(iq)
+            else
+                ! Compute on the fly
+                call ComputeCoefficientMatrix(stencil, ix(iq), iy(iq), B, Binv, &
+                    M, xstencil, ystencil, nxv, nyv)
+                xstencil = xstencil + ix(iq)
+                ystencil = ystencil + iy(iq)
+            end if 
+
+            ! Save original stencil for comparison
+            xstencil0 = xstencil
+            ystencil0 = ystencil
+
+            ! Set vertex ID
+            tvID(1:M+1, 1:M+1) = vertind(xstencil, ystencil)
+
+            ! Loop 
+            temp = 0
+            do ii = 1, na
+                do l = 0, C 
+                    do k = 0, C 
+                        termind = l*(M + 1) + k
+                        vecind = l*(C + 1) + k
+                        temp = temp + reshape(Ainv(ii, 1+vecind*4)*Binv(termind+1, :) &
+                            *prefac(termind+1)*eiga(ii)/ &
+                            (refdx(ic(iq))**derivx * refdy(ic(iq))**derivy), &
+                            [M+1, M+1])*(dxmean**k)*(dymean**l)
+                    end do 
+                end do
+            end do
+            !do k = 1, na 
+            !    do l = 1, (M + 1)**2
+            !        temp = temp + reshape(Ainv(k, l)*Binv(l, :) &
+            !            *prefac*eiga(k)/ &
+            !            (refdx(ic(iq))**derivx * refdy(ic(iq))**derivy), &
+            !            [M+1, M+1]) 
+            !    end do
+            !end do
+
+            ! Add
+            tempval(1:M+1, 1:M+1) = tempval(1:M+1, 1:M+1) + temp
+
+            ! Contribution of vertex (ix+1, iy)
+            !--------------------------------
+            ! Set value indices
+            valindx = [(k, k = 2, M+2)]
+            valindy = [(k, k = 1, M+1)]
+
+            ! Determine B^-1
+            if (inbulk(ix(iq)+1, iy(iq))) then 
+                ! Just reuse bulk inverse
+                Binv = Binvbulk 
+                xstencil = stencil + ix(iq) + 1
+                ystencil = stencil + iy(iq)
+            
+                
+            else
+                ! Compute on the fly
+                call ComputeCoefficientMatrix(stencil, ix(iq)+1, iy(iq), B, Binv, &
+                    M, xstencil, ystencil, nxv, nyv)
+                xstencil = xstencil + ix(iq) + 1
+                ystencil = ystencil + iy(iq)
+
+            end if 
+
+            ! Check stencil
+            if (xstencil(1) == xstencil0(1)) then 
+                valindx = valindx - 1
+            end if 
+
+            ! Check
+            if (.not. all(tvID(valindx(1:M), valindy) == vertind(xstencil(1:M), ystencil))) then 
+                ! Stop, this shouldn't happen
+                call gdErrorHandler('Implementation bug')
+            else
+                tvID(valindx, valindy) = vertind(xstencil, ystencil)
+            end if
+
+            ! Loop
+             
+            temp = 0
+            do ii = 1, na
+                do l = 0, C 
+                    do k = 0, C 
+                        termind = l*(M + 1) + k
+                        vecind = l*(C + 1) + k
+                        temp = temp + reshape(Ainv(ii, 2+vecind*4)*Binv(termind+1, :) &
+                            *prefac(termind+1)*eiga(ii)/ &
+                            (refdx(ic(iq))**derivx * refdy(ic(iq))**derivy), &
+                            [M+1, M+1])*(dxmean**k)*(dymean**l)
+                    end do 
+                end do
+            end do
+            !do k = 1, na 
+            !    do l = 1, (M + 1)**2
+            !        temp = temp + reshape(Ainv(k, l)*Binv(l, :) &
+            !            *prefac*eiga(k)/ &
+            !            (refdx(ic(iq))**derivx * refdy(ic(iq))**derivy), &
+            !            [M+1, M+1]) 
+            !    end do
+            !end do
+
+            ! Add
+            tempval(valindx, valindy) = tempval(valindx, valindy) + temp
+
+            ! Contribution of vertex (ix+1, iy+1)
+            !--------------------------------
+            ! Set value indices
+            valindx = [(k, k = 2, M+2)]
+            valindy = [(k, k = 2, M+2)]
+
+            ! Determine B^-1
+            if (inbulk(ix(iq)+1, iy(iq)+1)) then 
+                ! Just reuse bulk inverse
+                Binv = Binvbulk 
+                xstencil = stencil + ix(iq) + 1
+                ystencil = stencil + iy(iq) + 1
+            else
+                ! Compute on the fly
+                call ComputeCoefficientMatrix(stencil, ix(iq)+1, iy(iq)+1, B, Binv, &
+                    M, xstencil, ystencil, nxv, nyv)
+                xstencil = xstencil + ix(iq) + 1
+                ystencil = ystencil + iy(iq) + 1
+                
+            end if 
+
+            ! Check stencil
+            if (xstencil(1) == xstencil0(1)) then 
+                valindx = valindx - 1
+            end if 
+            if (ystencil(1) == ystencil0(1)) then 
+                valindy = valindy - 1
+            end if 
+
+            ! Check
+            if (.not. all(tvID(valindx(1:M), valindy(1:M)) == vertind(xstencil(1:M), ystencil(1:M)))) then 
+                ! Stop, this shouldn't happen
+                call gdErrorHandler('Implementation bug')
+            else
+                tvID(valindx, valindy) = vertind(xstencil, ystencil)
+            end if
+
+            ! Loop 
+            temp = 0
+            do ii = 1, na
+                do l = 0, C 
+                    do k = 0, C 
+                        termind = l*(M + 1) + k
+                        vecind = l*(C + 1) + k
+                        temp = temp + reshape(Ainv(ii, 3+vecind*4)*Binv(termind+1, :) &
+                            *prefac(termind+1)*eiga(ii)/ &
+                            (refdx(ic(iq))**derivx * refdy(ic(iq))**derivy), &
+                            [M+1, M+1])*(dxmean**k)*(dymean**l)
+                    end do 
+                end do
+            end do
+            !do k = 1, na 
+            !    do l = 1, (M + 1)**2
+            !        temp = temp + reshape(Ainv(k, l)*Binv(l, :) &
+            !            *prefac*eiga(k)/ &
+            !            (refdx(ic(iq))**derivx * refdy(ic(iq))**derivy), &
+            !            [M+1, M+1]) 
+            !    end do
+            !end do
+
+
+            ! Add
+            tempval(valindx, valindy) = tempval(valindx, valindy) + temp
+
+            ! Contribution of vertex (ix, iy+1)
+            !--------------------------------
+            ! Set value indices
+            valindx = [(k, k = 1, M+1)]
+            valindy = [(k, k = 2, M+2)]
+
+            ! Determine B^-1
+            if (inbulk(ix(iq), iy(iq)+1)) then 
+                ! Just reuse bulk inverse
+                Binv = Binvbulk 
+                xstencil = stencil + ix(iq) 
+                ystencil = stencil + iy(iq) + 1
+            else
+                ! Compute on the fly
+                call ComputeCoefficientMatrix(stencil, ix(iq), iy(iq)+1, B, Binv, &
+                    M, xstencil, ystencil, nxv, nyv)
+                xstencil = xstencil + ix(iq)
+                ystencil = ystencil + iy(iq) + 1
+
+            end if 
+
+            ! Check stencil
+            if (ystencil(1) == ystencil0(1)) then 
+                valindy = valindy - 1
+            end if 
+
+            ! Check
+            if (.not. all(tvID(valindx, valindy(1:M)) == vertind(xstencil, ystencil(1:M)))) then 
+                ! Stop, this shouldn't happen
+                call gdErrorHandler('Implementation bug')
+            else
+                tvID(valindx, valindy) = vertind(xstencil, ystencil)
+            end if
+
+            ! Loop 
+            temp = 0
+            do ii = 1, na
+                do l = 0, C 
+                    do k = 0, C 
+                        termind = l*(M + 1) + k
+                        vecind = l*(C + 1) + k
+                        temp = temp + reshape(Ainv(ii, 4+vecind*4)*Binv(termind+1, :) &
+                            *prefac(termind+1)*eiga(ii)/ &
+                            (refdx(ic(iq))**derivx * refdy(ic(iq))**derivy), &
+                            [M+1, M+1])*(dxmean**k)*(dymean**l)
+                    end do 
+                end do
+            end do 
+            !do k = 1, na 
+            !    do l = 1, (M + 1)**2
+            !        temp = temp + reshape(Ainv(k, l)*Binv(l, :) &
+            !            *prefac*eiga(k)/ &
+            !            (refdx(ic(iq))**derivx * refdy(ic(iq))**derivy), &
+            !            [M+1, M+1]) 
+            !    end do
+            !end do
+
+
+            ! Add
+            tempval(valindx, valindy) = tempval(valindx, valindy) + temp
+
+            ! Add 
+            !----
+            ! Add row, col, val 
+            where (tvID == 0) 
+                tvID = 1
+                tempval = 0
+            end where
+            row(cc+1:cc+nvals) = iq
+            col(cc+1:cc+nvals) = reshape(tvID, [nvals])
+            val(cc+1:cc+nvals) = reshape(tempval, [nvals])
+
+            ! Update counter
+            cc = cc + nvals
+
+        end do
+        
+        ! Check
+        if (cc /= nq*nvals) then 
+            call gdErrorHandler('Implementation bug')
+        end if
+
+        ! Construct sparse matrix
+        dvqdv = ConstructMySparse(row, col, val, nq, nxv*nyv)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
+    subroutine ComputeCoefficientMatrix(stencil, ix, iy, B, Binv, M, &
+        xstencil, ystencil, nxv, nyv)
+
+        ! Description
+        !============
+        ! Auxiliary routine to compute coefficient matrix given a certain
+        ! stencil (and its inverse)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)                 :: stencil(:), ix, iy, M, &
+            nxv, nyv
+        real(R8), intent(out), allocatable      :: B(:, :), Binv(:, :)
+           
+
+        ! Auxiliary
+        integer(I8)                             :: flag, dx, dy, info, &
+            nterms
+        integer(I8), intent(out), allocatable   :: xstencil(:), ystencil(:)
+
+        real(R8), allocatable                   :: tempb(:), sol(:)
+            
+
+        ! Loop
+        integer(I8)                             :: i, j, ii, jj, k, l
+
+        ! Initialize
+        !===========
+        ! Check allocation status
+        if (allocated(B)) then 
+            deallocate(B)
+        end if
+        if (allocated(Binv)) then 
+            deallocate(Binv)
+        end if 
+
+        ! Allocate & initialize
+        nterms = (M + 1)**2
+        allocate(B(nterms, nterms), Binv(nterms, nterms), tempb(nterms), &
+            sol(nterms))
+        B       = 0
+        Binv    = 0
+        sol     = 0
+        tempb   = 0
+
+        ! Determine stencil
+        !==================
+        xstencil = stencil 
+        ystencil = stencil
+        if (any( (stencil + ix) <= 0)) then 
+            dx = minval(stencil + ix)-1
+            xstencil = stencil - dx 
+        elseif (any( (stencil + ix) > nxv)) then 
+            dx = nxv - maxval(stencil + ix)
+            xstencil = stencil + dx 
+        end if
+        if (any( (stencil + iy) <= 0)) then 
+            dy = minval(stencil + iy)-1
+            ystencil = stencil - dy 
+        elseif (any( (stencil + iy) > nyv)) then 
+            dy = nyv - maxval(stencil + iy)
+            ystencil = stencil + dy 
+        end if
+
+        ! Compute
+        !========
+        ! Loop to compute 'weights' of coefficients
+        k = 1
+        do j = 1, M+1
+            do i = 1, M+1
+                ! Compute coefficient matrix entry
+                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []);
+                l = 1
+                do jj = 0, M
+                    do ii = 0, M
+                        B(k, l) = xstencil(i)**ii * ystencil(j)**jj
+                        l = l + 1
+                    end do 
+                end do
+
+                ! Update
+                k = k + 1
+            end do
+        end do
+
+        ! Invert
+        call SolveDenseLinearSystemDI(B, tempb, sol, info, Binv)
+        
 
     end subroutine
     
