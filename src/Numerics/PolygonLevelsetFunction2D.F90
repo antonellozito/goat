@@ -1150,7 +1150,7 @@ module PolygonLevelsetFunction2D
             onedge(:), te(:), tv(:)
 
         ! Loop
-        integer(I8)                             :: i, iq, ccv, cce
+        integer(I8)                             :: i, iq, ccv, cce, cnv
 
         ! Data
         inf = ieee_value(inf, ieee_positive_inf)
@@ -1215,16 +1215,18 @@ module PolygonLevelsetFunction2D
             allocate(psvert(np), psedges(npe, 2))
             ccv = 0
             cce = 0
+            cnv = 0
             do i = 1, plf%ps%np 
                 ! Add
                 ne = plf%ps%polygons(i)%ne 
-                psvert(ccv+1:ccv+ne+1) = plf%ps%polygons(i)%vert 
-                psedges(cce+1:cce+ne, 1) = plf%ps%polygons(i)%vert(1:ne)
-                psedges(cce+1:cce+ne, 2) = plf%ps%polygons(i)%vert(2:ne+1)
+                psvert(ccv+1:ccv+ne+1) = plf%ps%polygons(i)%vert + cnv
+                psedges(cce+1:cce+ne, 1) = plf%ps%polygons(i)%vert(1:ne) + cnv 
+                psedges(cce+1:cce+ne, 2) = plf%ps%polygons(i)%vert(2:ne+1) + cnv
 
                 ! Update counters
                 ccv = ccv + ne + 1
                 cce = cce + ne
+                cnv = cnv + plf%ps%polygons(i)%nv
             end do
 
             ! Initialize derivative structure (note: number values 
@@ -1298,7 +1300,7 @@ module PolygonLevelsetFunction2D
 
             indminv = minloc(abs(distvert), 1)
             fv = minval(abs(distvert))
-            tdistvert(iq) = distvert(indminv)
+            tdistvert(iq) = abs(distvert(indminv))
             tcrossprod(iq) = crossprod(indminv)
 
             signv = sign(myone, distvert(indminv))
@@ -1371,8 +1373,8 @@ module PolygonLevelsetFunction2D
                 end where
 
                 where (tv)
-                    dfdxp = sign(myones, tcrossprod)*(xp(vind) - xq)/(tdistvert)
-                    dfdyp = sign(myones, tcrossprod)*(yp(vind) - yq)/(tdistvert)
+                    dfdxp = sign(myones, tcrossprod)*(xp(vind) - xq)/(abs(tdistvert))
+                    dfdyp = sign(myones, tcrossprod)*(yp(vind) - yq)/(abs(tdistvert))
                 elsewhere 
                     dfdxp = 0
                     dfdyp = 0
@@ -1752,7 +1754,7 @@ module PolygonLevelsetFunction2D
         ! Auxiliary
         class(PolygonLevelsetFunction2DUDT), allocatable :: plfe
         type(MySparseUDT)                       :: dinterpda, dadvqinit, &
-             dvqinitdval
+             dvqinitdval, dvqdvqinit
         integer(I8)                             :: nx, ny
         real(R8), allocatable                   :: xg(:), &
             yg(:), vg(:), vg2D(:, :), xgv(:), ygv(:)
@@ -1801,23 +1803,28 @@ module PolygonLevelsetFunction2D
 
             ! Evaluate exact representation and its derivatives
             allocate(vg(size(xg, 1)*size(yg, 1)))
-            call plfe%Evaluate(xg, yg, 0, 0, vg, 'polygonsetcoordinates', &
+            call plfe%Evaluate(xg, yg, derivx, derivy, vg, 'polygonsetcoordinates', &
                 values, dvqinitdval)
 
             ! Reshape
             vg2D = reshape(vg, (/nx, ny/))
 
             ! Differentiate interpolant coefficient w.r.t. input values
-            call plf%interp%EvaluateDiffCoef2Val(xgv, ygv, vg2D, dadvqinit)
+            !call plf%interp%EvaluateDiffCoef2Val(xgv, ygv, vg2D, dadvqinit)
             ! Construct
             !call plf%interp%Construct(xgv, ygv, vg2D)
 
             ! Differentiate interpolant results w.r.t. coefficients
-            call plf%interp%EvaluateDiffInterp2Coef(xq, yq, derivx, derivy, vq, &
-                dinterpda)
+            !call plf%interp%EvaluateDiffInterp2Coef(xq, yq, derivx, derivy, vq, &
+            !   dinterpda)
+            
+               call plf%interp%EvaluateDiffInterp2Val(xq, yq, derivx, derivy, dvqdvqinit)
 
             ! Construct total derivative
-            dplfdvar = dinterpda*dadvqinit*dvqinitdval
+            !dplfdvar = dinterpda*dadvqinit
+            !dplfdvar = dplfdvar*dvqinitdval
+            
+               dplfdvar = dvqdvqinit*dvqinitdval
 
         case default
             
