@@ -97,7 +97,7 @@ subroutine GDtestdriver(goatoptions)
             call problem%UpdateProblemParameters([xv, yv], 'vesselcoordinates')
 
             ! Solve for new geomeatry
-            call optimizationdriver%solver%SolveOptimizationProblemKKT(problem)
+            call optimizationdriver%solver%SolveOptimizationProblem(problem)
 
             ! Write solution
             write(tempstring, '(I0.4, a)') i, trim(orig_writefilepath) 

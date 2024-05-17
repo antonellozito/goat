@@ -127,25 +127,45 @@ module optmod_optimizationengine
 
     ! Optimization solver
     !====================
-    type :: OptimizationSolverUDT
+    ! General abstract solver type
+    type, abstract :: OptimizationSolverUDT
 
-        ! Description
-        !============
         ! Defines the optimization solver and its numerics. It should 
         ! have a generic 'solve' method which acts on the optimization
         ! problem
         character(:), allocatable                   :: inputfilepath
         character(:), allocatable                   :: inputfileprefix
+
+    contains 
+
+        ! Initialization
+        procedure(InitializeOptimizationSolverINT), deferred :: &
+            Initialize
+
+        ! Solution procedure
+        procedure(SolveOptimizationProblemINT), deferred    :: &
+            SolveOptimizationProblem 
+
+    end type
+
+    ! KKT solver
+    type, extends(OptimizationSolverUDT) :: OptimizationSolverKKTUDT
+
+        ! Description
+        !============
+        ! KKT system based optimization solver. Contains additional
+        ! numerics fields and auxiliary routines
         type(NumKKTUDT)         :: numKKT
         type(numLSUDT)          :: numLS 
         type(NumNCPUDT)         :: numNCP
 
     contains 
 
+        ! Initialization
+        procedure ::    Initialize                  => InitializeKKTSolver
+
         ! Solution procedure using KKT solver
-        procedure ::    InitializeKKTSolver     => InitializeKKTSolver
-        procedure ::    SolveOptimizationProblemKKT &
-                        => SolveOptimizationProblemKKT
+        procedure ::    SolveOptimizationProblem    => SolveOptimizationProblemKKT
 
         ! Convergence checking
         procedure :: CheckConvergenceKKT 
@@ -174,7 +194,7 @@ module optmod_optimizationengine
         character(:), allocatable                   :: inputfilepath
         character(:), allocatable                   :: inputfileprefix
         class(OptimizationProblemUDT), allocatable  :: problem
-        type(OptimizationSolverUDT)                 :: solver
+        class(OptimizationSolverUDT), allocatable   :: solver
 
     contains
 
@@ -213,7 +233,7 @@ module optmod_optimizationengine
         !============
         ! Function type for evaluating and checking the cost function.
         class(OptimizationProblemUDT), allocatable      :: problem 
-        type(OptimizationSolverUDT)                     :: solver
+        class(OptimizationSolverUDT), allocatable       :: solver
 
         ! Lagrange multipliers
         real(R8), allocatable, dimension(:)             :: lambda, mu 
@@ -464,6 +484,19 @@ module optmod_optimizationengine
 
         end subroutine
 
+        ! Solver initialization
+        subroutine InitializeOptimizationSolverINT(solver)
+            import :: OptimizationSolverUDT
+            class(OptimizationSolverUDT)    :: solver 
+        end subroutine
+
+        ! Solver driver
+        subroutine SolveOptimizationProblemINT(solver, problem)
+            import :: OptimizationSolverUDT, OptimizationProblemUDT 
+            class(OptimizationSolverUDT)    :: solver 
+            class(OptimizationProblemUDt)   :: problem 
+        end subroutine
+
     end interface
 
     contains
@@ -513,12 +546,12 @@ module optmod_optimizationengine
         print *, 'reading optimization engine input from file: ' // optimizationengine%inputfilepath
         optimizationengine%solver%inputfilepath = optimizationengine%inputfilepath
         optimizationengine%solver%inputfileprefix = optimizationengine%inputfileprefix
-        call optimizationengine%solver%InitializeKKTSolver()
+        call optimizationengine%solver%Initialize()
 
         ! Solve
         !======
         ! Solve the optimization problem by calling the KKT solver
-        call optimizationengine%solver%SolveOptimizationProblemKKT( &
+        call optimizationengine%solver%SolveOptimizationProblem( &
             optimizationengine%problem)
 
     end subroutine
@@ -737,7 +770,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)                :: solver    
+        class(OptimizationSolverKKTUDT)             :: solver    
 
         ! Data
 
@@ -768,7 +801,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)                :: solver    
+        class(OptimizationSolverKKTUDT)             :: solver    
         class(OptimizationProblemUDT)               :: problem
     
         ! Loop variables
@@ -830,10 +863,7 @@ module optmod_optimizationengine
         dohessian   = .true. 
 
         ! Initialize the solver 
-        call solver%InitializeKKTSolver()
-
-        ! Initialize problem
-        allocate(problem%lambda(neq), problem%mu(nineq), problem%A(nineq))
+        call solver%Initialize()
 
         ! Initialize the monitor - only temporary here
         call problem%GetProblemDimensions(nphi, neq, nineq)
@@ -1154,7 +1184,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationSolverKKTUDT)     :: solver 
         type(MySparseUDT)                   :: hessL, hessL_copy
         integer(I8)                         :: nphi, neq, nineq
 
@@ -1214,7 +1244,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationSolverKKTUDT)     :: solver 
         real(R8), intent(in)                :: gradient(:)
         logical, intent(inout)              :: converged 
         real(R8), intent(out)               :: infnorm
@@ -1577,7 +1607,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationSolverKKTUDT)     :: solver 
         class(OptimizationProblemUDT)       :: problem 
         real(R8), allocatable               :: dx(:), lambda(:), mu(:), dphi(:)
         real(R8)                            :: alpha
@@ -1928,7 +1958,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationSolverKKTUDT)     :: solver 
 
         real(R8), intent(inout)             :: rhs(:) 
         type(MySparseUDT), intent(inout)    :: lhs 
@@ -2218,7 +2248,7 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(OptimizationProblemUDT)       :: problem 
-        type(OptimizationSolverUDT)         :: solver
+        class(OptimizationSolverUDT)        :: solver
         real(R8), allocatable               :: lambda(:), mu(:)
         logical                             :: checkgradient, &
             checkhessian

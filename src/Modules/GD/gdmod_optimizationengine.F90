@@ -176,15 +176,19 @@ module gdmod_optimizationengine
         ! Arguments
         class(OptimizationEngineGDUDT)      :: optimizationdriver 
 
-        ! Loop variables
+        ! Auxiliary
         type(OptimizationProblemGDUDT)      :: thisproblem
+        type(OptimizationSolverKKTUDT)      :: thissolver
 
         ! Data
 
-        ! Design variables
-        !=================
-        ! Set the design options
+        ! Initialize
+        !===========
+        ! Allocate the problem type
         allocate(optimizationdriver%problem, source=thisproblem)
+
+        ! Allocate the solver
+        allocate(optimizationdriver%solver, source=thissolver)
 
     end subroutine
 
