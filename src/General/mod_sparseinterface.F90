@@ -140,6 +140,7 @@ module mod_sparseinterface
 
     interface ConstructMySparse
         module procedure ConstructMySparseTriplet
+        module procedure ConstructMySparseFromFull
     end interface
 
     contains
@@ -208,6 +209,54 @@ module mod_sparseinterface
         sp%nrow = nrow 
         sp%ncol = ncol 
         sp%nval = size(val, 1)
+
+    end function
+
+    function ConstructMySparseFromFull(A) result(sp)
+
+        ! Description
+        !============
+        ! Construct a sparse matrix starting from a full matrix. Not 
+        ! really a lot of intended uses, but might be handy for some 
+        ! things. Zero values are excluded. Note that the resulting
+        ! 'sparse' matrix may be dense and hence require more 
+        ! storage than the initial full matrix...
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in), dimension(:, :)   :: A 
+        type(MySparseUDT)                       :: sp 
+
+        ! Auxiliary
+        integer(I8)                             :: nrow, ncol, nval 
+        integer(I8), allocatable, dimension(:)  :: row, col
+
+        real(R8), allocatable, dimension(:)     :: Avec
+
+        logical, allocatable, dimension(:)      :: nzvec
+
+        ! Loop
+        integer(I8)                             :: k
+
+        ! Construct
+        !==========
+        ! Get row and column dimensions, number of values
+        nrow = size(A, 1)
+        ncol = size(A, 2)
+        nval = count(A /= 0)
+
+        ! Get row and column indices
+        row = reshape(spread([(k, k = 1, nrow)], 2, ncol), [size(A)])
+        col = reshape(spread([(k, k = 1, ncol)], 1, nrow), [size(A)])
+
+        ! Construct matrix
+        Avec = reshape(A, [size(A)])
+        nzvec = Avec /= 0
+        call sp%Initialize(nrow, ncol, nval)
+        sp%row = pack(row, nzvec)
+        sp%col = pack(col, nzvec)
+        sp%val = pack(Avec, nzvec)
 
     end function
 
