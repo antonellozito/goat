@@ -26,7 +26,8 @@ module GOAT_tests
         ! Interpolant testing
         !call TestStructuredInterpolant2D()
         !call TestCSparse()
-        call TestPLF2D
+        !call TestPLF2D
+        call TestQPSolvers
 
     end subroutine
 
@@ -949,6 +950,206 @@ module GOAT_tests
         deallocate(xq, yq, vqg, vqgFW, vqgBW, xp, yp)
 
 
+
+    end subroutine
+
+    ! QP solvers
+    subroutine TestQPSolvers()
+
+        ! Description
+        !============
+        ! Test the different QP solvers by solving unconstrained, 
+        ! equality constrained, and inequality constrained problems. 
+        ! We take a very simple 2D quadratic problem (quadratic cost 
+        ! function, linear (in)equality constraints) with known 
+        ! solution. Normally, the equality constrained problems with 
+        ! direct solver should yield the exact solution up to machine
+        ! precision (we provide the exact hessian, which is assumed 
+        ! by the QP - otherwise we should do SQP/use a different solver)
+        !
+        ! The test problem is: 
+        !
+        !   min_x1,x2   0.5*( (x1 - x1*)^2 + (x2 - x2*)^2 ) 
+        !                   = 0.5* ( x1^2 + x2^2) - (x1x1* + x2x2*) + c
+        !   s.t.        (x1 - x1*) + (x2 - x2*) = 1
+        !               (x1 - x1*) - (x2 - x2*) <= -1
+        !
+        ! Note that we neglect the constant term c. 
+        ! For the unconstrained problem, the optimum lies at x1*, x2*.
+        ! For the equality constrained problem, lambda = -0.5 and 
+        ! x1 = 0.5 + x1*, x2 = 0.5 + x2*
+        ! For the full problem, x1 = x1*, x2 = 1 + x2*, lambda = -0.5, 
+        ! mu = 0.5
+
+        ! Modules & the usual
+        use optmod_qp
+        use mod_constants
+        use mod_sparseinterface
+        use mod_precision
+        use optmod_hessianapproximation
+
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+
+        ! Auxiliary
+        integer(I8)                             :: flag, maxit, &
+            verbosity
+
+        real(R8)                                :: x1s, x2s, tol 
+        real(R8), allocatable, dimension(:)     :: gradJ, b, c, x, &
+            lambda, mu, x0, lambda0, mu0, xe, lambdae, mue
+        real(R8), allocatable, dimension(:, :)  :: Bdinit, jacGd, jacHd
+
+        type(MySparseUDT)                       :: Bspinit, jacGsp, &
+            jacHsp
+        class(HessianApproximationUDT), allocatable     :: Bd, Bsp
+
+        ! Initialize
+        !===========
+        ! Display
+        call DisplayTestStart('TestQPSolvers')
+
+        ! Construct test problem
+        !=======================
+        ! Problem parameters
+        x1s = 1.0
+        x2s = 2.0
+
+        gradJ = [-x1s, -x2s]
+        b = [1 + x1s + x2s]
+        c = [-1 + x1s - x2s]
+
+        ! Solver parameters
+        maxit = 10
+        tol = 1e-8
+        verbosity = 2
+
+        ! Initial guess
+        x0 = [0, 0]*1.0
+        lambda0 = [0]*1.0
+        mu0 = [0]*1.0
+
+        ! Dense representation
+        Bdinit = reshape([1, 0, 0, 1]*1.0, [2, 2])
+        Bd = ConstructHessianApproximation('no', 2, Bdinit)  
+
+        jacGd = reshape([1, 1]*1.0, [1, 2])
+        jacHd = reshape([1, -1]*1.0, [1, 2])
+
+        ! Sparse representation
+        Bspinit = ConstructMySparse(Bdinit)
+        Bsp = ConstructHessianApproximation('no', 2, Bspinit)
+
+        jacGsp = ConstructMySparse(jacGd)
+        jacHsp = ConstructMySparse(jacHd)
+
+        ! Unconstrained problem
+        !----------------------
+        ! Print
+        print *, ' '
+        print *, 'testing unconstrained problem'
+
+        ! Set analytical solution
+        xe = [x1s, x2s]
+
+        ! Solve dense
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bd, gradJ, x, flag)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (dense): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+
+        ! Solve sparse
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bsp, gradJ, x, flag)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (sparse): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+
+        ! Equality constrained
+        !---------------------
+        ! Print
+        print *, ' '
+        print *, 'testing equality constrained problem'
+        
+
+        ! Set analytical solution
+        xe = [x1s + 0.5, x2s + 0.5]
+        lambdae = [-0.5]
+
+        ! Solve dense
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bd, gradJ, jacGd, b, x, lambda, flag)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (dense): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution lambda (dense): ', &
+            maxval(abs(lambda - lambdae)), maxval(abs(lambda - lambdae)/lambdae)
+
+        ! Solve sparse
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bsp, gradJ, jacGsp, b, x, lambda, flag)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (sparse): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution lambda (sparse): ', &
+            maxval(abs(lambda - lambdae)), maxval(abs(lambda - lambdae)/lambdae)
+
+        ! Inequality constrained
+        !-----------------------
+        ! Print
+        print *, ' '
+        print *, 'testing equality constrained problem'
+
+        ! Set analytical solution
+        xe = [x1s, x2s + 1]
+        lambdae = [-0.5]
+        mue = [0.5]
+
+        ! Solve dense
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bd, gradJ, jacGd, b, jacHd, c, x, lambda, &
+            mu, flag, maxit, tol, verbosity)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (dense): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution lambda (dense): ', &
+            maxval(abs(lambda - lambdae)), maxval(abs(lambda - lambdae)/lambdae)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution mu (dense): ', &
+            maxval(abs(mu - mue)), maxval(abs(mu - mue)/mue)
+
+        ! Solve sparse
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bsp, gradJ, jacGsp, b, jacHsp, c, x, lambda, &
+            mu, flag, maxit, tol, verbosity)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (sparse): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution lambda (sparse): ', &
+            maxval(abs(lambda - lambdae)), maxval(abs(lambda - lambdae)/lambdae)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution mu (dense): ', &
+            maxval(abs(mu - mue)), maxval(abs(mu - mue)/mue)
+
+
+        ! Housekeeping
+        !=============
+        ! Display
+        call DisplayTestEnd()
 
     end subroutine
 
