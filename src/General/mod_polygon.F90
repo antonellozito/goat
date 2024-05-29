@@ -159,28 +159,31 @@ module mod_polygon
         procedure, private  :: ConstructPolygonSetCoordinates
         procedure, private  :: ConstructPolygonSetFromPolygons
         procedure, private  :: ConstructPolygonSetFromEdges
+        procedure, private  :: ConstructPolygonSetCoordinatesNolabels
         generic :: Construct        => ConstructPolygonSetCoordinates, &
-            ConstructPolygonSetFromPolygons, ConstructPolygonSetFromEdges
+            ConstructPolygonSetFromPolygons, ConstructPolygonSetFromEdges, &
+            ConstructPolygonSetCoordinatesNolabels
 
         ! Operations
-        procedure :: SelfIntersections  => PolygonSetSelfIntersections
+        procedure :: SelfIntersections      => PolygonSetSelfIntersections
         procedure :: OrientNestedClosedPolygons
 
         ! Data access
         procedure, private  :: GetPolygonSetEdgesCoordinates, &
             GetPolygonSetEdgesIDs
-        generic   :: GetEdges           => GetPolygonSetEdgesCoordinates, &
+        generic   :: GetEdges               => GetPolygonSetEdgesCoordinates, &
             GetPolygonSetEdgesIDs
-        procedure :: GetNormals         => GetPolygonSetNormals
-        procedure :: GetTangents        => GetPolygonSetTangents
+        procedure :: GetNormals             => GetPolygonSetNormals
+        procedure :: GetTangents            => GetPolygonSetTangents
         procedure, private   :: GetPolygonSetVerticesCoordinates, &
             GetPolygonSetVerticesID
-        generic   :: GetVertices          => GetPolygonSetVerticesCoordinates, &
+        generic   :: GetVertices            => GetPolygonSetVerticesCoordinates, &
             GetPolygonSetVerticesID
-        procedure :: UpdateCoordinates    => UpdatePolygonSetVertexCoordinates
+        procedure :: GetLabels              => GetPolygonSetVertexLabels
+        procedure :: UpdateCoordinates      => UpdatePolygonSetVertexCoordinates
 
         ! I/O
-        procedure :: WriteData          => WritePolygonSetData        
+        procedure :: WriteData              => WritePolygonSetData        
 
     end type 
 
@@ -210,7 +213,7 @@ module mod_polygon
     !------------------------------------------------------------------!
 
     ! Construct the polygon set
-    subroutine ConstructPolygonSetCoordinates(polygonset, x, y)
+    subroutine ConstructPolygonSetCoordinates(polygonset, x, y, labels)
 
         ! Description
         !============
@@ -221,18 +224,25 @@ module mod_polygon
         ! is constructed separately, including all metric and logical
         ! data. 
 
+        ! Note: labels can be added (integer 2D array) to save other 
+        ! data. These labels are propagated to the subsequent polygons
+        ! and stored there locally. The labels do not need to contain
+        ! NaNs at polygon boundaries. 
+
         ! Declare variables
         !==================
         ! Arguments
         real(R8), allocatable, intent(in)   :: x(:), y(:) 
-        class(PolygonSetUDT), intent(inout)  :: polygonset 
+        integer(I8), intent(in)             :: labels(:, :)
+        class(PolygonSetUDT), intent(inout) :: polygonset 
 
         ! Auxiliary 
-        integer(I8)                     :: nnans, nx, ny
+        integer(I8)                     :: nnans, nx, ny, nl1, nl2
         integer(I8), allocatable        :: nanloc(:), startind(:), &
             endind(:), nvpp(:) 
 
         real(R8), allocatable           :: tempx(:), tempy(:)
+        integer(I8), allocatable        :: templabels(:, :)
 
         ! Loop
         integer(I8)                     :: i, k
@@ -243,9 +253,15 @@ module mod_polygon
         ! Compute and check sizes
         nx = size(x)
         ny = size(y)
+        nl1 = size(labels, 1)
+        nl2 = size(labels, 2)
         if (nx .ne. ny) then 
             ! Call the error handler
             call PolygonErrorHandler('x and y should have equal number of elements')
+        end if 
+        if (nx .ne. nl1) then 
+            ! Call error handles
+            call PolygonErrorHandler('labels should have equal number of elements as coordinates')
         end if 
 
         ! Count NaNs and check
@@ -287,17 +303,55 @@ module mod_polygon
         do i = 1, polygonset%np 
 
             ! Build polygon
-            allocate(tempx(nvpp(i)), tempy(nvpp(i)))
             tempx = x(startind(i):endind(i))
             tempy = y(startind(i):endind(i))
-            call polygonset%polygons(i)%Construct(tempx, tempy)
-            deallocate(tempx, tempy)
+            templabels = labels(startind(i):endind(i), :)
+            call polygonset%polygons(i)%Construct(tempx, tempy, templabels)
 
         end do 
 
         ! Housekeeping
         !=============
         deallocate(startind, endind, nvpp, nanloc)
+
+    end subroutine
+
+    ! Construct the polygon set (no labels)
+    subroutine ConstructPolygonSetCoordinatesNolabels(polygonset, x, y)
+
+        ! Description
+        !============
+        ! Construct a set of polygons from the given x and y 
+        ! coordinates. NaNs should be present to indicate different 
+        ! polygon pieces. First, the number of polygons are checked 
+        ! by computing the number of NaNs etc. Afterwards, each polygon
+        ! is constructed separately, including all metric and logical
+        ! data. 
+
+        ! Note: we simply call the routine with labels, but initialize
+        ! the labels to an empty array
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), allocatable, intent(in)   :: x(:), y(:) 
+        class(PolygonSetUDT), intent(inout)  :: polygonset 
+
+        ! Auxiliary 
+        integer(I8)                     :: nx
+        integer(I8), allocatable        :: labels(:, :)
+
+        ! Initialize
+        !===========
+        ! Set nx (dimension checks done in general routine)
+        nx = size(x)
+
+        ! Set labels
+        allocate(labels(nx, 0))
+
+        ! Call constructor
+        !=================
+        call polygonset%ConstructPolygonSetCoordinates(x, y, labels)
 
     end subroutine
 
@@ -1326,6 +1380,63 @@ module mod_polygon
 
     end subroutine
 
+    ! Get polygonset vertex labels
+    subroutine GetPolygonSetVertexLabels(polygonset, labels)
+
+        ! Description
+        !============
+        ! Return the polygonset vertex labels in the same sequence
+        ! as the vertex coordinates. Note that in general the number of
+        ! labels between polygons doesn't have to be the same. If this 
+        ! is the case, the labels that are returned are sized to the
+        ! maximum number of labels and non-used labels are filled with
+        ! zeros.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)            :: polygonset 
+        integer(I8), allocatable        :: labels(:, :)
+
+        ! Auxiliary
+        integer(I8)                     :: maxnl, nv 
+
+        ! Loop
+        integer(I8)                     :: i, lc
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(pol   => polygonset%polygons)
+
+        ! Compute maximal number of labels and number of vertices
+        maxnl = 0
+        nv = 0
+        do i = 1, polygonset%np 
+            maxnl = max(maxnl, size(pol(i)%labels, 2))
+            nv = nv + pol(i)%nv
+        end do 
+
+        ! Allocate
+        allocate(labels(nv, maxnl))
+
+        ! Extract labels
+        !===============
+        lc = 0
+        do i = 1, polygonset%np 
+            ! Assign
+            labels(lc+1:lc+pol(i)%nv, 1:size(pol(i)%labels, 2)) = &
+                pol(i)%labels
+
+            ! Update counter
+            lc = lc + pol(i)%nv 
+        end do
+
+        ! Housekeeping
+        !=============
+        end associate 
+
+    end subroutine
 
     ! Write polygonset vertex data
     subroutine WritePolygonSetData(polygonset, filepath)
