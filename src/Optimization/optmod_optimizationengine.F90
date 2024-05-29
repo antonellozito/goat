@@ -176,8 +176,35 @@ module optmod_optimizationengine
         ! Relaxation of KKT system
         procedure :: RelaxKKTSystem
 
-        ! Step length computation
-        procedure :: ComputeStepLength
+    end type
+
+    ! Quasi-Newton solver 
+    type, extends(OptimizationSolverUDT) :: OptimizationSolverQNUDT
+
+        ! Description
+        !============  
+        ! Quasi-Newton solver that uses approximate Hessian to compute
+        ! the step direction. 
+
+        ! Numerics
+        type(NumQNUDT)          :: numQN
+        type(numLSUDT)          :: numLS
+        
+        ! Hessian approximation
+        !class(HessianApprximationUDT)   :: hessian
+
+    contains
+
+        ! Initialization
+        procedure ::    Initialize                  => InitializeQNSolver
+
+        ! Solution procedure using QN solver
+        procedure ::    SolveOptimizationProblem    => SolveOptimizationProblemQN
+
+        ! Convergence checking
+        procedure :: CheckConvergenceQN 
+
+        ! Hessian 
 
     end type
 
@@ -755,7 +782,7 @@ module optmod_optimizationengine
     end subroutine
     
     !------------------------------------------------------------------!
-    !                       OPTIMIZATION SOLVER                        !
+    !                     KKT OPTIMIZATION SOLVER                      !
     !------------------------------------------------------------------!
 
     ! KKT solver initialization
@@ -1034,7 +1061,7 @@ module optmod_optimizationengine
                 ! Lagrange multipliers may change!
                 if (flag == 0) then 
 
-                    call solver%ComputeStepLength(problem, dx, lambda, mu, alphals, flagls) ! dx is changed during linesearch
+                    call ComputeStepLengthLS(problem, solver%numLS, dx, lambda, mu, alphals, flagls) ! dx is changed during linesearch
                 else 
                     ! Something wrong during linear solver, try with relaxation
                     flagls = 1
@@ -1582,7 +1609,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! Step length computation
-    subroutine ComputeStepLength(solver, problem, dx, lambda, mu, alpha, flag)
+    subroutine ComputeStepLengthLS(problem, numLS, dx, lambda, mu, alpha, flag)
 
         ! Description
         !============
@@ -1590,10 +1617,9 @@ module optmod_optimizationengine
         ! It is assumed that all necessary data etc can be derived from
         ! the problem definition (e.g. dimensions of design variables).
         ! The step length computation is typically done using a 
-        ! linesearch approach, depending on the numerics defined in the
-        ! solver object. 
+        ! linesearch approach.
 
-        ! The line search method should be defined in solver%numLS%type
+        ! The line search method should be defined in numLS%type
         ! and can be 'backtracking', 'wolfe', 'backtracking_soc'. The 
         ! last one also applies a second-order correction. Note that 
         ! no constraints are explicitly accounted for in this line 
@@ -1607,7 +1633,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverKKTUDT)     :: solver 
+        type(numLSUDT)                      :: numLS  
         class(OptimizationProblemUDT)       :: problem 
         real(R8), allocatable               :: dx(:), lambda(:), mu(:), dphi(:)
         real(R8)                            :: alpha
@@ -1670,8 +1696,6 @@ module optmod_optimizationengine
         dohessian   = .false.
 
         ! Associate
-        associate(&
-            numLS           => solver%numLS)
         associate(&
             maxit           => numLS%maxit, &
             c1              => numLS%c1, &
@@ -1929,7 +1953,7 @@ module optmod_optimizationengine
 
             ! Unknown option, throw error
             call gdErrorHandler('ComputeStepLength: unknown line search option: ' &
-                 // solver%numLS%type)
+                 // numLS%type)
 
         end select 
 
@@ -1939,7 +1963,6 @@ module optmod_optimizationengine
         ! Housekeeping
         !=============
         end associate
-        end associate 
 
     end subroutine
 
@@ -2060,6 +2083,92 @@ module optmod_optimizationengine
 
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                      QN OPTIMIZATION SOLVER                      !
+    !------------------------------------------------------------------!
+
+    ! QN solver initialization
+    subroutine InitializeQNSolver(solver)
+
+        ! Description
+        !============
+        ! Initialize the necessary fields and structures for the QN 
+        ! solver. This is basically only the numerics - the optimization
+        ! problem itself should already be initialized beforehand!
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverQNUDT)             :: solver    
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Numerics
+        solver%numLS%inputfilepath  = solver%inputfilepath
+        solver%numLS%fieldprefix    = solver%inputfileprefix
+        solver%numQN%inputfilepath  = solver%inputfilepath
+        solver%numQN%fieldprefix    = solver%inputfileprefix
+        call solver%numLS%InitializeNumParams()
+        call solver%numQN%InitializeNumParams()
+
+    end subroutine
+
+    ! QN solver
+    subroutine SolveOptimizationProblemQN(solver, problem)
+
+        ! Description
+        !============
+        ! QN solver for the optimization problem defined by the generic
+        ! 'problem'. It is assumed that the optimization problem is
+        ! properly initialized. The solver solves the optimization 
+        ! problem by computing the solution to quadratic subproblems 
+        ! where the hessian is estimated during the optimization. A 
+        ! linesearch procedure is used to determine the step size. 
+
+        ! Note that, due to the implementation of the optimization 
+        ! problem structure, a hessian output argument is expected from
+        ! cost function and constraint routines. However, this may be 
+        ! left unitialized/unused, as it will not be used by the solver.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverQNUDT)              :: solver    
+        class(OptimizationProblemUDT)               :: problem
+
+    end subroutine
+
+    ! QN convergence checker
+    subroutine CheckConvergenceQN(solver, gradient, converged, infnorm)
+
+        ! Description
+        !============
+        ! Convergence checker for QN solver. Convergence is based on 
+        ! the infinity norm of the provided gradient (which is assumed
+        ! to be the gradient of the Lagrangian)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverQNUDT)      :: solver 
+        real(R8), intent(in)                :: gradient(:)
+        logical, intent(inout)              :: converged 
+        real(R8), intent(out)               :: infnorm
+
+        ! Check convergence
+        !==================
+        ! Compute infinity norm
+        infnorm = maxval(abs(gradient))
+
+        ! Compare
+        converged = infnorm < solver%numQN%tol
+
+    end subroutine
+
+ 
 
     !==================================================================!
     !                                                                  !

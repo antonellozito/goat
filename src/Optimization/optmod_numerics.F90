@@ -140,6 +140,18 @@ module optmod_numerics
 
     end type
 
+    ! Quasi-Newton numerics
+    type, extends(NumUDT) :: NumQNUDT 
+
+        
+    contains 
+
+        procedure :: SetDefaultNumParamsQN 
+        procedure :: InitializeNumParams    => InitializeNumParamsQN 
+        procedure :: Read                   => ReadNumQNOptions
+
+    end type
+
     ! Nonlinear complementarity problem numerics
     type :: NumNCPUDT 
 
@@ -610,6 +622,53 @@ module optmod_numerics
         !=============
         ! Close the file
         close(unit=fid)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                         QN SOLVER OPTIONS                        !
+    !------------------------------------------------------------------!
+    ! Set numerical parameters
+    subroutine SetDefaultNumParamsQN(num)
+
+        ! Description
+        !============
+        ! Set default numerical parameters of quasi newton solver
+
+        ! Declare variables
+        !==================
+        class(NumQNUDT)         :: num 
+
+    end subroutine
+
+    ! Initialize
+    subroutine InitializeNumParamsQN(num)
+
+        ! Description
+        !============
+        ! Initialization routine that calls the default parameter setter
+        ! and the reader
+
+        ! Declare variables
+        !==================
+        class(NumQNUDT)         :: num
+        
+        ! Set parameters
+        !===============
+        ! Set defaults 
+        call num%SetDefaultNumParams()
+
+        ! Override with user settings (to be implemented)
+        call num%Read()
+
+    end subroutine 
+
+    ! Read
+    subroutine ReadNumQNOptions(num)
+
+        ! Declare variables
+        !==================
+        class(NumQNUDT)         :: num 
 
     end subroutine
 
