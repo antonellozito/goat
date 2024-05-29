@@ -522,6 +522,9 @@ module goatmod_types
         ! Update vessel description using coordinates
         procedure :: UpdateVesselCoordinates
 
+        ! Vessel coordinate getter
+        procedure :: GetVesselCoordinates
+
     end type
 
     ! Environment
@@ -1923,7 +1926,51 @@ module goatmod_types
 
     end subroutine
 
-    ! Updating (assumed already initialised)
+    ! Getting coordinates (assumed already initialized)
+    subroutine GetVesselCoordinates(vessel, xv, yv)
+
+        ! Description
+        !============
+        ! This routine returns the vessel coordinates in the same order
+        ! as they are updated. Useful for e.g. shape optimization 
+        ! purposes. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselUDT)                    :: vessel 
+        real(R8), allocatable, intent(out)  :: xv(:), yv(:)
+
+        ! Auxiliary
+        integer(I8)                     :: nv
+
+        ! Loop 
+        integer(I8)                     :: i, cc
+
+        ! Compute total number of vertices
+        nv = 0
+        do i = 1, vessel%polygonset%np
+            nv = nv + vessel%polygonset%polygons(i)%nv
+        end do
+
+        ! Extract
+        cc = 0
+        if (allocated(xv)) then 
+            deallocate(xv)
+        end if 
+        if (allocated(yv)) then 
+            deallocate(yv)
+        end if 
+        allocate(xv(nv), yv(nv))
+        do i = 1, vessel%polygonset%np 
+            xv(cc+1:cc+vessel%polygonset%polygons(i)%nv) = vessel%polygonset%polygons(i)%x
+            yv(cc+1:cc+vessel%polygonset%polygons(i)%nv) = vessel%polygonset%polygons(i)%y
+        end do
+
+
+    end subroutine
+
+    ! Updating (assumed already initialized)
     subroutine UpdateVesselCoordinates(vessel, xv, yv)
 
         ! Description
