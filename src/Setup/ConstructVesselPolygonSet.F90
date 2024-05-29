@@ -1,12 +1,11 @@
-subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
+subroutine ConstructVesselPolygonSet(vessel, ps)
 
     ! Description
     !============
     ! ConstructVesselPolygonSet constructs a closed vessel polygon set (possibly
     ! consisting of multiple closed polygons) starting from an initial set of
     ! polygons, given in the oldvessel input argument (see later for input
-    ! specifications). Options can be parsed through the vesseloptions input
-    ! structure. The routine has support for multiple open and closed polygon
+    ! specifications). The routine has support for multiple open and closed polygon
     ! boundaries, though the closed polygons (or the closed polygons resulting
     ! from combining multiple open polygons) should not intersect themselves
     ! with other open or closed polygons. Otherwise, an error will be thrown.
@@ -44,49 +43,69 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
     ! Note 3: the resulting vessel polygon(s) is(are) arbitrarily sorted
     ! (either clockwise or counterclockwise). 
 
+    ! Note 4: we propagate the structure number(s) of each vertex and 
+    ! the vertex IDs as they were present in the original vessel 
+    ! structure. Note that vertices are only allowed up to two structure
+    ! IDs and only one vertex ID. Vertex IDs will be removed since 
+    ! either the structures intersect exactly in the end points and only
+    ! one node is retained, or the structures intersect somewhere along
+    ! the polygon and the 'dangling' nodes are removed. It is assumed 
+    ! that this information is already available through the polygon
+    ! labels field, which should be setup in ExtractVesselData.F90. 
+
     ! Modules
     !========
     use gdmod_types 
     use gdmod_userinput
     use gdmod_plots
 
+    implicit none
+
     ! Declare variables
     !==================
     ! Arguments
     type(VesselUDT)             :: vessel
-    type(VesselOptionsUDT)      :: vesseloptions 
     type(PolygonSetUDT)         :: ps 
 
     ! Auxiliary
     integer(I8)                 :: ni, nfinpol, thisp, firstpolygon, &
-        c1, c2, nvest, nvv, tempnv, nextp, sv, ev, flag
+        c1, c2, nvest, nvv, tempnv, nextp, sv, ev, flag, vID
     logical                     :: polygonnotfound, doflip  
     real(R8)                    :: nan, xs, ys, xe, ye 
 
     real(R8), allocatable       :: xi(:), yi(:), tempx(:), tempy(:), &
         xv(:), yv(:)
+    integer(I8)                 :: pis(1:2), pie(1:2)
     integer(I8), allocatable    :: p1(:), p2(:), s1(:), s2(:), &
         polcat(:, :), npol(:), remp(:), tempp(:), indi(:, :), &
-        si(:, :), pi(:, :), ci(:)
+        si(:, :), pi(:, :), ci(:), templabels(:, :), &
+        labelsv(:, :)
     logical, allocatable        :: notfound(:)
 
     character(:), allocatable   :: vesselpath
 
     ! Loop
+    integer(I8)                 :: i, j, k
 
     ! Initialize
     !===========
-    ! Checks
-    if (size(vesseloptions%TPind) == 0 ) then 
-        call gdErrorHandler('ConstructVesselPolygon: no target plates are specified, check input')
-    elseif (size(vesseloptions%TPind) .ne. size(vesseloptions%TP)) then 
-        call gdErrorHandler('ConstructVesselPolygon: number of ' &
-            // 'elements in vesseloptions%TPind does not correspond' &
-            // ' to number of structures in vesseloptions%TP')
-    end if 
+    ! Checks - seem unnecessary?
+    !if (size(vesseloptions%TPind) == 0 ) then 
+    !    call gdErrorHandler('ConstructVesselPolygon: no target plates are specified, check input')
+    !elseif (size(vesseloptions%TPind) .ne. size(vesseloptions%TP)) then 
+    !    call gdErrorHandler('ConstructVesselPolygon: number of ' &
+    !        // 'elements in vesseloptions%TPind does not correspond' &
+    !        // ' to number of structures in vesseloptions%TP')
+    !end if 
 
     ! Set NaN
     nan = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+
+    ! Get maximal vertex ID label
+    vID = 0
+    do i = 1, ps%np 
+        vID = max(maxval(ps%polygons(i)%labels(:, 3)), vID)
+    end do 
 
     ! Determine intersections
     !========================
@@ -300,7 +319,7 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
     allocate(indi(2, ps%np), si(2, ps%np), pi(2, ps%np), ci(ps%np))
     indi(:, :)  = 0
     si(:, :)    = 0
-    pi(:, :) = 0
+    pi(:, :)    = 0
     ci(:)       = 0
 
     do i = 1, size(xi)
@@ -327,7 +346,7 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
     nvest = nvest*2 ! factor 2 just to be sure 
 
     ! Allocate
-    allocate(tempx(nvest), tempy(nvest))
+    allocate(tempx(nvest), tempy(nvest), templabels(nvest, 3))
 
     ! Loop 
     nvv = 0 ! vessel vertex counter
@@ -345,6 +364,9 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
             ! Add coordinates
             tempx(nvv+1:nvv+tempnv) = ps%polygons(thisp)%x(ps%polygons(thisp)%vert) 
             tempy(nvv+1:nvv+tempnv) = ps%polygons(thisp)%y(ps%polygons(thisp)%vert)  
+
+            ! Add labels
+            templabels(nvv+1:nvv+tempnv, :) = ps%polygons(thisp)%labels(ps%polygons(thisp)%vert, :) 
 
             ! Update counter
             nvv = nvv + tempnv 
@@ -375,8 +397,10 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
                         ! Don't flip
                         xs = xi(indi(2, thisp)) ! start 
                         ys = yi(indi(2, thisp)) 
+                        pis = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         xe = xi(indi(1, thisp)) ! end 
                         ye = yi(indi(1, thisp)) 
+                        pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         sv = si(2, thisp) + 1
                         ev = si(1, thisp) 
                     else 
@@ -384,8 +408,10 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
                         doflip = .true. 
                         xs = xi(indi(1, thisp)) ! start 
                         ys = yi(indi(1, thisp)) 
+                        pis = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         xe = xi(indi(2, thisp)) ! end 
                         ye = yi(indi(2, thisp)) 
+                        pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         sv = si(1, thisp) + 1
                         ev = si(2, thisp) 
                     end if 
@@ -395,8 +421,10 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
                         ! Don't flip
                         xs = xi(indi(1, thisp)) ! start 
                         ys = yi(indi(1, thisp)) 
+                        pis = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         xe = xi(indi(2, thisp)) ! end 
                         ye = yi(indi(2, thisp)) 
+                        pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         sv = si(1, thisp) + 1 
                         ev = si(2, thisp) 
                     else 
@@ -404,8 +432,10 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
                         doflip = .true. 
                         xs = xi(indi(2, thisp)) ! start 
                         ys = yi(indi(2, thisp)) 
+                        pis = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         xe = xi(indi(1, thisp)) ! end 
-                        ye = yi(indi(1, thisp)) 
+                        ye = yi(indi(1, thisp))
+                        pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         sv = si(2, thisp) + 1
                         ev = si(1, thisp) 
                     end if 
@@ -420,25 +450,38 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
                 ! Starting point
                 tempx(nvv+1) = xs 
                 tempy(nvv+1) = ys 
-                nvv = nvv+1
+                templabels(nvv+1, 1:2) = pis
+                templabels(nvv+1, 3) = vID+1
+
+                ! Update counters
+                nvv     = nvv + 1
+                vID     = vID + 1
 
                 ! Polygon points
                 tempnv = ev - sv + 1 
                 if (doflip) then 
                     tempx(nvv+1:nvv+tempnv) = &
-                        ps%polygons(thisp)%x(ev:sv:-1)
+                        ps%polygons(thisp)%x(ps%polygons(thisp)%vert(ev:sv:-1))
                     tempy(nvv+1:nvv+tempnv) = &
-                        ps%polygons(thisp)%y(ev:sv:-1)
+                        ps%polygons(thisp)%y(ps%polygons(thisp)%vert(ev:sv:-1))
+                    templabels(nvv+1:nvv+tempnv, :) = &
+                        ps%polygons(thisp)%labels(ps%polygons(thisp)%vert(ev:sv:-1), :)
                 else 
                     tempx(nvv+1:nvv+tempnv) = ps%polygons(thisp)%x(ps%polygons(thisp)%vert(sv:ev))
                     tempy(nvv+1:nvv+tempnv) = ps%polygons(thisp)%y(ps%polygons(thisp)%vert(sv:ev))
+                    templabels(nvv+1:nvv+tempnv, :) = ps%polygons(thisp)%labels(ps%polygons(thisp)%vert(sv:ev), :)
                 end if
                 nvv = nvv+tempnv
 
                 ! End point
                 tempx(nvv+1) = xe
                 tempy(nvv+1) = ye 
-                nvv = nvv+1
+                templabels(nvv+1, 1:2) = pie
+                templabels(nvv+1, 3) = vID+1
+
+                ! Update counters
+                nvv = nvv + 1 
+                vID = vID + 1
 
             end do 
         end if
@@ -447,15 +490,16 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
         if (i .ne. nfinpol) then 
             tempx(nvv+1) = nan 
             tempy(nvv+1) = nan
+            templabels(nvv+1, :) = 0 
             nvv = nvv+1
         end if
     end do
 
     ! Construct vessel polygon set
-    allocate(xv(nvv), yv(nvv))
     xv = tempx(1:nvv)
     yv = tempy(1:nvv)
-    call vessel%polygonset%Construct(xv, yv)
+    labelsv = templabels(1:nvv, :)
+    call vessel%polygonset%Construct(xv, yv, labelsv)
 
     ! Test orientation
     call vessel%polygonset%OrientNestedClosedPolygons(flag)
@@ -473,6 +517,6 @@ subroutine ConstructVesselPolygonSet(vessel, vesseloptions, ps)
 
     ! Housekeeping
     !=============
-    deallocate(xv, yv, indi, si, pi, ci, tempx, tempy) 
+    deallocate(indi, si, pi, ci, tempx, tempy) 
 
 end subroutine
