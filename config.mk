@@ -47,6 +47,10 @@ TEST_TARGETS = $(GOAT_TARGETS)
 ## CTEST_TARGETS            : Targets to be run to test C layer
 CTEST_TARGETS = Clayer
 
+## SHAPEOPT_TARGETS         : Targets to be run for shape optimization program
+SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+    IO_carre IO_output IO_input  Setup  ShapeOptimization Drivers 
+
 ##
 ## % Compiler
 ## %=========
@@ -152,3 +156,8 @@ CLAYER_FILES    = $(wildcard src/Clayer/*.c)
 
 ## ClayerF              : fortran files for interfacing with other c code
 CLAYERF_FILES    =  src/Clayer/CSparseF.F90 src/Clayer/Clayer.F90
+
+## ShapeOpt             : fortran files for shape optimization
+SHAPEOPT_FILES  = src/Modules/ShapeOpt/somod_userinput.F90 \
+    src/Modules/ShapeOpt/somod_designvariables.F90 src/Modules/ShapeOpt/somod_costfunction.F90 \
+    src/Modules/ShapeOpt/somod_constraints.F90   $(wildcard src/Modules/ShapeOpt/*.F90)

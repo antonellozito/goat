@@ -1,0 +1,56 @@
+! 
+!    _____ __                                                  
+!   / ___// /_  ____ _____  ___                                
+!   \__ \/ __ \/ __ `/ __ \/ _ \
+!  ___/ / / / / /_/ / /_/ /  __/                               
+! /____/_/ /_/\__,_/ .___/\___/                                
+!    ____        _/_/_           _             __  _           
+!   / __ \____  / /_(_)___ ___  (_)___  ____ _/ /_(_)___  ____ 
+!  / / / / __ \/ __/ / __ `__ \/ /_  / / __ `/ __/ / __ \/ __ \
+! / /_/ / /_/ / /_/ / / / / / / / / /_/ /_/ / /_/ / /_/ / / / /
+! \____/ .___/\__/_/_/ /_/ /_/_/ /___/\__,_/\__/_/\____/_/ /_/ 
+!     /_/                                                      
+
+!======================================================================!
+!                                                                      !
+!                            DOCUMENTATION                             !
+!                                                                      !
+!======================================================================!
+
+! Short description
+!==================
+! This is the main driver to run shape optimization with the goat 
+! grid deformation as a constraint.
+
+program ShapeOptimization
+
+    ! Modules
+    !========
+    use somod_userinput
+
+    ! Declare variables
+    !==================
+    ! Arguments
+
+    ! Loop variables
+
+    ! Auxiliary
+    character(:), allocatable           :: filepath
+
+    ! Initialize
+    !===========
+    allocate(character(len('./SOoptions.dat')) :: filepath)
+    filepath = './SOoptions.dat'
+
+    ! Read the user input
+    !====================
+    ! fileID should always be SOoptions.dat
+    print *, 'Reading shape optimization options from file: ', filepath
+
+    ! Run driver
+    !===========
+    call ShapeOptDriver(inputfilepath)
+
+
+end program ShapeOptimization
+                                    

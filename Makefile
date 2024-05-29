@@ -18,6 +18,7 @@ include config.mk
 ## tests		: Create executable for tests
 ## testc 		: Create executable for tests of C layer
 ## goattranslator: Create executable for GOAToptions file translator
+## shapeopt 	: Create executable for shape optimization with goat
 
 goat: $(GOAT_TARGETS) goat.o
 	$(FC) -o goat *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
@@ -36,6 +37,10 @@ gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
 
 testc: $(CTEST_TARGETS) testc.o 
 	$(CC) -o testc *.o -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
+
+shapeopt: $(SHAPEOPT_TARGETS) shapeopt.o 
+	$(FC) -o shapeopt *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 
 
 ## % Runfiles
@@ -60,6 +65,10 @@ testc.o: Runfiles/Testc.c
 ## goattranslator.o	: translator
 goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
 	$(FC) $(CFLAGS) Runfiles/TranslateGOAToptionsFile.F90 
+
+## shapeopt.o		: shape optimization 
+shapeopt.o : Runfiles/ShapeOptimization.F90 
+	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 
 
 ##
 ## % Folder compilation targets
@@ -134,6 +143,11 @@ ClayerF: $(CLAYERF_FILES)
 	$(FC) $(CFLAGS) $^
 	touch ClayerF
 
+## ShapeOptimization 			: compile shape optimization modules
+ShapeOptimization: $(SHAPEOPT_FILES)
+	$(FC) $(CFLAGS) $^
+	touch ShapeOptimization
+
 ##
 ## % Run commands
 ## %=============
@@ -157,16 +171,18 @@ clean:
 # Cleanup
 .PHONY: deepclean
 deepclean: 
-	rm *.o *.mod $(wildcard gdrun*); rm $(GDRUN_TARGETS); \
+	rm *.o *.mod $(wildcard gdrun*); rm $(GOAT_TARGETS); \
+	rm $(GOATTRANSLATOR_TARGETS); rm $(SHAPEOPT_TARGETS); \
 	rm goat
 	rm tests
 	rm goattranslator
 	rm testc
+	rm shapeopt
 
 ## cleanexeo			: clean o-files of executables
 .PHONY: cleanexeo
 cleanexeo:	
-	rm Goat.o; rm Tests.o; rm Testc.o; rm TranslateGOAToptionsFile.o
+	rm Goat.o; rm Tests.o; rm Testc.o; rm TranslateGOAToptionsFile.o; rm shapeopt.o
 	
 
 ## help			: print out documentation
