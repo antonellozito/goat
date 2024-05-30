@@ -280,6 +280,7 @@ module somod_costfunction
 
         ! Initialize
         nv = size(xv)
+        hessJ = SpZeros(designvariables%nphi, designvariables%nphi)
 
         ! Value
         !======
