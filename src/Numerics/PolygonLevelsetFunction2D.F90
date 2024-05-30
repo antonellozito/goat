@@ -1282,6 +1282,9 @@ module PolygonLevelsetFunction2D
             theta = atan2(dx*nypv(:, 1) - dy*nxpv(:, 1), dx*nxpv(:, 1) + dy*nypv(:, 1))
             where (theta < 0) theta = theta + 2*pi_R8
             isinvert = theta < theta0
+
+            ! Hedge for vertices lying exactly on polygonset vertex
+            where ((dx == 0) .and. (dy == 0)) isinvert = .true. 
             
             ! Edge regions
             onedge = (abs(tvn) <= 0.5*tnp)
@@ -1405,7 +1408,11 @@ module PolygonLevelsetFunction2D
                 if (te(iq)) then 
                     vq(iq) = nxp(eind(iq))
                 else
-                    vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(xp(vind(iq)) - xq(iq))
+                    if (tdistvert(iq) == 0.0) then 
+                        vq(iq) = 0
+                    else
+                        vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(xp(vind(iq)) - xq(iq))
+                    end if 
                 end if
             end do 
 
@@ -1452,7 +1459,7 @@ module PolygonLevelsetFunction2D
                     dfdyp2 = 0
                 end where
 
-                where (tv)
+                where (tv .and. (tdistvert /= 0.0))
                     dfdxp = (sign(myones, tcrossprod)*(xp(vind) - xq)**2)/(2*tdistvert**3) - sign(myones, tcrossprod)/tdistvert ! xqxp
                     dfdyp = (sign(myones, tcrossprod)*(xp(vind) - xq)*(yp(vind) - yq))/(tdistvert**3) ! xqyp
                 elsewhere 
@@ -1485,7 +1492,11 @@ module PolygonLevelsetFunction2D
                 if (te(iq)) then 
                     vq(iq) = nyp(eind(iq))
                 else
-                    vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(yp(vind(iq)) - yq(iq))
+                    if (tdistvert(iq) == 0.0) then 
+                        vq(iq) = 0
+                    else
+                        vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(yp(vind(iq)) - yq(iq))
+                    end if
                 end if
             end do 
 
@@ -1532,7 +1543,7 @@ module PolygonLevelsetFunction2D
                     dfdyp2 = 0
                 end where
 
-                where (tv)
+                where (tv .and. (tdistvert /= 0.0))
                     dfdxp = (sign(myones, tcrossprod)*(xp(vind) - xq)*(yp(vind) - yq))/(tdistvert**3) ! yqxp
                     dfdyp = (sign(myones, tcrossprod)*(yp(vind) - yq)**2)/(2*tdistvert**3) - sign(myones, tcrossprod)/tdistvert ! yqyp
                 elsewhere 
@@ -1575,7 +1586,7 @@ module PolygonLevelsetFunction2D
             te = minind == 1
             tv = minind == 2
             do iq = 1, nq
-                if (tv(iq)) then 
+                if (tv(iq) .and. (tdistvert(iq) /= 0.0)) then 
                     vq(iq) = -sign(myone, tdistvert(iq))*&
                     sign(myone, tcrossprod(iq))/tdistvert(iq)**3&
                     *(xp(vind(iq)) - xq(iq))**2 + &
@@ -1590,7 +1601,7 @@ module PolygonLevelsetFunction2D
             te = minind == 1;
             tv = minind == 2;
             do iq = 1, nq
-                if (tv(iq)) then 
+                if (tv(iq) .and. (tdistvert(iq) /= 0.0)) then 
                     vq(iq) = -sign(myone, tdistvert(iq))*&
                     sign(myone, tcrossprod(iq))/tdistvert(iq)**3&
                     *(xp(vind(iq)) - xq(iq))*(yp(vind(iq)) - xq(iq))
@@ -1619,7 +1630,7 @@ module PolygonLevelsetFunction2D
             tv = minind == 2;
 
             do iq = 1, nq
-                if (tv(iq)) then 
+                if (tv(iq) .and. (tdistvert(iq) /= 0.0)) then 
                     vq(iq) = -sign(myone, tdistvert(iq))*&
                     sign(myone, tcrossprod(iq))/tdistvert(iq)**3&
                     *(yp(vind(iq)) - yq(iq))**2 + &
