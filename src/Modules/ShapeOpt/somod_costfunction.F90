@@ -284,6 +284,7 @@ module somod_costfunction
         ! Value
         !======
         ! Simply evaluate the levelset function 
+        allocate(val(nv))
         call plf%Evaluate(xv, yv, 0, 0, val)
 
         ! Compute cost function contribution
@@ -306,6 +307,7 @@ module somod_costfunction
             if (dogradient) then 
                 
                 ! Evaluate derivatives
+                allocate(dvaldx(nv), dvaldy(nv))
                 call plf%Evaluate(xv, yv, 1, 0, dvaldx)
                 call plf%Evaluate(xv, yv, 0, 1, dvaldy)
 
@@ -323,12 +325,14 @@ module somod_costfunction
                 if (.not. dogradient) then 
 
                     ! Evaluate derivatives
+                    allocate(dvaldx(nv), dvaldy(nv))
                     call plf%Evaluate(xv, yv, 1, 0, dvaldx)
                     call plf%Evaluate(xv, yv, 0, 1, dvaldy)
 
                 end if 
 
                 ! Evaluate second order derivatives
+                allocate(d2valdx2(nv), d2valdxdy(nv), d2valdy2(nv))
                 call plf%Evaluate(xv, yv, 2, 0, d2valdx2)
                 call plf%Evaluate(xv, yv, 1, 1, d2valdxdy)
                 call plf%Evaluate(xv, yv, 0, 2, d2valdy2)
@@ -358,6 +362,11 @@ module somod_costfunction
                 designvariables%type)
 
         end select
+
+        ! Scale
+        !------
+        gradJ = gradJ*costfunction%lambda 
+        hessJ = hessJ*costfunction%lambda
 
         ! Housekeeping
         !=============

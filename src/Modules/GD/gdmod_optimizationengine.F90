@@ -190,6 +190,10 @@ module gdmod_optimizationengine
         ! Allocate the solver
         allocate(optimizationdriver%solver, source=thissolver)
 
+        ! Propagate input filepath
+        optimizationdriver%solver%inputfilepath = optimizationdriver%inputfilepath 
+        optimizationdriver%problem%inputfilepath = optimizationdriver%inputfilepath
+
     end subroutine
 
     !------------------------------------------------------------------!
@@ -404,7 +408,13 @@ module gdmod_optimizationengine
             problem%magneticField, problem%environment, & 
             problem%designvariables, problem%designoptions%constraints)
 
-        ! 
+        ! Set Lagrange multipliers
+        allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
+            problem%mu(problem%constraints%ineqcon%nineqcon))
+        problem%lambda = 0
+        problem%mu = 0
+
+        
         !=================
         ! Initialize design variables further for constraint/cfv 
         ! dependent fields
@@ -2005,30 +2015,43 @@ module gdmod_optimizationengine
 
         ! Auxiliary
         logical                             :: dogradient, dohessian
+        logical, allocatable                :: A(:), I(:)
         real(R8)                            :: J
         real(R8), allocatable               :: gradJ(:), G(:), H(:), &
-            dJdvar(:)
+            dJdvar(:), ncp(:)
         type(MySparseUDT)                   :: hessJ, gradG, gradH, &
             hessG, hessH, dgradJdvar, dGdvar, dgradGdvar, dHdvar, &
-            dgradHdvar
+            dgradHdvar, gradncpphi, gradncpmu
+        type(NumNCPUDT)         :: num
 
         ! Initialize
         !===========
         ! Associate
         associate(&
+            nphi        =>      problem%designvariables%nphi,   &
+            neqcon      =>      problem%constraints%eqcon%neqcon, &
+            nineqcon    =>      problem%constraints%ineqcon%nineqcon, &
             lambda      =>      problem%lambda, &
             mu          =>      problem%mu,     &
-            A           =>      problem%A,      &
             grid        =>      problem%grid,   &
             magneticField   =>  problem%magneticField,  &
             environment     =>  problem%environment,    &
             designvariables =>  problem%designvariables)
+
+        ! Allocate
+        allocate(gradJ(nphi), G(neqcon), H(nineqcon), ncp(nineqcon), &
+            A(nineqcon), I(nineqcon))
+        
+        ! Initialize - to be cleaned up...
+        num%ncpfun = 'max'
+        num%alpha = 1
         
         ! Evaluate
         !=========
         ! We don't need hessian evaluation w.r.t. coordinates
         dogradient  = .true. 
         dohessian   = .false.
+
         ! Cost function (gradient) sensitivities
         call problem%costfunction%Evaluate(J, gradJ, hessJ, grid, &
             magneticField, environment, dogradient, dohessian, &
@@ -2043,6 +2066,10 @@ module gdmod_optimizationengine
         call problem%constraints%ineqcon%Evaluate(H, gradH, hessH, grid, &
             magneticField, environment, dogradient, dohessian, &
             designvariables, mu, 'vesselcoordinates', values, dHdvar, dgradHdvar)
+
+        ! Nonlinear complementarity function
+        call EvaluateNCPfunction(ncp, A, I, gradncpphi, gradncpmu, &
+            H, gradH, mu, num, dogradient)
 
         ! Extract
         !========

@@ -1237,6 +1237,9 @@ module optmod_optimizationengine
         hessL_copy%val = abs(hessL_copy%val)
         call hessL_copy%SumColumnwiseFull(diag)
 
+        ! Set to one if diagonal is zero
+        where (diag == 0.0) diag= 1.0
+
         ! Set the diagonal elements
         hessrelax%val = solver%numKKT%rxf*diag(1:nphi)
         hessrelax%row = [(k, k=1, nphi)]

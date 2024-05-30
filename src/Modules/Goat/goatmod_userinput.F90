@@ -829,7 +829,6 @@ module goatmod_userinput
         reachedeof = .false. 
 
         ! Open the file, check if it exists
-        print *, options%inputfilepath
         open(unit=fid, file=options%inputfilepath, status='old', &
             iostat=openstatus)
 

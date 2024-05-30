@@ -940,14 +940,6 @@ module gdmod_costfunction
         else
             allocate(values(0))
         end if 
-        if (present(dJdvarin)) then 
-            dJdvar = dJdvarin 
-        else
-            allocate(dJdvar(0))
-        end if 
-        if (present(dgradJdvarin)) then 
-            dgradJdvar = dgradJdvarin 
-        end if 
 
         ! Cost function
         J = 0
@@ -1328,6 +1320,23 @@ module gdmod_costfunction
 
             end select
 
+        end if
+
+        ! Other derivatives
+        !==================
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
         end if
 
         
@@ -2222,14 +2231,6 @@ module gdmod_costfunction
             values = valuesin 
         else
             allocate(values(0))
-        end if 
-        if (present(dJdvarin)) then 
-            dJdvar = dJdvarin 
-        else
-            allocate(dJdvar(0))
-        end if 
-        if (present(dgradJdvarin)) then 
-            dgradJdvar = dgradJdvarin 
         end if 
 
         ! Cost function
@@ -3153,8 +3154,23 @@ module gdmod_costfunction
 
         end if
 
+        ! Other derivatives
+        !==================
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
         ! Housekeeping
         !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
         ! Deallocate auxiliary arrays
         deallocate(xv, yv, xfv1 , xfv2 , yfv1 , &
             yfv2 , gxfv1 , gxfv2 , gyfv1 , gyfv2 , &
@@ -3563,14 +3579,6 @@ module gdmod_costfunction
         else
             allocate(values(0))
         end if 
-        if (present(dJdvarin)) then 
-            dJdvar = dJdvarin 
-        else
-            allocate(dJdvar(0))
-        end if 
-        if (present(dgradJdvarin)) then 
-            dgradJdvar = dgradJdvarin 
-        end if 
 
         ! Cost function
         J = 0
@@ -3912,6 +3920,23 @@ module gdmod_costfunction
 
         end select
 
+        ! Other derivatives
+        !==================
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
        
         ! Deassociate
         !============
@@ -4115,8 +4140,10 @@ module gdmod_costfunction
 
         character(:), allocatable           :: var
         real(R8), allocatable               :: values(:)
-        real(R8), allocatable               :: dJdvar(:) 
-        type(MySparseUDT)                   :: dgradJdvar
+        real(R8), allocatable               :: dJdvar(:), dJdvar1(:), &
+            dJdvar2(:)
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvar1, &
+            dgradJdvar2
 
         ! Loop variables
         integer(I8)                     :: i
@@ -4138,14 +4165,6 @@ module gdmod_costfunction
         else
             allocate(values(0))
         end if 
-        if (present(dJdvarin)) then 
-            dJdvar = dJdvarin 
-        else
-            allocate(dJdvar(0))
-        end if 
-        if (present(dgradJdvarin)) then 
-            dgradJdvar = dgradJdvarin 
-        end if 
 
         ! Store original vertex pairs and bias
         allocate(tempvpairs, source=costfunction%cfv_lr%vpairs)
@@ -4160,20 +4179,28 @@ module gdmod_costfunction
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)), &
+            dJdvar1(size(values)), dJdvar2(size(values)), &
+            dJdvar(size(values)))
+        dJdvar1 = 0
+        dJdvar2 = 0
+        dJdvar = 0
 
         ! Hessian
         hessJ1%nrow = hessJ%nrow 
         hessJ2%nrow = hessJ%nrow 
         hessJ1%ncol = hessJ%ncol 
         hessJ2%ncol = hessJ%ncol 
+        dgradJdvar  = SpZeros(size(values), size(gradJ))
+        dgradJdvar1 = dgradJdvar
+        dgradJdvar2 = dgradJdvar
 
         ! Compute cost function
         !======================
         ! First contribution
         call costfunction%cfv_lr%Evaluate(J1, gradJ1, &
             hessJ1, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar1, dgradJdvar1)
         
         ! Adjust vertex pairs and bias
         do i = 1, maxval(costfunction%cfv_lr%nvpairs)
@@ -4185,7 +4212,7 @@ module gdmod_costfunction
         ! Second contribution
         call costfunction%cfv_lr%Evaluate(J2, gradJ2, &
             hessJ2, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar2, dgradJdvar2)
 
         ! Reset vertex pairs and bias
         costfunction%cfv_lr%b0(:) = tempb0
@@ -4195,10 +4222,18 @@ module gdmod_costfunction
         J = J1 + J2 
         gradJ = gradJ1 + gradJ2
         hessJ = hessJ1 + hessJ2
+        dJdvar = dJdvar1 + dJdvar2
+        dgradJdvar = dgradJdvar1 + dgradJdvar2
 
         ! Housekeeping
         !=============
-        deallocate(gradJ1, gradJ2)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
 
     end subroutine
 
@@ -4332,8 +4367,10 @@ module gdmod_costfunction
 
         character(:), allocatable           :: var
         real(R8), allocatable               :: values(:)
-        real(R8), allocatable               :: dJdvar(:) 
-        type(MySparseUDT)                   :: dgradJdvar
+        real(R8), allocatable               :: dJdvar(:), dJdvar1(:), &
+            dJdvar2(:)
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvar1, &
+            dgradJdvar2
 
         ! Loop variables
         integer(I8)                     :: i
@@ -4355,14 +4392,6 @@ module gdmod_costfunction
         else
             allocate(values(0))
         end if 
-        if (present(dJdvarin)) then 
-            dJdvar = dJdvarin 
-        else
-            allocate(dJdvar(0))
-        end if 
-        if (present(dgradJdvarin)) then 
-            dgradJdvar = dgradJdvarin 
-        end if 
 
         ! Store original vertex pairs and bias
         allocate(tempvpairs, source=costfunction%cfv_lrrad%vpairs)
@@ -4377,20 +4406,28 @@ module gdmod_costfunction
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)), &
+            dJdvar1(size(values)), dJdvar2(size(values)), &
+            dJdvar(size(values)))
+        dJdvar1 = 0
+        dJdvar2 = 0
+        dJdvar = 0
 
         ! Hessian
         hessJ1%nrow = hessJ%nrow 
         hessJ2%nrow = hessJ%nrow 
         hessJ1%ncol = hessJ%ncol 
         hessJ2%ncol = hessJ%ncol 
+        dgradJdvar  = SpZeros(size(values), size(gradJ))
+        dgradJdvar1 = dgradJdvar
+        dgradJdvar2 = dgradJdvar
 
         ! Compute cost function
         !======================
         ! First contribution
         call costfunction%cfv_lrrad%Evaluate(J1, gradJ1, &
             hessJ1, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar1, dgradJdvar1)
         
         ! Adjust vertex pairs and bias
         do i = 1, maxval(costfunction%cfv_lrrad%nvpairs)
@@ -4402,7 +4439,7 @@ module gdmod_costfunction
         ! Second contribution
         call costfunction%cfv_lrrad%Evaluate(J2, gradJ2, &
             hessJ2, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar2, dgradJdvar2)
 
         ! Reset vertex pairs and bias
         costfunction%cfv_lrrad%b0(:) = tempb0
@@ -4412,10 +4449,19 @@ module gdmod_costfunction
         J = J1 + J2 
         gradJ = gradJ1 + gradJ2
         hessJ = hessJ1 + hessJ2
+        dJdvar = dJdvar1 + dJdvar2
+        dgradJdvar = dgradJdvar1 + dgradJdvar2
 
         ! Housekeeping
         !=============
-        deallocate(gradJ1, gradJ2)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
 
     end subroutine
 
@@ -4798,14 +4844,6 @@ module gdmod_costfunction
         else
             allocate(values(0))
         end if 
-        if (present(dJdvarin)) then 
-            dJdvar = dJdvarin 
-        else
-            allocate(dJdvar(0))
-        end if 
-        if (present(dgradJdvarin)) then 
-            dgradJdvar = dgradJdvarin 
-        end if 
 
         ! Cost function
         J = 0
@@ -5011,8 +5049,23 @@ module gdmod_costfunction
 
         end if
 
+        ! Derivatives
+        !============
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
         ! Deassociate
         !============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if 
+
         end associate
 
     end subroutine
@@ -5242,8 +5295,10 @@ module gdmod_costfunction
 
         character(:), allocatable           :: var
         real(R8), allocatable               :: values(:)
-        real(R8), allocatable               :: dJdvar(:) 
-        type(MySparseUDT)                   :: dgradJdvar
+        real(R8), allocatable               :: dJdvar(:), dJdvar1(:), &
+            dJdvar2(:)
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvar1, &
+            dgradJdvar2
 
         ! Loop variables
 
@@ -5264,14 +5319,6 @@ module gdmod_costfunction
         else
             allocate(values(0))
         end if 
-        if (present(dJdvarin)) then 
-            dJdvar = dJdvarin 
-        else
-            allocate(dJdvar(0))
-        end if 
-        if (present(dgradJdvarin)) then 
-            dgradJdvar = dgradJdvarin 
-        end if 
 
         ! Store original vertex pairs and bias
         allocate(tempvpairs, source=costfunction%cfv_prpb%psipairs)
@@ -5286,20 +5333,27 @@ module gdmod_costfunction
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)), &
+            dJdvar1(size(values)), dJdvar2(size(values)), &
+            dJdvar(size(values)))
+        dJdvar1 = 0
+        dJdvar2 = 0
 
         ! Hessian
         hessJ1%nrow = hessJ%nrow 
         hessJ2%nrow = hessJ%nrow 
         hessJ1%ncol = hessJ%ncol 
         hessJ2%ncol = hessJ%ncol 
+        dgradJdvar  = SpZeros(size(values), size(gradJ))
+        dgradJdvar1 = dgradJdvar
+        dgradJdvar2 = dgradJdvar
 
         ! Compute cost function
         !======================
         ! First contribution
         call costfunction%cfv_prpb%Evaluate(J1, gradJ1, &
             hessJ1, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar1, dgradJdvar1)
         
         ! Adjust vertex pairs and bias
         costfunction%cfv_prpb%psipairs(:, :) = tempvpairs(:, [1, 3, 2])
@@ -5308,7 +5362,7 @@ module gdmod_costfunction
         ! Second contribution
         call costfunction%cfv_prpb%Evaluate(J2, gradJ2, &
             hessJ2, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar2, dgradJdvar2)
 
         ! Reset vertex pairs and bias
         costfunction%cfv_prpb%b0(:) = tempb0
@@ -5318,10 +5372,19 @@ module gdmod_costfunction
         J = J1 + J2 
         gradJ = gradJ1 + gradJ2
         hessJ = hessJ1 + hessJ2
+        dJdvar = dJdvar1 + dJdvar2
+        dgradJdvar = dgradJdvar1 + dgradJdvar2
 
         ! Housekeeping
         !=============
-        deallocate(gradJ1, gradJ2)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
 
     end subroutine
 
@@ -5477,8 +5540,10 @@ module gdmod_costfunction
 
         character(:), allocatable           :: var
         real(R8), allocatable               :: values(:)
-        real(R8), allocatable               :: dJdvar(:) 
-        type(MySparseUDT)                   :: dgradJdvar
+        real(R8), allocatable               :: dJdvar(:), dJdvar1(:), &
+            dJdvar2(:)
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvar1, &
+            dgradJdvar2
 
         ! Loop variables
 
@@ -5497,14 +5562,6 @@ module gdmod_costfunction
         else
             allocate(values(0))
         end if 
-        if (present(dJdvarin)) then 
-            dJdvar = dJdvarin 
-        else
-            allocate(dJdvar(0))
-        end if 
-        if (present(dgradJdvarin)) then 
-            dgradJdvar = dgradJdvarin 
-        end if 
 
         ! Cost function
         J = 0
@@ -5513,34 +5570,50 @@ module gdmod_costfunction
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)), &
+            dJdvar1(size(values)), dJdvar2(size(values)), dJdvar(size(values)))
+        dJdvar1 = 0
+        dJdvar2 = 0
+        dJdvar = 0
 
         ! Hessian
         hessJ1%nrow = hessJ%nrow 
         hessJ2%nrow = hessJ%nrow 
         hessJ1%ncol = hessJ%ncol 
         hessJ2%ncol = hessJ%ncol 
+        dgradJdvar  = SpZeros(size(values), size(gradJ))
+        dgradJdvar1 = dgradJdvar
+        dgradJdvar2 = dgradJdvar
 
         ! Compute cost function
         !======================
         ! First contribution
         call costfunction%cfv_lr%Evaluate(J1, gradJ1, &
             hessJ1, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar1, dgradJdvar1)
         
         ! Second contribution
         call costfunction%cfv_fad%Evaluate(J2, gradJ2, &
             hessJ2, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar2, dgradJdvar2)
 
         ! Add
         J = J1 + J2 
         gradJ = gradJ1 + gradJ2
         hessJ = hessJ1 + hessJ2
+        dJdvar = dJdvar1 + dJdvar2
+        dgradJdvar = dgradJdvar1 + dgradJdvar2
 
         ! Housekeeping
         !=============
-        deallocate(gradJ1, gradJ2)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
 
     end subroutine
 
@@ -5745,8 +5818,8 @@ module gdmod_costfunction
 
         character(:), allocatable           :: var
         real(R8), allocatable               :: values(:)
-        real(R8), allocatable               :: dJdvar(:) 
-        type(MySparseUDT)                   :: dgradJdvar
+        real(R8), allocatable               :: dJdvar(:), dJdvartemp(:) 
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvartemp
 
         ! Loop variables
 
@@ -5765,14 +5838,6 @@ module gdmod_costfunction
         else
             allocate(values(0))
         end if 
-        if (present(dJdvarin)) then 
-            dJdvar = dJdvarin 
-        else
-            allocate(dJdvar(0))
-        end if 
-        if (present(dgradJdvarin)) then 
-            dgradJdvar = dgradJdvarin 
-        end if 
 
         ! Cost function
         J = 0
@@ -5780,11 +5845,17 @@ module gdmod_costfunction
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJtemp(size(gradJ)))
+        allocate(gradJtemp(size(gradJ)), dJdvartemp(size(values)), &
+            dJdvar(size(values)))
+        gradJtemp = 0
+        dJdvartemp = 0
+        dJdvar = 0
 
         ! Hessian
         hessJtemp%nrow = hessJ%nrow 
         hessJtemp%ncol = hessJ%ncol 
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+        dgradJdvartemp = dgradJdvar
         
         ! Allocate initially to avoid errors 
         if (.not. allocated(hessJ%row)) then 
@@ -5805,12 +5876,14 @@ module gdmod_costfunction
             ! Compute
             call costfunction%cfv_lr%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
             
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for LR'
@@ -5818,6 +5891,7 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
         
         ! Face angle difference
@@ -5825,12 +5899,14 @@ module gdmod_costfunction
             ! Compute
             call costfunction%cfv_fad%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
 
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for FAD'
@@ -5838,6 +5914,7 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
 
         ! Face angle
@@ -5845,12 +5922,14 @@ module gdmod_costfunction
             ! Compute
             call costfunction%cfv_fa%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
 
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for FA'
@@ -5858,6 +5937,7 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
 
         ! Psi ratio, psi based
@@ -5865,12 +5945,15 @@ module gdmod_costfunction
             ! Compute
             call costfunction%cfv_prpb%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
 
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
+
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for PRPB'
@@ -5878,6 +5961,7 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
 
         ! Length ratio, radial
@@ -5885,12 +5969,14 @@ module gdmod_costfunction
             ! Compute
             call costfunction%cfv_lrrad%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
 
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for LRrad'
@@ -5898,11 +5984,18 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
 
         ! Housekeeping
         !=============
-        deallocate(gradJtemp)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
 
     end subroutine
 

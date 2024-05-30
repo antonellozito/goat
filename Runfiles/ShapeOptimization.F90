@@ -28,6 +28,8 @@ program ShapeOptimization
     !========
     use somod_userinput
 
+    implicit none
+
     ! Declare variables
     !==================
     ! Arguments
@@ -49,7 +51,7 @@ program ShapeOptimization
 
     ! Run driver
     !===========
-    call ShapeOptDriver(inputfilepath)
+    call ShapeOptDriver(filepath)
 
 
 end program ShapeOptimization

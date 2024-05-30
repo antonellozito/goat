@@ -956,6 +956,9 @@ module somod_constraints
                 val = spread(1.0, 1, 2*size(tv))
                 jacG = ConstructMySparse(row, col, val, constraints%ncon, &
                     designvariables%nphi)
+                
+                ! Transpose
+                gradG = jacG%Transpose()
             end if 
 
             ! Hessian
@@ -1157,6 +1160,15 @@ module somod_constraints
             dohessiang = .true. 
         end if 
 
+        ! Initialize & allocate
+        associate(nphi         => goat%designvariables%nphi, &
+            neqcon              => goat%constraints%eqcon%neqcon, &
+            nineqcon            => goat%constraints%ineqcon%nineqcon)
+        allocate(gradJg(nphi), Gg(neqcon), Hg(nineqcon), ncp(nineqcon), &
+            A(nineqcon), I(nineqcon), gradL(nphi+neqcon+nineqcon), &
+            rhs(nphi+neqcon+nineqcon))
+        
+
         ! Evaluate
         !=========
         ! Cost function
@@ -1184,6 +1196,10 @@ module somod_constraints
         call kktsolver%SetupCorrectionEquation(lhs, rhs, &
             gradJg, hessJg, Gg, gradGg, hessGg, goat%lambda, Hg, gradHg, hessHg, goat%mu, A, &
             ncp, gradncpphi, gradncpmu)
+
+        ! Relax lhs? 
+        !kktsolver%numKKT%rxf = 1.0
+        !call kktsolver%RelaxKKTSystem(lhs, nphi, neqcon, nineqcon)
 
         ! Set constraint value
         G = rhs
@@ -1236,6 +1252,10 @@ module somod_constraints
         !========
         ! Simply set to zero
         hessG = SpZeros(designvariables%nphi, designvariables%nphi)
+
+        ! Housekeeping
+        !=============
+        end associate
         
     end subroutine
 

@@ -546,9 +546,9 @@ module somod_userinput
         ! Read options
         !=============
         ! Structure & vertex IDs
-        field = 'so.ec.par.structureIDs'
+        field = 'so.ec.par.fvp.structureIDs'
         call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
-        field = 'so.ec.par.vertIDs'
+        field = 'so.ec.par.fvp.vertIDs'
         call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
 
         ! Housekeeping

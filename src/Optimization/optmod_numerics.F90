@@ -349,7 +349,6 @@ module optmod_numerics
         ! Read options
         !=============
         ! General
-        print *, num%fieldprefix 
         field = num%fieldprefix // 'opt.num.itmax'
         call ExtractOptionValueInteger0D(fid, field, num%maxit)
         field = num%fieldprefix // 'opt.num.verbosity'
@@ -483,7 +482,6 @@ module optmod_numerics
         ! Read options
         !=============
         ! General
-        print *, num%fieldprefix 
         field = num%fieldprefix // 'opt.num.ls.type'
         call ExtractOptionValueCharacter(fid, field, num%type)
         field = num%fieldprefix // 'opt.num.ls.meritfunction'
@@ -612,7 +610,6 @@ module optmod_numerics
         ! Read options
         !=============
         ! General
-        print *, num%fieldprefix 
         field = num%fieldprefix // 'opt.num.ncp.ncpfun'
         call ExtractOptionValueCharacter(fid, field, num%ncpfun)
         field = num%fieldprefix // 'opt.num.ncp.alpha'

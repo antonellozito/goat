@@ -337,7 +337,7 @@ module mod_plotter
         character(*)             :: gnuplotoptions
         character(*)             :: plotfile
 
-        print *, trim(plotfile)
+        !print *, trim(plotfile)
         ! Execute gnuplot
         call execute_command_line('gnuplot ' // trim(gnuplotoptions) &
             // ' ' // trim(plotfile))
@@ -472,7 +472,7 @@ module mod_plotter
         !======
         open (action='write', file=trim(datafile), newunit=fu, &
              status='unknown')
-        print *, datafile
+        !print *, datafile
             
         ! Header
         write (fu, *) 'x, y'
@@ -509,7 +509,7 @@ module mod_plotter
         !======
         open (action='write', file=trim(datafile), newunit=fu, &
              status='unknown')
-        print *, datafile
+        !print *, datafile
             
         ! Header
         write (fu, *) 'x, y'

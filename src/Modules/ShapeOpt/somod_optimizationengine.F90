@@ -163,6 +163,11 @@ module somod_optimizationengine
         ! Allocate the solver
         allocate(optimizationdriver%solver, source=thissolver)
 
+        ! Propagate paths
+        optimizationdriver%problem%inputfilepath = optimizationdriver%inputfilepath 
+        optimizationdriver%solver%inputfilepath = optimizationdriver%inputfilepath
+        optimizationdriver%solver%inputfileprefix = optimizationdriver%inputfileprefix
+
     end subroutine
 
     !------------------------------------------------------------------!
@@ -296,6 +301,11 @@ module somod_optimizationengine
             ! Vessel coordinates
             allocate(DesignVariablesVesselCoordinatesUDT::problem%designvariables)
 
+        case ('vesselcoordinates_goat')
+
+            ! Vessel coordinates & goat variables
+            allocate(DesignVariablesVesselCoordinatesGoatUDT::problem%designvariables)
+
         case default
 
             ! Throw error
@@ -334,8 +344,55 @@ module somod_optimizationengine
         call problem%constraints%Initialize(problem%goat, & 
             problem%designvariables, problem%designoptions%constraints)
 
-        ! 
-        !=================
+        ! Set Lagrange multipliers
+        allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
+            problem%mu(problem%constraints%ineqcon%nineqcon), &
+            problem%A(problem%constraints%ineqcon%nineqcon))
+        problem%lambda = 0
+        problem%mu = 0
+        problem%A = .false.
+
+        ! Checks
+        !=======
+        ! Check some combinations of cfv/cons/designvariables
+        select case (trim(problem%designoptions%variables%type))
+
+        case ('vesselcoordinates')
+
+        case ('vesselcoordinates_goat')
+
+            ! Check if goat constraints are on, otherwise throw error
+            if (.not. problem%constraints%eqcon%dogoat) then 
+                call gdErrorHandler('Design variables "vesselcoordinates_goat" ' // &
+                    'require active goat constraints (are currently not active)')
+            end if 
+
+        case default 
+
+            ! Check cost function
+            select case (problem%costfunction%type)
+
+            case ('PLF')
+
+                ! Requires  vesselcoordinates(_goat)
+                call gdErrorHandler('Cost function "PLF" requires design ' // &
+                    'variables with vessel coordinates, check input')
+
+            case default 
+
+            end select
+
+            ! Check constraints
+            if (problem%constraints%eqcon%dofixedvesselpoints) then 
+                ! Requires vesselcoordinates(_goat)
+                call gdErrorHandler('"fixedvesselpoints" constraint requires design ' // &
+                    'variables with vessel coordinates, check input')
+            end if 
+
+        end select
+
+        ! Finalize initialization
+        !========================
         ! Initialize design variables further for constraint/cfv 
         ! dependent fields
         call problem%FinalizeInitialization()

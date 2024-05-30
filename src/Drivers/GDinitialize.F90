@@ -53,5 +53,8 @@ subroutine GDinitialize(inputfilepath, optimizationdriver)
     call ConstructGridDesignProblem(optimizationdriver, designoptions, &
         grid, magneticField, environment)
 
+    ! Further initialize the design problem
+    call optimizationdriver%problem%Initialize()
+
 
 end subroutine

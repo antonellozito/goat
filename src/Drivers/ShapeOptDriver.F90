@@ -19,7 +19,7 @@ subroutine ShapeOptDriver(inputfilepath)
     ! Declare variables
     !==================
     ! Arguments
-    character(:), allocatable       :: inputfilepath 
+    character(*), intent(in)        :: inputfilepath 
 
     ! Auxiliary
     type(OptimizationEngineSOUDT)   :: ShapeOptEngine
@@ -29,7 +29,14 @@ subroutine ShapeOptDriver(inputfilepath)
 
     ! Initialize
     !===========
-    ! Initialize problem
+    ! Add the path 
+    ShapeOptEngine%inputfilepath = inputfilepath
+    ShapeOptEngine%inputfileprefix = 'so.'
+
+    ! Initialize the driver
+    call ShapeOptEngine%SetupOptimizationDriver()
+
+    ! Initialize the problem
     ShapeOptEngine%problem%inputfilepath = inputfilepath
     call ShapeOptEngine%problem%Initialize()
 

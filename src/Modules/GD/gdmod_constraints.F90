@@ -1013,13 +1013,7 @@ module gdmod_constraints
         else
             allocate(values(0))
         end if 
-        if (present(dGdvarin)) then 
-            dGdvar = dGdvarin 
-        end if 
-        if (present(dgradGdvarin)) then 
-            dgradGdvar = dgradGdvarin 
-        end if 
-        
+
         ! Set the constraint counter
         ic = 0
 
@@ -1028,7 +1022,7 @@ module gdmod_constraints
         gradG = SpZeros(designvariables%nphi, 0) ! will concatenate
         hessG = SpZeros(designvariables%nphi, designvariables%nphi) ! will add
         dGdvar = SpZeros(0, size(values, 1))
-        dgradGdvar = SpZeros(designvariables%nphi, size(values))
+        dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
 
         ! X-point constraints
         !--------------------
@@ -1224,6 +1218,16 @@ module gdmod_constraints
 
         end if
 
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if 
+
     end subroutine
 
     !------------------------------------------------------------------!
@@ -1323,12 +1327,13 @@ module gdmod_constraints
         type(MySparseUDT)                   :: dGdvar, dgradGdvar
 
         ! Loop
-        integer(I8)                     :: ic, ivg, ivh, k
+        integer(I8)                     :: ic, k
         integer(I8), allocatable        :: conindex(:)
 
         ! Auxiliary
         real(R8), allocatable           :: G_lf(:), lambda_lf(:)
-        type(MySparseUDT)               :: gradG_lf, hessG_lf
+        type(MySparseUDT)               :: gradG_lf, hessG_lf, &
+            dG_lfdvar, dgradG_lfdvar
 
         ! Initialize
         !===========
@@ -1343,18 +1348,18 @@ module gdmod_constraints
         else
             allocate(values(0))
         end if 
-        if (present(dGdvarin)) then 
-            dGdvar = dGdvarin 
-        end if 
-        if (present(dgradGdvarin)) then 
-            dgradGdvar = dgradGdvarin 
-        end if 
 
         ! Set the constraint counter
         ic = 0
 
+        ! Set derivatives
+
         ! Constraint values
         !==================
+        gradG = SpZeros(designvariables%nphi, 0) ! will concatenate
+        hessG = SpZeros(designvariables%nphi, designvariables%nphi) ! will add
+        dGdvar = SpZeros(0, size(values, 1))
+        dgradGdvar = SpZeros(designvariables%nphi, size(values))
 
         ! Linefolding constraints
         !------------------------
@@ -1364,7 +1369,6 @@ module gdmod_constraints
             conindex = [(k, k = ic+1, ic+constraints%linefolding%ncon)]
 
             ! Allocate & initialize
-            allocate(lambda_lf(constraints%linefolding%ncon))
             lambda_lf = lambda(conindex)
 
             ! Call the evaluation routine
@@ -1372,132 +1376,33 @@ module gdmod_constraints
                 gradG_lf, hessG_lf, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
-                lambda_lf)
+                lambda_lf, var, values, dG_lfdvar, dgradG_lfdvar)
 
             ! Assign
             G(conindex) = G_lf
-
-            ! Update the gradient column indices
             if (dogradient) then 
-                ! For easier concatenation later on
-                gradG_lf%col = gradG_lf%col + ic
-
-            end if
+                gradG = gradG%Concatenate(gradG_lf, 2)
+            end if 
+            if (dohessian) then 
+                hessG = hessG + hessG_lf
+            end if 
+            dGdvar = dGdvar%Concatenate(dG_lfdvar, 1)
+            dgradGdvar = dgradGdvar + dgradG_lfdvar
 
             ! Update the constraint counter
             ic = ic + constraints%linefolding%ncon
 
-            ! Housekeeping
-            deallocate(conindex, lambda_lf) 
-            if (allocated(G_lf)) then
-                deallocate(G_lf)
-            end if
-
-        end if
-    
-        ! Concatenate gradient
-        !=====================
-        if (dogradient) then 
-
-            ! Determine sizes
-            !----------------
-            ! Size of the gradient
-            gradG%ncol = constraints%nineqcon 
-            gradG%nrow = designvariables%nphi
-
-            ! Allocate
-            if (.not. allocated(gradG%val)) then 
-                ! Number of values (to be determined)
-                gradG%nval = 0
-
-                ! Add values of each constraint, if used
-                ! Linefolding
-                if (constraints%dolinefolding) then 
-                    gradG%nval = gradG%nval + gradG_lf%nval 
-                end if
-
-                ! Allocate
-                call gradG%Allocate()
-            end if
-
-            ! Add contributions
-            !------------------
-            ! Initialize counter
-            ivg = 0
-
-            ! Linefolding
-            if (constraints%dolinefolding) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%linefolding%ncon, &
-                    nval    => gradG_lf%nval)
-
-                ! Add values
-                gradG%row(ivg+1:ivg+nval) = gradG_lf%row 
-                gradG%col(ivg+1:ivg+nval) = gradG_lf%col
-                gradG%val(ivg+1:ivg+nval) = gradG_lf%val
-
-                ! Update counter
-                ivg = ivg + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            
         end if
 
-        ! Concatenate the hessian
-        !========================
-        if (dohessian) then 
-
-            ! Determine sizes
-            !----------------
-            ! Size of the hessian
-            hessG%ncol = designvariables%nphi
-            hessG%nrow = designvariables%nphi
-
-            ! Allocate
-            if (.not. allocated(hessG%val)) then 
-                ! Number of values (to be determined)
-                hessG%nval = 0
-
-                ! Add values of each constraint, if used
-                if (constraints%dolinefolding) then 
-                    hessG%nval = hessG%nval + hessG_lf%nval  
-                end if 
-
-                ! Allocate
-                call hessG%Allocate()
-            end if
-
-            ! Add contributions
-            !------------------
-            ! Initialize counter
-            ivh = 0
-
-            ! Linefolding
-            if (constraints%dolinefolding) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%linefolding%ncon, &
-                    nval    => hessG_lf%nval)
-
-                ! Add values
-                hessG%row(ivh+1:ivh+nval) = hessG_lf%row 
-                hessG%col(ivh+1:ivh+nval) = hessG_lf%col
-                hessG%val(ivh+1:ivh+nval) = hessG_lf%val
-
-                ! Update counter
-                ivh = ivh + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-        end if
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if 
 
 
     end subroutine
@@ -3390,12 +3295,6 @@ module gdmod_constraints
             values = valuesin 
         else
             allocate(values(0))
-        end if 
-        if (present(dGdvarin)) then 
-            dGdvar = dGdvarin 
-        end if 
-        if (present(dgradGdvarin)) then 
-            dgradGdvar = dgradGdvarin 
         end if 
 
         ! Check derivative computation
@@ -7009,12 +6908,6 @@ module gdmod_constraints
         else
             allocate(values(0))
         end if 
-        if (present(dGdvarin)) then 
-            dGdvar = dGdvarin 
-        end if 
-        if (present(dgradGdvarin)) then 
-            dgradGdvar = dgradGdvarin 
-        end if 
     
         ! Checks
         if ( (.not. allocated(lambda)) .and. dohessian) then
@@ -7088,7 +6981,6 @@ module gdmod_constraints
 
             end if
         end if
-
 
         ! Constraint value
         !=================
