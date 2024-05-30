@@ -393,7 +393,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                 doflip = .false. 
                 if (pi(1, thisp) == nextp) then 
                     ! First intersection, check si
-                    if (si(1, thisp) > si(2, thisp) ) then 
+                    if (si(1, thisp) >= si(2, thisp) ) then 
                         ! Don't flip
                         xs = xi(indi(2, thisp)) ! start 
                         ys = yi(indi(2, thisp)) 
@@ -402,7 +402,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(1, thisp)) 
                         pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         sv = si(2, thisp) + 1
-                        ev = si(1, thisp) 
+                        ev = si(1, thisp) - 1
                     else 
                         ! Flip
                         doflip = .true. 
@@ -413,11 +413,11 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(2, thisp)) 
                         pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         sv = si(1, thisp) + 1
-                        ev = si(2, thisp) 
+                        ev = si(2, thisp) - 1
                     end if 
                 elseif ( pi(2, thisp) == nextp) then 
                     ! Second intersection, check si
-                    if (si(2, thisp) > si(1, thisp) ) then 
+                    if (si(2, thisp) >= si(1, thisp) ) then 
                         ! Don't flip
                         xs = xi(indi(1, thisp)) ! start 
                         ys = yi(indi(1, thisp)) 
@@ -426,7 +426,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(2, thisp)) 
                         pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         sv = si(1, thisp) + 1 
-                        ev = si(2, thisp) 
+                        ev = si(2, thisp) - 1
                     else 
                         ! Flip
                         doflip = .true. 
@@ -437,7 +437,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(1, thisp))
                         pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         sv = si(2, thisp) + 1
-                        ev = si(1, thisp) 
+                        ev = si(1, thisp) - 1
                     end if 
                 else 
                     ! Unexpected error
@@ -459,6 +459,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
 
                 ! Polygon points
                 tempnv = ev - sv + 1 
+                
                 if (doflip) then 
                     tempx(nvv+1:nvv+tempnv) = &
                         ps%polygons(thisp)%x(ps%polygons(thisp)%vert(ev:sv:-1))
@@ -470,6 +471,11 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                     tempx(nvv+1:nvv+tempnv) = ps%polygons(thisp)%x(ps%polygons(thisp)%vert(sv:ev))
                     tempy(nvv+1:nvv+tempnv) = ps%polygons(thisp)%y(ps%polygons(thisp)%vert(sv:ev))
                     templabels(nvv+1:nvv+tempnv, :) = ps%polygons(thisp)%labels(ps%polygons(thisp)%vert(sv:ev), :)
+                end if
+
+                ! Hedge for zero/negative length
+                if (tempnv < 0) then 
+                    tempnv = 0
                 end if
                 nvv = nvv+tempnv
 
