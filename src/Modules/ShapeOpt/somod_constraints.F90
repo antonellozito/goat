@@ -1167,6 +1167,11 @@ module somod_constraints
         allocate(gradJg(nphi), Gg(neqcon), Hg(nineqcon), ncp(nineqcon), &
             A(nineqcon), I(nineqcon), gradL(nphi+neqcon+nineqcon), &
             rhs(nphi+neqcon+nineqcon))
+        hessJg = SpZeros(goat%designvariables%nphi, goat%designvariables%nphi)
+        hessGg = hessJg 
+        hessHg = hessJG 
+        gradGg = SpZeros(goat%designvariables%nphi, neqcon)
+        gradHg = SpZeros(goat%designvariables%nphi, nineqcon)
         
 
         ! Evaluate
@@ -1197,12 +1202,22 @@ module somod_constraints
             gradJg, hessJg, Gg, gradGg, hessGg, goat%lambda, Hg, gradHg, hessHg, goat%mu, A, &
             ncp, gradncpphi, gradncpmu)
 
-        ! Relax lhs? 
-        !kktsolver%numKKT%rxf = 1.0
-        !call kktsolver%RelaxKKTSystem(lhs, nphi, neqcon, nineqcon)
-
+        ! Relax lhs? Only if hessian is evaluated! Will yield wrong 
+        ! constraint gradients, but that shouldn't be an issue 
+        if (dohessiang) then 
+            kktsolver%numKKT%rxf = 1-5
+            call kktsolver%RelaxKKTSystem(lhs, nphi, neqcon, nineqcon)
+        end if 
+        
         ! Set constraint value
-        G = rhs
+        G = -rhs ! need to compensate for minus sign in SetUpCorrectionEquation
+
+        if (any(ieee_is_nan(rhs))) then 
+            print *, 'NaN in goat constraints'
+        end if 
+        if (any(.not. ieee_is_finite(rhs))) then 
+            print *, 'Inf in goat constraints'
+        end if 
             
         ! Construct linearization
         !========================
@@ -1246,6 +1261,14 @@ module somod_constraints
             ! Simply zero
             gradG = SpZeros(designvariables%nphi, constraints%ncon)
 
+        end if 
+
+        ! Check
+        if (any(ieee_is_nan(gradG%val))) then 
+            print *, 'NaN in goat constraints linearization'
+        end if 
+        if (any(.not. ieee_is_finite(gradG%val))) then 
+            print *, 'Inf in goat constraints linearization'
         end if 
 
         ! Hessian

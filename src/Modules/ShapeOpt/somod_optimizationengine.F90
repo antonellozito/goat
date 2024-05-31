@@ -477,6 +477,12 @@ module somod_optimizationengine
         ! Simply call the update routine from the design variables
         call designvariables%UpdateDesign(goat)
 
+        ! Update goat
+        !===========
+        ! Assumed coordinates already properly re-initialized during
+        ! UpdateDesign
+        call goat%UpdateProblem()
+
         ! Housekeeping
         !=============
         end associate
