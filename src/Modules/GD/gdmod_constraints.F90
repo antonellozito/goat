@@ -3448,7 +3448,7 @@ module gdmod_constraints
         constraints%plf = environment%vessel%plfvessel
 
         ! Visualize 
-        call constraints%plf%Visualize('constraints_boundary_plf')
+        !call constraints%plf%Visualize('constraints_boundary_plf')
 
     end subroutine
 
@@ -3584,8 +3584,10 @@ module gdmod_constraints
 
             ! Expand
             tempderivx%nrow = designvariables%nphi
+            tempderivx%ncol = size(values)
             tempderivx%row = tv(tempderivx%row) 
             tempderivy%nrow = designvariables%nphi
+            tempderivy%ncol = size(values)
             tempderivy%row = tv(tempderivy%row) + grid%vert%ntot
 
             ! Add
@@ -3730,6 +3732,9 @@ module gdmod_constraints
         type(EnvironmentUDT)            :: environment 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Auxiliary
+        real(R8), allocatable           :: val(:)
+
         ! Initialize
         !===========
         ! Associate
@@ -3745,8 +3750,8 @@ module gdmod_constraints
         ! Compute jacG
         !=============
         ! Simply call differentiation of plf w.r.t. polygonset coordinates 
-        !call plf%EvaluateDiff(x(tv), y(tv), 0, 0, jacG, &
-        !    'polygonsetcoordinates')
+        allocate(val(size(tv)))
+        call plf%Evaluate(x(tv), y(tv), 0, 0, val, 'polygonsetcoordinates', values, jacG)
 
         ! Housekeeping
         !=============
