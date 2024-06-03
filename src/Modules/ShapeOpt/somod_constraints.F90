@@ -1204,10 +1204,10 @@ module somod_constraints
 
         ! Relax lhs? Only if hessian is evaluated! Will yield wrong 
         ! constraint gradients, but that shouldn't be an issue 
-        if (dohessiang) then 
-            kktsolver%numKKT%rxf = 1-5
-            call kktsolver%RelaxKKTSystem(lhs, nphi, neqcon, nineqcon)
-        end if 
+        !if (dohessiang) then 
+        !    kktsolver%numKKT%rxf = 1-5
+        !    call kktsolver%RelaxKKTSystem(lhs, nphi, neqcon, nineqcon)
+        !end if 
         
         ! Set constraint value
         G = -rhs ! need to compensate for minus sign in SetUpCorrectionEquation

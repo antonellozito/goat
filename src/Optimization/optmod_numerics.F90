@@ -86,6 +86,8 @@ module optmod_numerics
         !           cases)
         ! - rxfmin: minimal value of relaxation factor
         ! - fieldprefix: all numerical options are read in assuming a 
+        ! - useproblemrelaxation:   use problem-specific KKT relaxation
+        !                           routine
         ! format '<fieldprefix>opt.num.<field>'. Fieldprefix can be 
         ! empty or given (default is empty)
 
@@ -94,6 +96,7 @@ module optmod_numerics
         real(R8)            :: rxfdec 
         real(R8)            :: rxfmin
         real(R8)            :: rxfdesign
+        logical             :: useproblemrelaxation
 
     contains 
 
@@ -278,6 +281,7 @@ module optmod_numerics
         num%rxfdesign       = 1
         num%rxfdec          = 0.98
         num%rxfmin          = 2e-2
+        num%useproblemrelaxation    = .false.
 
     end subroutine
 
@@ -355,6 +359,8 @@ module optmod_numerics
         call ExtractOptionValueInteger0D(fid, field, num%verbosity)
         field = num%fieldprefix // 'opt.num.tol'
         call ExtractOptionValueReal0D(fid, field, num%tol)
+        field = num%fieldprefix // 'opt.num.useproblemrelaxation'
+        call ExtractOptionValueLogical0D(fid, field, num%useproblemrelaxation)
         
         ! Relaxation factors
         field = num%fieldprefix // 'opt.num.rxf'

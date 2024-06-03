@@ -92,6 +92,9 @@ module somod_optimizationengine
         procedure :: EvaluateInequalityConstraints &
                         => EvaluateInequalityConstraintsSO
 
+        ! KKT relaxation
+        procedure :: RelaxProblemKKTSystem => RelaxProblemKKTSystemSO
+
         ! Additional routines
         !====================
         ! Initialization finalizer to account for cross-design/cfv/con
@@ -664,6 +667,97 @@ module somod_optimizationengine
         ! as well? At least gradient should be tackled by activeness
         ! of constraint...
         ! call problem%DeactivateInequalityConstraints(H)
+
+    end subroutine
+
+    ! KKT system relaxation
+    subroutine RelaxProblemKKTSystemSO(problem, KKT)
+
+        ! Description
+        !============
+        ! Relax KKT system for shape optimization. It is recommended to
+        ! use this routine if the goat is treated explicitly as a 
+        ! constraint and therefore the optimization variables include
+        ! lagrange multipliers of these constraints. It might make sense
+        ! to do a problem-specific approach here, e.g. by applying 
+        ! relaxation only on the hessian contributions of the design 
+        ! variables in the upper and lower level problems. 
+
+        ! In this implementation, we apply the same relaxation factor 
+        ! as obtained from the problem monitor to the shape optimization
+        ! and goat problem (this may be adjusted in the future). Only
+        ! the cost function contribution to the hessian are retained, 
+        ! and only those contributions that differentiate w.r.t. (only)
+        ! the actual design variables (i.e. vessel coordinates and 
+        ! grid coordinates/psi values)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemSOUDT)         :: problem 
+        type(MySparseUDT)                       :: KKT 
+
+        ! Auxiliary
+        integer(I8)                             :: nphi, neq, nineq
+        integer(I8), allocatable, dimension(:)  :: phiind
+
+        real(R8), allocatable, dimension(:)     :: diag
+        
+        type(MySparseUDT)                       :: KKTcopy, rxfmat
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            rxf         => problem%monitor%rxf)
+
+        ! Get the problem dimensions
+        call problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Get the indices of the contributions to relax (i.e. shape opt
+        ! design variables and, if present, goat design variables)
+        associate(dv        => problem%designvariables)
+        select type(dv)
+
+        type is (DesignVariablesVesselCoordinatesUDT) 
+
+            ! Only shape optimization design variables to account for
+            phiind = [dv%xind, dv%yind]
+
+        type is (DesignVariablesVesselCoordinatesGoatUDT)
+
+            ! Shape and goat design variables
+            phiind = [dv%xind, dv%yind, dv%phigoatind]
+
+        class default
+
+            ! Unknown
+            call gdErrorHandler('RelaxProblemKKTSystemSO: unknown ' // & 
+                'shape optimization design variable type')
+
+        end select
+        end associate
+
+        ! Relax
+        !======
+        ! Compute diagonal entries
+        KKTcopy = KKT 
+        KKTcopy%val = abs(KKTcopy%val)
+        call KKTcopy%SumColumnwiseFull(diag) ! diagonal matrix
+
+        ! Set to one where diag is zero
+        where(diag == 0.0) diag = 1.0
+
+        ! Construct relaxation matrix
+        rxfmat = ConstructMySparse(phiind, phiind, rxf*diag(phiind), &
+            nphi+neq+nineq, nphi+neq+nineq)
+
+        ! Add to KKT matrix 
+        KKT = KKT + rxfmat
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 

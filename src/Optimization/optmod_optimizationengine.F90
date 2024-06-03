@@ -116,6 +116,10 @@ module optmod_optimizationengine
         procedure(EvaluateInequalityConstraintsINT), deferred :: &
             EvaluateInequalityConstraints
 
+        ! KKT system relaxation (not always used)
+        procedure(RelaxProblemKKTSystemINT), deferred  :: &
+            RelaxProblemKKTSystem
+
         ! Merit function evaluation
         procedure :: EvaluateMeritFunction
         procedure :: EvaluateMeritFunctionL1
@@ -509,6 +513,13 @@ module optmod_optimizationengine
             type(MySparseUDT)                   :: gradH, hessH 
             logical                             :: dogradient, dohessian
 
+        end subroutine
+    
+        ! KKT system relaxation
+        subroutine RelaxProblemKKTSystemINT(problem, KKT)
+            import :: MySparseUDT, OptimizationProblemUDT
+            class(OptimizationProblemUDT)   :: problem 
+            type(MySparseUDT)               :: KKT
         end subroutine
 
         ! Solver initialization
@@ -954,6 +965,7 @@ module optmod_optimizationengine
 
         ! Initialize counter(s)
         itopt = 1
+        problem%monitor%itopt = itopt
         maxit = solver%numKKT%maxit
 
         ! Unpack 
@@ -983,6 +995,10 @@ module optmod_optimizationengine
             call wall_time(t_it_s)
             call wall_time(t_eval_s)
 
+            ! Update the monitor
+            problem%monitor%itopt = itopt
+            problem%monitor%rxf = rxf 
+
             ! Update the optimization problem 
             call problem%UpdateProblem()
 
@@ -992,10 +1008,10 @@ module optmod_optimizationengine
                 !    checkgradients, checkhessians)
                 !call CheckLagrangianLinearization(problem, solver, lambda, & 
                 !    mu, checkgradients, checkhessians)
-                !call CheckEqconLinearization(problem, lambda, &
-                !    checkgradients, checkhessians)
-                call CheckIneqconLinearization(problem, lambda, &
+                call CheckEqconLinearization(problem, lambda, &
                     checkgradients, checkhessians)
+                !call CheckIneqconLinearization(problem, lambda, &
+                !    checkgradients, checkhessians)
             end if
 
             ! Evaluate cost function
@@ -1038,7 +1054,13 @@ module optmod_optimizationengine
                     ncp, gradncpphi, gradncpmu)
 
                 ! Relax
-                call solver%RelaxKKTSystem(lhs, nphi, neq, nineq)
+                if (solver%numKKT%useproblemrelaxation) then 
+                    ! Call problem-specific KKT relaxation routine
+                    call problem%RelaxProblemKKTSystem(lhs)
+                else
+                    ! Use default KKT solver routine
+                    call solver%RelaxKKTSystem(lhs, nphi, neq, nineq)
+                end if 
 
                 !print *, 'hessian size: ', hessL%nrow, hessL%ncol
                 !call SpyPlot(lhs%row, lhs%col, lhs%nval, '-p')
@@ -1131,9 +1153,29 @@ module optmod_optimizationengine
                 
 
             else
-                ! Directly update design without linesearch, apply the
-                ! relaxation using rxfdesign
-                dx(1:nphi) = rxfdesign*dx(1:nphi)
+                ! Check convergence of solver
+                if (flag == 0) then 
+                    ! Directly update design without linesearch, apply the
+                    ! relaxation using rxfdesign
+                    dx(1:nphi) = rxfdesign*dx(1:nphi)
+                else
+                    ! Set step to zero
+                    dx(:) = 0
+                    alphals = 0
+
+                    ! Add relaxation
+                    if (rxf > 0) then 
+                        rxf = 2*rxf 
+                    else
+                        ! Apparently no relaxation, add
+                        print *, 'No relaxation detected, adding relaxation'
+                        rxf = 1
+                        if (rxfdec > 0) then 
+                        else 
+                            rxfdec = 0.9
+                        end if 
+                    end if 
+                end if 
             end if
 
             ! Update the design
@@ -1154,9 +1196,6 @@ module optmod_optimizationengine
             ! Timers
             call wall_time(t_it_e)
 
-            ! Update the monitor
-            problem%monitor%itopt = itopt
-
             ! Update the monitor again
             problem%monitor%J(itopt)        = J
             problem%monitor%L(itopt)        = L
@@ -1167,7 +1206,6 @@ module optmod_optimizationengine
             problem%monitor%evaltime        = t_eval_e - t_eval_s
             problem%monitor%ittime          = t_it_e - t_it_s 
             problem%monitor%linsolvetime    = t_linsolve_e - t_linsolve_s
-            problem%monitor%rxf = rxf 
             problem%monitor%maxdphi = maxval(dx(1:nphi))
 
             ! Print the current iterate
@@ -2661,12 +2699,12 @@ module optmod_optimizationengine
         ! Set the constraints to check
         neqID =  1
         allocate(eqID(neqID))
-        eqID = [105] !  some random numbers for now
+        eqID = [3400] !  some random numbers for now
 
         ! Set the design variables to check
-        nvars = 5
+        nvars = 4
         allocate(vars(nvars))
-        vars = [641, 1+860, 860, 3+860, 1720] ! some random variables for now
+        vars = [2, 3, 64, 65] ! some random variables for now
 
         ! Sanity checks
         if (any(eqID > neq)) then

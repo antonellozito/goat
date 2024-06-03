@@ -94,6 +94,9 @@ module gdmod_optimizationengine
         procedure :: EvaluateInequalityConstraints &
                         => EvaluateInequalityConstraintsGD
 
+        ! KKT relaxation
+        procedure :: RelaxProblemKKTSystem => RelaxProblemKKTSystemGD
+
         ! Additional routines
         !====================
         ! Initialization finalizer to account for cross-design/cfv/con
@@ -933,6 +936,26 @@ module gdmod_optimizationengine
         ! as well? At least gradient should be tackled by activeness
         ! of constraint...
         call problem%DeactivateInequalityConstraints(H)
+
+    end subroutine
+
+    ! KKT relaxation 
+    subroutine RelaxProblemKKTSystemGD(problem, KKT)
+
+        ! Description
+        !============
+        ! Relax KKT system based on problem parameters. Note: this is not
+        ! necessary/not supported yet for the general GD problem. If 
+        ! used, an error will be thrown. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)         :: problem 
+        type(MySparseUDT)                       :: KKT 
+
+        ! Call error handler
+        call gdErrorHandler('RelaxProblemKKTSystemGD: method not yet implemented')
 
     end subroutine
 
