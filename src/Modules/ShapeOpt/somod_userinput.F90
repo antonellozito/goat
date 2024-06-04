@@ -157,10 +157,14 @@ module somod_userinput
         ! Description
         !============
         ! General cost function options structure that contains fields
-        ! for each possible cost function contribution. 
+        ! for each possible cost function contribution. Additionally, 
+        ! there is the option to make a reduced cost function by 
+        ! solving the goat equations for each cost function evaluation. 
+        ! This is set by the logical 'dogoatreduction'
 
         ! Fields
         character(:), allocatable           :: type
+        logical                             :: dogoatreduction
         type(CostFunctionOptionsPLFUDT)     :: plf 
 
     contains 
@@ -358,6 +362,9 @@ module somod_userinput
         !=============
         ! Set type
         options%type                = 'PLF'
+
+        ! Set goat reduction switch
+        options%dogoatreduction = .false. 
 
         ! Propagate filepaths
         options%plf%inputfilepath = options%inputfilepath
@@ -704,6 +711,10 @@ module somod_userinput
         ! Cost function type
         field = 'so.cfv.type'
         call ExtractOptionValueCharacter(fid, field, options%type)
+
+        ! Goat reduction
+        field = 'so.cfv.dogoatreduction'
+        call ExtractOptionValueLogical0D(fid, field, options%dogoatreduction)
 
         ! Housekeeping
         !=============

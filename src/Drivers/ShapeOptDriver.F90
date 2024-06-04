@@ -38,7 +38,7 @@ subroutine ShapeOptDriver(inputfilepath)
 
     ! Initialize the problem
     ShapeOptEngine%problem%inputfilepath = inputfilepath
-    call ShapeOptEngine%problem%Initialize()
+    !call ShapeOptEngine%problem%Initialize()
 
     ! Initialize options
     SOoptions%inputfilepath = inputfilepath 
@@ -51,7 +51,8 @@ subroutine ShapeOptDriver(inputfilepath)
     ! Solve
     !======
     ! Solve the problem
-    call ShapeOptEngine%solver%SolveOptimizationProblem(ShapeOptEngine%problem)
+    !call ShapeOptEngine%solver%SolveOptimizationProblem(ShapeOptEngine%problem)
+    call ShapeOptEngine%Driver()
 
     ! Write data
     !===========

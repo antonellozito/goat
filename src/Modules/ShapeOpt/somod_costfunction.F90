@@ -22,6 +22,7 @@ module somod_costfunction
     use somod_userinput
     use somod_designvariables
     use PolygonLevelsetFunction2D
+    use mod_linearsolverinterface
 
     ! The usual
     implicit none
@@ -100,6 +101,40 @@ module somod_costfunction
 
     end type
 
+    ! General goat-reduced cost function
+    type, extends(CostfunctionSOUDT) :: CostFunctionGRUDT
+
+        ! Description 
+        !============
+        ! General cost function for goat-reduced formulation. It has an
+        ! allocatable cost function field which can take any of the 
+        ! regular cost function options and the goat solver (the
+        ! optimization problem is already saved as state variable 
+        ! anyway). This allows for a nested formulation without 
+        ! having to change solvers etc (i.e. KKT solver can be reused or
+        ! any other if desired for the shape optimization problem). 
+        ! Additionally, the full goat engine is added. Since the goat
+        ! problem is already passed through to all the routines, the
+        ! problem instance of the engine is simply equated to the 
+        ! goat problem. 
+
+        ! Note: one should *not* impose the goat constraints in 
+        ! addition to the optimization problem 
+
+        ! Fields
+        class(CostFunctionSOUDT), allocatable       :: costfunction 
+        type(OptimizationEngineGDUDT)               :: goatengine 
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionGR
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionGR
+
+    end type
+
     
     !==================================================================!
     !                                                                  !
@@ -134,7 +169,8 @@ module somod_costfunction
 
         ! Cost function evaluation
         subroutine EvaluateCostFunctionSOINT(costfunction, J, gradJ, &
-            hessJ, goat, dogradient, dohessian, designvariables)
+            hessJ, goat, dogradient, dohessian, designvariables, &
+            varin, valuesin, dJdvarin, dgradJdvarin)
 
             ! Description
             !============
@@ -153,6 +189,11 @@ module somod_costfunction
             type(OptimizationProblemGDUDT)  :: goat
             logical                         :: dogradient, dohessian
             class(DesignVariablesSOUDT)     :: designvariables
+
+            character(*), intent(in), optional  :: varin 
+            real(R8), intent(in), optional      :: valuesin(:)
+            real(R8), allocatable, optional     :: dJdvarin(:) 
+            type(MySparseUDT), optional         :: dgradJdvarin
 
         end subroutine
 
@@ -240,7 +281,8 @@ module somod_costfunction
 
     ! Cost function evaluation
     subroutine EvaluateCostFunctionPLF(costfunction, J, gradJ, hessJ, &
-        goat, dogradient, dohessian, designvariables)
+        goat, dogradient, dohessian, designvariables, &
+        varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -259,6 +301,17 @@ module somod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesSOUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
         ! Auxiliary
         integer(I8)                             :: nv 
         integer(I8), allocatable, dimension(:)  :: row, col
@@ -274,6 +327,18 @@ module somod_costfunction
         associate(&
             ps          => goat%environment%vessel%polygonset,    &
             plf         => costfunction%targetplf)
+
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
 
         ! Get vessel coordinates
         call ps%GetVertices(xv, yv)
@@ -369,9 +434,254 @@ module somod_costfunction
         gradJ = gradJ*costfunction%lambda 
         hessJ = hessJ*costfunction%lambda
 
+        ! Other derivatives
+        !==================
+        ! Initialize
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values)) ! jacobian, not gradient
+
+        ! Currently no derivatives w.r.t. any other variables
+        select case (var)
+
+        case ('goatvariables', 'no')
+
+        case default 
+
+            call gdErrorHandler('EvaluateCostFunctionPLF: unknown ' // & 
+                'variable for derivative calculation: ' // var)
+
+        end select
+
         ! Housekeeping
         !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
+        ! Assocation termination
         end associate
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                     GOAT REDUCED COST FUNCTION                   !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionGR(costfunction, goat, options)
+
+        ! Description
+        !============
+        ! Initialize the goat reduced cost function. This basically means
+        ! initializing the goat engine and the costfunction type. The 
+        ! cost function is then allocated to the correct type and 
+        ! initialized here as well. 
+
+        ! Arguments
+        class(CostfunctionGRUDT)            :: costfunction
+        type(OptimizationProblemGDUDT)      :: goat
+        type(CostFunctionOptionsSOUDT)      :: options
+
+        ! Initialize goat engine
+        !=======================
+        ! Set the input filepaths for the driver
+        costfunction%goatengine%inputfilepath = goat%inputfilepath
+        costfunction%goatengine%inputfileprefix = 'gd.'
+        
+        ! Initialize the driver
+        call costfunction%goatengine%SetupOptimizationDriver()
+
+        ! Initialize the problem
+        costfunction%goatengine%problem = goat
+
+        ! Initialize the solver
+        call costfunction%goatengine%solver%Initialize()
+
+        ! Initialize costfunction
+        !========================
+        ! Check which cost function it is
+        select case (options%type)
+
+        case ('PLF')
+
+            ! Allocate
+            allocate(CostfunctionPLFUDT::costfunction%costfunction)
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('InitializeCostFunctionGR: unknown cost' // & 
+                'function type: ' // options%type)
+
+        end select
+
+        ! Initialize the cost function further
+        call costfunction%costfunction%Initialize(goat, options)
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateCostFunctionGR(costfunction, J, gradJ, hessJ, &
+        goat, dogradient, dohessian, designvariables, &
+        varin, valuesin, dJdvarin, dgradJdvarin)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! First, the goat equations are solved by calling the driver (
+        ! it is assumed that goat is up to date). Afterwards, the cost
+        ! function is evaluated and its gradient is computed by 
+        ! applying a discrete adjoint approach to account for the
+        ! goat constraints. The contributions of the goat constraints to
+        ! the hessian of the problem are not accounted for... 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionGRUDT)        :: costfunction 
+        real(R8)                        :: J
+        real(R8), allocatable           :: gradJ(:) ! assumed initialized
+        type(MySparseUDT)               :: hessJ ! assumed in initialized
+        type(OptimizationProblemGDUDT)  :: goat
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesSOUDT)     :: designvariables
+
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
+        ! Auxiliary
+        integer(I8)                                 :: flag
+
+        real(R8), allocatable, dimension(:)         :: goatvariables, &
+            gradJR, gradJgoat, lambdaG 
+
+        type(MySparseUDT)                           :: hessJR, &
+            jacGgoat, jacGdes, gradGdes, gradGgoat
+
+        ! Initialize
+        !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
+        ! Initialize others
+        allocate(gradJR(designvariables%nphi))
+        gradJR = 0
+
+        ! Construct goat variables
+        goatvariables = [goat%designvariables%phi, goat%lambda, goat%mu]
+
+        ! Initialize others
+        allocate(gradJgoat(size(goatvariables)))
+
+        ! Solve goat 
+        !===========
+        associate(goatproblem       => costfunction%goatengine%problem)
+        select type (goatproblem)
+
+        type is (OptimizationProblemGDUDT)
+
+            ! Update the problem with the latest goat
+            goatproblem = goat 
+
+            ! Call the driver
+            call costfunction%goatengine%solver%SolveOptimizationProblem(goatproblem)
+
+            ! Update goat
+            goat = goatproblem
+
+        class default 
+
+            ! Throw error
+            call gdErrorHandler('EvaluateCostFunctionGR: unexpected goat type')
+
+        end select
+        end associate
+
+        ! Compute reduced cost function
+        !==============================
+        ! Call evaluation routine
+        call costfunction%costfunction%Evaluate(J, gradJR, hessJR, &
+            goat, dogradient, dohessian, designvariables, &
+            'goatvariables', goatvariables, gradJgoat)
+
+        ! Compute gradient 
+        !=================
+        ! Evaluate goat jacobian w.r.t. goat variables
+        call goat%EvaluateJacobian('goatvariables', goatvariables, jacGgoat)
+
+        ! Evaluate goat jacobian w.r.t. design variables
+        select case (designvariables%type)
+
+        case ('vesselcoordinates')
+
+            ! Derivatives w.r.t. vessel coordinate
+            call goat%EvaluateJacobian('vesselcoordinates', &
+                designvariables%phi, jacGdes)
+
+        case ('vesselcoordinates_goat')
+
+            ! Illegal, throw error
+            call gdErrorHandler('EvaluteCostFunctionGR: goat variables' // & 
+                ' cannot be present as explicit design variables, ' // & 
+                ' not supported')
+
+        case default 
+
+            ! Unknown 
+            call gdErrorHandler('EvaluateCostFunctionGR: design variable' // & 
+                ' gradient w.r.t. design variables of type: ' // & 
+                designvariables%type // ' are not implemented')
+
+        end select
+
+        ! Compute lagrange multipliers
+        gradGgoat = jacGgoat%Transpose()
+        call SolveSparseLinearSystemDI(gradGgoat, -gradJgoat, lambdaG, flag)
+
+        ! Compute gradient
+        gradGdes = jacGdes%Transpose()
+        gradJ = gradJR + gradGdes%MatrixVectorProduct(lambdaG)
+
+        ! Compute hessian
+        !================
+        ! Only take the raw cost function contribution as hessian - 
+        ! perhaps replace by hessian estimator in the future? 
+        hessJ = hessJR
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
+
+
 
     end subroutine
 

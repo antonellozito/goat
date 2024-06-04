@@ -322,19 +322,28 @@ module somod_optimizationengine
         ! Cost function
         !==============
         ! Allocate the cost function, depending on the type
-        select case (trim(problem%designoptions%costfunction%type))
+        if (problem%designoptions%costfunction%dogoatreduction) then 
 
-        case ('PLF')
+            ! Goat-reduced cost function - initialization is done 
+            ! further in the initialization routine of the cost function
+            allocate(CostFunctionGRUDT::problem%costfunction)
 
-            ! Allocate 
-            allocate(CostFunctionPLFUDT::problem%costfunction)
+        else
+            ! Classical cost function
+            select case (trim(problem%designoptions%costfunction%type))
 
-        case default
-            
-            ! Throw error
-            call gdErrorHandler('Unknown cost function type')
+            case ('PLF')
 
-        end select
+                ! Allocate 
+                allocate(CostFunctionPLFUDT::problem%costfunction)
+
+            case default
+                
+                ! Throw error
+                call gdErrorHandler('Unknown cost function type')
+
+            end select
+        end if
 
         ! Initialize the cost function
         call problem%costfunction%Initialize(problem%goat, &
@@ -362,12 +371,27 @@ module somod_optimizationengine
 
         case ('vesselcoordinates')
 
+            ! If goat constraints are active, the cost function should
+            ! be reduced
+            if (problem%constraints%eqcon%dogoat) then 
+                call gdErrorHandler('Design variables "vesselcoordinates" '// & 
+                    ' require reduced cost function formulation and ' // &
+                    'inactive goat constraints (these are active now)')
+            end if 
+            
+
         case ('vesselcoordinates_goat')
 
             ! Check if goat constraints are on, otherwise throw error
             if (.not. problem%constraints%eqcon%dogoat) then 
                 call gdErrorHandler('Design variables "vesselcoordinates_goat" ' // &
                     'require active goat constraints (are currently not active)')
+            end if 
+
+            ! Check if we don't have a goat-reduced cost function
+            if (problem%designoptions%costfunction%dogoatreduction) then 
+                call gdErrorHandler('Design variables "vesselcoordinates_goat" ' // &
+                'cannot be used together with a goat-reduced cost function')
             end if 
 
         case default 
