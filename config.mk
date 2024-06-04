@@ -33,7 +33,7 @@ SUITESPARSEPATH = /usr/include/suitesparse
 ## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
 GDRUN_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
-    IO_carre IO_output IO_input  Setup  Drivers 
+    IO_carre IO_output IO_input  Setup  ShapeOptimization Drivers 
 
 ## GOAT_TARGETS             : Targets to be run for the full goat
 GOAT_TARGETS = $(GDRUN_TARGETS) 
