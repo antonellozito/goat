@@ -599,7 +599,7 @@ module optmod_optimizationengine
     !------------------------------------------------------------------!
 
     ! Merit function wrapper
-    subroutine EvaluateMeritFunction(problem, f, DJf, dx, lambda, mu, &
+    recursive subroutine EvaluateMeritFunction(problem, f, DJf, dx, lambda, mu, &
         doderiv, meritfunction, num)
 
         ! Description
@@ -643,7 +643,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! L1 merit function
-    subroutine EvaluateMeritFunctionL1(problem, f, DJf, dx, lambda, mu, &
+    recursive subroutine EvaluateMeritFunctionL1(problem, f, DJf, dx, lambda, mu, &
         doderiv, num)
 
         ! Description
@@ -828,7 +828,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! KKT solver
-    subroutine SolveOptimizationProblemKKT(solver, problem)
+    recursive subroutine SolveOptimizationProblemKKT(solver, problem)
 
         ! Description
         !============
@@ -899,9 +899,6 @@ module optmod_optimizationengine
         ! Logicals
         dogradient  = .true. 
         dohessian   = .true. 
-
-        ! Initialize the solver 
-        call solver%Initialize()
 
         ! Initialize the monitor - only temporary here
         call problem%GetProblemDimensions(nphi, neq, nineq)
@@ -1650,7 +1647,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! Step length computation
-    subroutine ComputeStepLengthLS(problem, numLS, dx, lambda, mu, alpha, flag)
+    recursive subroutine ComputeStepLengthLS(problem, numLS, dx, lambda, mu, alpha, flag)
 
         ! Description
         !============
