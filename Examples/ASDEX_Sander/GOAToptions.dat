@@ -9,17 +9,18 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # General options
 'goat.debug'                        '0'
-'goat.meth'                         'GDtest'
+'goat.meth'                         'GD'
 
 # Input file locations 
 #'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
-'goat.gridfilepath'                 'traduit.out.b2us_smoothed3'
+#'goat.gridfilepath'                 'traduit.out.b2us_basegeom'
+'goat.gridfilepath'                 'traduit.out.b2us'
 'goat.magneticfieldfilepath'        'rzpsi.dat'
 'goat.structurefilepath'            'structure.dat'
 'goat.GDinputfilepath'              'GOAToptions.dat'
 
 # Output file locations 
-'goat.writefilepath'                'traduit.out.b2us_smoothed3'  
+'goat.writefilepath'                'traduit.out.b2us_demo'  
 
 # Output options 
 'goat.write_final'                  '1'
@@ -297,10 +298,10 @@ VERSION 1.00.00
 # KKT driver (see also GridKKTDriver.m)
 # Design relaxation factors
 'gd.opt.num.docfrelax'              '1'
-'gd.opt.num.rxf'                    '2e-1'
+'gd.opt.num.rxf'                    '1e0'
 'gd.opt.num.rxfdesign'              '1'
 'gd.opt.num.rxfmin'                 '0e-1'
-'gd.opt.num.rxfdec'                 '0.80'
+'gd.opt.num.rxfdec'                 '0.90'
 
 # Line search parameters 
 'gd.opt.num.ls.type'                'backtracking_soc'
