@@ -75,11 +75,6 @@ program Goat
 
         call GDtestdriver(goatoptions)
 
-    case ('ShapeOpt')
-
-        ! Move to different program?
-        call ShapeOptDriver(goatoptions)
-
     case default 
 
         ! Call error handler
