@@ -428,8 +428,13 @@ def PlotPolygons2D(x, y, fignum, **plotargs):
     plt.figure(fignum)
 
     # Plot the data as a polygon plot
+    #fig, ax = plt.subplots()
     plt.plot(x, y, **plotargs)
-    plt.draw()
+    
+    #myrange = range(len(x))
+    #for i, txt in enumerate(myrange):
+    #    ax.annotate(txt, (x[i], y[i]))
+    #plt.draw()
 
 def PlotPolygonData(filepath, fignum, **plotargs):
     # Read data
@@ -437,7 +442,7 @@ def PlotPolygonData(filepath, fignum, **plotargs):
 
     # Plot
     plt.figure(fignum)
-    plt.plot(data[:, 0], data[:, 1], **plotargs)
+    PlotPolygons2D(data[:, 0], data[:, 1], fignum, **plotargs)
 
 def PlotVertexPairsData2D(filepath, fignum, **plotargs):
     # Read data
@@ -452,6 +457,7 @@ def PlotVertexPairsData2D(filepath, fignum, **plotargs):
 
 
 
+
 def PlotPoints2D(x, y, fignum, **plotargs):
     # General point plotter.
 
@@ -459,6 +465,8 @@ def PlotPoints2D(x, y, fignum, **plotargs):
     plt.figure(fignum)
     plt.scatter(x, y, **plotargs)
     plt.draw()
+    
+        
 
 def PlotGeneral2DSurface(x, y, z, fignum, **plotargs):
     # General z = f(x, y) surface plotter - may be expensive since
