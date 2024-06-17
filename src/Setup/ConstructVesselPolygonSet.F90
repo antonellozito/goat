@@ -247,13 +247,13 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                     if (c1 > 0) then 
                         ! Update thisp 
                         allocate(tempp(c1))
-                        tempp = pack(p1, (thisp == p2) .and. (.not. notfound))
+                        tempp = pack(p1, (thisp == p2) .and. (notfound(p1)))
                         thisp = tempp(1)
                         deallocate(tempp)
                     else 
                         ! Update thisp 
                         allocate(tempp(c2))
-                        tempp = pack(p2, (thisp == p1) .and. (.not. notfound))
+                        tempp = pack(p2, (thisp == p1) .and. (notfound(p2)))
                         thisp = tempp(1)
                         deallocate(tempp)
                     end if 
@@ -406,12 +406,12 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                     else 
                         ! Flip
                         doflip = .true. 
-                        xs = xi(indi(1, thisp)) ! start 
-                        ys = yi(indi(1, thisp)) 
-                        pis = [p1(indi(1, thisp)), p2(indi(1, thisp))]
-                        xe = xi(indi(2, thisp)) ! end 
-                        ye = yi(indi(2, thisp)) 
-                        pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
+                        xs = xi(indi(2, thisp)) ! start 
+                        ys = yi(indi(2, thisp)) 
+                        pis = [p1(indi(2, thisp)), p2(indi(2, thisp))]
+                        xe = xi(indi(1, thisp)) ! end 
+                        ye = yi(indi(1, thisp)) 
+                        pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         sv = si(1, thisp) + 1
                         ev = si(2, thisp) - 1
                     end if 
@@ -430,12 +430,12 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                     else 
                         ! Flip
                         doflip = .true. 
-                        xs = xi(indi(2, thisp)) ! start 
-                        ys = yi(indi(2, thisp)) 
-                        pis = [p1(indi(2, thisp)), p2(indi(2, thisp))]
-                        xe = xi(indi(1, thisp)) ! end 
-                        ye = yi(indi(1, thisp))
-                        pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
+                        xs = xi(indi(1, thisp)) ! start 
+                        ys = yi(indi(1, thisp)) 
+                        pis = [p1(indi(1, thisp)), p2(indi(1, thisp))]
+                        xe = xi(indi(2, thisp)) ! end 
+                        ye = yi(indi(2, thisp))
+                        pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         sv = si(2, thisp) + 1
                         ev = si(1, thisp) - 1
                     end if 
