@@ -27,15 +27,15 @@ subroutine ConstructGrid(grid, gridoptions)
         ! Default plasma edge grid, check the provided format
         select case (gridoptions%readmeth)
 
-        case ('b2fgmtry')
+        case ('b2fgmtry_us')
 
             ! Extract the grid data structures
-            call ExtractGridData(grid, 'b2fgmtry', gridoptions)
+            call ExtractGridData(grid, 'b2fgmtry_us', gridoptions)
 
         case ('traduitb2us')
 
             ! Extract the grid data structures 
-            call ExtractGridData(grid, 'traduit', gridoptions)
+            call ExtractGridData(grid, 'traduitb2us', gridoptions)
 
         case default 
 
