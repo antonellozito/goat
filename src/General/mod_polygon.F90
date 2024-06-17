@@ -441,13 +441,13 @@ module mod_polygon
         ! Construct polygon start and end indices
         allocate(ps(np), pe(np))
         ps = pack([(k, k = 1, ne)], ispolygonstart)
-        pe = [ps(2:ne), ne]
+        pe = [ps(2:np)-1, ne]
 
         ! Construct polygons
         do i = 1, np
             ! Get polygon edges
             tempne = pe(i) - ps(i) + 1
-            tempedges = edges(ps(i):pe(i), :)
+            tempedges = sortededges(ps(i):pe(i), :)
 
             ! Get polygon vertices
             allocate(tempvert(tempne+1))
@@ -461,6 +461,9 @@ module mod_polygon
             ! Construct polygon
             call polygonset%polygons(i)%Construct(x(tempvert), &
                 y(tempvert), templabels)
+
+            ! Housekeeping
+            deallocate(tempvert, templabels)
         end do
 
         

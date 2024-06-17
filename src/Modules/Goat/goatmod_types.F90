@@ -1385,6 +1385,9 @@ module goatmod_types
         do i = 2, v%ntot 
             v%faceP(i, 1) = v%faceP(i-1, 1) + v%faceP(i-1, 2)
         end do 
+        if (allocated(v%face)) then 
+            deallocate(v%face)
+        end if 
         allocate(v%face(v%nface), vcc(v%ntot)) 
         vcc(:) = 0
         do i = 1, f%ntot
