@@ -547,7 +547,7 @@ module mod_sparseinterface
         !==================
         ! Arguments
         type(MySparseUDT), intent(in)       :: a
-        real(R8)                            :: b  
+        real(R8), intent(in)                :: b  
         type(MysparseUDT)                   :: c 
 
         ! Compute
@@ -570,7 +570,7 @@ module mod_sparseinterface
         !==================
         ! Arguments
         type(MySparseUDT), intent(in)       :: b
-        real(R8)                            :: a 
+        real(R8), intent(in)                :: a 
         type(MysparseUDT)                   :: c 
 
         ! Compute
