@@ -42,6 +42,9 @@ shapeopt: $(SHAPEOPT_TARGETS) shapeopt.o
 	$(FC) -o shapeopt *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 
+shapeopt_solps: $(SHAPEOPTSOLPS_TARGETS) shapeopt.o 
+	$(FC) -o shapeopt *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include -I $(B25LIBPATH) -I $(B25ADJLIBPATH) $(DEFINEFLAGS)
+
 
 ## % Runfiles
 ## %=========
@@ -68,7 +71,7 @@ goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
 
 ## shapeopt.o		: shape optimization 
 shapeopt.o : Runfiles/ShapeOptimization.F90 
-	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 
+	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 $(DEFINEFLAGS)
 
 ##
 ## % Folder compilation targets
@@ -145,8 +148,14 @@ ClayerF: $(CLAYERF_FILES)
 
 ## ShapeOptimization 			: compile shape optimization modules
 ShapeOptimization: $(SHAPEOPT_FILES)
-	$(FC) $(CFLAGS) $^
+	$(FC) $(CFLAGS) $(DEFINEFLAGS) $^
 	touch ShapeOptimization
+
+## ShapeOptimizationSolps 			: compile shape optimization modules for SOLPS
+ShapeOptimizationSolps: $(SHAPEOPTSOLPS_FILES)
+	$(FC) $(CFLAGS) -I$(B25LIBPATH) -I$(B25ADJLIBPATH) $(DEFINEFLAGS) $^ 
+	touch ShapeOptimizationSolps
+
 
 ##
 ## % Run commands
@@ -165,19 +174,23 @@ gd:
 # Cleanup
 .PHONY: clean
 clean: 
-	rm *.o $(wildcard gdrun*); rm $(GDRUN_TARGETS); \
+	rm *.o $(wildcard gdrun*); rm $(GDRUN_TARGETS); rm $(GOATTRANSLATOR_TARGETS); rm $(SHAPEOPT_TARGETS); rm $(SHAPEOPTSOLPS_TARGETS);
 
 ## deepclean			: clean by removing *.o, *.mod, and executables
 # Cleanup
 .PHONY: deepclean
 deepclean: 
-	rm *.o *.mod $(wildcard gdrun*); rm $(GOAT_TARGETS); \
-	rm $(GOATTRANSLATOR_TARGETS); rm $(SHAPEOPT_TARGETS); \
-	rm goat
-	rm tests
-	rm goattranslator
-	rm testc
-	rm shapeopt
+	rm *.o *.mod $(wildcard gdrun*); \
+	find . -name "*.mod" -type f -delete; \
+	rm $(GOAT_TARGETS); \
+	rm $(GOATTRANSLATOR_TARGETS); \
+	rm $(SHAPEOPT_TARGETS); \
+	rm $(SHAPEOPTSOLPS_TARGETS); \
+	rm goat; \
+	rm tests; \
+	rm goattranslator; \
+	rm testc; \
+	rm shapeopt; \
 
 ## cleanexeo			: clean o-files of executables
 .PHONY: cleanexeo
