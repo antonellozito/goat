@@ -71,6 +71,24 @@ module somod_costfunction
 
     ! Derived types
     !==============
+    ! Dummy (zero) cost function (e.g. for reduced formulation with solps)
+    type, extends(CostFunctionSOUDT) :: CostFunctionDummyUDT 
+
+        ! Description
+        !============
+        ! Dummy cost function that simply returns zero  for evaluation
+        ! etc.
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize         => InitializeCostFunctionDummy 
+
+        ! Evaluation
+        procedure :: Evaluate           => EvaluateCostFunctionDummy
+
+    end type
+    
     ! Levelset fitting cost function
     type, extends(CostfunctionSOUDT) :: CostfunctionPLFUDT
 
@@ -206,6 +224,90 @@ module somod_costfunction
     !                               ROUTINES                           !
     !                                                                  !
     !==================================================================!
+
+    !------------------------------------------------------------------!
+    !                        DUMMY COST FUNCTION                       !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionDummy(costfunction, goat, options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionDummyUDT)         :: costfunction
+        type(OptimizationProblemGDUDT)      :: goat
+        type(CostFunctionOptionsSOUDT)      :: options
+
+        ! Nothing to do here
+        
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionDummy(costfunction, J, gradJ, hessJ, &
+        goat, dogradient, dohessian, designvariables, &
+        varin, valuesin, dJdvarin, dgradJdvarin)
+
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionDummyUDT)     :: costfunction 
+        real(R8)                        :: J
+        real(R8), allocatable           :: gradJ(:) ! assumed initialized
+        type(MySparseUDT)               :: hessJ ! assumed in initialized
+        type(OptimizationProblemGDUDT)  :: goat
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesSOUDT)     :: designvariables
+
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
+        ! Initialize
+        !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
+        ! Set outputs to zero
+        J = 0
+        gradJ = 0
+        hessJ = SpZeros(designvariables%nphi, designvariables%nphi)
+
+        ! Other derivatives
+        !==================
+        ! Initialize
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values)) ! jacobian, not gradient
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                         LEVELSET FUNCTION                        !

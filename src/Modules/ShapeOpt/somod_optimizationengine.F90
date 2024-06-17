@@ -14,6 +14,8 @@
 ! Note 1: Descriptions of what the deferred procedures should do are 
 ! provided in the abstract interface. 
 
+! Note 2: if shape optimization 
+
 module somod_optimizationengine
     
     ! Initialize
@@ -29,6 +31,11 @@ module somod_optimizationengine
     use gdmod_costfunction
     use gdmod_constraints
     use gdmod_types
+
+    ! Load SOLPS-specific modules if needed
+#ifdef SOLPS 
+    use sosmod_costfunction, only : CostfunctionGSRUDT
+#endif
 
     ! The usual
     implicit none
@@ -321,13 +328,38 @@ module somod_optimizationengine
         
         ! Cost function
         !==============
+        ! Check some options
+        if (.not. problem%designoptions%costfunction%dogoatreduction) then 
+            ! Check if SOLPS is active - can only be active for reduced
+            ! goat approach
+            if (problem%designoptions%costfunction%includesolps) then 
+                call gdErrorHandler('InitializeOptimizationProblemSO: '// & 
+                    'solps contribution only allowed if goat is used in ' // & 
+                    'reduced way')
+            end if 
+        end if 
+
         ! Allocate the cost function, depending on the type
         if (problem%designoptions%costfunction%dogoatreduction) then 
 
-            ! Goat-reduced cost function - initialization is done 
-            ! further in the initialization routine of the cost function
-            allocate(CostFunctionGRUDT::problem%costfunction)
+            ! Check if it's also SOLPS-based and if this is allowed
+            if (problem%designoptions%costfunction%includesolps) then 
+#ifdef SOLPS 
+                ! Allowed
+                allocate(CostFunctionGSRUDT::problem%costfunction)
+#else 
+                ! Not allowed, throw error
+                call gdErrorHandler('InitializeOptimizationProblemSO: ' // & 
+                    'cannot use solps-reduced cost function, since ' // & 
+                    'solps is not available')
+#endif
+            else
 
+                ! Goat-reduced cost function - initialization is done 
+                ! further in the initialization routine of the cost function
+                allocate(CostFunctionGRUDT::problem%costfunction)
+
+            end if 
         else
             ! Classical cost function
             select case (trim(problem%designoptions%costfunction%type))
@@ -337,6 +369,11 @@ module somod_optimizationengine
                 ! Allocate 
                 allocate(CostFunctionPLFUDT::problem%costfunction)
 
+            case ('no')
+
+                ! Zero cost function
+                allocate(CostFunctionDummyUDT::problem%costfunction)
+                
             case default
                 
                 ! Throw error

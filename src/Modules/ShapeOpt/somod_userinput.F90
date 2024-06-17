@@ -160,11 +160,14 @@ module somod_userinput
         ! for each possible cost function contribution. Additionally, 
         ! there is the option to make a reduced cost function by 
         ! solving the goat equations for each cost function evaluation. 
-        ! This is set by the logical 'dogoatreduction'
+        ! This is set by the logical 'dogoatreduction'. If a solps 
+        ! contribution should be included, this should be set by
+        ! the 'includesolps' switch. Note that this switch requires 
+        ! also the goat reduction to be active
 
         ! Fields
         character(:), allocatable           :: type
-        logical                             :: dogoatreduction
+        logical                             :: dogoatreduction, includesolps
         type(CostFunctionOptionsPLFUDT)     :: plf 
 
     contains 
@@ -365,6 +368,7 @@ module somod_userinput
 
         ! Set goat reduction switch
         options%dogoatreduction = .false. 
+        options%includesolps    = .false.
 
         ! Propagate filepaths
         options%plf%inputfilepath = options%inputfilepath
@@ -715,6 +719,10 @@ module somod_userinput
         ! Goat reduction
         field = 'so.cfv.dogoatreduction'
         call ExtractOptionValueLogical0D(fid, field, options%dogoatreduction)
+
+        ! Solps inclusion
+        field = 'so.cfv.includesolps'
+        call ExtractOptionValueLogical0D(fid, field, options%includesolps)
 
         ! Housekeeping
         !=============
