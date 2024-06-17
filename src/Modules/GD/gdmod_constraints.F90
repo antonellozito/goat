@@ -5619,14 +5619,28 @@ module gdmod_constraints
         else
             allocate(values(0))
         end if 
-        if (present(dGdvarin)) then 
-            dGdvar = dGdvarin 
-        end if 
-        if (present(dgradGdvarin)) then 
-            dgradGdvar = dgradGdvarin 
-        else
-            dgradGdvarin = SpZeros(0, 0)
-        end if 
+
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
 
         ! Checks
         if ( (.not. allocated(lambda)) .and. dohessian) then
@@ -5948,6 +5962,14 @@ module gdmod_constraints
             deallocate(valxx, valxy, valyx, valyy)
             deallocate(gxxxf, gxyxf, gyxxf, gyyxf, gxxyf, gxyyf, &
                 gyxyf, gyyyf)  
+        end if
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
         end if
 
     end subroutine
