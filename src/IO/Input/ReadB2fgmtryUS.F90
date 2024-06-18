@@ -64,7 +64,7 @@ subroutine ReadB2fgmtryUS(grid, filepath)
 
     integer(I8)                                 :: ngv, ngc 
     integer(I8), allocatable, dimension(:)      :: vertmap, cellmap, &
-        sortindex, tcf, tv
+        sortindex, tcf, tv, tftc
     integer(I8), allocatable, dimension(:, :)   :: tempvertfaceP, &
         tempvertcellP, tempcellfaceP, tempcellvertP, tcfv
 
@@ -219,11 +219,11 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     end where
 
 
-    ! vertex quantities - only keep coordinates
+    ! vertex quantities - only keep coordinates (and ffbz)
     call cfrure (filespec, nv*4, vdummyr(:,1:4),   'vxBb')
     call cfrure (filespec, nv,   grid%vert%x,    'vxX')
     call cfrure (filespec, nv,   grid%vert%y,    'vxY')
-    call cfrure (filespec, nv,   vdummyr(:,1), 'vxFfbz')
+    call cfrure (filespec, nv,   grid%vert%ffbz, 'vxFfbz')
     call cfrure (filespec, nv,   vdummyr(:,1), 'vxFpsi')
 
     ! flux surface quantities
@@ -367,8 +367,21 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     
     ! Rebuild flux tube data
     grid%data%fluxdata%fluxtubecells = cellmap(grid%data%fluxdata%fluxtubecells)
+    do i = 1, grid%data%fluxdata%nft 
+        tftc = GetFTCell(grid%data%fluxdata, i)
+        grid%data%fluxdata%fluxtubecellsP(i, 2) = grid%data%fluxdata%fluxtubecellsP(i, 2) - count(tftc == 0)
+    end do 
     grid%data%fluxdata%fluxtubecells = &
         pack(grid%data%fluxdata%fluxtubecells, grid%data%fluxdata%fluxtubecells /= 0)
+    grid%data%fluxdata%fluxtubecellsP(1, 1) = 1
+    grid%data%fluxdata%fluxtubefacesP(1, 1) = 1 ! hedge for junk here from input
+    do i = 2, grid%data%fluxdata%nft 
+        grid%data%fluxdata%fluxtubecellsP(i, 1) = &
+            grid%data%fluxdata%fluxtubecellsP(i-1, 1) + grid%data%fluxdata%fluxtubecellsP(i-1, 2)
+        grid%data%fluxdata%fluxtubefacesP(i, 1) = &
+            grid%data%fluxdata%fluxtubefacesP(i-1, 1) + grid%data%fluxdata%fluxtubefacesP(i-1, 2)
+    end do 
+
 
     ! Rebuild cell interconnection data
     allocate(keepcellface(grid%cell%nface), keepcellvert(grid%cell%nvert), &
