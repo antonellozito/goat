@@ -97,12 +97,13 @@ subroutine GDtestdriver(goatoptions)
             call problem%UpdateProblemParameters([xv, yv], 'vesselcoordinates')
 
             ! Solve for new geomeatry
-            call optimizationdriver%solver%SolveOptimizationProblemKKT(problem)
+            call optimizationdriver%solver%SolveOptimizationProblem(problem)
 
             ! Write solution
             write(tempstring, '(I0.4, a)') i, trim(orig_writefilepath) 
             goatoptions%writefilepath = trim(tempstring)
-            call WriteGOAT(goatoptions, problem%grid)
+            call WriteGOAT(goatoptions, problem%grid, problem%magneticField, &
+                problem%environment)
 
         end do
 

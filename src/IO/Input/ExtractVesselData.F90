@@ -24,6 +24,12 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     ! functions to be used. Note that self-intersecting polygons are not 
     ! allowed for targets and will cause an error. 
 
+    ! Note 2: (27/05/2024) Added labels in polygon set representation with 
+    ! the following format: label(:, 1), label(:, 2) are vessel structure
+    ! ID(s) of the vertex (max. 2 allowed per vertex), label(:, 3)  is 
+    ! the unique vertex ID (may, after intersections, not go from 1 to 
+    ! number of vertices due to exclusion of vertices)
+
     ! Initialize
     !===========
     ! Declare modules
@@ -44,13 +50,14 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     type(VesselOptionsUDT), intent(in)  :: vesseloptions
 
     ! Loop variables
-    integer(I8)                         :: i, status
+    integer(I8)                         :: i, k, status
 
     ! Auxiliary variables 
     type(PolygonSetUDT)                 :: tempps 
     type(PolygonUDT)                    :: temppol
-    integer(I8)                         :: nvp, cc, nexcl, nTP, tne   
-    integer(I8), allocatable            :: tv(:)
+    integer(I8)                         :: nvp, cc, nexcl, nTP, tne, &
+        vID   
+    integer(I8), allocatable            :: tv(:), templabels(:, :)
     real(R8), allocatable               :: tempx(:), &
         tempy(:), tx(:), ty(:), xp(:), yp(:), tvx(:), tvy(:), tnxp(:), &
         tnyp(:), tnnp(:), tnx(:), tny(:), tnn(:)
@@ -67,6 +74,9 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     ! Set NaN
     NaN = IEEE_VALUE(nan, IEEE_QUIET_NAN)
     
+    ! Set vertex ID
+    vID = 0
+
     ! Associate
     associate(&
         nvs         => vessel%nstructures,  &
@@ -87,6 +97,8 @@ subroutine ExtractVesselData(vessel, vesseloptions)
 
     ! Allocate (account for NaNs)
     allocate(tempx(nvp+nvs-1-nexcl), tempy(nvp+nvs-1-nexcl))
+    allocate(templabels(size(tempx), 3))
+    templabels = 0
     
     ! Set vertices
     cc = 0
@@ -95,22 +107,30 @@ subroutine ExtractVesselData(vessel, vesseloptions)
             ! Coordinates
             tempx(cc+1:cc+vs(i)%np) = vs(i)%x
             tempy(cc+1:cc+vs(i)%np) = vs(i)%y
-            cc = cc + vs(i)%np 
+            
+            ! Labels
+            templabels(cc+1:cc+vs(i)%np, 1) = vs(i)%ID 
+            templabels(cc+1:cc+vs(i)%np, 3) = [(k, k = vID+1, vID+vs(i)%np)]
+
+            ! Update counters
+            cc = cc + vs(i)%np
+            vID = vID + vs(i)%np 
 
             ! Add NaN
             if (i .ne. nvs) then 
                 tempx(cc+1) = NaN 
                 tempy(cc+1) = NaN 
+                templabels(cc+1, :) = 0
                 cc = cc + 1
             end if 
         end if
     end do
 
     ! Construct temporary vessel polygon set
-    call tempps%Construct(tempx, tempy)
+    call tempps%Construct(tempx, tempy, templabels)
 
     ! Construct vessel polygon set 
-    call ConstructVesselPolygonSet(vessel, vesseloptions, tempps)
+    call ConstructVesselPolygonSet(vessel, tempps)
 
     ! Target polygon representation
     !==============================
@@ -240,7 +260,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
 
             if (size(plfoptions%xrange, 1) < 2) then 
                 ! Reset
-                call vessel%polygonset%GetPoints(xp, yp)
+                call vessel%polygonset%GetVertices(xp, yp)
                 plfoptions%xrange = xp 
                 plfoptions%yrange = yp
             end if

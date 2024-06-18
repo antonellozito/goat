@@ -37,6 +37,7 @@ module PolygonLevelsetFunction2D
     use mod_plotter
     use Interpolant
     use mod_polygon
+    use mod_sparseinterface
 
     ! The usual
     implicit none
@@ -220,7 +221,8 @@ module PolygonLevelsetFunction2D
         type(PLF2DClosedExactOptionsUDT)    :: options
         real(R8), allocatable               :: xp(:), yp(:), xf(:), &
             yf(:), nxp(:), nyp(:), tnp(:), nxpv(:, :), &
-            nypv(:, :), crossprod(:), thetav(:)
+            nypv(:, :), crossprod(:), thetav(:), xp1(:), xp2(:), &
+            yp1(:), yp2(:)
 
     contains 
 
@@ -250,6 +252,9 @@ module PolygonLevelsetFunction2D
         ! Evaluation
         procedure :: Evaluate       => EvaluatePLF2DClosedApproximation
 
+        ! Grid construction
+        procedure :: ConstructGrid  => ConstructGridPLF2DClosedApproximation
+
     end type
 
     
@@ -272,12 +277,18 @@ module PolygonLevelsetFunction2D
         end subroutine
 
         ! Evaluation
-        subroutine EvaluatePLF2DINT(plf, xq, yq, derivx, derivy, vq)
-            import :: PolygonLevelsetFunction2DUDT, R8, I8
+        subroutine EvaluatePLF2DINT(plf, xq, yq, derivx, derivy, vq, &
+            varin, valuesin, dplfdvarin)
+            import :: PolygonLevelsetFunction2DUDT, R8, I8, MySparseUDT
             class(PolygonLevelsetFunction2DUDT)     :: plf 
             real(R8), intent(in)                    :: xq(:), yq(:)
             real(R8), intent(out)                   :: vq(size(xq))
             integer(I8), intent(in)                 :: derivx, derivy
+
+            character(*), intent(in), optional      :: varin 
+            real(R8), intent(in), optional          :: valuesin(:)
+            type(MySparseUDT), optional             :: dplfdvarin
+
 
         end subroutine
 
@@ -549,7 +560,7 @@ module PolygonLevelsetFunction2D
 
     ! Evaluation
     subroutine EvaluatePLF2DGeneral(plf, xq, yq, &
-        derivx, derivy, vq)
+        derivx, derivy, vq, varin, valuesin, dplfdvarin)
 
         ! Description
         !============
@@ -570,20 +581,79 @@ module PolygonLevelsetFunction2D
         real(R8), intent(out)                       :: vq(size(xq)) 
         integer(I8), intent(in)                     :: derivx, derivy 
 
+        ! Optional arguments
+        character(*), intent(in), optional      :: varin 
+        real(R8), intent(in), optional          :: valuesin(:)
+        type(MySparseUDT), optional             :: dplfdvarin
+        
+        character(:), allocatable               :: var 
+        real(R8), allocatable                   :: values(:)
+        type(MySparseUDT)                       :: dplfdvar
+
         ! Auxiliary
         character(:), allocatable               :: deriv, derivxc, &
             derivyc 
-        integer(I8)                             :: nq, nc
+        integer(I8)                             :: nq, nc, nval , npsc
+        integer(I8), allocatable                :: psedges(:, :), &
+            edgeID(:)
         real(R8), allocatable                   :: vnx(:), vny(:), &
             vtx(:, :), vty(:, :), f(:), ind(:), fq(:), vtxq(:, :), &
             vtyq(:, :), dvnq(:), myones(:), vnxq(:), vnyq(:), dvn(:), &
-            nxpq(:), nypq(:), txpq(:), typq(:)
+            nxpq(:), nypq(:), txpq(:), typq(:), dfdxp1(:), dfdxp2(:), &
+            dfdyp1(:), dfdyp2(:), xp1(:), xp2(:), yp1(:), yp2(:)
         real(R8)                                :: macheps = 0
 
         ! Loop
         integer(I8)                             :: i, thisloc
 
         ! Data
+        
+        ! Check input
+        !============
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if
+        if (present(dplfdvarin)) then 
+            dplfdvar = dplfdvarin 
+        else
+            dplfdvar = SpZeros(0, 0)
+        end if 
+
+        ! Check if derivatives are implemented
+        nval = size(values, 1)
+        select case(var)
+
+        case ('no')
+
+            ! All good
+
+        case ('polygonsetcoordinates')
+
+            ! Initialize basic quantities
+            npsc = nval/2 ! nval should be even
+
+            ! Initialize mapping
+            call plf%ps%GetEdges(psedges) 
+
+            ! Initialize derivative structure
+            dplfdvar%ncol = nval
+            dplfdvar%nrow = size(vq, 1)
+            dplfdvar%nval = 4*size(vq, 1)
+            call dplfdvar%Allocate()
+            
+        case default
+
+            ! All bad
+            call gdErrorHandler('EvaluatePLF2DGeneral: variable not implemented')
+
+        end select
 
         ! Initialize
         !===========
@@ -599,10 +669,10 @@ module PolygonLevelsetFunction2D
         allocate(vnx(nc), vny(nc), vtx(nc, 2), vty(nc, 2), f(nc), &
             dvn(nc), ind(nc), fq(nq), vtxq(nq, 2), vtyq(nq, 2), &
             dvnq(nq), myones(nq), vnxq(nq), vnyq(nq), nxpq(nq), &
-            nypq(nq), txpq(nq), typq(nq))
+            nypq(nq), txpq(nq), typq(nq), edgeID(nq))
         
         ! Initialize
-        myones(:) = 1
+        myones = 1
 
         ! Associate
         associate(&
@@ -623,8 +693,8 @@ module PolygonLevelsetFunction2D
             ! Normal distance
             !----------------
             ! Compute vectors between query point and edge center
-            vnx(:) = -(xf(:) - xq(i)) 
-            vny(:) = -(yf(:) - yq(i))
+            vnx = -(xf - xq(i)) 
+            vny = -(yf - yq(i))
 
             ! Project 
             dvn = vnx * nxp + vny * nyp 
@@ -632,13 +702,13 @@ module PolygonLevelsetFunction2D
             ! Tangential distances
             !---------------------
             ! Compute vectors between query point and vertices
-            vtx(:,:) = x(:,:) - xq(i)
-            vty(:,:) = y(:,:) - yq(i)
+            vtx = x - xq(i)
+            vty = y - yq(i)
             
             ! Compute 
             !--------
             ! Value
-            f(:) = abs( abs(vtx(:,1)) + abs(vtx(:, 2)) - abs(txp) ) &
+            f = abs( abs(vtx(:,1)) + abs(vtx(:, 2)) - abs(txp) ) &
                 + abs( abs(vty(:,1)) + abs(vty(:, 2)) - abs(typ) ) &
                 + abs(dvn)
 
@@ -646,16 +716,17 @@ module PolygonLevelsetFunction2D
             thisloc = minloc(f, 1)
 
             ! Store variables for later
-            dvnq(i) = dvn(thisloc)
-            fq(i) = f(thisloc)
-            vnxq(i) = vnx(thisloc)
-            vnyq(i) = vny(thisloc)
-            vtxq(i, :) = vtx(thisloc, :)
-            vtyq(i, :) = vty(thisloc, :)
-            txpq(i) = txp(thisloc)
-            typq(i) = typ(thisloc)
-            nxpq(i) = nxp(thisloc)
-            nypq(i) = nyp(thisloc)
+            dvnq(i)     = dvn(thisloc)
+            fq(i)       = f(thisloc)
+            vnxq(i)     = vnx(thisloc)
+            vnyq(i)     = vny(thisloc)
+            vtxq(i, :)  = vtx(thisloc, :)
+            vtyq(i, :)  = vty(thisloc, :)
+            txpq(i)     = txp(thisloc)
+            typq(i)     = typ(thisloc)
+            nxpq(i)     = nxp(thisloc)
+            nypq(i)     = nyp(thisloc)
+            edgeID(i)   = thisloc
 
         end do
 
@@ -683,6 +754,52 @@ module PolygonLevelsetFunction2D
             ! Function evaluation
             vq = fq
 
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case ('polygonsetcoordinates')
+
+                ! Derivatives w.r.t. polygon set coordinates
+
+                ! Compute derivatives w.r.t. edge coordinates
+                xp1 = x(edgeID, 1)
+                xp2 = x(edgeID, 2)
+                yp1 = y(edgeID, 1)
+                yp2 = y(edgeID, 2) 
+                dfdxp1 = sign(myones, abs(vtxq(:, 1)) - abs(txpq) + abs(vtxq(:, 2)))* &
+                    (sign(myones, txpq) + sign(myones, vtxq(:, 1))) - &
+                    sign(myones, dvnq)*(nxpq/2 + vnyq/(txpq**2 + typq**2)**(0.5) - &
+                    (txpq**2*vnyq)/(txpq**2 + typq**2)**(1.5) + &
+                    (txpq*typq*vnxq)/(txpq**2 + typq**2)**(1.5)) ! xp1
+                dfdxp2 = - sign(myones, abs(vtxq(:, 1)) - abs(txpq) + abs(vtxq(:, 2)))* &
+                    (sign(myones, txpq) - sign(myones, vtxq(:, 2))) - &
+                    sign(myones, dvnq)*(nxpq/2 - vnyq/(txpq**2 + typq**2)**(0.5) + &
+                    (txpq**2*vnyq)/(txpq**2 + typq**2)**(1.5) - &
+                    (txpq*typq*vnxq)/(txpq**2 + typq**2)**(1.5)) ! xp2
+                dfdyp1 = sign(myones, abs(vtyq(:, 1)) - abs(typq) + abs(vtyq(:, 2)))* &
+                    (sign(myones, typq) + sign(myones, vtyq(:, 1))) - &
+                    sign(myones, dvnq)*(nypq/2 - vnxq/(txpq**2 + typq**2)**(0.5) + &
+                    (typq**2*vnxq)/(txpq**2 + typq**2)**(1.5) - &
+                    (txpq*typq*vnyq)/(txpq**2 + typq**2)**(1.5)) ! yp1
+                dfdyp2 = - sign(myones, abs(vtyq(:, 1)) - abs(typq) + abs(vtyq(:, 2)))* &
+                    (sign(myones, typq) - sign(myones, vtyq(:, 2))) - &
+                    sign(myones, dvnq)*(nypq/2 + vnxq/(txpq**2 + typq**2)**(0.5) - &
+                    (typq**2*vnxq)/(txpq**2 + typq**2)**(1.5) + &
+                    (txpq*typq*vnyq)/(txpq**2 + typq**2)**(1.5)) ! yp2
+
+                ! Compute derivatives w.r.t. polygon set coordinates
+                dplfdvar%col = [psedges(edgeID, 1), psedges(edgeID, 2), &
+                    psedges(edgeID, 1)+npsc, psedges(edgeID, 2)+npsc] ! first x, then y
+                dplfdvar%row = reshape(spread([(i, i = 1, nq)], 2, 4), [4*nq])
+                dplfdvar%val = [dfdxp1, dfdxp2, dfdyp1, dfdyp2]
+
+            end select
+
         case ('10')
 
             ! fx
@@ -693,6 +810,38 @@ module PolygonLevelsetFunction2D
             ! Set the gradient to 1 - can choose this value, since the 
             ! function is exactly zero here anyway. 
             where (fq .eq. 0) vq = 1
+
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case ('polygonsetcoordinates')
+
+                ! Derivatives w.r.t. polygon set coordinates
+
+                ! Compute derivatives w.r.t. edge coordinates (note: dirac functions neglected)
+                xp1 = x(edgeID, 1)
+                xp2 = x(edgeID, 2)
+                yp1 = y(edgeID, 1)
+                yp2 = y(edgeID, 2) 
+                dfdxp1 =  - (txpq*typq*sign(myones, dvnq))/(txpq**2 + typq**2)**(1.5) ! xqxp1
+                dfdxp2 =  (txpq*typq*sign(myones, dvnq))/(txpq**2 + typq**2)**(1.5) ! xqxp2
+                dfdyp1 = sign(myones, dvnq)/(txpq**2 + typq**2)**(0.5) - &
+                    (typq**2*sign(myones, dvnq))/(txpq**2 + typq**2)**(1.5) ! xqyp1
+                dfdyp2 = (typq**2*sign(myones, dvnq))/(txpq**2 + typq**2)**(1.5) - &
+                    sign(myones, dvnq)/(txpq**2 + typq**2)**(0.5) ! xqyp2
+
+                ! Compute derivatives w.r.t. polygon set coordinates
+                dplfdvar%col = [psedges(edgeID, 1), psedges(edgeID, 2), &
+                    psedges(edgeID, 1)+npsc, psedges(edgeID, 2)+npsc] ! first x, then y
+                dplfdvar%row = reshape(spread([(i, i = 1, nq)], 2, 4), [4*nq])
+                dplfdvar%val = [dfdxp1, dfdxp2, dfdyp1, dfdyp2]
+
+            end select
 
         case ('01')
 
@@ -705,20 +854,55 @@ module PolygonLevelsetFunction2D
             ! function is exactly zero here anyway. 
             where (fq .eq. 0) vq = 1
 
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case ('polygonsetcoordinates')
+
+                ! Derivatives w.r.t. polygon set coordinates
+
+                ! Compute derivatives w.r.t. edge coordinates (note: dirac functions neglected)
+                xp1 = x(edgeID, 1)
+                xp2 = x(edgeID, 2)
+                yp1 = y(edgeID, 1)
+                yp2 = y(edgeID, 2) 
+                dfdxp1 = (txpq**2*sign(myones, dvnq))/(txpq**2 + typq**2)**(1.5) &
+                    - sign(myones, dvnq)/(txpq**2 + typq**2)**(0.5) ! yqxp1
+                dfdxp2 = sign(myones, dvnq)/(txpq**2 + typq**2)**(0.5) - &
+                    (txpq**2*sign(myones, dvnq))/(txpq**2 + typq**2)**(1.5) ! yqxp2
+                dfdyp1 = (txpq*typq*sign(myones, dvnq))/(txpq**2 + typq**2)**(1.5) ! yqyp1
+                dfdyp2 = - (txpq*typq*sign(myones, dvnq))/(txpq**2 + typq**2)**(1.5) ! yqyp2
+
+                ! Compute derivatives w.r.t. polygon set coordinates
+                dplfdvar%col = [psedges(edgeID, 1), psedges(edgeID, 2), &
+                    psedges(edgeID, 1)+npsc, psedges(edgeID, 2)+npsc] ! first x, then y
+                dplfdvar%row = reshape(spread([(i, i = 1, nq)], 2, 4), [4*nq])
+                dplfdvar%val = [dfdxp1, dfdxp2, dfdyp1, dfdyp2]
+
+            end select
+
         case ('20')
 
             ! fxx - simply zero
             vq(:) = 0
+            dplfdvar = SpZeros(nq, nval)
 
         case ('11')
 
             ! fxy - simply zero
             vq(:) = 0
+            dplfdvar = SpZeros(nq, nval)
 
         case ('02')
 
             ! fyy - simply zero
             vq(:) = 0
+            dplfdvar = SpZeros(nq, nval)
 
         case default
 
@@ -726,6 +910,13 @@ module PolygonLevelsetFunction2D
             vq(:) = 0
 
         end select
+
+        ! Housekeeping
+        !=============
+        ! Optional output arguments
+        if (present(dplfdvarin)) then 
+            dplfdvarin = dplfdvar
+        end if 
 
         ! End associate
         end associate
@@ -759,7 +950,8 @@ module PolygonLevelsetFunction2D
             ye(:, :), nx(:), ny(:), nn(:), tx(:), ty(:), tn(:), xp(:), &
             yp(:), tempx(:), tempy(:), tempnx(:, :), tempny(:, :), &
             nxpv(:, :), nypv(:, :), theta0(:), crossprod(:), tnxp(:), &
-            tnyp(:), tnn(:), xf(:), yf(:)
+            tnyp(:), tnn(:), xf(:), yf(:), xp1(:), yp1(:), xp2(:), &
+            yp2(:), txp1(:), typ1(:), txp2(:), typ2(:)
 
         ! Loop
         integer(I8)                                 :: i, ce, ce2
@@ -792,7 +984,8 @@ module PolygonLevelsetFunction2D
         ! Allocate
         np = (size(xe, 1))+ps%np
         allocate(nxpv(np, 2), nypv(np, 2), xp(np), yp(np), &
-            xf(size(xe, 1)),  yf(size(xe, 1)))
+            xf(size(xe, 1)), yf(size(xe, 1)), xp1(size(xe, 1)),  &
+            yp1(size(xe, 1)), xp2(size(xe, 1)), yp2(size(xe, 1)))
 
         ! Compute vertex regions
         ce = 0
@@ -809,11 +1002,16 @@ module PolygonLevelsetFunction2D
             tempx = pol(i)%x(pol(i)%vert)
             tempy = pol(i)%y(pol(i)%vert)
 
+            txp1 = tempx(1:ne)
+            txp2 = tempx(2:ne+1)
+            typ1 = tempy(1:ne)
+            typ2 = tempy(2:ne+1)
+
             ! Normals
             allocate(tempnx(ne+1, 2), tempny(ne+1, 2))
 
-            tnxp = -(tempy(2:ne+1) - tempy(1:ne))
-            tnyp = (tempx(2:ne+1) - tempx(1:ne))
+            tnxp = -(typ2 - typ1)
+            tnyp = (txp2 - txp1)
             tnn = sqrt(tnxp**2 + tnyp**2)
             tnxp = tnxp/tnn 
             tnyp = tnyp/tnn
@@ -846,6 +1044,10 @@ module PolygonLevelsetFunction2D
             tn(ce2+1:ce2+ne) = pol(i)%nn
             xf(ce2+1:ce2+ne) = 0.5*(tempx(1:ne) + tempx(2:ne+1)) 
             yf(ce2+1:ce2+ne) = 0.5*(tempy(1:ne) + tempy(2:ne+1)) 
+            xp1(ce2+1:ce2+ne) = txp1
+            xp2(ce2+1:ce2+ne) = txp2
+            yp1(ce2+1:ce2+ne) = typ1
+            yp2(ce2+1:ce2+ne) = typ2
 
             ! Update counter
             ce = ce + ne + 1
@@ -867,13 +1069,17 @@ module PolygonLevelsetFunction2D
         where (theta0 < 0) theta0 = theta0 + 2*pi_R8         
         
         ! Add to plf
-        plf%xp  = xp 
-        plf%yp  = yp
-        plf%xf  = xf
-        plf%yf  = yf
-        plf%nxp = nx 
-        plf%nyp = ny
-        plf%tnp = tn 
+        plf%xp      = xp 
+        plf%yp      = yp
+        plf%xp1     = xp1 
+        plf%yp1     = yp1
+        plf%xp2     = xp2 
+        plf%yp2     = yp2
+        plf%xf      = xf
+        plf%yf      = yf
+        plf%nxp     = nx 
+        plf%nyp     = ny
+        plf%tnp     = tn 
         plf%nxpv    = nxpv 
         plf%nypv    = nypv
         plf%thetav  = theta0 
@@ -886,7 +1092,8 @@ module PolygonLevelsetFunction2D
     end subroutine 
 
     ! Evaluation
-    subroutine EvaluatePLF2DClosedExact(plf, xq, yq, derivx, derivy, vq)
+    subroutine EvaluatePLF2DClosedExact(plf, xq, yq, derivx, derivy, vq, &
+        varin, valuesin, dplfdvarin)
 
         ! Description
         !============
@@ -910,14 +1117,23 @@ module PolygonLevelsetFunction2D
         real(R8), intent(out)                       :: vq(size(xq)) 
         integer(I8), intent(in)                     :: derivx, derivy 
 
+        ! Optional arguments
+        character(*), intent(in), optional      :: varin 
+        real(R8), intent(in), optional          :: valuesin(:)
+        type(MySparseUDT), optional             :: dplfdvarin
+
+        character(:), allocatable               :: var 
+        real(R8), allocatable                   :: values(:)
+        type(MySparseUDT)                       :: dplfdvar
+
         ! Auxiliary
-        character(:), allocatable                   :: deriv, derivxc, &
+        character(:), allocatable               :: deriv, derivxc, &
             derivyc
 
-        integer(I8)                             :: nq, np, &
-            indmine, indminv, indmin
+        integer(I8)                             :: nq, np, npe, &
+            indmine, indminv, indmin, nval, ne, npsc
         integer(I8), allocatable                :: eind(:), vind(:), &
-            minind(:)
+            minind(:), psvert(:), psedges(:, :)
 
         real(R8)                                :: inf, signe, signv, &
             fv, fe, xqr, yqr, totsign(1:2)
@@ -925,17 +1141,36 @@ module PolygonLevelsetFunction2D
         real(R8), allocatable                   :: myones(:), dvn(:), &
             tdistvert(:), tcrossprod(:), vx(:), vy(:), tvn(:), &
             dx(:), dy(:), theta(:), distedge(:), distvert(:), &
-            val(:)
+            val(:), tvx(:), tvy(:), ttxp(:), ttyp(:), tnxp(:), &
+            tnyp(:), dfdxp1(:), dfdxp2(:), dfdyp1(:), dfdyp2(:), &
+            dfdxp(:), dfdyp(:)
         
 
         logical, allocatable                    :: isinvert(:), &
             onedge(:), te(:), tv(:)
 
         ! Loop
-        integer(I8)                             :: iq
+        integer(I8)                             :: i, iq, ccv, cce, cnv
 
         ! Data
         inf = ieee_value(inf, ieee_positive_inf)
+
+        
+        ! Check input
+        !============
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if
+        if (present(dplfdvarin)) then 
+            dplfdvar = dplfdvarin 
+        end if 
 
         ! Initialize
         !===========
@@ -943,6 +1178,10 @@ module PolygonLevelsetFunction2D
         associate(&
             xp      => plf%xp,      &
             yp      => plf%yp,      &
+            xp1     => plf%xp1,     &
+            xp2     => plf%xp2,     &
+            yp1     => plf%yp1,     &
+            yp2     => plf%yp2,     &
             nxp     => plf%nxp,     &
             nyp     => plf%nyp,     &
             nxpv    => plf%nxpv,    &
@@ -955,8 +1194,52 @@ module PolygonLevelsetFunction2D
             )
 
         ! Get sizes
+        npe = size(xp1, 1)
         np = size(xp, 1)
         nq = size(xq, 1)
+
+        ! Check if derivatives are implemented
+        nval = size(values, 1)
+        select case(var)
+
+        case ('no')
+
+            ! All good
+
+        case ('polygonsetcoordinates')
+
+            ! Initialize basic quantities
+            npsc = nval/2 ! nval should be even
+
+            ! Initialize mapping
+            allocate(psvert(np), psedges(npe, 2))
+            ccv = 0
+            cce = 0
+            cnv = 0
+            do i = 1, plf%ps%np 
+                ! Add
+                ne = plf%ps%polygons(i)%ne 
+                psvert(ccv+1:ccv+ne+1) = plf%ps%polygons(i)%vert + cnv
+                psedges(cce+1:cce+ne, 1) = plf%ps%polygons(i)%vert(1:ne) + cnv 
+                psedges(cce+1:cce+ne, 2) = plf%ps%polygons(i)%vert(2:ne+1) + cnv
+
+                ! Update counters
+                ccv = ccv + ne + 1
+                cce = cce + ne
+                cnv = cnv + plf%ps%polygons(i)%nv
+            end do
+
+            ! Initialize derivative structure (note: number values 
+            ! depends, initialized later)
+            dplfdvar%ncol = nval
+            dplfdvar%nrow = size(vq, 1)
+            
+        case default
+
+            ! All bad
+            call gdErrorHandler('EvaluatePLF2DGeneral: variable not implemented')
+
+        end select
         
         ! Allocate and initialize
         allocate(eind(nq), vind(nq), minind(nq), tdistvert(nq), &
@@ -999,6 +1282,9 @@ module PolygonLevelsetFunction2D
             theta = atan2(dx*nypv(:, 1) - dy*nxpv(:, 1), dx*nxpv(:, 1) + dy*nypv(:, 1))
             where (theta < 0) theta = theta + 2*pi_R8
             isinvert = theta < theta0
+
+            ! Hedge for vertices lying exactly on polygonset vertex
+            where ((dx == 0) .and. (dy == 0)) isinvert = .true. 
             
             ! Edge regions
             onedge = (abs(tvn) <= 0.5*tnp)
@@ -1017,7 +1303,7 @@ module PolygonLevelsetFunction2D
 
             indminv = minloc(abs(distvert), 1)
             fv = minval(abs(distvert))
-            tdistvert(iq) = distvert(indminv)
+            tdistvert(iq) = abs(distvert(indminv))
             tcrossprod(iq) = crossprod(indminv)
 
             signv = sign(myone, distvert(indminv))
@@ -1038,6 +1324,78 @@ module PolygonLevelsetFunction2D
             ! Function value
             vq = val
             
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case ('polygonsetcoordinates')
+
+                ! Derivatives w.r.t. polygon set coordinates
+
+                ! Precompute values
+                tvx = (xq - xf(eind))
+                tvy = (yq - yf(eind))
+                ttxp = (xp2(eind) - xp1(eind))
+                ttyp = (yp2(eind) - yp1(eind))
+                tnxp = nxp(eind)
+                tnyp = nyp(eind)
+                if (allocated(myones)) then 
+                    deallocate(myones)
+                end if 
+                allocate(myones(nq))
+                myones = 1
+            
+                te = minind == 1
+                tv = minind == 2
+
+                ! Compute derivatives w.r.t. edge coordinates
+                allocate(dfdxp1(nq), dfdxp2(nq), dfdyp1(nq), &
+                    dfdyp2(nq), dfdxp(nq), dfdyp(nq))
+                where (te)
+                    dfdxp1 = (ttxp**2*tvy)/(ttxp**2 + ttyp**2)**(1.5) - &
+                        tvy/(ttxp**2 + ttyp**2)**(0.5) - tnxp*0.5 - &
+                        (ttxp*ttyp*tvx)/(ttxp**2 + ttyp**2)**(1.5) ! xp1
+                    dfdxp2 = tvy/(ttxp**2 + ttyp**2)**(0.5) - tnxp*0.5 - &
+                        (ttxp**2*tvy)/(ttxp**2 + ttyp**2)**(1.5) + &
+                        (ttxp*ttyp*tvx)/(ttxp**2 + ttyp**2)**(1.5) ! xp2
+                    dfdyp1 = tvx/(ttxp**2 + ttyp**2)**(0.5) - tnyp*0.5 - &
+                        (ttyp**2*tvx)/(ttxp**2 + ttyp**2)**(1.5) + &
+                        (ttxp*ttyp*tvy)/(ttxp**2 + ttyp**2)**(1.5) ! yp1
+                    dfdyp2 = (ttyp**2*tvx)/(ttxp**2 + ttyp**2)**(1.5) - &
+                        tvx/(ttxp**2 + ttyp**2)**(0.5) - tnyp*0.5 - &
+                        (ttxp*ttyp*tvy)/(ttxp**2 + ttyp**2)**(1.5) ! yp2
+                elsewhere
+                    dfdxp1 = 0
+                    dfdyp1 = 0
+                    dfdxp2 = 0
+                    dfdyp2 = 0
+                end where
+
+                where (tv)
+                    dfdxp = sign(myones, tcrossprod)*(xp(vind) - xq)/(abs(tdistvert))
+                    dfdyp = sign(myones, tcrossprod)*(yp(vind) - yq)/(abs(tdistvert))
+                elsewhere 
+                    dfdxp = 0
+                    dfdyp = 0
+                end where
+
+                ! Compute derivatives w.r.t. polygon set coordinates
+                dplfdvar%col = [pack(psedges(eind, 1), te), pack(psedges(eind, 2), te), &
+                    pack(psedges(eind, 1), te)+npsc, pack(psedges(eind, 2), te)+npsc, &
+                    pack(psvert(vind), tv), pack(psvert(vind), tv)+npsc]
+                dplfdvar%row = [reshape(spread(pack([(i, i = 1, nq)], te), 2, 4), [4*count(te)]), &
+                    reshape(spread(pack([(i, i = 1, nq)], tv), 2, 4), [2*count(tv)])]
+                dplfdvar%val = [pack(dfdxp1, te), pack(dfdxp2, te), &
+                    pack(dfdyp1, te), pack(dfdyp2, te), &
+                    pack(dfdxp, tv), pack(dfdyp, tv)]
+                dplfdvar%nval = size(dplfdvar%val, 1)
+
+            end select
+
         case ('10')
             
             ! First order derivative w.r.t. xq
@@ -1050,10 +1408,78 @@ module PolygonLevelsetFunction2D
                 if (te(iq)) then 
                     vq(iq) = nxp(eind(iq))
                 else
-                    vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(xp(vind(iq)) - xq(iq))
+                    if (tdistvert(iq) == 0.0) then 
+                        vq(iq) = 0
+                    else
+                        vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(xp(vind(iq)) - xq(iq))
+                    end if 
                 end if
             end do 
-            
+
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case ('polygonsetcoordinates')
+
+                ! Derivatives w.r.t. polygon set coordinates
+
+                ! Precompute values
+                tvx = (xq - xf(eind))
+                tvy = (yq - yf(eind))
+                ttxp = (xp2(eind) - xp1(eind))
+                ttyp = (yp2(eind) - yp1(eind))
+                tnxp = nxp(eind)
+                tnyp = nyp(eind)
+                if (allocated(myones)) then 
+                    deallocate(myones)
+                end if 
+                allocate(myones(nq))
+                myones = 1
+
+                te = minind == 1
+                tv = minind == 2
+
+                ! Compute derivatives w.r.t. edge coordinates
+                allocate(dfdxp1(nq), dfdxp2(nq), dfdyp1(nq), &
+                    dfdyp2(nq), dfdxp(nq), dfdyp(nq))
+                where (te)
+                    dfdxp1 = -(ttxp*ttyp)/(ttxp**2 + ttyp**2)**(1.5) ! xqxp1
+                    dfdxp2 = (ttxp*ttyp)/(ttxp**2 + ttyp**2)**(1.5) ! xqxp2
+                    dfdyp1 = 1.0/(ttxp**2 + ttyp**2)**(0.5) - ttyp**2/(ttxp**2 + ttyp**2)**(1.5) ! xqyp1
+                    dfdyp2 = ttyp**2/(ttxp**2 + ttyp**2)**(1.5) - 1.0/(ttxp**2 + ttyp**2)**(0.5) ! xqyp2
+                elsewhere
+                    dfdxp1 = 0
+                    dfdyp1 = 0
+                    dfdxp2 = 0
+                    dfdyp2 = 0
+                end where
+
+                where (tv .and. (tdistvert /= 0.0))
+                    dfdxp = (sign(myones, tcrossprod)*(xp(vind) - xq)**2)/(2*tdistvert**3) - sign(myones, tcrossprod)/tdistvert ! xqxp
+                    dfdyp = (sign(myones, tcrossprod)*(xp(vind) - xq)*(yp(vind) - yq))/(tdistvert**3) ! xqyp
+                elsewhere 
+                    dfdxp = 0
+                    dfdyp = 0
+                end where
+
+                ! Compute derivatives w.r.t. polygon set coordinates
+                dplfdvar%col = [pack(psedges(eind, 1), te), pack(psedges(eind, 2), te), &
+                    pack(psedges(eind, 1), te)+npsc, pack(psedges(eind, 2), te)+npsc, &
+                    pack(psvert(vind), tv), pack(psvert(vind), tv)+npsc]
+                    dplfdvar%row = [reshape(spread(pack([(i, i = 1, nq)], te), 2, 4), [4*count(te)]), &
+                    reshape(spread(pack([(i, i = 1, nq)], tv), 2, 4), [2*count(tv)])]
+                dplfdvar%val = [pack(dfdxp1, te), pack(dfdxp2, te), &
+                    pack(dfdyp1, te), pack(dfdyp2, te), &
+                    pack(dfdxp, tv), pack(dfdyp, tv)]
+                dplfdvar%nval = size(dplfdvar%val, 1)
+
+            end select
+        
         case ('01')
             
             ! First order derivative w.r.t. yq
@@ -1066,18 +1492,101 @@ module PolygonLevelsetFunction2D
                 if (te(iq)) then 
                     vq(iq) = nyp(eind(iq))
                 else
-                    vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(yp(vind(iq)) - yq(iq))
+                    if (tdistvert(iq) == 0.0) then 
+                        vq(iq) = 0
+                    else
+                        vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(yp(vind(iq)) - yq(iq))
+                    end if
                 end if
             end do 
 
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case ('polygonsetcoordinates')
+
+                ! Derivatives w.r.t. polygon set coordinates
+
+                ! Precompute values
+                tvx = (xq - xf(eind))
+                tvy = (yq - yf(eind))
+                ttxp = (xp2(eind) - xp1(eind))
+                ttyp = (yp2(eind) - yp1(eind))
+                tnxp = nxp(eind)
+                tnyp = nyp(eind)
+                if (allocated(myones)) then 
+                    deallocate(myones)
+                end if 
+                allocate(myones(nq))
+                myones = 1
+
+                te = minind == 1
+                tv = minind == 2
+
+                ! Compute derivatives w.r.t. edge coordinates
+                allocate(dfdxp1(nq), dfdxp2(nq), dfdyp1(nq), &
+                    dfdyp2(nq), dfdxp(nq), dfdyp(nq))
+                where (te)
+                    dfdxp1 = ttxp**2/(ttxp**2 + ttyp**2)**(1.5) - 1.0/(ttxp**2 + ttyp**2)**(0.5) ! yqxp1
+                    dfdxp2 = 1.0/(ttxp**2 + ttyp**2)**(0.5) - ttxp**2/(ttxp**2 + ttyp**2)**(1.5) ! yqxp2
+                    dfdyp1 = (ttxp*ttyp)/(ttxp**2 + ttyp**2)**(1.5) ! yqyp1
+                    dfdyp2 = -(ttxp*ttyp)/(ttxp**2 + ttyp**2)**(1.5) ! yqyp2
+                elsewhere
+                    dfdxp1 = 0
+                    dfdyp1 = 0
+                    dfdxp2 = 0
+                    dfdyp2 = 0
+                end where
+
+                where (tv .and. (tdistvert /= 0.0))
+                    dfdxp = (sign(myones, tcrossprod)*(xp(vind) - xq)*(yp(vind) - yq))/(tdistvert**3) ! yqxp
+                    dfdyp = (sign(myones, tcrossprod)*(yp(vind) - yq)**2)/(2*tdistvert**3) - sign(myones, tcrossprod)/tdistvert ! yqyp
+                elsewhere 
+                    dfdxp = 0
+                    dfdyp = 0
+                end where
+
+                ! Compute derivatives w.r.t. polygon set coordinates
+                dplfdvar%col = [pack(psedges(eind, 1), te), pack(psedges(eind, 2), te), &
+                    pack(psedges(eind, 1), te)+npsc, pack(psedges(eind, 2), te)+npsc, &
+                    pack(psvert(vind), tv), pack(psvert(vind), tv)+npsc]
+                dplfdvar%row = [reshape(spread(pack([(i, i = 1, nq)], te), 2, 4), [4*count(te)]), &
+                    reshape(spread(pack([(i, i = 1, nq)], tv), 2, 4), [2*count(tv)])]
+                dplfdvar%val = [pack(dfdxp1, te), pack(dfdxp2, te), &
+                    pack(dfdyp1, te), pack(dfdyp2, te), &
+                    pack(dfdxp, tv), pack(dfdyp, tv)]
+                dplfdvar%nval = size(dplfdvar%val, 1)
+
+            end select
+
         case ('20')
+
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case default
+
+                ! Not implemented
+                call gdErrorHandler('EvaluatePLF2DClosedExact: derivatives not implemented')
+
+            end select
             
             ! Second order derivative w.r.t. xq, xq
             vq = 0
             te = minind == 1
             tv = minind == 2
             do iq = 1, nq
-                if (tv(iq)) then 
+                if (tv(iq) .and. (tdistvert(iq) /= 0.0)) then 
                     vq(iq) = -sign(myone, tdistvert(iq))*&
                     sign(myone, tcrossprod(iq))/tdistvert(iq)**3&
                     *(xp(vind(iq)) - xq(iq))**2 + &
@@ -1092,12 +1601,27 @@ module PolygonLevelsetFunction2D
             te = minind == 1;
             tv = minind == 2;
             do iq = 1, nq
-                if (tv(iq)) then 
+                if (tv(iq) .and. (tdistvert(iq) /= 0.0)) then 
                     vq(iq) = -sign(myone, tdistvert(iq))*&
                     sign(myone, tcrossprod(iq))/tdistvert(iq)**3&
                     *(xp(vind(iq)) - xq(iq))*(yp(vind(iq)) - xq(iq))
                 end if
             end do 
+
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case default
+
+                ! Not implemented
+                call gdErrorHandler('EvaluatePLF2DClosedExact: derivatives not implemented')
+
+            end select
             
         case ('02')
             
@@ -1106,7 +1630,7 @@ module PolygonLevelsetFunction2D
             tv = minind == 2;
 
             do iq = 1, nq
-                if (tv(iq)) then 
+                if (tv(iq) .and. (tdistvert(iq) /= 0.0)) then 
                     vq(iq) = -sign(myone, tdistvert(iq))*&
                     sign(myone, tcrossprod(iq))/tdistvert(iq)**3&
                     *(yp(vind(iq)) - yq(iq))**2 + &
@@ -1114,6 +1638,20 @@ module PolygonLevelsetFunction2D
                 end if
             end do 
 
+            ! Check derivatives
+            select case(var)
+
+            case ('no')
+                
+                ! No derivatives
+                dplfdvar = SpZeros(nq, size(values, 1))
+
+            case default
+
+                ! Not implemented
+                call gdErrorHandler('EvaluatePLF2DClosedExact: derivatives not implemented')
+
+            end select
             
         case default
 
@@ -1125,8 +1663,14 @@ module PolygonLevelsetFunction2D
         ! Housekeeping
         !=============
         end associate
+        
+        ! Optional arguments
+        if (present(dplfdvarin)) then 
+            dplfdvarin = dplfdvar 
+        end if
 
     end subroutine
+
 
     !------------------------------------------------------------------!
     !                     PLF CLOSED APPROXIMATION                     !
@@ -1149,26 +1693,205 @@ module PolygonLevelsetFunction2D
         class(PolygonLevelsetFunction2DUDT), allocatable :: plfe
 
         integer(I8)                         :: nx, ny
-
-        real(R8)                            :: minx, maxx, miny, maxy, &
-            dx, dy
-        real(R8), allocatable               :: xp(:), yp(:), xg(:), &
-            yg(:), xgv(:), ygv(:), vg(:), vg2D(:, :)
-
-        ! Loop
-        integer(I8)                         :: k
+        real(R8), allocatable               :: xg(:), yg(:), vg(:), &
+            vg2D(:, :), xgv(:), ygv(:)
 
         ! Initialize
         !===========
         ! Add polygonset structure
         plf%ps = ps 
 
-        ! Get polygon vertices for later
-        call ps%GetPoints(xp, yp)
-
         ! Construct closed exact levelset function
         call InitializePolygonLevelsetFunction2D(plfe, ps, &
             plf%options%optionsClosedExact)
+
+        ! Construct 2D evaluation grid
+        call plf%ConstructGrid(xg, yg, xgv, ygv, nx, ny)
+
+        ! Evaluate exact representation
+        allocate(vg(nx*ny))
+        call plfe%Evaluate(xg, yg, 0, 0, vg)
+
+        ! Reshape
+        vg2D = reshape(vg, (/nx, ny/))
+
+        ! Build polygon representation
+        !=============================
+        ! Construct
+        call plf%interp%SetParameters(plf%options%meth, plf%options%C, plf%options%M)
+        call plf%interp%Construct(xgv, ygv, vg2D)
+        
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluatePLF2DClosedApproximation(plf, xq, yq, derivx, &
+        derivy, vq, varin, valuesin, dplfdvarin)
+
+        ! Description
+        !============
+        ! Evaluate - simply call interpolant routine if no derivatives 
+        ! need to be evaluate. Otherwise, if derivatives are needed, we
+        ! apply the chain rule as follows:
+        !
+        !   dplf/dvar = dvq/db db/dvar
+        !
+        ! where dvq/db is the linearization of the interpolation routine
+        ! w.r.t. the initial sample values 'b', and db/dvar the linearization
+        ! of the initial sample values w.r.t. the desired variable. 
+        ! Note that dvq/db is given by the interpolant as dvq/da da/db, 
+        ! where da/db is the inverse of the system matrix used to 
+        ! determine the interpolation weights a. db/dvar is the 
+        ! linearization of the underlying closed exact polygon levelset
+        ! function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonLevelsetFunction2DClosedApproximationUDT)  :: plf 
+        real(R8), intent(in)            :: xq(:), yq(:)
+        integer(I8), intent(in)         :: derivx, derivy
+        real(R8), intent(out)           :: vq(size(xq))
+
+        ! Optional arguments
+        character(*), intent(in), optional      :: varin 
+        real(R8), intent(in), optional          :: valuesin(:)
+        type(MySparseUDT), optional             :: dplfdvarin
+
+        character(:), allocatable               :: var 
+        real(R8), allocatable                   :: values(:)
+        type(MySparseUDT)                       :: dplfdvar
+
+        ! Auxiliary
+        class(PolygonLevelsetFunction2DUDT), allocatable :: plfe
+        type(MySparseUDT)                       :: dinterpda, dadvqinit, &
+             dvqinitdval, dvqdvqinit
+        integer(I8)                             :: nx, ny
+        real(R8), allocatable                   :: xg(:), &
+            yg(:), vg(:), vg2D(:, :), xgv(:), ygv(:)
+        logical                                 :: domemoryfriendly
+
+        ! Check input
+        !============
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if
+        if (present(dplfdvarin)) then 
+            dplfdvar = dplfdvarin 
+        end if 
+
+        ! Set memory friendly option default to true
+        domemoryfriendly = .true. 
+
+
+        ! Call interpolant
+        !=================
+        ! Evaluate values
+        call plf%interp%Evaluate(xq, yq, derivx, derivy, vq)
+
+
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives
+            
+
+        case ('polygonsetcoordinates')
+
+            ! Only w.r.t. vessel coordinates. Need to differentiate 
+            ! initialization and interpolation routines
+
+            ! Construct closed exact levelset function
+            call InitializePolygonLevelsetFunction2D(plfe, plf%ps, &
+                plf%options%optionsClosedExact)
+
+            ! Construct 2D evaluation grid
+            call plf%ConstructGrid(xg, yg, xgv, ygv, nx, ny)
+
+            ! Evaluate exact representation and its derivatives
+            allocate(vg(size(xg, 1)*size(yg, 1)))
+            call plfe%Evaluate(xg, yg, derivx, derivy, vg, 'polygonsetcoordinates', &
+                values, dvqinitdval)
+
+            ! Reshape
+            vg2D = reshape(vg, (/nx, ny/))
+
+            ! Compute derivative
+            if (domemoryfriendly) then 
+                ! Differentiate interpolated values w.r.t. input values (memory friendly)
+                call plf%interp%EvaluateDiffInterp2Val(xq, yq, derivx, derivy, dvqdvqinit)
+
+                ! Construct total derivative
+                dplfdvar = dvqdvqinit*dvqinitdval
+
+            else
+                ! Memory unfriendly alternative
+                ! Differentiate interpolant coefficient w.r.t. input values
+                call plf%interp%EvaluateDiffCoef2Val(xgv, ygv, vg2D, dadvqinit)
+                
+                ! Construct
+                call plf%interp%Construct(xgv, ygv, vg2D)
+
+                ! Differentiate interpolant results w.r.t. coefficients
+                call plf%interp%EvaluateDiffInterp2Coef(xq, yq, derivx, derivy, vq, &
+                dinterpda)
+
+                ! Construct total derivative
+                dplfdvar = dinterpda*dadvqinit
+                dplfdvar = dplfdvar*dvqinitdval
+            end if 
+
+        case default
+            
+            ! Throw error
+            call gdErrorHandler('EvaluatePLF2DClosedApproximation: ' // & 
+                ' variable not implemented')
+
+        end select
+
+        if (present(dplfdvarin)) then 
+            dplfdvarin = dplfdvar 
+        end if
+ 
+    end subroutine
+
+    ! Grid construction
+    subroutine ConstructGridPLF2DClosedApproximation(plf, xg, yg, xgv, &
+        ygv, nx, ny)
+
+        ! Description
+        !============
+        ! Routine to create a 2D structured mesh for the closed 
+        ! approximation plf function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonLevelsetFunction2DClosedApproximationUDT)  :: plf 
+        real(R8), intent(out), allocatable      :: xg(:), yg(:), &
+            xgv(:), ygv(:)
+        integer(I8), intent(out)                :: nx, ny
+
+        ! Auxiliary
+        real(R8)                            :: minx, maxx, miny, maxy, &
+            dx, dy
+        real(R8), allocatable               :: xp(:), yp(:)
+
+        ! Loop
+        integer(I8)                         :: k
+
+        ! Initialize
+        !===========
+        ! Get polygon vertices 
+        call plf%ps%GetVertices(xp, yp)
 
         ! Check interpolant range
         if (allocated(plf%options%xrange)) then 
@@ -1196,7 +1919,7 @@ module PolygonLevelsetFunction2D
         ny = plf%options%resy + 1
 
         ! Allocate
-        allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny), vg(nx*ny))
+        allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny))
 
         ! Get polygon extent
         minx = minval(plf%options%xrange) 
@@ -1222,43 +1945,7 @@ module PolygonLevelsetFunction2D
         
         call Construct2DStructuredGrid(xgv, ygv, nx, ny, xg, yg)
 
-        ! Evaluate exact representation
-        call plfe%Evaluate(xg, yg, 0, 0, vg)
-
-        ! Reshape
-        vg2D = reshape(vg, (/nx, ny/))
-
-        ! Build polygon representation
-        !=============================
-        ! Construct
-        call plf%interp%SetParameters(plf%options%meth, plf%options%C, plf%options%M)
-        call plf%interp%Construct(xgv, ygv, vg2D)
-        
-
     end subroutine
-
-    ! Evaluation
-    subroutine EvaluatePLF2DClosedApproximation(plf, xq, yq, derivx, &
-        derivy, vq)
-
-        ! Description
-        !============
-        ! Evaluate - simply call interpolant routine
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(PolygonLevelsetFunction2DClosedApproximationUDT)  :: plf 
-        real(R8), intent(in)            :: xq(:), yq(:)
-        integer(I8), intent(in)         :: derivx, derivy
-        real(R8), intent(out)           :: vq(size(xq))
-
-        ! Call interpolant
-        !=================
-        call plf%interp%Evaluate(xq, yq, derivx, derivy, vq)
- 
-    end subroutine
-
 
 
 end module

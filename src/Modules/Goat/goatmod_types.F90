@@ -522,6 +522,9 @@ module goatmod_types
         ! Update vessel description using coordinates
         procedure :: UpdateVesselCoordinates
 
+        ! Vessel coordinate getter
+        procedure :: GetVesselCoordinates
+
     end type
 
     ! Environment
@@ -1382,6 +1385,9 @@ module goatmod_types
         do i = 2, v%ntot 
             v%faceP(i, 1) = v%faceP(i-1, 1) + v%faceP(i-1, 2)
         end do 
+        if (allocated(v%face)) then 
+            deallocate(v%face)
+        end if 
         allocate(v%face(v%nface), vcc(v%ntot)) 
         vcc(:) = 0
         do i = 1, f%ntot
@@ -1825,6 +1831,83 @@ module goatmod_types
     !                             Numerics                             !
     !------------------------------------------------------------------!
 
+    ! Grid data updating
+    subroutine UpdateGridData(grid, magneticField, environment)
+
+        ! Description
+        !============
+        ! Update grid data such as metrics, magnetic field at vertices,
+        ! ... that depends on the magnetic field and possibly on 
+        ! the environment. Assumes all other fields are properly 
+        ! initialized and allocated. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)        :: grid 
+        type(MagneticFieldUDT), intent(in)  :: magneticField 
+        type(EnvironmentUDT), intent(in)    :: environment
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tv, tf, tfv 
+        real(R8), allocatable, dimension(:)     :: tpsi
+        
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(mf        => magneticField%interp,    &
+                nc          => grid%cell%ntot,          &
+                nfs         => grid%data%fluxdata%nfs)
+
+        ! Compute
+        !========
+        ! Magnetic field at vertices
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 0, grid%vert%psi)
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 1, 0, grid%vert%bx)
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 1, grid%vert%by)
+
+        ! Cell centers
+        do i = 1, nc 
+            tv = GetCellVert(grid%cell, i)
+            grid%cell%x(i) = sum(grid%vert%x(tv))/size(tv)
+            grid%cell%y(i) = sum(grid%vert%y(tv))/size(tv)
+        end do 
+
+        ! Magnetic field at cell centers
+        call mf%Evaluate(grid%cell%x, grid%cell%y, 0, 0, grid%cell%psi)
+        do i = 1, nc
+            tv = GetCellVert(grid%cell, i)
+            grid%cell%bp(i) = -sum(sqrt(grid%vert%bx(tv)**2 + grid%vert%by(tv)**2))/(size(tv)*2*pi_R8*grid%cell%x(i))
+            grid%cell%bt(i) = sum(grid%vert%ffbz(tv))/(size(tv)*2*pi_R8*grid%cell%x(i))
+        end do
+
+        ! Flux surface psi values
+        do i = 1, nfs 
+
+            ! Get flux surface faces
+            tf = GetFSFace(grid%data%fluxdata, i)
+
+            ! Get vertices
+            tfv = reshape(grid%face%vert(tf, :), [size(tf)*2])
+
+            ! Get psi values
+            tpsi = grid%vert%psi(tfv)
+
+            ! Average and add
+            grid%data%fluxdata%fluxsurfacepsi = sum(tpsi)/size(tpsi)
+
+        end do
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                          Magnetic field                          !
     !------------------------------------------------------------------!
@@ -1923,7 +2006,51 @@ module goatmod_types
 
     end subroutine
 
-    ! Updating (assumed already initialised)
+    ! Getting coordinates (assumed already initialized)
+    subroutine GetVesselCoordinates(vessel, xv, yv)
+
+        ! Description
+        !============
+        ! This routine returns the vessel coordinates in the same order
+        ! as they are updated. Useful for e.g. shape optimization 
+        ! purposes. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselUDT)                    :: vessel 
+        real(R8), allocatable, intent(out)  :: xv(:), yv(:)
+
+        ! Auxiliary
+        integer(I8)                     :: nv
+
+        ! Loop 
+        integer(I8)                     :: i, cc
+
+        ! Compute total number of vertices
+        nv = 0
+        do i = 1, vessel%polygonset%np
+            nv = nv + vessel%polygonset%polygons(i)%nv
+        end do
+
+        ! Extract
+        cc = 0
+        if (allocated(xv)) then 
+            deallocate(xv)
+        end if 
+        if (allocated(yv)) then 
+            deallocate(yv)
+        end if 
+        allocate(xv(nv), yv(nv))
+        do i = 1, vessel%polygonset%np 
+            xv(cc+1:cc+vessel%polygonset%polygons(i)%nv) = vessel%polygonset%polygons(i)%x
+            yv(cc+1:cc+vessel%polygonset%polygons(i)%nv) = vessel%polygonset%polygons(i)%y
+        end do
+
+
+    end subroutine
+
+    ! Updating (assumed already initialized)
     subroutine UpdateVesselCoordinates(vessel, xv, yv)
 
         ! Description

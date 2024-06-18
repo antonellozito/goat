@@ -82,6 +82,15 @@ module mod_sparseinterface
         procedure :: DeleteColumnsInteger 
         generic   :: Deletecolumns  => DeleteColumnsLogical, DeleteColumnsInteger
 
+        ! Setting zero values
+        procedure :: SetZeroRowsLogical
+        procedure :: SetZeroRowsInteger
+        generic   :: SetZeroRows     => SetZeroRowsLogical, SetZeroRowsInteger 
+
+        procedure :: SetZeroColumnsLogical
+        procedure :: SetZeroColumnsInteger
+        generic   :: SetZeroColumns     => SetZeroColumnsLogical, SetZeroColumnsInteger 
+
         ! Summation routines
         procedure :: SumColumnwiseFull
         procedure :: SumRowwiseFull
@@ -129,6 +138,11 @@ module mod_sparseinterface
         module procedure MultiplySparseMatrices
     end interface
 
+    interface ConstructMySparse
+        module procedure ConstructMySparseTriplet
+        module procedure ConstructMySparseFromFull
+    end interface
+
     contains
 
     !==================================================================!
@@ -141,7 +155,7 @@ module mod_sparseinterface
     !                          CONSTRUCTORS                            !
     !------------------------------------------------------------------!
 
-    ! Constructor
+    ! Initialization
     subroutine InitializeMySparse(mysparse, nrow, ncol, nval)
 
         ! Description
@@ -170,6 +184,81 @@ module mod_sparseinterface
         call mysparse%Allocate()
 
     end subroutine
+
+    ! Constructor
+    function ConstructMySparseTriplet(row, col, val, nrow, ncol) result(sp)
+
+        ! Description
+        !============
+        ! This function constructs a sparse matrix for a given set of 
+        ! row, column, and value triplets, and for given number of 
+        ! rows and columns. 
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)             :: row(:), col(:), nrow, ncol 
+        real(R8), intent(in)                :: val(:)
+        type(MySparseUDT)                   :: sp 
+
+        ! Construct
+        !==========
+        sp%row = row 
+        sp%col = col 
+        sp%val = val 
+        sp%nrow = nrow 
+        sp%ncol = ncol 
+        sp%nval = size(val, 1)
+
+    end function
+
+    function ConstructMySparseFromFull(A) result(sp)
+
+        ! Description
+        !============
+        ! Construct a sparse matrix starting from a full matrix. Not 
+        ! really a lot of intended uses, but might be handy for some 
+        ! things. Zero values are excluded. Note that the resulting
+        ! 'sparse' matrix may be dense and hence require more 
+        ! storage than the initial full matrix...
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in), dimension(:, :)   :: A 
+        type(MySparseUDT)                       :: sp 
+
+        ! Auxiliary
+        integer(I8)                             :: nrow, ncol, nval 
+        integer(I8), allocatable, dimension(:)  :: row, col
+
+        real(R8), allocatable, dimension(:)     :: Avec
+
+        logical, allocatable, dimension(:)      :: nzvec
+
+        ! Loop
+        integer(I8)                             :: k
+
+        ! Construct
+        !==========
+        ! Get row and column dimensions, number of values
+        nrow = size(A, 1)
+        ncol = size(A, 2)
+        nval = count(A /= 0)
+
+        ! Get row and column indices
+        row = reshape(spread([(k, k = 1, nrow)], 2, ncol), [size(A)])
+        col = reshape(spread([(k, k = 1, ncol)], 1, nrow), [size(A)])
+
+        ! Construct matrix
+        Avec = reshape(A, [size(A)])
+        nzvec = Avec /= 0
+        call sp%Initialize(nrow, ncol, nval)
+        sp%row = pack(row, nzvec)
+        sp%col = pack(col, nzvec)
+        sp%val = pack(Avec, nzvec)
+
+    end function
 
     ! Zeros constructor
     function SpZeros(nrow, ncol) result(a)
@@ -283,6 +372,11 @@ module mod_sparseinterface
         ! Extract
         !========
         ! Allocate
+        if (allocated(col)) then 
+            if (size(col, 1) /= mysparse%nrow) then 
+                deallocate(col)
+            end if 
+        end if 
         if (.not. allocated(col)) then 
             allocate(col(mysparse%nrow))
         end if
@@ -453,7 +547,7 @@ module mod_sparseinterface
         !==================
         ! Arguments
         type(MySparseUDT), intent(in)       :: a
-        real(R8)                            :: b  
+        real(R8), intent(in)                :: b  
         type(MysparseUDT)                   :: c 
 
         ! Compute
@@ -476,7 +570,7 @@ module mod_sparseinterface
         !==================
         ! Arguments
         type(MySparseUDT), intent(in)       :: b
-        real(R8)                            :: a 
+        real(R8), intent(in)                :: a 
         type(MysparseUDT)                   :: c 
 
         ! Compute
@@ -615,7 +709,7 @@ module mod_sparseinterface
         ! Multiply
         !=========
         ! First convert to CS format - note: it appears that setting
-        ! the correct c memory location is scope dependent (ore more 
+        ! the correct c memory location is scope dependent (or more 
         ! precisely, if we do this in a subroutine, memory goes to shit)
         ! That's why we do it here... 
         rowta = a%row-1 
@@ -938,6 +1032,161 @@ module mod_sparseinterface
 
         ! Delete
         c = c%DeleteRows(b)
+
+        ! Transpose again
+        c = c%Transpose()
+
+    end function
+
+    ! Delete rows
+    function SetZeroRowsLogical(a, b) result(c)
+
+        ! Description
+        !============
+        ! Delete the rows of the matrix a that are true in the logical
+        ! vector b. b should have adequate dimensions. The matrix's 
+        ! dimensions will be the same, so elements are simply set to zero
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        type(MySparseUDT)       :: c
+        logical, intent(in)     :: b(:) 
+
+        ! Auxiliary
+        logical, allocatable        :: reductionvec(:)
+
+        ! Initialize
+        !===========
+        ! Check sizes
+        if (size(b, 1) .ne. a%nrow) then 
+            call gdErrorHandler('DeleteRowsLogical: deletion vector has improper dimensions')
+        end if 
+
+        ! Check if allocated
+        if (.not. allocated(a%row)) then 
+            call gdErrorHandler('DeleteRowsLogical: matrix is not allocated')
+        end if 
+
+        ! Delete
+        !=======
+        ! Adjust dimension
+        c%nrow = a%nrow 
+        c%ncol = a%ncol
+        c%nval = a%nval 
+
+        ! Remove elements, if any
+        if (a%nval > 0) then 
+            
+            ! Determine elements to retain
+            reductionvec = .not. b(a%row)
+
+            ! Construct new matrix
+            c%nval  = count(reductionvec)
+            call c%Allocate()
+            c%row   = pack(a%row, reductionvec)
+            c%col   = pack(a%col, reductionvec)
+            c%val   = pack(a%val, reductionvec)
+
+        else
+            ! Still need to allocate!
+            c%nval = 0
+            call c%Allocate()
+        end if 
+
+    end function
+
+    function SetZeroRowsInteger(a, b) result(c)
+
+        ! Description
+        !============
+        ! Same functionality as DeleteRowsLogical, but now the input
+        ! vector is an integer array. This routine converts the array
+        ! to a logical array (and performs some checks) and calls the
+        ! logical deletion routine afterwards. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        integer(I8), intent(in) :: b(:)
+        type(MySparseUDT)       :: c 
+
+        ! Auxiliary
+        logical, allocatable    :: bl(:)
+
+        ! Initialize
+        !===========
+        ! Check b
+        if ( (minval(b) < 1) .or. (maxval(b) > a%nrow ) ) then 
+            ! Out of bounds, throw error
+            call gdErrorHandler('DeleteRowsInteger: some values are out of bounds for deletion')
+        end if 
+
+        ! Construct logical
+        allocate(bl(a%nrow))
+        bl = .false.
+        bl(b) = .true. 
+
+        ! Delete
+        !=======
+        c = a%SetZeroRowsLogical(bl) 
+
+
+    end function 
+
+    ! Delete columns
+    function SetZeroColumnsLogical(a, b) result(c)
+        
+        ! Description
+        !============
+        ! The same as rows, but now for columns. Here, we simply 
+        ! transpose the matrix first, call the row deleter, then 
+        ! transpose again. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        logical, intent(in)     :: b(:)
+        type(MySparseUDT)       :: c 
+
+        ! Delete
+        !=======
+        ! Transpose
+        c = a%Transpose()
+
+        ! Delete
+        c = c%SetZeroRows(b)
+
+        ! Transpose again
+        c = c%Transpose()
+
+    end function
+
+    function SetZeroColumnsInteger(a, b) result(c)
+        
+        ! Description
+        !============
+        ! The same as rows, but now for columns. Here, we simply 
+        ! transpose the matrix first, call the row deleter, then 
+        ! transpose again. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(MySparseUDT)      :: a 
+        integer(I8), intent(in) :: b(:)
+        type(MySparseUDT)       :: c 
+
+        ! Delete
+        !=======
+        ! Transpose
+        c = a%Transpose()
+
+        ! Delete
+        c = c%SetZeroRows(b)
 
         ! Transpose again
         c = c%Transpose()
@@ -1349,11 +1598,21 @@ module mod_sparseinterface
 
         ! Allocate
         !=========
-        if (.not. allocated(mysparse%col)) then 
-            allocate(mysparse%col(mysparse%nval))
-            allocate(mysparse%row(mysparse%nval))
-            allocate(mysparse%val(mysparse%nval))
+        ! Check allocation status
+        if (allocated(mysparse%col)) then 
+            deallocate(mysparse%col)
         end if 
+        if (allocated(mysparse%row)) then 
+            deallocate(mysparse%row)
+        end if 
+        if (allocated(mysparse%val)) then 
+            deallocate(mysparse%val)
+        end if
+
+        ! Allocate
+        allocate(mysparse%col(mysparse%nval))
+        allocate(mysparse%row(mysparse%nval))
+        allocate(mysparse%val(mysparse%nval))
 
     end subroutine
 

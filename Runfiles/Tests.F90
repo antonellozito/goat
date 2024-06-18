@@ -26,7 +26,8 @@ module GOAT_tests
         ! Interpolant testing
         !call TestStructuredInterpolant2D()
         !call TestCSparse()
-        call TestPLF2D
+        !call TestPLF2D
+        call TestQPSolvers
 
     end subroutine
 
@@ -63,6 +64,7 @@ module GOAT_tests
         ! Modules
         !========
         use Interpolant
+        use mod_sparseinterface
 
         implicit none
         save 
@@ -75,15 +77,23 @@ module GOAT_tests
 
         ! Auxiliary
         type(StructuredInterpolant2DUDT)    :: interp
+        type(MySparseUDT)                   :: jacvq, jaca
 
-        integer(I8)                         :: nx, ny, nq, nres
+        integer(I8)                         :: nx, ny, nq, nres, &
+            derivx, derivy
         real(R8)                            :: Lx, Ly
 
         character(:), allocatable           :: meth 
-        integer(I8), allocatable            :: reshuffle(:)
+        integer(I8), allocatable            :: reshuffle(:), aind(:), &
+            vind(:)
         real(R8), allocatable               :: xgv(:), ygv(:), &
             v(:, :), a(:), vq(:, :), xq(:), yq(:), vqan(:, :), &
-            dv(:, :), temp(:), relerr(:)
+            dv(:, :), temp(:), relerr(:), vvals(:), avals(:), d(:), &
+            ainit(:), vqeval(:), tempvals(:, :)
+
+        real(R8), allocatable, dimension(:) :: vqFW, vqBW, dvqdaFW, &
+            dvqdaBW, dvqdaC, eabsFW, eabsBW, eabsC, &
+            erelFW, erelBW, erelC, dvqda
 
         ! Loop
         integer(I8)                         :: i, j, k 
@@ -94,8 +104,8 @@ module GOAT_tests
         call DisplayTestStart('TestStructuredInterpolant2D')
 
         ! Build structured grid
-        nx = 100 ! number of cells, not vertices!
-        ny = 200
+        nx = 10 ! number of cells, not vertices!
+        ny = 10
         Lx = 10
         Ly = 5 
         allocate(xgv(nx+1), ygv(ny+1), v(nx+1, ny+1))
@@ -103,18 +113,19 @@ module GOAT_tests
         ygv = Ly*[(k, k=0, ny)]/ny
 
         ! Set evaluation points (avoid out of bounds)
-        nq = 100
-        nres = 6 ! number of results 
-        allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), &
-            vq(nq, nres), temp(nq))
-        call random_number(xq)
-        call random_number(yq)
-
-        !nq = 2
+        !nq = 10000
         !nres = 6 ! number of results 
-        !allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), vq(nq, nres))
-        !xq = [0.12, 0.999]
-        !yq = [0.16, 0.999]
+        !allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), &
+        !    vq(nq, nres), temp(nq), vqeval(nq), vqFW(nq), vqBW(nq))
+        !call random_number(xq)
+        !call random_number(yq)
+
+        nq = 2
+        nres = 6 ! number of results 
+        allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), vq(nq, nres), &
+            temp(nq), vqeval(nq), vqFW(nq), vqBW(nq))
+        xq = [0.12, 0.999]
+        yq = [0.16, 0.999]
         
         xq = xq*Lx
         yq = yq*Ly
@@ -135,6 +146,9 @@ module GOAT_tests
         call interp%SetParameters(meth, 3, 6)
         call interp%Construct(xgv, ygv, v)
 
+
+        ! Test evaluation
+        !----------------
         ! Test1: evaluate the interpolant at some query points and 
         ! evaluate the analytic solution
         vqan(:, 1) = a(1) + a(2)*xq + a(3)*yq ! field value
@@ -163,6 +177,218 @@ module GOAT_tests
         ! Print
         print *, 'test case     f     dfdx    dfdy    d2fdx2      d2fdxdy     d2fdy2      '
         print *, 'Linear field test case', relerr(reshuffle)
+
+        ! Test derivatives
+        !-----------------
+        ! Set fixed evaluation points to know in which cell we need to check
+        ! (otherwise extremely likely to have zero derivatives everywhere)
+        deallocate(xq, yq, vq, vqan, dv, temp, vqeval, vqFW, vqBW)
+        nq = 2
+        nres = 6 ! number of results 
+        allocate(xq(nq), yq(nq), vqan(nq, nres), dv(nq, nres), vq(nq, nres), &
+            temp(nq), vqeval(nq), vqFW(nq), vqBW(nq))
+        xq = [0.12, 0.999]
+        yq = [0.16, 0.999]
+        
+        xq = xq*Lx
+        yq = yq*Ly
+
+        ! Set derivatives
+        derivx = 0
+        derivy = 0
+
+        ! Print
+        print *, 'Partial derivatives, derivtype: values w.r.t. interpolant coefficients'
+        
+        ! Derivatives w.r.t. coefficients and initial values. Compare to FD
+        call interp%EvaluateDiffInterp2Coef(xq, yq, derivx, derivy, vqeval, jaca)
+
+        ! Compare with FD
+        avals = reshape(interp%a, [size(interp%a, 1)*size(interp%a, 2)])
+
+        ! Indices to test all coefficients in certain cell
+        !aind = [(k, k = 12, 12+(size(interp%a, 2)-1)*nx*ny, nx*ny)] ![(k, k = 1, (nx+1)*(ny+1))]
+        
+        ! Indices to test only a couple of derivatives
+        aind = [12, 12 + nx*ny, 12+2*nx*ny]
+
+        d = [1e-8, 1e-6, 1e-4, 1e-2] 
+        
+        do i = 1, size(aind, 1)
+            ! Output
+            print *, 'variable: ', aind(i)
+            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call jaca%ExtractColumnFull(dvqda, aind(i))
+
+            ! Loop over fd steps
+            do j = 1, size(d, 1) 
+                ! Forward difference
+                avals(aind(i)) = avals(aind(i)) + d(j)
+                interp%a = reshape(avals, [size(interp%a, 1), size(interp%a, 2)])
+                call interp%Evaluate(xq, yq, derivx, derivy, vqFW)
+                dvqdaFW = (vqFW - vqeval)/d(j)
+
+                ! Backward difference
+                avals(aind(i)) = avals(aind(i)) - 2*d(j)
+                interp%a = reshape(avals, [size(interp%a, 1), size(interp%a, 2)])
+                call interp%Evaluate(xq, yq, derivx, derivy, vqBW)
+                dvqdaBW = (vqBW - vqeval)/(-d(j))
+
+                ! Central difference
+                dvqdaC = 0.5*(dvqdaFW + dvqdaBW)
+
+                ! Reset value
+                avals(aind(i)) = avals(aind(i)) + d(j)
+                interp%a = reshape(avals, [size(interp%a, 1), size(interp%a, 2)])
+
+                ! Errors
+                eabsFW = abs(dvqda - dvqdaFW)
+                eabsBW = abs(dvqda - dvqdaBW)
+                eabsC = abs(dvqda - 0.5*(dvqdaFW + dvqdaBW))
+                erelFW = eabsFW/dvqda 
+                erelBW = eabsBW/dvqda 
+                erelC = eabsC/dvqda 
+
+                ! Print out information
+                print *, d(j), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(abs(erelFW)), maxval(abs(erelBW)), &
+                    maxval(abs(erelC)), maxloc(abs(erelC))
+
+            end do
+        end do
+
+        ! Test derivatives
+        !-----------------
+        ! Print
+        print *, 'Partial derivatives, derivtype: values w.r.t. interpolant coefficients'
+        
+        ! Derivatives w.r.t. coefficients and initial values. Compare to FD
+        call interp%EvaluateDiffCoef2Val(xgv, ygv, v, jacvq)
+
+        ! Compare with FD
+        vvals = reshape(v, [(nx+1)*(ny+1)]) 
+        ainit = reshape(interp%a, [size(interp%a)])
+        vind = [1, nx + 1, 2, 2+ nx]
+        d = [1e-8, 1e-6, 1e-4, 1e-2] 
+        
+        do i = 1, size(vind, 1)
+            ! Output
+            print *, 'variable: ', vind(i)
+            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call jacvq%ExtractColumnFull(dvqda, vind(i))
+
+            ! Loop over fd steps
+            do j = 1, size(d, 1) 
+                ! Forward difference
+                vvals(vind(i)) = vvals(vind(i)) + d(j)
+                tempvals = reshape(vvals, [nx+1, ny+1])
+                call interp%Construct(xgv, ygv, tempvals)
+                dvqdaFW = (reshape(interp%a, [size(interp%a)]) - ainit)/d(j)
+
+                ! Backward difference
+                vvals(vind(i)) = vvals(vind(i)) - 2*d(j)
+                tempvals = reshape(vvals, [nx+1, ny+1])
+                call interp%Construct(xgv, ygv, tempvals)
+                dvqdaBW = (reshape(interp%a, [size(interp%a)]) - ainit)/(-d(j))
+
+                ! Central difference
+                dvqdaC = 0.5*(dvqdaFW + dvqdaBW)
+
+                ! Reset value
+                vvals(vind(i)) = vvals(vind(i)) + d(j)
+
+                ! Errors
+                eabsFW = abs(dvqda - dvqdaFW)
+                eabsBW = abs(dvqda - dvqdaBW)
+                eabsC = abs(dvqda - 0.5*(dvqdaFW + dvqdaBW))
+                erelFW = eabsFW/dvqda 
+                erelBW = eabsBW/dvqda 
+                erelC = eabsC/dvqda 
+
+                ! Print out information
+                print *, d(j), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(abs(erelFW)), maxval(abs(erelBW)), &
+                    maxval(abs(erelC)), maxloc(abs(erelC))
+
+
+            end do
+        end do
+        
+        ! Test derivatives
+        !-----------------
+        ! Print
+        print *, 'Partial derivatives, derivtype: values w.r.t. initial values coefficients'
+        
+        ! Set derivatives
+        derivx = 0
+        derivy = 0
+
+        ! Compute values
+        do i = 1, nx+1
+            do j = 1, ny+1
+                v(i, j) = sin(xgv(i))*sin(ygv(j))
+            end do 
+        end do
+
+        ! Derivatives w.r.t. coefficients and initial values. Compare to FD
+        call interp%Construct(xgv, ygv, v)
+        call interp%Evaluate(xq, yq, derivx, derivy, vqeval)
+        call interp%EvaluateDiffInterp2Val(xq, yq, derivx, derivy, jacvq)
+
+        ! Compare with FD
+        vvals = reshape(v, [(nx+1)*(ny+1)]) 
+        vind = [1, nx + 1, 2, 2+ nx]
+        d = [1e-8, 1e-6, 1e-4, 1e-2] 
+        
+        do i = 1, size(vind, 1)
+            ! Output
+            print *, 'variable: ', vind(i)
+            print *, '| step size | eabsFW | eabsBW | eabsC | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call jacvq%ExtractColumnFull(dvqda, vind(i))
+
+            ! Loop over fd steps
+            do j = 1, size(d, 1) 
+                ! Forward difference
+                vvals(vind(i)) = vvals(vind(i)) + d(j)
+                tempvals = reshape(vvals, [nx+1, ny+1])
+                call interp%Construct(xgv, ygv, tempvals)
+                call interp%Evaluate(xq, yq, derivx, derivy, vqFW)
+                dvqdaFW = (vqFW - vqeval)/(d(j))
+
+                ! Backward difference
+                vvals(vind(i)) = vvals(vind(i)) - 2*d(j)
+                tempvals = reshape(vvals, [nx+1, ny+1])
+                call interp%Construct(xgv, ygv, tempvals)
+                call interp%Evaluate(xq, yq, derivx, derivy, vqBW)
+                dvqdaBW = (vqBW - vqeval)/(-d(j))
+
+                ! Central difference
+                dvqdaC = 0.5*(dvqdaFW + dvqdaBW)
+
+                ! Reset value
+                vvals(vind(i)) = vvals(vind(i)) + d(j)
+
+                ! Errors
+                eabsFW = abs(dvqda - dvqdaFW)
+                eabsBW = abs(dvqda - dvqdaBW)
+                eabsC = abs(dvqda - 0.5*(dvqdaFW + dvqdaBW))
+                erelFW = eabsFW/dvqda 
+                erelBW = eabsBW/dvqda 
+                erelC = eabsC/dvqda 
+
+                ! Print out information
+                print *, d(j), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(abs(erelFW)), maxval(abs(erelBW)), &
+                    maxval(abs(erelC)), maxloc(abs(erelC))
+
+            end do
+        end do
 
         ! Housekeeping
         deallocate(a)
@@ -305,6 +531,7 @@ module GOAT_tests
         ! The usual
         use PolygonLevelsetFunction2D
         use mod_polygon
+        use mod_sparseinterface
 
         ! Declare variables
         !==================
@@ -320,11 +547,20 @@ module GOAT_tests
 
         type(PolygonSetUDT)         :: psg, psce, psca
 
-        real(R8)                    :: NaN 
-        real(R8), allocatable       :: xg(:), yg(:), xcps(:), &
-            ycps(:), xncp(:), yncp(:)
+        type(MySparseUDT)           :: dplfgdvar, dplfcedvar, dplfcadvar
+
+        integer(I8)                 :: nvaluesg, nxm, nym, derivx, derivy
+        integer(I8), allocatable    :: varind(:)
+
+        real(R8)                            :: NaN, maxxm, minxm, maxym, &
+            minym
+        real(R8), allocatable, dimension(:) :: xg, yg, xcps, &
+            ycps, xncp, yncp, d, xp, yp, valuesg, vqg, xq, yq, xgv, ygv, &
+            vqgFW, vqgBW, dvqFW, dvqBW, dvqC, eabsFW, eabsBW, eabsC, &
+            erelFW, erelBW, erelC, dvqg, eabsdir, ereldir
 
         ! Loop
+        integer(I8)                         :: i, j
 
         ! Initialize
         !===========
@@ -349,12 +585,13 @@ module GOAT_tests
         ! Construct general polygon set
         call psg%Construct(xg, yg)
 
-
         ! Construct simple closed polygon set
-        call psce%Construct(xcps, ycps)
+        !call psce%Construct(xcps, ycps)
+        call psce%Construct(xncp, yncp)
 
         ! Construct nested closed polygon set
         call psca%Construct(xncp, yncp)
+        !call psca%Construct(xcps, ycps)
 
         ! Set plf options (only for ca)
         optionsca%C         = 3
@@ -362,8 +599,8 @@ module GOAT_tests
         optionsca%meth      = 'uniformgrid'
         optionsca%offsetx   = 1
         optionsca%offsety   = 1
-        optionsca%resx      = 400
-        optionsca%resy      = 400
+        optionsca%resx      = 20
+        optionsca%resy      = 10
         optionsca%optionsClosedExact = optionsce
 
         ! Construct PLFs
@@ -376,6 +613,543 @@ module GOAT_tests
         call plfce%Visualize('closedexactplf')
         call plfca%Visualize('closedapproximationplf')
 
+        ! Test derivatives w.r.t. polygonset coordinates
+        !===============================================
+        ! General plf
+        !------------
+        ! Set finite differences & values
+        d = [1e-8, 1e-6, 1e-4, 1e-2]
+        varind = [1, 6, 2, 7, 3, 8, 4, 9, 5, 10]
+
+        ! Extract polygonset coordinates
+        call plfg%ps%GetVertices(xp, yp)
+        nvaluesg = size(xp, 1)
+        valuesg = [xp, yp]
+
+        ! Create a meshgrid for polygon evaluation, limited by polygon
+        ! extent
+        nxm = 2
+        nym = 2
+        allocate(xq(nxm*nym), yq(nxm*nym), vqg(nxm*nym), vqgFW(nxm*nym), &
+            vqgBW(nxm*nym))
+        maxxm = maxval(xp)
+        minxm = minval(xp)
+        maxym = maxval(yp)
+        minym = minval(yp)
+        
+        xgv = [(i, i = 0, nxm-1)]*(1./real(nxm-1, kind=R8))*(maxxm - minxm) + minxm 
+        ygv = [(i, i = 0, nym-1)]*(1./real(nym-1, kind=R8))*(maxym - minym) + minym 
+
+        call Construct2DStructuredGrid(xgv, ygv, nxm, nym, xq, yq)
+
+        ! Evaluate implemented derivatives
+        call plfg%Evaluate(xq, yq, &
+            0, 0, vqg, 'polygonsetcoordinates', valuesg, dplfgdvar)
+        
+        ! Compute finite differences (crude)
+        print *, 'Evaluating FD for general polygonset (variable: polygonsetcoordinates)'
+        
+        do j = 1, size(varind)
+            ! Output
+            print *, 'variable: ', varind(j)
+            print *, '| step size | eabsdir | eabsFW | eabsBW | eabsC | ereldir | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call dplfgdvar%ExtractColumnFull(dvqg, varind(j))
+            do i = 1, size(d)
+                ! Forward
+                !--------
+                ! Update values
+                valuesg(varind(j)) = valuesg(varind(j)) + d(i)
+
+                ! Update polygonset coordinates
+                call plfg%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+                ! Reconstruct the levelset function
+                call plfg%Initialize(plfg%ps)
+
+                ! Compute
+                call plfg%Evaluate(xq, yq, 0, 0, vqgFW)
+                dvqFW = (vqgFW - vqg)/(d(i))
+
+                ! Backward
+                !---------
+                ! Update values
+                valuesg(varind(j)) = valuesg(varind(j)) - 2*d(i) ! 2*d to compensate for previous + d
+
+                ! Update polygonset coordinates
+                call plfg%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+                ! Reconstruct the levelset function
+                call plfg%Initialize(plfg%ps)
+
+                ! Compute
+                call plfg%Evaluate(xq, yq, 0, 0, vqgBW)
+                dvqBW = (vqgBW - vqg)/(-d(i))
+
+                ! Compute errors
+                !---------------
+                eabsFW = abs(dvqg - dvqFW)
+                eabsBW = abs(dvqg - dvqBW)
+                eabsC = abs(dvqG - 0.5*(dvqFW + dvqBW))
+                erelFW = eabsFW/dvqg 
+                erelBW = eabsBW/dvqg 
+                erelC = eabsC/dvqg 
+                eabsdir = eabsFW 
+                ereldir = eabsFW/dvqg
+                where (eabsFW > eabsBW)
+                    eabsdir = eabsBW 
+                    ereldir = eabsBW/dvqg
+                end where
+            
+
+                ! Print out information
+                print *, d(i), maxval(eabsdir), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(ereldir), maxval(erelFW), maxval(erelBW), &
+                    maxval(erelC), maxloc(erelC)
+
+                ! Update
+                !-------
+                ! Downdate values
+                valuesg(varind(j)) = valuesg(varind(j)) + d(i) ! + d to compensate for - d
+            
+                ! Update polygonset coordinates (no need to update plf)
+                call plfg%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+            end do
+        end do
+
+        ! Housekeeping
+        deallocate(xq, yq, vqg, vqgFW, vqgBW)
+
+        
+
+        ! Closed exact
+        !-------------
+        ! Set derivatives
+        derivx = 0
+        derivy = 0
+
+        ! Set finite differences & values
+        d = [1e-8, 1e-6, 1e-4, 1e-2]
+        varind = [1, 5, 2, 6, 3, 7, 4, 8]
+
+        ! Extract polygonset coordinates
+        call plfce%ps%GetVertices(xp, yp)
+        nvaluesg = size(xp, 1)
+        valuesg = [xp, yp]
+
+        ! Create a meshgrid for polygon evaluation, limited by polygon
+        ! extent
+        nxm = 33
+        nym = 33
+        allocate(xq(nxm*nym), yq(nxm*nym), vqg(nxm*nym), vqgFW(nxm*nym), &
+            vqgBW(nxm*nym))
+        maxxm = maxval(xp)+0.1
+        minxm = minval(xp)-0.1
+        maxym = maxval(yp)+0.1
+        minym = minval(yp)-0.1
+        
+        xgv = [(i, i = 0, nxm-1)]*(1./real(nxm-1, kind=R8))*(maxxm - minxm) + minxm 
+        ygv = [(i, i = 0, nym-1)]*(1./real(nym-1, kind=R8))*(maxym - minym) + minym 
+
+        call Construct2DStructuredGrid(xgv, ygv, nxm, nym, xq, yq)
+
+        ! Evaluate implemented derivatives
+        call plfce%Evaluate(xq, yq, &
+            derivx, derivy, vqg, 'polygonsetcoordinates', valuesg, dplfcedvar)
+
+        ! Compute finite differences (crude)
+        print *, 'Evaluating FD for closed exact polygonset (variable: polygonsetcoordinates)'
+        
+        do j = 1, size(varind)
+            ! Output
+            print *, 'variable: ', varind(j)
+            print *, '| step size | eabsdir | eabsFW | eabsBW | eabsC | ereldir | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call dplfcedvar%ExtractColumnFull(dvqg, varind(j))
+            do i = 1, size(d)
+                ! Forward
+                !--------
+                ! Update values
+                valuesg(varind(j)) = valuesg(varind(j)) + d(i)
+
+                ! Update polygonset coordinates
+                call plfce%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+                ! Reconstruct the levelset function
+                call plfce%Initialize(plfce%ps)
+
+                ! Compute
+                call plfce%Evaluate(xq, yq, derivx, derivy, vqgFW)
+                dvqFW = (vqgFW - vqg)/d(i)
+
+                ! Backward
+                !---------
+                ! Update values
+                valuesg(varind(j)) = valuesg(varind(j)) - 2*d(i) ! 2*d to compensate for previous + d
+
+                ! Update polygonset coordinates
+                call plfce%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+                ! Reconstruct the levelset function
+                call plfce%Initialize(plfce%ps)
+
+                ! Compute
+                call plfce%Evaluate(xq, yq, derivx, derivy, vqgBW)
+                dvqBW = (vqgBW - vqg)/(-d(i))
+
+                ! Compute errors
+                !---------------
+                eabsFW = abs(dvqg - dvqFW)
+                eabsBW = abs(dvqg - dvqBW)
+                eabsC = abs(dvqG - 0.5*(dvqFW + dvqBW))
+                eabsdir = eabsFW 
+                ereldir = eabsFW/dvqg
+                where (eabsFW > eabsBW)
+                    eabsdir = eabsBW 
+                    ereldir = eabsBW/dvqg
+                end where
+                
+                erelFW = eabsFW/dvqg 
+                erelBW = eabsBW/dvqg 
+                erelC = eabsC/dvqg 
+            
+
+                ! Print out information
+                print *, d(i), maxval(eabsdir), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(abs(ereldir)), maxval(abs(erelFW)), &
+                    maxval(abs(erelBW)), maxval(abs(erelC)), maxloc(abs(erelC))
+
+
+                ! Update
+                !-------
+                ! Downdate values
+                valuesg(varind(j)) = valuesg(varind(j)) + d(i) ! + d to compensate for - d
+            
+                ! Update polygonset coordinates (no need to update plf)
+                call plfce%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+            end do
+        end do
+
+        ! Housekeeping
+        deallocate(xq, yq, vqg, vqgFW, vqgBW, xp, yp)
+
+        ! Closed approximation
+        !---------------------
+        ! Set derivatives
+        derivx = 0
+        derivy = 0
+
+        ! Set finite differences & values
+        d = [1e-8, 1e-6, 1e-4, 1e-2]
+        !varind = [1, 5, 2, 6, 3, 7, 4, 8]
+        varind = [1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15, 8, 16]
+
+        ! Extract polygonset coordinates
+        call plfca%ps%GetVertices(xp, yp)
+        nvaluesg = size(xp, 1)
+        valuesg = [xp, yp]
+
+        ! Create a meshgrid for polygon evaluation, limited by polygon
+        ! extent
+        nxm = 6
+        nym = 6
+        allocate(xq(nxm*nym), yq(nxm*nym), vqg(nxm*nym), vqgFW(nxm*nym), &
+            vqgBW(nxm*nym))
+        maxxm = maxval(xp)+0.1
+        minxm = minval(xp)-0.1
+        maxym = maxval(yp)+0.1
+        minym = minval(yp)-0.1
+        
+        xgv = [(i, i = 0, nxm-1)]*(1./real(nxm-1, kind=R8))*(maxxm - minxm) + minxm 
+        ygv = [(i, i = 0, nym-1)]*(1./real(nym-1, kind=R8))*(maxym - minym) + minym 
+
+        call Construct2DStructuredGrid(xgv, ygv, nxm, nym, xq, yq)
+
+        ! Evaluate implemented derivatives
+        call plfca%Evaluate(xq, yq, &
+            derivx, derivy, vqg, 'polygonsetcoordinates', valuesg, dplfcadvar)
+
+        ! Compute finite differences (crude)
+        print *, 'Evaluating FD for closed approximation polygonset (variable: polygonsetcoordinates)'
+        
+        do j = 1, size(varind)
+            ! Output
+            print *, 'variable: ', varind(j)
+            print *, '| step size | eabsdir | eabsFW | eabsBW | eabsC | ereldir | erelFW | erelBW | erelC | indrelC |'
+            
+            ! Extract value of implemented derivative
+            call dplfcadvar%ExtractColumnFull(dvqg, varind(j))
+            do i = 1, size(d)
+                ! Forward
+                !--------
+                ! Update values
+                valuesg(varind(j)) = valuesg(varind(j)) + d(i)
+
+                ! Update polygonset coordinates
+                call plfca%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+                ! Reconstruct the levelset function
+                call plfca%Initialize(plfca%ps)
+
+                ! Compute
+                call plfca%Evaluate(xq, yq, derivx, derivy, vqgFW)
+                dvqFW = (vqgFW - vqg)/d(i)
+
+                ! Backward
+                !---------
+                ! Update values
+                valuesg(varind(j)) = valuesg(varind(j)) - 2*d(i) ! 2*d to compensate for previous + d
+
+                ! Update polygonset coordinates
+                call plfca%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+                ! Reconstruct the levelset function
+                call plfca%Initialize(plfca%ps)
+
+                ! Compute
+                call plfca%Evaluate(xq, yq, derivx, derivy, vqgBW)
+                dvqBW = (vqgBW - vqg)/(-d(i))
+
+                ! Compute errors
+                !---------------
+                eabsFW = abs(dvqg - dvqFW)
+                eabsBW = abs(dvqg - dvqBW)
+                eabsC = abs(dvqG - 0.5*(dvqFW + dvqBW))
+                erelFW = eabsFW/dvqg 
+                erelBW = eabsBW/dvqg 
+                erelC = eabsC/dvqg 
+                eabsdir = eabsFW 
+                ereldir = eabsFW/dvqg
+            
+                where (eabsFW > eabsBW)
+                    eabsdir = eabsBW 
+                    ereldir = eabsBW/dvqg
+                end where
+
+                ! Print out information
+                print *, d(i), maxval(eabsdir), maxval(eabsFW), maxval(eabsBW), &
+                    maxval(eabsC), maxval(ereldir), maxval(abs(erelFW)), maxval(abs(erelBW)), &
+                    maxval(abs(erelC)), maxloc(abs(erelC))
+
+                ! Update
+                !-------
+                ! Downdate values
+                valuesg(varind(j)) = valuesg(varind(j)) + d(i) ! + d to compensate for - d
+            
+                ! Update polygonset coordinates (no need to update plf)
+                call plfca%ps%UpdateCoordinates(valuesg(1:nvaluesg), valuesg(nvaluesg+1:2*nvaluesg))
+
+            end do
+        end do
+
+        ! Housekeeping
+        deallocate(xq, yq, vqg, vqgFW, vqgBW, xp, yp)
+
+
+
+    end subroutine
+
+    ! QP solvers
+    subroutine TestQPSolvers()
+
+        ! Description
+        !============
+        ! Test the different QP solvers by solving unconstrained, 
+        ! equality constrained, and inequality constrained problems. 
+        ! We take a very simple 2D quadratic problem (quadratic cost 
+        ! function, linear (in)equality constraints) with known 
+        ! solution. Normally, the equality constrained problems with 
+        ! direct solver should yield the exact solution up to machine
+        ! precision (we provide the exact hessian, which is assumed 
+        ! by the QP - otherwise we should do SQP/use a different solver)
+        !
+        ! The test problem is: 
+        !
+        !   min_x1,x2   0.5*( (x1 - x1*)^2 + (x2 - x2*)^2 ) 
+        !                   = 0.5* ( x1^2 + x2^2) - (x1x1* + x2x2*) + c
+        !   s.t.        (x1 - x1*) + (x2 - x2*) = 1
+        !               (x1 - x1*) - (x2 - x2*) <= -1
+        !
+        ! Note that we neglect the constant term c. 
+        ! For the unconstrained problem, the optimum lies at x1*, x2*.
+        ! For the equality constrained problem, lambda = -0.5 and 
+        ! x1 = 0.5 + x1*, x2 = 0.5 + x2*
+        ! For the full problem, x1 = x1*, x2 = 1 + x2*, lambda = -0.5, 
+        ! mu = 0.5
+
+        ! Modules & the usual
+        use optmod_qp
+        use mod_constants
+        use mod_sparseinterface
+        use mod_precision
+        use optmod_hessianapproximation
+
+        implicit none 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+
+        ! Auxiliary
+        integer(I8)                             :: flag, maxit, &
+            verbosity
+
+        real(R8)                                :: x1s, x2s, tol 
+        real(R8), allocatable, dimension(:)     :: gradJ, b, c, x, &
+            lambda, mu, x0, lambda0, mu0, xe, lambdae, mue
+        real(R8), allocatable, dimension(:, :)  :: Bdinit, jacGd, jacHd
+
+        type(MySparseUDT)                       :: Bspinit, jacGsp, &
+            jacHsp
+        class(HessianApproximationUDT), allocatable     :: Bd, Bsp
+
+        ! Initialize
+        !===========
+        ! Display
+        call DisplayTestStart('TestQPSolvers')
+
+        ! Construct test problem
+        !=======================
+        ! Problem parameters
+        x1s = 1.0
+        x2s = 2.0
+
+        gradJ = [-x1s, -x2s]
+        b = [1 + x1s + x2s]
+        c = [-1 + x1s - x2s]
+
+        ! Solver parameters
+        maxit = 10
+        tol = 1e-8
+        verbosity = 2
+
+        ! Initial guess
+        x0 = [0, 0]*1.0
+        lambda0 = [0]*1.0
+        mu0 = [0]*1.0
+
+        ! Dense representation
+        Bdinit = reshape([1, 0, 0, 1]*1.0, [2, 2])
+        Bd = ConstructHessianApproximation('no', 2, Bdinit)  
+
+        jacGd = reshape([1, 1]*1.0, [1, 2])
+        jacHd = reshape([1, -1]*1.0, [1, 2])
+
+        ! Sparse representation
+        Bspinit = ConstructMySparse(Bdinit)
+        Bsp = ConstructHessianApproximation('no', 2, Bspinit)
+
+        jacGsp = ConstructMySparse(jacGd)
+        jacHsp = ConstructMySparse(jacHd)
+
+        ! Unconstrained problem
+        !----------------------
+        ! Print
+        print *, ' '
+        print *, 'testing unconstrained problem'
+
+        ! Set analytical solution
+        xe = [x1s, x2s]
+
+        ! Solve dense
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bd, gradJ, x, flag)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (dense): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+
+        ! Solve sparse
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bsp, gradJ, x, flag)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (sparse): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+
+        ! Equality constrained
+        !---------------------
+        ! Print
+        print *, ' '
+        print *, 'testing equality constrained problem'
+        
+
+        ! Set analytical solution
+        xe = [x1s + 0.5, x2s + 0.5]
+        lambdae = [-0.5]
+
+        ! Solve dense
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bd, gradJ, jacGd, b, x, lambda, flag)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (dense): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution lambda (dense): ', &
+            maxval(abs(lambda - lambdae)), maxval(abs(lambda - lambdae)/lambdae)
+
+        ! Solve sparse
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bsp, gradJ, jacGsp, b, x, lambda, flag)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (sparse): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution lambda (sparse): ', &
+            maxval(abs(lambda - lambdae)), maxval(abs(lambda - lambdae)/lambdae)
+
+        ! Inequality constrained
+        !-----------------------
+        ! Print
+        print *, ' '
+        print *, 'testing equality constrained problem'
+
+        ! Set analytical solution
+        xe = [x1s, x2s + 1]
+        lambdae = [-0.5]
+        mue = [0.5]
+
+        ! Solve dense
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bd, gradJ, jacGd, b, jacHd, c, x, lambda, &
+            mu, flag, maxit, tol, verbosity)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (dense): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution lambda (dense): ', &
+            maxval(abs(lambda - lambdae)), maxval(abs(lambda - lambdae)/lambdae)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution mu (dense): ', &
+            maxval(abs(mu - mue)), maxval(abs(mu - mue)/mue)
+
+        ! Solve sparse
+        x = x0
+        lambda = lambda0 
+        mu = mu0 
+        call SolveQPDirect(Bsp, gradJ, jacGsp, b, jacHsp, c, x, lambda, &
+            mu, flag, maxit, tol, verbosity)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution (sparse): ', maxval(abs(x - xe)), maxval(abs(x - xe)/xe)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution lambda (sparse): ', &
+            maxval(abs(lambda - lambdae)), maxval(abs(lambda - lambdae)/lambdae)
+        print *, 'max absolute and relative difference between ' // & 
+            'analytical and numerical solution mu (dense): ', &
+            maxval(abs(mu - mue)), maxval(abs(mu - mue)/mue)
+
+
+        ! Housekeeping
+        !=============
+        ! Display
+        call DisplayTestEnd()
 
     end subroutine
 

@@ -217,6 +217,7 @@ module gdmod_constraints
             EvaluateCoordinatesDerivativesBoundaryFunctionConstraints
         procedure :: EvaluateDerivativesFlux            => &
             EvaluateFluxDerivativesBoundaryFunctionConstraints
+        procedure :: EvaluateVesselcoordinatesDerivativesBoundaryFunctionConstraints
 
         ! Update
         procedure :: Update     => UpdateBoundaryFunctionConstraints
@@ -576,7 +577,8 @@ module gdmod_constraints
         ! Constraint evaluation
         subroutine EvaluateConstraintsINT(constraints, G, gradG, & 
             hessG, grid, magneticField, environment, &
-            dogradient, dohessian, designvariables, lambda)
+            dogradient, dohessian, designvariables, lambda, varin, &
+            valuesin, dGdvarin, dgradGdvarin)
 
             ! Description
             !============
@@ -597,6 +599,10 @@ module gdmod_constraints
             type(EnvironmentUDT)            :: environment 
             logical                         :: dogradient, dohessian
             class(DesignVariablesGDUDT)     :: designvariables
+
+            character(*), intent(in), optional  :: varin 
+            real(R8), intent(in), optional      :: valuesin(:)
+            type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
 
         end subroutine
 
@@ -934,7 +940,7 @@ module gdmod_constraints
     ! Constraint evaluation
     subroutine EvaluateEqCon(constraints, G, gradG, hessG, &
         grid, magneticField, environment, dogradient, dohessian, & 
-        designvariables, lambda)
+        designvariables, lambda, varin, valuesin, dGdvarin, dgradGdvarin)
 
         ! Description
         !============
@@ -956,46 +962,75 @@ module gdmod_constraints
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables 
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dGdvar, dgradGdvar
+
         ! Loop
-        integer(I8)                     :: ic, ivg, ivh, k
+        integer(I8)                     :: ic, k
         integer(I8), allocatable        :: conindex(:)
 
         ! Auxiliary
         real(R8), allocatable           :: G_flux(:), lambda_flux(:)
-        type(MySparseUDT)               :: gradG_flux, hessG_flux
+        type(MySparseUDT)               :: gradG_flux, hessG_flux, &
+            dG_fluxdvar, dgradG_fluxdvar
 
         real(R8), allocatable           :: G_bnd(:), lambda_bnd(:)
-        type(MySparseUDT)               :: gradG_bnd, hessG_bnd
+        type(MySparseUDT)               :: gradG_bnd, hessG_bnd, &
+            dG_bnddvar, dgradG_bnddvar
 
         real(R8), allocatable           :: G_xp(:), lambda_xp(:)
-        type(MySparseUDT)               :: gradG_xp, hessG_xp
+        type(MySparseUDT)               :: gradG_xp, hessG_xp, &
+            dG_xpdvar, dgradG_xpdvar
 
         real(R8), allocatable           :: G_el(:), lambda_el(:)
-        type(MySparseUDT)               :: gradG_el, hessG_el
+        type(MySparseUDT)               :: gradG_el, hessG_el, &
+            dG_eldvar, dgradG_eldvar
 
         real(R8), allocatable           :: G_orth(:), lambda_orth(:)
-        type(MySparseUDT)               :: gradG_orth, hessG_orth
+        type(MySparseUDT)               :: gradG_orth, hessG_orth, &
+            dG_orthdvar, dgradG_orthdvar
 
         real(R8), allocatable           :: G_ffv(:), lambda_ffv(:)
-        type(MySparseUDT)               :: gradG_ffv, hessG_ffv
+        type(MySparseUDT)               :: gradG_ffv, hessG_ffv, &
+            dG_ffvdvar, dgradG_ffvdvar
 
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Set the constraint counter
         ic = 0
 
         ! Constraint values
         !==================
+        gradG = SpZeros(designvariables%nphi, 0) ! will concatenate
+        hessG = SpZeros(designvariables%nphi, designvariables%nphi) ! will add
+        dGdvar = SpZeros(0, size(values, 1))
+        dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
 
         ! X-point constraints
         !--------------------
         if (constraints%doxpoints) then 
             ! Construct the constraint index
-            allocate(conindex(constraints%xpoints%ncon))
             conindex = [(k, k = ic+1, ic+constraints%xpoints%ncon)]
 
             ! Allocate & initialize
-            allocate(lambda_xp(constraints%xpoints%ncon))
             lambda_xp = lambda(conindex)
 
             ! Call the evaluation routine
@@ -1003,26 +1038,21 @@ module gdmod_constraints
                 gradG_xp, hessG_xp, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
-                lambda_xp)
+                lambda_xp, var, values, dG_xpdvar, dgradG_xpdvar)
 
             ! Assign
             G(conindex) = G_xp
-
-            ! Update the gradient column indices
             if (dogradient) then 
-                ! For easier concatenation later on
-                gradG_xp%col = gradG_xp%col + ic
-
+                gradG = gradG%Concatenate(gradG_xp, 2)
             end if
+            if (dohessian) then 
+                hessG = hessG + hessG_xp
+            end if 
+            dGdvar = dGdvar%Concatenate(dG_xpdvar, 1)
+            dgradGdvar = dgradGdvar + dgradG_xpdvar
 
             ! Update the constraint counter
             ic = ic + constraints%xpoints%ncon
-
-            ! Housekeeping
-            deallocate(conindex, lambda_xp) 
-            if (allocated(G_xp)) then
-                deallocate(G_xp)
-            end if
 
         end if
 
@@ -1030,11 +1060,9 @@ module gdmod_constraints
         !------------------------------
         if (constraints%doboundaryfunction) then 
             ! Construct the constraint index
-            allocate(conindex(constraints%boundaryfunction%ncon))
             conindex = [(k, k = ic+1, ic+constraints%boundaryfunction%ncon)]
 
             ! Allocate & initialize
-            allocate(lambda_bnd(constraints%boundaryfunction%ncon))
             lambda_bnd = lambda(conindex)
 
             ! Call the evaluation routine
@@ -1042,26 +1070,21 @@ module gdmod_constraints
                 gradG_bnd, hessG_bnd, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
-                lambda_bnd)
+                lambda_bnd, var, values, dG_bnddvar, dgradG_bnddvar)
 
             ! Assign
             G(conindex) = G_bnd
-
-            ! Update the gradient column indices
             if (dogradient) then 
-                ! For easier concatenation later on
-                gradG_bnd%col = gradG_bnd%col + ic
-
-            end if
+                gradG = gradG%Concatenate(gradG_bnd, 2)
+            end if 
+            if (dohessian) then 
+                hessG = hessG + hessG_bnd
+            end if 
+            dGdvar = dGdvar%Concatenate(dG_bnddvar, 1)
+            dgradGdvar = dgradGdvar + dgradG_bnddvar
 
             ! Update the constraint counter
             ic = ic + constraints%boundaryfunction%ncon
-
-            ! Housekeeping
-            deallocate(conindex, lambda_bnd) 
-            if (allocated(G_bnd)) then
-                deallocate(G_bnd)
-            end if
 
         end if
 
@@ -1069,11 +1092,9 @@ module gdmod_constraints
         !--------------------------
         if (constraints%dofluxfunction) then 
             ! Construct the constraint index
-            allocate(conindex(constraints%fluxfunction%ncon))
             conindex = [(k, k = ic+1, ic+constraints%fluxfunction%ncon)]
 
             ! Allocate & initialize
-            allocate(lambda_flux(constraints%fluxfunction%ncon))
             lambda_flux = lambda(conindex)
 
             ! Call the evaluation routine
@@ -1081,26 +1102,21 @@ module gdmod_constraints
                 gradG_flux, hessG_flux, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
-                lambda_flux)
+                lambda_flux, var, values, dG_fluxdvar, dgradG_fluxdvar)
 
             ! Assign
             G(conindex) = G_flux
-
-            ! Update the gradient column indices
             if (dogradient) then 
-                ! For easier concatenation later on
-                gradG_flux%col = gradG_flux%col + ic
-
-            end if
+                gradG = gradG%Concatenate(gradG_flux, 2)
+            end if 
+            if (dohessian) then 
+                hessG = hessG + hessG_flux
+            end if 
+            dGdvar = dGdvar%Concatenate(dG_fluxdvar, 1)
+            dgradGdvar = dgradGdvar + dgradG_fluxdvar
 
             ! Update the constraint counter
             ic = ic + constraints%fluxfunction%ncon
-
-            ! Housekeeping
-            deallocate(conindex, lambda_flux) 
-            if (allocated(G_flux)) then
-                deallocate(G_flux)
-            end if
 
         end if
 
@@ -1108,11 +1124,9 @@ module gdmod_constraints
         !-------------------------
         if (constraints%doedgelengths) then 
             ! Construct the constraint index
-            allocate(conindex(constraints%edgelengths%ncon))
             conindex = [(k, k = ic+1, ic+constraints%edgelengths%ncon)]
 
             ! Allocate & initialize
-            allocate(lambda_el(constraints%edgelengths%ncon))
             lambda_el = lambda(conindex)
 
             ! Call the evaluation routine
@@ -1120,26 +1134,23 @@ module gdmod_constraints
                 gradG_el, hessG_el, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
-                lambda_el)
+                lambda_el, var, values, dG_eldvar, dgradG_eldvar)
 
             ! Assign
             G(conindex) = G_el
 
             ! Update the gradient column indices
-            if (dogradient) then 
-                ! For easier concatenation later on
-                gradG_el%col = gradG_el%col + ic
-
-            end if
+            if (dogradient) then
+                gradG = gradG%Concatenate(gradG_el, 2)
+            end if 
+            if (dohessian) then 
+                hessG = hessG + hessG_el
+            end if 
+            dGdvar = dGdvar%Concatenate(dG_eldvar, 1)
+            dgradGdvar = dgradGdvar + dgradG_eldvar
 
             ! Update the constraint counter
             ic = ic + constraints%edgelengths%ncon
-
-            ! Housekeeping
-            deallocate(conindex, lambda_el) 
-            if (allocated(G_el)) then
-                deallocate(G_el)
-            end if
 
         end if
 
@@ -1147,11 +1158,9 @@ module gdmod_constraints
         !--------------------------
         if (constraints%doorthogonality) then 
             ! Construct the constraint index
-            allocate(conindex(constraints%orthogonality%ncon))
             conindex = [(k, k = ic+1, ic+constraints%orthogonality%ncon)]
 
             ! Allocate & initialize
-            allocate(lambda_orth(constraints%orthogonality%ncon))
             lambda_orth = lambda(conindex)
 
             ! Call the evaluation routine
@@ -1159,26 +1168,21 @@ module gdmod_constraints
                 gradG_orth, hessG_orth, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
-                lambda_orth)
+                lambda_orth, var, values, dG_orthdvar, dgradG_orthdvar)
 
             ! Assign
             G(conindex) = G_orth
-
-            ! Update the gradient column indices
             if (dogradient) then 
-                ! For easier concatenation later on
-                gradG_orth%col = gradG_orth%col + ic
-
+                gradG = gradG%Concatenate(gradG_orth, 2)
+            end if 
+            if (dohessian) then 
+                hessG = hessG + hessG_orth
             end if
+            dGdvar = dGdvar%Concatenate(dG_orthdvar, 1)
+            dgradGdvar = dgradGdvar + dgradG_orthdvar
 
             ! Update the constraint counter
             ic = ic + constraints%orthogonality%ncon
-
-            ! Housekeeping
-            deallocate(conindex, lambda_orth) 
-            if (allocated(G_orth)) then
-                deallocate(G_orth)
-            end if
 
         end if
 
@@ -1186,11 +1190,9 @@ module gdmod_constraints
         !------------------------------
         if (constraints%dofixedfluxvalues) then 
             ! Construct the constraint index
-            allocate(conindex(constraints%fixedfluxvalues%ncon))
             conindex = [(k, k = ic+1, ic+constraints%fixedfluxvalues%ncon)]
 
             ! Allocate & initialize
-            allocate(lambda_orth(constraints%fixedfluxvalues%ncon))
             lambda_ffv = lambda(conindex)
 
             ! Call the evaluation routine
@@ -1198,366 +1200,35 @@ module gdmod_constraints
                 gradG_ffv, hessG_ffv, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
-                lambda_ffv)
+                lambda_ffv, var, values, dG_ffvdvar, dgradG_ffvdvar)
 
             ! Assign
             G(conindex) = G_ffv
-
-            ! Update the gradient column indices
             if (dogradient) then 
-                ! For easier concatenation later on
-                gradG_ffv%col = gradG_ffv%col + ic
-
+                gradG = gradG%Concatenate(gradG_ffv, 2)
+            end if 
+            if (dohessian) then 
+                hessG = hessG + hessG_ffv
             end if
+            dGdvar = dGdvar%Concatenate(dG_ffvdvar, 1)
+            dgradGdvar = dgradGdvar + dgradG_ffvdvar
 
             ! Update the constraint counter
             ic = ic + constraints%fixedfluxvalues%ncon
 
-            ! Housekeeping
-            deallocate(conindex, lambda_ffv) 
-            if (allocated(G_ffv)) then
-                deallocate(G_ffv)
-            end if
-
         end if
 
-
-        ! Concatenate gradient
-        !=====================
-        if (dogradient) then 
-
-            ! Determine sizes
-            !----------------
-            ! Size of the gradient
-            gradG%ncol = constraints%neqcon 
-            gradG%nrow = designvariables%nphi
-
-            ! Allocate
-            if (.not. allocated(gradG%val)) then 
-                ! Number of values (to be determined)
-                gradG%nval = 0
-
-                ! Add values of each constraint, if used
-                if (constraints%doxpoints) then 
-                    gradG%nval = gradG%nval + gradG_xp%nval 
-                end if
-                if (constraints%doboundaryfunction) then 
-                    gradG%nval = gradG%nval + gradG_bnd%nval 
-                end if
-                if (constraints%dofluxfunction) then 
-                    gradG%nval = gradG%nval + gradG_flux%nval  
-                end if 
-                if (constraints%doedgelengths) then 
-                    gradG%nval = gradG%nval + gradG_el%nval  
-                end if 
-                if (constraints%doorthogonality) then 
-                    gradG%nval = gradG%nval + gradG_orth%nval  
-                end if 
-                if (constraints%dofixedfluxvalues) then 
-                    gradG%nval = gradG%nval + gradG_ffv%nval  
-                end if 
-
-                ! Allocate
-                call gradG%Allocate()
-            end if
-
-            ! Add contributions
-            !------------------
-            ! Initialize counter
-            ivg = 0
-
-            ! x-points
-            if (constraints%doxpoints) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%xpoints%ncon, &
-                    nval    => gradG_xp%nval)
-
-                ! Add values
-                gradG%row(ivg+1:ivg+nval) = gradG_xp%row 
-                gradG%col(ivg+1:ivg+nval) = gradG_xp%col
-                gradG%val(ivg+1:ivg+nval) = gradG_xp%val
-
-                ! Update counter
-                ivg = ivg + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            ! Boundary function
-            if (constraints%doboundaryfunction) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%boundaryfunction%ncon, &
-                    nval    => gradG_bnd%nval)
-
-                ! Add values
-                gradG%row(ivg+1:ivg+nval) = gradG_bnd%row 
-                gradG%col(ivg+1:ivg+nval) = gradG_bnd%col
-                gradG%val(ivg+1:ivg+nval) = gradG_bnd%val
-
-                ! Update counter
-                ivg = ivg + nval 
-
-                ! End associate
-                end associate
-
-            end if
-            
-            ! Flux function
-            if (constraints%dofluxfunction) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%fluxfunction%ncon, &
-                    nval    => gradG_flux%nval)
-
-                ! Add values
-                gradG%row(ivg+1:ivg+nval) = gradG_flux%row 
-                gradG%col(ivg+1:ivg+nval) = gradG_flux%col
-                gradG%val(ivg+1:ivg+nval) = gradG_flux%val
-
-                ! Update counter
-                ivg = ivg + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            ! Edge lengths
-            if (constraints%doedgelengths) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%edgelengths%ncon, &
-                    nval    => gradG_el%nval)
-
-                ! Add values
-                gradG%row(ivg+1:ivg+nval) = gradG_el%row 
-                gradG%col(ivg+1:ivg+nval) = gradG_el%col
-                gradG%val(ivg+1:ivg+nval) = gradG_el%val
-
-                ! Update counter
-                ivg = ivg + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            ! Orthogonality
-            if (constraints%doorthogonality) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%orthogonality%ncon, &
-                    nval    => gradG_orth%nval)
-
-                ! Add values
-                gradG%row(ivg+1:ivg+nval) = gradG_orth%row 
-                gradG%col(ivg+1:ivg+nval) = gradG_orth%col
-                gradG%val(ivg+1:ivg+nval) = gradG_orth%val
-
-                ! Update counter
-                ivg = ivg + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            ! Fixed flux values
-            if (constraints%dofixedfluxvalues) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%fixedfluxvalues%ncon, &
-                    nval    => gradG_ffv%nval)
-
-                ! Add values
-                gradG%row(ivg+1:ivg+nval) = gradG_ffv%row 
-                gradG%col(ivg+1:ivg+nval) = gradG_ffv%col
-                gradG%val(ivg+1:ivg+nval) = gradG_ffv%val
-
-                ! Update counter
-                ivg = ivg + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-        end if
-
-        ! Concatenate the hessian
-        !========================
-        if (dohessian) then 
-
-            ! Determine sizes
-            !----------------
-            ! Size of the hessian
-            hessG%ncol = designvariables%nphi
-            hessG%nrow = designvariables%nphi
-
-            ! Allocate
-            if (.not. allocated(hessG%val)) then 
-                ! Number of values (to be determined)
-                hessG%nval = 0
-
-                ! Add values of each constraint, if used
-                if (constraints%doxpoints) then 
-                    hessG%nval = hessG%nval + hessG_xp%nval  
-                end if 
-                if (constraints%doboundaryfunction) then 
-                    hessG%nval = hessG%nval + hessG_bnd%nval  
-                end if 
-                if (constraints%dofluxfunction) then 
-                    hessG%nval = hessG%nval + hessG_flux%nval  
-                end if 
-                if (constraints%doedgelengths) then 
-                    hessG%nval = hessG%nval + hessG_el%nval  
-                end if 
-                if (constraints%doorthogonality) then 
-                    hessG%nval = hessG%nval + hessG_orth%nval  
-                end if 
-                if (constraints%dofixedfluxvalues) then 
-                    hessG%nval = hessG%nval + hessG_ffv%nval  
-                end if 
-                
-                ! Allocate
-                call hessG%Allocate()
-
-            end if
-
-            ! Add contributions
-            !------------------
-            ! Initialize counter
-            ivh = 0
-
-            ! X-points
-            if (constraints%doxpoints) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%xpoints%ncon, &
-                    nval    => hessG_xp%nval)
-
-                ! Add values
-                hessG%row(ivh+1:ivh+nval) = hessG_xp%row 
-                hessG%col(ivh+1:ivh+nval) = hessG_xp%col
-                hessG%val(ivh+1:ivh+nval) = hessG_xp%val
-
-                ! Update counter
-                ivh = ivh + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            ! Boundary function
-            if (constraints%doboundaryfunction) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%boundaryfunction%ncon, &
-                    nval    => hessG_bnd%nval)
-
-                ! Add values
-                hessG%row(ivh+1:ivh+nval) = hessG_bnd%row 
-                hessG%col(ivh+1:ivh+nval) = hessG_bnd%col
-                hessG%val(ivh+1:ivh+nval) = hessG_bnd%val
-
-                ! Update counter
-                ivh = ivh + nval 
-
-                ! End associate
-                end associate
-
-            end if
-            
-            ! Flux function
-            if (constraints%dofluxfunction) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%fluxfunction%ncon, &
-                    nval    => hessG_flux%nval)
-
-                ! Add values
-                hessG%row(ivh+1:ivh+nval) = hessG_flux%row 
-                hessG%col(ivh+1:ivh+nval) = hessG_flux%col
-                hessG%val(ivh+1:ivh+nval) = hessG_flux%val
-
-                ! Update counter
-                ivh = ivh + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            ! Edge lengths
-            if (constraints%doedgelengths) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%edgelengths%ncon, &
-                    nval    => hessG_el%nval)
-
-                ! Add values
-                hessG%row(ivh+1:ivh+nval) = hessG_el%row 
-                hessG%col(ivh+1:ivh+nval) = hessG_el%col
-                hessG%val(ivh+1:ivh+nval) = hessG_el%val
-
-                ! Update counter
-                ivh = ivh + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            ! Orthogonality
-            if (constraints%doorthogonality) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%orthogonality%ncon, &
-                    nval    => hessG_orth%nval)
-
-                ! Add values
-                hessG%row(ivh+1:ivh+nval) = hessG_orth%row 
-                hessG%col(ivh+1:ivh+nval) = hessG_orth%col
-                hessG%val(ivh+1:ivh+nval) = hessG_orth%val
-
-                ! Update counter
-                ivh = ivh + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            ! Orthogonality
-            if (constraints%dofixedfluxvalues) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%fixedfluxvalues%ncon, &
-                    nval    => hessG_ffv%nval)
-
-                ! Add values
-                hessG%row(ivh+1:ivh+nval) = hessG_ffv%row 
-                hessG%col(ivh+1:ivh+nval) = hessG_ffv%col
-                hessG%val(ivh+1:ivh+nval) = hessG_ffv%val
-
-                ! Update counter
-                ivh = ivh + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-        end if
-
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if 
 
     end subroutine
-
 
     !------------------------------------------------------------------!
     !                          INEQUALITY CONSTRAINTS                  !
@@ -1624,7 +1295,7 @@ module gdmod_constraints
     ! Constraint evaluation
     subroutine EvaluateIneqCon(constraints, G, gradG, hessG, &
         grid, magneticField, environment, dogradient, dohessian, & 
-        designvariables, lambda)
+        designvariables, lambda, varin, valuesin, dGdvarin, dgradGdvarin)
 
         ! Description
         !============
@@ -1646,21 +1317,49 @@ module gdmod_constraints
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables 
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dGdvar, dgradGdvar
+
         ! Loop
-        integer(I8)                     :: ic, ivg, ivh, k
+        integer(I8)                     :: ic, k
         integer(I8), allocatable        :: conindex(:)
 
         ! Auxiliary
         real(R8), allocatable           :: G_lf(:), lambda_lf(:)
-        type(MySparseUDT)               :: gradG_lf, hessG_lf
+        type(MySparseUDT)               :: gradG_lf, hessG_lf, &
+            dG_lfdvar, dgradG_lfdvar
 
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Set the constraint counter
         ic = 0
 
+        ! Set derivatives
+
         ! Constraint values
         !==================
+        gradG = SpZeros(designvariables%nphi, 0) ! will concatenate
+        hessG = SpZeros(designvariables%nphi, designvariables%nphi) ! will add
+        dGdvar = SpZeros(0, size(values, 1))
+        dgradGdvar = SpZeros(designvariables%nphi, size(values))
 
         ! Linefolding constraints
         !------------------------
@@ -1670,7 +1369,6 @@ module gdmod_constraints
             conindex = [(k, k = ic+1, ic+constraints%linefolding%ncon)]
 
             ! Allocate & initialize
-            allocate(lambda_lf(constraints%linefolding%ncon))
             lambda_lf = lambda(conindex)
 
             ! Call the evaluation routine
@@ -1678,135 +1376,37 @@ module gdmod_constraints
                 gradG_lf, hessG_lf, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
-                lambda_lf)
+                lambda_lf, var, values, dG_lfdvar, dgradG_lfdvar)
 
             ! Assign
             G(conindex) = G_lf
-
-            ! Update the gradient column indices
             if (dogradient) then 
-                ! For easier concatenation later on
-                gradG_lf%col = gradG_lf%col + ic
-
-            end if
+                gradG = gradG%Concatenate(gradG_lf, 2)
+            end if 
+            if (dohessian) then 
+                hessG = hessG + hessG_lf
+            end if 
+            dGdvar = dGdvar%Concatenate(dG_lfdvar, 1)
+            dgradGdvar = dgradGdvar + dgradG_lfdvar
 
             ! Update the constraint counter
             ic = ic + constraints%linefolding%ncon
 
-            ! Housekeeping
-            deallocate(conindex, lambda_lf) 
-            if (allocated(G_lf)) then
-                deallocate(G_lf)
-            end if
-
-        end if
-    
-        ! Concatenate gradient
-        !=====================
-        if (dogradient) then 
-
-            ! Determine sizes
-            !----------------
-            ! Size of the gradient
-            gradG%ncol = constraints%nineqcon 
-            gradG%nrow = designvariables%nphi
-
-            ! Allocate
-            if (.not. allocated(gradG%val)) then 
-                ! Number of values (to be determined)
-                gradG%nval = 0
-
-                ! Add values of each constraint, if used
-                ! Linefolding
-                if (constraints%dolinefolding) then 
-                    gradG%nval = gradG%nval + gradG_lf%nval 
-                end if
-
-                ! Allocate
-                call gradG%Allocate()
-            end if
-
-            ! Add contributions
-            !------------------
-            ! Initialize counter
-            ivg = 0
-
-            ! Linefolding
-            if (constraints%dolinefolding) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%linefolding%ncon, &
-                    nval    => gradG_lf%nval)
-
-                ! Add values
-                gradG%row(ivg+1:ivg+nval) = gradG_lf%row 
-                gradG%col(ivg+1:ivg+nval) = gradG_lf%col
-                gradG%val(ivg+1:ivg+nval) = gradG_lf%val
-
-                ! Update counter
-                ivg = ivg + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-            
         end if
 
-        ! Concatenate the hessian
-        !========================
-        if (dohessian) then 
-
-            ! Determine sizes
-            !----------------
-            ! Size of the hessian
-            hessG%ncol = designvariables%nphi
-            hessG%nrow = designvariables%nphi
-
-            ! Allocate
-            if (.not. allocated(hessG%val)) then 
-                ! Number of values (to be determined)
-                hessG%nval = 0
-
-                ! Add values of each constraint, if used
-                if (constraints%dolinefolding) then 
-                    hessG%nval = hessG%nval + hessG_lf%nval  
-                end if 
-
-                ! Allocate
-                call hessG%Allocate()
-            end if
-
-            ! Add contributions
-            !------------------
-            ! Initialize counter
-            ivh = 0
-
-            ! Linefolding
-            if (constraints%dolinefolding) then 
-                ! Associate 
-                associate(&
-                    nc      => constraints%linefolding%ncon, &
-                    nval    => hessG_lf%nval)
-
-                ! Add values
-                hessG%row(ivh+1:ivh+nval) = hessG_lf%row 
-                hessG%col(ivh+1:ivh+nval) = hessG_lf%col
-                hessG%val(ivh+1:ivh+nval) = hessG_lf%val
-
-                ! Update counter
-                ivh = ivh + nval 
-
-                ! End associate
-                end associate
-
-            end if
-
-        end if
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if 
 
 
     end subroutine
+
 
     !------------------------------------------------------------------!
     !                           FLUX FUNCTION                          !
@@ -2382,7 +1982,8 @@ module gdmod_constraints
     ! Evaluation
     subroutine EvaluateFluxfunctionConstraints(constraints, G, gradG, & 
         hessG, grid, magneticField, environment, dogradient, &
-        dohessian, designvariables, lambda)
+        dohessian, designvariables, lambda, varin, valuesin, dGdvarin, &
+        dgradGdvarin)
 
         ! Description
         !============
@@ -2440,7 +2041,16 @@ module gdmod_constraints
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
         logical                             :: dogradient, dohessian
-        class(DesignVariablesGDUDT)         :: designvariables                
+        class(DesignVariablesGDUDT)         :: designvariables       
+        
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dGdvar, dgradGdvar
 
         ! Loop variables
         integer(I8)                         :: ic, ivg, ivh, i
@@ -2458,6 +2068,46 @@ module gdmod_constraints
 
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+        if (present(dGdvarin)) then 
+            dGdvar = dGdvarin
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvar = dgradGdvarin 
+        end if 
+
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
+
         ! Checks
         if ( (.not. allocated(lambda)) .and. dohessian) then
             ! Throw error
@@ -2684,6 +2334,14 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 
@@ -3553,7 +3211,8 @@ module gdmod_constraints
     ! Evaluation
     subroutine EvaluateBoundaryFunctionConstraints(constraints, G, gradG, & 
         hessG, grid, magneticField, environment, dogradient, &
-        dohessian, designvariables, lambda)
+        dohessian, designvariables, lambda, varin, valuesin, dGdvarin, &
+        dgradGdvarin)
 
         ! Description
         !============
@@ -3610,6 +3269,15 @@ module gdmod_constraints
         logical                             :: dogradient, dohessian
         class(DesignVariablesGDUDT)         :: designvariables 
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dGdvar, dgradGdvar
+
         ! Loop variables
         integer(I8)                         :: ic, ivg, ivh
 
@@ -3617,6 +3285,40 @@ module gdmod_constraints
         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
+
         ! Checks
         if ( (.not. allocated(lambda)) .and. dohessian) then
             ! Throw error
@@ -3665,7 +3367,20 @@ module gdmod_constraints
         end if
 
         ! Evaluate
-        call plf%Evaluate(x(tv), y(tv), 0, 0, G) 
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives needed
+            call plf%Evaluate(x(tv), y(tv), 0, 0, G) 
+
+        case ('vesselcoordinates')
+
+            ! Derivatives needed w.r.t. polygon structure coordinates
+            call plf%Evaluate(x(tv), y(tv), 0, 0, G, &
+                'polygonsetcoordinates', values, dGdvar)
+
+        end select
 
         ! Derivatives
         !============
@@ -3682,7 +3397,8 @@ module gdmod_constraints
 
             ! Call dedicated routine - no flux contributions
             call constraints%EvaluateDerivativesCoordinates(gradG, &
-                hessG, grid, dogradient, dohessian, lambda)
+                hessG, grid, dogradient, dohessian, lambda, designvariables, &
+                var, values, dgradGdvar)
 
         case default 
 
@@ -3693,6 +3409,14 @@ module gdmod_constraints
         ! Housekeeping
         !=============
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 
@@ -3724,13 +3448,14 @@ module gdmod_constraints
         constraints%plf = environment%vessel%plfvessel
 
         ! Visualize 
-        call constraints%plf%Visualize('constraints_boundary_plf')
+        !call constraints%plf%Visualize('constraints_boundary_plf')
 
     end subroutine
 
     ! Derivatives, coordinates
     subroutine EvaluateCoordinatesDerivativesBoundaryFunctionConstraints(&
-        constraints, gradG, hessG, grid, dogradient, dohessian, lambda)
+        constraints, gradG, hessG, grid, dogradient, dohessian, lambda, &
+        designvariables, var, values, dgradGdvar)
 
         ! Description
         !============
@@ -3746,6 +3471,7 @@ module gdmod_constraints
         !==================
         ! Arguments 
         class(BoundaryFunctionConstraintsUDT)   :: constraints 
+        class(DesignvariablesGDUDT)         :: designvariables
         real(R8), allocatable, intent(in)   :: lambda(:)
         type(MySparseUDT)                   :: hessG, gradG, jacG 
         type(GridUDT), intent(in)           :: grid 
@@ -3758,6 +3484,11 @@ module gdmod_constraints
         ! Auxiliary variables
         real(R8), allocatable               :: dpsfdx(:), dpsfdy(:), &
             valxx(:), valxy(:), valyy(:)
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dgradGdvar, &
+            dpsfdxdvar, dpsfdydvar, tempderivx, tempderivy
 
         ! Initialize
         !===========
@@ -3789,8 +3520,31 @@ module gdmod_constraints
             allocate(valindex(ntv))
 
             ! Compute the derivative values
-            call plf%Evaluate(x(tv), y(tv), 1, 0, dpsfdx)
-            call plf%Evaluate(x(tv), y(tv), 0, 1, dpsfdy)
+            select case (var)
+
+            case ('no')
+
+                ! No derivatives
+                call plf%Evaluate(x(tv), y(tv), 1, 0, dpsfdx)
+                call plf%Evaluate(x(tv), y(tv), 0, 1, dpsfdy)
+                dpsfdxdvar = SpZeros(size(tv, 1), size(values, 1))
+                dpsfdydvar = SpZeros(size(tv, 1), size(values, 1))
+
+            case ('vesselcoordinates')
+
+                ! Derivative w.r.t. polygonset vertices
+                call plf%Evaluate(x(tv), y(tv), 1, 0, dpsfdx, &
+                    'polygonsetcoordinates', values, dpsfdxdvar)
+                call plf%Evaluate(x(tv), y(tv), 0, 1, dpsfdy, &
+                    'polygonsetcoordinates', values, dpsfdydvar)
+
+            case default
+
+                ! Not implemented
+                call gdErrorHandler('EvaluateCoordinatesDerivativesBoundaryFunctionConstraints: ' // &
+                    'variable not implemented')
+
+            end select
 
             ! x-contribution
             !---------------
@@ -3821,6 +3575,23 @@ module gdmod_constraints
             gradG%row = jacG%col 
             gradG%col = jacG%row
             gradG%val = jacG%val
+
+            ! Derivatives
+            !------------
+            ! Full product between lambda and linearization
+            tempderivx = lambda*dpsfdxdvar ! only local derivative, since rows go 1:ntv
+            tempderivy = lambda*dpsfdydvar 
+
+            ! Expand
+            tempderivx%nrow = designvariables%nphi
+            tempderivx%ncol = size(values)
+            tempderivx%row = tv(tempderivx%row) 
+            tempderivy%nrow = designvariables%nphi
+            tempderivy%ncol = size(values)
+            tempderivy%row = tv(tempderivy%row) + grid%vert%ntot
+
+            ! Add
+            dgradGdvar = tempderivx + tempderivy
 
             ! Housekeeping
             call jacG%Deallocate()
@@ -3938,6 +3709,57 @@ module gdmod_constraints
 
     end subroutine
 
+    ! Derivatives, vessel coordinates
+    subroutine EvaluateVesselcoordinatesDerivativesBoundaryFunctionConstraints(&
+        constraints, values, jacG, hessG, grid, magneticField, &
+        environment, designvariables, lambda)
+
+        ! Description
+        !============
+        ! Evaluate the jacobian (not gradient) of the constraints with
+        ! respect to the vessel coordinates. Also add the linearization
+        ! of the 'lambda*gradG' term as the 'hessian'. It is assumed that
+        ! all fields are up to date.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(BoundaryFunctionConstraintsUDT)       :: constraints 
+        real(R8), intent(in)            :: lambda(:), values(:)
+        type(MySparseUDT)               :: hessG, jacG 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Auxiliary
+        real(R8), allocatable           :: val(:)
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            nc      => constraints%ncon,        &
+            plf     => constraints%plf,         &
+            tv      => constraints%vert,        &
+            ntv     => constraints%nvert,       &
+            x       => grid%vert%x,             & 
+            y       => grid%vert%y              & 
+            )
+
+        ! Compute jacG
+        !=============
+        ! Simply call differentiation of plf w.r.t. polygonset coordinates 
+        allocate(val(size(tv)))
+        call plf%Evaluate(x(tv), y(tv), 0, 0, val, 'polygonsetcoordinates', values, jacG)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
     ! Destructor
 
     !------------------------------------------------------------------!
@@ -4022,7 +3844,8 @@ module gdmod_constraints
     ! Evaluation
     subroutine EvaluateXPointConstraints(constraints, G, gradG, & 
         hessG, grid, magneticField, environment, dogradient, &
-        dohessian, designvariables, lambda)
+        dohessian, designvariables, lambda, varin, valuesin, dGdvarin, &
+        dgradGdvarin)
 
         ! Description
         !============
@@ -4085,6 +3908,15 @@ module gdmod_constraints
         logical                             :: dogradient, dohessian
         class(DesignVariablesGDUDT)         :: designvariables 
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dGdvar, dgradGdvar
+
         ! Loop variables
         integer(I8)                         :: i, ic, ivg, ivh
 
@@ -4094,6 +3926,26 @@ module gdmod_constraints
         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+        if (present(dGdvarin)) then 
+            dGdvar = dGdvarin 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvar = dgradGdvarin 
+        else
+            dgradGdvarin = SpZeros(0, 0)
+        end if 
+
         ! Checks
         if ( (.not. allocated(lambda)) .and. dohessian) then
             ! Throw error
@@ -4106,6 +3958,28 @@ module gdmod_constraints
             call gdErrorHandler('Lambda should have the same size ' &
                 // 'as the constraint vector')
         end if
+
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
 
         ! Counters
         ic = 0 ! constraint counter (local)
@@ -4213,6 +4087,14 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 
@@ -4803,7 +4685,8 @@ module gdmod_constraints
     ! Evaluation
     subroutine EvaluateEdgeLengthsConstraints(constraints, G, gradG, & 
         hessG, grid, magneticField, environment, dogradient, &
-        dohessian, designvariables, lambda)
+        dohessian, designvariables, lambda, varin, valuesin, dGdvarin, &
+        dgradGdvarin)
 
         ! Description
         !============
@@ -4869,6 +4752,15 @@ module gdmod_constraints
         logical                             :: dogradient, dohessian
         class(DesignVariablesGDUDT)         :: designvariables 
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dGdvar, dgradGdvar
+
         ! Loop variables
         integer(I8)                         :: ic, ivg, ivh, k
         integer(I8), allocatable            :: valindex(:), conindex(:)
@@ -4879,6 +4771,24 @@ module gdmod_constraints
         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+        if (present(dGdvarin)) then 
+            dGdvar = dGdvarin 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvar = dgradGdvarin 
+        end if 
+
         ! Checks
         if ( (.not. allocated(lambda)) .and. dohessian) then
             ! Throw error
@@ -4891,6 +4801,28 @@ module gdmod_constraints
             call gdErrorHandler('Lambda should have the same size ' &
                 // 'as the constraint vector')
         end if
+
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
 
         ! Counters
         ic = 0 ! constraint counter (local)
@@ -5185,7 +5117,6 @@ module gdmod_constraints
         end associate
 
         ! Deallocate
-
         if (dogradient) then 
             deallocate(valindex, conindex)
         end if 
@@ -5195,6 +5126,14 @@ module gdmod_constraints
                 deallocate(valindex, conindex)
             end if 
             deallocate(valxx, valxy, valyy)
+        end if
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
         end if
 
     end subroutine
@@ -5613,7 +5552,8 @@ module gdmod_constraints
     ! Evaluation
     subroutine EvaluateOrthogonalityConstraints(constraints, G, gradG, & 
         hessG, grid, magneticField, environment, dogradient, &
-        dohessian, designvariables, lambda)
+        dohessian, designvariables, lambda, varin, valuesin, dGdvarin, &
+        dgradGdvarin)
 
         ! Description
         !============
@@ -5645,6 +5585,15 @@ module gdmod_constraints
         logical                             :: dogradient, dohessian
         class(DesignVariablesGDUDT)         :: designvariables 
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dGdvar, dgradGdvar
+
         ! Loop variables
         integer(I8)                         :: ic, ivg, ivh, k
         integer(I8), allocatable            :: valindex(:), conindex(:), &
@@ -5659,6 +5608,40 @@ module gdmod_constraints
         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
+
         ! Checks
         if ( (.not. allocated(lambda)) .and. dohessian) then
             ! Throw error
@@ -5981,6 +5964,14 @@ module gdmod_constraints
                 gyxyf, gyyyf)  
         end if
 
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
+
     end subroutine
 
     !------------------------------------------------------------------!
@@ -6283,7 +6274,8 @@ module gdmod_constraints
     ! Evaluation
     subroutine EvaluateFixedFluxvaluesConstraints(constraints, G, gradG, & 
         hessG, grid, magneticField, environment, dogradient, &
-        dohessian, designvariables, lambda)
+        dohessian, designvariables, lambda, varin, valuesin, dGdvarin, &
+        dgradGdvarin)
 
         ! Description
         !============
@@ -6307,6 +6299,15 @@ module gdmod_constraints
         logical                             :: dogradient, dohessian
         class(DesignVariablesGDUDT)         :: designvariables 
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dGdvar, dgradGdvar
+
         ! Loop variables
         integer(I8)                         :: ic, ivg, ivh, k
         integer(I8), allocatable            :: valindex(:), conindex(:), &
@@ -6316,6 +6317,25 @@ module gdmod_constraints
         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+        if (present(dGdvarin)) then 
+            dGdvar = dGdvarin 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvar = dgradGdvarin 
+        end if 
+
+
         ! Checks
         if ( (.not. allocated(lambda)) .and. dohessian) then
             ! Throw error
@@ -6328,6 +6348,28 @@ module gdmod_constraints
             call gdErrorHandler('Lambda should have the same size ' &
                 // 'as the constraint vector')
         end if
+
+        ! Check derivative computation
+        select case (var)
+
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
 
         ! Counters
         ic = 0 ! constraint counter (local)
@@ -6486,6 +6528,14 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 
@@ -6792,7 +6842,8 @@ module gdmod_constraints
     ! Evaluation
     subroutine EvaluateLinefoldingConstraints(constraints, G, gradG, & 
         hessG, grid, magneticField, environment, dogradient, &
-        dohessian, designvariables, lambda)
+        dohessian, designvariables, lambda, varin, valuesin, dGdvarin, &
+        dgradGdvarin)
 
         ! Description
         !============
@@ -6842,6 +6893,15 @@ module gdmod_constraints
         logical                             :: dogradient, dohessian
         class(DesignVariablesGDUDT)         :: designvariables 
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        type(MySparseUDT), optional         :: dGdvarin, dgradGdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        type(MySparseUDT)                   :: dGdvar, dgradGdvar
+
         ! Auxiliary
         integer(I8)                             :: nvpairs
 
@@ -6864,6 +6924,18 @@ module gdmod_constraints
         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+    
         ! Checks
         if ( (.not. allocated(lambda)) .and. dohessian) then
             ! Throw error
@@ -6876,7 +6948,28 @@ module gdmod_constraints
             call gdErrorHandler('Lambda should have the same size ' &
                 // 'as the constraint vector')
         end if
+        
+        ! Check derivative computation
+        select case (var)
 
+        case ('no')
+
+            ! No derivatives, initialize correctly
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case ('vesselcoordinates')
+
+            ! No contributions
+            dGdvar = SpZeros(constraints%ncon, size(values, 1))
+            dgradGdvar = SpZeros(designvariables%nphi, size(values, 1))
+
+        case default
+
+            ! Not implemented
+            call gdErrorHandler('EvaluateFluxfunctionConstraints: variable not implemented')
+
+        end select
         ! Counters
         ic = 0 ! constraint counter (local)
         ivg = 0 ! value index for gradient
@@ -6915,7 +7008,6 @@ module gdmod_constraints
 
             end if
         end if
-
 
         ! Constraint value
         !=================
@@ -7384,6 +7476,14 @@ module gdmod_constraints
         !=============
         ! End associate
         end associate
+
+        ! Optional arguments
+        if (present(dGdvarin)) then 
+            dGdvarin = dGdvar 
+        end if 
+        if (present(dgradGdvarin)) then 
+            dgradGdvarin = dgradGdvar
+        end if
 
     end subroutine
 

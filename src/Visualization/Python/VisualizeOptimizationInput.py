@@ -7,7 +7,7 @@ import Plotter as plotter
 # which all the files reside has to be defined in 'datadir'
 
 # Data directory
-datadir = './goatf/Examples/ASDEX_Sander'
+datadir = './goatf/Examples/DEMO'
 
 # Design
 #-------

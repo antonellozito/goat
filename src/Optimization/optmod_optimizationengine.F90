@@ -69,8 +69,14 @@ module optmod_optimizationengine
         ! this module. The only field that is added, is a monitor 
         ! structure to keep track of the progress of the algorithm. 
         ! (to be moved to the engine in the future)
+
+        ! Note: additionally, we store the lagrange multipliers of
+        ! equality and inequality constraints, and the active set
         character(:), allocatable                   :: inputfilepath
         type(OptimizationMonitorUDT)                :: monitor
+
+        real(R8), allocatable                       :: lambda(:), mu(:)
+        logical, allocatable                        :: A(:)
 
     contains 
 
@@ -110,39 +116,63 @@ module optmod_optimizationengine
         procedure(EvaluateInequalityConstraintsINT), deferred :: &
             EvaluateInequalityConstraints
 
+        ! KKT system relaxation (not always used)
+        procedure(RelaxProblemKKTSystemINT), deferred  :: &
+            RelaxProblemKKTSystem
+
         ! Merit function evaluation
         procedure :: EvaluateMeritFunction
         procedure :: EvaluateMeritFunctionL1
+
+        ! Lagrangian evaluation
+        procedure :: EvaluateLagrangian
 
     end type
 
     ! Optimization solver
     !====================
-    type :: OptimizationSolverUDT
+    ! General abstract solver type
+    type, abstract :: OptimizationSolverUDT
 
-        ! Description
-        !============
         ! Defines the optimization solver and its numerics. It should 
         ! have a generic 'solve' method which acts on the optimization
         ! problem
         character(:), allocatable                   :: inputfilepath
         character(:), allocatable                   :: inputfileprefix
+
+    contains 
+
+        ! Initialization
+        procedure(InitializeOptimizationSolverINT), deferred :: &
+            Initialize
+
+        ! Solution procedure
+        procedure(SolveOptimizationProblemINT), deferred    :: &
+            SolveOptimizationProblem 
+
+    end type
+
+    ! KKT solver
+    type, extends(OptimizationSolverUDT) :: OptimizationSolverKKTUDT
+
+        ! Description
+        !============
+        ! KKT system based optimization solver. Contains additional
+        ! numerics fields and auxiliary routines
         type(NumKKTUDT)         :: numKKT
         type(numLSUDT)          :: numLS 
         type(NumNCPUDT)         :: numNCP
 
     contains 
 
+        ! Initialization
+        procedure ::    Initialize                  => InitializeKKTSolver
+
         ! Solution procedure using KKT solver
-        procedure ::    InitializeKKTSolver     => InitializeKKTSolver
-        procedure ::    SolveOptimizationProblemKKT &
-                        => SolveOptimizationProblemKKT
+        procedure ::    SolveOptimizationProblem    => SolveOptimizationProblemKKT
 
         ! Convergence checking
         procedure :: CheckConvergenceKKT 
-
-        ! Lagrangian evaluation
-        procedure :: EvaluateLagrangian
 
         ! Setup of correction equation
         procedure :: SetupCorrectionEquation
@@ -150,8 +180,35 @@ module optmod_optimizationengine
         ! Relaxation of KKT system
         procedure :: RelaxKKTSystem
 
-        ! Step length computation
-        procedure :: ComputeStepLength
+    end type
+
+    ! Quasi-Newton solver 
+    type, extends(OptimizationSolverUDT) :: OptimizationSolverQNUDT
+
+        ! Description
+        !============  
+        ! Quasi-Newton solver that uses approximate Hessian to compute
+        ! the step direction. 
+
+        ! Numerics
+        type(NumQNUDT)          :: numQN
+        type(numLSUDT)          :: numLS
+        
+        ! Hessian approximation
+        !class(HessianApprximationUDT)   :: hessian
+
+    contains
+
+        ! Initialization
+        procedure ::    Initialize                  => InitializeQNSolver
+
+        ! Solution procedure using QN solver
+        procedure ::    SolveOptimizationProblem    => SolveOptimizationProblemQN
+
+        ! Convergence checking
+        procedure :: CheckConvergenceQN 
+
+        ! Hessian 
 
     end type
 
@@ -168,7 +225,7 @@ module optmod_optimizationengine
         character(:), allocatable                   :: inputfilepath
         character(:), allocatable                   :: inputfileprefix
         class(OptimizationProblemUDT), allocatable  :: problem
-        type(OptimizationSolverUDT)                 :: solver
+        class(OptimizationSolverUDT), allocatable   :: solver
 
     contains
 
@@ -207,7 +264,7 @@ module optmod_optimizationengine
         !============
         ! Function type for evaluating and checking the cost function.
         class(OptimizationProblemUDT), allocatable      :: problem 
-        type(OptimizationSolverUDT)                     :: solver
+        class(OptimizationSolverUDT), allocatable       :: solver
 
         ! Lagrange multipliers
         real(R8), allocatable, dimension(:)             :: lambda, mu 
@@ -457,6 +514,26 @@ module optmod_optimizationengine
             logical                             :: dogradient, dohessian
 
         end subroutine
+    
+        ! KKT system relaxation
+        subroutine RelaxProblemKKTSystemINT(problem, KKT)
+            import :: MySparseUDT, OptimizationProblemUDT
+            class(OptimizationProblemUDT)   :: problem 
+            type(MySparseUDT)               :: KKT
+        end subroutine
+
+        ! Solver initialization
+        subroutine InitializeOptimizationSolverINT(solver)
+            import :: OptimizationSolverUDT
+            class(OptimizationSolverUDT)    :: solver 
+        end subroutine
+
+        ! Solver driver
+        subroutine SolveOptimizationProblemINT(solver, problem)
+            import :: OptimizationSolverUDT, OptimizationProblemUDT 
+            class(OptimizationSolverUDT)    :: solver 
+            class(OptimizationProblemUDt)   :: problem 
+        end subroutine
 
     end interface
 
@@ -507,12 +584,12 @@ module optmod_optimizationengine
         print *, 'reading optimization engine input from file: ' // optimizationengine%inputfilepath
         optimizationengine%solver%inputfilepath = optimizationengine%inputfilepath
         optimizationengine%solver%inputfileprefix = optimizationengine%inputfileprefix
-        call optimizationengine%solver%InitializeKKTSolver()
+        call optimizationengine%solver%Initialize()
 
         ! Solve
         !======
         ! Solve the optimization problem by calling the KKT solver
-        call optimizationengine%solver%SolveOptimizationProblemKKT( &
+        call optimizationengine%solver%SolveOptimizationProblem( &
             optimizationengine%problem)
 
     end subroutine
@@ -522,7 +599,7 @@ module optmod_optimizationengine
     !------------------------------------------------------------------!
 
     ! Merit function wrapper
-    subroutine EvaluateMeritFunction(problem, f, DJf, dx, lambda, mu, &
+    recursive subroutine EvaluateMeritFunction(problem, f, DJf, dx, lambda, mu, &
         doderiv, meritfunction, num)
 
         ! Description
@@ -566,7 +643,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! L1 merit function
-    subroutine EvaluateMeritFunctionL1(problem, f, DJf, dx, lambda, mu, &
+    recursive subroutine EvaluateMeritFunctionL1(problem, f, DJf, dx, lambda, mu, &
         doderiv, num)
 
         ! Description
@@ -716,7 +793,7 @@ module optmod_optimizationengine
     end subroutine
     
     !------------------------------------------------------------------!
-    !                       OPTIMIZATION SOLVER                        !
+    !                     KKT OPTIMIZATION SOLVER                      !
     !------------------------------------------------------------------!
 
     ! KKT solver initialization
@@ -731,7 +808,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)                :: solver    
+        class(OptimizationSolverKKTUDT)             :: solver    
 
         ! Data
 
@@ -751,7 +828,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! KKT solver
-    subroutine SolveOptimizationProblemKKT(solver, problem)
+    recursive subroutine SolveOptimizationProblemKKT(solver, problem)
 
         ! Description
         !============
@@ -762,7 +839,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)                :: solver    
+        class(OptimizationSolverKKTUDT)             :: solver    
         class(OptimizationProblemUDT)               :: problem
     
         ! Loop variables
@@ -822,9 +899,6 @@ module optmod_optimizationengine
         ! Logicals
         dogradient  = .true. 
         dohessian   = .true. 
-
-        ! Initialize the solver 
-        call solver%InitializeKKTSolver()
 
         ! Initialize the monitor - only temporary here
         call problem%GetProblemDimensions(nphi, neq, nineq)
@@ -888,6 +962,7 @@ module optmod_optimizationengine
 
         ! Initialize counter(s)
         itopt = 1
+        problem%monitor%itopt = itopt
         maxit = solver%numKKT%maxit
 
         ! Unpack 
@@ -917,6 +992,10 @@ module optmod_optimizationengine
             call wall_time(t_it_s)
             call wall_time(t_eval_s)
 
+            ! Update the monitor
+            problem%monitor%itopt = itopt
+            problem%monitor%rxf = rxf 
+
             ! Update the optimization problem 
             call problem%UpdateProblem()
 
@@ -926,10 +1005,10 @@ module optmod_optimizationengine
                 !    checkgradients, checkhessians)
                 !call CheckLagrangianLinearization(problem, solver, lambda, & 
                 !    mu, checkgradients, checkhessians)
-                !call CheckEqconLinearization(problem, lambda, &
-                !    checkgradients, checkhessians)
-                call CheckIneqconLinearization(problem, lambda, &
+                call CheckEqconLinearization(problem, lambda, &
                     checkgradients, checkhessians)
+                !call CheckIneqconLinearization(problem, lambda, &
+                !    checkgradients, checkhessians)
             end if
 
             ! Evaluate cost function
@@ -949,7 +1028,7 @@ module optmod_optimizationengine
                 H, gradH, mu, solver%numNCP, dogradient)
 
             ! Evaluate the Lagrangian
-            call solver%EvaluateLagrangian(L, gradL, hessL, &
+            call problem%EvaluateLagrangian(L, gradL, hessL, &
                 J, gradJ, hessJ, &
                 G, gradG, hessG, lambda, &
                 H, gradH, hessH, mu, A, &
@@ -972,7 +1051,13 @@ module optmod_optimizationengine
                     ncp, gradncpphi, gradncpmu)
 
                 ! Relax
-                call solver%RelaxKKTSystem(lhs, nphi, neq, nineq)
+                if (solver%numKKT%useproblemrelaxation) then 
+                    ! Call problem-specific KKT relaxation routine
+                    call problem%RelaxProblemKKTSystem(lhs)
+                else
+                    ! Use default KKT solver routine
+                    call solver%RelaxKKTSystem(lhs, nphi, neq, nineq)
+                end if 
 
                 !print *, 'hessian size: ', hessL%nrow, hessL%ncol
                 !call SpyPlot(lhs%row, lhs%col, lhs%nval, '-p')
@@ -995,7 +1080,7 @@ module optmod_optimizationengine
                 ! Lagrange multipliers may change!
                 if (flag == 0) then 
 
-                    call solver%ComputeStepLength(problem, dx, lambda, mu, alphals, flagls) ! dx is changed during linesearch
+                    call ComputeStepLengthLS(problem, solver%numLS, dx, lambda, mu, alphals, flagls) ! dx is changed during linesearch
                 else 
                     ! Something wrong during linear solver, try with relaxation
                     flagls = 1
@@ -1065,9 +1150,29 @@ module optmod_optimizationengine
                 
 
             else
-                ! Directly update design without linesearch, apply the
-                ! relaxation using rxfdesign
-                dx(1:nphi) = rxfdesign*dx(1:nphi)
+                ! Check convergence of solver
+                if (flag == 0) then 
+                    ! Directly update design without linesearch, apply the
+                    ! relaxation using rxfdesign
+                    dx(1:nphi) = rxfdesign*dx(1:nphi)
+                else
+                    ! Set step to zero
+                    dx(:) = 0
+                    alphals = 0
+
+                    ! Add relaxation
+                    if (rxf > 0) then 
+                        rxf = 2*rxf 
+                    else
+                        ! Apparently no relaxation, add
+                        print *, 'No relaxation detected, adding relaxation'
+                        rxf = 1
+                        if (rxfdec > 0) then 
+                        else 
+                            rxfdec = 0.9
+                        end if 
+                    end if 
+                end if 
             end if
 
             ! Update the design
@@ -1079,12 +1184,14 @@ module optmod_optimizationengine
 
             ! Set mu of non-active constraints to zero
             where (.not. A) mu = 0
+
+            ! Update problem multipliers
+            problem%lambda  = lambda 
+            problem%mu      = mu 
+            problem%A       = A
             
             ! Timers
             call wall_time(t_it_e)
-
-            ! Update the monitor
-            problem%monitor%itopt = itopt
 
             ! Update the monitor again
             problem%monitor%J(itopt)        = J
@@ -1096,7 +1203,6 @@ module optmod_optimizationengine
             problem%monitor%evaltime        = t_eval_e - t_eval_s
             problem%monitor%ittime          = t_it_e - t_it_s 
             problem%monitor%linsolvetime    = t_linsolve_e - t_linsolve_s
-            problem%monitor%rxf = rxf 
             problem%monitor%maxdphi = maxval(dx(1:nphi))
 
             ! Print the current iterate
@@ -1140,7 +1246,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationSolverKKTUDT)     :: solver 
         type(MySparseUDT)                   :: hessL, hessL_copy
         integer(I8)                         :: nphi, neq, nineq
 
@@ -1165,6 +1271,9 @@ module optmod_optimizationengine
         ! Set the diagonal elements
         hessL_copy%val = abs(hessL_copy%val)
         call hessL_copy%SumColumnwiseFull(diag)
+
+        ! Set to one if diagonal is zero
+        where (diag == 0.0) diag= 1.0
 
         ! Set the diagonal elements
         hessrelax%val = solver%numKKT%rxf*diag(1:nphi)
@@ -1200,7 +1309,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationSolverKKTUDT)     :: solver 
         real(R8), intent(in)                :: gradient(:)
         logical, intent(inout)              :: converged 
         real(R8), intent(out)               :: infnorm
@@ -1216,7 +1325,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! Lagrangian 
-    subroutine EvaluateLagrangian(solver, L, gradL, hessL, J, gradJ, &
+    subroutine EvaluateLagrangian(problem, L, gradL, hessL, J, gradJ, &
         hessJ, G, gradG, hessG, lambda, H, gradH, hessH, mu, A, &
         dogradient, dohessian)
 
@@ -1266,7 +1375,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationProblemUDT)       :: problem 
 
         real(R8), intent(inout)             :: L, gradL(:) 
         type(MySparseUDT), intent(inout)    :: hessL 
@@ -1377,12 +1486,6 @@ module optmod_optimizationengine
 
         end if
 
-        ! A simple workaround to avoid unused dummy argument warnings 
-        ! during compilation
-        if (.false.) then 
-            print *, solver%inputfilepath
-        end if
-        
     end subroutine
 
     ! Nonlinear complementarity function 
@@ -1544,7 +1647,7 @@ module optmod_optimizationengine
     end subroutine
 
     ! Step length computation
-    subroutine ComputeStepLength(solver, problem, dx, lambda, mu, alpha, flag)
+    recursive subroutine ComputeStepLengthLS(problem, numLS, dx, lambda, mu, alpha, flag)
 
         ! Description
         !============
@@ -1552,10 +1655,9 @@ module optmod_optimizationengine
         ! It is assumed that all necessary data etc can be derived from
         ! the problem definition (e.g. dimensions of design variables).
         ! The step length computation is typically done using a 
-        ! linesearch approach, depending on the numerics defined in the
-        ! solver object. 
+        ! linesearch approach.
 
-        ! The line search method should be defined in solver%numLS%type
+        ! The line search method should be defined in numLS%type
         ! and can be 'backtracking', 'wolfe', 'backtracking_soc'. The 
         ! last one also applies a second-order correction. Note that 
         ! no constraints are explicitly accounted for in this line 
@@ -1569,7 +1671,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        type(numLSUDT)                      :: numLS  
         class(OptimizationProblemUDT)       :: problem 
         real(R8), allocatable               :: dx(:), lambda(:), mu(:), dphi(:)
         real(R8)                            :: alpha
@@ -1632,8 +1734,6 @@ module optmod_optimizationengine
         dohessian   = .false.
 
         ! Associate
-        associate(&
-            numLS           => solver%numLS)
         associate(&
             maxit           => numLS%maxit, &
             c1              => numLS%c1, &
@@ -1891,7 +1991,7 @@ module optmod_optimizationengine
 
             ! Unknown option, throw error
             call gdErrorHandler('ComputeStepLength: unknown line search option: ' &
-                 // solver%numLS%type)
+                 // numLS%type)
 
         end select 
 
@@ -1901,7 +2001,6 @@ module optmod_optimizationengine
         ! Housekeeping
         !=============
         end associate
-        end associate 
 
     end subroutine
 
@@ -1920,7 +2019,7 @@ module optmod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationSolverUDT)        :: solver 
+        class(OptimizationSolverKKTUDT)     :: solver 
 
         real(R8), intent(inout)             :: rhs(:) 
         type(MySparseUDT), intent(inout)    :: lhs 
@@ -2022,6 +2121,92 @@ module optmod_optimizationengine
 
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                      QN OPTIMIZATION SOLVER                      !
+    !------------------------------------------------------------------!
+
+    ! QN solver initialization
+    subroutine InitializeQNSolver(solver)
+
+        ! Description
+        !============
+        ! Initialize the necessary fields and structures for the QN 
+        ! solver. This is basically only the numerics - the optimization
+        ! problem itself should already be initialized beforehand!
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverQNUDT)             :: solver    
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Numerics
+        solver%numLS%inputfilepath  = solver%inputfilepath
+        solver%numLS%fieldprefix    = solver%inputfileprefix
+        solver%numQN%inputfilepath  = solver%inputfilepath
+        solver%numQN%fieldprefix    = solver%inputfileprefix
+        call solver%numLS%InitializeNumParams()
+        call solver%numQN%InitializeNumParams()
+
+    end subroutine
+
+    ! QN solver
+    subroutine SolveOptimizationProblemQN(solver, problem)
+
+        ! Description
+        !============
+        ! QN solver for the optimization problem defined by the generic
+        ! 'problem'. It is assumed that the optimization problem is
+        ! properly initialized. The solver solves the optimization 
+        ! problem by computing the solution to quadratic subproblems 
+        ! where the hessian is estimated during the optimization. A 
+        ! linesearch procedure is used to determine the step size. 
+
+        ! Note that, due to the implementation of the optimization 
+        ! problem structure, a hessian output argument is expected from
+        ! cost function and constraint routines. However, this may be 
+        ! left unitialized/unused, as it will not be used by the solver.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverQNUDT)              :: solver    
+        class(OptimizationProblemUDT)               :: problem
+
+    end subroutine
+
+    ! QN convergence checker
+    subroutine CheckConvergenceQN(solver, gradient, converged, infnorm)
+
+        ! Description
+        !============
+        ! Convergence checker for QN solver. Convergence is based on 
+        ! the infinity norm of the provided gradient (which is assumed
+        ! to be the gradient of the Lagrangian)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationSolverQNUDT)      :: solver 
+        real(R8), intent(in)                :: gradient(:)
+        logical, intent(inout)              :: converged 
+        real(R8), intent(out)               :: infnorm
+
+        ! Check convergence
+        !==================
+        ! Compute infinity norm
+        infnorm = maxval(abs(gradient))
+
+        ! Compare
+        converged = infnorm < solver%numQN%tol
+
+    end subroutine
+
+ 
 
     !==================================================================!
     !                                                                  !
@@ -2210,7 +2395,7 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(OptimizationProblemUDT)       :: problem 
-        type(OptimizationSolverUDT)         :: solver
+        class(OptimizationSolverUDT)        :: solver
         real(R8), allocatable               :: lambda(:), mu(:)
         logical                             :: checkgradient, &
             checkhessian
@@ -2399,7 +2584,7 @@ module optmod_optimizationengine
         !    H, gradH, mu)
 
         ! Evaluate the Lagrangian
-        call fun%solver%EvaluateLagrangian(f, df, d2f, &
+        call fun%problem%EvaluateLagrangian(f, df, d2f, &
             J, gradJ, hessJ, &
             G, gradG, hessG, fun%lambda, &
             H, gradH, hessH, fun%mu, A, &
@@ -2511,12 +2696,12 @@ module optmod_optimizationengine
         ! Set the constraints to check
         neqID =  1
         allocate(eqID(neqID))
-        eqID = [105] !  some random numbers for now
+        eqID = [3400] !  some random numbers for now
 
         ! Set the design variables to check
-        nvars = 5
+        nvars = 4
         allocate(vars(nvars))
-        vars = [641, 1+860, 860, 3+860, 1720] ! some random variables for now
+        vars = [2, 3, 64, 65] ! some random variables for now
 
         ! Sanity checks
         if (any(eqID > neq)) then

@@ -94,6 +94,9 @@ module gdmod_optimizationengine
         procedure :: EvaluateInequalityConstraints &
                         => EvaluateInequalityConstraintsGD
 
+        ! KKT relaxation
+        procedure :: RelaxProblemKKTSystem => RelaxProblemKKTSystemGD
+
         ! Additional routines
         !====================
         ! Initialization finalizer to account for cross-design/cfv/con
@@ -105,6 +108,12 @@ module gdmod_optimizationengine
 
         ! Inequality constraint deactivator
         procedure :: DeactivateInequalityConstraints
+
+        ! Linearizations
+        !===============
+        procedure :: EvaluateJacobian       => EvaluateJacobianGD
+        procedure :: EvaluateJacobianGDGoatvariables
+        procedure :: EvaluateJacobianGDVesselcoordinates
 
     end type 
 
@@ -170,15 +179,24 @@ module gdmod_optimizationengine
         ! Arguments
         class(OptimizationEngineGDUDT)      :: optimizationdriver 
 
-        ! Loop variables
+        ! Auxiliary
         type(OptimizationProblemGDUDT)      :: thisproblem
+        type(OptimizationSolverKKTUDT)      :: thissolver
 
         ! Data
 
-        ! Design variables
-        !=================
-        ! Set the design options
+        ! Initialize
+        !===========
+        ! Allocate the problem type
         allocate(optimizationdriver%problem, source=thisproblem)
+
+        ! Allocate the solver
+        allocate(optimizationdriver%solver, source=thissolver)
+
+        ! Propagate input filepath
+        optimizationdriver%solver%inputfilepath = optimizationdriver%inputfilepath 
+        optimizationdriver%solver%inputfileprefix = optimizationdriver%inputfileprefix
+        optimizationdriver%problem%inputfilepath = optimizationdriver%inputfilepath
 
     end subroutine
 
@@ -394,7 +412,13 @@ module gdmod_optimizationengine
             problem%magneticField, problem%environment, & 
             problem%designvariables, problem%designoptions%constraints)
 
-        ! 
+        ! Set Lagrange multipliers
+        allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
+            problem%mu(problem%constraints%ineqcon%nineqcon))
+        problem%lambda = 0
+        problem%mu = 0
+
+        
         !=================
         ! Initialize design variables further for constraint/cfv 
         ! dependent fields
@@ -913,6 +937,26 @@ module gdmod_optimizationengine
         ! as well? At least gradient should be tackled by activeness
         ! of constraint...
         call problem%DeactivateInequalityConstraints(H)
+
+    end subroutine
+
+    ! KKT relaxation 
+    subroutine RelaxProblemKKTSystemGD(problem, KKT)
+
+        ! Description
+        !============
+        ! Relax KKT system based on problem parameters. Note: this is not
+        ! necessary/not supported yet for the general GD problem. If 
+        ! used, an error will be thrown. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)         :: problem 
+        type(MySparseUDT)                       :: KKT 
+
+        ! Call error handler
+        call gdErrorHandler('RelaxProblemKKTSystemGD: method not yet implemented')
 
     end subroutine
 
@@ -1769,6 +1813,378 @@ module gdmod_optimizationengine
         !=============
         end associate
                
+
+    end subroutine
+
+    ! Derivative calculation wrapper
+    subroutine EvaluateJacobianGD(problem, var, values, jac)
+
+        ! Description
+        !============
+        ! This routine computes the Jacobian of the optimization problem
+        ! with respect to some predefined variable. Note that it is 
+        ! assumed that all fields of the problem are up to date. The 
+        ! variable(s) to differentiate to should be specified by the
+        ! string 'var'. The Jacobian is returned in a sparse matrix 
+        ! format and contains the linearization of the optimization 
+        ! problem residuals w.r.t. the chosen variables. 
+
+        ! Notes
+        !======
+        ! Note 1: this routine is a wrapper routine for specific 
+        ! derivation computations which are defined in separate 
+        ! routines. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        character(*), intent(in)            :: var 
+        real(R8), intent(in)                :: values(:)
+        type(MySparseUDT), intent(out)      :: jac 
+
+        ! Compute
+        !========
+        ! Check the variable name and call differentiation routine
+        select case (var)
+
+        case ('coordinates')
+
+            ! Differentiate w.r.t. coordinates of the grid (x, y)
+            call problem%EvaluateJacobianGDGoatvariables(jac, 'coordinates')
+
+        case ('coordinates_flux')
+
+            ! Differentiate w.r.t. coordinates of the grid (x, y) and 
+            ! flux values that were optimized for (psi) 
+            call problem%EvaluateJacobianGDGoatvariables(jac, 'coordinates_flux')
+
+        case ('goatvariables')
+
+            ! Differentiate w.r.t. all goat variables (design variables,
+            ! lagrange multipliers)
+            call problem%EvaluateJacobianGDGoatvariables(jac, 'all')
+
+        case ('vesselcoordinates')
+
+            ! Differentiate w.r.t. vessel coordinates
+            call problem%EvaluateJacobianGDVesselcoordinates(values, jac)
+
+        case default 
+
+            ! Throw error, not implemented
+            call gdErrorHandler('ComputeJacobianGD: variable not implemented')
+
+        end select
+
+
+    end subroutine
+
+    ! Derivative calculation w.r.t. coordinates
+    subroutine EvaluateJacobianGDGoatvariables(problem, jac, var)
+
+        ! Description
+        !============
+        ! Evaluate the Jacobian of the optimization problem w.r.t. the 
+        ! grid coordinates. This is done by calling the cost function, 
+        ! constraint, and other evaluation routines. Then, only columns
+        ! that correspond to coordinates are retained from the 
+        ! computed linearization. 
+
+        implicit none
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)         :: problem 
+        type(MySparseUDT), intent(inout)        :: jac 
+        character(*), intent(in)                :: var
+
+        ! Loop
+        integer(I8)                             :: k 
+
+        ! Auxiliary
+        ! Cost function 
+        real(R8)                    :: J 
+        real(R8), allocatable       :: gradJ(:)
+        type(MySparseUDT)           :: hessJ 
+
+        ! Equality constraints 
+        real(R8), allocatable       :: G(:)
+        type(MySparseUDT)           :: gradG, hessG  
+
+        ! Inequality constraints 
+        real(R8), allocatable       :: H(:), ncp(:)
+        type(MySparseUDT)           :: gradH, hessH, gradncpmu, &
+            gradncpphi   
+
+        ! Lagrangian 
+        real(R8)                    :: L 
+        real(R8), allocatable       :: gradL(:), rhs(:)
+        type(MySparseUDT)           :: hessL, lhs
+
+        ! Logicals
+        logical                     :: dogradient, dohessian
+        logical, allocatable        :: tempind(:), I(:)
+
+        ! Other
+        integer(I8)                 :: nphi, neq, nineq
+        integer(I8), allocatable    :: cind(:)
+
+        type(OptimizationSolverKKTUDT)  :: kktsolver
+        type(NumNCPUDT)                 :: num
+
+        ! Initialize
+        !===========
+        ! Set numerics
+        ! Set numerics
+        num%ncpfun = 'max'
+        num%alpha = 1
+
+        ! Get problem dimensions
+        call problem%GetProblemDimensions(nphi, neq, nineq)
+
+        ! Cost function 
+        allocate(gradJ(nphi))
+        J = 0
+        gradJ(:) = 0
+        hessJ%nrow = nphi 
+        hessJ%ncol = nphi 
+
+        ! Equality constraint 
+        allocate(G(neq))
+        G(:) = 0
+        gradG%nrow = nphi 
+        gradG%ncol = neq 
+        hessG%nrow = nphi 
+        hessG%ncol = nphi
+
+        ! Inequality constraint 
+        allocate(H(nineq), ncp(nineq), I(nineq))
+        H(:) = 0
+        ncp = 0
+        I = .true.
+        gradH%nrow = nphi 
+        gradH%ncol = nineq 
+        hessH%nrow = nphi 
+        hessH%ncol = nphi
+
+        ! Lagrangian 
+        allocate(gradL(nphi + neq + nineq))
+        hessL%nrow = nphi + neq + nineq
+        hessL%ncol = nphi + neq + nineq
+        L = 0
+        gradL(:) = 0
+        rhs = gradL
+
+        ! Set logicals
+        dogradient  = .true. 
+        dohessian   = .true.
+
+        ! Associate
+        associate(& 
+            lambda          =>      problem%lambda, &
+            mu              =>      problem%mu, &
+            A               =>      problem%A)
+
+        ! Evaluate
+        !=========
+        ! Update the optimization problem 
+        call problem%UpdateProblem()
+
+        ! Evaluate cost function
+        call problem%EvaluateCostFunction(J, gradJ, & 
+            hessJ, dogradient, dohessian)
+        
+        ! Evaluate the equality constraints
+        call problem%EvaluateEqualityConstraints(G, gradG, &
+            hessG, dogradient, dohessian, problem%lambda)
+        
+        ! Evaluate the inequality constraints
+        call problem%EvaluateInequalityConstraints(H, gradH, &
+            hessH, dogradient, dohessian, problem%mu)
+
+        ! Nonlinear complementarity function
+        call EvaluateNCPfunction(ncp, A, I, gradncpphi, gradncpmu, &
+            H, gradH, problem%mu, num, dogradient)
+
+        ! Evaluate lagrangian
+        call problem%EvaluateLagrangian(L, gradL, hessL, J, gradJ, &
+            hessJ, G, gradG, hessG, problem%lambda, H, gradH, hessH, problem%mu, A, &
+            dogradient, dohessian)
+
+        ! Build goat hessian & rhs
+        call kktsolver%SetupCorrectionEquation(lhs, rhs, &
+            gradJ, hessJ, G, gradG, hessG, problem%lambda, H, gradH, hessH, problem%mu, A, &
+            ncp, gradncpphi, gradncpmu)
+
+        ! Extract linearization
+        !======================
+        ! Get indices
+        associate(designvariables  =>   problem%designvariables)
+        select case (var)
+
+        case ('coordinates')
+
+            ! Only w.r.t. coordinates
+            select type (designvariables)
+
+            type is (DesignVariablesCoordinatesUDT)
+
+                cind = [designvariables%xind, designvariables%yind]
+
+            type is (DesignVariablesCoordinatesFluxUDT)
+
+                cind = [designvariables%xind, designvariables%yind]
+
+            class default
+
+            call gdErrorHandler('EvaluateJacobianGDCoordinates: design variable type not implemented')
+
+            end select
+            
+
+        case ('coordinates_flux')
+
+            ! w.r.t. coordinates and flux values (only possible if they 
+            ! are optimized)
+            select type (designvariables)
+
+            type is (DesignVariablesCoordinatesUDT)
+
+                ! Throw error
+                call gdErrorHandler('EvaluateJacobianGDGoatvariables: ' // & 
+                    'cannot return derivatives w.r.t. flux as they are not ' // & 
+                    'optimized for')
+
+            type is (DesignVariablesCoordinatesFluxUDT)
+
+                cind = [designvariables%xind, designvariables%yind, designvariables%psiind]
+
+            class default
+
+            call gdErrorHandler('EvaluateJacobianGDCoordinates: design variable type not implemented')
+
+            end select
+
+        case ('all')
+
+            ! w.r.t. all variables, so including lagrange multipliers
+            cind = [(k, k = 1, nphi+neq+nineq)]
+
+        case default 
+
+        end select
+        end associate
+
+        ! Extract linearization
+        allocate(tempind(nphi+neq+nineq))
+        tempind = .true.
+        tempind(cind) = .false.
+        jac = lhs%DeleteColumns(tempind)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
+    ! Derivative calculation w.r.t. vessel coordinates
+    subroutine EvaluateJacobianGDVesselcoordinates(problem, values, jac)
+
+        ! Description
+        !============
+        ! Evaluate the jacobian of the optimization problem with 
+        ! respect to the vessel polygon coordinates xv, yv. It is 
+        ! assumed that the vessel polygon and its fields are up to date,
+        ! and that the optimization problem is also fully solved and
+        ! up to date. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)     :: problem 
+        real(R8), intent(in)                :: values(:)
+        type(MySparseUDT)                   :: jac
+
+        ! Auxiliary
+        logical                             :: dogradient, dohessian
+        logical, allocatable                :: A(:), I(:)
+        real(R8)                            :: J
+        real(R8), allocatable               :: gradJ(:), G(:), H(:), &
+            dJdvar(:), ncp(:)
+        type(MySparseUDT)                   :: hessJ, gradG, gradH, &
+            hessG, hessH, dgradJdvar, dGdvar, dgradGdvar, dHdvar, &
+            dgradHdvar, gradncpphi, gradncpmu
+        type(NumNCPUDT)         :: num
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            nphi        =>      problem%designvariables%nphi,   &
+            neqcon      =>      problem%constraints%eqcon%neqcon, &
+            nineqcon    =>      problem%constraints%ineqcon%nineqcon, &
+            lambda      =>      problem%lambda, &
+            mu          =>      problem%mu,     &
+            grid        =>      problem%grid,   &
+            magneticField   =>  problem%magneticField,  &
+            environment     =>  problem%environment,    &
+            designvariables =>  problem%designvariables)
+
+        ! Allocate
+        allocate(gradJ(nphi), G(neqcon), H(nineqcon), ncp(nineqcon), &
+            A(nineqcon), I(nineqcon))
+        
+        ! Initialize - to be cleaned up...
+        num%ncpfun = 'max'
+        num%alpha = 1
+        
+        ! Evaluate
+        !=========
+        ! We don't need hessian evaluation w.r.t. coordinates
+        dogradient  = .true. 
+        dohessian   = .false.
+
+        ! Cost function (gradient) sensitivities
+        call problem%costfunction%Evaluate(J, gradJ, hessJ, grid, &
+            magneticField, environment, dogradient, dohessian, &
+            designvariables, 'vesselcoordinates', values, dJdvar, dgradJdvar)
+
+        ! lambda*gradG and G sensitivities 
+        call problem%constraints%eqcon%Evaluate(G, gradG, hessG, grid, &
+            magneticField, environment, dogradient, dohessian, &
+            designvariables, lambda, 'vesselcoordinates', values, dGdvar, dgradGdvar)
+
+        ! mu*gradH and H sensitivities
+        call problem%constraints%ineqcon%Evaluate(H, gradH, hessH, grid, &
+            magneticField, environment, dogradient, dohessian, &
+            designvariables, mu, 'vesselcoordinates', values, dHdvar, dgradHdvar)
+
+        ! Nonlinear complementarity function
+        call EvaluateNCPfunction(ncp, A, I, gradncpphi, gradncpmu, &
+            H, gradH, mu, num, dogradient)
+
+        ! Extract
+        !========
+        ! Full linearization of residuals should be:
+        ! [hess + hessG + hessH, jacG, jacH] (nphi+neq+nineq-by-nvalues)
+        jac = SpZeros(0, size(values, 1))
+
+        ! 'Cost function' contribution
+        jac = jac%Concatenate(dgradJdvar + dgradGdvar + dgradHdvar, 1)
+
+        ! Equality constraint contribution
+        jac = jac%Concatenate(dGdvar, 1)
+
+        ! Inequality constraint contributions (need to set zero for inactive constraints)
+        dHdvar = dHdvar%SetZeroRows(.not. A)
+        jac = jac%Concatenate(dHdvar, 1)
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 

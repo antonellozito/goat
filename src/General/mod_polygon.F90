@@ -129,6 +129,7 @@ module mod_polygon
         procedure, private  :: ConstructPolygonNolabels
         generic   :: Construct      => ConstructPolygon, ConstructPolygonNolabels
         procedure :: Initialize     => InitializePolygon 
+        procedure :: UpdateCoordinates      => UpdatePolygonVertexCoordinates
         procedure :: ComputeMetrics => ComputePolygonMetrics
         procedure :: SetVert        => SetPolygonVertices
         procedure :: RemoveDuplicatePoints
@@ -138,6 +139,8 @@ module mod_polygon
         procedure :: Inpolygon
         procedure :: Flip           => FlipPolygon
         procedure :: SelfIntersections   => PolygonSelfIntersections
+        procedure, private  :: GetPolygonVertexID
+        generic   :: GetVert        => GetPolygonVertexID
 
     end type 
 
@@ -152,21 +155,37 @@ module mod_polygon
 
     contains 
 
+        ! Construction
         procedure, private  :: ConstructPolygonSetCoordinates
         procedure, private  :: ConstructPolygonSetFromPolygons
         procedure, private  :: ConstructPolygonSetFromEdges
+        procedure, private  :: ConstructPolygonSetCoordinatesNolabels
         generic :: Construct        => ConstructPolygonSetCoordinates, &
-            ConstructPolygonSetFromPolygons, ConstructPolygonSetFromEdges
-        procedure :: SelfIntersections  => PolygonSetSelfIntersections
-        procedure :: GetEdges           => GetPolygonSetEdges
-        procedure :: GetNormals         => GetPolygonSetNormals
-        procedure :: GetTangents        => GetPolygonSetTangents
-        procedure :: GetPoints          => GetPolygonSetPoints
-        procedure :: WriteData          => WritePolygonSetData
+            ConstructPolygonSetFromPolygons, ConstructPolygonSetFromEdges, &
+            ConstructPolygonSetCoordinatesNolabels
+
+        ! Operations
+        procedure :: SelfIntersections      => PolygonSetSelfIntersections
         procedure :: OrientNestedClosedPolygons
 
-    end type 
+        ! Data access
+        procedure, private  :: GetPolygonSetEdgesCoordinates, &
+            GetPolygonSetEdgesIDs
+        generic   :: GetEdges               => GetPolygonSetEdgesCoordinates, &
+            GetPolygonSetEdgesIDs
+        procedure :: GetNormals             => GetPolygonSetNormals
+        procedure :: GetTangents            => GetPolygonSetTangents
+        procedure, private   :: GetPolygonSetVerticesCoordinates, &
+            GetPolygonSetVerticesID
+        generic   :: GetVertices            => GetPolygonSetVerticesCoordinates, &
+            GetPolygonSetVerticesID
+        procedure :: GetLabels              => GetPolygonSetVertexLabels
+        procedure :: UpdateCoordinates      => UpdatePolygonSetVertexCoordinates
 
+        ! I/O
+        procedure :: WriteData              => WritePolygonSetData        
+
+    end type 
 
     !==================================================================!
     !                                                                  !
@@ -194,7 +213,7 @@ module mod_polygon
     !------------------------------------------------------------------!
 
     ! Construct the polygon set
-    subroutine ConstructPolygonSetCoordinates(polygonset, x, y)
+    subroutine ConstructPolygonSetCoordinates(polygonset, x, y, labels)
 
         ! Description
         !============
@@ -205,18 +224,25 @@ module mod_polygon
         ! is constructed separately, including all metric and logical
         ! data. 
 
+        ! Note: labels can be added (integer 2D array) to save other 
+        ! data. These labels are propagated to the subsequent polygons
+        ! and stored there locally. The labels do not need to contain
+        ! NaNs at polygon boundaries. 
+
         ! Declare variables
         !==================
         ! Arguments
         real(R8), allocatable, intent(in)   :: x(:), y(:) 
-        class(PolygonSetUDT), intent(inout)  :: polygonset 
+        integer(I8), intent(in)             :: labels(:, :)
+        class(PolygonSetUDT), intent(inout) :: polygonset 
 
         ! Auxiliary 
-        integer(I8)                     :: nnans, nx, ny
+        integer(I8)                     :: nnans, nx, ny, nl1, nl2
         integer(I8), allocatable        :: nanloc(:), startind(:), &
             endind(:), nvpp(:) 
 
         real(R8), allocatable           :: tempx(:), tempy(:)
+        integer(I8), allocatable        :: templabels(:, :)
 
         ! Loop
         integer(I8)                     :: i, k
@@ -227,9 +253,15 @@ module mod_polygon
         ! Compute and check sizes
         nx = size(x)
         ny = size(y)
+        nl1 = size(labels, 1)
+        nl2 = size(labels, 2)
         if (nx .ne. ny) then 
             ! Call the error handler
             call PolygonErrorHandler('x and y should have equal number of elements')
+        end if 
+        if (nx .ne. nl1) then 
+            ! Call error handles
+            call PolygonErrorHandler('labels should have equal number of elements as coordinates')
         end if 
 
         ! Count NaNs and check
@@ -271,17 +303,55 @@ module mod_polygon
         do i = 1, polygonset%np 
 
             ! Build polygon
-            allocate(tempx(nvpp(i)), tempy(nvpp(i)))
             tempx = x(startind(i):endind(i))
             tempy = y(startind(i):endind(i))
-            call polygonset%polygons(i)%Construct(tempx, tempy)
-            deallocate(tempx, tempy)
+            templabels = labels(startind(i):endind(i), :)
+            call polygonset%polygons(i)%Construct(tempx, tempy, templabels)
 
         end do 
 
         ! Housekeeping
         !=============
         deallocate(startind, endind, nvpp, nanloc)
+
+    end subroutine
+
+    ! Construct the polygon set (no labels)
+    subroutine ConstructPolygonSetCoordinatesNolabels(polygonset, x, y)
+
+        ! Description
+        !============
+        ! Construct a set of polygons from the given x and y 
+        ! coordinates. NaNs should be present to indicate different 
+        ! polygon pieces. First, the number of polygons are checked 
+        ! by computing the number of NaNs etc. Afterwards, each polygon
+        ! is constructed separately, including all metric and logical
+        ! data. 
+
+        ! Note: we simply call the routine with labels, but initialize
+        ! the labels to an empty array
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), allocatable, intent(in)   :: x(:), y(:) 
+        class(PolygonSetUDT), intent(inout)  :: polygonset 
+
+        ! Auxiliary 
+        integer(I8)                     :: nx
+        integer(I8), allocatable        :: labels(:, :)
+
+        ! Initialize
+        !===========
+        ! Set nx (dimension checks done in general routine)
+        nx = size(x)
+
+        ! Set labels
+        allocate(labels(nx, 0))
+
+        ! Call constructor
+        !=================
+        call polygonset%ConstructPolygonSetCoordinates(x, y, labels)
 
     end subroutine
 
@@ -371,13 +441,13 @@ module mod_polygon
         ! Construct polygon start and end indices
         allocate(ps(np), pe(np))
         ps = pack([(k, k = 1, ne)], ispolygonstart)
-        pe = [ps(2:ne), ne]
+        pe = [ps(2:np)-1, ne]
 
         ! Construct polygons
         do i = 1, np
             ! Get polygon edges
             tempne = pe(i) - ps(i) + 1
-            tempedges = edges(ps(i):pe(i), :)
+            tempedges = sortededges(ps(i):pe(i), :)
 
             ! Get polygon vertices
             allocate(tempvert(tempne+1))
@@ -391,8 +461,78 @@ module mod_polygon
             ! Construct polygon
             call polygonset%polygons(i)%Construct(x(tempvert), &
                 y(tempvert), templabels)
+
+            ! Housekeeping
+            deallocate(tempvert, templabels)
         end do
 
+        
+
+    end subroutine
+
+    ! Update polygonset coordinates
+    subroutine UpdatePolygonSetVertexCoordinates(polygonset, xp, yp)
+
+        ! Description
+        !============
+        ! Update the vertex coordinates of a polygonset. First, it is 
+        ! checked that xp, yp have the correct dimensions (i.e. equal 
+        ! to the number of vertices of all polygons). Then, we loop over
+        ! the polygons and attribute the correct vertices. It is assumed
+        ! that the polygons are correctly updated by attributing these
+        ! vertices with the polygon specific subroutine. Note that 
+        ! self-intersections or polygon closedness may change!
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)            :: polygonset 
+        real(R8), intent(in)            :: xp(:), yp(:)
+
+        ! Auxiliary
+        integer(I8)                     :: nvtot
+        integer(I8), allocatable        :: vIDs(:), tempind(:)
+
+        ! Loop
+        integer(I8)                     :: i, j, nv
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            np          => polygonset%np,       &
+            pol         => polygonset%polygons  &
+            )
+
+        ! Compute total number of vertices
+        call polygonset%GetVertices(vIDs)
+        nvtot = size(vIDs, 1)
+
+        ! Check
+        if ((size(xp, 1) /= nvtot) .or. (size(xp, 1) /= size(yp, 1))) then 
+            ! Throw error
+            call gdErrorHandler('UpdatePolygonSetVertexCoordinates: ' // &
+                'xp, yp do not have as many elements as there are vertices in the ' // &
+                'polygon set. Check input.')
+        end if 
+
+        ! Update coordinates
+        !===================
+        nv = 0
+        do i = 1, np
+            ! Set index vector
+            tempind = [(j, j = nv+1, nv+pol(i)%nv)]
+
+            ! Update
+            call pol(i)%UpdateCoordinates(xp(tempind), yp(tempind))
+
+            ! Update counter
+            nv = nv + pol(i)%nv 
+        end do
+        
+        ! Housekeeping
+        !=============
+        end associate
         
 
     end subroutine
@@ -694,12 +834,12 @@ module mod_polygon
                 p   => polygonset%polygons)
 
         ! Check if multiple polygons are present
-        if (np > 1) then 
-            ! Issue warning
-            call PolygonWarningHandler('OrientNestedClosedPolygons: ' // &
-            'sorting part not yet verified for more than one vessel ' // &
-            'polygon, proceed with caution')
-        end if 
+        !if (np > 1) then 
+        !    ! Issue warning
+        !    call PolygonWarningHandler('OrientNestedClosedPolygons: ' // &
+        !    'sorting part not yet verified for more than one vessel ' // &
+        !    'polygon, proceed with caution')
+        !end if 
 
         ! Exit in trivial cases
         if (np == 0) then 
@@ -864,7 +1004,7 @@ module mod_polygon
     end subroutine
 
     ! Get polygonset edges
-    subroutine GetPolygonSetEdges(polygonset, xe, ye)
+    subroutine GetPolygonSetEdgesCoordinates(polygonset, xe, ye)
 
         ! Description
         !============
@@ -920,6 +1060,59 @@ module mod_polygon
 
             ! Update counter
             ce = ce + pol(i)%ne 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    subroutine GetPolygonSetEdgesIDs(polygonset, edges)
+
+        ! Description
+        !============
+        ! Similar to GetPolygonSetEdgesCoordinates, but now returns the
+        ! edges by their vertex ID pairs. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                    :: polygonset 
+        integer(I8), allocatable, intent(out)   :: edges(:, :)
+
+        ! Auxiliary
+        integer(I8)                             :: netot 
+
+        ! Loop
+        integer(I8)                             :: i, vc, ec
+
+        ! Initialize
+        !===========
+        associate(&
+            np          => polygonset%np,       &
+            pol         => polygonset%polygons  &
+            )
+
+        ! Compute
+        !========
+        ! Precompute sizes
+        netot = 0
+        do i = 1, np 
+            netot = netot + pol(i)%ne 
+        end do
+
+        ! Compute edges
+        allocate(edges(netot, 2))
+        vc = 0 ! keep track of vertices to update local polygon vertex IDs
+        ec = 0
+        do i = 1, np 
+            ! Add
+            edges(ec+1:ec+pol(i)%ne, :) = pol(i)%edges + vc 
+
+            ! Update counters
+            vc = vc + pol(i)%nv 
+            ec = ec + pol(i)%ne
         end do 
 
         ! Housekeeping
@@ -1066,12 +1259,12 @@ module mod_polygon
 
     end subroutine
 
-    ! Get polygonset points 
-    subroutine GetPolygonSetPoints(polygonset, xp, yp)
+    ! Get polygonset Vertices 
+    subroutine GetPolygonSetVerticesCoordinates(polygonset, xp, yp)
 
         ! Description
         !============
-        ! Return all coordinates of the points in an unspecified order.
+        ! Return all coordinates of the Vertices in an unspecified order.
         ! The points should in principle be unique. Useful for 
         ! operations that only considers the points and not the edges
         ! of the polygon in any particular order. 
@@ -1083,7 +1276,7 @@ module mod_polygon
         real(R8), allocatable, intent(out)  :: xp(:), yp(:)
 
         ! Auxiliary
-        integer(I8)                         :: nv, cp  
+        integer(I8)                         :: nv
 
         ! Loop
         integer(I8)                         :: i, ce
@@ -1121,7 +1314,7 @@ module mod_polygon
             yp(ce+1:ce+pol(i)%nv)   = pol(i)%y 
 
             ! Update counter
-            cp = cp + pol(i)%nv 
+            ce = ce + pol(i)%nv 
         end do 
 
         ! Housekeeping
@@ -1130,6 +1323,123 @@ module mod_polygon
 
     end subroutine
 
+    subroutine GetPolygonSetVerticesID(polygonset, ID)
+
+        ! Description
+        !============
+        ! Return the ID vector of all points in the polygon set (IDs). 
+        ! Actually, this is simply the 1:nv vector, but just in case 
+        ! this changes at some point we compute it here. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                    :: polygonset 
+        integer(I8), allocatable, intent(out)   :: ID(:)
+
+        ! Auxiliary
+        integer(I8)                         :: nv  
+        integer(I8), allocatable            :: tID(:)
+
+        ! Loop
+        integer(I8)                         :: i, vc
+
+        ! Initialize
+        !===========
+        ! Deallocate if already allocated
+        if (allocated(ID)) then 
+            deallocate(ID)
+        end if 
+
+        ! Build points
+        !=============
+        ! Associate
+        associate( &
+            pol         => polygonset%polygons)
+        
+        ! Precompute the total number of points
+        nv = 0
+        do i = 1, polygonset%np 
+            nv = nv + polygonset%polygons(i)%nv             
+        end do 
+
+        ! Allocate
+        allocate(ID(nv))
+
+        ! Loop and add
+        vc = 0 ! vertex counter
+        do i = 1, polygonset%np 
+            ! Add coordinates
+            call pol(i)%GetVert(tID)
+            ID(vc+1:vc+pol(i)%nv)   = tID + vc ! update
+
+            ! Update counter
+            vc = vc + pol(i)%nv 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Get polygonset vertex labels
+    subroutine GetPolygonSetVertexLabels(polygonset, labels)
+
+        ! Description
+        !============
+        ! Return the polygonset vertex labels in the same sequence
+        ! as the vertex coordinates. Note that in general the number of
+        ! labels between polygons doesn't have to be the same. If this 
+        ! is the case, the labels that are returned are sized to the
+        ! maximum number of labels and non-used labels are filled with
+        ! zeros.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)            :: polygonset 
+        integer(I8), allocatable        :: labels(:, :)
+
+        ! Auxiliary
+        integer(I8)                     :: maxnl, nv 
+
+        ! Loop
+        integer(I8)                     :: i, lc
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(pol   => polygonset%polygons)
+
+        ! Compute maximal number of labels and number of vertices
+        maxnl = 0
+        nv = 0
+        do i = 1, polygonset%np 
+            maxnl = max(maxnl, size(pol(i)%labels, 2))
+            nv = nv + pol(i)%nv
+        end do 
+
+        ! Allocate
+        allocate(labels(nv, maxnl))
+
+        ! Extract labels
+        !===============
+        lc = 0
+        do i = 1, polygonset%np 
+            ! Assign
+            labels(lc+1:lc+pol(i)%nv, 1:size(pol(i)%labels, 2)) = &
+                pol(i)%labels
+
+            ! Update counter
+            lc = lc + pol(i)%nv 
+        end do
+
+        ! Housekeeping
+        !=============
+        end associate 
+
+    end subroutine
 
     ! Write polygonset vertex data
     subroutine WritePolygonSetData(polygonset, filepath)
@@ -1207,6 +1517,10 @@ module mod_polygon
     end subroutine
 
     !------------------------------------------------------------------!
+    !                    PolygonSet derivative routines                !
+    !------------------------------------------------------------------!
+
+    !------------------------------------------------------------------!
     !                          Polygon routines                        !
     !------------------------------------------------------------------!
 
@@ -1278,6 +1592,60 @@ module mod_polygon
         allocate(labels(size(x, 1), 1))
         labels = 0
         call polygon%Construct(x, y, labels)
+
+    end subroutine
+
+    ! Vertex coordinate updating
+    subroutine UpdatePolygonVertexCoordinates(polygon, x, y)
+
+        ! Description
+        !============
+        ! This routine updates the polygon coordinates using the new
+        ! values set by x, y. These values should have the same size as
+        ! the original coordinates (otherwise, construct a new polygon).
+        ! Metrics are recomputed as required, but duplicate points are 
+        ! NOT removed anymore. If this is desired, simply reconstruct the
+        ! polygon from scratch as this will be almost the same cost. 
+
+        ! Notes:
+        !=======
+        ! Note 1: the advantage of not removing any vertices is that the
+        ! topology of the polygon remains the same, which may be 
+        ! required for shape optimization purposes, for example. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)               :: polygon 
+        real(R8), intent(in)            :: x(:), y(:)
+
+        ! Initialize
+        !===========
+        ! Check sizes 
+        if ( (size(x, 1) /= size(y, 1)) .or. (size(x, 1) /= polygon%nv)) then 
+            ! Throw error
+            call gdErrorHandler('UpdatePolygonVertexCoordinates: ' // &
+                'incompatible sizes of new coordinates, check input')
+        end if
+
+        ! Attribute
+        !==========
+        polygon%x = x 
+        polygon%y = y
+
+        ! Update fields
+        !==============
+        ! Check if the polygon is closed
+        call polygon%IsClosedPolygon()
+
+        ! Construct the polygon metrics
+        call polygon%ComputeMetrics()
+
+        ! Check if the polygon is simple
+        call polygon%IsSimplePolygon()
+
+        ! Check if the polygon self intersects
+        call polygon%IsSelfIntersectingPolygon()
 
     end subroutine
 
@@ -1651,6 +2019,28 @@ module mod_polygon
 
     end subroutine
 
+    ! Vertex ID getter
+    subroutine GetPolygonVertexID(polygon, ID)
+
+        ! Description
+        !============
+        ! Get polygon vertex ID vector - this is simply the 1:nv 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)                       :: polygon 
+        integer(I8), allocatable, intent(out)   :: ID(:)
+
+        ! Loop
+        integer(I8)                             :: k 
+
+        ! Add
+        !====
+        ID = [(k, k = 1, polygon%nv)]
+
+    end subroutine
+
     ! Flipper
     subroutine FlipPolygon(polygon)
 
@@ -1675,7 +2065,7 @@ module mod_polygon
 
         ! Vertices
         polygon%vert    = polygon%vert(ne+1:1:-1)
-        polygon%edges   = polygon%edges(ne:1:-1, :)
+        polygon%edges   = polygon%edges(ne:1:-1, 2:1:-1)
         
         ! Edge centers
         polygon%ex      = polygon%ex(ne:1:-1)
@@ -1753,6 +2143,9 @@ module mod_polygon
 
         logical, allocatable                :: isin(:)
 
+        ! Loop
+        integer(I8)                         :: i
+
         ! Initialize
         !===========
         ! Distance to construct test points for normal
@@ -1810,10 +2203,20 @@ module mod_polygon
 
         ! See if points lie in polygon
         call polygon%Inpolygon(tpx, tpy, isin)
-        where (.not. isin) nx = -nx 
-        where (.not. isin) ny = -ny
-        where (.not. isin) tx = -tx 
-        where (.not. isin) ty = -ty
+        where (.not. isin) 
+            ! Switch sign
+            nx = -nx 
+            ny = -ny
+            tx = -tx 
+            ty = -ty
+        end where
+
+        ! Don't forget to switch edges!
+        do i = 1, ne
+            if (.not.isin(i)) then 
+                polygon%edges(i, :) = polygon%edges(i, [2, 1])
+            end if 
+        end do
 
 
         end associate
@@ -1930,6 +2333,10 @@ module mod_polygon
         end if               
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                     Polygon derivative routines                  !
+    !------------------------------------------------------------------!
         
 
     !------------------------------------------------------------------!

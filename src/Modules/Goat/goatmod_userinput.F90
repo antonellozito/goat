@@ -31,27 +31,6 @@ module goatmod_userinput
     !==================================================================!
 
     !------------------------------------------------------------------!
-    !                               Abstract                           !
-    !------------------------------------------------------------------!
-
-
-    ! Abstract option type
-    type, abstract :: OptionsUDT  
-
-        ! General abstract type for options. Should at least contain the
-        ! path from where the options should be read. 
-        character(:), allocatable       :: inputfilepath
-
-    contains 
-
-        procedure(ReadOptionsINT), deferred     :: Read 
-        procedure(SetDefaultsINT), deferred     :: SetDefaults
-        procedure                               :: Set => SetOptions
-        procedure                               :: SetInputFile 
-
-    end type 
-
-    !------------------------------------------------------------------!
     !                               GOAT                               !
     !------------------------------------------------------------------!
 
@@ -355,32 +334,6 @@ module goatmod_userinput
         
     end type
 
-    !------------------------------------------------------------------!
-    !                         Grid deformation                         !
-    !------------------------------------------------------------------!
-
-    !==================================================================!
-    !                                                                  !
-    !                            INTERFACES                            !
-    !                                                                  !
-    !==================================================================!
-
-    ! Abstract interfaces
-    abstract interface
-
-        subroutine ReadOptionsINT(options)
-            import :: OptionsUDT
-            class(OptionsUDT) :: options 
-
-        end subroutine
-
-        subroutine SetDefaultsINT(options)
-            import :: OptionsUDT
-            class(OptionsUDT) :: options 
-
-        end subroutine
-
-    end interface
 
     contains 
 
@@ -393,51 +346,6 @@ module goatmod_userinput
     !------------------------------------------------------------------!
     !                            Option setters                        !
     !------------------------------------------------------------------!
-
-    ! Main option setter
-    recursive subroutine SetOptions(options)
-
-        ! Description
-        !============
-        ! Set the options by first setting the defaults and overriding
-        ! them later on with the user-defined values from the input 
-        ! file. It is assumed that the inputfile is set beforehand. This
-        ! inputfilepath should not be overridden in the defaults! Use 
-        ! the 'SetInputFile' routine in the setup to determine the
-        ! input file to be read. 
-
-        ! Declare variables
-        !==================
-        class(OptionsUDT)       :: options 
-
-        ! Set options
-        !============
-        ! Defaults
-        call options%SetDefaults()
-
-        ! Read
-        call options%Read()
-
-    end subroutine
-
-    ! Main option inputfile path setter
-    subroutine SetInputFile(options, path)
-
-        ! Description
-        !============ 
-        ! Set the option inputfilepath
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(OptionsUDT)                       :: options
-        character(:), allocatable, intent(in)   :: path 
-
-        ! Set path
-        !=========
-        options%inputfilepath = path
-
-    end subroutine
 
     ! Goat options routines
     subroutine SetDefaultGoatOptions(options)
@@ -921,7 +829,6 @@ module goatmod_userinput
         reachedeof = .false. 
 
         ! Open the file, check if it exists
-        print *, options%inputfilepath
         open(unit=fid, file=options%inputfilepath, status='old', &
             iostat=openstatus)
 

@@ -186,6 +186,7 @@ module optmod_monitor
         monitor%nineq = nineq
         monitor%maxitopt = maxitopt
         monitor%opttol = opttol 
+        monitor%itopt = 0
 
         ! Allocate
         !=========

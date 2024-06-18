@@ -86,6 +86,8 @@ module optmod_numerics
         !           cases)
         ! - rxfmin: minimal value of relaxation factor
         ! - fieldprefix: all numerical options are read in assuming a 
+        ! - useproblemrelaxation:   use problem-specific KKT relaxation
+        !                           routine
         ! format '<fieldprefix>opt.num.<field>'. Fieldprefix can be 
         ! empty or given (default is empty)
 
@@ -94,6 +96,7 @@ module optmod_numerics
         real(R8)            :: rxfdec 
         real(R8)            :: rxfmin
         real(R8)            :: rxfdesign
+        logical             :: useproblemrelaxation
 
     contains 
 
@@ -137,6 +140,18 @@ module optmod_numerics
         procedure :: SetDefaultNumParamsLS  
         procedure :: InitializeNumParams    => InitializeNumParamsLS 
         procedure :: Read                   => ReadNumLSOptions
+
+    end type
+
+    ! Quasi-Newton numerics
+    type, extends(NumUDT) :: NumQNUDT 
+
+        
+    contains 
+
+        procedure :: SetDefaultNumParamsQN 
+        procedure :: InitializeNumParams    => InitializeNumParamsQN 
+        procedure :: Read                   => ReadNumQNOptions
 
     end type
 
@@ -266,6 +281,7 @@ module optmod_numerics
         num%rxfdesign       = 1
         num%rxfdec          = 0.98
         num%rxfmin          = 2e-2
+        num%useproblemrelaxation    = .false.
 
     end subroutine
 
@@ -337,13 +353,14 @@ module optmod_numerics
         ! Read options
         !=============
         ! General
-        print *, num%fieldprefix 
         field = num%fieldprefix // 'opt.num.itmax'
         call ExtractOptionValueInteger0D(fid, field, num%maxit)
         field = num%fieldprefix // 'opt.num.verbosity'
         call ExtractOptionValueInteger0D(fid, field, num%verbosity)
         field = num%fieldprefix // 'opt.num.tol'
         call ExtractOptionValueReal0D(fid, field, num%tol)
+        field = num%fieldprefix // 'opt.num.useproblemrelaxation'
+        call ExtractOptionValueLogical0D(fid, field, num%useproblemrelaxation)
         
         ! Relaxation factors
         field = num%fieldprefix // 'opt.num.rxf'
@@ -471,7 +488,6 @@ module optmod_numerics
         ! Read options
         !=============
         ! General
-        print *, num%fieldprefix 
         field = num%fieldprefix // 'opt.num.ls.type'
         call ExtractOptionValueCharacter(fid, field, num%type)
         field = num%fieldprefix // 'opt.num.ls.meritfunction'
@@ -600,7 +616,6 @@ module optmod_numerics
         ! Read options
         !=============
         ! General
-        print *, num%fieldprefix 
         field = num%fieldprefix // 'opt.num.ncp.ncpfun'
         call ExtractOptionValueCharacter(fid, field, num%ncpfun)
         field = num%fieldprefix // 'opt.num.ncp.alpha'
@@ -610,6 +625,53 @@ module optmod_numerics
         !=============
         ! Close the file
         close(unit=fid)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                         QN SOLVER OPTIONS                        !
+    !------------------------------------------------------------------!
+    ! Set numerical parameters
+    subroutine SetDefaultNumParamsQN(num)
+
+        ! Description
+        !============
+        ! Set default numerical parameters of quasi newton solver
+
+        ! Declare variables
+        !==================
+        class(NumQNUDT)         :: num 
+
+    end subroutine
+
+    ! Initialize
+    subroutine InitializeNumParamsQN(num)
+
+        ! Description
+        !============
+        ! Initialization routine that calls the default parameter setter
+        ! and the reader
+
+        ! Declare variables
+        !==================
+        class(NumQNUDT)         :: num
+        
+        ! Set parameters
+        !===============
+        ! Set defaults 
+        call num%SetDefaultNumParams()
+
+        ! Override with user settings (to be implemented)
+        call num%Read()
+
+    end subroutine 
+
+    ! Read
+    subroutine ReadNumQNOptions(num)
+
+        ! Declare variables
+        !==================
+        class(NumQNUDT)         :: num 
 
     end subroutine
 

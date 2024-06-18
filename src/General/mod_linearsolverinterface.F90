@@ -26,6 +26,7 @@ module mod_linearsolverinterface
     private 
 
     external umf4def
+    integer, external :: ilaenv
 
     ! Public routines
     public TestUMFPACK !  tester
@@ -228,7 +229,12 @@ module mod_linearsolverinterface
         end subroutine
 
 
-    end interface    
+    end interface   
+    
+    interface SolveDenseLinearSystemDI
+        module procedure SolveDenseLinearSystemDI1D 
+        module procedure SolveDenseLinearSystemDI2D
+    end interface
 
     contains
 
@@ -448,12 +454,12 @@ module mod_linearsolverinterface
     end subroutine
 
     ! The dense solver
-    subroutine SolveDenseLinearSystemDI(A, b, sol, flag)
+    subroutine SolveDenseLinearSystemDI1D(A, b, sol, flag, Ainv)
 
         ! Description
         !============
         ! Solve (small) dense linear systems. We rely on LAPACK to 
-        ! compute the solution
+        ! compute the solution. If desired, the inverse is computed
 
         ! Declare variables
         !==================
@@ -463,10 +469,13 @@ module mod_linearsolverinterface
         real(R8), intent(out)   :: sol(size(b))
         integer(I8)             :: flag 
 
+        ! Optional arguments
+        real(R8), intent(out), optional     :: Ainv(size(b), size(b)) ! inv
+
         ! Auxiliary
         integer(I8), allocatable        :: ipiv(:)
-        integer                         :: neq, info
-        double precision, allocatable   :: rhs(:), lhs(:, :)
+        integer                         :: neq, info, infoinv, nb
+        double precision, allocatable   :: rhs(:), lhs(:, :), work(:)
 
         ! Initialize
         !===========
@@ -496,6 +505,92 @@ module mod_linearsolverinterface
 
         ! Set solution
         sol = rhs
+
+        ! Compute inverse if desired
+        if (present(Ainv)) then 
+            ! Compute preliminaries 
+            nb = ilaenv( 1, 'DGETRI', ' ', neq, -1, -1, -1 )
+            allocate(work(nb*neq))
+
+            ! Compute inverse
+            Ainv = lhs
+            call dgetri(neq, Ainv, neq, ipiv, work, neq*nb, infoinv)
+
+            ! Check 
+            if (infoinv /= 0) then 
+                print *, 'dgetri could not determine inverse, info: ', infoinv 
+            end if
+        end if 
+
+    end subroutine
+
+    subroutine SolveDenseLinearSystemDI2D(A, b, sol, flag, Ainv)
+
+        ! Description
+        !============
+        ! Solve (small) dense linear systems. We rely on LAPACK to 
+        ! compute the solution. If desired, the inverse is computed
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)    :: A(:, :)
+        real(R8), intent(in)    :: b(:, :)
+        real(R8), intent(out)   :: sol(size(b, 1), size(b, 2))
+        integer(I8)             :: flag 
+
+        ! Optional arguments
+        real(R8), intent(out), optional     :: Ainv(size(b, 1), size(b, 1)) ! inv
+
+        ! Auxiliary
+        integer(I8), allocatable        :: ipiv(:)
+        integer                         :: neq, info, infoinv, nb
+        double precision, allocatable   :: rhs(:, :), lhs(:, :), work(:)
+
+        ! Initialize
+        !===========
+        ! Check dimensions
+        neq = size(b, 1)
+        if ( (size(A, 1) /= neq) .or. (size(A, 2) /= neq)) then 
+            ! Incompatible sizes
+            call gdErrorHandler('SolveDenseLinearSystemDI: incompatible size of A w.r.t. b')
+        end if 
+
+        ! Set solver data
+        allocate(rhs(neq, size(b, 2)), lhs(neq, neq))
+        rhs = b
+        lhs = A
+        flag = 0
+
+        ! Call the solver (make sure input is in right format!)
+        allocate(ipiv(neq))
+        call dgesv(neq, size(b, 2), lhs, neq, ipiv, rhs, neq, info)
+
+        ! Check if converged
+        if (info .ne. 0) then
+            ! Not converged 
+            flag = 1
+            print *, 'dgesv could not converge, info: ', info 
+        end if
+
+        ! Set solution
+        sol = rhs
+
+        ! Compute inverse if desired
+        if (present(Ainv)) then 
+            ! Compute preliminaries 
+            nb = ilaenv( 1, 'DGETRI', ' ', neq, -1, -1, -1 )
+            allocate(work(nb*neq))
+
+            ! Compute inverse
+            Ainv = lhs
+            call dgetri(neq, Ainv, neq, ipiv, work, neq*nb, infoinv)
+
+            ! Check 
+            if (infoinv /= 0) then 
+                print *, 'dgetri could not determine inverse, info: ', infoinv 
+            end if
+        end if 
 
     end subroutine
 

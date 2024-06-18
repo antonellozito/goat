@@ -12,6 +12,9 @@
 ##
 ## Variables are defined in config.mk
 
+# Target-specific variables
+shapeopt_solps : DEFINEFLAGS = -DSOLPS
+
 ## % Library paths
 ## %==============
 ## LAPACKPATH 			: LAPACK library path (user defined)
@@ -23,6 +26,13 @@ BLASPATH = -lopenblas
 ## UMFPACKPATH 			: UMFPACK library path (user defined)
 UMFPACKPATH = -lumfpack
 
+## SOLPSPATH            : path to SOLPS (user defined)
+SOLPSPATH = ../solps-iter
+
+## B25LIBPATH           : B25 library path (relative to solps path)
+B25LIBPATH = $(SOLPSPATH)/modules/B2.5/builds/standalone.LEUVEN.ifort64
+B25ADJLIBPATH = $(SOLPSPATH)/modules/B2.5/builds/standalone.LEUVEN.ifort64.adj_shape 
+
 ## % Include paths
 ## %==============
 ## SUITESPARSEPATH      : SuiteSparse header file path
@@ -32,8 +42,8 @@ SUITESPARSEPATH = /usr/include/suitesparse
 ## % Targets
 ## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Clayer ClayerF Constants Auxiliary General Numerics Optimization Modules IO_b25  \
-    IO_carre IO_output IO_input  Setup  Drivers 
+GDRUN_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+    IO_carre IO_output IO_input  Setup  ShapeOptimization Drivers 
 
 ## GOAT_TARGETS             : Targets to be run for the full goat
 GOAT_TARGETS = $(GDRUN_TARGETS) 
@@ -46,6 +56,12 @@ TEST_TARGETS = $(GOAT_TARGETS)
 
 ## CTEST_TARGETS            : Targets to be run to test C layer
 CTEST_TARGETS = Clayer
+
+## SHAPEOPT_TARGETS         : Targets to be run for shape optimization program
+SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+    IO_carre IO_output IO_input  Setup  ShapeOptimization Drivers 
+SHAPEOPTSOLPS_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+    IO_carre IO_output IO_input  Setup  ShapeOptimizationSolps Drivers 
 
 ##
 ## % Compiler
@@ -98,7 +114,7 @@ CCFLAGS = $(CCFLAGS_DEF)
 MAIN_RUNFILE = MainRunFileGridDeformation.F90
 
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
-GENERAL_FILES = src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 $(wildcard src/General/*.F90)
+GENERAL_FILES = src/General/mod_plotter.F90 src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 $(wildcard src/General/*.F90)
     
 
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
@@ -113,8 +129,7 @@ MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
 
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
-AUXILIARY_FILES = src/Auxiliary/mod_plotter.F90 \
-    src/Auxiliary/Construct2DStructuredGrid.F90 \
+AUXILIARY_FILES = src/Auxiliary/Construct2DStructuredGrid.F90 \
     $(wildcard src/Auxiliary/*.F90) \
     src/Auxiliary/Interpolation/Interpolant2D_auxiliaries.F90 \
     src/Auxiliary/Interpolation/Interpolant2D.F90 \
@@ -153,3 +168,15 @@ CLAYER_FILES    = $(wildcard src/Clayer/*.c)
 
 ## ClayerF              : fortran files for interfacing with other c code
 CLAYERF_FILES    =  src/Clayer/CSparseF.F90 src/Clayer/Clayer.F90
+
+## ShapeOpt             : fortran files for shape optimization
+SHAPEOPT_FILES  = src/Modules/ShapeOpt/somod_userinput.F90 \
+    src/Modules/ShapeOpt/somod_designvariables.F90 src/Modules/ShapeOpt/somod_costfunction.F90 \
+    src/Modules/ShapeOpt/somod_constraints.F90   src/Modules/ShapeOpt/somod_optimizationengine.F90
+
+## ShapeOptSolps            : fortran files for shape optimization with SOLPS
+SHAPEOPTSOLPS_FILES  =  src/Modules/ShapeOpt/somod_userinput.F90 \
+    src/Modules/ShapeOpt/somod_designvariables.F90 src/Modules/ShapeOpt/somod_costfunction.F90 \
+    src/Modules/ShapeOpt/somod_constraints.F90  src/Modules/ShapeOpt/sosmod_costfunction.F90 \
+    src/Modules/ShapeOpt/somod_optimizationengine.F90 
+    
