@@ -80,16 +80,12 @@ subroutine RunGridOptimization(grid, magneticField, environment, &
 
         ! Unpack solution
         grid = problem%grid
+        magneticField = problem%magneticField 
+        environment = problem%environment
 
     end select
 
     end associate
-
-    ! ... and unpack the solution
-    !grid = optimizationdriver%grid
-    
-    ! Post-processing
-    !================
 
 
 

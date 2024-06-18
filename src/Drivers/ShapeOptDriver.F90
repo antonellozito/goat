@@ -67,7 +67,8 @@ subroutine ShapeOptDriver(inputfilepath)
         grid = problem%goat%grid 
 
         ! Write
-        call WriteGOAT(goatoptions, grid)
+        call WriteGOAT(goatoptions, grid, problem%goat%magneticField, &
+            problem%goat%environment)
 
         ! b2ag file
         !call Writeb2agdat(goatoptions, grid)

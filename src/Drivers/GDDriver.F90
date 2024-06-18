@@ -45,7 +45,7 @@ subroutine GDDriver(goatoptions)
     ! Write data
     !===========
     ! Grid data
-    call WriteGOAT(goatoptions, grid)
+    call WriteGOAT(goatoptions, grid, magneticField, environment)
 
     ! b2ag file
     !call Writeb2agdat(goatoptions, grid)

@@ -102,7 +102,8 @@ subroutine GDtestdriver(goatoptions)
             ! Write solution
             write(tempstring, '(I0.4, a)') i, trim(orig_writefilepath) 
             goatoptions%writefilepath = trim(tempstring)
-            call WriteGOAT(goatoptions, problem%grid)
+            call WriteGOAT(goatoptions, problem%grid, problem%magneticField, &
+                problem%environment)
 
         end do
 
