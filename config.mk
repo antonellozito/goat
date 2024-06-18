@@ -31,7 +31,7 @@ SOLPSPATH = ../solps-iter
 
 ## B25LIBPATH           : B25 library path (relative to solps path)
 B25LIBPATH = $(SOLPSPATH)/modules/B2.5/builds/standalone.LEUVEN.ifort64
-B25ADJLIBPATH = $(SOLPSPATH)/modules/B2.5/builds/standalone.LEUVEN.ifort64.adj_shape 
+B25ADJLIBPATH = $(SOLPSPATH)/modules/B2.5/builds/standalone.LEUVEN.ifort64.adj_shape
 
 ## % Include paths
 ## %==============
@@ -60,7 +60,7 @@ CTEST_TARGETS = Clayer
 ## SHAPEOPT_TARGETS         : Targets to be run for shape optimization program
 SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
     IO_carre IO_output IO_input  Setup  ShapeOptimization Drivers 
-SHAPEOPTSOLPS_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+SHAPEOPTSOLPS_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
     IO_carre IO_output IO_input  Setup  ShapeOptimizationSolps Drivers 
 
 ##
@@ -68,6 +68,7 @@ SHAPEOPTSOLPS_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Opti
 ## %=========
 ## FC			: Compiler to be used for fortran
 FC = gfortran
+
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
 CFLAGS_DEF = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all
 ## CFLAGS_OMP	: compiler flags for OpenMP 

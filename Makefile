@@ -4,6 +4,9 @@
 # Include the config file
 include config.mk
 
+# Set the compiler in case of SOLPS
+shapeopt_solps : FC = ifort 
+
 ##
 ## %===================================================================%
 ## %                                                                   %
@@ -43,7 +46,7 @@ shapeopt: $(SHAPEOPT_TARGETS) shapeopt.o
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 
 shapeopt_solps: $(SHAPEOPTSOLPS_TARGETS) shapeopt.o 
-	$(FC) -o shapeopt *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include -I $(B25LIBPATH) -I $(B25ADJLIBPATH) $(DEFINEFLAGS)
+	$(FC) -o shapeopt *.o ../solps-iter/modules/B2.5/builds/standalone.LEUVEN.ifort64.adj_shape/adStack.o ../solps-iter/modules/B2.5/builds/standalone.LEUVEN.ifort64.adj_shape/b2mod_cdf.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25ADJLIBPATH) -L$(B25ADJLIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf `nf-config --flibs`
 
 
 ## % Runfiles
@@ -71,8 +74,7 @@ goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
 
 ## shapeopt.o		: shape optimization 
 shapeopt.o : Runfiles/ShapeOptimization.F90 
-	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 $(DEFINEFLAGS)
-
+	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 $(DEFINEFLAGS) 
 ##
 ## % Folder compilation targets
 ## %===========================
@@ -153,7 +155,7 @@ ShapeOptimization: $(SHAPEOPT_FILES)
 
 ## ShapeOptimizationSolps 			: compile shape optimization modules for SOLPS
 ShapeOptimizationSolps: $(SHAPEOPTSOLPS_FILES)
-	$(FC) $(CFLAGS) -I$(B25LIBPATH) -I$(B25ADJLIBPATH) $(DEFINEFLAGS) $^ 
+	$(FC) $(CFLAGS) -I$(B25LIBPATH) -I$(B25ADJLIBPATH) $(DEFINEFLAGS) -L$(B25ADJLIBPATH) -l:libb2.a -lnetcdf $^ 
 	touch ShapeOptimizationSolps
 
 
