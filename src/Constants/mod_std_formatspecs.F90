@@ -15,7 +15,7 @@ module mod_std_formatspecs
 
     character(*), parameter :: spacefm      = '1X'
     character(*), parameter :: Ifm          = 'I11'
-    character(*), parameter :: Rfm          = 'F13.8'
+    character(*), parameter :: Rfm          = 'e21.13e3'
 
 
 end module

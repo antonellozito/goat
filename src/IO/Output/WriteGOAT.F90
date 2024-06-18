@@ -1,4 +1,4 @@
-subroutine WriteGOAT(goatoptions, grid)
+subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
 
     ! Description
     !============
@@ -18,6 +18,7 @@ subroutine WriteGOAT(goatoptions, grid)
     use goatmod_types
     use goatmod_userinput
     use mod_std_formatspecs
+    use mod_constants
 
     ! The usual
     !==========
@@ -27,14 +28,16 @@ subroutine WriteGOAT(goatoptions, grid)
     !==================
     ! Arguments
     type(GoatoptionsUDT), intent(in)        :: goatoptions 
-    type(GridUDT), intent(in)               :: grid 
+    type(GridUDT), intent(inout)            :: grid 
+    type(MagneticFieldUDT), intent(in)      :: magneticField
+    type(EnvironmentUDT), intent(in)        :: environment
 
     ! Auxiliary
     character(:), allocatable               :: version, tempstring, fmt
     integer                                 :: fu 
-    
+
     ! Loop
-    integer(I8)                             :: i
+    integer(I8)                             :: i 
 
     ! Initialize
     !===========
@@ -48,8 +51,14 @@ subroutine WriteGOAT(goatoptions, grid)
     open (action='write', file=trim(goatoptions%writefilepath), newunit=fu, &
         status='unknown')
 
+    ! Recompute data
+    call UpdateGridData(grid, magneticField, environment)
+
+    ! Write
+    !======
     ! Associate
     associate(&
+        mf              => magneticField%interp,    &
         xv              => grid%vert%x,         &
         yv              => grid%vert%y,         &
         nv              => grid%vert%ntot,      &
@@ -106,8 +115,6 @@ subroutine WriteGOAT(goatoptions, grid)
         isClassicalGrid => grid%data%sglegacy%isclassicalgrid       &
         )
 
-    ! Write data 
-    !===========
     ! Version
     version = 'VERSION03.002.000 Matlab traduit.out.b2us'
     write(fu, '(a)') version 
@@ -162,7 +169,7 @@ subroutine WriteGOAT(goatoptions, grid)
 
     tempstring = '*cf: Vx vxX vxY vxPsi vxBx vxBy vxFfbz'
     write(fu, '(a)' ) tempstring 
-    fmt = '('//Ifm// ',' //repeat(Rfm, 6)//')'
+    fmt = '('//Ifm// ',' //repeat(spacefm // Rfm // ',', 5)// spacefm // Rfm //')'
     do i = 1, nv 
         write(fu, fmt) i, xv(i), yv(i), psiv(i), Bxv(i), Byv(i), ffbzv(i)
     end do
