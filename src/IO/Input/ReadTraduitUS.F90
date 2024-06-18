@@ -21,7 +21,6 @@ subroutine ReadTraduitUS(grid, filepath)
 
     integer                     :: filespec
     integer(I8)                 :: idum(0:9), idum2(1)    
-    character(10)               :: b2fgmtryversion
     integer(I8)                 :: nc, nf, nv, nfsFc, nftCv, nftFc
     character(*)               :: filepath
 
@@ -60,8 +59,12 @@ subroutine ReadTraduitUS(grid, filepath)
     open(unit = filespec, file = filepath)
     rewind(filespec)
 
-    ! First, read the header with the version
-    call cfverr(filespec,b2fgmtryversion)
+    ! First, read the header with the versionv - just ignore that alltogether
+    call ReadSingleLine(filespec, chardummy, reachedeof)
+    if (reachedeof) then 
+        call gdErrorHandler('ReadTraduitUS: reached EOF prematurely')
+    end if 
+    ! call cfverr(filespec,b2fgmtryversion)
 
     ! Primary array dimensions
     call cfruin (filespec,6,idum,'nCi,nFc,nVx,nCg,nFs,nFt')
