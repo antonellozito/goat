@@ -1131,8 +1131,13 @@ module mod_inputfileparser
                 elseif (isrepstart(i)) then 
                     ! Compute number of elements and add
                     nval = nval + tempintval(i+1)
-                elseif (isrepstart(i-1) .or. isarraystart(i-1)) then 
-                    ! Skip addition, already added before
+                elseif (i > 1) then 
+                    if (isrepstart(i-1) .or. isarraystart(i-1)) then 
+                        ! Skip addition, already added before
+                    else 
+                        ! Normal entry, +1
+                        nval = nval + 1
+                    end if 
                 else
                     ! Normal entry, +1
                     nval = nval + 1
@@ -1153,9 +1158,15 @@ module mod_inputfileparser
                     tempi = tempintval(i+1)
                     intval(k+1:k+tempi) = tempintval(i)
                     k = k + tempi
-                elseif (isrepstart(i-1) .or. isarraystart(i-1)) then 
-                    ! Skip addition, already added before
-                else
+                    elseif (i > 1) then 
+                        if (isrepstart(i-1) .or. isarraystart(i-1)) then 
+                            ! Skip addition, already added before
+                        else 
+                            ! Normal entry, +1
+                            intval(k+1) = tempintval(i)
+                            k = k + 1
+                        end if 
+                    else
                     ! Normal entry
                     intval(k+1) = tempintval(i)
                     k = k + 1
