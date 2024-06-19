@@ -1618,6 +1618,7 @@ module gdmod_constraints
             do i = 1, ntpind
                 if (cc(tpind(i)) < maxcc(tpind(i))) then 
                     ! Impose
+                    allocate(constraints%tangencypoints(i)%ID(1))
                     constraints%tangencypoints(i)%ID = tpind(i)
                     constraints%tangencypoints(i)%nID = 1
                     constraints%tangencypoints(i)%fsID = fieldlineID(tpind(i))
