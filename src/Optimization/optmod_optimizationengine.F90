@@ -1128,9 +1128,9 @@ module optmod_optimizationengine
                 activeineqconind = pack(ineqconind, A)
                 inactiveineqconind = pack(ineqconind, I)
                 hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
-                hessLJ = hessLJ%DeleteRows(inactiveineqconind)
+                hessLJ = hessLJ%DeleteRows([eqconind, ineqconind])
                 hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
-                hessLC = hessLC%DeleteRows(inactiveineqconind)
+                hessLC = hessLC%DeleteRows([eqconind, ineqconind])
                 allocate(dxl(neq + count(A)))
                 !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
                 !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
@@ -1138,7 +1138,7 @@ module optmod_optimizationengine
                 !dxl2 = -dxl2
                 call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
                     MatrixVectorProduct(hessLC%Transpose(), &
-                    (rhs([phiind, eqconind, activeineqconind]) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
+                    (rhs(phiind) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
                     dxl, flag)
 
                 !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))

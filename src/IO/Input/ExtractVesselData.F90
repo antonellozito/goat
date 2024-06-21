@@ -117,7 +117,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
             vID = vID + vs(i)%np 
 
             ! Add NaN
-            if (i .ne. nvs) then 
+            if (i .ne. (nvs - nexcl)) then 
                 tempx(cc+1) = NaN 
                 tempy(cc+1) = NaN 
                 templabels(cc+1, :) = 0
