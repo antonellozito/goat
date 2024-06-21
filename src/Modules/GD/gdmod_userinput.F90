@@ -420,6 +420,7 @@ module gdmod_userinput
 
         ! Fields for inequality constraints
         integer(I8)         :: linefolding ! prevent flux line folding
+        integer(I8)         :: invessel ! prevent vertices from moving out of the vessel structure
 
         ! Number of (continuous) constraints
         integer(I8)         :: neq ! number of equality constraints
@@ -690,6 +691,7 @@ module gdmod_userinput
         options%fixedfluxvalues     = 1
 
         options%linefolding         = 0
+        options%invessel            = 0 
 
         options%neq                 = 5
         options%nineq               = 0
@@ -1482,6 +1484,8 @@ module gdmod_userinput
         ! Inequality constraints
         field = 'gd.design.inec.linefolding'
         call ExtractOptionValueInteger0D(fid, field, options%linefolding)
+        field = 'gd.design.inec.invessel'
+        call ExtractOptionValueInteger0D(fid, field, options%invessel)
 
         ! Data writing
         field = 'gd.design.ec.writedata'

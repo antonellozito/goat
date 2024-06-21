@@ -1348,6 +1348,48 @@ module gdmod_optimizationengine
         ! Constraint counter
         cc = 0
 
+        ! Invessel
+        if (ineqcon%doinvessel) then 
+            
+            ! Associate
+            associate( &
+                vert          => ineqcon%invessel%vert,         &
+                nvert         => ineqcon%invessel%nvert         &
+                )
+
+            ! Set rules
+            fslegal = .true. 
+            rllegal = .true.
+            vertlegal = .true. 
+
+            ! Loop over all vertices
+            do i = 1, nvert
+                ! Update counter
+                cc = cc + 1
+
+                ! Attribute
+                call DetermineConstraintDofgroups([vert(i)], dofs, fslegal, rllegal, &
+                    vertlegal, hasfs, hasrl, groupindrl, groupindfs, vertrl, vertfs, nvertrl, &
+                    attributed, groupID)
+                
+                ! Add
+                congroups(cc)%dofgroups = groupID
+                isineqconattributed(cc) = attributed
+
+            end do 
+
+            if (any(.not. isineqconattributed(cc-nvert+1:cc))) then 
+                ! Throw warning, some constraints will not be set
+                print *, 'ConstructInequalityConstraintGroups: some ' // & 
+                    'invessel inequalities will never be active as ' // &
+                    'they could not be attributed'
+            end if
+           
+            ! Housekeeping
+            end associate
+        end if 
+
+
         ! Linefolding
         if (ineqcon%dolinefolding) then 
             

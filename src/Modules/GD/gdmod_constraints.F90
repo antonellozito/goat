@@ -407,6 +407,30 @@ module gdmod_constraints
 
     end type
 
+    ! In-vessel constraints
+    type, extends(BoundaryFunctionConstraintsUDT) :: InVesselConstraintsUDT
+
+        ! Description
+        !============
+        ! (inequality) constraints to keep vertices inside the vessel 
+        ! structure. May help for sudden geometry changes etc. Should 
+        ! eventually boil down in combination with flux function
+        ! constraints to moving the vertices (approximately) along the 
+        ! magnetic field lines. It is important to note that we assume
+        ! that the vessel is closed and that the interior is defined
+        ! by negative values of the vessel boundary representation. 
+        ! Therefore, we can inherit from the boundary constraints and 
+        ! we only need to overwrite the initialization of the 
+        ! constraints.
+
+        ! No additional fields to define
+
+    contains
+
+        procedure :: Initialize         => InitializeInVesselConstraints
+
+    end type
+
     ! Overarching types
     !==================
     ! Equality constraints
@@ -454,8 +478,10 @@ module gdmod_constraints
 
         ! Constraint switches
         logical                             :: dolinefolding = .false.
+        logical                             :: doinvessel = .false. 
 
-        type(LinefoldingConstraintsUDT)      :: linefolding
+        type(LinefoldingConstraintsUDT)     :: linefolding
+        type(InVesselConstraintsUDT)        :: invessel
 
     contains
 
@@ -1290,6 +1316,32 @@ module gdmod_constraints
 
         end if
 
+        ! Invessel
+        if (constraintoptions%invessel == 1) then 
+
+            ! Set the logical
+            constraints%doinvessel = .true.
+
+            ! Initialize
+            call constraints%invessel%Initialize(grid, &
+                magneticField, environment, monitor, designvariables, &
+                constraintoptions)
+
+            ! Add constraints number
+            constraints%nineqcon = constraints%nineqcon + &
+                constraints%invessel%ncon 
+
+            ! Print
+            print *, 'number of invessel constraints: ', &
+                constraints%invessel%ncon
+
+
+        else
+            ! Set to false, don't initialize
+            constraints%doinvessel = .false.
+
+        end if
+
     end subroutine
 
     ! Constraint evaluation
@@ -1335,6 +1387,10 @@ module gdmod_constraints
         type(MySparseUDT)               :: gradG_lf, hessG_lf, &
             dG_lfdvar, dgradG_lfdvar
 
+        real(R8), allocatable           :: G_iv(:), lambda_iv(:)
+        type(MySparseUDT)               :: gradG_iv, hessG_iv, &
+            dG_ivdvar, dgradG_ivdvar
+
         ! Initialize
         !===========
         ! Check inputs
@@ -1361,11 +1417,43 @@ module gdmod_constraints
         dGdvar = SpZeros(0, size(values, 1))
         dgradGdvar = SpZeros(designvariables%nphi, size(values))
 
+        
+        ! Invessel constraints
+        !---------------------
+        if (constraints%doinvessel) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%invessel%ncon)]
+
+            ! Allocate & initialize
+            lambda_iv = lambda(conindex)
+
+            ! Call the evaluation routine
+            call constraints%invessel%Evaluate(G_iv, &
+                gradG_iv, hessG_iv, &
+                grid, magneticField, environment, dogradient, &
+                dohessian, designvariables, &
+                lambda_iv, var, values, dG_ivdvar, dgradG_ivdvar)
+
+            ! Assign
+            G(conindex) = G_iv
+            if (dogradient) then 
+                gradG = gradG%Concatenate(gradG_iv, 2)
+            end if 
+            if (dohessian) then 
+                hessG = hessG + hessG_iv
+            end if 
+            dGdvar = dGdvar%Concatenate(dG_ivdvar, 1)
+            dgradGdvar = dgradGdvar + dgradG_ivdvar
+
+            ! Update the constraint counter
+            ic = ic + constraints%invessel%ncon
+
+        end if
+
         ! Linefolding constraints
         !------------------------
         if (constraints%dolinefolding) then 
             ! Construct the constraint index
-            allocate(conindex(constraints%linefolding%ncon))
             conindex = [(k, k = ic+1, ic+constraints%linefolding%ncon)]
 
             ! Allocate & initialize
@@ -1488,6 +1576,7 @@ module gdmod_constraints
         !===========
         ! Modules
         use gdmod_plots
+        use mod_definitions, only : targetID, vesselID
         implicit none
         
         ! Declare variables
@@ -1781,7 +1870,7 @@ module gdmod_constraints
             do i = 1, size(grid%bnd, 1)
                 select case (grid%bnd(i)%ID)
 
-                case (1, 5)
+                case (targetID, vesselID)
 
                     ! Get boundary vertices
                     tv = grid%bnd(i)%vert 
@@ -1808,7 +1897,7 @@ module gdmod_constraints
             do i = 1, size(grid%bnd, 1)
                 select case (grid%bnd(i)%ID)
 
-                case (1)
+                case (targetID)
 
                     ! Get the end vertices
                     tv = grid%Bnd(i)%vert([1, size(grid%Bnd(i)%vert, 1)])
@@ -1842,7 +1931,7 @@ module gdmod_constraints
 
                     ! Do nothing
 
-                case (5)
+                case (vesselID)
 
                     ! Get the vertices
                     tv = grid%Bnd(i)%vert
@@ -3062,6 +3151,9 @@ module gdmod_constraints
         ! desired, also extend this towards other boundaries/boundary
         ! descriptions and other nodes. 
 
+        ! Modules
+        use mod_definitions, only : targetID, vesselID
+
         ! Declare variables
         !==================
         ! Arguments
@@ -3114,7 +3206,7 @@ module gdmod_constraints
         do i = 1, size(grid%bnd)
 
             ! Check if target plate - hard coded here... 
-            if (any(grid%bnd(i)%ID == [1, 5])) then 
+            if (any(grid%bnd(i)%ID == [targetID, vesselID])) then 
 
                 ! Get the current vertices
                 allocate(tv(grid%bnd(i)%nvert))
@@ -3157,7 +3249,7 @@ module gdmod_constraints
         isconstrained = .false. 
         ic = 0
         do i = 1, size(grid%bnd)
-            if (any(grid%bnd(i)%ID == [1, 5])) then 
+            if (any(grid%bnd(i)%ID == [targetID, vesselID])) then 
 
                 ! Get the current vertices
                 allocate(tv(grid%bnd(i)%nvert))
@@ -5997,6 +6089,9 @@ module gdmod_constraints
         ! optimization problem (see FinalizeInitialization in the 
         ! gdmod_optimizationengine module)
 
+        ! Modules
+        use mod_definitions, only : coreID, outerboundaryID
+
         ! Declare variables
         !==================
         ! Arguments
@@ -6064,7 +6159,7 @@ module gdmod_constraints
         if (docoreflux) then 
             ! Determine core flux surface ID(s)
             do i = 1, size(grid%Bnd, 1)
-                if (grid%Bnd(i)%ID == 2) then ! core boundary ID hard coded here...
+                if (grid%Bnd(i)%ID == coreID) then ! core boundary ID hard coded here...
 
                     ! Get the fieldline IDs of these vertices
                     tvID = fieldlineID(grid%Bnd(i)%vert)
@@ -6156,7 +6251,7 @@ module gdmod_constraints
         if (doouterflux) then 
             ! Determine outer flux surface ID(s)
             do i = 1, size(grid%Bnd, 1)
-                if (any([grid%Bnd(i)%ID == [3]])) then ! outer boundary ID hard coded here...
+                if (any([grid%Bnd(i)%ID == [outerboundaryID]])) then ! outer boundary ID hard coded here...
 
                     ! Get the fieldline IDs of these vertices
                     tvID = fieldlineID(grid%Bnd(i)%vert)
@@ -6588,22 +6683,6 @@ module gdmod_constraints
 
         ! Loop
         integer(I8)                                 :: i, j
-
-        ! Checks
-        !=======
-        ! Are the design variable compatible?
-        select case (designvariables%type)
-
-        case ('coordinates_desiredflux')
-
-            ! All good
-
-        case default
-
-            ! All bad
-            call gdErrorHandler('InitializeFixedFluxvaluesConstraints: design variable type is incompatible')
-
-        end select
 
         ! Initialize
         !===========
@@ -7513,6 +7592,92 @@ module gdmod_constraints
         type(EnvironmentUDT), intent(in)            :: environment
 
 
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                       IN-VESSEL CONSTRAINTS                      !
+    !------------------------------------------------------------------!
+
+    ! Initialize
+    subroutine InitializeInVesselConstraints(constraints, &
+        grid, magneticField, environment, monitor, designvariables, &
+        options)
+
+        ! Description
+        !============
+        ! Initialize the line folding constraints. There are three 
+        ! line folding 'types': poloidal, radial, and vessel. Each of 
+        ! these depends on a different coordinate field: poloidal is 
+        ! simply the poloidal magnetic field vector, radial a direction
+        ! perpendicular in the 2D plane, and vessel is the coordinate
+        ! direction that follows vessel contours. 
+
+        ! Notes
+        !======
+
+        ! Modules
+        use mod_definitions, only : targetID, vesselID
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(InVesselConstraintsUDT)               :: constraints
+        type(GridUDT)                               :: grid 
+        type(MagneticFieldUDT)                      :: magneticField 
+        type(EnvironmentUDT)                        :: environment 
+        type(ConstraintsMonitorUDT)                 :: monitor
+        type(ConstraintOptionsUDT)                  :: options
+        class(DesignVariablesGDUDT)                 :: designvariables
+
+        ! Auxiliary
+        logical, allocatable                        :: isconstrained(:)
+
+        ! Loop
+        integer(I8)                                 :: i
+
+        ! Associate
+        associate(&
+            vessel      => environment%vessel  &
+            )
+
+        ! Bookkeeping of constrained vertices (to prevent imposing 
+        ! constraint twice)
+        allocate(isconstrained(grid%vert%ntot))
+        isconstrained = .true. ! constrain all, but ignore boundary         
+
+        ! Construct boundary
+        !===================
+        ! Should already be constructed in vessel - assign
+        constraints%plf = vessel%plfvessel
+
+        ! Visualize 
+        call constraints%plf%Visualize('constraints_invessel_plf')
+
+        ! Set the constraints
+        !====================
+        ! Kick out vertices that are fixed on the boundary
+        constraints%ncon = 0
+        constraints%nvert = 0        
+        do i = 1, size(grid%bnd)
+
+            ! Check if target plate - hard coded here... 
+            if (any(grid%bnd(i)%ID == [targetID, vesselID])) then 
+
+                ! Get the current vertices, set to false
+                isconstrained(grid%bnd(i)%vert) = .false. 
+
+            end if
+
+        end do        
+
+        ! Add
+        constraints%vert = pack([(i, i = 1, grid%vert%ntot)], isconstrained)
+        constraints%nvert = size(constraints%vert)
+        constraints%ncon = constraints%nvert
+
+        ! End associate
+        end associate
+        
     end subroutine
 
     
