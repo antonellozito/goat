@@ -350,6 +350,8 @@ module goatmod_types
         ! - OMPcell, OMPface    : cells and faces belonging to outer mid
         !                       plane
         ! - IMPcell, IMPface    : same, but inner mid plane
+        ! - OMPr, OMPz          : points defining line segment of OMP
+        ! - IMPr, IMPz          : same but for inner mid plane
         ! - xpointID            : array containing all X-point vertex IDs
         ! - nxp                 : number of x-points
 
@@ -367,6 +369,8 @@ module goatmod_types
             IMPcell, IMPface
         integer(I8)                             :: nOMPcell, nOMPface, &
             nIMPcell, nIMPface
+        real(R8), dimension(1:2)                :: OMPr, OMPz, IMPr, &
+            IMPz
 
         ! X-point(s)
         integer(I8), allocatable                :: xpointID(:)
