@@ -101,6 +101,55 @@ module mod_readwrite
 
     end subroutine
 
+    ! Read until substring is found in line (position is next line)
+    subroutine ReadUntilFound(fid, substring, reachedeof)
+
+        ! Description
+        !============
+        ! This routine keeps reading next lines until either the 
+        ! a line contains the desired substring or until the end of file
+        ! has been reached. Note that the current line being read in
+        ! may depend on previous read statements and is not reset here!
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer, intent(in)             :: fid 
+        character(*), intent(in)        :: substring
+        logical, intent(out)            :: reachedeof
+
+        ! Auxiliary
+        character(:), allocatable       :: thisline
+        
+        ! Loop
+        logical                         :: isnotfound 
+
+        ! Initialize
+        !===========
+        isnotfound = .true. 
+        reachedeof = .false. 
+
+        ! Loop
+        !=====
+        do while (isnotfound .and. (.not. reachedeof))
+
+            ! Read next line
+            call ReadSingleLine(fid, thisline, reachedeof)
+
+            ! Check 
+            if (reachedeof) then 
+                ! Will exit, do nothing
+            end if 
+            if (index(thisline, substring) /= 0) then 
+                ! Substring found, exit
+                isnotfound = .false. 
+            end if
+
+        end do
+
+
+    end subroutine
+
     
 
 end module
