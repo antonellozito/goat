@@ -27,5 +27,8 @@ src/Visualization/Python/*.pyc
 # ignore output files
 *.out
 
+# ignore run directory
+Runs/*
+
 
 
