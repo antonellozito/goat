@@ -3275,7 +3275,7 @@ module gdmod_constraints
                 nv = count(mask)
 
                 ! Add these nodes
-                constraints%vert(ic+1:nv) = pack(tv, mask)
+                constraints%vert(ic+1:ic+nv) = pack(tv, mask)
                 
                 ! Update counter
                 ic = ic + nv
