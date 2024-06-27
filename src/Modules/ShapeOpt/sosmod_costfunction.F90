@@ -209,7 +209,7 @@ module sosmod_costfunction
             state_avgb, J1, J1b)
 
         ! Extract and cast into our precision format
-        J = real(J1(0), kind=R8_G) ! assumed first entry is total cost function
+        J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
         gradJ = real([gb%vxx, gb%vxy, gb%vxfpsi, gb%vxbx, gb%vxby, &
             gb%vxffbz], kind=R8_G)
         
