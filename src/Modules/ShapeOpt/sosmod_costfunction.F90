@@ -193,7 +193,7 @@ module sosmod_costfunction
             gb              => costfunction%gb,             &
             mpg             => costfunction%mpg,            &
             mpgb            => costfunction%mpgb,           &
-            st              => costfunction%stb,            &
+            st              => costfunction%st,             &
             state_ext       => costfunction%state_ext,      &
             state_extb      => costfunction%state_extb,     &
             state_avg       => costfunction%state_avg,      &
