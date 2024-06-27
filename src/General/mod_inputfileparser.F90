@@ -800,6 +800,11 @@ module mod_inputfileparser
 
         ! Check string
         !=============
+        if (len(curline) < 1) then 
+            ! Empty, return
+            return 
+        end if 
+        
         if ( ((curline(1:1) == commentchar)) .or. (ndelim < 4) ) then ! Comment or bogus line
             ! No key-value pair present
         else
