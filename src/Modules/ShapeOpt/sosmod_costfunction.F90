@@ -23,8 +23,8 @@ module sosmod_costfunction
     use b2mod_main_diff, only : b2mn_init_b
     use b2us_geo_diff
     use b2us_plasma_diff
-    use b2mod_agdr_diff, only : b2agdr_opt, b2agdr_opt_b, b2agdr_init, &
-        b2agdr_init_b, b2agdr_write, b2agdr_fin, b2agdr_fin_b
+    !use b2mod_agdr_diff, only : b2agdr_opt, b2agdr_opt_b, b2agdr_init, &
+    !    b2agdr_init_b, b2agdr_write, b2agdr_fin, b2agdr_fin_b
     use b2mod_par_opt_diff
     use somod_costfunction 
     use gdmod_optimizationengine
@@ -73,8 +73,6 @@ module sosmod_costfunction
         type(geometry_diff)     :: gb ! geometry derivatives 
         type(b2state)           :: st ! state
         type(b2state_diff)      :: stb ! state derivatives
-        type(switches)          :: switches 
-        type(switches_diff)     :: switches_diff
         type(b2stateext)        :: state_ext 
         type(b2stateext_diff)   :: state_extb
         type(b2average)         :: state_avg 

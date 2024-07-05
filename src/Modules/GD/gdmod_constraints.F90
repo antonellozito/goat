@@ -1611,6 +1611,20 @@ module gdmod_constraints
 
         ! Initialize
         !===========
+        ! Check allocation status
+        if (allocated(constraints%tangencypoints)) then 
+            deallocate(constraints%tangencypoints)
+        end if
+        if (allocated(constraints%specialpoints)) then 
+            deallocate(constraints%specialpoints)
+        end if
+        if (allocated(constraints%fixedpoints)) then 
+            deallocate(constraints%fixedpoints)
+        end if
+        if (allocated(constraints%fluxsurfaces)) then 
+            deallocate(constraints%fluxsurfaces)
+        end if
+
         ! Number of constraints
         constraints%ncon = 0
 
@@ -3180,6 +3194,11 @@ module gdmod_constraints
 
         ! Initialize
         !===========
+        ! Check allocation
+        if (allocated(constraints%vert)) then 
+            deallocate(constraints%vert)
+        end if 
+
         ! Associate
         associate(&
             vessel      => environment%vessel  &
@@ -3891,6 +3910,10 @@ module gdmod_constraints
 
         ! Initialize
         !===========
+        ! Check allocation
+        if (allocated(constraints%xpind)) then 
+            deallocate(constraints%xpind)
+        end if 
 
         ! Get x-points
         !=============
@@ -3912,7 +3935,7 @@ module gdmod_constraints
         allocate(constraints%xpind(count(mask)))
         constraints%xpind = pack(xpind, mask)
 
-        ! Get current coordinates, assign
+        ! Get current§ coordinates, assign
         constraints%locx = grid%vert%x(constraints%xpind)
         constraints%locy = grid%vert%y(constraints%xpind)
 
@@ -4620,6 +4643,14 @@ module gdmod_constraints
 
         ! Initialize
         !===========
+        ! Check allocation
+        if (allocated(constraints%edgevert)) then
+            deallocate(constraints%edgevert) 
+        end if 
+        if (allocated(constraints%d)) then 
+            deallocate(constraints%d)
+        end if
+
         ! Associate
         associate(&
             vert        => grid%vert,           &
@@ -5297,6 +5328,11 @@ module gdmod_constraints
 
         ! Initialize
         !===========
+        ! Check allocation
+        if (allocated(constraints%edgevert)) then 
+            deallocate(constraints%edgevert)
+        end if 
+
         ! Associate
         associate(&
             interp      => magneticField%interp,    &
@@ -6119,6 +6155,11 @@ module gdmod_constraints
 
         ! Checks
         !=======
+        ! Allocation status
+        if (allocated(constraints%psiind)) then 
+            deallocate(constraints%psiind)
+        end if 
+
         ! Are the design variable compatible?
         select case (designvariables%type)
 
@@ -7679,6 +7720,9 @@ module gdmod_constraints
         end associate
         
     end subroutine
+
+    ! Update
+
 
     
 

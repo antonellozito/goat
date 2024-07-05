@@ -300,6 +300,15 @@ module gdmod_optimizationengine
 
         ! Design variables
         !=================
+        ! Check if already allocated
+        if (allocated(problem%designvariables)) then 
+            ! Print and deallocate
+            print *, 'InitializeOptimizationProblemGD: design variables ' // & 
+                'already allocated, reinitializing...'
+
+            deallocate(problem%designvariables)
+        end if 
+
         ! Allocate the design variables, depending on the type.
         select case (trim(problem%designoptions%variables%type))
 
@@ -332,6 +341,14 @@ module gdmod_optimizationengine
         
         ! Cost function
         !==============
+        if (allocated(problem%costfunction)) then 
+            ! Print and deallocate
+            print *, 'InitializeOptimizationProblemGD: cost function ' // & 
+                'already allocated, reinitializing...'
+
+            deallocate(problem%costfunction)
+        end if
+        
         ! Allocate the cost function, depending on the type
         select case (trim(problem%designoptions%costfunction%type))
 
@@ -413,6 +430,13 @@ module gdmod_optimizationengine
             problem%designvariables, problem%designoptions%constraints)
 
         ! Set Lagrange multipliers
+        if (allocated(problem%lambda)) then 
+            deallocate(problem%lambda)
+        end if 
+        if (allocated(problem%mu)) then 
+            deallocate(problem%mu)
+        end if 
+
         allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
             problem%mu(problem%constraints%ineqcon%nineqcon))
         problem%lambda = 0
@@ -734,7 +758,8 @@ module gdmod_optimizationengine
         character(*), intent(in)            :: updatemeth 
 
         ! Auxiliary
-        logical                             :: upconbnd, upconlf
+        logical                             :: upconbnd, upconlf, &
+            upconiv
 
         integer(I8)                         :: np
 
@@ -755,6 +780,7 @@ module gdmod_optimizationengine
         ! Set initial switches to update cost function and constraints
         upconbnd    = .false. 
         upconlf     = .false.
+        upconiv     = .false.
 
         ! Update parameters
         !==================
@@ -774,6 +800,7 @@ module gdmod_optimizationengine
             ! update
             upconbnd    = .true. 
             upconlf     = .true.
+            upconiv     = .true.
 
         case default
 
@@ -799,6 +826,12 @@ module gdmod_optimizationengine
             call problem%constraints%ineqcon%linefolding%Update(grid, &
                 magneticField, environment)
         end if
+
+        ! In vessel constraints
+        if (upconiv .and. problem%constraints%ineqcon%doinvessel) then 
+            call problem%constraints%ineqcon%invessel%Update(grid, &
+                magneticField, environment)
+        end if 
 
         ! Housekeeping
         !=============
@@ -1109,6 +1142,12 @@ module gdmod_optimizationengine
         end if 
 
         ! Allocate
+        if (allocated(problem%congroups)) then 
+            deallocate(problem%congroups)
+        end if 
+        if (allocated(problem%dofgroups)) then 
+            deallocate(problem%dofgroups)
+        end if 
         allocate(hasrl(nv), hasfs(nv), nvertrl(nv), vertfs(nv))
         allocate(vertrl(nv, maxval(grid%vert%neigP(:, 2)))) ! vertex can belong to multiple radial lines if x-point... initialized too big here
         allocate(dofs(nv + nfs + nrl), problem%dofgroups(nv + nfs + nrl))

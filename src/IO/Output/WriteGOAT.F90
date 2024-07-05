@@ -48,14 +48,14 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     end if 
 
     ! Open file, overwrite if existing
-    open (action='write', file=trim(goatoptions%writefilepath), newunit=fu, &
+    open (action='write', file=trim('traduit.out_' // goatoptions%writefilepath // '.b2us'), newunit=fu, &
         status='unknown')
 
     ! Recompute data
     call UpdateGridData(grid, magneticField, environment)
 
-    ! Write
-    !======
+    ! Write grid (unstructured traduit format)
+    !=========================================
     ! Associate
     associate(&
         mf              => magneticField%interp,    &
@@ -258,12 +258,14 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     write(fmt, *) '(', 12, '(', Ifm, '))'  
     write(fu, fmt) fsface(1:fsfaceP(nfs, 1)+fsfaceP(nfs, 2)-1)
 
-
-
     ! Housekeeping
     !=============
     ! Close file
     close (fu)
+
+    ! Write vessel
+    !=============
+    call environment%vessel%polygonset%WriteData(goatoptions%writefilepath // '_vesselpolygonset')
 
     ! End associate
     end associate

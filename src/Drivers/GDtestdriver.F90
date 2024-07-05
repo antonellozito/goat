@@ -18,8 +18,9 @@ subroutine GDtestdriver(goatoptions)
     type(OptimizationEngineGDUDT)           :: optimizationdriver
     
     ! Auxiliary
-    real(R8)                        :: dist, angle
-    real(R8), allocatable           :: xv(:), yv(:), dx(:), dy(:)
+    real(R8)                            :: dist, angle
+    real(R8), allocatable, dimension(:) :: xv, yv, dx, dy, bx, by, &
+        dpsidx, dpsidy
 
     integer(I8)                     :: nv, incr 
 
@@ -33,7 +34,7 @@ subroutine GDtestdriver(goatoptions)
     !===========
     ! Set distance to move vessel vertices
     dist = 1e-1
-    angle = 0.0*pi_R8/4
+    angle = -pi_R8/2
     incr = 100
 
     ! Set up optimization problem
@@ -81,15 +82,30 @@ subroutine GDtestdriver(goatoptions)
     select type(problem)
 
     type is (OptimizationProblemGDUDT)
-
+        allocate(dpsidx(size(xv)), dpsidy(size(xv)), bx(size(xv)), by(size(xv)))
         do i = 1, incr 
             ! Print
             print *, '================================================='
             print *, '          vessel geometry iteration ', i 
             print *, '================================================='
+            
             ! Update geometry
-            dx = dist*cos(angle)*(real(1, kind=R8)/real(incr, kind=R8))
-            dy = dist*sin(angle)*(real(1, kind=R8)/real(incr, kind=R8))
+            !----------------
+            ! Simple linear distance based
+            !dx = dist*cos(angle)*(real(1, kind=R8)/real(incr, kind=R8))
+            !dy = dist*sin(angle)*(real(1, kind=R8)/real(incr, kind=R8))
+            !xv = xv + dx 
+            !yv = yv + dy
+
+            ! Based on normalized magnetic field vector
+            call problem%magneticField%interp%Evaluate(xv, yv, 1, 0, dpsidx)
+            call problem%magneticField%interp%Evaluate(xv, yv, 0, 1, dpsidy)
+            bx = -dpsidy/(sqrt(dpsidx**2 + dpsidy**2))
+            by = dpsidx/(sqrt(dpsidx**2 + dpsidy**2))
+
+            dx = dist*bx*(real(1, kind=R8)/real(incr, kind=R8))
+            dy = dist*by*(real(1, kind=R8)/real(incr, kind=R8))
+
             xv = xv + dx 
             yv = yv + dy
 
