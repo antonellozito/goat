@@ -1,11 +1,45 @@
 # A very simple and straightforward makefile without too many options 
-# yet. To be improved in the future. 
+# yet. To be improved in the future. An attempt has been made to clean
+# up the compilation and linking steps etc by moving all .o and .mod
+# files into a build directory that is constructed during compilation
 
 # Include the config file
 include config.mk
 
 # Set the compiler in case of SOLPS
 shapeopt_solps : FC = ifort 
+
+# Echo the different environment variables 
+$(info % ===========================)
+$(info % Executing the goat makefile)
+$(info % ===========================)
+$(info % )
+$(info % General environment variables)
+$(info % -----------------------------)
+$(info % fortran compiler: $(FC))
+$(info % C compiler: $(CC))
+$(info % Build directory: $(BUILDDIR))
+$(info % )
+$(info % SOLPS specific environment variables)
+$(info % ------------------------------------)
+$(info % running at host: $(HOST_NAME))
+$(info % solps path: $(SOLPSPATH))
+$(info % B2.5 build path: $(BUILDDIR))
+$(info % B2.5 libary path: $(B25LIBPATH))
+
+## %===================================================================%
+## %                                                                   %
+## %                          PRELIMINARIES                            %
+## %                                                                   %
+## %===================================================================%
+## Construction of directories
+## %==========================
+## CREATE_BUILDDIR: construct build directory based on BUILDDIR environment variable
+CREATE_BUILDDIR := $(shell mkdir $(BUILDDIR))
+
+## CREATE_EXEDIR: construct executable directory 
+CREATE_EXEDIR := $(shell mkdir ./executables)
+
 
 ##
 ## %===================================================================%
@@ -23,140 +57,175 @@ shapeopt_solps : FC = ifort
 ## goattranslator: Create executable for GOAToptions file translator
 ## shapeopt 	: Create executable for shape optimization with goat
 
-goat: $(GOAT_TARGETS) goat.o
-	$(FC) -o goat *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+goat: $(addprefix $(BUILDDIR)/, $(GOAT_TARGETS)) $(BUILDDIR)/goat.o
+	-mv -f *.o $(BUILDDIR);  
+	-mv -f *.mod $(BUILDDIR); 
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/goat.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+	-I $(SUITESPARSEPATH) -I src/Clayer/Include; 
+	rm $(BUILDDIR)/goat.o; 
+	cp $(BUILDDIR)/goat.exe $(GOAT_EXECUTABLES)
+
+goattranslator: $(addprefix $(BUILDDIR)/,$(GOATTRANSLATOR_TARGETS) ) $(BUILDDIR)/goattranslator.o 
+	-mv -f *.o $(BUILDDIR);  
+	-mv -f *.mod $(BUILDDIR); 
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/goattranslator.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
+	rm $(BUILDDIR)/TranslateGOAToptionsFile.o; 
+	cp $(BUILDDIR)/goattranslator.exe $(GOAT_EXECUTABLES)
 
-goattranslator: $(GOATTRANSLATOR_TARGETS) goattranslator.o 
-	$(FC) -o goattranslator *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+tests: $(addprefix $(BUILDDIR)/,$(TEST_TARGETS) ) $(BUILDDIR)/tests.o 
+	-mv -f *.o $(BUILDDIR);  
+	-mv -f *.mod $(BUILDDIR); 
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/tests.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
+	rm $(BUILDDIR)/tests.o; 
+	cp $(BUILDDIR)/tests.exe $(GOAT_EXECUTABLES)
 
-tests: $(TEST_TARGETS) tests.o 
-	$(FC) -o tests *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+gdrun: $(addprefix $(BUILDDIR)/,$(GDRUN_TARGETS) ) $(BUILDDIR)/MainRunFileGridDeformation.o
+	-mv -f *.o $(BUILDDIR);  
+	-mv -f *.mod $(BUILDDIR); 
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/gdrun.exe $(BUILDDIR)/*.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
+	rm $(BUILDDIR)/gdrun.o; 
+	cp $(BUILDDIR)/gdrun.exe $(GOAT_EXECUTABLES)
+
+testc: $(addprefix $(BUILDDIR)/,$(CTEST_TARGETS) ) $(BUILDDIR)/testc.o 
+	-mv -f *.o $(BUILDDIR);  
+	-mv -f *.mod $(BUILDDIR); 
+	$(CC) $(LFLAGS) -o $(BUILDDIR)/testc.exe $(BUILDDIR)/*.o -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
+	rm $(BUILDDIR)/Testc.o; 
+	cp $(BUILDDIR)/testc.exe $(GOAT_EXECUTABLES)
+
+shapeopt: $(addprefix $(BUILDDIR)/, $(SHAPEOPT_TARGETS) ) $(BUILDDIR)/shapeopt.o 
+	-mv -f *.o $(BUILDDIR);  
+	-mv -f *.mod $(BUILDDIR); 
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
+	rm $(BUILDDIR)/ShapeOptimization.o; 
+	cp $(BUILDDIR)/shapeopt.exe $(GOAT_EXECUTABLES)
 
-gdrun: $(GDRUN_TARGETS) MainRunFileGridDeformation.o
-	$(FC) -o gdrun *.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
-
-testc: $(CTEST_TARGETS) testc.o 
-	$(CC) -o testc *.o -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
-
-shapeopt: $(SHAPEOPT_TARGETS) shapeopt.o 
-	$(FC) -o shapeopt *.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
-	-I $(SUITESPARSEPATH) -I src/Clayer/Include
-
-shapeopt_solps: $(SHAPEOPTSOLPS_TARGETS) shapeopt.o 
-	$(FC) -o shapeopt *.o ../solps-iter/modules/B2.5/builds/standalone.LEUVEN.ifort64.adj_shape/adStack.o ../solps-iter/modules/B2.5/builds/standalone.LEUVEN.ifort64.adj_shape/b2mod_cdf.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25ADJLIBPATH) -L$(B25ADJLIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf `nf-config --flibs`
+shapeopt_solps: $(addprefix $(BUILDDIR)/,$(SHAPEOPTSOLPS_TARGETS) ) $(BUILDDIR)/shapeopt_solps.o 
+	-mv -f *.o $(BUILDDIR);  
+	-mv -f *.mod $(BUILDDIR); 
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt_solps $(BUILDDIR)/*.o $(B25LIBBPATH)/adStack.o \
+	 $(B25LIBBPATH)/b2mod_cdf.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) \
+	 -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
+	rm $(BUILDDIR)/ShapeOptimization.o; 
+	cp $(BUILDDIR)/shapeopt_solps.exe $(GOAT_EXECUTABLES)
 
 
 ## % Runfiles
 ## %=========
 ## MainRunFileGridDeformation.o			: main runfile grid deformation
 # Compiling
-MainRunFileGridDeformation.o: Runfiles/MainRunFileGridDeformation.F90
+$(BUILDDIR)/MainRunFileGridDeformation.o: Runfiles/MainRunFileGridDeformation.F90
 	$(FC) $(CFLAGS) Runfiles/MainRunFileGridDeformation.F90 
 
 ## Goat.o 			: main run file goat
-goat.o: Runfiles/Goat.F90
-	$(FC) $(CFLAGS) Runfiles/Goat.F90 
+$(BUILDDIR)/goat.o: Runfiles/Goat.F90
+	$(FC) $(CFLAGS) Runfiles/Goat.F90 -I$(BUILDDIR)
 
 ## Tests.o 			: all tests
-tests.o: Runfiles/Tests.F90 
-	$(FC) $(CFLAGS) Runfiles/Tests.F90 
+$(BUILDDIR)/tests.o: Runfiles/Tests.F90 
+	$(FC) $(CFLAGS) Runfiles/Tests.F90 -I$(BUILDDIR)
 
 ## Testc.o 			: C layer tests
-testc.o: Runfiles/Testc.c 
-	$(CC) $(CCFLAGS) Runfiles/Testc.c -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
+$(BUILDDIR)/testc.o: Runfiles/Testc.c 
+	$(CC) $(CCFLAGS) Runfiles/Testc.c -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include -I$(BUILDDIR)
 
 ## goattranslator.o	: translator
-goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
-	$(FC) $(CFLAGS) Runfiles/TranslateGOAToptionsFile.F90 
+$(BUILDDIR)/goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
+	$(FC) $(CFLAGS) Runfiles/TranslateGOAToptionsFile.F90  -I$(BUILDDIR)
 
 ## shapeopt.o		: shape optimization 
-shapeopt.o : Runfiles/ShapeOptimization.F90 
-	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 $(DEFINEFLAGS) 
+$(BUILDDIR)/shapeopt.o : Runfiles/ShapeOptimization.F90 
+	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR)
+
+## shapeopt_solps.o		: shape optimization with solps
+$(BUILDDIR)/shapeopt_solps.o : Runfiles/ShapeOptimization.F90 
+	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR)
+
 ##
 ## % Folder compilation targets
 ## %===========================
 ## Constants 		: compile files containing constants
-Constants: $(CONSTANTS_FILES) 
-	$(FC) $(CFLAGS) $^
-	touch Constants 
+$(BUILDDIR)/Constants: $(CONSTANTS_FILES) 
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Constants 
 
 ## General 			: compile general files and modules
-General: $(GENERAL_FILES)
-	$(FC) $(CFLAGS) $^
-	touch General
+$(BUILDDIR)/General: $(GENERAL_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/General
 	
 ## Modules			: compile modules 
-Modules: $(MODULE_FILES)
-	$(FC) $(CFLAGS) $^
-	touch Modules
+$(BUILDDIR)/Modules: $(MODULE_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Modules
 
 ## Auxiliary			: compile auxiliary routines
-Auxiliary: $(AUXILIARY_FILES)
-	$(FC) $(CFLAGS) $^
-	touch Auxiliary
+$(BUILDDIR)/Auxiliary: $(AUXILIARY_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Auxiliary
 
 ## Drivers			: compile all driver routines
-Drivers: $(DRIVER_FILES)
-	$(FC) $(CFLAGS) $^
-	touch Drivers
+$(BUILDDIR)/Drivers: $(DRIVER_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Drivers
 
 ## Setup			: compile all setup routines
-Setup: $(SETUP_FILES)
-	$(FC) $(CFLAGS) $^
-	touch Setup
+$(BUILDDIR)/Setup: $(SETUP_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Setup
 
 ## IO_output 			: compile output routines
-IO_output: $(OUTPUT_FILES)
-	$(FC) $(CFLAGS) $^
-	touch IO_output
+$(BUILDDIR)/IO_output: $(OUTPUT_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/IO_output
 
 ## IO_input			: compile input routines
-IO_input: $(INPUT_FILES)
-	$(FC) $(CFLAGS) $^
-	touch IO_input
+$(BUILDDIR)/IO_input: $(INPUT_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/IO_input
 
 ## IO_b25			: compile b25 routines
-IO_b25: $(B25_FILES)
-	$(FC) $(CFLAGS) $^
-	touch IO_b25
+$(BUILDDIR)/IO_b25: $(B25_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/IO_b25
 
 ## IO_carre			: compile carre routines
-IO_carre: $(CARRE_FILES)
-	$(FC) $(CFLAGS) $^
-	touch IO_carre
+$(BUILDDIR)/IO_carre: $(CARRE_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/IO_carre
 
 ## Numerics		 	: compile numerics routines
-Numerics: $(NUMERICS_FILES)
-	$(FC) $(CFLAGS) $^
-	touch Numerics
+$(BUILDDIR)/Numerics: $(NUMERICS_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Numerics
 
 ## Optimization		 	: compile optimization routines
-Optimization: $(OPTIMIZATION_FILES)
-	$(FC) $(CFLAGS) $^
-	touch Optimization
+$(BUILDDIR)/Optimization: $(OPTIMIZATION_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Optimization
 
 ## Clayer 				: compile C interlayer routines
-Clayer: $(CLAYER_FILES)
-	$(CC) $(CCFLAGS) $^ -I $(SUITESPARSEPATH) -I src/Clayer/Include
-	touch Clayer
+$(BUILDDIR)/Clayer: $(CLAYER_FILES)
+	$(CC) $(CCFLAGS) $^ -I $(SUITESPARSEPATH) -I src/Clayer/Include -I$(BUILDDIR)
+	touch $(BUILDDIR)/Clayer
 
 ## ClayerF 				: compile fortran modules in Clayer
-ClayerF: $(CLAYERF_FILES)
-	$(FC) $(CFLAGS) $^
-	touch ClayerF
+$(BUILDDIR)/ClayerF: $(CLAYERF_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/ClayerF
 
 ## ShapeOptimization 			: compile shape optimization modules
-ShapeOptimization: $(SHAPEOPT_FILES)
-	$(FC) $(CFLAGS) $(DEFINEFLAGS) $^
-	touch ShapeOptimization
+$(BUILDDIR)/ShapeOptimization: $(SHAPEOPT_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/ShapeOptimization
 
 ## ShapeOptimizationSolps 			: compile shape optimization modules for SOLPS
-ShapeOptimizationSolps: $(SHAPEOPTSOLPS_FILES)
-	$(FC) $(CFLAGS) -I$(B25LIBPATH) -I$(B25ADJLIBPATH) $(DEFINEFLAGS) -L$(B25ADJLIBPATH) -l:libb2.a -lnetcdf $^ 
-	touch ShapeOptimizationSolps
+$(BUILDDIR)/ShapeOptimizationSolps: $(SHAPEOPTSOLPS_FILES)
+	$(FC) $(CFLAGS) -I$(B25LIBPATH) -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -lnetcdf $^ 
+	touch $(BUILDDIR)/ShapeOptimizationSolps 
 
 
 ##
