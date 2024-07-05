@@ -54,6 +54,7 @@ module BicubicSplineInterpolant
     !============
     ! Load modules
     use mod_precision 
+    use mod_errorhandler
 
     ! The usual
     implicit none

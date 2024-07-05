@@ -86,6 +86,7 @@ module mod_polygon
     !============
     ! Load modules
     use mod_precision
+    use mod_errorhandler
     use, intrinsic :: ieee_arithmetic
     use mod_plotter
 
@@ -1453,7 +1454,7 @@ module mod_polygon
         !==================
         ! Arguments
         class(PolygonSetUDT)                    :: polygonset 
-        character(:), allocatable,  intent(in)  :: filepath
+        character(*),  intent(in)               :: filepath
 
         ! Auxiliary
         integer(I8)                             :: ndata 

@@ -61,6 +61,7 @@ module PolygonShapeFunction
     ! Load modules
     use mod_precision
     use mod_plotter
+    use mod_errorhandler
 
     ! The usual
     implicit none

@@ -15,6 +15,7 @@ module Interpolant2D_auxiliaries
     !============
     ! Load modules
     use mod_precision
+    use mod_errorhandler
 
     implicit none
 

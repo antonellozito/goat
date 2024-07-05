@@ -86,6 +86,7 @@ module mod_inputfileparser
     use mod_precision
     use mod_specialchars 
     use mod_readwrite 
+    use mod_errorhandler
 
     implicit none 
     save
