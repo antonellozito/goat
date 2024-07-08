@@ -49,7 +49,6 @@ program Goat
     ! Auxiliary
     type(GoatoptionsUDT)        :: goatoptions
     character(:), allocatable   :: filepath
-    integer                     :: iostat
 
     ! Initialize
     !===========
