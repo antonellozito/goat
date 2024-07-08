@@ -65,7 +65,7 @@ goat: $(addprefix $(BUILDDIR)/, $(GOAT_TARGETS)) $(BUILDDIR)/goat.o
 	-mv -f *.mod $(BUILDDIR); 
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/goat.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include; 
-	rm $(BUILDDIR)/goat.o; 
+	rm $(BUILDDIR)/Goat.o; 
 	cp $(BUILDDIR)/goat.exe $(GOAT_EXECUTABLES)
 
 goattranslator: $(addprefix $(BUILDDIR)/,$(GOATTRANSLATOR_TARGETS) ) $(BUILDDIR)/goattranslator.o 
