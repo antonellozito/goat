@@ -18,6 +18,9 @@ module goatmod_userinput
     use mod_precision
     use mod_readwrite
     use mod_inputfileparser
+    use mod_global_environment, only: solps, solps_inputfilepath, &
+        solps_writefilepath, solps_gridfilepath, solps_magneticfieldfilepath, &
+        solps_structurefilepath
 
     ! The usual
     implicit none
@@ -356,7 +359,12 @@ module goatmod_userinput
         class(GoatoptionsUDT)       :: options        
         
         ! Input file
-        options%inputfilepath    = './GOAToptions.dat'
+        if (solps) then 
+            ! SOLPS defaults
+            options%inputfilepath    = solps_inputfilepath
+        else
+            options%inputfilepath    = './GOAToptions.dat'
+        end if 
 
         ! General
         options%debug           = .false. 
@@ -364,12 +372,24 @@ module goatmod_userinput
         options%gdinputfilepath = './GOAToptions.dat'
 
         ! Specify input filenames
-        options%gridfilepath            = './traduit.out.b2us'
-        options%structurefilepath       = './structure.dat'
-        options%magneticfieldfilepath   = './rzpsi.dat'
+        if (solps) then 
+            ! SOLPS defaults
+            options%gridfilepath            = solps_gridfilepath
+            options%structurefilepath       = solps_structurefilepath
+            options%magneticfieldfilepath   = solps_magneticfieldfilepath
+        else
+            options%gridfilepath            = './traduit.out.b2us'
+            options%structurefilepath       = './structure.dat'
+            options%magneticfieldfilepath   = './rzpsi.dat'
+        end if 
 
         ! Output options
-        options%writefilepath       = 'traduit.out.b2us_smoothed'
+        if (solps) then 
+            ! SOLPS defaults
+            options%writefilepath   = solps_writefilepath
+        else
+            options%writefilepath       = 'traduit.out.b2us_smoothed'
+        end if 
         options%write_final         = .true. 
         options%write_traduitb2us   = .true.
         options%write_b2agdat       = .true. 
@@ -564,12 +584,13 @@ module goatmod_userinput
         integer                         :: openstatus 
         character(:), allocatable       :: field
         integer, parameter              :: fid = 10 
-        logical                         :: reachedeof
+        logical                         :: reachedeof, throwerror
 
         ! Initialize
         !===========
         ! Variables
         reachedeof = .false. 
+        throwerror = .false. 
 
         ! Open the file, check if it exists
         open(unit=fid, file=options%inputfilepath, status='old', &
@@ -666,6 +687,41 @@ module goatmod_userinput
         field = 'goat.IMPz'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_z)
+
+        ! Checks
+        !=======
+        ! Check for name clashes when using solps
+        if (solps) then 
+            ! Check input file names and assert they are equal to 
+            ! assumed solps filenames
+            if (options%gridfilepath /= solps_gridfilepath) then 
+                print *, 'ReadGoatOptions: set goat.gridfilepath value ' // &
+                    'to "' // solps_gridfilepath // '" in GOAToptions.dat'
+                throwerror = .true. 
+            end if 
+            if (options%magneticfieldfilepath /= solps_magneticfieldfilepath) then 
+                print *, 'ReadGoatOptions: set goat.magneticfieldfilepath value ' // &
+                    'to "' // solps_magneticfieldfilepath // '" in GOAToptions.dat'
+                throwerror = .true. 
+            end if 
+            if (options%structurefilepath /= solps_structurefilepath) then 
+                print *, 'ReadGoatOptions: set goat.structurefilepath value ' // &
+                    'to "' // solps_structurefilepath // '" in GOAToptions.dat'
+                throwerror = .true. 
+            end if 
+            if (options%writefilepath /= solps_writefilepath) then 
+                print *, 'ReadGoatOptions: set goat.writefilepath value ' // &
+                    'to "' // solps_writefilepath // '" in GOAToptions.dat'
+                throwerror = .true. 
+            end if 
+
+            ! Throw error
+            if (throwerror) then 
+                call gdErrorHandler('ReadGoatOptions: exiting due to ' // &
+                    'wrong I/O filenames for SOLPS (see messages above)')
+            end if
+
+        end if 
 
         ! Housekeeping
         !=============

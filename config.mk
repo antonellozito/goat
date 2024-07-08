@@ -13,8 +13,11 @@
 ## Variables are defined in config.mk
 
 # Target-specific variables
-## COMPDIRFLAGS:        define variables for compiler directives
-shapeopt_solps : COMPDIRFVARS = -DSOLPS
+## COMPDIRVARS:        define variables for compiler directives
+COMPDIRVARS = 
+ifdef SOLPSTOP
+COMPDIRVARS += -DSOLPS
+endif
 
 ## % Library paths
 ## %==============
@@ -27,10 +30,9 @@ BLASPATH = -lopenblas
 ## UMFPACKPATH 			: UMFPACK library path (user defined)
 UMFPACKPATH = -lumfpack
 
-## SOLPSPATH            : path to SOLPS (overridden if SOLPSPATH is defined)
-ifdef SOLPSPATH 
-else
-SOLPSPATH = ../solps-iter
+## SOLPSTOP            : path to SOLPS (overridden if SOLPSTOP is define)
+ifdef SOLPSTOP
+DOSOLPS = true
 endif
 ifdef HOST_NAME
 else
@@ -98,10 +100,10 @@ FC = gfortran
 endif 
 
 # Directory where objectcode/binaries will be created
-B25LIBPATH = ${SOLPSPATH}/modules/B2.5/builds/${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_IMPGYRO}${EXT_DIFF}${EXT_DEBUG}
+B25LIBPATH = ${SOLPSTOP}/modules/B2.5/builds/${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_IMPGYRO}${EXT_DIFF}${EXT_DEBUG}
 
 # Build path
-BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}
+BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_IMPGYRO}${EXT_DIFF}${EXT_DEBUG}
 
 ## % Include paths
 ## %==============
@@ -138,13 +140,13 @@ LFLAGS_OMP_DEBUG = -pg -g -fopenmp
 # Set flags
 #==========
 # Set the CFLAGS
-CFLAGS = $(CFLAGS_DEF) $(COMPDIRFVARS)
+CFLAGS = $(CFLAGS_DEF) $(COMPDIRVARS)
 
 # Set the linking flags
 LFLAGS = $(LFLAGS_DEF)
 
 # Set CFLAGS for C compiler
-CCFLAGS = $(CCFLAGS_DEF) $(COMPDIRFVARS)
+CCFLAGS = $(CCFLAGS_DEF) $(COMPDIRVARS)
 
 ##
 ## % Files
@@ -157,7 +159,10 @@ GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_plotter.F90 src
     
 
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
-DRIVER_FILES = $(wildcard src/Drivers/*.F90)
+DRIVER_FILES = $(wildcard src/Drivers/Goat/*.F90)
+
+## SODRIVER_FILES			: Shape optimization driver filenames (.F90) - unsequenced
+SODRIVER_FILES = $(wildcard src/Drivers/ShapeOpt/*.F90)
 
 ## MODULE_FILES			: Module filenames (.F90, .F) - sequence matters
 MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
@@ -199,7 +204,7 @@ OPTIMIZATION_FILES = src/Optimization/optmod_designvariables.F90 src/Optimizatio
     src/Optimization/optmod_numerics.F90 $(wildcard src/Optimization/*.F90)
 
 ## CONSTANTS            : constants such as precision and special characters (.F90) - unsequenced
-CONSTANTS_FILES = src/Constants/mod_precision.F90 $(wildcard src/Constants/*.F90)
+CONSTANTS_FILES = src/Constants/mod_global_environment.F90 src/Constants/mod_precision.F90 $(wildcard src/Constants/*.F90)
 
 ## Clayer               : c files for interfacing with other c code
 CLAYER_FILES    = $(wildcard src/Clayer/*.c)
@@ -223,7 +228,7 @@ SHAPEOPTSOLPS_FILES  =  src/Modules/ShapeOpt/somod_userinput.F90 \
 ## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
 GDRUN_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
-    IO_carre IO_output IO_input Setup ShapeOptimization Drivers 
+    IO_carre IO_output IO_input Setup Drivers 
 
 ## GOAT_TARGETS             : Targets to be run for the full goat
 GOAT_TARGETS = $(GDRUN_TARGETS) 
@@ -238,7 +243,10 @@ TEST_TARGETS = $(GOAT_TARGETS)
 CTEST_TARGETS = Clayer
 
 ## SHAPEOPT_TARGETS         : Targets to be run for shape optimization program
+ifdef DOSOLPS
+SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
+    IO_carre IO_output IO_input  Setup  ShapeOptimizationSolps Drivers SODrivers
+else
 SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
-    IO_carre IO_output IO_input  Setup  ShapeOptimization Drivers 
-SHAPEOPTSOLPS_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
-    IO_carre IO_output IO_input  Setup  ShapeOptimizationSolps Drivers 
+    IO_carre IO_output IO_input  Setup  ShapeOptimization Drivers SODrivers
+endif

@@ -6,9 +6,6 @@
 # Include the config file
 include config.mk
 
-# Set the compiler in case of SOLPS
-shapeopt_solps : FC = ifort 
-
 # Echo the different environment variables 
 $(info % ===========================)
 $(info % Executing the goat makefile)
@@ -23,7 +20,7 @@ $(info % )
 $(info % SOLPS specific environment variables)
 $(info % ------------------------------------)
 $(info % running at host: $(HOST_NAME))
-$(info % solps path: $(SOLPSPATH))
+$(info % solps path: $(SOLPSTOP))
 $(info % B2.5 build path: $(BUILDDIR))
 $(info % B2.5 libary path: $(B25LIBPATH))
 
@@ -101,19 +98,25 @@ testc: $(addprefix $(BUILDDIR)/,$(CTEST_TARGETS) ) $(BUILDDIR)/testc.o
 shapeopt: $(addprefix $(BUILDDIR)/, $(SHAPEOPT_TARGETS) ) $(BUILDDIR)/shapeopt.o 
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
+ifdef DOSOLPS
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt.exe $(BUILDDIR)/*.o $(B25LIBBPATH)/adStack.o \
+	 $(B25LIBBPATH)/b2mod_cdf.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) \
+	 -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
+else
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
+endif
 	rm $(BUILDDIR)/ShapeOptimization.o; 
 	cp $(BUILDDIR)/shapeopt.exe ./executables/.
 
-shapeopt_solps: $(addprefix $(BUILDDIR)/,$(SHAPEOPTSOLPS_TARGETS) ) $(BUILDDIR)/shapeopt_solps.o 
-	-mv -f *.o $(BUILDDIR);  
-	-mv -f *.mod $(BUILDDIR); 
-	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt_solps $(BUILDDIR)/*.o $(B25LIBBPATH)/adStack.o \
+#shapeopt_solps: $(addprefix $(BUILDDIR)/,$(SHAPEOPTSOLPS_TARGETS) ) $(BUILDDIR)/shapeopt_solps.o 
+#	-mv -f *.o $(BUILDDIR);  
+#	-mv -f *.mod $(BUILDDIR); 
+#	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt_solps $(BUILDDIR)/*.o $(B25LIBBPATH)/adStack.o \
 	 $(B25LIBBPATH)/b2mod_cdf.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) \
 	 -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
-	rm $(BUILDDIR)/ShapeOptimization.o; 
-	cp $(BUILDDIR)/shapeopt_solps.exe ./executables/.
+#	rm $(BUILDDIR)/ShapeOptimization.o; 
+#	cp $(BUILDDIR)/shapeopt_solps.exe ./executables/.
 
 
 ## % Runfiles
@@ -141,6 +144,7 @@ $(BUILDDIR)/goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
 
 ## shapeopt.o		: shape optimization 
 $(BUILDDIR)/shapeopt.o : Runfiles/ShapeOptimization.F90 
+	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR)
 	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR)
 
 ## shapeopt_solps.o		: shape optimization with solps
@@ -170,10 +174,15 @@ $(BUILDDIR)/Auxiliary: $(AUXILIARY_FILES)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
 	touch $(BUILDDIR)/Auxiliary
 
-## Drivers			: compile all driver routines
+## Drivers			: compile all (goat) driver routines
 $(BUILDDIR)/Drivers: $(DRIVER_FILES)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
 	touch $(BUILDDIR)/Drivers
+
+## SODrivers			: compile all shape optimization driver routines
+$(BUILDDIR)/SODrivers: $(SODRIVER_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/SODrivers
 
 ## Setup			: compile all setup routines
 $(BUILDDIR)/Setup: $(SETUP_FILES)
@@ -265,6 +274,11 @@ deepclean:
 	rm goattranslator; \
 	rm testc; \
 	rm shapeopt; \
+
+## cleanbuilds   		: clean builds directory (removes all subdirectories)
+.PHONY: cleanbuilds 
+cleanbuilds: 
+	rm -r ./builds/*
 
 ## cleanexeo			: clean o-files of executables
 .PHONY: cleanexeo

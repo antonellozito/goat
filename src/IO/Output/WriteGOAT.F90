@@ -48,7 +48,7 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     end if 
 
     ! Open file, overwrite if existing
-    open (action='write', file=trim('traduit.out_' // goatoptions%writefilepath // '.b2us'), newunit=fu, &
+    open (action='write', file=trim(goatoptions%writefilepath), newunit=fu, &
         status='unknown')
 
     ! Recompute data

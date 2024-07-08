@@ -38,7 +38,11 @@ module mod_plotter
     public 
 
     ! Define the (relative) file directory where the plot are located
-    character(len=*), parameter     :: plotdir = './'
+#ifdef SOLPS
+    character(*), parameter     :: plotdir = '../output/'
+#else
+    character(*), parameter     :: plotdir = './'
+#endif
 
     ! Define the (general) plot filename and data filename
     character(:), allocatable                 :: plotfile

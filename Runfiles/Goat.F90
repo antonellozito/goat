@@ -38,6 +38,7 @@ program Goat
     ! Modules
     !========
     use goatmod_userinput
+    use mod_global_environment, only: solps, SolpsPreamble
 
     ! Declare variables
     !==================
@@ -46,13 +47,21 @@ program Goat
     ! Loop variables
 
     ! Auxiliary
-    type(GoatoptionsUDT)    :: goatoptions
-    character(:), allocatable    :: filepath
+    type(GoatoptionsUDT)        :: goatoptions
+    character(:), allocatable   :: filepath
+    integer                     :: iostat
 
     ! Initialize
     !===========
+    ! Set the filepath
     allocate(character(len('./GOAToptions.dat')) :: filepath)
     filepath = './GOAToptions.dat'
+
+    ! Call solps preamble
+    if (solps) then 
+        call SolpsPreamble('goat')
+    end if
+
 
     ! Read the user input
     !====================

@@ -27,6 +27,7 @@ program ShapeOptimization
     ! Modules
     !========
     use somod_userinput
+    use mod_global_environment, only: solps, SolpsPreamble
 
     implicit none
 
@@ -43,6 +44,11 @@ program ShapeOptimization
     !===========
     allocate(character(len('./SOoptions.dat')) :: filepath)
     filepath = './SOoptions.dat'
+
+    ! Call solps preamble
+    if (solps) then 
+        call SolpsPreamble('goat')
+    end if
 
     ! Read the user input
     !====================
