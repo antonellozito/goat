@@ -66,7 +66,7 @@ goat: $(addprefix $(BUILDDIR)/, $(GOAT_TARGETS)) $(BUILDDIR)/goat.o
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/goat.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include; 
 	rm $(BUILDDIR)/Goat.o; 
-	cp $(BUILDDIR)/goat.exe $(GOAT_EXECUTABLES)
+	cp $(BUILDDIR)/goat.exe ./executables/.
 
 goattranslator: $(addprefix $(BUILDDIR)/,$(GOATTRANSLATOR_TARGETS) ) $(BUILDDIR)/goattranslator.o 
 	-mv -f *.o $(BUILDDIR);  
@@ -74,7 +74,7 @@ goattranslator: $(addprefix $(BUILDDIR)/,$(GOATTRANSLATOR_TARGETS) ) $(BUILDDIR)
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/goattranslator.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 	rm $(BUILDDIR)/TranslateGOAToptionsFile.o; 
-	cp $(BUILDDIR)/goattranslator.exe $(GOAT_EXECUTABLES)
+	cp $(BUILDDIR)/goattranslator.exe ./executables/.
 
 tests: $(addprefix $(BUILDDIR)/,$(TEST_TARGETS) ) $(BUILDDIR)/tests.o 
 	-mv -f *.o $(BUILDDIR);  
@@ -82,21 +82,21 @@ tests: $(addprefix $(BUILDDIR)/,$(TEST_TARGETS) ) $(BUILDDIR)/tests.o
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/tests.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 	rm $(BUILDDIR)/tests.o; 
-	cp $(BUILDDIR)/tests.exe $(GOAT_EXECUTABLES)
+	cp $(BUILDDIR)/tests.exe ./executables/.
 
 gdrun: $(addprefix $(BUILDDIR)/,$(GDRUN_TARGETS) ) $(BUILDDIR)/MainRunFileGridDeformation.o
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/gdrun.exe $(BUILDDIR)/*.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
 	rm $(BUILDDIR)/gdrun.o; 
-	cp $(BUILDDIR)/gdrun.exe $(GOAT_EXECUTABLES)
+	cp $(BUILDDIR)/gdrun.exe ./executables/.
 
 testc: $(addprefix $(BUILDDIR)/,$(CTEST_TARGETS) ) $(BUILDDIR)/testc.o 
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
 	$(CC) $(LFLAGS) -o $(BUILDDIR)/testc.exe $(BUILDDIR)/*.o -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
 	rm $(BUILDDIR)/Testc.o; 
-	cp $(BUILDDIR)/testc.exe $(GOAT_EXECUTABLES)
+	cp $(BUILDDIR)/testc.exe ./executables/.
 
 shapeopt: $(addprefix $(BUILDDIR)/, $(SHAPEOPT_TARGETS) ) $(BUILDDIR)/shapeopt.o 
 	-mv -f *.o $(BUILDDIR);  
@@ -104,7 +104,7 @@ shapeopt: $(addprefix $(BUILDDIR)/, $(SHAPEOPT_TARGETS) ) $(BUILDDIR)/shapeopt.o
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 	rm $(BUILDDIR)/ShapeOptimization.o; 
-	cp $(BUILDDIR)/shapeopt.exe $(GOAT_EXECUTABLES)
+	cp $(BUILDDIR)/shapeopt.exe ./executables/.
 
 shapeopt_solps: $(addprefix $(BUILDDIR)/,$(SHAPEOPTSOLPS_TARGETS) ) $(BUILDDIR)/shapeopt_solps.o 
 	-mv -f *.o $(BUILDDIR);  
@@ -113,7 +113,7 @@ shapeopt_solps: $(addprefix $(BUILDDIR)/,$(SHAPEOPTSOLPS_TARGETS) ) $(BUILDDIR)/
 	 $(B25LIBBPATH)/b2mod_cdf.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) \
 	 -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
 	rm $(BUILDDIR)/ShapeOptimization.o; 
-	cp $(BUILDDIR)/shapeopt_solps.exe $(GOAT_EXECUTABLES)
+	cp $(BUILDDIR)/shapeopt_solps.exe ./executables/.
 
 
 ## % Runfiles
