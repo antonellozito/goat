@@ -31,7 +31,7 @@ module sosmod_costfunction
 
     ! Rename precision ... 
     use b2mod_types, only: R8_B25 => R8
-    use mod_precision, only: R8_G => R8
+    use mod_precision, only: R8_G => R8, I8_G => I8
 
     
 
@@ -317,7 +317,7 @@ module sosmod_costfunction
         type(MySparseUDT)                   :: dgradJdvar
 
         ! Auxiliary
-        integer(I8)                         :: flag
+        integer(I8_G)                         :: flag
 
         real(R8_G)                                  :: Js, Jg
         real(R8_G), allocatable, dimension(:)       :: goatvariables, &
