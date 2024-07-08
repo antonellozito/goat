@@ -28,6 +28,7 @@ module sosmod_costfunction
     use b2mod_par_opt_diff
     use somod_costfunction 
     use gdmod_optimizationengine
+    use b2mod_costfunction
 
     ! Rename precision ... 
     use b2mod_types, only: R8_B25 => R8
@@ -321,7 +322,7 @@ module sosmod_costfunction
 
         real(R8_G)                                  :: Js, Jg
         real(R8_G), allocatable, dimension(:)       :: goatvariables, &
-            gradJR, gradJgoat, lambdaG, gradJs, gradJg, dpsidx, dpsidy, &
+            gradJR, gradJgoat, lambdaG, gradJs, dpsidx, dpsidy, &
             d2psidx2, d2psidxdy, d2psidy2, gradJsolps
 
         type(MySparseUDT)                           :: hessJg, &
@@ -378,7 +379,7 @@ module sosmod_costfunction
         ! Compute reduced cost function
         !==============================
         ! GOAT side
-        call costfunction%costfunction%Evaluate(Jg, gradJg, hessJg, &
+        call costfunction%costfunction%Evaluate(Jg, gradJR, hessJg, &
             goat, dogradient, dohessian, designvariables, &
             'goatvariables', goatvariables, gradJgoat)
 
