@@ -35,10 +35,13 @@ $(info % B2.5 libary path: $(B25LIBPATH))
 ## Construction of directories
 ## %==========================
 ## CREATE_BUILDDIR: construct build directory based on BUILDDIR environment variable
-CREATE_BUILDDIR := $(shell mkdir $(BUILDDIR))
+CREATE_BUILDDIR:= $(shell mkdir ./builds)
+CREATE_BUILDDIR:= $(shell mkdir ./builds/$(BUILDDIR))
 
 ## CREATE_EXEDIR: construct executable directory 
-CREATE_EXEDIR := $(shell mkdir ./executables)
+CREATE_EXEDIR:= $(shell mkdir ./executables)
+
+BUILDDIR :=./builds/$(BUILDDIR)
 
 
 ##

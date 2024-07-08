@@ -101,7 +101,7 @@ endif
 B25LIBPATH = ${SOLPSPATH}/modules/B2.5/builds/${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_IMPGYRO}${EXT_DIFF}${EXT_DEBUG}
 
 # Build path
-BUILDDIR = builds/${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}
+BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}
 
 ## % Include paths
 ## %==============
