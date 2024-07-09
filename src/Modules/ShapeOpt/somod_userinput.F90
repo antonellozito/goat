@@ -95,6 +95,31 @@ module somod_userinput
 
     end type
 
+    ! Fixed vessel flux constraints
+    type, extends(optionsUDT)   :: FixedVesselFluxConOptionsUDT
+
+        ! Description
+        !============
+        ! Constraint options for fixed vessel flux. The following
+        ! fields are present:
+        !   structureIDs:   structure IDs of structures of which the 
+        !                   vertices should be constrained 
+        !   vertIDs:        IDs of specific vessel vertices (according
+        !                   to the original numbering in the 
+        !                   structure.dat file) to be constrained
+        ! 
+        ! Note that vertices are constrained to their original psi value
+
+        ! Fields
+        integer(I8), allocatable    :: structureIDs(:), vertIDs(:)
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultFixedVesselFluxConOptions
+        procedure :: Read           => ReadFixedVesselFluxConOptions
+
+    end type
+
     ! General constraints
     type, extends(optionsUDT)   :: ConstraintOptionsSOUDT 
 
@@ -107,10 +132,12 @@ module somod_userinput
         ! read in separately anyway. 
         
         ! Switches
-        integer(I8)                 :: fixedvesselpoints, goat
+        integer(I8)                 :: fixedvesselpoints, &
+            fixedvesselflux, goat
 
         ! Constraint options
         type(FixedVesselPointsConOptionsUDT)    :: fvpoptions
+        type(FixedVesselFluxConOptionsUDT)      :: fvfoptions
 
     contains 
 
@@ -315,6 +342,26 @@ module somod_userinput
 
     end subroutine
 
+    ! Fixed vessel points constraints
+    subroutine SetDefaultFixedVesselFluxConOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FixedVesselFluxConOptionsUDT)   :: options 
+
+        ! Set defaults
+        !=============
+        if (allocated(options%structureIDs)) then 
+            deallocate(options%structureIDs)
+        end if
+        if (allocated(options%vertIDs)) then 
+            deallocate(options%vertIDs)
+        end if 
+        allocate(options%structureIDs(0), options%vertIDs(0))
+
+    end subroutine
+
     ! General constraints
     subroutine SetDefaultConstraintOptionsSO(options)
 
@@ -327,13 +374,16 @@ module somod_userinput
         !=============
         ! Own fields
         options%fixedvesselpoints       = 0
+        options%fixedvesselflux         = 0 
         options%goat                    = 0
 
         ! Propagate filepaths
         options%fvpoptions%inputfilepath = options%inputfilepath
+        options%fvfoptions%inputfilepath = options%inputfilepath
 
         ! Other constraints
         call options%fvpoptions%SetDefaults()
+        call options%fvfoptions%SetDefaults()
 
     end subroutine
 
@@ -570,6 +620,56 @@ module somod_userinput
 
     end subroutine
 
+    ! Fixed vessel points constraints
+    subroutine ReadFixedVesselFluxConOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FixedVesselFluxConOptionsUDT)  :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadFixedVesselFluxConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadFixedVesselFluxConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Structure & vertex IDs
+        field = 'so.ec.par.fvf.structureIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
+        field = 'so.ec.par.fvf.vertIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+
+    end subroutine
+
     ! General constraints
     subroutine ReadConstraintOptionsSO(options)
 
@@ -609,6 +709,8 @@ module somod_userinput
         ! Constraint switches
         field = 'so.ec.fixedvesselpoints'
         call ExtractOptionValueInteger0D(fid, field, options%fixedvesselpoints)
+        field = 'so.ec.fixedvesselflux'
+        call ExtractOptionValueInteger0D(fid, field, options%fixedvesselflux)
         field = 'so.ec.goat'
         call ExtractOptionValueInteger0D(fid, field, options%goat)
 

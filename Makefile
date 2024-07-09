@@ -100,7 +100,7 @@ shapeopt: $(addprefix $(BUILDDIR)/, $(SHAPEOPT_TARGETS) ) $(BUILDDIR)/shapeopt.o
 	-mv -f *.mod $(BUILDDIR); 
 ifdef DOSOLPS
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt.exe $(BUILDDIR)/*.o $(B25LIBPATH)/adStack.o \
-	 $(B25LIBPATH)/b2mod_cdf.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) \
+	 $(B25LIBPATH)/b2mod_cdf.o $(B25LIBPATH)/smax.o $(B25LIBPATH)/smin.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) \
 	 -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
 else
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
@@ -236,7 +236,7 @@ $(BUILDDIR)/ShapeOptimization: $(SHAPEOPT_FILES)
 
 ## ShapeOptimizationSolps 			: compile shape optimization modules for SOLPS
 $(BUILDDIR)/ShapeOptimizationSolps: $(SHAPEOPTSOLPS_FILES)
-	$(FC) $(CFLAGS) -I$(B25LIBPATH) -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -lnetcdf $^ 
+	$(FC) $(CFLAGS) -I$(B25LIBPATH) -I$(BUILDDIR) -L$(B25LIBPATH) -l:libb2.a -lnetcdf $^ 
 	touch $(BUILDDIR)/ShapeOptimizationSolps 
 
 
