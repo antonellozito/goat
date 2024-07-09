@@ -385,6 +385,9 @@ module sosmod_costfunction
         ! SOLPS side (gradient is w.r.t. coordinates, psi, dpsidx, dpsidy, ffbz)
         call costfunction%cfvsolps%Evaluate(Js, gradJs)
 
+        ! Total
+        J = Jg + Js
+
         ! Compute goat linearization 
         !===========================
         ! Evaluate goat jacobian w.r.t. goat variables
