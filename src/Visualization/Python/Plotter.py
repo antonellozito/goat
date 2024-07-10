@@ -36,6 +36,10 @@ vesselpolygonfile = 'vesselpolygon.dat'
 gridcellsfile = 'cells_init.dat'
 gridcellsiteratefile = 'cells_iterate.dat'
 
+# Files with optimization history
+goathistoryfile = 'goat_optimization_history.dat'
+shapeopthistoryfile = 'shapeopt_optimization_history.dat'
+
 
 #==========================================================================#
 #                                                                          #
@@ -104,7 +108,6 @@ def PlotGridCellsIterate(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
-
 def MonitorGrid(datadir, num, pausetime, maxruntime):
     # Description
     #------------
@@ -137,8 +140,6 @@ def MonitorGrid(datadir, num, pausetime, maxruntime):
             ClearCurrentAxes()
         except: 
             time.sleep(pausetime)
-
-
 
 #--------------------------------------------------------------------------#
 #                                Optimization                              #
@@ -206,7 +207,6 @@ def PlotFluxfunctionConstraintVertices(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
-
 def PlotBoundaryConstraintVertices(dirpath, fignum):
     # Description
     #------------
@@ -240,7 +240,6 @@ def PlotBoundaryConstraintVertices(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
-
 def PlotXPointConstraintVertices(dirpath, fignum):
     # Description
     #------------
@@ -270,7 +269,6 @@ def PlotXPointConstraintVertices(dirpath, fignum):
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
-
 
 def PlotEdgelengthsConstraintEdges(dirpath, fignum):
     # Description
@@ -303,7 +301,6 @@ def PlotEdgelengthsConstraintEdges(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
-
 def PlotOrthogonalityConstraintEdges(dirpath, fignum):
     # Description
     #------------
@@ -333,6 +330,118 @@ def PlotOrthogonalityConstraintEdges(dirpath, fignum):
     thisaxes.set_title('Orthogonality constrained edges')
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotLinefoldingConstraintEdges(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertex pairs that belong to the linefolding constraints.
+    # This includes poloidal, radial, and vessel line folding 
+    # constraints. 
+
+    # General
+    #--------
+    # Underlying grid
+    cellfilepath = dirpath + filesep + gridcellsfile
+    vals = dh.GetPolygonCoordinates(cellfilepath)
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r',
+        label='Grid faces')
+
+    # Poloidal
+    #---------
+    # Set filepaths
+    confilepath = dirpath + filesep + 'con_lf_vpairspol.dat'
+
+    # Get the data
+    valscon = dh.GetVertexPairCoordinates(confilepath)
+
+    # Plot the data
+    PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
+        0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='b',
+        marker='o', label='Constrained edges')
+    
+    # Radial
+    #-------
+    confilepath = dirpath + filesep + 'con_lf_vpairsrad.dat'
+
+    # Get the data
+    valscon = dh.GetVertexPairCoordinates(confilepath)
+
+    # Plot the data
+    PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
+        0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='g',
+        marker='x', label='Constrained edges')
+    
+    # Vessel
+    #-------
+    confilepath = dirpath + filesep + 'con_lf_vpairsves'
+
+    # Get the data
+    valscon = dh.GetVertexPairCoordinates(confilepath)
+
+    # Plot the data
+    PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
+        0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='k',
+        marker='+', label='Constrained edges')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Linefolding constrained edges')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotGoatOptimizationHistory(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the goat optimization history on a log(value)-iterate plot.
+    # This includes the cost function, (max) value of 
+    # constraints, the convergence history (infinity norm of 
+    # lagrangian gradient), and the linesearch step length 
+
+    # Read data
+    #----------
+    historypath = dirpath + filesep + goathistoryfile
+    [valnames, vals] = dh.ReadGeneralColumnwiseFloatData(historypath)
+
+    # Set figure
+    #-----------
+    plt.figure(fignum)
+
+    # Plot data
+    #----------
+    # First entry should be iteration counter, then convnorm, dphi, L, 
+    # J, max(G), max(H), rxf, step, tol, ...
+
+    # Convnorm
+    plt.plot(vals[:, 0], vals[:, 1], 'rx', label='max(abs(grad L))')
+    
+    # Cost function
+    plt.plot(vals[:, 0], vals[:, 4], 'bx', label='J')
+
+    # Equality constraints
+    plt.plot(vals[:, 0], vals[:, 5], 'gx', label='max(G)')
+
+    # Inequality constraints
+    plt.plot(vals[:, 0], vals[:, 6], 'mx', label='max(H)')
+
+    # Line search step length
+    plt.plot(vals[:, 0], vals[:, 7], 'kx', label='alpha_ls')
+
+    # Set figure data
+    #----------------
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Goat grid deformation convergence history')
+    thisaxes.set_xlabel('iteration number')
+    thisaxes.set_ylabel('value')
+    thisaxes.set_yscale('log')
     thisaxes.legend(loc='upper right')
 
 

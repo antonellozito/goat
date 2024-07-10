@@ -50,6 +50,7 @@ echo 'Running at goat top directory: '  ${GOATTOP}
 # Add scripts to the path variable
 setenv GOAT_SCRIPTPATHS ${GOATTOP}/scripts
 setenv GOAT_EXECUTABLES ${GOATTOP}/executables
+setenv GOAT_VISUALIZATION ${GOATTOP}/src/Visualization/Python
 setenv PATH  "${GOAT_SCRIPTPATHS}:${GOAT_EXECUTABLES}:${PATH}"
 
 # Set default environment variables
@@ -57,3 +58,5 @@ setenv COMPILER gfortran
 
 # Set some aliases
 alias gtop cd ${GOATTOP}
+alias gpinput python3 ${GOAT_VISUALIZATION}/VisualizeGoatInput.py
+alias gpoutput python3 ${GOAT_VISUALIZATION}/VisualizeGoatOutput.py
