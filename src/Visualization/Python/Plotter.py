@@ -407,6 +407,12 @@ def PlotGoatOptimizationHistory(dirpath, fignum):
     historypath = dirpath + filesep + goathistoryfile
     [valnames, vals] = dh.ReadGeneralColumnwiseFloatData(historypath)
 
+    # Hedge for negative numbers
+    for j in range(len(vals[1,:])):
+        for i in range(len(vals[:, j])):
+            if (vals[i, j] <= 0):
+                vals[i, j] = np.nan
+
     # Set figure
     #-----------
     plt.figure(fignum)
@@ -417,24 +423,24 @@ def PlotGoatOptimizationHistory(dirpath, fignum):
     # J, max(G), max(H), rxf, step, tol, ...
 
     # Convnorm
-    plt.plot(vals[:, 0], vals[:, 1], 'rx', label='max(abs(grad L))')
+    plt.plot(vals[:, 0], vals[:, 1], 'rx-', label='max(abs(grad L))')
     
     # Cost function
-    plt.plot(vals[:, 0], vals[:, 4], 'bx', label='J')
+    plt.plot(vals[:, 0], vals[:, 4], 'bx-', label='J')
 
     # Equality constraints
-    plt.plot(vals[:, 0], vals[:, 5], 'gx', label='max(G)')
+    plt.plot(vals[:, 0], vals[:, 5], 'gx-', label='max(G)')
 
     # Inequality constraints
-    plt.plot(vals[:, 0], vals[:, 6], 'mx', label='max(H)')
+    plt.plot(vals[:, 0], vals[:, 6], 'mx-', label='max(H)')
 
     # Line search step length
-    plt.plot(vals[:, 0], vals[:, 7], 'kx', label='alpha_ls')
+    plt.plot(vals[:, 0], vals[:, 8], 'kx-', label='alpha_ls')
 
     # Set figure data
     #----------------
     # Set axes
-    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+    SetAxesLimitsLogplot(plt.gca(), vals[:, 0], vals[:, 1])
 
     # Set title and other descriptors
     thisaxes = plt.gca()
@@ -647,6 +653,29 @@ def SetAxesLimits2D(thisaxes, xdata, ydata):
 
     # Set proper scaling
     thisaxes.set_aspect(1)
+
+def SetAxesLimitsLogplot(thisaxes, xdata, ydata):
+    # Automatically set the axes limits based on the x and y figure data.
+    # Also applies true scaling
+
+    # Compute data limits - ignore NaNs
+    maxx = np.nanmax(xdata)
+    minx = np.nanmin(xdata)
+    maxy = np.nanmax(ydata)
+    miny = np.nanmin(ydata)
+
+
+    # Compute limits
+    xlim = [minx, maxx]
+    ylim = [miny, maxy]
+
+    # Set limits
+    thisaxes.set_xlim(xlim)
+    thisaxes.set_ylim(ylim)
+
+    # Set proper scaling
+    thisaxes.set_aspect(1)
+
 
 
 
