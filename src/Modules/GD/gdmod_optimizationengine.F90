@@ -97,6 +97,9 @@ module gdmod_optimizationengine
         ! KKT relaxation
         procedure :: RelaxProblemKKTSystem => RelaxProblemKKTSystemGD
 
+        ! Optimization iteration data writing
+        procedure :: WriteIterationData => WriteIterationDataGD
+
         ! Additional routines
         !====================
         ! Initialization finalizer to account for cross-design/cfv/con
@@ -990,6 +993,79 @@ module gdmod_optimizationengine
 
         ! Call error handler
         call gdErrorHandler('RelaxProblemKKTSystemGD: method not yet implemented')
+
+    end subroutine
+
+    ! Optimization iteration data writing
+    subroutine WriteIterationDataGD(problem, itopt)
+
+        ! Description
+        !============
+        ! Write out any data of the optimization problem per iteration
+        ! to a specific file. Uses the plotter module in the backend.
+        ! Here, we don't use the itopt variable, which gives the 
+        ! iteration number, so we overwrite each file.
+        ! The following data is written out:
+        ! - temp_gridcellsiterate.dat: grid cell coordinates with vertices for plotting (overwritten each time)
+        ! - history.dat (created at iteration one, appended each iteration)
+
+        ! Modules
+        !========
+        use mod_plotter, only: plotdir 
+        use mod_specialchars, only: filesepchar
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)         :: problem 
+        integer(I8)                             :: itopt 
+
+        ! Auxiliary 
+        integer, parameter                      :: fid = 70
+        integer                                 :: iostat
+        logical                                 :: isfile 
+        character(:), allocatable               :: filepath 
+
+        ! Initialize
+        !===========
+        ! Associate some fields for easier reading/writing
+        associate(grid      => problem%grid)
+
+        ! Set filepath
+        filepath = plotdir // filesepchar // 'goat_optimization_history.dat'
+
+        ! Write data
+        !===========
+        ! Cell vertex data
+        call WriteGridCells(grid, 'temp_gridcellsiterate')
+
+        ! Iteration data
+        if (itopt == 1) then 
+            ! Check if the file exists
+            inquire(file=filepath, exist=isfile)
+            if (isfile) then 
+                ! Replace old file
+                open(unit=fid, status='old', iostat=iostat, file=filepath)
+                rewind(fid)
+            else
+                ! Create new file
+                open(unit=fid, status='new', iostat=iostat, file=filepath)
+            end if
+
+            ! Write header
+            call problem%monitor%WriteFileHeader(fid)
+        else
+            ! File should already by opened, append
+            open(unit=fid, status='old', iostat=iostat, file=filepath, access='sequential', position='append')
+        end if
+
+        ! Write
+        call problem%monitor%WriteFileIterate(fid)
+
+        ! Housekeeping
+        !=============
+        close(unit=fid)
+        end associate
 
     end subroutine
 

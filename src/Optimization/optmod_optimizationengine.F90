@@ -120,6 +120,10 @@ module optmod_optimizationengine
         procedure(RelaxProblemKKTSystemINT), deferred  :: &
             RelaxProblemKKTSystem
 
+        ! Data writing per optimization iteration
+        procedure(WriteIterationDataOptimizationProblemINT), deferred :: &
+            WriteIterationData 
+
         ! Merit function evaluation
         procedure :: EvaluateMeritFunction
         procedure :: EvaluateMeritFunctionL1
@@ -520,6 +524,13 @@ module optmod_optimizationengine
             import :: MySparseUDT, OptimizationProblemUDT
             class(OptimizationProblemUDT)   :: problem 
             type(MySparseUDT)               :: KKT
+        end subroutine
+
+        ! Data output
+        subroutine WriteIterationDataOptimizationProblemINT(problem, itopt)
+            import :: OptimizationProblemUDT, I8
+            class(OptimizationProblemUDT)   :: problem 
+            integer(I8)                     :: itopt
         end subroutine
 
         ! Solver initialization
@@ -1211,6 +1222,11 @@ module optmod_optimizationengine
                 call problem%monitor%PrintIterate()
 
             end if
+
+            ! Write out the problem data
+            if (verbosity > 1) then 
+                call problem%WriteIterationData(itopt)
+            end if 
 
             ! Update the iteration counter
             itopt = itopt+1
