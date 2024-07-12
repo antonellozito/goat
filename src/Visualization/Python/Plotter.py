@@ -428,24 +428,24 @@ def PlotGoatOptimizationHistory(dirpath, fignum):
     # J, max(G), max(H), rxf, step, tol, ...
 
     # Convnorm
-    plt.plot(vals[:, 0], vals[:, 1], fignum, 'rx-', label='max(abs(grad L))')
+    plt.plot(vals[:, 0], vals[:, 1], 'rx-', label='max(abs(grad L))')
     
     # Cost function
-    plt.plot(vals[:, 0], vals[:, 4], fignum, 'bx-', label='J')
+    plt.plot(vals[:, 0], vals[:, 4], 'bx-', label='J')
 
     # Equality constraints
-    plt.plot(vals[:, 0], vals[:, 5], fignum, 'gx-', label='max(G)')
+    plt.plot(vals[:, 0], vals[:, 5], 'gx-', label='max(G)')
 
     # Inequality constraints
-    plt.plot(vals[:, 0], vals[:, 6], fignum, 'mx-', label='max(H)')
+    plt.plot(vals[:, 0], vals[:, 6], 'mx-', label='max(H)')
 
     # Line search step length
-    plt.plot(vals[:, 0], vals[:, 8], fignum, 'kx-', label='alpha_ls')
+    plt.plot(vals[:, 0], vals[:, 8], 'kx-', label='alpha_ls')
 
     # Set figure data
     #----------------
     # Set axes
-    SetAxesLimitsLogplot(plt.gca(), vals[:, 0], vals[:, 1])
+    SetAxesLimitsLogplot(plt.gca(), vals[:, 0], vals[:, [1, 4, 5, 6, 8]])
 
     # Set title and other descriptors
     thisaxes = plt.gca()
@@ -524,6 +524,63 @@ def PlotFixedVesselFluxConstraintVertices(dirpath, fignum):
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
+
+def PlotShapeOptimizationHistory(dirpath, fignum):
+        # Description
+    #------------
+    # Plot the goat optimization history on a log(value)-iterate plot.
+    # This includes the cost function, (max) value of 
+    # constraints, the convergence history (infinity norm of 
+    # lagrangian gradient), and the linesearch step length 
+
+    # Read data
+    #----------
+    historypath = dirpath + filesep + shapeopthistoryfile
+    [valnames, vals] = dh.ReadGeneralColumnwiseFloatData(historypath)
+
+    # Hedge for negative numbers
+    for j in range(len(vals[1,:])):
+        for i in range(len(vals[:, j])):
+            if (vals[i, j] <= 0):
+                vals[i, j] = np.nan
+
+    # Set figure
+    #-----------
+    plt.figure(fignum)
+
+    # Plot data
+    #----------
+    # First entry should be iteration counter, then convnorm, dphi, L, 
+    # J, max(G), max(H), rxf, step, tol, ...
+
+    # Convnorm
+    plt.plot(vals[:, 0], vals[:, 1], 'rx-', label='max(abs(grad L))')
+    
+    # Cost function
+    plt.plot(vals[:, 0], vals[:, 4], 'bx-', label='J')
+
+    # Equality constraints
+    plt.plot(vals[:, 0], vals[:, 5], 'gx-', label='max(G)')
+
+    # Inequality constraints
+    plt.plot(vals[:, 0], vals[:, 6], 'mx-', label='max(H)')
+
+    # Line search step length
+    plt.plot(vals[:, 0], vals[:, 8], 'kx-', label='alpha_ls')
+
+    # Set figure data
+    #----------------
+    # Set axes
+    SetAxesLimitsLogplot(plt.gca(), vals[:, 0], vals[:, [1, 4, 5, 6, 8]])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Shape optimization convergence history')
+    thisaxes.set_xlabel('iteration number')
+    thisaxes.set_ylabel('value')
+    thisaxes.set_yscale('log')
+    thisaxes.legend(loc='upper right')
+
 
 #--------------------------------------------------------------------------#
 #                                 Vessel                                   #

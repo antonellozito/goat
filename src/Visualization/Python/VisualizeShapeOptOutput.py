@@ -24,7 +24,7 @@ plotter.PlotVesselPolygon(datadir, -1)
 
 # Optimization history
 #---------------------
-plotter.PlotShapeOptOptimizationHistory(datadir, 2)
+plotter.PlotShapeOptimizationHistory(datadir, 2)
 
 # Show figures
 #-------------
