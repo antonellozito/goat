@@ -13,7 +13,7 @@ import Datahandler as dh
 datadir = dh.GetDataDirectory()
 
 # Print
-print('VisualizeGoatOutput: reading from directory: ' + datadir)
+print('VisualizeShapeOptOutput: reading from directory: ' + datadir)
 
 # Design
 #-------
@@ -24,7 +24,7 @@ plotter.PlotVesselPolygon(datadir, -1)
 
 # Optimization history
 #---------------------
-plotter.PlotGoatOptimizationHistory(datadir, 2)
+plotter.PlotShapeOptOptimizationHistory(datadir, 2)
 
 # Show figures
 #-------------
