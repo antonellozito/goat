@@ -145,7 +145,6 @@ $(BUILDDIR)/goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
 ## shapeopt.o		: shape optimization 
 $(BUILDDIR)/shapeopt.o : Runfiles/ShapeOptimization.F90 
 	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR)
-	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR)
 
 ## shapeopt_solps.o		: shape optimization with solps
 $(BUILDDIR)/shapeopt_solps.o : Runfiles/ShapeOptimization.F90 

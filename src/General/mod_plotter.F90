@@ -30,6 +30,7 @@ module mod_plotter
     !============
     ! Load modules
     use mod_precision
+    use mod_specialchars, only: filesepchar
     use, intrinsic :: ieee_arithmetic, only: IEEE_Value, IEEE_QUIET_NAN
 
     ! The usual
@@ -39,9 +40,9 @@ module mod_plotter
 
     ! Define the (relative) file directory where the plot are located
 #ifdef SOLPS
-    character(*), parameter     :: plotdir = '../output/'
+    character(*), parameter     :: plotdir = '../output'
 #else
-    character(*), parameter     :: plotdir = './'
+    character(*), parameter     :: plotdir = '.'
 #endif
 
     ! Define the (general) plot filename and data filename
@@ -365,8 +366,8 @@ module mod_plotter
         character(*)         :: funname
 
         ! Set output
-        plt = trim(plotdir) // trim(funname) // '.plt'
-        dat = trim(plotdir) // trim(funname) // '.dat'
+        plt = trim(plotdir) // filesepchar // trim(funname) // '.plt'
+        dat = trim(plotdir) // filesepchar // trim(funname) // '.dat'
 
     end subroutine
 

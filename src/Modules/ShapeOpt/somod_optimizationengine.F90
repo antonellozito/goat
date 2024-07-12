@@ -102,6 +102,9 @@ module somod_optimizationengine
         ! KKT relaxation
         procedure :: RelaxProblemKKTSystem => RelaxProblemKKTSystemSO
 
+        ! Data output
+        procedure :: WriteIterationData => WriteIterationDataSO 
+
         ! Additional routines
         !====================
         ! Initialization finalizer to account for cross-design/cfv/con
@@ -595,6 +598,7 @@ module somod_optimizationengine
         cellpath = 'cells_iterate'
         call WriteGridVertices(problem%goat%grid, vertpath) 
         call WriteGridCells(problem%goat%grid, cellpath)
+        call problem%goat%environment%vessel%polygonset%WriteData('vesselpolygon_iterate')
 
     end subroutine
 
@@ -815,6 +819,46 @@ module somod_optimizationengine
 
         ! Add to KKT matrix 
         KKT = KKT + rxfmat
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Data writing
+    subroutine WriteIterationDataSO(problem, itopt)
+
+        ! Description
+        !============
+        ! Write out the optimization problem data in each optimization
+        ! iteration. Here, we call the goat-specific data writing 
+        ! routine and additionally write out the vessel polygon 
+        ! coordinates.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemSOUDT)     :: problem 
+        integer(I8)                         :: itopt 
+
+        ! Initialize
+        !===========
+        associate(&
+            vessel  => problem%goat%environment%vessel, &
+            goat    => problem%goat                     &
+            )
+
+        ! Write data
+        !===========
+        ! Goat
+        call goat%WriteIterationData(itopt)
+
+        ! Vessel data
+        call vessel%polygonset%WriteData('temp_vesselpolygon_so')
+
+        ! Optimization output
+        
 
         ! Housekeeping
         !=============
