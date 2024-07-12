@@ -379,7 +379,7 @@ def PlotLinefoldingConstraintEdges(dirpath, fignum):
     
     # Vessel
     #-------
-    confilepath = dirpath + filesep + 'con_lf_vpairsves'
+    confilepath = dirpath + filesep + 'con_lf_vpairsves.dat'
 
     # Get the data
     valscon = dh.GetVertexPairCoordinates(confilepath)
