@@ -322,7 +322,7 @@ module sosmod_costfunction
 
         real(R8_G)                                  :: Js, Jg
         real(R8_G), allocatable, dimension(:)       :: goatvariables, &
-            gradJR, gradJgoat, lambdaG, gradJs, dpsidx, dpsidy, &
+            gradJg, gradJgoat, lambdaG, gradJs, dpsidx, dpsidy, &
             d2psidx2, d2psidxdy, d2psidy2, gradJsolps
 
         type(MySparseUDT)                           :: hessJg, &
@@ -343,8 +343,8 @@ module sosmod_costfunction
         end if 
 
         ! Initialize others
-        allocate(gradJR(designvariables%nphi))
-        gradJR = 0
+        allocate(gradJg(designvariables%nphi))
+        gradJg = 0
 
         ! Construct goat variables
         goatvariables = [goat%designvariables%phi, goat%lambda, goat%mu]
@@ -379,7 +379,7 @@ module sosmod_costfunction
         ! Compute reduced cost function
         !==============================
         ! GOAT side
-        call costfunction%costfunction%Evaluate(Jg, gradJR, hessJg, &
+        call costfunction%costfunction%Evaluate(Jg, gradJg, hessJg, &
             goat, dogradient, dohessian, designvariables, &
             'goatvariables', goatvariables, gradJgoat)
 
@@ -452,7 +452,7 @@ module sosmod_costfunction
 
         ! Compute gradient
         gradGdes = jacGdes%Transpose()
-        gradJ = gradJR + gradGdes%MatrixVectorProduct(lambdaG)
+        gradJ = gradJg + gradGdes%MatrixVectorProduct(lambdaG)
 
         ! End association
         end associate
@@ -462,6 +462,16 @@ module sosmod_costfunction
         ! Only take the raw cost function contribution as hessian - 
         ! perhaps replace by hessian estimator in the future? 
         hessJ = hessJg
+
+        ! Write out data for gradient verification
+        !=========================================
+        call WriteRealData('Js', Js)
+        call WriteRealData('Jg', Jg)
+        call WriteRealData('gradJ', gradJ)
+        call WriteRealData('gradJg', gradJg)
+        call WriteRealData('gradJs', gradJs)
+        call WriteRealData('gradJsolps', gradJsolps)
+
 
         ! Housekeeping
         !=============
