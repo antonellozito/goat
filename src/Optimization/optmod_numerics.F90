@@ -105,6 +105,7 @@ module optmod_numerics
         ! - check<x>eqs:    equation IDs to check with FD (only for 
         !                   eqcon, ineqcon)
         !
+        ! - FDsteps:        step sizes (absolute) for FD
         ! It goes without saying that IDs should not exceed the number
         ! of variables or constraints. 
 
@@ -113,6 +114,7 @@ module optmod_numerics
         real(R8)            :: rxfdec 
         real(R8)            :: rxfmin
         real(R8)            :: rxfdesign
+        real(R8), allocatable   :: FDsteps(:)
         logical             :: useproblemrelaxation, checkcfvgradient, &
             checkcfvhessian, checkeqcongradient, checkeqconhessian, &
             checkineqcongradient, checkineqconhessian
@@ -316,6 +318,9 @@ module optmod_numerics
         num%checkineqcongradient    = .false.
         num%checkineqconhessian     = .false.
 
+        if (allocated(num%FDsteps)) then 
+            deallocate(num%FDsteps)
+        end if 
         if (allocated(num%checkcfvvars)) then 
             deallocate(num%checkcfvvars)
         end if 
@@ -334,7 +339,7 @@ module optmod_numerics
 
         allocate(num%checkcfvvars(0), num%checkeqconvars(0), &
             num%checkineqconvars(0), num%checkeqconeqs(0), &
-            num%checkineqconeqs(0))
+            num%checkineqconeqs(0), num%FDsteps(0))
 
         
     end subroutine
@@ -453,6 +458,9 @@ module optmod_numerics
         call ExtractOptionValueInteger1D(fid, field, num%checkeqconeqs)
         field = num%fieldprefix // 'opt.num.checkineqconeqs'
         call ExtractOptionValueInteger1D(fid, field, num%checkineqconeqs)
+
+        field = num%fieldprefix // 'opt.num.FDsteps'
+        call ExtractOptionValueReal1D(fid, field, num%FDsteps)
 
         ! Housekeeping
         !=============

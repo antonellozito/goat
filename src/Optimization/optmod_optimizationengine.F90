@@ -920,9 +920,12 @@ module optmod_optimizationengine
             nineq, solver%numKKT%tol)
 
         ! Initialize FD checkers
-        call FDcfv%Initialize(solver%numKKT%checkcfvvars, solver%numKKT%checkoutputfile // '_cfv')
-        call FDeqcon%Initialize(solver%numKKT%checkeqconvars, solver%numKKT%checkoutputfile // '_eqcon')
-        call FDineqcon%Initialize(solver%numKKT%checkineqconvars, solver%numKKT%checkoutputfile // '_ineqcon')
+        call FDcfv%Initialize(solver%numKKT%checkcfvvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_cfv')
+        call FDeqcon%Initialize(solver%numKKT%checkeqconvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_eqcon')
+        call FDineqcon%Initialize(solver%numKKT%checkineqconvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_ineqcon')
 
         ! Cost function 
         allocate(gradJ(nphi))
@@ -2455,7 +2458,7 @@ module optmod_optimizationengine
         end if
 
         ! Initialize checker 
-        call FDchecker%Initialize(vars, 'fd_check_lagrange')
+        call FDchecker%Initialize(vars, real([1e-2, 1e-4, 1e-6, 1e-8], kind=R8), 'fd_check_lagrange')
         allocate(DFLagrangianUDT::FDchecker%fun)
 
         ! Associate

@@ -101,7 +101,7 @@ module mod_diagnostics
         ! - fun:        function to be evaluated and checked
         ! - nvars:      number of variables to check
         ! - vars:       variable indices that have to be checked 
-        ! - d:          step size vector
+        ! - d:          step size vector (absolute)
         ! - nd:         number of steps
         ! - outputfile: output file to which data should be written
 
@@ -223,7 +223,7 @@ module mod_diagnostics
     !------------------------------------------------------------------!
 
     ! Constructor
-    subroutine InitializeFDchecker(FDchecker, vars, outputfile) 
+    subroutine InitializeFDchecker(FDchecker, vars, steps, outputfile) 
 
         ! Description
         !============
@@ -243,6 +243,7 @@ module mod_diagnostics
         ! Arguments
         class(FDcheckerUDT)             :: FDchecker 
         integer(I8), intent(in)         :: vars(:)
+        real(R8), intent(in)            :: steps(:)
         character(*), intent(in)        :: outputfile
 
         ! Auxiliary
@@ -254,7 +255,7 @@ module mod_diagnostics
         !===========
         ! Initialize
         FDchecker%nvars = size(vars) 
-        FDchecker%nd = 5
+        FDchecker%nd = size(steps)
 
         ! Allocate
         call FDchecker%Allocate()
@@ -263,8 +264,8 @@ module mod_diagnostics
         FDchecker%vars = vars  
         FDchecker%outputfile = plotdir // filesepchar // outputfile // '.dat'
 
-        ! Set the step sizes (hard coded - these values are fine)
-        FDchecker%d = [1e-2, 1e-4, 1e-6, 1e-8, 1e-10]
+        ! Set the (absolute) step sizes 
+        FDchecker%d = steps
 
         ! Check whether the output file exists
         inquire(file=FDchecker%outputfile, exist=isfile)
