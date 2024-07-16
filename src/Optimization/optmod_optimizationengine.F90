@@ -893,8 +893,11 @@ module optmod_optimizationengine
             ineqconind(:), activeineqconind(:), inactiveineqconind(:)
         type(MySparseUDT)           :: hessLJ, lhs, hessLC
 
+        ! FD checkers
+        type(FDcheckerUDT)          :: FDcfv, FDeqcon, FDineqcon
+
         ! Diagnostics
-        logical                     :: checkgradients, checkhessians 
+        ! logical                     :: checkgradients, checkhessians 
 
         ! Timing
         real(R8)                    :: t_it_s, t_it_e, &
@@ -915,6 +918,14 @@ module optmod_optimizationengine
         call problem%GetProblemDimensions(nphi, neq, nineq)
         call problem%monitor%Initialize(solver%numKKT%maxit, nphi, neq,&
             nineq, solver%numKKT%tol)
+
+        ! Initialize FD checkers
+        call FDcfv%Initialize(solver%numKKT%checkcfvvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_cfv')
+        call FDeqcon%Initialize(solver%numKKT%checkeqconvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_eqcon')
+        call FDineqcon%Initialize(solver%numKKT%checkineqconvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_ineqcon')
 
         ! Cost function 
         allocate(gradJ(nphi))
@@ -968,8 +979,8 @@ module optmod_optimizationengine
         ineqconind = [(k, k = nphi+neq+1, nphi+neq+nineq)]
 
         ! Diagnostics
-        checkgradients  = .false. ! check gradients in each iteration?
-        checkhessians   = .false. ! check hessians in each iteration?
+        !checkgradients  = .false. ! check gradients in each iteration?
+        !checkhessians   = .false. ! check hessians in each iteration?
 
         ! Initialize counter(s)
         itopt = 1
@@ -982,7 +993,8 @@ module optmod_optimizationengine
             rxfdesign   => solver%numKKT%rxfdesign, &
             rxfdec      => solver%numKKT%rxfdec, &
             rxfmin      => solver%numKKT%rxfmin, &
-            verbosity   => solver%numKKT%verbosity)
+            verbosity   => solver%numKKT%verbosity, &
+            num         => solver%numKKT)
 
         ! Main loop
         !==========
@@ -1011,16 +1023,25 @@ module optmod_optimizationengine
             call problem%UpdateProblem()
 
             ! Check gradients & hessians if needed
-            if (checkgradients .or. checkhessians) then 
-                !call CheckCostFunctionLinearization(problem, &
-                !    checkgradients, checkhessians)
+            if (num%checkcfvgradient .or. num%checkcfvhessian) then 
+                call CheckCostFunctionLinearization(problem, FDcfv, &
+                    num%checkcfvgradient, num%checkcfvhessian)
+            end if 
+            if (num%checkeqcongradient .or. num%checkeqconhessian) then 
+                call CheckEqconLinearization(problem, FDeqcon, lambda, &
+                    num%checkeqcongradient, num%checkeqconhessian, &
+                    num%checkeqconeqs)
+            end if 
+            if (num%checkineqcongradient .or. num%checkineqconhessian) then 
+                call CheckIneqconLinearization(problem, FDineqcon, lambda, &
+                    num%checkineqcongradient, num%checkineqconhessian, &
+                    num%checkineqconeqs)
+            end if 
+
+            !if (checkgradients .or. checkhessians) then 
                 !call CheckLagrangianLinearization(problem, solver, lambda, & 
                 !    mu, checkgradients, checkhessians)
-                call CheckEqconLinearization(problem, lambda, &
-                    checkgradients, checkhessians)
-                !call CheckIneqconLinearization(problem, lambda, &
-                !    checkgradients, checkhessians)
-            end if
+            !end if
 
             ! Evaluate cost function
             call problem%EvaluateCostFunction(J, gradJ, & 
@@ -2234,7 +2255,7 @@ module optmod_optimizationengine
     !                           COST FUNCTION                          !
     !------------------------------------------------------------------!
     ! Stand-alone driver to check the cost function
-    subroutine CheckCostFunctionLinearization(problem, checkgradient, &
+    subroutine CheckCostFunctionLinearization(problem, FDchecker, checkgradient, &
         checkhessian)
 
         ! Description
@@ -2248,35 +2269,30 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(OptimizationProblemUDT)       :: problem 
-        logical                             :: checkgradient, &
+        logical, intent(in)                 :: checkgradient, &
             checkhessian
 
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
 
-        integer(I8)                         :: nvars, nphi, neq, nineq 
-        integer(I8), allocatable            :: vars(:)
+        integer(I8)                         :: nphi, neq, nineq 
 
         ! Initialize
         !===========
         ! Get the problem dimensions
         call problem%GetProblemDimensions(nphi, neq, nineq)
 
-        ! Set the design variables to check
-        nvars = 5
-        allocate(vars(nvars))
-        vars = [1, 1+860, 3, 3+860, 5] ! some random variables for now
-
         ! Sanity checks
-        if (any(vars > nphi)) then
+        if (any(FDchecker%vars > nphi)) then
             ! Throw error
             call gdErrorHandler('Design indices exceed the number &
                 & of design variables!')
         end if
 
         ! Initialize checker 
-        call FDchecker%Initialize(nvars, vars)
-        allocate(DFCostfunctionUDT::FDchecker%fun)
+        if (.not. allocated(FDchecker%fun)) then 
+            allocate(DFCostfunctionUDT::FDchecker%fun)
+        end if
 
         ! Associate
         associate(&
@@ -2289,6 +2305,11 @@ module optmod_optimizationengine
 
             ! Set the problem
             fun%problem = problem
+
+        class default
+
+            ! Throw error
+            call gdErrorHandler('CheckCostFunctionLinearization: unexpected cost function type')
 
         end select
 
@@ -2303,9 +2324,6 @@ module optmod_optimizationengine
         if (checkhessian) then 
             call FDchecker%CheckHessian()
         end if
-
-        ! Deallocate
-        deallocate(vars)
 
 
     end subroutine
@@ -2440,7 +2458,7 @@ module optmod_optimizationengine
         end if
 
         ! Initialize checker 
-        call FDchecker%Initialize(nvars, vars)
+        call FDchecker%Initialize(vars, real([1e-2, 1e-4, 1e-6, 1e-8], kind=R8), 'fd_check_lagrange')
         allocate(DFLagrangianUDT::FDchecker%fun)
 
         ! Associate
@@ -2665,8 +2683,8 @@ module optmod_optimizationengine
     !                       EQUALITY CONSTRAINTS                       !
     !------------------------------------------------------------------!
     ! Stand-alone driver 
-    subroutine CheckEqconLinearization(problem, lambda, checkgradient, &
-        checkhessian)
+    subroutine CheckEqconLinearization(problem, FDchecker, lambda, checkgradient, &
+        checkhessian, eqID)
 
         ! Description
         !============
@@ -2692,11 +2710,8 @@ module optmod_optimizationengine
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
 
-        integer(I8)                         :: nvars 
-        integer(I8), allocatable            :: vars(:)
-
         integer(I8)                         :: neq, neqID, nphi, nineq  
-        integer(I8), allocatable            :: eqID(:)
+        integer(I8), intent(in)             :: eqID(:)
 
         real(R8), allocatable               :: lambda(:)
 
@@ -2708,16 +2723,8 @@ module optmod_optimizationengine
         !===========
         ! Get the problem dimensions
         call problem%GetProblemDimensions(nphi, neq, nineq)
+        neqID =  size(eqID)
 
-        ! Set the constraints to check
-        neqID =  1
-        allocate(eqID(neqID))
-        eqID = [3400] !  some random numbers for now
-
-        ! Set the design variables to check
-        nvars = 4
-        allocate(vars(nvars))
-        vars = [2, 3, 64, 65] ! some random variables for now
 
         ! Sanity checks
         if (any(eqID > neq)) then
@@ -2725,7 +2732,7 @@ module optmod_optimizationengine
             call gdErrorHandler('Constraint indices exceed the number &
                 & of constraints!')
         end if
-        if (any(vars > nphi)) then
+        if (any(FDchecker%vars > nphi)) then
             ! Throw error
             call gdErrorHandler('Design indices exceed the number &
                 & of design variables!')
@@ -2733,8 +2740,9 @@ module optmod_optimizationengine
 
 
         ! Initialize checker 
-        call FDchecker%Initialize(nvars, vars)
-        allocate(DFEqconUDT::FDchecker%fun)
+        if (.not. allocated(FDchecker%fun)) then 
+            allocate(DFEqconUDT::FDchecker%fun)
+        end if 
 
         ! Associate
         associate(&
@@ -2775,14 +2783,15 @@ module optmod_optimizationengine
                 end if
             end do
 
+        class default 
+
+            ! Throw error
+            call gdErrorHandler('CheckEqonLinearization: unexpected function type')
+
         end select
 
         ! End associate
         end associate
-
-        ! Deallocate
-        deallocate(vars, eqID)
-
 
     end subroutine
 
@@ -2925,8 +2934,8 @@ module optmod_optimizationengine
     !                      INEQUALITY CONSTRAINTS                      !
     !------------------------------------------------------------------!
     ! Stand-alone driver 
-    subroutine CheckIneqconLinearization(problem, mu, checkgradient, &
-        checkhessian)
+    subroutine CheckIneqconLinearization(problem, FDchecker, mu, checkgradient, &
+        checkhessian, ineqID)
 
         ! Description
         !============
@@ -2952,11 +2961,8 @@ module optmod_optimizationengine
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
 
-        integer(I8)                         :: nvars 
-        integer(I8), allocatable            :: vars(:)
-
         integer(I8)                         :: nineq, nineqID, nphi, neq  
-        integer(I8), allocatable            :: ineqID(:)
+        integer(I8), intent(in)             :: ineqID(:)
 
         real(R8), allocatable               :: mu(:)
 
@@ -2968,15 +2974,7 @@ module optmod_optimizationengine
         !===========
         ! Get the problem dimensions
         call problem%GetProblemDimensions(nphi, neq, nineq)
-
-        ! Set the constraints to check
-        nineqID =  1
-        allocate(ineqID(nineqID))
-        ineqID = [1022] !  some random numbers for now
-
-        ! Set the design variables to check
-        vars = [915, 1045] ! some random variables for now
-        nvars = size(vars, 1)
+        nineqID =  size(ineqID)
 
         ! Sanity checks
         if (any(ineqID > nineq)) then
@@ -2984,7 +2982,7 @@ module optmod_optimizationengine
             call gdErrorHandler('Constraint indices exceed the number &
                 & of constraints!')
         end if
-        if (any(vars > nphi)) then
+        if (any(FDchecker%vars > nphi)) then
             ! Throw error
             call gdErrorHandler('Design indices exceed the number &
                 & of design variables!')
@@ -2992,8 +2990,9 @@ module optmod_optimizationengine
 
 
         ! Initialize checker 
-        call FDchecker%Initialize(nvars, vars)
-        allocate(DFIneqconUDT::FDchecker%fun)
+        if (.not. allocated(FDchecker%fun)) then
+            allocate(DFIneqconUDT::FDchecker%fun)
+        end if 
 
         ! Associate
         associate(&
@@ -3034,14 +3033,15 @@ module optmod_optimizationengine
                 end if
             end do
 
+        class default 
+
+            ! Throw error
+            call gdErrorHandler('CheckIneqconLinearization: unexpected function type')
+
         end select
 
         ! End associate
         end associate
-
-        ! Deallocate
-        deallocate(vars, ineqID)
-
 
     end subroutine
 
