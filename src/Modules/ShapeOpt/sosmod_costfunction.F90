@@ -106,7 +106,7 @@ module sosmod_costfunction
         ! initialize and evaluation routines.
 
         ! Additional fields
-        type(CostFunctionSOLPSUDT)      :: cfvsolps, cfvsolps_initstate
+        type(CostFunctionSOLPSUDT)      :: cfvsolps 
         
     contains 
 
@@ -277,9 +277,6 @@ module sosmod_costfunction
         !===============================
         ! Simply call initializer
         call costfunction%cfvsolps%Initialize()
-        
-        ! Initialize cost function with initial state
-        costfunction%cfvsolps_initstate = costfunction%cfvsolps
 
     end subroutine
 
@@ -338,12 +335,12 @@ module sosmod_costfunction
 
         ! Auxiliary
         integer(I8_G)                       :: flag
-        integer(I8_G), allocatable          :: tv(:), fv(:)
+        integer(I8_G), allocatable          :: tv(:)
 
-        real(R8_G)                                  :: Js, Jg, dist
+        real(R8_G)                                  :: Js, Jg
         real(R8_G), allocatable, dimension(:)       :: goatvariables, &
             gradJg, gradJgoat, lambdaG, gradJs, dpsidx, dpsidy, &
-            d2psidx2, d2psidxdy, d2psidy2, gradJsolps, psi, xv, yv 
+            d2psidx2, d2psidxdy, d2psidy2, gradJsolps, psi
 
         type(MySparseUDT)                           :: hessJg, &
             jacGgoat, jacGdes, gradGdes, gradGgoat
@@ -396,10 +393,6 @@ module sosmod_costfunction
             ! Call the driver
             call costfunction%goatengine%solver%SolveOptimizationProblem(goatproblem)
 
-            ! Checks
-            print *, 'max dx: ', maxval(abs(goatproblem%grid%vert%x - goat%grid%vert%x))
-            print *, 'max dy: ', maxval(abs(goatproblem%grid%vert%y - goat%grid%vert%y))
-
             ! Update goat
             goat = goatproblem
 
@@ -426,9 +419,6 @@ module sosmod_costfunction
         call MFinterp%Evaluate(x, y, 0, 0, psi)
         call MFinterp%Evaluate(x, y, 1, 0, dpsidx)
         call MFinterp%Evaluate(x, y, 0, 1, dpsidy)
-
-        ! Reinitialize SOLPS state for gradient verification
-        costfunction%cfvsolps = costfunction%cfvsolps_initstate
         
         ! Update SOLPS quantities
         costfunction%cfvsolps%g%vxX = x 
@@ -446,24 +436,7 @@ module sosmod_costfunction
         end do
 
         ! SOLPS side (gradient is w.r.t. coordinates, psi, dpsidx, dpsidy, ffbz)
-        !call costfunction%cfvsolps%Evaluate(Js, gradJs)
-
-        ! Override
-        Js = 0 
-        do i = 1, goat%grid%face%ntot 
-            if (goat%grid%face%BF(i)) then 
-                ! Compute length
-                fv = goat%grid%face%vert(i,:)
-                xv = x(fv)
-                yv = y(fv)
-                dist = ((xv(2) - xv(1))**2 + (yv(2) - yv(1))**2)
-                Js = Js + dist 
-            end if 
-        end do 
-        !Js = goat%grid%vert%x(592)**2
-        Js = 0.5*sum(x**2 + y**2 + psi**2 + dpsidx**2 + dpsidy**2)
-        gradJs = [x, y, psi, dpsidx, dpsidy]
-        !gradJs(592) = 2*goat%grid%vert%x(592)
+        call costfunction%cfvsolps%Evaluate(Js, gradJs)
 
         ! Total
         J = Jg + Js
