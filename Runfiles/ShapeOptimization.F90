@@ -28,6 +28,8 @@ program ShapeOptimization
     !========
     use somod_userinput
     use mod_global_environment, only: solps, SolpsPreamble
+    use mod_plotter, only: plotdir
+
 
     implicit none
 
@@ -48,6 +50,8 @@ program ShapeOptimization
     ! Call solps preamble
     if (solps) then 
         call SolpsPreamble('goat')
+    else
+        call execute_command_line('mkdir ' // plotdir)
     end if
 
     ! Read the user input

@@ -39,6 +39,7 @@ program Goat
     !========
     use goatmod_userinput
     use mod_global_environment, only: solps, SolpsPreamble
+    use mod_plotter, only: plotdir
 
     ! Declare variables
     !==================
@@ -59,6 +60,8 @@ program Goat
     ! Call solps preamble
     if (solps) then 
         call SolpsPreamble('goat')
+    else
+        call execute_command_line('mkdir ' // plotdir)
     end if
 
 

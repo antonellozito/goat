@@ -1,8 +1,23 @@
 # This module handles plotting data. It reads in data and returns the data
 # in proper structures.
 import numpy as np
+import os 
 
+def GetDataDirectory():
+    # Description
+    #------------
+    # This routine determines based on the environment variables which
+    # data directory has to be considered. For goat not coupled to 
+    # solps, this is simply the current directory '.', when coupled to
+    # solps, all output should be written to './output'.
 
+    # Check
+    if 'SOLPSTOP' in os.environ:
+        datadir = './output'
+    else:
+        datadir = '.'
+
+    return datadir
 
 def GetVertexCoordinates(filepath):
     # Description
@@ -139,6 +154,48 @@ def GetGeneral2DSurfaceData(filepath):
 
     # Return values
     return vals[0:cc, 0:3]
+
+def ReadGeneralColumnwiseFloatData(filepath):
+    # Description
+    #------------
+    # Read in any columnwise organized float data. It is assumed that 
+    # the first line is a header with the same amount of columns as the
+    # data later on, and that the string of each header describes 
+    # the data. 
+
+    # Read data
+    #----------
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Split the header
+    valnames = alllines[0].split()
+
+    # Delete the header
+    del alllines[0]
+
+    # Count the number of columns
+    ncol = len(valnames)
+
+    # Initialize
+    vals = np.zeros([len(alllines), ncol])
+
+    # Read data
+    cc = 0
+    for i in alllines:
+        if i == '\n':  # empty string
+            pass
+            # Don't read in
+        else:
+            # Read
+            vals[cc, 0:ncol] = np.fromstring(i, dtype=float, count=ncol, sep=' ')
+            cc = cc + 1
+        
+    # Return 
+    return valnames, vals
 
 
 

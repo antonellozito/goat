@@ -295,6 +295,22 @@ module sosmod_costfunction
         ! goat constraints. The contributions of the goat constraints to
         ! the hessian of the problem are not accounted for... 
 
+        ! Note: for the gradient, we need to account for the dependency
+        ! of the psi values (and first order derivatives) on the 
+        ! grid coordinates in solps. The partial derivatives are 
+        ! available through the differentiated structures (geo_diff 
+        ! types for example), but we need to differentiate again w.r.t.
+        ! the coordinates here. Additionally, we have to update the 
+        ! coordinate-dependent structures before evaluating the solps
+        ! cost function. Note that we also update the grid cell 
+        ! coordinates, even though they are recomputed afterwards in 
+        ! solps - reason is that there is a vertex ordening step that
+        ! (for solps reasons) comes before recomputation of the cell 
+        ! centers, which requires an estimate of the cell center 
+        ! coordinates. This also means that there is no gradient
+        ! contribution of the cell center coordinates that has to be
+        ! accounted for. 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -318,18 +334,30 @@ module sosmod_costfunction
         type(MySparseUDT)                   :: dgradJdvar
 
         ! Auxiliary
-        integer(I8_G)                         :: flag
+        integer(I8_G)                       :: flag
+        integer(I8_G), allocatable          :: tv(:)
 
         real(R8_G)                                  :: Js, Jg
         real(R8_G), allocatable, dimension(:)       :: goatvariables, &
-            gradJR, gradJgoat, lambdaG, gradJs, dpsidx, dpsidy, &
-            d2psidx2, d2psidxdy, d2psidy2, gradJsolps
+            gradJg, gradJgoat, lambdaG, gradJs, dpsidx, dpsidy, &
+            d2psidx2, d2psidxdy, d2psidy2, gradJsolps, psi
 
         type(MySparseUDT)                           :: hessJg, &
             jacGgoat, jacGdes, gradGdes, gradGgoat
 
+        ! Loop
+        integer(I8_G)                       :: i
+
         ! Initialize
         !===========
+        ! Associate for ease
+        associate(nv            => goat%grid%vert%ntot, &
+            MFinterp            => goat%magneticField%interp)
+
+        ! Allocate
+        allocate(psi(nv), dpsidx(nv), dpsidy(nv), d2psidx2(nv), d2psidy2(nv), &
+            d2psidxdy(nv))
+
         ! Check inputs
         if (present(varin)) then 
             var = varin 
@@ -343,8 +371,8 @@ module sosmod_costfunction
         end if 
 
         ! Initialize others
-        allocate(gradJR(designvariables%nphi))
-        gradJR = 0
+        allocate(gradJg(designvariables%nphi))
+        gradJg = 0
 
         ! Construct goat variables
         goatvariables = [goat%designvariables%phi, goat%lambda, goat%mu]
@@ -379,12 +407,39 @@ module sosmod_costfunction
         ! Compute reduced cost function
         !==============================
         ! GOAT side
-        call costfunction%costfunction%Evaluate(Jg, gradJR, hessJg, &
+        call costfunction%costfunction%Evaluate(Jg, gradJg, hessJg, &
             goat, dogradient, dohessian, designvariables, &
             'goatvariables', goatvariables, gradJgoat)
 
+        ! Associate coordinates for ease
+        associate(x         => goat%grid%vert%x, &
+                y         => goat%grid%vert%y)
+
+        ! Evaluate magnetic field and derivatives
+        call MFinterp%Evaluate(x, y, 0, 0, psi)
+        call MFinterp%Evaluate(x, y, 1, 0, dpsidx)
+        call MFinterp%Evaluate(x, y, 0, 1, dpsidy)
+        
+        ! Update SOLPS quantities
+        costfunction%cfvsolps%g%vxX = x 
+        costfunction%cfvsolps%g%vxY = y 
+        costfunction%cfvsolps%g%vxFpsi = psi 
+        costfunction%cfvsolps%g%vxBx = dpsidx 
+        costfunction%cfvsolps%g%vxBy = dpsidy 
+
+        ! Update cell center coordinates (only necessary for vertex 
+        ! ordening, should be unnecessary in the future)
+        do i = 1, goat%grid%cell%ntot 
+            tv = GetCellVert(goat%grid%cell, i)
+            costfunction%cfvsolps%g%cvX(i) = sum(x(tv))/real(size(tv), kind=R8_G)
+            costfunction%cfvsolps%g%cvY(i) = sum(y(tv))/real(size(tv), kind=R8_G)
+        end do
+
         ! SOLPS side (gradient is w.r.t. coordinates, psi, dpsidx, dpsidy, ffbz)
         call costfunction%cfvsolps%Evaluate(Js, gradJs)
+
+        ! Total
+        J = Jg + Js
 
         ! Compute goat linearization 
         !===========================
@@ -418,18 +473,9 @@ module sosmod_costfunction
 
         ! Compute gradients
         !==================
-        ! Associate for ease
-        associate(nv            => goat%grid%vert%ntot, &
-            x                   => goat%grid%vert%x,    &
-            y                   => goat%grid%vert%y,    &
-            MFinterp            => goat%magneticField%interp)
-
         ! Compute partial derivatives of psi and dpsidx, dpsidy w.r.t. 
-        ! grid coordinates (simply 'diagonal' matrix linearization)
-        allocate(dpsidx(nv), dpsidy(nv), d2psidx2(nv), d2psidy2(nv), &
-            d2psidxdy(nv))
-        call MFinterp%Evaluate(x, y, 1, 0, dpsidx)
-        call MFinterp%Evaluate(x, y, 0, 1, dpsidy)
+        ! grid coordinates (simply 'diagonal' matrix linearization 
+        ! (dpsidx, dpsidy computed before and up to date))
         call MFinterp%Evaluate(x, y, 2, 0, d2psidx2)
         call MFinterp%Evaluate(x, y, 1, 1, d2psidxdy)
         call MFinterp%Evaluate(x, y, 0, 2, d2psidy2)
@@ -449,7 +495,7 @@ module sosmod_costfunction
 
         ! Compute gradient
         gradGdes = jacGdes%Transpose()
-        gradJ = gradJR + gradGdes%MatrixVectorProduct(lambdaG)
+        gradJ = gradJg + gradGdes%MatrixVectorProduct(lambdaG)
 
         ! End association
         end associate
@@ -460,8 +506,21 @@ module sosmod_costfunction
         ! perhaps replace by hessian estimator in the future? 
         hessJ = hessJg
 
+        ! Write out data for gradient verification
+        !=========================================
+        call WriteRealData('Js', Js)
+        call WriteRealData('Jg', Jg)
+        call WriteRealData('gradJ', gradJ)
+        call WriteRealData('gradJg', gradJg)
+        call WriteRealData('gradJs', gradJs)
+        call WriteRealData('gradJsolps', gradJsolps)
+
+
         ! Housekeeping
         !=============
+        ! Association
+        end associate
+
         ! Optional arguments
         if (present(dJdvarin)) then 
             dJdvarin = dJdvar 
