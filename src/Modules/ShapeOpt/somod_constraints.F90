@@ -199,32 +199,7 @@ module somod_constraints
     contains
 
         ! Initialization
-        procedure :: Initialize     => InitializeVesselDistanceFluxConstraints
-
-        ! Evaluation
-        procedure :: Evaluate       => EvaluateVesselDistanceConstraints
-
-        ! Write
-        procedure :: WriteData      => WriteDataVesselDistanceConstraints
-
-    end type
-
-    ! Vessel bound constraints
-    type, extends(GenericConstraintsSOUDT) :: VesselBoundsConstraintsUDT
-
-        real 
-        ! Description
-        !============
-        ! Apply vessel bounds by imposing vessel distance constraints
-        ! as inequality constraints. 
-
-        type(VesselDistanceConstraintsUDT)  :: UpperBoundConstraint, &
-            LowerBoundConstraint
-
-    contains
-
-        ! Initialization
-        procedure :: Initialize     => InitializeVesselDistanceFluxConstraints
+        procedure :: Initialize     => InitializeVesselDistanceConstraints
 
         ! Evaluation
         procedure :: Evaluate       => EvaluateVesselDistanceConstraints
@@ -809,12 +784,12 @@ module somod_constraints
             constraints%dovesselupperbound = .true. 
 
             ! Initialize
-            constraintoptions%vd = constraintoptions%vdub
+            constraintoptions%vdoptions = constraintoptions%vduboptions 
             call constraints%vesselupperbound%Initialize(goat, &
                 monitor, designvariables, constraintoptions)
 
             ! Add constraints number
-            constraints%neqcon = constraints%neqcon + &
+            constraints%nineqcon = constraints%nineqcon + &
                 constraints%vesselupperbound%ncon 
 
             ! Print
@@ -835,12 +810,12 @@ module somod_constraints
             constraints%dovessellowerbound = .true. 
 
             ! Initialize
-            constraintoptions%vd = constraintoptions%vdlb
+            constraintoptions%vdoptions = constraintoptions%vdlboptions
             call constraints%vessellowerbound%Initialize(goat, &
                 monitor, designvariables, constraintoptions)
 
             ! Add constraints number
-            constraints%neqcon = constraints%neqcon + &
+            constraints%nineqcon = constraints%nineqcon + &
                 constraints%vessellowerbound%ncon 
 
             ! Print
@@ -880,9 +855,10 @@ module somod_constraints
         class(DesignVariablesSOUDT)     :: designvariables 
 
         ! Loop
-        integer(I8)                     :: ic
+        integer(I8)                     :: ic, k
 
         ! Auxiliary
+        integer(I8), allocatable        :: conindex(:)
         real(R8), allocatable           :: G_vub(:), lambda_vub(:)
         type(MySparseUDT)               :: gradG_vub, hessG_vub
 
@@ -1787,15 +1763,6 @@ module somod_constraints
         ! according to polygon structure)
         constraints%ID = pack([(k, k = 1, size(labels, 1))], isconstrained)
 
-        ! Get current psi values
-        if (allocated(constraints%PsiD)) then 
-            deallocate(constraints%PsiD)
-        end if 
-        allocate(constraints%PsiD(size(constraints%ID)))
-        call goat%magneticField%interp%Evaluate(&
-            pack(xv, isconstrained), pack(yv, isconstrained), 0, 0, &
-            constraints%PsiD)
-
         ! set number of constraints
         constraints%ncon = size(constraints%ID)
 
@@ -1837,13 +1804,13 @@ module somod_constraints
 
         type is (PLF2DClosedApproximationOptionsUDT)
             ! Set options
-            plfoptions%resx     = vdoptions%resx
-            plfoptions%resy     = vdoptions%resy
-            plfoptions%C        = vdoptions%C
-            plfoptions%M        = vdoptions%M
-            plfoptions%offsetx  = vdoptions%offsetx
-            plfoptions%offsety  = vdoptions%offsety
-            plfoptions%meth     = vdoptions%meth
+            plfoptions%resx     = opt%resx
+            plfoptions%resy     = opt%resy
+            plfoptions%C        = opt%C
+            plfoptions%M        = opt%M
+            plfoptions%offsetx  = opt%offsetx
+            plfoptions%offsety  = opt%offsety
+            plfoptions%meth     = opt%meth
 
         class default
 
@@ -2061,7 +2028,7 @@ module somod_constraints
         ! Declare variables
         !==================
         ! Arguments
-        class(FixedVesselFluxConstraintsUDT)            :: constraints
+        class(VesselDistanceConstraintsUDT)             :: constraints
         type(OptimizationProblemGDUDT)                  :: goat
 
         ! Auxiliary

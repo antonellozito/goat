@@ -861,9 +861,9 @@ module somod_userinput
 
         ! Plf options
         field = 'so.ec.par.vd.plftype'
-        call ExtractOptionValueCharaceter(fid, field, options%plftype)
+        call ExtractOptionValueCharacter(fid, field, options%plftype)
         field = 'so.ec.par.vd.meth'
-        call ExtractOptionValueCharaceter(fid, field, options%meth)
+        call ExtractOptionValueCharacter(fid, field, options%meth)
         field = 'so.ec.par.vd.resx'
         call ExtractOptionValueInteger0D(fid, field, options%resx)
         field = 'so.ec.par.vd.resy'
@@ -930,9 +930,9 @@ module somod_userinput
 
         ! Plf options
         field = 'so.ec.par.vdub.plftype'
-        call ExtractOptionValueCharaceter(fid, field, options%plftype)
+        call ExtractOptionValueCharacter(fid, field, options%plftype)
         field = 'so.ec.par.vdub.meth'
-        call ExtractOptionValueCharaceter(fid, field, options%meth)
+        call ExtractOptionValueCharacter(fid, field, options%meth)
         field = 'so.ec.par.vdub.resx'
         call ExtractOptionValueInteger0D(fid, field, options%resx)
         field = 'so.ec.par.vdub.resy'
@@ -999,9 +999,9 @@ module somod_userinput
 
         ! Plf options
         field = 'so.ec.par.vdlb.plftype'
-        call ExtractOptionValueCharaceter(fid, field, options%plftype)
+        call ExtractOptionValueCharacter(fid, field, options%plftype)
         field = 'so.ec.par.vdlb.meth'
-        call ExtractOptionValueCharaceter(fid, field, options%meth)
+        call ExtractOptionValueCharacter(fid, field, options%meth)
         field = 'so.ec.par.vdlb.resx'
         call ExtractOptionValueInteger0D(fid, field, options%resx)
         field = 'so.ec.par.vdlb.resy'
