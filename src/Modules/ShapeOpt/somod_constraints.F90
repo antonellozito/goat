@@ -1765,6 +1765,7 @@ module somod_constraints
 
         ! set number of constraints
         constraints%ncon = size(constraints%ID)
+        constraints%nID = constraints%ncon
 
         ! Update
         cc(constraints%ID) = cc(constraints%ID) + 1
@@ -1835,7 +1836,7 @@ module somod_constraints
         end if
 
         ! Print data
-        call constraints%WriteData()
+        call constraints%WriteData(goat)
         
         ! Housekeeping
         !=============
@@ -2013,7 +2014,7 @@ module somod_constraints
     end subroutine 
 
     ! Data output
-    subroutine WriteDataVesselDistanceConstraints(constraints)
+    subroutine WriteDataVesselDistanceConstraints(constraints, goat)
 
         ! Description
         !============

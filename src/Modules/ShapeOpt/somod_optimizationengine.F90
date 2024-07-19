@@ -855,7 +855,7 @@ module somod_optimizationengine
         call goat%WriteIterationData(itopt)
 
         ! Vessel data
-        call vessel%polygonset%WriteData('temp_vesselpolygon_so')
+        call vessel%polygonset%WriteData('vesselpolygon_iterate_so')
 
         ! Optimization output
         

@@ -436,7 +436,14 @@ module somod_userinput
         if (allocated(options%vertIDs)) then 
             deallocate(options%vertIDs)
         end if 
-        allocate(options%structureIDs(0), options%vertIDs(0))
+        if (allocated(options%xp)) then 
+            deallocate(options%xp)
+        end if 
+        if (allocated(options%yp)) then 
+            deallocate(options%yp)
+        end if
+        allocate(options%structureIDs(0), options%vertIDs(0), &
+            options%xp(0), options%yp(0))
 
         options%plftype = 'closedpolygon_exact'
         options%resx = 100
@@ -465,7 +472,14 @@ module somod_userinput
         if (allocated(options%vertIDs)) then 
             deallocate(options%vertIDs)
         end if 
-        allocate(options%structureIDs(0), options%vertIDs(0))
+        if (allocated(options%xp)) then 
+            deallocate(options%xp)
+        end if 
+        if (allocated(options%yp)) then 
+            deallocate(options%yp)
+        end if
+        allocate(options%structureIDs(0), options%vertIDs(0), &
+            options%xp(0), options%yp(0))
 
         options%plftype = 'closedpolygon_exact'
         options%resx = 100
@@ -494,7 +508,14 @@ module somod_userinput
         if (allocated(options%vertIDs)) then 
             deallocate(options%vertIDs)
         end if 
-        allocate(options%structureIDs(0), options%vertIDs(0))
+        if (allocated(options%xp)) then 
+            deallocate(options%xp)
+        end if 
+        if (allocated(options%yp)) then 
+            deallocate(options%yp)
+        end if
+        allocate(options%structureIDs(0), options%vertIDs(0), &
+            options%xp(0), options%yp(0))
 
         options%plftype = 'closedpolygon_exact'
         options%resx = 100
@@ -527,10 +548,14 @@ module somod_userinput
         ! Propagate filepaths
         options%fvpoptions%inputfilepath = options%inputfilepath
         options%fvfoptions%inputfilepath = options%inputfilepath
+        options%vduboptions%inputfilepath = options%inputfilepath 
+        options%vdlboptions%inputfilepath = options%inputfilepath
 
         ! Other constraints
         call options%fvpoptions%SetDefaults()
         call options%fvfoptions%SetDefaults()
+        call options%vduboptions%SetDefaults()
+        call options%vdlboptions%SetDefaults()
 
     end subroutine
 
@@ -864,6 +889,8 @@ module somod_userinput
         call ExtractOptionValueCharacter(fid, field, options%plftype)
         field = 'so.ec.par.vd.meth'
         call ExtractOptionValueCharacter(fid, field, options%meth)
+        field = 'so.ec.par.vdlb.d'
+        call ExtractOptionValueReal0D(fid, field, options%d)
         field = 'so.ec.par.vd.resx'
         call ExtractOptionValueInteger0D(fid, field, options%resx)
         field = 'so.ec.par.vd.resy'
@@ -876,6 +903,10 @@ module somod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%M)
         field = 'so.ec.par.vd.C'
         call ExtractOptionValueInteger0D(fid, field, options%C)
+        field = 'so.ec.par.vd.xp'
+        call ExtractOptionValueReal1D(fid, field, options%xp)
+        field = 'so.ec.par.vd.yp'
+        call ExtractOptionValueReal1D(fid, field, options%yp)
 
 
         ! Housekeeping
@@ -933,6 +964,8 @@ module somod_userinput
         call ExtractOptionValueCharacter(fid, field, options%plftype)
         field = 'so.ec.par.vdub.meth'
         call ExtractOptionValueCharacter(fid, field, options%meth)
+        field = 'so.ec.par.vdlb.d'
+        call ExtractOptionValueReal0D(fid, field, options%d)
         field = 'so.ec.par.vdub.resx'
         call ExtractOptionValueInteger0D(fid, field, options%resx)
         field = 'so.ec.par.vdub.resy'
@@ -945,7 +978,10 @@ module somod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%M)
         field = 'so.ec.par.vdub.C'
         call ExtractOptionValueInteger0D(fid, field, options%C)
-
+        field = 'so.ec.par.vdub.xp'
+        call ExtractOptionValueReal1D(fid, field, options%xp)
+        field = 'so.ec.par.vdub.yp'
+        call ExtractOptionValueReal1D(fid, field, options%yp)
 
         ! Housekeeping
         !=============
@@ -1006,6 +1042,8 @@ module somod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%resx)
         field = 'so.ec.par.vdlb.resy'
         call ExtractOptionValueInteger0D(fid, field, options%resy)
+        field = 'so.ec.par.vdlb.d'
+        call ExtractOptionValueReal0D(fid, field, options%d)
         field = 'so.ec.par.vdlb.offsetx'
         call ExtractOptionValueReal0D(fid, field, options%offsetx)
         field = 'so.ec.par.vdlb.offsety'
