@@ -3036,11 +3036,13 @@ module mod_polygon
 
         ! Auxiliary
         real(R8)                :: nan, d1, d2, dotprod, d11, d12, &
-            d21, d22, dp11, dp12, dp21, dp22, vx11, vx12, vx21, vx22, &
-            vy11, vy12, vy21, vy22 
+            d21, d22, dp11, dp12, dp21, dp22, vx1121, vx1122, vx1221, vx1222, &
+            vy1121, vy1122, vy1221, vy1222, x2, y2
+        logical                 :: v11on2, v12on2, v21on1, v22on1
 
         ! Compute intersection
         !=====================
+        ! Check if edges overlap, if so: compute intersections
         if (CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, x22, y22)) then 
             call LineIntersections(x, y, x11, y11, x12, y12, x21, y21, &
                 x22, y22)
@@ -3049,6 +3051,15 @@ module mod_polygon
             x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
             y = x
         end if 
+
+        ! First, check if nodes coincide - overwrite in that case (to hedge for
+        ! ill-conditioning effects in line intersection routine)
+        call CheckSegmentCoincidence(x2, y2, x11, y11, x12, y12, x21, y21, &
+            x22, y22)
+        if (.not. isnan(x2)) then 
+            x = x2
+            y = y2
+        end if
 
         ! Return if no intersection is found - x and y will be NaN 
         ! already
@@ -3071,27 +3082,27 @@ module mod_polygon
             if ( ((d11 < disttol) .and. (d22 < disttol)) &
                  .or. ((d12 < disttol) .and. (d21 < disttol)) ) then 
                 ! Edges are the same up to distance tolerance, take
-                ! average 
+                ! average - should actually already be captured before
                 x = 0.5*(x11 + x12) 
                 y = 0.5*(y11 + y12) 
             else
                 ! Compute vectors between points 
-                vx11 = x21 - x11 
-                vx12 = x22 - x11 
-                vx21 = x21 - x12 
-                vx22 = x22 - x12 
+                vx1121 = x21 - x11 
+                vx1122 = x22 - x11 
+                vx1221 = x21 - x12 
+                vx1222 = x22 - x12 
 
-                vy11 = y21 - y11 
-                vy12 = y22 - y11 
-                vy21 = y21 - y12 
-                vy22 = y22 - y12 
+                vy1121 = y21 - y11 
+                vy1122 = y22 - y11 
+                vy1221 = y21 - y12 
+                vy1222 = y22 - y12 
 
                 ! Compute scalar products
-                dp11 = vx11*vx12 + vy11*vy12 
-                dp12 = vx21*vx22 + vy21*vy22 
+                dp11 = vx1121*vx1122 + vy1121*vy1122 
+                dp12 = vx1221*vx1222 + vy1221*vy1222 
 
-                dp21 = vx21*vx11 + vy21*vy11 
-                dp22 = vx22*vx12 + vy22*vy12
+                dp21 = vx1221*vx1121 + vy1221*vy1121 
+                dp22 = vx1222*vx1122 + vy1222*vy1122
 
                 ! Checks
                 if (d11 < disttol) then 
@@ -3168,38 +3179,49 @@ module mod_polygon
                 else 
                     ! No coincidence of nodes, can simply check vector 
                     ! products
-                    if (dp11 < 0) then 
-                        ! First point on second segment 
-                        if (dp21 < 0) then 
-                            ! First point on first segment 
-                            x = 0.5*(x11 + x21) 
-                            y = 0.5*(y11 + y21) 
-                        elseif (dp22 < 0) then 
-                            ! Second point on first segment
-                            x = 0.5*(x11 + x22)
-                            y = 0.5*(y11 + y22) 
-                        else 
-                            ! This shouldn't happen
-                            call PolygonErrorHandler('Something wrong in segment intersection routine')
-                        end if 
-                    elseif (dp12 < 0) then 
-                        ! Second point on second segment 
-                        if (dp21 < 0) then 
-                            ! First point on first segment 
-                            x = 0.5*(x12 + x21) 
-                            y = 0.5*(y12 + y21) 
-                        elseif (dp22 < 0) then 
-                            ! Second point on first segment
-                            x = 0.5*(x12 + x22)
-                            y = 0.5*(y12 + y22) 
-                        else 
-                            ! This shouldn't happen
-                            call PolygonErrorHandler('Something wrong in segment intersection routine')
-                        end if 
+                    if (vx1121*vx1122 + vy1121*vy1122 < 0) then 
+                        ! Node 11 lies on segment 2
+                        v11on2 = .true.
+                    end if 
+                    if (vx1221*vx1222 + vy1221*vy1222 < 0) then 
+                        ! Node 12 lies on segment 2
+                        v12on2 = .true.
+                    end if 
+                    if (vx1121*vx1221 + vy1121*vy1221 < 0) then 
+                        ! Node 21 lies on segment 1
+                        v21on1 = .true.
+                    end if 
+                    if (vx1122*vx1221 + vy1122*vy1221 < 0) then 
+                        ! Node 22 lies on segment 1
+                        v22on1 = .true.
+                    end if 
+
+                    ! Check cases
+                    if (v11on2 .and. v12on2) then 
+                        ! Segment 1 lies within segment 2
+                        x = 0.5*(x11 + x12)
+                        y = 0.5*(y11 + y12)
+                    elseif (v21on1 .and. v22on1) then 
+                        ! Segment 2 lies within segment 1
+                        x = 0.5*(x21 + x22)
+                        y = 0.5*(y21 + y22)
+                    elseif (v11on2 .and. v21on1) then 
+                        x = 0.5*(x11 + x21)
+                        y = 0.5*(y11 + y21)
+                    elseif (v11on2 .and. v22on1) then 
+                        x = 0.5*(x11 + x22)
+                        y = 0.5*(y11 + y22)
+                    elseif (v12on2 .and. v21on1) then 
+                        x = 0.5*(x12 + x21)
+                        y = 0.5*(y12 + y21)
+                    elseif (v12on2 .and. v22on1) then 
+                        x = 0.5*(x12 + x22)
+                        y = 0.5*(y12 + y22)
                     else 
-                        ! This shouldn't happen
-                        call PolygonErrorHandler('Something wrong in segment intersection routine')
-                    end if
+                        ! Edges don't seem to be overlapping, shouldn't
+                        ! happen at this point. Throw error
+                        call PolygonErrorHandler('Edges that should overlap do not seem to overlap')
+                    end if 
                 end if 
             end if 
             return
@@ -3827,6 +3849,77 @@ module mod_polygon
         end if 
 
     end function
+
+    ! Edge coincidence checker
+    subroutine CheckSegmentCoincidence(x, y, x11, y11, x12, y12, x21, &
+        y21, x22, y22)
+
+        ! Description
+        !============
+        ! Check if two segments are coincident, either at one of the two
+        ! end vertices or at both. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)    :: x11, y11, x12, y12, x21, y21, &
+            x22, y22 
+        real(R8), intent(out)   :: x, y
+
+        ! Auxiliary
+        real(R8)                :: nan, d11, d12, d21, d22
+
+
+        ! Compute distances
+        !==================
+        ! Distances between segment points
+        call Distance(d11, x11, y11, x21, y21)
+        call Distance(d12, x11, y11, x22, y22)
+        call Distance(d21, x12, y12, x21, y21)
+        call Distance(d22, x12, y12, x22, y22)
+
+        ! Check
+        if (( ((d11 < disttol) .and. (d22 < disttol)) &
+                .or. ((d12 < disttol) .and. (d21 < disttol)) )) then 
+            ! Edges are the same up to distance tolerance, take
+            ! average
+            x = 0.5*(x11 + x12)
+            y = 0.5*(y11 + y12)
+        else
+            
+            ! Checks
+            if (d11 < disttol) then 
+                ! First points coincide
+                x = x11;
+                y = y11;
+            elseif (d12 < disttol) then 
+                ! First point of first segment and second point of
+                ! second segment coincide
+                
+                x = x11;
+                y = y11;
+            elseif (d21 < disttol) then 
+                ! Second point of first segment and first point of
+                ! second segment coincide
+                
+                ! Intersection in single point
+                x = x12;
+                y = y12;
+            elseif (d22 < disttol) then 
+                ! Second point of first segment and first point of
+                ! second segment coincide
+                
+                x = x12;
+                y = y12;
+            else
+                ! No coincidence of nodes, set to NaN
+                x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+                y = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+            end if 
+        end if
+
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                               Writing                            !
