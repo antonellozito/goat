@@ -44,7 +44,7 @@ shapeopthistoryfile = 'shapeopt_optimization_history.dat'
 fvpfile = 'so_con_fvp_vertices.dat' # fixed vessel points file
 fvffile = 'so_con_fvf_vertices.dat' # fixed vessel flux file
 origvesselpolygonfile = 'vesselpolygon_orig.dat' # original/initial vessel file
-currentvesselpolygonfile = 'vesselpolygon_iterate.dat' # current/new vessel file
+currentvesselpolygonfile = 'vesselpolygon_iterate_so.dat' # current/new vessel file
 
 #==========================================================================#
 #                                                                          #
@@ -623,7 +623,7 @@ def PlotVesselIterate(dirpath, fignum):
     vals = dh.GetPolygonCoordinates(filepath)
 
     # Plot
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='ro-', marker='',
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
                    label='Vessel polygon')
 
     # Set axes
