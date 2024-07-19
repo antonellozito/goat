@@ -1395,6 +1395,7 @@ module somod_constraints
         ! Vertices, but locally indexed (i.e. not vertex ID, but ID 
         ! according to polygon structure)
         constraints%ID = pack([(k, k = 1, size(labels, 1))], isconstrained)
+        constraints%nID = size(constraints%ID)
 
         ! Get current psi values
         if (allocated(constraints%PsiD)) then 
