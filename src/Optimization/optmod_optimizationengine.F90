@@ -1791,7 +1791,7 @@ module optmod_optimizationengine
             doderiv, meritfunction, numLS)
 
         ! If no descent, exit with flag 1
-        if (DJf0 > 0) then 
+        if (DJf0 >= 0) then 
             flag = 1
             return 
         end if 
