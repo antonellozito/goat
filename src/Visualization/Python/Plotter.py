@@ -38,13 +38,13 @@ gridcellsiteratefile = 'cells_iterate.dat'
 
 # Files with optimization history
 goathistoryfile = 'goat_optimization_history.dat'
-shapeopthistoryfile = 'shapeopt_optimization_history.dat'
+shapeopthistoryfile = 'so_optimization_history.dat'
 
 # Shape optimization paths
 fvpfile = 'so_con_fvp_vertices.dat' # fixed vessel points file
 fvffile = 'so_con_fvf_vertices.dat' # fixed vessel flux file
-origvesselpolygonfile = 'vesselpolygon_orig.dat' # original/initial vessel file
-currentvesselpolygonfile = 'vesselpolygon_iterate.dat' # current/new vessel file
+origvesselpolygonfile = 'vesselpolygon_orig_so.dat' # original/initial vessel file
+currentvesselpolygonfile = 'vesselpolygon_iterate_so.dat' # current/new vessel file
 
 #==========================================================================#
 #                                                                          #
@@ -470,7 +470,7 @@ def PlotFixedVesselPointsConstraintVertices(dirpath, fignum):
     filepath = dirpath + filesep + fvpfile 
 
     # Get the grid data
-    vals = dh.GetVertexCoordinates(vertfilepath)
+    vals = dh.GetPolygonCoordinates(vertfilepath)
     PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
         facecolors='none', label='Vertices')
 
@@ -503,7 +503,7 @@ def PlotFixedVesselFluxConstraintVertices(dirpath, fignum):
     filepath = dirpath + filesep + fvffile
 
     # Get the grid data
-    vals = dh.GetVertexCoordinates(vertfilepath)
+    vals = dh.GetPolygonCoordinates(vertfilepath)
     PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
         facecolors='none', label='Vertices')
 
@@ -581,10 +581,62 @@ def PlotShapeOptimizationHistory(dirpath, fignum):
     thisaxes.set_yscale('log')
     thisaxes.legend(loc='upper right')
 
+def PlotVesselDisplacement(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vessel displacement between original and new vessel
+
+    # Get filepath
+    filepathorig = dirpath + filesep + origvesselpolygonfile 
+    filepathnew = dirpath + filesep + vesselpolygonfile 
+
+    # Get data
+    valsorig = dh.GetPolygonCoordinates(filepathorig)
+    valsnew = dh.GetPolygonCoordinates(filepathnew)
+
+    # Plot both polygons
+    PlotPolygons2D(valsorig[:, 0], valsorig[:, 1], fignum, color='b', marker='x',
+        label='Original vessel polygon')
+    PlotPolygons2D(valsnew[:, 0], valsnew[:, 1], fignum, color='r', marker='o',
+        label='New vessel polygon')
+
+    # Plot displacement vector
+    d = valsnew - valsorig 
+    plt.quiver(valsorig[:, 0], valsorig[:, 1], d[:, 0], d[:, 1], color='g', angles='xy', scale_units='xy', scale=1)
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), valsnew[:, 0], valsnew[:, 1])
+    
+
 
 #--------------------------------------------------------------------------#
 #                                 Vessel                                   #
 #--------------------------------------------------------------------------#
+
+def PlotInitialVesselPolygon(dirpath, fignum):
+    # Description
+    # ------------
+    # Plot the initial vessel polygon
+
+    # Get filepath
+    filepath = dirpath + filesep + origvesselpolygonfile 
+
+    # Get data
+    vals = dh.GetPolygonCoordinates(filepath)
+
+    # Plot
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='b', marker='x',
+                   label='Vessel polygon')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Vessel polygon')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
 
 def PlotVesselPolygon(dirpath, fignum):
     # Description
@@ -599,7 +651,7 @@ def PlotVesselPolygon(dirpath, fignum):
     vals = dh.GetPolygonCoordinates(filepath)
 
     # Plot
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='',
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
                    label='Vessel polygon')
 
     # Set axes
@@ -623,7 +675,7 @@ def PlotVesselIterate(dirpath, fignum):
     vals = dh.GetPolygonCoordinates(filepath)
 
     # Plot
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='ro-', marker='',
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
                    label='Vessel polygon')
 
     # Set axes

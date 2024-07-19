@@ -2068,6 +2068,9 @@ module goatmod_types
         ! Notes
         !======
         ! Note 1: the targets are NOT updated yet!
+        ! Note 2: we must construct the polygon sets using the polygon
+        ! vertices, not simply passing the new set of coordinates! This
+        ! will lead to an open polygon by default...
 
         ! Declare variables
         !==================
@@ -2077,6 +2080,7 @@ module goatmod_types
 
         ! Auxiliary
         integer(I8)                     :: flag, npv, npvtot
+        real(R8), allocatable           :: xvp(:), yvp(:)
         character(:), allocatable       :: vesselpath 
 
         ! Loop 
@@ -2092,7 +2096,7 @@ module goatmod_types
             ! Incompatible dimensions
             call gdErrorHandler('UpdateVesselCoordinates: incompatible ' // &
                 'dimensions of new coordinates and original vessel polygon')
-        end if 
+        end if  
 
         ! Adjust coordinates
         !===================
@@ -2102,9 +2106,15 @@ module goatmod_types
             ! Get number of vertices of this polygon
             npv = vessel%polygonset%polygons(i)%nv 
 
+            ! Get the coordinates
+            xvp = xv(k+1:k+npv)
+            yvp = yv(k+1:k+npv)
+
             ! Assign
             call vessel%polygonset%polygons(i)%Construct(&
-                xv(k+1:k+npv), yv(k+1:k+npv), vessel%polygonset%polygons(i)%labels)
+                xv(vessel%polygonset%polygons(i)%vert), &
+                yv(vessel%polygonset%polygons(i)%vert), &
+                vessel%polygonset%polygons(i)%labels(vessel%polygonset%polygons(i)%vert,:))
             
             ! Update counter
             k = k + npv 

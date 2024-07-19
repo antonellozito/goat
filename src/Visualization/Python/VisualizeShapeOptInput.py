@@ -11,6 +11,7 @@ import Datahandler as dh
 #---------------
 # Check if solps is present
 datadir = dh.GetDataDirectory()
+#datadir = './goatf/Runs/adjoint_shape_case/compass_adjoint_shape/run/output'
 
 # Print
 print('VisualizeShapeOptInput: reading from directory: ' + datadir)
@@ -18,9 +19,14 @@ print('VisualizeShapeOptInput: reading from directory: ' + datadir)
 # Design
 #-------
 # Plot the grid
-plotter.PlotGridCells(datadir, 1)
-plotter.PlotGridCellsIterate(datadir, 0)
-plotter.PlotVesselPolygon(datadir, -1)
+try:
+    plotter.PlotGridCells(datadir, 1)
+except:
+    print('Could not plot grid cells')
+try:
+    plotter.PlotInitialVesselPolygon(datadir, -1)
+except: 
+    print('Could not plot initial vessel')
 
 # Constraints
 #------------

@@ -772,6 +772,10 @@ module optmod_optimizationengine
         call problem%EvaluateInequalityConstraints(H, gradH, hessH, &
             dogradient, dohessian, mu)
 
+        ! Determine which inequality constraints are active and should
+        ! contribute
+        A = H > 0
+
         ! Compute merit function
         !=======================
         ! Compute penalty factor
@@ -1033,7 +1037,7 @@ module optmod_optimizationengine
                     num%checkeqconeqs)
             end if 
             if (num%checkineqcongradient .or. num%checkineqconhessian) then 
-                call CheckIneqconLinearization(problem, FDineqcon, lambda, &
+                call CheckIneqconLinearization(problem, FDineqcon, mu, &
                     num%checkineqcongradient, num%checkineqconhessian, &
                     num%checkineqconeqs)
             end if 
@@ -3005,7 +3009,7 @@ module optmod_optimizationengine
 
             ! Set the problem
             fun%problem = problem
-            allocate(fun%mu(nineq))
+            !allocate(fun%mu(nineq))
             fun%mu = mu
 
             ! Compute errors

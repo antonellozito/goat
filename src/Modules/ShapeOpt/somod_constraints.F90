@@ -37,6 +37,7 @@ module somod_constraints
     use gdmod_constraints ! to be cleaned up?
     use gdmod_optimizationengine
     use, intrinsic :: ieee_arithmetic
+    use PolygonLevelsetFunction2D
 
     ! The usual
     implicit none
@@ -158,6 +159,56 @@ module somod_constraints
 
     end type
 
+    ! Distance constraints
+    type, extends(GenericConstraintsSOUDT) :: VesselDistanceConstraintsUDT
+        
+        ! Description
+        !============
+        ! Constraints that fix the maximal vessel Distance based on a 
+        ! closed polygon description. Should only be used as an 
+        ! inequality constraint. The distance is based on the vessel
+        ! levelset function value and should be interpreted (roughly) 
+        ! as the perpendicular signed distance to the vessel. As always,
+        ! the constraints can be imposed on vessel polygon vertices 
+        ! only, and the vertex IDs can be given either directly or based
+        ! on the original vessel structure IDs. 
+
+        ! Note that it is possible to set upper and lower bounds by 
+        ! having two instances of this constraint and constraining the 
+        ! maximal distance to be zero. Furthermore, by defining
+        ! two different polygons, even the shape can be free (even 
+        ! disjoint polygons are allowed, as long as they are closed)
+
+        ! Fields:
+        ! - nID:    number of vertices
+        ! - ID:     vessel vertex indices to be considered 
+        ! - d:      maximal/minimal signed distance w.r.t. polygon 
+        ! - mode:   either 'max' or 'min', to determine if distance is 
+        !           maximal or minimal
+        ! - ps:     polygon set describing the (set of) closed polygons
+        ! - plf:    polygon levelset function based on ps for 
+        !           evaluation
+
+        integer(I8)                     :: nID
+        integer(I8), allocatable        :: ID(:)
+        real(R8)                        :: d 
+        character(:), allocatable       :: mode 
+        type(PolygonSetUDT)             :: ps 
+        class(PolygonLevelsetFunction2DUDT), allocatable    :: plf
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize     => InitializeVesselDistanceConstraints
+
+        ! Evaluation
+        procedure :: Evaluate       => EvaluateVesselDistanceConstraints
+
+        ! Write
+        procedure :: WriteData      => WriteDataVesselDistanceConstraints
+
+    end type
+
     ! Overarching types
     !==================
     ! Equality constraints
@@ -198,6 +249,11 @@ module somod_constraints
         integer(I8)             :: nineqcon = 0
 
         ! Constraint switches
+        logical                 :: dovesselupperbound = .false. 
+        logical                 :: dovessellowerbound = .false. 
+
+        type(VesselDistanceConstraintsUDT)  :: vesselupperbound 
+        type(VesselDistanceConstraintsUDT)  :: vessellowerbound
 
     contains
 
@@ -452,8 +508,6 @@ module somod_constraints
         nineqcon = constraints%ineqcon%nineqcon
 
     end subroutine
-
-         
 
     !------------------------------------------------------------------!
     !                           EQUALITY CONSTRAINTS                   !
@@ -723,6 +777,59 @@ module somod_constraints
         !=======================
         constraints%nineqcon = 0
 
+        ! Vessel upper bound
+        if (constraintoptions%vesselupperbound == 1) then 
+
+            ! Set the logical
+            constraints%dovesselupperbound = .true. 
+
+            ! Initialize
+            constraintoptions%vdoptions = constraintoptions%vduboptions 
+            call constraints%vesselupperbound%Initialize(goat, &
+                monitor, designvariables, constraintoptions)
+
+            ! Add constraints number
+            constraints%nineqcon = constraints%nineqcon + &
+                constraints%vesselupperbound%ncon 
+
+            ! Print
+            print *, 'number of vessel upperbound constraints: ', &
+                constraints%vesselupperbound%ncon
+
+        else
+
+            ! Set to false, don't initialize
+            constraints%dovesselupperbound = .false.
+
+        end if
+
+        ! Vessel lower bound
+        if (constraintoptions%vessellowerbound == 1) then 
+
+            ! Set the logical
+            constraints%dovessellowerbound = .true. 
+
+            ! Initialize
+            constraintoptions%vdoptions = constraintoptions%vdlboptions
+            call constraints%vessellowerbound%Initialize(goat, &
+                monitor, designvariables, constraintoptions)
+
+            ! Add constraints number
+            constraints%nineqcon = constraints%nineqcon + &
+                constraints%vessellowerbound%ncon 
+
+            ! Print
+            print *, 'number of vessel upperbound constraints: ', &
+                constraints%vessellowerbound%ncon
+
+        else
+
+            ! Set to false, don't initialize
+            constraints%dovessellowerbound = .false.
+
+        end if
+
+
     end subroutine
 
     ! Constraint evaluation
@@ -748,9 +855,15 @@ module somod_constraints
         class(DesignVariablesSOUDT)     :: designvariables 
 
         ! Loop
-        integer(I8)                     :: ic
+        integer(I8)                     :: ic, k
 
         ! Auxiliary
+        integer(I8), allocatable        :: conindex(:)
+        real(R8), allocatable           :: G_vub(:), lambda_vub(:)
+        type(MySparseUDT)               :: gradG_vub, hessG_vub
+
+        real(R8), allocatable           :: G_vlb(:), lambda_vlb(:)
+        type(MySparseUDT)               :: gradG_vlb, hessG_vlb
 
         ! Initialize
         !===========
@@ -762,9 +875,63 @@ module somod_constraints
         gradG = SpZeros(designvariables%nphi, 0) ! will concatenate
         hessG = SpZeros(designvariables%nphi, designvariables%nphi) ! will add
 
+        ! Vessel upper bound
+        !-------------------
+        if (constraints%dovesselupperbound) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%vesselupperbound%ncon)]
+
+            ! Allocate & initialize
+            lambda_vub = lambda(conindex)
+
+            ! Call the evaluation routine
+            call constraints%vesselupperbound%Evaluate(G_vub, &
+                gradG_vub, hessG_vub, goat, dogradient, &
+                dohessian, designvariables, lambda_vub)
+
+            ! Assign
+            G(conindex) = G_vub
+            if (dogradient) then 
+                gradG = gradG%Concatenate(gradG_vub, 2)
+            end if
+            if (dohessian) then 
+                hessG = hessG + hessG_vub
+            end if 
+
+            ! Update the constraint counter
+            ic = ic + constraints%vesselupperbound%ncon
+
+        end if
+
+        ! Vessel lower bound
+        !-------------------
+        if (constraints%dovessellowerbound) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%vessellowerbound%ncon)]
+
+            ! Allocate & initialize
+            lambda_vlb = lambda(conindex)
+
+            ! Call the evaluation routine
+            call constraints%vessellowerbound%Evaluate(G_vlb, &
+                gradG_vlb, hessG_vlb, goat, dogradient, &
+                dohessian, designvariables, lambda_vlb)
+
+            ! Assign
+            G(conindex) = G_vlb
+            if (dogradient) then 
+                gradG = gradG%Concatenate(gradG_vlb, 2)
+            end if
+            if (dohessian) then 
+                hessG = hessG + hessG_vlb
+            end if 
+
+            ! Update the constraint counter
+            ic = ic + constraints%vessellowerbound%ncon
+
+        end if
         
     end subroutine
-
 
     !------------------------------------------------------------------!
     !                        FIXED VESSEL POINTS                       !
@@ -1111,7 +1278,7 @@ module somod_constraints
     end subroutine
 
     !------------------------------------------------------------------!
-    !                        FIXED VESSEL POINTS                       !
+    !                         FIXED VESSEL FLUX                        !
     !------------------------------------------------------------------!
     ! Initialize
     subroutine InitializeFixedVesselFluxConstraints(constraints, goat, &
@@ -1221,13 +1388,14 @@ module somod_constraints
         end do
 
         ! Check if we can constrain, set to false if not the case
-        where (cc > maxcc + 2) isconstrained = .false. 
+        where (cc > maxcc + 1) isconstrained = .false. 
 
         ! Add to constraints
         !===================
         ! Vertices, but locally indexed (i.e. not vertex ID, but ID 
         ! according to polygon structure)
         constraints%ID = pack([(k, k = 1, size(labels, 1))], isconstrained)
+        constraints%nID = size(constraints%ID)
 
         ! Get current psi values
         if (allocated(constraints%PsiD)) then 
@@ -1457,6 +1625,423 @@ module somod_constraints
         ! Set the correct directories
         allocate(character(len('so_con_fvf_vertices')) :: filepath)
         filepath = 'so_con_fvf_vertices'
+
+        ! Associate
+        associate(&
+            ps              => goat%environment%vessel%polygonset,     &
+            ID              => constraints%ID  &
+            )
+
+        ! Get vessel vertices
+        call ps%GetVertices(x, y)
+
+        ! Write
+        call WriteVertexData(ID, x(ID), y(ID), filepath)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                           VESSEL DISTANCE                        !
+    !------------------------------------------------------------------!
+    ! Initialize
+    subroutine InitializeVesselDistanceConstraints(constraints, goat, &
+        monitor, designvariables, options)
+
+        ! Description
+        !============
+        ! Initialize the vessel Distance constraints. 
+
+        ! Notes
+        !======
+        
+        ! Initialize
+        !===========
+        implicit none
+        
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(VesselDistanceConstraintsUDT) :: constraints 
+        type(OptimizationProblemGDUDT)          :: goat 
+        type(ConstraintsMonitorSOUDT)           :: monitor
+        type(ConstraintOptionsSOUDT)            :: options 
+        class(DesignVariablesSOUDT)             :: designvariables
+
+        ! Auxiliary variables
+        class(PLF2DOptionsUDT), allocatable     :: plfoptions
+        logical, allocatable                    :: isconstrained(:), &
+            isvertextreated(:)
+        integer(I8), allocatable                :: labels(:, :)
+
+        real(R8), allocatable                   :: xv(:), yv(:)
+
+        ! Loop variables
+        integer(I8)                 :: i, k
+
+        ! Initialize
+        !===========
+        ! Number of constraints
+        constraints%ncon = 0
+
+        ! Check design variable type
+        select case (designvariables%type)
+
+        case ('vesselcoordinates', 'vesselcoordinates_goat')
+
+            ! All good
+
+        case default
+
+            ! All bad
+            call gdErrorHandler('InitializeFixedVesselFluxConstraints: ' // &
+                'design variable type not implemented')
+
+        end select
+
+        ! Associate
+        associate(&
+            ps      => goat%environment%vessel%polygonset,          &
+            cc      => monitor%eqvcc,                               &
+            maxcc   => monitor%maxeqvcc,                            &
+            opt     => options%vdoptions                            &
+            )
+
+        ! Get vessel coordinates and labels (should be same as design variables)
+        call ps%GetLabels(labels)
+        call ps%GetVertices(xv, yv)
+
+        ! Initialize logical indicating if vertex is constrained
+        allocate(isconstrained(size(labels, 1)))
+        isconstrained = .false. 
+
+        ! Initialize logical indicating if desired constrained vertex
+        ! was present and constrained
+        allocate(isvertextreated(size(opt%vertIDs)))
+        isvertextreated = .false. 
+
+        ! Determine constrained vertices
+        !===============================
+        ! Constrain per vessel structure (label 1 and 2)
+        do i = 1, size(opt%structureIDs)
+            ! Unpack ID
+            associate(tID       => opt%structureIDs(i))
+
+            ! Check vertices
+            where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) &
+                isconstrained = .true. 
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Constrain per vertex ID
+        do i = 1, size(opt%vertIDs)
+            ! Unpack ID
+            associate(tID       => opt%vertIDs(i))
+
+            ! Check vertices
+            where( (labels(:, 3) == tID)) isconstrained = .true. 
+
+            ! Check if found
+            if (any(labels(:, 3) == tID)) then 
+                isvertextreated(i) = .true. 
+            end if
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Check if we can constrain, set to false if not the case
+        where (cc > maxcc + 1) isconstrained = .false. 
+
+        ! Add to constraints
+        !===================
+        ! Vertices, but locally indexed (i.e. not vertex ID, but ID 
+        ! according to polygon structure)
+        constraints%ID = pack([(k, k = 1, size(labels, 1))], isconstrained)
+
+        ! set number of constraints
+        constraints%ncon = size(constraints%ID)
+        constraints%nID = constraints%ncon
+
+        ! Update
+        cc(constraints%ID) = cc(constraints%ID) + 1
+
+        ! Construct constraint polygon levelset
+        !======================================
+        ! Construct polygon set
+        call constraints%ps%Construct(opt%xp, opt%yp)
+
+        ! Set options for levelset
+        select case (opt%plftype)
+
+        case ('closedpolygon_exact')
+
+            ! Allocate
+            allocate(PLF2DClosedExactOptionsUDT::plfoptions)
+
+        case ('closedpolygon_smoothapproximation')
+
+            ! Allocate
+            allocate(PLF2DClosedApproximationOptionsUDT::plfoptions)
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('InitializeVesselDistanceConstraints: ' // & 
+                'polygon levelset function: ' // opt%plftype // & 
+                ' not implemented')
+
+        end select
+
+        select type (plfoptions)
+
+        type is (PLF2DClosedExactOptionsUDT)
+
+            ! Set options (none to set right now)
+
+        type is (PLF2DClosedApproximationOptionsUDT)
+            ! Set options
+            plfoptions%resx     = opt%resx
+            plfoptions%resy     = opt%resy
+            plfoptions%C        = opt%C
+            plfoptions%M        = opt%M
+            plfoptions%offsetx  = opt%offsetx
+            plfoptions%offsety  = opt%offsety
+            plfoptions%meth     = opt%meth
+
+        class default
+
+            ! Throw error - should actually already be thrown above
+            call gdErrorHandler('InitializeVesselDistanceConstraints: ' // & 
+            'polygon levelset function: ' // opt%plftype // & 
+                ' not implemented')
+
+        end select
+
+        ! Construct levelset
+        call InitializePolygonLevelsetFunction2D(constraints%plf, &
+            constraints%ps, plfoptions)
+
+        ! Output
+        !=======
+        ! Display warning message if necessary
+        if (any(.not. isvertextreated)) then 
+            ! Display message
+            print *, 'Vertices with following IDs were not present and ' // &
+                'are not constrained: ', pack(opt%vertIDs, .not. isvertextreated)
+        end if
+
+        ! Print data
+        call constraints%WriteData(goat)
+        
+        ! Housekeeping
+        !=============
+        end associate
+        
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateVesselDistanceConstraints(constraints, G, gradG, & 
+        hessG, goat, dogradient, dohessian, designvariables, lambda)
+
+        ! Description
+        !============
+        ! Evaluate the vessel Distance constraints
+        ! 
+        !       plf(xv, yv) - d = 0
+        ! 
+        ! Gradients and hessians w.r.t. xv, yv are simply the 
+        ! derivatives of the plf function. It is assumed that the plf
+        ! gives some measure of the distance (only important if d is 
+        ! non-zero)
+
+        ! Initialize
+        !===========
+        ! Modules
+        
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(VesselDistanceConstraintsUDT)     :: constraints 
+        real(R8), allocatable                   :: G(:) 
+        real(R8), allocatable                   :: lambda(:)
+        type(MySparseUDT)                       :: hessG, gradG
+        type(OptimizationProblemGDUDT)          :: goat 
+        logical                                 :: dogradient, dohessian
+        class(DesignVariablesSOUDT)             :: designvariables   
+        
+        ! Auxiliary
+        integer(I8)                             :: nv, ntv
+        integer(I8), allocatable, dimension(:)  :: row, col
+        real(R8), allocatable, dimension(:)     :: xv, yv, val, V, &
+            dVdx, dVdy, d2Vdx2, d2Vdy2, d2Vdxdy
+        type(MySparseUDT)                       :: jacG
+
+        ! Loop 
+        integer(I8)                         :: ic, ivg, ivh, k
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Checks
+        if ( (.not. allocated(lambda)) .and. dohessian) then
+            ! Throw error
+            call gdErrorHandler('When evaluating the hessian vector' &
+                // ' multiplication, lambda must be given')
+        end if
+
+        if (size(lambda) .ne. constraints%ncon) then
+            ! Lambda should have the same size as the constraints
+            call gdErrorHandler('Lambda should have the same size ' &
+                // 'as the constraint vector')
+        end if
+        if (allocated(G)) then 
+            if (size(G, 1) .ne. constraints%ncon) then 
+                deallocate(G)
+                allocate(G(constraints%ncon))
+            end if 
+        else
+            allocate(G(constraints%ncon))
+        end if 
+
+        ! Counters
+        ic = 0 ! constraint counter (local)
+        ivg = 0 ! value index for gradient
+        ivh = 0 ! value index for hessian
+
+        ! Associate
+        associate(&
+            plf         => constraints%plf,                 &
+            tv          => constraints%ID,                  &
+            d           => constraints%d,                   &
+            ps          => goat%environment%vessel%polygonset   &
+            )
+
+        ! Get coordinates
+        call ps%GetVertices(xv, yv)
+
+        ! Get number of vessel vertices
+        nv = size(xv)
+
+        ! Take only coordinates that are considered
+        xv = xv(tv)
+        yv = yv(tv)
+
+        ! Get number of constrained vertices
+        ntv = constraints%nID 
+
+        ! Evaluate
+        !=========
+        ! Values at vessel coordinates
+        allocate(V(ntv))
+        call plf%Evaluate(xv, yv, 0, 0, V)
+
+        ! Constraint
+        G(ic+1:ic+ntv) = V - d
+        
+        ! Derivatives
+        !============
+        ! Initialize
+        jacG%nrow = constraints%ncon 
+        jacG%ncol = designvariables%nphi 
+        
+        hessG%nrow = designvariables%nphi 
+        hessG%ncol = designvariables%nphi 
+
+        ! Check design variable type
+        select case(designvariables%type)
+
+        case ('vesselcoordinates', 'vesselcoordinates_goat') ! same since vessel coordinates come first in design variable vector
+
+            ! Gradient
+            !---------
+            if (dogradient) then
+                ! Evaluate derivatives
+                allocate(dVdx(ntv), dVdy(ntv))
+                call plf%Evaluate(xv, yv, 1, 0, dVdx)
+                call plf%Evaluate(xv, yv, 0, 1, dVdy) 
+                 
+                ! All contributions
+                row = [[(k, k = 1, constraints%ncon)], [(k, k = 1, constraints%ncon)]]
+                col = [tv, tv+nv]
+                val = [dVdx, dVdy]
+                jacG = ConstructMySparse(row, col, val, constraints%ncon, &
+                    designvariables%nphi)
+                                
+                ! Transpose
+                gradG = jacG%Transpose()
+            end if 
+
+            ! Hessian
+            !--------
+            if (dohessian) then
+                
+                ! Evaluate derivatives
+                allocate(d2Vdx2(ntv), d2Vdy2(ntv), d2Vdxdy(ntv))
+                call plf%Evaluate(xv, yv, 2, 0, d2Vdx2)
+                call plf%Evaluate(xv, yv, 1, 1, d2Vdxdy)
+                call plf%Evaluate(xv, yv, 0, 2, d2Vdy2)
+
+                ! All contributions
+                row = [tv, tv, tv+nv, tv+nv]
+                col = [tv, tv+nv, tv, tv+nv]
+                val = [d2Vdx2*lambda, d2Vdxdy*lambda, &
+                    d2Vdxdy*lambda, d2Vdy2*lambda]
+
+                ! Simply zero
+                hessG = ConstructMySparse(row, col, val, &
+                    designvariables%nphi, designvariables%nphi)
+            end if 
+
+        case default
+
+            call gdErrorHandler('EvaluateFixedVesselPointsConstraints: ' // &
+                'derivatives not implemented for design variable type: ' // &
+                designvariables%type)
+
+        end select
+        
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+    end subroutine 
+
+    ! Data output
+    subroutine WriteDataVesselDistanceConstraints(constraints, goat)
+
+        ! Description
+        !============
+        ! Write vessel nodes in the following format:
+        ! ID, x, y 
+        ! Different files are written for special vertices, fixed
+        ! vertices, flux surface vertices, and tangency points
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselDistanceConstraintsUDT)             :: constraints
+        type(OptimizationProblemGDUDT)                  :: goat
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)             :: x, y
+        character(:), allocatable                       :: filepath
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        allocate(character(len('so_con_vd_vertices')) :: filepath)
+        filepath = 'so_con_vd_vertices'
 
         ! Associate
         associate(&

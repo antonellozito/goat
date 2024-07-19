@@ -18,13 +18,28 @@ print('VisualizeShapeOptOutput: reading from directory: ' + datadir)
 # Design
 #-------
 # Plot the grid
-plotter.PlotGridCells(datadir, 1)
-plotter.PlotGridCellsIterate(datadir, 0)
-plotter.PlotVesselPolygon(datadir, -1)
+try:
+    plotter.PlotGridCells(datadir, 1)
+except: 
+    print('Could not plot grid cells')
+
+try: 
+    plotter.PlotVesselPolygon(datadir, -1)
+except: 
+    print('Could not plot vessel polygon')
+
+plotter.PlotVesselDisplacement(datadir, 3)
+try:
+    plotter.PlotVesselDisplacement(datadir, 3)
+except:
+    print('Could not plot vessel displacement')
 
 # Optimization history
 #---------------------
-plotter.PlotShapeOptimizationHistory(datadir, 2)
+try:
+    plotter.PlotShapeOptimizationHistory(datadir, 2)
+except: 
+    print('Could not plot shape optimization history')
 
 # Show figures
 #-------------
