@@ -2191,10 +2191,13 @@ module optmod_optimizationengine
         ! Initialize
         !===========
         ! Numerics
+        solver%num%inputfilepath    = solver%inputfilepath
+        solver%num%fieldprefix      = solver%inputfileprefix
         solver%numLS%inputfilepath  = solver%inputfilepath
         solver%numLS%fieldprefix    = solver%inputfileprefix
         solver%numQN%inputfilepath  = solver%inputfilepath
         solver%numQN%fieldprefix    = solver%inputfileprefix
+        call solver%num%InitializeNumParams()
         call solver%numLS%InitializeNumParams()
         call solver%numQN%InitializeNumParams()
 
@@ -2248,7 +2251,7 @@ module optmod_optimizationengine
         infnorm = maxval(abs(gradient))
 
         ! Compare
-        converged = infnorm < solver%numQN%tol
+        converged = infnorm < solver%num%tol
 
     end subroutine
 
