@@ -505,7 +505,7 @@ module sosmod_costfunction
         !================
         if (dohessian) then 
             ! Update the hessian approximation for the reduced part
-            call costfunction%B%UpdateHessian(designvariables%phi, gradR)
+            call costfunction%B%Update(designvariables%phi, gradR)
 
             ! Extract the hessian approximation and add with other 
             ! contributions of which exact hessian is known
