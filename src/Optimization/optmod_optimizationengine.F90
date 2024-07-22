@@ -144,6 +144,8 @@ module optmod_optimizationengine
         character(:), allocatable                   :: inputfilepath
         character(:), allocatable                   :: inputfileprefix
 
+        type(NumUDT)                                :: num
+
     contains 
 
         ! Initialization
@@ -830,12 +832,15 @@ module optmod_optimizationengine
         ! Initialize
         !===========
         ! Numerics
+        solver%num%inputfilepath    = solver%inputfilepath
+        solver%num%fieldprefix      = solver%inputfileprefix
         solver%numKKT%inputfilepath = solver%inputfilepath
         solver%numKKT%fieldprefix   = solver%inputfileprefix 
         solver%numLS%inputfilepath  = solver%inputfilepath
         solver%numLS%fieldprefix    = solver%inputfileprefix
         solver%numNCP%inputfilepath = solver%inputfilepath
         solver%numNCP%fieldprefix   = solver%inputfileprefix
+        call solver%num%InitializeNumParams()
         call solver%numKKT%InitializeNumParams() 
         call solver%numLS%InitializeNumParams()
         call solver%numNCP%InitializeNumParams()
@@ -920,8 +925,8 @@ module optmod_optimizationengine
 
         ! Initialize the monitor - only temporary here
         call problem%GetProblemDimensions(nphi, neq, nineq)
-        call problem%monitor%Initialize(solver%numKKT%maxit, nphi, neq,&
-            nineq, solver%numKKT%tol)
+        call problem%monitor%Initialize(solver%num%maxit, nphi, neq,&
+            nineq, solver%num%tol)
 
         ! Initialize FD checkers
         call FDcfv%Initialize(solver%numKKT%checkcfvvars, &
@@ -989,7 +994,7 @@ module optmod_optimizationengine
         ! Initialize counter(s)
         itopt = 1
         problem%monitor%itopt = itopt
-        maxit = solver%numKKT%maxit
+        maxit = solver%num%maxit
 
         ! Unpack 
         associate(&
@@ -1361,7 +1366,7 @@ module optmod_optimizationengine
         infnorm = maxval(abs(gradient))
 
         ! Compare
-        converged = infnorm < solver%numKKT%tol
+        converged = infnorm < solver%num%tol
 
     end subroutine
 

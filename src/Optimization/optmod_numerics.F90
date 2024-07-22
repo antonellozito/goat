@@ -58,6 +58,7 @@ module optmod_numerics
 
         procedure :: SetDefaultNumParams => SetDefaultNumParamsINT
         procedure :: InitializeNumParams => InitializeGeneralNumParamsINT
+        procedure :: Read                => ReadNumOptions
 
     end type
 
@@ -272,6 +273,64 @@ module optmod_numerics
         call num%SetDefaultNumParams()
 
         ! Override with user settings (to be implemented)
+        call num%Read()
+
+    end subroutine
+
+    
+    ! Read user data
+    subroutine ReadNumOptions(num)
+
+        ! Description
+        !============
+        ! Read in grid options from file. It is assumed that the 
+        ! filepath has been set correctly. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(NumUDT)                   :: num 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=num%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadNumOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadNumOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! General
+        field = num%fieldprefix // 'opt.num.itmax'
+        call ExtractOptionValueInteger0D(fid, field, num%maxit)
+        field = num%fieldprefix // 'opt.num.verbosity'
+        call ExtractOptionValueInteger0D(fid, field, num%verbosity)
+        field = num%fieldprefix // 'opt.num.tol'
+        call ExtractOptionValueReal0D(fid, field, num%tol)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
 
     end subroutine
 
