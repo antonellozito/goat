@@ -139,6 +139,11 @@ module somod_costfunction
         ! Note: one should *not* impose the goat constraints in 
         ! addition to the optimization problem 
 
+        ! Note: since the hessian of the reduced problem is typically
+        ! hard to compute, we use a hessian estimator for the reduced 
+        ! cost function  (except for those contributions that can be 
+        ! computed directly). This hessian estimator 
+
         ! Fields
         class(CostFunctionSOUDT), allocatable       :: costfunction 
         type(OptimizationEngineGDUDT)               :: goatengine 
