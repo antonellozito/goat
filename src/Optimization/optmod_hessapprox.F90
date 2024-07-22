@@ -50,18 +50,41 @@ module optmod_hessianapproximation
     ! Hessian approximation class (abstract)
     type, abstract :: HessianApproximationUDT
 
+        ! Description
+        !============
+        ! General hessian approximation format that should be used 
+        ! when doing hessian approximations. All general implementation
+        ! can be found in this type, but storage type specific
+        ! routines are deferred to inheriting subtypes. The following
+        ! fields are present:
+        ! - nphi:       number of design variables and hence dimension 
+        !               of the hessian
+        ! - nupdates:   how many times the hessian estimator has been 
+        !               updated (used for initialization step)
+        ! - updatemethod:   method to update hessian description (not 
+        !                   all methods may be available to all subtypes)
+        ! - grad0, phi0:    gradient and design at previous step 
+
         integer(I8)                 :: nphi
+        integer(I8)                 :: nupdates = 0
+        real(R8), allocatable       :: grad0(:), phi0(:)
         character(:), allocatable   :: updatemethod 
 
     contains 
 
         ! Hessian updating
         procedure(UpdateHessianBFGSINT), deferred :: UpdateHessianBFGS
-        generic :: UpdateHessian        => UpdateHessianBFGS
+        procedure :: Update => UpdateHessian
 
         ! Inverse Hessian vector product
         procedure(InverseHessianVectorProductINT), deferred     :: &
             InverseHessianVectorProduct
+
+        ! Querying of hessian approximation as dense matrix
+        procedure(GetFullHessianINT), deferred :: GetFullHessian 
+
+        ! Querying of hessian approximation as sparse matrix
+        procedure(GetSparseHessianINT), deferred :: GetSparseHessian
 
     end type
 
@@ -85,6 +108,12 @@ module optmod_hessianapproximation
         ! Inverse Hessian vector product
         procedure :: InverseHessianVectorProduct &   
             => InverseDenseHessianVectorProduct
+
+        ! Dense getter
+        procedure :: GetFullHessian     => GetFullDenseHessian 
+
+        ! Sparse getter
+        procedure :: GetSparseHessian   => GetSparseDenseHessian
 
     end type
 
@@ -110,6 +139,12 @@ module optmod_hessianapproximation
         ! Inverse Hessian vector product
         procedure :: InverseHessianVectorProduct &   
             => InverseSparseHessianVectorProduct
+
+        ! Dense getter
+        procedure :: GetFullHessian     => GetFullSparseHessian 
+
+        ! Sparse getter
+        procedure :: GetSparseHessian   => GetSparseSparseHessian
 
     end type
 
@@ -146,6 +181,20 @@ module optmod_hessianapproximation
                 real(R8), intent(in), dimension(:)  :: x 
                 real(R8), allocatable               :: y(:)
             end function
+
+            ! Dense getter
+            function GetFullHessianINT(hess) result(hessd)
+                import :: HessianApproximationUDT, R8
+                class(HessianApproximationUDT)      :: hess 
+                real(R8), allocatable               :: hessd(:, :)
+            end function
+
+            ! Sparse getter
+            function GetSparseHessianINT(hess) result(hesssp)
+                import :: HessianApproximationUDT, MySparseUDT 
+                class(HessianApproximationUDT)      :: hess 
+                type(MySparseUDT)                   :: hesssp 
+            end function 
 
     end interface
 
@@ -293,7 +342,7 @@ module optmod_hessianapproximation
         integer(I8), allocatable            :: row(:), col(:)
         real(R8), allocatable               :: eld(:, :), val(:)
         logical                             :: uniformdiagonals = .false.
-        type(MySparseUDT)                   :: diagmat, elsp
+        type(MySparseUDT)                   :: elsp
 
         ! Loop
         integer(I8)                         :: i, k, cc
@@ -393,11 +442,131 @@ module optmod_hessianapproximation
     ! Elementwise constructor
     function ConstructElementwiseHessianApproximation(updatemethod, &
         nphi, row, col, val, hessiantype) result(hess)
+
+        ! Description
+        !============
+        ! Construct a hessian approximation based on the element values
+        ! and position defined by the row and col indices.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(*), intent(in)        :: updatemethod, hessiantype 
+        integer(I8), intent(in)         :: row(:), col(:), nphi
+        real(R8), intent(in)            :: val(:)
+        class(HessianApproximationUDT), allocatable     :: hess
+
+        ! Auxiliary
+        real(R8), allocatable           :: B0d(:, :)
+        type(MysparseUDT)               :: B0sp
+
+        ! Loop
+        integer(I8)                     :: i 
+
+        ! Initialize
+        !===========
+        ! Checks
+        if ( (size(row) /= size(col)) .or. (size(row) /= size(val)) ) then 
+            call gdErrorHandler('ConstructElementwiseHessianApproximation: ' // & 
+                'dimension mismatch in input arguments row, col, val')
+        end if 
+        if (any(row > nphi) .or. any(col > nphi)) then 
+            call gdErrorHandler('ConstructElementwiseHessianApproximation: ' // &
+                'some elements are out of matrix range')
+        end if 
+
+        ! Construct
+        !==========
+        select case (hessiantype)
+
+        case ('dense')
+
+            ! Allocate
+            allocate(B0d(nphi, nphi))
+
+            ! Construct
+            do i = 1, size(row)
+                B0d(row(i), col(i)) = val(i)
+            end do
+            hess = ConstructDenseHessianApproximation(updatemethod, nphi, B0d)
+
+        case ('sparse')
+
+            ! Construct
+            B0sp = ConstructMySparse(row, col, val, nphi, nphi)
+            hess = ConstructSparseHessianApproximation(updatemethod, nphi, B0sp)
+
+        case default
+
+            call gdErrorHandler('ConstructElementwiseHessianApproximation: ' // &
+                'hessian type: "' // hessiantype // '" not implemented')
+        end select
+
     end function
 
     !------------------------------------------------------------------!
     !                             OPERATORS                            !
     !------------------------------------------------------------------!
+
+    ! Hessian approximation updating (general)
+    subroutine UpdateHessian(hess, phi, grad)
+
+        ! Description
+        !============
+        ! Update the hessian based only on the current design and 
+        ! gradient data (given by phi and grad). The type of update is
+        ! chosen based on the 'updatemethod' field of the hessian. Note
+        ! that, depending on which actual hessian type is used under 
+        ! the hood, some updating methods may not be available, or may
+        ! not be well suited for that specific hessian storage format! 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(HessianApproximationUDT)      :: hess 
+        real(R8), intent(in)                :: phi(:), grad(:)
+
+        ! Initialize
+        !===========
+        ! Check dimensions
+        if (size(phi) /= size(grad)) then 
+            call gdErrorHandler('UpdateHessian: inconsistent dimensions ' // &
+                'of psi and grad input arguments (should have same size)')
+        end if 
+
+        ! Update
+        !=======
+        select case (hess%updatemethod) 
+
+        case ('BFGS', 'bfgs')
+
+            ! BFGS updating
+            if (hess%nupdates > 0) then 
+                ! Update
+                call hess%UpdateHessianBFGS(hess%phi0, phi, hess%grad0, &
+                    grad)
+            end if 
+            
+        case ('no', 'none')
+
+            ! Don't do any updates
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('UpdateHessian: updating method: "' // &
+                hess%updatemethod // '" not implemented')
+
+        end select
+
+        ! Update phi and grad
+        hess%phi0   = phi
+        hess%grad0  = grad
+
+        ! Update counter
+        hess%nupdates = hess%nupdates + 1
+
+    end subroutine
 
     ! Hessian approximation updating (dense)
     subroutine UpdateDenseHessianBFGS(hess, phi0, phi1,  grad0, grad1)
@@ -619,6 +788,67 @@ module optmod_hessianapproximation
         end if 
 
     end function
+
+    ! Dense getter (dense)
+    function GetFullDenseHessian(hess) result(hessd)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DenseHessianApproximationUDT)     :: hess 
+        real(R8), allocatable                   :: hessd(:, :)
+
+        ! Return full 
+        !============
+        hessd = hess%val 
+
+    end function 
+
+    ! Dense getter (sparse)
+    function GetFullSparseHessian(hess) result(hessd)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(SparseHessianApproximationUDT)     :: hess 
+        real(R8), allocatable                   :: hessd(:, :)
+
+        ! Return full 
+        !============
+        call hess%val%ConvertToFull(hessd)
+
+    end function 
+
+    ! Sparse getter (dense)
+    function GetSparseDenseHessian(hess) result(hesssp)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DenseHessianApproximationUDT)     :: hess 
+        type(MySparseUDT)                       :: hesssp
+
+        ! Return sparse 
+        !==============
+        hesssp = ConstructMySparse(hess%val)
+
+    end function 
+
+    ! Sparse getter (sparse)
+    function GetSparseSparseHessian(hess) result(hesssp)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(SparseHessianApproximationUDT)    :: hess 
+        type(MySparseUDT)                       :: hesssp
+
+        ! Return sparse 
+        !==============
+        hesssp = hess%val
+
+    end function 
+
 
     
   
