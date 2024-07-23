@@ -350,7 +350,7 @@ module optmod_hessianapproximation
         ! Initialize
         !===========
         ! Hedge for empty hessian & check input type
-        select case ('hessiantype')
+        select case (hessiantype)
 
         case ('dense')
 
