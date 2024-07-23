@@ -412,10 +412,10 @@ module optmod_hessianapproximation
         do i = 1, nd
             if (diagind(i) >= 0) then 
                 row(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = 1, nphi-abs(diagind(i)))]
-                col(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = abs(diagind(i)), nphi)]
+                col(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = abs(diagind(i))+1, nphi)]
             else
                 col(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = 1, nphi-abs(diagind(i)))]
-                row(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = abs(diagind(i)), nphi)]
+                row(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = abs(diagind(i))+1, nphi)]
             end if 
             cc = cc + (nphi-abs(diagind(i)))
         end do
