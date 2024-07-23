@@ -3453,6 +3453,13 @@ module mod_polygon
                 if (.not. isnan(xi)) then  
                     ! Intersection found, add
                     counter = counter + 1
+                    if (counter > size(tempx)) then 
+                        ! Extend
+                        tempx = [tempx, 0*tempx]
+                        tempy = [tempy, 0*tempy]
+                        temps1 = [temps1, 0*temps1]
+                        temps2 = [temps2, 0*temps2]
+                    end if 
                     tempx(counter) = xi 
                     tempy(counter) = yi 
                     temps1(counter) = i 
@@ -3482,6 +3489,13 @@ module mod_polygon
             if (.not. isnan(xi)) then  
                 ! Intersection found, add
                 counter = counter + 1
+                if (counter > size(tempx)) then 
+                    ! Extend
+                    tempx = [tempx, 0*tempx]
+                    tempy = [tempy, 0*tempy]
+                    temps1 = [temps1, 0*temps1]
+                    temps2 = [temps2, 0*temps2]
+                end if 
                 tempx(counter) = xi 
                 tempy(counter) = yi 
                 temps1(counter) = i 
@@ -3506,6 +3520,13 @@ module mod_polygon
                 if (.not. isnan(xi)) then  
                     ! Intersection found, add
                     counter = counter + 1
+                    if (counter > size(tempx)) then 
+                        ! Extend
+                        tempx = [tempx, 0*tempx]
+                        tempy = [tempy, 0*tempy]
+                        temps1 = [temps1, 0*temps1]
+                        temps2 = [temps2, 0*temps2]
+                    end if 
                     tempx(counter) = xi 
                     tempy(counter) = yi 
                     temps1(counter) = i 
