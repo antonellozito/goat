@@ -205,6 +205,45 @@ module somod_userinput
     end type
 
     !------------------------------------------------------------------!
+    !                       HESSIAN APPROXIMATION                      !
+    !------------------------------------------------------------------!
+    ! General hessian approximation options
+    type, extends(optionsUDT)   :: HessianApproximationOptionsUDT
+
+        ! Description
+        !============
+        ! Options for the hessian approximation of the cost function.
+        ! See also the optmod_hessapprox module for more information on
+        ! which hessian approximations etc are currently available. 
+
+        ! The following fields are present:
+        ! - storagetype:    type of hessian approximation storage ('dense', 
+        !                   'sparse', or others)
+        ! - updatemethod:   method to update the hessian (may depend on 
+        !                   storage type, typically 'BFGS')
+        ! - inithess:       initial hessian type ('diagonal')
+
+        ! Options for 'diagonal' inithess:
+        ! - diagind:        diagonal indices (relative to main diagonal) 
+        !                   with non-zeros
+        ! - diagval:        values on the diagonal (for uniform values on
+        !                   separate diagonals, equal amount of values 
+        !                   as diagonal indices, for non-uniform: 
+        !                   specify equal to total number of elements)
+
+        character(:), allocatable       :: storagetype, updatemethod, &
+            inithess 
+        integer(I8), allocatable        :: diagind(:)
+        real(R8), allocatable           :: diagval(:)
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultHessianApproximationOptionsSO
+        procedure :: Read           => ReadHessianApproximationOptionsSO
+
+    end type
+
+    !------------------------------------------------------------------!
     !                          COST FUNCTION                           !
     !------------------------------------------------------------------!
 
@@ -254,6 +293,7 @@ module somod_userinput
         character(:), allocatable           :: type
         logical                             :: dogoatreduction, includesolps
         type(CostFunctionOptionsPLFUDT)     :: plf 
+        type(HessianApproximationOptionsUDT)    :: hessapprox
 
     contains 
 
@@ -594,9 +634,11 @@ module somod_userinput
 
         ! Propagate filepaths
         options%plf%inputfilepath = options%inputfilepath
+        options%hessapprox%inputfilepath = options%inputfilepath
 
         ! Contributions
         call options%plf%SetDefaults()
+        call options%hessapprox%SetDefaults()
 
     end subroutine
 
@@ -619,6 +661,25 @@ module somod_userinput
         call options%costfunction%SetDefaults()
         call options%constraints%SetDefaults()
         call options%variables%SetDefaults()
+
+    end subroutine
+    
+    ! General cost function
+    subroutine SetDefaultHessianApproximationOptionsSO(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(HessianApproximationOptionsUDT)   :: options 
+
+        ! Set defaults
+        !=============
+        ! Initial hessian (identity matrix)
+        options%inithess            = 'diagonal'
+        options%diagind             = [0]
+        options%diagval             = [1.0_R8]
+        options%updatemethod        = 'no' ! no updates
+        options%storagetype         = 'sparse'
 
     end subroutine
 
@@ -1233,6 +1294,7 @@ module somod_userinput
         !===================
         ! Contributions
         call options%plf%Read()
+        call options%hessapprox%Read()
 
     end subroutine
 
@@ -1250,6 +1312,63 @@ module somod_userinput
         call options%costfunction%Read()
         call options%variables%Read()
         call options%constraints%Read()
+
+    end subroutine
+
+    ! General design
+    subroutine ReadHessianApproximationOptionsSO(options)
+
+         ! Declare variables
+        !==================
+        ! Arguments
+        class(HessianApproximationOptionsUDT)    :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadHessianApproximationOptionsSO: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadHessianApproximationOptionsSO: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Storage type etc
+        field = 'so.cfv.par.hess.storagetype'
+        call ExtractOptionValueCharacter(fid, field, options%storagetype)
+        field = 'so.cfv.par.hess.inithess'
+        call ExtractOptionValueCharacter(fid, field, options%inithess)
+        field = 'so.cfv.par.hess.updatemethod'
+        call ExtractOptionValueCharacter(fid, field, options%updatemethod)
+
+        ! Initial hessian options for diagonal 
+        field = 'so.cfv.par.hess.diagind'
+        call ExtractOptionValueInteger1D(fid, field, options%diagind)
+        field = 'so.cfv.par.hess.diagval'
+        call ExtractOptionValueReal1D(fid, field, options%diagval)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
 
     end subroutine
 

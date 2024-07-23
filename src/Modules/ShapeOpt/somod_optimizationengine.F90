@@ -483,7 +483,7 @@ module somod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationProblemSOUDT)     :: problem 
+        class(OptimizationProblemSOUDT)                 :: problem 
 
         ! Auxiliary
 
@@ -492,6 +492,27 @@ module somod_optimizationengine
         ! Initialize
         !===========
         ! Associate
+
+        ! Update cost function
+        !=====================
+        ! Hessian estimator
+        ! Check which hessian estimator to construct
+        associate(hopt => problem%designoptions%costfunction%hessapprox)
+    
+        select case (hopt%inithess)
+
+        case ('diagonal')
+
+            problem%costfunction%B = ConstructHessianApproximation(hopt%updatemethod, &
+                problem%designvariables%nphi, hopt%diagind, hopt%diagval, hopt%storagetype)
+
+        case default 
+
+            call gdErrorHandler('FinalizeInitializationSO: ' // & 
+                'unknown initial hessian option: "' // hopt%inithess // '"')
+
+        end select
+        end associate
 
         ! Update constraints
         !===================

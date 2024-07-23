@@ -340,7 +340,7 @@ module sosmod_costfunction
         real(R8_G)                                  :: Js, Jg
         real(R8_G), allocatable, dimension(:)       :: goatvariables, &
             gradJg, gradJgoat, lambdaG, gradJs, dpsidx, dpsidy, &
-            d2psidx2, d2psidxdy, d2psidy2, gradJsolps, psi
+            d2psidx2, d2psidxdy, d2psidy2, gradJsolps, psi, gradR
 
         type(MySparseUDT)                           :: hessJg, &
             jacGgoat, jacGdes, gradGdes, gradGgoat
@@ -495,16 +495,22 @@ module sosmod_costfunction
 
         ! Compute gradient
         gradGdes = jacGdes%Transpose()
-        gradJ = gradJg + gradGdes%MatrixVectorProduct(lambdaG)
+        gradR = gradGdes%MatrixVectorProduct(lambdaG)
+        gradJ = gradJg + gradR
 
         ! End association
         end associate
 
         ! Compute hessian
         !================
-        ! Only take the raw cost function contribution as hessian - 
-        ! perhaps replace by hessian estimator in the future? 
-        hessJ = hessJg
+        if (dohessian) then 
+            ! Update the hessian approximation for the reduced part
+            call costfunction%B%Update(designvariables%phi, gradR)
+
+            ! Extract the hessian approximation and add with other 
+            ! contributions of which exact hessian is known
+            hessJ = hessJg + costfunction%B%GetSparseHessian()
+        end if 
 
         ! Write out data for gradient verification
         !=========================================
