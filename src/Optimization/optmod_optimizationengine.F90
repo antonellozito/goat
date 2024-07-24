@@ -1987,6 +1987,9 @@ module optmod_optimizationengine
                 ! Update current iterate
                 x = x0 + alpha*dphi
 
+                ! Start tracking for possible problems
+                call ErrorStack%StartTrack()
+
                 ! Update the design
                 call problem%UpdateDesign(alpha*dphi)
 
@@ -2023,7 +2026,7 @@ module optmod_optimizationengine
 
                     ! Decrease alpha
                     alpha = dec*alpha
-                    
+
                 else
                     
                     ! Try if we can get there by applying a second order
