@@ -382,6 +382,10 @@ module sosmod_costfunction
 
         ! Solve goat 
         !===========
+        ! Keep track of errors
+        call ErrorHandler%StartTrack()
+
+        ! Try to solve
         associate(goatproblem       => costfunction%goatengine%problem)
         select type (goatproblem)
 
@@ -403,6 +407,18 @@ module sosmod_costfunction
 
         end select
         end associate
+
+        ! Check if an error was found, if so: call error (softly) and 
+        ! set cost function value and gradient to inf
+        errstat = ErrorHandler%ErrorState()
+        call ErrorHandler%EndTrack()
+        if (errstat > 0) then 
+            call gdErrorHandler('EvaluateCostFunctionGSR: error encountered ' // &
+                'while evaluating goat equations. Setting cost function value ' // & 
+                'to infinity and exiting evaluation', severityin=0)
+            J = posinfval_R8()
+            return 
+        end if 
 
         ! Compute reduced cost function
         !==============================
