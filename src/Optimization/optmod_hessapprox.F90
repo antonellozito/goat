@@ -595,6 +595,7 @@ module optmod_hessianapproximation
         !======================
         ! Allocate
         allocate(sk(hess%nphi, 1), yk(hess%nphi, 1), bs(hess%nphi, 1))
+        Bk = hess%val
 
         ! Compute differences
         sk(:, 1) = phi1 - phi0 
@@ -618,9 +619,6 @@ module optmod_hessianapproximation
 
         ! BFGS Update
         !============
-        ! Store Bk
-        Bk = hess%val 
-
         ! Compute new hessian
         hess%val = Bk - matmul(bs, transpose(bs))/sbs(1, 1) &
             + matmul(ykt, transpose(ykt))/ys(1, 1)
