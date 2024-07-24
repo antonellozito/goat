@@ -1085,7 +1085,7 @@ module optmod_optimizationengine
             if (errstat > 0) then 
                 ! Call error, exit the loop
                 call gdErrorHandler('SolveOptimizationProblemKKT: could ' // &
-                    'not evaluate problem, exiting', severityin=1)
+                    'not evaluate problem, exiting', severityin=0)
                 exit 
             end if 
 
@@ -1093,7 +1093,7 @@ module optmod_optimizationengine
             if (any(isnan(gradL))) then 
                 ! Call error, exit the loop
                 call gdErrorHandler('SolveOptimizationProblemKKT: NaNs ' // &
-                    'detected when evaluating the problem, exiting', severityin=1)
+                    'detected when evaluating the problem, exiting', severityin=0)
                 exit 
             end if 
 
