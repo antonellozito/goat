@@ -348,6 +348,9 @@ module sosmod_costfunction
         ! Loop
         integer(I8_G)                       :: i
 
+        ! Error handling
+        integer                             :: errstat
+
         ! Initialize
         !===========
         ! Associate for ease
@@ -383,7 +386,7 @@ module sosmod_costfunction
         ! Solve goat 
         !===========
         ! Keep track of errors
-        call ErrorHandler%StartTrack()
+        call ErrorStack%StartTrack()
 
         ! Try to solve
         associate(goatproblem       => costfunction%goatengine%problem)
@@ -410,8 +413,8 @@ module sosmod_costfunction
 
         ! Check if an error was found, if so: call error (softly) and 
         ! set cost function value and gradient to inf
-        errstat = ErrorHandler%ErrorState()
-        call ErrorHandler%EndTrack()
+        errstat = ErrorStack%ErrorState()
+        call ErrorStack%EndTrack()
         if (errstat > 0) then 
             call gdErrorHandler('EvaluateCostFunctionGSR: error encountered ' // &
                 'while evaluating goat equations. Setting cost function value ' // & 
