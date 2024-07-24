@@ -18,7 +18,7 @@ module mod_errorhandler
     implicit none
     save
     private
-    public :: gdErrorStack, ErrorHandlerUDT, gdErrorHandler 
+    public :: ErrorStack, ErrorHandlerUDT, gdErrorHandler 
 
     !==================================================================!
     !                                                                  !
@@ -77,7 +77,7 @@ module mod_errorhandler
 
     ! Define error handlers
     !======================
-    type(ErrorHandlerUDT) :: gdErrorStack
+    type(ErrorHandlerUDT) :: ErrorStack
 
     contains 
 
@@ -126,7 +126,7 @@ module mod_errorhandler
         ! Error handling
         !===============
         ! Add to stack
-        call gdErrorStack%Add(msg, ID)
+        call ErrorStack%Add(msg, ID)
 
         ! Print
         print *, 'gd error: ', msg
@@ -328,11 +328,11 @@ module mod_errorhandler
         ! Associate
         associate(t         => errorhandler%t)
 
+        ! Remove the tracker
+        errorhandler%trackstack(t) = .false. ! no error upon exit
+
         ! Update the tracking counter
         t = t - 1
-
-        ! Add the tracker
-        errorhandler%trackstack(t) = .false. ! no error upon entry
 
         ! Housekeeping
         !=============
