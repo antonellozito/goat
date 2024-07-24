@@ -1928,9 +1928,7 @@ module optmod_optimizationengine
                         mu, doderiv, meritfunction, numLS)
                 end if
                 
-                ! Calculate new cost function value
-                call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
-                    mu, doderiv, meritfunction, numLS)
+
                 
                 ! Check Armijo & Wolfe conditions
                 if (fk > f0 + c1*alpha*DJf0) then 
@@ -2008,10 +2006,6 @@ module optmod_optimizationengine
                     call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
                         mu, doderiv, meritfunction, numLS)
                 end if
-                
-                ! Calculate new cost function value
-                call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
-                    mu, doderiv, meritfunction, numLS)
                 
                 ! Check Armijo condition
                 if (fk < f0 + c1*alpha*DJf0) then 
