@@ -1846,18 +1846,20 @@ module optmod_optimizationengine
 
                 ! Update the problem
                 call problem%UpdateProblem()
-                
-                ! Calculate new cost function value
-                call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
-                    mu, doderiv, meritfunction, numLS)
 
                 ! Check error status
                 errstat = ErrorStack%ErrorState()
                 call ErrorStack%EndTrack()
                 if (errstat > 0) then 
-                    ! Error encountered, set value to infinity
+                    ! Error encountered, set value to infinity - don't
+                    ! bother trying to compute the merit function
                     fk = inf
-                end if 
+                else
+                    ! Calculate new cost function value
+                    call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                        mu, doderiv, meritfunction, numLS)
+                end if
+
                 
                 ! Check Armijo condition
                 if (fk < f0 + c1*alpha*DJf0) then 
@@ -1904,11 +1906,27 @@ module optmod_optimizationengine
                 ! Update current iterate
                 x = x0 + alpha*dphi
 
+                ! Start tracking for possible problems
+                call ErrorStack%StartTrack()
+
                 ! Update the design
                 call problem%UpdateDesign(alpha*dphi)
 
                 ! Update the problem
                 call problem%UpdateProblem()
+
+                ! Check error status
+                errstat = ErrorStack%ErrorState()
+                call ErrorStack%EndTrack()
+                if (errstat > 0) then 
+                    ! Error encountered, set value to infinity - don't
+                    ! bother trying to compute the merit function
+                    fk = inf
+                else
+                    ! Calculate new cost function value
+                    call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                        mu, doderiv, meritfunction, numLS)
+                end if
                 
                 ! Calculate new cost function value
                 call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
@@ -1974,6 +1992,19 @@ module optmod_optimizationengine
 
                 ! Update the problem
                 call problem%UpdateProblem()
+
+                ! Check error status
+                errstat = ErrorStack%ErrorState()
+                call ErrorStack%EndTrack()
+                if (errstat > 0) then 
+                    ! Error encountered, set value to infinity - don't
+                    ! bother trying to compute the merit function
+                    fk = inf
+                else
+                    ! Calculate new cost function value
+                    call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                        mu, doderiv, meritfunction, numLS)
+                end if
                 
                 ! Calculate new cost function value
                 call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
@@ -1984,6 +2015,14 @@ module optmod_optimizationengine
                     
                     ! Sufficient decrease, terminate
                     conv = .true.
+                    
+                elseif (errstat <= 0) then 
+
+                    ! Error when updating problem, don't even bother 
+                    ! trying a second order correction
+
+                    ! Decrease alpha
+                    alpha = dec*alpha
                     
                 else
                     
