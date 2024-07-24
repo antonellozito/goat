@@ -2019,7 +2019,7 @@ module optmod_optimizationengine
                     ! Sufficient decrease, terminate
                     conv = .true.
                     
-                elseif (errstat <= 0) then 
+                elseif (errstat > 0) then 
 
                     ! Error when updating problem, don't even bother 
                     ! trying a second order correction
