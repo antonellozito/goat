@@ -35,6 +35,7 @@ module optmod_optimizationengine
     use mod_diagnostics
     use mod_linearsolverinterface
     use mod_plotter
+    use mod_errorhandler
     use optmod_designvariables
     use optmod_costfunction
     use optmod_constraints
@@ -906,7 +907,7 @@ module optmod_optimizationengine
         type(FDcheckerUDT)          :: FDcfv, FDeqcon, FDineqcon
 
         ! Diagnostics
-        ! logical                     :: checkgradients, checkhessians 
+        integer                     :: errstat
 
         ! Timing
         real(R8)                    :: t_it_s, t_it_e, &
@@ -1028,6 +1029,9 @@ module optmod_optimizationengine
             problem%monitor%itopt = itopt
             problem%monitor%rxf = rxf 
 
+            ! Start tracking errors
+            call ErrorStack%StartTrack()
+
             ! Update the optimization problem 
             call problem%UpdateProblem()
 
@@ -1074,6 +1078,24 @@ module optmod_optimizationengine
                 G, gradG, hessG, lambda, &
                 H, gradH, hessH, mu, A, &
                 dogradient, dohessian)
+
+            ! Check if an error was encountered
+            errstat = ErrorStack%ErrorState()
+            call ErrorStack%EndTrack()
+            if (errstat > 0) then 
+                ! Call error, exit the loop
+                call gdErrorHandler('SolveOptimizationProblemKKT: could ' // &
+                    'not evaluate problem, exiting', severityin=1)
+                exit 
+            end if 
+
+            ! Check if NaNs are encountered in residual
+            if (any(isnan(gradL))) then 
+                ! Call error, exit the loop
+                call gdErrorHandler('SolveOptimizationProblemKKT: NaNs ' // &
+                    'detected when evaluating the problem, exiting', severityin=1)
+                exit 
+            end if 
 
             ! Check convergence
             call solver%CheckConvergenceKKT(gradL, converged, convnorm)
@@ -1165,31 +1187,30 @@ module optmod_optimizationengine
                 ! Update lagrange multipliers using least-squares approach
                 ! for active constraints
                 if ( (flag == 0) .and. (flagls == 0)) then 
-                allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
-                activeineqconind = pack(ineqconind, A)
-                inactiveineqconind = pack(ineqconind, I)
-                hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
-                hessLJ = hessLJ%DeleteRows([eqconind, ineqconind])
-                hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
-                hessLC = hessLC%DeleteRows([eqconind, ineqconind])
-                allocate(dxl(neq + count(A)))
-                !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
-                !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
-                !    dxl2, flag)
-                !dxl2 = -dxl2
-                call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
-                    MatrixVectorProduct(hessLC%Transpose(), &
-                    (rhs(phiind) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
-                    dxl, flag)
+                    allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
+                    activeineqconind = pack(ineqconind, A)
+                    inactiveineqconind = pack(ineqconind, I)
+                    hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
+                    hessLJ = hessLJ%DeleteRows([eqconind, ineqconind])
+                    hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
+                    hessLC = hessLC%DeleteRows([eqconind, ineqconind])
+                    allocate(dxl(neq + count(A)))
+                    !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
+                    !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
+                    !    dxl2, flag)
+                    !dxl2 = -dxl2
+                    call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
+                        MatrixVectorProduct(hessLC%Transpose(), &
+                        (rhs(phiind) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
+                        dxl, flag)
 
-                !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
-                
-                dx(nphi+1:nphi+neq) = dxl(1:neq)
-                dx(activeineqconind) = dxl(neq+1:neq+count(A))
-                deallocate(dxl, activeineqconind, inactiveineqconind)
+                    !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
+                    
+                    dx(nphi+1:nphi+neq) = dxl(1:neq)
+                    dx(activeineqconind) = dxl(neq+1:neq+count(A))
+                    deallocate(dxl, activeineqconind, inactiveineqconind)
                 end if 
                 
-
             else
                 ! Check convergence of solver
                 if (flag == 0) then 
@@ -1743,6 +1764,7 @@ module optmod_optimizationengine
         logical                             :: dogradient, dohessian 
         logical, allocatable                :: A(:)
         integer(I8)                         :: flag2
+        integer                             :: errstat
 
         ! Initialize
         !===========
@@ -1816,6 +1838,9 @@ module optmod_optimizationengine
                 ! Update current iterate
                 x = x0 + alpha*dphi
 
+                ! Start tracking for possible problems
+                call ErrorStack%StartTrack()
+
                 ! Update the design
                 call problem%UpdateDesign(alpha*dphi)
 
@@ -1825,6 +1850,14 @@ module optmod_optimizationengine
                 ! Calculate new cost function value
                 call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
                     mu, doderiv, meritfunction, numLS)
+
+                ! Check error status
+                errstat = ErrorStack%ErrorState()
+                call ErrorStack%EndTrack()
+                if (errstat > 0) then 
+                    ! Error encountered, set value to infinity
+                    fk = inf
+                end if 
                 
                 ! Check Armijo condition
                 if (fk < f0 + c1*alpha*DJf0) then 

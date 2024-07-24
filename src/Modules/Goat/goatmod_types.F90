@@ -2126,12 +2126,12 @@ module goatmod_types
         ! Test orientation
         call vessel%polygonset%OrientNestedClosedPolygons(flag)
 
-        ! Check
+        ! Check if vessel polygon is still a closed and simple polygon
         if (flag .ne. 0) then  
-            ! Throw error
+            ! Throw error, but do not exit program - may be dealt with upstream
             print *, 'flag: ', flag
             call gdErrorHandler('UpdateVesselCoordinates: could not orient ' // &
-                'polygons, OrientNestedClosedPolygons exited with flag above')
+                'polygons, OrientNestedClosedPolygons exited with flag above', severityin=0)
         end if 
 
         ! Write data

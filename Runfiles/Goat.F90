@@ -93,5 +93,8 @@ program Goat
 
     end select 
 
+    call ErrorStack%Print()
+
+
 end program Goat
                                     
