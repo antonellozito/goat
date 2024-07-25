@@ -1458,7 +1458,8 @@ module optmod_optimizationengine
         integer(I8)                         :: k 
 
         ! Auxiliary variables
-        real(R8), allocatable               :: tmu(:), tH(:)
+        real(R8), allocatable               :: tmu(:), tH(:), val(:)
+        integer(I8), allocatable            :: row(:), col(:)
                                         
         ! Compute Lagrangian
         !===================
@@ -1499,57 +1500,59 @@ module optmod_optimizationengine
             hessL%nval  = hessJ%nval + hessG%nval + hessH%nval &
                         + 2*gradG%nval + 2*gradH%nval   
 
-            if (.not. allocated(hessL%val)) then
-                call hessL%Allocate()
-            end if
+            allocate(row(hessL%nval), col(hessL%nval), val(hessL%nval))
 
             ! dLdpsi2
             !--------
             ! Cost function contribution
-            hessL%val(k+1:k+hessJ%nval) = hessJ%val
-            hessL%row(k+1:k+hessJ%nval) = hessJ%row 
-            hessL%col(k+1:k+hessJ%nval) = hessJ%col 
+            val(k+1:k+hessJ%nval) = hessJ%val
+            row(k+1:k+hessJ%nval) = hessJ%row 
+            col(k+1:k+hessJ%nval) = hessJ%col 
             k = k + hessJ%nval 
 
             ! Equality constraints contribution
-            hessL%val(k+1:k+hessG%nval) = hessG%val
-            hessL%row(k+1:k+hessG%nval) = hessG%row 
-            hessL%col(k+1:k+hessG%nval) = hessG%col 
+            val(k+1:k+hessG%nval) = hessG%val
+            row(k+1:k+hessG%nval) = hessG%row 
+            col(k+1:k+hessG%nval) = hessG%col 
             k = k + hessG%nval 
 
             ! Inequality constraints contribution
-            hessL%val(k+1:k+hessH%nval) = hessH%val
-            hessL%row(k+1:k+hessH%nval) = hessH%row 
-            hessL%col(k+1:k+hessH%nval) = hessH%col 
+            val(k+1:k+hessH%nval) = hessH%val
+            row(k+1:k+hessH%nval) = hessH%row 
+            col(k+1:k+hessH%nval) = hessH%col 
             k = k + hessH%nval 
 
             ! dLdlambdadphi
             !--------------
-            hessL%val(k+1:k+gradG%nval) = gradG%val 
-            hessL%row(k+1:k+gradG%nval) = gradG%row
-            hessL%col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+            val(k+1:k+gradG%nval) = gradG%val 
+            row(k+1:k+gradG%nval) = gradG%row
+            col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
             k = k + gradG%nval 
 
             ! dLdphidlambda 
             !--------------
-            hessL%val(k+1:k+gradG%nval) = gradG%val 
-            hessL%row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
-            hessL%col(k+1:k+gradG%nval) = gradG%row  
+            val(k+1:k+gradG%nval) = gradG%val 
+            row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+            col(k+1:k+gradG%nval) = gradG%row  
             k = k + gradG%nval 
 
             ! dLdmudphi
             !----------
-            hessL%val(k+1:k+gradH%nval) = gradH%val 
-            hessL%row(k+1:k+gradH%nval) = gradH%row
-            hessL%col(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
+            val(k+1:k+gradH%nval) = gradH%val 
+            row(k+1:k+gradH%nval) = gradH%row
+            col(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
             k = k + gradH%nval 
 
             ! dLdphidmu
             !----------
-            hessL%val(k+1:k+gradH%nval) = gradH%val 
-            hessL%row(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
-            hessL%col(k+1:k+gradH%nval) = gradH%row
+            val(k+1:k+gradH%nval) = gradH%val 
+            row(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
+            col(k+1:k+gradH%nval) = gradH%row
             k = k + gradH%nval 
+
+            ! Construct 
+            !==========
+            hessL = ConstructMySparse(row, col, val, hessL%nrow, hessL%ncol)
 
         end if
 
@@ -2150,7 +2153,8 @@ module optmod_optimizationengine
         integer(I8)                         :: k 
 
         ! Auxiliary variables
-        real(R8), allocatable               :: tmu(:)
+        real(R8), allocatable               :: tmu(:), val(:)
+        integer(I8), allocatable            :: row(:), col(:)
 
         ! Set up rhs
         !===========
@@ -2169,9 +2173,7 @@ module optmod_optimizationengine
         lhs%ncol = size(rhs, 1)
         lhs%nval = hessJ%nval + hessG%nval + hessH%nval + 2*gradG%nval &
             + 2*gradncpphi%nval + gradncpmu%nval
-        if (.not. allocated(lhs%val)) then 
-            call lhs%Allocate()
-        end if 
+        allocate(row(lhs%nval), col(lhs%nval), val(lhs%nval))
 
         ! dLdpsi2
         !--------
@@ -2179,61 +2181,61 @@ module optmod_optimizationengine
         k = 0
 
         ! Cost function contribution
-        lhs%val(k+1:k+hessJ%nval) = hessJ%val
-        lhs%row(k+1:k+hessJ%nval) = hessJ%row 
-        lhs%col(k+1:k+hessJ%nval) = hessJ%col 
+        val(k+1:k+hessJ%nval) = hessJ%val
+        row(k+1:k+hessJ%nval) = hessJ%row 
+        col(k+1:k+hessJ%nval) = hessJ%col 
         k = k + hessJ%nval 
 
         ! Equality constraints contribution
-        lhs%val(k+1:k+hessG%nval) = hessG%val
-        lhs%row(k+1:k+hessG%nval) = hessG%row 
-        lhs%col(k+1:k+hessG%nval) = hessG%col 
+        val(k+1:k+hessG%nval) = hessG%val
+        row(k+1:k+hessG%nval) = hessG%row 
+        col(k+1:k+hessG%nval) = hessG%col 
         k = k + hessG%nval 
 
         ! Inequality constraints contribution
-        lhs%val(k+1:k+hessH%nval) = hessH%val
-        lhs%row(k+1:k+hessH%nval) = hessH%row 
-        lhs%col(k+1:k+hessH%nval) = hessH%col 
+        val(k+1:k+hessH%nval) = hessH%val
+        row(k+1:k+hessH%nval) = hessH%row 
+        col(k+1:k+hessH%nval) = hessH%col 
         k = k + hessH%nval 
 
         ! dLdlambdadphi
         !--------------
-        lhs%val(k+1:k+gradG%nval) = gradG%val 
-        lhs%row(k+1:k+gradG%nval) = gradG%row 
-        lhs%col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+        val(k+1:k+gradG%nval) = gradG%val 
+        row(k+1:k+gradG%nval) = gradG%row 
+        col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
         k = k + gradG%nval 
 
         ! dLdphidlambda 
         !--------------
-        lhs%val(k+1:k+gradG%nval) = gradG%val 
-        lhs%row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
-        lhs%col(k+1:k+gradG%nval) = gradG%row  
+        val(k+1:k+gradG%nval) = gradG%val 
+        row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+        col(k+1:k+gradG%nval) = gradG%row  
         k = k + gradG%nval 
 
         ! dLdmudphi
         !----------
-        lhs%val(k+1:k+gradncpphi%nval) = gradncpphi%val 
-        lhs%row(k+1:k+gradncpphi%nval) = gradncpphi%row
-        lhs%col(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
+        val(k+1:k+gradncpphi%nval) = gradncpphi%val 
+        row(k+1:k+gradncpphi%nval) = gradncpphi%row
+        col(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
         k = k + gradncpphi%nval 
 
         ! dLdphidmu
         !----------
-        lhs%val(k+1:k+gradncpphi%nval) = gradncpphi%val 
-        lhs%row(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
-        lhs%col(k+1:k+gradncpphi%nval) = gradncpphi%row
+        val(k+1:k+gradncpphi%nval) = gradncpphi%val 
+        row(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
+        col(k+1:k+gradncpphi%nval) = gradncpphi%row
         k = k + gradncpphi%nval 
 
         ! dLdmudmu
         !----------
-        lhs%val(k+1:k+gradncpmu%nval) = gradncpmu%val 
-        lhs%row(k+1:k+gradncpmu%nval) = gradncpmu%col + hessJ%nrow + gradG%ncol
-        lhs%col(k+1:k+gradncpmu%nval) = gradncpmu%row + hessJ%nrow + gradG%ncol
+        val(k+1:k+gradncpmu%nval) = gradncpmu%val 
+        row(k+1:k+gradncpmu%nval) = gradncpmu%col + hessJ%nrow + gradG%ncol
+        col(k+1:k+gradncpmu%nval) = gradncpmu%row + hessJ%nrow + gradG%ncol
         k = k + gradncpmu%nval 
 
-
-        
-
+        ! Construct sparse
+        !=================
+        lhs = ConstructMySparse(row, col, val, lhs%nrow, lhs%ncol)
 
     end subroutine
 
