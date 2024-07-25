@@ -31,6 +31,7 @@ module optmod_hessianapproximation
     use mod_constants
     use mod_sparseinterface
     use mod_linearsolverinterface
+    use, intrinsic :: ieee_arithmetic
 
     ! The usual
     implicit none
@@ -623,6 +624,12 @@ module optmod_hessianapproximation
         hess%val = Bk - matmul(bs, transpose(bs))/sbs(1, 1) &
             + matmul(ykt, transpose(ykt))/ys(1, 1)
 
+        ! Check 
+        if (any(.not. ieee_is_finite(hess%val))) then 
+            ! Reset, skip update
+            hess%val = Bk 
+        end if 
+
         ! Ensure symmetry
         hess%val = 0.5*(hess%val + transpose(hess%val))
 
@@ -700,7 +707,13 @@ module optmod_hessianapproximation
         ! Compute new hessian - Actually dense due to outer products!
         dval = ConstructMySparse(-matmul(bs, transpose(bs))/sbs(1, 1) &
             - matmul(ykt, transpose(ykt))/ys(1, 1))
-        hess%val = Bk + dval
+        
+        ! Check
+        if (any(.not. ieee_is_finite(dval%val))) then 
+            ! Skip update
+        else
+            hess%val = Bk + dval
+        end if 
 
 
     end subroutine
