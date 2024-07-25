@@ -157,7 +157,7 @@ module sosmod_costfunction
     end subroutine 
 
      ! Evaluation
-    subroutine EvaluateCostFunctionSOLPS(costfunction, J, gradJ)
+    subroutine EvaluateCostFunctionSOLPS(costfunction, J, gradJ, dogradient)
 
         ! Description
         !============
@@ -178,9 +178,11 @@ module sosmod_costfunction
         class(CostFunctionSOLPSUDT)                 :: costfunction 
         real(R8_G), intent(out)                  :: J 
         real(R8_G), allocatable, intent(out)     :: gradJ(:)
+        logical, intent(in)                      :: dogradient
 
         ! Auxiliary
         real(R8_B25)                        :: J1(nncf), J1b(nncf)
+        
 
         ! Initialize
         !===========
@@ -203,14 +205,26 @@ module sosmod_costfunction
         ! Evaluate
         !=========
         ! Call routine
-        call EvaluateCostFunctionGradient(switch, switchb, g, gb, &
-            mpg, mpgb, st, stb, state_ext, state_extb, state_avg, &
-            state_avgb, J1, J1b)
+        if (dogradient) then
+            ! Evaluate the gradient as well 
+            call EvaluateCostFunctionGradient(switch, switchb, g, gb, &
+                mpg, mpgb, st, stb, state_ext, state_extb, state_avg, &
+                state_avgb, J1, J1b)
 
-        ! Extract and cast into our precision format
-        J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
-        gradJ = real([gb%vxx, gb%vxy, gb%vxfpsi, gb%vxbx, gb%vxby, &
-            gb%vxffbz], kind=R8_G)
+            ! Extract and cast into our precision format
+            J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
+            gradJ = real([gb%vxx, gb%vxy, gb%vxfpsi, gb%vxbx, gb%vxby, &
+                gb%vxffbz], kind=R8_G)
+        else
+            ! Evaluate only the cost function
+            call EvaluateCostfunction(switch, g, mpg, st, &
+                state_ext, state_avg, J1)
+
+            ! Extract and cast into our precision format
+            J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
+            gradJ = 0*real([g%vxx, g%vxy, g%vxfpsi, g%vxbx, g%vxby, &
+                g%vxffbz], kind=R8_G)
+        end if 
         
         ! Housekeeping
         !=============
@@ -459,7 +473,7 @@ module sosmod_costfunction
         end do
 
         ! SOLPS side (gradient is w.r.t. coordinates, psi, dpsidx, dpsidy, ffbz)
-        call costfunction%cfvsolps%Evaluate(Js, gradJs)
+        call costfunction%cfvsolps%Evaluate(Js, gradJs, dogradient)
 
         ! Total
         J = Jg + Js
