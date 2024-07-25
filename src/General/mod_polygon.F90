@@ -805,6 +805,8 @@ module mod_polygon
         ! 1:    exit due to no polygons present in the set
         ! 2:    intersecting closed polygons
         ! 3:    coinciding closed polygons  
+        ! 4:    open polygons present
+        ! 5:    self-intersecting polygons present
 
         ! Declare variables
         !==================
@@ -841,6 +843,25 @@ module mod_polygon
         !    'sorting part not yet verified for more than one vessel ' // &
         !    'polygon, proceed with caution')
         !end if 
+
+        ! Check polygon status
+        do i = 1, np
+            ! Check closedness
+            if (.not. p(i)%isclosed) then 
+                ! Adjust flag and exit
+                call PolygonWarningHandler(&
+                    'OrientNestedClosedPolygons: open polygons detected. Returning...')
+                flag = 4
+                return 
+            end if 
+            if (p(i)%selfintersecting) then 
+                ! Adjust flag and exit
+                call PolygonWarningHandler(&
+                    'OrientNestedClosedPolygons: self-intersecting polygons detected. Returning...')
+                flag = 5
+                return 
+            end if 
+        end do  
 
         ! Exit in trivial cases
         if (np == 0) then 

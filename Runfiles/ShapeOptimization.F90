@@ -63,6 +63,10 @@ program ShapeOptimization
     !===========
     call ShapeOptDriver(filepath)
 
+    ! Print out the error stack
+    !==========================
+    call ErrorStack%Print()
+
 
 end program ShapeOptimization
                                     

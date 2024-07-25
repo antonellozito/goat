@@ -13,7 +13,7 @@ def GetDataDirectory():
 
     # Check
     if 'SOLPSTOP' in os.environ:
-        datadir = './output'
+        datadir = '../output'
     else:
         datadir = './output'
 

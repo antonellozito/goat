@@ -627,7 +627,7 @@ module somod_optimizationengine
         cellpath = 'cells_iterate'
         call WriteGridVertices(problem%goat%grid, vertpath) 
         call WriteGridCells(problem%goat%grid, cellpath)
-        call problem%goat%environment%vessel%polygonset%WriteData('vesselpolygon_iterate')
+        call problem%goat%environment%vessel%polygonset%WriteData('vesselpolygon_iterate_so')
 
     end subroutine
 
