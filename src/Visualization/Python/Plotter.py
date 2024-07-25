@@ -520,7 +520,7 @@ def PlotFixedVesselFluxConstraintVertices(dirpath, fignum):
 
     # Set title and other descriptors
     thisaxes = plt.gca()
-    thisaxes.set_title('Fixed vessel points constraint vertices')
+    thisaxes.set_title('Fixed vessel flux constraint vertices')
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
