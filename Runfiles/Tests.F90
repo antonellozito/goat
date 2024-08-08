@@ -27,8 +27,9 @@ module GOAT_tests
         !call TestStructuredInterpolant2D()
         !call TestCSparse()
         !call TestPLF2D
-        call TestQPSolvers
-
+        !call TestQPSolvers
+        !call TestDynamicArrays()
+        call TestContourTracing()
     end subroutine
 
     !------------------------------------------------------------------!
@@ -1150,6 +1151,143 @@ module GOAT_tests
         !=============
         ! Display
         call DisplayTestEnd()
+
+    end subroutine
+
+    ! Dynamic array
+    subroutine TestDynamicArrays()
+
+        ! Modules
+        !========
+        use mod_precision
+        use mod_dynamicarrays
+
+        ! Declare variables
+        !==================
+        ! Auxiliary
+        type(RealDynamicArrayUDT)       :: rda1, rda2, rda3
+        real(R8), allocatable           :: val(:)
+
+        ! Initialize
+        !===========
+        ! Call header
+        call DisplayTestStart('Dynamic array testing')
+
+        ! Tests
+        !======
+        ! Construct arrays
+        val = [1, 2, 3, 4, 5]*1.0_R8
+        rda1 = ConstructRealDynamicArray(val)
+        rda2 = ConstructRealDynamicArray(val+2.5)
+
+        ! Print
+        print *, 'rda1 array values: ', rda1%val 
+        print *, 'rda2 array values: ', rda2%val 
+
+        ! Sum arrays
+        rda3 = rda1 + rda2
+        print *, 'sum of rda1 and rda2: ', rda3%val
+        rda1 = rda1 + 1.0_R8
+        print *, 'sum of rda1 and scalar: ', rda1%val
+        rda1 = rda1 + val
+        print *, 'sum of rda1 and array: ', rda1%val
+
+        ! Extend arrays
+        call rda1%Insert(2.5_R8, 4_I8)
+        print *, 'rda1 extended values: ', rda1%val
+        call rda2%Insert([2.0_R8, 3.0_R8], int([2, 6], kind=I8))
+        print *, 'rda2 extended values: ', rda2%val
+
+        ! Append arrays
+        call rda1%Append(1.0_R8)
+        call rda1%Append([2.0, 3.0]*1.0_R8)
+        print *, 'rda1 appended values: ', rda1%val
+
+        ! Remove array values
+
+
+        
+
+        ! Finalize
+        !=========
+        call DisplayTestEnd()
+
+    end subroutine
+
+    ! Contour tracing
+    subroutine TestContourTracing()
+
+        ! Description
+        !============
+        ! Test contour tracing algorithm for simple contours. Data is 
+        ! written out in polygon format, to be plotted using python.
+
+        ! Modules
+        !========
+        use mod_precision 
+        use mod_contour2D
+        use mod_constants
+        use mod_plotter
+        use mod_dynamicarrays
+        
+        ! Declare variables
+        !==================
+        ! Auxiliary
+        real(R8)                        :: Lx, Ly 
+        real(R8), allocatable           :: xgv(:), ygv(:), xg(:), yg(:), &
+            vtest(:, :), cval(:), ea(:), xw(:), yw(:)
+        integer(I8)                     :: nx, ny
+        integer(I8), allocatable        :: order(:) 
+        type(ContourUDT), allocatable   :: contours(:)
+        type(RealDynamicArrayUDT)       :: xc, yc 
+
+        ! Loop
+        integer(I8)                     :: k 
+
+        ! Initialize
+        !===========
+        ! Set the grid coordinates
+        Lx = 1
+        Ly = 1
+        nx = 101
+        ny = 201 
+        xgv = real([(k, k = 0, nx-1)], kind=R8)*(Lx/real((nx-1), kind=R8))
+        ygv = real([(k, k = 0, ny-1)], kind=R8)*(Ly/real((ny-1), kind=R8))
+
+        ! Construct 2D grid
+        allocate(xg(nx*ny), yg(nx*ny))
+        call Construct2DStructuredGrid(xgv, ygv, nx, ny, xg, yg)
+
+        ! Construct test values
+        vtest = reshape(sin(xg*pi_R8)*sin(yg*pi_R8) &
+            + sin(2*xg*pi_R8)*sin(2*yg*pi_R8) &
+            + sin(3*xg*pi_R8)*sin(3*yg*pi_R8), [nx, ny])
+
+        ! Trace contours
+        !===============
+        ! Set contour values
+        cval = [0.2, 0.8, -0.3]*1.0_R8
+
+        ! Set saddle points (empty arrays)
+        allocate(ea(0), order(0))
+
+        ! Trace
+        call TraceContoursStructured2D(vtest, xgv, ygv, cval, ea, ea, ea, &
+            order, contours)
+
+        ! Visualize
+        !==========
+        ! Write as polygons
+        xc = ConstructRealDynamicArray(contours(1)%x)
+        yc = ConstructRealDynamicArray(contours(1)%y)
+        do k = 2, size(contours)
+            call xc%Append([nanval_R8(), contours(k)%x])
+            call yc%Append([nanval_R8(), contours(k)%y])
+        end do 
+        xw = xc%Get()
+        yw = yc%Get()
+        call Write2DPolygonData(xw, yw, 'testcontourtracing')
+
 
     end subroutine
 
