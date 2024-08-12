@@ -169,7 +169,8 @@ MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
     src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
     $(wildcard src/Modules/GD/*.F90) \
-    $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F)
+    $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F) \
+    src/Modules/GG/ggmod_topology2D.F90
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
 AUXILIARY_FILES =  src/Auxiliary/Construct2DStructuredGrid.F90 \

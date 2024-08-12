@@ -337,6 +337,125 @@ module goatmod_userinput
         
     end type
 
+    !------------------------------------------------------------------!
+    !                          GRID GENERATION                         !
+    !------------------------------------------------------------------!
+
+    ! Options for topological mesh generation
+    type, extends(OptionsUDT) :: TopomeshOptionsUDT 
+
+        ! Description
+        !============
+        ! Options for the topological mesh construction. The 
+        ! following fields are set:
+        ! - fresx, fresy    : resolution for 2D tracing of contours and
+        !                   extrema of the field
+        ! - fdonewton       : option to refine extrema with newton 
+        !                   solver (may not always converge!)
+        ! - v(...)          : same options but for vessel 
+        ! - ffieldtol       : tolerance on field value of extrema (if 
+        !                   difference is below tolerance, two extrema 
+        !                   are considered to have exactly the same field
+        !                   value)
+        ! - addcoreboundaries   : adds additional core boundaries
+        ! - removecoreregions   : remove the innermost core regions
+        ! - coreboundariesfrac  : fraction in field value between core 
+        !                       and connecting X-point (0: X-point, 1: 
+        !                       core)
+
+        integer(I8)             :: fresx, fresy, vresx, vresy
+        logical                 :: addcoreboundaries, removecoreregions, &
+            fdonewton, vdonewton 
+        real(R8)                :: coreboundariesfrac, ffieldtol
+    contains 
+
+        procedure :: Read           => ReadTopomeshOptions
+        procedure :: SetDefaults    => SetDefaultTopomeshOptions
+
+    end type
+
+    ! Options for grid generation
+    type, extends(OptionsUDT) :: GGOptionsUDT 
+
+        ! Description
+        !============
+        ! Options for the grid generator, including vertex distribution 
+        ! options (poloidal and radial), flux surface removal options, 
+        ! boundary triangle removal options, and small face removal 
+        ! options. The following fields are present: 
+        ! 
+        ! Vertex distribution, poloidal direction:
+        ! - vdptype:        'uniform' for uniform distribution, 
+        !                   'densitybased' for non-uniform distribution 
+        !                   based on predefined node density distribution
+        !                   function 
+        ! - vdpdtype:       (for 'densitybased') distribution type, 
+        !                   typically 'vessel_bnd_weight'
+        ! - vdpdfacelength: length of face for 'uniform' distribution 
+        ! - vdpdlengthparam:    decay length from vessel for 
+        !                       'densitybased' option
+        ! - vdpdx, y, d, val:   parameters to add attraction points for
+        !                       densitybased option: x, y are 
+        !                       coordinates, d is a decay length, and 
+        !                       val is the desired density at the point
+        ! - vdpddensityatvessel:    desired density at the vessel boundary
+        ! - vdpddensityatinf:       desired density far from the vessel 
+        !                           boundary 
+
+        ! Vertex distribution, radial direction:
+        ! largely the same as poloidal one (but then vdr instead of vdp)
+        ! but some differences
+        ! - vdrtype:        (same as vdptype)
+        ! - vdrdtype:       distribution function type, here typically 
+        !                   'magneticfield_separatrix_psi_weight'
+        ! - vdrdfieldwidth: desired field with for uniform distribution
+        ! - vdrdlengthparam:    decay length parameter 
+        ! - vdrddensityatseparatrix:    desired density at separatrix
+        ! - vdrddensityatinf:           density far from separatrix
+
+        ! Options for flux surface removal
+        ! - removefluxsurfaces:     switch to remove or not
+        ! - remfspsitol:            absolute tolerance for difference in 
+        !                           flux value between flux surfaces 
+        !                           (if below, one is removed)
+        ! - remfspsirattol:         maximal ratio between flux surface 
+        !                           difference (and inverse), if above/
+        !                           below: removed
+
+        ! Options for boundary triangle removal
+        ! - removenarrowboundarytriangles:  switch
+        ! - rembndtriacriterion:    criterion for removal, typically 
+        !                           'angle' (if too small, remove triangle)
+        ! - rmbndtriaminangle:      minimal angle [rad] (too small - removed)
+        !                           input is in degrees!
+        
+        ! Options for small face removal
+        ! - removefaces             switch 
+        ! - remfacescriterion       criterion to remove faces. Typically
+        !                           'facelength_radial_bnd' to remove
+        !                           too narrow radial faces at the 
+        !                           boundary 
+        ! - remfacesminlength       minimal length of these faces  [m] 
+        
+        logical                     :: removefluxsurfaces, &
+            removenarrowboundarytriangles, removefaces 
+        integer(I8)                 :: gcresx, gcresy
+        real(R8)                    :: vdpdfacelength, vdpdlengthparam, &
+            vdpddensityatvessel, vdpddensityatinf, vdrdfieldwidth, &
+            vdrdlengthparam, vdrddensityatseparatrix, vdrddensityatinf, &
+            remfspsitol, remfspsirattol, rembndtriaminangle, &
+            remfacesminlength
+        real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
+            vdpdval 
+        character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
+            vdrdtype, rembndtriacriterion, remfacescriterion
+    contains 
+
+        procedure :: Read           => ReadGGOptions
+        procedure :: SetDefaults    => SetDefaultGGOptions
+
+    end type
+
 
     contains 
 
@@ -558,6 +677,91 @@ module goatmod_userinput
         ! Set data
 
     end subroutine
+
+    ! Topomesh
+    subroutine SetDefaultTopomeshOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshOptionsUDT)   :: options
+
+        ! Set defaults
+        !=============
+        ! Contouring (field)
+        options%fresx = 100
+        options%fresy = 100
+
+        ! Contouring (vessel)
+        options%vresx = 100
+        options%vresy = 100
+
+        ! Refining options for extrema (field)
+        options%fdonewton = .true. 
+        options%ffieldtol = 1e-8 
+        
+        ! Refining options for extrema (vessel)
+        options%vdonewton = .true.
+
+        ! Boundary options
+        options%addcoreboundaries = .true. 
+        options%coreboundariesfrac = 0.2
+        options%removecoreregions = .true. 
+
+    end subroutine 
+
+    ! Grid generation
+    subroutine SetDefaultGGOptions(options)
+
+        ! Modules
+        !========
+        use mod_constants, only : pi_R8
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGOptionsUDT)   :: options
+
+        ! Set defaults
+        !=============
+        ! Contouring options in grid generator
+        options%gcresx = 100 
+        options%gcresy = 100
+
+        ! Options for poloidal vertex distribution
+        options%vdptype             = 'densitybased'
+        options%vdpdtype            = 'vessel_bnd_weight'
+        options%vdpdfacelength      = 4e-2 
+        options%vdpdlengthparam     = 0.05
+        allocate(options%vdpdx(0), options%vdpdy(0), options%vdpdd(0), &
+            options%vdpdval(0))
+        options%vdpddensityatvessel = 250.0_R8
+        options%vdpddensityatinf    = 10.0_R8
+
+        ! Options for radial vertex distribution
+        options%vdrtype             = 'densitybased'
+        options%vdrdtype            = 'magneticfield_separatrix_psi_weight'
+        options%vdrdfieldwidth      = 4e-3
+        options%vdrdlengthparam     = 0.005
+        options%vdrddensityatseparatrix     = 2500.0_R8
+        options%vdrddensityatinf            = 250.0_R8
+
+        ! Options for flux surface removal 
+        options%removefluxsurfaces = .true.
+        options%remfspsitol = 1e-4 
+        options%remfspsirattol = 1e-1 
+        
+        ! Options for boundary triangle removal
+        options%removenarrowboundarytriangles = .true. 
+        options%rembndtriacriterion = 'angle' 
+        options%rembndtriaminangle = 15.0_R8*pi_R8/180.0_R8
+
+        ! Options for small face removal
+        options%removefaces = .false. 
+        options%remfacescriterion = 'facelength_radial_bnd'
+        options%remfacesminlength = 2e-3        
+
+    end subroutine 
 
     !------------------------------------------------------------------!
     !                            Option readers                        !
@@ -1047,6 +1251,195 @@ module goatmod_userinput
         ! Read options
         !=============
         ! Nothing to be read in currently
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    ! Topomesh options reader
+    subroutine ReadTopomeshOptions(options)
+
+        ! Description
+        !============
+        ! Read in Topomesh options from file. It is assumed that the 
+        ! filepath has been set correctly. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshOptionsUDT)       :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadTopomeshOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadTopomeshOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Resolution 
+        field = 'gg.tm.field.resx'
+        call ExtractOptionValueInteger0D(fid, field, options%fresx)
+        field = 'gg.tm.field.resy'
+        call ExtractOptionValueInteger0D(fid, field, options%fresy)
+        field = 'gg.tm.vessel.resx'
+        call ExtractOptionValueInteger0D(fid, field, options%vresx)
+        field = 'gg.tm.vessel.resy'
+        call ExtractOptionValueInteger0D(fid, field, options%vresy)
+
+        ! Refinement
+        field = 'gg.tm.field.donewton'
+        call ExtractOptionValueLogical0D(fid, field, options%fdonewton)
+        field = 'gg.tm.vessel.donewton'
+        call ExtractOptionValueLogical0D(fid, field, options%vdonewton)
+        field = 'gg.tm.fieldtol'
+        call ExtractOptionValueReal0D(fid, field, options%ffieldtol)
+
+        ! Boundaries
+        field = 'gg.tm.addcoreboundaries'
+        call ExtractOptionValueLogical0D(fid, field, options%addcoreboundaries)
+        field = 'gg.tm.removecoreregions'
+        call ExtractOptionValueLogical0D(fid, field, options%removecoreregions)
+        field = 'gg.tm.cbnd.frac'
+        call ExtractOptionValueReal0D(fid, field, options%coreboundariesfrac)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    ! Grid generator options reader
+    subroutine ReadGGOptions(options)
+
+        ! Description
+        !============
+        ! Read in GG options from file. It is assumed that the 
+        ! filepath has been set correctly. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGOptionsUDT)             :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadGGOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadGGOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Contouring options in grid generator
+        field = 'gg.vd.contouring.resx'
+        call ExtractOptionValueInteger0D(fid, field, options%gcresx)
+        field = 'gg.vd.contouring.resy'
+        call ExtractOptionValueInteger0D(fid, field, options%gcresy)
+
+        ! Options for poloidal vertex distribution
+        field = 'gg.vd.pd.type'
+        call ExtractOptionValueCharacter(fid, field, options%vdptype)
+        field = 'gg.vd.pd.distribution.type'
+        call ExtractOptionValueCharacter(fid, field, options%vdpdtype)
+        field = 'gg.vd.pd.distribution.facelength'
+        call ExtractOptionValueReal0D(fid, field, options%vdpdfacelength)
+        field = 'gg.vd.pd.distribution.lengthparam'
+        call ExtractOptionValueReal0D(fid, field, options%vdpdlengthparam)
+        field = 'gg.vd.pd.distribution.points.x'
+        call ExtractOptionValueReal1D(fid, field, options%vdpdx)
+        field = 'gg.vd.pd.distribution.points.y'
+        call ExtractOptionValueReal1D(fid, field, options%vdpdy)
+        field = 'gg.vd.pd.distribution.points.d'
+        call ExtractOptionValueReal1D(fid, field, options%vdpdd)
+        field = 'gg.vd.pd.distribution.points.val'
+        call ExtractOptionValueReal1D(fid, field, options%vdpdval)
+        field = 'gg.vd.pd.distribution.densityatvessel'
+        call ExtractOptionValueReal0D(fid, field, options%vdpddensityatvessel)
+        field = 'gg.vd.pd.distribution.densityatinf'
+        call ExtractOptionValueReal0D(fid, field, options%vdpddensityatinf)
+
+
+        ! Options for radial vertex distribution
+        field = 'gg.vd.rd.type'
+        call ExtractOptionValueCharacter(fid, field, options%vdrtype)
+        field = 'gg.vd.rd.distribution.type'
+        call ExtractOptionValueCharacter(fid, field, options%vdrdtype)
+        field = 'gg.vd.rd.distribution.fieldwidth'
+        call ExtractOptionValueReal0D(fid, field, options%vdrdfieldwidth)
+        field = 'gg.vd.rd.distribution.lengthparam'
+        call ExtractOptionValueReal0D(fid, field, options%vdrdlengthparam)
+        field = 'gg.vd.rd.distribution.densityatseparatrix'
+        call ExtractOptionValueReal0D(fid, field, options%vdrddensityatseparatrix)
+        field = 'gg.vd.rd.distribution.densityatinf'
+        call ExtractOptionValueReal0D(fid, field, options%vdrddensityatinf)
+
+        ! Options for flux surface removal 
+        field = 'gg.vd.removefluxsurfaces'
+        call ExtractOptionValueLogical0D(fid, field, options%removefluxsurfaces)
+        field = 'gg.vd.rfs.mark.psitol'
+        call ExtractOptionValueReal0D(fid, field, options%remfspsitol)
+        field = 'gg.vd.rfs.mark.psirattol'
+        call ExtractOptionValueReal0D(fid, field, options%remfspsirattol)
+        
+        ! Options for boundary triangle removal
+        field = 'gg.vd.removenarrowboundarytriangles'
+        call ExtractOptionValueLogical0D(fid, field, options%removenarrowboundarytriangles)
+        field = 'gg.vd.rnbt.mark.criterion'
+        call ExtractOptionValueCharacter(fid, field, options%rembndtriacriterion)
+        field = 'gg.vd.rnbt.mark.minangle'
+        call ExtractOptionValueReal0D(fid, field, options%rembndtriaminangle)
+
+        ! Options for small face removal
+        field = 'gg.vd.removefaces'
+        call ExtractOptionValueLogical0D(fid, field, options%removefaces)
+        field = 'gg.vd.rf.criterion'
+        call ExtractOptionValueCharacter(fid, field, options%remfacescriterion)
+        field = 'gg.vd.rf.minlength'
+        call ExtractOptionValueReal0D(fid, field, options%remfacesminlength)       
 
         ! Housekeeping
         !=============
