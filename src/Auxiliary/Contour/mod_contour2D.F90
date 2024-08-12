@@ -21,7 +21,8 @@ module mod_contour2D
     use mod_dynamicarrays
     implicit none
     private 
-    public :: ContourUDT, TraceContoursStructured2D
+    public :: ContourUDT, TraceContoursStructured2D, ContourTracerUDT, &
+        StructuredContourTracerUDT, ConstructStructuredTracer
 
     ! Module parameters
     integer, parameter  :: npq          = 1 ! number of padding quads for 2D tracer to determine saddle points
@@ -75,6 +76,46 @@ module mod_contour2D
 
     end type
 
+    ! General contour tracer 
+    type, abstract :: ContourTracerUDT
+
+        ! Description
+        !============
+        ! General type that traces contour. Allows abstraction from any
+        ! underlying mechanics (structured/unstructured grid etc), except
+        ! on the constructor level. All necessary data to trace the 
+        ! contours should be saved in the object itself, except for the 
+        ! saddle point data - that is already available in this 
+        ! type already, since it should be supported in any tracer here
+        real(R8), allocatable, dimension(:)     :: xs, ys, vs
+        integer(I8), allocatable, dimension(:)  :: order 
+
+    contains 
+
+        ! Tracer
+        procedure(TraceContoursINT), deferred  :: TraceContours
+
+    end type
+
+    ! Structured 2D tracer
+    type, extends(ContourTracerUDT)     :: StructuredContourTracerUDT
+
+        ! Description
+        !============
+        ! Tracer for structured 2D grids. Values etc are all saved in 
+        ! the structure, the tracer routine is a wrapper for the 
+        ! standalone 2D tracer routine
+
+        real(R8), allocatable       :: X(:), Y(:), V(:, :)
+
+
+    contains 
+
+        ! Tracer
+        procedure :: TraceContours  => TraceContoursStructured2DWrapper
+
+    end type 
+
     ! Saddle point structure type (only used in this module)
     type :: sp2DUDT 
 
@@ -94,6 +135,32 @@ module mod_contour2D
 
     end type 
 
+    !==================================================================!
+    !                                                                  !
+    !                            INTERFACES                            !
+    !                                                                  !
+    !==================================================================!
+
+    ! Abstract interfaces
+    !====================
+    ! Tracer interface
+    abstract interface 
+
+        ! Tracer routine
+        function TraceContoursINT(tracer, tracevalues) result(contours)
+            
+            import :: ContourTracerUDT, R8, ContourUDT 
+            class(ContourTracerUDT)         :: tracer 
+            real(R8), intent(in)            :: tracevalues(:) 
+            type(ContourUDT), allocatable   :: contours(:)
+
+        end function
+
+    end interface
+
+    ! Normal interfaces
+    !==================
+    ! Contour addition
     interface AddContours 
         module procedure AddContourArray
         module procedure AddContourScalar
@@ -138,6 +205,51 @@ module mod_contour2D
         contour%isclosed    = isclosed
 
     end function
+
+    ! Structured tracer constructor
+    function ConstructStructuredTracer(V, X, Y, xs, ys, vs) result(tracer)
+
+        ! Description
+        !============
+        ! Construct a structured tracer. The result is returned as an 
+        ! abstract type though that is allocated in this routine
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(ContourTracerUDT), allocatable    :: tracer 
+        real(R8), intent(in), dimension(:)      :: X, Y, xs, ys, vs 
+        real(R8), intent(in)                    :: V(:, :)
+
+        ! Auxiliary
+        integer(I8), allocatable                :: order(:)
+
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(StructuredContourTracerUDT::tracer) 
+        allocate(order(size(xs)))
+
+        ! Set values
+        !===========
+        select type (tracer)
+
+        type is (StructuredContourTracerUDT)
+
+            tracer%V = V 
+            tracer%X = X 
+            tracer%Y = Y 
+            tracer%xs = xs 
+            tracer%ys = ys 
+            tracer%vs = vs 
+            tracer%order = order  
+
+        class default 
+
+        end select
+
+    end function 
 
     !------------------------------------------------------------------!
     !                              TRACERS                             !
@@ -305,6 +417,29 @@ module mod_contour2D
 
 
     end subroutine
+
+    ! Wrapper for structured contour line tracer
+    function TraceContoursStructured2DWrapper(tracer, tracevalues) result(contours)
+
+        ! Description
+        !============
+        ! Wrapper for the 2D tracer. The order etc is added to the 
+        ! tracer routine
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)       :: tracer 
+        real(R8), intent(in)                    :: tracevalues(:)
+        type(ContourUDT), allocatable           :: contours(:)
+
+        ! Trace
+        !======
+        call TraceContoursStructured2D(tracer%V, tracer%X, tracer%Y, &
+            tracevalues, tracer%xs, tracer%ys, tracer%vs, tracer%order, &
+            contours)
+
+    end function 
 
     ! 2D structured single contour line tracer 
     function TraceSingleContourStructured2D(V, X, Y, tv, spstruct,  &
