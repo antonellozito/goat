@@ -20,6 +20,7 @@ module DistributionFunction
     use mod_linearsolverinterface
     use mod_polygon
     use PolygonLevelsetFunction2D
+    use mod_structured2Dgridding
 
     ! The usual
     implicit none 

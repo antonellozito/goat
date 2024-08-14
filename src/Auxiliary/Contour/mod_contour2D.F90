@@ -19,6 +19,8 @@ module mod_contour2D
     use mod_precision
     use mod_errorhandler
     use mod_dynamicarrays
+    use mod_structured2Dgridding
+
     implicit none
     private 
     public :: ContourUDT, TraceContoursStructured2D, ContourTracerUDT, &
@@ -81,12 +83,15 @@ module mod_contour2D
 
         ! Description
         !============
-        ! General type that traces contour. Allows abstraction from any
+        ! General type that traces contours. Allows abstraction from any
         ! underlying mechanics (structured/unstructured grid etc), except
         ! on the constructor level. All necessary data to trace the 
         ! contours should be saved in the object itself, except for the 
         ! saddle point data - that is already available in this 
-        ! type already, since it should be supported in any tracer here
+        ! type already, since it should be supported in any tracer here.
+        ! For easier redefinition of tracing values, routines should be
+        ! specified that return the location on which the field value
+        ! should be known, and a routine that sets the values again. 
         real(R8), allocatable, dimension(:)     :: xs, ys, vs
         integer(I8), allocatable, dimension(:)  :: order 
 
@@ -94,6 +99,12 @@ module mod_contour2D
 
         ! Tracer
         procedure(TraceContoursINT), deferred  :: TraceContours
+
+        ! Coordinate getter
+        procedure(GetTracerValueCoordinatesINT), deferred :: GetCoordinates 
+
+        ! Field value setter
+        procedure(SetTracerValuesINT), deferred     :: SetValues
 
     end type
 
@@ -104,15 +115,20 @@ module mod_contour2D
         !============
         ! Tracer for structured 2D grids. Values etc are all saved in 
         ! the structure, the tracer routine is a wrapper for the 
-        ! standalone 2D tracer routine
-
-        real(R8), allocatable       :: X(:), Y(:), V(:, :)
+        ! standalone 2D tracer routine. 
+        real(R8), allocatable       :: X(:), Y(:), V(:, :), xg(:), yg(:)
 
 
     contains 
 
         ! Tracer
         procedure :: TraceContours  => TraceContoursStructured2DWrapper
+
+        ! Coordinate getter
+        procedure :: GetCoordinates => GetCoordinatesStructured2D
+
+        ! Field value setter
+        procedure :: SetValues      => SetValuesStructured2D
 
     end type 
 
@@ -155,6 +171,24 @@ module mod_contour2D
             type(ContourUDT), allocatable   :: contours(:)
 
         end function
+
+        ! Coordinates getter
+        subroutine GetTracerValueCoordinatesINT(tracer, x, y) 
+            
+            import :: ContourTracerUDT, R8
+            class(ContourTracerUDT)             :: tracer 
+            real(R8), allocatable, intent(out)  :: x(:), y(:)
+
+        end subroutine
+
+        ! Values setter
+        subroutine SetTracerValuesINT(tracer, v) 
+            
+            import :: ContourTracerUDT, R8
+            class(ContourTracerUDT)             :: tracer 
+            real(R8), intent(in)                :: v(:)
+
+        end subroutine
 
     end interface
 
@@ -223,6 +257,7 @@ module mod_contour2D
 
         ! Auxiliary
         integer(I8), allocatable                :: order(:)
+        real(R8), allocatable                   :: xg(:), yg(:)
 
 
         ! Initialize
@@ -244,6 +279,11 @@ module mod_contour2D
             tracer%ys = ys 
             tracer%vs = vs 
             tracer%order = order  
+
+            allocate(xg(size(X)*size(Y)), yg(size(X)*size(Y)))
+            call Construct2DStructuredGrid(X, Y, size(X), size(Y), xg, yg)
+            tracer%xg = xg 
+            tracer%yg = yg
 
         class default 
 
@@ -574,6 +614,7 @@ module mod_contour2D
             isfound = .false. 
             bndface = findloc(xfacec(1, :), .true., 1) 
             if (bndface /= 0) then 
+                xfacec(1, bndface) = .false. 
                 isfound = .true. 
                 jjf = [bndface, bndface+1]
                 iif = [1, 1]
@@ -583,6 +624,7 @@ module mod_contour2D
             if (.not. isfound) then 
                 bndface = findloc(xfacec(nx, :), .true., 1)
                 if (bndface /= 0) then 
+                    xfacec(nx, bndface) = .false.
                     isfound = .true. 
                     jjf = [bndface, bndface+1]
                     iif = [nx, nx]
@@ -593,6 +635,7 @@ module mod_contour2D
             if (.not. isfound) then 
                 bndface = findloc(yfacec(:, 1), .true., 1)
                 if (bndface /= 0) then 
+                    yfacec(bndface, 1) = .false. 
                     isfound = .true. 
                     jjf = [1, 1]
                     iif = [bndface, bndface+1]
@@ -603,6 +646,7 @@ module mod_contour2D
             if (.not. isfound) then 
                 bndface = findloc(yfacec(:, ny), .true., 1)
                 if (bndface /= 0) then 
+                    yfacec(bndface, ny) = .false.
                     isfound = .true. 
                     jjf = [ny, ny]
                     iif = [bndface, bndface+1]
@@ -1514,6 +1558,43 @@ module mod_contour2D
         where (superquadflags > 0) quadflags = superquadflags
 
     end function 
+
+    ! Coordinate/values getters/setters
+    subroutine GetCoordinatesStructured2D(tracer, x, y)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)   :: tracer 
+        real(R8), allocatable, intent(out)  :: x(:), y(:)
+
+        ! Get
+        !====
+        x = tracer%xg 
+        y = tracer%yg
+
+    end subroutine
+
+    subroutine SetValuesStructured2D(tracer, v)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)   :: tracer 
+        real(R8), intent(in)                :: v(:)
+
+        ! Set
+        !====
+        ! Check
+        if (size(v) /= size(tracer%xg)) then 
+            call gdErrorHandler('SetValuesStructured2D: value dimension '// &
+                ' is inconsistent with current number of grid points')
+        end if 
+
+        ! Set
+        tracer%V = reshape(v, [size(tracer%X), size(tracer%Y)])
+        
+    end subroutine
 
     
 

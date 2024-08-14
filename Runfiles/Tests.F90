@@ -11,6 +11,7 @@
 
 module GOAT_tests 
 
+    use mod_structured2Dgridding
     use, intrinsic :: ieee_arithmetic
     implicit none
     save 
@@ -29,7 +30,8 @@ module GOAT_tests
         !call TestPLF2D
         !call TestQPSolvers
         !call TestDynamicArrays()
-        call TestContourTracing()
+        !call TestContourTracing()
+        call TestSorting()
     end subroutine
 
     !------------------------------------------------------------------!
@@ -1215,6 +1217,62 @@ module GOAT_tests
     end subroutine
 
     ! Contour tracing
+    subroutine TestSorting()
+
+        ! Description
+        !============
+        ! Test contour tracing algorithm for simple contours. Data is 
+        ! written out in polygon format, to be plotted using python.
+
+        ! Modules
+        !========
+        use mod_precision 
+        use mod_constants
+        use mod_plotter
+        use mod_sort
+        
+        ! Declare variables
+        !==================
+        ! Auxiliary
+        integer(I8), allocatable        :: int_a_rng(:), temp(:), &
+            ind(:)
+        integer(I8)                     :: n 
+
+        real(R8), allocatable           :: real_a_rng(:), real_a_smallval(:)
+
+        ! Initialize
+        !===========
+        ! Construct test matrices
+        n = 10 ! start small
+
+        ! Construct random vector of integers
+        allocate(real_a_rng(n), int_a_rng(n), ind(n), real_a_smallval(n))
+        call random_number(real_a_rng) 
+        int_a_rng = floor(real_a_rng*n)
+        real_a_smallval = 1e-13
+
+        ! Print 
+        print *, 'Unsorted integer array: ', int_a_rng 
+        print *, 'Unsorted real array: ', real_a_rng
+
+        ! Sort
+        !=====
+        temp = int_a_rng 
+        call Sort(int_a_rng, ind=ind)
+        call Sort(real_a_rng)
+        call Sort(real_a_smallval)
+
+        ! Print
+        !======
+        print *, 'Sorted integer array: ', int_a_rng
+        print *, 'Indices: ', ind 
+        print *, 'Sorted array by indexing', temp(ind)
+        print *, 'Sorted real array: ', real_a_rng
+        print *, 'Sorted small value array: ', real_a_smallval
+
+    end subroutine
+
+    ! Sorting
     subroutine TestContourTracing()
 
         ! Description
@@ -1290,6 +1348,7 @@ module GOAT_tests
 
 
     end subroutine
+
 
     !------------------------------------------------------------------!
     !                           Auxiliary                              !

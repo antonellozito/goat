@@ -173,7 +173,8 @@ MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
     src/Modules/GG/ggmod_topology2D.F90
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
-AUXILIARY_FILES =  src/Auxiliary/Construct2DStructuredGrid.F90 \
+AUXILIARY_FILES =  src/Auxiliary/mod_sort.F90 \
+    src/Auxiliary/mod_structured2Dgridding.F90 \
     $(wildcard src/Auxiliary/*.F90) \
     src/Auxiliary/Interpolation/Interpolant2D_auxiliaries.F90 \
     src/Auxiliary/Interpolation/Interpolant2D.F90 \

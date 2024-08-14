@@ -11,6 +11,7 @@ subroutine GGDriver(goatoptions)
     ! Modules
     use goatmod_types 
     use goatmod_userinput
+    use ggmod_topology2D
 
     ! The usual
     implicit none 
@@ -28,6 +29,7 @@ subroutine GGDriver(goatoptions)
     type(TopomeshOptionsUDT)    :: topomeshoptions
     
     ! Auxiliary
+    type(TopomeshUDT)           :: topomesh
 
     ! Initialize
     !===========
@@ -44,6 +46,8 @@ subroutine GGDriver(goatoptions)
 
     ! Generate the topological mesh
     !==============================
+    topomesh = ConstructTopologicalMesh(environment%vessel, magneticField, &
+        topomeshoptions)
 
     ! Generate the grid
     !==================

@@ -38,6 +38,7 @@ module PolygonLevelsetFunction2D
     use Interpolant
     use mod_polygon
     use mod_sparseinterface
+    use mod_structured2Dgridding
 
     ! The usual
     implicit none

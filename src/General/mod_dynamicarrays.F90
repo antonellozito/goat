@@ -121,10 +121,58 @@ module mod_dynamicarrays
 
     end type 
 
-    ! Type optimized for appending values
-    !type, extends(RealDynamicArrayUDT) :: RealAppendingOptimizedArrayUDT
-    !contains
-    !end type
+    ! Integer dynamic array class
+    type :: IntegerDynamicArrayUDT
+
+        ! Description
+        !============
+        ! This is the base dynamic array type for general purpose 
+        ! dynamic array operations. Only for Integer values (integer has 
+        ! its own UDT) and not optimized for anything (simple 
+        ! straightforward implementation of methods). All implementation
+        ! is basically done as one would do with a standard array. 
+        ! This can be sufficient in some cases where the array changes
+        ! only few times, in which case the overhead for other 
+        ! other operations such as addition etc in optimized types may
+        ! lead to poor performance. 
+
+        integer(kind=ik), allocatable   :: val(:) ! values 
+
+    contains 
+
+        ! Element insertion
+        procedure   :: InsertSingleElement      => InsertSingleElementIDA
+        procedure   :: InsertMultipleElements   => InsertMultipleElementsIDA
+        generic     :: Insert                   => &
+            InsertSingleElement, InsertMultipleElements
+
+        ! Element appending
+        procedure   :: AppendSingleElement      => AppendSingleElementIDA
+        procedure   :: AppendMultipleElements   => AppendMultipleElementsIDA
+        generic     :: Append                   => &
+            AppendSingleElement, AppendMultipleElements
+
+        ! Element removal
+        procedure   :: RemoveSingleElement      => RemoveSingleElementIDA
+        procedure   :: RemoveMultipleElements   => RemoveMultipleElementsIDA
+        generic     :: Remove                   => &
+            RemoveSingleElement, RemoveMultipleElements
+
+        ! Element getter
+        procedure   :: GetSingleElement      => GetSingleElementIDA
+        procedure   :: GetMultipleElements   => GetMultipleElementsIDA
+        procedure   :: GetAllElements        => GetAllElementsIDA
+        generic     :: Get                   => &
+            GetSingleElement, GetMultipleElements, GetAllElements
+
+        ! Element setter
+        procedure   :: SetSingleElement      => SetSingleElementIDA
+        procedure   :: SetMultipleElements   => SetMultipleElementsIDA
+        procedure   :: SetAllElements        => SetAllElementsIDA
+        generic     :: Set                   => &
+            SetSingleElement, SetMultipleElements, SetAllElements
+
+    end type 
 
     !==================================================================!
     !                                                                  !
@@ -135,21 +183,25 @@ module mod_dynamicarrays
     ! Summation overriding
     interface operator(+)
         module procedure SumRDA, SumRDAscalar, SumRDAarray
+        module procedure SumIDA, SumIDAscalar, SumIDAarray
     end interface
 
     ! Subtraction overriding
     interface operator(-)
         module procedure SubtractRDA, SubtractRDAscalar, SubtractRDAarray
+        module procedure SubtractIDA, SubtractIDAscalar, SubtractIDAarray
     end interface
 
     ! Multiplication overriding
     interface operator(*)
         module procedure MultiplyRDA, MultiplyRDAscalar, MultiplyRDAarray
+        module procedure MultiplyIDA, MultiplyIDAscalar, MultiplyIDAarray
     end interface
 
     ! Division overriding
     interface operator(/)
         module procedure DivideRDA, DivideRDAscalar, DivideRDAarray
+        module procedure DivideIDA, DivideIDAscalar, DivideIDAarray
     end interface
 
 
@@ -697,6 +749,545 @@ contains
         !====
         rda3 = rda1 
         rda3%val = rda3%val/array
+
+    end function
+
+    !------------------------------------------------------------------!
+    !                      INTEGER DYNAMIC ARRAY                       !
+    !------------------------------------------------------------------!
+
+    ! Constructors
+    !=============
+    ! General constructor
+    function ConstructIntegerDynamicArray(val) result(ida)
+
+        ! Description
+        !============
+        ! Arrays are constructed empty by default. Adding values should
+        ! be done later on (if the optional argument 'val' is given, 
+        ! then these values are constructed directly)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(IntegerDynamicArrayUDT)        :: ida 
+        integer(I8), intent(in), optional   :: val(:)
+
+        ! Construct
+        !==========
+        if (present(val)) then 
+            ida%val = val 
+        else 
+            ! empty array
+            allocate(ida%val(0))
+        end if 
+        
+    end function
+
+    ! Array manipulators
+    !===================
+    ! Single element appending 
+    subroutine AppendSingleElementIDA(ida, val)
+
+        ! Description
+        !============
+        ! Append a single element to the end of the array.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT)          :: ida 
+        integer(ik), intent(in)                :: val 
+
+        ! Append
+        !=======
+        ida%val = [ida%val, val]
+
+    end subroutine 
+
+    ! Multiple element appending
+    subroutine AppendMultipleElementsIDA(ida, val)
+
+        ! Description
+        !============
+        ! Append a multiple elements to the end of the array.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT)          :: ida 
+        integer(ik), intent(in)                :: val(:) 
+
+        ! Append
+        !=======
+        ida%val = [ida%val, val]
+
+    end subroutine
+
+    ! Single element insertion
+    subroutine InsertSingleElementIDA(ida, val, loc)
+
+        ! Description
+        !============
+        ! Add a single element to an arbitrary location to the array. 
+        ! Note that we don't explicitly check for a feasible location
+        ! value! In case it is negative, then the element will simply be
+        ! added to the beginning of the array. If it's higher than the 
+        ! array size, it will be appended. 
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(IntegerDynamicArrayUDT)       :: ida 
+        integer(ik), intent(in)             :: val 
+        integer(ik), intent(in)             :: loc 
+
+        ! Auxiliary
+        integer(ik), allocatable           :: temp1(:), temp2(:)
+
+        ! Insert
+        !=======
+        ! Split up array
+        temp1 = ida%val(1:loc-1)
+        temp2 = ida%val(loc:size(ida%val))
+
+        ! Reconstruct
+        ida%val = [temp1, val, temp2]
+
+    end subroutine 
+
+    ! Multiple element insertion
+    subroutine InsertMultipleElementsIDA(ida, val, loc)
+
+        ! Description
+        !============
+        ! Add multiple elements to an arbitrary location to the array. 
+        ! Here, we simply call the single insertion routine multiple
+        ! times and update the location as needed. Probably not the 
+        ! most efficient way for many elements or when called many times
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(IntegerDynamicArrayUDT)       :: ida 
+        integer(ik), intent(in)             :: val(:) 
+        integer(ik), intent(in)             :: loc(:) 
+
+        ! Auxiliary
+        integer(ik)                     :: nval
+        integer(ik)                     :: tloc(size(val))
+
+        ! Loop
+        integer(ik)                     :: i
+
+        ! Check
+        !======
+        if (size(loc) /= size(val)) then 
+            call gdErrorHandler('InsertMultipleElementsIDA: incompatible ' // &
+                'sizes of val and loc')
+        end if 
+
+        ! Add
+        !====
+        tloc = loc
+        nval = size(val)
+        do i = 1, nval
+            ! Add the next element
+            call ida%Insert(val(i), tloc(i))
+
+            ! Update the location
+            where (tloc >= tloc(i)) tloc = tloc + 1
+        end do 
+
+    end subroutine 
+
+    ! Single element deletion
+    subroutine RemoveSingleElementIDA(ida, loc)
+
+        ! Description
+        !============
+        ! Remove a single element at a certain array location. We do 
+        ! not explicitly check if the location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(IntegerDynamicArrayUDT)       :: ida 
+        integer(ik), intent(in)             :: loc 
+
+        ! Auxiliary
+        integer(ik), allocatable           :: temp1(:), temp2(:)
+
+        ! Remove
+        !=======
+        ! Split up array
+        temp1 = ida%val(1:loc-1)
+        temp2 = ida%val(loc+1:size(ida%val))
+
+        ! Reconstruct
+        ida%val = [temp1, temp2]
+
+    end subroutine 
+
+    ! Multiple element deletion
+    subroutine RemoveMultipleElementsIDA(ida, loc)
+
+        ! Description
+        !============
+        ! Remove multiple elements at a certain array location. We do 
+        ! not explicitly check if the location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(IntegerDynamicArrayUDT)       :: ida 
+        integer(ik), intent(in)             :: loc(:)
+
+        ! Auxiliary
+        logical, allocatable            :: mask(:)
+
+        ! Remove
+        !=======
+        ! Set mask
+        allocate(mask(size(ida%val)))
+        mask = .true.
+        mask(loc) = .false. 
+
+        ! Remove
+        ida%val = pack(ida%val, mask)
+
+    end subroutine 
+
+    ! Single element getter
+    function GetSingleElementIDA(ida, loc) result(val)
+
+        ! Description
+        !============
+        ! Get the value of a single element on a specified location. It
+        ! is not checked whether this location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT)   :: ida 
+        integer(ik), intent(in)         :: loc 
+        integer(ik)                     :: val 
+
+        ! Get 
+        !====
+        val = ida%val(loc)
+
+    end function
+
+    ! Multiple element getter
+    function GetMultipleElementsIDA(ida, loc) result(val)
+
+        ! Description
+        !============
+        ! Get the value of multiple elements on a specified location. It
+        ! is not checked whether this location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT)   :: ida 
+        integer(ik), intent(in)         :: loc(:) 
+        integer(ik)                     :: val(size(loc))
+
+        ! Get 
+        !====
+        val = ida%val(loc)
+        
+    end function
+
+    ! All element getter
+    function GetAllElementsIDA(ida) result(val)
+
+        ! Description
+        !============
+        ! Get the value of all elements as an array. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT)  :: ida 
+        integer(ik)                    :: val(size(ida%val))
+
+        ! Get 
+        !====
+        val = ida%val
+        
+    end function
+
+    ! Single element setter
+    subroutine SetSingleElementIDA(ida, loc, val)
+
+        ! Description
+        !============
+        ! Set the value of a single element on a specified location. It
+        ! is not checked whether this location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT)   :: ida 
+        integer(ik), intent(in)         :: loc 
+        integer(ik)                     :: val 
+
+        ! Set 
+        !====
+        ida%val(loc) = val
+
+    end subroutine
+
+    ! Multiple element setter
+    subroutine SetMultipleElementsIDA(ida, loc, val)
+
+        ! Description
+        !============
+        ! Set the value of multiple elements on a specified location. It
+        ! is not checked whether this location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT)   :: ida 
+        integer(ik), intent(in)         :: loc(:) 
+        integer(ik)                     :: val(size(loc))
+
+        ! Set 
+        !====
+        ida%val(loc) = val
+        
+    end subroutine
+
+    ! All element setter
+    subroutine SetAllElementsIDA(ida, val) 
+
+        ! Description
+        !============
+        ! Set the value of all elements to a single scalar value
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT)  :: ida 
+        integer(ik)                    :: val
+
+        ! Set 
+        !====
+        ida%val = val
+        
+    end subroutine
+
+    ! Elementray array operations
+    !============================
+    ! Summation
+    function SumIDA(ida1, ida2) result(ida3)
+
+        ! Description
+        !============
+        ! Sum two real dynamic arrays elementwise
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1, ida2 
+        class(IntegerDynamicArrayUDT), allocatable :: ida3 
+
+        ! Sum values
+        !===========
+        ida3 = ida1 
+        ida3%val = ida1%val + ida2%val
+
+    end function
+
+    function SumIDAscalar(ida1, scalar) result(ida3)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1 
+        integer(I8), intent(in)                    :: scalar 
+        class(IntegerDynamicArrayUDT), allocatable :: ida3
+
+        ! Sum
+        !====
+        ida3 = ida1 
+        ida3%val = ida3%val + scalar
+
+    end function 
+
+    function SumIDAarray(ida1, array) result(ida3)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1 
+        integer(I8), intent(in)                    :: array(:)
+        class(IntegerDynamicArrayUDT), allocatable :: ida3
+
+        ! Sum
+        !====
+        ida3 = ida1 
+        ida3%val = ida3%val + array
+
+    end function
+
+    ! Subtraction
+    function SubtractIDA(ida1, ida2) result(ida3)
+
+        ! Description
+        !============
+        ! Subtract two real dynamic arrays elementwise
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1, ida2 
+        class(IntegerDynamicArrayUDT), allocatable :: ida3 
+
+        ! Subtract values
+        !===========
+        ida3 = ida1 
+        ida3%val = ida1%val - ida2%val
+
+    end function
+
+    function SubtractIDAscalar(ida1, scalar) result(ida3)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1 
+        integer(I8), intent(in)                    :: scalar 
+        class(IntegerDynamicArrayUDT), allocatable :: ida3
+
+        ! Subtract
+        !====
+        ida3 = ida1 
+        ida3%val = ida3%val - scalar
+
+    end function 
+
+    function SubtractIDAarray(ida1, array) result(ida3)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1 
+        integer(I8), intent(in)                    :: array(:)
+        class(IntegerDynamicArrayUDT), allocatable :: ida3
+
+        ! Subtract
+        !====
+        ida3 = ida1 
+        ida3%val = ida3%val - array
+
+    end function
+
+    ! Multiplication
+    function MultiplyIDA(ida1, ida2) result(ida3)
+
+        ! Description
+        !============
+        ! Multiply two real dynamic arrays elementwise
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1, ida2 
+        class(IntegerDynamicArrayUDT), allocatable :: ida3 
+
+        ! Multiply values
+        !===========
+        ida3 = ida1 
+        ida3%val = ida1%val*ida2%val
+
+    end function
+
+    function MultiplyIDAscalar(ida1, scalar) result(ida3)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1 
+        integer(I8), intent(in)                    :: scalar 
+        class(IntegerDynamicArrayUDT), allocatable :: ida3
+
+        ! Multiply
+        !====
+        ida3 = ida1 
+        ida3%val = ida3%val*scalar
+
+    end function 
+
+    function MultiplyIDAarray(ida1, array) result(ida3)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1 
+        integer(I8), intent(in)                    :: array(:)
+        class(IntegerDynamicArrayUDT), allocatable :: ida3
+
+        ! Multiply
+        !====
+        ida3 = ida1 
+        ida3%val = ida3%val*array
+
+    end function
+
+    ! Division
+    function DivideIDA(ida1, ida2) result(ida3)
+
+        ! Description
+        !============
+        ! Divide two real dynamic arrays elementwise - this is 
+        ! integer division though!
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1, ida2 
+        class(IntegerDynamicArrayUDT), allocatable :: ida3 
+
+        ! Divide values
+        !===========
+        ida3 = ida1 
+        ida3%val = ida1%val/ida2%val
+
+    end function
+
+    function DivideIDAscalar(ida1, scalar) result(ida3)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1 
+        integer(I8), intent(in)                    :: scalar 
+        class(IntegerDynamicArrayUDT), allocatable :: ida3
+
+        ! Divide
+        !====
+        ida3 = ida1 
+        ida3%val = ida3%val/scalar
+
+    end function 
+
+    function DivideIDAarray(ida1, array) result(ida3)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT), intent(in)  :: ida1 
+        integer(I8), intent(in)                    :: array(:)
+        class(IntegerDynamicArrayUDT), allocatable :: ida3
+
+        ! Divide
+        !====
+        ida3 = ida1 
+        ida3%val = ida3%val/array
 
     end function
     
