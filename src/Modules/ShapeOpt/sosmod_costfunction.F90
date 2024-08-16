@@ -29,7 +29,7 @@ module sosmod_costfunction
     use somod_costfunction 
     use gdmod_optimizationengine
     use b2mod_costfunction
-    use b2mod_state_constr
+    use b2mod_state_constr_diff
     use b2mod_costfunction_data
 
     ! Rename precision ... 
@@ -218,7 +218,7 @@ module sosmod_costfunction
             ! Evaluate the gradient as well 
             call EvaluateCostFunctionGradient(switch, switchb, g, gb, &
                 mpg, mpgb, st, stb, state_ext, state_extb, state_avg, &
-                state_avgb, stc, stcb, cf_data, J1, J1b)
+                state_avgb, J1, J1b, stc, stcb, cf_data)
 
             ! Extract and cast into our precision format
             J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
@@ -227,7 +227,7 @@ module sosmod_costfunction
         else
             ! Evaluate only the cost function
             call EvaluateCostfunction(switch, g, mpg, st, &
-                state_ext, state_avg, J1)
+                state_ext, state_avg, J1, stc, cf_data)
 
             ! Extract and cast into our precision format
             J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
