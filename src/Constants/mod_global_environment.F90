@@ -29,7 +29,7 @@ module mod_global_environment
         solps_structurefilepath         = 'structure.dat', &
         solps_magneticfieldfilepath     = 'rzpsi.dat', &
         solps_writefilepath             = 'traduit_goat.out.b2us', & 
-        solps_outputfilepath            = '../output/'
+        solps_outputfilepath            = './output/'
 
 
     contains 
@@ -68,7 +68,7 @@ module mod_global_environment
 
         ! Construct the output directory (one level above current directory
         ! to comply with run/baserun assumption)
-        call execute_command_line('mkdir ../output')
+        call execute_command_line('mkdir ./output')
         
     end subroutine
 
