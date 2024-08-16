@@ -27,7 +27,7 @@ module mod_contour2D
         StructuredContourTracerUDT, ConstructStructuredTracer
 
     ! Module parameters
-    integer, parameter  :: npq          = 1 ! number of padding quads for 2D tracer to determine saddle points
+    integer, parameter  :: npq          = 2 ! number of padding quads for 2D tracer to determine saddle points
     integer, parameter  :: verbosity    = 0 ! verbosity level (0: only true errors, 1: additional messages)
     real(R8), parameter :: pert         = 1e-13 ! perturbation value 
     real(R8), parameter :: spvalabstol  = 1e-13 ! absolute tolerance in field value to determine if value is equal to saddlepoint value
@@ -98,7 +98,10 @@ module mod_contour2D
     contains 
 
         ! Tracer
-        procedure(TraceContoursINT), deferred  :: TraceContours
+        procedure(TraceContoursValINT), deferred    :: TraceContoursVal 
+        procedure(TraceContoursLocINT), deferred    :: TraceContoursLoc
+        generic :: TraceContours        => TraceContoursVal, &
+            TraceContoursLoc
 
         ! Coordinate getter
         procedure(GetTracerValueCoordinatesINT), deferred :: GetCoordinates 
@@ -122,7 +125,8 @@ module mod_contour2D
     contains 
 
         ! Tracer
-        procedure :: TraceContours  => TraceContoursStructured2DWrapper
+        procedure :: TraceContoursVal  => TraceContoursValStructured2DWrapper
+        procedure :: TraceContoursLoc  => TraceContoursLocStructured2DWrapper
 
         ! Coordinate getter
         procedure :: GetCoordinates => GetCoordinatesStructured2D
@@ -163,11 +167,20 @@ module mod_contour2D
     abstract interface 
 
         ! Tracer routine
-        function TraceContoursINT(tracer, tracevalues) result(contours)
+        function TraceContoursValINT(tracer, tracevalues) result(contours)
             
             import :: ContourTracerUDT, R8, ContourUDT 
             class(ContourTracerUDT)         :: tracer 
             real(R8), intent(in)            :: tracevalues(:) 
+            type(ContourUDT), allocatable   :: contours(:)
+
+        end function
+
+        function TraceContoursLocINT(tracer, x, y) result(contours)
+            
+            import :: ContourTracerUDT, R8, ContourUDT 
+            class(ContourTracerUDT)         :: tracer 
+            real(R8), intent(in)            :: x(:), y(:)
             type(ContourUDT), allocatable   :: contours(:)
 
         end function
@@ -432,6 +445,9 @@ module mod_contour2D
         call InitializeSaddlePointStructure2D(spstruct, superquadflags, &
             superquadfacexflags, superquadfaceyflags, V, X, Y, xs, ys, &
             vs)
+        do i = 1, size(spstruct)
+            order(i) = spstruct(i)%order
+        end do 
 
         ! Main loop
         !==========
@@ -458,8 +474,163 @@ module mod_contour2D
 
     end subroutine
 
+    ! 2D structured contour line tracer that starts from point locations
+    subroutine TracecontoursStructured2DPoint(V, X, Y, xt, yt, xs, ys, &
+        vs, order, contours)
+
+        ! Description
+        !============
+        ! Similar routine as TracecontourLineStructured2D, but now we start from a
+        ! given set of points x0, y0 instead of trace values. First, we check in
+        ! which quad the point is present (if no quad, an empty contour line is
+        ! returned - the point lies outside of the domain in that case). Then, we
+        ! use bilinear interpolation to determine the contour value to be traced.
+        ! The tracing can only start in the current point itself and any saddle
+        ! points that are encountered along the way.
+
+        ! The output consists of a structure with the fields 'V' (trace value,
+        ! scalar), 'x', y', (array of coordinates), 'ID', (index of traced
+        ! point, to be able to merge different parts together afterwards)
+        ! Each line represents a simple
+        ! polygon that is either closed upon itself (end point is repeated) or
+        ! starts and stops at a mesh boundary. If saddle points are present, the
+        ! different parts of the contour line are treated as different polygon
+        ! pieces, where each end point is either a grid boundary or a saddle point.
+        ! The location of the saddle point itself is determined as the center of
+        ! the cell where the saddle point is present.
+
+        ! Algorithm
+        !==========
+        ! When searching contours for specified points, the following algorithm is
+        ! employed:
+        !
+        ! 1) Check if V >= F
+        ! 2) Check each quadrilateral:
+        !       if it has the value on all four edges, it is a saddle point
+        !       otherwise it is a regular quad
+        ! 3) Determine from which quad to start and determine the trace value using
+        ! bilinear interpolation. Then determine the quad types and which faces
+        ! that contain the value like in any contour tracing algorithm. However,
+        ! now, we keep separate track of which quads that can be started from (and
+        ! how many times). For the initial quad, this value can be two or four.
+        ! 4) Trace the contour line:
+        !   4.1) Check if there are starting quads left, if yes, take one. IF no,
+        !   exit (all contour parts should have been found)
+        !   4.2) Determine the first face with the current value that has not yet
+        !   been considered, determine the next quad. If no face is found, we
+        !   should have ended up in the first quad and the contour line should be
+        !   closed (we stop in saddle points before, see below)
+        !   4.3) If the next quad is a saddle point, add this saddle point as a
+        !   starting quad and stop. Go to 4.1)
+
+        ! Notes
+        !======
+        ! Note 1: it is assumed that there is some variation in V over X, Y.
+        ! Otherwise, any contour algorithm will return bullshit (e.g when (part of)
+        ! the field is constant).
+
+        ! Note 2: if values lie exactly on a node (or multiple nodes), the value in
+        ! these nodes is elevated by 1e-13 (a message will be displayed if this
+        ! happens).
+
+        ! Note 3: the coordinates x0 and y0 will likely not be a part of the traced
+        ! contour! It is simply used to determine the starting point of the contour
+        ! and to determine which part of the contour one would like.
+
+        ! Note 4: starting from the exact location of an x-point is possible.
+        ! However, the interpolated value is likely not equal to the actual value
+        ! of the x-point. In order to be able to trace the contour also beyond
+        ! other x-point that did originally have exactly the same value (or have
+        ! been set to do so), we check whether the starting point is an x-point,
+        ! and set the value of all x-points that have exactly the same value as
+        ! this x-point equal to the interpolated value. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)            :: V(:, :), X(:), Y(:), &
+            xt(:), yt(:)
+        real(R8), intent(in)            :: xs(:), ys(:), vs(:)
+        type(ContourUDT), allocatable, intent(out)  :: contours(:) 
+        integer(I8), intent(inout)      :: order(:)
+
+        ! Auxiliary
+        type(sp2DUDt)                   :: spstruct(size(xs))
+        type(ContourUDT), allocatable   :: tempcontours(:)
+        logical, allocatable            :: superquadfacexflags(:, :), &
+            superquadfaceyflags(:, :)
+        integer(I8)                     :: nx, ny, nt
+        integer(I8), allocatable        :: superquadflags(:, :)
+        real(R8)                        :: txt, tyt
+
+        ! Loop
+        integer(I8)                     :: i, j
+
+        ! Initialize
+        !===========
+        ! Check inputs
+        nx = size(X)
+        ny = size(Y)
+        nt = size(xt)
+        if ((nx /= size(V, 1)) .or. (ny /= size(V, 2))) then 
+            call gdErrorHandler('TraceContourStructured2DPoint: incompatible ' // &
+                'dimensions of arguments V, X, Y')
+        end if 
+        if ((size(order) /= size(xs)) .or. (size(xs) /= size(ys)) .or. &
+            (size(ys) /= size(vs))) then 
+            call gdErrorHandler('TraceContourStructured2DPoint: incompatible ' // &
+            'dimensions of arguments xs, ys, vs, order')
+        end if 
+        if (nt == 0) then 
+            ! Empty trace value array - not allowed
+            call gdErrorHandler('TraceContourStructured2DPoint: trace value ' // & 
+                'array appears to be empty, not supported')
+        end if 
+        if (nt /= size(yt)) then 
+            ! Incompatible dimensions of tracing coordinates
+            call gdErrorHandler('TraceContourStructured2DPoint: trace coordinates ' // & 
+                'xt and yt have incompatible dimensions, check input')
+        end if 
+
+        ! Contours
+        allocate(contours(0))
+
+        ! Initialize the saddle point structure
+        allocate(superquadflags(nx-1, ny-1), superquadfacexflags(nx, ny-1), &
+            superquadfaceyflags(nx-1, ny))
+        call InitializeSaddlePointStructure2D(spstruct, superquadflags, &
+            superquadfacexflags, superquadfaceyflags, V, X, Y, xs, ys, &
+            vs)
+        do i = 1, size(spstruct)
+            order(i) = spstruct(i)%order
+        end do 
+
+        ! Main loop
+        !==========
+        do i = 1, nt
+            ! Get current trace value
+            txt = xt(i)
+            tyt = yt(i)
+
+            ! Call tracer
+            tempcontours = TraceSingleContourStructured2DPoint(V, X, Y, txt, tyt, &
+                spstruct, superquadflags, superquadfacexflags, &
+                superquadfaceyflags, nx, ny)
+
+            ! Set ID
+            do j = 1, size(tempcontours)
+                tempcontours(j)%ID = i 
+            end do
+
+            ! Add contours
+            contours = AddContours(contours, tempcontours)
+
+        end do 
+        
+    end subroutine
+
     ! Wrapper for structured contour line tracer
-    function TraceContoursStructured2DWrapper(tracer, tracevalues) result(contours)
+    function TraceContoursValStructured2DWrapper(tracer, tracevalues) result(contours)
 
         ! Description
         !============
@@ -477,6 +648,28 @@ module mod_contour2D
         !======
         call TraceContoursStructured2D(tracer%V, tracer%X, tracer%Y, &
             tracevalues, tracer%xs, tracer%ys, tracer%vs, tracer%order, &
+            contours)
+
+    end function 
+
+    function TraceContoursLocStructured2DWrapper(tracer, x, y) result(contours)
+        
+        ! Description
+        !============
+        ! Wrapper for the 2D tracer. The order etc is added to the 
+        ! tracer routine
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)       :: tracer 
+        real(R8), intent(in)                    :: x(:), y(:)
+        type(ContourUDT), allocatable           :: contours(:)
+
+        ! Trace
+        !======
+        call TraceContoursStructured2DPoint(tracer%V, tracer%X, tracer%Y, &
+            x, y, tracer%xs, tracer%ys, tracer%vs, tracer%order, &
             contours)
 
     end function 
@@ -523,7 +716,7 @@ module mod_contour2D
         type(sp2DUDT)                   :: thissp
 
         ! Loop
-        integer(I8)                     :: i, cc
+        integer(I8)                     :: cc
 
         ! Initialize
         !===========
@@ -545,7 +738,7 @@ module mod_contour2D
             ! Empty contour - construct and return
             allocate(contours(1))
             contours(1) = ConstructContour(emptyarrayR8, &
-                emptyarrayR8, tv, i, 0, 0, .false.)
+                emptyarrayR8, tv, 0, 0, 0, .false.)
 
             ! Return
             return
@@ -1068,6 +1261,399 @@ module mod_contour2D
         end do
 
 
+
+    end function
+
+    ! 2D structured single contour line tracer starting from point
+    function TraceSingleContourStructured2DPoint(V, X, Y, x0, y0, spstruct,  &
+        superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny) &
+        result(contours) 
+
+        ! Description
+        !============
+        ! Trace the contour line(s) for a single point. This function
+        ! should not be used standalone, but in conjunction with 
+        ! TraceContourStructured2DPoint. This is the main workhorse though 
+        ! of the contouring algorithm. For the algorithm, see the 
+        ! TraceContourStructured2DPoint routine. Note that this routine is 
+        ! slightly different than the routine that starts from a given 
+        ! value, since we can only start/end in one particular quad. 
+
+        ! Declare variables
+        !==================
+        ! Modules
+        use mod_constants, only: posinfval_R8
+        ! Arguments
+        integer(I8), intent(in)         :: nx, ny
+        real(R8), intent(in)            :: V(nx, ny), X(nx), Y(ny), x0, y0 
+        integer(I8), intent(in)         :: superquadflags(nx-1, ny-1)
+        logical, intent(in)             :: superquadfacexflags(nx, ny-1), &
+            superquadfaceyflags(nx-1, ny)
+        type(sp2DUDT), intent(in)       :: spstruct(:) 
+        type(ContourUDT), allocatable   :: contours(:)
+
+        ! Auxiliary
+        logical                         :: hasvv(nx, ny), isexactv(nx, ny), &
+            xfacec(nx, ny-1), yfacec(nx-1, ny), issuperquad(nx-1, ny-1), &
+            haswestface(nx-1, ny-1), haseastface(nx-1, ny-1), &
+            hasnorthface(nx-1, ny-1), hassouthface(nx-1, ny-1), isfound, &
+            doexit, saddlequads(nx-1,ny-1), issad, addpoint, issaddlepoint, &
+            startquads(nx-1, ny-1) 
+        integer(I8)                     :: iif(1:2), jjf(1:2), iic, jjc, &
+            nextquad, siic, sjjc, iisq, jjsq, saddlepointID
+        integer(I8), allocatable        :: quadflags(:, :), quadc(:, :)
+        real(R8)                        :: V1, V2, x1, y1, x2, &
+            y2, frac, tx, ty, tv1, tv2, tv 
+        real(R8), allocatable           :: emptyarrayR8(:), Vtrace(:, :)
+        type(RealDynamicArrayUDT)       :: xc, yc
+        type(ContourUDT)                :: thiscontour
+        type(sp2DUDT)                   :: thissp
+
+        ! Loop
+        integer(I8)                     :: i, cc
+
+        ! Initialize
+        !===========
+        ! Empty array
+        allocate(emptyarrayR8(0))
+
+        ! Contour counter
+        cc = 0
+
+        ! Find the starting quad indices
+        iisq = findloc(x0 > X, .true., 1, back=.true.)
+        jjsq = findloc(y0 > Y, .true., 1, back=.true.)
+
+        ! Hedge for out of bounds
+        if ((iisq == 0) .or. (jjsq == 0) .or. (iisq == nx) .or. (jjsq == ny)) then 
+            ! Out of bounds, make empty contour and return 
+            allocate(contours(1))
+            contours(1) = ConstructContour(emptyarrayR8, &
+                emptyarrayR8, posinfval_R8(), 0, 0, 0, .false.)
+            return 
+        else 
+            allocate(contours(0))
+        end if 
+
+        ! Compute value at starting quad by bilinear interpolation
+        tv1 = (V(iisq+1, jjsq) - V(iisq, jjsq))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq);
+        tv2 = (V(iisq+1, jjsq+1) - V(iisq, jjsq+1))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq+1);
+        tv = (tv2 - tv1)/(Y(jjsq+1) - Y(jjsq))*(y0 - Y(jjsq)) + tv1;
+        
+        ! Check if the current point is an x-point. 
+        issaddlepoint = .false.
+        saddlepointID = 0
+        do i = 1, size(spstruct)
+            if ((x0 == spstruct(i)%x) .and. (y0 == spstruct(i)%y)) then 
+                issaddlepoint = .true.
+                saddlepointID = i
+            end if 
+        end do 
+        
+        ! Overwrite the trace value
+        if (issaddlepoint) then 
+            tv = spstruct(saddlepointID)%val
+        end if 
+
+        ! Check nodal values
+        Vtrace = V
+        hasvv = Vtrace > tv 
+        isexactv = Vtrace == tv 
+
+        ! Values found, check if we need to perturb some locations
+        if (any(isexactv)) then 
+            ! Issue message 
+            if (verbosity > 0) then 
+                ! Print message
+                print *, 'TraceSingleContourStructured2DPoint: some values ' // & 
+                    'lie exactly on a vertex - perturbing the value ' // & 
+                    'at these vertices'
+            end if 
+
+            ! Perturb values & recompute
+            where (isexactv) 
+                Vtrace = Vtrace + pert
+                hasvv = Vtrace > tv
+            end where
+
+        end if 
+
+        ! Determine the quadflags
+        quadflags = GetQuadFlags(hasvv, superquadflags)
+
+        ! Determine faceflags (true if value is present on face and if 
+        ! face is not an internal face flag - can be logical since we 
+        ! can only pass each face once in a contour)
+        xfacec = (hasvv(:, 1:ny-1) .and. (.not. hasvv(:, 2:ny))) .or. &
+            ((.not. hasvv(:, 1:ny-1)) .and. (hasvv(:, 2:ny))) .and. &
+            (.not. superquadfacexflags)
+        yfacec = (hasvv(1:nx-1, :) .and. (.not. hasvv(2:nx, :))) .or. &
+            ((.not. hasvv(1:nx-1, :)) .and. (hasvv(2:nx, :))) .and. &
+            (.not. superquadfaceyflags)
+        
+        ! Set number of times we may end up in quad 
+        quadc = quadflags
+        startquads = .false. 
+        quadc = 0
+        issuperquad = superquadflags > 0 
+        where ((quadflags == 1) .and. (.not. issuperquad)) quadc = 1
+        where ((quadflags == 4) .and. (.not. issuperquad)) quadc = 4
+        where (issuperquad) quadc = 0 ! just to be sure but shouldn't be necessary 
+        
+        ! Only consider quads of superquads that have an external face of
+        ! the superquad on which the value is present
+        haswestface = issuperquad .and. xfacec(1:nx-1, :) 
+        haseastface = issuperquad .and. xfacec(2:nx, :)  
+        hasnorthface = issuperquad .and. yfacec(:, 1:ny-1) 
+        hassouthface = issuperquad .and. yfacec(:, 2:ny) 
+        where (haswestface) quadc = quadc + 1
+        where (haseastface) quadc = quadc + 1
+        where (hasnorthface) quadc = quadc + 1
+        where (hassouthface) quadc = quadc + 1
+
+        ! Determine starting quads
+        if (issuperquad(iisq, jjsq)) then 
+            ! Set all superquad cells to true with this flag
+            where ( (quadc > 0) .and. (superquadflags == superquadflags(iisq, jjsq)) ) startquads = .true.
+        else 
+            ! Only current cell is start quad
+            startquads(iisq, jjsq) = .true. 
+        end if 
+
+        ! Starting quads that are not saddle point quads should have two
+        ! starts
+        saddlequads = (quadflags == 4) .and. (.not. issuperquad)
+        where (startquads .and. (.not. saddlequads) .and. (.not. issuperquad)) quadc = 2
+
+        ! All contours
+        !=============    
+        do while (.true.)
+            
+            ! Check if any saddle point quads remain. If so, start with
+            ! these
+            nextquad = findloc(reshape((quadc > 0) .and. saddlequads &
+                .and. startquads .and. (.not. issuperquad), [size(quadc)]), &
+                .true., 1)
+            issad = .true. ! is it a saddle point? 
+            if (nextquad == 0) then 
+                ! Check if any superquad remains
+                nextquad = findloc(reshape((quadc > 0) .and. startquads &
+                .and. issuperquad, [size(quadc)]),  .true., 1)
+                issad = .false.
+            end if 
+            if (nextquad == 0) then 
+                ! Check if any quad in general remains
+                nextquad = findloc(reshape((quadc > 0) .and. (startquads), [size(quadc)]), .true., 1)
+                issad = .false. 
+            end if 
+            if (nextquad == 0) then 
+                ! All found, exit
+                exit 
+            end if 
+            
+            ! Initialize the new contour
+            cc = cc + 1
+            thiscontour = ConstructContour(emptyarrayR8, emptyarrayR8, &
+                tv, 0, 0, 0, .false.) ! ID is set later
+
+            ! Initialize the x, y coordinates
+            xc = ConstructRealDynamicArray()
+            yc = ConstructRealDynamicArray()
+            
+            ! Get indices
+            iic = modulo(nextquad, nx-1)
+            jjc = nextquad/(nx-1) + 1
+            if (iic == 0) then 
+                ! Hedge for edge case where modulo becomes zero 
+                iic = nx-1 
+                jjc = jjc - 1
+            end if
+
+            ! Check if we should add the starting point
+            if ((iic == iisq) .and. (jjc == jjsq)) then 
+                call xc%Append(x0)
+                call yc%Append(y0)
+            end if 
+            
+            ! Save starting indices
+            siic = iic
+            sjjc = jjc
+            
+            ! Subtract counter. If it's a saddle point, add the center of 
+            ! this quad
+            if (issad) then 
+                ! Compute point at center and add
+                tx = sum(X([iic, iic+1]))/2.0_R8
+                ty = sum(Y([jjc, jjc+1]))/2.0_R8
+                call xc%Append(tx)
+                call yc%Append(ty)
+                quadc(iic, jjc) = quadc(iic, jjc) - 1
+            end if 
+            if (superquadflags(iic, jjc) > 0) then 
+                ! Check if the value is exactly the same as the x-point
+                ! value - add the point in that case
+                quadc(iic, jjc) = quadc(iic, jjc) - 1
+                thissp = spstruct(quadflags(iic, jjc))
+                addpoint = .false. 
+                if (thissp%val - tv < spvalabstol) then 
+                    addpoint = .true. 
+                elseif ( (thissp%val - tv)/tv < spvalreltol) then 
+                    addpoint = .true.
+                end if 
+                if (addpoint) then 
+                    tx = thissp%x
+                    ty = thissp%y 
+                    call xc%Append(tx)
+                    call yc%Append(ty)
+                    thiscontour%startsaddle = quadflags(iic, jjc)
+                end if 
+            end if 
+            
+            ! Loop
+            do while (.true.)
+                ! Find a face that contains the value and for which the
+                ! neighbour has quadc > 0 - normally, no quads with the value
+                ! exactly on the boundary should be present anymore (boundary
+                ! quads where the value lies not on the actual boundary may
+                ! still be there). Additionally, no turning back is
+                ! allowed!
+                
+                isfound = .false.                
+                ! North face?
+                if (yfacec(iic, jjc+1) .and. (.not. isfound)) then 
+                    isfound = .true.
+                    iif = [iic, iic+1]
+                    jjf = [jjc+1, jjc+1]
+                    yfacec(iic, jjc+1) = .false.
+                    jjc = jjc+1
+                end if 
+                
+                ! South face?
+                if (yfacec(iic, jjc) .and. (.not. isfound)) then 
+                    isfound = .true.
+                    iif = [iic, iic+1]
+                    jjf = [jjc, jjc]
+                    yfacec(iic, jjc) = .false.
+                    jjc = jjc-1
+                end if 
+                
+                ! East face?
+                if (xfacec(iic+1, jjc) .and. (.not. isfound)) then 
+                    isfound = .true.
+                    iif = [iic+1, iic+1]
+                    jjf = [jjc, jjc+1]
+                    xfacec(iic+1, jjc) = .false.
+                    iic = iic + 1
+                end if 
+                
+                ! West face?
+                if (xfacec(iic, jjc) .and. (.not. isfound)) then 
+                    isfound = .true.
+                    iif = [iic, iic]
+                    jjf = [jjc, jjc+1]
+                    xfacec(iic, jjc) = .false.
+                    iic = iic - 1
+                end if 
+                
+                ! check if a cell could be found, otherwise exit
+                if (.not. isfound) then 
+                    ! Normally no other cell left here, if the starting
+                    ! quad is encountered again (and it wasn't a saddle
+                    ! point), add the first vertex again
+                    if (.not. issad) then 
+                        ! Do a sanity check: this should be the first cell
+                        if ((iic == siic) .and. (jjc == sjjc)) then 
+                            ! Subtract
+                            quadc(iic, jjc) = quadc(iic, jjc) - 1
+
+                            ! Set isclosed
+                            thiscontour%isclosed = .true. 
+                            
+                        else
+                            call gdErrorHandler('TraceSingleContourStructured2D: ' // &
+                                'Contour should be closed, but did not ' // &
+                                'end up at original cell')
+                        end if 
+                        tx = xc%Get(1)
+                        ty = yc%Get(1)
+                        call xc%Append(tx)
+                        call yc%Append(ty)
+                    else
+                        call gdErrorHandler('TraceSingleContourStructured2D: ' // &
+                            'unknown error, this is likely a bug')
+                    end if 
+                
+                    exit 
+                end if 
+                
+                ! Compute point at this face
+                V1 = V(iif(1), jjf(1)) 
+                V2 = V(iif(2), jjf(2))
+                x1 = X(iif(1)) 
+                x2 = X(iif(2))
+                y1 = Y(jjf(1)) 
+                y2 = Y(jjf(2))
+                frac = (tv - V1)/(V2 - V1)
+                tx = x1 + frac*(x2 - x1)
+                ty = y1 + frac*(y2 - y1)
+
+                ! Check if we hit a boundary face
+                if ((iic == nx) .or. (iic == 0) .or. (jjc == ny) .or. (jjc == 0)) then 
+                    ! Exit
+                    exit
+                end if 
+
+                ! Subtract
+                quadc(iic, jjc) = quadc(iic, jjc) - 1
+                
+                ! Add point to contour
+                call xc%Append(tx)
+                call yc%Append(ty)
+                
+                ! Check if the next quad contains a saddle point -> add and
+                ! stop
+                if (saddlequads(iic, jjc)) then 
+                    ! Compute point at center and add
+                    tx = sum(X([iic, iic+1]))/2.0_R8
+                    ty = sum(Y([jjc, jjc+1]))/2.0_R8
+                    call xc%Append(tx)
+                    call yc%Append(ty)
+                    
+                    ! Exit
+                    exit 
+                end if 
+                
+                ! Check if the next quad is part of a superquad -> traverse
+                ! through, exit if necessary
+                if (superquadflags(iic, jjc) > 0) then 
+                    ! Traverse the saddle point
+                    call TraverseSaddlePoint(iic, jjc, iif, jjf, doexit, &
+                        hasvv, quadflags, spstruct, tv, xc, yc, thiscontour, &
+                        V, X, Y, nx, ny)
+
+                    ! Exit?
+                    if (doexit) then 
+                        ! Mark this saddle point as potential starting quads
+                        where ((superquadflags == superquadflags(iic, jjc)) &
+                            .and. (quadc > 0)) startquads = .true.  
+                        exit 
+                    end if 
+                    
+                    ! Subtract
+                    if (quadc(iic, jjc) == 0) then 
+                        call gdErrorHandler('TraceSingleContourStructured2D: ' // & 
+                        'could not subtract counter, this is a bug')
+                    end if 
+                    quadc(iic, jjc) = quadc(iic, jjc) - 1
+                end if 
+            end do 
+
+            ! Add contours
+            thiscontour%x = xc%Get()
+            thiscontour%y = yc%Get()
+            contours = AddContours(contours, thiscontour)
+
+        end do
 
     end function
 
