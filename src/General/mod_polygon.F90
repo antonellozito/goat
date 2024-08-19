@@ -96,7 +96,7 @@ module mod_polygon
     public 
 
     ! Constants
-    real(R8), private, parameter        :: disttol = 1e-8 ! tolerance when computing distances
+    real(R8), private, parameter        :: disttol = 1e-12 ! tolerance when computing distances
     real(R8), private, parameter        :: macheps = 1e-12 ! 'machine' precision
 
     !==================================================================!
@@ -2841,14 +2841,52 @@ module mod_polygon
         ! Declare variables
         !==================
         ! Arguments
-        real(R8), allocatable, intent(in)  ::  x1(:), x2(:), y1(:), y2(:) 
-        real(R8), allocatable              :: d(:)
+        real(R8),  intent(in)               ::  x1(:), x2(:), y1(:), y2(:) 
+        real(R8), allocatable               :: d(:)
 
         ! Compute
         !========
         d = sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
     end subroutine
+
+    ! Continuous index computation
+    function ComputeI(x, y, x1, y1, x2, y2) result(frac)
+
+        ! Description
+        !============
+        ! Compute the relative distance on the edge where a vertex (x, y) lies. It
+        ! is assumed that x, y truly lies on the edge, i.e. this routine will give
+        ! wrong results if x, y is not on the edge with points (x1, y1), (x2, y2).
+        ! Note that also the order of the points matters. 
+
+        ! We hedge for points on one of the two nodes by comparing vertex values
+        ! with disttol (this should be conform how the intersections are computed
+        ! in SegmentIntersections).
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in), dimension(:)  :: x, y, x1, y1, x2, y2
+        real(R8), allocatable               :: frac(:)
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:) :: d1, d2, de
+
+        ! Check
+        !======
+        ! Check for equal distance
+        call Distance(d1, x, y, x1, y1)
+        call Distance(d2, x, y, x2, y2)
+        call Distance(de, x1, y1, x2, y2)
+
+        ! Compute frac
+        !=============
+        where ((d1 < disttol)) frac = 0 ! first point is the same
+        where ((d2 < disttol)) frac = 1 ! second point is the same
+        where ( .not. (d1 < disttol) .and. .not. (d2 < disttol)) frac = d1/de
+
+    end function 
 
     ! Intersection between two lines with points x11, x12, x21, x22 
     subroutine LineIntersections(x, y, x11, y11, x12, y12, x21, y21, &
@@ -3303,7 +3341,7 @@ module mod_polygon
         ! Arguments
         class(PolygonUDT), intent(in)           :: polygon 
         real(R8), intent(in)                    :: x1, y1, x2, y2 
-        real(R8), allocatable, intent(out)      :: x(:), y(:)  
+        real(R8), allocatable, intent(out)      :: x(:), y(:) 
         integer(I8), allocatable, intent(out)   :: s(:)
 
         ! Auxiliary
@@ -3311,7 +3349,8 @@ module mod_polygon
         real(R8)                            :: xi, yi, xe1, ye1, xe2, ye2
 
         integer(I8), allocatable            :: temps(:)
-        real(R8), allocatable               :: tempx(:), tempy(:)
+        real(R8), allocatable               :: tempx(:), tempy(:), &
+            tempsr(:)
 
         ! Loop
         integer(I8)                         :: i 
@@ -3324,7 +3363,7 @@ module mod_polygon
         end if    
         if (allocated(y)) then 
             deallocate(y) 
-        end if          
+        end if        
 
         ! Unpack polygon
         associate( &
@@ -3337,7 +3376,7 @@ module mod_polygon
         counter = 0
 
         ! Allocate temporary arrays
-        allocate(tempx(ne), tempy(ne), temps(ne)) ! maximum ne intersections, to be trimmed later
+        allocate(tempx(ne), tempy(ne), temps(ne), tempsr(ne)) ! maximum ne intersections, to be trimmed later
 
         ! Loop   
         do i = 1, ne 
@@ -3573,7 +3612,7 @@ module mod_polygon
     end subroutine
 
     ! Intersections between two polygons
-    subroutine PolygonIntersections(p1, p2, x, y, s1, s2)
+    subroutine PolygonIntersections(p1, p2, x, y, s1, s2, s1r, s2r)
 
         ! Description
         !============
@@ -3601,13 +3640,14 @@ module mod_polygon
         class(PolygonUDT), intent(in)           :: p1, p2
         real(R8), allocatable, intent(out)      :: x(:), y(:)
         integer(I8), allocatable, intent(out)   :: s1(:), s2(:)
+        real(R8), allocatable, intent(out), optional    :: s1r(:), s2r(:)
 
         ! Auxiliary
         integer(I8)                             :: ni, counter, sz, &
             szold, szmult 
         real(R8)                                :: xe1, ye1, xe2, ye2
         real(R8), allocatable                   :: tempx(:), tempy(:), &
-            xi(:), yi(:) 
+            xi(:), yi(:), temps1r(:), temps2r(:)
         integer(I8), allocatable                :: temps1(:), &
             temps2(:), si(:)
 
@@ -3633,6 +3673,23 @@ module mod_polygon
         if (allocated(s2)) then 
             deallocate(s2) 
         end if
+        if (present(s1r)) then 
+            if (allocated(s1r)) then 
+                deallocate(s1r)
+            end if
+        end if 
+        if (present(s2r)) then 
+            if (allocated(s2r)) then 
+                deallocate(s2r)
+            end if 
+        end if 
+
+        ! Check if either both s1r, s2r are present or not present
+        if (.not. (present(s1r) .and. present(s1r)) &
+            .or. (.not. (.not. present(s1r) .and. .not. present(s2r)))) then 
+            call gdErrorHandler('PolygonIntersections: s1r and s2r should either be ' // &
+                'both present or not present, one of the two is not supported')
+        end if 
 
         ! Associate
         associate(&
@@ -3686,8 +3743,9 @@ module mod_polygon
                     end do
 
                     ! Reallocate
-                    deallocate(tempx, tempy, temps1, temps2) 
-                    allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz))
+                    deallocate(tempx, tempy, temps1, temps2, temps1r, temps2r) 
+                    allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz), &
+                        temps1r(sz), temps2r(sz))
 
                     ! Add
                     tempx(1:szold) = mgmtr(:, 1) 
@@ -3716,6 +3774,23 @@ module mod_polygon
         y = tempy(1:counter) 
         s1 = temps1(1:counter) 
         s2 = temps2(1:counter) 
+
+        ! Compute true intersection locations
+        !====================================
+        if (present(s1r) .and. present(s2r)) then 
+            ! Compute the continuous intersection index (0: first point
+            ! of polygon, ne+1: last point of polygon)
+            allocate(s1r(counter), s2r(counter))
+
+            ! First polygon index
+            s1r = ComputeI(x, y, p1%x(p1%edges(s1, 1)), p1%y(p1%edges(s1, 1)), &
+                p1%x(p1%edges(s1, 2)), p1%y(p1%edges(s1, 2))) + s1 
+
+            ! Second polygon index
+            s2r = ComputeI(x, y, p2%x(p2%edges(s2, 1)), p2%y(p2%edges(s2, 1)), &
+                p2%x(p2%edges(s2, 2)), p2%y(p2%edges(s2, 2))) + s2
+
+        end if 
 
         ! Housekeeping
         !=============
