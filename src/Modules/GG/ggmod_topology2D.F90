@@ -281,9 +281,11 @@ module ggmod_topology2D
         call AddTopologicalMeshData(topomesh)
 
         ! Add cells
+        call AddTopologicalMeshCells(topomesh)
 
         ! Remove parts if desired
         if (options%removecoreregions) then 
+            call RemoveTopologicalMeshCoreRegions(topomesh)
         end if 
 
         ! Compute interconnection data
@@ -1345,6 +1347,81 @@ module ggmod_topology2D
         call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
 
     end subroutine 
+
+    ! Core region removal
+    subroutine RemoveTopologicalMeshCoreRegions(topomesh)
+
+        ! Description
+        !============
+        ! This routine removes extrema in the topological mesh (vertices type 1 or
+        ! 3) and removes all their faces and regions. This routine is useful if one wants to
+        ! generate grids that do not extend to the extrema in the field, but only a
+        ! certain fraction (if used in combination with
+        ! AddTopologicalMeshCoreBoundaries). 
+
+        ! This routine should be used after the topological mesh has been fully
+        ! constructed. 
+
+        ! Notes 
+        !======
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(TopomeshUDT)                      :: topomesh 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tv
+        logical, allocatable, dimension(:)      :: delv, delf, delc
+
+        ! Loop
+        integer(I8)                         :: i
+
+        ! Initialize
+        !===========
+        ! Mark vertices for deletion
+        delv = (topomesh%vert%type == TMvertexmaxID) .or. &
+            (topomesh%vert%type == TMvertexminID)
+
+        ! Mark faces for deletion
+        allocate(delf(topomesh%face%ntot))
+        delf = .false. 
+        do i = 1, topomesh%face%ntot
+            if (any(delv(topomesh%face%vert(i, :)))) then 
+                delf(i) = .true.
+            end if 
+        end do
+
+        ! Mark cells for deletion
+        allocate(delc(topomesh%cell%ntot))
+        delc = .false.
+        do i = 1, topomesh%cell%ntot
+            tv = GetTMCellVert(topomesh%cell, i)
+            if (any(delv(tv))) then 
+                delc(i) = .true.
+            end if 
+        end do 
+
+        ! Delete
+        !=======
+        ! Vertices
+        call RemoveTopologicalMeshVertexLogical(topomesh, delv)
+
+        ! Faces
+        call RemoveTopologicalMeshFaceLogical(topomesh, delf)
+
+        ! Cells
+        call RemoveTopologicalMeshCellLogical(topomesh, delc)
+
+        ! Update again
+        !=============
+        ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Data
+        call AddTopologicalMeshData(topomesh)
+
+    end subroutine
 
     ! Contour insertion into topological mesh
     subroutine InsertTopologicalMeshContour(topomesh, magneticField, contour, &
@@ -3449,7 +3526,68 @@ module ggmod_topology2D
 
     end subroutine
 
-    ! Cell removal
+    ! Cell removal 
+    subroutine RemoveTopologicalMeshCellLogical(topomesh, rmcell)
+
+        ! Description
+        !============
+        ! Remove the cells with IDs specified in IDs from the mesh. 
+        ! IMPORTANT: no face or vertex information is updated here! This should be
+        ! recomputed afterwards.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        logical, intent(in)                     :: rmcell(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: indv, indf, vp, &
+            fp
+        logical, allocatable, dimension(:)      :: delv, delf 
+
+        ! Loop
+        integer(I8)                             :: i, k 
+
+        ! Delete
+        !=======
+        ! Initialize
+        allocate(delv(size(topomesh%cell%vert)), delf(size(topomesh%cell%face)))
+        delv = .false. 
+        delf = .false. 
+
+        ! Mark vertices and faces for removal
+        do i = 1, topomesh%cell%ntot 
+            if (rmcell(i)) then 
+                indv = [(k, k = topomesh%cell%vertP(i, 1), &
+                    topomesh%cell%vertP(i, 1)+topomesh%cell%vertP(i, 2)-1)]
+                indf = [(k, k = topomesh%cell%faceP(i, 1), &
+                    topomesh%cell%faceP(i, 1)+topomesh%cell%faceP(i, 2)-1)]
+                delf(indf) = .true.
+                delv(indv) = .true.
+            end if 
+        end do 
+
+        ! Remove
+        topomesh%cell%ntot = count(.not. rmcell)
+        topomesh%cell%vert = pack(topomesh%cell%vert, .not. delv)
+        vp = pack(topomesh%cell%vertP(:, 2), .not. rmcell)
+        fp = pack(topomesh%cell%faceP(:, 2), .not. rmcell)
+        deallocate(topomesh%cell%vertP, topomesh%cell%faceP)
+        allocate(topomesh%cell%vertP(topomesh%cell%ntot, 2), &
+            topomesh%cell%faceP(topomesh%cell%ntot, 2))
+        topomesh%cell%vertP(:, 2) = vp 
+        topomesh%cell%faceP(:, 2) = fp 
+        topomesh%cell%vertP(1, 1) = 1
+        topomesh%cell%faceP(1, 1) = 1
+        do i = 2, topomesh%cell%ntot 
+            topomesh%cell%vertP(i, 1) = topomesh%cell%vertP(i-1, 1) + &
+                topomesh%cell%vertP(i-1, 2)
+            topomesh%cell%faceP(i, 1) = topomesh%cell%faceP(i-1, 1) + &
+                topomesh%cell%faceP(i-1, 2)
+        end do
+
+    end subroutine
 
     ! Topological face extraction
     subroutine ExtractTopologicalFacesFromPolygon(pol, eID, sID, &
