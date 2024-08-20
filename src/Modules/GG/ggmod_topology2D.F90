@@ -57,7 +57,7 @@ module ggmod_topology2D
 
         integer(I8)                     :: ntot ! total number of vertices
         integer(I8), allocatable        :: ID(:), face(:), cell(:), &
-            flags(:), type(:), faceP(:, :)
+            flags(:), type(:), faceP(:, :), cellP(:, :)
         real(R8), allocatable           :: x(:), y(:), fval(:)
         logical, allocatable            :: BV(:)
 
@@ -82,7 +82,7 @@ module ggmod_topology2D
 
         integer(I8)                     :: ntot ! total number of vertices
         integer(I8), allocatable        :: ID(:), vert(:, :), cell(:), &
-            label(:), fsID(:), type(:)
+            label(:), fsID(:), type(:), cellP(:, :)
         type(RealDynamicArrayUDT), allocatable  :: x(:), y(:)
         real(R8), allocatable           :: fval(:)
         type(PolygonUDT), allocatable   :: pol(:)
@@ -289,6 +289,7 @@ module ggmod_topology2D
         end if 
 
         ! Compute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
 
         ! Write
         !======
@@ -2753,6 +2754,73 @@ module ggmod_topology2D
 
     end subroutine
 
+    ! Face cell addition
+    subroutine AddTopologicalMeshFaceCells(topomesh)
+
+        ! Description
+        !============
+        ! Add the cell neighbours of a face using the pointer way of working. It is
+        ! assumed that all cells etc have been constructed correctly and that other
+        ! basic topology information is available. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh   
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: ncpf, tf, fc, ind
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Add faces
+        !==========
+        ! Initialize
+        if (allocated(topomesh%face%cellP)) then 
+            deallocate(topomesh%face%cellP)
+        end if 
+        if (allocated(topomesh%face%cell)) then 
+            deallocate(topomesh%face%cell)
+        end if 
+        allocate(topomesh%face%cellP(topomesh%face%ntot, 2))
+
+        ! Compute number of cells per face
+        allocate(ncpf(topomesh%face%ntot))
+        ncpf = 0
+        do i = 1, topomesh%cell%ntot
+            ! Get cell faces
+            tf = GetTMCellFace(topomesh%cell, i)
+            ncpf(tf) = ncpf(tf) + 1
+        end do
+
+        ! Set cellP
+        topomesh%face%cellP(:, 2) = ncpf
+        topomesh%face%cellP(1, 1) = 1
+        do i = 2, topomesh%face%ntot 
+            topomesh%face%cellP(i, 1) = topomesh%face%cellP(i-1, 1) + & 
+                topomesh%face%cellP(i-1, 2)
+        end do 
+
+        ! Set cells of each face
+        allocate(topomesh%face%cell(sum(ncpf)), fc(topomesh%face%ntot))
+        fc = 0
+        topomesh%face%cell = 0
+        do i = 1, topomesh%cell%ntot
+            ! Get cell faces
+            tf = GetTMCellFace(topomesh%cell, i);
+            do j = 1, size(tf)
+                ! Add
+                ind = topomesh%face%cellP(tf(j), 1) + fc(tf(j))
+                topomesh%face%cell(ind) = i
+                
+                ! Update counter
+                fc(tf(j)) = fc(tf(j)) + 1
+            end do 
+        end do 
+
+    end subroutine 
+
     ! Cell addition 
     subroutine AddTopologicalMeshCells(topomesh)
 
@@ -3327,6 +3395,138 @@ module ggmod_topology2D
         do i = 1, topomesh%face%ntot
             topomesh%face%label(i) = i
         end do 
+
+    end subroutine
+
+    ! Interconnection
+    subroutine AddTopologicalMeshInterconnectionData(topomesh)
+
+        ! Description
+        !============
+        ! Add additional interconnection data to the topological mesh. 
+        ! Similar to AddGridInterconnections. Some fields may be 
+        ! constructed again that already existed (e.g. cell faces etc), 
+        ! but we keep it in here to have a general interconnections 
+        ! routine.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+
+        ! Auxiliary
+        integer(I8), allocatable                :: tempvcells(:, :)
+        integer(I8), allocatable, dimension(:)  :: ncpv, vcount, tv
+        logical, allocatable, dimension(:)      :: wasfound(:)
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Add face cells
+        !===============
+        ! Because separate routine
+        call AddTopologicalMeshFaceCells(topomesh)
+         
+        ! Unpack & initialize
+        !====================
+        ! Data structures
+        associate(&
+            nv      => topomesh%vert%ntot,  &
+            nf      => topomesh%face%ntot,  &
+            nc      => topomesh%cell%ntot,  &
+            v       => topomesh%vert,   &
+            f       => topomesh%face,   &
+            c       => topomesh%cell    &
+            )
+        
+        ! Checks
+        if (any((f%vert(:, 1) == 0) .or. (f%vert(:, 2) == 0))) then 
+            call gdErrorHandler('AddTopologicalMeshInterconnectionData : ' // & 
+                'Some vertex indices are zero in faces, not supported')
+        end if 
+        if (allocated(v%cell)) then 
+            deallocate(v%cell)
+        end if 
+        if (allocated(v%cellP)) then 
+            deallocate(v%cellP)
+        end if 
+        
+        ! Basic interconnections
+        !=======================
+        ! Initialize
+        allocate(ncpv(v%ntot))
+        ncpv = 0
+        do i = 1, size(c%vert)
+            ncpv(c%vert(i)) = ncpv(c%vert(i))+1
+        end do
+        allocate(v%cell(sum(ncpv)), v%cellP(v%ntot, 2))
+        v%cellP(1, 1) = 1
+        v%cellP(:, 2) = ncpv
+        do i = 2, v%ntot
+            v%cellP(i, 1) = v%cellP(i-1, 1) + v%cellP(i-1, 2)
+        end do 
+        
+        ! Sanity check
+        if (any(v%cellP(:, 2) < 1)) then 
+            call gdErrorHandler('AddTopologicalMeshInterconnectionData: ' // & 
+                'vertex without any cells detected. Check grid interconnectivity')
+        end if 
+        
+        ! Construct vertex cells (cells of faces and faces of cells 
+        ! already found in constructor phase)
+        ! Note: we construct first
+        ! temporary arrays (nv-by-ncpv, nf-by-2) that are afterwards converted to
+        ! cell and cellP arrays. 
+        allocate(tempvcells(v%ntot, maxval(ncpv)), vcount(v%ntot), &
+            wasfound(v%ntot))
+        tempvcells = 0
+        vcount = 0
+        do i = 1, nc
+            ! Reset logical
+            wasfound = .false. ! to hedge for doubly appearing vertices
+
+            ! Get vertices of cell
+            tv = GetTMCellVert(c, i) ! there may be doubles in here!
+            
+            ! Add vertex cells
+            do j = 1, size(tv)
+                if (.not. wasfound(tv(j))) then 
+                    ! Update counter
+                    vcount(tv(j)) = vcount(tv(j))+1
+
+                    ! Update logical
+                    wasfound(tv(j)) = .true.
+
+                    ! Add cell
+                    tempvcells(tv(j), vcount(tv(j))) = i 
+                end if 
+            end do 
+        end do 
+        
+        ! Construct 
+        do i = 1, v%ntot
+            v%cell(v%cellP(i, 1):v%cellP(i, 1)+v%cellP(i, 2)) = & 
+                tempvcells(i, 1:vcount(i))
+        end do 
+        
+        ! Add logicals
+        f%BF = f%cellP(:, 2) == 1
+
+        ! Reconstruct boundary vertices based on boundary faces
+        if (allocated(v%BV)) then 
+            deallocate(v%BV)
+        end if
+        allocate(v%BV(v%ntot))
+        v%BV = .false. 
+        do i = 1, f%ntot
+            if (f%BF(i)) then 
+                v%BV(f%vert(i, :)) = .true. 
+            end if 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
