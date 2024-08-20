@@ -57,7 +57,7 @@ module ggmod_topology2D
 
         integer(I8)                     :: ntot ! total number of vertices
         integer(I8), allocatable        :: ID(:), face(:), cell(:), &
-            flags(:), type(:)
+            flags(:), type(:), faceP(:, :)
         real(R8), allocatable           :: x(:), y(:), fval(:)
 
     contains 
@@ -273,6 +273,7 @@ module ggmod_topology2D
         ! Compute additional interconnnection data
         !=========================================
         ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
 
         ! Data 
 
@@ -1933,8 +1934,6 @@ module ggmod_topology2D
 
     end subroutine 
 
-    
-
     !------------------------------------------------------------------!
     !                   EQUILIBRIUM CHARACTERIZATION                   !
     !------------------------------------------------------------------!
@@ -2469,6 +2468,133 @@ module ggmod_topology2D
         topomesh%vert%fval = [topomesh%vert%fval, F]
         topomesh%vert%type = [topomesh%vert%type, t]
         topomesh%vert%ID = [topomesh%vert%ID, topomesh%vert%ntot]
+
+    end subroutine
+
+    ! Vertex face addition
+    subroutine AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Description
+        !============
+        ! This function adds the faces of each vertex and sorts them in a uniquely
+        ! defined direction which is the same for all faces. It is assumed that all
+        ! faces and vertices of the topology are adequately defined and that each
+        ! face has a starting and end point etc (so basically after all
+        ! intersections and topology faces have been added). 
+
+        ! Algorithm
+        !==========
+        ! 1) For each vertex, find all faces that have this vertex and store them
+        ! in vert.face and vert.faceP (list and pointer)
+        ! 2) For each vertex, sort this list by doing the following steps:
+        !   2.1) For each face, get the closest point of that face to the current
+        !   vertex (but with distance > 1e-12 to hedge for numerical bullshit)
+        !   2.2) Take one face as reference, compute the angle of all other faces
+        !   w.r.t. that first face. 
+        !   2.3) Sort the faces in sequence of increasing angle
+        !   2.4) Check the cross product of each pair of consecutive faces. All
+        !   cross-products should have the same sign. If it is positive, keep it
+        !   like that. If it is negative, reverse the sorting direction. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: nfpv, tf, sortind, &
+            tfsorted 
+        real(R8)                                :: vx, vy
+        real(R8), allocatable, dimension(:)     :: npx, npy, dx, dy,&
+            theta
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Do some checks
+        if (any(topomesh%face%vert(:, 1) == 0) .or. any(topomesh%face%vert(:, 2) == 0)) then  
+            call gdErrorHandler('AddTopologicalMeshVertexFaces: faces without vertex ' // & 
+                'encountered. First, clean up the topological mesh before calling this routine')
+        end if 
+
+        ! Get faces of each vertex
+        !-========================
+        ! Compute for each vertex how many faces they would have
+        allocate(nfpv(topomesh%vert%ntot))
+        nfpv = 0
+        do i = 1, topomesh%face%ntot
+            nfpv(topomesh%face%vert(i, :)) = nfpv(topomesh%face%vert(i, :)) + 1
+        end do
+
+        ! Initialize 
+        if (allocated(topomesh%vert%face)) then 
+            deallocate(topomesh%vert%face)
+        end if 
+        if (allocated(topomesh%vert%faceP)) then 
+            deallocate(topomesh%vert%faceP)
+        end if 
+        allocate(topomesh%vert%face(sum(nfpv)))
+
+        ! Construct the face pointer
+        allocate(topomesh%vert%faceP(topomesh%vert%ntot, 2))
+        topomesh%vert%faceP(:, 2) = nfpv 
+        topomesh%vert%faceP(1, 1) = 1
+        do i = 2, topomesh%vert%ntot 
+            topomesh%vert%faceP(i, 1) = topomesh%vert%faceP(i-1, 1) + nfpv(i-1)
+        end do 
+
+        ! Get face list (unsorted)
+        do i = 1, topomesh%vert%ntot
+            ! Get face indices
+            tf = findloc(any(topomesh%face%vert == i, dim=2), .true.)
+            
+            ! Add
+            topomesh%vert%face(topomesh%vert%faceP(i, 1):topomesh%vert%faceP(i, 1)+topomesh%vert%faceP(i, 2)-1) = tf
+        end do
+
+        ! Sort faces
+        !===========
+        ! Sort
+        do i = 1, topomesh%vert%ntot
+            ! Unpack this vertex
+            vx = topomesh%vert%x(i)
+            vy = topomesh%vert%y(i)
+
+            ! Get faces
+            tf = GetTMVertFace(topomesh%vert, i)
+            
+            ! Get the next point of each face 
+            allocate(npx(size(tf)), npy(size(tf)))
+            do j = 1, size(tf)
+                if (topomesh%face%vert(tf(j), 1) == i) then  ! first vertex
+                    npx(j) = topomesh%face%x(tf(j))%Get(2)
+                    npy(j) = topomesh%face%y(tf(j))%Get(2)
+                elseif (topomesh%face%vert(tf(j), 2) == i) then  ! second vertex
+                    npx(j) = topomesh%face%x(tf(j))%Get(topomesh%face%x(tf(j))%size()-1)
+                    npy(j) = topomesh%face%y(tf(j))%Get(topomesh%face%y(tf(j))%size()-1)
+                else
+                    call gdErrorHandler('AddTopologicalMeshVertexFaces: ' // & 
+                        'This should not be happening and is a bug!')
+                end if 
+            end do 
+            
+            ! Compute angles (w.r.t. horizontal axis)
+            dx = npx - vx
+            dy = npy - vy
+            theta = atan2(dy, dx)
+            
+            ! Sort
+            call Sort(theta, ind=sortind)
+            tfsorted = tf(sortind)
+            
+            ! Add
+            topomesh%vert%face(topomesh%vert%faceP(i, 1):&
+                topomesh%vert%faceP(i, 1)+topomesh%vert%faceP(i, 2)-1) = tfsorted
+            
+        end do
+
 
     end subroutine
 
@@ -3121,6 +3247,13 @@ module ggmod_topology2D
     end subroutine
 
     ! Getters
+    function GetTMVertFace(vert, i) result(res)
+        integer(I8)                 :: i 
+        type(TopomeshVertUDT)       :: vert 
+        integer(I8), allocatable    :: res(:)
+        res = vert%face(vert%faceP(i, 1):(vert%faceP(i, 1) +  vert%faceP(i, 2) - 1))
+    end function
+
     function GetTMCellVert(cell, i) result(res)
         integer(I8)                 :: i 
         type(TopomeshCellUDT)       :: cell 
