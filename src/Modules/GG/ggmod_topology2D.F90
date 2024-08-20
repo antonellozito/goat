@@ -59,6 +59,7 @@ module ggmod_topology2D
         integer(I8), allocatable        :: ID(:), face(:), cell(:), &
             flags(:), type(:), faceP(:, :)
         real(R8), allocatable           :: x(:), y(:), fval(:)
+        logical, allocatable            :: BV(:)
 
     contains 
 
@@ -81,10 +82,11 @@ module ggmod_topology2D
 
         integer(I8)                     :: ntot ! total number of vertices
         integer(I8), allocatable        :: ID(:), vert(:, :), cell(:), &
-            flags(:), fsID(:), type(:)
+            label(:), fsID(:), type(:)
         type(RealDynamicArrayUDT), allocatable  :: x(:), y(:)
         real(R8), allocatable           :: fval(:)
         type(PolygonUDT), allocatable   :: pol(:)
+        logical, allocatable            :: BF(:)
 
     contains 
     
@@ -276,6 +278,7 @@ module ggmod_topology2D
         call AddTopologicalMeshVertexFaces(topomesh)
 
         ! Data 
+        call AddTopologicalMeshData(topomesh)
 
         ! Add cells
 
@@ -2674,6 +2677,55 @@ module ggmod_topology2D
     end subroutine
 
     ! Cell addition 
+
+    ! Data addition
+    subroutine AddTopologicalMeshData(topomesh)
+
+        ! Description
+        !============
+        ! Add data of the vertices, faces, and cells (if they are present) based on
+        ! their type. The following fields are updated:
+        ! - vert:
+        !   * BV, IV: logical (nv-by-1) for boundary or internal vertex. Boundary
+        !   vertices are those vertices with type 4, 5 or 6, all the rest are
+        !   internal. (i.e. tangency points and regular boundary points)
+        ! - face:
+        !   * BF, IF: logical (nf-by-1) for boundary or internal face. Boundary
+        !   faces are those faces with type 3, all the rest are internal. 
+
+        ! Note: it is assumed that all necessary contours/faces have 
+        ! been added already
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                  :: topomesh 
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Vertices
+        !=========
+        ! Logicals
+        topomesh%vert%BV = (topomesh%vert%type == TMvertextp1ID) .or. &
+            (topomesh%vert%type == TMvertextp2ID) .or. &
+            (topomesh%vert%type == TMvertexbndID)
+
+        ! Faces
+        !======
+        ! Logicals
+        topomesh%face%BF = (topomesh%face%type == TMfacebndID)
+
+        ! Labels
+        if (allocated(topomesh%face%label)) then 
+            deallocate(topomesh%face%label)
+        end if 
+        allocate(topomesh%face%label(topomesh%face%ntot))
+        do i = 1, topomesh%face%ntot
+            topomesh%face%label(i) = i
+        end do 
+
+    end subroutine
 
     ! Vertex removal
     subroutine RemoveTopologicalMeshVertexLogical(topomesh, rmvert)
