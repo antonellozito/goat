@@ -265,6 +265,10 @@ module ggmod_topology2D
             fieldtracer, vesseltracer, options)
 
         ! Core boundaries? 
+        if (options%addcoreboundaries) then 
+            call AddTopologicalMeshCoreBoundaries(topomesh, magneticField, &
+                vessel, fieldtracer, options)
+        end if 
 
         ! Compute additional interconnnection data
         !=========================================
@@ -1171,6 +1175,170 @@ module ggmod_topology2D
         ! Housekeeping
         !=============
         end associate
+
+    end subroutine 
+
+    ! Core boundary contours
+    subroutine AddTopologicalMeshCoreBoundaries(topomesh, magneticField, &
+        vessel, fieldtracer, options)
+
+        ! Description
+        !============
+        ! This routine adds additional poloidal contours (type 2) for core parts.
+        ! True limiter configurations are not yet supported (a warning is thrown). 
+        ! The field value of this contour is determined as frac*(psiO - psiX) +
+        ! psiX, where psiX is the value of the field at the X-point (or other 
+        ! point), and psiO the value at the extremum (i.e. frac = 0 -> x-point,
+        ! frac = 1 -> extremum). Note that values of frac close to 0 or 1 may lead
+        ! to problems further downstream, as these contours may be very coarse
+        ! depending on the tracing grid size. 
+
+        ! It is assumed that all other necessary contours have been added (i.e.
+        ! this routine should be invoked after 'AddTopologicalMeshContours).
+        ! Otherwise, the introduced core boundary may not be properly determined.
+        ! The remainder of this routine is much alike AddTopologicalMeshContours.
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        type(magneticFieldUDT), intent(in)      :: magneticField
+        type(VesselUDT), intent(in)             :: vessel 
+        class(ContourTracerUDT), intent(in)     :: fieldtracer 
+        type(TopomeshOptionsUDT), intent(in)    :: options
+
+        ! Auxiliary
+        integer(I8)                             :: thisf
+        integer(I8), allocatable, dimension(:)  :: tf, tfv, s1, s2, &
+            contourtypes, fsIDs
+        real(R8)                                :: thisfval, traceval 
+        real(R8), allocatable, dimension(:)     :: xint, yint 
+        logical, allocatable, dimension(:)      :: keepind 
+        type(ContourUDT), allocatable           :: tc(:), allc(:)
+        type(PolygonUDT)                        :: tcp 
+        ! real(R8), allocatable, dimension(:)     :: 
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !============
+        ! Associate
+        associate(&
+            nfs             => topomesh%nfs,    &
+            vert            => topomesh%vert    &
+        )
+
+        ! Allocate
+        allocate(allc(0), contourtypes(0), fsIDs(0))
+
+        ! Trace contours
+        !===============
+        ! Loop
+        do i = 1, vert%ntot 
+            ! Check if we should trace for this extremum
+            if (.not. ((vert%type(i) == TMvertexminID) .or. (vert%type(i) == TMvertexmaxID))) then 
+                cycle 
+            end if 
+
+            ! Get the faces that have this extremum
+            tf = findloc(any(topomesh%face%vert == i, dim=2), .true.)
+
+            ! Sanity check
+            if (size(tf) == 0) then 
+                ! No faces found - limiter-like configuration, not yet 
+                ! supported here
+                print *, 'AddTopologicalMeshCoreBoundaries: limiter-like case ' // & 
+                    'detected which is not yet supported. Not adding core ' // & 
+                    'boundaries for extremum with coordinates (', & 
+                    vert%x(i), ' , ', vert%y(i), ')'
+                cycle 
+            end if 
+
+            ! Choose face with closest field value
+            allocate(tfv(size(tf)))
+            do j = 1, size(tf)
+                if (topomesh%face%vert(tf(j), 1) == i) then 
+                    tfv(j) = topomesh%face%vert(tf(j), 2)
+                else
+                    tfv(j) = topomesh%face%vert(tf(j), 1) 
+                end if 
+            end do 
+            thisf = tf(minloc(abs(vert%fval(i) - vert%fval(tfv)), dim=1))
+            thisfval = minval(abs(vert%fval(i) - vert%fval(tfv)))
+
+            ! Compute the field value to trace
+            traceval = options%coreboundariesfrac*(vert%fval(i) - thisfval) + thisfval
+
+            ! Trace contours 
+            tc = fieldtracer%TraceContours([thisfval])
+            call CleanContours(tc)
+
+            ! Check which contour is closed and intersects with the 
+            ! current face
+            allocate(keepind(size(tc)))
+            keepind = .true. 
+            do j = 1, size(tc)
+                ! Convert to polygon
+                call tcp%Construct(tc(j)%x, tc(j)%y)
+
+                ! Compute intersections
+                call PolygonIntersections(topomesh%face%pol(thisf), tcp, &
+                    xint, yint, s1, s2)
+
+                ! Check
+                if (size(xint) == 0) then 
+                    keepind(j) = .false. 
+                end if 
+            end do
+
+            ! Remove contours without intersections
+            tc = pack(tc, keepind)
+            deallocate(keepind)
+
+            ! Check
+            if (size(tc) == 0) then 
+                ! No boundaries found
+                print *, 'AddTopologicalMeshCoreBoundaries: no ' // & 
+                    'contours found that intersect with the extremum face. ' // & 
+                    'Not adding any core boundaries for extremum with ' // & 
+                    'coordinates: (', vert%x(i), ', ', vert%y(i), ')'
+                cycle 
+            elseif (size(tc) > 1) then 
+                ! Multiple boundaries found - also not expected, but
+                ! may not be a problem 
+                print *, 'AddTopologicalMeshCoreBoundaries: multiple' // & 
+                    'contours found that intersect with the extremum face. ' // & 
+                    'May lead to too many core boundaries for extremum with coordinates (', & 
+                    vert%x(i), ' , ', vert%y(i), ')'
+            end if 
+
+            ! Concatenate
+            allc = [allc, tc]
+            contourtypes = [contourtypes, spread(2_I8, 1, size(tc))]
+
+            ! Add flux surface ID
+            nfs = nfs + 1
+            fsIDs = [fsIDs, spread(nfs, 1, size(tc))]
+
+        end do 
+
+        ! End association
+        end associate
+
+        ! Add to the topology mesh
+        !=========================
+        ! Add contours
+        do  i = 1, size(allc)
+            call InsertTopologicalMeshContour(topomesh, magneticField, &
+                allc(i), contourtypes(i), fsIDs(i))
+        end do 
+
+        ! Trim the topological mesh
+        call TrimTopologicalMesh(topomesh, magneticField, vessel)
+
+        ! Split boundaries
+        call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
 
     end subroutine 
 
