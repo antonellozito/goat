@@ -2677,6 +2677,532 @@ module ggmod_topology2D
     end subroutine
 
     ! Cell addition 
+    subroutine AddTopologicalMeshCells(topomesh)
+
+        ! Description
+        !============
+        ! This routine forms cells of the given topology mesh with consistent data
+        ! of faces and vertices. It is assumed that all faces are 'simple', i.e.
+        ! they do not start and end in the same point (in that case, points
+        ! should've been introduced before). The cells can be of arbitrary topology
+        ! (i.e. triangles, quads, ...) - if this is not desired, it should be
+        ! checked afterwards.
+
+        ! The following cell types are allowed: 
+        ! - regular cells: cells with all unique boundaries that do not appear
+        ! twice for this cell 
+        ! - Disc-type cells: cells that have a single boundary appearing twice, but
+        ! where this single boundary has one vertex that only has one face.
+
+        ! All other cell types will not be properly identified by this routine and
+        ! will very likely lead to undesired output or even crashing. If necessary,
+        ! some other cell types may be supported in the future by making the stop
+        ! condition for a cell more stringent (i.e. not just stopping if we find
+        ! the same face, but if we also arrive at the face in the same way as we
+        ! started - this would allow cells with duplicate boundaries as well). 
+
+        ! Algorithm
+        !==========
+        ! We assume that the following data is readily available:
+        ! - face indices of vertices, sorted either clockwise or counter-clockwise,
+        ! but consistently the same for each vertex. This allows us to uniquely
+        ! define the left and right neighbor face when determining the next one.
+        ! This should be computed beforehand with the
+        ! 'AddTopologicalMeshVertexFaces' routine.
+        ! - Face identifiers that are accurate and up to date: at least boundary
+        ! faces must be indicated to be type 3. No closed faces are assumed to
+        ! exist. 
+
+        ! Furthermore, we assume that the ensemble of vertices and faces results in
+        ! a non-overlapping partition of the bounded 2D domain, and that the union
+        ! of all faces with type 3 represents a closed boundary polygon (or
+        ! multiple closed polygons) that bound the domain.
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(TopomeshUDT)                      :: topomesh 
+
+        ! Auxiliary 
+        integer(I8)                             :: tf, startface, & 
+            turndirection, tfv(1:2), tvind, tv, startvert, &
+            starttvind, nf, nfv(1:2)
+        integer(I8), allocatable, dimension(:)  :: fc, disccellvert, &
+            nfvfn, tcf, tcv, faceneig1, faceneig2, faceneig
+
+        logical                                 :: istfv(1:2)
+        logical, allocatable                    :: hasturned1(:, :), &
+            hasturned2(:, :), donotstartfromface(:)
+
+        type(IntegerDynamicArrayUDT), allocatable   :: cellvert(:), &
+            cellface(:)
+        type(IntegerDynamicArrayUDT)                :: thiscellvert, &
+            thiscellface
+
+        ! Loop 
+        integer(I8)                             :: i, cc 
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate( & 
+            vert        => topomesh%vert,   &
+            face        => topomesh%face,   &
+            cell        => topomesh%cell    &
+            )
+
+        ! Allocate
+        allocate(fc(face%ntot), hasturned1(face%ntot, 2), &
+            hasturned2(face%ntot, 2), donotstartfromface(face%ntot), &
+            cellvert(0), cellface(0))
+
+        ! Initialize face counters
+        where (face%BF) 
+            fc = 1 ! boundary faces: only once
+        elsewhere 
+            fc = 2
+        end where 
+            
+        ! Initialize turn checkers
+        hasturned1 = .false.
+        hasturned2 = .false.
+
+        ! Initialize cell counter
+        cc = 0
+
+        ! Check if there are any disc-type cells
+        disccellvert = findloc(vert%faceP(:, 2), 1_I8)
+
+        ! Check if there are any faces with only one adjacent face on each side -
+        ! these faces shouldn't be started from, as one cannot determine the
+        ! turning direction (and several other faces should remain that can be
+        ! started from)
+        donotstartfromface = .false. 
+        do i = 1, face%ntot
+            nfvfn = vert%faceP(face%vert(i, :), 2)
+            if (all(nfvfn == 2)) then 
+                donotstartfromface(i) = .true.
+            end if 
+        end do 
+
+        ! Loop
+        !=====
+        do while (.true.)
+            
+            ! Initialize cell faces & vertices
+            allocate(tcv(0), tcf(0))
+
+            ! Find the next face (any next internal face)
+            tf = findloc( (fc > 0) .and. (.not. face%BF) .and. &
+                (.not. donotstartfromface), .true., 1)
+            
+            ! Check
+            if (tf == 0) then 
+                ! Check
+                if (any(fc > 0)) then 
+                    call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                        'could not find next face')
+                end if 
+                ! All faces added, exit
+                exit 
+            end if 
+            
+            ! Do not subtract a counter - we need to end up in this face again.
+            ! Also, don't add, we do this later on
+            
+            ! Set starting face for this cell
+            startface = tf
+            
+            ! Turning direction (0: not found, 1: first neighbour, 2: second
+            ! neighbour)
+            turndirection = 0
+            
+            ! Get neighbouring faces in correct order
+            tfv = face%vert(tf, :)
+            faceneig1 = GetTMVertFaceNeig(vert, tfv(1), tf);
+            faceneig2 = GetTMVertFaceNeig(vert, tfv(2), tf);
+            
+            ! Sanity checks
+            if ((size(faceneig1) == 0) .or. (size(faceneig2) == 0)) then 
+                ! No neighbours found
+                call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                    'could not find neighbouring faces, something wrong ' //& 
+                    'with topological mesh construction. Check input')
+            end if 
+            if (all(faceneig1 == tf) .and. all(faceneig2 == tf)) then 
+                ! Isolated face
+                call gdErrorHandler('AddTopologicalMeshCells: isolated ' // & 
+                    'face found, check input')
+            end if
+            
+            ! Set the starting vertex index (if boundary vertices, needs checks)
+            tvind = 0
+            if ((.not. all(faceneig1 == tf)) .and. (.not. vert%BV(tfv(1)))) then 
+                tvind = 1
+            elseif ((.not. all(faceneig2 == tf)) .and. (.not. vert%BV(tfv(2)))) then 
+                tvind = 2
+            end if 
+
+            ! If none found,  check if the first vertex has neighbours 
+            ! with available faces
+            if (any(fc(faceneig1) > 0) .and. (tvind == 0)) then 
+                ! Check if both neighours are the same - in that case we can
+                ! safely take this vertex as next vertex
+                if (faceneig1(1) == tf) then 
+                    ! Vertex has single face here, do not take it
+                elseif (faceneig1(1) == faceneig1(2)) then 
+                    tvind = 1
+                else
+                    ! Check if any face neighbour can be taken 
+                    if (any((fc(faceneig1) > 0))) then 
+                        tvind = 1
+                    end if 
+                end if 
+            end if 
+
+            ! If none found, check if the second vertex has neighbours 
+            ! with available faces
+            if (any(fc(faceneig2) > 0) .and. (tvind == 0)) then 
+                ! Check if both neighours are the same - in that case we can
+                ! safely take this vertex as next vertex
+                if (faceneig2(1) == tf) then 
+                    ! Vertex has single face here, do not take it
+                elseif (faceneig2(1) == faceneig2(2)) then 
+                    tvind = 2
+                else
+                    ! Check if any face neighbour can be taken
+                    if (any((fc(faceneig2) > 0))) then  
+                        tvind = 2
+                    end if 
+                end if 
+            end if 
+            
+            ! Sanity check
+            if (tvind == 0) then 
+                ! No starting vertex found - possibly dangling face?
+                call gdErrorHandler('AddTopologicalMeshCells: could not ' // & 
+                    'find next cell although initial face was found - ' // & 
+                    'possible dangling face detected, check input')
+            end if
+            
+            ! Set current vertex
+            tv = face%vert(tf, tvind);
+            startvert = tv
+            starttvind = tvind
+        
+            ! Loop 
+            !=====
+            do while (.true.)
+                
+                ! Get neighbouring faces in correct order
+                faceneig = GetTMVertFaceNeig(vert, tv, tf)
+                        
+                ! Sanity checks
+                if (size(faceneig) == 0) then 
+                    ! No neighbours found
+                    call gdErrorHandler('AddTopologicalMeshCells: could ' // & 
+                        'not find neighbouring faces, something wrong ' // & 
+                        'with topological mesh construction. Check input')
+                end if 
+                if (all(fc(faceneig) <= 0)) then 
+                    ! No neighbours with counter left
+                    call gdErrorHandler('AddTopologicalMeshCells: all ' // & 
+                        'neighbouring faces cannot be taken anymore, ' // &
+                        'faces do not seem to form cell')
+                end if 
+                
+                ! Find the next face
+                if (turndirection /= 0) then 
+                    ! We have a turn direction, so we can only check if we should
+                    ! throw errors
+                    nf = faceneig(turndirection)
+                    
+                    ! Check counter
+                    if (fc(nf) <= 0) then 
+                        call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                            'next face is forced by turning direction ' // & 
+                            'but is not available')
+                    end if 
+                    
+                    ! If we passed this, we should check the vertices
+                    nfv = face%vert(nf, :)
+                    istfv = nfv == tv
+                    if (.not.any(istfv)) then 
+                        ! Current vertex is not found in the next face, this should
+                        ! not be possible
+                        call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                            'next face does not have current vertex, ' // & 
+                            'check input')
+                    end if 
+                    if (all(istfv)) then 
+                        ! Next face is a face that starts and ends in the same
+                        ! vertex - not supported
+                        call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                            'face detected with same start and end vertex, ' // & 
+                            'not supported')
+                    end if 
+                    
+                    ! Add and update
+                    tcf = [tcf, nf]
+                    tcv = [tcv, tv]
+                    tf = nf
+                    if (.not. istfv(1)) then 
+                        tv = nfv(1)
+                    else
+                        tv = nfv(2)
+                    end if 
+                    
+                    ! Update counter
+                    fc(tf) = fc(tf) - 1
+                    
+                    ! Set that this direction can't be turned in anymore
+                    ! from neither side for this face
+                    if ((startface == nf) .and. (tv == startvert)) then 
+                        ! Just break, turning direction etc already adjusted
+                        ! before.
+                        exit
+                    else
+                        if (turndirection == 1) then 
+                            if (face%vert(tf, 1) == tv) then 
+                                hasturned1(tf, 1) = .true. 
+                                hasturned2(tf, 2) = .true. 
+                            else 
+                                hasturned1(tf, 2) = .true. 
+                                hasturned2(tf, 1) = .true. 
+                            end if 
+                        elseif (turndirection == 2) then 
+                            if (face%vert(tf, 1) == tv) then 
+                                hasturned1(tf, 2) = .true. 
+                                hasturned2(tf, 1) = .true. 
+                            else 
+                                hasturned1(tf, 1) = .true. 
+                                hasturned2(tf, 2) = .true. 
+                            end if 
+                        else
+                            call gdErrorHandler('AddTopologicalMEshCells: ' // & 
+                                'bug detecetd when adjusting turning direction')
+                        end if 
+                    end if 
+                    
+                else
+                    ! We don't have a turning direction yet. Check the current
+                    ! neighbours
+                    if (faceneig(1) == faceneig(2)) then 
+                        ! We have to take this face if we can, or we should error.
+                        ! Turning direction cannot be determined
+                        if (fc(faceneig(1)) <= 0) then 
+                            call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                                'next face is only possible face but ' // & 
+                                'cannot be taken due to counter being zero')
+                        end if             
+                        
+                        ! Take face
+                        nf = faceneig(1)
+                        
+                        ! If we passed this, we should check the vertices
+                        nfv = face%vert(nf, :)
+                        istfv = nfv == tv
+                        if (.not. any(istfv)) then 
+                            ! Current vertex is not found in the next face, this should
+                            ! not be possible
+                            call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                                'next face does not have current vertex, ' // & 
+                                'check input')
+                        end if 
+                        if (all(istfv)) then 
+                            ! Next face is a face that starts and ends in the same
+                            ! vertex - not supported
+                            call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                                'face detected with same start and end ' // & 
+                                'vertex, not supported')
+                        end if
+
+                        ! Add and update
+                        tcf = [tcf, nf]
+                        tcv = [tcv, tv]
+                        tf = nf
+                        if (.not. istfv(1)) then 
+                            tv = nfv(1)
+                        else
+                            tv = nfv(2)
+                        end if 
+                        
+                        ! Update counter
+                        fc(tf) = fc(tf) - 1
+                        
+                        ! Is the next face the start face? If so, exit
+                        if ((startface == nf) .and. (tv == startvert)) then 
+                            exit 
+                        end if 
+                    else
+                        ! Check which one has a positive counter (at least one,
+                        ! cause we already passed a check for this)
+                        if ((fc(faceneig(1)) > 0) .and. .not. hasturned1(startface, starttvind)) then 
+                            ! Take face
+                            nf = faceneig(1)
+                            
+                            ! If we passed this, we should check the vertices
+                            nfv = face%vert(nf, :)
+                            istfv = nfv == tv
+                            if (.not. any(istfv)) then 
+                                ! Current vertex is not found in the next face, this should
+                                ! not be possible
+                                call gdErrorHandler('AddTopologicalMeshCells:  ' // & 
+                                    'next face does not have current vertex,  ' // & 
+                                    'check input')
+                            end if
+                            if (all(istfv)) then 
+                                ! Next face is a face that starts and ends in the same
+                                ! vertex - not supported
+                                call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                                    'face detected with same start and ' // & 
+                                    'end vertex, not supported')
+                            end if 
+                            
+                            ! Add and update
+                            tcf = [tcf, nf]
+                            tcv = [tcv, tv]
+                            tf = nf
+                            if (.not. istfv(1)) then 
+                                tv = nfv(1)
+                            else
+                                tv = nfv(2)
+                            end if 
+                            
+                            ! Update counter
+                            fc(tf) = fc(tf) - 1
+                            
+                            ! Set turn direction
+                            turndirection = 1
+                            
+                            ! Set that this direction can't be turned in anymore
+                            ! from neither side
+                            hasturned1(startface, starttvind) = .true.
+                            if (starttvind == 1) then 
+                                hasturned2(startface, 2) = .true.
+                            else
+                                hasturned2(startface, 1) = .true.
+                            end if 
+                            
+                            ! Is the next face the start face? If so, exit
+                            if ((startface == nf) .and. (tv == startvert)) then 
+                                exit 
+                            end if 
+                            
+                        elseif ((fc(faceneig(2)) > 0) .and. .not. hasturned2(startface, starttvind)) then 
+                            
+                            ! Take face
+                            nf = faceneig(2)
+                            
+                            ! If we passed this, we should check the vertices
+                            nfv = face%vert(nf, :)
+                            istfv = nfv == tv;
+                            if (.not. any(istfv)) then 
+                                ! Current vertex is not found in the next face, this should
+                                ! not be possible
+                                call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                                    'next face does not have current vertex, ' // & 
+                                    'check input')
+                            end if
+                            if (all(istfv)) then 
+                                ! Next face is a face that starts and ends in the same
+                                ! vertex - not supported
+                                call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                                    'face detected with same start and ' // & 
+                                    'end vertex, not supported')
+                            end if
+                            
+                            ! Add and update
+                            tcf = [tcf, nf]
+                            tcv = [tcv, tv]
+                            tf = nf
+                            if (.not. istfv(1)) then 
+                                tv = nfv(1)
+                            else
+                                tv = nfv(2)
+                            end if 
+                            
+                            ! Update counter
+                            fc(tf) = fc(tf) - 1
+                            
+                            ! Set turn direction
+                            turndirection = 2
+                            
+                            ! Set that this direction can't be turned in anymore
+                            ! from neither side
+                            hasturned2(startface, starttvind) = .true.
+                            if (starttvind == 1) then 
+                                hasturned1(startface, 2) = .true.
+                            else
+                                hasturned1(startface, 1) = .true.
+                            end if 
+                            
+                            ! Is the next face the start face? If so, exit
+                            if ((startface == nf) .and. (tv == startvert)) then 
+                                exit 
+                            end if 
+                            
+                        else
+                            call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                                'could not find next face since no ' // &
+                                'combination of available start direction ' // &
+                                'and free face found')
+                        end if 
+                    end if 
+                end if 
+            end do 
+            
+            ! Add found cell to the structure
+            cc = cc + 1;
+            thiscellvert = ConstructIntegerDynamicArray(tcv)
+            thiscellface = ConstructIntegerDynamicArray(tcf)
+            cellvert = [cellvert, thiscellvert]
+            cellface = [cellface, thiscellface]
+        end do 
+
+        ! Add to the topology mesh
+        if (allocated(topomesh%cell%vert)) then 
+            deallocate(topomesh%cell%vert)
+        end if 
+        if (allocated(topomesh%cell%vertP)) then 
+            deallocate(topomesh%cell%vertP)
+        end if 
+        if (allocated(topomesh%cell%face)) then 
+            deallocate(topomesh%cell%face)
+        end if 
+        if (allocated(topomesh%cell%faceP)) then 
+            deallocate(topomesh%cell%faceP)
+        end if 
+
+        topomesh%cell%ntot = cc;
+        allocate(topomesh%cell%vertP(cc, 2))
+        allocate(topomesh%cell%faceP(cc, 2))
+        topomesh%cell%vertP(1, 1) = 1
+        topomesh%cell%faceP(1, 1) = 1
+        do i = 1, cc
+            topomesh%cell%vertP(i, 2) = cellvert(i)%size()
+            topomesh%cell%faceP(i, 2) = cellface(i)%size()
+        end do 
+        allocate(topomesh%cell%vert(sum(topomesh%cell%vertP(:, 2))))
+        allocate(topomesh%cell%face(sum(topomesh%cell%faceP(:, 2))))
+        do i = 2, cc
+            topomesh%cell%vertP(i, 1) = topomesh%cell%vertP(i-1, 1) + &
+                topomesh%cell%vertP(i-1, 2)
+            topomesh%cell%faceP(i, 1) = topomesh%cell%faceP(i-1, 1) + &
+                topomesh%cell%faceP(i-1, 2)
+        end do 
+        do i = 1, cc
+            topomesh%cell%vert(topomesh%cell%vertP(i, 1):topomesh%cell%vertP(i, 2)) = & 
+                cellvert(i)%Get()
+            topomesh%cell%face(topomesh%cell%faceP(i, 1):topomesh%cell%faceP(i, 2)) = & 
+                cellface(i)%Get()
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+        
+    end subroutine 
 
     ! Data addition
     subroutine AddTopologicalMeshData(topomesh)
@@ -3318,6 +3844,40 @@ module ggmod_topology2D
         type(TopomeshCellUDT)       :: cell 
         integer(I8), allocatable    :: res(:)
         res = cell%face(cell%faceP(i, 1):(cell%faceP(i, 1) + cell%faceP(i, 2) - 1))
+    end function
+
+    function GetTMVertFaceNeig(vert, i, tf) result(res)
+
+        ! Description
+        !============
+        ! Return the 'left' and 'right' neighbouring faces for vertex tv and
+        ! current face tf. If the face is not found, fn is empty. Otherwise, fn is
+        ! a 1-by-2 integer array containing the face indices.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)     :: i, tf 
+        type(TopomeshVertUDT)       :: vert 
+        integer(I8), allocatable    :: res(:)
+
+        ! Auxiliary
+        integer(I8)                     :: tfind
+        integer(I8), allocatable        :: tvf(:), tvfe(:)
+
+        ! Get vertex faces
+        tvf = GetTMVertFace(vert, i)
+
+        ! Find where this face is located
+        tfind = findloc(tvf, tf, 1)
+
+        ! Find the neighbours 
+        if (tfind == 0) then 
+            allocate(res(0))
+        else
+            tvfe = [tvf(size(tvf)), tvf, tvf(1)]
+            res = [tvfe(tfind), tvfe(tfind+2)]
+        end if 
     end function
 
     !------------------------------------------------------------------!
