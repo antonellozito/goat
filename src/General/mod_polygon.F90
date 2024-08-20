@@ -3335,6 +3335,15 @@ module mod_polygon
         ! cost, a simple check is made whether the encompassing boxes of
         ! two edges overlap or not. If they don't, there can be no 
         ! intersection. 
+        
+        ! Notes
+        !======
+        ! Note 1: we now hedge for duplicate intersections that happen 
+        ! exactly in one of the nodes of the polygon, and which appears
+        ! twice due to the fact that the node belongs to two edges, for
+        ! which intersections are sought. Note that actual multiple 
+        ! intersections (same coordinates, but different segment 
+        ! indices) are not removed, since these are valid intersections. 
 
         ! Declare variables
         !==================
@@ -3346,11 +3355,13 @@ module mod_polygon
 
         ! Auxiliary
         integer(I8)                         :: counter  
-        real(R8)                            :: xi, yi, xe1, ye1, xe2, ye2
+        real(R8)                            :: xi, yi, xe1, ye1, xe2, ye2, &
+            d
 
         integer(I8), allocatable            :: temps(:)
         real(R8), allocatable               :: tempx(:), tempy(:), &
             tempsr(:)
+        logical, allocatable                :: keepind(:)
 
         ! Loop
         integer(I8)                         :: i 
@@ -3408,6 +3419,29 @@ module mod_polygon
         x = tempx(1:counter) 
         y = tempy(1:counter)  
         s = temps(1:counter)
+
+        ! Hedge for duplicates
+        !=====================
+        ! Since intersections should be sorted by default, we can 
+        ! simply loop and check
+        allocate(keepind(counter))
+        keepind = .true.
+        do i = 1, counter-1
+            ! Check for segment index
+            if ((s(i+1) - s(i)) == 1) then 
+                ! Check for same intersection
+                call Distance(d, x(i), y(i), x(i+1), y(i+1))
+                if (d <= disttol) then 
+                    ! Delete
+                    keepind(i+1) = .false. 
+                end if 
+            end if 
+        end do 
+
+        ! Delete
+        x = pack(x, keepind)
+        y = pack(y, keepind)
+        s = pack(s, keepind)
 
         ! Housekeeping
         !=============
@@ -3634,6 +3668,15 @@ module mod_polygon
         ! be very large (but usually very small), we dynamically grow 
         ! the intersection storage arrays while computing intersections.
 
+        ! Notes
+        !======
+        ! Note 1: we now hedge for duplicate intersections that happen 
+        ! exactly in one of the nodes of the polygon, and which appears
+        ! twice due to the fact that the node belongs to two edges, for
+        ! which intersections are sought. Note that actual multiple 
+        ! intersections (same coordinates, but different segment 
+        ! indices) are not removed, since these are valid intersections. 
+ 
         ! Declare variables
         !==================
         ! Arguments
@@ -3645,11 +3688,13 @@ module mod_polygon
         ! Auxiliary
         integer(I8)                             :: ni, counter, sz, &
             szold, szmult 
-        real(R8)                                :: xe1, ye1, xe2, ye2
+        real(R8)                                :: xe1, ye1, xe2, ye2, &
+            d
         real(R8), allocatable                   :: tempx(:), tempy(:), &
             xi(:), yi(:), temps1r(:), temps2r(:)
         integer(I8), allocatable                :: temps1(:), &
             temps2(:), si(:)
+        logical, allocatable                    :: keepind(:)
 
         ! Loop
         integer(I8)                             :: i 
@@ -3718,7 +3763,8 @@ module mod_polygon
             xe2 = xp(edges(i, 2))
             ye2 = yp(edges(i, 2))
 
-            ! Compute intersections
+            ! Compute intersections (duplicates of p1 with segment are 
+            ! already removed in this routine)
             call SegmentPolygonIntersections(p1, xe1, ye1, xe2, ye2, &
                 xi, yi, si)
 
@@ -3775,6 +3821,31 @@ module mod_polygon
         s1 = temps1(1:counter) 
         s2 = temps2(1:counter) 
 
+        ! Hedge for duplicates
+        !=====================
+        ! We only need to check s2 since duplicates of s1 should have
+        ! already been removed before
+        allocate(keepind(counter))
+        keepind = .true.
+        do i = 1, counter-1
+            ! Check for segment index
+            if ((s2(i+1) - s2(i)) == 1) then 
+                ! Check for same intersection
+                call Distance(d, x(i), y(i), x(i+1), y(i+1))
+                if (d <= disttol) then 
+                    ! Delete
+                    keepind(i+1) = .false. 
+                end if 
+            end if 
+        end do 
+
+        ! Delete
+        x = pack(x, keepind)
+        y = pack(y, keepind)
+        s1 = pack(s1, keepind)
+        s2 = pack(s2, keepind)
+        counter = count(keepind)
+
         ! Compute true intersection locations
         !====================================
         if (present(s1r) .and. present(s2r)) then 
@@ -3784,11 +3855,11 @@ module mod_polygon
 
             ! First polygon index
             s1r = ComputeI(x, y, p1%x(p1%edges(s1, 1)), p1%y(p1%edges(s1, 1)), &
-                p1%x(p1%edges(s1, 2)), p1%y(p1%edges(s1, 2))) + s1 
+                p1%x(p1%edges(s1, 2)), p1%y(p1%edges(s1, 2))) + s1 - 1 
 
             ! Second polygon index
             s2r = ComputeI(x, y, p2%x(p2%edges(s2, 1)), p2%y(p2%edges(s2, 1)), &
-                p2%x(p2%edges(s2, 2)), p2%y(p2%edges(s2, 2))) + s2
+                p2%x(p2%edges(s2, 2)), p2%y(p2%edges(s2, 2))) + s2 - 1
 
         end if 
 
