@@ -293,6 +293,7 @@ module ggmod_topology2D
 
         ! Write
         !======
+        call WriteTopologicalMesh(topomesh, 'topomesh')
 
     end function
 
@@ -4361,6 +4362,170 @@ module ggmod_topology2D
             deallocate(delind)
         end do 
     end subroutine 
+
+    ! Topological mesh data writer
+    subroutine WriteTopologicalMesh(topomesh, filename)
+
+        ! Description
+        !============
+        ! Routine to write topological mesh file in our own format. Also
+        ! handy for reading in once constructed. The following data is
+        ! written in a column-wise fashion:
+
+        ! Vertex data
+        !============
+        ! 'vertices' 
+        ! <vert%ntot> 
+        ! 'ID, x, y, fval, BV'
+        ! <ID, x, y, fval, BV (as zero or one)>
+        ! 'faces'
+        ! <face%ntot> 
+        ! 'ID, fsID, type, vert1, vert2, BF'
+        ! <ID, fsID, type, vert(:, 1), vert(:, 2), BF>
+        ! 'face <nf>' <repeated for each face including header>
+        ! <x, y> 
+        ! 'cells'
+        ! <cell%ntot,  cells%nvert, cells%nface> 
+        ! 'cell vertices'
+        ! <cell%vert>
+        ! 'cell vertex pointer'
+        ! <cell%vertP>
+        ! 'cell faces'
+        ! <cell%face> 
+        ! 'cell face pointer'
+        ! <cell%faceP(:, 1), cell%faceP(:, 2)>
+        
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        character(*), intent(in)                :: filename 
+
+        ! Auxiliary
+        integer                                 :: fu, BVval
+        real(R8), allocatable, dimension(:)     :: xf, yf
+        character(:), allocatable               :: dir
+
+        ! Loop
+        integer(I8)                             :: i, j 
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            v       => topomesh%vert,   &
+            f       => topomesh%face,   &
+            c       => topomesh%cell    &
+        )
+
+        ! Construct writing directory
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Write header
+        write(fu, *) 'VERSION3.00.00'
+
+        ! Check data
+        !===========
+        ! Only the fields that are not added when constructing vertices,
+        ! faces or cells. The rest should be always available
+        if (.not. allocated(v%BV)) then 
+            allocate(v%BV(v%ntot))
+            v%BV = .false.
+        end if 
+        if (.not. allocated(f%BF)) then 
+            allocate(f%BF(f%ntot))
+            f%BF = .false.
+        end if
+
+        ! Write vertex data
+        !==================
+        ! Number of vertices
+        write (fu, *) 'vertices'
+        write (fu, *) v%ntot
+
+        ! Basic vertex data
+        write (fu, *) 'ID, x, y, fval, BV'
+        do i = 1, v%ntot
+            if (v%BV(i)) then 
+                BVval = 1
+            else 
+                BVval = 0
+            end if
+            write (fu, *) v%ID(i), v%x(i), v%y(i), v%fval(i), BVval
+        end do 
+
+        ! Write face data
+        !================
+        ! Number of faces
+        write (fu, *) 'faces'
+        write (fu, *) f%ntot 
+
+        ! Basic face data
+        write (fu, *) 'ID, fsID, type, vert1, vert2, BF'
+        do i = 1, f%ntot 
+            if (f%BF(i)) then 
+                BVval = 1
+            else 
+                BVval = 0
+            end if 
+            write (fu, *) f%ID(i), f%fsID(i), f%type(i), f%vert(i, 1), &
+                f%vert(i, 2), BVval 
+        end do 
+        
+        ! Face coordinates
+        write (fu, *) 'face coordinates'
+        do i = 1, f%ntot 
+            ! Write header
+            write (fu, *) 'face ', i 
+
+            ! Write coordinates
+            xf = f%x(i)%Get()
+            yf = f%y(i)%Get()
+            do j = 1, size(xf)
+                write(fu, *) xf(j), yf(j)
+            end do 
+        end do 
+
+        ! Write cell data
+        !================
+        ! Number of cells, number of cell vertices, number of cell faces
+        write (fu, *) 'cells'
+        write (fu, *) c%ntot, size(c%vert), size(c%face)
+
+        ! Cell vertices
+        write (fu, *) 'cell vertices'
+        do i = 1, size(c%vert)
+            write (fu, *) c%vert(i)
+        end do 
+        write (fu, *) 'cell vertex pointer'
+        do i = 1, c%ntot 
+            write (fu, *) c%vertP(i, 1), c%vertP(i, 2)
+        end do 
+
+        ! Cell faces
+        write (fu, *) 'cell faces'
+        do i = 1, size(c%face)
+            write (fu, *) c%face(i)
+        end do 
+        write (fu, *) 'cell face pointer'
+        do i = 1, c%ntot 
+            write (fu, *) c%faceP(i, 1), c%faceP(i, 2)
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+        close(fu)
+
+    end subroutine
 
 
 end module
