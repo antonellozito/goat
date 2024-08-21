@@ -399,7 +399,7 @@ module mod_contour2D
         integer(I8), intent(inout)      :: order(:) 
 
         ! Auxiliary
-        type(sp2DUDt)                   :: spstruct(size(xs))
+        type(sp2DUDt), allocatable      :: spstruct(:)
         type(ContourUDT), allocatable   :: tempcontours(:)
         logical, allocatable            :: superquadfacexflags(:, :), &
             superquadfaceyflags(:, :)
@@ -555,7 +555,7 @@ module mod_contour2D
         integer(I8), intent(inout)      :: order(:)
 
         ! Auxiliary
-        type(sp2DUDt)                   :: spstruct(size(xs))
+        type(sp2DUDt), allocatable      :: spstruct(:)
         type(ContourUDT), allocatable   :: tempcontours(:)
         logical, allocatable            :: superquadfacexflags(:, :), &
             superquadfaceyflags(:, :)
@@ -770,11 +770,11 @@ module mod_contour2D
         ! Determine faceflags (true if value is present on face and if 
         ! face is not an internal face flag - can be logical since we 
         ! can only pass each face once in a contour)
-        xfacec = (hasvv(:, 1:ny-1) .and. (.not. hasvv(:, 2:ny))) .or. &
-            ((.not. hasvv(:, 1:ny-1)) .and. (hasvv(:, 2:ny))) .and. &
+        xfacec = ((hasvv(:, 1:ny-1) .and. (.not. hasvv(:, 2:ny))) .or. &
+            ((.not. hasvv(:, 1:ny-1)) .and. (hasvv(:, 2:ny)))) .and. &
             (.not. superquadfacexflags)
-        yfacec = (hasvv(1:nx-1, :) .and. (.not. hasvv(2:nx, :))) .or. &
-            ((.not. hasvv(1:nx-1, :)) .and. (hasvv(2:nx, :))) .and. &
+        yfacec = ((hasvv(1:nx-1, :) .and. (.not. hasvv(2:nx, :))) .or. &
+            ((.not. hasvv(1:nx-1, :)) .and. (hasvv(2:nx, :)))) .and. &
             (.not. superquadfaceyflags)
         
         ! Set number of times we may end up in quad 
@@ -1747,12 +1747,19 @@ module mod_contour2D
         ! be possible. If this poses to be an issue, refine the grid locally or
         ! remove one of the x-points (at the expense of possible inaccuracies).
 
+        ! Note 2: we're now hedging more for wrongly identified saddle
+        ! points, which will not be included in the spstruct. This 
+        ! identification is based firstly on location (outside of bounds
+        ! ) and secondly on the field value. However, we cannot fully
+        ! hedge for wrongly passed saddle points, so errors may still 
+        ! occur... 
+
         ! Declare variables
         !==================
         ! Arguments
         real(R8), intent(in)                :: xs(:), ys(:), vs(:), &
             X(:), Y(:), V(:, :)
-        type(sp2DUDT), intent(out)          :: spstruct(size(xs))
+        type(sp2DUDT), allocatable, intent(out)     :: spstruct(:)
         integer(I8), intent(out)            :: quadflags(size(X)-1, size(Y)-1)
         logical, intent(out)                :: facexflags(size(X), size(Y)-1), &
             faceyflags(size(X)-1, size(Y))
@@ -1761,7 +1768,8 @@ module mod_contour2D
         integer(I8)                         :: ixquad, iyquad, ntri, &
             nx, ny, m
         integer(I8), allocatable            :: stencilx(:), stencily(:)
-        logical, allocatable                :: hasvp(:), hasftri(:)
+        logical, allocatable                :: hasvp(:), hasftri(:), &
+            keepind(:)
 
         ! Loop  
         integer(I8)                         :: i, k
@@ -1780,6 +1788,10 @@ module mod_contour2D
         facexflags = .false. 
         faceyflags = .false.
 
+        ! Initialize deletion index & spstruct
+        allocate(keepind(size(xs)), spstruct(size(xs)))
+        keepind = .true. 
+
         ! Set up saddle point structure
         !==============================
         do i = 1, size(xs)
@@ -1795,6 +1807,9 @@ module mod_contour2D
                 print *, 'InitializeSaddlePointStructure2D: saddle point ' // &
                     'location lies out of bounds, ignoring saddle point ' // &
                     'number: ', i 
+
+                ! Mark for deletion
+                keepind(i) = .false. 
 
                 ! Skip
                 cycle 
@@ -1854,6 +1869,43 @@ module mod_contour2D
                  'saddle point domains overlap, not supported. ' // & 
                  'Consider refining the grid or removing saddle points. ')
             end if
+
+            ! Determine x-point order
+            hasvp = spstruct(i)%valpoints >= spstruct(i)%val 
+            hasftri = (hasvp(spstruct(i)%tri(:, 2)) .and. &
+                (.not. hasvp(spstruct(i)%tri(:, 3)))) .or. &
+                (hasvp(spstruct(i)%tri(:, 3)) .and. &
+                (.not. (hasvp(spstruct(i)%tri(:, 2))))) 
+            m = count(hasftri)  ! number of intersections with outer boundary
+            
+            ! Check
+            if (modulo(m, 2) > 0) then 
+                ! Something weird going on
+                print *, 'InitializeSaddlePointStructure: order of saddle ' // &
+                    'point with ID ', i, ' could not be determined, ' // &
+                    'returning NaN for this order and not including as '// & 
+                    'saddle point for tracing'
+                
+                ! Mark for deletion
+                keepind(i) = .false. 
+
+                ! Skip
+                cycle 
+            end if
+            if (m == 0) then 
+                ! This shouldn't be happening, ignore the saddle point
+                print *, 'InitializeSaddlePointStructure: given saddle ' // & 
+                    'point value is not present on any of the saddle ' // & 
+                    'point domain boundaries - please check input value.' // &
+                    'Ignoring saddle point ', i
+
+                ! Mark for deletion
+                keepind(i) = .false. 
+                cycle 
+            end if 
+            
+            ! Compute
+            spstruct(i)%order = m/2-1   
             
             ! Set quadflags
             quadflags(stencilx, stencily) = i 
@@ -1870,25 +1922,10 @@ module mod_contour2D
                 spread(stencily(2*npq+1), 1, 2*npq+1), &
                 stencily((2*npq+1):1:-1), spread(stencily(1), 1, 2*npq+1)]  
 
-            ! Determine x-point order
-            hasvp = spstruct(i)%valpoints >= spstruct(i)%val 
-            hasftri = (hasvp(spstruct(i)%tri(:, 2)) .and. &
-                (.not. hasvp(spstruct(i)%tri(:, 3)))) .or. &
-                (hasvp(spstruct(i)%tri(:, 3)) .and. &
-                (.not. (hasvp(spstruct(i)%tri(:, 2))))) 
-            m = count(hasftri)  ! number of intersections with outer boundary
-            
-            ! Check
-            if (modulo(m, 2) > 0) then 
-                print *, 'TraceContourLineStructured2D: order of saddle ' // &
-                    'point with ID ', i, ' could not be determined, ' // &
-                    'returning NaN for this order'
-            end if
-            
-            ! Compute
-            spstruct(i)%order = m/2-1   
-
         end do 
+
+        ! Delete if necessary
+        spstruct = pack(spstruct, keepind)
 
 
     end subroutine 
@@ -1909,6 +1946,9 @@ module mod_contour2D
         ! - if we didn't exit, continue tracing until we encounter the
         ! first pair of nodes that is fully external to the x-point. Return
         ! the quad indices corresponding to that point as output.
+
+        ! Note: if the saddle point value has been wrongly determined,
+        ! it is possible that this routine cannot proceed. 
 
         ! Declare variables
         !==================
@@ -1976,11 +2016,11 @@ module mod_contour2D
         end if
         
         ! Check values
-        allocate(hasvsp(size(thissp%ixpoints)+1), &
+        allocate(hasvsp(size(thissp%ixpoints)), &
             hasvtri(size(thissp%tri, 1), size(thissp%tri, 2)))
         hasvsp(1) = thissp%val > tv 
-        do i = 1, size(thissp%ixpoints)
-            hasvsp(i+1) = hasvv(thissp%ixpoints(i), thissp%iypoints(i))
+        do i = 2, size(thissp%ixpoints)
+            hasvsp(i) = hasvv(thissp%ixpoints(i), thissp%iypoints(i))
         end do
         do i = 1, size(thissp%tri, 2)
             hasvtri(:, i) = hasvsp(thissp%tri(:, i))
@@ -2011,10 +2051,12 @@ module mod_contour2D
             ! Consistency check
             if (count(hasftri(ctri, :)) > 1) then 
                 call gdErrorHandler('TraverseSaddlePoint: Too many ' // &
-                    'values found in saddle point region')
+                    'values found in saddle point region - check if ' // & 
+                    'saddle points were correctly determined')
             elseif (count(hasftri(ctri, :)) < 1) then 
                 call gdErrorHandler('TraverseSaddlePoint: Not enough values' // & 
-                    'found in saddle point region')
+                    'found in saddle point region - check if ' // & 
+                    'saddle points were correctly determined')
             end if
             
             ! Find the next face that contains the value

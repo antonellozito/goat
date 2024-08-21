@@ -184,10 +184,10 @@ module ggmod_topology2D
         ! Initialize topomesh 
         call topomesh%Initialize()
 
-        ! Determine domain bounds based on vessel extent
+        ! Determine domain bounds based on vessel and magnetic field extent
         call vessel%plfvessel%ps%GetVertices(xps, yps)
-        xb = [minval(xps), maxval(xps)]
-        yb = [minval(yps), maxval(yps)]
+        xb = [minval([xps, magneticField%interp%xgv]), maxval([xps, magneticField%interp%xgv])]
+        yb = [minval([yps, magneticField%interp%ygv]), maxval([yps, magneticField%interp%ygv])]
 
         ! Construct a 2D structured grid for tracing (may be extended
         ! in the future for different grid types)
@@ -322,6 +322,12 @@ module ggmod_topology2D
         ! that no damping strategy is necessary since the initial point should be
         ! (very) close to the optimum. 
 
+        ! Note 3: we pass the field tracer to reuse the grid already
+        ! used before. However, we need to initialize the tracers for
+        ! dfdx and dfdy again, since 1) the values change, 2) the 
+        ! saddle points of the original field should not be present 
+        ! (these are in fact often no saddle points of the derivatives!)
+
         ! Declare variables
         !==================
         ! Arguments
@@ -332,7 +338,7 @@ module ggmod_topology2D
 
         ! Auxiliary
         integer(I8)                             :: ngp, nfxc, nfyc, &
-            nx 
+            nx, nxg, nyg
         integer(I8), allocatable, dimension(:)  :: ts1, ts2, tt, typee, &
             vf1, vf2, teid, tsid, sortind
         real(R8)                                :: tempx, tempy
@@ -348,6 +354,7 @@ module ggmod_topology2D
         type(IntegerDynamicArrayUDT)            :: tc
         type(ContourUDT), allocatable           :: fxc(:), fyc(:)
         type(PolygonUDT), allocatable           :: fxp(:), fyp(:)
+        class(ContourTracerUDT), allocatable    :: fxtracer, fytracer
 
         ! Loop
         integer(I8)                             :: i, j, k, ec
@@ -382,11 +389,24 @@ module ggmod_topology2D
         call magneticField%interp%Evaluate(xg, yg, 1, 0, fx)
         call magneticField%interp%Evaluate(xg, yg, 0, 1, fy)
 
+        ! Construct new tracers
+        fxtracer = fieldtracer
+        fytracer = fieldtracer 
+        if (allocated(fxtracer%xs)) then 
+            deallocate(fxtracer%xs, fxtracer%ys, fxtracer%vs, fxtracer%order)
+        end if 
+        allocate(fxtracer%xs(0), fxtracer%ys(0), fxtracer%vs(0), fxtracer%order(0))
+        if (allocated(fytracer%xs)) then 
+            deallocate(fytracer%xs, fytracer%ys, fytracer%vs, fytracer%order)
+        end if 
+        allocate(fytracer%xs(0), fytracer%ys(0), fytracer%vs(0), fytracer%order(0))
+        call fxtracer%SetValues(fx)
+        call fytracer%SetValues(fy)
+        
+
         ! Trace 
-        call fieldtracer%SetValues(fx)
-        fxc = fieldtracer%TraceContours([0.0_R8])
-        call fieldtracer%SetValues(fy)
-        fyc = fieldtracer%TraceContours([0.0_R8])
+        fxc = fxtracer%TraceContours([0.0_R8])
+        fyc = fytracer%TraceContours([0.0_R8])
 
         ! Compute all intersections
         !==========================
@@ -4259,11 +4279,16 @@ module ggmod_topology2D
             ! Compute residuals
             call magneticField%interp%Evaluate(xi, yi, 1, 0, dFdxi)
             call magneticField%interp%Evaluate(xi, yi, 1, 0, dFdyi)
-            
+
             ! Check convergence 
             res = -[dFdxi, dFdyi]
             if (all(abs(res) <= tol)) then 
                 converged = .true.
+                exit 
+            end if 
+            if (any(isnan(res))) then 
+                ! Probably out of bounds of the interpolator, exit
+                converged = .false. 
                 exit 
             end if 
             

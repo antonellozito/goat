@@ -2882,6 +2882,7 @@ module mod_polygon
 
         ! Compute frac
         !=============
+        allocate(frac(size(x)))
         where ((d1 < disttol)) frac = 0 ! first point is the same
         where ((d2 < disttol)) frac = 1 ! second point is the same
         where ( .not. (d1 < disttol) .and. .not. (d2 < disttol)) frac = d1/de
@@ -3730,8 +3731,8 @@ module mod_polygon
         end if 
 
         ! Check if either both s1r, s2r are present or not present
-        if (.not. (present(s1r) .and. present(s1r)) &
-            .or. (.not. (.not. present(s1r) .and. .not. present(s2r)))) then 
+        if (((.not. present(s1r)) .and. present(s1r)) &
+            .or. (present(s1r) .and. .not. present(s2r))) then 
             call gdErrorHandler('PolygonIntersections: s1r and s2r should either be ' // &
                 'both present or not present, one of the two is not supported')
         end if 
@@ -3751,7 +3752,8 @@ module mod_polygon
         szmult      = 2 ! size multiplier 
 
         ! Allocate
-        allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz))
+        allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz), &
+            temps1r(sz), temps2r(sz))
 
         ! Compute intersections
         !======================
