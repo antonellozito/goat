@@ -105,6 +105,10 @@ module ggmod_topology2D
         integer(I8)                     :: ntot ! total number of vertices
         integer(I8), allocatable        :: ID(:), vert(:), vertP(:, :), &
             face(:), faceP(:, :), flags(:)
+    contains 
+
+        ! Initializer
+        procedure :: Initialize     => InitializeTopologicalMeshCell
 
     end type
 
@@ -570,7 +574,7 @@ module ggmod_topology2D
             ! Extract the faces from this polygon
             teid = fypeid(i)%Get()
             tsid = fypsid(i)%Get()
-            tsrid = fxpsrid(i)%Get()
+            tsrid = fypsrid(i)%Get()
             call Sort(tsrid, ind=sortind)
             tsid = tsid(sortind)
             teid = teid(sortind)
@@ -673,11 +677,12 @@ module ggmod_topology2D
                 end if 
                 
                 ! Make sure no segments are added that close upon themselves -
-                ! shouldn't be possible at this stage
-                !if (tc(i)%startsaddle == tc(i)%endsaddle) then 
-                !    print *, 'AddTopologicalMeshTangencyPoints: segment detected that closes upon itself. Removing...'
-                !    cycle
-                !end if 
+                ! shouldn't be possible at this stage, only in some 
+                ! very exceptional cases
+                if (tc(i)%startsaddle == tc(i)%endsaddle) then 
+                    print *, 'AddTopologicalMeshTangencyPoints: segment detected that closes upon itself. Removing...'
+                    cycle
+                end if 
 
                 ! Add the face
                 ftype = TMfacebndID ! vessel boundary -> outer boundary
@@ -1632,8 +1637,8 @@ module ggmod_topology2D
             end if 
 
             ! Check if this vertex is already added
-            iscoinciding = ((xinti - topomesh%vert%x) < disttol) .and. &
-                ((yinti - topomesh%vert%y) < disttol)
+            iscoinciding = (abs(xinti - topomesh%vert%x) < disttol) .and. &
+                (abs(yinti - topomesh%vert%y) < disttol)
             if (any (iscoinciding) ) then 
                 ! Sanity check
                 if (count(iscoinciding) > 1) then 
@@ -2507,6 +2512,7 @@ module ggmod_topology2D
         ! Substructures
         call topomesh%vert%Initialize()
         call topomesh%face%Initialize()
+        call topomesh%cell%Initialize()
         
 
     end subroutine
@@ -2547,6 +2553,24 @@ module ggmod_topology2D
         allocate(tpface%ID(0), tpface%vert(0, 2), tpface%cell(0), &
             tpface%fsID(0), tpface%x(0), tpface%y(0), tpface%fval(0), &
             tpface%pol(0), tpface%type(0))
+
+    end subroutine
+
+    subroutine InitializeTopologicalMeshCell(tpcell)
+
+        ! Description
+        !============
+        ! Initialize the topomesh cell structure (simply empty arrays)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshCellUDT)      :: tpcell
+
+        ! Initialize
+        !===========
+        tpcell%ntot = 0
+        allocate(tpcell%ID(0))
 
     end subroutine
 
