@@ -1772,10 +1772,14 @@ module mod_contour2D
             keepind(:)
 
         ! Loop  
-        integer(I8)                         :: i, k
+        integer(I8)                         :: i, k, qfc
 
         ! Initialize
         !===========
+        ! Quadflag counter - to account for possible deletion of 
+        ! saddle points
+        qfc = 0
+
         ! Set sizes
         nx = size(X)
         ny = size(Y)
@@ -1906,9 +1910,12 @@ module mod_contour2D
             
             ! Compute
             spstruct(i)%order = m/2-1   
+
+            ! Update quadflag counter
+            qfc = qfc + 1
             
             ! Set quadflags
-            quadflags(stencilx, stencily) = i 
+            quadflags(stencilx, stencily) = qfc
             
             ! Set faceflags - only for inner faces
             facexflags(stencilx(2:size(stencilx)), stencily) = .true. 
