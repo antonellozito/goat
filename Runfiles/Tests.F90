@@ -1424,7 +1424,9 @@ module GOAT_tests
             plfoptions)
 
         ! Set the default topomesh options
-        call Topoptions%SetDefaults()
+        call topoptions%SetDefaults()
+        topoptions%vresx = 400
+        topoptions%vresy = 400
 
         ! Construct topological mesh
         !===========================

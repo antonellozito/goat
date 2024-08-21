@@ -172,9 +172,10 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
             yps, xg, yg, Vf, Vv, xgv, ygv
         real(R8), parameter                     :: emptyR8(0)= 0
-        real(R8), allocatable, dimension(:)     :: xtp, ytp, Ftp
+        real(R8), allocatable, dimension(:)     :: xtp, ytp, Ftp, &
+            xe, ye, fe
         integer(I8)                             :: nv 
-        integer(I8), allocatable, dimension(:)  :: typetp
+        integer(I8), allocatable, dimension(:)  :: typetp, typee
 
         ! Loop
         integer(I8)                             :: i, j
@@ -210,16 +211,19 @@ module ggmod_topology2D
             reshape(Vf, [options%vresx, options%vresy]), xgv, ygv, &
             emptyR8, emptyR8, emptyR8)
 
-        ! Compute tangency points
-        !========================
+        ! Compute tangency points & extrema
+        !==================================
         call TraceTangencyPoints2D(xtp, ytp, typetp, Ftp, &
             vesseltracer, magneticField)
+        call TraceExtrema2D(xe, ye, fe, typee, fieldtracer, magneticField, &
+            options%fdonewton)
+        
 
         ! Update the tracers
         !===================
-        ! Construct refined grid based on tangency points
+        ! Construct refined grid based on tangency points and extrema
         call ConstructRefined2DStructuredGrid(xg, yg, xgv, ygv, xb, yb, &
-            options%vresx, options%vresy, xtp, ytp, 5, 5)  
+            options%vresx, options%vresy, [xtp, xe], [ytp, ye], 5, 5)  
 
         ! Evaluate magnetic field and vessel
         deallocate(Vv, Vf)
@@ -338,7 +342,7 @@ module ggmod_topology2D
 
         ! Auxiliary
         integer(I8)                             :: ngp, nfxc, nfyc, &
-            nx, nxg, nyg
+            nx
         integer(I8), allocatable, dimension(:)  :: ts1, ts2, tt, typee, &
             vf1, vf2, teid, tsid, sortind
         real(R8)                                :: tempx, tempy
@@ -670,10 +674,10 @@ module ggmod_topology2D
                 
                 ! Make sure no segments are added that close upon themselves -
                 ! shouldn't be possible at this stage
-                if (tc(i)%startsaddle == tc(i)%endsaddle) then 
-                    print *, 'AddTopologicalMeshTangencyPoints: segment detected that closes upon itself. Removing...'
-                    cycle
-                end if 
+                !if (tc(i)%startsaddle == tc(i)%endsaddle) then 
+                !    print *, 'AddTopologicalMeshTangencyPoints: segment detected that closes upon itself. Removing...'
+                !    cycle
+                !end if 
 
                 ! Add the face
                 ftype = TMfacebndID ! vessel boundary -> outer boundary
@@ -2521,7 +2525,8 @@ module ggmod_topology2D
         ! Initialize
         !===========
         tpvert%ntot = 0
-        allocate(tpvert%ID(0), tpvert%x(0), tpvert%y(0), tpvert%fval(0))
+        allocate(tpvert%ID(0), tpvert%x(0), tpvert%y(0), tpvert%fval(0), &
+            tpvert%type(0))
 
     end subroutine 
 
@@ -2541,7 +2546,7 @@ module ggmod_topology2D
         tpface%ntot = 0
         allocate(tpface%ID(0), tpface%vert(0, 2), tpface%cell(0), &
             tpface%fsID(0), tpface%x(0), tpface%y(0), tpface%fval(0), &
-            tpface%pol(0))
+            tpface%pol(0), tpface%type(0))
 
     end subroutine
 
@@ -2770,7 +2775,7 @@ module ggmod_topology2D
         topomesh%face%y = [topomesh%face%y, y]
         topomesh%face%fsID = [topomesh%face%fsID, fsID]
         topomesh%face%type = [topomesh%face%type, t]
-        topomesh%face%ID = [topomesh%vert%ID, topomesh%vert%ntot]
+        topomesh%face%ID = [topomesh%face%ID, topomesh%face%ntot]
         topomesh%face%pol = [topomesh%face%pol, tp]
 
     end subroutine
