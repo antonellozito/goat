@@ -213,6 +213,7 @@ module mod_structured2Dgridding
         end if
 
         ! Construct grid
+        allocate(xg(size(xgv)*size(ygv)), yg(size(xgv)*size(ygv)))
         call Construct2DStructuredGrid(xgv, ygv, size(xgv), size(ygv), &
             xg, yg)
 

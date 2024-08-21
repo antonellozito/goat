@@ -1785,8 +1785,8 @@ module mod_contour2D
         do i = 1, size(xs)
 
             ! Determine saddle point location
-            ixquad = findloc(xs > X, .true., dim=1, back=.true.)
-            iyquad = findloc(ys > Y, .true., dim=1, back=.true.)
+            ixquad = findloc(xs(i) > X, .true., dim=1, back=.true.)
+            iyquad = findloc(ys(i) > Y, .true., dim=1, back=.true.)
 
             ! Check for out-of-bounds
             if ((ixquad == 0) .or. (iyquad == 0)) then 
@@ -1859,8 +1859,8 @@ module mod_contour2D
             quadflags(stencilx, stencily) = i 
             
             ! Set faceflags - only for inner faces
-            facexflags(stencilx(2:nx), stencily) = .true. 
-            faceyflags(stencilx, stencily(2:ny)) = .true. 
+            facexflags(stencilx(2:size(stencilx)), stencily) = .true. 
+            faceyflags(stencilx, stencily(2:size(stencily))) = .true. 
             
             ! Set quad indices for triangles
             spstruct(i)%ixquadtri = [spread(stencilx(1), 1, 2*npq+1), &
