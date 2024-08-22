@@ -3852,16 +3852,22 @@ module mod_polygon
         !====================================
         if (present(s1r) .and. present(s2r)) then 
             ! Compute the continuous intersection index (0: first point
-            ! of polygon, ne+1: last point of polygon)
+            ! of polygon, ne+1: last point of polygon) - note: we need
+            ! to use the vert array here instead of the edges array, since
+            ! the latter is not necessarily sorted!
             allocate(s1r(counter), s2r(counter))
 
             ! First polygon index
-            s1r = ComputeI(x, y, p1%x(p1%edges(s1, 1)), p1%y(p1%edges(s1, 1)), &
-                p1%x(p1%edges(s1, 2)), p1%y(p1%edges(s1, 2))) + s1 - 1 
+            !s1r = ComputeI(x, y, p1%x(p1%edges(s1, 1)), p1%y(p1%edges(s1, 1)), &
+            !    p1%x(p1%edges(s1, 2)), p1%y(p1%edges(s1, 2))) + s1 - 1 
+            s1r = ComputeI(x, y, p1%x(p1%vert(s1)), p1%y(p1%vert(s1)), &
+                p1%x(p1%vert(s1+1)), p1%y(p1%vert(s1+1))) + s1 - 1 
 
             ! Second polygon index
-            s2r = ComputeI(x, y, p2%x(p2%edges(s2, 1)), p2%y(p2%edges(s2, 1)), &
-                p2%x(p2%edges(s2, 2)), p2%y(p2%edges(s2, 2))) + s2 - 1
+            !s2r = ComputeI(x, y, p2%x(p2%edges(s2, 1)), p2%y(p2%edges(s2, 1)), &
+            !    p2%x(p2%edges(s2, 2)), p2%y(p2%edges(s2, 2))) + s2 - 1
+            s2r = ComputeI(x, y, p2%x(p2%vert(s2)), p2%y(p2%vert(s2)), &
+                p2%x(p2%vert(s2+1)), p2%y(p2%vert(s2+1))) + s2 - 1
 
         end if 
 

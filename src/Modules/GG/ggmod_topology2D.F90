@@ -1677,7 +1677,7 @@ module ggmod_topology2D
                     vIDs(i) = contour%startsaddle
 
                 elseif ((s1ri == 0_R8) .and. &
-                    (s2ri == real(topomesh%face%pol(fIDi)%ne+1, R8))) then 
+                    (s2ri == real(topomesh%face%pol(fIDi)%ne, R8))) then 
 
                     ! Intersection in start of face and end of contour
                     if (((topomesh%face%vert(fIDi, 1)) /= contour%endsaddle) .or. &
@@ -1690,7 +1690,7 @@ module ggmod_topology2D
                     ! Set ID 
                     vIDs(i) = contour%endsaddle
 
-                elseif ((s1ri == real(topomesh%face%pol(fIDi)%ne+1, R8)) .and. &
+                elseif ((s1ri == real(topomesh%face%pol(fIDi)%ne, R8)) .and. &
                     (s2ri == 0_R8)) then 
 
                     ! Intersection in end of face and start of contour    
@@ -1704,8 +1704,8 @@ module ggmod_topology2D
                     ! Set ID 
                     vIDs(i) = contour%startsaddle
 
-                elseif ((s1ri == real(topomesh%face%pol(fIDi)%ne+1, R8)) .and. &
-                    (s2ri == real(topomesh%face%pol(fIDi)%ne+1, R8))) then 
+                elseif ((s1ri == real(topomesh%face%pol(fIDi)%ne, R8)) .and. &
+                    (s2ri == real(topomesh%face%pol(fIDi)%ne, R8))) then 
 
                     ! Intersection in end of face and end of contour
                     if (((topomesh%face%vert(fIDi, 2)) /= contour%endsaddle) .or. &
@@ -3778,6 +3778,7 @@ module ggmod_topology2D
         topomesh%face%fsID      = pack(topomesh%face%fsID, keepface)
         topomesh%face%type      = pack(topomesh%face%type, keepface)
         topomesh%face%ID        = pack(topomesh%face%ID, keepface)
+        topomesh%face%pol       = pack(topomesh%face%pol, keepface)
 
 
         ! Update cell face IDs
