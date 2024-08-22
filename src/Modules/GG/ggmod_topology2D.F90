@@ -556,9 +556,11 @@ module ggmod_topology2D
             teid = fxpeid(i)%Get()
             tsid = fxpsid(i)%Get()
             tsrid = fxpsrid(i)%Get()
+            allocate(sortind(size(tsrid)))
             call Sort(tsrid, ind=sortind)
             tsid = tsid(sortind)
             teid = teid(sortind)
+            deallocate(sortind)
             call ExtractTopologicalFacesFromPolygon(fxp(i), teid, &
                 tsid, xe, ye, vf1, vf2, xfrda, yfrda)
 
@@ -575,9 +577,11 @@ module ggmod_topology2D
             teid = fypeid(i)%Get()
             tsid = fypsid(i)%Get()
             tsrid = fypsrid(i)%Get()
+            allocate(sortind(size(tsrid)))
             call Sort(tsrid, ind=sortind)
             tsid = tsid(sortind)
             teid = teid(sortind)
+            deallocate(sortind)
             call ExtractTopologicalFacesFromPolygon(fyp(i), teid, &
                 tsid, xe, ye, vf1, vf2, xfrda, yfrda)
 
@@ -915,10 +919,12 @@ module ggmod_topology2D
                             ! Check
                             if (size(xout) > 0) then 
                                 ! Sort based on continuous polygon coordinate
+                                allocate(sortind(size(jout)))
                                 call Sort(iout, ind=sortind)
                                 jout = jout(sortind)
                                 vindI = vindI(sortind)
                                 vindJ = vindJ(sortind)
+                                deallocate(sortind)
 
                                 ! Check
                                 if (any(topomesh%face%vert(j, :) == pspID(i))) then 
@@ -997,8 +1003,10 @@ module ggmod_topology2D
                     ! Remove contour parts that lie outside of the vessel
                     sortedI = realI%Get()
                     vindI = intI%Get()
+                    allocate(sortind(size(vindI)))
                     call Sort(sortedI, ind=sortind) ! Normally, first one will always be one to be deleted
                     vindI = vindI(sortind)
+                    deallocate(sortind)
 
                     ! Trim contour data
                     sizeI = size(sortedI)
@@ -1758,6 +1766,7 @@ module ggmod_topology2D
         ! Add contour faces
         !==================
         ! Sort intersections according to contour coordinate
+        allocate(sortind(size(s1r)))
         call Sort(s2r, ind=sortind)
         s1r = s1r(sortind)
         fID = fID(sortind)
@@ -1766,6 +1775,7 @@ module ggmod_topology2D
         xint = xint(sortind)
         yint = yint(sortind)
         vIDs = vIDs(sortind)
+        deallocate(sortind)
 
         ! Add start and end points as intersections if they have an 
         ! ID (and if that ID is not already present as an intersection)
@@ -1793,6 +1803,7 @@ module ggmod_topology2D
         ! Adjust existing faces
         !======================
         ! Sort intersections according to face index
+        allocate(sortind(size(s1r)))
         call Sort(s1r, ind=sortind)
         s1r = s1r(sortind)
         fID = fID(sortind)
@@ -1801,6 +1812,7 @@ module ggmod_topology2D
         xint = xint(sortind)
         yint = yint(sortind)
         vIDs = vIDs(sortind)
+        deallocate(sortind)
 
         ! Extract
         k = 0
@@ -2717,8 +2729,10 @@ module ggmod_topology2D
             theta = atan2(dy, dx)
             
             ! Sort
+            allocate(sortind(size(theta)))
             call Sort(theta, ind=sortind)
             tfsorted = tf(sortind)
+            deallocate(sortind)
             
             ! Add
             topomesh%vert%face(topomesh%vert%faceP(i, 1):&
@@ -2775,6 +2789,9 @@ module ggmod_topology2D
 
         ! Make sure that final and start point are equal to vertex 
         ! coordinates if facevert is not zero
+        if (x%size() < 2) then 
+            print *, 'size is smaller than 2'
+        end if 
         if (facevert(1) /= 0) then 
             call x%Set(1, topomesh%vert%x(facevert(1)))
             call y%Set(1, topomesh%vert%y(facevert(1)))
@@ -3969,8 +3986,8 @@ module ggmod_topology2D
                 end if 
             else 
                 ! Open polygon
-                if ((sortedsID(1) == 1) .and. (px(1) == xint(sortedsID(1))) & 
-                    .and. (py(1) == yint(sortedsID(1)))) then 
+                if ((sortedsID(1) == 1) .and. (px(1) == xint(sortedeID(1))) & 
+                    .and. (py(1) == yint(sortedeID(1)))) then 
                     ! Start veretx at first intersection, no starting segment
                     ! without starting vertex 
                 else
@@ -3987,8 +4004,8 @@ module ggmod_topology2D
                     call yf(fc)%Append([py(1:sortedsID(1)), yint(sortedeID(1))])
                 
                 end if 
-                if ((sortedsID(nsID) == 1) .and. (px(1) == xint(sortedsID(nsID))) & 
-                    .and. (py(1) == yint(sortedsID(nsID)))) then 
+                if ((sortedsID(nsID) == 1) .and. (px(1) == xint(sortedeID(nsID))) & 
+                    .and. (py(1) == yint(sortedeID(nsID)))) then 
                     ! Start veretx at first intersection, no starting segment
                     ! without starting vertex 
                 else
@@ -4053,11 +4070,14 @@ module ggmod_topology2D
                     tx = [sx, ex]
                     ty = [ex, ey]
                 end if 
+
+                ! Add
+                call xf(fc)%Append(tx)
+                call yf(fc)%Append(ty)
+
             end do
 
-            ! Add
-            call xf(fc)%Append(tx)
-            call yf(fc)%Append(ty)
+            
 
 
             ! Housekeeping
