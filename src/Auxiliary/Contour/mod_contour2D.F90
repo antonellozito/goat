@@ -1384,11 +1384,11 @@ module mod_contour2D
         ! Determine faceflags (true if value is present on face and if 
         ! face is not an internal face flag - can be logical since we 
         ! can only pass each face once in a contour)
-        xfacec = (hasvv(:, 1:ny-1) .and. (.not. hasvv(:, 2:ny))) .or. &
-            ((.not. hasvv(:, 1:ny-1)) .and. (hasvv(:, 2:ny))) .and. &
+        xfacec = ((hasvv(:, 1:ny-1) .and. (.not. hasvv(:, 2:ny))) .or. &
+            ((.not. hasvv(:, 1:ny-1)) .and. (hasvv(:, 2:ny)))) .and. &
             (.not. superquadfacexflags)
-        yfacec = (hasvv(1:nx-1, :) .and. (.not. hasvv(2:nx, :))) .or. &
-            ((.not. hasvv(1:nx-1, :)) .and. (hasvv(2:nx, :))) .and. &
+        yfacec = ((hasvv(1:nx-1, :) .and. (.not. hasvv(2:nx, :))) .or. &
+            ((.not. hasvv(1:nx-1, :)) .and. (hasvv(2:nx, :)))) .and. &
             (.not. superquadfaceyflags)
         
         ! Set number of times we may end up in quad 

@@ -509,7 +509,7 @@ module ggmod_topology2D
                     call fxpsrid(i)%Append(tsr1(k))
                     call fypeid(j)%Append(ec)
                     call fypsid(j)%Append(ts2(k))
-                    call fypsrid(i)%Append(tsr2(k))
+                    call fypsrid(j)%Append(tsr2(k))
                 end do 
 
                 ! Append
@@ -1756,6 +1756,8 @@ module ggmod_topology2D
                 call magneticField%interp%Evaluate([xinti], [yinti], 0, 0, tfv)
                 call AddTopologicalMeshVertex(topomesh, xinti, yinti, &
                     tfv(1), vtypes(i))
+                ! Add ID as well 
+                vIDs(i) = topomesh%vert%ntot
                 deallocate(tfv)
             end if 
                 
@@ -4428,7 +4430,7 @@ module ggmod_topology2D
             dy = contours(i)%y(2:size(contours(i)%y)) - &
                 contours(i)%y(1:size(contours(i)%y)-1)
             allocate(delind(size(dx)))
-            delind = (dx <= disttol) .and. (dy <= disttol)
+            delind = (abs(dx) <= disttol) .and. (abs(dy) <= disttol)
             if (any(delind)) then 
                 contours(i)%x = pack(contours(i)%x, [.true., .not. delind])
                 contours(i)%y = pack(contours(i)%y, [.true., .not. delind])
