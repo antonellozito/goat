@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 import Datahandler as dh
 import time
+import goat_types as gt
 
 #==========================================================================#
 #                                                                          #
@@ -45,6 +46,10 @@ fvpfile = 'so_con_fvp_vertices.dat' # fixed vessel points file
 fvffile = 'so_con_fvf_vertices.dat' # fixed vessel flux file
 origvesselpolygonfile = 'vesselpolygon_orig_so.dat' # original/initial vessel file
 currentvesselpolygonfile = 'vesselpolygon_iterate_so.dat' # current/new vessel file
+
+# Grid generation paths
+tm_beforecellsfile = 'topomesh_beforecells.dat'
+tmfile = 'topomesh.dat'
 
 #==========================================================================#
 #                                                                          #
@@ -456,6 +461,90 @@ def PlotGoatOptimizationHistory(dirpath, fignum):
     thisaxes.legend(loc='upper right')
 
 #--------------------------------------------------------------------------#
+#                             Grid Generation                              #
+#--------------------------------------------------------------------------#
+
+# Topological mesh plotting from file
+def PlotTopologicalMeshFromFile(dirpath, fignum):
+    filepath = dirpath + filesep + tmfile
+    topomesh = dh.ReadTopomeshFile(dirpath)
+    PlotTopologicalMesh(topomesh, fignum)
+
+# Topological mesh plotting
+def PlotTopologicalMesh(topomesh, fignum):
+    # Description
+    #------------
+    # Plot the topological mesh 
+
+    # Plot the vertices
+    #------------------
+    # Plot per vertex type
+    regular = np.where(topomesh.vert.type == 0) 
+    split = np.where(topomesh.vert.type == gt.TMvertexsplitID) 
+    minima = np.where(topomesh.vert.type == gt.TMvertexminID)
+    saddle = np.where(topomesh.vert.type == gt.TMvertexsaddleID)
+    maxima = np.where(topomesh.vert.type == gt.TMvertexmaxID)
+    tp1 = np.where(topomesh.vert.type == gt.TMvertextp1ID)
+    tp2 = np.where(topomesh.vert.type == gt.TMvertextp2ID)
+    PlotPoints2D(topomesh.vert.x[maxima], topomesh.vert.y[maxima], fignum, color='b', 
+        marker='o', label='field maxima')
+    PlotPoints2D(topomesh.vert.x[saddle], topomesh.vert.y[saddle], fignum, color='b', 
+        marker='x', label='field saddle')
+    PlotPoints2D(topomesh.vert.x[minima], topomesh.vert.y[minima], fignum, color='b', 
+        marker='s', label='field minima')
+    PlotPoints2D(topomesh.vert.x[tp1], topomesh.vert.y[tp1], fignum, color='r', 
+        marker='o', label='field tangency point type 1')
+    PlotPoints2D(topomesh.vert.x[tp2], topomesh.vert.y[tp2], fignum, color='r', 
+        marker='x', label='field tangency point type 2')
+    PlotPoints2D(topomesh.vert.x[regular], topomesh.vert.y[regular], fignum, color='k', 
+        marker='.', label='regular vertex')
+    PlotPoints2D(topomesh.vert.x[split], topomesh.vert.y[split], fignum, color='g', 
+        marker='d', label='splitted face vertex')
+    
+    # Store bounds
+    xb = [np.min(topomesh.vert.x), np.max(topomesh.vert.x)]
+    yb = [np.min(topomesh.vert.y), np.max(topomesh.vert.y)]
+    
+    # Plot the faces
+    #---------------
+    # Plot per face type
+    pf = np.where(topomesh.face.type == gt.TMfacepolID)
+    rf = np.where(topomesh.face.type == gt.TMfaceradID)
+    bndf = np.where(topomesh.face.type == gt.TMfacebndID)
+    sepf = np.where(topomesh.face.type == gt.TMfacesepID)
+
+    for i in pf[0]:
+        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
+            fignum, color='r')
+    for i in rf[0]:
+        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
+            fignum, color='g')
+    for i in bndf[0]:
+        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
+            fignum, color='k')
+    for i in sepf[0]:
+        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
+            fignum, color='m')
+        
+    # Check bounds
+    for i in np.arange(0, topomesh.face.ntot, 1):
+        xb[0] = np.min([xb[0], np.min(topomesh.face.data[i].x)])
+        xb[1] = np.max([xb[1], np.max(topomesh.face.data[i].x)])
+        yb[0] = np.min([yb[0], np.min(topomesh.face.data[i].y)])
+        yb[1] = np.max([yb[1], np.max(topomesh.face.data[i].y)])
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('topomesh')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+
+#--------------------------------------------------------------------------#
 #                             Shape Optimization                           #
 #--------------------------------------------------------------------------#
 
@@ -607,8 +696,6 @@ def PlotVesselDisplacement(dirpath, fignum):
     # Set axes
     SetAxesLimits2D(plt.gca(), valsnew[:, 0], valsnew[:, 1])
     
-
-
 #--------------------------------------------------------------------------#
 #                                 Vessel                                   #
 #--------------------------------------------------------------------------#
