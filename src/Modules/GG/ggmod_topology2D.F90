@@ -27,7 +27,7 @@ module ggmod_topology2D
     use mod_definitions, only: TMvertexbndID, TMvertexmaxID, &
         TMvertexminID, TMvertexsaddleID, TMvertextp1ID, &
         TMvertextp2ID, TMfacepolID, TMfaceradID, TMfacebndID, &
-        TMvertexsplitID
+        TMvertexsplitID, TMfacesepID
     use mod_linearsolverinterface, only: SolveDenseLinearSystemDI
     use goatmod_types, only : magneticFieldUDT, VesselUDT
     use goatmod_userinput, only : TopomeshOptionsUDT
@@ -279,6 +279,9 @@ module ggmod_topology2D
             call AddTopologicalMeshCoreBoundaries(topomesh, magneticField, &
                 vessel, fieldtracer, options)
         end if 
+
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
 
         ! Compute additional interconnnection data
         !=========================================
@@ -820,17 +823,16 @@ module ggmod_topology2D
         pspID = topomesh%vert%ID
         npsp = size(pspx)
 
-        ! Check for saddle points with exactly the same field value - don't trace
-        ! multiple times
+        ! Check for saddle points that are connected - don't trace twice
         allocate(tracepoints(npsp))
         tracepoints = .true.
-        do i = 1, npsp-1
-            do j = i+1, npsp
-                if ((pspf(i) == pspf(j)) .and. (psptype(i) == 2)) then 
-                    tracepoints(j) = .false.
-                end if 
-            end do 
-        end do
+        !do i = 1, npsp-1
+        !    do j = i+1, npsp
+        !        if ((pspf(i) == pspf(j)) .and. (psptype(i) == 2)) then 
+        !            tracepoints(j) = .false.
+        !        end if 
+        !    end do 
+        !end do
 
         ! Add saddle points to field tracer
         fieldtracer%xs = pspx 
@@ -849,13 +851,30 @@ module ggmod_topology2D
                 ! Process
                 call CleanContours(tc)
 
+                ! Check if any other saddle points were encountered 
+                ! during tracing. If so, do not trace these anymore 
+                ! (leads to duplicate faces)
+                do j = 1, size(tc)
+                    if (tc(j)%startsaddle /= 0) then
+                        if (psptype(tc(j)%startsaddle) == 2) then  
+                            tracepoints(tc(j)%startsaddle) = .false. 
+                        end if 
+                    end if 
+                    if (tc(j)%endsaddle /= 0) then
+                        if (psptype(tc(j)%endsaddle) == 2) then  
+                            tracepoints(tc(j)%endsaddle) = .false. 
+                        end if 
+                    end if 
+                end do 
+
+
                 ! Add
                 allc = [allc, tc]
-                call curvetypes%Append([(k, k = 1, size(tc))]*4_I8)
+                call curvetypes%Append(spread(TMfacesepID, 1, size(tc)))
                 
                 ! Add flux surface ID
                 nfs = nfs + 1
-                call fsIDs%Append([(k, k = 1, size(tc))]*nfs)
+                call fsIDs%Append(spread(nfs, 1, size(tc)))
             end if 
         end do
 
@@ -1190,7 +1209,7 @@ module ggmod_topology2D
            
                 ! Add
                 allc = [allc, tc]
-                call curvetypes%Append(spread(2_I8, 1, size(tc)))
+                call curvetypes%Append(spread(TMfacepolID, 1, size(tc)))
                 
                 ! Add flux surface ID
                 nfs = nfs + 1;
@@ -1264,7 +1283,7 @@ module ggmod_topology2D
         ! real(R8), allocatable, dimension(:)     :: 
 
         ! Loop
-        integer(I8)                             :: i, j
+        integer(I8)                             :: i, j, k
 
         ! Initialize
         !============
@@ -1287,7 +1306,8 @@ module ggmod_topology2D
             end if 
 
             ! Get the faces that have this extremum
-            tf = findloc(any(topomesh%face%vert == i, dim=2), .true.)
+            tf = pack([(k, k = 1, topomesh%face%ntot)], any(topomesh%face%vert == i, dim=2))
+            !tf = findloc(any(topomesh%face%vert == i, dim=2), .true.)
 
             ! Sanity check
             if (size(tf) == 0) then 
@@ -1310,7 +1330,7 @@ module ggmod_topology2D
                 end if 
             end do 
             thisf = tf(minloc(abs(vert%fval(i) - vert%fval(tfv)), dim=1))
-            thisfval = minval(abs(vert%fval(i) - vert%fval(tfv)))
+            thisfval = vert%fval(tfv(minloc(abs(vert%fval(i) - vert%fval(tfv)), dim=1)))
 
             ! Compute the field value to trace
             traceval = options%coreboundariesfrac*(vert%fval(i) - thisfval) + thisfval
@@ -1547,14 +1567,14 @@ module ggmod_topology2D
 
         ! Auxiliary
         real(R8), allocatable, dimension(:)     :: xint, yint, s1r, s2r, &
-            tfv
+            tfv, ts1r
         integer(I8)                             :: nint
         integer(I8), allocatable, dimension(:)  :: s1, s2, fID, vIDs, &
-            vtypes, sortind, vf1, vf2, tvIDs, ts2
+            vtypes, sortind, vf1, vf2, tvIDs, ts2, ts1
         logical                                 :: alreadyadded, &
             isinconsistent
         logical, allocatable, dimension(:)      :: iscoinciding, &
-            delind
+            delind, keepind
         type(PolygonUDT)                        :: cp 
         type(RealDynamicArrayUDT)               :: xda, yda, s1rda, &
             s2rda
@@ -1562,7 +1582,7 @@ module ggmod_topology2D
         type(IntegerDynamicArrayUDT)            :: s1da, s2da, fda 
 
         ! Loop
-        integer(I8)                             :: i, k, kold
+        integer(I8)                             :: i, j, k, kold
 
         ! Initialize
         !===========
@@ -1677,7 +1697,7 @@ module ggmod_topology2D
                     vIDs(i) = contour%startsaddle
 
                 elseif ((s1ri == 0_R8) .and. &
-                    (s2ri == real(topomesh%face%pol(fIDi)%ne, R8))) then 
+                    (s2ri == real(cp%ne, R8))) then 
 
                     ! Intersection in start of face and end of contour
                     if (((topomesh%face%vert(fIDi, 1)) /= contour%endsaddle) .or. &
@@ -1694,8 +1714,8 @@ module ggmod_topology2D
                     (s2ri == 0_R8)) then 
 
                     ! Intersection in end of face and start of contour    
-                    if (((topomesh%face%vert(fIDi, 1)) /= contour%startsaddle) .or. &
-                        (topomesh%face%vert(fIDi, 1) == 0) .or. &
+                    if (((topomesh%face%vert(fIDi, 2)) /= contour%startsaddle) .or. &
+                        (topomesh%face%vert(fIDi, 2) == 0) .or. &
                         (contour%startsaddle == 0)) then 
                         ! Inconsistent - throw error later
                         isinconsistent = .true.
@@ -1705,7 +1725,7 @@ module ggmod_topology2D
                     vIDs(i) = contour%startsaddle
 
                 elseif ((s1ri == real(topomesh%face%pol(fIDi)%ne, R8)) .and. &
-                    (s2ri == real(topomesh%face%pol(fIDi)%ne, R8))) then 
+                    (s2ri == real(cp%ne, R8))) then 
 
                     ! Intersection in end of face and end of contour
                     if (((topomesh%face%vert(fIDi, 2)) /= contour%endsaddle) .or. &
@@ -1779,17 +1799,28 @@ module ggmod_topology2D
         vIDs = vIDs(sortind)
         deallocate(sortind)
 
+        ! Hedge for duplicate intersections (possible with closed polygons 
+        ! or if multiple faces intersect in the same point)
+        allocate(keepind(size(s1r)))
+        keepind = .true. 
+        do j = 1, size(keepind)-1
+            if ((s2r(j+1) - s2r(j)) == 0_R8) then 
+                keepind(j+1) = .false. 
+            end if 
+        end do         
+
         ! Add start and end points as intersections if they have an 
         ! ID (and if that ID is not already present as an intersection)
-        tvIDs = vIDs 
-        ts2 = s2
+        tvIDs = pack(vIDs, keepind) 
+        ts2 = pack(s2, keepind)
+        deallocate(keepind)
         if ((contour%startsaddle /= 0) .and. (contour%startsaddle /= vIDs(1))) then 
             tvIDs = [contour%startsaddle, tvIDs]
-            ts2 = [1, s2]
+            ts2 = [1, ts2]
         end if 
         if ((contour%endsaddle /= 0) .and. (contour%endsaddle /= vIDs(size(vIDs)))) then 
             tvIDs = [tvIDs, contour%endsaddle]
-            ts2 = [s2, cp%ne]
+            ts2 = [ts2, cp%ne]
         end if 
 
         ! Extract faces
@@ -1806,9 +1837,9 @@ module ggmod_topology2D
         !======================
         ! Sort intersections according to face index
         allocate(sortind(size(s1r)))
-        call Sort(s1r, ind=sortind)
+        call Sort(fID, ind=sortind)
+        s2r = s2r(sortind)
         s1r = s1r(sortind)
-        fID = fID(sortind)
         s1 = s1(sortind)
         s2 = s2(sortind)
         xint = xint(sortind)
@@ -1824,31 +1855,49 @@ module ggmod_topology2D
             kold = k 
             k = findloc(fID, fID(kold+1), 1, back=.true.)
 
-            ! Mark face for deletion
-            delind(fID(k)) = .true.
-
             ! Add start and end points as intersections if they have an 
             ! ID (and if that ID is not already present as an intersection)
             tvIDs = vIDs(kold+1:k) 
-            ts2 = s2(kold+1:k)
-            if ((topomesh%face%vert(k, 1) /= 0) .and. (topomesh%face%vert(k, 1) /= vIDs(1))) then 
-                tvIDs = [topomesh%face%vert(k, 1), tvIDs]
-                ts2 = [1, s2]
+            ts1 = s1(kold+1:k)
+            ts1r = s1r(kold+1:k)
+
+            ! Sort along ts1r
+            allocate(sortind(size(ts1r)))
+            call Sort(ts1r, ind=sortind)
+            tvIDs = tvIDs(sortind)
+            ts1 = ts1(sortind)
+            deallocate(sortind)
+
+            ! Hedge for duplicate intersections
+            allocate(keepind(size(tvIDs)))
+            keepind = .true. 
+            do j = 1, size(keepind)-1
+                if ((ts1r(j+1) - ts1r(j)) == 0_R8) then 
+                    keepind(j+1) = .false. 
+                end if 
+            end do 
+            tvIDs = pack(tvIDs, keepind) ! can simply reduce here, not used afterwards
+            ts1 = pack(ts1, keepind)
+            deallocate(keepind)
+
+            if ((topomesh%face%vert(fID(k), 1) /= 0) .and. (topomesh%face%vert(fID(k), 1) /= tvIDs(1))) then 
+                tvIDs = [topomesh%face%vert(fID(k), 1), tvIDs]
+                ts1 = [1, ts1]
             end if 
-            if ((topomesh%face%vert(k, 2) /= 0) .and. (topomesh%face%vert(k, 2) /= vIDs(size(vIDs)))) then 
-                tvIDs = [tvIDs, topomesh%face%vert(k, 2)]
-                ts2 = [s2, topomesh%face%pol(k)%ne]
+            if ((topomesh%face%vert(fID(k), 2) /= 0) .and. (topomesh%face%vert(fID(k), 2) /= tvIDs(size(tvIDs)))) then 
+                tvIDs = [tvIDs, topomesh%face%vert(fID(k), 2)]
+                ts1 = [ts1, topomesh%face%pol(fID(k))%ne]
             end if 
 
             ! Extract faces
             call ExtractTopologicalFacesFromPolygon(&
-                topomesh%face%pol(fID(k)), tvIDs, ts2, topomesh%vert%x, &
+                topomesh%face%pol(fID(k)), tvIDs, ts1, topomesh%vert%x, &
                 topomesh%vert%y, vf1, vf2, xfda, yfda)
 
             ! Add to faces
             do i = 1, size(xfda)
                 call AddTopologicalMeshFace(topomesh, [vf1(i), vf2(i)], xfda(i), &
-                    yfda(i), topomesh%face%type(k), topomesh%face%fsID(k))
+                    yfda(i), topomesh%face%type(fID(k)), topomesh%face%fsID(fID(k)))
             end do 
 
         end do 
@@ -1941,7 +1990,7 @@ module ggmod_topology2D
                 ' closed faces detected, splitting up ...'
         end if 
         if (any(isduplicateface)) then 
-            print *, 'SplitTopologicalMeshFaces: ', nncf, &
+            print *, 'SplitTopologicalMeshFaces: ', nndf, &
             ' faces with the same vertices detected, splitting up ...'
         end if 
 
@@ -2018,8 +2067,8 @@ module ggmod_topology2D
                 ind(1) = np/2
                 
                 ! Get vertex coordinates
-                newvdfx = face%x(i)%Get(ind)
-                newvdfy = face%y(i)%Get(ind)
+                newvdfx = face%x(i)%Get(ind(1))
+                newvdfy = face%y(i)%Get(ind(1))
                 call magneticField%interp%Evaluate(newvdfx, newvdfy, &
                     0, 0, newvdff)
                 
@@ -2648,13 +2697,14 @@ module ggmod_topology2D
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:)  :: nfpv, tf, sortind, &
-            tfsorted 
+            tfsorted , fID
         real(R8)                                :: vx, vy
         real(R8), allocatable, dimension(:)     :: npx, npy, dx, dy,&
             theta
+        logical, allocatable                    :: test(:)
 
         ! Loop
-        integer(I8)                             :: i, j
+        integer(I8)                             :: i, j, k
 
         ! Initialize
         !===========
@@ -2691,9 +2741,12 @@ module ggmod_topology2D
         end do 
 
         ! Get face list (unsorted)
+        allocate(fID(topomesh%face%ntot))
+        fID = [(k, k = 1, topomesh%face%ntot)]
         do i = 1, topomesh%vert%ntot
             ! Get face indices
-            tf = findloc(any(topomesh%face%vert == i, dim=2), .true.)
+            test = (topomesh%face%vert(:, 1) == i) .or. (topomesh%face%vert(:, 2) == i) 
+            tf = pack(fID, test)
             
             ! Add
             topomesh%vert%face(topomesh%vert%faceP(i, 1):topomesh%vert%faceP(i, 1)+topomesh%vert%faceP(i, 2)-1) = tf
@@ -2739,6 +2792,9 @@ module ggmod_topology2D
             ! Add
             topomesh%vert%face(topomesh%vert%faceP(i, 1):&
                 topomesh%vert%faceP(i, 1)+topomesh%vert%faceP(i, 2)-1) = tfsorted
+
+            ! Housekeeping
+            deallocate(npx, npy)
             
         end do
 
@@ -2838,7 +2894,8 @@ module ggmod_topology2D
         class(TopomeshUDT)                      :: topomesh   
 
         ! Auxiliary
-        integer(I8), allocatable, dimension(:)  :: ncpf, tf, fc, ind
+        integer(I8)                             :: ind
+        integer(I8), allocatable, dimension(:)  :: ncpf, tf, fc
 
         ! Loop
         integer(I8)                             :: i, j
@@ -3367,11 +3424,14 @@ module ggmod_topology2D
             end do 
             
             ! Add found cell to the structure
-            cc = cc + 1;
+            cc = cc + 1
             thiscellvert = ConstructIntegerDynamicArray(tcv)
             thiscellface = ConstructIntegerDynamicArray(tcf)
             cellvert = [cellvert, thiscellvert]
             cellface = [cellface, thiscellface]
+
+            ! Housekeeping
+            deallocate(tcv, tcf)
         end do 
 
         ! Add to the topology mesh
@@ -3904,7 +3964,7 @@ module ggmod_topology2D
 
             ! Initialize
             !===========
-            ! Check number of faces
+            ! Check maximal number of faces
             nf = size(eID) + 1
 
             ! Allocate & initialize
@@ -4007,8 +4067,8 @@ module ggmod_topology2D
                     call yf(fc)%Append([py(1:sortedsID(1)), yint(sortedeID(1))])
                 
                 end if 
-                if ((sortedsID(nsID) == 1) .and. (px(1) == xint(sortedeID(nsID))) & 
-                    .and. (py(1) == yint(sortedeID(nsID)))) then 
+                if ((sortedsID(nsID) == pol%ne) .and. (px(pol%ne+1) == xint(sortedeID(nsID))) & 
+                    .and. (py(pol%ne+1) == yint(sortedeID(nsID)))) then 
                     ! Start veretx at first intersection, no starting segment
                     ! without starting vertex 
                 else
@@ -4079,6 +4139,14 @@ module ggmod_topology2D
                 call yf(fc)%Append(ty)
 
             end do
+
+            ! Check if we need to shrink (may happen for closed polygons)
+            if (fc < nf) then 
+                xf = xf(1:fc)
+                yf = yf(1:fc)
+                V1 = V1(1:fc)
+                V2 = V2(1:fc)
+            end if 
 
             
 
@@ -4453,12 +4521,12 @@ module ggmod_topology2D
         !============
         ! 'vertices' 
         ! <vert%ntot> 
-        ! 'ID, x, y, fval, BV'
-        ! <ID, x, y, fval, BV (as zero or one)>
+        ! 'ID, x, y, type, fval, BV'
+        ! <ID, x, y, type, fval, BV (as zero or one)>
         ! 'faces'
         ! <face%ntot> 
-        ! 'ID, fsID, type, vert1, vert2, BF'
-        ! <ID, fsID, type, vert(:, 1), vert(:, 2), BF>
+        ! 'ID, fsID, type, vert1, vert2, BF, nc'
+        ! <ID, fsID, type, vert(:, 1), vert(:, 2), BF, face%x%size()>
         ! 'face <nf>' <repeated for each face including header>
         ! <x, y> 
         ! 'cells'
@@ -4483,7 +4551,8 @@ module ggmod_topology2D
         character(*), intent(in)                :: filename 
 
         ! Auxiliary
-        integer                                 :: fu, BVval
+        integer                                 :: fu, BVval, cvsize, &
+            cfsize
         real(R8), allocatable, dimension(:)     :: xf, yf
         character(:), allocatable               :: dir
 
@@ -4529,14 +4598,14 @@ module ggmod_topology2D
         write (fu, *) v%ntot
 
         ! Basic vertex data
-        write (fu, *) 'ID, x, y, fval, BV'
+        write (fu, *) 'ID, x, y, type, fval, BV'
         do i = 1, v%ntot
             if (v%BV(i)) then 
                 BVval = 1
             else 
                 BVval = 0
             end if
-            write (fu, *) v%ID(i), v%x(i), v%y(i), v%fval(i), BVval
+            write (fu, *) v%ID(i), v%x(i), v%y(i), v%type(i), v%fval(i), BVval
         end do 
 
         ! Write face data
@@ -4546,7 +4615,7 @@ module ggmod_topology2D
         write (fu, *) f%ntot 
 
         ! Basic face data
-        write (fu, *) 'ID, fsID, type, vert1, vert2, BF'
+        write (fu, *) 'ID, fsID, type, vert1, vert2, BF, nc'
         do i = 1, f%ntot 
             if (f%BF(i)) then 
                 BVval = 1
@@ -4554,7 +4623,7 @@ module ggmod_topology2D
                 BVval = 0
             end if 
             write (fu, *) f%ID(i), f%fsID(i), f%type(i), f%vert(i, 1), &
-                f%vert(i, 2), BVval 
+                f%vert(i, 2), BVval, f%x(i)%size()
         end do 
         
         ! Face coordinates
@@ -4574,12 +4643,22 @@ module ggmod_topology2D
         ! Write cell data
         !================
         ! Number of cells, number of cell vertices, number of cell faces
+        if (allocated(c%vert)) then 
+            cvsize = size(c%vert)
+        else
+            cvsize = 0
+        end if 
+        if (allocated(c%face)) then 
+            cfsize = size(c%face)
+        else
+            cfsize = 0
+        end if 
         write (fu, *) 'cells'
-        write (fu, *) c%ntot, size(c%vert), size(c%face)
+        write (fu, *) c%ntot, cvsize, cfsize
 
         ! Cell vertices
         write (fu, *) 'cell vertices'
-        do i = 1, size(c%vert)
+        do i = 1, cvsize
             write (fu, *) c%vert(i)
         end do 
         write (fu, *) 'cell vertex pointer'
@@ -4589,7 +4668,7 @@ module ggmod_topology2D
 
         ! Cell faces
         write (fu, *) 'cell faces'
-        do i = 1, size(c%face)
+        do i = 1, cfsize
             write (fu, *) c%face(i)
         end do 
         write (fu, *) 'cell face pointer'

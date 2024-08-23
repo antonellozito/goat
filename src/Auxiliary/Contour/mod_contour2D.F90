@@ -1115,7 +1115,7 @@ module mod_contour2D
                     ty = thissp%y 
                     call xc%Append(tx)
                     call yc%Append(ty)
-                    thiscontour%startsaddle = quadflags(iic, jjc)
+                    thiscontour%startsaddle = thissp%ID
                 end if 
             end if 
             
@@ -1505,7 +1505,7 @@ module mod_contour2D
                     ty = thissp%y 
                     call xc%Append(tx)
                     call yc%Append(ty)
-                    thiscontour%startsaddle = quadflags(iic, jjc)
+                    thiscontour%startsaddle = thissp%ID
                 end if 
             end if 
             
@@ -2018,7 +2018,7 @@ module mod_contour2D
             ! Add to contour
             call xc%Append(tx)
             call yc%Append(ty)
-            contour%endsaddle = isp
+            contour%endsaddle = thissp%ID
             return
         end if
         

@@ -35,8 +35,9 @@ module mod_definitions
         TMvertexsplitID = -1
 
     ! Topological mesh boundary IDs (1: radial face, 2: poloidal face, &
-    ! 3: boundary face)
-    integer(I8), parameter :: TMfaceradID = 1, TMfacepolID = 2, TMfacebndID = 3
+    ! 3: boundary face, 4: separatrix/saddle point)
+    integer(I8), parameter :: TMfaceradID = 1, TMfacepolID = 2, TMfacebndID = 3, &
+        TMfacesepID = 4
 
    
 end module
