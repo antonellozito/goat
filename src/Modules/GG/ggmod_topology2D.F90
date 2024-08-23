@@ -3466,9 +3466,11 @@ module ggmod_topology2D
                 topomesh%cell%faceP(i-1, 2)
         end do 
         do i = 1, cc
-            topomesh%cell%vert(topomesh%cell%vertP(i, 1):topomesh%cell%vertP(i, 2)) = & 
+            topomesh%cell%vert(&
+                topomesh%cell%vertP(i, 1):topomesh%cell%vertP(i, 2)+topomesh%cell%vertP(i, 2)-1) = & 
                 cellvert(i)%Get()
-            topomesh%cell%face(topomesh%cell%faceP(i, 1):topomesh%cell%faceP(i, 2)) = & 
+            topomesh%cell%face(&
+                topomesh%cell%faceP(i, 1):topomesh%cell%faceP(i, 1)+topomesh%cell%faceP(i, 2)-1) = & 
                 cellface(i)%Get()
         end do 
 
@@ -3546,7 +3548,6 @@ module ggmod_topology2D
         ! Auxiliary
         integer(I8), allocatable                :: tempvcells(:, :)
         integer(I8), allocatable, dimension(:)  :: ncpv, vcount, tv
-        logical, allocatable, dimension(:)      :: wasfound(:)
 
         ! Loop
         integer(I8)                             :: i, j
@@ -3606,35 +3607,26 @@ module ggmod_topology2D
         ! Note: we construct first
         ! temporary arrays (nv-by-ncpv, nf-by-2) that are afterwards converted to
         ! cell and cellP arrays. 
-        allocate(tempvcells(v%ntot, maxval(ncpv)), vcount(v%ntot), &
-            wasfound(v%ntot))
+        allocate(tempvcells(v%ntot, maxval(ncpv)), vcount(v%ntot))
         tempvcells = 0
         vcount = 0
         do i = 1, nc
-            ! Reset logical
-            wasfound = .false. ! to hedge for doubly appearing vertices
-
             ! Get vertices of cell
             tv = GetTMCellVert(c, i) ! there may be doubles in here!
             
             ! Add vertex cells
             do j = 1, size(tv)
-                if (.not. wasfound(tv(j))) then 
-                    ! Update counter
-                    vcount(tv(j)) = vcount(tv(j))+1
+                ! Update counter
+                vcount(tv(j)) = vcount(tv(j))+1
 
-                    ! Update logical
-                    wasfound(tv(j)) = .true.
-
-                    ! Add cell
-                    tempvcells(tv(j), vcount(tv(j))) = i 
-                end if 
+                ! Add cell
+                tempvcells(tv(j), vcount(tv(j))) = i 
             end do 
         end do 
         
         ! Construct 
         do i = 1, v%ntot
-            v%cell(v%cellP(i, 1):v%cellP(i, 1)+v%cellP(i, 2)) = & 
+            v%cell(v%cellP(i, 1):v%cellP(i, 1)+v%cellP(i, 2)-1) = & 
                 tempvcells(i, 1:vcount(i))
         end do 
         
