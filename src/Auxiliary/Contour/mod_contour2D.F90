@@ -1298,12 +1298,12 @@ module mod_contour2D
             haswestface(nx-1, ny-1), haseastface(nx-1, ny-1), &
             hasnorthface(nx-1, ny-1), hassouthface(nx-1, ny-1), isfound, &
             doexit, saddlequads(nx-1,ny-1), issad, addpoint, issaddlepoint, &
-            startquads(nx-1, ny-1) 
+            startquads(nx-1, ny-1), isstartperturbed
         integer(I8)                     :: iif(1:2), jjf(1:2), iic, jjc, &
-            nextquad, siic, sjjc, iisq, jjsq, saddlepointID
+            nextquad, siic, sjjc, iisq, jjsq, saddlepointID, xloc, yloc
         integer(I8), allocatable        :: quadflags(:, :), quadc(:, :)
         real(R8)                        :: V1, V2, x1, y1, x2, &
-            y2, frac, tx, ty, tv1, tv2, tv 
+            y2, frac, tx, ty, tv1, tv2, tv, x0p, y0p, xpert, ypert
         real(R8), allocatable           :: emptyarrayR8(:), Vtrace(:, :)
         type(RealDynamicArrayUDT)       :: xc, yc
         type(ContourUDT)                :: thiscontour
@@ -1319,6 +1319,22 @@ module mod_contour2D
 
         ! Contour counter
         cc = 0
+
+        ! Hedge for starting indices that lie exactly on a node 
+        isstartperturbed = .false.
+        x0p = x0 
+        y0p = y0
+        xloc = findloc(X, x0, 1) 
+        yloc = findloc(Y, y0, 1)
+        if ( (xloc /= 0) .and. ( yloc /= 0)) then 
+            ! Only perturb to compute initial value, then set equal 
+            ! again to original starting point
+            isstartperturbed = .true.
+
+            ! Compute perturbation 
+            x0p = x0 + pert
+            y0p = y0 + pert  
+        end if 
 
         ! Find the starting quad indices
         iisq = findloc(x0 > X, .true., 1, back=.true.)
@@ -1336,9 +1352,9 @@ module mod_contour2D
         end if 
 
         ! Compute value at starting quad by bilinear interpolation
-        tv1 = (V(iisq+1, jjsq) - V(iisq, jjsq))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq);
-        tv2 = (V(iisq+1, jjsq+1) - V(iisq, jjsq+1))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq+1);
-        tv = (tv2 - tv1)/(Y(jjsq+1) - Y(jjsq))*(y0 - Y(jjsq)) + tv1;
+        tv1 = (V(iisq+1, jjsq) - V(iisq, jjsq))/(X(iisq+1) - X(iisq))*(x0p - X(iisq)) + V(iisq, jjsq)
+        tv2 = (V(iisq+1, jjsq+1) - V(iisq, jjsq+1))/(X(iisq+1) - X(iisq))*(x0p - X(iisq)) + V(iisq, jjsq+1)
+        tv = (tv2 - tv1)/(Y(jjsq+1) - Y(jjsq))*(y0p - Y(jjsq)) + tv1
         
         ! Check if the current point is an x-point. 
         issaddlepoint = .false.
@@ -1518,7 +1534,7 @@ module mod_contour2D
                 ! still be there). Additionally, no turning back is
                 ! allowed!
                 
-                isfound = .false.                
+                isfound = .false.      
                 ! North face?
                 if (yfacec(iic, jjc+1) .and. (.not. isfound)) then 
                     isfound = .true.
@@ -1529,30 +1545,36 @@ module mod_contour2D
                 end if 
                 
                 ! South face?
-                if (yfacec(iic, jjc) .and. (.not. isfound)) then 
-                    isfound = .true.
-                    iif = [iic, iic+1]
-                    jjf = [jjc, jjc]
-                    yfacec(iic, jjc) = .false.
-                    jjc = jjc-1
+                if (.not. isfound) then 
+                    if (yfacec(iic, jjc)) then 
+                        isfound = .true.
+                        iif = [iic, iic+1]
+                        jjf = [jjc, jjc]
+                        yfacec(iic, jjc) = .false.
+                        jjc = jjc-1
+                    end if 
                 end if 
                 
                 ! East face?
-                if (xfacec(iic+1, jjc) .and. (.not. isfound)) then 
-                    isfound = .true.
-                    iif = [iic+1, iic+1]
-                    jjf = [jjc, jjc+1]
-                    xfacec(iic+1, jjc) = .false.
-                    iic = iic + 1
+                if (.not. isfound) then 
+                    if (xfacec(iic+1, jjc)) then 
+                        isfound = .true.
+                        iif = [iic+1, iic+1]
+                        jjf = [jjc, jjc+1]
+                        xfacec(iic+1, jjc) = .false.
+                        iic = iic + 1
+                    end if 
                 end if 
                 
                 ! West face?
-                if (xfacec(iic, jjc) .and. (.not. isfound)) then 
-                    isfound = .true.
-                    iif = [iic, iic]
-                    jjf = [jjc, jjc+1]
-                    xfacec(iic, jjc) = .false.
-                    iic = iic - 1
+                if (.not. isfound) then 
+                    if (xfacec(iic, jjc)) then 
+                        isfound = .true.
+                        iif = [iic, iic]
+                        jjf = [jjc, jjc+1]
+                        xfacec(iic, jjc) = .false.
+                        iic = iic - 1
+                    end if 
                 end if 
                 
                 ! check if a cell could be found, otherwise exit
@@ -1897,11 +1919,12 @@ module mod_contour2D
                 cycle 
             end if
             if (m == 0) then 
-                ! This shouldn't be happening, ignore the saddle point
-                print *, 'InitializeSaddlePointStructure: given saddle ' // & 
-                    'point value is not present on any of the saddle ' // & 
-                    'point domain boundaries - please check input value.' // &
-                    'Ignoring saddle point ', i
+                ! This may happen when e.g. an extremum is given as a 
+                ! pseudo saddlepoint. Ignore it, but don't issue warning
+                !print *, 'InitializeSaddlePointStructure: given saddle ' // & 
+                !    'point value is not present on any of the saddle ' // & 
+                !    'point domain boundaries - please check input value.' // &
+                !    'Ignoring saddle point ', i
 
                 ! Mark for deletion
                 keepind(i) = .false. 
