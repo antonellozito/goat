@@ -326,6 +326,17 @@ def ReadTopomeshFile(filepath):
         else: 
             i = i + 1 
 
+    # Read cell data
+    #---------------
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "cells" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+
 
 
 

@@ -158,6 +158,35 @@ class TopomeshFace:
         # Add face coordinates
         self.data[faceindex].x = xf 
         self.data[faceindex].y = yf
+
+# Topological mesh cells
+class TopomeshCell:
+    # Definition
+    def __init__(self):
+        # Total number of cells
+        self.ntot = 0
+
+        # Vertices
+        self.vert = np.zeros(0)
+        self.vertP = np.zeros((0, 2))
+
+        # Faces
+        self.face = np.zeros(0)
+        self.faceP = np.zeros((0, 2))
+
+    # Initialization
+    def Initialize(self, ntot, nvert, nface):
+        # Total number of cells
+        self.ntot = ntot
+
+        # Vertices
+        self.vert = np.zeros(nvert)
+        self.vertP = np.zeros((ntot, 2))
+
+        # Faces
+        self.face = np.zeros(nface)
+        self.faceP = np.zeros((ntot, 2))
+
         
 # Topological mesh
 class Topomesh:
@@ -165,6 +194,7 @@ class Topomesh:
         # Fields
         self.vert = TopomeshVert()
         self.face = TopomeshFace() 
+        self.cell = TopomeshCell()
 
         
 
