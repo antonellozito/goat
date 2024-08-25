@@ -3974,12 +3974,17 @@ module mod_polygon
                 elseif ( (yp(j) == 0) .and. (xp(j) > 0) ) then
                     if ( (yp(j+1) > 0) ) then 
                         w(i) = w(i) + 1
+                    elseif (yp(j+1) == 0) then 
+                        ! Do nothing - we're still on the same line and 
+                        ! didn't cross
                     else 
                         w(i) = w(i) - 1
                     end if 
                 elseif ( (yp(j+1) == 0) .and. (xp(j+1) > 0) ) then 
                     if (yp(j) < 0) then 
                         w(i) = w(i) + 1
+                    elseif (yp(j) == 0) then 
+                        ! Do nothing
                     else 
                         w(i) = w(i) - 1
                     end if 
