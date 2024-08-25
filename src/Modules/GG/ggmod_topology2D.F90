@@ -37,7 +37,7 @@ module ggmod_topology2D
         TraceTangencyPoints2D
 
     ! Module parameters
-    real(R8), parameter, private        :: tprelfieldtol = 1e-2 ! relative field tolerance under which extrema are removed
+    real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
     real(R8), parameter, private        :: disttol = 1e-12 ! distance tolerance
 
     !==================================================================!
@@ -232,14 +232,17 @@ module ggmod_topology2D
         ! Evaluate magnetic field and vessel
         deallocate(Vv, Vf)
         allocate(Vv(size(xg)), Vf(size(xg)))
-        call vessel%plfvessel%Evaluate(xg, yg, 0, 0, Vv)
+        !call vessel%plfvessel%Evaluate(xg, yg, 0, 0, Vv)
         call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
+
+        ! Re-evaluate extrema and tangency point field values
+        call magneticField%interp%Evaluate(xtp, ytp, 0, 0, Ftp) 
 
         ! Construct the vessel and magnetic field tracers (currently in 
         ! structured format)
-        vesseltracer = ConstructStructuredTracer(&
-            reshape(Vv, [size(xgv), size(ygv)]), xgv, ygv, &
-            xtp, ytp, Ftp*0.0_R8) ! tangency points lie on vessel so zero value
+        !vesseltracer = ConstructStructuredTracer(&
+        !   reshape(Vv, [size(xgv), size(ygv)]), xgv, ygv, &
+        !    xtp, ytp, Ftp*0.0_R8) ! tangency points lie on vessel so zero value
         fieldtracer = ConstructStructuredTracer(&
             reshape(Vf, [size(xgv), size(ygv)]), xgv, ygv, &
             xtp, ytp, Ftp)
@@ -251,11 +254,19 @@ module ggmod_topology2D
             magneticField, options)
 
         ! Tangency points
-        call AddTopologicalMeshTangencyPoints(topomesh, xtp, ytp, ftp, &
-            typetp, vesseltracer)
+        !call AddTopologicalMeshTangencyPoints(topomesh, xtp, ytp, ftp, &
+        !    typetp, vesseltracer)
+        call AddTopologicalMeshTangencyPoints2(topomesh, vesseltracer, &
+            magneticField)
+
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
 
         ! Remove parts that do not lie inside the vessel
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
+
+            ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
 
         ! Process points
         !===============
@@ -273,6 +284,9 @@ module ggmod_topology2D
         ! Necessary contours
         call AddTopologicalMeshContours(topomesh, magneticField, vessel, &
             fieldtracer, vesseltracer, options)
+
+            ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
 
         ! Core boundaries? 
         if (options%addcoreboundaries) then 
@@ -707,6 +721,271 @@ module ggmod_topology2D
 
     end subroutine
 
+    ! 2D tangency points
+    subroutine AddTopologicalMeshTangencyPoints2(topomesh, &
+        boundarytracer, magneticField)
+
+        ! Description
+        !============
+        ! This routine traces the tangency points on a prescribed boundary.
+        ! We base ourselves solely on the
+        ! discrete representation of the vessel geometry and compute the tangency
+        ! points by looking at the field evaluated in the vertices of the vessel
+        ! polygon(s). Here, minima and maxima are quite easily and rapidly found
+        ! without having to compute any intersections between curves. To determine
+        ! the type of tangency point (i.e. whether the curve bends inside or
+        ! outside the domain), we check whether it's a minima or maxima along the
+        ! vessel curve and whether the tangency point field value is found in the
+        ! interior of the domain near the tangency point location. 
+
+        ! The latter is a bit tricky here: since we don't explicitly know the
+        ! magnetic field in the interior, we evaluate the derivative in the
+        ! tangency point location and base ourselves on that. This, however, may be
+        ! inaccurate since the tangency point location itself will not correspond
+        ! with the location of the continuous optimum. Caution is therefore advised
+        ! when the local magnetic field varies strongly locally (or when the mesh
+        ! is too coarse). 
+
+
+        ! Notes
+        !======
+        ! Note 1: the contour tracing algorithm used to trace dFdx = 0 and dFdy = 0
+        ! contours is assumed to be able to deal with saddle points and should
+        ! return only 'simple' polygons. Saddle points may exist even in the dFdx =
+        ! 0 and dFdy = 0 fields. Therefore, we've implemented our own tracing
+        ! routine in TraceContourLineStructured2D. 
+
+        ! Note 2: it is assumed that the vessel polygon forms a closed (or a set of
+        ! closed) surfaces. These polygons are oriented later on such that the face
+        ! normal points inward the domain at all times. 
+
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(inout)       :: topomesh
+        class(ContourTracerUDT), intent(in)     :: boundarytracer
+        type(MagneticFieldUDT), intent(in)      :: magneticField 
+
+        ! Auxiliary
+        integer(I8)                             :: flag, ntp, nv
+        integer(I8), allocatable                :: dvals(:), ddvals(:), &
+            tv(:), extrlocind(:), tt(:), vf1(:), vf2(:), eID(:), sID(:), &
+            sortind(:)
+        real(R8)                                :: fdifftol 
+        real(R8), allocatable, dimension(:)     :: val, dval, tx, ty, &
+            tf, nxpe, nype, nxp, nyp, normprod, dFdx, dFdy
+        logical                                 :: hasbeendeleted
+        logical, allocatable                    :: extrloc(:)
+        type(RealDynamicArrayUDT), allocatable  :: xf(:), yf(:)
+        type(ContourUDT), allocatable           :: bndcontours(:)
+        type(PolygonUDT), allocatable           :: bndpol(:)
+        type(PolygonSetUDT)                     :: bndps
+
+        ! Loop
+        integer(I8)                             :: i, j, k 
+
+        ! Initialize
+        !===========
+        ! Initialize dynamic arrays
+
+        ! Trace contours
+        !---------------
+        ! Boundary
+        bndcontours = boundarytracer%TraceContours([0.0_R8])
+        
+        ! Sanity check
+        if (size(bndcontours) == 0) then 
+            ! Throw error - no boundary polygon
+            call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not trace ' // & 
+                'boundary contour, check input')
+        end if 
+
+        ! Construct boundary polygonset
+        !==============================
+        ! Construct polygons from boundary
+        allocate(bndpol(size(bndcontours)))
+        do i = 1, size(bndcontours)
+            ! Construct
+            call bndpol(i)%Construct(bndcontours(i)%x, bndcontours(i)%y)
+
+            ! Check for closedness, if not -> error
+            if (.not. bndpol(i)%isclosed) then 
+                call gdErrorHandler('AddTopologicalMeshTangencyPoints2: boundary polygon ' // & 
+                    'is not closed, not supported. Check input')
+            end if 
+        end do 
+
+        ! Construct polygonset
+        call bndps%Construct(bndpol)
+
+        ! Orient
+        call bndps%OrientNestedClosedPolygons(flag)
+
+        ! Check if successful
+        if (flag /= 0) then
+            call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not orient ' // & 
+                'boundary polygons, check input')
+        end if 
+
+        ! Compute tangency points
+        !========================
+        do i = 1, size(bndps%polygons)
+            ! Associate for ease
+            associate(p         => bndps%polygons(i))
+
+            ! Evaluate field at vertex locations
+            allocate(val(size(p%vert)))
+            call magneticField%interp%Evaluate(p%x(p%vert), p%y(p%vert), &
+                0, 0, val) ! assumed start and end point the same
+            val = [val, val(2)] ! extend to take next edge into account
+
+            ! Take difference
+            dval = val(2:size(val)) - val(1:size(val)-1)
+
+            ! Check where this changes sign
+            allocate(dvals(size(dval)))
+            where (dval > 0) dvals = 1
+            where (dval <= 0) dvals = -1
+            ddvals = dvals(2:size(dvals)) - dvals(1:size(dvals)-1) 
+
+            ! Find the location and value of extrema
+            extrloc = [.false., ddvals /= 0]
+            allocate(tv(count(extrloc)))
+            tv = pack(p%vert, extrloc)
+            tx = p%x(tv)
+            ty = p%y(tv)
+            tf = pack(val(1:size(val)-1), extrloc)
+            
+            ! Check if we should exclude extremum pairs based on field value
+            ! difference
+            fdifftol = (maxval(val) - minval(val))*tprelfieldtol
+            k = 1
+            hasbeendeleted = .false.
+            do while (k < size(tf))
+                ! Check difference
+                if (abs(tf(k+1)-tf(k)) < fdifftol) then 
+                    ! Remove values, such that subsequent ones can be
+                    ! checked too
+                    hasbeendeleted = .true.
+                    extrloc(tv(k:k+1)) = .false.
+                    tv = [tv(:k-1), tv(k+1:)]
+                    tf = [tf(:k-1), tf(k+1:)]
+                    k = 1
+                else
+                    k = k + 1
+                end if
+            end do 
+            
+            ! Check last 'edge' - shouldn't do this, since boundary
+            ! polygons are closed and therefore first and last 
+            ! vertex are the same
+            !if (abs(tf(size(tf))-tf(1)) < fdifftol) then 
+            !    extrloc(tv([1, size(tf)])) = .false.
+            !    tv = pack(p%vert, extrloc)
+            !    tf = val(tv)
+            !    hasbeendeleted = .true.
+            !end if
+            
+            ! Issue message
+            if (hasbeendeleted) then 
+                print *, 'AddTopologicalMeshTangencyPoints2: some ' // & 
+                    'tangency points were deleted based on their field ' // & 
+                    'values as they are very close together'
+            end if
+
+            ! Recompute points
+            tv = pack(p%vert, extrloc)
+            extrlocind = tv 
+            extrlocind = pack([(k, k = 1, size(extrloc))], extrloc)
+            tx = p%x(tv)
+            ty = p%y(tv)
+            tf = val(extrlocind)
+
+            ! Compute product between normal at vertex and magnetic field
+            allocate(dFdx(size(tf)), dFdy(size(tf)))
+            call magneticField%interp%Evaluate(tx, ty, 1, 0, dFdx)
+            call magneticField%interp%Evaluate(tx, ty, 0, 1, dFdy)
+
+            nxpe = [p%nx, p%nx(1)]
+            nype = [p%ny, p%ny(1)]
+            nxp = 0.5*(nxpe(extrlocind-1) + nxpe(extrlocind))
+            nyp = 0.5*(nype(extrlocind-1) + nype(extrlocind))
+            normprod = dFdx*nxp + dFdy*nyp
+
+            ! Determine type and add
+            allocate(tt(size(tf)))
+            tt = 0
+            do j = 1, size(extrlocind)
+
+                ! Determine type
+                if ((val(extrlocind(j)-1) < tf(j)) .and. &
+                    (val(extrlocind(j)+1) < tf(j))) then 
+
+                    ! Local maximum
+                    if (normprod(j) < 0) then 
+                        ! Curve bends outwards of the domain
+                        tt(j) = TMvertextp1ID
+                    else
+                        ! Curve bends inwards
+                        tt(j) = TMvertextp2ID
+                    end if
+                else
+                    ! Local minimum
+                    if (normprod(j) > 0) then 
+                        ! Curve bends outwards of the domain
+                        tt(j) = TMvertextp1ID
+                    else
+                        ! Curve bends inwards
+                        tt(j) = TMvertextp2ID
+                    end if 
+                end if
+            end do 
+
+            ! Add to topological mesh
+            !========================
+            ! Extract faces from polygon
+            eID = [(k, k = 1, size(tv))]
+            sID = tv 
+            ntp = size(tv)
+            allocate(sortind(size(sID)))
+            call Sort(sID, ind=sortind)
+            eID = eID(sortind)
+
+            ! Check if the first vertex is a tangency point. If so, add 
+            ! the first vertex as well
+            if (sID(1) == 1) then 
+                sID = [sID, bndpol(i)%ne]
+                eID = [eID, eID(1)]
+            end if 
+            call ExtractTopologicalFacesFromPolygon(bndpol(i), eID, sID, &
+                tx, ty, vf1, vf2, xf, yf)  
+            deallocate (sortind) 
+
+            ! Update face vertices to correct indices for after adding
+            ! vertices
+            vf1 = vf1 + topomesh%vert%ntot 
+            vf2 = vf2 + topomesh%vert%ntot 
+
+            ! Add vertices
+            do j = 1, ntp 
+                call AddTopologicalMeshVertex(topomesh, tx(j), ty(j), &
+                    tf(j), tt(j))
+            end do 
+
+            ! Add faces
+            do j = 1, size(xf)
+                call AddTopologicalMeshFace(topomesh, [vf1(j), vf2(j)], &
+                    xf(j), yf(j), TMfacebndID, 0)
+            end do 
+
+            ! Housekeeping
+            deallocate(val, dvals, dFdx, dFdy, tt, tv)
+            end associate
+
+        end do 
+    end subroutine
+
     ! Necessary contours
     subroutine AddTopologicalMeshContours(topomesh, magneticField, vessel, &
         fieldtracer, bndtracer, options)
@@ -995,9 +1274,11 @@ module ggmod_topology2D
                                         
                                         ! Check which part to delete from face data
                                         if (topomesh%face%vert(j, 1) == pspID(i)) then 
-                                            delind = [1, (cc, cc = vindJ(size(vindJ))+1, topomesh%face%x(j)%Size() )]
+                                            ! keepind = [1, (cc, cc = vindJ(size(vindJ))+1, topomesh%face%x(j)%Size() )]
+                                            delind = [(cc, cc = 2, vindJ(size(vindJ)))]
                                         else
-                                            delind = [(cc, cc = 1, vindJ(1)), topomesh%face%x(j)%Size()]
+                                            delind = [(cc, cc = vindJ(1)+1, topomesh%face%x(j)%Size()-1)]
+                                            ! keepind = [(cc, cc = 1, vindJ(1)), topomesh%face%x(j)%Size()]
                                         end if 
 
                                         ! Delete
@@ -1008,6 +1289,7 @@ module ggmod_topology2D
                                         call topomesh%face%pol(j)%Construct(&
                                             topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get())
                                     end if
+                                    deallocate(keepind)
                                 end if
                             end if
                             
@@ -1206,6 +1488,7 @@ module ggmod_topology2D
                         end if 
                     end if 
                 end do
+                deallocate(tcp)
            
                 ! Add
                 allc = [allc, tc]
@@ -1336,7 +1619,7 @@ module ggmod_topology2D
             traceval = options%coreboundariesfrac*(vert%fval(i) - thisfval) + thisfval
 
             ! Trace contours 
-            tc = fieldtracer%TraceContours([thisfval])
+            tc = fieldtracer%TraceContours([traceval])
             call CleanContours(tc)
 
             ! Check which contour is closed and intersects with the 
@@ -2458,8 +2741,8 @@ module ggmod_topology2D
                     ! checked too
                     hasbeendeleted = .true.
                     extrloc(tv(k:k+1)) = .false.
-                    tv = pack(p%vert, extrloc)
-                    tf = val(tv)
+                    tv = [tv(:k-1), tv(k+1:)]
+                    tf = [tf(:k-1), tf(k+1:)]
                     k = 1
                 else
                     k = k + 1
@@ -4009,7 +4292,11 @@ module ggmod_topology2D
             ! Treat start and end segments
             if (pol%isclosed) then 
                 ! Closed polygon
-                if ((sortedsID(1) /= 1) .and. (sortedsID(nsID) /= pol%ne)) then 
+                if (( (sortedsID(1) == 1 .and. px(1) == xint(sortedeID(1)))) .and. & 
+                    ( (sortedsID(nsID) == pol%ne .and. px(pol%ne+1) == xint(sortedeID(nsID))))) then 
+                    ! Start and end exactly in start point, do nothing
+                elseif (.not. ( (sortedsID(1) == 1 .and. px(1) == xint(sortedeID(1)))) .and. & 
+                    .not. ( (sortedsID(nsID) == pol%ne .and. px(pol%ne+1) == xint(sortedeID(nsID))))) then 
                     ! Start and end segment without start and end vertex,
                     ! so merge
                     fc = fc + 1
@@ -4025,19 +4312,15 @@ module ggmod_topology2D
                     call yf(fc)%Append([yint(sortedeID(neID)), &
                         py(sortedsID(nsID)+1:pol%ne), &  
                         py(1:sortedsID(1)), yint(sortedeID(1))])
-                elseif (((sortedsID(1) == 1) .and. (sortedsID(nsID) /= pol%ne)) .or. &
-                    ((sortedsID(1) /= 1) .and. (sortedsID(nsID) == pol%ne))) then 
-                        ! Something weird here: intersection in exactly first node, but
-                        ! only at first and not at last segment. Likely because
-                        ! intersection with last segment was not added. Throw error. 
-                        call gdErrorHandler(&
-                            'ExtractTopologicalFacesFromPolygon: ' // & 
-                            'closed polygon intersects in start point ' // & 
-                            'but not in end point - check input '// & 
-                            '(end point intersection should be added separately)')
-
                 else
-                    ! Nothing to do: intersection exactly at start and end point. 
+                    ! Something weird here: intersection in exactly first node, but
+                    ! only at first and not at last segment. Likely because
+                    ! intersection with last segment was not added. Throw error. 
+                    call gdErrorHandler(&
+                        'ExtractTopologicalFacesFromPolygon: ' // & 
+                        'closed polygon intersects in start point ' // & 
+                        'but not in end point - check input '// & 
+                        '(end point intersection should be added separately)')
                 end if 
             else 
                 ! Open polygon
@@ -4547,6 +4830,7 @@ module ggmod_topology2D
             cfsize
         real(R8), allocatable, dimension(:)     :: xf, yf
         character(:), allocatable               :: dir
+        logical, allocatable, dimension(:)      :: BV, BF
 
         ! Loop
         integer(I8)                             :: i, j 
@@ -4575,12 +4859,16 @@ module ggmod_topology2D
         ! Only the fields that are not added when constructing vertices,
         ! faces or cells. The rest should be always available
         if (.not. allocated(v%BV)) then 
-            allocate(v%BV(v%ntot))
-            v%BV = .false.
+            allocate(BV(v%ntot))
+            BV = .false.
+        else 
+            BV = v%BV
         end if 
         if (.not. allocated(f%BF)) then 
-            allocate(f%BF(f%ntot))
-            f%BF = .false.
+            allocate(BF(f%ntot))
+            BF = .false.
+        else 
+            BF = f%BF
         end if
 
         ! Write vertex data
@@ -4592,7 +4880,7 @@ module ggmod_topology2D
         ! Basic vertex data
         write (fu, *) 'ID, x, y, type, fval, BV'
         do i = 1, v%ntot
-            if (v%BV(i)) then 
+            if (BV(i)) then 
                 BVval = 1
             else 
                 BVval = 0
@@ -4609,7 +4897,7 @@ module ggmod_topology2D
         ! Basic face data
         write (fu, *) 'ID, fsID, type, vert1, vert2, BF, nc'
         do i = 1, f%ntot 
-            if (f%BF(i)) then 
+            if (BF(i)) then 
                 BVval = 1
             else 
                 BVval = 0
@@ -4670,6 +4958,9 @@ module ggmod_topology2D
 
         ! Housekeeping
         !=============
+        ! Deallocate again
+
+        ! Others
         end associate
         close(fu)
 
