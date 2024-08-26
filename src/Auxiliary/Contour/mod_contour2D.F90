@@ -93,7 +93,7 @@ module mod_contour2D
         ! specified that return the location on which the field value
         ! should be known, and a routine that sets the values again. 
         real(R8), allocatable, dimension(:)     :: xs, ys, vs
-        integer(I8), allocatable, dimension(:)  :: order 
+        integer(I8), allocatable, dimension(:)  :: order, IDs 
 
     contains 
 
@@ -254,7 +254,7 @@ module mod_contour2D
     end function
 
     ! Structured tracer constructor
-    function ConstructStructuredTracer(V, X, Y, xs, ys, vs) result(tracer)
+    function ConstructStructuredTracer(V, X, Y, xs, ys, vs, IDs) result(tracer)
 
         ! Description
         !============
@@ -267,6 +267,7 @@ module mod_contour2D
         class(ContourTracerUDT), allocatable    :: tracer 
         real(R8), intent(in), dimension(:)      :: X, Y, xs, ys, vs 
         real(R8), intent(in)                    :: V(:, :)
+        integer(I8), intent(in), dimension(:)   :: IDs
 
         ! Auxiliary
         integer(I8), allocatable                :: order(:)
@@ -291,6 +292,7 @@ module mod_contour2D
             tracer%xs = xs 
             tracer%ys = ys 
             tracer%vs = vs 
+            tracer%IDs = IDs
             tracer%order = order  
 
             allocate(xg(size(X)*size(Y)), yg(size(X)*size(Y)))
@@ -310,7 +312,7 @@ module mod_contour2D
 
     ! 2D structured contour line tracer 
     subroutine TraceContoursStructured2D(V, X, Y, tracevalues, xs, ys, &
-        vs, order, contours) 
+        vs, IDs, order, contours) 
 
         ! Description
         !============
@@ -397,6 +399,7 @@ module mod_contour2D
         real(R8), intent(in)            :: xs(:), ys(:), vs(:)
         type(ContourUDT), allocatable, intent(out)  :: contours(:) 
         integer(I8), intent(inout)      :: order(:) 
+        integer(I8), intent(in)         :: IDs(:)
 
         ! Auxiliary
         type(sp2DUDt), allocatable      :: spstruct(:)
@@ -421,9 +424,9 @@ module mod_contour2D
                 'dimensions of arguments V, X, Y')
         end if 
         if ((size(order) /= size(xs)) .or. (size(xs) /= size(ys)) .or. &
-            (size(ys) /= size(vs))) then 
-            call gdErrorHandler('TraceContourStructured2D: incompatible ' // &
-            'dimensions of arguments xs, ys, vs, order')
+            (size(ys) /= size(vs)).or. (size(IDs) /= size(xs))) then 
+            call gdErrorHandler('TraceContourStructured2DPoint: incompatible ' // &
+            'dimensions of arguments xs, ys, vs, order, IDs')
         end if 
         if (size(tracevalues) == 0) then 
             ! Empty trace value array - not allowed
@@ -444,7 +447,7 @@ module mod_contour2D
             superquadfaceyflags(nx-1, ny))
         call InitializeSaddlePointStructure2D(spstruct, superquadflags, &
             superquadfacexflags, superquadfaceyflags, V, X, Y, xs, ys, &
-            vs)
+            vs, IDs)
         do i = 1, size(spstruct)
             order(i) = spstruct(i)%order
         end do 
@@ -476,7 +479,7 @@ module mod_contour2D
 
     ! 2D structured contour line tracer that starts from point locations
     subroutine TracecontoursStructured2DPoint(V, X, Y, xt, yt, xs, ys, &
-        vs, order, contours)
+        vs, IDs, order, contours)
 
         ! Description
         !============
@@ -553,6 +556,7 @@ module mod_contour2D
         real(R8), intent(in)            :: xs(:), ys(:), vs(:)
         type(ContourUDT), allocatable, intent(out)  :: contours(:) 
         integer(I8), intent(inout)      :: order(:)
+        integer(I8), intent(in)         :: IDs(:)
 
         ! Auxiliary
         type(sp2DUDt), allocatable      :: spstruct(:)
@@ -577,9 +581,9 @@ module mod_contour2D
                 'dimensions of arguments V, X, Y')
         end if 
         if ((size(order) /= size(xs)) .or. (size(xs) /= size(ys)) .or. &
-            (size(ys) /= size(vs))) then 
+            (size(ys) /= size(vs)).or. (size(IDs) /= size(xs))) then 
             call gdErrorHandler('TraceContourStructured2DPoint: incompatible ' // &
-            'dimensions of arguments xs, ys, vs, order')
+            'dimensions of arguments xs, ys, vs, order, IDs')
         end if 
         if (nt == 0) then 
             ! Empty trace value array - not allowed
@@ -600,7 +604,7 @@ module mod_contour2D
             superquadfaceyflags(nx-1, ny))
         call InitializeSaddlePointStructure2D(spstruct, superquadflags, &
             superquadfacexflags, superquadfaceyflags, V, X, Y, xs, ys, &
-            vs)
+            vs, IDs)
         do i = 1, size(spstruct)
             order(i) = spstruct(i)%order
         end do 
@@ -647,8 +651,8 @@ module mod_contour2D
         ! Trace
         !======
         call TraceContoursStructured2D(tracer%V, tracer%X, tracer%Y, &
-            tracevalues, tracer%xs, tracer%ys, tracer%vs, tracer%order, &
-            contours)
+            tracevalues, tracer%xs, tracer%ys, tracer%vs, tracer%IDs, &
+            tracer%order, contours)
 
     end function 
 
@@ -669,8 +673,8 @@ module mod_contour2D
         ! Trace
         !======
         call TraceContoursStructured2DPoint(tracer%V, tracer%X, tracer%Y, &
-            x, y, tracer%xs, tracer%ys, tracer%vs, tracer%order, &
-            contours)
+            x, y, tracer%xs, tracer%ys, tracer%vs, tracer%IDs, &
+            tracer%order, contours)
 
     end function 
 
@@ -1303,7 +1307,7 @@ module mod_contour2D
             nextquad, siic, sjjc, iisq, jjsq, saddlepointID, xloc, yloc
         integer(I8), allocatable        :: quadflags(:, :), quadc(:, :)
         real(R8)                        :: V1, V2, x1, y1, x2, &
-            y2, frac, tx, ty, tv1, tv2, tv, x0p, y0p, xpert, ypert
+            y2, frac, tx, ty, tv1, tv2, tv, x0p, y0p
         real(R8), allocatable           :: emptyarrayR8(:), Vtrace(:, :)
         type(RealDynamicArrayUDT)       :: xc, yc
         type(ContourUDT)                :: thiscontour
@@ -1742,7 +1746,7 @@ module mod_contour2D
     ! Saddle point structure initializer for 2D tracer
     subroutine InitializeSaddlePointStructure2D(spstruct, &
         quadflags, facexflags, faceyflags, &
-        V, X, Y, xs, ys, vs)
+        V, X, Y, xs, ys, vs, IDs)
 
         ! Description
         !============
@@ -1783,6 +1787,7 @@ module mod_contour2D
             X(:), Y(:), V(:, :)
         type(sp2DUDT), allocatable, intent(out)     :: spstruct(:)
         integer(I8), intent(out)            :: quadflags(size(X)-1, size(Y)-1)
+        integer(I8), intent(in)             :: IDs(:)
         logical, intent(out)                :: facexflags(size(X), size(Y)-1), &
             faceyflags(size(X)-1, size(Y))
         
@@ -1842,7 +1847,7 @@ module mod_contour2D
             end if 
 
             ! Add
-            spstruct(i)%ID      = i  
+            spstruct(i)%ID      = IDs(i)  
             spstruct(i)%x       = xs(i)
             spstruct(i)%y       = ys(i) 
             spstruct(i)%val     = vs(i)

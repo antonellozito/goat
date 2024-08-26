@@ -486,19 +486,19 @@ def PlotTopologicalMesh(topomesh, fignum):
     maxima = np.where(topomesh.vert.type == gt.TMvertexmaxID)
     tp1 = np.where(topomesh.vert.type == gt.TMvertextp1ID)
     tp2 = np.where(topomesh.vert.type == gt.TMvertextp2ID)
-    PlotPoints2D(topomesh.vert.x[maxima], topomesh.vert.y[maxima], fignum, color='b', 
+    PlotPoints2DWithID(topomesh.vert.x[maxima], topomesh.vert.y[maxima], topomesh.vert.ID[maxima], fignum, color='b', 
         marker='o', label='field maxima')
-    PlotPoints2D(topomesh.vert.x[saddle], topomesh.vert.y[saddle], fignum, color='b', 
+    PlotPoints2DWithID(topomesh.vert.x[saddle], topomesh.vert.y[saddle], topomesh.vert.ID[saddle], fignum, color='b', 
         marker='x', label='field saddle')
-    PlotPoints2D(topomesh.vert.x[minima], topomesh.vert.y[minima], fignum, color='b', 
+    PlotPoints2DWithID(topomesh.vert.x[minima], topomesh.vert.y[minima], topomesh.vert.ID[minima], fignum, color='b', 
         marker='s', label='field minima')
-    PlotPoints2D(topomesh.vert.x[tp1], topomesh.vert.y[tp1], fignum, color='r', 
+    PlotPoints2DWithID(topomesh.vert.x[tp1], topomesh.vert.y[tp1], topomesh.vert.ID[tp1], fignum, color='r', 
         marker='o', label='field tangency point type 1')
-    PlotPoints2D(topomesh.vert.x[tp2], topomesh.vert.y[tp2], fignum, color='r', 
+    PlotPoints2DWithID(topomesh.vert.x[tp2], topomesh.vert.y[tp2], topomesh.vert.ID[tp2], fignum, color='r', 
         marker='x', label='field tangency point type 2')
-    PlotPoints2D(topomesh.vert.x[regular], topomesh.vert.y[regular], fignum, color='k', 
+    PlotPoints2DWithID(topomesh.vert.x[regular], topomesh.vert.y[regular], topomesh.vert.ID[regular], fignum, color='k', 
         marker='.', label='regular vertex')
-    PlotPoints2D(topomesh.vert.x[split], topomesh.vert.y[split], fignum, color='g', 
+    PlotPoints2DWithID(topomesh.vert.x[split], topomesh.vert.y[split], topomesh.vert.ID[split], fignum, color='g', 
         marker='d', label='splitted face vertex')
     
     # Store bounds
@@ -906,6 +906,17 @@ def PlotPoints2D(x, y, fignum, **plotargs):
     plt.scatter(x, y, **plotargs)
     plt.draw()
     
+def PlotPoints2DWithID(x, y, ID, fignum, **plotargs):
+    # Set the current figure
+    fig = plt.figure(fignum)
+    plt.scatter(x, y, **plotargs)
+    ax = fig.axes
+    k = 0
+    for i, txt in enumerate(ID):
+        ax[0].annotate(txt, (x[k], y[k]))
+        k = k + 1
+    plt.draw()
+
 def PlotGeneral2DSurface(x, y, z, fignum, **plotargs):
     # General z = f(x, y) surface plotter - may be expensive since
     # a triangulation is created under the hood. 

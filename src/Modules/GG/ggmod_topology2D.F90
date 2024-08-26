@@ -179,7 +179,8 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)     :: xtp, ytp, Ftp, &
             xe, ye, fe
         integer(I8)                             :: nv 
-        integer(I8), allocatable, dimension(:)  :: typetp, typee
+        integer(I8), allocatable, dimension(:)  :: typee, IDs
+        integer(I8), parameter                  :: emptyI8(0) = 0
 
         ! Loop
         integer(I8)                             :: i, j
@@ -210,54 +211,49 @@ module ggmod_topology2D
         ! structured format)
         vesseltracer = ConstructStructuredTracer(&
             reshape(Vv, [options%vresx, options%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8)
+            emptyR8, emptyR8, emptyR8, emptyI8)
         fieldtracer = ConstructStructuredTracer(&
             reshape(Vf, [options%vresx, options%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8)
+            emptyR8, emptyR8, emptyR8, emptyi8)
 
-        ! Compute tangency points & extrema
-        !==================================
-        call TraceTangencyPoints2D(xtp, ytp, typetp, Ftp, &
-            vesseltracer, magneticField)
+        ! Compute extrema
+        !================
+        ! Only for mesh refinement later on
         call TraceExtrema2D(xe, ye, fe, typee, fieldtracer, magneticField, &
             options%fdonewton)
         
 
-        ! Update the tracers
-        !===================
+        ! Add extrema & related boundaries
+        !=================================
+        ! Tangency points & vessel geometry
+        call AddTopologicalMeshTangencyPoints2(topomesh, vesseltracer, &
+            magneticField)
+        
         ! Construct refined grid based on tangency points and extrema
+        xtp = pack(topomesh%vert%x, &
+            (topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
+        ytp = pack(topomesh%vert%y, &
+            (topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
+        Ftp = pack(topomesh%vert%fval, &
+            (topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
+        IDs = pack(topomesh%vert%ID, &
+            (topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
         call ConstructRefined2DStructuredGrid(xg, yg, xgv, ygv, xb, yb, &
             options%vresx, options%vresy, [xtp, xe], [ytp, ye], 5, 5)  
 
         ! Evaluate magnetic field and vessel
         deallocate(Vv, Vf)
         allocate(Vv(size(xg)), Vf(size(xg)))
-        !call vessel%plfvessel%Evaluate(xg, yg, 0, 0, Vv)
         call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
 
-        ! Re-evaluate extrema and tangency point field values
-        call magneticField%interp%Evaluate(xtp, ytp, 0, 0, Ftp) 
-
-        ! Construct the vessel and magnetic field tracers (currently in 
-        ! structured format)
-        !vesseltracer = ConstructStructuredTracer(&
-        !   reshape(Vv, [size(xgv), size(ygv)]), xgv, ygv, &
-        !    xtp, ytp, Ftp*0.0_R8) ! tangency points lie on vessel so zero value
+        ! Update the field tracer 
         fieldtracer = ConstructStructuredTracer(&
             reshape(Vf, [size(xgv), size(ygv)]), xgv, ygv, &
-            xtp, ytp, Ftp)
+            xtp, ytp, Ftp, IDs)
 
-        ! Add extrema & related boundaries
-        !=================================
         ! Extrema
         call AddTopologicalMeshExtrema(topomesh, fieldtracer, &
             magneticField, options)
-
-        ! Tangency points
-        !call AddTopologicalMeshTangencyPoints(topomesh, xtp, ytp, ftp, &
-        !    typetp, vesseltracer)
-        call AddTopologicalMeshTangencyPoints2(topomesh, vesseltracer, &
-            magneticField)
 
         ! Do temporary writing
         call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
@@ -335,6 +331,14 @@ module ggmod_topology2D
         ! lines and are therefore less accurate. For a description on how the
         ! extrema are computed, see TraceExtrema2DBox. 
 
+        ! IMPORTANT: it is assumed that the boundary faces are already
+        ! present in the topological mesh! These are used to determine
+        ! which 'radial' faces, resulting from the dfdx, dfdy contours, 
+        ! should be retained in the topological mesh. Only those that 
+        ! do not intersect the boundary are retained. This means that
+        ! only radial faces that start and end in an extremum without
+        ! intersecting the vessel boundary will be retained. 
+
         ! Notes
         !======
         ! Note 1: the contour tracing algorithm used to trace dFdx = 0 and dFdy = 0
@@ -353,6 +357,10 @@ module ggmod_topology2D
         ! saddle points of the original field should not be present 
         ! (these are in fact often no saddle points of the derivatives!)
 
+        ! Note 4: only segments of dfdx and dfdy that start or end in a
+        ! topological mesh extremum (saddle, min, max) are added to the 
+        ! topological mesh
+
         ! Declare variables
         !==================
         ! Arguments
@@ -363,21 +371,23 @@ module ggmod_topology2D
 
         ! Auxiliary
         integer(I8)                             :: ngp, nfxc, nfyc, &
-            nx
+            nx, nvinit
         integer(I8), allocatable, dimension(:)  :: ts1, ts2, tt, typee, &
-            vf1, vf2, teid, tsid, sortind
+            vf1, vf2, teid, tsid, sortind, temps1, temps2
         real(R8)                                :: tempx, tempy
         real(R8), allocatable, dimension(:)     :: xg, yg, f, fx, fy, &
             tx, ty, thiseig, tf, tfxx, tfxy, tfyy, xe, ye, fe, tsr1, tsr2, &
-            tsrid
-        logical                                 :: conv, donewton 
+            tsrid, tempxint, tempyint
+        logical                                 :: conv, donewton, addsegment
         type(RealDynamicArrayUDT)               :: xc, yc, fc
         type(RealDynamicArrayUDT), allocatable  :: xfrda(:), yfrda(:), &
             fxpsrid(:), fypsrid(:) 
         type(IntegerDynamicArrayUDT), allocatable   :: fxpeid(:), &
             fxpsid(:), fypeid(:), fypsid(:)
         type(IntegerDynamicArrayUDT)            :: tc
+        type(ContourUDT)                        :: tempc
         type(ContourUDT), allocatable           :: fxc(:), fyc(:)
+        type(PolygonUDT)                        :: temppol
         type(PolygonUDT), allocatable           :: fxp(:), fyp(:)
         class(ContourTracerUDT), allocatable    :: fxtracer, fytracer
 
@@ -406,6 +416,9 @@ module ggmod_topology2D
         ! Initialize extrema counter
         ec = 0
 
+        ! Store initial amount of vertices
+        nvinit = topomesh%vert%ntot ! to update intersection IDs later on
+
         ! Trace contours
         !===============
         ! Evaluate derivatives
@@ -418,13 +431,17 @@ module ggmod_topology2D
         fxtracer = fieldtracer
         fytracer = fieldtracer 
         if (allocated(fxtracer%xs)) then 
-            deallocate(fxtracer%xs, fxtracer%ys, fxtracer%vs, fxtracer%order)
+            deallocate(fxtracer%xs, fxtracer%ys, fxtracer%vs, &
+                fxtracer%order, fxtracer%IDs)
         end if 
-        allocate(fxtracer%xs(0), fxtracer%ys(0), fxtracer%vs(0), fxtracer%order(0))
+        allocate(fxtracer%xs(0), fxtracer%ys(0), fxtracer%vs(0), &
+            fxtracer%order(0), fxtracer%IDs(0))
         if (allocated(fytracer%xs)) then 
-            deallocate(fytracer%xs, fytracer%ys, fytracer%vs, fytracer%order)
+            deallocate(fytracer%xs, fytracer%ys, fytracer%vs, &
+            fytracer%order, fytracer%IDs)
         end if 
-        allocate(fytracer%xs(0), fytracer%ys(0), fytracer%vs(0), fytracer%order(0))
+        allocate(fytracer%xs(0), fytracer%ys(0), fytracer%vs(0), &
+            fytracer%order(0), fytracer%IDs(0))
         call fxtracer%SetValues(fx)
         call fytracer%SetValues(fy)
         
@@ -569,7 +586,7 @@ module ggmod_topology2D
         !==================
         ! Loop over fxp
         do i = 1, nfxc 
-            ! Extract the faces from this polygon
+            ! Unpack
             teid = fxpeid(i)%Get()
             tsid = fxpsid(i)%Get()
             tsrid = fxpsrid(i)%Get()
@@ -578,19 +595,64 @@ module ggmod_topology2D
             tsid = tsid(sortind)
             teid = teid(sortind)
             deallocate(sortind)
+
+            ! Check
+            if (size(teid) == 0) then 
+                ! No intersections whatsoever, so no saddle points at 
+                ! start and end - continue without adding
+                cycle
+            end if 
+            
+            ! Extract the faces from this polygon
             call ExtractTopologicalFacesFromPolygon(fxp(i), teid, &
                 tsid, xe, ye, vf1, vf2, xfrda, yfrda)
 
-            ! Add to faces
-            do j = 1, size(vf1)
-                call AddTopologicalMeshFace(topomesh, [vf1(j), vf2(j)], &
-                    xfrda(j), yfrda(j), TMfaceradID, 0)
+            ! Insert into topological mesh as contour (need to rebuild contour)
+            tempc = fxc(i)
+            do j = 1, size(xfrda)
+                ! Check
+                if ((vf1(j) == 0) .or. (vf2(j) == 0)) then 
+                    ! Skip
+                    cycle
+                end if 
+
+                ! Check if we intersect a boundary face
+                call temppol%Construct(xfrda(j)%Get(), yfrda(j)%Get())
+                addsegment = .true. 
+                do k = 1, topomesh%face%ntot
+                    if (topomesh%face%type(k) == TMfacebndID) then 
+                        ! Check for intersections
+                        call PolygonIntersections(topomesh%face%pol(k), &
+                            temppol, tempxint, tempyint, temps1, temps2)
+                        if (size(tempxint) /= 0) then 
+                            ! Skip and exit
+                            addsegment = .false. 
+                            exit 
+                        end if 
+                    end if 
+                end do 
+
+                ! Check if we add
+                if (addsegment) then 
+                    tempc%x = xfrda(j)%Get()
+                    tempc%y = yfrda(j)%Get()
+                    tempc%startsaddle = vf1(j) + nvinit ! per definition non-zero, so this is fine
+                    tempc%endsaddle = vf2(j) + nvinit
+                    call InsertTopologicalMeshContour(topomesh, magneticField, &
+                        tempc, TMfaceradID, 0)
+                end if 
             end do 
+
+            ! Add to faces
+            !do j = 1, size(vf1)
+            !    call AddTopologicalMeshFace(topomesh, [vf1(j), vf2(j)], &
+            !        xfrda(j), yfrda(j), TMfaceradID, 0)
+            !end do 
         end do 
 
         ! Loop over fyp
         do i = 1, nfyc 
-            ! Extract the faces from this polygon
+            ! Unpack
             teid = fypeid(i)%Get()
             tsid = fypsid(i)%Get()
             tsrid = fypsrid(i)%Get()
@@ -599,14 +661,58 @@ module ggmod_topology2D
             tsid = tsid(sortind)
             teid = teid(sortind)
             deallocate(sortind)
+
+            ! Check
+            if (size(teid) == 0) then 
+                ! No intersections whatsoever, so no saddle points at 
+                ! start and end - continue without adding
+                cycle
+            end if 
+            
+            ! Extract the faces from this polygon
             call ExtractTopologicalFacesFromPolygon(fyp(i), teid, &
                 tsid, xe, ye, vf1, vf2, xfrda, yfrda)
 
-            ! Add to faces
-            do j = 1, size(vf1)
-                call AddTopologicalMeshFace(topomesh, [vf1(j), vf2(j)], &
-                    xfrda(j), yfrda(j), TMfaceradID, 0)
+            ! Insert into topological mesh as contour (need to rebuild contour)
+            tempc = fyc(i)
+            do j = 1, size(xfrda)
+                ! Check
+                if ((vf1(j) == 0) .or. (vf2(j) == 0)) then 
+                    ! Skip
+                    cycle
+                end if 
+
+                ! Check if we intersect a boundary face
+                call temppol%Construct(xfrda(j)%Get(), yfrda(j)%Get())
+                addsegment = .true. 
+                do k = 1, topomesh%face%ntot
+                    if (topomesh%face%type(k) == TMfacebndID) then 
+                        ! Check for intersections
+                        call PolygonIntersections(topomesh%face%pol(k), &
+                            temppol, tempxint, tempyint, temps1, temps2)
+                        if (size(tempxint) /= 0) then 
+                            ! Skip and exit
+                            addsegment = .false. 
+                            exit 
+                        end if 
+                    end if 
+                end do 
+
+                ! Check if we need to add 
+                if (addsegment) then 
+                    tempc%x = xfrda(j)%Get()
+                    tempc%y = yfrda(j)%Get()
+                    tempc%startsaddle = vf1(j) + nvinit ! per definition non-zero, so this is fine
+                    tempc%endsaddle = vf2(j) + nvinit
+                    call InsertTopologicalMeshContour(topomesh, magneticField, &
+                        tempc, TMfaceradID, 0)
+                end if 
             end do 
+            ! Add to faces
+            !do j = 1, size(vf1)
+            !    call AddTopologicalMeshFace(topomesh, [vf1(j), vf2(j)], &
+            !        xfrda(j), yfrda(j), TMfaceradID, 0)
+            !end do 
         end do 
 
 
@@ -768,7 +874,7 @@ module ggmod_topology2D
         type(MagneticFieldUDT), intent(in)      :: magneticField 
 
         ! Auxiliary
-        integer(I8)                             :: flag, ntp, nv
+        integer(I8)                             :: flag, ntp
         integer(I8), allocatable                :: dvals(:), ddvals(:), &
             tv(:), extrlocind(:), tt(:), vf1(:), vf2(:), eID(:), sID(:), &
             sortind(:)
@@ -1072,7 +1178,7 @@ module ggmod_topology2D
         logical                                 :: deletefirstpart, &
             deletestart, deleteend
         logical, allocatable, dimension(:)      :: tracepoints, keepind, &
-            isinpolyg
+            isinpolyg, ispseudosaddlepoint
 
         type(ContourUDt)                        :: tempc
         type(ContourUDT), allocatable           :: tc(:), allc(:)
@@ -1095,12 +1201,19 @@ module ggmod_topology2D
         fsIDs = ConstructIntegerDynamicArray()
 
         ! Build 'saddle' points
-        pspx = topomesh%vert%x 
-        pspy = topomesh%vert%y 
-        pspf = topomesh%vert%fval 
-        psptype = topomesh%vert%type 
-        pspID = topomesh%vert%ID
-        npsp = size(pspx)
+        ispseudosaddlepoint = (topomesh%vert%type == TMvertexmaxID) .or. &
+            (topomesh%vert%type == TMvertexminID) .or. &
+            (topomesh%vert%type == TMvertexsaddleID) .or. & 
+            (topomesh%vert%type == TMvertextp1ID) .or. & 
+            (topomesh%vert%type == TMvertextp2ID)
+        npsp = count(ispseudosaddlepoint)
+        allocate(pspx(npsp), pspy(npsp), pspf(npsp), psptype(npsp), &
+            pspID(npsp))
+        pspx    = pack(topomesh%vert%x, ispseudosaddlepoint)
+        pspy    = pack(topomesh%vert%y, ispseudosaddlepoint) 
+        pspf    = pack(topomesh%vert%fval, ispseudosaddlepoint) 
+        psptype = pack(topomesh%vert%type, ispseudosaddlepoint)
+        pspID   = pack(topomesh%vert%ID, ispseudosaddlepoint)
 
         ! Check for saddle points that are connected - don't trace twice
         allocate(tracepoints(npsp))
@@ -1113,10 +1226,13 @@ module ggmod_topology2D
         !    end do 
         !end do
 
-        ! Add saddle points to field tracer
+        ! Add saddle points to field tracer - only tangency points and
+        ! extrema, no other 'regular' vertices
+
         fieldtracer%xs = pspx 
         fieldtracer%ys = pspy
         fieldtracer%vs = pspf
+        fieldtracer%IDs = pspID
         fieldtracer%order = 0*psptype   
 
         ! Trace contours
@@ -2097,13 +2213,27 @@ module ggmod_topology2D
         tvIDs = pack(vIDs, keepind) 
         ts2 = pack(s2, keepind)
         deallocate(keepind)
-        if ((contour%startsaddle /= 0) .and. (contour%startsaddle /= vIDs(1))) then 
-            tvIDs = [contour%startsaddle, tvIDs]
-            ts2 = [1, ts2]
+        if ((contour%startsaddle /= 0)) then 
+            if (size(vIDs) > 0) then ! need to hedge for zero intersections
+                if (contour%startsaddle /= vIDs(1)) then 
+                    tvIDs = [contour%startsaddle, tvIDs]
+                    ts2 = [1, ts2]
+                end if 
+            else
+                tvIDs = [contour%startsaddle, tvIDs]
+                ts2 = [1, ts2]
+            end if 
         end if 
-        if ((contour%endsaddle /= 0) .and. (contour%endsaddle /= vIDs(size(vIDs)))) then 
-            tvIDs = [tvIDs, contour%endsaddle]
-            ts2 = [ts2, cp%ne]
+        if ((contour%endsaddle /= 0)) then 
+            if (size(vIDs) > 0) then ! need to hedge for zero intersections
+                if (contour%endsaddle /= vIDs(size(vIDs))) then 
+                    tvIDs = [tvIDs, contour%endsaddle]
+                    ts2 = [ts2, cp%ne]
+                end if 
+            else
+                tvIDs = [tvIDs, contour%endsaddle]
+                ts2 = [ts2, cp%ne]
+            end if 
         end if 
 
         ! Extract faces
@@ -4479,6 +4609,11 @@ module ggmod_topology2D
         ! is likely to fail for these boundaries (as expected...). Boundary faces
         ! are expected to be of type 3. 
 
+        ! Note 3: separatrix segments (type 4) that do not have a 
+        ! saddle point at either end are removed as well, since they
+        ! are not strictly necessary in the topological mesh. Splitting
+        ! points are also allowed of course. 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -4520,6 +4655,33 @@ module ggmod_topology2D
         ! Start by removing faces with zero start or end vertex
         rmface = (topomesh%face%vert(:, 1) == 0) .or. &
             (topomesh%face%vert(:, 2) == 0)
+
+        ! Also remove separatrix faces without saddle points or splitting points
+        do i = 1, topomesh%face%ntot
+            if (topomesh%face%type(i) == TMfacesepID) then 
+                ! Set to true, will be set to false if saddle point present
+                rmface(i) = .true. 
+                if (topomesh%face%vert(i, 1) /= 0) then 
+                    if ((topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsaddleID) .or. &
+                        (topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsplitID)) then 
+                        rmface(i) = .false. 
+                    end if 
+                else 
+                    ! Make sure is removed because of zero vertex
+                    rmface(i) = .true.
+                    
+                end if 
+                if (topomesh%face%vert(i, 2) /= 0) then 
+                    if ((topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsaddleID) .or. &
+                        (topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsplitID)) then 
+                        rmface(i) = .false. 
+                    end if 
+                else 
+                    ! Make sure is removed because of zero vertex
+                    rmface(i) = .true.
+                end if 
+            end if 
+        end do 
 
         ! Remove
         call RemoveTopologicalMeshFaceLogical(topomesh, rmface)

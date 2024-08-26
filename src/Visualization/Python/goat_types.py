@@ -50,18 +50,18 @@ class TopomeshVert:
         self.ntot = 0
 
         # Coordinates
-        self.x = np.zeros(0)
-        self.y = np.zeros(0)
+        self.x = np.zeros(0, dtype=float)
+        self.y = np.zeros(0, dtype=float)
 
         # ID
-        self.ID = np.zeros(0)
-        self.type = np.zeros(0)
+        self.ID = np.zeros(0, dtype=int)
+        self.type = np.zeros(0, dtype=int)
 
         # Field value
-        self.fval = np.zeros(0)
+        self.fval = np.zeros(0, dtype=float)
 
         # Boundary vertex
-        self.BV = np.zeros(0)
+        self.BV = np.zeros(0, dtype=int)
 
     # Initialization
     def Initialize(self, ntot):
@@ -69,18 +69,18 @@ class TopomeshVert:
         self.ntot = ntot
 
         # Coordinates
-        self.x = np.zeros(ntot)
-        self.y = np.zeros(ntot)
+        self.x = np.zeros(ntot, dtype=float)
+        self.y = np.zeros(ntot, dtype=float)
 
         # ID
-        self.ID = np.zeros(ntot)
-        self.type = np.zeros(ntot)
+        self.ID = np.zeros(ntot, dtype=int)
+        self.type = np.zeros(ntot, dtype=int)
 
         # Field value
-        self.fval = np.zeros(ntot)
+        self.fval = np.zeros(ntot, dtype=float)
 
         # Boundary vertex
-        self.BV = np.zeros(ntot)
+        self.BV = np.zeros(ntot, dtype=int)
 
 
 # Topological mesh face data
@@ -94,8 +94,8 @@ class TopomeshFacedata:
     # Initializer
     def Initialize(self, nc):
         # Initialize coordinates
-        self.x = np.zeros(nc)
-        self.y = np.zeros(nc)
+        self.x = np.zeros(nc, dtype=float)
+        self.y = np.zeros(nc, dtype=float)
 
 # Topological mesh faces
 class TopomeshFace:
@@ -108,23 +108,23 @@ class TopomeshFace:
         self.data = TopomeshFacedata()
 
         # ID
-        self.ID = np.zeros(0)
+        self.ID = np.zeros(0, dtype=int)
 
         # Field value
-        self.fval = np.zeros(0)
+        self.fval = np.zeros(0, dtype=float)
 
         # Boundary face
-        self.BF = np.zeros(0)
+        self.BF = np.zeros(0, dtype=int)
 
         # Flux surface ID
-        self.fsID = np.zeros(0)
+        self.fsID = np.zeros(0, dtype=int)
         
         # Type
-        self.type = np.zeros(0)
-        self.vert = np.zeros((0, 2))
+        self.type = np.zeros(0, dtype=int)
+        self.vert = np.zeros((0, 2), dtype=int)
 
         # Number of coordinates
-        self.nc = np.zeros(0)
+        self.nc = np.zeros(0, dtype=int)
 
     # Initialization
     def Initialize(self, ntot):
@@ -135,20 +135,20 @@ class TopomeshFace:
         self.data = [TopomeshFacedata() for i in range(ntot)]
 
         # ID
-        self.ID = np.zeros(ntot)
+        self.ID = np.zeros(ntot, dtype=int)
 
         # Field value
-        self.fval = np.zeros(ntot)
+        self.fval = np.zeros(ntot, dtype=float)
 
         # Boundary face
-        self.BF = np.zeros(ntot)
+        self.BF = np.zeros(ntot, dtype=int)
 
         # Flux surface ID
-        self.fsID = np.zeros(ntot)
+        self.fsID = np.zeros(ntot, dtype=int)
         
         # Type
-        self.type = np.zeros(ntot)
-        self.vert = np.zeros((ntot, 2))
+        self.type = np.zeros(ntot, dtype=int)
+        self.vert = np.zeros((ntot, 2), dtype=int)
 
         # Number of coordinates
         self.nc = np.zeros(ntot, dtype=int)
@@ -167,12 +167,12 @@ class TopomeshCell:
         self.ntot = 0
 
         # Vertices
-        self.vert = np.zeros(0)
-        self.vertP = np.zeros((0, 2))
+        self.vert = np.zeros(0, dtype=int)
+        self.vertP = np.zeros((0, 2), dtype=int)
 
         # Faces
-        self.face = np.zeros(0)
-        self.faceP = np.zeros((0, 2))
+        self.face = np.zeros(0, dtype=int)
+        self.faceP = np.zeros((0, 2), dtype=int)
 
     # Initialization
     def Initialize(self, ntot, nvert, nface):
@@ -180,12 +180,12 @@ class TopomeshCell:
         self.ntot = ntot
 
         # Vertices
-        self.vert = np.zeros(nvert)
-        self.vertP = np.zeros((ntot, 2))
+        self.vert = np.zeros(nvert, dtype=int)
+        self.vertP = np.zeros((ntot, 2), dtype=int)
 
         # Faces
-        self.face = np.zeros(nface)
-        self.faceP = np.zeros((ntot, 2))
+        self.face = np.zeros(nface, dtype=int)
+        self.faceP = np.zeros((ntot, 2), dtype=int)
 
         
 # Topological mesh
