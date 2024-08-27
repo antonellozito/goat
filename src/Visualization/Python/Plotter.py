@@ -479,7 +479,8 @@ def PlotTopologicalMesh(topomesh, fignum):
     # Plot the vertices
     #------------------
     # Plot per vertex type
-    regular = np.where(topomesh.vert.type == 0) 
+    regular = np.where(topomesh.vert.type == gt.TMvertexregularID) 
+    bnd = np.where(topomesh.vert.type == gt.TMvertexbndID)
     split = np.where(topomesh.vert.type == gt.TMvertexsplitID) 
     minima = np.where(topomesh.vert.type == gt.TMvertexminID)
     saddle = np.where(topomesh.vert.type == gt.TMvertexsaddleID)
@@ -498,6 +499,8 @@ def PlotTopologicalMesh(topomesh, fignum):
         marker='x', label='field tangency point type 2')
     PlotPoints2DWithID(topomesh.vert.x[regular], topomesh.vert.y[regular], topomesh.vert.ID[regular], fignum, color='k', 
         marker='.', label='regular vertex')
+    PlotPoints2DWithID(topomesh.vert.x[bnd], topomesh.vert.y[bnd], topomesh.vert.ID[bnd], fignum, color='k', 
+        marker='.', label='bnd vertex')
     PlotPoints2DWithID(topomesh.vert.x[split], topomesh.vert.y[split], topomesh.vert.ID[split], fignum, color='g', 
         marker='d', label='splitted face vertex')
     
@@ -543,6 +546,19 @@ def PlotTopologicalMesh(topomesh, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+# Topological cell plotting
+def PlotTopologicalMeshCells(topomesh, fignum):
+    # Description
+    #------------
+    # Separate routine to plot topological mesh cells in order not to
+    # overburden the standard plot
+    maxcellvert = 1000
+    thisrange = np.arange(0, topomesh.cell.ntot, 1)
+    thisrange = [36]
+    for i in thisrange:
+        index = np.arange(0, len(topomesh.cell.data[i].x), len(topomesh.cell.data[i].x)/maxcellvert, dtype=int)
+        #PlotPolygons2D(topomesh.cell.data[i].x[index], topomesh.cell.data[i].y[index], fignum)
+        PlotPolygons2D(topomesh.cell.data[i].x, topomesh.cell.data[i].y, fignum)
 
 #--------------------------------------------------------------------------#
 #                             Shape Optimization                           #
@@ -942,6 +958,21 @@ def PlotGeneral2DContour(x, y, z, fignum, **plotargs):
     fig = plt.figure(fignum)
     CS = plt.tricontour(x, y, z, **plotargs)
     cbar = fig.colorbar(CS)
+    plt.draw()
+
+def PlotGeneral2DPatch(x, y, fignum):
+    # General z = f(x, y) surface plotter - may be expensive since
+    # a triangulation is created under the hood. 
+
+    # Set the current figure
+    fig = plt.figure(fignum)
+    ax = fig.axes 
+    if len(ax) == 0:
+        ax = fig.add_subplot()
+    this = np.zeros((len(x), 2), dtype=float)
+    this[:, 0] = x 
+    this[:, 1] = y
+    ax.add_patch(mpl.patches.PathPatch(mpl.path.Path(this)))
     plt.draw()
 
 #==========================================================================#

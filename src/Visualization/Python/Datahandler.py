@@ -335,6 +335,116 @@ def ReadTopomeshFile(filepath):
             break 
         else: 
             i = i + 1
+    
+    # Read total amount of cells
+    i = i + 1
+    ntot = np.fromstring(alllines[i], dtype=int, count=3, sep=' ')
+    topomesh.cell.ntot = ntot[0]
+    topomesh.cell.nvert = ntot[1]
+    topomesh.cell.nface = ntot[2]
+    
+    # Initialize fields
+    topomesh.cell.Initialize(topomesh.cell.ntot, topomesh.cell.nvert, topomesh.cell.nface)
+
+    # Skip header
+    i = i + 2
+
+    # Read vertex data
+    for j in np.arange(0, topomesh.cell.ntot, 1):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        topomesh.cell.ID[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+        topomesh.cell.nc[j] = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+
+    # Update file position
+    i = i + topomesh.cell.ntot-1
+
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "cell vertices" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read vertex data
+    for j in np.arange(0, topomesh.cell.nvert, 1):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        topomesh.cell.vert[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "cell vertex pointer" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read vertex data
+    for j in np.arange(0, topomesh.cell.ntot, 1):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        tv = np.fromstring(values[0], dtype=int, count=2, sep=' ')
+        topomesh.cell.vertP[j, 0:2] = tv
+
+    # Read cell coordinates
+    #----------------------
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "cell polygons" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read coordinates
+    allfound = False 
+    if topomesh.cell.ntot == 0:
+        allfound = True
+    counter = 0
+    while (i < len(alllines)) and (not allfound):
+        # Read until we find 'cell'
+        if "cell" in alllines[i]:
+            # Get cell ID
+            values = alllines[i].split()
+            fID = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+            fID = fID[0] - 1 
+            counter = counter + 1
+            if (counter == topomesh.cell.ntot):
+                allfound = True 
+
+            # Update position
+            i = i + 1
+
+            # Read nc coordinates
+            topomesh.cell.data[fID].Initialize(topomesh.cell.nc[fID])
+            for k in np.arange(0, topomesh.cell.nc[fID], 1):
+                values = alllines[i+k].split()
+                this = np.fromstring(values[0], dtype=float, count=1)
+                topomesh.cell.data[fID].x[k] = np.fromstring(values[0], dtype=float, count=1, sep=' ')
+                topomesh.cell.data[fID].y[k] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+
+            # Update position
+            i = i + topomesh.cell.nc[fID]
+        else: 
+            i = i + 1 
+
 
 
 

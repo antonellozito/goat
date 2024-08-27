@@ -30,6 +30,7 @@ TMvertextp1ID = 4
 TMvertextp2ID = 5
 TMvertexbndID = 6
 TMvertexsplitID = -1
+TMvertexregularID = 0
 
 # Topological mesh boundary IDs (1: radial face, 2: poloidal face, &
 # 3: boundary face)
@@ -165,6 +166,14 @@ class TopomeshCell:
     def __init__(self):
         # Total number of cells
         self.ntot = 0
+        self.nvert = 0
+        self.nface = 0
+
+        # ID
+        self.ID = np.zeros(0, dtype=int)
+
+        # Number of coordinates
+        self.nc = np.zeros(0, dtype=int)
 
         # Vertices
         self.vert = np.zeros(0, dtype=int)
@@ -174,10 +183,21 @@ class TopomeshCell:
         self.face = np.zeros(0, dtype=int)
         self.faceP = np.zeros((0, 2), dtype=int)
 
+        # Coordinates
+        self.data = TopomeshFacedata() 
+
     # Initialization
     def Initialize(self, ntot, nvert, nface):
         # Total number of cells
         self.ntot = ntot
+        self.nvert = nvert 
+        self.nface = nface
+
+        # ID
+        self.ID = np.zeros(ntot, dtype=int)
+
+        # Number of polygon coordinates
+        self.nc = np.zeros(ntot, dtype=int)
 
         # Vertices
         self.vert = np.zeros(nvert, dtype=int)
@@ -187,6 +207,13 @@ class TopomeshCell:
         self.face = np.zeros(nface, dtype=int)
         self.faceP = np.zeros((ntot, 2), dtype=int)
 
+        # Coordinates
+        self.data = [TopomeshFacedata() for i in range(ntot)]
+
+    def AddCellCoordinates(self, cellindex, xc, yc):
+        # Add face coordinates
+        self.data[cellindex].x = xc 
+        self.data[cellindex].y = yc
         
 # Topological mesh
 class Topomesh:
@@ -195,6 +222,5 @@ class Topomesh:
         self.vert = TopomeshVert()
         self.face = TopomeshFace() 
         self.cell = TopomeshCell()
-
         
 
