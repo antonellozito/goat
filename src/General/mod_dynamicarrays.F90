@@ -118,6 +118,9 @@ module mod_dynamicarrays
         procedure   :: SetAllElements        => SetAllElementsRDA
         generic     :: Set                   => &
             SetSingleElement, SetMultipleElements, SetAllElements
+        
+        ! Number of element getter
+        procedure   :: Size                  => GetSizeRDA
 
     end type 
 
@@ -171,6 +174,9 @@ module mod_dynamicarrays
         procedure   :: SetAllElements        => SetAllElementsIDA
         generic     :: Set                   => &
             SetSingleElement, SetMultipleElements, SetAllElements
+
+        ! Number of element getter
+        procedure   :: Size                  => GetSizeIDA
 
     end type 
 
@@ -541,6 +547,21 @@ contains
         rda%val = val
         
     end subroutine
+
+    ! Size getter
+    function GetSizeRDA(rda) result(s)
+
+        ! Declare variables
+        !==================
+        class(RealDynamicArrayUDT)  :: rda 
+        integer(ik)                 :: s 
+
+        ! Determine size
+        !===============
+        ! easy here
+        s = size(rda%val)
+
+    end function 
 
     ! Elementray array operations
     !============================
@@ -1079,6 +1100,21 @@ contains
         ida%val = val
         
     end subroutine
+    
+    ! Size getter
+    function GetSizeIDA(ida) result(s)
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayUDT)   :: ida 
+        integer(ik)                     :: s 
+
+        ! Determine size
+        !===============
+        ! easy here
+        s = size(ida%val)
+
+    end function 
 
     ! Elementray array operations
     !============================

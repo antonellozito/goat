@@ -20,7 +20,8 @@ module mod_structured2Dgridding
     implicit none 
     private 
     save
-    public Construct2DStructuredGrid, Construct2DStructuredUniformGrid
+    public Construct2DStructuredGrid, Construct2DStructuredUniformGrid, &
+        ConstructRefined2DStructuredGrid
 
     ! General precision parameters
     real(R8), parameter, private    :: disttol = 1e-12
@@ -199,11 +200,11 @@ module mod_structured2Dgridding
             ! Recompute gridding vector
             allocate(ygv(sum(nsy)+1))
             ygv = 0
-            xc = 0 !counter
+            yc = 0 !counter
             do i = 1, size(nsy)
-                ygv(xc+1:xc+nsy(i)+1) = [(k, k = 0, nsy(i))]*&
+                ygv(yc+1:yc+nsy(i)+1) = [(k, k = 0, nsy(i))]*&
                     (ygvp(i+1) - ygvp(i))/(nsy(i)) + ygvp(i)
-                xc = xc + nsy(i)
+                yc = yc + nsy(i)
             end do 
         else 
             ! Uniform gridding vector
@@ -212,6 +213,7 @@ module mod_structured2Dgridding
         end if
 
         ! Construct grid
+        allocate(xg(size(xgv)*size(ygv)), yg(size(xgv)*size(ygv)))
         call Construct2DStructuredGrid(xgv, ygv, size(xgv), size(ygv), &
             xg, yg)
 

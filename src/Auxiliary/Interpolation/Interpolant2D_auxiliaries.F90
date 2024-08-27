@@ -232,6 +232,12 @@ module Interpolant2D_auxiliaries
             end if
         end do
 
+        ! Hedge for NaNs etc
+        if (notfound) then 
+            ! Should be NaN - set out of bounds
+            ind = 0
+        end if 
+
 
     end subroutine
 

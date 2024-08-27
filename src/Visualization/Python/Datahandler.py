@@ -2,6 +2,7 @@
 # in proper structures.
 import numpy as np
 import os 
+import goat_types as gt
 
 def GetDataDirectory():
     # Description
@@ -13,7 +14,7 @@ def GetDataDirectory():
 
     # Check
     if 'SOLPSTOP' in os.environ:
-        datadir = '../output'
+        datadir = './output'
     else:
         datadir = './output'
 
@@ -197,5 +198,150 @@ def ReadGeneralColumnwiseFloatData(filepath):
     # Return 
     return valnames, vals
 
+def ReadTopomeshFile(filepath):
+    # Description
+    #------------
+    # Read in the data of a topological mesh by reading the topological
+    # mesh file (format specific here)
+    topomesh = gt.Topomesh()
 
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read in vertex data
+    #--------------------
+    # Get the 'vertices' header
+    i = 0
+    while i < len(alllines): 
+        if "vertices" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Read total amount of vertices
+    i = i + 1
+    ntot = np.fromstring(alllines[i], dtype=int, count=1, sep=' ')
+    topomesh.vert.ntot = ntot[0]
+    
+    # Initialize fields
+    topomesh.vert.Initialize(topomesh.vert.ntot)
+
+    # Skip header
+    i = i + 2
+
+    # Read vertex data
+    for j in np.arange(0, topomesh.vert.ntot, 1):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        topomesh.vert.ID[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+        topomesh.vert.x[j] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+        topomesh.vert.y[j] = np.fromstring(values[2], dtype=float, count=1, sep=' ')
+        topomesh.vert.type[j] = np.fromstring(values[3], dtype=int, count=1, sep=' ')
+        topomesh.vert.fval[j] = np.fromstring(values[4], dtype=float, count=1, sep=' ')
+        topomesh.vert.BV[j] = np.fromstring(values[5], dtype=int, count=1, sep=' ')
+
+    # Read face data
+    #---------------
+    # Get the 'faces' header
+    i = 0
+    while i < len(alllines): 
+        if "faces" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Read total amount of faces
+    i = i + 1
+    ntot = np.fromstring(alllines[i], dtype=int, count=1, sep=' ')
+    topomesh.face.ntot = ntot[0]
+    
+    # Initialize fields
+    topomesh.face.Initialize(topomesh.face.ntot)
+
+    # Skip header
+    i = i + 2
+
+    # Read vertex data
+    for j in np.arange(0, topomesh.face.ntot, 1):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        topomesh.face.ID[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+        topomesh.face.fsID[j] = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+        topomesh.face.type[j] = np.fromstring(values[2], dtype=int, count=1, sep=' ')
+        topomesh.face.vert[j, 0] = np.fromstring(values[3], dtype=int, count=1, sep=' ')
+        topomesh.face.vert[j, 1] = np.fromstring(values[4], dtype=int, count=1, sep=' ')
+        topomesh.face.BF[j] = np.fromstring(values[5], dtype=int, count=1, sep=' ')
+        topomesh.face.nc[j] = np.fromstring(values[6], dtype=int, count=1, sep=' ')
+
+    # Update file position
+    i = i + topomesh.face.ntot-1
+
+    # Read face coordinates
+    #----------------------
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "face coordinates" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read coordinates
+    allfound = False 
+    counter = 0
+    while (i < len(alllines)) and (not allfound):
+        # Read until we find 'face'
+        if "face" in alllines[i]:
+            # Get face ID
+            values = alllines[i].split()
+            fID = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+            fID = fID[0] - 1 
+            counter = counter + 1
+            if (counter == topomesh.face.ntot):
+                allfound = True 
+
+            # Update position
+            i = i + 1
+
+            # Read nc coordinates
+            topomesh.face.data[fID].Initialize(topomesh.face.nc[fID])
+            for k in np.arange(0, topomesh.face.nc[fID], 1):
+                values = alllines[i+k].split()
+                this = np.fromstring(values[0], dtype=float, count=1)
+                topomesh.face.data[fID].x[k] = np.fromstring(values[0], dtype=float, count=1, sep=' ')
+                topomesh.face.data[fID].y[k] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+
+            # Update position
+            i = i + topomesh.face.nc[fID]
+        else: 
+            i = i + 1 
+
+    # Read cell data
+    #---------------
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "cells" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+
+
+
+
+    # Return 
+    return topomesh 
+
+    
 

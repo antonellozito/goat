@@ -31,7 +31,8 @@ module GOAT_tests
         !call TestQPSolvers
         !call TestDynamicArrays()
         !call TestContourTracing()
-        call TestSorting()
+        !call TestSorting()
+        call TestTopomeshGeneration()
     end subroutine
 
     !------------------------------------------------------------------!
@@ -1346,6 +1347,90 @@ module GOAT_tests
         yw = yc%Get()
         call Write2DPolygonData(xw, yw, 'testcontourtracing')
 
+
+    end subroutine
+
+    ! Topological mesh generation
+    subroutine TestTopomeshGeneration()
+
+        ! Description
+        !============
+        ! Test topological mesh generation algorithm for predefined
+        ! magnetic field and vessel geometry. Only the true necessary
+        ! fields of the magnetic field and vessel are initialized here
+
+        ! Modules
+        !========
+        use mod_precision 
+        use mod_contour2D
+        use mod_constants
+        use mod_plotter
+        use mod_dynamicarrays
+        use goatmod_types 
+        use ggmod_topology2D 
+        use goatmod_userinput
+        
+        ! Declare variables
+        !==================
+        ! Auxiliary
+        character(:), allocatable       :: meth 
+        real(R8)                        :: Lx, Ly 
+        real(R8), allocatable           :: xgv(:), ygv(:), xg(:), yg(:), &
+            vtest(:, :), cval(:), ea(:), xw(:), yw(:), xp(:), yp(:)
+        integer(I8)                     :: nx, ny
+        integer(I8), allocatable        :: order(:) 
+        type(ContourUDT), allocatable   :: contours(:)
+        type(RealDynamicArrayUDT)       :: xc, yc 
+        type(magneticFieldUDT)          :: magneticField 
+        type(VesselUDT)                 :: vessel 
+        type(TopomeshUDT)               :: topomesh 
+        type(PLF2DClosedExactOptionsUDT)    :: plfoptions
+        type(TopomeshOptionsUDT)        :: topoptions
+
+        ! Loop
+        integer(I8)                     :: k 
+
+        ! Initialize
+        !===========
+        ! Set the vessel polygon coordinates (closed polygon)
+        xp = [0.25, 0.75, 0.75, 0.25, 0.25]
+        yp = [0.25, 0.25, 0.75, 0.75, 0.25]
+
+        ! Set the grid coordinates
+        Lx = 1
+        Ly = 1
+        nx = 101
+        ny = 201 
+        xgv = real([(k, k = 0, nx-1)], kind=R8)*(Lx/real((nx-1), kind=R8))
+        ygv = real([(k, k = 0, ny-1)], kind=R8)*(Ly/real((ny-1), kind=R8))
+
+        ! Construct 2D grid
+        allocate(xg(nx*ny), yg(nx*ny))
+        call Construct2DStructuredGrid(xgv, ygv, nx, ny, xg, yg)
+
+        ! Construct test values
+        vtest = reshape(sin(xg*pi_R8)*sin(yg*pi_R8) &
+            + sin(2*xg*pi_R8)*sin(2*yg*pi_R8) &
+            + sin(3*xg*pi_R8)*sin(3*yg*pi_R8), [nx, ny])
+
+        ! Construct magnetic field
+        meth = 'uniformgrid'
+        call magneticField%interp%SetParameters(meth, 3, 6)
+        call magneticField%interp%Construct(xgv, ygv, vtest)
+
+        ! Construct vessel polygon set (exact representation for now)
+        call vessel%polygonset%Construct(xp, yp)
+        call InitializePolygonLevelsetFunction2D(vessel%plfvessel, vessel%polygonset, &
+            plfoptions)
+
+        ! Set the default topomesh options
+        call topoptions%SetDefaults()
+        topoptions%vresx = 400
+        topoptions%vresy = 400
+
+        ! Construct topological mesh
+        !===========================
+        topomesh = ConstructTopologicalMesh(vessel, magneticField, topoptions)       
 
     end subroutine
 
