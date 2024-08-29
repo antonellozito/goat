@@ -66,6 +66,10 @@ module ggmod_topology2D
         ! Initializer
         procedure :: Initialize     => InitializeTopologicalMeshVertex
 
+        ! Getters
+        procedure :: GetFace        => GetTMVertFace 
+        procedure :: GetFaceNeig    => GetTMVertFaceNeig
+
     end type 
 
     ! Topological face
@@ -93,6 +97,9 @@ module ggmod_topology2D
         ! Initializer
         procedure :: Initialize     => InitializeTopologicalMeshFace
 
+        ! Getters
+        procedure :: GetCell        => GetTMFaceCell
+
     end type
 
     ! Topological cell
@@ -109,6 +116,10 @@ module ggmod_topology2D
 
         ! Initializer
         procedure :: Initialize     => InitializeTopologicalMeshCell
+
+        ! Getters
+        procedure :: GetVert        => GetTMCellVert
+        procedure :: GetFace        => GetTMCellFace 
 
     end type
 
@@ -139,6 +150,10 @@ module ggmod_topology2D
         ! Deallocator
         procedure :: Deallocate     => DeallocateTopologicalMeshTube
 
+        ! Getter
+        procedure :: GetFace        => GetTMTubeFace
+        procedure :: GetCell        => GetTMTubeCell
+
     end type 
 
     ! General topological mesh type
@@ -149,6 +164,7 @@ module ggmod_topology2D
         type(TopomeshCellUDT)   :: cell 
         type(TopomeshTubeUDT)   :: tube 
         integer(I8)             :: nfs 
+
     contains 
 
         ! Initialize
@@ -5182,7 +5198,7 @@ module ggmod_topology2D
         class(TopomeshUDT)                      :: topomesh 
 
         ! Auxiliary
-        integer(I8)                             :: nvorig, nforig, tf(1:2)
+        integer(I8)                             :: nforig, tf(1:2)
         integer(I8), allocatable, dimension(:)  :: rmvID, rmf1, rmf2, &
             fvert 
         logical, allocatable, dimension(:)      :: markv, markf, &
@@ -5338,42 +5354,42 @@ module ggmod_topology2D
     ! Getters
     function GetTMVertFace(vert, i) result(res)
         integer(I8)                 :: i 
-        type(TopomeshVertUDT)       :: vert 
+        class(TopomeshVertUDT)      :: vert 
         integer(I8), allocatable    :: res(:)
         res = vert%face(vert%faceP(i, 1):(vert%faceP(i, 1) +  vert%faceP(i, 2) - 1))
     end function
 
     function GetTMCellVert(cell, i) result(res)
         integer(I8)                 :: i 
-        type(TopomeshCellUDT)       :: cell 
+        class(TopomeshCellUDT)      :: cell 
         integer(I8), allocatable    :: res(:)
         res = cell%vert(cell%vertP(i, 1):(cell%vertP(i, 1) + cell%vertP(i, 2) - 1))
     end function
 
     function GetTMCellFace(cell, i) result(res)
         integer(I8)                 :: i 
-        type(TopomeshCellUDT)       :: cell 
+        class(TopomeshCellUDT)      :: cell 
         integer(I8), allocatable    :: res(:)
         res = cell%face(cell%faceP(i, 1):(cell%faceP(i, 1) + cell%faceP(i, 2) - 1))
     end function
 
     function GetTMFaceCell(face, i) result(res)
         integer(I8)                 :: i 
-        type(TopomeshFaceUDT)       :: face 
+        class(TopomeshFaceUDT)      :: face 
         integer(I8), allocatable    :: res(:)
         res = face%cell(face%cellP(i, 1):(face%cellP(i, 1) + face%cellP(i, 2) - 1))
     end function
 
     function GetTMTubeCell(tube, i) result(res)
         integer(I8)                 :: i 
-        type(TopomeshTubeUDT)       :: tube 
+        class(TopomeshTubeUDT)      :: tube 
         integer(I8), allocatable    :: res(:)
         res = tube%cell(tube%cellP(i, 1):(tube%cellP(i, 1) + tube%cellP(i, 2) - 1))
     end function
 
     function GetTMTubeFace(tube, i) result(res)
         integer(I8)                 :: i 
-        type(TopomeshTubeUDT)       :: tube 
+        class(TopomeshTubeUDT)      :: tube 
         integer(I8), allocatable    :: res(:)
         res = tube%face(tube%faceP(i, 1):(tube%faceP(i, 1) + tube%faceP(i, 2) - 1))
     end function
@@ -5390,7 +5406,7 @@ module ggmod_topology2D
         !==================
         ! Arguments
         integer(I8), intent(in)     :: i, tf 
-        type(TopomeshVertUDT)       :: vert 
+        class(TopomeshVertUDT)      :: vert 
         integer(I8), allocatable    :: res(:)
 
         ! Auxiliary
