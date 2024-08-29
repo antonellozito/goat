@@ -59,6 +59,24 @@ module DistributionFunction
 
     end type
 
+    ! Simple field evaluation based on interpolant
+    type, extends(DistributionFunctionUDT) :: Structured2DDFUDT
+
+        ! Description
+        !============
+        ! Distribution function that serves as a wrapper for a 2D
+        ! structured interpolant. May be usefule in some cases.
+
+        ! Fields
+        type(StructuredInterpolant2DUDT)    :: F 
+
+    contains 
+
+        ! Evaluation
+        procedure :: Evaluate       => EvaluateStructured2DDF
+
+    end type
+
     ! Regular distance function
     type, extends(DistributionFunctionUDT)  :: Structured2DDistanceDFUDT 
 
@@ -319,6 +337,59 @@ module DistributionFunction
         call Write3DCoordinateData(xg, yg, vg, savefilepath)
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                     2D STRUCTURED INTERPOLANT                    !
+    !------------------------------------------------------------------!
+
+    ! Constructor
+    function ConstructStructured2DDF(interp) result(distribution)
+
+        ! Description
+        !============
+        ! Construct the distributor based on the given interpolant
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredInterpolant2DUDT), intent(in)   :: interp 
+        class(DistributionFunctionUDT), allocatable     :: distribution 
+
+        ! Initialize
+        !===========
+        allocate(Structured2DDFUDT::distribution)
+
+        select type(distribution)
+
+        type is (Structured2DDFUDT)
+
+            ! Add interpolant
+            distribution%F = interp
+
+        end select
+
+    end function 
+
+    ! Evaluation
+    subroutine EvaluateStructured2DDF(distribution, x, y, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Structured2DDFUDT)            :: distribution 
+        real(R8), intent(in)                :: x(:), y(:)
+        real(R8), intent(out)               :: v(size(x))
+
+        ! Evaluate
+        !=========
+        ! Just call interpolant evaluator
+        call distribution%F%Evaluate(x, y, 0, 0, v)
+
+    end subroutine 
 
     !------------------------------------------------------------------!
     !                         DISTANCE FUNCTION                        !
