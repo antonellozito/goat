@@ -14,18 +14,15 @@ module ggmod_vertexdistribution2D
     ! Load modules
     use mod_precision
     use mod_errorhandler
-    use mod_dynamicarrays
-    use mod_contour2D
-    use mod_polygon
-    use mod_sort
     use Interpolant1D
     use mod_lagrangefunctions
     use mod_constants, only: nanval_R8
-    use mod_linearsolverinterface, only: SolveDenseLinearSystemDI
-    use goatmod_types, only : magneticFieldUDT, VesselUDT, GridUDT
-    use goatmod_userinput, only : TopomeshOptionsUDT
+    use DistributionFunction, only: DistributionFunctionUDT
     implicit none
     private 
+
+    public :: VertexDistributor2DUDT, ConstructUniformVertexDistributor, &
+        FieldDistributor1DUDT, ConstructUniformFieldDistributor
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -37,8 +34,10 @@ module ggmod_vertexdistribution2D
     !                                                                  !
     !==================================================================!
 
+    ! Vertex distribution
+    !====================
     ! General vertex distributor
-    type, abstract :: VertexDistributor2D 
+    type, abstract :: VertexDistributor2DUDT
 
         ! Description
         !============
@@ -50,28 +49,84 @@ module ggmod_vertexdistribution2D
     contains 
 
         ! Distribution over given coordinates
-        procedure(DistributeOverCurveINT), deferred :: DistributeOverCurve
+        procedure(DistributeVerticesOverCurveINT), deferred :: DistributeOverCurve
+
+        ! Distribution over field
+        procedure(DistributeVerticesOverFieldINT), deferred :: DistributeOverField
 
     end type 
 
+    
+
 
     ! Uniform vertex distributor
-    type, extends(VertexDistributor2D) :: UniformVertexDistributor2D
+    type, extends(VertexDistributor2DUDT) :: UniformVertexDistributor2DUDT
 
         ! Description
         !============
         ! Distributor that distributes vertices uniformly with a spacing
         ! equal to 'd' (this is an input parameter of the distribution
-        ! function)
+        ! function) in the case of a curve based distribution or with
+        ! field values separated by a distance 'fd' in the case of a
+        ! field based distribution. These distances can only be 
+        ! approximated, since the start and end points are always taken
+        ! to be on the given 
 
-        real(R8)                        :: d 
+        real(R8)                        :: d, fd
 
     contains 
 
         ! Distribution over given coordinates
-        procedure :: DistributeOverCurve    => DistributeUniformOverCurve
+        procedure :: DistributeOverCurve    => DistributeVerticesUniformOverCurve
+
+        ! Distribution over given field
+        procedure :: DistributeOverField    => DistributeVerticesUniformOverField
 
     end type
+
+    ! Field distribution
+    !===================
+    ! General field distributor
+    type, abstract :: FieldDistributor1DUDT
+
+        ! Description
+        !============
+        ! General abstract type that mainly stipulates which routines
+        ! a field distributor should have. This is currently only the
+        ! 'DistributeOverCurve' subroutine, which yields vertex 
+        ! coordinates that lie on a given curve. The evaluation routine
+        ! expects a distribution from the class 'DistributionFunctionUDT'
+        ! that can be evaluated at x, y coordinates
+
+    contains 
+
+        ! Distribution of field values over given coordinates
+        procedure(DistributeFieldOverCurveINT), deferred :: DistributeOverCurve
+
+    end type 
+
+    ! Uniform field distributor
+    type, extends(FieldDistributor1DUDT) :: UniformFieldDistributor1DUDT
+
+        ! Description
+        !============
+        ! Distributor that distributes vertices uniformly with a spacing
+        ! equal to 'd' (this is an input parameter of the distribution
+        ! function) in the case of a curve based distribution or with
+        ! field values separated by a distance 'fd' in the case of a
+        ! field based distribution. These distances can only be 
+        ! approximated, since the start and end points are always taken
+        ! to be on the given 
+
+        real(R8)                        :: d, fd
+
+    contains 
+
+        ! Distribution over given coordinates
+        procedure :: DistributeOverCurve    => DistributeFieldUniformOverCurve
+
+    end type
+
 
     !==================================================================!
     !                                                                  !
@@ -81,14 +136,40 @@ module ggmod_vertexdistribution2D
 
     abstract interface 
 
-        ! Distribution over curve
-        subroutine DistributeOverCurveINT(vd, xc, yc, xv, yv, nv)
+        ! Vertex distribution over curve
+        subroutine DistributeVerticesOverCurveINT(vd, xc, yc, xv, yv, nv)
 
-            import :: I8, R8, VertexDistributor2D
-            class(VertexDistributor2D)          :: vd 
+            import :: I8, R8, VertexDistributor2DUDT
+            class(VertexDistributor2DUDT)          :: vd 
             real(R8), intent(in)                :: xc(:), yc(:)
             real(R8), allocatable, intent(out)  :: xv(:), yv(:)
             integer(I8), intent(out)            :: nv 
+
+        end subroutine 
+
+        ! Vertex distribution over field
+        subroutine DistributeVerticesOverFieldINT(vd, xc, yc, field, &
+            xv, yv, nv)
+
+            import :: I8, R8, VertexDistributor2DUDT, DistributionFunctionUDT
+            class(VertexDistributor2DUDT)       :: vd 
+            class(DistributionFunctionUDT), intent(in)  :: field
+            real(R8), intent(in)                :: xc(:), yc(:)
+            real(R8), allocatable, intent(out)  :: xv(:), yv(:)
+            integer(I8), intent(out)            :: nv 
+
+        end subroutine 
+
+        ! Field distribution over curve
+        subroutine DistributeFieldOverCurveINT(vd, xc, yc, field, nv, fv)
+
+            import :: I8, R8, FieldDistributor1DUDT, &
+                DistributionFunctionUDT
+            class(FieldDistributor1DUDT)            :: vd
+            real(R8), intent(in)                    :: xc(:), yc(:)
+            real(R8), allocatable, intent(out)      :: fv(:)
+            integer(I8), intent(out)                :: nv 
+            class(DistributionFunctionUDT), intent(in)  :: field    
 
         end subroutine 
 
@@ -107,43 +188,84 @@ module ggmod_vertexdistribution2D
     !                           CONSTRUCTORS                           !
     !------------------------------------------------------------------!
     
-    ! Uniform distributor
-    function ConstructUniformVertexDistributor(d) result(vd)
+    ! Uniform vertex distributor
+    function ConstructUniformVertexDistributor(d, fd) result(vd)
 
         ! Description
         !============
         ! Construct a uniform vertex distributor. Options are directly
-        ! passed through the constructor
+        ! passed through the constructor. these are:
+        ! - d: desired distance between vertices using the curve based
+        ! distribution function
+        ! - fd: desired distance measured in the field width that is 
+        ! given using the field based distribution function
 
         ! Declare variables
         !==================
         ! Arguments
-        class(VertexDistributor2D), allocatable :: vd 
-        real(R8), intent(in)                    :: d 
+        class(VertexDistributor2DUDT), allocatable :: vd 
+        real(R8), intent(in)                    :: d, fd
 
         ! Initialize
         !===========
         ! Allocate
-        allocate(UniformVertexDistributor2D::vd)
+        allocate(UniformVertexDistributor2DUDT::vd)
 
         ! Set the fields
         select type (vd)
 
-        type is (UniformVertexDistributor2D)
+        type is (UniformVertexDistributor2DUDT)
 
             ! Set parameters
             vd%d = d ! distance 
+            vd%fd = fd ! field distance
+
+        end select 
+
+    end function 
+
+    ! Uniform field distributor
+    function ConstructUniformFieldDistributor(d, fd) result(vd)
+
+        ! Description
+        !============
+        ! Construct a uniform vertex distributor. Options are directly
+        ! passed through the constructor. these are:
+        ! - d: desired distance between vertices using the curve based
+        ! distribution function
+        ! - fd: desired distance measured in the field width that is 
+        ! given using the field based distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(FieldDistributor1DUDT), allocatable   :: vd 
+        real(R8), intent(in)                        :: d, fd
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(UniformFieldDistributor1DUDT::vd)
+
+        ! Set the fields
+        select type (vd)
+
+        type is (UniformFieldDistributor1DUDT)
+
+            ! Set parameters
+            vd%d = d ! distance 
+            vd%fd = fd ! field distance
 
         end select 
 
     end function 
 
     !------------------------------------------------------------------!
-    !                       UNIFORM DISTRIBUTOR                        !
+    !                    UNIFORM VERTEX DISTRIBUTOR                    !
     !------------------------------------------------------------------!
 
-    ! Distributor
-    subroutine DistributeUniformOverCurve(vd, xc, yc, xv, yv, nv)
+    ! Curve based distributor
+    subroutine DistributeVerticesUniformOverCurve(vd, xc, yc, xv, yv, nv)
 
         ! Description
         !============
@@ -153,7 +275,7 @@ module ggmod_vertexdistribution2D
         ! Declare variables
         !==================
         ! Arguments
-        class(UniformVertexDistributor2D)   :: vd 
+        class(UniformVertexDistributor2DUDT):: vd 
         real(R8), intent(in)                :: xc(:), yc(:)
         real(R8), allocatable, intent(out)  :: xv(:), yv(:)
         integer(I8), intent(out)            :: nv 
@@ -198,6 +320,104 @@ module ggmod_vertexdistribution2D
         ! Distribute
         call DistributeVerticesLine(xc, yc, dl, distr, xv, yv)
 
+    end subroutine
+
+    ! Field based distributor
+    subroutine DistributeVerticesUniformOverField(vd, xc, yc, field, &
+        xv, yv, nv)
+
+        ! Description
+        !============
+        ! Distribute the vertices over the given curve xc, yc based on 
+        ! uniform distance in terms of the field values fc that are defined
+        ! on the curve coordinates. fc is made monotonic by building the
+        ! interpolation coordinate as the sum of the absolute value of
+        ! the difference in fc (which is therefore always monotonic). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(UniformVertexDistributor2DUDT)        :: vd 
+        class(DistributionFunctionUDT), intent(in)  :: field 
+        real(R8), intent(in)                :: xc(:), yc(:)
+        real(R8), allocatable, intent(out)  :: xv(:), yv(:)
+        integer(I8), intent(out)            :: nv 
+
+        ! Auxiliary
+        real(R8)                            :: l 
+        real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, fc
+
+        ! Loop
+        integer(I8)                         :: k 
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (size(xc) /= size(yc)) then 
+            call gdErrorHandler('DistributeUniformOverCurve: curve ' // & 
+                'coordinates have incompatible dimensions')
+        end if 
+        if (allocated(xv)) then 
+            deallocate(xv)
+        end if 
+        if (allocated(yv)) then 
+            deallocate(yv)
+        end if 
+
+        ! Precompute
+        !===========
+        ! Compute curve quantities
+        dx = xc(2:) - xc(1:size(xc)-1)
+        dy = yc(2:) - yc(1:size(yc)-1) 
+        allocate(fc(size(xc)))
+        call field%Evaluate(xc, yc, fc) 
+        dl = abs(fc(2:) - fc(1:size(fc)-1))
+        l = sum(dl)
+
+        ! Compute number of vertices
+        nv = ceiling(l/vd%fd)+1
+
+        ! Compute distribution
+        distr = [(k, k = 0, nv)]*(l/nv)
+        distr(size(distr)) = l ! just to make sure
+
+        ! Distribute
+        call DistributeVerticesLine(xc, yc, dl, distr, xv, yv)
+
+    end subroutine
+    
+    
+    !------------------------------------------------------------------!
+    !                     UNIFORM FIELD DISTRIBUTOR                    !
+    !------------------------------------------------------------------!
+
+    ! Curve based distributor
+    subroutine DistributeFieldUniformOverCurve(vd, xc, yc, field, nv, fv)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(UniformFieldDistributor1DUDT)         :: vd 
+        real(R8), intent(in)                        :: xc(:), yc(:)
+        real(R8), allocatable, intent(out)          :: fv(:)
+        integer(I8), intent(out)                    :: nv 
+        class(DistributionFunctionUDT), intent(in)  :: field
+        
+        ! Auxiliary
+        real(R8)                        :: fval(1:2), df 
+
+        ! Loop
+        integer(I8)                     :: k 
+
+        ! Distribute
+        !===========
+        ! Very simple
+        call field%Evaluate([xc(1), xc(ubound(xc))], [yc(1), yc(ubound(yc))], &
+            fval)
+        df = fval(2) - fval(1)
+        nv = ceiling(abs(df)/vd%fd) + 1 
+        fv = [(k, k = 0, nv-1)]*df/(nv-1)
+
     end subroutine 
 
 
@@ -226,7 +446,6 @@ module ggmod_vertexdistribution2D
 
         ! Auxiliary
         real(R8)                :: dlc(1:size(xl))
-        real(R8), allocatable   :: dx(:), dy(:)
 
         ! Loop
         integer(I8)             :: i 
@@ -234,8 +453,6 @@ module ggmod_vertexdistribution2D
         ! Initialize
         !===========
         ! Construct the length axis
-        dx = xl(2:) - xl(1:size(xl)-1)
-        dy = yl(2:) - yl(1:size(yl)-1)
         dlc(1) = 0
         do i = 1, size(dl) ! cumulative sum
             dlc(i+1) = dl(i) + dlc(i)
