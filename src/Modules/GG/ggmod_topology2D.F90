@@ -184,7 +184,8 @@ module ggmod_topology2D
     !------------------------------------------------------------------!
 
     ! Main constructor
-    function ConstructTopologicalMesh(vessel, magneticField, options) result(topomesh)
+    subroutine ConstructTopologicalMesh(vessel, magneticField, options, &
+        topomesh, fieldtracer, vesseltracer)
 
         ! Description
         !============
@@ -216,9 +217,9 @@ module ggmod_topology2D
         type(VesselUDT), intent(in)             :: vessel
         type(magneticFieldUDT), intent(in)      :: magneticField 
         type(TopomeshOptionsUDT), intent(in)    :: options
+        class(ContourTracerUDT), allocatable    :: vesseltracer, fieldtracer
 
         ! Auxiliary
-        class(ContourTracerUDT), allocatable    :: vesseltracer, fieldtracer
         real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
             yps, xg, yg, Vf, Vv, xgv, ygv
         real(R8), parameter                     :: emptyR8(0)= 0
@@ -365,7 +366,7 @@ module ggmod_topology2D
         !======
         call WriteTopologicalMesh(topomesh, 'topomesh')
 
-    end function
+    end subroutine
 
     ! Extrema addition
     subroutine AddTopologicalMeshExtrema(topomesh, fieldtracer, &
@@ -5681,44 +5682,6 @@ module ggmod_topology2D
         eig(2) = ((a+b) - det)/2.0_R8
 
     end function 
-
-    ! Contour clean-up
-    subroutine CleanContours(contours)
-
-        ! Description
-        !============
-        ! This routine cleans up the contours, i.e. it removes subsequent
-        ! points that are up to disttol coinciding. May be necessary
-        ! for later intersection computing etc. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(ContourUDT), intent(inout)        :: contours(:)
-
-        ! Auxiliary
-        logical, allocatable                    :: delind(:)
-        real(R8), allocatable                   :: dx(:), dy(:)
-
-        ! Loop
-        integer(I8)                             :: i 
-        
-        ! Clean
-        !======
-        do  i = 1, size(contours)
-            dx = contours(i)%x(2:size(contours(i)%x)) - &
-                contours(i)%x(1:size(contours(i)%x)-1)
-            dy = contours(i)%y(2:size(contours(i)%y)) - &
-                contours(i)%y(1:size(contours(i)%y)-1)
-            allocate(delind(size(dx)))
-            delind = (abs(dx) <= disttol) .and. (abs(dy) <= disttol)
-            if (any(delind)) then 
-                contours(i)%x = pack(contours(i)%x, [.true., .not. delind])
-                contours(i)%y = pack(contours(i)%y, [.true., .not. delind])
-            end if 
-            deallocate(delind)
-        end do 
-    end subroutine 
 
     !------------------------------------------------------------------!
     !                               I/O                                !
