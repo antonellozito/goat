@@ -24,7 +24,7 @@ module mod_contour2D
     implicit none
     private 
     public :: ContourUDT, TraceContoursStructured2D, ContourTracerUDT, &
-        StructuredContourTracerUDT, ConstructStructuredTracer
+        StructuredContourTracerUDT, ConstructStructuredTracer, CleanContours
 
     ! Module parameters
     integer, parameter  :: npq          = 2 ! number of padding quads for 2D tracer to determine saddle points
@@ -32,6 +32,7 @@ module mod_contour2D
     real(R8), parameter :: pert         = 1e-13 ! perturbation value 
     real(R8), parameter :: spvalabstol  = 1e-13 ! absolute tolerance in field value to determine if value is equal to saddlepoint value
     real(R8), parameter :: spvalreltol  = 1e-10 ! relative tolerance for ^ 
+    real(R8), parameter :: disttol      = 1e-12 ! distance tolerance (absolute) for face lengths (deleted if lower)
 
     !==================================================================!
     !                                                                  !
@@ -2258,6 +2259,45 @@ module mod_contour2D
         tracer%V = reshape(v, [size(tracer%X), size(tracer%Y)])
         
     end subroutine
+
+    ! Contour clean-up
+    subroutine CleanContours(contours)
+
+        ! Description
+        !============
+        ! This routine cleans up the contours, i.e. it removes subsequent
+        ! points that are up to disttol coinciding. May be necessary
+        ! for later intersection computing etc. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(ContourUDT), intent(inout)        :: contours(:)
+
+        ! Auxiliary
+        logical, allocatable                    :: delind(:)
+        real(R8), allocatable                   :: dx(:), dy(:)
+
+        ! Loop
+        integer(I8)                             :: i 
+        
+        ! Clean
+        !======
+        do  i = 1, size(contours)
+            dx = contours(i)%x(2:size(contours(i)%x)) - &
+                contours(i)%x(1:size(contours(i)%x)-1)
+            dy = contours(i)%y(2:size(contours(i)%y)) - &
+                contours(i)%y(1:size(contours(i)%y)-1)
+            allocate(delind(size(dx)))
+            delind = (abs(dx) <= disttol) .and. (abs(dy) <= disttol)
+            if (any(delind)) then 
+                contours(i)%x = pack(contours(i)%x, [.true., .not. delind])
+                contours(i)%y = pack(contours(i)%y, [.true., .not. delind])
+            end if 
+            deallocate(delind)
+        end do 
+    end subroutine 
+
 
     
 
