@@ -383,6 +383,13 @@ module goatmod_userinput
         ! options (poloidal and radial), flux surface removal options, 
         ! boundary triangle removal options, and small face removal 
         ! options. The following fields are present: 
+
+        ! General grid generation
+        ! - ggmethod        method how to construct the grid. Can be 
+        !                   'independent' (treating each topological
+        !                    cell independently) or 'orthogonal' (
+        !                   yields largely orthogonal grid, but needs 
+        !                   dependency between mesh cells)
         ! 
         ! Vertex distribution, poloidal direction:
         ! - vdptype:        'uniform' for uniform distribution, 
@@ -448,7 +455,7 @@ module goatmod_userinput
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
             vdpdval 
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
-            vdrdtype, rembndtriacriterion, remfacescriterion
+            vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -737,6 +744,9 @@ module goatmod_userinput
             options%vdpdval(0))
         options%vdpddensityatvessel = 250.0_R8
         options%vdpddensityatinf    = 10.0_R8
+
+        ! Grid generation approach
+        options%ggmethod            = 'independent'
 
         ! Options for radial vertex distribution
         options%vdrtype             = 'densitybased'
@@ -1374,6 +1384,10 @@ module goatmod_userinput
         
         ! Read options
         !=============
+        ! General options
+        field  = 'gg.vd.distributionmethod'
+        call ExtractOptionValueCharacter(fid, field, options%ggmethod)
+
         ! Contouring options in grid generator
         field = 'gg.vd.contouring.resx'
         call ExtractOptionValueInteger0D(fid, field, options%gcresx)
