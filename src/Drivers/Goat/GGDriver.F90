@@ -12,6 +12,8 @@ subroutine GGDriver(goatoptions)
     use goatmod_types 
     use goatmod_userinput
     use ggmod_topology2D
+    use ggmod_gridgeneration2D
+    use mod_contour2D, only : ContourTracerUDT
 
     ! The usual
     implicit none 
@@ -30,6 +32,7 @@ subroutine GGDriver(goatoptions)
     
     ! Auxiliary
     type(TopomeshUDT)           :: topomesh
+    class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
 
     ! Initialize
     !===========
@@ -46,14 +49,13 @@ subroutine GGDriver(goatoptions)
 
     ! Generate the topological mesh
     !==============================
-    topomesh = ConstructTopologicalMesh(environment%vessel, magneticField, &
-        topomeshoptions)
+    call ConstructTopologicalMesh(environment%vessel, magneticField, &
+        topomeshoptions, topomesh, fieldtracer, vesseltracer)
 
     ! Generate the grid
     !==================
-    ! Run
-    !call RunGridOptimization(grid, magneticField, environment, &
-    !    gdoptions)
+    call GenerateUnstructuredAlignedGrid(topomesh, magneticField, &
+        environment%vessel, fieldtracer, vesseltracer, ggoptions)
 
     ! Write data
     !===========
