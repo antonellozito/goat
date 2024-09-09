@@ -390,6 +390,9 @@ module goatmod_userinput
         !                    cell independently) or 'orthogonal' (
         !                   yields largely orthogonal grid, but needs 
         !                   dependency between mesh cells)
+        ! - cellconstructionmethod: method how to determine grid cells
+        !                   starting from given vertex distribution. 
+        !                   'quads_triangles' is recommended one
         ! 
         ! Vertex distribution, poloidal direction:
         ! - vdptype:        'uniform' for uniform distribution, 
@@ -455,7 +458,8 @@ module goatmod_userinput
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
             vdpdval 
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
-            vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod
+            vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
+            cellconstructionmethod
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -747,6 +751,7 @@ module goatmod_userinput
 
         ! Grid generation approach
         options%ggmethod            = 'independent'
+        options%cellconstructionmethod  = 'quads_triangles'
 
         ! Options for radial vertex distribution
         options%vdrtype             = 'densitybased'
@@ -1385,8 +1390,10 @@ module goatmod_userinput
         ! Read options
         !=============
         ! General options
-        field  = 'gg.vd.distributionmethod'
+        field  = 'gg.distributionmethod'
         call ExtractOptionValueCharacter(fid, field, options%ggmethod)
+        field  = 'gg.cellconstructionmethod'
+        call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)
 
         ! Contouring options in grid generator
         field = 'gg.vd.contouring.resx'

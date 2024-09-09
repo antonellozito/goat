@@ -82,6 +82,7 @@ module ggmod_gridgeneration2D
 
     ! Load modules
     use mod_precision
+    use mod_constants
     use mod_errorhandler
     use mod_dynamicarrays
     use mod_contour2D
@@ -126,6 +127,7 @@ module ggmod_gridgeneration2D
         ! Contains additional face data, including the grid vertices
         ! xv, yv and the field values at these vertices, fv.
         real(R8), allocatable, dimension(:)     :: xv, yv, fv
+        integer(I8), allocatable, dimension(:)  :: vert
 
     end type 
 
@@ -133,7 +135,8 @@ module ggmod_gridgeneration2D
     type :: GGTMFieldlineDataUDT
 
         real(R8), allocatable, dimension(:)         :: xv, yv, xl, yl
-        integer(I8), allocatable, dimension(:)      :: vert
+        integer(I8), allocatable, dimension(:)      :: vert, facelabels
+        integer(I8)                                 :: fsID
 
     end type
 
@@ -152,10 +155,12 @@ module ggmod_gridgeneration2D
         ! face orientation anyway when making the grid)
 
         type(GGTMFieldlineDataUDT), allocatable     :: lines(:)
+        type(GGTMFieldlineDataUDT)                  :: hfline, lfline
         integer(I8)                                 :: srflabel, erflabel, &
-            srf, erf 
+            srf, erf, region
         integer(I8), allocatable, dimension(:)      :: srfvert, erfvert, &
             hffaces, lffaces, hfvert, lfvert
+        logical                                     :: flipsrf, fliperf
 
     end type
 
@@ -207,7 +212,9 @@ module ggmod_gridgeneration2D
         ! as allocatable dynamic array classes, such that suitable 
         ! classes can be determined during initialization.
 
+        integer(I8)                                 :: ntot 
         class(RealDynamicArrayUDT), allocatable     :: x, y
+        class(IntegerDynamicArrayUDT), allocatable  :: fieldlineID
 
     contains
 
@@ -230,7 +237,9 @@ module ggmod_gridgeneration2D
         ! as allocatable dynamic array classes, such that suitable 
         ! classes can be determined during initialization.
 
-        class(IntegerDynamicArrayUDT), allocatable  :: v1, v2, label
+        integer(I8)                                 :: ntot 
+        class(IntegerDynamicArrayUDT), allocatable  :: v1, v2, label, &
+            region
 
     contains
 
@@ -254,7 +263,8 @@ module ggmod_gridgeneration2D
         ! as allocatable dynamic array classes, such that suitable 
         ! classes can be determined during initialization.
 
-        class(IntegerDynamicArrayUDT), allocatable  :: v, vp1, vp2, &
+        integer(I8)                                 :: ntot 
+        class(IntegerDynamicArrayUDT), allocatable  :: vert, vp1, vp2, &
             region
 
     contains
@@ -275,6 +285,15 @@ module ggmod_gridgeneration2D
 
         ! Initialization
         procedure :: Initialize         => InitializeGGGrid
+
+        ! Vertex addition
+        procedure :: AddVert            => AddGGVert
+
+        ! Face addition
+        procedure :: AddFace            => AddGGFace 
+
+        ! Cell addition
+        procedure :: AddCell            => AddGGCell
     end type 
 
 
@@ -427,10 +446,13 @@ module ggmod_gridgeneration2D
         call AddTopologicalMeshCellGriddingData(ggtmdata, topomesh, &
             fieldtracer, magneticField)
 
-        ! Distribute vertices
+        ! Distribute vertices 
         select case (options%ggmethod)
 
         case ('independent')
+
+            call DistributeVerticesIndependent(ggtmdata, topomesh, grid, &
+                poloidalvertexdistributor)
 
         case default 
 
@@ -438,6 +460,26 @@ module ggmod_gridgeneration2D
                 'unknown distribution method: ' // options%ggmethod)
 
         end select
+
+        ! Extract vertices
+        call ConstructGridVertices(ggtmdata, grid, topomesh)
+
+        ! Construct faces and cells
+        select case (options%cellconstructionmethod)
+
+        case ('quads_triangles')
+
+            ! Evaluate the magnetic field vector at vertex locations
+            call ConstructCellsQuadTria(ggtmdata, grid, magneticField)
+
+        case default
+
+            call gdErrorHandler('GenerateUnstructuredAlignedGrid: ' // & 
+                'unknown cell construction method: ' // options%cellconstructionmethod)
+
+        end select
+
+
 
         ! Distribute the vertices
         !call DistributeVerticesTopologicalMeshCells(ggtmdata, topomesh, &
@@ -461,7 +503,557 @@ module ggmod_gridgeneration2D
     !------------------------------------------------------------------!
 
     ! Independent gridder
-    !subroutine IndependentGridder(ggtmdata, topomesh, )
+    subroutine DistributeVerticesIndependent(ggtmdata, &
+        topomesh, grid, vd)
+
+        ! Description
+        !============
+        ! This routine generates for each topological cell a grid in 
+        ! an independent way. It is assumed that grid coordinates are
+        ! already present on all topological mesh faces, but that no 
+        ! vertex indices have been assigned. This is done as a first
+        ! step in this routine. Afterwards, vertices are distributed
+        ! per grid cell over the lines defined there. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)                          :: ggtmdata 
+        class(TopomeshUDT), intent(in)              :: topomesh 
+        class(GGGridUDT), intent(inout)             :: grid 
+        class(VertexDistributor2DUDT), intent(in)   :: vd
+
+        ! Auxiliary
+        integer(I8)                                 :: nv, vertID
+        integer(I8), allocatable, dimension(:)      :: tvID, srfvID, &
+            erfvID
+
+        ! Loop
+        integer(I8)                                 :: i, j, k
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert            => topomesh%vert,   &
+            face            => topomesh%face,   &
+            facedata        => ggtmdata%face,   &
+            cell            => topomesh%cell,   &
+            celldata        => ggtmdata%cell    &
+            )
+
+        ! Add topological mesh vertices
+        !==============================
+        ! Only update counter, vertices are added afterwards
+        grid%vert%ntot = grid%vert%ntot + vert%ntot
+
+        ! Set vertID
+        vertID = grid%vert%ntot
+
+        ! Add face vertices
+        !==================
+        do i = 1, face%ntot
+            ! Compute number of new vertices
+            nv = size(facedata(i)%xv) - 2 
+
+            ! Set ID
+            tvID = [face%vert(i, 1), (k, k = vertID+1, vertID+nv), face%vert(i, 2)]
+            facedata(i)%vert = tvID
+
+            ! Update 
+            vertID = vertID + nv
+        end do
+
+        ! Add cell vertices
+        !==================
+        do i = 1, cell%ntot
+
+            ! Get cell starting and ending radial line vertices
+            srfvID = facedata(celldata(i)%srf)%vert
+            if (celldata(i)%flipsrf) then 
+                srfvID = srfvID(size(srfvID):1:-1)
+            end if 
+            erfvID = facedata(celldata(i)%erf)%vert
+            if (celldata(i)%fliperf) then 
+                erfvID = erfvID(size(erfvID):1:-1)
+            end if 
+
+            ! Distribute lines
+            do j = 1, size(celldata(i)%lines)
+                ! Distribute over line
+                call vd%DistributeOverCurve(celldata(i)%lines(j)%xl, &
+                celldata(i)%lines(j)%yl, celldata(i)%lines(j)%xv, &
+                celldata(i)%lines(j)%yv, nv)
+
+                ! Set vertex ID
+                celldata(i)%lines(j)%vert = [srfvID(j+1), &
+                    & (k, k = vertID+1, vertID+nv), erfvID(j+1)]
+            end do 
+
+            ! Extract high field line
+            call ExtractTMCellAlignedBoundary(celldata(i), 'high', ggtmdata, &
+                topomesh, celldata(i)%hfline)
+
+            ! Extract low field line
+            call ExtractTMCellAlignedBoundary(celldata(i), 'low', ggtmdata, &
+                topomesh, celldata(i)%hfline) 
+
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Grid vertex constructor
+    subroutine ConstructGridVertices(ggtmdata, grid, topomesh)
+
+        ! Description
+        !============
+        ! Construct grid vertices by extracting them from the
+        ! topological mesh cells. It is assumed that the total
+        ! number of grid vertices is known and given in grid%vert%ntot
+        ! but that the vertex coordinates have not yet been added. 
+        ! Additionally, we do some checks to ensure all vertices have
+        ! been accounted for 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)                      :: ggtmdata 
+        class(GGGridUDT), intent(inout)         :: grid 
+        class(TopomeshUDT), intent(in)          :: topomesh 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: xv, yv 
+        integer(I8), allocatable, dimension(:)  :: fieldlineID, tvID
+        logical, allocatable, dimension(:)      :: isvertfound
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            cell            => topomesh%cell,   &
+            celldata        => ggtmdata%cell    &
+            )
+        ! Allocate
+        allocate(xv(grid%vert%ntot), yv(grid%vert%ntot), &
+            isvertfound(grid%vert%ntot), fieldlineID(grid%vert%ntot))
+        isvertfound = .false. 
+
+        ! Determine vertices
+        !===================
+        do i = 1, cell%ntot 
+            ! Loop over lines
+            do j = 1, size(celldata(i)%lines)
+                ! Get IDs
+                tvID = celldata(i)%lines(j)%vert
+
+                ! Set logicals
+                isvertfound(tvID) = .true.
+
+                ! Add coordinates
+                xv(tvID) = celldata(i)%lines(j)%xv 
+                yv(tvID) = celldata(i)%lines(j)%yv 
+                
+                ! Set field line ID
+                fieldlineID(tvID) = celldata(i)%lines(j)%fsID
+            end do
+
+            ! Add high field and low field line
+            ! Get IDs
+            tvID = celldata(i)%hfline%vert
+
+            ! Set logicals
+            isvertfound(tvID) = .true.
+
+            ! Add coordinates
+            xv(tvID) = celldata(i)%hfline%xv 
+            yv(tvID) = celldata(i)%hfline%yv 
+            
+            ! Set field line ID
+            fieldlineID(tvID) = celldata(i)%hfline%fsID
+
+            ! Get IDs
+            tvID = celldata(i)%lfline%vert
+
+            ! Set logicals
+            isvertfound(tvID) = .true.
+
+            ! Add coordinates
+            xv(tvID) = celldata(i)%lfline%xv 
+            yv(tvID) = celldata(i)%lfline%yv 
+            
+            ! Set field line ID
+            fieldlineID(tvID) = celldata(i)%lfline%fsID
+        end do 
+
+        ! Checks
+        !=======
+        ! This is normally impossible
+        if (.not. all(isvertfound)) then 
+            call gdErrorHandler('ConstructGridVertices: some vertices ' // & 
+                'were not found, this is probably a bug')
+        end if 
+
+        ! Add
+        !====
+        call grid%AddVert(xv, yv, fieldlineID)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Grid cell and face construction, quads & triangles
+    subroutine ConstructCellsQuadTria(ggtmdata, grid, magneticField)
+
+        ! Description
+        !============
+        ! Construct (mostly) quadrilateral cells from the vertex distributions given in lines.
+        ! To this end, we assume throughout most of this routine (and possibly
+        ! subroutines) that the lines are nearly 'parallel' to each other, and that
+        ! the local curvature doesn't vary quickly along the lines. 
+        ! To this end, we do the following steps:
+
+        ! 1) Start at the beginning of a pair of subsequent lines
+        ! 2) Check which additional face should be added (take one which results in
+        ! smallest aligned face length for now). Then, add the additional faces and
+        ! cells to the grid using the dedicated routines for that.
+        ! 3) Repeat for all line pairs until ended
+
+        ! This is the basic algorithm. In practice, we added the following improved
+        ! logic:
+        ! - We check if the resulting face would overlap/intersect with one of the
+        ! lines by checking vector cross products
+        ! - We check if the first face intersects with any of the lines (not in the
+        ! initial points). If that's the case, we know that an overlap will be
+        ! created, but we try to construct the grid as such that the overlapping
+        ! triangles can be removed by the 'RemoveNarrowBoundaryTriangles'
+        ! routine. This is only possible if at least a subset of the faces is not
+        ! overlapping. For this, we check potential faces of both start nodes in
+        ! the two lines with the nodes in the other lines. The one with the least
+        ! amount of intersections is taken. 
+
+
+        ! Notes
+        !======
+        ! Note 1: we need to check if the last face is the same as the initial one
+        ! to hedge for closed cells. 
+
+        ! Note 2: no guarantees can be given on non-overlapping cells. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)                      :: ggtmdata
+        class(GGGridUDT), intent(inout)         :: grid 
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+
+        ! Auxiliary
+        real(R8)                                :: dx1, dy1, &
+            alpha1, dx2, dy2, alpha2, dx3, dy3, alpha3, bxf(1:3), byf(1:3)
+        real(R8), allocatable, dimension(:)     :: xint, yint
+        integer(I8)                             :: nf, nc, ncv, mink1, &
+            mink2, v1, v3, v2, v4, tff(1:2), indmin
+        integer(I8), allocatable, dimension(:)  :: tempfacelabels, &
+            tempcellvert, s1, s2, tempfaceregion, tempcellregion
+        integer(I8), allocatable, dimension(:, :)   :: tempfacevert, &
+            tempcellvertP
+        logical                                 :: isintersectingl1, &
+            isintersectingl2, doquad, issameface
+        type(GGTMFieldlineDataUDT), allocatable :: lines(:)
+        type(PolygonUDT)                        :: facep, lp
+
+        ! Loop
+        integer(I8)                             :: i, j, k1, k2
+
+        ! Initialize
+        !===========
+        associate(celldata  => ggtmdata%cell)
+
+        ! Loop
+        !=====
+        do i = 1, size(celldata)
+            ! Concatenate lines for ease
+            lines = [celldata(i)%hfline, celldata(i)%lines, &
+                celldata(i)%lfline]
+
+            ! Loop over all lines
+            do j = 1, size(lines)-1
+                ! Unpack
+                associate(&
+                    l1      => lines(j),    &
+                    l2      => lines(j+1),      &
+                    n1      => size(lines(j)%xv),   &
+                    n2      => size(lines(j+1)%xv), &
+                    sff     => celldata(i)%srflabel, &
+                    eff     => celldata(i)%erflabel)
+
+                ! Initialize
+                k1 = 1
+                k2 = 1
+                nf = 0
+                nc = 0
+                ncv = 0
+                allocate(tempfacevert(4*(n1+n2), 2), tempfacelabels(4*(n1+n2)), &
+                    tempcellvert(3*(n1+n2)), tempcellvertP(4*(n1+n2), 2)) ! overestimations
+
+                ! Check if the first face intersects with one of the lines
+                isintersectingl1 = .false. 
+                isintersectingl2 = .false.
+                mink1 = 0
+                mink2 = 0
+                call facep%Construct([l1%xv(1), l2%xv(1)], [l1%yv(1), l2%yv(1)])
+
+                ! First line
+                if (l1%vert(1) == l1%vert(size(l1%vert))) then 
+                    ! Closed 
+                    call lp%Construct(l1%xv(2:size(l1%xv)-1), l1%yv(2:size(l1%xv)-1)) ! no need to include 
+                    call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                else
+                    call lp%Construct(l1%xv(2:), l1%yv(2:))
+                    call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                end if
+                if (size(xint) > 0) then 
+                    isintersectingl1 = .true.
+                    mink1 = s1(1)+2
+                end if
+
+                ! Second line
+                if (l2%vert(1) == l2%vert(size(l2%vert))) then 
+                    ! Closed 
+                    call lp%Construct(l2%xv(2:size(l2%xv)-1), l2%yv(2:size(l2%xv)-1)) ! no need to include 
+                    call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                else
+                    call lp%Construct(l1%xv(2:), l1%yv(2:))
+                    call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                end if 
+                if (size(xint) > 0) then 
+                    isintersectingl2 = .true.
+                    mink2 = s1(1)+2
+                end if
+                
+                ! Add the first face
+                nf = nf + 1
+                tempfacevert(nf, :) = [l1%vert(k1), l2%vert(k2)]
+                tempfacelabels(nf) = sff
+
+                ! Loop
+                do while (.true.)
+
+                    ! Make candidate faces
+                    !---------------------
+                    ! Face pair 1: vertex k1 and vertex k2+1, vertex k2, k2+1
+                    ! (triangle)
+                    
+                    ! Face pair 2: vertex k1+1 and vertex k2, vertex k1, k1+1
+                    ! (triangle)
+                    
+                    ! Face pair 3: k1+1, k2+1 (quad)
+
+                    ! Determine which face to take
+                    !-----------------------------
+                    ! First two vertices are always the same
+                    v1 = l1%vert(k1)
+                    v3 = l2%vert(k2)
+                    
+                    ! Here, purely based on length of added aligned face
+                    doquad = .false.
+                    if ((k1 < n1) .and. (k2 < n2)) then 
+                                
+                        ! Compute angle of face normal with magnetic field
+                        dx1 = l2%xv(k2+1) - l1%xv(k1)
+                        dy1 = l2%yv(k2+1) - l1%yv(k1)
+                        dx2 = l1%xv(k1+1) - l2%xv(k2)
+                        dy2 = l1%yv(k1+1) - l2%yv(k2)
+                        dx3 = l2%xv(k2+1) - l1%xv(k1+1)
+                        dy3 = l2%yv(k2+1) - l1%yv(k1+1)
+
+                        call magneticField%interp%Evaluate(&
+                            [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
+                            [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
+                            0, 1, bxf)
+                        call magneticField%interp%Evaluate(&
+                            [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
+                            [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
+                            1, 0, byf)
+                        bxf = -bxf ! adjust sign
+
+                        alpha1 = abs(atan( (-dy1*byf(1) -dx1*bxf(1))/(-dy1*bxf(1) + dx1*byf(1))))
+                        alpha2 = abs(atan( (-dy2*byf(2) -dx2*bxf(2))/(-dy2*bxf(2) + dx2*byf(2))))
+                        alpha3 = abs(atan( (-dy3*byf(3) -dx3*bxf(3))/(-dy3*bxf(3) + dx3*byf(3))))
+                        
+
+
+                        ! Check if we still need to hedge for intersecting
+                        ! lines
+                        if (k1 > mink1) then 
+                            isintersectingl1 = .false.
+                        end if 
+                        if (k2 > mink2) then 
+                            isintersectingl2 = .false.
+                        end if
+
+                        ! Check which triangles are allowed
+                        if (isintersectingl1) then 
+                            ! First line is intersected by starting face:
+                            ! triangles should be built using second line
+                            alpha1 = posinfval_R8()
+                            alpha3 = posinfval_R8()
+                            
+                        elseif (isintersectingl2) then 
+                            ! Second line is intersected by starting face:
+                            ! triangles should be built using first line
+                            alpha2 = posinfval_R8()
+                            alpha3 = posinfval_R8()
+                        end if
+                        
+                        ! Find face that makes the smallest angle
+                        indmin = minloc([alpha1, alpha2, alpha3], 1)
+                        
+                        ! Add the face
+                        if (indmin == 3) then 
+                            ! Add third face, quad
+                            doquad = .true.
+                            v2 = l2%vert(k2+1)
+                            v4 = l1%vert(k1+1)
+                            
+                            ! Update counter
+                            k2 = k2+1
+                            k1 = k1+1
+                        elseif (indmin == 1) then 
+                            ! Add first face, triangle
+                            v2 = l2%vert(k2+1)
+                            tff = [0, l2%facelabels(k2)]
+                            
+                            ! Update counter
+                            k2 = k2 + 1
+                        elseif (indmin == 2 ) then 
+                            ! Add second face, triangle
+                            v2 = l1%vert(k1+1)
+                            tff = [l1%facelabels(k1), 0]
+                            
+                            ! Update counter
+                            k1 = k1 + 1
+                        else
+                            ! Should never happen
+                            call gdErrorHandler('Something wrong')
+                        end if 
+                                
+                        
+                    elseif ((k1 == n1) .and. (k2 < n2)) then 
+                        ! We have to take the first option, no vertices left in first
+                        ! line
+                        ! Add first face pair
+                        v2 = l2%vert(k2+1)
+                        tff = [0, l2%facelabels(k2)]
+                        
+                        ! Update counter
+                        k2 = k2 + 1
+                        
+                        if (k2 == n2) then 
+                            tff(1) = eff
+                        end if 
+                    elseif ((k1 < n1) .and. (k2 == n2)) then 
+                        ! We have to take the second option
+                        ! Add second face pair
+                        v2 = l1%vert(k1+1)
+                        tff = [l1%facelabels(k1), 0]
+                        
+                        ! Update counter
+                        k1 = k1 + 1
+                        
+                        if (k1 == n1) then  
+                            tff(2) = eff
+                        end if 
+                        
+                    else
+                        ! This shouldn't happen
+                        call gdErrorHandler('Something wrong in quad gridder')
+                    end if 
+                        
+                    ! Add grid faces and cells
+                    !-------------------------
+                    ! Add face pair
+                    if (doquad) then 
+                        nf = nf + 1
+                        tempfacevert(nf, :) = [v1, v4]
+                        tempfacelabels(nf) = l1%facelabels(k1-1)
+                        nf = nf + 1
+                        tempfacevert(nf, :) = [v3, v2]
+                        tempfacelabels(nf) = l2%facelabels(k2-1)
+                        nf = nf + 1
+                        tempfacevert(nf, :) = [v4, v2]
+                        if ((k1 /= n1) .or. (k2 /= n2)) then 
+                            tempfacelabels(nf) = 0
+                        else
+                            tempfacelabels(nf) = eff
+                        end if 
+                    else
+                        nf = nf + 1
+                        tempfacevert(nf, :) = [v1, v2]
+                        tempfacelabels(nf) = tff(1)
+                        nf = nf + 1
+                        tempfacevert(nf, :) = [v3, v2]
+                        tempfacelabels(nf) = tff(2)
+                    end if 
+
+                    ! Add cell
+                    nc = nc + 1
+                    if (doquad) then 
+                        tempcellvert(ncv+1:ncv+4) = [v1, v3, v2, v4]
+                        tempcellvertP(nc, :) = [ncv+1, 4]
+                        ncv = ncv + 4
+                    else
+                        tempcellvert(ncv+1:ncv+3) = [v1, v2, v3]
+                        tempcellvertP(nc, :) = [ncv+1, 3]
+                        ncv = ncv + 3
+                    end if 
+                    
+                    ! Check stop criterium
+                    if ((k1 >= n1) .and. (k2 >= n2)) then 
+                        ! Check if the last non-aligned face was equal to the first one
+                        issameface = (tempfacevert(nf-1, 1) == tempfacevert(1, 1) ) .and. &
+                            (tempfacevert(nf-1, 2) == tempfacevert(1, 2))
+                        issameface = issameface .or. (tempfacevert(nf-1, 2) == tempfacevert(1, 1) ) .and. &
+                            (tempfacevert(nf-1, 1) == tempfacevert(1, 2))
+                        if (issameface) then 
+                            ! Don't add the last face
+                            nf = nf-1
+                        end if 
+                        exit
+                    end if 
+
+                end do
+
+                ! Housekeeping
+                end associate
+            end do 
+    
+            
+            ! Add to grid
+            allocate(tempcellregion(nc), tempfaceregion(nf))
+            tempcellregion = celldata(i)%region
+            tempfaceregion = celldata(i)%region
+            call grid%AddFace(tempfacevert(1:nf, :), tempfacelabels(1:nf), tempfaceregion(1:nf))
+            call grid%AddCell(tempcellvert(1:ncv), tempcellvertP(1:nc, :), tempcellregion(1:nc))
+
+            ! Housekeeping
+            deallocate(tempcellregion, tempfaceregion)
+
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                  TOPOMESH GRID DATA ROUTINES                     !
@@ -763,6 +1355,10 @@ module ggmod_gridgeneration2D
                 ! Unpack
                 tc = tubec(j)
 
+                ! Set cell region
+                !----------------
+                celldata(tc)%region = tc ! just equal to cell number for now
+
                 ! Extract boundaries
                 !-------------------
                 ! Get the cell faces & vertices and precompute some values
@@ -799,6 +1395,17 @@ module ggmod_gridgeneration2D
                 ! Determine high and low field value
                 hfval = maxval(vert%fval(face%vert(srf, :)))
                 lfval = minval(vert%fval(face%vert(srf, :)))
+
+                ! Check if, when querying the radial faces, we should 
+                ! flip to get them from high to low field
+                celldata(tubec(k))%flipsrf = .false.
+                celldata(tubec(k))%fliperf = .false.
+                if (vert%fval(face%vert(srf, 1)) < vert%fval(face%vert(srf, 2))) then 
+                    celldata(tubec(k))%flipsrf = .true.
+                end if 
+                if (vert%fval(face%vert(erf, 1)) < vert%fval(face%vert(erf, 2))) then 
+                    celldata(tubec(k))%fliperf = .true.
+                end if 
 
                 ! Determine high and low field poloidal faces (unsorted)
                 tcfv1val = vert%fval(tcfv1)
@@ -1122,6 +1729,7 @@ module ggmod_gridgeneration2D
                 ! Add labels of radial faces
                 celldata(tubec(k))%srflabel = face%label(tubef(k))
                 celldata(tubec(k))%erflabel = face%label(tubef(k+1))
+
             end do 
 
             ! Housekeeping
@@ -1137,7 +1745,7 @@ module ggmod_gridgeneration2D
     end subroutine 
 
     !------------------------------------------------------------------!
-    !                           AUXILIARY                              !
+    !                       GRID DATA ROUTINES                         !
     !------------------------------------------------------------------!
 
     ! Initializers
@@ -1151,12 +1759,14 @@ module ggmod_gridgeneration2D
 
         ! Initialize
         !===========
+        vert%ntot = 0
         select case (storagetype)
 
         case ('standard')
 
             vert%x = ConstructRealDynamicArray()
             vert%y = ConstructRealDynamicArray()
+            vert%fieldlineID = ConstructIntegerDynamicArray()
 
         case default 
 
@@ -1176,6 +1786,7 @@ module ggmod_gridgeneration2D
 
         ! Initialize
         !===========
+        face%ntot = 0
         select case (storagetype)
 
         case ('standard')
@@ -1202,11 +1813,12 @@ module ggmod_gridgeneration2D
 
         ! Initialize
         !===========
+        cell%ntot = 0
         select case (storagetype)
 
         case ('standard')
 
-            cell%v = ConstructIntegerDynamicArray()
+            cell%vert = ConstructIntegerDynamicArray()
             cell%vp1 = ConstructIntegerDynamicArray()
             cell%vp2 = ConstructIntegerDynamicArray()
             cell%region = ConstructIntegerDynamicArray()
@@ -1235,6 +1847,107 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Vertex addition
+    subroutine AddGGVert(grid, xv, yv, flID)
+
+        ! Description
+        !============
+        ! Add vertices to the grid (without updating interconnection)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGGridUDT)            :: grid 
+        real(R8), intent(in)        :: xv(:), yv(:)
+        integer(I8), intent(in)     :: flID(:)
+
+        ! Checks
+        !=======
+        ! Size checks
+        if ((size(xv) /= size(yv)) .or. (size(xv) /= size(flID))) then 
+            call gdErrorHandler('AddGGVert: incompatible input sizes')
+        end if 
+
+        ! Add
+        !====
+        call grid%vert%x%Append(xv)
+        call grid%vert%y%Append(yv)
+        call grid%vert%fieldlineID%Append(flID)
+
+    end subroutine
+
+    ! Face addition
+    subroutine AddGGFace(grid, facevert, facelabel, faceregion)
+
+        ! Description
+        !============
+        ! Add faces to the grid (without updating interconnection)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGGridUDT)            :: grid 
+        integer(I8), intent(in)     :: facevert(:, :), facelabel(:), &
+            faceregion(:)
+
+        ! Checks
+        !=======
+        ! Size checks
+        if ((size(facevert, 1) /= size(facelabel)) .or. (size(facelabel) /= size(faceregion))) then 
+            call gdErrorHandler('AddGGFace: incompatible input sizes')
+        end if 
+        if (size(facevert, 2) /= 2) then 
+            call gdErrorHandler('AddGGFace: wrong second dimension of face vertices')
+        end if 
+
+        ! Add
+        !====
+        call grid%face%v1%Append(facevert(:, 1))
+        call grid%face%v2%Append(facevert(:, 2))
+        call grid%face%label%Append(facelabel)
+        call grid%face%region%Append(faceregion)
+
+    end subroutine
+
+    ! Cell addition
+    subroutine AddGGCell(grid, cellvert, cellvertP, cellregion)
+
+        ! Description
+        !============
+        ! Add cells to the grid (without updating interconnection)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGGridUDT)            :: grid 
+        integer(I8), intent(in)     :: cellvertP(:, :), cellvert(:), &
+            cellregion(:)
+
+        ! Checks
+        !=======
+        ! Size checks
+        if ((size(cellvertP, 1) /= size(cellvert)) .or. (size(cellvert) /= size(cellregion))) then 
+            call gdErrorHandler('AddGGcell: incompatible input sizes')
+        end if 
+        if (size(cellvertP, 2) /= 2) then 
+            call gdErrorHandler('AddGGcell: wrong second dimension of cell vertex pointer')
+        end if 
+
+        ! Add
+        !====
+        call grid%cell%vp1%Append(cellvertP(:, 1))
+        call grid%cell%vp2%Append(cellvertP(:, 2))
+        call grid%cell%vert%Append(cellvert)
+        call grid%cell%region%Append(cellregion)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                           AUXILIARY                              !
+    !------------------------------------------------------------------!
+
+    
+
     ! Boundary line extractor for cells
     subroutine ExtractTMCellAlignedBoundary(tmcell, loc, ggtmdata, &
         topomesh, line)
@@ -1252,10 +1965,7 @@ module ggmod_gridgeneration2D
         ! allocated as empty arrays. 
 
         ! Note: the facedata is assumed to hold vertex distributions 
-        ! (xv, yv) for all faces. However, since they may be 
-        ! overwritten at later stages, vertex indices are not 
-        ! propagated in this routine (these may be not initialized
-        ! yet...)
+        ! (xv, yv) for all faces, including vertex IDs. 
 
         ! Declare variables
         !==================
@@ -1357,8 +2067,8 @@ module ggmod_gridgeneration2D
                 line%xv = line%xl
                 line%yv = line%yl
                 line%vert = bndv
+                allocate(line%facelabels(0))
 
-                ! Initialize rest
             else 
                 call gdErrorHandler('ExtractTMCellAlignedBoundary: expected ' // & 
                     'a single boundary vertex but found multiple/none')
@@ -1396,12 +2106,16 @@ module ggmod_gridgeneration2D
         line%yl = face%y(thisf)%Get()
         line%xv = facedata(thisf)%xv
         line%yv = facedata(thisf)%yv
+        line%vert = facedata(thisf)%vert
+        line%facelabels = spread(face%label(thisf), 1, size(line%vert)-1)
 
         if (doflip) then 
             line%xl = line%xl(size(line%xl):1:-1)
             line%yl = line%yl(size(line%yl):1:-1)
             line%xv = line%xv(size(line%xv):1:-1)
             line%yv = line%yv(size(line%yv):1:-1)
+            line%vert = line%vert(size(line%vert):1:-1)
+            line%facelabels = line%facelabels(size(line%facelabels):1:-1)
         end if 
 
         ! Get the next vertex
@@ -1472,12 +2186,19 @@ module ggmod_gridgeneration2D
                     facedata(thisf)%xv(size(facedata(thisf)%xv):1:-1)]
                 line%yv = [line%yv(1:size(line%yl)-1), &
                     facedata(thisf)%yv(size(facedata(thisf)%xv):1:-1)]
+                line%vert = [line%vert(1:size(line%yl)-1), &
+                    facedata(thisf)%vert(size(facedata(thisf)%xv):1:-1)]
+                line%facelabels = [line%facelabels(1:size(line%yl)-1), &
+                    spread(face%label(thisf), 1, size(line%vert)-1)]
             
             else
                 line%xl = [line%xl(1:size(line%xl)-1), face%x(thisf)%Get()] ! avoid double coordinates
                 line%yl = [line%yl(1:size(line%yl)-1), face%y(thisf)%Get()]
                 line%xv = [line%xv(1:size(line%yl)-1), facedata(thisf)%xv]
                 line%yv = [line%yv(1:size(line%yl)-1), facedata(thisf)%yv]
+                line%vert = [line%vert(1:size(line%yl)-1), facedata(thisf)%vert]
+                line%facelabels = [line%facelabels(1:size(line%yl)-1), &
+                    spread(face%label(thisf), 1, size(line%vert)-1)]
             end if 
 
             ! Set
