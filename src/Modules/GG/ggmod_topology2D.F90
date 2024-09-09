@@ -4180,11 +4180,10 @@ module ggmod_topology2D
             ! Add if it is a single cell tube
             if (singlefacetube) then 
                 call tubef%Append(tf)
-                cycle
             end if 
             
             ! Loop untill all flux tube cells found from one side
-            do while (.true.) 
+            do while (.true. .and. (.not. singlefacetube)) 
                 ! Add the current face before already found faces (to keep correct
                 ! order)
                 call tubef%Append(thistf)
@@ -4354,6 +4353,7 @@ module ggmod_topology2D
         ! Set fields
         topomesh%tube%face = alltubef%Get()
         topomesh%tube%cell = alltubec%Get()
+        topomesh%tube%isclosed = isclosedtube%Get() == 1_I8
         topomesh%tube%faceP(:, 2) = ntubef%Get()
         topomesh%tube%cellp(:, 2) = ntubec%Get()
         topomesh%tube%faceP(1, 1) = 1
