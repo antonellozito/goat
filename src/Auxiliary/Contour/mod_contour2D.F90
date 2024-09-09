@@ -1502,18 +1502,18 @@ module mod_contour2D
             
             ! Subtract counter. If it's a saddle point, add the center of 
             ! this quad
+            quadc(iic, jjc) = quadc(iic, jjc) - 1
             if (issad) then 
                 ! Compute point at center and add
                 tx = sum(X([iic, iic+1]))/2.0_R8
                 ty = sum(Y([jjc, jjc+1]))/2.0_R8
                 call xc%Append(tx)
                 call yc%Append(ty)
-                quadc(iic, jjc) = quadc(iic, jjc) - 1
+                
             end if 
             if (superquadflags(iic, jjc) > 0) then 
                 ! Check if the value is exactly the same as the x-point
                 ! value - add the point in that case
-                quadc(iic, jjc) = quadc(iic, jjc) - 1
                 thissp = spstruct(quadflags(iic, jjc))
                 addpoint = .false. 
                 if (thissp%val - tv < spvalabstol) then 
