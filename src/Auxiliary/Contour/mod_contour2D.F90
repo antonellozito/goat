@@ -146,11 +146,12 @@ module mod_contour2D
         ! used during the contour line tracing to traverse saddle 
         ! points in a correct way. 
 
-        integer(I8)                 :: ID, ixquad, iyquad, order
+        integer(I8)                 :: ID, ixquad, iyquad, order, starttri
         integer(I8), allocatable    :: tri(:, :), ixquadtri(:), &
             iyquadtri(:), ixpoints(:), iypoints(:)
-        real(R8)                    :: x, y, val 
+        real(R8)                    :: x, y, val, startx, starty 
         real(R8), allocatable       :: valpoints(:)
+        logical, allocatable        :: hasftri(:, :)
 
     contains 
 
@@ -429,11 +430,6 @@ module mod_contour2D
             call gdErrorHandler('TraceContourStructured2DPoint: incompatible ' // &
             'dimensions of arguments xs, ys, vs, order, IDs')
         end if 
-        if (size(tracevalues) == 0) then 
-            ! Empty trace value array - not allowed
-            call gdErrorHandler('TraceContourStructured2D: trace value ' // & 
-                'array appears to be empty, not supported')
-        end if 
 
         ! Initialize
         !===========
@@ -453,6 +449,11 @@ module mod_contour2D
             order(i) = spstruct(i)%order
         end do 
 
+        ! Check if we need to trace
+        if (size(tracevalues) == 0) then 
+            return 
+        end if
+ 
         ! Main loop
         !==========
         do i = 1, size(tracevalues)
@@ -586,11 +587,6 @@ module mod_contour2D
             call gdErrorHandler('TraceContourStructured2DPoint: incompatible ' // &
             'dimensions of arguments xs, ys, vs, order, IDs')
         end if 
-        if (nt == 0) then 
-            ! Empty trace value array - not allowed
-            call gdErrorHandler('TraceContourStructured2DPoint: trace value ' // & 
-                'array appears to be empty, not supported')
-        end if 
         if (nt /= size(yt)) then 
             ! Incompatible dimensions of tracing coordinates
             call gdErrorHandler('TraceContourStructured2DPoint: trace coordinates ' // & 
@@ -609,6 +605,11 @@ module mod_contour2D
         do i = 1, size(spstruct)
             order(i) = spstruct(i)%order
         end do 
+
+        ! Check if we should trace
+        if (nt == 0) then 
+            return 
+        end if 
 
         ! Main loop
         !==========
@@ -700,7 +701,7 @@ module mod_contour2D
         integer(I8), intent(in)         :: superquadflags(nx-1, ny-1)
         logical, intent(in)             :: superquadfacexflags(nx, ny-1), &
             superquadfaceyflags(nx-1, ny)
-        type(sp2DUDT), intent(in)       :: spstruct(:) 
+        type(sp2DUDT), intent(inout)    :: spstruct(:) 
         type(ContourUDT), allocatable   :: contours(:)
 
         ! Auxiliary
@@ -771,6 +772,9 @@ module mod_contour2D
 
         ! Determine the quadflags
         quadflags = GetQuadFlags(hasvv, superquadflags)
+
+        ! Initialize saddle point contour data
+        call InitializeSaddlePointContourData(spstruct, hasvv, tv)
 
         ! Determine faceflags (true if value is present on face and if 
         ! face is not an internal face flag - can be logical since we 
@@ -915,7 +919,7 @@ module mod_contour2D
                 if (issuperquad(iic, jjc)) then 
                     ! Traverse the saddle point region
                     call TraverseSaddlePoint(iic, jjc, iif, jjf, doexit, &
-                        hasvv, quadflags, spstruct, tv, xc, yc, thiscontour, &
+                        quadflags, spstruct, tv, xc, yc, thiscontour, &
                         V, X, Y, nx, ny)
 
                     ! Exit loop?
@@ -1110,9 +1114,9 @@ module mod_contour2D
                 quadc(iic, jjc) = quadc(iic, jjc) - 1
                 thissp = spstruct(quadflags(iic, jjc))
                 addpoint = .false. 
-                if (thissp%val - tv < spvalabstol) then 
+                if (abs(thissp%val - tv) < spvalabstol) then 
                     addpoint = .true. 
-                elseif ( (thissp%val - tv)/tv < spvalreltol) then 
+                elseif ( abs((thissp%val - tv)/tv) < spvalreltol) then 
                     addpoint = .true.
                 end if 
                 if (addpoint) then 
@@ -1241,7 +1245,7 @@ module mod_contour2D
                 if (superquadflags(iic, jjc) > 0) then 
                     ! Traverse the saddle point
                     call TraverseSaddlePoint(iic, jjc, iif, jjf, doexit, &
-                        hasvv, quadflags, spstruct, tv, xc, yc, thiscontour, &
+                        quadflags, spstruct, tv, xc, yc, thiscontour, &
                         V, X, Y, nx, ny)
 
                     ! Exit?
@@ -1294,7 +1298,7 @@ module mod_contour2D
         integer(I8), intent(in)         :: superquadflags(nx-1, ny-1)
         logical, intent(in)             :: superquadfacexflags(nx, ny-1), &
             superquadfaceyflags(nx-1, ny)
-        type(sp2DUDT), intent(in)       :: spstruct(:) 
+        type(sp2DUDT), intent(inout)    :: spstruct(:) 
         type(ContourUDT), allocatable   :: contours(:)
 
         ! Auxiliary
@@ -1399,6 +1403,9 @@ module mod_contour2D
 
         end if 
 
+        ! Initialize saddle point contour data
+        call InitializeSaddlePointContourData(spstruct, hasvv, tv)
+
         ! Determine the quadflags
         quadflags = GetQuadFlags(hasvv, superquadflags)
 
@@ -1490,10 +1497,22 @@ module mod_contour2D
                 jjc = jjc - 1
             end if
 
-            ! Check if we should add the starting point
-            if ((iic == iisq) .and. (jjc == jjsq)) then 
-                call xc%Append(x0)
-                call yc%Append(y0)
+            ! Check how we should start
+            if ((superquadflags(iic, jjc) /= 0) .and. .not. issaddlepoint) then 
+                if (superquadflags(iic, jjc) == superquadflags(iisq, jjsq)) then 
+                    ! Start in saddle point
+                    call StartFromSaddlePoint(x0p, y0p, iic, jjc, doexit, &
+                        quadflags, spstruct, tv, xc, yc, thiscontour, &
+                        V, X, Y, nx, ny)
+                    
+                    ! Check if we need to exit
+                    if (doexit) then 
+                        exit 
+                    end if 
+                end if
+            elseif ((iic == iisq) .and. (jjc == jjsq)) then 
+                call xc%Append(x0p)
+                call yc%Append(y0p)
             end if 
             
             ! Save starting indices
@@ -1516,9 +1535,9 @@ module mod_contour2D
                 ! value - add the point in that case
                 thissp = spstruct(quadflags(iic, jjc))
                 addpoint = .false. 
-                if (thissp%val - tv < spvalabstol) then 
+                if (abs(thissp%val - tv) < spvalabstol) then 
                     addpoint = .true. 
-                elseif ( (thissp%val - tv)/tv < spvalreltol) then 
+                elseif ( abs((thissp%val - tv)/tv) < spvalreltol) then 
                     addpoint = .true.
                 end if 
                 if (addpoint) then 
@@ -1655,7 +1674,7 @@ module mod_contour2D
                 if (superquadflags(iic, jjc) > 0) then 
                     ! Traverse the saddle point
                     call TraverseSaddlePoint(iic, jjc, iif, jjf, doexit, &
-                        hasvv, quadflags, spstruct, tv, xc, yc, thiscontour, &
+                        quadflags, spstruct, tv, xc, yc, thiscontour, &
                         V, X, Y, nx, ny)
 
                     ! Exit?
@@ -1966,9 +1985,71 @@ module mod_contour2D
 
     end subroutine 
 
+    ! Saddle point contour data initializer 
+    subroutine InitializeSaddlePointContourData(spstruct, hasvv, tv)
+
+        ! Description
+        !============
+        ! This routine initializes the contouring data for each saddle
+        ! point by checking where the values are present and which 
+        ! triangles/edges contain the value. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(sp2DUDT), intent(inout)                :: spstruct(:)
+        logical, intent(in), dimension(:, :)        :: hasvv
+        real(R8), intent(in)                        :: tv
+
+        ! Auxiliary
+        logical, allocatable                        :: hasvsp(:), &
+            hasvtri(:, :), hasftri(:, :)
+
+        ! Loop
+        integer(I8)                                 :: i, j 
+
+        ! Loop 
+        do j = 1, size(spstruct)
+            ! Associate
+            associate(thissp        => spstruct(j))
+
+            ! Check values
+            allocate(hasvsp(size(thissp%ixpoints)), &
+                hasvtri(size(thissp%tri, 1), size(thissp%tri, 2)))
+            hasvsp(1) = thissp%val > tv 
+            do i = 2, size(thissp%ixpoints)
+                hasvsp(i) = hasvv(thissp%ixpoints(i), thissp%iypoints(i))
+            end do
+            do i = 1, size(thissp%tri, 2)
+                hasvtri(:, i) = hasvsp(thissp%tri(:, i))
+            end do 
+            hasftri = hasvtri 
+            hasftri = .false. ! indicator for faces of triangle
+            hasftri(:, 1) = (hasvtri(:, 1) .and. (.not. hasvtri(:, 2))) .or.&
+                (hasvtri(:, 2) .and. (.not. hasvtri(:, 1)))
+            hasftri(:, 2) = (hasvtri(:, 2) .and. (.not. hasvtri(:, 3))) .or.&
+                (hasvtri(:, 3) .and. (.not. hasvtri(:, 2)))
+            hasftri(:, 3) = (hasvtri(:, 1) .and. (.not. hasvtri(:, 3))) .or.&
+                (hasvtri(:, 3) .and. (.not. hasvtri(:, 1)))
+
+            ! Add
+            spstruct(j)%hasftri = hasftri
+
+            ! Starting point if started from saddle point
+            spstruct(j)%starttri = 0
+            spstruct(j)%startx = 0
+            spstruct(j)%starty = 0
+
+            ! Housekeeping
+            deallocate(hasvsp, hasvtri)
+            end associate 
+        end do 
+
+    end subroutine
+
     ! Saddle point traversal 
     subroutine TraverseSaddlePoint(iic, jjc, ixv, iyv, doexit, &
-        hasvv, quadflags, spstruct, tv, xc, yc, contour, V, X, Y, &
+        quadflags, spstruct, tv, xc, yc, contour, V, X, Y, &
         nx, ny)
 
         ! Description
@@ -1992,24 +2073,21 @@ module mod_contour2D
         integer(I8), intent(inout)      :: iic, jjc
         integer(I8), intent(in)         :: ixv(1:2), iyv(1:2), quadflags(:, :), &
             nx, ny
-        logical, intent(in)             :: hasvv(nx, ny)
         logical, intent(inout)          :: doexit 
-        type(sp2DUDT), intent(in)       :: spstruct(:)
+        type(sp2DUDT), intent(inout)    :: spstruct(:)
         type(ContourUDT), intent(inout) :: contour
         type(RealDynamicArrayUDT), intent(inout)    :: xc, yc
         real(R8), intent(in)            :: tv, V(nx, ny), X(nx), Y(ny)
 
         ! Auxiliary
         type(sp2DUDT)                   :: thissp
-        logical, allocatable            :: hasvsp(:), hasftri(:, :), &
-            hasvtri(:, :)
+        logical, allocatable            :: hasftri(:, :)
         integer(I8)                     :: isp, thisiic, thisjjc, &
             nodes(1:2), ctri, p2
         real(R8)                        :: tx, ty, V1, V2, x1, x2, y1, &
             y2, frac 
 
         ! Loop 
-        integer(I8)                     :: i
 
         ! Initialize
         !===========
@@ -2023,6 +2101,7 @@ module mod_contour2D
         
         ! Unpack
         thissp = spstruct(isp)
+        hasftri = spstruct(isp)%hasftri
 
         ! Check if we need to skip 
         if ( abs(tv - thissp%val) <= spvalabstol) then 
@@ -2051,25 +2130,6 @@ module mod_contour2D
             return
         end if
         
-        ! Check values
-        allocate(hasvsp(size(thissp%ixpoints)), &
-            hasvtri(size(thissp%tri, 1), size(thissp%tri, 2)))
-        hasvsp(1) = thissp%val > tv 
-        do i = 2, size(thissp%ixpoints)
-            hasvsp(i) = hasvv(thissp%ixpoints(i), thissp%iypoints(i))
-        end do
-        do i = 1, size(thissp%tri, 2)
-            hasvtri(:, i) = hasvsp(thissp%tri(:, i))
-        end do 
-        hasftri = hasvtri 
-        hasftri = .false. ! indicator for faces of triangle
-        hasftri(:, 1) = (hasvtri(:, 1) .and. (.not. hasvtri(:, 2))) .or.&
-            (hasvtri(:, 2) .and. (.not. hasvtri(:, 1)))
-        hasftri(:, 2) = (hasvtri(:, 2) .and. (.not. hasvtri(:, 3))) .or.&
-            (hasvtri(:, 3) .and. (.not. hasvtri(:, 2)))
-        hasftri(:, 3) = (hasvtri(:, 1) .and. (.not. hasvtri(:, 3))) .or.&
-            (hasvtri(:, 3) .and. (.not. hasvtri(:, 1)))
-        
         ! Trace
         !======
         ! Determine initial triangle
@@ -2080,10 +2140,39 @@ module mod_contour2D
         else
             ctri = size(thissp%tri, 1)
         end if
+
+        ! Check 
+        if (ctri == thissp%starttri) then 
+            ! Arrived again at starting point when tracing from point and
+            ! when started in this saddle point region. Add starting point
+            ! and exit
+            tx = thissp%startx
+            ty = thissp%starty
+
+            ! Add to contour
+            call xc%Append(tx)
+            call yc%Append(ty)
+
+            ! Update saddle point structure
+            spstruct(isp) = thissp
+            spstruct(isp)%hasftri = hasftri
+
+            ! Set to exit
+            doexit = .true.
+            return 
+        end if 
         
         ! Traverse through the saddle point region
-        hasftri(ctri, 2) = .false.
+        if (hasftri(ctri, 2)) then 
+            hasftri(ctri, 2) = .false.
+        else 
+            ! Shouldn't be happening?
+            call gdErrorHandler('TraverseSaddlePoint: starting face ' // & 
+                'supposedly does not have value, this may be a bug')
+        end if 
         do while (.true.)
+            
+
             ! Consistency check
             if (count(hasftri(ctri, :)) > 1) then 
                 call gdErrorHandler('TraverseSaddlePoint: Too many ' // &
@@ -2126,7 +2215,10 @@ module mod_contour2D
             elseif (hasftri(ctri, 2)) then 
                 ! Current triangle, exterior face -> exit (point will
                 ! be added in overarching tracing routine later)
-                ! hasftri(ctri, 2) = false
+                ! Update saddle point structure
+                hasftri(ctri, 2) = .false.
+                spstruct(isp) = thissp
+                spstruct(isp)%hasftri = hasftri
                 exit
             elseif (hasftri(ctri, 3)) then 
                 ! Compute point at this face
@@ -2159,13 +2251,243 @@ module mod_contour2D
                     'find next face in saddle point region, this is ' // & 
                     'likely a bug in the code')
             end if
+
+            ! Check 
+            if (ctri == thissp%starttri) then 
+                ! Arrived again at starting point when tracing from point and
+                ! when started in this saddle point region. Add starting point
+                ! and exit
+                tx = thissp%startx
+                ty = thissp%starty
+
+                ! Add to contour
+                call xc%Append(tx)
+                call yc%Append(ty)
+
+                ! Update saddle point structure
+                spstruct(isp) = thissp
+                spstruct(isp)%hasftri = hasftri
+
+                ! Set to exit
+                doexit = .true.
+                return 
+            end if 
+
         end do
         
         ! Compute the quad we ended up in
         iic = thissp%ixquadtri(ctri)
         jjc = thissp%iyquadtri(ctri)
+
         
     end subroutine 
+    
+    ! Start from saddle point
+    subroutine StartFromSaddlePoint(xp, yp, iic, jjc, doexit, &
+        quadflags, spstruct, tv, xc, yc, contour, V, X, Y, &
+        nx, ny)
+
+        ! Description
+        !============
+        ! Start from a point within a saddle point region that is not
+        ! equal to the saddle point itself. Initially, iic and jjc 
+        ! should give the indices in the quadrilateral mesh such that 
+        ! the correct saddle point index can be found. 
+
+        ! Note: if the saddle point value has been wrongly determined,
+        ! it is possible that this routine cannot proceed. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)            :: xp, yp
+        integer(I8), intent(inout)      :: iic, jjc
+        integer(I8), intent(in)         :: quadflags(:, :), &
+            nx, ny
+        logical, intent(inout)          :: doexit 
+        logical, allocatable            :: hasftri(:, :)
+        type(sp2DUDT), intent(inout)    :: spstruct(:)
+        type(ContourUDT), intent(inout) :: contour
+        type(RealDynamicArrayUDT), intent(inout)    :: xc, yc
+        real(R8), intent(in)            :: tv, V(nx, ny), X(nx), Y(ny)
+
+        ! Auxiliary
+        type(sp2DUDT)                   :: thissp
+        logical, allocatable            :: in(:), on(:)
+        integer(I8)                     :: isp, thisiic, thisjjc, &
+            ctri, p2
+        real(R8)                        :: tx, ty, V1, V2, x1, x2, y1, &
+            y2, frac 
+
+        ! Loop 
+
+        ! Initialize
+        !===========
+        ! Get saddlepoint index
+        isp = quadflags(iic, jjc)
+        
+        ! Initialize
+        thisiic = iic
+        thisjjc = jjc
+        doexit = .false.
+        
+        ! Unpack
+        thissp = spstruct(isp)
+        hasftri = spstruct(isp)%hasftri
+
+        ! Check if we need to skip 
+        if ( abs(tv - thissp%val) <= spvalabstol) then 
+            ! Exit
+            doexit = .true.
+        else
+            ! It should be safe to check for the relative error now, 
+            ! otherwise we would've exited due to the first statement 
+            ! already
+            if (abs((tv - thissp%val)/tv) <= spvalreltol) then 
+                doexit = .true.
+            end if 
+        end if 
+        
+        ! Check
+        if (doexit) then 
+
+            ! Add the saddle point location
+            tx = thissp%x
+            ty = thissp%y
+
+            ! Add to contour
+            call xc%Append(tx)
+            call yc%Append(ty)
+            contour%endsaddle = thissp%ID
+            return
+        end if
+        
+        ! Trace
+        !======
+        ! Determine initial triangle
+        call InTriangle(thissp%tri(:, 1), thissp%tri(:, 2), thissp%tri(:, 3), &
+            [thissp%x, X(thissp%ixpoints(2:))], [thissp%y, Y(thissp%iypoints(2:))], &
+            xp, yp, in, on)
+        ctri = findloc(in .or. on, .true., 1)
+        if (ctri == 0) then 
+            call gdErrorHandler('StartFromSaddlePoint: starting triangle ' // & 
+                'could not be found, this may be a bug')
+        end if 
+
+        ! Set
+        thissp%starttri = ctri 
+        thissp%startx = xp 
+        thissp%starty = yp 
+
+        ! Add to contour
+        call xc%Append(xp)
+        call yc%Append(yp)
+        
+        ! Traverse through the saddle point region
+        do while (.true.)
+            ! Consistency check
+            if (count(hasftri(ctri, :)) < 1) then 
+                call gdErrorHandler('TraverseSaddlePoint: Not enough values' // & 
+                    'found in saddle point region - check if ' // & 
+                    'saddle points were correctly determined')
+            end if
+            
+            ! Find the next face that contains the value
+            if (hasftri(ctri, 1)) then 
+                ! Compute point at this face
+                p2 = thissp%tri(ctri, 2)
+                V1 = thissp%val 
+                V2 = V(thissp%ixpoints(p2), thissp%iypoints(p2))
+                x1 = thissp%x 
+                x2 = X(thissp%ixpoints(p2))
+                y1 = thissp%y 
+                y2 = Y(thissp%iypoints(p2))
+                frac = (tv - V1)/(V2 - V1)
+                tx = x1 + frac*(x2 - x1)
+                ty = y1 + frac*(y2 - y1)
+                
+                ! Add point to contour
+                call xc%Append(tx)
+                call yc%Append(ty)
+            
+                ! Previous triangle, update
+                hasftri(ctri, 1) = .false.
+                ctri = ctri-1
+                if (ctri == 0) then 
+                    ctri = size(thissp%tri, 1)
+                end if
+                
+                ! Remove from next triangle
+                hasftri(ctri, 3) = .false. 
+                
+            elseif (hasftri(ctri, 2)) then 
+                ! Current triangle, exterior face -> exit (point will
+                ! be added in overarching tracing routine later)
+                hasftri(ctri, 2) = .false.
+                spstruct(isp) = thissp
+                spstruct(isp)%hasftri = hasftri
+                exit
+            elseif (hasftri(ctri, 3)) then 
+                ! Compute point at this face
+                p2 = thissp%tri(ctri, 3)
+                V1 = thissp%val 
+                V2 = V(thissp%ixpoints(p2), thissp%iypoints(p2))
+                x1 = thissp%x 
+                x2 = X(thissp%ixpoints(p2))
+                y1 = thissp%y 
+                y2 = Y(thissp%iypoints(p2))
+                frac = (tv - V1)/(V2 - V1)
+                tx = x1 + frac*(x2 - x1)
+                ty = y1 + frac*(y2 - y1)
+                
+                ! Add point to contour
+                call xc%Append(tx)
+                call yc%Append(ty)
+                
+                ! Next triangle, update
+                hasftri(ctri, 3) = .false.
+                ctri = ctri+1
+                if (ctri > size(thissp%tri, 1)) then 
+                    ctri = 1
+                end if 
+                
+                ! Remove from next triangle
+                hasftri(ctri, 1) = .false.
+            else
+                call gdErrorHandler('TraverseSaddlePoint: Could not ' // & 
+                    'find next face in saddle point region, this is ' // & 
+                    'likely a bug in the code')
+            end if
+
+            ! Check 
+            if (ctri == thissp%starttri) then 
+                ! Arrived again at starting point when tracing from point and
+                ! when started in this saddle point region. Add starting point
+                ! and exit
+                tx = thissp%startx
+                ty = thissp%starty
+
+                ! Add to contour
+                call xc%Append(tx)
+                call yc%Append(ty)
+
+                ! Update saddle point
+                spstruct(isp) = thissp
+                spstruct(isp)%hasftri = hasftri
+
+                ! Set to exit
+                doexit = .true.
+                return 
+            end if 
+
+        end do
+        
+        ! Compute the quad we ended up in
+        iic = thissp%ixquadtri(ctri)
+        jjc = thissp%iyquadtri(ctri)
+
+
+    end subroutine
 
     ! Quad flag determination
     function GetQuadFlags(hasvv, superquadflags) result(quadflags)
@@ -2297,6 +2619,104 @@ module mod_contour2D
             deallocate(delind)
         end do 
     end subroutine 
+
+    ! InTriangle routine
+    subroutine InTriangle(v1, v2, v3, x, y, xp, yp, in, on)
+
+        ! Description
+        !============
+        ! This routine checks if a point lies within or on a triangle.
+        ! The result is returned in the in and on arrays,
+        ! as input the triangle vertices should be given in v1, v2, v3. 
+        ! The triangle coordinates, which can be queried as x(v1), should
+        ! be given in the x, y arrays, and the query point is given as a
+        ! scalar set of coordinates xp, yp. 
+
+        ! Note: the implementation here is very naive and simply loops
+        ! over all triangles, assuming there are not many to deal with.
+        ! This assumption is only valid within this module, since 
+        ! this routine is only used for saddle points which have few
+        ! triangles. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), dimension(:), intent(in)           :: v1, v2, v3 
+        real(R8), dimension(:), intent(in)              :: x, y 
+        real(R8), intent(in)                            :: xp, yp 
+        logical, allocatable, dimension(:), intent(out) :: in, on
+
+        ! Auxiliary
+        real(R8)                        :: x1, y1, dx1, dy1, dx1p, dy1p, &
+            x2, y2, dx2, dy2, dx2p, dy2p, x3, y3, dx3, dy3, dx3p, dy3p, & 
+            cp(1:3)
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Checks
+        !=======
+        if ((size(v1) /= size(v2)) .or. (size(v1) /= size(v3))) then 
+            call gdErrorHandler('InTriangle: v1, v2, v3 have incompatible sizes')
+        end if 
+        if (size(x) /= size(y)) then 
+            call gdErrorHandler('InTriangle: x, y have incompatible sizes')
+        end if 
+        if (allocated(in)) then 
+            deallocate(in)
+        end if 
+        if (allocated(on)) then
+            deallocate(on)
+        end if 
+
+        ! Initialize
+        !===========
+        allocate(in(size(v1)), on(size(v1)))
+        in = .false. 
+        on = .false. 
+
+        ! Compute
+        !========
+        ! Loop
+        do i = 1, size(v1)
+            ! Get coordinates
+            x1 = x(v1(i))
+            x2 = x(v2(i))
+            x3 = x(v3(i))
+            y1 = y(v1(i))
+            y2 = y(v2(i))
+            y3 = y(v3(i))
+
+            ! Get vectors
+            dx1 = x2 - x1 
+            dx2 = x3 - x2 
+            dx3 = x1 - x3
+            dy1 = y2 - y1 
+            dy2 = y3 - y2 
+            dy3 = y1 - y3
+
+            dx1p = xp - x1 
+            dx2p = xp - x2 
+            dx3p = xp - x3
+            dy1p = yp - y1 
+            dy2p = yp - y2 
+            dy3p = yp - y3
+
+            ! Compute cross products
+            cp(1) = dx1*dy1p - dy1*dx1p 
+            cp(2) = dx2*dy2p - dy2*dx2p
+            cp(3) = dx3*dy3p - dy3*dx3p
+
+            ! Check signs
+            if (all(cp > 0) .or. all(cp < 0)) then 
+                in(i) = .true. 
+            elseif (all(cp >= 0) .or. all(cp <= 0)) then 
+                on(i) = .true.
+            end if 
+
+        end do 
+
+    end subroutine
 
 
     
