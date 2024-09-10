@@ -98,6 +98,7 @@ module ggmod_gridgeneration2D
     use ggmod_topology2D
     use ggmod_vertexdistribution2D
     use DistributionFunction
+    use mod_plotter
     implicit none
     private 
     public :: GenerateUnstructuredAlignedGrid
@@ -125,8 +126,8 @@ module ggmod_gridgeneration2D
         ! Description
         !============
         ! Contains additional face data, including the grid vertices
-        ! xv, yv and the field values at these vertices, fv.
-        real(R8), allocatable, dimension(:)     :: xv, yv, fv
+        ! xv, yv 
+        real(R8), allocatable, dimension(:)     :: xv, yv
         integer(I8), allocatable, dimension(:)  :: vert
 
     end type 
@@ -367,13 +368,6 @@ module ggmod_gridgeneration2D
         ! Temporary grid structure
         call grid%Initialize('standard')
 
-        ! Initial grid structure
-        !vert = struct('x', zeros(0, 1), 'y', zeros(0, 1), 'BV', zeros(0, 1), 'ntot', 0);
-        !face = struct('vert', zeros(0, 2) , 'ntot', 0, 'labels', zeros(0, 1), 'region', zeros(0, 1));
-        !cell = struct('vert', zeros(0, 1), 'vertP', zeros(0, 2), 'region', zeros(0, 1), 'ntot', 0, 'nvert', 0);
-        !fs = struct('ntot', 0);
-        !grid = struct('vert', vert, 'face', face, 'cell', cell, 'fs', fs);
-
         ! Set up vertex distribution
         !===========================
         ! Poloidal vertex distributor
@@ -478,12 +472,6 @@ module ggmod_gridgeneration2D
                 'unknown cell construction method: ' // options%cellconstructionmethod)
 
         end select
-
-
-
-        ! Distribute the vertices
-        !call DistributeVerticesTopologicalMeshCells(ggtmdata, topomesh, &
-        !    topomesh, poloidalvertexdistributor, magneticFieldDF, )
 
         ! Add interconnections
         ![grid] = ComputeGridInterconnections(grid);
@@ -1209,6 +1197,9 @@ module ggmod_gridgeneration2D
                 facedata(i)%xv = tx
                 facedata(i)%yv = ty
 
+                ! Housekeeping
+                deallocate(fc)
+
             end if 
         end do 
 
@@ -1225,7 +1216,7 @@ module ggmod_gridgeneration2D
             ! Loop
             do j = 1, size(tf)
                 ! Determine number of field lines
-                nfl = size(facedata(tf(j))%fv)
+                nfl = size(facedata(tf(j))%xv)
                 if (nfl > nflmax) then 
                     nflmax = nfl 
                     tfmax = tf(j)
@@ -1301,7 +1292,7 @@ module ggmod_gridgeneration2D
             indsrf, tf, cind, nc, ntf, incr, nv
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
-            allIDs, s1, s2
+            allIDs, s1, s2, polv
         integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
             segc, vertexID
         real(R8)                                :: hfval, lfval, &
@@ -1321,6 +1312,7 @@ module ggmod_gridgeneration2D
         type(IntegerDynamicArrayUDT), allocatable, dimension(:, :)     :: &
             segcda, segrfda
         type(PolygonUDT), allocatable           :: polc(:)
+        type(PolygonSetUDT)                     :: tempps
 
         ! Loop
         integer(I8)                             :: i, j, k, cc
@@ -1370,7 +1362,7 @@ module ggmod_gridgeneration2D
 
                 ! Set start radial face
                 srf = tubef(j) ! should work 
-                celldata(tubec(k))%srf = srf 
+                celldata(tc)%srf = srf 
                 indsrf = findloc(tcf, srf, 1)
                 if (indsrf == 0) then 
                     ! This shouldn't be happening
@@ -1382,7 +1374,7 @@ module ggmod_gridgeneration2D
 
                 ! Set end radial face
                 erf = tubef(j+1) ! should work 
-                celldata(tubec(k))%erf = erf
+                celldata(tc)%erf = erf
                 inderf = findloc(tcf, erf, 1)
                 if (inderf == 0) then 
                     ! This shouldn't be happening
@@ -1398,13 +1390,13 @@ module ggmod_gridgeneration2D
 
                 ! Check if, when querying the radial faces, we should 
                 ! flip to get them from high to low field
-                celldata(tubec(k))%flipsrf = .false.
-                celldata(tubec(k))%fliperf = .false.
+                celldata(tc)%flipsrf = .false.
+                celldata(tc)%fliperf = .false.
                 if (vert%fval(face%vert(srf, 1)) < vert%fval(face%vert(srf, 2))) then 
-                    celldata(tubec(k))%flipsrf = .true.
+                    celldata(tc)%flipsrf = .true.
                 end if 
                 if (vert%fval(face%vert(erf, 1)) < vert%fval(face%vert(erf, 2))) then 
-                    celldata(tubec(k))%fliperf = .true.
+                    celldata(tc)%fliperf = .true.
                 end if 
 
                 ! Determine high and low field poloidal faces (unsorted)
@@ -1416,10 +1408,10 @@ module ggmod_gridgeneration2D
                 do k = 1, size(tcf)
                     ! Check if the face is of poloidal/sep type
                     if (any(face%type(tcf(k)) == [TMfacepolID, TMfacesepID])) then 
-                        dhf1 = abs(tcfv1val(tcf(k)) - hfval)
-                        dhf2 = abs(tcfv2val(tcf(k)) - hfval)
-                        dlf1 = abs(tcfv1val(tcf(k)) - lfval)
-                        dlf2 = abs(tcfv2val(tcf(k)) - lfval)
+                        dhf1 = abs(tcfv1val(k) - hfval)
+                        dhf2 = abs(tcfv2val(k) - hfval)
+                        dlf1 = abs(tcfv1val(k) - lfval)
+                        dlf2 = abs(tcfv2val(k) - lfval)
                         if ((dhf1 < dlf1) .and. (dhf2 < dlf2)) then 
                             ! High field face
                             ishfface(k) = .true. 
@@ -1468,21 +1460,33 @@ module ggmod_gridgeneration2D
         ! Loop over all tubes
         do i = 1, tube%ntot 
 
+            ! Initialize
+            !-----------
+            tubef = tube%GetFace(i)
+            tubec = tube%GetCell(i)
+
+            if (tube%isclosed(i)) then 
+                print *, 'closed tube'
+            end if 
+
             ! Trace contours
             !---------------
-            ! Get initial vertex distribution
+            ! Get initial vertex distribution (skip start and end points)
             tf = tubedata(i)%distributionface
-            tx = facedata(i)%xv
-            ty = facedata(i)%yv
+            tx = facedata(tf)%xv(2:size(facedata(tf)%xv)-1)
+            ty = facedata(tf)%yv(2:size(facedata(tf)%yv)-1)
 
-            ! Make sure we trace from high to low field value
-            allocate(tfval(size(tx)))
-            call magneticField%interp%Evaluate(tx, ty, 0, 0, tfval)
-            if (tfval(1) < tfval(size(tfval))) then 
-                tx = tx(size(tx):1:-1)
-                ty = ty(size(ty):1:-1)
+            ! Check
+            if (size(tx) > 0) then 
+                ! Make sure we trace from high to low field value
+                allocate(tfval(size(tx)))
+                call magneticField%interp%Evaluate(tx, ty, 0, 0, tfval)
+                if (tfval(1) < tfval(size(tfval))) then 
+                    tx = tx(size(tx):1:-1)
+                    ty = ty(size(ty):1:-1)
+                end if 
+                deallocate(tfval)
             end if 
-            deallocate(tfval)
 
             ! Trace
             tempc = fieldtracer%TraceContours(tx, ty)
@@ -1560,6 +1564,7 @@ module ggmod_gridgeneration2D
                             c1%startsaddle = c1%endsaddle
                             c1%endsaddle = c2%endsaddle
                             c1%isclosed = .false. ! normally, checked later
+                            tempc(j) = c1
                             
                             ! Check if the contour is open, should be the case
                             if ((c1%x(1) == c1%x(size(c1%x))) .and. (c1%y(1) == c1%y(size(c1%y)))) then 
@@ -1572,7 +1577,7 @@ module ggmod_gridgeneration2D
                             iscontourfound(c1%ID) = .true. 
 
                             ! Mark for removal
-                            keepind(j) = .false. 
+                            keepind(cind) = .false. 
                         end if 
                     end if 
                 end do 
@@ -1592,10 +1597,11 @@ module ggmod_gridgeneration2D
 
             ! Compute intersections 
             !----------------------
-            ! Initialize
             nc = size(tempc)
             ntf = size(tubef)
-            allocate(xintda(nc, ntf), yintda(nc, ntf), nint(nc, ntf))
+            allocate(xintda(nc, ntf), yintda(nc, ntf), nint(nc, ntf), &
+                segrfda(nc, ntf), segcda(nc, ntf), segrrfda(nc, ntf), &
+                segrcda(nc, ntf), polc(nc))
             nint = 0
 
             ! Convert to polygon
@@ -1621,6 +1627,12 @@ module ggmod_gridgeneration2D
                     nint(j, k) = size(txint)
                 end do 
             end do 
+
+            ! Print
+            call tempps%Construct(polc)
+            call tempps%WriteData('lines')
+            call tempps%Construct(face%pol(tubef))
+            call tempps%WriteData('faces')
 
             !!! we need a different approach for closed ft!
             ! Check intersections & sort
@@ -1711,8 +1723,9 @@ module ggmod_gridgeneration2D
 
                     ! Note: we ensure no duplicate points by skipping the
                     ! first vertex of the face segment
-                    xl = [xint(j, k), tempc(j)%x(segc(j, k)+2:segc(j, k+1)-1:incr), xint(j, k+1)]
-                    yl = [yint(j, k), tempc(j)%y(segc(j, k)+2:segc(j, k+1)-1:incr), yint(j, k+1)]
+                    polv = polc(j)%vert(segc(j, k)+2:segc(j, k+1)-1:incr)
+                    xl = [xint(j, k), polc(j)%x(polv), xint(j, k+1)]
+                    yl = [yint(j, k), polc(j)%y(polv), yint(j, k+1)]
 
                     ! Add 
                     celldata(tubec(k))%lines(j)%xl = xl
@@ -1734,7 +1747,8 @@ module ggmod_gridgeneration2D
 
             ! Housekeeping
             deallocate(xint, yint, segc, segrf, segrc, segrrf, nint, &
-                vertexID)
+                vertexID, polc, xintda, yintda, segcda, segrfda, &
+                segrcda, segrrfda,)
         end do 
         
         ! Housekeeping
