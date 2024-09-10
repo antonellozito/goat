@@ -314,7 +314,7 @@ module ggmod_vertexdistribution2D
         nv = ceiling(l/vd%d)+1
 
         ! Compute distribution
-        distr = [(k, k = 0, nv)]*(l/nv)
+        distr = [(k, k = 0, nv-1)]*(l/(nv-1))
         distr(size(distr)) = l ! just to make sure
 
         ! Distribute
@@ -378,7 +378,7 @@ module ggmod_vertexdistribution2D
         nv = ceiling(l/vd%fd)+1
 
         ! Compute distribution
-        distr = [(k, k = 0, nv)]*(l/nv)
+        distr = [(k, k = 0, nv-1)]*(l/(nv-1))
         distr(size(distr)) = l ! just to make sure
 
         ! Distribute
