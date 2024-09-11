@@ -436,10 +436,10 @@ VERSION 1.00.00
 'gg.vd.contouring.resy'         '200'
 
 # Distribution of flux surfaces (radial)
-'gg.vd.rd.type'                         'densitybased'
+'gg.vd.rd.type'                         'uniform'
 
 # Distribution of vertices on flux surfaces (poloidal)
-'gg.vd.pd.type'                         'densitybased'
+'gg.vd.pd.type'                         'uniform'
 
 # Options for uniform distribution
 'gg.vd.pd.distribution.facelength'      '4e-2';
