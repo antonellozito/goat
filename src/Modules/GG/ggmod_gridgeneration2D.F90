@@ -1289,16 +1289,17 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: tc, srf, erf, inderf, &
-            indsrf, tf, cind, nc, ntf, incr, nv
+            indsrf, tf, cind, nc, ntf, incr, nv, temp
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
             allIDs, s1, s2, polv
         integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
             segc, vertexID
         real(R8)                                :: hfval, lfval, &
-            dhf1, dhf2, dlf1, dlf2
+            dhf1, dhf2, dlf1, dlf2, nxc, nyc, nxfv, nyfv
         real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
-            tcfv2val, tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint
+            tcfv2val, tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint, &
+            nxf, nyf, nnf
         real(R8), allocatable, dimension(:, :)  :: segrrf, segrc, &
             xint, yint
         logical                                 :: isflremoved, &
@@ -1501,6 +1502,14 @@ module ggmod_gridgeneration2D
             iscontourfound = .false. 
             keepind = .true. 
             if (tube%isclosed(i)) then 
+                ! Precompute face normals for each flux surface for 
+                ! determining orientation
+                nxf = -(facedata(tf)%yv(2:) - facedata(tf)%yv(1:size(facedata(tf)%yv)))
+                nyf = (facedata(tf)%xv(2:) - facedata(tf)%xv(1:size(facedata(tf)%xv)))
+                nnf = sqrt(nxf**2 + nyf**2)
+                nxf = nxf/nnf
+                nyf = nyf/nnf
+
                 ! Closed contour: only one contour value expected
                 do j = 1, size(tempc)
                     ! Check if contour is closed
@@ -1515,6 +1524,21 @@ module ggmod_gridgeneration2D
 
                     ! Mark as found
                     iscontourfound(tempc(j)%ID) = .true. 
+
+                    ! Ensure proper orientation
+                    nxc = tempc(j)%x(2) - tempc(j)%x(1)
+                    nyc = tempc(j)%y(2) - tempc(j)%y(1)
+                    nxfv = 0.5*(nxf(j) + nxf(j+1))
+                    nyfv = 0.5*(nyf(j) + nyf(j+1))
+                    if ((nxc*nxfv + nyc*nyfv) < 0) then 
+                        ! Flip the contour
+                        tempc(j)%x = tempc(j)%x(size(tempc(j)%x):1:-1)
+                        tempc(j)%y = tempc(j)%y(size(tempc(j)%y):1:-1)
+                        temp = tempc(j)%startsaddle
+                        tempc(j)%startsaddle = tempc(j)%endsaddle
+                        tempc(j)%endsaddle = temp
+                    end if 
+
                 end do
 
             else
@@ -1653,9 +1677,21 @@ module ggmod_gridgeneration2D
                 end if 
 
                 ! Check if multiple intersections with radial lines
-                if (any(nint(j, :) > 1)) then 
-                    ! Simply set warning message
-                    isintersectremoved = .true. 
+                if (tube%isclosed(i)) then 
+                    ! Two intersections are expected in first and 
+                    ! last face, since they are the same face
+                    if (any(nint(j, 2:ntf-1) > 1)) then 
+                        ! Simply set warning message
+                        isintersectremoved = .true. 
+                    end if 
+                    if ((nint(j, 1) > 2) .or. (nint(j, ntf) > 2)) then 
+                        isintersectremoved = .true. 
+                    end if 
+                else
+                    if (any(nint(j, :) > 1)) then 
+                        ! Simply set warning message
+                        isintersectremoved = .true. 
+                    end if 
                 end if 
             end do 
 
@@ -1687,7 +1723,7 @@ module ggmod_gridgeneration2D
                     cc = cc + 1 
 
                     ! Loop
-                    do k = 1, ntf 
+                    do k = 1, ntf-1 
                         ! Get first intersection
                         xint(cc, k) = xintda(j, k)%Get(1)
                         yint(cc, k) = yintda(j, k)%Get(1)
@@ -1700,9 +1736,56 @@ module ggmod_gridgeneration2D
                         nv = nv + 1
                         vertexID(cc, k) = nv
                     end do 
+                    
+                    ! Hedge for closed flux surfaces
+                    if (tube%isclosed(i)) then 
+                        ! Intersection with first and last radial line
+                        ! should be exactly the same! Only intersection
+                        ! coordinate should differ
+                        xint(cc, ntf) = xint(cc, 1)
+                        yint(cc, ntf) = yint(cc, 1)
+                        segc(cc, ntf) = segcda(j, ntf)%Get(segcda(j, ntf)%Size())
+                        segrf(cc, ntf) = segrfda(j, ntf)%Get(segrfda(j, ntf)%Size())
+                        segrc(cc, ntf) = segrcda(j, ntf)%Get(segrcda(j, ntf)%Size())
+                        segrrf(cc, ntf) = segrrfda(j, ntf)%Get(segrrfda(j, ntf)%Size())
+
+                        ! Set vertex ID - should be the same as before
+                        nv = nv + 1
+                        vertexID(cc, ntf) = vertexID(cc, 1)
+                    else
+                        ! Get first intersection
+                        xint(cc, ntf) = xintda(j, ntf)%Get(1)
+                        yint(cc, ntf) = yintda(j, ntf)%Get(1)
+                        segc(cc, ntf) = segcda(j, ntf)%Get(1)
+                        segrf(cc, ntf) = segrfda(j, ntf)%Get(1)
+                        segrc(cc, ntf) = segrcda(j, ntf)%Get(1)
+                        segrrf(cc, ntf) = segrrfda(j, ntf)%Get(1)
+
+                        ! Set vertex ID
+                        nv = nv + 1
+                        vertexID(cc, ntf) = nv
+                    end if 
                 end if 
             end do 
             deallocate(keepind)
+
+            ! Do sanity checks for closed tube
+            if (tube%isclosed(i)) then 
+                ! First and last intersection should be at 0 
+                ! and ne coordinate by construction
+                do j = 1, nc
+                    if (segrc(j, 1) /= 0_R8) then 
+                        call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
+                            'first intersection of closed contour is not at start of ' // & 
+                            'contour for closed flux tube, unexpected')
+                    end if
+                    if (segrc(j, size(segrc)) /= polc(j)%nv) then 
+                        call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
+                            'last intersection of closed contour is not at end of ' // & 
+                            'contour for closed flux tube, unexpected')
+                    end if 
+                end do 
+            end if 
 
             ! Add lines for each cell
             do k = 1, ntf-1
