@@ -12,10 +12,7 @@ def GetDataDirectory():
     # solps, all output should be written to './output'.
 
     # Check
-    if 'SOLPSTOP' in os.environ:
-        datadir = '../output'
-    else:
-        datadir = './output'
+    datadir = './output'
 
     return datadir
 

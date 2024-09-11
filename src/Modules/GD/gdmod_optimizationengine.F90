@@ -1022,9 +1022,9 @@ module gdmod_optimizationengine
 
         ! Auxiliary 
         integer, parameter                      :: fid = 70
-        integer                                 :: iostat
+        integer                                 :: tiostat
         logical                                 :: isfile 
-        character(:), allocatable               :: filepath 
+        character(:), allocatable               :: filepath
 
         ! Initialize
         !===========
@@ -1045,18 +1045,18 @@ module gdmod_optimizationengine
             inquire(file=filepath, exist=isfile)
             if (isfile) then 
                 ! Replace old file
-                open(unit=fid, status='old', iostat=iostat, file=filepath)
+                open(unit=fid, status='old', iostat=tiostat, file=filepath)
                 rewind(fid)
             else
                 ! Create new file
-                open(unit=fid, status='new', iostat=iostat, file=filepath)
+                open(unit=fid, status='new', iostat=tiostat, file=filepath)
             end if
 
             ! Write header
             call problem%monitor%WriteFileHeader(fid)
         else
             ! File should already by opened, append
-            open(unit=fid, status='old', iostat=iostat, file=filepath, access='sequential', position='append')
+            open(unit=fid, status='old', iostat=tiostat, file=filepath, access='sequential', position='append')
         end if
 
         ! Write
