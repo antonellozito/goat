@@ -223,4 +223,115 @@ class Topomesh:
         self.face = TopomeshFace() 
         self.cell = TopomeshCell()
         
+#----------------------------------------------------------------------#
+#                            GGTM DATA                                 #
+#----------------------------------------------------------------------#
 
+# GGTM lines
+class GGTMLine:
+    # Definition
+    def __init__(self):
+        # coordinates
+        self.x = np.zeros(0, dtype=float)
+        self.y = np.zeros(0, dtype=float)
+
+        # Vertices
+        self.vert = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nv):
+        # Initialize coordinates
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
+
+        # Vertices
+        self.vert = np.zeros(nv, dtype=int)
+
+    # Coordinate addition
+    def AddCoordinates(self, xc, yc, vc):
+        self.x = xc 
+        self.y = yc 
+        self.vert = vc
+
+# GGTM faces
+class GGTMFace:
+    # Definition
+    def __init__(self):
+        # coordinates
+        self.x = np.zeros(0, dtype=float)
+        self.y = np.zeros(0, dtype=float)
+
+        # Vertices
+        self.vert = np.zeros(0, dtype=int)
+
+        # Number
+        self.nv = 0
+
+        # ID
+        self.ID = 0
+
+    # Initializer
+    def Initialize(self, nv, ID):
+        # Initialize coordinates
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
+
+        # Vertices
+        self.vert = np.zeros(nv, dtype=int)
+
+        # Number
+        self.nv = nv
+
+        # ID
+        self.ID = ID
+
+# GGTM cells
+class GGTMCell:
+    # Definition
+    def __init__(self):
+
+        # hfline, lfline
+        self.hfline = GGTMLine()
+        self.lfline = GGTMLine()
+
+        # Start and end radial face IDs
+        self.srf = 0
+        self.erf = 0
+
+        # Lines
+        self.nl = 0
+        self.lines = GGTMLine()
+
+        # ID
+        self.ID = 0
+
+    # Initialization
+    def Initialize(self, nl, ID):
+
+        # Coordinates
+        self.nl = nl
+        self.lines = [GGTMLine() for i in range(nl)]
+
+        # ID
+        self.ID = ID
+
+    # Adding line coordinates
+    def AddLineCoordinates(self, lineindex, xl, yl, vl):
+        # Add face coordinates
+        self.lines[lineindex].AddCoordinates(xl, yl, vl)
+
+
+# GGTM data class
+class GGTMData:
+    # Init
+    def __init__(self):
+        # Fields
+        self.face = GGTMFace() 
+        self.cell = GGTMCell()
+
+    # Initializer
+    def Initialize(self, nf, nc):
+        # Fields
+        self.face = [GGTMFace() for i in range(nf)]
+        self.cell = [GGTMCell() for i in range(nc)]
+        

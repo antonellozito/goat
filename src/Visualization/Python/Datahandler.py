@@ -445,13 +445,224 @@ def ReadTopomeshFile(filepath):
         else: 
             i = i + 1 
 
-
-
-
-
-
     # Return 
     return topomesh 
+
+def ReadGGTMDataFile(filepath):
+    # Description
+    #------------
+    # Read in the grid generation data of a topological mesh by reading 
+    # the ggtmdata file (format specific here)
+    ggtmdata = gt.GGTMData()
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read basic face and cell data
+    i = 0
+    while i < len(alllines):
+        if "faces" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+    i = i + 1
+    values = alllines[i].split()
+    nftot = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nf = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+    nf = nf[0]
+
+    i = 0
+    while i < len(alllines):
+        if "cells" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+    i = i + 1
+    values = alllines[i].split()
+    nctot = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nc = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+    nc = nc[0]
+
+    # Initialize
+    ggtmdata.Initialize(nftot[0], nctot[0])
+
+    # Read in face data
+    #------------------
+    # Get the face header
+    i = 0 # reset counter to start from beginning
+    while i < len(alllines):
+        if "faces" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Read until ID header is found
+    while i < len(alllines):
+        if "ID, nc" in alllines[i]:
+            break 
+        else:
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read face data 
+    for j in np.arange(0, nf):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        ID = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+        ID = ID[0]
+        nv = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+        nv = nv[0]
+        ggtmdata.face[ID-1].nv = nv
+        ggtmdata.face[ID-1].ID = ID
+
+    # Update position
+    i = i + nf - 1
+
+    # Get the face coordinates
+    while i < len(alllines): 
+        if "face coordinates" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read 
+    counter = 0
+    while (i < len(alllines)) and (counter < nf):
+        # Read until we find 'face'
+        if "face" in alllines[i]:
+            # Get face ID
+            values = alllines[i].split()
+            fID = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+            fID = fID[0] - 1 
+            counter = counter + 1
+
+            # Update position
+            i = i + 1
+
+            # Read nc coordinates
+            ggtmdata.face[fID].Initialize(ggtmdata.face[fID].nv, ggtmdata.face[fID].ID)
+            for k in np.arange(0, ggtmdata.face[fID].nv, 1):
+                values = alllines[i+k].split()
+                ggtmdata.face[fID].vert[k] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                ggtmdata.face[fID].x[k] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+                ggtmdata.face[fID].y[k] = np.fromstring(values[2], dtype=float, count=1, sep=' ')
+
+            # Update position
+            i = i + ggtmdata.face[fID].nv
+        else: 
+            i = i + 1 
+
+    # Read cell data
+    #---------------
+    # Get the cell header
+    i = 0 # reset counter to start from beginning
+    while i < len(alllines):
+        if "cells" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Read until ID header is found
+    while i < len(alllines):
+        if "ID, srf, erf, cell line size" in alllines[i]:
+            break 
+        else:
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read cell data 
+    for j in np.arange(0, nc):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        ID = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+        ID = ID[0]
+        ggtmdata.cell[ID-1].ID = ID
+        srf = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+        erf = np.fromstring(values[2], dtype=int, count=1, sep=' ')
+        nl = np.fromstring(values[3], dtype=int, count=1, sep=' ')
+        ggtmdata.cell[ID-1].srf = srf[0]
+        ggtmdata.cell[ID-1].erf = erf[0]
+        ggtmdata.cell[ID-1].nl = nl[0]
+        
+    # Update file position
+    i = i + nc-1
+
+    # Get header position
+    while i < len(alllines): 
+        if "cell lines" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read line data
+    counter = 0
+    while (i < len(alllines)) and (counter < nc):
+        # Read until we find 'cell'
+        if "cell" in alllines[i]:
+            # Get cell ID
+            values = alllines[i].split()
+            fID = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+            fID = fID[0] - 1 
+            counter = counter + 1
+
+            # Read nl lines
+            ggtmdata.cell[fID].Initialize(ggtmdata.cell[fID].nl-2, ggtmdata.cell[fID].ID)
+            for k in np.arange(0, ggtmdata.cell[fID].nl+2, 1):
+                # Update position
+                i = i + 1
+
+                # Read size of line
+                values = alllines[i].split()
+
+                # Initialize line
+                nv = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                nv = nv[0]
+                line = gt.GGTMLine()
+                line.Initialize(nv)
+
+                # Read 
+                for cc in np.arange(0, nv, 1): 
+                    values = alllines[i+cc+1].split()
+                    line.vert[cc] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                    line.x[cc] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+                    line.y[cc] = np.fromstring(values[2], dtype=float, count=1, sep=' ')
+
+                # Add line
+                if k == 0:
+                    # First line -> hfline
+                    ggtmdata.cell[fID].hfline = line
+                elif k == ggtmdata.cell[fID].nl+1:
+                    # Last line -> lfline
+                    ggtmdata.cell[fID].lfline = line
+                else:
+                    # intermediate line
+                    ggtmdata.cell[fID].lines[k-1] = line
+
+                # Update position
+                i = i + nv
+
+        else: 
+            i = i + 1 
+
+    # Return
+    return ggtmdata
 
     
 

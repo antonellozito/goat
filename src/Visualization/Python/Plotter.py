@@ -560,6 +560,88 @@ def PlotTopologicalMeshCells(topomesh, fignum):
         #PlotPolygons2D(topomesh.cell.data[i].x[index], topomesh.cell.data[i].y[index], fignum)
         PlotPolygons2D(topomesh.cell.data[i].x, topomesh.cell.data[i].y, fignum)
 
+# Grid generation data plotting: face vertex distributions
+def PlotGGTMDataFaceVertexDistribution(ggtmdata, topomesh, fignum):
+    # Plot all vertices that were distributed on faces only
+   
+    # Plot per face type
+    pf = np.where(topomesh.face.type == gt.TMfacepolID)
+    rf = np.where(topomesh.face.type == gt.TMfaceradID)
+    bndf = np.where(topomesh.face.type == gt.TMfacebndID)
+    sepf = np.where(topomesh.face.type == gt.TMfacesepID)
+
+    for i in pf[0]:
+        if not (ggtmdata.face[i].ID == 0):
+            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
+                fignum, color='r', marker='.')
+    for i in rf[0]:
+        if not (ggtmdata.face[i].ID == 0):
+            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
+                fignum, color='g', marker='.')
+    for i in bndf[0]:
+        if not (ggtmdata.face[i].ID == 0):
+            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
+                fignum, color='k', marker='.')
+    for i in sepf[0]:
+        if not (ggtmdata.face[i].ID == 0):
+            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
+                fignum, color='m', marker='.')
+        
+    # Check bounds
+    xb = [np.Infinity, -np.Infinity]
+    yb = [np.Infinity, -np.Infinity]
+    for i in np.arange(0, topomesh.face.ntot, 1):
+        xb[0] = np.min([xb[0], np.min(topomesh.face.data[i].x)])
+        xb[1] = np.max([xb[1], np.max(topomesh.face.data[i].x)])
+        yb[0] = np.min([yb[0], np.min(topomesh.face.data[i].y)])
+        yb[1] = np.max([yb[1], np.max(topomesh.face.data[i].y)])
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('topomesh face vertex distribution')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+# Grid generation data plotting: cell vertex distributions
+def PlotGGTMDataCellVertexDistribution(ggtmdata, topomesh, fignum):
+    # Plot all vertices that were distributed on cells only
+
+    # Initialize plotting bounds
+    xb = [np.Infinity, -np.Infinity]
+    yb = [np.Infinity, -np.Infinity]
+
+    # Loop over all cells
+    for thiscell in ggtmdata.cell:
+        # Plot high field line and low field line
+        PlotPolygons2DQuiver(thiscell.hfline.x, thiscell.hfline.y, fignum, color='r')
+        PlotPolygons2DQuiver(thiscell.lfline.x, thiscell.lfline.y, fignum, color='g')
+
+        # Plot all other lines
+        for thisline in thiscell.lines: 
+            PlotPolygons2DQuiver(thisline.x, thisline.y, fignum, color='b')
+        
+    # Check bounds
+    
+    for i in np.arange(0, topomesh.face.ntot, 1):
+        xb[0] = np.min([xb[0], np.min(topomesh.face.data[i].x)])
+        xb[1] = np.max([xb[1], np.max(topomesh.face.data[i].x)])
+        yb[0] = np.min([yb[0], np.min(topomesh.face.data[i].y)])
+        yb[1] = np.max([yb[1], np.max(topomesh.face.data[i].y)])
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('topomesh face vertex distribution')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
 #--------------------------------------------------------------------------#
 #                             Shape Optimization                           #
 #--------------------------------------------------------------------------#
@@ -894,6 +976,23 @@ def PlotPolygons2D(x, y, fignum, **plotargs):
     #for i, txt in enumerate(myrange):
     #    ax.annotate(txt, (x[i], y[i]))
     #plt.draw()
+
+def PlotPolygons2DQuiver(x, y, fignum, **plotargs):
+    # Same as PlotPolygons2D, but now we plot arrows between the 
+    # different nodes according to the polygon orientation
+
+    # Set the current figure
+    plt.figure(fignum)
+
+    # Plot the data as a polygon plot
+    #fig, ax = plt.subplots()
+    plt.plot(x, y, **plotargs)
+
+    # Plot displacement vector
+    dx = -(x[0:len(x)-1] - x[1:len(x)])
+    dy = -(y[0:len(y)-1] - y[1:len(y)])
+    plt.quiver(x[0:len(x)-1], y[0:len(y)-1], dx, dy, 
+        **plotargs, angles='xy', scale_units='xy', scale=1)
 
 def PlotPolygonData(filepath, fignum, **plotargs):
     # Read data
