@@ -99,6 +99,7 @@ module ggmod_gridgeneration2D
     use ggmod_vertexdistribution2D
     use DistributionFunction
     use mod_plotter
+    use mod_utility, only: wall_time
     implicit none
     private 
     public :: GenerateUnstructuredAlignedGrid
@@ -455,6 +456,9 @@ module ggmod_gridgeneration2D
 
         end select
 
+        ! Write data
+        call WriteGGTMData(ggtmdata, 'ggtmdata_after_vertexdistribution')
+
         ! Extract vertices
         call ConstructGridVertices(ggtmdata, grid, topomesh)
 
@@ -550,6 +554,7 @@ module ggmod_gridgeneration2D
 
             ! Update 
             vertID = vertID + nv
+            grid%vert%ntot = grid%vert%ntot + nv
         end do
 
         ! Add cell vertices
@@ -575,7 +580,11 @@ module ggmod_gridgeneration2D
 
                 ! Set vertex ID
                 celldata(i)%lines(j)%vert = [srfvID(j+1), &
-                    & (k, k = vertID+1, vertID+nv), erfvID(j+1)]
+                    & (k, k = vertID+1, vertID+nv-2), erfvID(j+1)]
+
+                ! Update total number of vertices
+                vertID = vertID+nv-2
+                grid%vert%ntot = grid%vert%ntot + nv-2
             end do 
 
             ! Extract high field line
@@ -584,7 +593,7 @@ module ggmod_gridgeneration2D
 
             ! Extract low field line
             call ExtractTMCellAlignedBoundary(celldata(i), 'low', ggtmdata, &
-                topomesh, celldata(i)%hfline) 
+                topomesh, celldata(i)%lfline) 
 
         end do 
 
@@ -1289,10 +1298,10 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: tc, srf, erf, inderf, &
-            indsrf, tf, cind, nc, ntf, incr, nv, temp
+            indsrf, tf, cind, nc, ntf, incr, nv, temp, minind, maxind
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
-            allIDs, s1, s2, polv
+            allIDs, s1, s2, polv, tf1, tf2
         integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
             segc, vertexID
         real(R8)                                :: hfval, lfval, &
@@ -1314,6 +1323,9 @@ module ggmod_gridgeneration2D
             segcda, segrfda
         type(PolygonUDT), allocatable           :: polc(:)
         type(PolygonSetUDT)                     :: tempps
+
+        ! Diagnostics
+        real(R8)                                :: tstart, tend 
 
         ! Loop
         integer(I8)                             :: i, j, k, cc
@@ -1343,6 +1355,10 @@ module ggmod_gridgeneration2D
             tubec = tube%GetCell(i)
             tubef = tube%GetFace(i)
 
+            if (tube%isclosed(i)) then 
+                print *, 'closed tube'
+            end if 
+
             ! Loop over all tube cells
             do j = 1, size(tubec)
                 ! Unpack
@@ -1364,7 +1380,7 @@ module ggmod_gridgeneration2D
                 ! Set start radial face
                 srf = tubef(j) ! should work 
                 celldata(tc)%srf = srf 
-                indsrf = findloc(tcf, srf, 1)
+                indsrf = findloc(tcf, srf, 1, back=.false.) ! take the first one - hedge for closed cell
                 if (indsrf == 0) then 
                     ! This shouldn't be happening
                     call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
@@ -1376,7 +1392,7 @@ module ggmod_gridgeneration2D
                 ! Set end radial face
                 erf = tubef(j+1) ! should work 
                 celldata(tc)%erf = erf
-                inderf = findloc(tcf, erf, 1)
+                inderf = findloc(tcf, erf, 1, back=.true.) ! take the last one - hedge for closed cell
                 if (inderf == 0) then 
                     ! This shouldn't be happening
                     call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
@@ -1400,7 +1416,7 @@ module ggmod_gridgeneration2D
                     celldata(tc)%fliperf = .true.
                 end if 
 
-                ! Determine high and low field poloidal faces (unsorted)
+                ! Determine high and low field poloidal faces (sorted, but not properly oriented)
                 tcfv1val = vert%fval(tcfv1)
                 tcfv2val = vert%fval(tcfv2)
                 allocate(ishfface(size(tcf)), islfface(size(tcf)))
@@ -1429,11 +1445,34 @@ module ggmod_gridgeneration2D
                     end if 
                 end do 
 
+                ! Extract in a sorted way
+                minind = min(indsrf, inderf)
+                maxind = max(indsrf, inderf)
+                if (minind == maxind) then 
+                    ! Sanity check failed, this shouldn't happen even 
+                    ! if both start and end radial face are the same,
+                    ! since they should then appear twice in the cell. 
+                    call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
+                        'start and end radial face have the ' // & 
+                        'same index, unexpected')
+                end if 
+                tf1 = [tcf(maxind+1:), tcf(:minind-1)]
+                tf2 = tcf(minind+1:maxind-1)
+
                 ! Sanity checks
                 if (count(.not. ishfface .and. .not. islfface) /= 2) then 
-                    call gdErrorHandler('AddTopologicalMEshCellGriddingData: ' // & 
+                    call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
                         'cell has not exactly two radial faces, this is not yet supported')
                 end if 
+                if ((any(ishfface(minind+1:maxind-1)) .and. &
+                    any(islfface(minind+1:maxind-1))) .or. &
+                    (any([ishfface(maxind+1:), ishfface(:minind-1)]) .and. &
+                    any([islfface(maxind+1:), islfface(:minind-1)]))) then 
+                        call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
+                        'not all extracted faces are strictly high or ' // & 
+                        'low field faces, unexpected')
+                end if 
+
 
                 ! Determine high field and low field vertices (unsorted)
                 ishfvert = abs(tcvfval - hfval) < abs(tcvfval - lfval)
@@ -1445,10 +1484,29 @@ module ggmod_gridgeneration2D
                 lffaces = pack(tcf, islfface)
                 hfvert = pack(tcv, ishfvert)
                 lfvert = pack(tcv, .not. ishfvert)
+                
+                ! Overwrite to sort 
+                if (size(tf1) > 0) then 
+                    if (any([ishfface(maxind+1:), ishfface(:minind-1)])) then 
+                        hffaces = tf1 
+                    else
+                        lffaces = tf1 
+                    end if 
+                end if
+                if (size(tf2) > 0) then 
+                    if (any(ishfface(minind+1:maxind-1))) then 
+                        hffaces = tf2
+                    else
+                        lffaces = tf2 
+                    end if 
+                end if
+
+                ! Add
                 celldata(tc)%hffaces = hffaces
                 celldata(tc)%lffaces = lffaces
                 celldata(tc)%hfvert = hfvert
                 celldata(tc)%lfvert = lfvert
+
 
                 ! Housekeeping
                 deallocate(hffaces, lffaces, ishfface, islfface, hfvert, &
@@ -1474,41 +1532,45 @@ module ggmod_gridgeneration2D
             !---------------
             ! Get initial vertex distribution (skip start and end points)
             tf = tubedata(i)%distributionface
-            tx = facedata(tf)%xv(2:size(facedata(tf)%xv)-1)
-            ty = facedata(tf)%yv(2:size(facedata(tf)%yv)-1)
+            tx = facedata(tf)%xv
+            ty = facedata(tf)%yv
 
-            ! Check
-            if (size(tx) > 0) then 
-                ! Make sure we trace from high to low field value
-                allocate(tfval(size(tx)))
-                call magneticField%interp%Evaluate(tx, ty, 0, 0, tfval)
-                if (tfval(1) < tfval(size(tfval))) then 
-                    tx = tx(size(tx):1:-1)
-                    ty = ty(size(ty):1:-1)
-                end if 
+            !  Make sure we trace from high to low field value
+            if (allocated(tfval)) then 
                 deallocate(tfval)
+            end if 
+            allocate(tfval(size(tx)))
+            call magneticField%interp%Evaluate(tx, ty, 0, 0, tfval)
+            if (tfval(1) < tfval(size(tfval))) then 
+                tx = tx(size(tx):1:-1)
+                ty = ty(size(ty):1:-1)
             end if 
 
             ! Trace
-            tempc = fieldtracer%TraceContours(tx, ty)
+            tempc = fieldtracer%TraceContours(tx(2:size(tx)-1), ty(2:size(ty)-1))
 
             ! Clean
             call CleanContours(tempc)
 
             ! Check if contours make sense and reformat if necessary
             allIDs = tempc%ID
-            allocate(iscontourfound(size(tx))) ! normally, IDs go from 1 to number of points
+            allocate(iscontourfound(size(tx)-2)) ! normally, IDs go from 1 to number of points
             allocate(keepind(size(tempc)))
             iscontourfound = .false. 
             keepind = .true. 
             if (tube%isclosed(i)) then 
                 ! Precompute face normals for each flux surface for 
                 ! determining orientation
-                nxf = -(facedata(tf)%yv(2:) - facedata(tf)%yv(1:size(facedata(tf)%yv)))
-                nyf = (facedata(tf)%xv(2:) - facedata(tf)%xv(1:size(facedata(tf)%xv)))
+                nxf = -(facedata(tf)%yv(2:) - facedata(tf)%yv(1:size(facedata(tf)%yv)-1))
+                nyf = (facedata(tf)%xv(2:) - facedata(tf)%xv(1:size(facedata(tf)%xv)-1))
                 nnf = sqrt(nxf**2 + nyf**2)
                 nxf = nxf/nnf
                 nyf = nyf/nnf
+
+                if (tfval(1) < tfval(size(tfval))) then 
+                    nxf = -nxf(size(nxf):1:-1) 
+                    nyf = -nyf(size(nyf):1:-1) 
+                end if
 
                 ! Closed contour: only one contour value expected
                 do j = 1, size(tempc)
@@ -1629,11 +1691,18 @@ module ggmod_gridgeneration2D
             nint = 0
 
             ! Convert to polygon
+            call wall_time(tstart)
+            !$omp parallel do private(j)
             do j = 1, nc
                 call polc(j)%Construct(tempc(j)%x, tempc(j)%y)
             end do 
+            !$omp end parallel do
+            call wall_time(tend)
+            !print *, 'time spent in polygon setup:', tend-tstart
 
             ! Loop over all contours
+            call wall_time(tstart)
+            !$omp parallel do private(i, j, txint, tyint, s1, s2, sr1, sr2)
             do j = 1, size(tempc)
                 ! Compute intersections with each radial face's polygon
                 do k = 1, size(tubef)
@@ -1651,7 +1720,9 @@ module ggmod_gridgeneration2D
                     nint(j, k) = size(txint)
                 end do 
             end do 
-
+            !$omp end parallel do
+            call wall_time(tend)
+            !print *, 'time spent in intersections:', tend-tstart
             ! Print
             call tempps%Construct(polc)
             call tempps%WriteData('lines')
@@ -1779,7 +1850,7 @@ module ggmod_gridgeneration2D
                             'first intersection of closed contour is not at start of ' // & 
                             'contour for closed flux tube, unexpected')
                     end if
-                    if (segrc(j, size(segrc)) /= polc(j)%nv) then 
+                    if (segrc(j, size(segrc, 2)) /= polc(j)%nv) then 
                         call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
                             'last intersection of closed contour is not at end of ' // & 
                             'contour for closed flux tube, unexpected')
@@ -2043,8 +2114,6 @@ module ggmod_gridgeneration2D
     !                           AUXILIARY                              !
     !------------------------------------------------------------------!
 
-    
-
     ! Boundary line extractor for cells
     subroutine ExtractTMCellAlignedBoundary(tmcell, loc, ggtmdata, &
         topomesh, line)
@@ -2061,8 +2130,11 @@ module ggmod_gridgeneration2D
         ! holds one coordinate and the additional quantities are 
         ! allocated as empty arrays. 
 
-        ! Note: the facedata is assumed to hold vertex distributions 
+        ! Note 1: the facedata is assumed to hold vertex distributions 
         ! (xv, yv) for all faces, including vertex IDs. 
+
+        ! Note 2: it is assumed that the face data is already properly
+        ! sorted, but that the faces may still need to be flipped. 
 
         ! Declare variables
         !==================
@@ -2074,6 +2146,8 @@ module ggmod_gridgeneration2D
         class(GGTMDataUDT)                      :: ggtmdata 
 
         ! Auxiliary
+        real(R8)                                :: nxsrf, nysrf, nxl, &
+            nyl
         real(R8), allocatable, dimension(:)     :: tx, ty 
         integer(I8)                             :: startv, endv, &
             thisf, thisfind, nextv
@@ -2082,7 +2156,7 @@ module ggmod_gridgeneration2D
         logical, allocatable, dimension(:)      :: isnotfound 
 
         ! Loop
-        integer(I8)                             :: j 
+        integer(I8)                             :: i, j 
 
         ! Initialize
         !===========
@@ -2105,13 +2179,19 @@ module ggmod_gridgeneration2D
             ! Get the high field side vertex of start and end radial face
             associate( & 
                 srfv => topomesh%face%vert(tmcell%srf, :), &
-                erfv => topomesh%face%vert(tmcell%erf, :))
+                erfv => topomesh%face%vert(tmcell%erf, :), &
+                srfvx   => facedata(tmcell%srf)%xv,     &
+                srfvy   => facedata(tmcell%srf)%yv)
 
             ! Check field values
             if (vert%fval(srfv(1)) > vert%fval(srfv(2))) then 
                 startv = srfv(1)
+                nxsrf = -(srfvy(2) - srfvy(1))
+                nysrf =  (srfvx(2) - srfvx(1))
             else 
                 startv = srfv(2)
+                nxsrf =  (srfvy(size(srfvy)) - srfvy(size(srfvy)-1))
+                nysrf = -(srfvx(size(srfvx)) - srfvx(size(srfvx)-1))
             end if
             if (vert%fval(erfv(1)) > vert%fval(erfv(2))) then 
                 endv = erfv(1)
@@ -2131,13 +2211,19 @@ module ggmod_gridgeneration2D
             ! Get the low field side vertex of start and end radial face
             associate( & 
                 srfv => topomesh%face%vert(tmcell%srf, :), &
-                erfv => topomesh%face%vert(tmcell%erf, :))
+                erfv => topomesh%face%vert(tmcell%erf, :), &
+                srfvx   => facedata(tmcell%srf)%xv,     &
+                srfvy   => facedata(tmcell%srf)%yv)
 
             ! Check field values
             if (vert%fval(srfv(1)) < vert%fval(srfv(2))) then 
                 startv = srfv(1)
+                nxsrf =  (srfvy(2) - srfvy(1))
+                nysrf = -(srfvx(2) - srfvx(1))
             else 
                 startv = srfv(2)
+                nxsrf = -(srfvy(size(srfvy)) - srfvy(size(srfvy)-1))
+                nysrf =  (srfvx(size(srfvx)) - srfvx(size(srfvx)-1))
             end if
             if (vert%fval(erfv(1)) < vert%fval(erfv(2))) then 
                 endv = erfv(1)
@@ -2164,6 +2250,9 @@ module ggmod_gridgeneration2D
                 line%xv = line%xl
                 line%yv = line%yl
                 line%vert = bndv
+                if (allocated(line%facelabels)) then 
+                    deallocate(line%facelabels)
+                end if 
                 allocate(line%facelabels(0))
 
             else 
@@ -2181,18 +2270,25 @@ module ggmod_gridgeneration2D
         allocate(isnotfound(size(bndf)))
         isnotfound = .true. 
 
-        ! Get the starting aligned face
-        thisfind = findloc(face%vert(bndf, 1), startv, 1)
+        ! Get the starting aligned face (should be first or last face) - 
+        ! if it's the last face, flip the boundary order for ease
+        thisfind = 1
+        if (findloc(face%vert(bndf(1), :), startv, 1) /= 0) then 
+            ! No flipping of bndf needed
+        elseif (findloc(face%vert(bndf(size(bndf)), :), startv, 1) /= 0) then 
+            ! Need to flip bndf
+            bndf = bndf(size(bndf):1:-1)
+        else
+            ! Shouldn't happen
+            call gdErrorHandler('ExtractTMCellAlignedBoundary: both start and ' // & 
+                'end face do not have the starting vertex, unexpected' )
+        end if 
+        
+        ! Check if we need to flip the orientation
         doflip = .false. 
-        if (thisfind == 0) then 
-            thisfind = findloc(face%vert(bndf, 2), startv, 1)
+        if (face%vert(bndf(1), 2) == startv) then 
             doflip = .true. 
-        end if 
-        if (thisfind == 0) then 
-            ! Probably something wrong upstream when determining cell data
-            call gdErrorHandler('ExtractTMCellAlignedBoundary: could not ' // & 
-                'find face with starting vertex, check cell data')
-        end if 
+        end if  
 
         ! Set as found
         isnotfound(thisfind) = .false.
@@ -2222,92 +2318,271 @@ module ggmod_gridgeneration2D
             nextv = face%vert(thisf, 2)
         end if
         
-        ! Loop over remaining faces
-        do while (any(isnotfound))
-            
-            ! Check if the next vertex is the end vertex
-            if (nextv == endv) then 
-
-                ! Sanity check
-                if (any(isnotfound)) then 
-                    call gdErrorHandler('ExtractTMCellAlignedBoundary: ' // & 
-                        'already found end vertex while not all faces ' // & 
-                        'were found, this is a bug')
-                end if
-            end if 
-
-            ! Get the next face & vertex
-            j = 1
+        ! Loop over remaining faces (should be properly ordened, but we do
+        ! some sanity checks)
+        do i = 2, size(bndf)
+            ! Check
             doflip = .false. 
-            facefound = .true.
-            do while (j <= size(bndf))
-                if (isnotfound(j)) then 
-                    if (face%vert(bndf(j), 1) == nextv) then 
-                        ! Set
-                        thisfind = j 
-                        thisf = bndf(j)
-                        nextv = face%vert(thisf, 2)
-                        facefound = .true.
-
-                        ! Exit
-                        exit 
-                    elseif (face%vert(bndf(j), 2) == nextv) then 
-                        ! Set
-                        thisfind = j 
-                        thisf = bndf(j)
-                        nextv = face%vert(thisf, 1)
-                        facefound = .true. 
-                        
-                        ! Exit
-                        exit 
-                    else
-                        ! Update j
-                        j = j + 1
-                    end if 
-                end if 
-            end do 
-
-            ! Sanity check
-            if (.not. facefound) then 
-                call gdErrorHandler('ExtractTMCellAlignedBoundary: ' // & 
-                    'could not find a next face, this is a bug ')
+            if (face%vert(bndf(i), 1) == nextv) then 
+                ! all good
+                nextv = face%vert(bndf(i), 2)
+            elseif (face%vert(bndf(i), 2) == nextv) then 
+                ! need to flip
+                doflip = .true. 
+                nextv = face%vert(bndf(i), 1)
+            else 
+                ! All bad
+                call gdErrorHandler('ExtractTMCellAlignedBoundary: '// & 
+                    'could not find next face, check input')
             end if 
 
             ! Add face data 
             if (doflip) then 
-                tx = face%x(thisf)%Get()
-                ty = face%y(thisf)%Get()
+                tx = face%x(bndf(i))%Get()
+                ty = face%y(bndf(i))%Get()
                 line%xl = [line%xl(1:size(line%xl)-1), tx(size(tx):1:-1)] ! avoid double coordinates
                 line%yl = [line%yl(1:size(line%yl)-1), ty(size(ty):1:-1)]
-                line%xv = [line%xv(1:size(line%yl)-1), &
-                    facedata(thisf)%xv(size(facedata(thisf)%xv):1:-1)]
-                line%yv = [line%yv(1:size(line%yl)-1), &
-                    facedata(thisf)%yv(size(facedata(thisf)%xv):1:-1)]
-                line%vert = [line%vert(1:size(line%yl)-1), &
-                    facedata(thisf)%vert(size(facedata(thisf)%xv):1:-1)]
-                line%facelabels = [line%facelabels(1:size(line%yl)-1), &
-                    spread(face%label(thisf), 1, size(line%vert)-1)]
+                line%xv = [line%xv(1:size(line%xv)-1), &
+                    facedata(bndf(i))%xv(size(facedata(bndf(i))%xv):1:-1)]
+                line%yv = [line%yv(1:size(line%yv)-1), &
+                    facedata(bndf(i))%yv(size(facedata(bndf(i))%yv):1:-1)]
+                line%vert = [line%vert(1:size(line%vert)-1), &
+                    facedata(bndf(i))%vert(size(facedata(bndf(i))%vert):1:-1)]
+                line%facelabels = [line%facelabels(1:size(line%facelabels)-1), &
+                    spread(face%label(bndf(i)), 1, size(line%vert)-1)]
             
             else
-                line%xl = [line%xl(1:size(line%xl)-1), face%x(thisf)%Get()] ! avoid double coordinates
-                line%yl = [line%yl(1:size(line%yl)-1), face%y(thisf)%Get()]
-                line%xv = [line%xv(1:size(line%yl)-1), facedata(thisf)%xv]
-                line%yv = [line%yv(1:size(line%yl)-1), facedata(thisf)%yv]
-                line%vert = [line%vert(1:size(line%yl)-1), facedata(thisf)%vert]
-                line%facelabels = [line%facelabels(1:size(line%yl)-1), &
-                    spread(face%label(thisf), 1, size(line%vert)-1)]
+                line%xl = [line%xl(1:size(line%xl)-1), face%x(bndf(i))%Get()] ! avoid double coordinates
+                line%yl = [line%yl(1:size(line%yl)-1), face%y(bndf(i))%Get()]
+                line%xv = [line%xv(1:size(line%xv)-1), facedata(bndf(i))%xv]
+                line%yv = [line%yv(1:size(line%yv)-1), facedata(bndf(i))%yv]
+                line%vert = [line%vert(1:size(line%vert)-1), facedata(bndf(i))%vert]
+                line%facelabels = [line%facelabels(1:size(line%facelabels)-1), &
+                    spread(face%label(bndf(i)), 1, size(line%vert)-1)]
             end if 
 
-            ! Set
-            isnotfound(thisf) = .false.
+        end do
 
-        end do 
+        ! Sanity check: last vertex should be end vertex
+        if (nextv /= endv) then 
+            call gdErrorHandler('ExtractTMCellAlignedBoundary: '// & 
+                'all faces found, but last vertex does not equal end ' // & 
+                'vertex, unexpected')
+        end if 
+        
+        ! Check if the line closes upon itself. If that is the case, 
+        ! then we need to ensure a correct orientation (positive dot 
+        ! product with radial line that is sorted from high field to
+        ! low field)
+        if (startv == endv) then 
+            ! Get vector along line
+            nxl = line%xl(2) - line%xl(1)
+            nyl = line%yl(2) - line%yl(1)
+
+            ! Compute dot product and check
+            if ((nxl*nxsrf + nyl*nysrf) < 0) then 
+                line%xl = line%xl(size(line%xl):1:-1)
+                line%yl = line%yl(size(line%yl):1:-1)
+                line%xv = line%xv(size(line%xv):1:-1)
+                line%yv = line%yv(size(line%yv):1:-1)
+                line%vert = line%vert(size(line%vert):1:-1)
+                line%facelabels = line%facelabels(size(line%facelabels):1:-1)
+            end if 
+            
+        end if 
 
         ! Housekeeping
         !=============
         end associate
 
     end subroutine
+
+    ! GGTM data writing 
+    subroutine WriteGGTMData(ggtmdata, filename)
+
+        ! Description
+        !============
+        ! Routine to write ggtmdata in our own format. Also
+        ! handy for reading in once constructed. The following data is
+        ! written in a column-wise fashion:
+
+        ! 'faces'
+        ! <face%ntot, number of printed faces> 
+        ! 'face coordinates'
+        ! 'face <nf>' <repeated for each face including header>
+        ! <vertID, xv, yv> 
+        ! 'cells'
+        ! <cell%ntot, number of printed> 
+        ! 'ID, srf, erf, cell line size>'
+        ! <ID, nl>
+        ! 'cell lines <nc>' (repeated nc times)
+        ! <vertID, x, y> 
+        ! 'tubes'
+        ! <tubes%ntot> 
+        ! 'tube distribution faces'
+        ! <tube%distributionface>
+
+        ! This information is best used in conjuction with the topomesh
+        ! information to visualize the desired vertex distributions. Note
+        ! that the vertices and their coordinates are only implicitly 
+        ! present here through the cell lines and face vertex 
+        ! distributions
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+
+        ! Arguments
+        class(GGTMDataUDT)                      :: ggtmdata
+        character(*), intent(in)                :: filename 
+
+        ! Auxiliary
+        integer                                 :: fu, nf, nc, nl
+        logical, allocatable, dimension(:)      :: doface, docell, dolines 
+        character(:), allocatable               :: dir
+
+        ! Loop
+        integer(I8)                             :: i, j, k
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            f       => ggtmdata%face,   &
+            c       => ggtmdata%cell,   &
+            t       => ggtmdata%tube    &
+        )
+
+        ! Construct writing directory
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Write header
+        write(fu, *) 'VERSION3.00.00'
+
+        ! Check data
+        !===========
+        ! Only the fields that are not added when constructing vertices,
+        ! faces or cells. The rest should be always available
+        nf = 0
+        allocate(doface(size(f)))
+        doface = .false. 
+        do i = 1, size(f)
+            if (allocated(f(i)%xv) .and. allocated(f(i)%yv) .and. &
+                allocated(f(i)%vert)) then 
+                nf = nf + 1
+                doface(i) = .true. 
+            end if 
+        end do 
+
+        allocate(docell(size(c)), dolines(size(c)))
+        docell = .false.
+        dolines = .false.
+        nc = 0
+        do i = 1, size(c)
+            if (allocated(c(i)%srfvert)) then 
+                ! Assume other allocated as well
+                nc = nc + 1
+                docell(i) = .true.
+                if (allocated(c(i)%lines)) then 
+                    ! Lines should be determined as well
+                    dolines(i) = .true.
+                end if  
+            end if 
+        end do 
+
+        ! Write face data
+        !================
+        ! Number of faces
+        write (fu, *) 'faces'
+        write (fu, *) size(f), nf
+
+        ! Face data
+        write (fu, *) 'ID, nc'
+        do i = 1, size(f)
+            if (doface(i)) then 
+                ! Write ID and number of coordinates
+                write (fu, *) i, size(f(i)%vert)
+            end if 
+        end do 
+        
+        ! Face coordinates
+        write (fu, *) 'face coordinates'
+        do i = 1, size(f)
+            if (doface(i)) then 
+                ! Write header
+                write (fu, *) 'face ', i 
+
+                ! Write coordinates
+                do j = 1, size(f(i)%xv)
+                    write(fu, *) f(i)%vert(j), f(i)%xv(j), f(i)%yv(j)
+                end do 
+            end if 
+        end do 
+
+        ! Write cell data
+        !================
+        ! Number of cells
+        write (fu, *) 'cells'
+        write (fu, *) size(c), nc
+
+        ! Cell data
+        write (fu, *) 'ID, srf, erf, cell line size'
+        do i = 1, size(c) 
+            if (docell(i)) then 
+                if (dolines(i)) then 
+                    nl = size(c(i)%lines) + 2 ! account for hfline, lfline
+                else
+                    nl = 0 !  don't print lines
+                end if 
+                write (fu, *) i, c(i)%srf, c(i)%erf, nl 
+            end if 
+        end do 
+
+        ! Cell lines
+        write (fu, *) 'cell lines'
+        do i = 1, size(c) 
+            if (dolines(i)) then 
+                ! Write header
+                write (fu, *) 'cell ', i 
+
+                ! Write high field line
+                write (fu, *) size(c(i)%hfline%vert)
+                do j = 1, size(c(i)%hfline%vert)
+                    write (fu, *) c(i)%hfline%vert(j), c(i)%hfline%xv(j), c(i)%hfline%yv(j)
+                end do 
+
+                ! Write other lines
+                do k = 1, size(c(i)%lines)
+                    write (fu, *) size(c(i)%lines(k)%vert)
+                    do j = 1, size(c(i)%lines(k)%vert)
+                        write (fu, *) c(i)%lines(k)%vert(j), c(i)%lines(k)%xv(j), c(i)%lines(k)%yv(j)
+                    end do 
+                end do 
+
+                ! Write low field line
+                write (fu, *) size(c(i)%lfline%vert)
+                do j = 1, size(c(i)%lfline%vert)
+                    write (fu, *) c(i)%lfline%vert(j), c(i)%lfline%xv(j), c(i)%lfline%yv(j)
+                end do 
+            end if 
+        end do 
+
+        ! Housekeeping
+        !=============
+        ! Deallocate again
+
+        ! Others
+        end associate
+        close(fu)
+
+    end subroutine
+
 
 
 end module 
