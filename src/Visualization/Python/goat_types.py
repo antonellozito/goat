@@ -224,7 +224,7 @@ class Topomesh:
         self.cell = TopomeshCell()
         
 #----------------------------------------------------------------------#
-#                            GGTM DATA                                 #
+#                         GRID GENERATOR                               #
 #----------------------------------------------------------------------#
 
 # GGTM lines
@@ -320,7 +320,6 @@ class GGTMCell:
         # Add face coordinates
         self.lines[lineindex].AddCoordinates(xl, yl, vl)
 
-
 # GGTM data class
 class GGTMData:
     # Init
@@ -335,3 +334,121 @@ class GGTMData:
         self.face = [GGTMFace() for i in range(nf)]
         self.cell = [GGTMCell() for i in range(nc)]
         
+# Grid vertices
+class GGVert:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+
+        # coordinates
+        self.x = np.zeros(0, dtype=float)
+        self.y = np.zeros(0, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(0, dtype=int)
+
+        # Fieldline ID
+        self.fieldlineID = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nv):
+        # Number
+        self.ntot = nv 
+
+        # Coordinates
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(nv, dtype=int)
+
+        # Fieldline ID
+        self.fieldlineID = np.zeros(nv, dtype=int)
+
+# Grid faces
+class GGFace:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0 
+
+        # Vertices
+        self.v1 = np.zeros(0, dtype=int)
+        self.v2 = np.zeros(0, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(0, dtype=int)
+
+        # Label
+        self.label = np.zeros(0, dtype=int)
+        self.region = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nf):
+        # Number
+        self.ntot = nf
+
+        # Vertices
+        self.v1 = np.zeros(nf, dtype=int)
+        self.v2 = np.zeros(nf, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(nf, dtype=int)
+
+        # Label
+        self.label = np.zeros(nf, dtype=int)
+        self.region = np.zeros(nf, dtype=int)
+
+# Grid cells
+class GGCell:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+        self.nvert = 0
+
+        # Vertex pointer
+        self.vp1 = np.zeros(0, dtype=int)
+        self.vp2 = np.zeros(0, dtype=int)
+        
+        # Vertices
+        self.vert = np.zeros(0, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(0, dtype=int)
+
+        # Region
+        self.region = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nc, ncv):
+        # Number
+        self.ntot = nc
+        self.nvert = ncv
+
+        # Vertex pointer
+        self.vp1 = np.zeros(nc, dtype=int)
+        self.vp2 = np.zeros(nc, dtype=int)
+        
+        # Vertices
+        self.vert = np.zeros(ncv, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(nc, dtype=int)
+
+        # Region
+        self.region = np.zeros(nc, dtype=int)
+
+    # Vertex getter
+    def GetVert(self, i):
+        return self.vert[self.vp1[i]:self.vp1[i]+self.vp2[i]]
+
+# Grid
+class GGGrid:
+    # Init
+    def __init__(self):
+        # Fields
+        self.vert = GGVert()
+        self.face = GGFace() 
+        self.cell = GGCell()

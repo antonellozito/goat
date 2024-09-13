@@ -642,6 +642,72 @@ def PlotGGTMDataCellVertexDistribution(ggtmdata, topomesh, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+# Grid generation data plotting: vertices
+def PlotGridVertices(grid, fignum):
+    # Plot vertices only
+    
+    # Initialize plotting bounds
+    xb = [min(grid.vert.x), max(grid.vert.x)]
+    yb = [min(grid.vert.y), max(grid.vert.y)]
+
+    # Make plot
+    PlotPoints2D(grid.vert.x, grid.vert.y, fignum, color='k', marker='.')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+
+# Grid generation data plotting: faces
+def PlotGridFaces(grid, fignum):
+    # Plot faces only
+
+    # Initialize plotting bounds
+    xb = [min(grid.vert.x), max(grid.vert.x)]
+    yb = [min(grid.vert.y), max(grid.vert.y)]
+
+    # Construct face coordinates
+    xf = np.zeros(grid.face.ntot*3, dtype=float)
+    yf = np.zeros(grid.face.ntot*3, dtype=float)
+
+    for i in np.arange(0, grid.face.ntot): 
+        xf[3*i] = grid.vert.x[grid.face.v1[i]-1]
+        xf[3*i+1] = grid.vert.x[grid.face.v2[i]-1]
+        xf[3*i+2] = np.NaN 
+        yf[3*i] = grid.vert.y[grid.face.v1[i]-1]
+        yf[3*i+1] = grid.vert.y[grid.face.v2[i]-1]
+        yf[3*i+2] = np.NaN 
+    
+    # Plot
+    PlotPolygons2D(xf, yf, fignum, color='k', marker='')
+
+# Grid generation data plotting: cells
+def PlotGridCells(grid, fignum):
+    # Plot cells only
+
+    # Initialize plotting bounds
+    xb = [min(grid.vert.x), max(grid.vert.x)]
+    yb = [min(grid.vert.y), max(grid.vert.y)]
+
+    # Construct cell coordinates
+    xc = np.zeros(grid.cell.nvert + 2*grid.cell.ntot, dtype=float)
+    yc = np.zeros(grid.cell.nvert + 2*grid.cell.ntot, dtype=float)
+
+    counter = 0
+    for i in np.arange(0, grid.cell.ntot): 
+        nvc = grid.cell.vp2[i]
+        tv = grid.cell.GetVert(i)-1
+        xc[counter:counter+nvc] = grid.vert.x[tv]
+        xc[counter+nvc] = grid.vert.x[tv[0]]
+        xc[counter+nvc+1] = np.NaN
+        yc[counter:counter+nvc] = grid.vert.y[tv]
+        yc[counter+nvc] = grid.vert.y[tv[0]]
+        yc[counter+nvc+1] = np.NaN
+
+        counter = counter + nvc + 2
+    
+    # Plot
+    PlotPolygons2D(xc, yc, fignum, color='k', marker='')
+    
+
 #--------------------------------------------------------------------------#
 #                             Shape Optimization                           #
 #--------------------------------------------------------------------------#
@@ -951,9 +1017,6 @@ def Plot2DSurfaceDataContour(filepath, fignum, **plotargs):
 
     # Add colorbar
 
-
-
-    
 
 #==========================================================================#
 #                                                                          #
