@@ -296,6 +296,9 @@ module ggmod_gridgeneration2D
 
         ! Cell addition
         procedure :: AddCell            => AddGGCell
+
+        ! Data writing
+        procedure :: WriteDAta          => WriteGGGridData
     end type 
 
 
@@ -477,6 +480,9 @@ module ggmod_gridgeneration2D
 
         end select
 
+        ! Write intermediate file
+        call grid%WriteData('grid_after_cellconstruction')
+
         ! Add interconnections
         ![grid] = ComputeGridInterconnections(grid);
 
@@ -581,6 +587,9 @@ module ggmod_gridgeneration2D
                 ! Set vertex ID
                 celldata(i)%lines(j)%vert = [srfvID(j+1), &
                     & (k, k = vertID+1, vertID+nv-2), erfvID(j+1)]
+
+                ! Set face labels
+                celldata(i)%lines(j)%facelabels = spread(0, 1, nv-1)
 
                 ! Update total number of vertices
                 vertID = vertID+nv-2
@@ -809,32 +818,36 @@ module ggmod_gridgeneration2D
                 call facep%Construct([l1%xv(1), l2%xv(1)], [l1%yv(1), l2%yv(1)])
 
                 ! First line
-                if (l1%vert(1) == l1%vert(size(l1%vert))) then 
-                    ! Closed 
-                    call lp%Construct(l1%xv(2:size(l1%xv)-1), l1%yv(2:size(l1%xv)-1)) ! no need to include 
-                    call PolygonIntersections(lp, facep, xint, yint, s1, s2)
-                else
-                    call lp%Construct(l1%xv(2:), l1%yv(2:))
-                    call PolygonIntersections(lp, facep, xint, yint, s1, s2)
-                end if
-                if (size(xint) > 0) then 
-                    isintersectingl1 = .true.
-                    mink1 = s1(1)+2
-                end if
+                if (n1 > 2) then ! Hedge for point line
+                    if (l1%vert(1) == l1%vert(n1)) then 
+                        ! Closed 
+                        call lp%Construct(l1%xv(2:n1-1), l1%yv(2:n1-1)) ! no need to include 
+                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                    else
+                        call lp%Construct(l1%xv(2:), l1%yv(2:))
+                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                    end if
+                    if (size(xint) > 0) then 
+                        isintersectingl1 = .true.
+                        mink1 = s1(1)+2
+                    end if
+                end if 
 
                 ! Second line
-                if (l2%vert(1) == l2%vert(size(l2%vert))) then 
-                    ! Closed 
-                    call lp%Construct(l2%xv(2:size(l2%xv)-1), l2%yv(2:size(l2%xv)-1)) ! no need to include 
-                    call PolygonIntersections(lp, facep, xint, yint, s1, s2)
-                else
-                    call lp%Construct(l1%xv(2:), l1%yv(2:))
-                    call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                if (n2 > 2) then 
+                    if (l2%vert(1) == l2%vert(n2)) then 
+                        ! Closed 
+                        call lp%Construct(l2%xv(2:n2-1), l2%yv(2:n2-1)) ! no need to include 
+                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                    else
+                        call lp%Construct(l2%xv(2:), l2%yv(2:))
+                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                    end if 
+                    if (size(xint) > 0) then 
+                        isintersectingl2 = .true.
+                        mink2 = s1(1)+2
+                    end if
                 end if 
-                if (size(xint) > 0) then 
-                    isintersectingl2 = .true.
-                    mink2 = s1(1)+2
-                end if
                 
                 ! Add the first face
                 nf = nf + 1
@@ -1029,20 +1042,18 @@ module ggmod_gridgeneration2D
 
                 end do
 
+                ! Add to grid
+                allocate(tempcellregion(nc), tempfaceregion(nf))
+                tempcellregion = celldata(i)%region
+                tempfaceregion = celldata(i)%region
+                call grid%AddFace(tempfacevert(1:nf, :), tempfacelabels(1:nf), tempfaceregion(1:nf))
+                call grid%AddCell(tempcellvert(1:ncv), tempcellvertP(1:nc, 1:2), tempcellregion(1:nc))
+
                 ! Housekeeping
+                deallocate(tempfacevert, tempfacelabels, tempcellvert, &
+                    tempcellvertP, tempcellregion, tempfaceregion)
                 end associate
             end do 
-    
-            
-            ! Add to grid
-            allocate(tempcellregion(nc), tempfaceregion(nf))
-            tempcellregion = celldata(i)%region
-            tempfaceregion = celldata(i)%region
-            call grid%AddFace(tempfacevert(1:nf, :), tempfacelabels(1:nf), tempfaceregion(1:nf))
-            call grid%AddCell(tempcellvert(1:ncv), tempcellvertP(1:nc, :), tempcellregion(1:nc))
-
-            ! Housekeeping
-            deallocate(tempcellregion, tempfaceregion)
 
         end do 
 
@@ -1962,6 +1973,7 @@ module ggmod_gridgeneration2D
             face%v1 = ConstructIntegerDynamicArray()
             face%v2 = ConstructIntegerDynamicArray()
             face%label = ConstructIntegerDynamicArray()
+            face%region = ConstructIntegerDynamicArray()
 
         case default 
 
@@ -2074,6 +2086,7 @@ module ggmod_gridgeneration2D
         call grid%face%v2%Append(facevert(:, 2))
         call grid%face%label%Append(facelabel)
         call grid%face%region%Append(faceregion)
+        grid%face%ntot = grid%face%ntot + size(facelabel)
 
     end subroutine
 
@@ -2082,7 +2095,10 @@ module ggmod_gridgeneration2D
 
         ! Description
         !============
-        ! Add cells to the grid (without updating interconnection)
+        ! Add cells to the grid (without updating interconnection).
+        ! Note: it is assumed that the vertex pointer vp1 is local, 
+        ! i.e. that it always starts from one. We adjust this value
+        ! to be immediately correct. 
 
         ! Declare variables
         !==================
@@ -2094,7 +2110,7 @@ module ggmod_gridgeneration2D
         ! Checks
         !=======
         ! Size checks
-        if ((size(cellvertP, 1) /= size(cellvert)) .or. (size(cellvert) /= size(cellregion))) then 
+        if ((size(cellvertP, 1) /= size(cellregion))) then 
             call gdErrorHandler('AddGGcell: incompatible input sizes')
         end if 
         if (size(cellvertP, 2) /= 2) then 
@@ -2103,10 +2119,17 @@ module ggmod_gridgeneration2D
 
         ! Add
         !====
-        call grid%cell%vp1%Append(cellvertP(:, 1))
+        if (grid%cell%vp1%Size() > 0) then 
+            call grid%cell%vp1%Append(cellvertP(:, 1) &
+                + grid%cell%vp1%Get(grid%cell%vp1%Size()) & 
+                + grid%cell%vp2%Get(grid%cell%vp2%Size()) - 1)
+        else
+            call grid%cell%vp1%Append(cellvertP(:, 1))
+        end if 
         call grid%cell%vp2%Append(cellvertP(:, 2))
         call grid%cell%vert%Append(cellvert)
         call grid%cell%region%Append(cellregion)
+        grid%cell%ntot = grid%cell%ntot + size(cellregion)
 
     end subroutine
 
@@ -2571,6 +2594,137 @@ module ggmod_gridgeneration2D
                     write (fu, *) c(i)%lfline%vert(j), c(i)%lfline%xv(j), c(i)%lfline%yv(j)
                 end do 
             end if 
+        end do 
+
+        ! Housekeeping
+        !=============
+        ! Deallocate again
+
+        ! Others
+        end associate
+        close(fu)
+
+    end subroutine
+
+    ! Grid data writing
+    subroutine WriteGGGridData(grid, filename)
+
+        ! Description
+        !============
+        ! Write out grid data of intermediate grid structure. Mainly 
+        ! for plotting purposes, quite limited in output. 
+
+        ! 'vertices'
+        ! <vert%ntot>
+        ! 'ID, x, y, fieldlineID'
+        ! <ID, x, y, fieldlineID>
+        ! 'faces'
+        ! <face%ntot> 
+        ! 'ID, v1, v2, label, region'
+        ! <ID, v1, v2, label, region>
+        ! 'cells'
+        ! <cell%ntot, cell%nvert> 
+        ! 'ID, vp1, vp2, region>'
+        ! <ID, vp1, vp2, region>
+        ! 'cell vertices'
+        ! <cell%vert> 
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+
+        ! Arguments
+        class(GGGridUDT)                        :: grid
+        character(*), intent(in)                :: filename 
+
+        ! Auxiliary
+        integer                                 :: fu
+        real(R8), allocatable, dimension(:)     :: x, y 
+        integer(I8), allocatable, dimension(:)  :: fID, v1, v2, region, &   
+            label, vc
+        character(:), allocatable               :: dir
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            f       => grid%face,   &
+            c       => grid%cell,   &
+            v       => grid%vert    &
+        )
+
+        ! Construct writing directory
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Write header
+        write(fu, *) 'VERSION3.00.00'
+
+        ! Write vertex data
+        !==================
+        ! Unpack
+        x = v%x%Get()
+        y = v%y%Get()
+        fID = v%fieldlineID%Get()
+
+        ! Number of vertices
+        write (fu, *) 'vertices'
+        write (fu, *) v%ntot 
+
+        ! Vertex data
+        write (fu, *) 'ID, x, y, fieldlineID'
+        do i = 1, v%ntot 
+            write (fu, *) i, x(i), y(i), fID(i)
+        end do 
+
+        ! Write face data
+        !================
+        ! Unpack
+        v1 = f%v1%Get()
+        v2 = f%v2%Get()
+        region = f%region%Get()
+        label = f%label%Get()
+
+        ! Number of faces
+        write (fu, *) 'faces'
+        write (fu, *) f%ntot
+
+        ! Face data
+        write (fu, *) 'ID, v1, v2, label, region'
+        do i = 1, f%ntot
+            write (fu, *) i, v1(i), v2(i), label(i), region(i)
+        end do 
+
+        ! Write cell data
+        !================
+        ! Unpack
+        vc = c%vert%Get()
+        v1 = c%vp1%Get()
+        v2 = c%vp2%Get()
+        region = c%region%Get()
+
+        ! Number of cells
+        write (fu, *) 'cells'
+        write (fu, *) c%ntot, size(vc)
+
+        ! Cell data
+        write (fu, *) 'ID, vp1, vp2, region'
+        do i = 1, c%ntot
+            write (fu, *) i, v1(i), v2(i), region(i)
+        end do 
+
+        ! Cell vertices
+        write (fu, *) 'cell vertices'
+        do i = 1, size(vc)
+            write (fu, *) vc(i)
         end do 
 
         ! Housekeeping
