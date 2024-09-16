@@ -526,6 +526,7 @@ module somod_optimizationengine
 
         ! Write original grid cells
         call WriteGridCells(problem%goat%grid, 'cells_init')
+        call WriteGridVertices(grid, 'vertices_init')
 
         ! Housekeeping
         !=============
