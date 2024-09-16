@@ -953,40 +953,32 @@ module optmod_optimizationengine
         allocate(gradJ(nphi))
         J = 0
         gradJ(:) = 0
-        hessJ%nrow = nphi 
-        hessJ%ncol = nphi 
+        hessJ = SpZeros(nphi, nphi)
 
         ! Equality constraint 
         allocate(G(neq), lambda(neq))
         G(:) = 0
         lambda(:) = 0.0
-        gradG%nrow = nphi 
-        gradG%ncol = neq 
-        hessG%nrow = nphi 
-        hessG%ncol = nphi
+        gradG = SpZeros(nphi, neq)
+        hessG = SpZeros(nphi, nphi)
 
         ! Inequality constraint 
         allocate(H(nineq), mu(nineq))
         H(:) = 0
         mu(:) = 0
-        gradH%nrow = nphi 
-        gradH%ncol = nineq 
-        hessH%nrow = nphi 
-        hessH%ncol = nphi
+        gradH = SpZeros(nphi, nineq)
+        hessH = SpZeros(nphi, nphi)
 
         ! NCP function
         allocate(ncp(nineq), A(nineq), I(nineq))
-        gradncpphi%nrow = nphi 
-        gradncpphi%ncol = nineq
-        gradncpmu%nrow = nineq 
-        gradncpmu%ncol = nineq
+        gradncpphi = SpZeros(nphi, nineq)
+        gradncpmu = SpZeros(nineq, nineq)
         A(:) = .false.
         I(:) = .not. A
 
         ! Lagrangian 
         allocate(gradL(nphi + neq + nineq))
-        hessL%nrow = nphi + neq + nineq
-        hessL%ncol = nphi + neq + nineq
+        hessL = SpZeros(nphi + neq + nineq, nphi + neq + nineq)
         L = 0
         gradL(:) = 0
 
