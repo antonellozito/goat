@@ -768,7 +768,7 @@ module gdmod_plots
         integer(I8), allocatable                :: IDs(:)
         integer(I8)                             :: k
         character(:), allocatable               :: filepath
-        character(:), allocatable, intent(in)   :: filename
+        character(*), intent(in)                :: filename
 
         ! Initialize
         !===========
