@@ -6195,6 +6195,11 @@ module gdmod_constraints
             hasbeenfound(nfs), psi(grid%vert%ntot))
         hasbeenfound = .false. 
 
+        ! Initialize
+        fsind = 0
+        psid = 0
+
+
         ! Core flux 
         !==========
         if (docoreflux) then 
