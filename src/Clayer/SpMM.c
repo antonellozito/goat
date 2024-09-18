@@ -1,6 +1,8 @@
 # include <cs.h> 
 # include "clayer.h"
-MyCSparse *SpMM(MyCSparse *A, MyCSparse *B)
+# include <stdlib.h> 
+# include <string.h>
+MyCSparse SpMM(MyCSparse *A, MyCSparse *B)
 {
     /*
     Sparse matrix-matrix multiplication wrapper for interfacing to 
@@ -17,7 +19,7 @@ MyCSparse *SpMM(MyCSparse *A, MyCSparse *B)
     /* Local variables */
     cs *csA, *csB, *csC, *csA0, *csB0;
     int i, p1, p2, p;
-    MyCSparse *C = (MyCSparse *) calloc(1, sizeof(MyCSparse)); 
+    MyCSparse C;
 
     /* Convert */
     csA0 = ConvertMyCSparseToCS(A);
@@ -31,22 +33,24 @@ MyCSparse *SpMM(MyCSparse *A, MyCSparse *B)
     csC = cs_multiply(csA, csB);
 
     /* Reconvert */
-    C->nrow = csC->m; 
-    C->ncol = csC->n; 
+    C.nrow = csC->m; 
+    C.ncol = csC->n; 
     
-    C->nval = csC->p[csC->n];
-    C->val = csC->x;
-    C->row = csC->i; 
-    C->col = (int *) calloc(C->nval, sizeof(int));
+    C.nval = csC->p[csC->n];
+    C.val = (double *) calloc(C.nval, sizeof(double));
+    C.row = (int *) calloc(C.nval, sizeof(int));
+    memcpy(C.val, csC->x, sizeof(double)*C.nval);
+    memcpy(C.row, csC->i, sizeof(int)*C.nval);
+    C.col = (int *) calloc(C.nval, sizeof(int));
     
-    for (i = 0; i < C->ncol; i++)
+    for (i = 0; i < C.ncol; i++)
     {
         p1 = csC->p[i];
         p2 = csC->p[i+1];
 
         for(p = p1; p < p2; p++)
         {
-            C->col[p] = i;
+            C.col[p] = i;
         }
 
     }
@@ -54,8 +58,7 @@ MyCSparse *SpMM(MyCSparse *A, MyCSparse *B)
     cs_di_spfree(csB);
     cs_di_spfree(csA0);
     cs_di_spfree(csB0);
-    free(csC->p);
-    free(csC);
+    cs_di_spfree(csC);
 
     return (C);
 

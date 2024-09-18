@@ -4,16 +4,12 @@
 MyCSparse SpMMV(MyCSparse A, MyCSparse B)
 {
     MyCSparse C;
-    MyCSparse *D, *E, *F;
+    MyCSparse *D, *E;
     D=&A;
     E=&B;
 
-    F = SpMM(D, E);
-    C = *F;
-    free(F->row);
-    free(F->col);
-    free(F->val);
-    free(F);
+    C = SpMM(D, E);
+
     return C;
 
 }

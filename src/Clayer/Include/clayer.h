@@ -16,7 +16,7 @@ typedef struct MyCSparse
 cs *ConvertMyCSparseToCS(MyCSparse *);
 MyCSparse ParseTest(MyCSparse);
 MyCSparse *ParseTestP2(MyCSparse *);
-MyCSparse *SpMM(MyCSparse *, MyCSparse *);
+MyCSparse SpMM(MyCSparse *, MyCSparse *);
 MyCSparse *ConstructMyCSparse(int, int, int, int [], int [], 
     double []);
 MyCSparse SpMMV(MyCSparse, MyCSparse);
