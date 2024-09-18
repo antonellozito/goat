@@ -737,6 +737,11 @@ module mod_sparseinterface
         
         ! Reconvert
         call ConvertToMySparse(cscf, c)
+
+        ! Free
+        call FreeCSparse(cscf)
+        call FreeCSparse(csaf)
+        call FreeCSparse(csbf)
         
     end function 
 
