@@ -210,7 +210,7 @@ CONSTANTS_FILES = src/Constants/mod_global_environment.F90 src/Constants/mod_pre
 CLAYER_FILES    = $(wildcard src/Clayer/*.c)
 
 ## ClayerF              : fortran files for interfacing with other c code
-CLAYERF_FILES    =  src/Clayer/CSparseF.F90 src/Clayer/Clayer.F90
+CLAYERF_FILES    =  src/Clayer/CUtilities.F90 src/Clayer/CSparseF.F90 src/Clayer/Clayer.F90
 
 ## ShapeOpt             : fortran files for shape optimization
 SHAPEOPT_FILES  = src/Modules/ShapeOpt/somod_userinput.F90 \

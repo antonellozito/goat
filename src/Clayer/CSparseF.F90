@@ -15,9 +15,10 @@ module CSparseF
     ! Modules
     !========
     use, intrinsic :: iso_c_binding
+    use CUtilities
 
     implicit none 
-    save 
+    public 
 
     !==================================================================!
     !                                                                  !
@@ -103,6 +104,34 @@ module CSparseF
     end interface 
 
     contains 
+
+    !==================================================================!
+    !                                                                  !
+    !                              ROUTINES                            !
+    !                                                                  !
+    !==================================================================!
+
+    ! Free memory usage of sparse matrix
+    subroutine FreeCSparse(cs)
+
+        ! Description
+        !============
+        ! Free the c-pointer data of a CSparseUDT 
+        ! Important: it is assumed that these components are allocated!
+        ! Otherwise, memory issues may occur... 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CSparseUDT), intent(inout)     :: cs 
+
+        ! Free memory
+        !============
+        call FreeCptr(cs%row)
+        call FreeCptr(cs%col)
+        call FreeCptr(cs%val)
+
+    end subroutine
 
     
 
