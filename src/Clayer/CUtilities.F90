@@ -38,7 +38,7 @@ module CUtilities
         subroutine FreeCptr(cptr) &
             bind(c, name='free')
             use, intrinsic :: iso_c_binding, only: c_ptr
-            type(c_ptr) :: cptr 
+            type(c_ptr), value :: cptr 
         end subroutine 
 
     end interface 

@@ -57,10 +57,13 @@ BUILDDIR :=./builds/$(BUILDDIR)
 ## goattranslator: Create executable for GOAToptions file translator
 ## shapeopt 	: Create executable for shape optimization with goat
 
+# Add these flags for memory debugging with DDT:
+# -Wl,--wrap=dlopen,--wrap=dlclose,--allow-multiple-definition,--undefined=malloc,--undefined=_ZdaPv -lpthread -lstdc++ /apps/leuven/rocky8/skylake/2018a/software/ArmForge/22.1.2/lib/64/libdmallocthcxx.a
+
 goat: $(addprefix $(BUILDDIR)/, $(GOAT_TARGETS)) $(BUILDDIR)/goat.o
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
-	$(FC) $(LFLAGS) -o $(BUILDDIR)/goat.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+	$(FC)  $(LFLAGS) -o $(BUILDDIR)/goat.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include; 
 	rm $(BUILDDIR)/Goat.o; 
 	cp $(BUILDDIR)/goat.exe ./executables/.

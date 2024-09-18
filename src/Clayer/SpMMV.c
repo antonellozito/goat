@@ -10,7 +10,10 @@ MyCSparse SpMMV(MyCSparse A, MyCSparse B)
 
     F = SpMM(D, E);
     C = *F;
-
+    free(F->row);
+    free(F->col);
+    free(F->val);
+    free(F);
     return C;
 
 }

@@ -15,17 +15,17 @@ MyCSparse *SpMM(MyCSparse *A, MyCSparse *B)
 
     
     /* Local variables */
-    cs *csA, *csB, *csC;
+    cs *csA, *csB, *csC, *csA0, *csB0;
     int i, p1, p2, p;
     MyCSparse *C = (MyCSparse *) calloc(1, sizeof(MyCSparse)); 
 
     /* Convert */
-    csA = ConvertMyCSparseToCS(A);
-    csB = ConvertMyCSparseToCS(B);
+    csA0 = ConvertMyCSparseToCS(A);
+    csB0 = ConvertMyCSparseToCS(B);
 
     /* Compress to column storage*/
-    csA = cs_compress(csA);
-    csB = cs_compress(csB);
+    csA = cs_compress(csA0);
+    csB = cs_compress(csB0);
 
     /* Compute */
     csC = cs_multiply(csA, csB);
@@ -50,8 +50,14 @@ MyCSparse *SpMM(MyCSparse *A, MyCSparse *B)
         }
 
     }
+    cs_di_spfree(csA);
+    cs_di_spfree(csB);
+    cs_di_spfree(csA0);
+    cs_di_spfree(csB0);
+    free(csC->p);
+    free(csC);
 
-    return C;
+    return (C);
 
 
     
