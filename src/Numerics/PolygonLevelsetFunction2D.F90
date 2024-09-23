@@ -53,6 +53,7 @@ module PolygonLevelsetFunction2D
 
     ! Routines
     public InitializePolygonLevelsetFunction2D
+    public assignment(=)
 
     !==================================================================!
     !                                                                  !
@@ -293,6 +294,11 @@ module PolygonLevelsetFunction2D
         end subroutine
 
     end interface
+
+    ! Operator overloading
+    interface assignment(=)
+        module procedure AssignPLF2DClass
+    end interface
     
     contains
 
@@ -307,12 +313,12 @@ module PolygonLevelsetFunction2D
     !------------------------------------------------------------------!
 
     ! Initializer
-    recursive subroutine InitializePolygonLevelsetFunction2D(plf, ps, options) 
+    subroutine InitializePolygonLevelsetFunction2D(plf, ps, options) 
 
         ! Declare variables
         !==================
         ! Arguments
-        class(PolygonLevelsetFunction2DUDT), allocatable        :: plf 
+        class(PolygonLevelsetFunction2DUDT), allocatable, intent(out)  :: plf 
         type(PolygonSetUDT), intent(in)                         :: ps
         class(PLF2DOptionsUDT), intent(in)                      :: options
 
@@ -364,8 +370,6 @@ module PolygonLevelsetFunction2D
                 call plf%Initialize(ps)
 
             end select
-
-        class default
 
         end select 
 
@@ -444,6 +448,50 @@ module PolygonLevelsetFunction2D
         ! Deallocate
         deallocate(xgv, ygv, xg, yg, vg)
 
+    end subroutine
+
+    ! Assignment
+    subroutine AssignPLF2DClass(a, b)
+
+        class(PolygonLevelsetFunction2DUDT), allocatable, intent(inout)    :: a 
+        class(PolygonLevelsetFunction2DUDT), intent(in)                    :: b 
+
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+
+        select type (b)
+
+        class default 
+
+            call gdErrorHandler('Unknown type')
+
+        type is (PolygonLevelsetFunction2DClosedApproximationUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (PolygonLevelsetFunction2DClosedApproximationUDT)
+                a = b 
+            end select
+
+        type is (PolygonLevelsetFunction2DGeneralUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (PolygonLevelsetFunction2DGeneralUDT)
+                a = b 
+            end select
+
+        type is (PolygonLevelsetFunction2DClosedExactUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (PolygonLevelsetFunction2DClosedExactUDT)
+                a = b
+            end select
+
+        end select
+    
     end subroutine
 
     !------------------------------------------------------------------!
@@ -1670,7 +1718,6 @@ module PolygonLevelsetFunction2D
         end if
 
     end subroutine
-
 
     !------------------------------------------------------------------!
     !                     PLF CLOSED APPROXIMATION                     !

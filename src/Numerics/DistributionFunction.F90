@@ -24,7 +24,6 @@ module DistributionFunction
     ! The usual
     implicit none 
     public 
-    
 
     !==================================================================!
     !                                                                  !
@@ -259,6 +258,11 @@ module DistributionFunction
 
     end interface
 
+    ! Assignment override
+    interface assignment(=)
+        module procedure AssignDFClass
+    end interface
+
     contains 
 
     !==================================================================!
@@ -317,6 +321,67 @@ module DistributionFunction
         ! Write data
         call Write3DCoordinateData(xg, yg, vg, savefilepath)
 
+    end subroutine
+
+    ! Assignment
+    subroutine AssignDFClass(a, b)
+
+        class(DistributionFunctionUDT), allocatable, intent(inout)    :: a 
+        class(DistributionFunctionUDT), intent(in)                    :: b 
+
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+
+        select type (b)
+
+        class default 
+
+            call gdErrorHandler('Unknown type')
+
+        type is (Structured2DDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Structured2DDistanceDFUDT)
+                a = b 
+            end select
+
+        type is (StructuredPLF2DDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (StructuredPLF2DDistanceDFUDT)
+                a = b 
+            end select
+
+        type is (Polygonset2DFieldDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Polygonset2DFieldDistanceDFUDT)
+                a = b
+            end select
+
+        type is (Polygonset1DFieldDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Polygonset1DFieldDistanceDFUDT)
+                a = b
+            end select
+
+        type is (Coordinates1DFieldDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Coordinates1DFieldDistanceDFUDT)
+                a = b
+            end select
+
+        end select 
+
+    
     end subroutine
 
     !------------------------------------------------------------------!
