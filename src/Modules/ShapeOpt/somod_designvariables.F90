@@ -190,7 +190,7 @@ module somod_designvariables
         designvariables%nphi = 2*nv
 
         ! Set the design variables
-        designvariables%phi = [xv, yv]
+        designvariables%phi = [xv, yv]*1.01_R8
 
         ! Set other fields
         designvariables%xind = (/(i, i = 1, nv)/)

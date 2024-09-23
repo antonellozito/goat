@@ -931,6 +931,10 @@ module somod_optimizationengine
 
         ! Write
         call problem%monitor%WriteFileIterate(fid)
+
+
+        ! Close file
+        close(fid)
         
 
         ! Housekeeping
