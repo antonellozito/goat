@@ -165,6 +165,40 @@ module somod_costfunction
 
     end type
 
+    ! Cost function with all possible contributions (but vessel based only)
+    type, extends(CostfunctionSOUDT) :: CostfunctionGeneralSOUDT
+
+        ! Description
+        !============
+        ! Cost function that accounts for all possible combinations of 
+        ! length ratio(s), angles, differences, ... The inclusion of a 
+        ! cost function value is determined based on the value of the 
+        ! scaling coefficient lambda. If this is zero or negative, the 
+        ! contribution is not included. One should beware that if the 
+        ! lambda values are not properly set in the input file, 
+        ! contributions may be unexpectedly included since the default
+        ! value for these contributions is non-zero. If no contributions
+        ! would be included, the system is likely underdetermined, 
+        ! leading to NaNs/divergence of the solver. 
+
+        ! Fields
+        type(CostfunctionPLFUDT)        :: cfv_plf
+        type(CostFunctionSOFAUDT)       :: cfv_fa
+
+        ! Switches
+        logical                         :: doFA, doPLF
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize         => InitializeCostfunctionGeneralSO
+
+        ! Evaluation
+        procedure :: Evaluate           => EvaluateCostFunctionGeneralSO
+
+
+    end type
+
     ! General goat-reduced cost function
     type, extends(CostfunctionSOUDT) :: CostFunctionGRUDT
 
@@ -1467,6 +1501,210 @@ module somod_costfunction
         !=============
         end associate
         deallocate(IDn, xn, yn)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                             GENERAL                              !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionGeneralSO(costfunction, goat, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. 
+
+        ! Simply call the initialization of the original lenght ratio
+        ! cost function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionGeneralSOUDT)     :: costfunction
+        type(OptimizationProblemGDUDT)      :: goat
+        type(CostFunctionOptionsSOUDT)      :: options
+        
+        ! Initialize
+        !===========
+        ! Set evaluation switches
+        costfunction%doPLF      = .false.
+        costfunction%doFA       = .false.
+
+        ! Check based on cost function type
+        select case (costfunction%type)
+
+        case ('general')
+
+            ! Include all contributions
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('Unknown cost function type')
+
+        end select
+
+        ! Initialize if necessary
+        if (options%PLF%lambda > 0) then
+            costfunction%doPLF = .true.
+            call costfunction%cfv_plf%Initialize(goat, options)
+        end if 
+        if (options%FA%lambda > 0) then 
+            costfunction%doFA = .true.
+            call costfunction%cfv_fa%Initialize(goat, options)
+        end if 
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionGeneralSO(costfunction, J, gradJ, hessJ, &
+        goat, dogradient, dohessian, &
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, we simply call the same cost function twice, but switch
+        ! the order of the indices and recompute the bias. 
+
+        ! Notes:
+        !=======
+        ! Possible future performance improvements:
+        ! - Allocating hessian stuff only once and storing indices, 
+        ! since they don't change
+        ! - Instead of recomputing auxiliary variables, store them. May
+        ! not actually be better in terms of computational time, but 
+        ! may lead to shorter and hence better maintainable code. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionGeneralSOUDT) :: costfunction
+        real(R8)                        :: J, Jtemp
+        real(R8), allocatable           :: gradJ(:), gradJtemp(:)
+        type(MySparseUDT)               :: hessJ, hessJtemp
+        type(OptimizationProblemGDUDT)  :: goat
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesSOUDT)     :: designvariables
+
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:), dJdvartemp(:) 
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvartemp
+
+        ! Loop variables
+
+        ! Auxiliary
+                                        
+        ! Initialize
+        !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
+        ! Cost function
+        J = 0
+        Jtemp = 0
+
+        ! Gradient
+        gradJ = 0
+        allocate(gradJtemp(size(gradJ)), dJdvartemp(size(values)), &
+            dJdvar(size(values)))
+        gradJtemp = 0
+        dJdvartemp = 0
+        dJdvar = 0
+
+        ! Hessian
+        hessJtemp%nrow = hessJ%nrow 
+        hessJtemp%ncol = hessJ%ncol 
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+        dgradJdvartemp = dgradJdvar
+        
+        ! Allocate initially to avoid errors 
+        if (.not. allocated(hessJ%row)) then 
+            hessJ%nval = 0
+            call hessJ%Allocate()
+        else 
+            ! Reset hessian
+            call hessJ%Deallocate()
+            hessJ%nval = 0
+            call hessJ%Allocate()
+        end if 
+            
+
+        ! Compute cost function
+        !======================
+        ! PLF
+        if (costfunction%doPLF) then 
+            ! Compute
+            call costfunction%cfv_plf%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, goat, dogradient, &
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+            
+            ! Add
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for PLF'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
+        end if 
+        
+        ! Face angle 
+        if (costfunction%doFA) then 
+            ! Compute
+            call costfunction%cfv_fa%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, goat, dogradient, &
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+
+            ! Add
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for FA'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
+        end if 
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
 
     end subroutine
 
