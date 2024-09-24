@@ -275,6 +275,34 @@ module somod_userinput
 
     end type
 
+    ! Face angle cost function
+    type, extends(optionsUDT)   :: CostfunctionOptionsSOFAUDT
+
+        ! Description
+        !============
+        ! Cost function options for the face angle cost function.
+        ! This includes:
+        !
+        !   structureIDs:           IDs of the structure where to
+        !                           impose the costfunction
+        !   vertexIDs:              IDs of the vertices where to impose
+        !                           the cost function (note: at least 
+        !                           three subsequent IDs have to be 
+        !                           present to have a cost function
+        !                           contribution)
+        !   lambda:                 scaling constant for cost function
+        
+        ! Fields
+        real(R8)                    :: lambda
+        integer(I8), allocatable    :: structureIDs(:), vertIDs(:)
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultCostfunctionOptionsSOFA
+        procedure :: Read           => ReadCostfunctionOptionsSOFA
+
+    end type
+
     ! General cost function options
     type, extends(optionsUDT)   :: CostfunctionOptionsSOUDT 
 
@@ -293,6 +321,7 @@ module somod_userinput
         character(:), allocatable           :: type
         logical                             :: dogoatreduction, includesolps
         type(CostFunctionOptionsPLFUDT)     :: plf 
+        type(CostfunctionOptionsSOFAUDT)    :: fa 
         type(HessianApproximationOptionsUDT)    :: hessapprox
 
     contains 
@@ -615,6 +644,21 @@ module somod_userinput
 
     end subroutine
 
+    ! PLF cost function
+    subroutine SetDefaultCostfunctionOptionsSOFA(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionOptionsSOFAUDT)    :: options 
+
+        ! Set defaults
+        !=============
+        options%lambda                  = 1
+        allocate(options%structureIDs(0), options%vertIDs(0))
+
+    end subroutine
+
     ! General cost function
     subroutine SetDefaultCostfunctionOptionsSO(options)
 
@@ -634,10 +678,12 @@ module somod_userinput
 
         ! Propagate filepaths
         options%plf%inputfilepath = options%inputfilepath
+        options%fa%inputfilepath = options%inputfilepath
         options%hessapprox%inputfilepath = options%inputfilepath
 
         ! Contributions
         call options%plf%SetDefaults()
+        call options%fa%SetDefaults()
         call options%hessapprox%SetDefaults()
 
     end subroutine
@@ -1237,6 +1283,59 @@ module somod_userinput
 
     end subroutine
 
+    ! PLF cost function
+    subroutine ReadCostFunctionOptionsSOFA(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionOptionsSOFAUDT)    :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsSOFA: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsSOFA: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'so.cfv.par.FA.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda)
+
+        ! Structure & vertex IDs
+        field = 'so.cfv.par.FA.structureIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
+        field = 'so.cfv.par.FA.vertIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
     ! General cost function
     subroutine ReadCostfunctionOptionsSO(options)
 
@@ -1294,6 +1393,7 @@ module somod_userinput
         !===================
         ! Contributions
         call options%plf%Read()
+        call options%fa%Read()
         call options%hessapprox%Read()
 
     end subroutine

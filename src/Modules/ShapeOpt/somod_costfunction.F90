@@ -127,6 +127,44 @@ module somod_costfunction
 
     end type
 
+    ! Face angle cost function
+    type, extends(CostfunctionSOUDT) :: CostfunctionSOFAUDT
+
+        ! Description
+        !============
+        ! This cost function penalizes the angle that vessel
+        ! face make with respect to each other (actually the angle minus
+        ! pi since that would give a straight line). This is done using
+        ! an L2-norm. To this end, the vertex pairs of each edge are
+        ! stored in an nvp-by-4 array. This allows to also penalize 
+        ! non-subsequent edge pairs (though likely not necessary). The
+        ! following fields are stored
+        !
+        !   nvpairs         : total number of vertex pairs
+        !   vpairs          : vertex pairs (vessel vertex IDs)
+        !   lambda          : scaling parameter
+        !   wt              : weight vector to determine relative weight
+        !                   of each vertex pair in the cost function
+
+        ! Fields
+        integer(I8), allocatable                :: vpairs(:, :)
+        integer                                 :: nvpairs 
+        real(R8)                                :: lambda 
+        real(R8), allocatable                   :: wt(:)
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionSOFA
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionSOFA
+
+        ! Data writing
+        procedure :: WriteData              => WriteCostFunctionDataSOFA
+
+    end type
+
     ! General goat-reduced cost function
     type, extends(CostfunctionSOUDT) :: CostFunctionGRUDT
 
@@ -334,7 +372,7 @@ module somod_costfunction
         ! Initialize the cost function and its parameters based on the 
         ! goat. The cost function is defined as:
         ! 
-        !   cfv = lambda sum_i 0.5*V(xv(i), yv(i))^2,
+        !   cfv = lambda sum_i 0.5*V(xv(i), yv(i))**2,
         ! 
         ! where V is the polygon levelset function of the desired
         ! vessel location. This plf is set up by reading in another
@@ -580,6 +618,855 @@ module somod_costfunction
 
         ! Assocation termination
         end associate
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                            FACE ANGLE                            !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionSOFA(costfunction, goat, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! goat. The cost function is defined as:
+        ! 
+        !   cfv = lambda sum_i (theta_i - pi)**2,
+        ! 
+        ! where theta_i is the angle that is made between two vertex
+        ! pairs of the vessel. Note that this cost function promotes
+        ! straight surfaces and may not yield satisfactory results
+        ! if used on its own. 
+
+        ! Note: we assume that all vessel polygons are closed
+        
+        ! Modules
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionSOFAUDT)          :: costfunction
+        type(OptimizationProblemGDUDT)      :: goat
+        type(CostFunctionOptionsSOUDT)      :: options
+
+        ! Auxiliary 
+        logical, allocatable, dimension(:)          :: includevert, &
+            ispolygonstart 
+        integer(I8)                                 :: nvpairs, nv, &
+            ind, psind, prevv
+        integer(I8), allocatable, dimension(:)      :: pID, vID
+        integer(I8), allocatable, dimension(:, :)   :: labels, vpairs  
+        real(R8), allocatable, dimension(:)         :: xv, yv 
+
+        ! Loop
+        integer(I8)                                 :: i, cc
+        
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            opt       => options%fa,                        &   
+            ps        => goat%environment%vessel%polygonset &
+            )
+
+        ! Set the scaling constant
+        costfunction%lambda = opt%lambda
+
+        ! Determine vertex pairs
+        !=======================
+        ! Get all vertices and vertex labels
+        call ps%GetLabels(labels)
+        call ps%GetVertices(xv, yv, pID)
+        call ps%GetVertices(vID)
+        nv = size(labels, 1)
+
+        ! Check if contributions should be included
+        allocate(includevert(nv))
+        includevert = .false. 
+
+        ! Constrain per vessel structure (label 1 and 2)
+        do i = 1, size(opt%structureIDs)
+            ! Unpack ID
+            associate(tID       => opt%structureIDs(i))
+
+            ! Check vertices
+            where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) &
+                includevert = .true. 
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Constrain per vertex ID
+        do i = 1, size(opt%vertIDs)
+            ! Unpack ID
+            associate(tID       => opt%vertIDs(i))
+
+            ! Check vertices
+            where( (labels(:, 3) == tID)) includevert = .true. 
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Check starting points of polygon
+        ispolygonstart = [.true., pID(2:) - pID(:nv-1) /= 0]
+
+        ! Initialize vertex pairs 
+        nvpairs = count(includevert)
+        allocate(vpairs(nvpairs, 4))
+
+        ! Loop
+        cc = 0
+        psind = 1
+        do i = 1, size(vID) 
+            if (includevert(vID(i))) then 
+
+                ! Check if we should include the pair (need to account
+                ! for starting vertex appearing twice in vID)
+                if (ispolygonstart(i+1)) then 
+                    ! Update psind
+                    psind = psind + ps%polygons(pID(i))%ne + 1
+                    cycle 
+                end if 
+
+                ! Update counter
+                cc = cc + 1
+
+                ! Set current vertex
+                vpairs(cc, 2:3) = vID(i) 
+
+                ! Check
+                if (ispolygonstart(i)) then
+                    ! Previous vertex ID should be current polygon start 
+                    ! plus number of edges minus 1
+                    ind = psind + ps%polygons(pID(i))%ne - 1
+                    prevv = vID(ind) 
+                else 
+                    prevv = vID(i-1)
+                end if 
+
+                ! Add
+                vpairs(cc, 1) = prevv 
+                vpairs(cc, 4) = vID(i+1)
+            end if 
+        end do
+
+        ! Sanity check
+        if (cc /= nvpairs) then 
+            ! Should be a bug
+            call gdErrorHandler('InitializeCostFunctionSOFA: this is a bug')
+        end if 
+
+        ! Add
+        !====
+        costfunction%vpairs = vpairs 
+        costfunction%nvpairs = nvpairs 
+
+        ! Determine weights
+        !==================
+        ! Just equal to one for now
+        allocate(costfunction%wt(nvpairs))
+        costfunction%wt = 1 ! default
+
+        ! Write data
+        !===========
+        call costfunction%WriteData(xv, yv)
+
+        ! Housekeeping
+        !=============
+        end associate
+        
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionSOFA(costfunction, J, gradJ, hessJ, &
+        goat, dogradient, dohessian, designvariables, &
+        varin, valuesin, dJdvarin, dgradJdvarin)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. 
+        ! Here, the target plf is evaluated at the vessel coordinates 
+        ! (which may or may not be design variables...)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionSOFAUDT)      :: costfunction 
+        real(R8)                        :: J
+        real(R8), allocatable           :: gradJ(:) ! assumed initialized
+        type(MySparseUDT)               :: hessJ ! assumed in initialized
+        type(OptimizationProblemGDUDT)  :: goat
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesSOUDT)     :: designvariables
+
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
+        ! Auxiliary
+        integer(I8)                             :: nv 
+        integer(I8), allocatable, dimension(:)  :: row, col
+        real(R8), allocatable, dimension(:)     :: x1v, x2v, x3v, x4v, &
+            y1v, y2v, y3v, y4v, dx1v, dx2v, dy1v, dy2v, dpv, cpv, ratv, &
+            thetav, xv, yv, valxx, valxy, valyx, valyy
+
+        ! Loop 
+        integer(I8)                             :: i, k 
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            ps          => goat%environment%vessel%polygonset,    &
+            vpairs      => costfunction%vpairs,     &
+            nvpairs     => costfunction%nvpairs,    &
+            lambda      => costfunction%lambda,     &
+            wt          => costfunction%wt)
+
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
+        ! Check design variables
+        select case (designvariables%type)
+
+        case ('vesselcoordinates', 'vesselcoordinates_goat')
+
+            ! All good
+
+        case default
+
+            ! All bad
+            call gdErrorHandler('EvaluateCostFunctionSOFA: design variable ' // & 
+                'type: "' // designvariables%type // '" not implemented')
+
+        end select
+                
+        ! Get vessel coordinates
+        call ps%GetVertices(xv, yv)
+
+        ! Initialize
+        nv = size(xv)
+        hessJ = SpZeros(designvariables%nphi, designvariables%nphi)
+        gradJ = 0
+
+        ! Value
+        !======
+        ! Compute angle
+        x1v = xv(vpairs(:, 1))
+        x2v = xv(vpairs(:, 2))
+        x3v = xv(vpairs(:, 3))
+        x4v = xv(vpairs(:, 4))
+
+        y1v = yv(vpairs(:, 1))
+        y2v = yv(vpairs(:, 2))
+        y3v = yv(vpairs(:, 3))
+        y4v = yv(vpairs(:, 4))
+
+        dx1v = x2v - x1v 
+        dx2v = x4v - x3v 
+        dy1v = y2v - y1v 
+        dy2v = y4v - y3v 
+
+        dpv = dx1v*dx2v + dy1v*dy2v 
+        cpv = dx1v*dy2v - dx2v*dy1v 
+
+        ratv = cpv/dpv 
+        thetav = atan2(cpv, dpv)
+
+        ! Compute cost function contribution
+        J = 0.5*lambda*sum(thetav**2)
+
+        ! Gradient & Hessian
+        !===================
+        ! Compute
+        select case (designvariables%type)
+
+        case ('vesselcoordinates', 'vesselcoordinates_goat')
+
+            ! Same gradient contributions for both design variables, 
+            ! since vessel coordinates come first in design variable 
+            ! vector and since there are no contributions in terms of 
+            ! goat coordinates
+
+            ! Gradient
+            !---------
+            if (dogradient) then 
+
+                ! Evaluate contributions
+                do i = 1, nvpairs 
+                    ! Unpack 
+                    associate(&
+                        dx1   => dx1v(i),       dx2     => dx2v(i),     &
+                        dy1   => dy1v(i),       dy2     => dy2v(i),     &
+                        dp    => dpv(i),        cp      => cpv(i),      &
+                        rat   => ratv(i),       theta   => thetav(i),   &
+                        wti   => wt(i)  &
+                        )
+
+                    gradJ(vpairs(i, 1)) = gradJ(vpairs(i, 1)) + &
+                        -(theta*wti*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1) !x1
+                    gradJ(vpairs(i, 2)) = gradJ(vpairs(i, 2)) + &
+                        (theta*wti*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1) !x2
+                    gradJ(vpairs(i, 3)) = gradJ(vpairs(i, 3)) + &
+                        (theta*wti*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1) !x3
+                    gradJ(vpairs(i, 4)) = gradJ(vpairs(i, 4)) + &
+                        -(theta*wti*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1) !x4
+
+                    gradJ(vpairs(i, 1)+nv) = gradJ(vpairs(i, 1)+nv) + &
+                        (theta*wti*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1) !y1
+                    gradJ(vpairs(i, 2)+nv) = gradJ(vpairs(i, 2)+nv) + &
+                        -(theta*wti*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1) !y2
+                    gradJ(vpairs(i, 3)+nv) = gradJ(vpairs(i, 3)+nv) + &
+                        -(theta*wti*(dx1/dp - (dy1*rat)/dp))/(rat**2 + 1) !y3
+                    gradJ(vpairs(i, 4)+nv) = gradJ(vpairs(i, 4)+nv) + &
+                        (theta*wti*(dx1/dp - (dy1*rat)/dp))/(rat**2 + 1) !y4
+
+                    end associate 
+                end do 
+
+            end if 
+
+            ! Hessian
+            !--------
+            if (dohessian) then 
+
+                ! Allocate
+                allocate(valxx(nvpairs*16), valxy(nvpairs*16), &
+                    valyx(nvpairs*16), valyy(nvpairs*16), &
+                    row(nvpairs*16), col(nvpairs*16))
+
+                ! Initialize
+                k = 0
+
+                ! Unpack 
+                associate(&
+                    dx1   => dx1v,       dx2     => dx2v,     &
+                    dy1   => dy1v,       dy2     => dy2v,     &
+                    dp    => dpv,        cp      => cpv,      &
+                    rat   => ratv,       theta   => thetav,   &
+                    wti   => wt  &
+                    )
+
+                ! v1v1
+                row(k+1:k+nvpairs) = vpairs(:, 1)
+                col(k+1:k+nvpairs) = vpairs(:, 1)
+                valxx(k+1:k+nvpairs) =  (wti*(dy2/dp - (dx2*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    + (theta*wti*((2*dx2**2*rat)/dp**2 - (2*dx2*dy2)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dx2*rat**2)/dp - (2*dy2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1x1
+                valxy(k+1:k+nvpairs) = (theta*wti*(dx2**2/dp**2 - dy2**2/dp**2 &
+                    + (2*dx2*dy2*rat)/dp**2))/(rat**2 + 1) - (wti*(dx2/dp &
+                    + (dy2*rat)/dp)*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1)**2 &
+                    + (theta*wti*((2*dy2*rat**2)/dp + (2*dx2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1y1
+                valyx(k+1:k+nvpairs) = valxy(k+1:k+nvpairs) ! y1x1
+                valyy(k+1:k+nvpairs) = (wti*(dx2/dp + (dy2*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    + (theta*wti*((2*dy2**2*rat)/dp**2 + (2*dx2*dy2)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dy2*rat**2)/dp + (2*dx2*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 !y1y1
+                k = k + nvpairs
+
+                ! v1v2
+                row(k+1:k+nvpairs) = vpairs(:, 1)
+                col(k+1:k+nvpairs) = vpairs(:, 2)
+                valxx(k+1:k+nvpairs) =  - (wti*(dy2/dp &
+                    - (dx2*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dx2**2*rat)/dp**2 &
+                    - (2*dx2*dy2)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx2*rat**2)/dp &
+                    - (2*dy2*rat)/dp)*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1x2
+                valxy(k+1:k+nvpairs) = (wti*(dx2/dp + (dy2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(dx2**2/dp**2 &
+                    - dy2**2/dp**2 + (2*dx2*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dy2*rat**2)/dp + (2*dx2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1y2
+                valyx(k+1:k+nvpairs) = (wti*(dx2/dp + (dy2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(dx2**2/dp**2 &
+                    - dy2**2/dp**2 + (2*dx2*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dx2*rat**2)/dp - (2*dy2*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 !y1x2
+                valyy(k+1:k+nvpairs) = (theta*wti*((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dy2**2*rat)/dp**2 &
+                    + (2*dx2*dy2)/dp**2))/(rat**2 + 1) - (wti*(dx2/dp &
+                    + (dy2*rat)/dp)**2)/(rat**2 + 1)**2 !y1y2
+                k = k + nvpairs
+
+                ! v1v3
+                row(k+1:k+nvpairs) = vpairs(:, 1)
+                col(k+1:k+nvpairs) = vpairs(:, 3)
+                valxx(k+1:k+nvpairs) = (theta*wti*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1)**2 &
+                    - (wti*(dy1/dp + (dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(rat/dp &
+                    + (dx1*dy2)/dp**2 - (dx2*dy1)/dp**2 &
+                    - (2*dx1*dx2*rat)/dp**2))/(rat**2 + 1) !x1x3
+                valxy(k+1:k+nvpairs) = (wti*(dx1/dp - (dy1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*(1/dp &
+                    - (dx1*dx2)/dp**2 - (dy1*dy2)/dp**2 &
+                    + (2*dx2*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1y3
+                valyx(k+1:k+nvpairs) = (wti*(dy1/dp + (dx1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*((dx1*dx2)/dp**2 &
+                    - 1/dp + (dy1*dy2)/dp**2 + (2*dx1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx1*rat**2)/dp + (2*dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 !y1x3
+                valyy(k+1:k+nvpairs) = - (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dy1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    - (wti*(dx1/dp - (dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 !y1y3
+                k = k + nvpairs
+
+                ! v1v4
+                row(k+1:k+nvpairs) = vpairs(:, 1)
+                col(k+1:k+nvpairs) = vpairs(:, 4)
+                valxx(k+1:k+nvpairs) =  (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dx1*dx2*rat)/dp**2))/(rat**2 + 1) &
+                    + (wti*(dy1/dp + (dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1x4
+                valxy(k+1:k+nvpairs) = - (wti*(dx1/dp - (dy1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(1/dp &
+                    - (dx1*dx2)/dp**2 - (dy1*dy2)/dp**2 &
+                    + (2*dx2*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1y4
+                valyx(k+1:k+nvpairs) = (theta*wti*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((dx1*dx2)/dp**2 - 1/dp + (dy1*dy2)/dp**2 &
+                    + (2*dx1*dy2*rat)/dp**2))/(rat**2 + 1) - (wti*(dy1/dp &
+                    + (dx1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 !y1x4
+                valyy(k+1:k+nvpairs) = (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dy1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    + (wti*(dx1/dp - (dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 !y1y4
+                k = k + nvpairs
+
+                ! v2v1
+                row(k+1:k+nvpairs) = vpairs(:, 2)
+                col(k+1:k+nvpairs) = vpairs(:, 1)
+                valxx(k+1:k+nvpairs) = - (wti*(dy2/dp &
+                    - (dx2*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dx2**2*rat)/dp**2 &
+                    - (2*dx2*dy2)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx2*rat**2)/dp - (2*dy2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x2x1
+                valxy(k+1:k+nvpairs) = (wti*(dx2/dp + (dy2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(dx2**2/dp**2 &
+                    - dy2**2/dp**2 + (2*dx2*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dy2*rat**2)/dp + (2*dx2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x2y1
+                valyx(k+1:k+nvpairs) = (wti*(dx2/dp + (dy2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(dx2**2/dp**2 &
+                    - dy2**2/dp**2 + (2*dx2*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dx2*rat**2)/dp - (2*dy2*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 !y2x1
+                valyy(k+1:k+nvpairs) = (theta*wti*((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dy2**2*rat)/dp**2 + (2*dx2*dy2)/dp**2))/(rat**2 + 1) &
+                    - (wti*(dx2/dp + (dy2*rat)/dp)**2)/(rat**2 + 1)**2 !y2y1
+                k = k + nvpairs
+
+                ! v2v2
+                row(k+1:k+nvpairs) = vpairs(:, 2)
+                col(k+1:k+nvpairs) = vpairs(:, 2)
+                valxx(k+1:k+nvpairs) =  (wti*(dy2/dp &
+                    - (dx2*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    + (theta*wti*((2*dx2**2*rat)/dp**2 - (2*dx2*dy2)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dx2*rat**2)/dp - (2*dy2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x2x2
+                valxy(k+1:k+nvpairs) = (theta*wti*(dx2**2/dp**2 - dy2**2/dp**2 &
+                    + (2*dx2*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    - (wti*(dx2/dp + (dy2*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1)**2 !x2y2
+                valyx(k+1:k+nvpairs) = valxy(k+1:k+nvpairs)
+                valyy(k+1:k+nvpairs) = (wti*(dx2/dp + (dy2*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    + (theta*wti*((2*dy2**2*rat)/dp**2 + (2*dx2*dy2)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dy2*rat**2)/dp + (2*dx2*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 !y2y2
+                k = k + nvpairs
+
+                ! v2v3
+                row(k+1:k+nvpairs) = vpairs(:, 2)
+                col(k+1:k+nvpairs) = vpairs(:, 3)
+                valxx(k+1:k+nvpairs) = (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dx1*dx2*rat)/dp**2))/(rat**2 + 1) &
+                    + (wti*(dy1/dp + (dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1)**2 !x2x3
+                valxy(k+1:k+nvpairs) = - (wti*(dx1/dp - (dy1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(1/dp &
+                    - (dx1*dx2)/dp**2 - (dy1*dy2)/dp**2 &
+                    + (2*dx2*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x2y3
+                valyx(k+1:k+nvpairs) = (theta*wti*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((dx1*dx2)/dp**2 - 1/dp + (dy1*dy2)/dp**2 &
+                    + (2*dx1*dy2*rat)/dp**2))/(rat**2 + 1) - (wti*(dy1/dp &
+                    + (dx1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 !y2x3
+                valyy(k+1:k+nvpairs) = (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dy1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    + (wti*(dx1/dp - (dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 !y2y3
+                k = k + nvpairs
+
+                ! v2v4
+                row(k+1:k+nvpairs) = vpairs(:, 2)
+                col(k+1:k+nvpairs) = vpairs(:, 4)
+                valxx(k+1:k+nvpairs) =  (theta*wti*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1)**2 &
+                    - (wti*(dy1/dp + (dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(rat/dp &
+                    + (dx1*dy2)/dp**2 - (dx2*dy1)/dp**2 &
+                    - (2*dx1*dx2*rat)/dp**2))/(rat**2 + 1) !x2x4
+                valxy(k+1:k+nvpairs) = (wti*(dx1/dp - (dy1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*(1/dp &
+                    - (dx1*dx2)/dp**2 - (dy1*dy2)/dp**2 &
+                    + (2*dx2*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x2y4
+                valyx(k+1:k+nvpairs) = (wti*(dy1/dp + (dx1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*((dx1*dx2)/dp**2 &
+                    - 1/dp + (dy1*dy2)/dp**2 + (2*dx1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx1*rat**2)/dp + (2*dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 !y2x4
+                valyy(k+1:k+nvpairs) = - (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dy1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    - (wti*(dx1/dp - (dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 !y2y4
+                k = k + nvpairs
+
+                ! v3v1
+                row(k+1:k+nvpairs) = vpairs(:, 3)
+                col(k+1:k+nvpairs) = vpairs(:, 1)
+                valxx(k+1:k+nvpairs) =  - (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dx1*dx2*rat)/dp**2))/(rat**2 + 1) &
+                    - (wti*(dy1/dp + (dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*((2*dx2*rat**2)/dp &
+                    - (2*dy2*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 !x3x1
+                valxy(k+1:k+nvpairs) = (wti*(dy1/dp + (dx1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*((dx1*dx2)/dp**2 &
+                    - 1/dp + (dy1*dy2)/dp**2 + (2*dx1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dy2*rat**2)/dp + (2*dx2*rat)/dp)*(dy1/dp &
+                    + (dx1*rat)/dp))/(rat**2 + 1)**2 !x3y1
+                valyx(k+1:k+nvpairs) = (wti*(dx1/dp - (dy1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*(1/dp &
+                    - (dx1*dx2)/dp**2 - (dy1*dy2)/dp**2 &
+                    + (2*dx2*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dx2*rat**2)/dp - (2*dy2*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y3x1
+                valyy(k+1:k+nvpairs) = (theta*wti*((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dx1/dp - (dy1*rat)/dp))/(rat**2 + 1)**2 &
+                    - (wti*(dx1/dp - (dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(rat/dp &
+                    + (dx1*dy2)/dp**2 - (dx2*dy1)/dp**2 &
+                    - (2*dy1*dy2*rat)/dp**2))/(rat**2 + 1) !y3y1
+                k = k + nvpairs
+
+                ! v3v2
+                row(k+1:k+nvpairs) = vpairs(:, 3)
+                col(k+1:k+nvpairs) = vpairs(:, 2)
+                valxx(k+1:k+nvpairs) = (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dx1*dx2*rat)/dp**2))/(rat**2 + 1) &
+                    + (wti*(dy1/dp + (dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*((2*dx2*rat**2)/dp &
+                    - (2*dy2*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 !x3x2
+                valxy(k+1:k+nvpairs) = (theta*wti*((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((dx1*dx2)/dp**2 - 1/dp + (dy1*dy2)/dp**2 &
+                    + (2*dx1*dy2*rat)/dp**2))/(rat**2 + 1) - (wti*(dy1/dp &
+                    + (dx1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 !x3y2
+                valyx(k+1:k+nvpairs) = - (wti*(dx1/dp - (dy1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(1/dp &
+                    - (dx1*dx2)/dp**2 - (dy1*dy2)/dp**2 &
+                    + (2*dx2*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx2*rat**2)/dp - (2*dy2*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y3x2
+                valyy(k+1:k+nvpairs) = (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dy1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    + (wti*(dx1/dp - (dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dx1/dp - (dy1*rat)/dp))/(rat**2 + 1)**2 !y3y2
+                k = k + nvpairs
+
+                ! v3v3
+                row(k+1:k+nvpairs) = vpairs(:, 3)
+                col(k+1:k+nvpairs) = vpairs(:, 3)
+                valxx(k+1:k+nvpairs) =  (wti*(dy1/dp + (dx1*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    + (theta*wti*((2*dx1**2*rat)/dp**2 + (2*dx1*dy1)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx1*rat**2)/dp + (2*dy1*rat)/dp)*(dy1/dp &
+                    + (dx1*rat)/dp))/(rat**2 + 1)**2 !x3x3
+                valxy(k+1:k+nvpairs) = (theta*wti*(dy1**2/dp**2 - dx1**2/dp**2 &
+                    + (2*dx1*dy1*rat)/dp**2))/(rat**2 + 1) - (wti*(dy1/dp &
+                    + (dx1*rat)/dp)*(dx1/dp - (dy1*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dy1/dp &
+                    + (dx1*rat)/dp))/(rat**2 + 1)**2 !x3y3
+                valyx(k+1:k+nvpairs) = valxy(k+1:k+nvpairs)
+                valyy(k+1:k+nvpairs) = (wti*(dx1/dp - (dy1*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    + (theta*wti*((2*dy1**2*rat)/dp**2 - (2*dx1*dy1)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y3y3
+                k = k + nvpairs
+
+                ! v3v4
+                row(k+1:k+nvpairs) = vpairs(:, 3)
+                col(k+1:k+nvpairs) = vpairs(:, 4)
+                valxx(k+1:k+nvpairs) =  (theta*wti*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dx1**2*rat)/dp**2 + (2*dx1*dy1)/dp**2))/(rat**2 + 1) &
+                    - (wti*(dy1/dp + (dx1*rat)/dp)**2)/(rat**2 + 1)**2 !x3x4
+                valxy(k+1:k+nvpairs) = (wti*(dy1/dp + (dx1*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(dy1**2/dp**2 &
+                    - dx1**2/dp**2 + (2*dx1*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dy1/dp &
+                    + (dx1*rat)/dp))/(rat**2 + 1)**2 !x3y4
+                valyx(k+1:k+nvpairs) = (wti*(dy1/dp + (dx1*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(dy1**2/dp**2 &
+                    - dx1**2/dp**2 + (2*dx1*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx1*rat**2)/dp + (2*dy1*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y3x4
+                valyy(k+1:k+nvpairs) = - (wti*(dx1/dp - (dy1*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dy1**2*rat)/dp**2 - (2*dx1*dy1)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y3y4
+                k = k + nvpairs
+
+                ! v4v1
+                row(k+1:k+nvpairs) = vpairs(:, 4)
+                col(k+1:k+nvpairs) = vpairs(:, 1)
+                valxx(k+1:k+nvpairs) =  (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dx1*dx2*rat)/dp**2))/(rat**2 + 1) &
+                    + (wti*(dy1/dp + (dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*((2*dx2*rat**2)/dp &
+                    - (2*dy2*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 !x4x1
+                valxy(k+1:k+nvpairs) = (theta*wti*((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((dx1*dx2)/dp**2 - 1/dp + (dy1*dy2)/dp**2 &
+                    + (2*dx1*dy2*rat)/dp**2))/(rat**2 + 1) - (wti*(dy1/dp &
+                    + (dx1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 !x4y1
+                valyx(k+1:k+nvpairs) = - (wti*(dx1/dp - (dy1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(1/dp &
+                    - (dx1*dx2)/dp**2 - (dy1*dy2)/dp**2 &
+                    + (2*dx2*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx2*rat**2)/dp - (2*dy2*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y4x1
+                valyy(k+1:k+nvpairs) = (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dy1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    + (wti*(dx1/dp - (dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dy2*rat**2)/dp + (2*dx2*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y4y1
+                k = k + nvpairs
+
+                ! v4v2
+                row(k+1:k+nvpairs) = vpairs(:, 4)
+                col(k+1:k+nvpairs) = vpairs(:, 2)
+                valxx(k+1:k+nvpairs) =  - (theta*wti*(rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dx1*dx2*rat)/dp**2))/(rat**2 + 1) &
+                    - (wti*(dy1/dp + (dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*((2*dx2*rat**2)/dp &
+                    - (2*dy2*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 !x4x2
+                valxy(k+1:k+nvpairs) = (wti*(dy1/dp + (dx1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*((dx1*dx2)/dp**2 &
+                    - 1/dp + (dy1*dy2)/dp**2 + (2*dx1*dy2*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dy2*rat**2)/dp + (2*dx2*rat)/dp)*(dy1/dp &
+                    + (dx1*rat)/dp))/(rat**2 + 1)**2 !x4y2
+                valyx(k+1:k+nvpairs) = (wti*(dx1/dp - (dy1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 + (theta*wti*(1/dp &
+                    - (dx1*dx2)/dp**2 - (dy1*dy2)/dp**2 &
+                    + (2*dx2*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dx2*rat**2)/dp - (2*dy2*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y4x2
+                valyy(k+1:k+nvpairs) = (theta*wti*((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dx1/dp - (dy1*rat)/dp))/(rat**2 + 1)**2 &
+                    - (wti*(dx1/dp - (dy1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(rat/dp &
+                    + (dx1*dy2)/dp**2 - (dx2*dy1)/dp**2 &
+                    - (2*dy1*dy2*rat)/dp**2))/(rat**2 + 1) !y4y2
+                k = k + nvpairs
+
+                ! v4v3
+                row(k+1:k+nvpairs) = vpairs(:, 4)
+                col(k+1:k+nvpairs) = vpairs(:, 3)
+                valxx(k+1:k+nvpairs) = (theta*wti*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dx1**2*rat)/dp**2 + (2*dx1*dy1)/dp**2))/(rat**2 + 1) &
+                    - (wti*(dy1/dp + (dx1*rat)/dp)**2)/(rat**2 + 1)**2 !x4x3
+                valxy(k+1:k+nvpairs) = (wti*(dy1/dp + (dx1*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(dy1**2/dp**2 - dx1**2/dp**2 &
+                    + (2*dx1*dy1*rat)/dp**2))/(rat**2 + 1) + (theta*wti*((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 !x4y3
+                valyx(k+1:k+nvpairs) = (wti*(dy1/dp + (dx1*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 - (theta*wti*(dy1**2/dp**2 &
+                    - dx1**2/dp**2 + (2*dx1*dy1*rat)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx1*rat**2)/dp + (2*dy1*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y4x3
+                valyy(k+1:k+nvpairs) = - (wti*(dx1/dp &
+                    - (dy1*rat)/dp)**2)/(rat**2 + 1)**2 - (theta*wti*((2*dy1**2*rat)/dp**2 &
+                    - (2*dx1*dy1)/dp**2))/(rat**2 + 1) - (theta*wti*((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp)*(dx1/dp - (dy1*rat)/dp))/(rat**2 + 1)**2 !y4y3
+                k = k + nvpairs
+
+                ! v4v4
+                row(k+1:k+nvpairs) = vpairs(:, 4)
+                col(k+1:k+nvpairs) = vpairs(:, 4)
+                valxx(k+1:k+nvpairs) =  (wti*(dy1/dp + (dx1*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    + (theta*wti*((2*dx1**2*rat)/dp**2 + (2*dx1*dy1)/dp**2))/(rat**2 + 1) &
+                    - (theta*wti*((2*dx1*rat**2)/dp + (2*dy1*rat)/dp)*(dy1/dp &
+                    + (dx1*rat)/dp))/(rat**2 + 1)**2 !x4x4
+                valxy(k+1:k+nvpairs) = (theta*wti*(dy1**2/dp**2 - dx1**2/dp**2 &
+                    + (2*dx1*dy1*rat)/dp**2))/(rat**2 + 1) - (wti*(dy1/dp &
+                    + (dx1*rat)/dp)*(dx1/dp - (dy1*rat)/dp))/(rat**2 + 1)**2 &
+                    - (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dy1/dp &
+                    + (dx1*rat)/dp))/(rat**2 + 1)**2 !x4y4
+                valyx(k+1:k+nvpairs) = valxy(k+1:k+nvpairs)
+                valyy(k+1:k+nvpairs) = (wti*(dx1/dp - (dy1*rat)/dp)**2)/(rat**2 + 1)**2 &
+                    + (theta*wti*((2*dy1**2*rat)/dp**2 - (2*dx1*dy1)/dp**2))/(rat**2 + 1) &
+                    + (theta*wti*((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dx1/dp &
+                    - (dy1*rat)/dp))/(rat**2 + 1)**2 !y4y4
+                k = k + nvpairs
+
+                ! Construct
+                hessJ = ConstructMySparse([row, row, row + nv, row + nv], &
+                    [col, col + nv, col, col + nv], [valxx, valxy, valyx, valyy], &
+                    designvariables%nphi, designvariables%nphi)
+
+                ! Housekeeping
+                end associate
+
+            end if 
+
+
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('EvaluateCostFunctionPLF: gradient ' // & 
+                ' and hessian not implemented for design variables: ' // &
+                designvariables%type)
+
+        end select
+
+        ! Scale
+        !------
+        gradJ = gradJ*costfunction%lambda 
+        hessJ = hessJ*costfunction%lambda
+
+        ! Other derivatives
+        !==================
+        ! Initialize
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values)) ! jacobian, not gradient
+
+        ! Currently no derivatives w.r.t. any other variables
+        select case (var)
+
+        case ('goatvariables', 'no')
+
+        case default 
+
+            call gdErrorHandler('EvaluateCostFunctionPLF: unknown ' // & 
+                'variable for derivative calculation: ' // var)
+
+        end select
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
+        ! Assocation termination
+        end associate
+
+    end subroutine
+
+    ! Cost function data writing
+    subroutine WriteCostFunctionDataSOFA(costfunction, xv, yv)
+
+        ! Description
+        !============
+        ! This routine writes out the cost function data (vertex pairs)
+        ! for post-processing
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionSOFAUDT)          :: costfunction 
+        real(R8), intent(in)                :: xv(:), yv(:)
+
+        ! Auxiliary
+        integer(I8)                     :: ncol, nrow 
+
+        integer(I8), allocatable        :: IDn(:, :) 
+        real(R8), allocatable           :: xn(:, :), yn(:, :)
+        character(:), allocatable       :: filename 
+
+        ! Loop
+        integer(I8)                     :: j 
+
+        ! Initialize
+        !===========
+        ! Set filename
+        filename = 'so_cfv_sofa_vpairs'
+
+        ! Allocate
+        nrow = size(costfunction%vpairs, 1)
+        ncol = size(costfunction%vpairs, 2)
+        allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
+
+        ! Unpack
+        associate(vpairs      => costfunction%vpairs)
+
+        ! Loop
+        xn = 0
+        yn = 0
+        do j = 1, nrow 
+            IDn(j, :) = vpairs(j, :) 
+            xn(j, :) = xv(vpairs(j, :))
+            yn(j, :) = yv(vpairs(j, :))
+        end do
+
+        ! Call writer
+        !============
+        call WriteVertexPairData(IDn, xn, yn, filename)
+
+        ! Housekeeping
+        !=============
+        end associate
+        deallocate(IDn, xn, yn)
 
     end subroutine
 
