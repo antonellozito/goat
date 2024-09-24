@@ -2110,11 +2110,15 @@ module goatmod_types
             xvp = xv(k+1:k+npv)
             yvp = yv(k+1:k+npv)
 
-            ! Assign
-            call vessel%polygonset%polygons(i)%Construct(&
-                xv(vessel%polygonset%polygons(i)%vert), &
-                yv(vessel%polygonset%polygons(i)%vert), &
-                vessel%polygonset%polygons(i)%labels(vessel%polygonset%polygons(i)%vert,:))
+            ! Assign - don't reconstruct, may alter vertex oder!
+            vessel%polygonset%polygons(i)%x = xvp 
+            vessel%polygonset%polygons(i)%y = yvp
+
+            ! H
+            !call vessel%polygonset%polygons(i)%Construct(&
+            !   xv(vessel%polygonset%polygons(i)%vert), &
+            !    yv(vessel%polygonset%polygons(i)%vert), &
+            !    vessel%polygonset%polygons(i)%labels(vessel%polygonset%polygons(i)%vert,:))
             
             ! Update counter
             k = k + npv 
