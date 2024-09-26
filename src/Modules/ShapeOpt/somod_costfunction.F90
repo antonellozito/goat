@@ -686,16 +686,11 @@ module somod_costfunction
         type(CostFunctionOptionsSOUDT)      :: options
 
         ! Auxiliary 
-        logical, allocatable, dimension(:)          :: includevert, &
-            ispolygonstart 
-        integer(I8)                                 :: nvpairs, nv, &
-            ind, psind, prevv
-        integer(I8), allocatable, dimension(:)      :: pID, vID
-        integer(I8), allocatable, dimension(:, :)   :: labels, vpairs  
+        integer(I8)                                 :: nvpairs
+        integer(I8), allocatable, dimension(:, :)   :: vpairs  
         real(R8), allocatable, dimension(:)         :: xv, yv 
 
         ! Loop
-        integer(I8)                                 :: i, cc
         
         ! Initialize
         !===========
@@ -709,94 +704,15 @@ module somod_costfunction
         costfunction%lambda = opt%lambda
 
         ! Determine vertex pairs
-        !=======================
-        ! Get all vertices and vertex labels
-        call ps%GetLabels(labels)
-        call ps%GetVertices(xv, yv, pID)
-        call ps%GetVertices(vID)
-        nv = size(labels, 1)
-
-        ! Check if contributions should be included
-        allocate(includevert(nv))
-        includevert = .false. 
-
-        ! Constrain per vessel structure (label 1 and 2)
-        do i = 1, size(opt%structureIDs)
-            ! Unpack ID
-            associate(tID       => opt%structureIDs(i))
-
-            ! Check vertices
-            where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) &
-                includevert = .true. 
-
-            ! Housekeeping
-            end associate
-        end do
-
-        ! Constrain per vertex ID
-        do i = 1, size(opt%vertIDs)
-            ! Unpack ID
-            associate(tID       => opt%vertIDs(i))
-
-            ! Check vertices
-            where( (labels(:, 3) == tID)) includevert = .true. 
-
-            ! Housekeeping
-            end associate
-        end do
-
-        ! Check starting points of polygon
-        ispolygonstart = [.true., pID(2:) - pID(:nv-1) /= 0]
-
-        ! Initialize vertex pairs 
-        nvpairs = count(includevert)
-        allocate(vpairs(nvpairs, 4))
-
-        ! Loop
-        cc = 0
-        psind = 1
-        do i = 1, size(vID) 
-            if (includevert(vID(i))) then 
-
-                ! Check if we should include the pair (need to account
-                ! for starting vertex appearing twice in vID)
-                if (ispolygonstart(i+1)) then 
-                    ! Update psind
-                    psind = psind + ps%polygons(pID(i))%ne + 1
-                    cycle 
-                end if 
-
-                ! Update counter
-                cc = cc + 1
-
-                ! Set current vertex
-                vpairs(cc, 2:3) = vID(i) 
-
-                ! Check
-                if (ispolygonstart(i)) then
-                    ! Previous vertex ID should be current polygon start 
-                    ! plus number of edges minus 1
-                    ind = psind + ps%polygons(pID(i))%ne - 1
-                    prevv = vID(ind) 
-                else 
-                    prevv = vID(i-1)
-                end if 
-
-                ! Add
-                vpairs(cc, 1) = prevv 
-                vpairs(cc, 4) = vID(i+1)
-            end if 
-        end do
-
-        ! Sanity check
-        if (cc /= nvpairs) then 
-            ! Should be a bug
-            call gdErrorHandler('InitializeCostFunctionSOFA: this is a bug')
-        end if 
+        call goat%environment%vessel%GetVesselVertexPairs(vpairs, &
+            opt%structureIDs, opt%vertIDs)
+        nvpairs = size(vpairs, 1)
 
         ! Add
         !====
-        costfunction%vpairs = vpairs 
+        allocate(costfunction%vpairs(nvpairs, 4))
+        costfunction%vpairs(:, 1:2) = vpairs(:, 1:2)
+        costfunction%vpairs(:, 3:4) = vpairs(:, 2:3)
         costfunction%nvpairs = nvpairs 
 
         ! Determine weights
@@ -807,6 +723,7 @@ module somod_costfunction
 
         ! Write data
         !===========
+        call ps%GetVertices(xv, yv)
         call costfunction%WriteData(xv, yv)
 
         ! Housekeeping
