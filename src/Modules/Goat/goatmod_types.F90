@@ -529,6 +529,9 @@ module goatmod_types
         ! Vessel coordinate getter
         procedure :: GetVesselCoordinates
 
+        ! Vessel vertex pairs getter
+        procedure :: GetVesselVertexPairs
+
     end type
 
     ! Environment
@@ -2149,6 +2152,136 @@ module goatmod_types
         call vessel%plfvessel%Initialize(vessel%polygonset)
 
     end subroutine
-    
+
+    ! Vessel vertex pairs
+    subroutine GetVesselVertexPairs(vessel, vpairs, structureIDs, vertIDs)
+
+        ! Description
+        !============
+        ! This routine returns the vessel vertex pairs (i.e. the 
+        ! subsequent edge pairs) in a nvpairs-by-3 structure. The 
+        ! edges are formed by v1v2 and v2v3 (in that specific order). 
+        ! This routine is useful for many shape optimization related 
+        ! cost functions and constraints. Only vertex pairs of the 
+        ! specified structure IDs or vertices are taken (for the latter,
+        ! the vertex pair of v2, i.e. v1v2 v2v3 is stored). Note that 
+        ! the first and last pair may not be part of the specified 
+        ! structure. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselUDT)                        :: vessel 
+        integer(I8), allocatable, intent(out)   :: vpairs(:, :)
+        integer(I8), intent(in)                 :: structureIDs(:), &
+            vertIDs(:)
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)      :: includevert, &
+            ispolygonstart
+        integer(I8)                             :: nv, nvpairs, psind, &
+            prevv, ind
+        integer(I8), allocatable                :: labels(:, :)
+        integer(I8), allocatable, dimension(:)  :: pID, vID
+        real(R8), allocatable, dimension(:)     :: xv, yv
+
+        ! Loop
+        integer(I8)                             :: i, cc
+ 
+        ! Initialize
+        !===========
+        ! Associate
+        associate(ps        => vessel%polygonset)
+
+        ! Determine vertex pairs
+        !=======================
+        ! Get all vertices and vertex labels
+        call ps%GetLabels(labels)
+        call ps%GetVertices(xv, yv, pID)
+        call ps%GetVertices(vID)
+        nv = size(labels, 1)
+
+        ! Check if contributions should be included
+        allocate(includevert(nv))
+        includevert = .false. 
+
+        ! Constrain per vessel structure (label 1 and 2)
+        do i = 1, size(structureIDs)
+            ! Unpack ID
+            associate(tID       => structureIDs(i))
+
+            ! Check vertices
+            where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) &
+                includevert = .true. 
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Constrain per vertex ID
+        do i = 1, size(vertIDs)
+            ! Unpack ID
+            associate(tID       => vertIDs(i))
+
+            ! Check vertices
+            where( (labels(:, 3) == tID)) includevert = .true. 
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Check starting points of polygon
+        ispolygonstart = [.true., pID(2:) - pID(:nv-1) /= 0]
+
+        ! Initialize vertex pairs 
+        nvpairs = count(includevert)
+        allocate(vpairs(nvpairs, 3))
+
+        ! Loop
+        cc = 0
+        psind = 1
+        do i = 1, size(vID) 
+            if (includevert(vID(i))) then 
+
+                ! Check if we should include the pair (need to account
+                ! for starting vertex appearing twice in vID)
+                if (ispolygonstart(i+1)) then 
+                    ! Update psind
+                    psind = psind + ps%polygons(pID(i))%ne + 1
+                    cycle 
+                end if 
+
+                ! Update counter
+                cc = cc + 1
+
+                ! Set current vertex
+                vpairs(cc, 2) = vID(i) 
+
+                ! Check
+                if (ispolygonstart(i)) then
+                    ! Previous vertex ID should be current polygon start 
+                    ! plus number of edges minus 1
+                    ind = psind + ps%polygons(pID(i))%ne - 1
+                    prevv = vID(ind) 
+                else 
+                    prevv = vID(i-1)
+                end if 
+
+                ! Add
+                vpairs(cc, 1) = prevv 
+                vpairs(cc, 3) = vID(i+1)
+            end if 
+        end do
+
+        ! Sanity check
+        if (cc /= nvpairs) then 
+            ! Should be a bug
+            call gdErrorHandler('GetVesselVertexPairs: this is a bug')
+        end if 
+
+        ! Housekeeping
+        end associate
+
+    end subroutine
 
 end module
