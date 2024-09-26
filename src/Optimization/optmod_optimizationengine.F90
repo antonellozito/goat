@@ -787,14 +787,14 @@ module optmod_optimizationengine
         ! Check if we should update the penalty factor (rule of nocedal
         ! and wright, eq. 18.40 p545, first edition) - note that penfac
         ! here is mu^-1 in nocedal
-        if (num%mfpenfac >= penfac) then 
+        !if (num%mfpenfac >= penfac) then 
             ! Penalty factor would decrease - keep it high
-            penfac = num%mfpenfac 
-        else
+        !    penfac = num%mfpenfac 
+        !else
             ! Penalty factor increases, allow and update (note: we don't
             ! account for the factor 2 before delta as in N&W)
-            num%mfpenfac = penfac
-        end if 
+        !    num%mfpenfac = penfac
+        !end if 
         
         ! Compute L1 norm of constraints
         gnorm = 0
@@ -2444,6 +2444,7 @@ module optmod_optimizationengine
 
         ! Allocate
         allocate(xref(nx))
+        d2f = SpZeros(nx, nx)
 
         ! Get current design variables
         call fun%problem%GetProblemDesignVariables(xref)
