@@ -217,7 +217,7 @@ module ggmod_topology2D
         type(VesselUDT), intent(in)             :: vessel
         type(magneticFieldUDT), intent(in)      :: magneticField 
         type(TopomeshOptionsUDT), intent(in)    :: options
-        class(ContourTracerUDT), allocatable    :: vesseltracer, fieldtracer
+        class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
 
         ! Auxiliary
         real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
@@ -250,25 +250,11 @@ module ggmod_topology2D
         call Construct2DStructuredUniformGrid(xg, yg, xgv, ygv, xb, yb, &
             options%vresx,  options%vresy, 0.0_R8, 0.0_R8)
 
-        ! Evaluate the field and vessel values
-        call vessel%plfvessel%Evaluate(xg, yg, 0, 0, Vv)
-        call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
-
-        ! Construct the vessel and magnetic field tracers (currently in 
-        ! structured format)
-        vesseltracer = ConstructStructuredTracer(&
-            reshape(Vv, [options%vresx, options%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8, emptyI8)
-        fieldtracer = ConstructStructuredTracer(&
-            reshape(Vf, [options%vresx, options%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8, emptyi8)
-
         ! Compute extrema
         !================
         ! Only for mesh refinement later on
         call TraceExtrema2D(xe, ye, fe, typee, fieldtracer, magneticField, &
             options%fdonewton)
-        
 
         ! Add extrema & related boundaries
         !=================================
@@ -289,7 +275,6 @@ module ggmod_topology2D
             options%vresx, options%vresy, [xtp, xe], [ytp, ye], 5, 5)  
 
         ! Evaluate magnetic field and vessel
-        deallocate(Vv, Vf)
         allocate(Vv(size(xg)), Vf(size(xg)))
         call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
 

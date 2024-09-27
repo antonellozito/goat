@@ -86,6 +86,7 @@ module ggmod_gridgeneration2D
     use mod_errorhandler
     use mod_dynamicarrays
     use mod_contour2D
+    use mod_streamlinetracing2D
     use mod_polygon
     use mod_sort
     use mod_definitions, only: TMvertexbndID, TMvertexmaxID, &
@@ -317,7 +318,7 @@ module ggmod_gridgeneration2D
 
     ! Unstructured aligned grid generator
     subroutine GenerateUnstructuredAlignedGrid(topomesh, magneticField, &
-        vessel, fieldtracer, boundarytracer, options)
+        vessel, fieldtracer, boundarytracer, streamlinetracer, options)
 
         ! Description
         !============
@@ -359,6 +360,7 @@ module ggmod_gridgeneration2D
             poloidalvertexdistributor, radialvertexdistributor
         class(DistributionFunctionUDT), allocatable     :: & 
             magneticFieldDF 
+        class(StreamlineTracerUDT), intent(inout)  :: streamlinetracer
         type(GGGridUDT)             :: grid 
 
         ! Initialize
