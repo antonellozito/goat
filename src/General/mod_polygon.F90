@@ -1090,7 +1090,7 @@ module mod_polygon
 
     end subroutine
 
-    subroutine GetPolygonSetEdgesIDs(polygonset, edges)
+    subroutine GetPolygonSetEdgesIDs(polygonset, edges, polygonID)
 
         ! Description
         !============
@@ -1102,9 +1102,11 @@ module mod_polygon
         ! Arguments
         class(PolygonSetUDT)                    :: polygonset 
         integer(I8), allocatable, intent(out)   :: edges(:, :)
+        integer(I8), allocatable, intent(out), optional :: polygonID(:)
 
         ! Auxiliary
         integer(I8)                             :: netot 
+        integer(I8), allocatable, dimension(:)  :: pID 
 
         ! Loop
         integer(I8)                             :: i, vc, ec
@@ -1125,12 +1127,13 @@ module mod_polygon
         end do
 
         ! Compute edges
-        allocate(edges(netot, 2))
+        allocate(edges(netot, 2), pID(netot))
         vc = 0 ! keep track of vertices to update local polygon vertex IDs
         ec = 0
         do i = 1, np 
             ! Add
             edges(ec+1:ec+pol(i)%ne, :) = pol(i)%edges + vc 
+            pID(ec+1:ec+pol(i)%ne)  = i 
 
             ! Update counters
             vc = vc + pol(i)%nv 
@@ -1139,7 +1142,11 @@ module mod_polygon
 
         ! Housekeeping
         !=============
+        if (present(polygonID)) then 
+            polygonID = pID 
+        end if 
         end associate
+        
 
     end subroutine
 
@@ -1282,7 +1289,7 @@ module mod_polygon
     end subroutine
 
     ! Get polygonset Vertices 
-    subroutine GetPolygonSetVerticesCoordinates(polygonset, xp, yp)
+    subroutine GetPolygonSetVerticesCoordinates(polygonset, xp, yp, polygonID)
 
         ! Description
         !============
@@ -1296,9 +1303,11 @@ module mod_polygon
         ! Arguments
         class(PolygonSetUDT)                :: polygonset 
         real(R8), allocatable, intent(out)  :: xp(:), yp(:)
+        integer(I8), allocatable, intent(out), optional     :: polygonID(:)
 
         ! Auxiliary
         integer(I8)                         :: nv
+        integer(I8), allocatable, dimension(:)  :: pID
 
         ! Loop
         integer(I8)                         :: i, ce
@@ -1326,7 +1335,7 @@ module mod_polygon
         end do 
 
         ! Allocate
-        allocate(xp(nv), yp(nv))
+        allocate(xp(nv), yp(nv), pID(nv))
 
         ! Loop and add
         ce = 0 ! edge counter
@@ -1334,6 +1343,7 @@ module mod_polygon
             ! Add coordinates
             xp(ce+1:ce+pol(i)%nv)   = pol(i)%x 
             yp(ce+1:ce+pol(i)%nv)   = pol(i)%y 
+            pID(ce+1:ce+pol(i)%nv)  = i
 
             ! Update counter
             ce = ce + pol(i)%nv 
@@ -1341,27 +1351,31 @@ module mod_polygon
 
         ! Housekeeping
         !=============
+        if (present(polygonID)) then 
+            polygonID = pID 
+        end if 
         end associate
 
     end subroutine
 
-    subroutine GetPolygonSetVerticesID(polygonset, ID)
+    subroutine GetPolygonSetVerticesID(polygonset, ID, polygonID)
 
         ! Description
         !============
         ! Return the ID vector of all points in the polygon set (IDs). 
-        ! Actually, this is simply the 1:nv vector, but just in case 
-        ! this changes at some point we compute it here. 
+        ! Additionally, the polygon index may be returned as optional
+        ! output argument. 
 
         ! Declare variables
         !==================
         ! Arguments
         class(PolygonSetUDT)                    :: polygonset 
         integer(I8), allocatable, intent(out)   :: ID(:)
+        integer(I8), allocatable, intent(out), optional     :: polygonID(:) 
 
         ! Auxiliary
         integer(I8)                         :: nv  
-        integer(I8), allocatable            :: tID(:)
+        integer(I8), allocatable            :: tID(:), pID(:)
 
         ! Loop
         integer(I8)                         :: i, vc
@@ -1386,7 +1400,7 @@ module mod_polygon
         end do 
 
         ! Allocate
-        allocate(ID(nv))
+        allocate(ID(nv), pID(nv))
 
         ! Loop and add
         vc = 0 ! vertex counter
@@ -1394,6 +1408,7 @@ module mod_polygon
             ! Add coordinates
             call pol(i)%GetVert(tID)
             ID(vc+1:vc+pol(i)%nv)   = tID + vc ! update
+            pID(vc+1:vc+pol(i)%nv)  =  i 
 
             ! Update counter
             vc = vc + pol(i)%nv 
@@ -1401,6 +1416,9 @@ module mod_polygon
 
         ! Housekeeping
         !=============
+        if (present(polygonID)) then 
+            polygonID = pID 
+        end if 
         end associate
 
     end subroutine

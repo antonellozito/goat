@@ -372,10 +372,32 @@ module somod_optimizationengine
                 ! Allocate 
                 allocate(CostFunctionPLFUDT::problem%costfunction)
 
+                ! Set type
+                problem%costfunction%type = 'PLF'
+
+            case ('SOFA')
+
+                ! Allocate
+                allocate(CostFunctionSOFAUDT::problem%costfunction)
+
+                ! Set type
+                problem%costfunction%type = 'SOFA'
+
             case ('no')
 
                 ! Zero cost function
                 allocate(CostFunctionDummyUDT::problem%costfunction)
+
+                ! Set type
+                problem%costfunction%type = 'no'
+
+            case ('general')
+                
+                ! General cost function
+                allocate(CostFunctionGeneralSOUDT::problem%costfunction)
+
+                ! Set type
+                problem%costfunction%type = 'general'
                 
             case default
                 
@@ -439,10 +461,11 @@ module somod_optimizationengine
             ! Check cost function
             select case (problem%costfunction%type)
 
-            case ('PLF')
+            case ('PLF', 'SOFA', 'general')
 
                 ! Requires  vesselcoordinates(_goat)
-                call gdErrorHandler('Cost function "PLF" requires design ' // &
+                call gdErrorHandler('Cost function "' // problem%costfunction%type // &
+                    '" requires design ' // &
                     'variables with vessel coordinates, check input')
 
             case default 

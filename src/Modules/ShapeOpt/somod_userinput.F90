@@ -17,6 +17,7 @@ module somod_userinput
     use mod_precision
     use mod_readwrite
     use mod_inputfileparser
+    use mod_constants, only: Pi_R8
 
     ! The usual
     implicit none
@@ -175,6 +176,36 @@ module somod_userinput
 
     end type 
 
+    ! Vessel angle difference options
+    type, extends(optionsUDT)   :: VesselAngleDifferenceConOptionsUDT
+
+        ! Description
+        !============
+        ! Constraint options for vessel distance. The following
+        ! fields are present:
+        !   structureIDs:   structure IDs of structures of which the 
+        !                   vertices should be constrained 
+        !   vertIDs:        IDs of specific vessel vertices (according
+        !                   to the original numbering in the 
+        !                   structure.dat file) to be constrained
+        !   dthetas         bound for angle deviation (structure based)
+        !   dthetav,        same, but vertID based (should have same size)
+        !   alpha           minimal angle (scalar, one value)
+        ! IMPORTANT: angles should be set in degrees in the input! They
+        ! are converted to radians when reading in data.
+        
+        ! Fields
+        integer(I8), allocatable    :: structureIDs(:), vertIDs(:)
+        real(R8)                    :: alpha
+        real(R8), allocatable       :: dthetas(:), dthetav(:)
+        
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultVesselAngleDifferenceConOptions
+        procedure :: Read           => ReadVesselAngleDifferenceConOptions
+
+    end type
+
     ! General constraints
     type, extends(optionsUDT)   :: ConstraintOptionsSOUDT 
 
@@ -188,7 +219,8 @@ module somod_userinput
         
         ! Switches
         integer(I8)                 :: fixedvesselpoints, &
-            fixedvesselflux, goat, vesselupperbound, vessellowerbound
+            fixedvesselflux, goat, vesselupperbound, vessellowerbound, &
+            vesselangledifference
 
         ! Constraint options
         type(FixedVesselPointsConOptionsUDT)    :: fvpoptions
@@ -196,6 +228,7 @@ module somod_userinput
         class(VesselDistanceConOptionsUDT), allocatable  :: vdoptions
         type(VesselUBOptionsUDT)                :: vduboptions 
         type(VesselLBOptionsUDT)                :: vdlboptions
+        type(VesselAngleDifferenceConOptionsUDT)    :: vadoptions
 
     contains 
 
@@ -275,6 +308,34 @@ module somod_userinput
 
     end type
 
+    ! Face angle cost function
+    type, extends(optionsUDT)   :: CostfunctionOptionsSOFAUDT
+
+        ! Description
+        !============
+        ! Cost function options for the face angle cost function.
+        ! This includes:
+        !
+        !   structureIDs:           IDs of the structure where to
+        !                           impose the costfunction
+        !   vertexIDs:              IDs of the vertices where to impose
+        !                           the cost function (note: at least 
+        !                           three subsequent IDs have to be 
+        !                           present to have a cost function
+        !                           contribution)
+        !   lambda:                 scaling constant for cost function
+        
+        ! Fields
+        real(R8)                    :: lambda
+        integer(I8), allocatable    :: structureIDs(:), vertIDs(:)
+
+    contains 
+
+        procedure :: SetDefaults    => SetDefaultCostfunctionOptionsSOFA
+        procedure :: Read           => ReadCostfunctionOptionsSOFA
+
+    end type
+
     ! General cost function options
     type, extends(optionsUDT)   :: CostfunctionOptionsSOUDT 
 
@@ -293,6 +354,7 @@ module somod_userinput
         character(:), allocatable           :: type
         logical                             :: dogoatreduction, includesolps
         type(CostFunctionOptionsPLFUDT)     :: plf 
+        type(CostfunctionOptionsSOFAUDT)    :: fa 
         type(HessianApproximationOptionsUDT)    :: hessapprox
 
     contains 
@@ -440,7 +502,7 @@ module somod_userinput
 
     end subroutine
 
-    ! Fixed vessel points constraints
+    ! Fixed vessel flux constraints
     subroutine SetDefaultFixedVesselFluxConOptions(options)
 
         ! Declare variables
@@ -460,7 +522,7 @@ module somod_userinput
 
     end subroutine
 
-    ! Fixed vessel points constraints
+    ! Fixed vessel distance constraints
     subroutine SetDefaultVesselDistanceConOptions(options)
 
         ! Declare variables
@@ -496,7 +558,7 @@ module somod_userinput
 
     end subroutine
 
-    ! Fixed vessel points constraints
+    ! Fixed vessel distance constraints, upper bound
     subroutine SetDefaultVesselUpperBoundConOptions(options)
 
         ! Declare variables
@@ -532,7 +594,7 @@ module somod_userinput
 
     end subroutine
 
-    ! Fixed vessel points constraints
+    ! Fixed vessel distance constraints, lower bound
     subroutine SetDefaultVesselLowerBoundConOptions(options)
 
         ! Declare variables
@@ -568,6 +630,35 @@ module somod_userinput
 
     end subroutine
 
+    ! Fixed vessel angle difference constraints
+    subroutine SetDefaultVesselAngleDifferenceConOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselAngleDifferenceConOptionsUDT)   :: options 
+
+        ! Set defaults
+        !=============
+        if (allocated(options%structureIDs)) then 
+            deallocate(options%structureIDs)
+        end if
+        if (allocated(options%vertIDs)) then 
+            deallocate(options%vertIDs)
+        end if 
+        if (allocated(options%dthetas)) then 
+            deallocate(options%dthetas)
+        end if 
+        if (allocated(options%dthetav)) then 
+            deallocate(options%dthetav)
+        end if
+        allocate(options%structureIDs(0), options%vertIDs(0), &
+            options%dthetas(0), options%dthetav(0))
+
+        options%alpha = 5.0_R8*Pi_R8/180.0_R8 ! in radians!
+
+    end subroutine
+
     ! General constraints
     subroutine SetDefaultConstraintOptionsSO(options)
 
@@ -584,18 +675,21 @@ module somod_userinput
         options%goat                    = 0
         options%vesselupperbound        = 0
         options%vessellowerbound        = 0 
+        options%vesselangledifference   = 0
 
         ! Propagate filepaths
-        options%fvpoptions%inputfilepath = options%inputfilepath
-        options%fvfoptions%inputfilepath = options%inputfilepath
-        options%vduboptions%inputfilepath = options%inputfilepath 
-        options%vdlboptions%inputfilepath = options%inputfilepath
+        options%fvpoptions%inputfilepath    = options%inputfilepath
+        options%fvfoptions%inputfilepath    = options%inputfilepath
+        options%vduboptions%inputfilepath   = options%inputfilepath 
+        options%vdlboptions%inputfilepath   = options%inputfilepath
+        options%vadoptions%inputfilepath    = options%inputfilepath
 
         ! Other constraints
         call options%fvpoptions%SetDefaults()
         call options%fvfoptions%SetDefaults()
         call options%vduboptions%SetDefaults()
         call options%vdlboptions%SetDefaults()
+        call options%vadoptions%SetDefaults()
 
     end subroutine
 
@@ -612,6 +706,21 @@ module somod_userinput
         options%lambda                  = 1
         options%vesselinputfilepath     = 'GOAToptions.dat'
         options%newvesselfilepath       = 'structure_new.dat'
+
+    end subroutine
+
+    ! PLF cost function
+    subroutine SetDefaultCostfunctionOptionsSOFA(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionOptionsSOFAUDT)    :: options 
+
+        ! Set defaults
+        !=============
+        options%lambda                  = 1
+        allocate(options%structureIDs(0), options%vertIDs(0))
 
     end subroutine
 
@@ -634,10 +743,12 @@ module somod_userinput
 
         ! Propagate filepaths
         options%plf%inputfilepath = options%inputfilepath
+        options%fa%inputfilepath = options%inputfilepath
         options%hessapprox%inputfilepath = options%inputfilepath
 
         ! Contributions
         call options%plf%SetDefaults()
+        call options%fa%SetDefaults()
         call options%hessapprox%SetDefaults()
 
     end subroutine
@@ -853,7 +964,7 @@ module somod_userinput
 
     end subroutine
 
-    ! Fixed vessel points constraints
+    ! Fixed vessel flux constraints
     subroutine ReadFixedVesselFluxConOptions(options)
 
         ! Declare variables
@@ -1015,33 +1126,33 @@ module somod_userinput
         ! Read options
         !=============
         ! Structure & vertex IDs
-        field = 'so.ec.par.vdub.structureIDs'
+        field = 'so.inec.par.vdub.structureIDs'
         call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
-        field = 'so.ec.par.vdub.vertIDs'
+        field = 'so.inec.par.vdub.vertIDs'
         call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
 
         ! Plf options
-        field = 'so.ec.par.vdub.plftype'
+        field = 'so.inec.par.vdub.plftype'
         call ExtractOptionValueCharacter(fid, field, options%plftype)
-        field = 'so.ec.par.vdub.meth'
+        field = 'so.inec.par.vdub.meth'
         call ExtractOptionValueCharacter(fid, field, options%meth)
-        field = 'so.ec.par.vdlb.d'
+        field = 'so.inec.par.vdlb.d'
         call ExtractOptionValueReal0D(fid, field, options%d)
-        field = 'so.ec.par.vdub.resx'
+        field = 'so.inec.par.vdub.resx'
         call ExtractOptionValueInteger0D(fid, field, options%resx)
-        field = 'so.ec.par.vdub.resy'
+        field = 'so.inec.par.vdub.resy'
         call ExtractOptionValueInteger0D(fid, field, options%resy)
-        field = 'so.ec.par.vdub.offsetx'
+        field = 'so.inec.par.vdub.offsetx'
         call ExtractOptionValueReal0D(fid, field, options%offsetx)
-        field = 'so.ec.par.vdub.offsety'
+        field = 'so.inec.par.vdub.offsety'
         call ExtractOptionValueReal0D(fid, field, options%offsety)
-        field = 'so.ec.par.vdub.M'
+        field = 'so.inec.par.vdub.M'
         call ExtractOptionValueInteger0D(fid, field, options%M)
-        field = 'so.ec.par.vdub.C'
+        field = 'so.inec.par.vdub.C'
         call ExtractOptionValueInteger0D(fid, field, options%C)
-        field = 'so.ec.par.vdub.xp'
+        field = 'so.inec.par.vdub.xp'
         call ExtractOptionValueReal1D(fid, field, options%xp)
-        field = 'so.ec.par.vdub.yp'
+        field = 'so.inec.par.vdub.yp'
         call ExtractOptionValueReal1D(fid, field, options%yp)
 
         ! Housekeeping
@@ -1089,31 +1200,94 @@ module somod_userinput
         ! Read options
         !=============
         ! Structure & vertex IDs
-        field = 'so.ec.par.vdlb.structureIDs'
+        field = 'so.inec.par.vdlb.structureIDs'
         call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
-        field = 'so.ec.par.vdlb.vertIDs'
+        field = 'so.inec.par.vdlb.vertIDs'
         call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
 
         ! Plf options
-        field = 'so.ec.par.vdlb.plftype'
+        field = 'so.inec.par.vdlb.plftype'
         call ExtractOptionValueCharacter(fid, field, options%plftype)
-        field = 'so.ec.par.vdlb.meth'
+        field = 'so.inec.par.vdlb.meth'
         call ExtractOptionValueCharacter(fid, field, options%meth)
-        field = 'so.ec.par.vdlb.resx'
+        field = 'so.inec.par.vdlb.resx'
         call ExtractOptionValueInteger0D(fid, field, options%resx)
-        field = 'so.ec.par.vdlb.resy'
+        field = 'so.inec.par.vdlb.resy'
         call ExtractOptionValueInteger0D(fid, field, options%resy)
-        field = 'so.ec.par.vdlb.d'
+        field = 'so.inec.par.vdlb.d'
         call ExtractOptionValueReal0D(fid, field, options%d)
-        field = 'so.ec.par.vdlb.offsetx'
+        field = 'so.inec.par.vdlb.offsetx'
         call ExtractOptionValueReal0D(fid, field, options%offsetx)
-        field = 'so.ec.par.vdlb.offsety'
+        field = 'so.inec.par.vdlb.offsety'
         call ExtractOptionValueReal0D(fid, field, options%offsety)
-        field = 'so.ec.par.vdlb.M'
+        field = 'so.inec.par.vdlb.M'
         call ExtractOptionValueInteger0D(fid, field, options%M)
-        field = 'so.ec.par.vdlb.C'
+        field = 'so.inec.par.vdlb.C'
         call ExtractOptionValueInteger0D(fid, field, options%C)
 
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+
+    end subroutine
+
+    ! Vessel distance constraints
+    subroutine ReadVesselAngleDifferenceConOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselAngleDifferenceConOptionsUDT)  :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadVesselAngleDifferenceConOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadVesselAngleDifferenceConOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Structure & vertex IDs
+        field = 'so.inec.par.vad.structureIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
+        field = 'so.inec.par.vad.vertIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
+
+        ! Angles
+        field  = 'so.inec.par.vad.dthetas'
+        call ExtractOptionValueReal1D(fid, field, options%dthetas)
+        field  = 'so.inec.par.vad.dthetav'
+        call ExtractOptionValueReal1D(fid, field, options%dthetav)
+        field  = 'so.inec.par.vad.alpha'
+        call ExtractOptionValueReal0D(fid, field, options%alpha)
+
+        ! Convert to radians
+        options%dthetas = options%dthetas*Pi_R8/180_R8
+        options%dthetav = options%dthetav*Pi_R8/180_R8
+        options%alpha = options%alpha*Pi_R8/180_R8
 
         ! Housekeeping
         !=============
@@ -1166,16 +1340,19 @@ module somod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%fixedvesselflux)
         field = 'so.ec.goat'
         call ExtractOptionValueInteger0D(fid, field, options%goat)
-        field = 'so.ec.vesselupperbound'
+        field = 'so.inec.vesselupperbound'
         call ExtractOptionValueInteger0D(fid, field, options%vesselupperbound)
-        field = 'so.ec.vessellowerbound'
+        field = 'so.inec.vessellowerbound'
         call ExtractOptionValueInteger0D(fid, field, options%vessellowerbound)
+        field = 'so.inec.vesselangledifference'
+        call ExtractOptionValueInteger0D(fid, field, options%vesselangledifference)
 
         ! Other constraint options
         call options%fvpoptions%Read()
         call options%fvfoptions%Read()
         call options%vduboptions%Read()
         call options%vdlboptions%Read()
+        call options%vadoptions%Read()
 
         ! Housekeeping
         !=============
@@ -1229,6 +1406,59 @@ module somod_userinput
         call ExtractOptionValueCharacter(fid, field, options%vesselinputfilepath)
         field  = 'so.cfv.par.PLF.newvesselfilepath'
         call ExtractOptionValueCharacter(fid, field, options%newvesselfilepath)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    ! PLF cost function
+    subroutine ReadCostFunctionOptionsSOFA(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionOptionsSOFAUDT)    :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsSOFA: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsSOFA: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'so.cfv.par.FA.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda)
+
+        ! Structure & vertex IDs
+        field = 'so.cfv.par.FA.structureIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
+        field = 'so.cfv.par.FA.vertIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
 
         ! Housekeeping
         !=============
@@ -1294,6 +1524,7 @@ module somod_userinput
         !===================
         ! Contributions
         call options%plf%Read()
+        call options%fa%Read()
         call options%hessapprox%Read()
 
     end subroutine

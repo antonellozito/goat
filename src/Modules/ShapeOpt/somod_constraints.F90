@@ -209,6 +209,63 @@ module somod_constraints
 
     end type
 
+    ! Vessel angle constraints 
+    type, extends(GenericConstraintsSOUDT) :: VesselAngleDifferenceConstraintsUDT
+        
+        ! Description
+        !============
+        ! Constraints that fix how much the angle between vessel faces
+        ! can deviate from the initial angle. The upper and lower bounds
+        ! on this deviation are based on user input and on the initial 
+        ! angle (i.e. the minimal and maximal angle are always capped by
+        ! pi-alpha and -pi+alpha, where alpha > 0 is a minimal angle that
+        ! needs to be guaranteed). The constraint on the upper and lower
+        ! bound are therefore formulated as:
+        !
+        !       theta < theta0 + dtheta_upper
+        !       theta > theta0 - dtheta_lower 
+        ! 
+        ! where dtheta_upper, dtheta_lower > 0. These angles are:
+        !
+        !       dtheta_upper = dtheta_user if theta0+dtheta > pi-alpha
+        !       dtheta_upper = pi - alpha otherwise
+        !       (analogous for dtheta_lower)
+        !
+        ! In principle it's possible to determine for each possible 
+        ! vertex a different maximal and minimal angle, and that the
+        ! maximal and minimal angle are different. The latter, however,
+        ! makes not much sense since it is a priori unknown how the 
+        ! vessel polygon is actually sorted, and since this constraint
+        ! should anyway reflect a minimal feature size, which shouldn't
+        ! depend on orientation. The only reason we distinguish here 
+        ! is that one of the two may be effectively bounded by the 
+        ! minimal feature size while the other is not. 
+
+        ! Fields:
+        ! - nvpairs:    number of vertex pairs
+        ! - vpairs:     vessel vertex pairs to be considered 
+        ! - theta0:     initial angle
+        ! - dtheta:     angle differences (upper and lower)
+
+        integer(I8)                     :: nvpairs
+        integer(I8), allocatable        :: vpairs(:, :)
+        real(R8), allocatable           :: theta0(:), dtheta_ub(:), &
+            dtheta_lb(:)
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize     => InitializeVesselAngleDifferenceConstraints
+
+        ! Evaluation
+        procedure :: Evaluate       => EvaluateVesselAngleDifferenceConstraints
+
+        ! Write
+        procedure :: WriteData      => WriteDataVesselAngleDifferenceConstraints
+
+    end type
+
+
     ! Overarching types
     !==================
     ! Equality constraints
@@ -251,9 +308,11 @@ module somod_constraints
         ! Constraint switches
         logical                 :: dovesselupperbound = .false. 
         logical                 :: dovessellowerbound = .false. 
+        logical                 :: dovesselangledifference = .false.
 
         type(VesselDistanceConstraintsUDT)  :: vesselupperbound 
         type(VesselDistanceConstraintsUDT)  :: vessellowerbound
+        type(VesselAngleDifferenceConstraintsUDT)   :: vesselangledifference
 
     contains
 
@@ -829,6 +888,31 @@ module somod_constraints
 
         end if
 
+        ! Vessel angle difference
+        if (constraintoptions%vesselangledifference == 1) then 
+
+            ! Set the logical
+            constraints%dovesselangledifference = .true. 
+
+            ! Initialize
+            call constraints%vesselangledifference%Initialize(goat, &
+                monitor, designvariables, constraintoptions)
+
+            ! Add constraints number
+            constraints%nineqcon = constraints%nineqcon + &
+                constraints%vesselangledifference%ncon 
+
+            ! Print
+            print *, 'number of vessel angle difference constraints: ', &
+                constraints%vesselangledifference%ncon
+
+        else
+
+            ! Set to false, don't initialize
+            constraints%dovesselangledifference = .false.
+
+        end if
+
 
     end subroutine
 
@@ -864,6 +948,9 @@ module somod_constraints
 
         real(R8), allocatable           :: G_vlb(:), lambda_vlb(:)
         type(MySparseUDT)               :: gradG_vlb, hessG_vlb
+
+        real(R8), allocatable           :: G_vad(:), lambda_vad(:)
+        type(MySparseUDT)               :: gradG_vad, hessG_vad
 
         ! Initialize
         !===========
@@ -928,6 +1015,34 @@ module somod_constraints
 
             ! Update the constraint counter
             ic = ic + constraints%vessellowerbound%ncon
+
+        end if
+
+        ! Vessel angle difference
+        !------------------------
+        if (constraints%dovesselangledifference) then 
+            ! Construct the constraint index
+            conindex = [(k, k = ic+1, ic+constraints%vesselangledifference%ncon)]
+
+            ! Allocate & initialize
+            lambda_vad = lambda(conindex)
+
+            ! Call the evaluation routine
+            call constraints%vesselangledifference%Evaluate(G_vad, &
+                gradG_vad, hessG_vad, goat, dogradient, &
+                dohessian, designvariables, lambda_vad)
+
+            ! Assign
+            G(conindex) = G_vad
+            if (dogradient) then 
+                gradG = gradG%Concatenate(gradG_vad, 2)
+            end if
+            if (dohessian) then 
+                hessG = hessG + hessG_vad
+            end if 
+
+            ! Update the constraint counter
+            ic = ic + constraints%vesselangledifference%ncon
 
         end if
         
@@ -2058,6 +2173,688 @@ module somod_constraints
         ! Housekeeping
         !=============
         end associate
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                     VESSEL FACE ANGLE DIFFERENCE                 !
+    !------------------------------------------------------------------!
+    ! Initialize
+    subroutine InitializeVesselAngleDifferenceConstraints(constraints, goat, &
+        monitor, designvariables, options)
+
+        ! Description
+        !============
+        ! Initialize the vessel angle difference constraints. 
+
+        ! Notes
+        !======
+        
+        ! Initialize
+        !===========
+        implicit none
+        
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(VesselAngleDifferenceConstraintsUDT)  :: constraints 
+        type(OptimizationProblemGDUDT)          :: goat 
+        type(ConstraintsMonitorSOUDT)           :: monitor
+        type(ConstraintOptionsSOUDT)            :: options 
+        class(DesignVariablesSOUDT)             :: designvariables
+
+        ! Auxiliary variables
+        logical, allocatable, dimension(:)      :: isconstrained, &
+            isvertextreated, excludepairs
+
+        integer(I8)                             :: tID, sID1, sID2, &
+            nvpairs, tloc
+        integer(I8), allocatable                :: labels(:, :), &
+            vpairs(:, :)
+
+        real(R8)                                :: thisangle
+        real(R8), allocatable, dimension(:)     :: xv, yv, dthetas, &
+            x1, x2, x3, y1, y2, y3, dx1, dx2, dy1, dy2, cp, dp, theta0
+
+        ! Loop variables
+        integer(I8)                 :: i
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            ps      => goat%environment%vessel%polygonset,          &
+            cc      => monitor%eqvcc,                               &
+            maxcc   => monitor%maxeqvcc,                            &
+            opt     => options%vadoptions                           &
+            )
+
+        ! Number of constraints
+        constraints%ncon = 0
+
+        ! Check design variable type
+        select case (designvariables%type)
+
+        case ('vesselcoordinates', 'vesselcoordinates_goat')
+
+            ! All good
+
+        case default
+
+            ! All bad
+            call gdErrorHandler('InitializeVesselAngleDifferenceConstraints: ' // &
+                'design variable type not implemented')
+
+        end select
+
+        ! Check options
+        if (size(opt%structureIDs) /= size(opt%dthetas)) then 
+            call gdErrorHandler('InitializeVesselAngleDifferenceConstraints: ' // & 
+                'incompatible sizes of structureIDs and dthetas in options')
+        end if 
+        if (size(opt%vertIDs) /= size(opt%dthetav)) then 
+            call gdErrorHandler('InitializeVesselAngleDifferenceConstraints: ' // & 
+                'incompatible sizes of vertIDs and dthetav in options')
+        end if 
+
+        ! Get vessel coordinates and labels (should be same as design variables)
+        call ps%GetLabels(labels)
+        call ps%GetVertices(xv, yv)
+
+        ! Initialize logical indicating if vertex is constrained
+        allocate(isconstrained(size(labels, 1)))
+        isconstrained = .false. 
+
+        ! Initialize logical indicating if desired constrained vertex
+        ! was present and constrained
+        allocate(isvertextreated(size(opt%vertIDs)))
+        isvertextreated = .false. 
+
+        ! Determine constrained vertices
+        !===============================
+        ! Also determine desired angles
+        ! Constrain per vessel structure (label 1 and 2)
+        do i = 1, size(opt%structureIDs)
+            ! Unpack ID
+            associate(tID       => opt%structureIDs(i))
+
+            ! Check vertices
+            where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) &
+                isconstrained = .true. 
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Constrain per vertex ID
+        do i = 1, size(opt%vertIDs)
+            ! Unpack ID
+            associate(tID       => opt%vertIDs(i))
+
+            ! Check vertices
+            where( (labels(:, 3) == tID)) isconstrained = .true. 
+
+            ! Check if found
+            if (any(labels(:, 3) == tID)) then 
+                isvertextreated(i) = .true. 
+            end if
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Check if we can constrain, set to false if not the case
+        where (cc > maxcc + 1) isconstrained = .false. 
+
+        ! Determine initial vertex pairs
+        call goat%environment%vessel%GetVesselVertexPairs(vpairs, &
+            opt%structureIDs, opt%vertIDs)
+        nvpairs = size(vpairs, 1)
+
+        ! Determine angles
+        !=================
+        ! Initialize
+        allocate(constraints%dtheta_ub(nvpairs), constraints%dtheta_lb(nvpairs))
+        constraints%dtheta_ub = posinfval_R8()
+        constraints%dtheta_lb = -posinfval_R8()
+
+        ! Exclude pairs of non-constrained vertices
+        allocate(excludepairs(nvpairs))
+        excludepairs = .false. 
+        where (.not. isconstrained(vpairs(:, 2))) excludepairs = .true. 
+
+        ! Determine initial angle
+        x1 = xv(vpairs(:, 1))
+        x2 = xv(vpairs(:, 2))
+        x3 = xv(vpairs(:, 3))
+
+        y1 = yv(vpairs(:, 1))
+        y2 = yv(vpairs(:, 2))
+        y3 = yv(vpairs(:, 3))
+
+        dx1 = x2 - x1
+        dx2 = x3 - x2 
+        dy1 = y2 - y1
+        dy2 = y3 - y2 
+
+        dp = dx1*dx2 + dy1*dy2 
+        cp = dx1*dy2 - dx2*dy1 
+
+        theta0 = atan2(cp, dp) ! in radians
+
+        ! Exclude non-treated pairs
+        theta0 = pack(theta0, .not. excludepairs)
+        nvpairs = size(theta0)
+
+        ! Add vertex pairs and initial angle
+        constraints%theta0 = theta0 
+        allocate(constraints%vpairs(nvpairs, 3))
+        do i = 1, 3
+            constraints%vpairs(:, i) = pack(vpairs(:, i), .not. excludepairs)
+        end do
+        constraints%nvpairs = nvpairs 
+        constraints%ncon = 2*nvpairs ! upper and lower bound
+
+        ! Determine angle difference for each structure
+        allocate(dthetas(max(maxval(labels(:, 1)), maxval(labels(:, 2)))))
+        dthetas = posinfval_R8()
+        do i = 1, size(opt%structureIDs)
+            dthetas(opt%structureIDs(i)) = opt%dthetas(i)
+        end do 
+
+        ! Determine maximal angle for each vertex
+        do i = 1, size(theta0)
+            
+            ! Get structure IDs
+            tID = vpairs(i, 2)
+            sID1 = labels(tID, 1)
+            sID2 = labels(tID, 2)
+
+            ! Get minimal angle according to structures
+            if (sID2 /= 0) then 
+                thisangle = min(dthetas(sID1), dthetas(sID2))
+            else
+                thisangle = dthetas(sID1)
+            end if 
+            tloc = findloc(opt%vertIDs, tID, 1)
+            if (tloc /= 0) then 
+                thisangle = min(thisangle, opt%dthetav(tloc)) ! also in radians
+            end if 
+
+            ! Check
+            if (theta0(i) + thisangle <= (Pi_R8 - opt%alpha)) then 
+                constraints%dtheta_ub(i) = Pi_R8 - opt%alpha 
+            else
+                constraints%dtheta_ub(i) = thisangle 
+            end if 
+            if (theta0(i) - thisangle <= (-Pi_R8 - opt%alpha)) then 
+                constraints%dtheta_lb(i) = -Pi_R8 + opt%alpha 
+            else
+                constraints%dtheta_lb(i) = thisangle
+            end if 
+
+        end do 
+        
+        ! Output
+        !=======
+        ! Display warning message if necessary
+        if (any(.not. isvertextreated)) then 
+            ! Display message
+            print *, 'InitializeVesselAngleDifferenceConstraints: ' // & 
+                'Vertices with following IDs were not present and ' // &
+                'are not constrained: ', pack(opt%vertIDs, .not. isvertextreated)
+        end if
+
+        ! Print data
+        call constraints%WriteData(xv, yv)
+        
+        ! Housekeeping
+        !=============
+        end associate
+        
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateVesselAngleDifferenceConstraints(constraints, G, gradG, & 
+        hessG, goat, dogradient, dohessian, designvariables, lambda)
+
+        ! Description
+        !============
+        ! Evaluate the vessel angle difference constraints
+        ! 
+        !       theta <= theta0 + dtheta_upper
+        !       -theta <= -theta0 + dtheta_lower 
+        ! 
+
+        ! Initialize
+        !===========
+        ! Modules
+        
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(VesselAngleDifferenceConstraintsUDT)     :: constraints 
+        real(R8), allocatable                   :: G(:) 
+        real(R8), allocatable                   :: lambda(:)
+        type(MySparseUDT)                       :: hessG, gradG
+        type(OptimizationProblemGDUDT)          :: goat 
+        logical                                 :: dogradient, dohessian
+        class(DesignVariablesSOUDT)             :: designvariables   
+        
+        ! Auxiliary
+        integer(I8)                             :: nv
+        integer(I8), allocatable, dimension(:)  :: row, col
+        real(R8), allocatable, dimension(:)     :: xv, yv, &
+            x1, x2, x3, y1, y2, y3, dx1, dx2, dy1, dy2, cp, &
+            dp, theta, rat, val, valxx, valxy, valyx, valyy,lambdaub, &
+            lambdalb
+        type(MySparseUDT)                       :: jacG
+
+        ! Loop 
+        integer(I8)                         :: ic, ivg, ivh, k
+
+        ! Data
+
+        ! Initialize
+        !===========
+        ! Checks
+        if ( (.not. allocated(lambda)) .and. dohessian) then
+            ! Throw error
+            call gdErrorHandler('When evaluating the hessian vector' &
+                // ' multiplication, lambda must be given')
+        end if
+
+        if (size(lambda) .ne. constraints%ncon) then
+            ! Lambda should have the same size as the constraints
+            call gdErrorHandler('Lambda should have the same size ' &
+                // 'as the constraint vector')
+        end if
+        if (allocated(G)) then 
+            if (size(G, 1) .ne. constraints%ncon) then 
+                deallocate(G)
+                allocate(G(constraints%ncon))
+            end if 
+        else
+            allocate(G(constraints%ncon))
+        end if 
+
+        ! Counters
+        ic = 0 ! constraint counter (local)
+        ivg = 0 ! value index for gradient
+        ivh = 0 ! value index for hessian
+
+        ! Associate
+        associate(&
+            vpairs      => constraints%vpairs,              &
+            nvpairs     => constraints%nvpairs,             &
+            dthetaub    => constraints%dtheta_ub,           &
+            dthetalb    => constraints%dtheta_lb,           &
+            theta0      => constraints%theta0,              &
+            ps          => goat%environment%vessel%polygonset   &
+            )
+
+        ! Get coordinates
+        call ps%GetVertices(xv, yv)
+        nv = size(xv)
+
+        ! Evaluate
+        !=========
+        ! Evaluate angle
+        x1 = xv(vpairs(:, 1))
+        x2 = xv(vpairs(:, 2))
+        x3 = xv(vpairs(:, 3))
+
+        y1 = yv(vpairs(:, 1))
+        y2 = yv(vpairs(:, 2))
+        y3 = yv(vpairs(:, 3))
+
+        dx1 = x2 - x1
+        dx2 = x3 - x2 
+        dy1 = y2 - y1
+        dy2 = y3 - y2 
+
+        dp = dx1*dx2 + dy1*dy2 
+        cp = dx1*dy2 - dx2*dy1 
+
+        rat = cp/dp
+
+        theta = atan2(cp, dp) ! in radians
+
+        ! Upper bound
+        G(ic+1:ic+nvpairs) = theta - theta0 - dthetaub 
+        ic = ic + nvpairs
+
+        ! Lower bound
+        G(ic+1:ic+nvpairs) = -(theta - theta0) - dthetalb 
+        ic = ic + nvpairs
+        
+        ! Derivatives
+        !============
+        ! Initialize
+        jacG%nrow = constraints%ncon 
+        jacG%ncol = designvariables%nphi 
+        
+        hessG%nrow = designvariables%nphi 
+        hessG%ncol = designvariables%nphi 
+
+        ! Check design variable type
+        select case(designvariables%type)
+
+        case ('vesselcoordinates', 'vesselcoordinates_goat') ! same since vessel coordinates come first in design variable vector
+
+            ! Gradient
+            !---------
+            if (dogradient) then
+                ! Reset counter
+                ivg = 0
+
+                ! Allocate
+                !---------
+                ! Only for upper bound - lower bound is the same, but
+                ! then with minus sign
+                allocate(row(nvpairs*6), col(nvpairs*6), val(nvpairs*6))
+
+                ! Upper bound
+                !------------
+                ! x1
+                row(ivg+1:ivg+nvpairs) = [(k, k = 1, nvpairs)]
+                col(ivg+1:ivg+nvpairs) = vpairs(:, 1)
+                val(ivg+1:ivg+nvpairs) = -(dy2/dp - (dx2*rat)/dp)/(rat**2 + 1) !x1
+                ivg = ivg + nvpairs
+
+                ! x2
+                row(ivg+1:ivg+nvpairs) = [(k, k = 1, nvpairs)]
+                col(ivg+1:ivg+nvpairs) = vpairs(:, 2) 
+                val(ivg+1:ivg+nvpairs) = -((y1 - y3)/dp &
+                    - (rat*(dx1 - dx2))/dp)/(rat**2 + 1) !x2
+                ivg = ivg + nvpairs
+
+                ! x3
+                row(ivg+1:ivg+nvpairs) = [(k, k = 1, nvpairs)]
+                col(ivg+1:ivg+nvpairs) = vpairs(:, 3) 
+                val(ivg+1:ivg+nvpairs) = -(dy1/dp + (dx1*rat)/dp)/(rat**2 + 1) !x3
+                ivg = ivg + nvpairs
+
+                ! y1
+                row(ivg+1:ivg+nvpairs) = [(k, k = 1, nvpairs)] 
+                col(ivg+1:ivg+nvpairs) = vpairs(:, 1) + nv
+                val(ivg+1:ivg+nvpairs) = (dx2/dp + (dy2*rat)/dp)/(rat**2 + 1) !y1
+                ivg = ivg + nvpairs
+
+                ! y2
+                row(ivg+1:ivg+nvpairs) = [(k, k = 1, nvpairs)] 
+                col(ivg+1:ivg+nvpairs) = vpairs(:, 2) + nv
+                val(ivg+1:ivg+nvpairs) = ((x1 - x3)/dp &
+                    + (rat*(dy1 - dy2))/dp)/(rat**2 + 1) !y2
+                ivg = ivg + nvpairs
+
+                ! y3
+                row(ivg+1:ivg+nvpairs) = [(k, k = 1, nvpairs)] 
+                col(ivg+1:ivg+nvpairs) = vpairs(:, 3) + nv
+                val(ivg+1:ivg+nvpairs) = (dx1/dp - (dy1*rat)/dp)/(rat**2 + 1) !y3
+                ivg = ivg + nvpairs
+
+                ! Lower bound
+                !------------
+                ! Not done explicitly here
+
+                ! Concatenate
+                !------------
+                ! Construct Jacobian
+                jacG = ConstructMySparse([row, row + nvpairs], [col, col], &
+                    [val, -val], constraints%ncon, designvariables%nphi)
+                                
+                ! Transpose
+                gradG = jacG%Transpose()
+            end if 
+
+            ! Hessian
+            !--------
+            if (dohessian) then
+
+                ! Initialize counter
+                ivh = 0
+
+                ! Allocate
+                if (allocated(row)) then ! assume all allocated
+                    deallocate(row, col)
+                end if
+                allocate(row(nvpairs*9), col(nvpairs*9), valxx(nvpairs*9), &
+                    valxy(nvpairs*9), valyx(nvpairs*9), valyy(nvpairs*9))
+
+                ! Upper bound
+                !------------
+                ! Note: we don't account yet for multiplication with
+                ! lambda, this comes afterwards
+
+                ! v1v1
+                row(ivh+1:ivh+nvpairs) = vpairs(:, 1)
+                col(ivh+1:ivh+nvpairs) = vpairs(:, 1)
+                valxx(ivh+1:ivh+nvpairs) = ((2*dx2**2*rat)/dp**2 &
+                    - (2*dx2*dy2)/dp**2)/(rat**2 + 1) + (((2*dx2*rat**2)/dp &
+                    - (2*dy2*rat)/dp)*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1x1
+                valxy(ivh+1:ivh+nvpairs) = (dx2**2/dp**2 - dy2**2/dp**2 &
+                    + (2*dx2*dy2*rat)/dp**2)/(rat**2 + 1) + (((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dy2/dp - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1y1
+                valyx(ivh+1:ivh+nvpairs) = valxy(ivh+1:ivh+nvpairs)
+                valyy(ivh+1:ivh+nvpairs) = ((2*dy2**2*rat)/dp**2 &
+                    + (2*dx2*dy2)/dp**2)/(rat**2 + 1) - (((2*dy2*rat**2)/dp &
+                    + (2*dx2*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 !y1y1
+                ivh = ivh + nvpairs
+
+                ! v1v2
+                row(ivh+1:ivh+nvpairs) = vpairs(:, 1)
+                col(ivh+1:ivh+nvpairs) = vpairs(:, 2)
+                valxx(ivh+1:ivh+nvpairs) = - (rat/dp + (dy2*(dx1 - dx2))/dp**2 &
+                    + (dx2*(y1 - y3))/dp**2 - (2*dx2*rat*(dx1 - dx2))/dp**2)/(rat**2 + 1) &
+                    - (((2*rat*(y1 - y3))/dp - (2*rat**2*(dx1 - dx2))/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1x2
+                valxy(ivh+1:ivh+nvpairs) = (1/dp - (dy2*(dy1 - dy2))/dp**2 &
+                    + (dx2*(x1 - x3))/dp**2 + (2*dx2*rat*(dy1 - dy2))/dp**2)/(rat**2 + 1) &
+                    + (((2*rat*(x1 - x3))/dp + (2*rat**2*(dy1 - dy2))/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1y2
+                valyx(ivh+1:ivh+nvpairs) = (((2*rat*(y1 - y3))/dp &
+                    - (2*rat**2*(dx1 - dx2))/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 &
+                    - (1/dp - (dx2*(dx1 - dx2))/dp**2 + (dy2*(y1 - y3))/dp**2 &
+                    - (2*dy2*rat*(dx1 - dx2))/dp**2)/(rat**2 + 1) !y1x2
+                valyy(ivh+1:ivh+nvpairs) = ((dx2*(dy1 - dy2))/dp**2 - rat/dp &
+                    + (dy2*(x1 - x3))/dp**2 + (2*dy2*rat*(dy1 - dy2))/dp**2)/(rat**2 + 1) &
+                    - (((2*rat*(x1 - x3))/dp + (2*rat**2*(dy1 - dy2))/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 !y1y2
+                ivh = ivh + nvpairs
+
+                ! v2v1
+                row(ivh+1:ivh+nvpairs) = vpairs(:, 2)
+                col(ivh+1:ivh+nvpairs) = vpairs(:, 1)
+                valxx(ivh+1:ivh+nvpairs) = valxx(ivh-nvpairs+1:ivh)
+                valxy(ivh+1:ivh+nvpairs) = valyx(ivh-nvpairs+1:ivh)
+                valyx(ivh+1:ivh+nvpairs) = valxy(ivh-nvpairs+1:ivh)
+                valyy(ivh+1:ivh+nvpairs) = valyy(ivh-nvpairs+1:ivh)
+                ivh = ivh + nvpairs
+
+                ! v1v3
+                row(ivh+1:ivh+nvpairs) = vpairs(:, 1)
+                col(ivh+1:ivh+nvpairs) = vpairs(:, 3)
+                valxx(ivh+1:ivh+nvpairs) = (rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dx1*dx2*rat)/dp**2)/(rat**2 + 1) &
+                    - (((2*dx1*rat**2)/dp + (2*dy1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1x3
+                valxy(ivh+1:ivh+nvpairs) = - (1/dp - (dx1*dx2)/dp**2 &
+                    - (dy1*dy2)/dp**2 + (2*dx2*dy1*rat)/dp**2)/(rat**2 + 1) &
+                    - (((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dy2/dp &
+                    - (dx2*rat)/dp))/(rat**2 + 1)**2 !x1y3
+                valyx(ivh+1:ivh+nvpairs) = (((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dx2/dp + (dy2*rat)/dp))/(rat**2 + 1)**2 &
+                    - ((dx1*dx2)/dp**2 - 1/dp + (dy1*dy2)/dp**2 &
+                    + (2*dx1*dy2*rat)/dp**2)/(rat**2 + 1) !y1x3
+                valyy(ivh+1:ivh+nvpairs) = (rat/dp + (dx1*dy2)/dp**2 &
+                    - (dx2*dy1)/dp**2 - (2*dy1*dy2*rat)/dp**2)/(rat**2 + 1) &
+                    + (((2*dy1*rat**2)/dp - (2*dx1*rat)/dp)*(dx2/dp &
+                    + (dy2*rat)/dp))/(rat**2 + 1)**2 !y1y3
+                ivh = ivh + nvpairs
+
+                ! v3v1
+                row(ivh+1:ivh+nvpairs) = vpairs(:, 3)
+                col(ivh+1:ivh+nvpairs) = vpairs(:, 1)
+                valxx(ivh+1:ivh+nvpairs) = valxx(ivh-nvpairs+1:ivh)
+                valxy(ivh+1:ivh+nvpairs) = valyx(ivh-nvpairs+1:ivh)
+                valyx(ivh+1:ivh+nvpairs) = valxy(ivh-nvpairs+1:ivh)
+                valyy(ivh+1:ivh+nvpairs) = valyy(ivh-nvpairs+1:ivh)
+                ivh = ivh + nvpairs
+
+                ! v2v2
+                row(ivh+1:ivh+nvpairs) = vpairs(:, 2)
+                col(ivh+1:ivh+nvpairs) = vpairs(:, 2)
+                valxx(ivh+1:ivh+nvpairs) = ((2*rat)/dp &
+                    - (2*(dx1 - dx2)*(y1 - y3))/dp**2 + (2*rat*(dx1 &
+                    - dx2)**2)/dp**2)/(rat**2 + 1) - (((2*rat*(y1 - y3))/dp &
+                    - (2*rat**2*(dx1 - dx2))/dp)*((y1 - y3)/dp &
+                    - (rat*(dx1 - dx2))/dp))/(rat**2 + 1)**2 !x2x2
+                valxy(ivh+1:ivh+nvpairs) = (((dx1 - dx2)*(x1 - x3))/dp**2 &
+                    - ((dy1 - dy2)*(y1 - y3))/dp**2 &
+                    + (2*rat*(dx1 - dx2)*(dy1 - dy2))/dp**2)/(rat**2 + 1) &
+                    + (((2*rat*(x1 - x3))/dp + (2*rat**2*(dy1 - dy2))/dp)*((y1 - y3)/dp &
+                    - (rat*(dx1 - dx2))/dp))/(rat**2 + 1)**2 !x2y2
+                valyx(ivh+1:ivh+nvpairs) = valxy(ivh+1:ivh+nvpairs)
+                valyy(ivh+1:ivh+nvpairs) = ((2*rat)/dp + (2*(dy1 - dy2)*(x1 - x3))/dp**2 &
+                    + (2*rat*(dy1 - dy2)**2)/dp**2)/(rat**2 + 1) &
+                    - (((2*rat*(x1 - x3))/dp + (2*rat**2*(dy1 - dy2))/dp)*((x1 - x3)/dp &
+                    + (rat*(dy1 - dy2))/dp))/(rat**2 + 1)**2 !y2y2
+                ivh = ivh + nvpairs
+
+                ! v2v3
+                row(ivh+1:ivh+nvpairs) = vpairs(:, 2)
+                col(ivh+1:ivh+nvpairs) = vpairs(:, 3)
+                valxx(ivh+1:ivh+nvpairs) = - (rat/dp + (dy1*(dx1 - dx2))/dp**2 &
+                    - (dx1*(y1 - y3))/dp**2 + (2*dx1*rat*(dx1 - dx2))/dp**2)/(rat**2 + 1) &
+                    - (((y1 - y3)/dp - (rat*(dx1 - dx2))/dp)*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp))/(rat**2 + 1)**2 !x2x3
+                valxy(ivh+1:ivh+nvpairs) = (1/dp + (dx1*(dx1 - dx2))/dp**2 &
+                    + (dy1*(y1 - y3))/dp**2 - (2*dy1*rat*(dx1 - dx2))/dp**2)/(rat**2 + 1) &
+                    - (((y1 - y3)/dp - (rat*(dx1 - dx2))/dp)*((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp))/(rat**2 + 1)**2 !x2y3
+                valyx(ivh+1:ivh+nvpairs) = (((x1 - x3)/dp &
+                    + (rat*(dy1 - dy2))/dp)*((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp))/(rat**2 + 1)**2 - (1/dp + (dy1*(dy1 - dy2))/dp**2 &
+                    + (dx1*(x1 - x3))/dp**2 + (2*dx1*rat*(dy1 - dy2))/dp**2)/(rat**2 + 1) !y2x
+                valyy(ivh+1:ivh+nvpairs) = (((x1 - x3)/dp &
+                    + (rat*(dy1 - dy2))/dp)*((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp))/(rat**2 + 1)**2 - (rat/dp - (dx1*(dy1 - dy2))/dp**2 &
+                    + (dy1*(x1 - x3))/dp**2 + (2*dy1*rat*(dy1 - dy2))/dp**2)/(rat**2 + 1) !y2y3
+                ivh = ivh + nvpairs
+
+                ! v3v2
+                row(ivh+1:ivh+nvpairs) = vpairs(:, 3)
+                col(ivh+1:ivh+nvpairs) = vpairs(:, 2)
+                valxx(ivh+1:ivh+nvpairs) = valxx(ivh-nvpairs+1:ivh)
+                valxy(ivh+1:ivh+nvpairs) = valyx(ivh-nvpairs+1:ivh)
+                valyx(ivh+1:ivh+nvpairs) = valxy(ivh-nvpairs+1:ivh)
+                valyy(ivh+1:ivh+nvpairs) = valyy(ivh-nvpairs+1:ivh)
+                ivh = ivh + nvpairs
+
+                ! v3v3
+                row(ivh+1:ivh+nvpairs) = vpairs(:, 3)
+                col(ivh+1:ivh+nvpairs) = vpairs(:, 3)
+                valxx(ivh+1:ivh+nvpairs) = ((2*dx1**2*rat)/dp**2 &
+                    + (2*dx1*dy1)/dp**2)/(rat**2 + 1) - (((2*dx1*rat**2)/dp &
+                    + (2*dy1*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 !x3x3
+                valxy(ivh+1:ivh+nvpairs) = (dy1**2/dp**2 - dx1**2/dp**2 &
+                    + (2*dx1*dy1*rat)/dp**2)/(rat**2 + 1) - (((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp)*(dy1/dp + (dx1*rat)/dp))/(rat**2 + 1)**2 !x3y3
+                valyx(ivh+1:ivh+nvpairs) = valxy(ivh+1:ivh+nvpairs)
+                valyy(ivh+1:ivh+nvpairs) = ((2*dy1**2*rat)/dp**2 &
+                    - (2*dx1*dy1)/dp**2)/(rat**2 + 1) + (((2*dy1*rat**2)/dp &
+                    - (2*dx1*rat)/dp)*(dx1/dp - (dy1*rat)/dp))/(rat**2 + 1)**2 !y3y3
+                ivh = ivh + nvpairs
+
+                ! Lower bound
+                !------------
+                ! Not done explicitly here
+
+                ! Concatenate and multiply
+                !-------------------------
+                ! Need to deal with extra dimension introduced by spread
+                lambdaub = reshape(spread(lambda(1:nvpairs), 2, 36), [36*nvpairs])
+                lambdalb = reshape(spread(lambda(nvpairs+1:2*nvpairs), 2, 36), [36*nvpairs])
+                hessG = ConstructMySparse(&
+                    [row, row, row+nv, row+nv, row, row, row+nv, row+nv], &
+                    [col, col+nv, col, col+nv, col, col+nv, col, col+nv], &
+                    [[valxx, valxy, valyx, valyy]*lambdaub, &
+                    -[valxx, valxy, valyx, valyy]*lambdalb], &
+                    designvariables%nphi, designvariables%nphi) 
+                
+            end if 
+
+        case default
+
+            call gdErrorHandler('EvaluateFixedVesselPointsConstraints: ' // &
+                'derivatives not implemented for design variable type: ' // &
+                designvariables%type)
+
+        end select
+        
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+    end subroutine 
+
+    ! Data output
+    subroutine WriteDataVesselAngleDifferenceConstraints(constraints, xv, yv)
+
+        ! Description
+        !============
+        ! This routine writes out the cost function data (vertex pairs)
+        ! for post-processing
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselAngleDifferenceConstraintsUDT)  :: constraints 
+        real(R8), intent(in)                :: xv(:), yv(:)
+
+        ! Auxiliary
+        integer(I8)                     :: ncol, nrow 
+
+        integer(I8), allocatable        :: IDn(:, :) 
+        real(R8), allocatable           :: xn(:, :), yn(:, :)
+        character(:), allocatable       :: filename 
+
+        ! Loop
+        integer(I8)                     :: j 
+
+        ! Initialize
+        !===========
+        ! Set filename
+        filename = 'so_con_vad_vpairs'
+
+        ! Allocate
+        nrow = size(constraints%vpairs, 1)
+        ncol = size(constraints%vpairs, 2)
+        allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
+
+        ! Unpack
+        associate(vpairs      => constraints%vpairs)
+
+        ! Loop
+        xn = 0
+        yn = 0
+        do j = 1, nrow 
+            IDn(j, :) = vpairs(j, :) 
+            xn(j, :) = xv(vpairs(j, :))
+            yn(j, :) = yv(vpairs(j, :))
+        end do
+
+        ! Call writer
+        !============
+        call WriteVertexPairData(IDn, xn, yn, filename)
+
+        ! Housekeeping
+        !=============
+        end associate
+        deallocate(IDn, xn, yn)
+
 
     end subroutine
 
