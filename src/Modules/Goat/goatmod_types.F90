@@ -2178,7 +2178,7 @@ module goatmod_types
 
         ! Auxiliary
         logical, allocatable, dimension(:)      :: includevert, &
-            ispolygonstart
+            ispolygonstart, ispolygonend
         integer(I8)                             :: nv, nvpairs, psind, &
             prevv, ind
         integer(I8), allocatable                :: labels(:, :)
@@ -2232,20 +2232,21 @@ module goatmod_types
 
         ! Check starting points of polygon
         ispolygonstart = [.true., pID(2:) - pID(:nv-1) /= 0]
+        ispolygonend = [ispolygonstart(2:), .true.]
 
         ! Initialize vertex pairs 
-        nvpairs = count(includevert)
+        nvpairs = count(includevert .and. (.not. ispolygonend))
         allocate(vpairs(nvpairs, 3))
 
         ! Loop
         cc = 0
         psind = 1
-        do i = 1, size(vID) 
+        do i = 1, size(vID)
             if (includevert(vID(i))) then 
 
                 ! Check if we should include the pair (need to account
                 ! for starting vertex appearing twice in vID)
-                if (ispolygonstart(i+1)) then 
+                if (ispolygonend(i)) then 
                     ! Update psind
                     psind = psind + ps%polygons(pID(i))%ne + 1
                     cycle 
