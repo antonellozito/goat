@@ -285,10 +285,29 @@ module sosmod_costfunction
             ! Allocate
             allocate(CostfunctionPLFUDT::costfunction%costfunction)
 
+            ! Set type
+            costfunction%costfunction%type = 'PLF'
+
+        case ('SOFA')
+
+            ! Allocate
+            allocate(CostFunctionSOFAUDT::costfunction%costfunction)
+
+            ! Set type
+            costfunction%costfunction%type = 'SOFA'
+
+        case ('general')
+                
+            ! General cost function
+            allocate(CostFunctionGeneralSOUDT::costfunction%costfunction)
+
+            ! Set type
+            costfunction%costfunction%type = 'general'
+
         case default 
 
             ! Throw error
-            call gdErrorHandler('InitializeCostFunctionGR: unknown cost' // & 
+            call gdErrorHandler('InitializeCostFunctionGRS: unknown cost' // & 
                 'function type: ' // options%type)
 
         end select

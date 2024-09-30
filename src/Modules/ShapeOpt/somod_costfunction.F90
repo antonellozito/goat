@@ -1664,10 +1664,37 @@ module somod_costfunction
         ! Check which cost function it is
         select case (options%type)
 
-        case ('PLF')
+            case ('PLF')
 
-            ! Allocate
-            allocate(CostfunctionPLFUDT::costfunction%costfunction)
+                ! Allocate 
+                allocate(CostFunctionPLFUDT::costfunction%costfunction)
+
+                ! Set type
+                costfunction%costfunction%type = 'PLF'
+
+            case ('SOFA')
+
+                ! Allocate
+                allocate(CostFunctionSOFAUDT::costfunction%costfunction)
+
+                ! Set type
+                costfunction%costfunction%type = 'SOFA'
+
+            case ('no')
+
+                ! Zero cost function
+                allocate(CostFunctionDummyUDT::costfunction%costfunction)
+
+                ! Set type
+                costfunction%costfunction%type = 'no'
+
+            case ('general')
+                
+                ! General cost function
+                allocate(CostFunctionGeneralSOUDT::costfunction%costfunction)
+
+                ! Set type
+                costfunction%costfunction%type = 'general'
 
         case default 
 
