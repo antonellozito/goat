@@ -56,9 +56,6 @@ module ggmod_vertexdistribution2D
 
     end type 
 
-    
-
-
     ! Uniform vertex distributor
     type, extends(VertexDistributor2DUDT) :: UniformVertexDistributor2DUDT
 
@@ -137,25 +134,27 @@ module ggmod_vertexdistribution2D
     abstract interface 
 
         ! Vertex distribution over curve
-        subroutine DistributeVerticesOverCurveINT(vd, xc, yc, xv, yv, nv)
+        subroutine DistributeVerticesOverCurveINT(vd, xc, yc, nv, xv, yv, &
+            ldistr)
 
             import :: I8, R8, VertexDistributor2DUDT
             class(VertexDistributor2DUDT)          :: vd 
             real(R8), intent(in)                :: xc(:), yc(:)
-            real(R8), allocatable, intent(out)  :: xv(:), yv(:)
+            real(R8), allocatable, intent(out), optional  :: xv(:), yv(:)
             integer(I8), intent(out)            :: nv 
+            real(R8), allocatable, intent(out), optional :: ldistr(:)
 
         end subroutine 
 
         ! Vertex distribution over field
-        subroutine DistributeVerticesOverFieldINT(vd, xc, yc, field, &
-            xv, yv, nv)
+        subroutine DistributeVerticesOverFieldINT(vd, xc, yc, field, nv, &
+            xv, yv, ldistr)
 
             import :: I8, R8, VertexDistributor2DUDT, DistributionFunctionUDT
             class(VertexDistributor2DUDT)       :: vd 
             class(DistributionFunctionUDT), intent(in)  :: field
             real(R8), intent(in)                :: xc(:), yc(:)
-            real(R8), allocatable, intent(out)  :: xv(:), yv(:)
+            real(R8), allocatable, intent(out), optional  :: xv(:), yv(:), ldistr(:)
             integer(I8), intent(out)            :: nv 
 
         end subroutine 
@@ -265,7 +264,8 @@ module ggmod_vertexdistribution2D
     !------------------------------------------------------------------!
 
     ! Curve based distributor
-    subroutine DistributeVerticesUniformOverCurve(vd, xc, yc, xv, yv, nv)
+    subroutine DistributeVerticesUniformOverCurve(vd, xc, yc, nv, xv, yv, &
+        ldistr)
 
         ! Description
         !============
@@ -277,8 +277,9 @@ module ggmod_vertexdistribution2D
         ! Arguments
         class(UniformVertexDistributor2DUDT):: vd 
         real(R8), intent(in)                :: xc(:), yc(:)
-        real(R8), allocatable, intent(out)  :: xv(:), yv(:)
+        real(R8), allocatable, intent(out), optional  :: xv(:), yv(:)
         integer(I8), intent(out)            :: nv 
+        real(R8), allocatable, intent(out), optional :: ldistr(:)
 
         ! Auxiliary
         real(R8)                            :: l 
@@ -295,11 +296,15 @@ module ggmod_vertexdistribution2D
             call gdErrorHandler('DistributeUniformOverCurve: curve ' // & 
                 'coordinates have incompatible dimensions')
         end if 
-        if (allocated(xv)) then 
-            deallocate(xv)
+        if (present(xv)) then 
+            if (allocated(xv)) then 
+                deallocate(xv)
+            end if 
         end if 
-        if (allocated(yv)) then 
-            deallocate(yv)
+        if (present(yv)) then 
+            if (allocated(yv)) then 
+                deallocate(yv)
+            end if 
         end if 
 
         ! Precompute
@@ -318,13 +323,20 @@ module ggmod_vertexdistribution2D
         distr(size(distr)) = l ! just to make sure
 
         ! Distribute
-        call DistributeVerticesLine(xc, yc, dl, distr, xv, yv)
+        if (present(xv) .and. present(yv)) then 
+            call DistributeVerticesLine(xc, yc, dl, distr, xv, yv)
+        end if 
+
+        ! Return length distribution
+        if (present(ldistr)) then 
+            ldistr = distr 
+        end if 
 
     end subroutine
 
     ! Field based distributor
-    subroutine DistributeVerticesUniformOverField(vd, xc, yc, field, &
-        xv, yv, nv)
+    subroutine DistributeVerticesUniformOverField(vd, xc, yc, field, nv, &
+        xv, yv, ldistr)
 
         ! Description
         !============
@@ -340,12 +352,13 @@ module ggmod_vertexdistribution2D
         class(UniformVertexDistributor2DUDT)        :: vd 
         class(DistributionFunctionUDT), intent(in)  :: field 
         real(R8), intent(in)                :: xc(:), yc(:)
-        real(R8), allocatable, intent(out)  :: xv(:), yv(:)
         integer(I8), intent(out)            :: nv 
+        real(R8), allocatable, intent(out), optional    :: ldistr(:), xv(:), yv(:)
 
         ! Auxiliary
         real(R8)                            :: l 
-        real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, fc
+        real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, fc, &
+            dllc, dlc, dll
 
         ! Loop
         integer(I8)                         :: k 
@@ -357,12 +370,16 @@ module ggmod_vertexdistribution2D
             call gdErrorHandler('DistributeUniformOverCurve: curve ' // & 
                 'coordinates have incompatible dimensions')
         end if 
-        if (allocated(xv)) then 
-            deallocate(xv)
+        if (present(xv)) then 
+            if (allocated(xv)) then 
+                deallocate(xv)
+            end if 
         end if 
-        if (allocated(yv)) then 
-            deallocate(yv)
-        end if 
+        if (present(yv)) then 
+            if (allocated(yv)) then 
+                deallocate(yv)
+            end if 
+        end if
 
         ! Precompute
         !===========
@@ -380,9 +397,25 @@ module ggmod_vertexdistribution2D
         ! Compute distribution
         distr = [(k, k = 0, nv-1)]*(l/(nv-1))
         distr(size(distr)) = l ! just to make sure
+        if (present(ldistr)) then 
+            ! This has to be the length distribution!
+            dll = sqrt(dx**2 + dy**2)
+            dllc = spread(0, 1, size(xc))
+            dlc = spread(0, 1, size(xc))
+            do k = 1, size(xc)-1
+                dllc(k+1) = dllc(k) + dll(k)
+            end do 
+            do k = 1, size(xc)-1
+                dlc(k+1) = dlc(k) + dl(k)
+            end do 
+            ldistr = distr 
+            call Interpolate1D(distr, ldistr, dlc, dllc)
+        end if 
 
         ! Distribute
-        call DistributeVerticesLine(xc, yc, dl, distr, xv, yv)
+        if (present(xv) .and. (present(yv))) then 
+            call DistributeVerticesLine(xc, yc, dl, distr, xv, yv)
+        end if 
 
     end subroutine
     
