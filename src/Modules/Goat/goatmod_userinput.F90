@@ -385,6 +385,8 @@ module goatmod_userinput
         ! options. The following fields are present: 
 
         ! General grid generation
+        ! - verbosity       the higher, the more information is 
+        !                   printed out (default: 1, 0 suppresses all)
         ! - ggmethod        method how to construct the grid. Can be 
         !                   'independent' (treating each topological
         !                    cell independently) or 'orthogonal' (
@@ -446,10 +448,14 @@ module goatmod_userinput
         !                           too narrow radial faces at the 
         !                           boundary 
         ! - remfacesminlength       minimal length of these faces  [m] 
+
+        ! Options for refinement (only for 'orthogonal' construction option)
+        ! - reffac:                 refinement factor for too large 
+        !                           faces (should be > 1)    
         
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces 
-        integer(I8)                 :: gcresx, gcresy
+        integer(I8)                 :: gcresx, gcresy, orthreffac, verbosity
         real(R8)                    :: vdpdfacelength, vdpdlengthparam, &
             vdpddensityatvessel, vdpddensityatinf, vdrdfieldwidth, &
             vdrdlengthparam, vdrddensityatseparatrix, vdrddensityatinf, &
@@ -459,7 +465,7 @@ module goatmod_userinput
             vdpdval 
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
-            cellconstructionmethod
+            cellconstructionmethod, orthrefmeth
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -750,8 +756,14 @@ module goatmod_userinput
         options%vdpddensityatinf    = 10.0_R8
 
         ! Grid generation approach
+        options%verbosity           = 1
         options%ggmethod            = 'independent'
         options%cellconstructionmethod  = 'quads_triangles'
+
+        ! Refinement options ('orthogonal' ggmethod only)
+        options%orthrefmeth         = 'no'
+        options%orthreffac          = 2 
+        
 
         ! Options for radial vertex distribution
         options%vdrtype             = 'densitybased'
@@ -1390,10 +1402,18 @@ module goatmod_userinput
         ! Read options
         !=============
         ! General options
-        field  = 'gg.distributionmethod'
+        field  = 'gg.verbosity'
+        call ExtractOptionValueInteger0D(fid, field, options%verbosity)
+        field  = 'gg.verbosity'
         call ExtractOptionValueCharacter(fid, field, options%ggmethod)
         field  = 'gg.cellconstructionmethod'
         call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)
+
+        ! Refinement options
+        field = 'gg.ref.reffac'
+        call ExtractOptionValueInteger0D(fid, field, options%orthreffac) 
+        field = 'gg.ref.meth'
+        call ExtractOptionValueCharacter(fid, field, options%orthrefmeth) 
 
         ! Contouring options in grid generator
         field = 'gg.vd.contouring.resx'
