@@ -73,6 +73,7 @@ subroutine GGDriver(goatoptions)
         topomeshoptions%vresx,  topomeshoptions%vresy, 0.0_R8, 0.0_R8)
 
     ! Evaluate the field and vessel values
+    allocate(Vfx(nv), Vfy(nv))
     call environment%vessel%plfvessel%Evaluate(xg, yg, 0, 0, Vv)
     call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
     call magneticField%interp%Evaluate(xg, yg, 1, 0, Vfx)
@@ -90,8 +91,8 @@ subroutine GGDriver(goatoptions)
 
     ! Orthogonal lines
     streamlinetracer = ConstructStructuredStreamlineTracer(&
-        reshape(-Vfy, [topomeshoptions%vresx, topomeshoptions%vresy]), &
-        reshape(Vfx, [topomeshoptions%vresx, topomeshoptions%vresy]), & 
+        reshape(Vfx, [topomeshoptions%vresx, topomeshoptions%vresy]), &
+        reshape(Vfy, [topomeshoptions%vresx, topomeshoptions%vresy]), & 
         xgv, ygv) 
 
     ! Generate the topological mesh

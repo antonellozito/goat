@@ -245,8 +245,7 @@ module ggmod_topology2D
         ! Construct a 2D structured grid for tracing (may be extended
         ! in the future for different grid types)
         nv = options%vresx*options%vresy
-        allocate(xg(nv), yg(nv), Vf(nv), Vv(nv), xgv(options%vresx), &
-            ygv(options%vresy))
+        allocate(xg(nv), yg(nv), xgv(options%vresx), ygv(options%vresy))
         call Construct2DStructuredUniformGrid(xg, yg, xgv, ygv, xb, yb, &
             options%vresx,  options%vresy, 0.0_R8, 0.0_R8)
 
@@ -275,7 +274,7 @@ module ggmod_topology2D
             options%vresx, options%vresy, [xtp, xe], [ytp, ye], 5, 5)  
 
         ! Evaluate magnetic field and vessel
-        allocate(Vv(size(xg)), Vf(size(xg)))
+        allocate(Vf(size(xg)))
         call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
 
         ! Update the field tracer 
