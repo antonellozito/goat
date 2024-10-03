@@ -221,7 +221,7 @@ module ggmod_topology2D
 
         ! Auxiliary
         real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
-            yps, xg, yg, Vf, Vv, xgv, ygv
+            yps, xg, yg, Vf, xgv, ygv
         real(R8), parameter                     :: emptyR8(0)= 0
         real(R8), allocatable, dimension(:)     :: xtp, ytp, Ftp, &
             xe, ye, fe
