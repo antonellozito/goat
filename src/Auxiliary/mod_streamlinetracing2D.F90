@@ -181,7 +181,8 @@ module mod_streamlinetracing2D
     end function
 
     ! Structured tracer constructor
-    function ConstructStructuredStreamlineTracer(U, V, X, Y) result(tracer)
+    function ConstructStructuredStreamlineTracer(U, V, X, Y, step, tol, &
+        nsteps) result(tracer)
 
         ! Description
         !============
@@ -194,6 +195,8 @@ module mod_streamlinetracing2D
         class(StreamlineTracerUDT), allocatable    :: tracer 
         real(R8), intent(in), dimension(:)      :: X, Y
         real(R8), intent(in)                    :: U(:, :), V(:, :)
+        real(R8), intent(in), optional          :: step, tol
+        integer(I8), intent(in), optional       :: nsteps
 
         ! Auxiliary
         real(R8), allocatable                   :: xg(:), yg(:)
@@ -203,6 +206,23 @@ module mod_streamlinetracing2D
         !===========
         ! Allocate
         allocate(StructuredStreamlineTracerUDT::tracer) 
+
+        ! Initialize general values
+        if (present(step)) then 
+            tracer%step = step 
+        else 
+            tracer%step = 0.5
+        end if 
+        if (present(tol)) then 
+            tracer%tol = tol 
+        else 
+            tracer%tol = 1e-12
+        end if 
+        if (present(nsteps)) then 
+            tracer%nsteps = nsteps
+        else 
+            tracer%nsteps = 2000
+        end if 
 
         ! Set values
         !===========
@@ -359,10 +379,10 @@ module mod_streamlinetracing2D
 
                 ! Both directions
                 ! Trace forward
-                call TraceStreamlineSegment(U, V, X, Y, x0(i), y0(i), xb, yb, s, tol, nmax, xfw, yfw)
+                call TraceStreamlineSegment(U, V, X, Y, x0(i), y0(i), xb, yb, step, tol, nmax, xfw, yfw)
                     
                 ! Trace backward
-                call TraceStreamlineSegment(-U, -V, X, Y, x0(i), y0(i), xb, yb, s, tol, nmax, xbw, ybw)
+                call TraceStreamlineSegment(-U, -V, X, Y, x0(i), y0(i), xb, yb, step, tol, nmax, xbw, ybw)
                 
                 ! Concatenate
                 streamlines(i) = ConstructStreamline([xfw(size(xfw):2:-1), xbw], &
@@ -371,13 +391,13 @@ module mod_streamlinetracing2D
             case (1)
 
                 ! Forward
-                call TraceStreamlineSegment(U, V, X, Y, x0(i), y0(i), xb, yb, s, tol, nmax, xfw, yfw)
+                call TraceStreamlineSegment(U, V, X, Y, x0(i), y0(i), xb, yb, step, tol, nmax, xfw, yfw)
                 streamlines(i) = ConstructStreamline(xfw, yfw)
 
             case (-1)
 
                 ! Backward
-                call TraceStreamlineSegment(-U, -V, X, Y, x0(i), y0(i), xb, yb, s, tol, nmax, xbw, ybw)
+                call TraceStreamlineSegment(-U, -V, X, Y, x0(i), y0(i), xb, yb, step, tol, nmax, xbw, ybw)
                 streamlines(i) = ConstructStreamline(xbw, ybw)
 
             case default
@@ -481,6 +501,10 @@ module mod_streamlinetracing2D
             ! Check in which box we are (if we know we stepped out)
             i = findloc(x0 >= X, .true., 1, back=.true.)
             j = findloc(y0 >= Y, .true., 1, back=.true.)
+
+            if ((i == 0) .or. (j == 0)) then 
+                exit 
+            end if 
             
             if (i == size(X)) then 
                 i = i - 1

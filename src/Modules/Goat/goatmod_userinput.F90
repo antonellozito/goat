@@ -1404,7 +1404,7 @@ module goatmod_userinput
         ! General options
         field  = 'gg.verbosity'
         call ExtractOptionValueInteger0D(fid, field, options%verbosity)
-        field  = 'gg.verbosity'
+        field  = 'gg.vertexconstructionmethod'
         call ExtractOptionValueCharacter(fid, field, options%ggmethod)
         field  = 'gg.cellconstructionmethod'
         call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)

@@ -143,7 +143,6 @@ module DistributionFunction
 
     end type
 
-
     ! Polygonset and field based, 2D
     type, extends(DistributionFunctionUDT) :: Polygonset2DFieldDistanceDFUDT
 
