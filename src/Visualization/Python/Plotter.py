@@ -706,6 +706,9 @@ def PlotGridCells(grid, fignum):
     
     # Plot
     PlotPolygons2D(xc, yc, fignum, color='k', marker='')
+
+     # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
     
 
 #--------------------------------------------------------------------------#
