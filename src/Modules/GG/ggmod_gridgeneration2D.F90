@@ -340,6 +340,22 @@ module ggmod_gridgeneration2D
 
     end type
 
+    ! No refinement (dummy)
+    type, extends(GGTMLineRefiner2DUDT)     :: GGTMLineRefinerNoRefUDT
+
+        ! Description
+        !============
+        ! This refiner doesn't do any refinement and simply returns
+        ! the original distribution. No additional data needs to be
+        ! stored. 
+
+    contains 
+
+        ! Refine line
+        procedure :: RefineLineSingle   => RefineLineSingleNoRef
+
+    end type
+
     ! Length based refiner 
     type, extends(GGTMLineRefiner2DUDT)     :: GGTMLineRefinerLB2DUDT
 
@@ -347,6 +363,7 @@ module ggmod_gridgeneration2D
         !============
         ! This refiner is based on a minimal and maximal length 
         ! distribution. 
+        character(:), allocatable                       :: meth 
         class(DistributionFunctionUDT), allocatable     :: Lmin, Lmax 
 
     contains 
@@ -368,14 +385,13 @@ module ggmod_gridgeneration2D
 
         ! Refine GGTM line
         subroutine RefineGGTMLineSingleINT(refiner, line, vertID, &
-            keepvert, deletedvert)
+            keepvert)
 
             import :: GGTMFieldlineDataUDT, I8, GGTMLineRefiner2DUDT
             class(GGTMLineRefiner2DUDT)                 :: refiner 
             type(GGTMFieldlineDataUDT), intent(inout)   :: line
             integer(I8), intent(inout)                  :: vertID 
             logical, intent(in)                         :: keepvert(:) 
-            logical, allocatable, intent(inout)         :: deletedvert(:) 
 
         end subroutine
 
@@ -443,7 +459,8 @@ module ggmod_gridgeneration2D
             poloidalvertexdistributor, radialvertexdistributor
         class(DistributionFunctionUDT), allocatable     :: & 
             magneticFieldDF 
-        class(StreamlineTracerUDT), intent(inout)  :: streamlinetracer
+        class(StreamlineTracerUDT), intent(inout)   :: streamlinetracer
+        class(GGTMLineRefiner2DUDT), allocatable    :: GGTMlinerefiner
         type(GGGridUDT)             :: grid 
 
         ! Initialize
@@ -498,23 +515,10 @@ module ggmod_gridgeneration2D
 
         end select
 
-        !pdoptions = options.poloidaldistributor;
-        !pdoptions = SetPoloidalDistributorOptions(pdoptions);
-        !pdoptions.distribution.distrfield = field;
-        !pdoptions.distribution.bnd = bnd;
-        !poloidaldistributor = ConstructVertexDistributor(pdoptions);
-
-        ! Extract x-point data
-        !isxp = cat(1, topomesh.vertdata.type) == 2;
-        !xpdata = cat(1, topomesh.vertdata(isxp).F);
-
-        ! Radial
-        !rdoptions = options.radialdistributor;
-        !rdoptions = SetRadialDistributorOptions(rdoptions);
-        !rdoptions.distribution.distrfield = field;
-        !rdoptions.distribution.bnd = bnd;
-        !rdoptions.distribution.xpointdata = xpdata;
-        !radialdistributor = ConstructFieldDistributor(rdoptions, field);
+        ! Refiner
+        GGTMlinerefiner = InitializeGGTMLineRefiner(topomesh, &
+            magneticField, vessel, fieldtracer, boundarytracer, &
+            poloidalvertexdistributor, radialvertexdistributor, options)
 
         ! Distribute vertices on topological faces
         !=========================================
@@ -544,7 +548,7 @@ module ggmod_gridgeneration2D
 
             call DistributeVerticesOrthogonal(ggtmdata, topomesh, grid, &
                 poloidalvertexdistributor, magneticField, streamlinetracer, &
-                options)
+                GGTMlinerefiner, options)
 
         case default 
 
@@ -713,7 +717,7 @@ module ggmod_gridgeneration2D
 
     ! Orthogonal gridder
     subroutine DistributeVerticesOrthogonal(ggtmdata, topomesh, &
-        grid, vd, magneticField, streamlinetracer, options)
+        grid, vd, magneticField, streamlinetracer, GGTMlinerefiner, options)
 
         ! Description
         !============
@@ -742,6 +746,11 @@ module ggmod_gridgeneration2D
         ! to high value (therefore, we need to trace in the backward
         ! direction since we go from high to low)
 
+        ! Note 3: we don't explicitly keep track of all deleted vertices,
+        ! as this would be cumbersome. Instead, at the end we check which
+        ! vertex IDs are still present and remap those such that the 
+        ! numbering goes from 1 to grid%vert%ntot again. 
+
         ! Modules
         !========
         use mod_definitions, only: TMfacepolID, TMfacesepID, &
@@ -757,6 +766,7 @@ module ggmod_gridgeneration2D
         class(VertexDistributor2DUDT), intent(in)   :: vd
         type(MagneticFieldUDT), intent(in)          :: magneticField
         class(StreamlineTracerUDT), intent(in)      :: streamlinetracer
+        class(GGTMLineRefiner2DUDT), intent(in)     :: GGTMlinerefiner
         type(GGoptionsUDT), intent(in)              :: options
 
         ! Auxiliary
@@ -767,9 +777,9 @@ module ggmod_gridgeneration2D
         logical                                     :: addpoint
         logical, allocatable, dimension(:)          :: iscelldone, &
             isfacedone, isstartingcell, isstartingface, istopoverthf, &
-            istopovertlf, isvertexdeleted
+            istopovertlf, isvertexdeleted, keepvert
         real(R8)                                    :: xb(1:2), yb(1:2)
-        real(R8), allocatable, dimension(:)         :: dlcv, xt, yt, &
+        real(R8), allocatable, dimension(:)         :: xt, yt, &
             x1, x2, x3, x4, y1, y2, y3, y4, s11r, s12r, s21r, s22r, &
             s31r, s32r, s41r, s42r, s1r, temps2r, tempx, tempy, newtx, &
             newty, news2r, newdlcv
@@ -799,34 +809,11 @@ module ggmod_gridgeneration2D
         isstartingcell = .false.
         isstartingface = .false.
 
-        ! Set refinement/coarsening options
-        select case (options%orthrefmeth)
-
-        case ('no')
-
-            ! No refinement done (not recommended)
-
-        case ('lengthbased')
-
-            ! Refinement based on length distribution. Initialize
-            ! length distributions
-            call gdErrorHandler('Method not yet implemented')
-
-        case default
-
-            call gdErrorHandler('DistributeVerticesOrthogonal: ' // & 
-                'unknown refinement method: ' // options%orthrefmeth)
-                
-        end select
-
         ! Add topological mesh vertices
         !==============================
         ! Keep track of topological mesh vertices
-        ! Only update counter, vertices are added afterwards
-        grid%vert%ntot = grid%vert%ntot + vert%ntot
-
         ! Set vertID
-        vertID = grid%vert%ntot
+        vertID = vert%ntot
 
         ! Preprocess
         !===========
@@ -874,32 +861,30 @@ module ggmod_gridgeneration2D
 
         ! Add face vertices
         !==================
-        ! Do for all?
-        ! Only of faces that are starting faces! For others, set vertex
-        ! IDs to 0 (these will still change...)
+        ! Do for all, but only refine starting faces! 
         do i = 1, face%ntot
             ! Compute number of new vertices
             nv = size(facedata(i)%line%xv) - 2 
 
-            ! Check
-            !if (isstartingface(i)) then 
-                ! Set ID
-                tvID = [face%vert(i, 1), (k, k = vertID+1, vertID+nv), face%vert(i, 2)]
+            ! Set ID
+            tvID = [face%vert(i, 1), (k, k = vertID+1, vertID+nv), face%vert(i, 2)]
 
-                ! Update 
-                vertID = vertID + nv
-                grid%vert%ntot = grid%vert%ntot + nv
-
-            !else
-                ! Set ID
-            !    tvID = [face%vert(i, 1), spread(0, 1, nv), face%vert(i, 2)]
-
-                ! Don't update
-            !end if 
+            ! Update 
+            vertID = vertID + nv
 
             ! Set data
             call facedata(i)%line%AddVertexIDs(tvID)
             call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
+
+            ! Check if we should refine
+            if (isstartingface(i)) then 
+                ! Refine
+                keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
+                call GGTMlinerefiner%Refine(facedata(i)%line, vertID, keepvert)
+
+                ! Update
+                call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
+            end if 
         end do
 
         ! Add cell vertices
@@ -989,20 +974,6 @@ module ggmod_gridgeneration2D
             !------------------------
             ! Concatenate lines for ease
             tclines = [celldata(tc)%hfline, celldata(tc)%lines, celldata(tc)%lfline]
-
-            ! Refine the first line
-            select case (options%orthrefmeth)
-
-            case ('no')
-
-                ! no refinement
-
-            case default 
-
-                ! Refinement using refiner
-                call gdErrorHandler('Not yet implemented')
-                
-            end select
 
             ! Compute intersections
             do i = 2, size(tclines)
@@ -1148,35 +1119,13 @@ module ggmod_gridgeneration2D
                 call Sort(newdlcv, ind=sortind, ascend=.true.)
                 newID = newID(sortind)
                 
-                !if numel(isvertexdeleted) <= vertID
-                !    isvertexdeleted = [isvertexdeleted; false(numel(isvertexdeleted), 1)];
-                !end
-
-                
-
-                ! Refine/coarsen
-                select case (options%orthrefmeth)
-
-                case ('no')
-
-                    ! Do nothing
-
-                case ('lengthbased')
-
-                    call gdErrorHandler('Not yet implemented')
-
-                case default 
-
-                    ! If everything is correctly implemented, we should
-                    ! never end up here (exception should be caught 
-                    ! upstream)
-                    call gdErrorHandler('Unknown refinement option')
-
-                end select
-
                 ! Add points
                 call tclines(i)%AddVertexCoordinates(newdlcv, ecbased=.false.)
                 call tclines(i)%AddVertexIDs(newID)
+
+                ! Refine/coarsen
+                keepvert = IsTopomeshVert(tclines(i)%vert, topomesh)
+                call GGTMLinerefiner%Refine(tclines(i), vertID, keepvert)
 
                 ! Update line data (face labels, facedata if last line, ...)
                 call tclines(i)%UpdateLineData(topomesh, ggtmdata)
@@ -3155,8 +3104,171 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Refiner initialization
+    function InitializeGGTMLineRefiner(topomesh, &
+        magneticField, vessel, fieldtracer, boundarytracer, &
+        poloidalvertexdistributor, radialvertexdistributor, options)& 
+        result(GGTMlinerefiner)
+
+        ! Description
+        !============
+        ! This routine initializes the line refiner based on the options
+        ! given in the GGoptions structure. Since there may be a lot of
+        ! possible desired options to do refinement already in the grid
+        ! generation stage, we also pass most available data that we 
+        ! have.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(in)          :: topomesh 
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        type(VesselUDT), intent(in)             :: vessel 
+        class(ContourTracerUDT), intent(in)     :: fieldtracer, boundarytracer 
+        type(GGoptionsUDT), intent(in)          :: options 
+        class(VertexDistributor2DUDT), intent(in)      :: &
+            poloidalvertexdistributor, radialvertexdistributor
+        class(GGTMLineRefiner2DUDT), allocatable    :: GGTMlinerefiner
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:, :)   :: labels(:, :)
+        logical, allocatable, dimension(:)          :: includevesselvertex
+        real(R8), allocatable, dimension(:)         :: xp, yp, &
+            valpLmin, valpLmax, decaylength, xv, yv, tempLmin, tempLmax, &
+            tempdecaylength
+        type(Coordinates2DDistanceDFUDT)            :: Lmin, Lmax
+
+        ! Loop
+        integer(I8)                                 :: i 
+
+        ! Select refiner
+        !===============
+        select case (options%refmeth)
+
+        case ('no')
+
+            ! No refinement
+            allocate(GGTMLineRefinerNoRefUDT::GGTMlinerefiner)
+
+        case ('lengthbased')
+
+            ! Length-based refinement
+            allocate(GGTMLineRefinerLB2DUDT::GGTMlinerefiner)
+
+        case default 
+
+            ! Unknown
+            call gdErrorHandler('InitializeGGTMLineRefiner: unknown ' // & 
+                'option: ' // options%refmeth)
+
+        end select
+
+        ! Initialize refiner
+        !===================
+        select type (GGTMlinerefiner)
+
+        type is (GGTMLineRefinerNoRefUDT)
+
+            ! Do nothing
+
+        type is (GGTMLineRefinerLB2DUDT)
+
+            ! Check how to generate min and max distributions - note: 
+            ! currently, we only do point-based distribution methods
+        
+            ! Check which points to include
+            allocate(xp(0), yp(0), valpLmin(0), valpLmax(0), decaylength(0))
+
+            ! Include x-point regions?
+            if (options%refLBdoxp) then 
+                ! Add all x-points
+                do i = 1, topomesh%vert%ntot 
+                    if (topomesh%vert%type(i) == TMvertexsaddleID) then 
+                        xp = [xp, topomesh%vert%x(i)]
+                        yp = [yp, topomesh%vert%y(i)]
+                        valpLmin = [valpLmin, options%refLBLminxp]
+                        valpLmax = [valpLmax, options%refLBLmaxxp]
+                        decaylength = [decaylength, options%refLBdecaylengthxp]
+                    end if 
+                end do 
+            end if 
+
+            ! Include vessel vertices (e.g. targets)?
+            if (options%refLBdovessel) then 
+                ! Get labels & coordinates
+                call vessel%polygonset%GetLabels(labels)
+                call vessel%polygonset%GetVertices(xv, yv)
+                allocate(includevesselvertex(size(xv)), tempLmin(size(xv)), &
+                    tempLmax(size(yv)), tempdecaylength(size(xv)))
+                includevesselvertex = .false. 
+                tempLmin = 0
+                tempLmax = 0
+                tempdecaylength = 0
+
+                ! Add per vessel structure
+                do i = 1, size(options%refLBstructureIDs)
+                    ! Unpack ID
+                    associate(tID       => options%refLBstructureIDs(i))
+
+                    ! Check vertices
+                    where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) 
+                        includevesselvertex = .true. 
+                        tempLmin = options%refLBLminstructure(i)
+                        tempLmax = options%refLBLmaxstructure(i)
+                        tempdecaylength = options%refLBdecaylengthstructure(i)
+                    end where 
+        
+                    ! Housekeeping
+                    end associate
+                end do 
+
+                ! Add per separate vessel vertex ID
+                do i = 1, size(options%refLBvertIDs)
+                    ! Unpack ID
+                    associate(tID       => options%refLBvertIDs(i))
+        
+                    ! Check vertices
+                    where( (labels(:, 3) == tID)) 
+                        includevesselvertex = .true. 
+                        tempLmin = options%refLBLminvert(i)
+                        tempLmax = options%refLBLmaxvert(i)
+                        tempdecaylength = options%refLBdecaylengthvert(i)
+                    end where
+        
+                    ! Housekeeping
+                    end associate
+                end do
+
+                ! Include
+                xp = [xp, pack(xv, includevesselvertex)]
+                yp = [yp, pack(yv, includevesselvertex)]
+                valpLmin = [valpLmin, pack(tempLmin, includevesselvertex)]
+                valpLmax = [valpLmax, pack(tempLmax, includevesselvertex)]
+                decaylength = [decaylength, pack(tempdecaylength, includevesselvertex)]
+
+            end if 
+
+            ! Construct distribution functions
+            call Lmin%Initialize(xp, yp, valpLmin, options%refLBLmininf, &
+                decaylength)
+            call Lmax%Initialize(xp, yp, valpLmax, options%refLBLmaxinf, &
+                decaylength)
+
+            ! Construct refiner
+            GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic')
+
+
+        class default 
+
+            call gdErrorHandler('INitializeGGTMLineRefiner: type not implemented')
+
+        end select
+
+
+    end function 
+
     ! Length-based refiner constructor
-    function ConstructGGTMLineRefinerLB(Lmin, Lmax) result(refiner)
+    function ConstructGGTMLineRefinerLB(Lmin, Lmax, meth) result(refiner)
 
         ! Description
         !============
@@ -3166,25 +3278,48 @@ module ggmod_gridgeneration2D
         ! Declare variables
         !==================
         ! Arguments
-        class(GGTMLineRefiner2DUDT), allocatable    :: refiner 
+        type(GGTMLineRefinerLB2DUDT)                :: refiner 
         class(DistributionFunctionUDT), intent(in)  :: Lmin, Lmax
-
+        character(*), intent(in)                    :: meth 
+ 
         ! Initialize
         !===========
-        allocate(GGTMLineRefinerLB2DUDT::refiner) 
-        select type(refiner)
+        refiner%Lmin = Lmin 
+        refiner%Lmax = Lmax 
+        refiner%meth = meth
 
-        type is (GGTMLineRefinerLB2DUDT) 
-
-            refiner%Lmin = Lmin 
-            refiner%Lmax = Lmax 
-
-        end select 
     end function
 
+    ! Single line refinement, dummy
+    subroutine RefineLineSingleNoRef(refiner, line, vertID, keepvert)
+
+        ! Description
+        !============
+        ! Simply returns the original distribution
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerNoRefUDT)              :: refiner 
+        type(GGTMFieldlineDataUDT), intent(inout)   :: line 
+        integer(I8), intent(inout)                  :: vertID 
+        logical, intent(in)                         :: keepvert(:)
+
+        ! Checks
+        !=======
+        ! Ensure proper dimensions
+        if (size(keepvert) /= size(line%vert)) then 
+            call gdErrorHandler('RefineLineSingleLB: keepvert does not '// & 
+                'have same number of elements as line%vert, check input')
+        end if 
+
+        ! Return
+        !=======
+
+    end subroutine
+
     ! Single line refinement, length based
-    subroutine RefineLineSingleLB(refiner, line, vertID, keepvert, &
-        deletedvert)
+    subroutine RefineLineSingleLB(refiner, line, vertID, keepvert)
 
         ! Description
         !============
@@ -3217,15 +3352,20 @@ module ggmod_gridgeneration2D
         type(GGTMFieldlineDataUDT), intent(inout)   :: line 
         integer(I8), intent(inout)                  :: vertID 
         logical, intent(in)                         :: keepvert(:)
-        logical, allocatable, intent(inout)         :: deletedvert(:)
 
         ! Auxiliary
+        logical                                     :: ismerged, &
+            isnextfacelegal, isprevfacelegal
         logical, allocatable, dimension(:)          :: isreflegal, &
-            iscoarselegal
+            iscoarselegal, thiskeepvert, newkeepvert, refineface, &
+            coarsenface, thiskeepvertex
         real(R8), allocatable, dimension(:)         :: dxl, dyl, dll, &
-            Lmaxvert, Lminvert 
+            Lmaxvert, Lminvert, newdll
+        integer(I8), allocatable, dimension(:)      :: thisvertID, &
+            newvertID
 
         ! Loop
+        integer(I8)                                 :: i, cc 
 
         ! Initialize
         !===========
@@ -3236,8 +3376,10 @@ module ggmod_gridgeneration2D
         end if 
 
         ! Set initial logicals
-        iscoarselegal = spread(.true., 1, size(line%xv))
+        iscoarselegal = spread(.true., 1, line%nv-1)
         isreflegal = iscoarselegal
+        thiskeepvert = keepvert
+        thisvertID = line%vert
 
         ! Loop
         !=====
@@ -3251,7 +3393,7 @@ module ggmod_gridgeneration2D
             dll = sqrt(dxl**2 + dyl**2)
 
             ! Minimal & maximal length @ vertices
-            Lmaxvert = spread(0, 1, size(line%xv))
+            Lmaxvert = spread(0, 1, line%nv)
             Lminvert = Lmaxvert 
             call refiner%Lmax%Evaluate(line%xv, line%yv, Lmaxvert)
             call refiner%Lmin%Evaluate(line%xv, line%yv, Lminvert)
@@ -3264,10 +3406,174 @@ module ggmod_gridgeneration2D
                 end if 
             end if 
 
-            ! Determine which faces to refine/coarsen
+            ! Initialize
+            coarsenface = spread(.false., 1, size(dll))
+            refineface = spread(.false., 1, size(dll))
 
+            ! Determine which faces to refine/coarsen
+            where (((dll > Lmaxvert(1:line%nv-1)) .or. (dll > Lmaxvert(2:))) &
+                .and. isreflegal) 
+                refineface = .true. 
+                iscoarselegal = .false. 
+            end where
+            where (((dll < Lminvert(1:line%nv-1)) .or. (dll < Lminvert(2:))) &
+                .and. iscoarselegal)
+                coarsenface = .true.
+                isreflegal = .false.
+            end where
+                
+            ! Check exit conditions
+            if ((.not. any(refineface)) .and. (.not. any(coarsenface))) then 
+                exit
+            end if 
+
+            ! Refine/coarsen
+            !---------------
+            select case (refiner%meth)
+
+            case ('classic')
+
+                ! Classic refinement by splitting face, coarsening by
+                ! removing vertex (without any other adaptations)
+
+                ! Initialize new length distribution etc
+                newdll = spread(0.0_R8, 1, size(dll)+count(refineface)-count(coarsenface))
+                newkeepvert = spread(.false., 1, size(newdll)+1)
+                newvertID = spread(0_I8, 1, size(newdll)+1)
+
+                ! Loop
+                cc = 1 ! from one to size newdll
+                i = 1 ! from one to size dll
+                newkeepvert(cc) = .true. ! always keep first vertex
+                newvertID(cc) = thisvertID(cc) ! always keep first vertex
+                do while (i <= size(dll))
+                    
+                    ! Refine/coarsen face? 
+                    if (refineface(i)) then 
+                        ! Split face
+                        newdll(cc:cc+1) = dll(i)/2.0_R8 
+
+                        ! Update next vertex
+                        newkeepvert(cc+1) = thiskeepvert(i+1)
+                        newvertID(cc+1) = thisvertID(i+1)
+
+                        ! Update counters
+                        vertID = vertID + 1
+                        i = i + 1
+                        cc = cc + 2
+                    elseif (coarsenface(i)) then 
+                        ! Preliminary checks
+                        isnextfacelegal = (i < size(dll)) .and. (.not. thiskeepvertex(i+1))
+                        isprevfacelegal = (cc > 1) .and. (.not. thiskeepvertex(i))
+
+                        ! Check which face to merge with
+                        ismerged = .false. 
+                        if (isnextfacelegal) then 
+                            if (coarsenface(i+1)) then ! both faces mergeable
+                                ! Merge faces
+                                newdll(cc) = dll(i) + dll(i+1)
+
+                                ! Update next vertex
+                                newvertID(cc+1) = thisvertID(i+1)
+                                newkeepvert(cc+1) = thiskeepvert(i+1)
+
+                                ! Update counters
+                                cc = cc + 1
+                                i = i + 2 !skip next face, cause already merged
+                                ismerged = .true.
+                            end if 
+                        end if 
+
+                        ! If not merged, check previous/next face
+                        if (.not. ismerged .and. (isnextfacelegal .and. isprevfacelegal)) then
+                            ! Need to check both previous and next face
+                            ! Next face may be merged
+                            if (newdll(cc-1) < dll(i+1) .or. (refineface(i+1))) then 
+                                ! Merge previous face
+                                newdll(cc-1) = newdll(cc-1)+dll(i)
+
+                                ! Set next vertex 
+                                newvertID(cc) = thisvertID(i+1)
+                                newkeepvert(cc) = thiskeepvert(i+1)
+
+                                ! Update counter
+                                i = i + 1
+                            else
+                                ! Merge next face
+                                newdll(cc) = dll(i) + dll(i+1)
+
+                                ! Set next vertex
+                                newvertID(cc+1) = thisvertID(i+2)
+                                newkeepvert(cc+1) = thiskeepvert(i+2)
+
+                                ! Update counters
+                                cc = cc + 1
+                                i = i + 2
+                            end if 
+
+                            ! Anyhow merging should succeed
+                            ismerged = .true.
+                        end if 
+                        if (.not. ismerged .and. (isnextfacelegal)) then 
+                            if (.not. refineface(i+1)) then ! only merge if next face isn't refined
+                                ! Merge next face
+                                newdll(cc) = dll(i) + dll(i+1)
+
+                                ! Set new vertex
+                                newvertID(cc+1) = thisvertID(i+2)
+                                newkeepvert(cc+1) = thiskeepvert(i+2)
+
+                                ! Update counters
+                                cc = cc + 1
+                                i = i + 2
+                                ismerged = .true.
+                            end if 
+                        end if 
+                        if (.not. ismerged .and. (isprevfacelegal)) then 
+                            ! Merge previous face
+                            newdll(cc-1) = newdll(cc-1)+dll(i)
+
+                            ! Set next vertex 
+                            newvertID(cc) = thisvertID(i+1)
+                            newkeepvert(cc) = thiskeepvert(i+1)
+
+                            ! Update counter
+                            i = i + 1
+                        end if 
+                        if (.not. ismerged) then 
+                            ! Skip for next loop
+                            newdll(cc) = dll(i)
+                            newvertID(cc+1) = thisvertID(i+1)
+                            newkeepvert(cc+1) = thiskeepvert(i+1)
+                        end if
+                    else
+                        ! Don't do anything, simply copy
+                        newdll(cc) = dll(i)
+                        
+                        ! Update counters
+                        cc = cc + 1
+                        i = i + 1
+                    end if 
+                end do 
+
+                ! Update
+                thiskeepvert = newkeepvert
+                thisvertID = newvertID
+                dll = newdll
+
+            case default
+
+                call gdErrorHandler('RefineSingleLineLB: unknown ' // & 
+                    'refiner method: ' // refiner%meth)
+
+            end select
 
         end do
+
+        ! Construct line coordinates
+        !===========================
+        call line%AddVertexCoordinates(dll)
+        call line%AddVertexIDs(thisvertID)
 
     end subroutine
 

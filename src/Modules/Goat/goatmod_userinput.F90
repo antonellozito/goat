@@ -449,23 +449,48 @@ module goatmod_userinput
         !                           boundary 
         ! - remfacesminlength       minimal length of these faces  [m] 
 
-        ! Options for refinement (only for 'orthogonal' construction option)
-        ! - reffac:                 refinement factor for too large 
-        !                           faces (should be > 1)    
+        ! Options for refinement
+        ! - refmeth:                method for refinement. Can be 'no' 
+        !                           (no additional refinement), 
+        !                           'lengthbased' (ref based on min and
+        !                           max length distributions) 
+        
+        ! Refinement options for lengthbased option (this is currently 
+        ! based on exponential decay functions defined in points):
+        ! - refLBlmininf    minimal length at infinity
+        ! - refLBLmaxinf    maximal length at infinity
+        ! - refLBdoxp:      refine near x-points (x-points are added)
+        ! - refLBLminxp     minimal length on x-point
+        ! - refLBLmaxxp     maximal length on x-point
+        ! - refLBdecaylengthxp  decaylength on x-point (larger - wider influence)
+        ! - refLBdovessel   refine near (specified) vessel vertices
+        ! - refLBstructureIDs   structure IDs of vessel structures to include
+        ! - refLBvertIDs:   vessel vertex IDs of vessel vertices to include, 
+        !                   as specified in structure.dat file (some 
+        !                   may not be included if deleted during vessel 
+        !                   polygon construction)
+        ! - refLBLminstructure  minimal length on structure i (etc, 
+        !                   similar for vertices)
         
         logical                     :: removefluxsurfaces, &
-            removenarrowboundarytriangles, removefaces 
-        integer(I8)                 :: gcresx, gcresy, orthreffac, verbosity
+            removenarrowboundarytriangles, removefaces, refLBdoxp, &
+            refLBdovessel
+        integer(I8)                 :: gcresx, gcresy, &
+            verbosity
+        integer(I8), allocatable, dimension(:)  :: refLBstructureIDs, &
+            refLBvertIDs
         real(R8)                    :: vdpdfacelength, vdpdlengthparam, &
             vdpddensityatvessel, vdpddensityatinf, vdrdfieldwidth, &
             vdrdlengthparam, vdrddensityatseparatrix, vdrddensityatinf, &
             remfspsitol, remfspsirattol, rembndtriaminangle, &
-            remfacesminlength
+            remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
+            refLBLmaxxp, refLBdecaylengthxp
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
-            vdpdval 
+            vdpdval, refLBLminstructure, refLBLminvert, refLBLmaxstructure, &
+            refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
-            cellconstructionmethod, orthrefmeth
+            cellconstructionmethod, refmeth
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -761,9 +786,19 @@ module goatmod_userinput
         options%cellconstructionmethod  = 'quads_triangles'
 
         ! Refinement options ('orthogonal' ggmethod only)
-        options%orthrefmeth         = 'no'
-        options%orthreffac          = 2 
-        
+        options%refmeth         = 'no'      
+        options%refLBdoxp       = .true. 
+        options%refLBdovessel   = .false. 
+        options%refLBLmininf    = 0.0_R8
+        options%refLBLmaxinf    = 100 ! some absurd big number
+        options%refLBLminxp     = 0.0_R8
+        options%refLBLmaxxp     = 100 ! some absurd big number  
+        options%refLBLminstructure = 0.0_R8
+        options%refLBLmaxstructure = 100 ! some absurd big number  
+        options%refLBdecaylengthxp = 0.1 
+        allocate(options%refLBdecaylengthstructure(0), &
+            options%refLBdecaylengthvert(0), options%refLBstructureIDs(0), &
+            options%refLBvertIDs(0))
 
         ! Options for radial vertex distribution
         options%vdrtype             = 'densitybased'
@@ -1409,11 +1444,37 @@ module goatmod_userinput
         field  = 'gg.cellconstructionmethod'
         call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)
 
-        ! Refinement options
-        field = 'gg.ref.reffac'
-        call ExtractOptionValueInteger0D(fid, field, options%orthreffac) 
+        ! Refinement options (general)
         field = 'gg.ref.meth'
-        call ExtractOptionValueCharacter(fid, field, options%orthrefmeth) 
+        call ExtractOptionValueCharacter(fid, field, options%refmeth) 
+
+        ! Length-based refinement options
+        field  = 'gg.ref.LB.doxp'
+        call ExtractOptionValueLogical0D(fid, field, options%refLBdoxp)
+        field  = 'gg.ref.LB.dovessel'
+        call ExtractOptionValueLogical0D(fid, field, options%refLBdovessel)
+        field  = 'gg.ref.LB.Lmininf'
+        call ExtractOptionValueReal0D(fid, field, options%refLBLmininf)
+        field  = 'gg.ref.LB.Lmaxinf'
+        call ExtractOptionValueReal0D(fid, field, options%refLBLmaxinf)
+        
+        field  = 'gg.ref.LB.Lminxp'
+        call ExtractOptionValueReal0D(fid, field, options%refLBLminxp)
+        field  = 'gg.ref.LB.Lmaxxp'
+        call ExtractOptionValueReal0D(fid, field, options%refLBLmaxxp)
+        field  = 'gg.ref.LB.decaylengthxp'
+        call ExtractOptionValueReal0D(fid, field, options%refLBdecaylengthxp)
+
+        field  = 'gg.ref.LB.Lminstructure'
+        call ExtractOptionValueReal1D(fid, field, options%refLBLminstructure)
+        field  = 'gg.ref.LB.Lmaxstructure'
+        call ExtractOptionValueReal1D(fid, field, options%refLBLmaxstructure)
+        field  = 'gg.ref.LB.decaylengthstructure'
+        call ExtractOptionValueReal1D(fid, field, options%refLBdecaylengthstructure)
+        field  = 'gg.ref.LB.structureIDs'   
+        call ExtractOptionValueInteger1D(fid, field, options%refLBstructureIDs)
+        field  = 'gg.ref.LB.vertIDs'   
+        call ExtractOptionValueInteger1D(fid, field, options%refLBvertIDs)
 
         ! Contouring options in grid generator
         field = 'gg.vd.contouring.resx'
