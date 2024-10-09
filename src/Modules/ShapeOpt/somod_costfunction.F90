@@ -1738,7 +1738,8 @@ module somod_costfunction
         type(MySparseUDT)                   :: dgradJdvar
 
         ! Auxiliary
-        integer(I8)                                 :: flag
+        integer(I8)                                 :: flag, errstat
+        real(R8)                                    :: goatcfv 
 
         real(R8), allocatable, dimension(:)         :: goatvariables, &
             gradJR, gradJgoat, lambdaG 
@@ -1781,10 +1782,20 @@ module somod_costfunction
             goatproblem = goat 
 
             ! Call the driver
+            call ErrorStack%StartTrack()
             call costfunction%goatengine%solver%SolveOptimizationProblem(goatproblem)
 
-            ! Update goat
-            goat = goatproblem
+            ! Check for any issues, if so - don't update the problem!
+            errstat = ErrorStack%ErrorState()
+            call ErrorStack%EndTrack()
+            if (errstat > 0) then 
+                ! No need to recall error, but need to check how to adjust output
+                goatcfv = goat%monitor%convnorm(goat%monitor%itopt)
+            else
+                ! Update goat
+                goat = goatproblem 
+                goatcfv = goat%monitor%convnorm(goat%monitor%itopt)
+            end if 
 
         class default 
 
@@ -1833,7 +1844,7 @@ module somod_costfunction
         end select
 
         ! Add goat residual to cost function
-        J = J + goat%monitor%convnorm(goat%monitor%itopt)
+        J = J + goatcfv
 
         ! Compute lagrange multipliers
         gradGgoat = jacGgoat%Transpose()
