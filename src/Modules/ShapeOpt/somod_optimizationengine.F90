@@ -916,7 +916,9 @@ module somod_optimizationengine
         ! Write data
         !===========
         ! Goat
-        call goat%WriteIterationData(itopt)
+        if (problem%designoptions%costfunction%dogoatreduction) then 
+            call goat%WriteIterationData(itopt)
+        end if 
 
         ! Vessel data
         call vessel%polygonset%WriteData('vesselpolygon_iterate_so')
