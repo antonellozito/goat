@@ -272,7 +272,7 @@ module DistributionFunction
         real(R8)                                :: b0
 
         real(R8), allocatable                   :: xa(:), ya(:), &
-            coef(:), fval(:), d0(:), a0(:)
+            coef(:), d0(:), a0(:)
 
         character(:), allocatable               :: meth
 
@@ -1394,7 +1394,6 @@ module DistributionFunction
 
         ! Add
         !====
-        distribution%fval   = fval
         distribution%coef   = sol 
 
         ! Housekeeping
@@ -1439,8 +1438,7 @@ module DistributionFunction
             b0      => distribution%b0,     & 
             d0      => distribution%d0,     &
             xa      => distribution%xa,     &
-            ya      => distribution%ya,     &
-            fval    => distribution%fval    &
+            ya      => distribution%ya      &
         )
 
         ! Evaluate

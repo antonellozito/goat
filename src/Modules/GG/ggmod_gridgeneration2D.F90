@@ -1008,10 +1008,12 @@ module ggmod_gridgeneration2D
                             (tclines(i-1)%xv(1) == orthlines(j)%x(1))) then 
                             x1 = tclines(i-1)%xv
                             y1 = tclines(i-1)%yv 
-                            s11 = spread(1_I8, 1, size(x1))
-                            s12 = spread(1_I8, 1, size(x1))
-                            s11r = spread(0_R8, 1, size(x1))
-                            s12r = spread(0_R8, 1, size(x1))
+                            allocate(s11(size(x1)), s12(size(x1)), &
+                                s11r(size(x1)), s12r(size(x1)))
+                            s11 = 1_I8
+                            s12 = 1_I8
+                            s11r = 0_R8
+                            s12r = 0_R8
                         else 
                             call gdErrorHandler('DistributeVerticesOrthogonal: ' // & 
                                 'starting point of radial line should be ' // &
@@ -1045,7 +1047,8 @@ module ggmod_gridgeneration2D
                         spread(2_I8, 1, size(x2)), spread(3_I8, 1, size(x3)), &
                         spread(4_I8, 1, size(x4))]
                     s1r = [s11r, s21r, s31r, s41r]
-                    sortind = spread(0_I8, 1, size(s1r))
+                    allocate(sortind(size(s1r)))
+                    sortind = 0_I8
                     call Sort(s1r, ind=sortind, ascend=.true.)
                     stype = stype(sortind)
                     
@@ -1089,6 +1092,8 @@ module ggmod_gridgeneration2D
                         vertID = vertID+1
                     end if 
                     
+                    ! Housekeeping
+                    deallocate(s11, s12, s11r, s12r, sortind)
                     
                 end do 
                 
@@ -1100,14 +1105,14 @@ module ggmod_gridgeneration2D
 
                 ! Add topological mesh vertices for last line (make sure 
                 ! to include first and last vertex...)
+                allocate(newdlcv(size(news2r)))
+                newdlcv = 0_R8
                 if (i == size(tclines)) then 
-                    newdlcv = spread(0_R8, 1, size(news2r))
                     call Interpolate1D(news2r, newdlcv, &
                         real([(k, k = 0, tclines(i)%nl-1)], kind=R8), tclines(i)%dllc)
                     newdlcv = [newdlcv, pack(tclines(i)%dlcv, istopovertlf)]
                     newID = [newID, pack(tclines(i)%vert, istopovertlf)]
                 else
-                    newdlcv = spread(0_R8, 1, size(news2r))
                     call Interpolate1D(news2r, newdlcv, &
                         real([(k, k = 0, tclines(i)%nl-1)], kind=R8), tclines(i)%dllc)
                     newdlcv = [0.0_R8, newdlcv, tclines(i)%dllc(tclines(i)%nl)]
@@ -1115,7 +1120,8 @@ module ggmod_gridgeneration2D
                 end if 
 
                 ! Sort
-                sortind = spread(0_I8, 1, size(newdlcv))
+                allocate(sortind(size(newdlcv)))
+                sortind = 0_I8
                 call Sort(newdlcv, ind=sortind, ascend=.true.)
                 newID = newID(sortind)
                 
@@ -1134,7 +1140,7 @@ module ggmod_gridgeneration2D
                 call tclines(i)%UpdateGGTMData(topomesh, ggtmdata, updatedfaces)
 
                 ! Housekeeping
-                deallocate(newtx, newty, newID, news2r)
+                deallocate(newtx, newty, newID, news2r, sortind, newdlcv)
 
             end do
 
@@ -1164,7 +1170,8 @@ module ggmod_gridgeneration2D
         ! Post-process
         !=============
         ! Still need to account for deleted/overwritten vertices
-        isvertexdeleted = spread(.true., 1, vertID)
+        allocate(isvertexdeleted(vertID))
+        isvertexdeleted = .true. 
         do i = 1, cell%ntot 
             ! Check if vertices are present
             isvertexdeleted(celldata(i)%hfline%vert) = .false.
@@ -1176,7 +1183,8 @@ module ggmod_gridgeneration2D
 
         ! Get all IDs and construct mapping
         allIDs = pack([(k, k = 1, vertID)], .not. isvertexdeleted)
-        vertmap = spread(0, 1, vertID)
+        allocate(vertmap(vertID))
+        vertmap = 0_I8
         vertmap(allIDs) = [(k, k = 1, count(.not. isvertexdeleted))]
 
         ! Check if any topological mesh vertices were deleted (should not happen)
@@ -2737,7 +2745,8 @@ module ggmod_gridgeneration2D
         line%yl = yl 
         line%dll = sqrt((xl(2:) - xl(1:size(xl)-1))**2 &
             + (yl(2:) - yl(1:size(yl)-1))**2)
-        line%dllc = spread(0, 1, size(xl))
+        line%dllc = xl 
+        line%dllc = 0_R8
         do i = 1, size(xl)-1
             line%dllc(i+1) = line%dllc(i) + line%dll(i)
         end do 
@@ -2907,7 +2916,8 @@ module ggmod_gridgeneration2D
         ! Update
         !=======
         ! Initialize
-        line%facelabels = spread(0_I8, 1, size(line%vert)-1)
+        line%facelabels = line%vert(1:line%nv-1)
+        line%facelabels = 0_I8
 
         ! Check for topoverts
         if (any(istopovert)) then ! Need to check topological face labels
@@ -3358,9 +3368,9 @@ module ggmod_gridgeneration2D
             isnextfacelegal, isprevfacelegal
         logical, allocatable, dimension(:)          :: isreflegal, &
             iscoarselegal, thiskeepvert, newkeepvert, refineface, &
-            coarsenface, thiskeepvertex
+            coarsenface,  newisreflegal, newiscoarselegal, iscoarsenedface
         real(R8), allocatable, dimension(:)         :: dxl, dyl, dll, &
-            Lmaxvert, Lminvert, newdll
+            Lmaxvert, Lminvert, newdll, newdllc
         integer(I8), allocatable, dimension(:)      :: thisvertID, &
             newvertID
 
@@ -3376,10 +3386,21 @@ module ggmod_gridgeneration2D
         end if 
 
         ! Set initial logicals
-        iscoarselegal = spread(.true., 1, line%nv-1)
+        allocate(iscoarselegal(line%nv-1))
+        iscoarselegal = .true.
         isreflegal = iscoarselegal
         thiskeepvert = keepvert
         thisvertID = line%vert
+
+        ! Initial distribution
+        dxl = line%xv(2:line%nv) - line%xv(1:line%nv-1)
+        dyl = line%yv(2:line%nv) - line%yv(1:line%nv-1)
+        dll = sqrt(dxl**2 + dyl**2)
+        allocate(newdllc(size(dll)+1))
+        newdllc = spread(0.0_R8, 1, size(dll)+1)
+        do i = 2, size(newdllc)
+            newdllc(i) = newdllc(i-1) + dll(i-1)
+        end do 
 
         ! Loop
         !=====
@@ -3387,13 +3408,9 @@ module ggmod_gridgeneration2D
 
             ! Precompute
             !-----------
-            ! Lengths
-            dxl = line%xv(2:) - line%xv(1:size(line%xv))
-            dyl = line%yv(2:) - line%yv(1:size(line%yv))
-            dll = sqrt(dxl**2 + dyl**2)
-
             ! Minimal & maximal length @ vertices
-            Lmaxvert = spread(0, 1, line%nv)
+            allocate(Lmaxvert(line%nv), Lminvert(line%nv))
+            Lmaxvert = 0.0_R8
             Lminvert = Lmaxvert 
             call refiner%Lmax%Evaluate(line%xv, line%yv, Lmaxvert)
             call refiner%Lmin%Evaluate(line%xv, line%yv, Lminvert)
@@ -3407,16 +3424,17 @@ module ggmod_gridgeneration2D
             end if 
 
             ! Initialize
-            coarsenface = spread(.false., 1, size(dll))
-            refineface = spread(.false., 1, size(dll))
+            allocate(coarsenface(size(dll)), refineface(size(dll)))
+            coarsenface = .false.
+            refineface = .false.
 
             ! Determine which faces to refine/coarsen
-            where (((dll > Lmaxvert(1:line%nv-1)) .or. (dll > Lmaxvert(2:))) &
+            where (((dll > Lmaxvert(1:line%nv-1)) .or. (dll > Lmaxvert(2:line%nv))) &
                 .and. isreflegal) 
                 refineface = .true. 
                 iscoarselegal = .false. 
             end where
-            where (((dll < Lminvert(1:line%nv-1)) .or. (dll < Lminvert(2:))) &
+            where (((dll < Lminvert(1:line%nv-1)) .or. (dll < Lminvert(2:line%nv))) &
                 .and. iscoarselegal)
                 coarsenface = .true.
                 isreflegal = .false.
@@ -3437,9 +3455,16 @@ module ggmod_gridgeneration2D
                 ! removing vertex (without any other adaptations)
 
                 ! Initialize new length distribution etc
-                newdll = spread(0.0_R8, 1, size(dll)+count(refineface)-count(coarsenface))
-                newkeepvert = spread(.false., 1, size(newdll)+1)
-                newvertID = spread(0_I8, 1, size(newdll)+1)
+                allocate(newdll(size(dll)+count(refineface)-count(coarsenface)))
+                allocate(newkeepvert(size(newdll)+1), newvertID(size(newdll)+1))
+                allocate(newiscoarselegal(size(newdll)), newisreflegal(size(newdll)), &
+                    iscoarsenedface(size(newdll)))
+                newdll = 0.0_R8
+                newkeepvert = .false. 
+                newvertID = 0_I8
+                newiscoarselegal = .true.
+                newisreflegal = .true.
+                iscoarsenedface = .false.
 
                 ! Loop
                 cc = 1 ! from one to size newdll
@@ -3451,11 +3476,22 @@ module ggmod_gridgeneration2D
                     ! Refine/coarsen face? 
                     if (refineface(i)) then 
                         ! Split face
+                        if (cc+1 > size(newdll)) then 
+                            call gdErrorHandler('Something wrong')
+                        end if 
+                        if (iscoarsenedface(cc)) then 
+                            cc = cc + 1
+                        end if 
                         newdll(cc:cc+1) = dll(i)/2.0_R8 
 
-                        ! Update next vertex
-                        newkeepvert(cc+1) = thiskeepvert(i+1)
-                        newvertID(cc+1) = thisvertID(i+1)
+                        ! Update next vertices
+                        newkeepvert(cc+1) = .false.
+                        newvertID(cc+1) = vertID+1
+                        newkeepvert(cc+2) = thiskeepvert(i+1)
+                        newvertID(cc+2) = thisvertID(i+1)
+
+                        ! Coarsening is illegal
+                        newiscoarselegal(cc:cc+1) = .false.
 
                         ! Update counters
                         vertID = vertID + 1
@@ -3463,8 +3499,8 @@ module ggmod_gridgeneration2D
                         cc = cc + 2
                     elseif (coarsenface(i)) then 
                         ! Preliminary checks
-                        isnextfacelegal = (i < size(dll)) .and. (.not. thiskeepvertex(i+1))
-                        isprevfacelegal = (cc > 1) .and. (.not. thiskeepvertex(i))
+                        isnextfacelegal = (i < size(dll)) .and. (.not. thiskeepvert(i+1))
+                        isprevfacelegal = (cc > 1) .and. (.not. thiskeepvert(i)) 
 
                         ! Check which face to merge with
                         ismerged = .false. 
@@ -3477,8 +3513,12 @@ module ggmod_gridgeneration2D
                                 newvertID(cc+1) = thisvertID(i+1)
                                 newkeepvert(cc+1) = thiskeepvert(i+1)
 
+                                ! Refinement is illegal
+                                newisreflegal(cc) = .false. 
+                                iscoarsenedface(cc) = .true. 
+
                                 ! Update counters
-                                cc = cc + 1
+                                ! cc = cc + 1 
                                 i = i + 2 !skip next face, cause already merged
                                 ismerged = .true.
                             end if 
@@ -3496,6 +3536,10 @@ module ggmod_gridgeneration2D
                                 newvertID(cc) = thisvertID(i+1)
                                 newkeepvert(cc) = thiskeepvert(i+1)
 
+                                ! Refinement is illegal
+                                newisreflegal(cc-1) = .false. 
+                                iscoarsened
+
                                 ! Update counter
                                 i = i + 1
                             else
@@ -3506,8 +3550,10 @@ module ggmod_gridgeneration2D
                                 newvertID(cc+1) = thisvertID(i+2)
                                 newkeepvert(cc+1) = thiskeepvert(i+2)
 
+                                ! Refinement is illegal
+                                newisreflegal(cc+1) = .false. 
+
                                 ! Update counters
-                                cc = cc + 1
                                 i = i + 2
                             end if 
 
@@ -3523,8 +3569,10 @@ module ggmod_gridgeneration2D
                                 newvertID(cc+1) = thisvertID(i+2)
                                 newkeepvert(cc+1) = thiskeepvert(i+2)
 
+                                ! Refinement is illegal
+                                newisreflegal(cc) = .false. 
+
                                 ! Update counters
-                                cc = cc + 1
                                 i = i + 2
                                 ismerged = .true.
                             end if 
@@ -3537,6 +3585,9 @@ module ggmod_gridgeneration2D
                             newvertID(cc) = thisvertID(i+1)
                             newkeepvert(cc) = thiskeepvert(i+1)
 
+                            ! Refinement is illegal
+                            newisreflegal(cc-1) = .false. 
+
                             ! Update counter
                             i = i + 1
                         end if 
@@ -3545,10 +3596,18 @@ module ggmod_gridgeneration2D
                             newdll(cc) = dll(i)
                             newvertID(cc+1) = thisvertID(i+1)
                             newkeepvert(cc+1) = thiskeepvert(i+1)
+                            newisreflegal(cc) = isreflegal(i)
+                            newiscoarselegal(cc) = iscoarselegal(i)
+                            cc = cc + 1
+                            i = i + 1
                         end if
                     else
                         ! Don't do anything, simply copy
                         newdll(cc) = dll(i)
+                        newvertID(cc+1) = thisvertID(i+1)
+                        newkeepvert(cc+1) = thiskeepvert(i+1)
+                        newisreflegal(cc) = isreflegal(i)
+                        newiscoarselegal(cc) = iscoarselegal(i)
                         
                         ! Update counters
                         cc = cc + 1
@@ -3559,7 +3618,20 @@ module ggmod_gridgeneration2D
                 ! Update
                 thiskeepvert = newkeepvert
                 thisvertID = newvertID
+                isreflegal = newisreflegal 
+                iscoarselegal = newiscoarselegal
                 dll = newdll
+                deallocate(newdllc)
+                allocate(newdllc(size(dll)+1))
+                newdllc = 0_R8
+                do i = 2, size(newdllc)
+                    newdllc(i) = dll(i-1) + newdllc(i-1)
+                end do 
+                call line%AddVertexCoordinates(newdllc)
+
+                ! Housekeeping
+                deallocate(newvertID, newdll, newkeepvert, newisreflegal, &
+                    newiscoarselegal)
 
             case default
 
@@ -3568,11 +3640,14 @@ module ggmod_gridgeneration2D
 
             end select
 
+            ! Housekeeping
+            deallocate(coarsenface, refineface, Lminvert, Lmaxvert)
+
         end do
 
         ! Construct line coordinates
         !===========================
-        call line%AddVertexCoordinates(dll)
+        call line%AddVertexCoordinates(newdllc)
         call line%AddVertexIDs(thisvertID)
 
     end subroutine

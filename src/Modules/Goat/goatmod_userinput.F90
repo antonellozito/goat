@@ -793,12 +793,11 @@ module goatmod_userinput
         options%refLBLmaxinf    = 100 ! some absurd big number
         options%refLBLminxp     = 0.0_R8
         options%refLBLmaxxp     = 100 ! some absurd big number  
-        options%refLBLminstructure = 0.0_R8
-        options%refLBLmaxstructure = 100 ! some absurd big number  
         options%refLBdecaylengthxp = 0.1 
         allocate(options%refLBdecaylengthstructure(0), &
             options%refLBdecaylengthvert(0), options%refLBstructureIDs(0), &
-            options%refLBvertIDs(0))
+            options%refLBvertIDs(0), options%refLBLminstructure(0), &
+            options%refLBLmaxstructure(0))
 
         ! Options for radial vertex distribution
         options%vdrtype             = 'densitybased'
