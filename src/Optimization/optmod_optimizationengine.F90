@@ -1083,6 +1083,10 @@ module optmod_optimizationengine
                 H, gradH, hessH, mu, A, &
                 dogradient, dohessian)
 
+            ! Check convergence
+            call solver%CheckConvergenceKKT(gradL, converged, convnorm)
+            problem%monitor%convnorm(itopt) = convnorm
+
             ! Check if an error was encountered
             errstat = ErrorStack%ErrorState()
             call ErrorStack%EndTrack()
@@ -1101,8 +1105,7 @@ module optmod_optimizationengine
                 exit 
             end if 
 
-            ! Check convergence
-            call solver%CheckConvergenceKKT(gradL, converged, convnorm)
+            
 
             ! Timers
             call wall_time(t_eval_e)
@@ -1265,7 +1268,7 @@ module optmod_optimizationengine
             problem%monitor%G(itopt)        = maxval(abs(G))
             problem%monitor%H(itopt)        = maxval(H)
             problem%monitor%alpha(itopt)    = alphals
-            problem%monitor%convnorm(itopt) = convnorm
+            
             problem%monitor%evaltime        = t_eval_e - t_eval_s
             problem%monitor%ittime          = t_it_e - t_it_s 
             problem%monitor%linsolvetime    = t_linsolve_e - t_linsolve_s
