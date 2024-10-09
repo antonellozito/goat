@@ -1554,17 +1554,8 @@ module somod_costfunction
         dgradJdvartemp = dgradJdvar
         
         ! Allocate initially to avoid errors 
-        if (.not. allocated(hessJ%row)) then 
-            hessJ%nval = 0
-            call hessJ%Allocate()
-        else 
-            ! Reset hessian
-            call hessJ%Deallocate()
-            hessJ%nval = 0
-            call hessJ%Allocate()
-        end if 
+        hessJ = SpZeros(designvariables%nphi, designvariables%nphi)
             
-
         ! Compute cost function
         !======================
         ! PLF
@@ -1806,6 +1797,7 @@ module somod_costfunction
         ! Compute reduced cost function
         !==============================
         ! Call evaluation routine
+        hessJR = SpZeros(designvariables%nphi, designvariables%nphi)
         call costfunction%costfunction%Evaluate(J, gradJR, hessJR, &
             goat, dogradient, dohessian, designvariables, &
             'goatvariables', goatvariables, gradJgoat)
