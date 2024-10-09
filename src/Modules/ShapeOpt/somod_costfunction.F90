@@ -1832,6 +1832,9 @@ module somod_costfunction
 
         end select
 
+        ! Add goat residual to cost function
+        J = J + goat%monitor%convnorm(goat%monitor%itopt)
+
         ! Compute lagrange multipliers
         gradGgoat = jacGgoat%Transpose()
         call SolveSparseLinearSystemDI(gradGgoat, -gradJgoat, lambdaG, flag)
