@@ -1094,7 +1094,7 @@ module optmod_optimizationengine
             end if 
 
             ! Check if NaNs are encountered in residual
-            if (any(isnan(gradL))) then 
+            if (any(isnan(gradL)) .or. isnan(L)) then 
                 ! Call error, exit the loop
                 call gdErrorHandler('SolveOptimizationProblemKKT: NaNs ' // &
                     'detected when evaluating the problem, exiting', severityin=0)
