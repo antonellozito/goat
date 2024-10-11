@@ -1170,7 +1170,7 @@ module somod_constraints
         end do
 
         ! Check if we can constrain, set to false if not the case
-        where (cc > maxcc + 2) isconstrained = .false. 
+        where (cc + 2 > maxcc) isconstrained = .false. 
 
         ! Add to constraints
         !===================
@@ -1503,7 +1503,7 @@ module somod_constraints
         end do
 
         ! Check if we can constrain, set to false if not the case
-        where (cc > maxcc + 1) isconstrained = .false. 
+        where (cc + 1> maxcc) isconstrained = .false. 
 
         ! Add to constraints
         !===================
@@ -1871,7 +1871,7 @@ module somod_constraints
         end do
 
         ! Check if we can constrain, set to false if not the case
-        where (cc > maxcc + 1) isconstrained = .false. 
+        where (cc + 1> maxcc) isconstrained = .false. 
 
         ! Add to constraints
         !===================
@@ -2304,7 +2304,7 @@ module somod_constraints
         end do
 
         ! Check if we can constrain, set to false if not the case
-        where (cc > maxcc + 1) isconstrained = .false. 
+        where (cc + 1> maxcc ) isconstrained = .false. 
 
         ! Determine initial vertex pairs
         call goat%environment%vessel%GetVesselVertexPairs(vpairs, &

@@ -1891,7 +1891,8 @@ module gdmod_constraints
 
                     ! Set mask
                     mask(tv) = .true. 
-                    mask = mask .and. .not. ( (cc >= maxcc) .or. (istp))
+                    mask = mask .and. .not. ( (cc >= maxcc) .or. (istp) &
+                        .or. isconstrainedv) .and. (vert%fieldlineID == 0_I8)
                     where (mask) isfixedpoint = .true.
                     deallocate(tv)
 
@@ -7636,6 +7637,121 @@ module gdmod_constraints
         type(GridUDT), intent(in)                   :: grid 
         type(MagneticFieldUDT), intent(in)          :: magneticField
         type(EnvironmentUDT), intent(in)            :: environment
+
+        ! Auxiliary
+        real(R8), allocatable                       :: xf(:), yf(:), &
+            xv(:, :), yv(:, :), gx(:), gy(:), myones(:), dx(:), dy(:), &
+            dotprod(:), signvecpol(:), signvecrad(:), signvecves(:)
+
+        ! Loop
+        integer(I8)                                 :: j
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            nvpairspol      => constraints%nvpairspol,  &
+            nvpairsrad      => constraints%nvpairsrad,  &
+            nvpairsves      => constraints%nvpairsves,  &
+            vpairspol       => constraints%vpairspol,   &
+            vpairsrad       => constraints%vpairsrad,   &
+            vpairsves       => constraints%vpairsves,   &
+            vert            => grid%vert,               &
+            face            => grid%face,               &
+            x               => grid%vert%x,             &
+            y               => grid%vert%y,             &
+            fieldlineID     => grid%vert%fieldlineID    &
+            )
+
+        ! Check orientation
+        !==================
+        ! Poloidal
+        !---------
+        ! Allocate
+        allocate(xv(nvpairspol, 2), yv(nvpairspol, 2), gx(nvpairspol), &
+            gy(nvpairspol), myones(nvpairspol))
+        myones = 1
+
+        ! Compute coordinates and vectors
+        do j = 1, 2
+            xv(:, j) = x(vpairspol(:, j))
+            yv(:, j) = y(vpairspol(:, j))
+        end do 
+        dx = xv(:, 2) - xv(:, 1)
+        dy = yv(:, 2) - yv(:, 1)
+        xf = 0.5*(xv(:, 1) + xv(:, 2))
+        yf = 0.5*(yv(:, 1) + yv(:, 2))
+        call magneticField%interp%Evaluate(xf, yf, 1, 0, gx)
+        call magneticField%interp%Evaluate(xf, yf, 0, 1, gy)
+
+        ! Evaluate dot product and save sign
+        dotprod = -gy*dx + gx*dy 
+        signvecpol = sign(myones, dotprod)
+
+        ! Housekeeping
+        deallocate(xv, yv, gx, gy, myones)
+
+        ! Radial
+        !-------
+        ! Allocate
+        allocate(xv(nvpairsrad, 2), yv(nvpairsrad, 2), gx(nvpairsrad), &
+            gy(nvpairsrad), myones(nvpairsrad))
+        myones = 1
+
+        ! Compute coordinates and vectors
+        do j = 1, 2
+            xv(:, j) = x(vpairsrad(:, j))
+            yv(:, j) = y(vpairsrad(:, j))
+        end do 
+        dx = xv(:, 2) - xv(:, 1)
+        dy = yv(:, 2) - yv(:, 1)
+        xf = 0.5*(xv(:, 1) + xv(:, 2))
+        yf = 0.5*(yv(:, 1) + yv(:, 2))
+        call magneticField%interp%Evaluate(xf, yf, 1, 0, gx)
+        call magneticField%interp%Evaluate(xf, yf, 0, 1, gy)
+
+        ! Evaluate dot product and save sign
+        dotprod = gx*dx + gy*dy 
+        signvecrad = sign(myones, dotprod)
+
+        ! Housekeeping
+        deallocate(xv, yv, gx, gy, myones)
+
+        ! Vessel
+        !-------
+        ! Allocate
+        allocate(xv(nvpairsves, 2), yv(nvpairsves, 2), gx(nvpairsves), &
+            gy(nvpairsves), myones(nvpairsves))
+        myones = 1
+
+        ! Compute coordinates and vectors
+        do j = 1, 2
+            xv(:, j) = x(vpairsves(:, j))
+            yv(:, j) = y(vpairsves(:, j))
+        end do 
+        dx = xv(:, 2) - xv(:, 1)
+        dy = yv(:, 2) - yv(:, 1)
+        xf = 0.5*(xv(:, 1) + xv(:, 2))
+        yf = 0.5*(yv(:, 1) + yv(:, 2))
+        call environment%vessel%plfvessel%Evaluate(xf, yf, 1, 0, gx)
+        call environment%vessel%plfvessel%Evaluate(xf, yf, 0, 1, gy)
+
+        ! Evaluate dot product and save sign
+        dotprod = -gy*dx + gx*dy 
+        signvecves = sign(myones, dotprod)
+
+        ! Housekeeping
+        deallocate(xv, yv, gx, gy, myones)
+
+        ! Add
+        !----
+        constraints%signvecpol  = signvecpol
+        constraints%signvecrad  = signvecrad
+        constraints%signvecves  = signvecves
+
+        ! Housekeeping
+        !=============
+        end associate
 
 
     end subroutine

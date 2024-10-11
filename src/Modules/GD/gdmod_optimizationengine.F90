@@ -627,6 +627,7 @@ module gdmod_optimizationengine
         integer(I8)                         :: i
 
         ! Auxiliary variables 
+        character(:), allocatable           :: vertpath, cellpath
 
         ! Data
 
@@ -666,6 +667,17 @@ module gdmod_optimizationengine
             ! Do nothing
 
         end select
+
+        ! Write data
+        if (problem%designoptions%writedata == 1) then 
+            ! Call grid vertex writing routine
+            allocate(character(len('vertices_iterate')) :: vertpath)
+            allocate(character(len('cells_iterate')) :: cellpath)
+            vertpath = 'vertices_iterate'
+            cellpath = 'cells_iterate'
+            call WriteGridVertices(problem%grid, vertpath) 
+            call WriteGridCells(problem%grid, cellpath)
+        end if
 
         ! Housekeeping
         !=============
