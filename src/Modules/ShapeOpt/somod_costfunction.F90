@@ -1790,11 +1790,12 @@ module somod_costfunction
             call ErrorStack%EndTrack()
             if (errstat > 0) then 
                 ! No need to recall error, but need to check how to adjust output
-                goatcfv = goat%monitor%convnorm(goat%monitor%itopt)
+                goatcfv = goatproblem%monitor%convnorm(goat%monitor%itopt)
+                call costfunction%goatengine%solver%Initialize()
             else
                 ! Update goat
                 goat = goatproblem 
-                goatcfv = goat%monitor%convnorm(goat%monitor%itopt)
+                goatcfv = goatproblem%monitor%convnorm(goat%monitor%itopt)
             end if 
 
         class default 
