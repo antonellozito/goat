@@ -816,7 +816,7 @@ module optmod_optimizationengine
                 DJf = sum(gradJ*dx(1:nphi))
             end if 
         end if 
-
+        
         ! Housekeeping
         !=============
 
@@ -958,7 +958,12 @@ module optmod_optimizationengine
         ! Equality constraint 
         allocate(G(neq), lambda(neq))
         G(:) = 0
-        lambda(:) = 0.0
+        lambda = 0
+        if (allocated(problem%lambda)) then 
+            if (size(problem%lambda) == neq) then 
+                lambda = problem%lambda
+            end if 
+        end if 
         gradG = SpZeros(nphi, neq)
         hessG = SpZeros(nphi, nphi)
 
@@ -966,6 +971,11 @@ module optmod_optimizationengine
         allocate(H(nineq), mu(nineq))
         H(:) = 0
         mu(:) = 0
+        if (allocated(problem%mu)) then 
+            if (size(problem%mu) == nineq) then 
+                mu = problem%mu
+            end if 
+        end if 
         gradH = SpZeros(nphi, nineq)
         hessH = SpZeros(nphi, nphi)
 
@@ -973,8 +983,8 @@ module optmod_optimizationengine
         allocate(ncp(nineq), A(nineq), I(nineq))
         gradncpphi = SpZeros(nphi, nineq)
         gradncpmu = SpZeros(nineq, nineq)
-        A(:) = .false.
-        I(:) = .not. A
+        A = mu > 0_R8
+        I = .not. A
 
         ! Lagrangian 
         allocate(gradL(nphi + neq + nineq))
@@ -1144,105 +1154,107 @@ module optmod_optimizationengine
 
             ! Do linesearch?
             alphals = 1
-            if (solver%numLS%dolinesearch) then 
-                ! Compute the step length for the line search, don't 
-                ! apply relaxation using rxfdesign. Note: also the 
-                ! Lagrange multipliers may change!
-                if (flag == 0) then 
+            if (.not. converged) then 
+                if (solver%numLS%dolinesearch) then 
+                    ! Compute the step length for the line search, don't 
+                    ! apply relaxation using rxfdesign. Note: also the 
+                    ! Lagrange multipliers may change!
+                    if (flag == 0) then 
 
-                    call ComputeStepLengthLS(problem, solver%numLS, dx, lambda, mu, alphals, flagls) ! dx is changed during linesearch
-                else 
-                    ! Something wrong during linear solver, try with relaxation
-                    flagls = 1
-                end if 
-
-                ! Check the linesearch output
-                if (flagls == 0) then 
-                    ! All good
-
-                elseif (flagls == 1) then 
-                    ! Non-descent direction, print message and skip remainder of iterate
-                    if (flag /= 0) then 
-                        print *, 'step direction computation not succeeded, ' // &
-                            'reattempting with damped Hessian'
-
-                    else
-
-                        print *, 'non-descent direction, skipping update ' // &
-                            'and reattempt with damped Hessian'
-
+                        call ComputeStepLengthLS(problem, solver%numLS, dx, lambda, mu, alphals, flagls) ! dx is changed during linesearch
+                    else 
+                        ! Something wrong during linear solver, try with relaxation
+                        flagls = 1
                     end if 
 
-                    ! Set step to zero
-                    dx(:) = 0
-                    alphals = 0
+                    ! Check the linesearch output
+                    if (flagls == 0) then 
+                        ! All good
 
-                    ! Add relaxation
-                    if (rxf > 0) then 
-                        rxf = 2*rxf 
-                    else
-                        ! Apparently no relaxation, add
-                        print *, 'No relaxation detected, adding relaxation'
-                        rxf = 1
-                        if (rxfdec > 0) then 
-                        else 
-                            rxfdec = 0.9
+                    elseif (flagls == 1) then 
+                        ! Non-descent direction, print message and skip remainder of iterate
+                        if (flag /= 0) then 
+                            print *, 'step direction computation not succeeded, ' // &
+                                'reattempting with damped Hessian'
+
+                        else
+
+                            print *, 'non-descent direction, skipping update ' // &
+                                'and reattempt with damped Hessian'
+
+                        end if 
+
+                        ! Set step to zero
+                        dx(:) = 0
+                        alphals = 0
+
+                        ! Add relaxation
+                        if (rxf > 0) then 
+                            rxf = 2*rxf 
+                        else
+                            ! Apparently no relaxation, add
+                            print *, 'No relaxation detected, adding relaxation'
+                            rxf = 1
+                            if (rxfdec > 0) then 
+                            else 
+                                rxfdec = 0.9
+                            end if 
                         end if 
                     end if 
-                end if 
 
-                ! Update lagrange multipliers using least-squares approach
-                ! for active constraints
-                if ( (flag == 0) .and. (flagls == 0)) then 
-                    allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
-                    activeineqconind = pack(ineqconind, A)
-                    inactiveineqconind = pack(ineqconind, I)
-                    hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
-                    hessLJ = hessLJ%DeleteRows([eqconind, ineqconind])
-                    hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
-                    hessLC = hessLC%DeleteRows([eqconind, ineqconind])
-                    allocate(dxl(neq + count(A)))
-                    !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
-                    !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
-                    !    dxl2, flag)
-                    !dxl2 = -dxl2
-                    call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
-                        MatrixVectorProduct(hessLC%Transpose(), &
-                        (rhs(phiind) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
-                        dxl, flag)
+                    ! Update lagrange multipliers using least-squares approach
+                    ! for active constraints
+                    if ( (flag == 0) .and. (flagls == 0)) then 
+                        allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
+                        activeineqconind = pack(ineqconind, A)
+                        inactiveineqconind = pack(ineqconind, I)
+                        hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
+                        hessLJ = hessLJ%DeleteRows([eqconind, ineqconind])
+                        hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
+                        hessLC = hessLC%DeleteRows([eqconind, ineqconind])
+                        allocate(dxl(neq + count(A)))
+                        !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
+                        !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
+                        !    dxl2, flag)
+                        !dxl2 = -dxl2
+                        call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
+                            MatrixVectorProduct(hessLC%Transpose(), &
+                            (rhs(phiind) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
+                            dxl, flag)
 
-                    !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
+                        !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
+                        
+                        dx(nphi+1:nphi+neq) = dxl(1:neq)
+                        dx(activeineqconind) = dxl(neq+1:neq+count(A))
+                        deallocate(dxl, activeineqconind, inactiveineqconind)
+                    end if 
                     
-                    dx(nphi+1:nphi+neq) = dxl(1:neq)
-                    dx(activeineqconind) = dxl(neq+1:neq+count(A))
-                    deallocate(dxl, activeineqconind, inactiveineqconind)
-                end if 
-                
-            else
-                ! Check convergence of solver
-                if (flag == 0) then 
-                    ! Directly update design without linesearch, apply the
-                    ! relaxation using rxfdesign
-                    dx(1:nphi) = rxfdesign*dx(1:nphi)
                 else
-                    ! Set step to zero
-                    dx(:) = 0
-                    alphals = 0
-
-                    ! Add relaxation
-                    if (rxf > 0) then 
-                        rxf = 2*rxf 
+                    ! Check convergence of solver
+                    if (flag == 0) then 
+                        ! Directly update design without linesearch, apply the
+                        ! relaxation using rxfdesign
+                        dx(1:nphi) = rxfdesign*dx(1:nphi)
                     else
-                        ! Apparently no relaxation, add
-                        print *, 'No relaxation detected, adding relaxation'
-                        rxf = 1
-                        if (rxfdec > 0) then 
-                        else 
-                            rxfdec = 0.9
+                        ! Set step to zero
+                        dx(:) = 0
+                        alphals = 0
+
+                        ! Add relaxation
+                        if (rxf > 0) then 
+                            rxf = 2*rxf 
+                        else
+                            ! Apparently no relaxation, add
+                            print *, 'No relaxation detected, adding relaxation'
+                            rxf = 1
+                            if (rxfdec > 0) then 
+                            else 
+                                rxfdec = 0.9
+                            end if 
                         end if 
                     end if 
-                end if 
-            end if
+                end if
+            end if 
 
             ! Update the design
             call problem%UpdateDesign(dx(1:nphi))
