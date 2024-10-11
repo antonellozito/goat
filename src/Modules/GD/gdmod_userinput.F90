@@ -323,7 +323,8 @@ module gdmod_userinput
         ! - excludebox(x, y)    boxes for edge exclusion (applied after 
         !                       inclusion) 
 
-        integer(I8)                 :: checkperp 
+        integer(I8)                 :: checkperp
+        logical                     :: includecutcellvert
         real(R8)                    :: epsperp 
         real(R8), allocatable       :: includeboxx(:, :), &
             includeboxy(:, :), excludeboxx(:, :), excludeboxy(:, :)
@@ -794,6 +795,7 @@ module gdmod_userinput
         ! Default options
         !================
         options%checkperp = 0 
+        options%includecutcellvert = .false. 
         options%epsperp = 0.2
         if (allocated(options%includeboxx)) then 
             deallocate(options%includeboxx, options%includeboxy, &
@@ -1733,6 +1735,8 @@ module gdmod_userinput
         call ExtractOptionValueReal2D(fid, field, options%excludeboxx)
         field = 'gd.design.ec.par.orthogonality.excludeboxy'
         call ExtractOptionValueReal2D(fid, field, options%excludeboxy)
+        field = 'gd.design.ec.par.orthogonality.includecutcellvert'
+        call ExtractOptionValueLogical0D(fid, field, options%includecutcellvert)
         
         ! Housekeeping
         !=============
