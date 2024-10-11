@@ -5320,7 +5320,7 @@ module gdmod_constraints
 
         logical, allocatable        :: cvert(:), boxcheck(:), &
             movetoback(:), movetofront(:), ismarked(:), isconstrained(:), &
-            isperp(:), cID(:)
+            isperp(:), cID(:), isvesselvertex(:), isvesselface(:)
         
         ! Loop
         integer(I8)                 :: i, j, k
@@ -5358,6 +5358,9 @@ module gdmod_constraints
 
         ! Check perpendicularity? 
         checkperp = (opt%checkperp == 1)
+
+        ! Get vessel vertices
+        call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
 
         ! Determine edge vertices
         !========================
@@ -5400,6 +5403,11 @@ module gdmod_constraints
             boxcheck = IsInBox(minx, maxx, miny, maxy, vert%x, vert%y)
             where (boxcheck) cvert = .false.
         end do
+
+        ! Include boundary vertices with zero ID?
+        if (opt%includecutcellvert) then 
+            where (isvesselvertex) cvert = .true.
+        end if 
 
         ! Prioritize inner vertices (typically yields better results, 
         ! but may not be a general approach)
@@ -5544,8 +5552,24 @@ module gdmod_constraints
                         allocate(tvn(0))
                     end if 
                 else
-                    deallocate(tvn)
-                    allocate(tvn(0))
+                    ! Check if the current vertex is a vessel vertex
+                    if (isvesselvertex(tv)) then 
+                        ! Eliminate vessel vertex neighbours
+                        temp = tvn 
+                        deallocate(tvn)
+                        allocate(tvn(count(.not. isvesselvertex(temp))))
+                        tvn = pack(temp, .not. isvesselvertex(temp))
+                        deallocate(temp)
+
+                        ! Check if one remains, otherwise deallocate
+                        if (size(tvn) /= 1) then 
+                            deallocate(tvn)
+                            allocate(tvn(0))
+                        end if 
+                    else
+                        deallocate(tvn)
+                        allocate(tvn(0))
+                    end if 
                 end if
 
                 ! Deallocate 
