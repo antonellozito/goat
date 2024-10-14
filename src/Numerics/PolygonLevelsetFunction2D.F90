@@ -313,7 +313,7 @@ module PolygonLevelsetFunction2D
     !------------------------------------------------------------------!
 
     ! Initializer
-    subroutine InitializePolygonLevelsetFunction2D(plf, ps, options) 
+    recursive subroutine InitializePolygonLevelsetFunction2D(plf, ps, options) 
 
         ! Declare variables
         !==================
