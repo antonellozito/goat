@@ -103,7 +103,7 @@ VERSION 1.00.00
 # Vessel field description (similar to magnetic field interpolant, 
 # but for vessel - only used for vessel distance penalty, and if shape
 # method is the same, also used for boundary constraints)
-'goat.vessel.shapemeth'             'closedpolygon_exact'
+'goat.vessel.shapemeth'             'closedpolygon_smoothapproximation'
 'goat.vessel.resx'                  '100'
 'goat.vessel.resy'                  '100'
 'goat.vessel.offsetfracx'           '0.1'
@@ -179,12 +179,12 @@ VERSION 1.00.00
 'gd.design.cfv.par.LRrad.includecutcellfaces'   '1'
 'gd.design.cfv.par.LRrad.excludedomainfaces'    '1'
 'gd.design.cfv.par.FAD.lambda'		 		'1e-5'
-'gd.design.cfv.par.FAD.weightatvessel'       '0.1'
+'gd.design.cfv.par.FAD.weightatvessel'       '0.01'
 'gd.design.cfv.par.FAD.weightatinf'          '1'
 'gd.design.cfv.par.FAD.decaylength'          '0.5'
-'gd.design.cfv.par.FA.weightatvessel'       '0.1'
+'gd.design.cfv.par.FA.weightatvessel'       '0.001'
 'gd.design.cfv.par.FA.weightatinf'          '1'
-'gd.design.cfv.par.FA.decaylength'          '0.1'
+'gd.design.cfv.par.FA.decaylength'          '0.3'
 'gd.design.cfv.par.FA.lambda'		 		'1e-5'
 'gd.design.cfv.par.PRPB.lambda'		 		'1e-5'
 'gd.design.cfv.par.PRPB.biasdecaylength'	'0.05'
@@ -239,13 +239,13 @@ VERSION 1.00.00
 'gd.design.ec.par.xpoints.meth'                         'grad'
 
 # Orthogonality constraint parameters 
-'gd.design.ec.par.orthogonality.checkperp'				'1'
+'gd.design.ec.par.orthogonality.checkperp'				'0'
 'gd.design.ec.par.orthogonality.epsperp' 				'0.2'
 'gd.design.ec.par.orthogonality.includecutcellvert'     '1'
-'gd.design.ec.par.orthogonality.includeboxx' 			'[1, 2.3]' 
-'gd.design.ec.par.orthogonality.includeboxy' 			'[-0.9, 1.2]' 
-'gd.design.ec.par.orthogonality.excludeboxx' 			'[1.45, 1.55]' 
-'gd.design.ec.par.orthogonality.excludeboxy' 			'[-0.95, -0.65]' 
+'gd.design.ec.par.orthogonality.includeboxx' 			'[]' 
+'gd.design.ec.par.orthogonality.includeboxy' 			'[]' 
+'gd.design.ec.par.orthogonality.excludeboxx' 			'[]' 
+'gd.design.ec.par.orthogonality.excludeboxy' 			'[]' 
 
 # Some decent bounding box values for different geometries 
 # TCV, 		include: x: [-1 2; 0.72 0.82 ], 	y:  [-0.2 2; -0.3 -0.2]
@@ -292,7 +292,7 @@ VERSION 1.00.00
 # See SetNumParams.m for the default settings
 
 # General optimization
-'gd.opt.num.itmax'                  '200'
+'gd.opt.num.itmax'                  '20'
 'gd.opt.num.tol'                    '1e-10'
 
 # KKT driver (see also GridKKTDriver.m)
@@ -300,7 +300,7 @@ VERSION 1.00.00
 'gd.opt.num.docfrelax'              '1'
 'gd.opt.num.rxf'                    '1e0'
 'gd.opt.num.rxfdesign'              '1'
-'gd.opt.num.rxfmin'                 '0e-1'
+'gd.opt.num.rxfmin'                 '1e-7'
 'gd.opt.num.rxfdec'                 '0.90'
 
 # Line search parameters 
