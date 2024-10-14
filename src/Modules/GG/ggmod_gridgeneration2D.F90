@@ -1130,7 +1130,9 @@ module ggmod_gridgeneration2D
                 call tclines(i)%AddVertexIDs(newID)
 
                 ! Refine/coarsen
-                keepvert = IsTopomeshVert(tclines(i)%vert, topomesh)
+                keepvert = IsTopomeshVert(tclines(i)%vert, topomesh) ! keep vertices if topomesh vert
+                keepvert(1) = .true. ! keep first and last vertex anyway
+                keepvert(size(keepvert)) = .true. 
                 call GGTMLinerefiner%Refine(tclines(i), vertID, keepvert)
 
                 ! Update line data (face labels, facedata if last line, ...)
@@ -3454,8 +3456,8 @@ module ggmod_gridgeneration2D
                 ! Classic refinement by splitting face, coarsening by
                 ! removing vertex (without any other adaptations)
 
-                ! Initialize new length distribution etc
-                allocate(newdll(size(dll)+count(refineface)-count(coarsenface)))
+                ! Initialize new length distribution etc - too long, trimmed later
+                allocate(newdll(size(dll)+count(refineface)))
                 allocate(newkeepvert(size(newdll)+1), newvertID(size(newdll)+1))
                 allocate(newiscoarselegal(size(newdll)), newisreflegal(size(newdll)), &
                     iscoarsenedface(size(newdll)))
@@ -3469,7 +3471,7 @@ module ggmod_gridgeneration2D
                 ! Loop
                 cc = 1 ! from one to size newdll
                 i = 1 ! from one to size dll
-                newkeepvert(cc) = .true. ! always keep first vertex
+                newkeepvert(1) = keepvert(1)
                 newvertID(cc) = thisvertID(cc) ! always keep first vertex
                 do while (i <= size(dll))
                     
@@ -3518,7 +3520,7 @@ module ggmod_gridgeneration2D
                                 iscoarsenedface(cc) = .true. 
 
                                 ! Update counters
-                                ! cc = cc + 1 
+                                cc = cc + 1 
                                 i = i + 2 !skip next face, cause already merged
                                 ismerged = .true.
                             end if 
@@ -3538,7 +3540,6 @@ module ggmod_gridgeneration2D
 
                                 ! Refinement is illegal
                                 newisreflegal(cc-1) = .false. 
-                                iscoarsened
 
                                 ! Update counter
                                 i = i + 1
@@ -3554,6 +3555,7 @@ module ggmod_gridgeneration2D
                                 newisreflegal(cc+1) = .false. 
 
                                 ! Update counters
+                                cc = cc + 1
                                 i = i + 2
                             end if 
 
@@ -3573,6 +3575,7 @@ module ggmod_gridgeneration2D
                                 newisreflegal(cc) = .false. 
 
                                 ! Update counters
+                                cc = cc + 1
                                 i = i + 2
                                 ismerged = .true.
                             end if 
@@ -3616,11 +3619,11 @@ module ggmod_gridgeneration2D
                 end do 
 
                 ! Update
-                thiskeepvert = newkeepvert
-                thisvertID = newvertID
-                isreflegal = newisreflegal 
-                iscoarselegal = newiscoarselegal
-                dll = newdll
+                thiskeepvert = newkeepvert(1:cc)
+                thisvertID = newvertID(1:cc)
+                isreflegal = newisreflegal(1:cc-1) 
+                iscoarselegal = newiscoarselegal(1:cc-1)
+                dll = newdll(1:cc-1)
                 deallocate(newdllc)
                 allocate(newdllc(size(dll)+1))
                 newdllc = 0_R8
@@ -3631,7 +3634,7 @@ module ggmod_gridgeneration2D
 
                 ! Housekeeping
                 deallocate(newvertID, newdll, newkeepvert, newisreflegal, &
-                    newiscoarselegal)
+                    newiscoarselegal, iscoarsenedface)
 
             case default
 
