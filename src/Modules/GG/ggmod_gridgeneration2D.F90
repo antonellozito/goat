@@ -2818,8 +2818,11 @@ module ggmod_gridgeneration2D
                 return 
             end if 
         end if 
-                
+
+        ! Hedge for out of bounds points
         line%dlcv = tdlcv 
+        where (line%dlcv >= line%dllc(line%nl)) line%dlcv = line%dllc(line%nl)     
+        
         if (allocated(line%xv)) then 
             deallocate(line%xv, line%yv)
         end if 
@@ -3395,9 +3398,7 @@ module ggmod_gridgeneration2D
         thisvertID = line%vert
 
         ! Initial distribution
-        dxl = line%xv(2:line%nv) - line%xv(1:line%nv-1)
-        dyl = line%yv(2:line%nv) - line%yv(1:line%nv-1)
-        dll = sqrt(dxl**2 + dyl**2)
+        dll = line%dlcv(2:line%nv) - line%dlcv(1:line%nv-1)
         allocate(newdllc(size(dll)+1))
         newdllc = spread(0.0_R8, 1, size(dll)+1)
         do i = 2, size(newdllc)
@@ -3593,6 +3594,9 @@ module ggmod_gridgeneration2D
 
                             ! Update counter
                             i = i + 1
+
+                            ! Update statement
+                            ismerged = .true.
                         end if 
                         if (.not. ismerged) then 
                             ! Skip for next loop
