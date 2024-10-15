@@ -3518,8 +3518,10 @@ module mod_polygon
         ! Initialize intersection counter
         counter = 0
 
-        ! Allocate temporary arrays
+        ! Precompute overlapping edges
         ne = size(xp)-1
+
+        ! Allocate temporary arrays
         allocate(tempx(ne), tempy(ne), temps(ne), tempsr(ne)) ! maximum ne intersections, to be trimmed later
 
         ! Loop   
@@ -3549,8 +3551,8 @@ module mod_polygon
 
         ! Allocate and attribute
         allocate(x(counter), y(counter), s(counter))
-        x = tempx(1:counter) 
-        y = tempy(1:counter)  
+        x = tempx(1:counter)
+        y = tempy(1:counter)
         s = temps(1:counter)
 
         ! Hedge for duplicates
@@ -4362,7 +4364,7 @@ module mod_polygon
     end subroutine 
 
     ! Edge overlap checker
-    logical function CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, &
+    function CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, &
         x22, y22) result(isoverlapping)
 
         ! Description
@@ -4384,6 +4386,7 @@ module mod_polygon
         ! Arguments
         real(R8), intent(in)        :: x11, y11, x12, y12, x21, y21, &
             x22, y22
+        logical                     :: isoverlapping
 
         ! Auxiliary
 
@@ -4395,13 +4398,107 @@ module mod_polygon
         isoverlapping = .true. 
 
         ! x-interval
-        if ( (max(x11, x12)+disttol < min(x21, x22)-disttol) .or. &
-            (max(x21, x22)+disttol < min(x11, x12)-disttol) ) then 
-            isoverlapping = .false. 
-        elseif ( (max(y11, y12)+disttol < min(y21, y22)-disttol) .or. &
-            (max(y21, y22)+disttol < min(y11, y12)-disttol) ) then 
-            isoverlapping = .false.
-        end if 
+        if ((x11+disttol < x21-disttol) .and. (x11+disttol < x22-disttol) &
+            .and. (x12+disttol < x21-disttol) .and. (x12+disttol < x22-disttol)) then 
+                isoverlapping = .false. 
+        elseif ((x21+disttol < x11-disttol) .and. (x21+disttol < x12-disttol) &
+            .and. (x22+disttol < x11-disttol) .and. (x22+disttol < x12-disttol)) then 
+                isoverlapping = .false. 
+        elseif  ((y11+disttol < y21-disttol) .and. (y11+disttol < y22-disttol) &
+            .and. (y12+disttol < y21-disttol) .and. (y12+disttol < y22-disttol)) then 
+                isoverlapping = .false. 
+        elseif ((y21+disttol < y11-disttol) .and. (y21+disttol < y12-disttol) &
+            .and. (y22+disttol < y11-disttol) .and. (y22+disttol < y12-disttol)) then 
+                isoverlapping = .false.    
+        end if
+
+       ! if ( (max(x11, x12)+disttol < min(x21, x22)-disttol) .or. &
+       !     (max(x21, x22)+disttol < min(x11, x12)-disttol) ) then 
+       !     isoverlapping = .false. 
+       ! elseif ( (max(y11, y12)+disttol < min(y21, y22)-disttol) .or. &
+       !     (max(y21, y22)+disttol < min(y11, y12)-disttol) ) then 
+       !     isoverlapping = .false.
+       ! end if 
+
+    end function
+
+    ! Edge overlap checker
+    function CheckEdgeOverlap1D(x11, y11, x12, y12, x21, y21, &
+        x22, y22) result(isoverlapping)
+
+        ! Description
+        !============
+        ! This function checks whether two edges 'overlap', in the 
+        ! sense that the boxes formed around these edges overlap. The 
+        ! boxes have edges parallel with the axes. 
+
+        ! Algorithm
+        !==========
+        ! For two boxes to not overlap, the common set of points of the 
+        ! x-interval of both boxes should be the empty set (or the same
+        ! for the y-interval). We hedge for distance precision tolerance
+        ! as defined by macheps (i.e. we make the intervals disttol 
+        ! larger on each side
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in), dimension(:)  :: x11, y11, x12, y12
+        real(R8), intent(in)                :: x21, y21, x22, y22
+        logical, allocatable, dimension(:)  :: isoverlapping
+
+        ! Auxiliary
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Check boxes
+        !============
+        ! Initialize
+        allocate(isoverlapping(size(x11)))
+        isoverlapping = .true. 
+
+        ! x-interval
+        do i = 1, size(x11)
+                if ((x11(i)+disttol < x21-disttol) .and. (x11(i)+disttol < x22-disttol) &
+                .and. (x12(i)+disttol < x21-disttol) .and. (x12(i)+disttol < x22-disttol)) then 
+                    isoverlapping(i) = .false. 
+            elseif ((x21+disttol < x11(i)-disttol) .and. (x21+disttol < x12(i)-disttol) &
+                .and. (x22+disttol < x11(i)-disttol) .and. (x22+disttol < x12(i)-disttol)) then 
+                    isoverlapping(i) = .false. 
+            elseif  ((y11(i)+disttol < y21-disttol) .and. (y11(i)+disttol < y22-disttol) &
+                .and. (y12(i)+disttol < y21-disttol) .and. (y12(i)+disttol < y22-disttol)) then 
+                    isoverlapping(i) = .false. 
+            elseif ((y21+disttol < y11(i)-disttol) .and. (y21+disttol < y12(i)-disttol) &
+                .and. (y22+disttol < y11(i)-disttol) .and. (y22+disttol < y12(i)-disttol)) then 
+                    isoverlapping(i) = .false.    
+            end if
+        end do 
+        
+        !where ((x11+disttol < x21-disttol) .and. (x11+disttol < x22-disttol) &
+        !    .and. (x12+disttol < x21-disttol) .and. (x12+disttol < x22-disttol))  
+        !        isoverlapping = .false. 
+        !end where 
+        !where ((x21+disttol < x11-disttol) .and. (x21+disttol < x12-disttol) &
+        !    .and. (x22+disttol < x11-disttol) .and. (x22+disttol < x12-disttol))  
+        !        isoverlapping = .false. 
+        !end where 
+        !where  ((y11+disttol < y21-disttol) .and. (y11+disttol < y22-disttol) &
+        !    .and. (y12+disttol < y21-disttol) .and. (y12+disttol < y22-disttol))  
+        !        isoverlapping = .false. 
+        !end where 
+        !where ((y21+disttol < y11-disttol) .and. (y21+disttol < y12-disttol) &
+        !    .and. (y22+disttol < y11-disttol) .and. (y22+disttol < y12-disttol))  
+        !        isoverlapping = .false.    
+        !end where
+
+       ! if ( (max(x11, x12)+disttol < min(x21, x22)-disttol) .or. &
+       !     (max(x21, x22)+disttol < min(x11, x12)-disttol) ) then 
+       !     isoverlapping = .false. 
+       ! elseif ( (max(y11, y12)+disttol < min(y21, y22)-disttol) .or. &
+       !     (max(y21, y22)+disttol < min(y11, y12)-disttol) ) then 
+       !     isoverlapping = .false.
+       ! end if 
 
     end function
 
