@@ -111,7 +111,7 @@ BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_I
 SUITESPARSEPATH = /usr/include/suitesparse
 
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS_DEF = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -fopenmp -Wno-uninitialized
+CFLAGS_DEF = -c -pg -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -fopenmp -Wno-uninitialized
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
@@ -122,12 +122,12 @@ CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
 ## CC           : Compiler to be used for C
 CC = gcc 
 
-CCFLAGS_DEF = -c -g -Wall -O0 
+CCFLAGS_DEF = -pg -c -g -Wall -O0 
 
 ## % Linker
 ## %=======
 ## LFLAGS			: linking flags to be used (apart from libraries)
-LFLAGS_DEF =   -fcheck=all -fopenmp
+LFLAGS_DEF =   -pg -fcheck=all -fopenmp
 ## LFLAGS_DEBUG 	: linking flags for debugging
 LFLAGS_DEBUG = -pg -g -fcheck=all
 
