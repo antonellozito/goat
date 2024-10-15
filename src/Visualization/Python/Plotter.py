@@ -479,7 +479,8 @@ def PlotTopologicalMesh(topomesh, fignum):
     # Plot the vertices
     #------------------
     # Plot per vertex type
-    regular = np.where(topomesh.vert.type == 0) 
+    regular = np.where(topomesh.vert.type == gt.TMvertexregularID) 
+    bnd = np.where(topomesh.vert.type == gt.TMvertexbndID)
     split = np.where(topomesh.vert.type == gt.TMvertexsplitID) 
     minima = np.where(topomesh.vert.type == gt.TMvertexminID)
     saddle = np.where(topomesh.vert.type == gt.TMvertexsaddleID)
@@ -498,6 +499,8 @@ def PlotTopologicalMesh(topomesh, fignum):
         marker='x', label='field tangency point type 2')
     PlotPoints2DWithID(topomesh.vert.x[regular], topomesh.vert.y[regular], topomesh.vert.ID[regular], fignum, color='k', 
         marker='.', label='regular vertex')
+    PlotPoints2DWithID(topomesh.vert.x[bnd], topomesh.vert.y[bnd], topomesh.vert.ID[bnd], fignum, color='k', 
+        marker='.', label='bnd vertex')
     PlotPoints2DWithID(topomesh.vert.x[split], topomesh.vert.y[split], topomesh.vert.ID[split], fignum, color='g', 
         marker='d', label='splitted face vertex')
     
@@ -543,6 +546,170 @@ def PlotTopologicalMesh(topomesh, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+# Topological cell plotting
+def PlotTopologicalMeshCells(topomesh, fignum):
+    # Description
+    #------------
+    # Separate routine to plot topological mesh cells in order not to
+    # overburden the standard plot
+    maxcellvert = 1000
+    thisrange = np.arange(0, topomesh.cell.ntot, 1)
+    thisrange = [36]
+    for i in thisrange:
+        index = np.arange(0, len(topomesh.cell.data[i].x), len(topomesh.cell.data[i].x)/maxcellvert, dtype=int)
+        #PlotPolygons2D(topomesh.cell.data[i].x[index], topomesh.cell.data[i].y[index], fignum)
+        PlotPolygons2D(topomesh.cell.data[i].x, topomesh.cell.data[i].y, fignum)
+
+# Grid generation data plotting: face vertex distributions
+def PlotGGTMDataFaceVertexDistribution(ggtmdata, topomesh, fignum):
+    # Plot all vertices that were distributed on faces only
+   
+    # Plot per face type
+    pf = np.where(topomesh.face.type == gt.TMfacepolID)
+    rf = np.where(topomesh.face.type == gt.TMfaceradID)
+    bndf = np.where(topomesh.face.type == gt.TMfacebndID)
+    sepf = np.where(topomesh.face.type == gt.TMfacesepID)
+
+    for i in pf[0]:
+        if not (ggtmdata.face[i].ID == 0):
+            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
+                fignum, color='r', marker='.')
+    for i in rf[0]:
+        if not (ggtmdata.face[i].ID == 0):
+            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
+                fignum, color='g', marker='.')
+    for i in bndf[0]:
+        if not (ggtmdata.face[i].ID == 0):
+            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
+                fignum, color='k', marker='.')
+    for i in sepf[0]:
+        if not (ggtmdata.face[i].ID == 0):
+            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
+                fignum, color='m', marker='.')
+        
+    # Check bounds
+    xb = [np.Infinity, -np.Infinity]
+    yb = [np.Infinity, -np.Infinity]
+    for i in np.arange(0, topomesh.face.ntot, 1):
+        xb[0] = np.min([xb[0], np.min(topomesh.face.data[i].x)])
+        xb[1] = np.max([xb[1], np.max(topomesh.face.data[i].x)])
+        yb[0] = np.min([yb[0], np.min(topomesh.face.data[i].y)])
+        yb[1] = np.max([yb[1], np.max(topomesh.face.data[i].y)])
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('topomesh face vertex distribution')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+# Grid generation data plotting: cell vertex distributions
+def PlotGGTMDataCellVertexDistribution(ggtmdata, topomesh, fignum):
+    # Plot all vertices that were distributed on cells only
+
+    # Initialize plotting bounds
+    xb = [np.Infinity, -np.Infinity]
+    yb = [np.Infinity, -np.Infinity]
+
+    # Loop over all cells
+    for thiscell in ggtmdata.cell:
+        # Plot high field line and low field line
+        PlotPolygons2DQuiver(thiscell.hfline.x, thiscell.hfline.y, fignum, color='r')
+        PlotPolygons2DQuiver(thiscell.lfline.x, thiscell.lfline.y, fignum, color='g')
+
+        # Plot all other lines
+        for thisline in thiscell.lines: 
+            PlotPolygons2DQuiver(thisline.x, thisline.y, fignum, color='b')
+        
+    # Check bounds
+    
+    for i in np.arange(0, topomesh.face.ntot, 1):
+        xb[0] = np.min([xb[0], np.min(topomesh.face.data[i].x)])
+        xb[1] = np.max([xb[1], np.max(topomesh.face.data[i].x)])
+        yb[0] = np.min([yb[0], np.min(topomesh.face.data[i].y)])
+        yb[1] = np.max([yb[1], np.max(topomesh.face.data[i].y)])
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('topomesh face vertex distribution')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+# Grid generation data plotting: vertices
+def PlotGridVertices(grid, fignum):
+    # Plot vertices only
+    
+    # Initialize plotting bounds
+    xb = [min(grid.vert.x), max(grid.vert.x)]
+    yb = [min(grid.vert.y), max(grid.vert.y)]
+
+    # Make plot
+    PlotPoints2D(grid.vert.x, grid.vert.y, fignum, color='k', marker='.')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+
+# Grid generation data plotting: faces
+def PlotGridFaces(grid, fignum):
+    # Plot faces only
+
+    # Initialize plotting bounds
+    xb = [min(grid.vert.x), max(grid.vert.x)]
+    yb = [min(grid.vert.y), max(grid.vert.y)]
+
+    # Construct face coordinates
+    xf = np.zeros(grid.face.ntot*3, dtype=float)
+    yf = np.zeros(grid.face.ntot*3, dtype=float)
+
+    for i in np.arange(0, grid.face.ntot): 
+        xf[3*i] = grid.vert.x[grid.face.v1[i]-1]
+        xf[3*i+1] = grid.vert.x[grid.face.v2[i]-1]
+        xf[3*i+2] = np.NaN 
+        yf[3*i] = grid.vert.y[grid.face.v1[i]-1]
+        yf[3*i+1] = grid.vert.y[grid.face.v2[i]-1]
+        yf[3*i+2] = np.NaN 
+    
+    # Plot
+    PlotPolygons2D(xf, yf, fignum, color='k', marker='')
+
+# Grid generation data plotting: cells
+def PlotGridCells(grid, fignum):
+    # Plot cells only
+
+    # Initialize plotting bounds
+    xb = [min(grid.vert.x), max(grid.vert.x)]
+    yb = [min(grid.vert.y), max(grid.vert.y)]
+
+    # Construct cell coordinates
+    xc = np.zeros(grid.cell.nvert + 2*grid.cell.ntot, dtype=float)
+    yc = np.zeros(grid.cell.nvert + 2*grid.cell.ntot, dtype=float)
+
+    counter = 0
+    for i in np.arange(0, grid.cell.ntot): 
+        nvc = grid.cell.vp2[i]
+        tv = grid.cell.GetVert(i)-1
+        xc[counter:counter+nvc] = grid.vert.x[tv]
+        xc[counter+nvc] = grid.vert.x[tv[0]]
+        xc[counter+nvc+1] = np.NaN
+        yc[counter:counter+nvc] = grid.vert.y[tv]
+        yc[counter+nvc] = grid.vert.y[tv[0]]
+        yc[counter+nvc+1] = np.NaN
+
+        counter = counter + nvc + 2
+    
+    # Plot
+    PlotPolygons2D(xc, yc, fignum, color='k', marker='')
+
+     # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+    
 
 #--------------------------------------------------------------------------#
 #                             Shape Optimization                           #
@@ -854,9 +1021,6 @@ def Plot2DSurfaceDataContour(filepath, fignum, **plotargs):
     # Add colorbar
 
 
-
-    
-
 #==========================================================================#
 #                                                                          #
 #                           GENERAL PLOTTING ROUTINES                      #
@@ -878,6 +1042,23 @@ def PlotPolygons2D(x, y, fignum, **plotargs):
     #for i, txt in enumerate(myrange):
     #    ax.annotate(txt, (x[i], y[i]))
     #plt.draw()
+
+def PlotPolygons2DQuiver(x, y, fignum, **plotargs):
+    # Same as PlotPolygons2D, but now we plot arrows between the 
+    # different nodes according to the polygon orientation
+
+    # Set the current figure
+    plt.figure(fignum)
+
+    # Plot the data as a polygon plot
+    #fig, ax = plt.subplots()
+    plt.plot(x, y, **plotargs)
+
+    # Plot displacement vector
+    dx = -(x[0:len(x)-1] - x[1:len(x)])
+    dy = -(y[0:len(y)-1] - y[1:len(y)])
+    plt.quiver(x[0:len(x)-1], y[0:len(y)-1], dx, dy, 
+        **plotargs, angles='xy', scale_units='xy', scale=1)
 
 def PlotPolygonData(filepath, fignum, **plotargs):
     # Read data
@@ -942,6 +1123,21 @@ def PlotGeneral2DContour(x, y, z, fignum, **plotargs):
     fig = plt.figure(fignum)
     CS = plt.tricontour(x, y, z, **plotargs)
     cbar = fig.colorbar(CS)
+    plt.draw()
+
+def PlotGeneral2DPatch(x, y, fignum):
+    # General z = f(x, y) surface plotter - may be expensive since
+    # a triangulation is created under the hood. 
+
+    # Set the current figure
+    fig = plt.figure(fignum)
+    ax = fig.axes 
+    if len(ax) == 0:
+        ax = fig.add_subplot()
+    this = np.zeros((len(x), 2), dtype=float)
+    this[:, 0] = x 
+    this[:, 1] = y
+    ax.add_patch(mpl.patches.PathPatch(mpl.path.Path(this)))
     plt.draw()
 
 #==========================================================================#

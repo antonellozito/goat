@@ -335,13 +335,508 @@ def ReadTopomeshFile(filepath):
             break 
         else: 
             i = i + 1
+    
+    # Read total amount of cells
+    i = i + 1
+    ntot = np.fromstring(alllines[i], dtype=int, count=3, sep=' ')
+    topomesh.cell.ntot = ntot[0]
+    topomesh.cell.nvert = ntot[1]
+    topomesh.cell.nface = ntot[2]
+    
+    # Initialize fields
+    topomesh.cell.Initialize(topomesh.cell.ntot, topomesh.cell.nvert, topomesh.cell.nface)
 
+    # Skip header
+    i = i + 2
 
+    # Read vertex data
+    for j in np.arange(0, topomesh.cell.ntot, 1):
+        # Split the string
+        values = alllines[i+j].split()
 
+        # Add the values
+        topomesh.cell.ID[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+        topomesh.cell.nc[j] = np.fromstring(values[1], dtype=int, count=1, sep=' ')
 
+    # Update file position
+    i = i + topomesh.cell.ntot-1
+
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "cell vertices" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read vertex data
+    for j in np.arange(0, topomesh.cell.nvert, 1):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        topomesh.cell.vert[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "cell vertex pointer" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read vertex data
+    for j in np.arange(0, topomesh.cell.ntot, 1):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        tv = np.fromstring(values[0], dtype=int, count=2, sep=' ')
+        topomesh.cell.vertP[j, 0:2] = tv
+
+    # Read cell coordinates
+    #----------------------
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "cell polygons" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read coordinates
+    allfound = False 
+    if topomesh.cell.ntot == 0:
+        allfound = True
+    counter = 0
+    while (i < len(alllines)) and (not allfound):
+        # Read until we find 'cell'
+        if "cell" in alllines[i]:
+            # Get cell ID
+            values = alllines[i].split()
+            fID = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+            fID = fID[0] - 1 
+            counter = counter + 1
+            if (counter == topomesh.cell.ntot):
+                allfound = True 
+
+            # Update position
+            i = i + 1
+
+            # Read nc coordinates
+            topomesh.cell.data[fID].Initialize(topomesh.cell.nc[fID])
+            for k in np.arange(0, topomesh.cell.nc[fID], 1):
+                values = alllines[i+k].split()
+                this = np.fromstring(values[0], dtype=float, count=1)
+                topomesh.cell.data[fID].x[k] = np.fromstring(values[0], dtype=float, count=1, sep=' ')
+                topomesh.cell.data[fID].y[k] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+
+            # Update position
+            i = i + topomesh.cell.nc[fID]
+        else: 
+            i = i + 1 
 
     # Return 
     return topomesh 
+
+def ReadGGTMDataFile(filepath):
+    # Description
+    #------------
+    # Read in the grid generation data of a topological mesh by reading 
+    # the ggtmdata file (format specific here)
+    ggtmdata = gt.GGTMData()
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read basic face and cell data
+    i = 0
+    while i < len(alllines):
+        if "faces" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+    i = i + 1
+    values = alllines[i].split()
+    nftot = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nf = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+    nf = nf[0]
+
+    i = 0
+    while i < len(alllines):
+        if "cells" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+    i = i + 1
+    values = alllines[i].split()
+    nctot = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nc = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+    nc = nc[0]
+
+    # Initialize
+    ggtmdata.Initialize(nftot[0], nctot[0])
+
+    # Read in face data
+    #------------------
+    # Get the face header
+    i = 0 # reset counter to start from beginning
+    while i < len(alllines):
+        if "faces" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Read until ID header is found
+    while i < len(alllines):
+        if "ID, nc" in alllines[i]:
+            break 
+        else:
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read face data 
+    for j in np.arange(0, nf):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        ID = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+        ID = ID[0]
+        nv = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+        nv = nv[0]
+        ggtmdata.face[ID-1].nv = nv
+        ggtmdata.face[ID-1].ID = ID
+
+    # Update position
+    i = i + nf - 1
+
+    # Get the face coordinates
+    while i < len(alllines): 
+        if "face coordinates" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read 
+    counter = 0
+    while (i < len(alllines)) and (counter < nf):
+        # Read until we find 'face'
+        if "face" in alllines[i]:
+            # Get face ID
+            values = alllines[i].split()
+            fID = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+            fID = fID[0] - 1 
+            counter = counter + 1
+
+            # Update position
+            i = i + 1
+
+            # Read nc coordinates
+            ggtmdata.face[fID].Initialize(ggtmdata.face[fID].nv, ggtmdata.face[fID].ID)
+            for k in np.arange(0, ggtmdata.face[fID].nv, 1):
+                values = alllines[i+k].split()
+                ggtmdata.face[fID].vert[k] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                ggtmdata.face[fID].x[k] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+                ggtmdata.face[fID].y[k] = np.fromstring(values[2], dtype=float, count=1, sep=' ')
+
+            # Update position
+            i = i + ggtmdata.face[fID].nv
+        else: 
+            i = i + 1 
+
+    # Read cell data
+    #---------------
+    # Get the cell header
+    i = 0 # reset counter to start from beginning
+    while i < len(alllines):
+        if "cells" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Read until ID header is found
+    while i < len(alllines):
+        if "ID, srf, erf, cell line size" in alllines[i]:
+            break 
+        else:
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read cell data 
+    for j in np.arange(0, nc):
+        # Split the string
+        values = alllines[i+j].split()
+
+        # Add the values
+        ID = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+        ID = ID[0]
+        ggtmdata.cell[ID-1].ID = ID
+        srf = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+        erf = np.fromstring(values[2], dtype=int, count=1, sep=' ')
+        nl = np.fromstring(values[3], dtype=int, count=1, sep=' ')
+        ggtmdata.cell[ID-1].srf = srf[0]
+        ggtmdata.cell[ID-1].erf = erf[0]
+        ggtmdata.cell[ID-1].nl = nl[0]
+        
+    # Update file position
+    i = i + nc-1
+
+    # Get header position
+    while i < len(alllines): 
+        if "cell lines" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read line data
+    counter = 0
+    while (i < len(alllines)) and (counter < nc):
+        # Read until we find 'cell'
+        if "cell" in alllines[i]:
+            # Get cell ID
+            values = alllines[i].split()
+            fID = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+            fID = fID[0] - 1 
+            counter = counter + 1
+
+            # Read nl lines
+            ggtmdata.cell[fID].Initialize(ggtmdata.cell[fID].nl-2, ggtmdata.cell[fID].ID)
+            for k in np.arange(0, ggtmdata.cell[fID].nl+2, 1):
+                # Update position
+                i = i + 1
+
+                # Read size of line
+                values = alllines[i].split()
+
+                # Initialize line
+                nv = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                nv = nv[0]
+                line = gt.GGTMLine()
+                line.Initialize(nv)
+
+                # Read 
+                for cc in np.arange(0, nv, 1): 
+                    values = alllines[i+cc+1].split()
+                    line.vert[cc] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                    line.x[cc] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+                    line.y[cc] = np.fromstring(values[2], dtype=float, count=1, sep=' ')
+
+                # Add line
+                if k == 0:
+                    # First line -> hfline
+                    ggtmdata.cell[fID].hfline = line
+                elif k == ggtmdata.cell[fID].nl+1:
+                    # Last line -> lfline
+                    ggtmdata.cell[fID].lfline = line
+                else:
+                    # intermediate line
+                    ggtmdata.cell[fID].lines[k-1] = line
+
+                # Update position
+                i = i + nv
+
+        else: 
+            i = i + 1 
+
+    # Return
+    return ggtmdata
+
+def ReadGGGridDataFile(filepath):
+    # Description
+    #------------
+    # This routine reads in the grid data from an intermediate grid 
+    # generator grid object. This is not the same as the full grid
+    # that is used in the grid deformation module.
+
+    # Initialize
+    grid = gt.GGGrid()
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read vertex data
+    #-----------------
+    i = 0
+    while i < len(alllines):
+        if "vertices" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of vertices
+    values = alllines[i].split()
+    nv = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nv = nv[0]
+
+    # Initialize vertex structure
+    grid.vert.Initialize(nv)
+
+    # Read vertex data
+    while i < len(alllines):
+        if "ID, x, y, fieldlineID" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nv):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        x = np.fromstring(values[1], dtype=float, count=1, sep =' ')
+        y = np.fromstring(values[2], dtype=float, count=1, sep =' ')
+        fID = np.fromstring(values[3], dtype=int, count=1, sep =' ')
+        grid.vert.ID[ID-1] = ID
+        grid.vert.x[ID-1] = x[0]
+        grid.vert.y[ID-1] = y[0]
+        grid.vert.fieldlineID[ID-1] = fID[0] 
+
+    # Read in face data
+    #------------------
+    i = 0
+    while i < len(alllines):
+        if "faces" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of faces
+    values = alllines[i].split()
+    nf = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nf = nf[0]
+
+    # Initialize vertex structure
+    grid.face.Initialize(nf)
+
+    # Read vertex data
+    while i < len(alllines):
+        if "ID, v1, v2, label, region" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nf):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        v1 = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+        v2 = np.fromstring(values[2], dtype=int, count=1, sep =' ')
+        label = np.fromstring(values[3], dtype=int, count=1, sep =' ')
+        region = np.fromstring(values[4], dtype=int, count=1, sep =' ')
+        grid.face.ID[ID-1] = ID
+        grid.face.v1[ID-1] = v1[0]
+        grid.face.v2[ID-1] = v2[0]
+        grid.face.label[ID-1] = label[0] 
+        grid.face.region[ID-1] = region[0]
+
+    # Read in cell data
+    #------------------
+    i = 0
+    while i < len(alllines):
+        if "cells" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of cells and cell vertices
+    values = alllines[i].split()
+    nc = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    ncv = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+    nc = nc[0]
+    ncv = ncv[0]
+
+    # Initialize vertex structure
+    grid.cell.Initialize(nc, ncv)
+
+    # Read cell data
+    while i < len(alllines):
+        if "ID, vp1, vp2, region" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nc):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        v1 = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+        v2 = np.fromstring(values[2], dtype=int, count=1, sep =' ')
+        region = np.fromstring(values[3], dtype=int, count=1, sep =' ')
+        grid.cell.ID[ID-1] = ID
+        grid.cell.vp1[ID-1] = v1[0]-1 # Need to account for 0-based indexing
+        grid.cell.vp2[ID-1] = v2[0]
+        grid.cell.region[ID-1] = region[0]
+
+    # Read cell vertices
+    while i < len(alllines):
+        if "cell vertices" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read vertices
+    for j in np.arange(0, ncv):
+        values = alllines[i+j].split()
+        tv = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        tv = tv[0]
+        grid.cell.vert[j] = tv
+
+    # Return
+    return grid
+
+
+
+
+
 
     
 

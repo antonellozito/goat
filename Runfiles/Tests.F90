@@ -1296,7 +1296,7 @@ module GOAT_tests
         real(R8), allocatable           :: xgv(:), ygv(:), xg(:), yg(:), &
             vtest(:, :), cval(:), ea(:), xw(:), yw(:)
         integer(I8)                     :: nx, ny
-        integer(I8), allocatable        :: order(:) 
+        integer(I8), allocatable        :: order(:), eai(:)
         type(ContourUDT), allocatable   :: contours(:)
         type(RealDynamicArrayUDT)       :: xc, yc 
 
@@ -1328,11 +1328,11 @@ module GOAT_tests
         cval = [0.2, 0.8, -0.3]*1.0_R8
 
         ! Set saddle points (empty arrays)
-        allocate(ea(0), order(0))
+        allocate(ea(0), order(0), eai(0))
 
         ! Trace
         call TraceContoursStructured2D(vtest, xgv, ygv, cval, ea, ea, ea, &
-            order, contours)
+            eai, order, contours)
 
         ! Visualize
         !==========
@@ -1369,6 +1369,7 @@ module GOAT_tests
         use goatmod_types 
         use ggmod_topology2D 
         use goatmod_userinput
+        use ggmod_gridgeneration2D
         
         ! Declare variables
         !==================
@@ -1380,12 +1381,14 @@ module GOAT_tests
         integer(I8)                     :: nx, ny
         integer(I8), allocatable        :: order(:) 
         type(ContourUDT), allocatable   :: contours(:)
+        class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
         type(RealDynamicArrayUDT)       :: xc, yc 
         type(magneticFieldUDT)          :: magneticField 
         type(VesselUDT)                 :: vessel 
         type(TopomeshUDT)               :: topomesh 
         type(PLF2DClosedExactOptionsUDT)    :: plfoptions
         type(TopomeshOptionsUDT)        :: topoptions
+        type(GGOptionsUDT)              :: ggoptions
 
         ! Loop
         integer(I8)                     :: k 
@@ -1428,9 +1431,18 @@ module GOAT_tests
         topoptions%vresx = 400
         topoptions%vresy = 400
 
+        ! Set the default grid generation options
+        call ggoptions%SetDefaults()
+
         ! Construct topological mesh
         !===========================
-        topomesh = ConstructTopologicalMesh(vessel, magneticField, topoptions)       
+        call ConstructTopologicalMesh(vessel, magneticField, topoptions, &
+            topomesh, fieldtracer, vesseltracer)      
+            
+        ! Construct grid
+        !===============
+        call GenerateUnstructuredAlignedGrid(topomesh, magneticField, &
+            vessel, fieldtracer, vesseltracer, ggoptions)
 
     end subroutine
 

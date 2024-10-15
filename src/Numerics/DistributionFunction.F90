@@ -59,6 +59,24 @@ module DistributionFunction
 
     end type
 
+    ! Simple field evaluation based on interpolant
+    type, extends(DistributionFunctionUDT) :: Structured2DDFUDT
+
+        ! Description
+        !============
+        ! Distribution function that serves as a wrapper for a 2D
+        ! structured interpolant. May be usefule in some cases.
+
+        ! Fields
+        type(StructuredInterpolant2DUDT)    :: F 
+
+    contains 
+
+        ! Evaluation
+        procedure :: Evaluate       => EvaluateStructured2DDF
+
+    end type
+
     ! Regular distance function
     type, extends(DistributionFunctionUDT)  :: Structured2DDistanceDFUDT 
 
@@ -124,7 +142,6 @@ module DistributionFunction
         procedure :: Evaluate       => EvaluateStructuredPLF2DDistanceDF
 
     end type
-
 
     ! Polygonset and field based, 2D
     type, extends(DistributionFunctionUDT) :: Polygonset2DFieldDistanceDFUDT
@@ -240,6 +257,35 @@ module DistributionFunction
 
     end type
 
+    ! Coordinates, 2D
+    type, extends(DistributionFunctionUDT)  :: Coordinates2DDistanceDFUDT
+        
+        ! Description
+        !============
+        ! Simple distribution function based on decaying exponentials
+        ! defined in the set points xa, ya (at these points, the value
+        ! will be equal to fval). Decay lengths can be set to determine
+        ! how fast the value at those points approaches the value at    
+        ! infinitely far away from these points. 
+
+        ! Fields:
+        real(R8)                                :: b0
+
+        real(R8), allocatable                   :: xa(:), ya(:), &
+            coef(:), d0(:), a0(:)
+
+        character(:), allocatable               :: meth
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize     => InitializeCoordinates2DDistanceDF
+
+        ! Evaluation
+        procedure :: Evaluate       => EvaluateCoordinates2DDistanceDF
+
+    end type
+
     !==================================================================!
     !                                                                  !
     !                            INTERFACES                            !
@@ -319,6 +365,59 @@ module DistributionFunction
         call Write3DCoordinateData(xg, yg, vg, savefilepath)
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                     2D STRUCTURED INTERPOLANT                    !
+    !------------------------------------------------------------------!
+
+    ! Constructor
+    function ConstructStructured2DDF(interp) result(distribution)
+
+        ! Description
+        !============
+        ! Construct the distributor based on the given interpolant
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredInterpolant2DUDT), intent(in)   :: interp 
+        class(DistributionFunctionUDT), allocatable     :: distribution 
+
+        ! Initialize
+        !===========
+        allocate(Structured2DDFUDT::distribution)
+
+        select type(distribution)
+
+        type is (Structured2DDFUDT)
+
+            ! Add interpolant
+            distribution%F = interp
+
+        end select
+
+    end function 
+
+    ! Evaluation
+    subroutine EvaluateStructured2DDF(distribution, x, y, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Structured2DDFUDT)            :: distribution 
+        real(R8), intent(in)                :: x(:), y(:)
+        real(R8), intent(out)               :: v(size(x))
+
+        ! Evaluate
+        !=========
+        ! Just call interpolant evaluator
+        call distribution%F%Evaluate(x, y, 0, 0, v)
+
+    end subroutine 
 
     !------------------------------------------------------------------!
     !                         DISTANCE FUNCTION                        !
@@ -1198,6 +1297,162 @@ module DistributionFunction
             call gdErrorHandler('Unknown method')
 
         end select
+
+        ! Add constant component
+        v = v + b0
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                          COORDINATES, 2D                         !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCoordinates2DDistanceDF(distribution, &
+        xp, yp, val0, valinf, decaylength)
+
+        ! Description
+        !============
+        ! Initialization routine. The 'interp' structured interpolant
+        ! must be initialized and correctly set up. The argument 'val0'
+        ! is the value that the function achieves on the points xp, yp,
+        ! the value 'valinf' is achieved at locations very far of these 
+        ! points. 'decaylength' is a decay length of how fast val0 transitions 
+        ! to valinf. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Coordinates2DDistanceDFUDT)               :: distribution 
+        real(R8), intent(in)                            :: val0(:), valinf, &
+            decaylength(:), xp(:), yp(:)
+
+        ! Auxiliary
+        integer(I8)                                     :: flag, na
+
+        real(R8), parameter                             :: myone = 1
+        real(R8)                                        :: tempd
+        real(R8), allocatable                           :: d(:), b(:), &
+            bval(:), A(:, :), sol(:), fval(:)
+
+        ! Loop
+        integer(I8)                                     :: i, j
+
+        ! Set fields
+        !===========
+        ! Data
+        distribution%xa = xp 
+        distribution%ya = yp
+        distribution%a0 = val0
+        distribution%b0 = valinf 
+        distribution%d0 = decaylength
+
+        ! Associate
+        associate(&
+            a0      => distribution%a0,     &
+            b0      => distribution%b0,     &
+            d0      => distribution%d0)
+
+        ! Construct attractor function
+        !=============================
+        ! Determine number of attractor points
+        na = size(xp, 1)
+
+        ! Allocate
+        allocate(d(na), bval(na), b(na), A(na, na))
+
+        ! Construct rhs to compute attractor coefficients
+        b = a0 - b0
+
+        ! Compute lhs to compute attractor coefficients
+        A = 0
+        do j = 1, na
+            do i = 1, na
+                if (i /= 0) then 
+                    tempd = sqrt( (xp(i) - xp(j))**2 + (yp(i) - yp(j))**2)
+                    A(i, j) = exp(-tempd/d0(i))
+                else 
+                    A(i, j) = 1
+                end if 
+            end do 
+        end do
+
+        ! Call solver
+        allocate(sol(size(b)))
+        call SolveDenseLinearSystemDI(A, b, sol, flag)
+        if (flag /= 0) then
+            ! Call error
+            call gdErrorHandler('InitializeCoordinates1DDistanceDF: ' // &
+                'could not determine attractor function coefficients ' // &
+                'due to non-converging linear solver')
+        end if 
+
+        ! Add
+        !====
+        distribution%coef   = sol 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateCoordinates2DDistanceDF(distribution, x, y, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Coordinates2DDistanceDFUDT)       :: distribution 
+        real(R8), intent(in)                    :: x(:), y(:)
+        real(R8), intent(out)                   :: v(size(x))
+
+        ! Auxiliary
+        real(R8), parameter                     :: myone = 1
+        real(R8)                                :: d(size(x))
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Check sizes
+        if ( (size(v) /= size(x)) .or. (size(x) /= size(y))) then 
+            ! Throw error
+            call gdErrorHandler('EvaluatePolygonsetField2DDistanceDF: incompatible sizes in input')
+        end if 
+
+        ! Associate
+        associate(&
+            a0      => distribution%a0,     & 
+            c       => distribution%coef,   & 
+            b0      => distribution%b0,     & 
+            d0      => distribution%d0,     &
+            xa      => distribution%xa,     &
+            ya      => distribution%ya      &
+        )
+
+        ! Evaluate
+        !=========
+        ! Evaluate field values in coordinates
+        v = 0
+
+        do i = 1, size(xa)
+            ! Distance 
+            d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
+
+            ! Value
+            v = v + c(i)*exp(-d/d0(i))
+        end do
 
         ! Add constant component
         v = v + b0

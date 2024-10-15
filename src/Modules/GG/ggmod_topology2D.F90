@@ -66,6 +66,10 @@ module ggmod_topology2D
         ! Initializer
         procedure :: Initialize     => InitializeTopologicalMeshVertex
 
+        ! Getters
+        procedure :: GetFace        => GetTMVertFace 
+        procedure :: GetFaceNeig    => GetTMVertFaceNeig
+
     end type 
 
     ! Topological face
@@ -93,6 +97,9 @@ module ggmod_topology2D
         ! Initializer
         procedure :: Initialize     => InitializeTopologicalMeshFace
 
+        ! Getters
+        procedure :: GetCell        => GetTMFaceCell
+
     end type
 
     ! Topological cell
@@ -110,7 +117,44 @@ module ggmod_topology2D
         ! Initializer
         procedure :: Initialize     => InitializeTopologicalMeshCell
 
+        ! Getters
+        procedure :: GetVert        => GetTMCellVert
+        procedure :: GetFace        => GetTMCellFace 
+
     end type
+
+    ! Topological tubes
+    type :: TopomeshTubeUDT
+
+        ! Description
+        !============
+        ! Topological mesh tube object. This contains cells that are in 
+        ! the same flux tube. The faces that are in this flux tube are 
+        ! topological mesh faces that have the tube cells as boundaries.
+        ! Note that these tubes can only be constructed as a 
+        ! post-processing step after topological mesh construction. The
+        ! cell faces and cells present in the 'cell' and 'face' structure
+        ! are sorted after construction.  
+
+        integer(I8)                                 :: ncell, nface, ntot 
+        integer(I8), allocatable, dimension(:)      :: cell, face 
+        integer(I8), allocatable, dimension(:,: )   :: cellP, faceP
+        logical, allocatable, dimension(:)          :: isclosed 
+
+
+    contains
+    
+        ! Initializer
+        procedure :: Initialize     => InitializeTopologicalMeshTube
+
+        ! Deallocator
+        procedure :: Deallocate     => DeallocateTopologicalMeshTube
+
+        ! Getter
+        procedure :: GetFace        => GetTMTubeFace
+        procedure :: GetCell        => GetTMTubeCell
+
+    end type 
 
     ! General topological mesh type
     type :: TopomeshUDT 
@@ -118,7 +162,9 @@ module ggmod_topology2D
         type(TopomeshVertUDT)   :: vert 
         type(TopomeshFaceUDT)   :: face 
         type(TopomeshCellUDT)   :: cell 
+        type(TopomeshTubeUDT)   :: tube 
         integer(I8)             :: nfs 
+
     contains 
 
         ! Initialize
@@ -138,7 +184,8 @@ module ggmod_topology2D
     !------------------------------------------------------------------!
 
     ! Main constructor
-    function ConstructTopologicalMesh(vessel, magneticField, options) result(topomesh)
+    subroutine ConstructTopologicalMesh(vessel, magneticField, options, &
+        topomesh, fieldtracer, vesseltracer)
 
         ! Description
         !============
@@ -170,11 +217,11 @@ module ggmod_topology2D
         type(VesselUDT), intent(in)             :: vessel
         type(magneticFieldUDT), intent(in)      :: magneticField 
         type(TopomeshOptionsUDT), intent(in)    :: options
+        class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
 
         ! Auxiliary
-        class(ContourTracerUDT), allocatable    :: vesseltracer, fieldtracer
         real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
-            yps, xg, yg, Vf, Vv, xgv, ygv
+            yps, xg, yg, Vf, xgv, ygv
         real(R8), parameter                     :: emptyR8(0)= 0
         real(R8), allocatable, dimension(:)     :: xtp, ytp, Ftp, &
             xe, ye, fe
@@ -198,30 +245,15 @@ module ggmod_topology2D
         ! Construct a 2D structured grid for tracing (may be extended
         ! in the future for different grid types)
         nv = options%vresx*options%vresy
-        allocate(xg(nv), yg(nv), Vf(nv), Vv(nv), xgv(options%vresx), &
-            ygv(options%vresy))
+        allocate(xg(nv), yg(nv), xgv(options%vresx), ygv(options%vresy))
         call Construct2DStructuredUniformGrid(xg, yg, xgv, ygv, xb, yb, &
             options%vresx,  options%vresy, 0.0_R8, 0.0_R8)
-
-        ! Evaluate the field and vessel values
-        call vessel%plfvessel%Evaluate(xg, yg, 0, 0, Vv)
-        call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
-
-        ! Construct the vessel and magnetic field tracers (currently in 
-        ! structured format)
-        vesseltracer = ConstructStructuredTracer(&
-            reshape(Vv, [options%vresx, options%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8, emptyI8)
-        fieldtracer = ConstructStructuredTracer(&
-            reshape(Vf, [options%vresx, options%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8, emptyi8)
 
         ! Compute extrema
         !================
         ! Only for mesh refinement later on
         call TraceExtrema2D(xe, ye, fe, typee, fieldtracer, magneticField, &
             options%fdonewton)
-        
 
         ! Add extrema & related boundaries
         !=================================
@@ -242,8 +274,7 @@ module ggmod_topology2D
             options%vresx, options%vresy, [xtp, xe], [ytp, ye], 5, 5)  
 
         ! Evaluate magnetic field and vessel
-        deallocate(Vv, Vf)
-        allocate(Vv(size(xg)), Vf(size(xg)))
+        allocate(Vf(size(xg)))
         call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
 
         ! Update the field tracer 
@@ -290,6 +321,9 @@ module ggmod_topology2D
                 vessel, fieldtracer, options)
         end if 
 
+        ! Simplify
+        call SimplifyTopologicalMeshFaces(topomesh)
+
         ! Do temporary writing
         call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
 
@@ -316,7 +350,7 @@ module ggmod_topology2D
         !======
         call WriteTopologicalMesh(topomesh, 'topomesh')
 
-    end function
+    end subroutine
 
     ! Extrema addition
     subroutine AddTopologicalMeshExtrema(topomesh, fieldtracer, &
@@ -2985,11 +3019,11 @@ module ggmod_topology2D
         ! number of distinct flux surfaces
         topomesh%nfs = 0
 
-        ! Substructures
+        ! Substructures (tubes are initialized empty)
         call topomesh%vert%Initialize()
         call topomesh%face%Initialize()
         call topomesh%cell%Initialize()
-        
+        call topomesh%tube%Initialize(0, 0, 0)
 
     end subroutine
 
@@ -3047,6 +3081,64 @@ module ggmod_topology2D
         !===========
         tpcell%ntot = 0
         allocate(tpcell%ID(0))
+
+    end subroutine
+
+    subroutine InitializeTopologicalMeshTube(tptube, ntot, nface, ncell)
+
+        ! Description
+        !============
+        ! Initialize the topomesh tube structure (simply empty arrays)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshTubeUDT)      :: tptube 
+        integer(I8), intent(in)     :: ntot, nface, ncell 
+
+        ! Initialize
+        !===========
+        tptube%ntot = ntot
+        tptube%nface = nface
+        tptube%ncell = ncell
+        allocate(tptube%cell(ncell), tptube%face(nface), &
+            tptube%cellP(ntot, 2), tptube%faceP(ntot, 2), &
+            tptube%isclosed(ntot))
+
+    end subroutine
+
+    ! Deallocators
+    subroutine DeallocateTopologicalMeshTube(tptube)
+
+        ! Description
+        !============
+        ! Soft deallocation
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshTubeUDT)          :: tptube 
+
+        ! Deallocate
+        !===========
+        tptube%ntot = 0
+        tptube%nface = 0
+        tptube%ncell = 0
+        if (allocated(tptube%face)) then 
+            deallocate(tptube%face)
+        end if 
+        if (allocated(tptube%faceP)) then 
+            deallocate(tptube%faceP)
+        end if 
+        if (allocated(tptube%cell)) then 
+            deallocate(tptube%cell)
+        end if 
+        if (allocated(tptube%cellP)) then 
+            deallocate(tptube%cellP)
+        end if 
+        if (allocated(tptube%isclosed)) then 
+            deallocate(tptube%isclosed)
+        end if 
 
     end subroutine
 
@@ -3942,6 +4034,327 @@ module ggmod_topology2D
 
     end subroutine
 
+    ! Flux tube addition
+    subroutine AddTopologicalMeshTubes(topomesh, types)
+
+        ! Description
+        !============
+        ! This routine attempts to extract 'tubes' of cells (e.g. flux tubes for
+        ! fusion applications). These tubes are sequences of cells that have
+        ! exactly two faces of a certain topological type (or set of types). Tubes
+        ! are either closed (starting and ending at the same cell) or open
+        ! (starting and ending at boundary faces). If tubes can't be constructed,
+        ! the output is the empty struct. If some cells remain (i.e. some tubes
+        ! could not be constructed), a message is shown. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        integer(I8), intent(in)                 :: types(:)
+
+        ! Auxiliary
+        integer(I8)                             :: thistf, thisc, &
+            nextc, tc
+        integer(I8), allocatable, dimension(:)  :: tf, thesecells, &
+            tfc, thiscf
+        logical                                 :: isclosed, addtube, &
+            singlefacetube
+        logical, allocatable, dimension(:)      :: hasfacetype, &
+            hasfaces, iscellnotfound
+        type(IntegerDynamicArrayUDT)            :: tubef, tubec, &
+            ntubef, ntubec, isclosedtube, alltubef, alltubec
+
+        ! Loop
+        integer(I8)                             :: i, k, ct
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            face            => topomesh%face,   &
+            cell            => topomesh%cell    &
+            )
+
+
+        ! Get faces & cells
+        !==================
+        ! Check faces
+        allocate(hasfacetype(face%ntot))
+        hasfacetype = .false. 
+        do i = 1, size(types)
+            hasfacetype = hasfacetype .or. (face%type == types(i));
+        end do
+
+        ! Check cells
+        allocate(hasfaces(cell%ntot))
+        hasfaces = .false. 
+        do i = 1, cell%ntot
+            ! Get face cells
+            tf = GetTMCellFace(cell, i)
+            if (count(hasfacetype(tf)) == 2) then 
+                hasfaces(i) = .true.
+            end if 
+        end do 
+
+        ! Display warning if some cells were not found
+        if (any(.not. hasfaces)) then 
+            allocate(thesecells(count(.not. hasfaces)))
+            thesecells = pack([(k, k = 1, cell%ntot)], .not. hasfaces)
+            print *, 'The following cells do not have exactly two ' // & 
+                'tube faces and will not be part of a tube: ',  thesecells
+            deallocate(thesecells)
+        end if 
+
+        ! Construct tubes
+        !================
+        ! Initialize
+        iscellnotfound = hasfaces
+        ct = 0
+        ntubef = ConstructIntegerDynamicArray()
+        ntubec = ConstructIntegerDynamicArray()
+        alltubef = ConstructIntegerDynamicArray()
+        alltubec = ConstructIntegerDynamicArray()
+        isclosedtube = ConstructIntegerDynamicArray()
+
+        ! Loop
+        do while (.true.)
+            
+            ! Take the first cell
+            tc = findloc(iscellnotfound, .true., 1)
+            if (tc == 0) then 
+                ! all found, exit
+                exit 
+            end if 
+            iscellnotfound(tc) = .false.
+            
+            ! Initialize a new tube
+            tubef = ConstructIntegerDynamicArray()
+            tubec = ConstructIntegerDynamicArray()
+            isclosed = .false. 
+            singlefacetube = .false.
+            addtube = .true.
+
+            ! Append the cell
+            call tubec%Append(tc)
+            
+            ! Get the faces
+            tf = GetTMCellFace(cell, tc)
+            
+            ! Get only faces that have the type
+            tf = pack(tf, hasfacetype(tf))
+            
+            ! Sanity check
+            if (size(tf) /= 2) then 
+                call gdErrorHandler('AddTopologicalMeshTubes: did not ' // & 
+                    'find two faces for cell which should have two ' // & 
+                    'faces - this is a bug')
+            end if 
+
+            ! Check if both faces are the same - then don't trace, single cell tube
+            if (tf(1) == tf(2)) then 
+                isclosed = .true.
+                singlefacetube = .true.
+            end if 
+            
+            ! Take the first face and trace
+            thistf = tf(1)
+            thisc = tc
+            
+            ! Add if it is a single cell tube
+            if (singlefacetube) then 
+                call tubef%Append(tf)
+            end if 
+            
+            ! Loop untill all flux tube cells found from one side
+            do while (.true. .and. (.not. singlefacetube)) 
+                ! Add the current face before already found faces (to keep correct
+                ! order)
+                call tubef%Append(thistf)
+                
+                ! Is the face a boundary face? 
+                if (face%BF(thistf)) then 
+                    ! Exit
+                    exit 
+                end if 
+                
+                ! Get face cells (should be exactly two)
+                tfc = GetTMFaceCell(face, thistf)
+                if (size(tfc) /= 2 ) then 
+                    call gdErrorHandler('Did not find two cells for an ' // & 
+                        'inner face - this is a bug')
+                end if 
+                
+                ! Check which cell is next
+                if (tfc(1) /= thisc) then 
+                    nextc = tfc(1)
+                elseif (tfc(2) /= thisc) then 
+                    nextc = tfc(2) 
+                else 
+                    call gdErrorHandler('Did not find next cell - this ' // &
+                        'is a bug')
+                end if
+                
+                ! Check if this cell is marked, otherwise we need to stop here and
+                ! not add the flux tube
+                if (((.not. hasfaces(nextc)) .or. (.not. iscellnotfound(nextc))) &
+                    .and. (nextc /= tc))   then 
+                    print *, 'AddTopologicalMeshTubes: could not extract a tube'
+                    addtube = .false.
+                    exit 
+                end if 
+                
+                ! If we got here, we can safely add the cell and find the next face
+                thisc = nextc
+                if (nextc /= tc) then 
+                    call tubec%Insert(thisc, 1)
+                end if 
+                iscellnotfound(thisc) = .false.
+                
+                ! Find the next face
+                thiscf = GetTMCellFace(cell, thisc)
+                thiscf = pack(thiscf, hasfacetype(thiscf) .and. thiscf /= thistf)
+                
+                ! Sanity check
+                if (size(thiscf) > 1) then 
+                    call gdErrorHandler('AddTopologicalMeshTubes: too ' // & 
+                        'many faces found when trying to find next face')
+                elseif (size(thiscf) < 1) then 
+                    call gdErrorHandler('AddTopologicalMeshTubes: could ' // & 
+                        'not find next face')
+                end if 
+                thistf = thiscf(1)
+                
+                ! Is the face the same face as we started from? (closed tube)
+                if (thistf == tf(1)) then 
+                    isclosed = .true.
+                    call tubef%Insert(thistf, 1) ! add in front
+
+                    ! Exit
+                    exit 
+                end if 
+            end do 
+
+            ! Check if we should cycle
+            if (.not. addtube) then 
+                cycle 
+            end if 
+            
+            ! Take the second face and trace, unless we can't add the tube or the
+            ! tube is closed
+            thistf = tf(2)
+            thisc = tc
+            do while ((.true.) .and. (.not. isclosed))  
+                ! Add the current face after already found faces (to keep correct
+                ! order)
+                call tubef%Append(thistf)
+
+                ! Is the face a boundary face? 
+                if (face%BF(thistf)) then 
+                    ! Exit
+                    exit 
+                end if 
+
+                ! Get face cells (should be exactly two)
+                tfc = GetTMFaceCell(face, thistf)
+                if (size(tfc) /= 2 ) then 
+                    call gdErrorHandler('Did not find two cells for an ' // & 
+                        'inner face - this is a bug')
+                end if 
+                
+                ! Check which cell is next
+                if (tfc(1) /= thisc) then 
+                    nextc = tfc(1)
+                elseif (tfc(2) /= thisc) then 
+                    nextc = tfc(2) 
+                else 
+                    call gdErrorHandler('Did not find next cell - this ' // &
+                        'is a bug')
+                end if
+                
+                ! Check if this cell is marked, otherwise we need to stop here and
+                ! not add the flux tube
+                if (((.not. hasfaces(nextc)) .or. (.not. iscellnotfound(nextc))) &
+                    .and. (nextc /= tc))   then 
+                    print *, 'AddTopologicalMeshTubes: could not extract a tube'
+                    addtube = .false.
+                    exit 
+                end if 
+                
+                ! If we got here, we can safely add the cell and find the next face
+                thisc = nextc
+                if (nextc /= tc) then 
+                    call tubec%Append(thisc)
+                end if 
+                iscellnotfound(thisc) = .false.
+                
+                ! Find the next face
+                thiscf = GetTMCellFace(cell, thisc)
+                thiscf = pack(thiscf, hasfacetype(thiscf) .and. thiscf /= thistf)
+                
+                ! Sanity check
+                if (size(thiscf) > 1) then 
+                    call gdErrorHandler('AddTopologicalMeshTubes: too ' // & 
+                        'many faces found when trying to find next face')
+                elseif (size(thiscf) < 1) then 
+                    call gdErrorHandler('AddTopologicalMeshTubes: could ' // & 
+                        'not find next face')
+                end if 
+                thistf = thiscf(1)
+                
+            end do 
+            
+            ! Add data to the tube if possible
+            if (addtube) then 
+                ! Update counter
+                ct = ct + 1
+
+                ! Add number of faces and cells
+                call ntubef%Append(tubef%Size())
+                call ntubec%Append(tubec%Size())
+                if (isclosed) then 
+                    call isclosedtube%Append(1_I8)
+                else 
+                    call isclosedtube%Append(0_I8)
+                end if 
+
+                ! Add faces to total faces etc
+                call alltubef%Append(tubef%Get())
+                call alltubec%Append(tubec%Get())
+
+            end if 
+            
+        end do 
+
+        ! Construct
+        !==========
+        ! Ensure deallocation
+        call topomesh%tube%Deallocate()
+
+        ! Reallocate
+        call topomesh%tube%Initialize(ct, alltubef%Size(), alltubec%Size())
+
+        ! Set fields
+        topomesh%tube%face = alltubef%Get()
+        topomesh%tube%cell = alltubec%Get()
+        topomesh%tube%isclosed = isclosedtube%Get() == 1_I8
+        topomesh%tube%faceP(:, 2) = ntubef%Get()
+        topomesh%tube%cellp(:, 2) = ntubec%Get()
+        topomesh%tube%faceP(1, 1) = 1
+        topomesh%tube%cellP(1, 1) = 1
+        do i = 2, topomesh%tube%ntot 
+            topomesh%tube%faceP(i, 1) = topomesh%tube%faceP(i-1, 1) + &     
+                topomesh%tube%faceP(i-1, 2)
+            topomesh%tube%cellP(i, 1) = topomesh%tube%cellP(i-1, 1) + &     
+                topomesh%tube%cellP(i-1, 2)    
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
     ! Interconnection
     subroutine AddTopologicalMeshInterconnectionData(topomesh)
 
@@ -4057,6 +4470,11 @@ module ggmod_topology2D
                 v%BV(f%vert(i, :)) = .true. 
             end if 
         end do 
+
+        ! Tubes
+        !======
+        ! Flux tubes 
+        call AddTopologicalMeshTubes(topomesh, [TMfaceradID, TMfacebndID])
 
         ! Housekeeping
         !=============
@@ -4740,26 +5158,225 @@ module ggmod_topology2D
 
     end subroutine
 
+    ! Topomesh simplification
+    subroutine SimplifyTopologicalMeshFaces(topomesh)
+
+        ! Description
+        !============
+        ! This routine attempts to simplify the topological mesh by 
+        ! merging faces (and hence deleting vertices) if they would
+        ! form a single, unique face again. To achieve this, we loop 
+        ! over all vertices and check the following conditions:
+        ! - does the vertex only appear in two separate boundaries?
+        ! - are those two boundaries of the same type?
+        ! - is the vertex a regular or boundary vertex?
+        ! If all these conditions are met, the neighbouring faces may
+        ! be safely merged into a single face. Normally, this merging 
+        ! shouldn't be necessary, unless e.g. separatrix parts are 
+        ! removed during topological mesh trimming. This routine should
+        ! therefore be called after adding all boundaries to the 
+        ! topological mesh, but before adding cells and other data. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+
+        ! Auxiliary
+        integer(I8)                             :: nforig, tf(1:2)
+        integer(I8), allocatable, dimension(:)  :: rmvID, rmf1, rmf2, &
+            fvert 
+        logical, allocatable, dimension(:)      :: markv, markf, &
+            appearstwice
+        real(R8), allocatable, dimension(:)     :: tempx, tempy 
+        type(RealDynamicArrayUDT)               :: xda, yda 
+
+        ! Loop 
+        integer(I8)                             :: i, k 
+
+        ! Initialize
+        !===========
+        ! Keep looping until exit condition reached
+        do while (.true.) 
+
+            ! Store original sizes
+            nforig = topomesh%face%ntot
+
+            ! Mark vertices and faces for removal
+            allocate(markv(topomesh%vert%ntot), markf(topomesh%face%ntot), &
+                rmvID(0), rmf1(0), rmf2(0))
+            markv = .false. 
+            markf = .false.
+            do i = 1, topomesh%vert%ntot
+                ! Is it a regular or boundary vertex?
+                if ((.not. topomesh%vert%type(i) == TMvertexbndID) .and. &
+                    (.not. topomesh%vert%type(i) == 0)) then 
+                    cycle 
+                end if 
+
+                ! If it is, does it only appear twice in face%vert?
+                appearstwice = ((topomesh%face%vert(:, 1) == i) .or. (topomesh%face%vert(:, 2) == i))
+                if (.not. (count(appearstwice) == 2)) then 
+                    cycle 
+                end if 
+                tf = pack([(k, k = 1, topomesh%face%ntot)], appearstwice)
+
+                ! Are both faces not yet marked for deletion?
+                if (any(markf(tf))) then 
+                    cycle ! do in a next iteration
+                end if 
+
+                ! Do both boundaries have the same type and flux surface
+                ! ID? 
+                if (.not. (topomesh%face%type(tf(1)) == topomesh%face%type(tf(2)))) then 
+                    cycle
+                end if 
+                if (.not. (topomesh%face%fsID(tf(1)) == topomesh%face%fsID(tf(2)))) then 
+                    cycle
+                end if 
+
+                ! If we got here, we passed all checks. Mark for merging
+                ! and deletion
+                markv(i) = .true.
+                markf(tf) = .true. 
+                rmvID = [rmvID, i]
+                rmf1 = [rmf1, tf(1)]
+                rmf2 = [rmf2, tf(2)]
+
+            end do 
+
+            ! Check exit condition
+            if (count(markv) == 0) then 
+                exit 
+            end if 
+
+            ! Merge faces
+            !============
+            do i = 1, size(rmf1)
+                ! Check vertices
+                if (topomesh%face%vert(rmf1(i), 2) == rmvID(i)) then 
+                    ! First face is in good position 
+                    xda = topomesh%face%x(rmf1(i))
+                    yda = topomesh%face%y(rmf1(i))
+                    if (topomesh%face%vert(rmf2(i), 1) == rmvID(i)) then 
+                        ! Simply append 
+                        fvert = [topomesh%face%vert(rmf1(i), 1), &
+                            topomesh%face%vert(rmf2(i), 2)]
+                        call xda%Append(topomesh%face%x(rmf2(i))%Get())
+                        call yda%Append(topomesh%face%y(rmf2(i))%Get())
+
+                    elseif (topomesh%face%vert(rmf2(i), 2) == rmvID(i)) then 
+                        ! Need to flip second face
+                        fvert = [topomesh%face%vert(rmf1(i), 1), &
+                            topomesh%face%vert(rmf2(i), 1)]
+                        tempx = topomesh%face%x(rmf2(i))%Get()
+                        tempy = topomesh%face%y(rmf2(i))%Get()
+                        call xda%Append(tempx(size(tempx):1:-1))
+                        call yda%Append(tempy(size(tempy):1:-1))
+
+                    else 
+                        ! This is a bug
+                        call gdErrorHandler('SimplifyTopologicalMesh: ' // &
+                            'bug detected')
+                    end if 
+                elseif (topomesh%face%vert(rmf1(i), 1) == rmvID(i)) then 
+                    ! Need to flip first face
+                    tempx = topomesh%face%x(rmf1(i))%Get()
+                    tempy = topomesh%face%y(rmf1(i))%Get()
+                    tempx = tempx(size(tempx):1:-1)
+                    tempy = tempy(size(tempy):1:-1)
+                    xda = ConstructRealDynamicArray(tempx)
+                    yda = ConstructRealDynamicArray(tempy)
+                    if (topomesh%face%vert(rmf2(i), 1) == rmvID(i)) then 
+                        ! Simply append 
+                        fvert = [topomesh%face%vert(rmf1(i), 2), &
+                            topomesh%face%vert(rmf2(i), 2)]
+                        call xda%Append(topomesh%face%x(rmf2(i))%Get())
+                        call yda%Append(topomesh%face%y(rmf2(i))%Get())
+
+                    elseif (topomesh%face%vert(rmf2(i), 2) == rmvID(i)) then 
+                        ! Need to flip second face
+                        fvert = [topomesh%face%vert(rmf1(i), 2), &
+                            topomesh%face%vert(rmf2(i), 1)]
+                        tempx = topomesh%face%x(rmf2(i))%Get()
+                        tempy = topomesh%face%y(rmf2(i))%Get()
+                        call xda%Append(tempx(size(tempx):1:-1))
+                        call yda%Append(tempy(size(tempy):1:-1))
+                        
+                    else 
+                        ! This is a bug
+                        call gdErrorHandler('SimplifyTopologicalMesh: ' // &
+                            'bug detected')
+                    end if 
+                else 
+                    ! This is a bug
+                    call gdErrorHandler('SimplifyTopologicalMesh: ' // &
+                        'bug detected')
+                end if 
+
+                ! Add the new face
+                call AddTopologicalMeshFace(topomesh, fvert, &
+                    xda, yda, topomesh%face%type(rmf1(i)), topomesh%face%fsID(rmf1(i)))
+
+            end do 
+
+            ! Extend the face deletion vertices
+            markf = [markf, spread(.false., 1, topomesh%face%ntot - nforig)]
+
+            ! Delete the faces
+            call RemoveTopologicalMeshFaceLogical(topomesh, markf)
+
+            ! Delete the vertices
+            call RemoveTopologicalMeshVertexLogical(topomesh, markv)
+
+            ! Housekeeping
+            deallocate(markv, markf, rmvID, rmf1, rmf2)
+
+        end do 
+
+    end subroutine 
+
     ! Getters
     function GetTMVertFace(vert, i) result(res)
         integer(I8)                 :: i 
-        type(TopomeshVertUDT)       :: vert 
+        class(TopomeshVertUDT)      :: vert 
         integer(I8), allocatable    :: res(:)
         res = vert%face(vert%faceP(i, 1):(vert%faceP(i, 1) +  vert%faceP(i, 2) - 1))
     end function
 
     function GetTMCellVert(cell, i) result(res)
         integer(I8)                 :: i 
-        type(TopomeshCellUDT)       :: cell 
+        class(TopomeshCellUDT)      :: cell 
         integer(I8), allocatable    :: res(:)
         res = cell%vert(cell%vertP(i, 1):(cell%vertP(i, 1) + cell%vertP(i, 2) - 1))
     end function
 
     function GetTMCellFace(cell, i) result(res)
         integer(I8)                 :: i 
-        type(TopomeshCellUDT)       :: cell 
+        class(TopomeshCellUDT)      :: cell 
         integer(I8), allocatable    :: res(:)
         res = cell%face(cell%faceP(i, 1):(cell%faceP(i, 1) + cell%faceP(i, 2) - 1))
+    end function
+
+    function GetTMFaceCell(face, i) result(res)
+        integer(I8)                 :: i 
+        class(TopomeshFaceUDT)      :: face 
+        integer(I8), allocatable    :: res(:)
+        res = face%cell(face%cellP(i, 1):(face%cellP(i, 1) + face%cellP(i, 2) - 1))
+    end function
+
+    function GetTMTubeCell(tube, i) result(res)
+        integer(I8)                 :: i 
+        class(TopomeshTubeUDT)      :: tube 
+        integer(I8), allocatable    :: res(:)
+        res = tube%cell(tube%cellP(i, 1):(tube%cellP(i, 1) + tube%cellP(i, 2) - 1))
+    end function
+
+    function GetTMTubeFace(tube, i) result(res)
+        integer(I8)                 :: i 
+        class(TopomeshTubeUDT)      :: tube 
+        integer(I8), allocatable    :: res(:)
+        res = tube%face(tube%faceP(i, 1):(tube%faceP(i, 1) + tube%faceP(i, 2) - 1))
     end function
 
     function GetTMVertFaceNeig(vert, i, tf) result(res)
@@ -4774,7 +5391,7 @@ module ggmod_topology2D
         !==================
         ! Arguments
         integer(I8), intent(in)     :: i, tf 
-        type(TopomeshVertUDT)       :: vert 
+        class(TopomeshVertUDT)      :: vert 
         integer(I8), allocatable    :: res(:)
 
         ! Auxiliary
@@ -4795,6 +5412,149 @@ module ggmod_topology2D
             res = [tvfe(tfind), tvfe(tfind+2)]
         end if 
     end function
+
+    !------------------------------------------------------------------!
+    !                 TOPOLOGICAL MESH CELL OPERATORS                  !
+    !------------------------------------------------------------------!
+    ! Cell face sorter (CW or CCW)
+    subroutine SortTopologicalMeshCellFaces(topomesh, cellind, &
+        sortedfaces, sortedvertices, doflip)
+
+        ! Description
+        !============
+        ! This routine sorts the faces of a cell in arbitrary direction
+        ! (clockwise or counter-clockwise) and returns the sorted face
+        ! IDs (sortedfaces) and an indication whether the face 
+        ! coordinates should be flipped when querying the face from 
+        ! the topological mesh. This may be useful to post-process 
+        ! cells etc. Additionally, the vertices of the cell are also
+        ! returned (closed form, so first and last are the same).
+
+        ! Note: by construction, the cell faces should already be 
+        ! sorted correctly! 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        integer(I8), intent(in)                 :: cellind 
+        integer(I8), allocatable, intent(out)   :: sortedfaces(:), &
+            sortedvertices(:)
+        logical(I8), allocatable, intent(out)   :: doflip(:)
+
+        ! Auxiliary
+        integer(I8)                             :: startvert
+        integer(I8), allocatable, dimension(:)  :: tf, tfv
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            cell        => topomesh%cell,   &
+            face        => topomesh%face)
+
+        ! Unpack 
+        sortedfaces = GetTMCellFace(cell, cellind)
+        sortedvertices = GetTMCellVert(cell, cellind)
+        tf = sortedfaces
+
+        ! Initialize
+        if (allocated(doflip)) then 
+            deallocate(doflip)
+        end if 
+        allocate(doflip(size(sortedfaces)))
+        doflip = .false.
+
+        ! Loop
+        !=====
+        if (any(face%vert(tf(1), 1) == face%vert(tf(2), :))) then 
+            startvert = face%vert(tf(1), 1)
+            doflip(1) = .true. 
+        elseif (any(face%vert(tf(1), 2) == face%vert(tf(2), :))) then 
+            startvert = face%vert(tf(1), 2)
+            doflip(1) = .false. 
+        else 
+            call gdErrorHandler('SortTopologicalMeshCellFaces: unexpected error')
+        end if
+
+        do i = 2, size(tf)
+            tfv = face%vert(tf(i), :)
+            if (tfv(2) == startvert) then 
+                doflip(i) = .true. 
+                startvert = tfv(1)
+            elseif (tfv(1) == startvert) then 
+                doflip(i) = .false.
+                startvert = tfv(2)
+            else 
+                call gdErrorHandler('SortTopologicalMeshCellFaces: unexpected error')
+            end if 
+        end do 
+        
+
+
+        ! Housekeeping
+        !=============
+        end associate 
+
+    end subroutine
+
+    ! Full cell polygon coordinate constructor
+    subroutine ConstructTopologicalMeshCellPolygon(topomesh, cellind, &
+        xcda, ycda)
+
+        ! Description
+        !============
+        ! Construct the cell polygon by appending the face polygon
+        ! coordinates. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        integer(I8), intent(in)                 :: cellind
+        type(RealDynamicArrayUDT), intent(out)  :: xcda, ycda
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: sortedfaces, &
+            sortedvertices
+        real(R8), allocatable, dimension(:)     :: tempx, tempy 
+        logical, allocatable, dimension(:)      :: doflip
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Initialize dynamic arrays
+        xcda = ConstructRealDynamicArray()
+        ycda = ConstructRealDynamicArray()
+
+        ! Construct polygon
+        !==================
+        ! Sort the cell faces
+        call SortTopologicalMeshCellFaces(topomesh, cellind, sortedfaces, &
+            sortedvertices, doflip)
+
+        ! Loop over the faces 
+        do i = 1, size(sortedfaces)
+            ! Get face coordinates
+            tempx = topomesh%face%x(sortedfaces(i))%Get()
+            tempy = topomesh%face%y(sortedfaces(i))%Get()
+
+            ! Check
+            if (doflip(i)) then 
+                call xcda%Append(tempx(size(tempx):2:-1)) ! avoid double coordinates
+                call ycda%Append(tempy(size(tempy):2:-1))
+            else
+                call xcda%Append(tempx(2:size(tempx))) ! avoid double coordinates
+                call ycda%Append(tempy(2:size(tempy)))
+            end if 
+        end do 
+
+    end subroutine 
 
     !------------------------------------------------------------------!
     !                            AUXILIARY                             !
@@ -4907,44 +5667,9 @@ module ggmod_topology2D
 
     end function 
 
-    ! Contour clean-up
-    subroutine CleanContours(contours)
-
-        ! Description
-        !============
-        ! This routine cleans up the contours, i.e. it removes subsequent
-        ! points that are up to disttol coinciding. May be necessary
-        ! for later intersection computing etc. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(ContourUDT), intent(inout)        :: contours(:)
-
-        ! Auxiliary
-        logical, allocatable                    :: delind(:)
-        real(R8), allocatable                   :: dx(:), dy(:)
-
-        ! Loop
-        integer(I8)                             :: i 
-        
-        ! Clean
-        !======
-        do  i = 1, size(contours)
-            dx = contours(i)%x(2:size(contours(i)%x)) - &
-                contours(i)%x(1:size(contours(i)%x)-1)
-            dy = contours(i)%y(2:size(contours(i)%y)) - &
-                contours(i)%y(1:size(contours(i)%y)-1)
-            allocate(delind(size(dx)))
-            delind = (abs(dx) <= disttol) .and. (abs(dy) <= disttol)
-            if (any(delind)) then 
-                contours(i)%x = pack(contours(i)%x, [.true., .not. delind])
-                contours(i)%y = pack(contours(i)%y, [.true., .not. delind])
-            end if 
-            deallocate(delind)
-        end do 
-    end subroutine 
-
+    !------------------------------------------------------------------!
+    !                               I/O                                !
+    !------------------------------------------------------------------!
     ! Topological mesh data writer
     subroutine WriteTopologicalMesh(topomesh, filename)
 
@@ -4968,6 +5693,8 @@ module ggmod_topology2D
         ! <x, y> 
         ! 'cells'
         ! <cell%ntot,  cells%nvert, cells%nface> 
+        ! 'ID, cell polygon size>'
+        ! <ID, nc>
         ! 'cell vertices'
         ! <cell%vert>
         ! 'cell vertex pointer'
@@ -4976,6 +5703,18 @@ module ggmod_topology2D
         ! <cell%face> 
         ! 'cell face pointer'
         ! <cell%faceP(:, 1), cell%faceP(:, 2)>
+        ! 'cell polygon <nc>' (repeated nc times)
+        ! <x, y> 
+        ! 'tubes'
+        ! <tubes%ntot,  tubes%nface, tubes%ncell> 
+        ! 'tube faces'
+        ! <tube%face>
+        ! 'tube face pointer'
+        ! <tube%faceP(:, 1), tube%faceP(:, 2)>
+        ! 'tube cells'
+        ! <tube%cell>
+        ! 'tube cell pointer'
+        ! <tube%cellP(:, 1), tube%cellP(:, 2)>
         
         ! Declare variables
         !==================
@@ -4993,6 +5732,7 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)     :: xf, yf
         character(:), allocatable               :: dir
         logical, allocatable, dimension(:)      :: BV, BF
+        type(RealDynamicArrayUDT), allocatable  :: xcda(:), ycda(:)
 
         ! Loop
         integer(I8)                             :: i, j 
@@ -5003,7 +5743,8 @@ module ggmod_topology2D
         associate(&
             v       => topomesh%vert,   &
             f       => topomesh%face,   &
-            c       => topomesh%cell    &
+            c       => topomesh%cell,   &
+            t       => topomesh%tube    &
         )
 
         ! Construct writing directory
@@ -5098,6 +5839,18 @@ module ggmod_topology2D
         write (fu, *) 'cells'
         write (fu, *) c%ntot, cvsize, cfsize
 
+        ! Compute cell polygon data
+        allocate(xcda(c%ntot), ycda(c%ntot))
+        do i = 1, c%ntot
+            call ConstructTopologicalMeshCellPolygon(topomesh, i, xcda(i), ycda(i))
+        end do 
+
+        ! Cell data
+        write (fu, *) 'ID, nc'
+        do i = 1, c%ntot 
+            write (fu, *) i, xcda(i)%Size()
+        end do 
+
         ! Cell vertices
         write (fu, *) 'cell vertices'
         do i = 1, cvsize
@@ -5116,6 +5869,46 @@ module ggmod_topology2D
         write (fu, *) 'cell face pointer'
         do i = 1, c%ntot 
             write (fu, *) c%faceP(i, 1), c%faceP(i, 2)
+        end do 
+
+        ! Cell polygons
+        write (fu, *) 'cell polygons'
+        do i = 1, c%ntot 
+            ! Write header
+            write (fu, *) 'cell ', i 
+
+            ! Write coordinates
+            xf = xcda(i)%Get()
+            yf = ycda(i)%Get()
+            do j = 1, size(xf)
+                write(fu, *) xf(j), yf(j)
+            end do 
+        end do 
+
+        ! Write tube data
+        !================
+        ! Header and sizes
+        write (fu, *) 'tubes'
+        write (fu, *) t%ntot, t%nface, t%ncell 
+
+        ! Tube faces
+        write (fu, *) 'tube faces'
+        do i = 1, t%nface
+            write (fu, *) t%face(i)
+        end do 
+        write (fu, *) 'tube face pointer'
+        do i = 1, t%ntot 
+            write (fu, *) t%faceP(i, 1), t%faceP(i, 2)
+        end do 
+
+        ! Tube cells
+        write (fu, *) 'tube cells'
+        do i = 1, t%ncell
+            write (fu, *) t%cell(i)
+        end do 
+        write (fu, *) 'tube cell pointer'
+        do i = 1, t%ntot 
+            write (fu, *) t%cellP(i, 1), t%cellP(i, 2)
         end do 
 
         ! Housekeeping

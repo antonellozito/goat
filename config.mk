@@ -111,23 +111,23 @@ BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_I
 SUITESPARSEPATH = /usr/include/suitesparse
 
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS_DEF = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all
+CFLAGS_DEF = -c -pg -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -fopenmp -Wno-uninitialized
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
-CFLAGS_DEBUG = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all
+CFLAGS_DEBUG = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -fopenmp -Wno-uninitialized
 ## CFLAGS_OMP_DEBUG	: compiler flags for OpenMP and debugging
 CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
 
 ## CC           : Compiler to be used for C
 CC = gcc 
 
-CCFLAGS_DEF = -c -g -Wall -O0 
+CCFLAGS_DEF = -pg -c -g -Wall -O0 
 
 ## % Linker
 ## %=======
 ## LFLAGS			: linking flags to be used (apart from libraries)
-LFLAGS_DEF =   -fcheck=all 
+LFLAGS_DEF =   -pg -fcheck=all -fopenmp
 ## LFLAGS_DEBUG 	: linking flags for debugging
 LFLAGS_DEBUG = -pg -g -fcheck=all
 
@@ -170,7 +170,8 @@ MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
     $(wildcard src/Modules/GD/*.F90) \
     $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F) \
-    src/Modules/GG/ggmod_topology2D.F90
+    src/Modules/GG/ggmod_topology2D.F90 src/Modules/GG/ggmod_vertexdistribution2D.F90 \
+    src/Modules/GG/ggmod_gridgeneration2D.F90
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
 AUXILIARY_FILES =  src/Auxiliary/mod_sort.F90 \
@@ -181,7 +182,8 @@ AUXILIARY_FILES =  src/Auxiliary/mod_sort.F90 \
     src/Auxiliary/Interpolation/BicubicSplineInterpolant.F90 \
     src/Auxiliary/Interpolation/StructuredInterpolant2D.F90 \
     $(wildcard src/Auxiliary/Interpolation/*.F90) \
-    $(wildcard src/Auxiliary/Contour/*.F90)
+    $(wildcard src/Auxiliary/Contour/*.F90) \
+    src/Auxiliary/mod_streamlinetracing2D.F90 \
 
 ## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
 B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)

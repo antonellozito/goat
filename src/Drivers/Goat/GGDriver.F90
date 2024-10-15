@@ -12,6 +12,11 @@ subroutine GGDriver(goatoptions)
     use goatmod_types 
     use goatmod_userinput
     use ggmod_topology2D
+    use ggmod_gridgeneration2D
+    use mod_contour2D, only : ContourTracerUDT, ConstructStructuredTracer
+    use mod_streamlinetracing2D, only: StreamlineTracerUDT, &
+        ConstructStructuredStreamlineTracer
+    use mod_structured2Dgridding
 
     ! The usual
     implicit none 
@@ -30,6 +35,14 @@ subroutine GGDriver(goatoptions)
     
     ! Auxiliary
     type(TopomeshUDT)           :: topomesh
+    class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
+    class(StreamlineTracerUDT), allocatable :: streamlinetracer
+
+    real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
+        yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy
+    real(R8), parameter                     :: emptyR8(0)= 0
+    integer(I8)                             :: nv 
+    integer(I8), parameter                  :: emptyI8(0) = 0
 
     ! Initialize
     !===========
@@ -44,16 +57,54 @@ subroutine GGDriver(goatoptions)
     ggoptions%inputfilepath = goatoptions%inputfilepath 
     call ggoptions%Set()
 
+    ! Construct (initial) tracers
+    !============================
+    ! Determine domain bounds based on vessel and magnetic field extent
+    call environment%vessel%plfvessel%ps%GetVertices(xps, yps)
+    xb = [minval([xps, magneticField%interp%xgv]), maxval([xps, magneticField%interp%xgv])]
+    yb = [minval([yps, magneticField%interp%ygv]), maxval([yps, magneticField%interp%ygv])]
+
+    ! Construct a 2D structured grid for tracing (may be extended
+    ! in the future for different grid types)
+    nv = topomeshoptions%vresx*topomeshoptions%vresy
+    allocate(xg(nv), yg(nv), Vf(nv), Vv(nv), xgv(topomeshoptions%vresx), &
+        ygv(topomeshoptions%vresy))
+    call Construct2DStructuredUniformGrid(xg, yg, xgv, ygv, xb, yb, &
+        topomeshoptions%vresx,  topomeshoptions%vresy, 0.0_R8, 0.0_R8)
+
+    ! Evaluate the field and vessel values
+    allocate(Vfx(nv), Vfy(nv))
+    call environment%vessel%plfvessel%Evaluate(xg, yg, 0, 0, Vv)
+    call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
+    call magneticField%interp%Evaluate(xg, yg, 1, 0, Vfx)
+    call magneticField%interp%Evaluate(xg, yg, 0, 1, Vfy)
+
+    ! Field contours
+    fieldtracer = ConstructStructuredTracer(&
+        reshape(Vf, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
+        emptyR8, emptyR8, emptyR8, emptyi8)
+
+    ! Vessel contours
+    vesseltracer = ConstructStructuredTracer(&
+        reshape(Vv, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
+        emptyR8, emptyR8, emptyR8, emptyI8)
+
+    ! Orthogonal lines
+    streamlinetracer = ConstructStructuredStreamlineTracer(&
+        reshape(Vfx, [topomeshoptions%vresx, topomeshoptions%vresy]), &
+        reshape(Vfy, [topomeshoptions%vresx, topomeshoptions%vresy]), & 
+        xgv, ygv) 
+
     ! Generate the topological mesh
     !==============================
-    topomesh = ConstructTopologicalMesh(environment%vessel, magneticField, &
-        topomeshoptions)
+    call ConstructTopologicalMesh(environment%vessel, magneticField, &
+        topomeshoptions, topomesh, fieldtracer, vesseltracer)
 
     ! Generate the grid
     !==================
-    ! Run
-    !call RunGridOptimization(grid, magneticField, environment, &
-    !    gdoptions)
+    call GenerateUnstructuredAlignedGrid(topomesh, magneticField, &
+        environment%vessel, fieldtracer, vesseltracer, streamlinetracer, &
+        ggoptions)
 
     ! Write data
     !===========
