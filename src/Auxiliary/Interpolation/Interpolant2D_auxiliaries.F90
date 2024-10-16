@@ -208,26 +208,32 @@ module Interpolant2D_auxiliaries
             ! Outside of bin
             notfound = .false. 
             ind = 0
+            return 
+        end if
+
+        ! Check if there are NaNs - then return
+        if (isnan(xq)) then 
+            ind = 0
+            return 
         end if
 
         ! Check the first bin - equality holds for first value
-        if (notfound) then
-            if ((xq >= x(ind)) .and. (xq <= x(ind+1))) then
-                notfound = .false.
-                ind = 1
-            else
-                ! Not found, increase index
-                ind = ind+1
-            end if
+        if ((xq >= x(ind)) .and. (xq <= x(ind+1))) then
+            notfound = .false.
+            ind = 1
+            return 
+        else
+            ! Not found, increase index
+            ind = ind+1
         end if
 
-        ! Loop over the remaining bins
-        do while ((notfound) .and. (ind < nx))
+        do while ((ind < nx))
             if ((xq > x(ind)) .and. (xq <= x(ind+1))) then
                 ! Found, exit the loop
                 notfound = .false.
+                exit
             else 
-                ! Update ind
+               ! Update ind
                 ind = ind+1
             end if
         end do
