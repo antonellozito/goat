@@ -513,6 +513,8 @@ module ggmod_topology2D
         end do 
 
         ! Compute intersections
+        !$omp parallel do default(private) shared(fxp, fyp, magneticField, &
+        !$omp fxpeid, fxpsid, fxpsrid, fypeid, fypsid, fypsrid, xc, yc, fc, tc, ec, nfxc, nfyc)
         do i = 1, nfxc
             ! Only compute intersections with other polygons
             do j = 1, nfyc
@@ -569,6 +571,7 @@ module ggmod_topology2D
                     end if
 
                     ! Update counter
+                    !$omp critical
                     ec = ec + 1
 
                     ! Store intersection data
@@ -578,18 +581,22 @@ module ggmod_topology2D
                     call fypeid(j)%Append(ec)
                     call fypsid(j)%Append(ts2(k))
                     call fypsrid(j)%Append(tsr2(k))
+                    !$omp end critical
                 end do 
 
                 ! Append
+                !$omp critical
                 call xc%Append(tx)
                 call yc%Append(ty)
                 call fc%Append(tf)
                 call tc%Append(tt)
+                !$omp end critical
 
                 ! Housekeeping
                 deallocate(tt, tf, tfxx, tfyy, tfxy)
             end do 
         end do
+        !$omp end parallel do 
         
         ! Add extrema
         !============
@@ -742,11 +749,7 @@ module ggmod_topology2D
                         tempc, TMfaceradID, 0)
                 end if 
             end do 
-            ! Add to faces
-            !do j = 1, size(vf1)
-            !    call AddTopologicalMeshFace(topomesh, [vf1(j), vf2(j)], &
-            !        xfrda(j), yfrda(j), TMfaceradID, 0)
-            !end do 
+
         end do 
 
 
@@ -1272,6 +1275,7 @@ module ggmod_topology2D
         ! Trace contours
         !===============
         ! Add saddle point contours
+        !$omp parallel do default(shared) private(tc) 
         do i = 1, npsp
             if ((psptype(i) == 2) .and. tracepoints(i)) then 
                 ! Trace
@@ -1298,16 +1302,22 @@ module ggmod_topology2D
 
 
                 ! Add
+                !$omp critical
                 allc = [allc, tc]
                 call curvetypes%Append(spread(TMfacesepID, 1, size(tc)))
                 
                 ! Add flux surface ID
                 nfs = nfs + 1
                 call fsIDs%Append(spread(nfs, 1, size(tc)))
+                !$omp end critical
             end if 
         end do
+        !$omp end parallel do
 
         ! Add tangency point contours
+        !$omp parallel do default(private) shared(psptype, tracepoints, &
+        !$omp pspx, pspy, curvetypes, topomesh, vessel, fsIDs, fieldtracer, &
+        !$omp pspf, pspID, allc)
         do i = 1, npsp
             if ((psptype(i) == 5) .and. tracepoints(i)) then 
                 ! Trace
@@ -1339,6 +1349,7 @@ module ggmod_topology2D
                 ! Compute intersections with boundary faces
                 ntc = size(tc)
                 allocate(tcp(ntc))
+                !
                 do k = 1, ntc
                     ! Grow dynamically because I'm lazy
                     intI = ConstructIntegerDynamicArray()
@@ -1361,6 +1372,7 @@ module ggmod_topology2D
                             ! contours!
                             
                             ! Compute intersections
+                            !$omp critical
                             call PolygonIntersections(tcp(k), topomesh%face%pol(j), &
                                 xout, yout, vindI, vindJ, iout, jout)
                             
@@ -1432,6 +1444,7 @@ module ggmod_topology2D
                                         end if 
 
                                         ! Delete
+                                        
                                         call topomesh%face%x(j)%Remove(delind)
                                         call topomesh%face%y(j)%Remove(delind)
                                         
@@ -1441,15 +1454,20 @@ module ggmod_topology2D
                                     end if
                                     deallocate(keepind)
                                 end if
+                                
                             end if
+                            
                             
                             ! Add to intersections
                             if (size(vindI) > 0) then 
                                 call realI%Append(iout(size(iout)))
                                 call intI%Append(vindI(size(vindI)))
                             end if 
+                            !$omp end critical
                         end if
                     end do
+                    
+                    
                     
                     ! Remove contour parts that lie outside of the vessel
                     sortedI = realI%Get()
@@ -1541,8 +1559,8 @@ module ggmod_topology2D
                                         'tangency contour (1 intersection), this is likely ' // & 
                                         'a bug') 
                                 end if 
-                                tc(k)%x = s1x;
-                                tc(k)%y = s1y;
+                                tc(k)%x = s1x
+                                tc(k)%y = s1y
                             elseif (sizeI == 2) then 
                                 ! Not yet properly verified, print warning
                                 print *, 'AddTopologicalMeshContour: ' // & 
@@ -1641,14 +1659,17 @@ module ggmod_topology2D
                 deallocate(tcp)
            
                 ! Add
+                !$omp critical
                 allc = [allc, tc]
                 call curvetypes%Append(spread(TMfacepolID, 1, size(tc)))
                 
                 ! Add flux surface ID
-                nfs = nfs + 1;
+                nfs = nfs + 1
                 call fsIDs%Append(spread(nfs, 1, size(tc)))
+                !$omp end critical
             end if 
         end do 
+        !$omp end parallel do 
 
         ! Add to the topology mesh
         !=========================
@@ -2034,6 +2055,8 @@ module ggmod_topology2D
         ! Compute intersections 
         !======================
         ! Loop over all faces
+        !$omp parallel do default(private) shared(topomesh, fda, xda, &
+        !$omp yda, s1da, s2da, s1rda, s2rda, cp)
         do i  = 1, topomesh%face%ntot 
             ! Associate current face polygon 
             associate(&
@@ -2046,6 +2069,7 @@ module ggmod_topology2D
                 s1r=s1r, s2r=s2r)
 
             ! Store
+            !$omp critical
             call fda%Append(spread(i, 1, size(xint)))
             call xda%Append(xint)
             call yda%Append(yint)
@@ -2053,10 +2077,12 @@ module ggmod_topology2D
             call s2da%Append(s2)
             call s1rda%Append(s1r)
             call s2rda%Append(s2r)
+            !$omp end critical
 
             ! Housekeeping
             end associate
         end do
+        !$omp end parallel do
 
         ! Extract
         fID     = fda%Get()
@@ -2240,7 +2266,7 @@ module ggmod_topology2D
             if ((s2r(j+1) - s2r(j)) == 0_R8) then 
                 keepind(j+1) = .false. 
             end if 
-        end do         
+        end do
 
         ! Add start and end points as intersections if they have an 
         ! ID (and if that ID is not already present as an intersection)
@@ -2624,7 +2650,7 @@ module ggmod_topology2D
         type(RealDynamicArrayUDT)               :: xc, yc, fc 
         type(IntegerDynamicArrayUDT)            :: tc
         type(ContourUDT), allocatable           :: fxc(:), fyc(:)
-        type(PolygonUDT), allocatable           :: fxp(:), fyp(:)
+        !type(PolygonUDT), allocatable           :: fxp(:), fyp(:)
 
         ! Loop
         integer(I8)                             :: i, j, k
@@ -2666,21 +2692,25 @@ module ggmod_topology2D
         ! Convert all to polygons
         nfxc = size(fxc)
         nfyc = size(fyc)
-        allocate(fxp(nfxc), fyp(nfyc))
+        !allocate(fxp(nfxc), fyp(nfyc))
 
-        do i = 1, nfxc 
-            call fxp(i)%Construct(fxc(i)%x, fxc(i)%y)
-        end do 
-        do i = 1, nfyc 
-            call fyp(i)%Construct(fyc(i)%x, fyc(i)%y)
-        end do 
+        !do i = 1, nfxc 
+        !    call fxp(i)%Construct(fxc(i)%x, fxc(i)%y)
+        !end do 
+        !do i = 1, nfyc 
+        !    call fyp(i)%Construct(fyc(i)%x, fyc(i)%y)
+        !end do 
 
         ! Compute intersections
+        !$omp parallel do default(private), shared(nfxc, nfyc, fxc, fyc, &
+        !$omp magneticField, xc, yc, fc, tc)
         do i = 1, nfxc
             ! Only compute intersections with other polygons
             do j = 1, nfyc
                 ! Compute intersections with next polygon
-                call PolygonIntersections(fxp(i), fyp(j), tx, ty, ts1, ts2)
+                call SimplePolygonIntersections(fxc(i)%x, fxc(i)%y, &
+                    fyc(j)%x, fyc(j)%y, tx, ty, ts1, ts2)
+                !call PolygonIntersections(fxp(i), fyp(j), tx, ty, ts1, ts2)
                 
                 ! Check if found
                 nx = size(tx)
@@ -2721,13 +2751,13 @@ module ggmod_topology2D
                     end if 
                     if (all(thiseig > 0)) then 
                         ! Local minimum
-                        tt(k) = -1;
+                        tt(k) = -1
                     elseif (all(thiseig < 0)) then 
                         ! Local maximum
-                        tt(k) = 1;
+                        tt(k) = 1
                     else
                         ! Saddle point
-                        tt(k) = 0;
+                        tt(k) = 0
                     end if
                 end do 
 
@@ -2741,6 +2771,7 @@ module ggmod_topology2D
                 deallocate(tt, tf, tfxx, tfyy, tfxy)
             end do 
         end do
+        !$omp end parallel do 
         
         ! Extract
         !========
