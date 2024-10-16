@@ -2472,7 +2472,11 @@ module ggmod_gridgeneration2D
                     ! Note: we ensure no duplicate points by skipping the
                     ! first vertex of the face segment
                     !polv = [(cc, cc = 1, size(tempc(j)%x))]
-                    polv = [(cc, cc = segc(j, k)+2, segc(j, k+1)-1, incr)]
+                    if (incr > 0) then 
+                        polv = [(cc, cc = segc(j, k)+2, segc(j, k+1)-1, incr)]
+                    else 
+                        polv = [(cc, cc = segc(j, k)-2, segc(j, k+1)+1, incr)]
+                    end if 
                     !polv = polc(j)%vert(segc(j, k)+2:segc(j, k+1)-1:incr)
                     xl = [xint(j, k), tempc(j)%x(polv), xint(j, k+1)]
                     yl = [yint(j, k), tempc(j)%y(polv), yint(j, k+1)]
@@ -2827,8 +2831,8 @@ module ggmod_gridgeneration2D
             deallocate(line%xv, line%yv)
         end if 
         allocate(line%xv(size(tdlcv)), line%yv(size(tdlcv)))
-        call Interpolate1D(tdlcv, line%xv, line%dllc, line%xl)
-        call Interpolate1D(tdlcv, line%yv, line%dllc, line%yl)
+        call Interpolate1D(line%dlcv, line%xv, line%dllc, line%xl)
+        call Interpolate1D(line%dlcv, line%yv, line%dllc, line%yl)
         if (any(.not. ieee_is_finite(line%xv))) then 
             print *, 'NaNs detected'
         end if 
@@ -3374,7 +3378,7 @@ module ggmod_gridgeneration2D
         logical, allocatable, dimension(:)          :: isreflegal, &
             iscoarselegal, thiskeepvert, newkeepvert, refineface, &
             coarsenface,  newisreflegal, newiscoarselegal, iscoarsenedface
-        real(R8), allocatable, dimension(:)         :: dxl, dyl, dll, &
+        real(R8), allocatable, dimension(:)         :: dll, &
             Lmaxvert, Lminvert, newdll, newdllc
         integer(I8), allocatable, dimension(:)      :: thisvertID, &
             newvertID
@@ -3438,7 +3442,9 @@ module ggmod_gridgeneration2D
                 iscoarselegal = .false. 
             end where
             where (((dll < Lminvert(1:line%nv-1)) .or. (dll < Lminvert(2:line%nv))) &
-                .and. iscoarselegal)
+                .and. iscoarselegal &
+                .and. .not. (thiskeepvert(1:line%nv-1) .and. thiskeepvert(2:line%nv)) &
+                .and. .not. ([.false., .not. iscoarselegal(1:line%nv-2)] .and. [iscoarselegal(2:line%nv-1), .false.]))
                 coarsenface = .true.
                 isreflegal = .false.
             end where
@@ -3502,9 +3508,17 @@ module ggmod_gridgeneration2D
                         cc = cc + 2
                     elseif (coarsenface(i)) then 
                         ! Preliminary checks
-                        isnextfacelegal = (i < size(dll)) .and. (.not. thiskeepvert(i+1))
-                        isprevfacelegal = (cc > 1) .and. (.not. thiskeepvert(i)) 
-
+                        isnextfacelegal = (i < size(dll)) 
+                        if (isnextfacelegal) then 
+                            isnextfacelegal = isnextfacelegal .and. (.not. thiskeepvert(i+1))
+                        end if 
+                        isprevfacelegal = (cc > 1) 
+                        if (isprevfacelegal) then 
+                            isprevfacelegal = isprevfacelegal &
+                                .and. (.not. newkeepvert(cc)) &
+                                .and. (.not. newiscoarselegal(cc-1))
+                        end if  
+                        
                         ! Check which face to merge with
                         ismerged = .false. 
                         if (isnextfacelegal) then 
@@ -3513,8 +3527,8 @@ module ggmod_gridgeneration2D
                                 newdll(cc) = dll(i) + dll(i+1)
 
                                 ! Update next vertex
-                                newvertID(cc+1) = thisvertID(i+1)
-                                newkeepvert(cc+1) = thiskeepvert(i+1)
+                                newvertID(cc+1) = thisvertID(i+2)
+                                newkeepvert(cc+1) = thiskeepvert(i+2)
 
                                 ! Refinement is illegal
                                 newisreflegal(cc) = .false. 
@@ -3605,6 +3619,9 @@ module ggmod_gridgeneration2D
                             newkeepvert(cc+1) = thiskeepvert(i+1)
                             newisreflegal(cc) = isreflegal(i)
                             newiscoarselegal(cc) = iscoarselegal(i)
+                            if (.not. isnextfacelegal .and. .not. isprevfacelegal) then 
+                                newiscoarselegal(cc) = .false. 
+                            end if 
                             cc = cc + 1
                             i = i + 1
                         end if
