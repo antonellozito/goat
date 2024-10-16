@@ -113,7 +113,7 @@ module mod_polygon
 
         integer(I8)                 :: nv, ne, nl
 
-        logical                     :: isclosed, selfintersecting, &
+        logical                     :: isclosed, &
             issimple
 
         integer(I8), allocatable    :: edges(:, :), vert(:), labels(:, :)
@@ -854,7 +854,7 @@ module mod_polygon
                 flag = 4
                 return 
             end if 
-            if (p(i)%selfintersecting) then 
+            if (p(i)%IsSelfIntersectingPolygon()) then 
                 ! Adjust flag and exit
                 call PolygonWarningHandler(&
                     'OrientNestedClosedPolygons: self-intersecting polygons detected. Returning...')
@@ -1587,7 +1587,7 @@ module mod_polygon
         call polygon%IsSimplePolygon()
 
         ! Check if the polygon self intersects
-        call polygon%IsSelfIntersectingPolygon()
+        ! call polygon%IsSelfIntersectingPolygon()
 
 
     end subroutine
@@ -1667,7 +1667,7 @@ module mod_polygon
         call polygon%IsSimplePolygon()
 
         ! Check if the polygon self intersects
-        call polygon%IsSelfIntersectingPolygon()
+        ! call polygon%IsSelfIntersectingPolygon()
 
     end subroutine
 
@@ -2296,7 +2296,7 @@ module mod_polygon
     end subroutine
 
     ! Self-intersections of a polygon
-    subroutine IsSelfIntersectingPolygon(polygon)
+    function IsSelfIntersectingPolygon(polygon) result(isselfintersecting)
 
         ! Description
         !============
@@ -2311,6 +2311,7 @@ module mod_polygon
         !==================
         ! Arguments
         class(PolygonUDT)               :: polygon 
+        logical                         :: isselfintersecting
 
         ! Auxiliary
         real(R8), allocatable           :: x(:), y(:) 
@@ -2320,41 +2321,36 @@ module mod_polygon
 
         ! Initialize
         !===========
-        polygon%selfintersecting = .false.  
+        isselfintersecting = .false. 
 
         ! Checks
         !=======
-        ! Simple polygon?
-        if (.not. polygon%issimple) then 
-            polygon%selfintersecting = .true. 
-        else 
-            ! Need to check self intersections
-            call polygon%SelfIntersections(x, y, s1, s2)
+        ! Need to check self intersections
+        call polygon%SelfIntersections(x, y, s1, s2)
 
-            if (size(x) > 0) then 
-                ! Self-intersections found, need to check 
-                if (size(x) > 1) then 
-                    polygon%selfintersecting = .true. 
-                else 
-                    ! Additional check on closure
-                    if (polygon%isclosed) then 
-                        if ( (s1(1) .ne. 1) .and. (s2(1) .ne. 1) ) then
-                            ! Something wrong here, this shouldn't be happening
-                            call PolygonErrorHandler('SelfIntersections: ' &
-                                // 'closed polygon with single ' &
-                                // 'intersection that is not on end ' &
-                                // 'points detected - chck input')
-                        end if 
-                        ! Otherwise, do nothing - closed polygons are 
-                        ! not considered self-intersecting
-                    else
-                        polygon%selfintersecting = .true. 
+        if (size(x) > 0) then 
+            ! Self-intersections found, need to check 
+            if (size(x) > 1) then 
+                isselfintersecting = .true. 
+            else 
+                ! Additional check on closure
+                if (polygon%isclosed) then 
+                    if ( (s1(1) .ne. 1) .and. (s2(1) .ne. 1) ) then
+                        ! Something wrong here, this shouldn't be happening
+                        call PolygonErrorHandler('SelfIntersections: ' &
+                            // 'closed polygon with single ' &
+                            // 'intersection that is not on end ' &
+                            // 'points detected - chck input')
                     end if 
-                end if
-            end if 
-        end if               
+                    ! Otherwise, do nothing - closed polygons are 
+                    ! not considered self-intersecting
+                else
+                    isselfintersecting = .true. 
+                end if 
+            end if
+        end if 
 
-    end subroutine
+    end function
 
     !------------------------------------------------------------------!
     !                     Polygon derivative routines                  !
