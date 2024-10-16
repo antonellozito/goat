@@ -16,6 +16,7 @@ module Interpolant2D_auxiliaries
     ! Load modules
     use mod_precision
     use mod_errorhandler
+    use omp_lib
 
     implicit none
 
@@ -95,6 +96,7 @@ module Interpolant2D_auxiliaries
         ny = size(y, 1)
 
         ! Loop over all query points
+        !$omp parallel do default(shared) private(indx, indy)
         do k = 1, nq
             ! Get the bin index for x
             call GetBinIndex(xq(k), x, nx, indx)
@@ -110,6 +112,7 @@ module Interpolant2D_auxiliaries
             end if
             
         end do
+        !$omp end parallel do
 
     end subroutine
 
@@ -154,6 +157,7 @@ module Interpolant2D_auxiliaries
         ny = size(y, 1)
 
         ! Loop over all query points
+        !$omp parallel do default(shared) private(indx, indy)
         do k = 1, nq
             ! Get the bin index for x
             call GetBinIndex(xq(k), x, nx, indx)
@@ -166,6 +170,7 @@ module Interpolant2D_auxiliaries
             iy(k) = indy
             
         end do
+        !$omp end parallel do 
 
     end subroutine
 
