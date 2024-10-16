@@ -16,6 +16,7 @@ module mod_streamlinetracing2D
     use mod_errorhandler
     use mod_dynamicarrays
     use mod_structured2Dgridding
+    use omp_lib
 
     implicit none
     private 
@@ -365,6 +366,7 @@ module mod_streamlinetracing2D
         
         ! Loop and trace
         !---------------
+        !$omp parallel do default(shared) private(xfw, yfw, xbw, ybw)
         do i = 1, nv
             ! Check if we should trace
             if (isoutofbounds(i)) then 
@@ -408,6 +410,7 @@ module mod_streamlinetracing2D
             end select
 
         end do
+        !$omp end parallel do 
         
         
     end subroutine 
