@@ -771,7 +771,7 @@ module DistributionFunction
         A = 0
         do j = 1, na
             do i = 1, na
-                if (i /= 0) then 
+                if (i /= j) then 
                     tempd = sqrt((xa(i) - xa(j))**2 + (ya(i) - ya(j))**2)
                     A(i, j) = exp(-tempd/d0)
                 else 
@@ -998,7 +998,7 @@ module DistributionFunction
         A = 0
         do j = 1, na
             do i = 1, na
-                if (i /= 0) then 
+                if (i /= j) then 
                     tempd = abs(fval(i) - fval(j))
                     A(i, j) = sign(myone, fval(i)-fval(j))*exp(-tempd/d0)
                 else 
@@ -1194,7 +1194,7 @@ module DistributionFunction
         A = 0
         do j = 1, na
             do i = 1, na
-                if (i /= 0) then 
+                if (i /= j) then 
                     tempd = abs(fval(i) - fval(j))
                     A(i, j) = sign(myone, fval(i)-fval(j))*exp(-tempd/d0)
                 else 
@@ -1338,7 +1338,7 @@ module DistributionFunction
         real(R8), parameter                             :: myone = 1
         real(R8)                                        :: tempd
         real(R8), allocatable                           :: d(:), b(:), &
-            bval(:), A(:, :), sol(:), fval(:)
+            A(:, :), sol(:)
 
         ! Loop
         integer(I8)                                     :: i, j
@@ -1364,7 +1364,7 @@ module DistributionFunction
         na = size(xp, 1)
 
         ! Allocate
-        allocate(d(na), bval(na), b(na), A(na, na))
+        allocate(d(na), b(na), A(na, na))
 
         ! Construct rhs to compute attractor coefficients
         b = a0 - b0
@@ -1373,11 +1373,11 @@ module DistributionFunction
         A = 0
         do j = 1, na
             do i = 1, na
-                if (i /= 0) then 
+                if (i /= j) then 
                     tempd = sqrt( (xp(i) - xp(j))**2 + (yp(i) - yp(j))**2)
-                    A(i, j) = exp(-tempd/d0(i))
+                    A(i, j) = exp(-tempd/d0(j))
                 else 
-                    A(i, j) = 1
+                    A(i, j) = 1.0_R8
                 end if 
             end do 
         end do
