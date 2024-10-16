@@ -102,6 +102,7 @@ module ggmod_gridgeneration2D
     use DistributionFunction
     use mod_plotter
     use mod_utility, only: wall_time
+    use omp_lib
     implicit none
     private 
     public :: GenerateUnstructuredAlignedGrid
@@ -998,6 +999,8 @@ module ggmod_gridgeneration2D
                 nnew = 0
 
                 ! Find intersections with all other boundaries
+                !$omp parallel default(private) shared(orthlines, vertID, tclines, newtx, nnew, newty, news2r, newID, i) 
+                !$omp do 
                 do j = 1, size(orthlines)
                     ! Intersections with starting boundary (should only
                     ! intersect in first point)
@@ -1072,9 +1075,9 @@ module ggmod_gridgeneration2D
                     end if 
                     
                     ! Add the point if allowed
+                    
                     if (addpoint) then 
-                        ! Update counter
-                        nnew = nnew + 1
+                        
                         
                         ! Get point
                         tempx = [x1, x2, x3, x4]
@@ -1084,18 +1087,26 @@ module ggmod_gridgeneration2D
                         tempy = tempy(sortind)
                         temps2r = temps2r(sortind)
                         
+                        
+                        !$omp critical
+                        ! Update counter
+                        nnew = nnew + 1
+
                         ! Add
                         newtx(nnew) = tempx(2)
                         newty(nnew) = tempy(2)
                         news2r(nnew) = temps2r(2)
                         newID(nnew) = vertID+1
                         vertID = vertID+1
-                    end if 
+                        !$omp end critical
+                    end if
                     
                     ! Housekeeping
                     deallocate(s11, s12, s11r, s12r, sortind)
                     
                 end do 
+                !$omp end do
+                !$omp end parallel
                 
                 ! Trim
                 newtx = newtx(1:nnew)
@@ -1417,17 +1428,23 @@ module ggmod_gridgeneration2D
                 isintersectingl2 = .false.
                 mink1 = 0
                 mink2 = 0
-                call facep%Construct([l1%xv(1), l2%xv(1)], [l1%yv(1), l2%yv(1)])
+                !call facep%Construct([l1%xv(1), l2%xv(1)], [l1%yv(1), l2%yv(1)])
 
                 ! First line
                 if (n1 > 2) then ! Hedge for point line
                     if (l1%vert(1) == l1%vert(n1)) then 
                         ! Closed 
-                        call lp%Construct(l1%xv(2:n1-1), l1%yv(2:n1-1)) ! no need to include 
-                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                        call SimplePolygonIntersections(&
+                            l1%xv(2:n1-1), l1%yv(2:n1-1), [l1%xv(1), l2%xv(1)], &
+                            [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
+                        !call lp%Construct(l1%xv(2:n1-1), l1%yv(2:n1-1)) ! no need to include 
+                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     else
-                        call lp%Construct(l1%xv(2:), l1%yv(2:))
-                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                        call SimplePolygonIntersections(&
+                            l1%xv(2:), l1%yv(2:), [l1%xv(1), l2%xv(1)], &
+                            [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
+                        !call lp%Construct(l1%xv(2:), l1%yv(2:))
+                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     end if
                     if (size(xint) > 0) then 
                         isintersectingl1 = .true.
@@ -1439,11 +1456,17 @@ module ggmod_gridgeneration2D
                 if (n2 > 2) then 
                     if (l2%vert(1) == l2%vert(n2)) then 
                         ! Closed 
-                        call lp%Construct(l2%xv(2:n2-1), l2%yv(2:n2-1)) ! no need to include 
-                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                        call SimplePolygonIntersections(&
+                            l2%xv(2:n2-1), l2%yv(2:n2-1), [l1%xv(1), l2%xv(1)], &
+                            [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
+                        !call lp%Construct(l2%xv(2:n2-1), l2%yv(2:n2-1)) ! no need to include 
+                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     else
-                        call lp%Construct(l2%xv(2:), l2%yv(2:))
-                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                        call SimplePolygonIntersections(&
+                            l2%xv(2:), l2%yv(2:), [l1%xv(1), l2%xv(1)], &
+                            [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
+                        !call lp%Construct(l2%xv(2:), l2%yv(2:))
+                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     end if 
                     if (size(xint) > 0) then 
                         isintersectingl2 = .true.
