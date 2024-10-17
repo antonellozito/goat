@@ -20,6 +20,8 @@ module mod_contour2D
     use mod_errorhandler
     use mod_dynamicarrays
     use mod_structured2Dgridding
+    use mod_sort
+    use omp_lib
 
     implicit none
     private 
@@ -409,7 +411,8 @@ module mod_contour2D
         logical, allocatable            :: superquadfacexflags(:, :), &
             superquadfaceyflags(:, :)
         integer(I8)                     :: nx, ny 
-        integer(I8), allocatable        :: superquadflags(:, :)
+        integer(I8), allocatable        :: superquadflags(:, :), &
+            allIDs(:), sortind(:)
         real(R8)                        :: tv
         real(R8), allocatable           :: emptyarrayR8(:)
 
@@ -456,6 +459,10 @@ module mod_contour2D
  
         ! Main loop
         !==========
+        !$omp parallel default(private) shared(tracevalues, V, X, Y, &
+        !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
+        !$omp contours) firstprivate(spstruct) if(size(tracevalues) > 4)
+        !$omp do 
         do i = 1, size(tracevalues)
             ! Get current trace value
             tv = tracevalues(i)
@@ -471,10 +478,24 @@ module mod_contour2D
             end do
 
             ! Add contours
+            !$omp critical
             contours = AddContours(contours, tempcontours)
+            !$omp end critical
 
+        end do
+        !$omp end do
+        !$omp end parallel 
+
+        ! Sort
+        !=====
+        allIDs = contours%ID 
+        allocate(sortind(size(allIDs)))
+        call Sort(allIDs, ind=sortind, ascend=.true.)
+        tempcontours = contours 
+        do i = 1, size(contours)
+            contours(i) = tempcontours(sortind(i))
         end do 
-
+        
 
 
     end subroutine
@@ -566,7 +587,8 @@ module mod_contour2D
         logical, allocatable            :: superquadfacexflags(:, :), &
             superquadfaceyflags(:, :)
         integer(I8)                     :: nx, ny, nt
-        integer(I8), allocatable        :: superquadflags(:, :)
+        integer(I8), allocatable        :: superquadflags(:, :), &
+            allIDs(:), sortind(:)
         real(R8)                        :: txt, tyt
 
         ! Loop
@@ -613,6 +635,9 @@ module mod_contour2D
 
         ! Main loop
         !==========
+        !$omp parallel do default(private) shared(xt, yt, nt, V, X, Y, &
+        !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
+        !$omp contours) firstprivate(spstruct) if(nt > 4)
         do i = 1, nt
             ! Get current trace value
             txt = xt(i)
@@ -629,8 +654,21 @@ module mod_contour2D
             end do
 
             ! Add contours
+            !$omp critical
             contours = AddContours(contours, tempcontours)
+            !$omp end critical
 
+        end do 
+        !$omp end parallel do
+
+        ! Sort
+        !=====
+        allIDs = contours%ID 
+        allocate(sortind(size(allIDs)))
+        call Sort(allIDs, ind=sortind, ascend=.true.)
+        tempcontours = contours 
+        do i = 1, size(allIDs)
+            contours(i) = tempcontours(sortind(i))
         end do 
         
     end subroutine
@@ -2526,6 +2564,7 @@ module mod_contour2D
 
         ! Initial values
         quadflags = 0 ! default: no value
+        !$omp parallel workshare
         c1 = hasvv(1:nv1-1, 1:nv2-1)
         c2 = hasvv(2:nv1, 1:nv2-1)
         c3 = hasvv(2:nv1, 2:nv2) 
@@ -2542,6 +2581,7 @@ module mod_contour2D
         where (hasval)      quadflags = 1 
         where (issaddle)    quadflags = 4
         where (superquadflags > 0) quadflags = superquadflags
+        !$omp end parallel workshare
 
     end function 
 
@@ -2605,6 +2645,8 @@ module mod_contour2D
         
         ! Clean
         !======
+        !$omp parallel do default(none) private(dx, dy, delind) &
+        !$omp shared(contours)
         do  i = 1, size(contours)
             dx = contours(i)%x(2:size(contours(i)%x)) - &
                 contours(i)%x(1:size(contours(i)%x)-1)
@@ -2618,6 +2660,7 @@ module mod_contour2D
             end if 
             deallocate(delind)
         end do 
+        !$omp end parallel do
     end subroutine 
 
     ! InTriangle routine
@@ -2678,6 +2721,7 @@ module mod_contour2D
         ! Compute
         !========
         ! Loop
+        !$omp parallel do default(private) shared(v1, v2, v3, x, y, in, on, xp, yp)
         do i = 1, size(v1)
             ! Get coordinates
             x1 = x(v1(i))
@@ -2715,6 +2759,7 @@ module mod_contour2D
             end if 
 
         end do 
+        !$omp end parallel do
 
     end subroutine
 

@@ -102,6 +102,7 @@ module ggmod_gridgeneration2D
     use DistributionFunction
     use mod_plotter
     use mod_utility, only: wall_time
+    use omp_lib
     implicit none
     private 
     public :: GenerateUnstructuredAlignedGrid
@@ -827,8 +828,21 @@ module ggmod_gridgeneration2D
 
             ! Check if only one vertex -> check vertex type
             if (size(hfvert) == 1) then 
-                ! Sanity check 
-                if (any(vert%type(hfvert) == [TMvertextp1ID, TMvertextp2ID, TMvertexbndID])) then 
+                if (.not. allocated(celldata(i)%hfvert)) then 
+                    call gdErrorHandler('DistributeVerticesOrthogonal: ' // & 
+                        'hfvert is not yet allocated')
+                end if 
+                if (.not. all(IsTopomeshVert(hfvert, topomesh))) then 
+                    call gdErrorHandler('DistributeVerticesOrthogonal: ' // & 
+                        'assumed topomesh vertex is not a topomesh vertex')
+                end if 
+                if (any(hfvert > size(vert%type))) then 
+                    call gdErrorHandler('d')
+                end if 
+                ! Sanity check
+                print *, hfvert 
+                if (any(vert%type(hfvert(1)) == [TMvertextp1ID, TMvertextp2ID, &
+                    TMvertexbndID, TMvertexmaxID, TMvertexminID])) then 
                     isstartingcell(i) = .true. 
                 else
                     ! This shouldn't happen, unless we missed some kind of 
@@ -998,6 +1012,8 @@ module ggmod_gridgeneration2D
                 nnew = 0
 
                 ! Find intersections with all other boundaries
+                !$omp parallel default(private) shared(orthlines, vertID, tclines, newtx, nnew, newty, news2r, newID, i) 
+                !$omp do 
                 do j = 1, size(orthlines)
                     ! Intersections with starting boundary (should only
                     ! intersect in first point)
@@ -1072,9 +1088,9 @@ module ggmod_gridgeneration2D
                     end if 
                     
                     ! Add the point if allowed
+                    
                     if (addpoint) then 
-                        ! Update counter
-                        nnew = nnew + 1
+                        
                         
                         ! Get point
                         tempx = [x1, x2, x3, x4]
@@ -1084,18 +1100,26 @@ module ggmod_gridgeneration2D
                         tempy = tempy(sortind)
                         temps2r = temps2r(sortind)
                         
+                        
+                        !$omp critical
+                        ! Update counter
+                        nnew = nnew + 1
+
                         ! Add
                         newtx(nnew) = tempx(2)
                         newty(nnew) = tempy(2)
                         news2r(nnew) = temps2r(2)
                         newID(nnew) = vertID+1
                         vertID = vertID+1
-                    end if 
+                        !$omp end critical
+                    end if
                     
                     ! Housekeeping
                     deallocate(s11, s12, s11r, s12r, sortind)
                     
                 end do 
+                !$omp end do
+                !$omp end parallel
                 
                 ! Trim
                 newtx = newtx(1:nnew)
@@ -1417,17 +1441,23 @@ module ggmod_gridgeneration2D
                 isintersectingl2 = .false.
                 mink1 = 0
                 mink2 = 0
-                call facep%Construct([l1%xv(1), l2%xv(1)], [l1%yv(1), l2%yv(1)])
+                !call facep%Construct([l1%xv(1), l2%xv(1)], [l1%yv(1), l2%yv(1)])
 
                 ! First line
                 if (n1 > 2) then ! Hedge for point line
                     if (l1%vert(1) == l1%vert(n1)) then 
                         ! Closed 
-                        call lp%Construct(l1%xv(2:n1-1), l1%yv(2:n1-1)) ! no need to include 
-                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                        call SimplePolygonIntersections(&
+                            l1%xv(2:n1-1), l1%yv(2:n1-1), [l1%xv(1), l2%xv(1)], &
+                            [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
+                        !call lp%Construct(l1%xv(2:n1-1), l1%yv(2:n1-1)) ! no need to include 
+                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     else
-                        call lp%Construct(l1%xv(2:), l1%yv(2:))
-                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                        call SimplePolygonIntersections(&
+                            l1%xv(2:), l1%yv(2:), [l1%xv(1), l2%xv(1)], &
+                            [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
+                        !call lp%Construct(l1%xv(2:), l1%yv(2:))
+                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     end if
                     if (size(xint) > 0) then 
                         isintersectingl1 = .true.
@@ -1439,11 +1469,17 @@ module ggmod_gridgeneration2D
                 if (n2 > 2) then 
                     if (l2%vert(1) == l2%vert(n2)) then 
                         ! Closed 
-                        call lp%Construct(l2%xv(2:n2-1), l2%yv(2:n2-1)) ! no need to include 
-                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                        call SimplePolygonIntersections(&
+                            l2%xv(2:n2-1), l2%yv(2:n2-1), [l1%xv(1), l2%xv(1)], &
+                            [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
+                        !call lp%Construct(l2%xv(2:n2-1), l2%yv(2:n2-1)) ! no need to include 
+                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     else
-                        call lp%Construct(l2%xv(2:), l2%yv(2:))
-                        call PolygonIntersections(lp, facep, xint, yint, s1, s2)
+                        call SimplePolygonIntersections(&
+                            l2%xv(2:), l2%yv(2:), [l1%xv(1), l2%xv(1)], &
+                            [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
+                        !call lp%Construct(l2%xv(2:), l2%yv(2:))
+                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     end if 
                     if (size(xint) > 0) then 
                         isintersectingl2 = .true.
@@ -2472,7 +2508,11 @@ module ggmod_gridgeneration2D
                     ! Note: we ensure no duplicate points by skipping the
                     ! first vertex of the face segment
                     !polv = [(cc, cc = 1, size(tempc(j)%x))]
-                    polv = [(cc, cc = segc(j, k)+2, segc(j, k+1)-1, incr)]
+                    if (incr > 0) then 
+                        polv = [(cc, cc = segc(j, k)+2, segc(j, k+1)-1, incr)]
+                    else 
+                        polv = [(cc, cc = segc(j, k)-2, segc(j, k+1)+1, incr)]
+                    end if 
                     !polv = polc(j)%vert(segc(j, k)+2:segc(j, k+1)-1:incr)
                     xl = [xint(j, k), tempc(j)%x(polv), xint(j, k+1)]
                     yl = [yint(j, k), tempc(j)%y(polv), yint(j, k+1)]
@@ -2827,8 +2867,8 @@ module ggmod_gridgeneration2D
             deallocate(line%xv, line%yv)
         end if 
         allocate(line%xv(size(tdlcv)), line%yv(size(tdlcv)))
-        call Interpolate1D(tdlcv, line%xv, line%dllc, line%xl)
-        call Interpolate1D(tdlcv, line%yv, line%dllc, line%yl)
+        call Interpolate1D(line%dlcv, line%xv, line%dllc, line%xl)
+        call Interpolate1D(line%dlcv, line%yv, line%dllc, line%yl)
         if (any(.not. ieee_is_finite(line%xv))) then 
             print *, 'NaNs detected'
         end if 
@@ -3374,7 +3414,7 @@ module ggmod_gridgeneration2D
         logical, allocatable, dimension(:)          :: isreflegal, &
             iscoarselegal, thiskeepvert, newkeepvert, refineface, &
             coarsenface,  newisreflegal, newiscoarselegal, iscoarsenedface
-        real(R8), allocatable, dimension(:)         :: dxl, dyl, dll, &
+        real(R8), allocatable, dimension(:)         :: dll, &
             Lmaxvert, Lminvert, newdll, newdllc
         integer(I8), allocatable, dimension(:)      :: thisvertID, &
             newvertID
@@ -3438,7 +3478,9 @@ module ggmod_gridgeneration2D
                 iscoarselegal = .false. 
             end where
             where (((dll < Lminvert(1:line%nv-1)) .or. (dll < Lminvert(2:line%nv))) &
-                .and. iscoarselegal)
+                .and. iscoarselegal &
+                .and. .not. (thiskeepvert(1:line%nv-1) .and. thiskeepvert(2:line%nv)) &
+                .and. .not. ([.false., .not. iscoarselegal(1:line%nv-2)] .and. [iscoarselegal(2:line%nv-1), .false.]))
                 coarsenface = .true.
                 isreflegal = .false.
             end where
@@ -3502,9 +3544,17 @@ module ggmod_gridgeneration2D
                         cc = cc + 2
                     elseif (coarsenface(i)) then 
                         ! Preliminary checks
-                        isnextfacelegal = (i < size(dll)) .and. (.not. thiskeepvert(i+1))
-                        isprevfacelegal = (cc > 1) .and. (.not. thiskeepvert(i)) 
-
+                        isnextfacelegal = (i < size(dll)) 
+                        if (isnextfacelegal) then 
+                            isnextfacelegal = isnextfacelegal .and. (.not. thiskeepvert(i+1))
+                        end if 
+                        isprevfacelegal = (cc > 1) 
+                        if (isprevfacelegal) then 
+                            isprevfacelegal = isprevfacelegal &
+                                .and. (.not. newkeepvert(cc)) &
+                                .and. (.not. newiscoarselegal(cc-1))
+                        end if  
+                        
                         ! Check which face to merge with
                         ismerged = .false. 
                         if (isnextfacelegal) then 
@@ -3513,8 +3563,8 @@ module ggmod_gridgeneration2D
                                 newdll(cc) = dll(i) + dll(i+1)
 
                                 ! Update next vertex
-                                newvertID(cc+1) = thisvertID(i+1)
-                                newkeepvert(cc+1) = thiskeepvert(i+1)
+                                newvertID(cc+1) = thisvertID(i+2)
+                                newkeepvert(cc+1) = thiskeepvert(i+2)
 
                                 ! Refinement is illegal
                                 newisreflegal(cc) = .false. 
@@ -3605,6 +3655,9 @@ module ggmod_gridgeneration2D
                             newkeepvert(cc+1) = thiskeepvert(i+1)
                             newisreflegal(cc) = isreflegal(i)
                             newiscoarselegal(cc) = iscoarselegal(i)
+                            if (.not. isnextfacelegal .and. .not. isprevfacelegal) then 
+                                newiscoarselegal(cc) = .false. 
+                            end if 
                             cc = cc + 1
                             i = i + 1
                         end if

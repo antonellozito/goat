@@ -16,6 +16,7 @@ module mod_streamlinetracing2D
     use mod_errorhandler
     use mod_dynamicarrays
     use mod_structured2Dgridding
+    use omp_lib
 
     implicit none
     private 
@@ -352,9 +353,9 @@ module mod_streamlinetracing2D
         
         ! Rescale step size
         if (abs(X(nx)-X(1)) < abs(Y(ny)-Y(1))) then 
-            step = s/(nx*abs(X(nx)-X(1)))
+            step = s/(nx/abs(X(nx)-X(1)))
         else
-            step = s/(ny*abs(Y(ny)-Y(1)))
+            step = s/(ny/abs(Y(ny)-Y(1)))
         end if 
         
         ! Check points
@@ -365,6 +366,7 @@ module mod_streamlinetracing2D
         
         ! Loop and trace
         !---------------
+        !$omp parallel do default(shared) private(xfw, yfw, xbw, ybw)
         do i = 1, nv
             ! Check if we should trace
             if (isoutofbounds(i)) then 
@@ -408,6 +410,7 @@ module mod_streamlinetracing2D
             end select
 
         end do
+        !$omp end parallel do 
         
         
     end subroutine 
@@ -494,13 +497,13 @@ module mod_streamlinetracing2D
             dyold = dy
             
             ! Check if we should exit
-            if ((x0 < xb(1)) .or. (x0 > xb(2)) .or. (y0 < yb(1)) .or. (y0 > yb(2))) then 
+            if ((xt < xb(1)) .or. (xt > xb(2)) .or. (yt < yb(1)) .or. (yt > yb(2))) then 
                 exit
             end if 
             
             ! Check in which box we are (if we know we stepped out)
-            i = findloc(x0 >= X, .true., 1, back=.true.)
-            j = findloc(y0 >= Y, .true., 1, back=.true.)
+            i = findloc(xt >= X, .true., 1, back=.true.)
+            j = findloc(yt >= Y, .true., 1, back=.true.)
 
             if ((i == 0) .or. (j == 0)) then 
                 exit 
