@@ -828,8 +828,21 @@ module ggmod_gridgeneration2D
 
             ! Check if only one vertex -> check vertex type
             if (size(hfvert) == 1) then 
-                ! Sanity check 
-                if (any(vert%type(hfvert) == [TMvertextp1ID, TMvertextp2ID, TMvertexbndID])) then 
+                if (.not. allocated(celldata(i)%hfvert)) then 
+                    call gdErrorHandler('DistributeVerticesOrthogonal: ' // & 
+                        'hfvert is not yet allocated')
+                end if 
+                if (.not. all(IsTopomeshVert(hfvert, topomesh))) then 
+                    call gdErrorHandler('DistributeVerticesOrthogonal: ' // & 
+                        'assumed topomesh vertex is not a topomesh vertex')
+                end if 
+                if (any(hfvert > size(vert%type))) then 
+                    call gdErrorHandler('d')
+                end if 
+                ! Sanity check
+                print *, hfvert 
+                if (any(vert%type(hfvert(1)) == [TMvertextp1ID, TMvertextp2ID, &
+                    TMvertexbndID, TMvertexmaxID, TMvertexminID])) then 
                     isstartingcell(i) = .true. 
                 else
                     ! This shouldn't happen, unless we missed some kind of 

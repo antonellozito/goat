@@ -1373,8 +1373,11 @@ module ggmod_topology2D
                             
                             ! Compute intersections
                             !$omp critical
-                            call PolygonIntersections(tcp(k), topomesh%face%pol(j), &
+                            call SimplePolygonIntersections(tc(k)%x, tc(k)%y, &
+                                topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get(), &
                                 xout, yout, vindI, vindJ, iout, jout)
+                            !call PolygonIntersections(tcp(k), topomesh%face%pol(j), &
+                            !    xout, yout, vindI, vindJ, iout, jout)
                             
                             ! Check
                             if (size(xout) > 0) then 
@@ -5134,6 +5137,7 @@ module ggmod_topology2D
 
         ! Remove
         call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
 
         ! Check remaining faces 
         deallocate(rmface)
