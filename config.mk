@@ -111,18 +111,20 @@ BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_I
 SUITESPARSEPATH = /usr/include/suitesparse
 
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS_DEF = -c -pg -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -fopenmp -Wno-uninitialized
+CFLAGS_DEF = -c -pg -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized -fopenmp
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
 CFLAGS_DEBUG = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -fopenmp -Wno-uninitialized
 ## CFLAGS_OMP_DEBUG	: compiler flags for OpenMP and debugging
 CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
+CFLAGS_PERF = -c -O2 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fopenmp -Wno-uninitialized
 
 ## CC           : Compiler to be used for C
 CC = gcc 
 
 CCFLAGS_DEF = -pg -c -g -Wall -O0 
+CCFLAGS_PERF = -c -Wall -O2
 
 ## % Linker
 ## %=======
@@ -133,6 +135,7 @@ LFLAGS_DEBUG = -pg -g -fcheck=all
 
 ## LFLAGS			: linking flags to be used for openMP
 LFLAGS_OMP = -pg -g -fopenmp
+LFLAGS_PERF = -fopenmp
 
 ## LFLAGS_DEBUG 	: linking flags for debugging
 LFLAGS_OMP_DEBUG = -pg -g -fopenmp
