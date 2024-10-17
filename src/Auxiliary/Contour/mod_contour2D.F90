@@ -20,6 +20,7 @@ module mod_contour2D
     use mod_errorhandler
     use mod_dynamicarrays
     use mod_structured2Dgridding
+    use mod_sort
     use omp_lib
 
     implicit none
@@ -410,7 +411,8 @@ module mod_contour2D
         logical, allocatable            :: superquadfacexflags(:, :), &
             superquadfaceyflags(:, :)
         integer(I8)                     :: nx, ny 
-        integer(I8), allocatable        :: superquadflags(:, :)
+        integer(I8), allocatable        :: superquadflags(:, :), &
+            allIDs(:), sortind(:)
         real(R8)                        :: tv
         real(R8), allocatable           :: emptyarrayR8(:)
 
@@ -483,6 +485,17 @@ module mod_contour2D
         end do
         !$omp end do
         !$omp end parallel 
+
+        ! Sort
+        !=====
+        allIDs = contours%ID 
+        allocate(sortind(size(allIDs)))
+        call Sort(allIDs, ind=sortind, ascend=.true.)
+        tempcontours = contours 
+        do i = 1, size(contours)
+            contours(i) = tempcontours(sortind(i))
+        end do 
+        
 
 
     end subroutine
@@ -574,7 +587,8 @@ module mod_contour2D
         logical, allocatable            :: superquadfacexflags(:, :), &
             superquadfaceyflags(:, :)
         integer(I8)                     :: nx, ny, nt
-        integer(I8), allocatable        :: superquadflags(:, :)
+        integer(I8), allocatable        :: superquadflags(:, :), &
+            allIDs(:), sortind(:)
         real(R8)                        :: txt, tyt
 
         ! Loop
@@ -646,6 +660,16 @@ module mod_contour2D
 
         end do 
         !$omp end parallel do
+
+        ! Sort
+        !=====
+        allIDs = contours%ID 
+        allocate(sortind(size(allIDs)))
+        call Sort(allIDs, ind=sortind, ascend=.true.)
+        tempcontours = contours 
+        do i = 1, size(allIDs)
+            contours(i) = tempcontours(sortind(i))
+        end do 
         
     end subroutine
 
