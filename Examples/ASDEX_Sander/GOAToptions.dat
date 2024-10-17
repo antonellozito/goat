@@ -422,7 +422,7 @@ VERSION 1.00.00
 # Core boundary and region treatment
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.cbnd.frac'               '0.1'
-'gg.tm.removecoreregions'       '1'
+'gg.tm.removecoreregions'       '0'
 
 #-------------------------------------------------------------------------#
 #                         VERTEX DISTRIBUTION OPTIONS                     #
@@ -438,13 +438,13 @@ VERSION 1.00.00
 'gg.ref.LB.doxp'                        '1'
 'gg.ref.LB.dovessel'                    '1'
 'gg.ref.LB.Lmininf'                     '0.001'
-'gg.ref.LB.Lmaxinf'                     '0.1'
+'gg.ref.LB.Lmaxinf'                     '0.05'
 'gg.ref.LB.structureIDs'                '[1, 2]'
 'gg.ref.LB.Lminstructure'               '[0.0001, 0.0001]'
-'gg.ref.LB.Lmaxstructure'               '[0.001, 0.001]'
-'gg.ref.LB.decaylengthstructure'        '[0.05, 0.05]'
+'gg.ref.LB.Lmaxstructure'               '[0.005, 0.005]'
+'gg.ref.LB.decaylengthstructure'        '[0.01, 0.01]'
 'gg.ref.LB.Lminxp'                      '0.0001'
-'gg.ref.LB.Lmaxxp'                      '0.005'
+'gg.ref.LB.Lmaxxp'                      '0.025'
 'gg.ref.LB.decaylengthxp'               '0.05'
 
 # Post-processing options
@@ -464,7 +464,7 @@ VERSION 1.00.00
 # Options for uniform distribution
 'gg.vd.pd.distribution.facelength'      '4e-2';
 
-'gg.vd.rd.distribution.fieldwidth'      '8e-3';
+'gg.vd.rd.distribution.fieldwidth'      '2e-2';
 
 # Options for density based distribution
 'gg.vd.pd.distribution.type'            'vessel_bnd_weight';
