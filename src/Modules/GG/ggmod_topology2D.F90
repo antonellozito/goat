@@ -225,7 +225,7 @@ module ggmod_topology2D
         real(R8), parameter                     :: emptyR8(0)= 0
         real(R8), allocatable, dimension(:)     :: xtp, ytp, Ftp, &
             xe, ye, fe
-        integer(I8)                             :: nv 
+        integer(I8)                             :: nv, ntp
         integer(I8), allocatable, dimension(:)  :: typee, IDs
         integer(I8), parameter                  :: emptyI8(0) = 0
 
@@ -260,8 +260,10 @@ module ggmod_topology2D
         ! Tangency points & vessel geometry
         call AddTopologicalMeshTangencyPoints2(topomesh, vesseltracer, &
             magneticField)
-        
+
         ! Construct refined grid based on tangency points and extrema
+        ntp = count((topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
+        allocate(xtp(ntp), ytp(ntp), Ftp(ntp), IDs(ntp))
         xtp = pack(topomesh%vert%x, &
             (topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
         ytp = pack(topomesh%vert%y, &
@@ -345,6 +347,9 @@ module ggmod_topology2D
 
         ! Compute interconnection data
         call AddTopologicalMeshInterconnectionData(topomesh)
+
+        ! Re-evaluate topological mesh vertex field values
+        topomesh%vert%fval = fieldtracer%Evaluate(topomesh%vert%x, topomesh%vert%y)
 
         ! Write
         !======
