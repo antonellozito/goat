@@ -21,6 +21,7 @@ module mod_contour2D
     use mod_dynamicarrays
     use mod_structured2Dgridding
     use mod_sort
+    use mod_constants, only: nanval_R8
     use omp_lib
 
     implicit none
@@ -34,7 +35,7 @@ module mod_contour2D
     real(R8), parameter :: pert         = 1e-13 ! perturbation value 
     real(R8), parameter :: spvalabstol  = 1e-13 ! absolute tolerance in field value to determine if value is equal to saddlepoint value
     real(R8), parameter :: spvalreltol  = 1e-10 ! relative tolerance for ^ 
-    real(R8), parameter :: disttol      = 1e-12 ! distance tolerance (absolute) for face lengths (deleted if lower)
+    real(R8), parameter :: disttol      = 1e-10 ! distance tolerance (absolute) for face lengths (deleted if lower)
 
     !==================================================================!
     !                                                                  !
@@ -106,6 +107,9 @@ module mod_contour2D
         generic :: TraceContours        => TraceContoursVal, &
             TraceContoursLoc
 
+        ! Evaluation of function at points 
+        procedure(EvaluateTracerValuesINT), deferred    :: Evaluate
+
         ! Coordinate getter
         procedure(GetTracerValueCoordinatesINT), deferred :: GetCoordinates 
 
@@ -130,6 +134,9 @@ module mod_contour2D
         ! Tracer
         procedure :: TraceContoursVal  => TraceContoursValStructured2DWrapper
         procedure :: TraceContoursLoc  => TraceContoursLocStructured2DWrapper
+
+        ! Evaluator
+        procedure :: Evaluate       => EvaluateStructured2D
 
         ! Coordinate getter
         procedure :: GetCoordinates => GetCoordinatesStructured2D
@@ -186,6 +193,16 @@ module mod_contour2D
             class(ContourTracerUDT)         :: tracer 
             real(R8), intent(in)            :: x(:), y(:)
             type(ContourUDT), allocatable   :: contours(:)
+
+        end function
+
+        ! Evaluator routine
+        function EvaluateTracerValuesINT(tracer, xv, yv) result(val)
+
+            import :: ContourTracerUDT, R8
+            class(ContourTracerUDT)         :: tracer 
+            real(R8), intent(in)            :: xv(:), yv(:)
+            real(R8), allocatable           :: val(:) 
 
         end function
 
@@ -672,6 +689,115 @@ module mod_contour2D
         end do 
         
     end subroutine
+
+    ! Field evaluator
+    function EvaluateStructured2D(tracer, xv, yv) result(val)
+
+        ! Description
+        !============
+        ! Evaluate the field values at the locations x, y. This 
+        ! evaluation is done using simple bilinear interpolation, 
+        ! consistent with how contours are traced in the tracer.
+        
+        ! Note: we are likely not discretely consistent within 
+        ! saddle point regions... we may alleviate this by using the 
+        ! routine to start in a saddle point, check which triangle we 
+        ! have, and then do barycentric interpolation 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)       :: tracer 
+        real(R8), intent(in), dimension(:)      :: xv, yv
+        real(R8), allocatable, dimension(:)     :: val 
+
+        ! Auxiliary
+        integer(I8)                     :: iisq, jjsq, nx, ny
+        integer(I8), allocatable        :: superquadflags(:, :), IDs(:)
+        real(R8)                        :: x0, y0, tv1, tv2
+        real(R8), allocatable, dimension(:)     :: xs, ys, vs, X, Y
+        real(R8), allocatable, dimension(:, :)  :: V
+        logical                         :: issaddlepoint
+        logical, allocatable            :: superquadfacexflags(:, :), &
+            superquadfaceyflags(:, :)
+        type(sp2DUDt), allocatable      :: spstruct(:)
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Associate
+        nx = size(xv) 
+        ny = size(yv)
+        xs = tracer%xs
+        ys = tracer%ys 
+        vs = tracer%vs 
+        IDs = tracer%IDs
+        V = tracer%V
+        X = tracer%X
+        Y = tracer%Y
+
+        ! Check dimensions
+        if (nx /= ny) then 
+            call gdErrorHandler('EvaluateStructured2D: inconsistent ' // & 
+                'dimensions of input arguments x and y')
+        end if 
+
+        ! Initialize
+        allocate(val(nx))
+        val = 0
+
+        ! Initialize the saddle point structure
+        allocate(superquadflags(size(X)-1, size(Y)-1), superquadfacexflags(size(X), size(Y)-1), &
+            superquadfaceyflags(size(X)-1, size(Y)))
+        call InitializeSaddlePointStructure2D(spstruct, superquadflags, &
+            superquadfacexflags, superquadfaceyflags, V, X, Y, xs, ys, &
+            vs, IDs)
+
+        ! Compute values
+        !===============
+        ! Loop 
+        do i = 1, nx 
+            ! Unpack
+            x0 = xv(i)
+            y0 = yv(i)
+
+            ! Get starting location
+            iisq = findloc(x0 > X, .true., 1, back=.true.)
+            jjsq = findloc(y0 > Y, .true., 1, back=.true.)
+
+            ! Out of bounds?
+            if ((iisq == 0) .or. (jjsq == 0) .or. (iisq == nx) .or. (jjsq == ny)) then 
+                ! Set to NaN
+                val(i) = nanval_R8()
+
+                ! Skip remainder of loop
+                cycle 
+            end if 
+
+            ! Coincident with saddle point?
+            issaddlepoint = .false. 
+            do j = 1, size(spstruct)
+                if ((x0 == spstruct(j)%x) .and. (y0 == spstruct(j)%y)) then 
+                    val(i) = spstruct(j)%val
+                end if 
+            end do 
+            if (issaddlepoint) then 
+                ! Skip remainder of loop
+                cycle
+            end if 
+
+            ! Compute value at starting quad by bilinear interpolation
+            tv1 = (V(iisq+1, jjsq) - V(iisq, jjsq))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq)
+            tv2 = (V(iisq+1, jjsq+1) - V(iisq, jjsq+1))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq+1)
+            val(i) = (tv2 - tv1)/(Y(jjsq+1) - Y(jjsq))*(y0 - Y(jjsq)) + tv1
+        
+
+        end do 
+
+
+    end function
 
     ! Wrapper for structured contour line tracer
     function TraceContoursValStructured2DWrapper(tracer, tracevalues) result(contours)
