@@ -895,7 +895,7 @@ module StructuredInterpolant2D
         vq(:) = 0
 
         !$omp parallel default(private) shared(derivx, derivy, &
-        !$omp xqn, yqn, thisA) reduction(+:vq)
+        !$omp xqn, yqn, thisA, interp, vq)
         !$omp do
         do i = derivx, n 
             do j = derivy, n
@@ -907,7 +907,9 @@ module StructuredInterpolant2D
                     real(precfac(i+1-derivx), kind = R8)*&
                     real(precfac(j+1), kind=R8)/real(precfac(j+1-derivy), kind = R8)
                 term = thisA(:, indder)*prefac*xqn**(i - derivx)*yqn**(j - derivy)
-                vq = vq + term 
+                !$omp critical
+                vq = vq + term
+                !$omp end critical
             end do 
         end do
         !$omp end do 

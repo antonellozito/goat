@@ -1400,7 +1400,6 @@ module ggmod_gridgeneration2D
         logical                                 :: isintersectingl1, &
             isintersectingl2, doquad, issameface
         type(GGTMFieldlineDataUDT), allocatable :: lines(:)
-        type(PolygonUDT)                        :: facep, lp
 
         ! Loop
         integer(I8)                             :: i, j, k1, k2
@@ -1441,7 +1440,6 @@ module ggmod_gridgeneration2D
                 isintersectingl2 = .false.
                 mink1 = 0
                 mink2 = 0
-                !call facep%Construct([l1%xv(1), l2%xv(1)], [l1%yv(1), l2%yv(1)])
 
                 ! First line
                 if (n1 > 2) then ! Hedge for point line
@@ -1450,14 +1448,10 @@ module ggmod_gridgeneration2D
                         call SimplePolygonIntersections(&
                             l1%xv(2:n1-1), l1%yv(2:n1-1), [l1%xv(1), l2%xv(1)], &
                             [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
-                        !call lp%Construct(l1%xv(2:n1-1), l1%yv(2:n1-1)) ! no need to include 
-                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     else
                         call SimplePolygonIntersections(&
                             l1%xv(2:), l1%yv(2:), [l1%xv(1), l2%xv(1)], &
                             [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
-                        !call lp%Construct(l1%xv(2:), l1%yv(2:))
-                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     end if
                     if (size(xint) > 0) then 
                         isintersectingl1 = .true.
@@ -1472,14 +1466,10 @@ module ggmod_gridgeneration2D
                         call SimplePolygonIntersections(&
                             l2%xv(2:n2-1), l2%yv(2:n2-1), [l1%xv(1), l2%xv(1)], &
                             [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
-                        !call lp%Construct(l2%xv(2:n2-1), l2%yv(2:n2-1)) ! no need to include 
-                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     else
                         call SimplePolygonIntersections(&
                             l2%xv(2:), l2%yv(2:), [l1%xv(1), l2%xv(1)], &
                             [l1%yv(1), l2%yv(1)], xint, yint, s1, s2)
-                        !call lp%Construct(l2%xv(2:), l2%yv(2:))
-                        !call PolygonIntersections(lp, facep, xint, yint, s1, s2)
                     end if 
                     if (size(xint) > 0) then 
                         isintersectingl2 = .true.
@@ -1964,7 +1954,6 @@ module ggmod_gridgeneration2D
         type(IntegerDynamicArrayUDT), allocatable, dimension(:, :)     :: &
             segcda, segrfda
         type(PolygonUDT), allocatable           :: polc(:)
-        type(PolygonSetUDT)                     :: tempps
 
         ! Diagnostics
         real(R8)                                :: tstart, tend 

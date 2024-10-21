@@ -362,10 +362,12 @@ module goatmod_userinput
         ! - coreboundariesfrac  : fraction in field value between core 
         !                       and connecting X-point (0: X-point, 1: 
         !                       core)
+        ! - removewidegridregions: remove all regions that are not next    
+        !                           to a separatrix 
 
         integer(I8)             :: fresx, fresy, vresx, vresy
         logical                 :: addcoreboundaries, removecoreregions, &
-            fdonewton, vdonewton 
+            fdonewton, vdonewton, removewidegridregions
         real(R8)                :: coreboundariesfrac, ffieldtol
     contains 
 
@@ -749,6 +751,7 @@ module goatmod_userinput
         options%addcoreboundaries = .true. 
         options%coreboundariesfrac = 0.2
         options%removecoreregions = .true. 
+        options%removewidegridregions = .true. 
 
     end subroutine 
 
@@ -1384,6 +1387,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%addcoreboundaries)
         field = 'gg.tm.removecoreregions'
         call ExtractOptionValueLogical0D(fid, field, options%removecoreregions)
+        field = 'gg.tm.removewidegridregions'
+        call ExtractOptionValueLogical0D(fid, field, options%removewidegridregions)
         field = 'gg.tm.cbnd.frac'
         call ExtractOptionValueReal0D(fid, field, options%coreboundariesfrac)
 

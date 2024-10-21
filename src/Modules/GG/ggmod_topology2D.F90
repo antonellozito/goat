@@ -301,11 +301,15 @@ module ggmod_topology2D
         !===============
         ! Set extrema with nearly identical values to be the same value
         do i = 1, topomesh%vert%ntot-1
-            do j = i+1, topomesh%vert%ntot 
-                if (abs(topomesh%vert%fval(i)-topomesh%vert%fval(j)) < options%ffieldtol) then 
-                    topomesh%vert%fval(j) = topomesh%vert%fval(i)
-                end if 
-            end do 
+            if (topomesh%vert%type(i) == TMvertexsaddleID) then 
+                do j = i+1, topomesh%vert%ntot 
+                    if (topomesh%vert%type(j) == TMvertexsaddleID) then 
+                        if (abs(topomesh%vert%fval(i)-topomesh%vert%fval(j)) < options%ffieldtol) then 
+                            topomesh%vert%fval(j) = topomesh%vert%fval(i)
+                        end if 
+                    end if 
+                end do 
+            end if 
         end do 
 
         ! Compute and add intersections with contours
@@ -343,6 +347,9 @@ module ggmod_topology2D
         ! Remove parts if desired
         if (options%removecoreregions) then 
             call RemoveTopologicalMeshCoreRegions(topomesh)
+        end if 
+        if (options%removewidegridregions) then 
+            call RemoveTopologicalMeshWideGridRegions(topomesh)
         end if 
 
         ! Compute interconnection data
@@ -1944,6 +1951,72 @@ module ggmod_topology2D
 
     end subroutine
 
+    ! Wide grid region removal
+    subroutine RemoveTopologicalMeshWideGridRegions(topomesh)
+
+        ! Description
+        !============
+        ! This routine removes any regions that are classified as 
+        ! 'wide grid' regions. In practice, this means any region that 
+        ! does not have a separatrix boundary segment (note that if 
+        ! core boundaries are inserted, also the core region will be 
+        ! removed, if not removed already)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)      :: topomesh 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tcf, tcv
+        logical, allocatable, dimension(:)      :: delv, delf, delc
+
+        ! Loop
+        integer(I8)                         :: i
+
+        ! Initialize
+        !===========
+        ! Mark cells, vertices, faces for deletion
+        allocate(delc(topomesh%cell%ntot), delv(topomesh%vert%ntot), &
+            delf(topomesh%face%ntot))
+        delc = .true. ! default true
+        delv = .true.
+        delf = .true.
+
+        do i = 1, topomesh%cell%ntot 
+            ! Get faces
+            tcf = topomesh%cell%GetFace(i)
+
+            ! Check if there is a separatrix face, then keep cell
+            if (any(topomesh%face%type(tcf) == TMfacesepID)) then 
+                delc(i)     = .false. 
+                delf(tcf)   = .false.
+                tcv         = topomesh%cell%GetVert(i)
+                delv(tcv)   = .false.
+            end if 
+        end do
+
+        ! Delete
+        !=======
+        ! Vertices
+        call RemoveTopologicalMeshVertexLogical(topomesh, delv)
+
+        ! Faces
+        call RemoveTopologicalMeshFaceLogical(topomesh, delf)
+
+        ! Cells
+        call RemoveTopologicalMeshCellLogical(topomesh, delc)
+
+        ! Update again
+        !=============
+        ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Data
+        call AddTopologicalMeshData(topomesh)
+
+    end subroutine
+
     ! Contour insertion into topological mesh
     subroutine InsertTopologicalMeshContour(topomesh, magneticField, contour, &
         contourtype, contourfsID) 
@@ -2685,15 +2758,19 @@ module ggmod_topology2D
         !===============
         ! Evaluate derivatives
         allocate(f(ngp), fx(ngp), fy(ngp))
-        call magneticField%interp%Evaluate(xg, yg, 0, 0, f)
+        !call magneticField%interp%Evaluate(xg, yg, 0, 0, f)
         call magneticField%interp%Evaluate(xg, yg, 1, 0, fx)
         call magneticField%interp%Evaluate(xg, yg, 0, 1, fy)
 
         ! Trace 
+        f = fieldtracer%GetValues()
         call fieldtracer%SetValues(fx)
         fxc = fieldtracer%TraceContours([0.0_R8])
         call fieldtracer%SetValues(fy)
         fyc = fieldtracer%TraceContours([0.0_R8])
+
+        ! Reset tracer
+        call fieldtracer%SetValues(f)
 
         ! Compute all intersections
         !==========================
@@ -4763,6 +4840,7 @@ module ggmod_topology2D
         ! Remove
         topomesh%cell%ntot = count(.not. rmcell)
         topomesh%cell%vert = pack(topomesh%cell%vert, .not. delv)
+        topomesh%cell%face = pack(topomesh%cell%face, .not. delf)
         vp = pack(topomesh%cell%vertP(:, 2), .not. rmcell)
         fp = pack(topomesh%cell%faceP(:, 2), .not. rmcell)
         deallocate(topomesh%cell%vertP, topomesh%cell%faceP)

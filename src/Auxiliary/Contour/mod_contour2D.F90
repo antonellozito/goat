@@ -116,6 +116,9 @@ module mod_contour2D
         ! Field value setter
         procedure(SetTracerValuesINT), deferred     :: SetValues
 
+        ! Field value getter
+        procedure(GetTracerValuesINT), deferred     :: GetValues
+
     end type
 
     ! Structured 2D tracer
@@ -143,6 +146,9 @@ module mod_contour2D
 
         ! Field value setter
         procedure :: SetValues      => SetValuesStructured2D
+
+        ! Field value getter
+        procedure :: GetValues      => GetValuesStructured2D
 
     end type 
 
@@ -223,6 +229,13 @@ module mod_contour2D
             real(R8), intent(in)                :: v(:)
 
         end subroutine
+
+        ! Values getter
+        function GetTracerValuesINT(tracer) result(v)
+            import :: ContourTracerUDT, R8
+            class(ContourTracerUDT)         :: tracer 
+            real(R8), allocatable           :: v(:)
+        end function
 
     end interface
 
@@ -768,7 +781,7 @@ module mod_contour2D
             jjsq = findloc(y0 > Y, .true., 1, back=.true.)
 
             ! Out of bounds?
-            if ((iisq == 0) .or. (jjsq == 0) .or. (iisq == nx) .or. (jjsq == ny)) then 
+            if ((iisq == 0) .or. (jjsq == 0) .or. (iisq == size(X)) .or. (jjsq == size(Y))) then 
                 ! Set to NaN
                 val(i) = nanval_R8()
 
@@ -781,11 +794,16 @@ module mod_contour2D
             do j = 1, size(spstruct)
                 if ((x0 == spstruct(j)%x) .and. (y0 == spstruct(j)%y)) then 
                     val(i) = spstruct(j)%val
+                    issaddlepoint = .true. 
+                    exit 
                 end if 
             end do 
             if (issaddlepoint) then 
                 ! Skip remainder of loop
                 cycle
+            end if 
+            if (superquadflags(iisq, jjsq) > 0) then 
+                val(i) = 0
             end if 
 
             ! Compute value at starting quad by bilinear interpolation
@@ -2747,6 +2765,24 @@ module mod_contour2D
         tracer%V = reshape(v, [size(tracer%X), size(tracer%Y)])
         
     end subroutine
+
+    function GetValuesStructured2D(tracer) result(v)
+
+        ! Description
+        !============
+        ! Get tracer values
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)   :: tracer 
+        real(R8), allocatable               :: v(:)
+
+        ! Set output
+        !===========
+        v = reshape(tracer%v, [size(tracer%v)])
+
+    end function
 
     ! Contour clean-up
     subroutine CleanContours(contours)
