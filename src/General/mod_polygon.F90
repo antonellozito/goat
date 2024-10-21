@@ -80,13 +80,12 @@
 ! cope with most polygon behavior, except for exactly collinear edges.
 ! These will not be counted as intersections... 
 
-module mod_polygon 
+module mod_polygon
 
     ! Initialize
     !============
     ! Load modules
     use mod_precision
-    use mod_errorhandler
     use, intrinsic :: ieee_arithmetic
     use mod_plotter
 
@@ -96,7 +95,7 @@ module mod_polygon
     public 
 
     ! Constants
-    real(R8), private, parameter        :: disttol = 1e-12 ! tolerance when computing distances
+    real(R8), private, parameter        :: disttol = 1e-8 ! tolerance when computing distances
     real(R8), private, parameter        :: macheps = 1e-12 ! 'machine' precision
 
     !==================================================================!
@@ -113,7 +112,7 @@ module mod_polygon
 
         integer(I8)                 :: nv, ne, nl
 
-        logical                     :: isclosed, &
+        logical                     :: isclosed, selfintersecting, &
             issimple
 
         integer(I8), allocatable    :: edges(:, :), vert(:), labels(:, :)
@@ -805,8 +804,6 @@ module mod_polygon
         ! 1:    exit due to no polygons present in the set
         ! 2:    intersecting closed polygons
         ! 3:    coinciding closed polygons  
-        ! 4:    open polygons present
-        ! 5:    self-intersecting polygons present
 
         ! Declare variables
         !==================
@@ -843,25 +840,6 @@ module mod_polygon
         !    'sorting part not yet verified for more than one vessel ' // &
         !    'polygon, proceed with caution')
         !end if 
-
-        ! Check polygon status
-        do i = 1, np
-            ! Check closedness
-            if (.not. p(i)%isclosed) then 
-                ! Adjust flag and exit
-                call PolygonWarningHandler(&
-                    'OrientNestedClosedPolygons: open polygons detected. Returning...')
-                flag = 4
-                return 
-            end if 
-            if (p(i)%IsSelfIntersectingPolygon()) then 
-                ! Adjust flag and exit
-                call PolygonWarningHandler(&
-                    'OrientNestedClosedPolygons: self-intersecting polygons detected. Returning...')
-                flag = 5
-                return 
-            end if 
-        end do  
 
         ! Exit in trivial cases
         if (np == 0) then 
@@ -1475,7 +1453,7 @@ module mod_polygon
         !==================
         ! Arguments
         class(PolygonSetUDT)                    :: polygonset 
-        character(*),  intent(in)               :: filepath
+        character(:), allocatable,  intent(in)  :: filepath
 
         ! Auxiliary
         integer(I8)                             :: ndata 
@@ -1587,7 +1565,7 @@ module mod_polygon
         call polygon%IsSimplePolygon()
 
         ! Check if the polygon self intersects
-        ! call polygon%IsSelfIntersectingPolygon()
+        call polygon%IsSelfIntersectingPolygon()
 
 
     end subroutine
@@ -1667,7 +1645,7 @@ module mod_polygon
         call polygon%IsSimplePolygon()
 
         ! Check if the polygon self intersects
-        ! call polygon%IsSelfIntersectingPolygon()
+        call polygon%IsSelfIntersectingPolygon()
 
     end subroutine
 
@@ -2296,7 +2274,7 @@ module mod_polygon
     end subroutine
 
     ! Self-intersections of a polygon
-    function IsSelfIntersectingPolygon(polygon) result(isselfintersecting)
+    subroutine IsSelfIntersectingPolygon(polygon)
 
         ! Description
         !============
@@ -2311,7 +2289,6 @@ module mod_polygon
         !==================
         ! Arguments
         class(PolygonUDT)               :: polygon 
-        logical                         :: isselfintersecting
 
         ! Auxiliary
         real(R8), allocatable           :: x(:), y(:) 
@@ -2321,36 +2298,41 @@ module mod_polygon
 
         ! Initialize
         !===========
-        isselfintersecting = .false. 
+        polygon%selfintersecting = .false.  
 
         ! Checks
         !=======
-        ! Need to check self intersections
-        call polygon%SelfIntersections(x, y, s1, s2)
+        ! Simple polygon?
+        if (.not. polygon%issimple) then 
+            polygon%selfintersecting = .true. 
+        else 
+            ! Need to check self intersections
+            call polygon%SelfIntersections(x, y, s1, s2)
 
-        if (size(x) > 0) then 
-            ! Self-intersections found, need to check 
-            if (size(x) > 1) then 
-                isselfintersecting = .true. 
-            else 
-                ! Additional check on closure
-                if (polygon%isclosed) then 
-                    if ( (s1(1) .ne. 1) .and. (s2(1) .ne. 1) ) then
-                        ! Something wrong here, this shouldn't be happening
-                        call PolygonErrorHandler('SelfIntersections: ' &
-                            // 'closed polygon with single ' &
-                            // 'intersection that is not on end ' &
-                            // 'points detected - chck input')
+            if (size(x) > 0) then 
+                ! Self-intersections found, need to check 
+                if (size(x) > 1) then 
+                    polygon%selfintersecting = .true. 
+                else 
+                    ! Additional check on closure
+                    if (polygon%isclosed) then 
+                        if ( (s1(1) .ne. 1) .and. (s2(1) .ne. 1) ) then
+                            ! Something wrong here, this shouldn't be happening
+                            call PolygonErrorHandler('SelfIntersections: ' &
+                                // 'closed polygon with single ' &
+                                // 'intersection that is not on end ' &
+                                // 'points detected - chck input')
+                        end if 
+                        ! Otherwise, do nothing - closed polygons are 
+                        ! not considered self-intersecting
+                    else
+                        polygon%selfintersecting = .true. 
                     end if 
-                    ! Otherwise, do nothing - closed polygons are 
-                    ! not considered self-intersecting
-                else
-                    isselfintersecting = .true. 
-                end if 
-            end if
-        end if 
+                end if
+            end if 
+        end if               
 
-    end function
+    end subroutine
 
     !------------------------------------------------------------------!
     !                     Polygon derivative routines                  !
@@ -2837,53 +2819,14 @@ module mod_polygon
         ! Declare variables
         !==================
         ! Arguments
-        real(R8),  intent(in)               ::  x1(:), x2(:), y1(:), y2(:) 
-        real(R8), allocatable               :: d(:)
+        real(R8), allocatable, intent(in)  ::  x1(:), x2(:), y1(:), y2(:) 
+        real(R8), allocatable              :: d(:)
 
         ! Compute
         !========
         d = sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
     end subroutine
-
-    ! Continuous index computation
-    function ComputeI(x, y, x1, y1, x2, y2) result(frac)
-
-        ! Description
-        !============
-        ! Compute the relative distance on the edge where a vertex (x, y) lies. It
-        ! is assumed that x, y truly lies on the edge, i.e. this routine will give
-        ! wrong results if x, y is not on the edge with points (x1, y1), (x2, y2).
-        ! Note that also the order of the points matters. 
-
-        ! We hedge for points on one of the two nodes by comparing vertex values
-        ! with disttol (this should be conform how the intersections are computed
-        ! in SegmentIntersections).
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        real(R8), intent(in), dimension(:)  :: x, y, x1, y1, x2, y2
-        real(R8), allocatable               :: frac(:)
-
-        ! Auxiliary
-        real(R8), allocatable, dimension(:) :: d1, d2, de
-
-        ! Check
-        !======
-        ! Check for equal distance
-        call Distance(d1, x, y, x1, y1)
-        call Distance(d2, x, y, x2, y2)
-        call Distance(de, x1, y1, x2, y2)
-
-        ! Compute frac
-        !=============
-        allocate(frac(size(x)))
-        where ((d1 < disttol)) frac = 0 ! first point is the same
-        where ((d2 < disttol)) frac = 1 ! second point is the same
-        where ( .not. (d1 < disttol) .and. .not. (d2 < disttol)) frac = d1/de
-
-    end function 
 
     ! Intersection between two lines with points x11, x12, x21, x22 
     subroutine LineIntersections(x, y, x11, y11, x12, y12, x21, y21, &
@@ -3092,13 +3035,11 @@ module mod_polygon
 
         ! Auxiliary
         real(R8)                :: nan, d1, d2, dotprod, d11, d12, &
-            d21, d22, dp11, dp12, dp21, dp22, vx1121, vx1122, vx1221, vx1222, &
-            vy1121, vy1122, vy1221, vy1222, x2, y2
-        logical                 :: v11on2, v12on2, v21on1, v22on1
+            d21, d22, dp11, dp12, dp21, dp22, vx11, vx12, vx21, vx22, &
+            vy11, vy12, vy21, vy22 
 
         ! Compute intersection
         !=====================
-        ! Check if edges overlap, if so: compute intersections
         if (CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, x22, y22)) then 
             call LineIntersections(x, y, x11, y11, x12, y12, x21, y21, &
                 x22, y22)
@@ -3107,15 +3048,6 @@ module mod_polygon
             x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
             y = x
         end if 
-
-        ! First, check if nodes coincide - overwrite in that case (to hedge for
-        ! ill-conditioning effects in line intersection routine)
-        call CheckSegmentCoincidence(x2, y2, x11, y11, x12, y12, x21, y21, &
-            x22, y22)
-        if (.not. isnan(x2)) then 
-            x = x2
-            y = y2
-        end if
 
         ! Return if no intersection is found - x and y will be NaN 
         ! already
@@ -3138,27 +3070,27 @@ module mod_polygon
             if ( ((d11 < disttol) .and. (d22 < disttol)) &
                  .or. ((d12 < disttol) .and. (d21 < disttol)) ) then 
                 ! Edges are the same up to distance tolerance, take
-                ! average - should actually already be captured before
+                ! average 
                 x = 0.5*(x11 + x12) 
                 y = 0.5*(y11 + y12) 
             else
                 ! Compute vectors between points 
-                vx1121 = x21 - x11 
-                vx1122 = x22 - x11 
-                vx1221 = x21 - x12 
-                vx1222 = x22 - x12 
+                vx11 = x21 - x11 
+                vx12 = x22 - x11 
+                vx21 = x21 - x12 
+                vx22 = x22 - x12 
 
-                vy1121 = y21 - y11 
-                vy1122 = y22 - y11 
-                vy1221 = y21 - y12 
-                vy1222 = y22 - y12 
+                vy11 = y21 - y11 
+                vy12 = y22 - y11 
+                vy21 = y21 - y12 
+                vy22 = y22 - y12 
 
                 ! Compute scalar products
-                dp11 = vx1121*vx1122 + vy1121*vy1122 
-                dp12 = vx1221*vx1222 + vy1221*vy1222 
+                dp11 = vx11*vx12 + vy11*vy12 
+                dp12 = vx21*vx22 + vy21*vy22 
 
-                dp21 = vx1221*vx1121 + vy1221*vy1121 
-                dp22 = vx1222*vx1122 + vy1222*vy1122
+                dp21 = vx21*vx11 + vy21*vy11 
+                dp22 = vx22*vx12 + vy22*vy12
 
                 ! Checks
                 if (d11 < disttol) then 
@@ -3235,49 +3167,38 @@ module mod_polygon
                 else 
                     ! No coincidence of nodes, can simply check vector 
                     ! products
-                    if (vx1121*vx1122 + vy1121*vy1122 < 0) then 
-                        ! Node 11 lies on segment 2
-                        v11on2 = .true.
-                    end if 
-                    if (vx1221*vx1222 + vy1221*vy1222 < 0) then 
-                        ! Node 12 lies on segment 2
-                        v12on2 = .true.
-                    end if 
-                    if (vx1121*vx1221 + vy1121*vy1221 < 0) then 
-                        ! Node 21 lies on segment 1
-                        v21on1 = .true.
-                    end if 
-                    if (vx1122*vx1221 + vy1122*vy1221 < 0) then 
-                        ! Node 22 lies on segment 1
-                        v22on1 = .true.
-                    end if 
-
-                    ! Check cases
-                    if (v11on2 .and. v12on2) then 
-                        ! Segment 1 lies within segment 2
-                        x = 0.5*(x11 + x12)
-                        y = 0.5*(y11 + y12)
-                    elseif (v21on1 .and. v22on1) then 
-                        ! Segment 2 lies within segment 1
-                        x = 0.5*(x21 + x22)
-                        y = 0.5*(y21 + y22)
-                    elseif (v11on2 .and. v21on1) then 
-                        x = 0.5*(x11 + x21)
-                        y = 0.5*(y11 + y21)
-                    elseif (v11on2 .and. v22on1) then 
-                        x = 0.5*(x11 + x22)
-                        y = 0.5*(y11 + y22)
-                    elseif (v12on2 .and. v21on1) then 
-                        x = 0.5*(x12 + x21)
-                        y = 0.5*(y12 + y21)
-                    elseif (v12on2 .and. v22on1) then 
-                        x = 0.5*(x12 + x22)
-                        y = 0.5*(y12 + y22)
+                    if (dp11 < 0) then 
+                        ! First point on second segment 
+                        if (dp21 < 0) then 
+                            ! First point on first segment 
+                            x = 0.5*(x11 + x21) 
+                            y = 0.5*(y11 + y21) 
+                        elseif (dp22 < 0) then 
+                            ! Second point on first segment
+                            x = 0.5*(x11 + x22)
+                            y = 0.5*(y11 + y22) 
+                        else 
+                            ! This shouldn't happen
+                            call PolygonErrorHandler('Something wrong in segment intersection routine')
+                        end if 
+                    elseif (dp12 < 0) then 
+                        ! Second point on second segment 
+                        if (dp21 < 0) then 
+                            ! First point on first segment 
+                            x = 0.5*(x12 + x21) 
+                            y = 0.5*(y12 + y21) 
+                        elseif (dp22 < 0) then 
+                            ! Second point on first segment
+                            x = 0.5*(x12 + x22)
+                            y = 0.5*(y12 + y22) 
+                        else 
+                            ! This shouldn't happen
+                            call PolygonErrorHandler('Something wrong in segment intersection routine')
+                        end if 
                     else 
-                        ! Edges don't seem to be overlapping, shouldn't
-                        ! happen at this point. Throw error
-                        call PolygonErrorHandler('Edges that should overlap do not seem to overlap')
-                    end if 
+                        ! This shouldn't happen
+                        call PolygonErrorHandler('Something wrong in segment intersection routine')
+                    end if
                 end if 
             end if 
             return
@@ -3332,33 +3253,21 @@ module mod_polygon
         ! cost, a simple check is made whether the encompassing boxes of
         ! two edges overlap or not. If they don't, there can be no 
         ! intersection. 
-        
-        ! Notes
-        !======
-        ! Note 1: we now hedge for duplicate intersections that happen 
-        ! exactly in one of the nodes of the polygon, and which appears
-        ! twice due to the fact that the node belongs to two edges, for
-        ! which intersections are sought. Note that actual multiple 
-        ! intersections (same coordinates, but different segment 
-        ! indices) are not removed, since these are valid intersections. 
 
         ! Declare variables
         !==================
         ! Arguments
         class(PolygonUDT), intent(in)           :: polygon 
         real(R8), intent(in)                    :: x1, y1, x2, y2 
-        real(R8), allocatable, intent(out)      :: x(:), y(:) 
+        real(R8), allocatable, intent(out)      :: x(:), y(:)  
         integer(I8), allocatable, intent(out)   :: s(:)
 
         ! Auxiliary
         integer(I8)                         :: counter  
-        real(R8)                            :: xi, yi, xe1, ye1, xe2, ye2, &
-            d
+        real(R8)                            :: xi, yi, xe1, ye1, xe2, ye2
 
         integer(I8), allocatable            :: temps(:)
-        real(R8), allocatable               :: tempx(:), tempy(:), &
-            tempsr(:)
-        logical, allocatable                :: keepind(:)
+        real(R8), allocatable               :: tempx(:), tempy(:)
 
         ! Loop
         integer(I8)                         :: i 
@@ -3371,7 +3280,7 @@ module mod_polygon
         end if    
         if (allocated(y)) then 
             deallocate(y) 
-        end if        
+        end if          
 
         ! Unpack polygon
         associate( &
@@ -3384,7 +3293,7 @@ module mod_polygon
         counter = 0
 
         ! Allocate temporary arrays
-        allocate(tempx(ne), tempy(ne), temps(ne), tempsr(ne)) ! maximum ne intersections, to be trimmed later
+        allocate(tempx(ne), tempy(ne), temps(ne)) ! maximum ne intersections, to be trimmed later
 
         ! Loop   
         do i = 1, ne 
@@ -3417,165 +3326,10 @@ module mod_polygon
         y = tempy(1:counter)  
         s = temps(1:counter)
 
-        ! Hedge for duplicates
-        !=====================
-        ! Since intersections should be sorted by default, we can 
-        ! simply loop and check
-        allocate(keepind(counter))
-        keepind = .true.
-        do i = 1, counter-1
-            ! Check for segment index
-            if ((s(i+1) - s(i)) == 1) then 
-                ! Check for same intersection
-                call Distance(d, x(i), y(i), x(i+1), y(i+1))
-                if (d <= disttol) then 
-                    ! Delete
-                    keepind(i+1) = .false. 
-                end if 
-            end if 
-        end do 
-
-        ! Delete
-        x = pack(x, keepind)
-        y = pack(y, keepind)
-        s = pack(s, keepind)
-
         ! Housekeeping
         !=============
         end associate
 
-        deallocate(tempx, tempy)
-
-
-
-    end subroutine
-
-    subroutine SegmentSimplePolygonIntersections(xp, yp, x1, y1, x2, y2, &
-        x, y, s)
-
-        ! Description
-        !============
-        ! Compute the intersections between a segment and a polygon. The
-        ! segment must be given by two points, (x1, y1), (x2, y2). 
-        ! The output in x, y are the intersection coordinates. s 
-        ! contains a list (integer) of polygon segments where 
-        ! intersections where found. 
-        
-        ! Algorithm
-        !==========
-        ! The main idea is to loop over all segments of the polygon and
-        ! check for polygon edge whether it has an intersection with 
-        ! the segment. To compute intersections, the 
-        ! SegmentIntersections routine is used. To reduce computational 
-        ! cost, a simple check is made whether the encompassing boxes of
-        ! two edges overlap or not. If they don't, there can be no 
-        ! intersection. 
-        
-        ! Notes
-        !======
-        ! Note 1: we now hedge for duplicate intersections that happen 
-        ! exactly in one of the nodes of the polygon, and which appears
-        ! twice due to the fact that the node belongs to two edges, for
-        ! which intersections are sought. Note that actual multiple 
-        ! intersections (same coordinates, but different segment 
-        ! indices) are not removed, since these are valid intersections. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        real(R8), intent(in), dimension(:)      :: xp, yp
-        real(R8), intent(in)                    :: x1, y1, x2, y2 
-        real(R8), allocatable, intent(out)      :: x(:), y(:) 
-        integer(I8), allocatable, intent(out)   :: s(:)
-
-        ! Auxiliary
-        integer(I8)                         :: counter, ne
-        real(R8)                            :: xi, yi, xe1, ye1, xe2, ye2, &
-            d
-
-        integer(I8), allocatable            :: temps(:)
-        real(R8), allocatable               :: tempx(:), tempy(:), &
-            tempsr(:)
-        logical, allocatable                :: keepind(:)
-
-        ! Loop
-        integer(I8)                         :: i 
-
-        ! Initialize
-        !===========
-        ! Checks
-        if (allocated(x)) then 
-            deallocate(x) 
-        end if    
-        if (allocated(y)) then 
-            deallocate(y) 
-        end if        
-
-        ! Initialize intersection counter
-        counter = 0
-
-        ! Precompute overlapping edges
-        ne = size(xp)-1
-
-        ! Allocate temporary arrays
-        allocate(tempx(ne), tempy(ne), temps(ne), tempsr(ne)) ! maximum ne intersections, to be trimmed later
-
-        ! Loop   
-        do i = 1, ne
-            ! Get coordinates of next polygon edge
-            xe1 = xp(i)
-            ye1 = yp(i)
-            xe2 = xp(i+1)
-            ye2 = yp(i+1)
-
-            ! Check boxes
-            if (CheckEdgeOverlap(xe1, ye1, xe2, ye2, x1, y1, x2, y2)) then 
-                ! Edges overlap, compute intersection
-                call SegmentIntersections(xi, yi, xe1, ye1, xe2, ye2, &
-                    x1, y1, x2, y2)
-                
-                ! If intersection is found, add it
-                if (.not. isnan(xi)) then 
-                    ! Update counter
-                    counter = counter + 1
-                    tempx(counter) = xi 
-                    tempy(counter) = yi 
-                    temps(counter) = i
-                end if 
-            end if
-        end do  
-
-        ! Allocate and attribute
-        allocate(x(counter), y(counter), s(counter))
-        x = tempx(1:counter)
-        y = tempy(1:counter)
-        s = temps(1:counter)
-
-        ! Hedge for duplicates
-        !=====================
-        ! Since intersections should be sorted by default, we can 
-        ! simply loop and check
-        allocate(keepind(counter))
-        keepind = .true.
-        do i = 1, counter-1
-            ! Check for segment index
-            if ((s(i+1) - s(i)) == 1) then 
-                ! Check for same intersection
-                call Distance(d, x(i), y(i), x(i+1), y(i+1))
-                if (d <= disttol) then 
-                    ! Delete
-                    keepind(i+1) = .false. 
-                end if 
-            end if 
-        end do 
-
-        ! Delete
-        x = pack(x, keepind)
-        y = pack(y, keepind)
-        s = pack(s, keepind)
-
-        ! Housekeeping
-        !=============
         deallocate(tempx, tempy)
 
 
@@ -3676,13 +3430,6 @@ module mod_polygon
                 if (.not. isnan(xi)) then  
                     ! Intersection found, add
                     counter = counter + 1
-                    if (counter > size(tempx)) then 
-                        ! Extend
-                        tempx = [tempx, 0*tempx]
-                        tempy = [tempy, 0*tempy]
-                        temps1 = [temps1, 0*temps1]
-                        temps2 = [temps2, 0*temps2]
-                    end if 
                     tempx(counter) = xi 
                     tempy(counter) = yi 
                     temps1(counter) = i 
@@ -3712,13 +3459,6 @@ module mod_polygon
             if (.not. isnan(xi)) then  
                 ! Intersection found, add
                 counter = counter + 1
-                if (counter > size(tempx)) then 
-                    ! Extend
-                    tempx = [tempx, 0*tempx]
-                    tempy = [tempy, 0*tempy]
-                    temps1 = [temps1, 0*temps1]
-                    temps2 = [temps2, 0*temps2]
-                end if 
                 tempx(counter) = xi 
                 tempy(counter) = yi 
                 temps1(counter) = i 
@@ -3743,13 +3483,6 @@ module mod_polygon
                 if (.not. isnan(xi)) then  
                     ! Intersection found, add
                     counter = counter + 1
-                    if (counter > size(tempx)) then 
-                        ! Extend
-                        tempx = [tempx, 0*tempx]
-                        tempy = [tempy, 0*tempy]
-                        temps1 = [temps1, 0*temps1]
-                        temps2 = [temps2, 0*temps2]
-                    end if 
                     tempx(counter) = xi 
                     tempy(counter) = yi 
                     temps1(counter) = i 
@@ -3775,7 +3508,7 @@ module mod_polygon
     end subroutine
 
     ! Intersections between two polygons
-    subroutine PolygonIntersections(p1, p2, x, y, s1, s2, s1r, s2r)
+    subroutine PolygonIntersections(p1, p2, x, y, s1, s2)
 
         ! Description
         !============
@@ -3797,33 +3530,21 @@ module mod_polygon
         ! be very large (but usually very small), we dynamically grow 
         ! the intersection storage arrays while computing intersections.
 
-        ! Notes
-        !======
-        ! Note 1: we now hedge for duplicate intersections that happen 
-        ! exactly in one of the nodes of the polygon, and which appears
-        ! twice due to the fact that the node belongs to two edges, for
-        ! which intersections are sought. Note that actual multiple 
-        ! intersections (same coordinates, but different segment 
-        ! indices) are not removed, since these are valid intersections. 
- 
         ! Declare variables
         !==================
         ! Arguments
         class(PolygonUDT), intent(in)           :: p1, p2
         real(R8), allocatable, intent(out)      :: x(:), y(:)
         integer(I8), allocatable, intent(out)   :: s1(:), s2(:)
-        real(R8), allocatable, intent(out), optional    :: s1r(:), s2r(:)
 
         ! Auxiliary
         integer(I8)                             :: ni, counter, sz, &
             szold, szmult 
-        real(R8)                                :: xe1, ye1, xe2, ye2, &
-            d
+        real(R8)                                :: xe1, ye1, xe2, ye2
         real(R8), allocatable                   :: tempx(:), tempy(:), &
-            xi(:), yi(:), temps1r(:), temps2r(:)
+            xi(:), yi(:) 
         integer(I8), allocatable                :: temps1(:), &
             temps2(:), si(:)
-        logical, allocatable                    :: keepind(:)
 
         ! Loop
         integer(I8)                             :: i 
@@ -3847,23 +3568,6 @@ module mod_polygon
         if (allocated(s2)) then 
             deallocate(s2) 
         end if
-        if (present(s1r)) then 
-            if (allocated(s1r)) then 
-                deallocate(s1r)
-            end if
-        end if 
-        if (present(s2r)) then 
-            if (allocated(s2r)) then 
-                deallocate(s2r)
-            end if 
-        end if 
-
-        ! Check if either both s1r, s2r are present or not present
-        if (((.not. present(s1r)) .and. present(s1r)) &
-            .or. (present(s1r) .and. .not. present(s2r))) then 
-            call gdErrorHandler('PolygonIntersections: s1r and s2r should either be ' // &
-                'both present or not present, one of the two is not supported')
-        end if 
 
         ! Associate
         associate(&
@@ -3880,8 +3584,7 @@ module mod_polygon
         szmult      = 2 ! size multiplier 
 
         ! Allocate
-        allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz), &
-            temps1r(sz), temps2r(sz))
+        allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz))
 
         ! Compute intersections
         !======================
@@ -3893,8 +3596,7 @@ module mod_polygon
             xe2 = xp(edges(i, 2))
             ye2 = yp(edges(i, 2))
 
-            ! Compute intersections (duplicates of p1 with segment are 
-            ! already removed in this routine)
+            ! Compute intersections
             call SegmentPolygonIntersections(p1, xe1, ye1, xe2, ye2, &
                 xi, yi, si)
 
@@ -3919,9 +3621,8 @@ module mod_polygon
                     end do
 
                     ! Reallocate
-                    deallocate(tempx, tempy, temps1, temps2, temps1r, temps2r) 
-                    allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz), &
-                        temps1r(sz), temps2r(sz))
+                    deallocate(tempx, tempy, temps1, temps2) 
+                    allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz))
 
                     ! Add
                     tempx(1:szold) = mgmtr(:, 1) 
@@ -3950,282 +3651,10 @@ module mod_polygon
         y = tempy(1:counter) 
         s1 = temps1(1:counter) 
         s2 = temps2(1:counter) 
-
-        ! Hedge for duplicates
-        !=====================
-        ! We only need to check s2 since duplicates of s1 should have
-        ! already been removed before
-        allocate(keepind(counter))
-        keepind = .true.
-        do i = 1, counter-1
-            ! Check for segment index
-            if ((s2(i+1) - s2(i)) == 1) then 
-                ! Check for same intersection
-                call Distance(d, x(i), y(i), x(i+1), y(i+1))
-                if (d <= disttol) then 
-                    ! Delete
-                    keepind(i+1) = .false. 
-                end if 
-            end if 
-        end do 
-
-        ! Delete
-        x = pack(x, keepind)
-        y = pack(y, keepind)
-        s1 = pack(s1, keepind)
-        s2 = pack(s2, keepind)
-        counter = count(keepind)
-
-        ! Compute true intersection locations
-        !====================================
-        if (present(s1r) .and. present(s2r)) then 
-            ! Compute the continuous intersection index (0: first point
-            ! of polygon, ne+1: last point of polygon) - note: we need
-            ! to use the vert array here instead of the edges array, since
-            ! the latter is not necessarily sorted!
-            allocate(s1r(counter), s2r(counter))
-
-            ! First polygon index
-            !s1r = ComputeI(x, y, p1%x(p1%edges(s1, 1)), p1%y(p1%edges(s1, 1)), &
-            !    p1%x(p1%edges(s1, 2)), p1%y(p1%edges(s1, 2))) + s1 - 1 
-            s1r = ComputeI(x, y, p1%x(p1%vert(s1)), p1%y(p1%vert(s1)), &
-                p1%x(p1%vert(s1+1)), p1%y(p1%vert(s1+1))) + s1 - 1 
-
-            ! Second polygon index
-            !s2r = ComputeI(x, y, p2%x(p2%edges(s2, 1)), p2%y(p2%edges(s2, 1)), &
-            !    p2%x(p2%edges(s2, 2)), p2%y(p2%edges(s2, 2))) + s2 - 1
-            s2r = ComputeI(x, y, p2%x(p2%vert(s2)), p2%y(p2%vert(s2)), &
-                p2%x(p2%vert(s2+1)), p2%y(p2%vert(s2+1))) + s2 - 1
-
-        end if 
 
         ! Housekeeping
         !=============
         end associate 
-
-        deallocate(tempx, tempy, temps1, temps2)
-
-
-    end subroutine
-
-    ! Intersections between two simple polygons (given by coordinates only)
-    subroutine SimplePolygonIntersections(x1, y1, x2, y2, x, y, s1, s2, s1r, s2r)
-
-        ! Description
-        !============
-        ! This routine computes the intersections between two polygons.
-        ! It returns the coordinates of these intersections in the 
-        ! x, y arrays and the edge numbers in s1 and s2 for the first 
-        ! and second polygon, resp. 
-
-        ! Important: don't use this routine to compute
-        ! self-intersections! Do this with the dedicated 
-        ! PolygonSelfIntersections routine... 
-
-        ! Algorithm
-        !==========
-        ! We simply loop over all edges of p2 and call 
-        ! SegmentPolygonIntersections of p1 to compute the 
-        ! intersections. Since the number of intersections is a priori
-        ! unknown, and since the maximal amount of intersections may 
-        ! be very large (but usually very small), we dynamically grow 
-        ! the intersection storage arrays while computing intersections.
-
-        ! Notes
-        !======
-        ! Note 1: we now hedge for duplicate intersections that happen 
-        ! exactly in one of the nodes of the polygon, and which appears
-        ! twice due to the fact that the node belongs to two edges, for
-        ! which intersections are sought. Note that actual multiple 
-        ! intersections (same coordinates, but different segment 
-        ! indices) are not removed, since these are valid intersections. 
- 
-        ! Declare variables
-        !==================
-        ! Arguments
-        real(R8), intent(in), dimension(:)      :: x1, y1, x2, y2
-        real(R8), allocatable, intent(out)      :: x(:), y(:)
-        integer(I8), allocatable, intent(out)   :: s1(:), s2(:)
-        real(R8), allocatable, intent(out), optional    :: s1r(:), s2r(:)
-
-        ! Auxiliary
-        integer(I8)                             :: ni, counter, sz, &
-            szold, szmult 
-        real(R8)                                :: xe1, ye1, xe2, ye2, &
-            d
-        real(R8), allocatable                   :: tempx(:), tempy(:), &
-            xi(:), yi(:), temps1r(:), temps2r(:)
-        integer(I8), allocatable                :: temps1(:), &
-            temps2(:), si(:)
-        logical, allocatable                    :: keepind(:)
-
-        ! Loop
-        integer(I8)                             :: i 
-
-        ! Memory mgmt
-        integer(I8), allocatable                :: mgmti(:, :)
-        real(R8), allocatable                   :: mgmtr(:, :)
-
-        ! Initialize
-        !===========
-        ! Checks
-        if (allocated(x)) then
-            deallocate(x) 
-        end if 
-        if (allocated(y)) then 
-            deallocate(y) 
-        end if
-        if (allocated(s1)) then 
-            deallocate(s1) 
-        end if
-        if (allocated(s2)) then 
-            deallocate(s2) 
-        end if
-        if (present(s1r)) then 
-            if (allocated(s1r)) then 
-                deallocate(s1r)
-            end if
-        end if 
-        if (present(s2r)) then 
-            if (allocated(s2r)) then 
-                deallocate(s2r)
-            end if 
-        end if 
-
-        ! Check if either both s1r, s2r are present or not present
-        if (((.not. present(s1r)) .and. present(s1r)) &
-            .or. (present(s1r) .and. .not. present(s2r))) then 
-            call gdErrorHandler('PolygonIntersections: s1r and s2r should either be ' // &
-                'both present or not present, one of the two is not supported')
-        end if 
-
-        ! Initialize
-        counter     = 0 ! intersection counter 
-        ni          = 0
-        szold       = 0
-        sz          = 2 ! initial size of intersection array
-        szmult      = 2 ! size multiplier 
-
-        ! Allocate
-        allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz), &
-            temps1r(sz), temps2r(sz))
-
-        ! Compute intersections
-        !======================
-        ! Loop over p2
-        do i = 1, size(x2)-1 
-            ! Get coordinates of next polygon edge
-            xe1 = x2(i)
-            ye1 = y2(i)
-            xe2 = x2(i+1)
-            ye2 = y2(i+1)
-
-            ! Compute intersections (duplicates of p1 with segment are 
-            ! already removed in this routine)
-            call SegmentSimplePolygonIntersections(x1, y1, xe1, ye1, xe2, ye2, &
-                xi, yi, si)
-
-            ! Check if intersections were found
-            ni = size(xi)
-            if (ni > 0) then 
-                ! Memory MGMT
-                if (counter + ni > sz) then 
-                    ! Store old size
-                    szold = sz
-
-                    ! Store old values
-                    allocate(mgmti(szold, 2), mgmtr(szold, 2))
-                    mgmti(:, 1) = temps1 
-                    mgmti(:, 2) = temps2   
-                    mgmtr(:, 1) = tempx 
-                    mgmtr(:, 2) = tempy
-
-                    ! Adjust size
-                    do while (sz < counter+ni)
-                        sz = sz*szmult 
-                    end do
-
-                    ! Reallocate
-                    deallocate(tempx, tempy, temps1, temps2, temps1r, temps2r) 
-                    allocate(tempx(sz), tempy(sz), temps1(sz), temps2(sz), &
-                        temps1r(sz), temps2r(sz))
-
-                    ! Add
-                    tempx(1:szold) = mgmtr(:, 1) 
-                    tempy(1:szold) = mgmtr(:, 2)
-                    temps1(1:szold) = mgmti(:, 1)
-                    temps2(1:szold) = mgmti(:, 2)
-
-                    ! Deallocate mgmt arrays
-                    deallocate(mgmti, mgmtr)
-                end if 
-
-                ! Add intersections
-                tempx(counter+1:counter+ni) = xi 
-                tempy(counter+1:counter+ni) = yi
-                temps1(counter+1:counter+ni) = si 
-                temps2(counter+1:counter+ni) = i
-
-                ! Update counter
-                counter = counter + ni
-            end if 
-        end do  
-
-        ! Add to output
-        allocate(x(counter), y(counter), s1(counter), s2(counter)) 
-        x = tempx(1:counter) 
-        y = tempy(1:counter) 
-        s1 = temps1(1:counter) 
-        s2 = temps2(1:counter) 
-
-        ! Hedge for duplicates
-        !=====================
-        ! We only need to check s2 since duplicates of s1 should have
-        ! already been removed before
-        allocate(keepind(counter))
-        keepind = .true.
-        do i = 1, counter-1
-            ! Check for segment index
-            if ((s2(i+1) - s2(i)) == 1) then 
-                ! Check for same intersection
-                call Distance(d, x(i), y(i), x(i+1), y(i+1))
-                if (d <= disttol) then 
-                    ! Delete
-                    keepind(i+1) = .false. 
-                end if 
-            end if 
-        end do 
-
-        ! Delete
-        x = pack(x, keepind)
-        y = pack(y, keepind)
-        s1 = pack(s1, keepind)
-        s2 = pack(s2, keepind)
-        counter = count(keepind)
-
-        ! Compute true intersection locations
-        !====================================
-        if (present(s1r) .and. present(s2r)) then 
-            ! Compute the continuous intersection index (0: first point
-            ! of polygon, ne+1: last point of polygon) - note: we need
-            ! to use the vert array here instead of the edges array, since
-            ! the latter is not necessarily sorted!
-            allocate(s1r(counter), s2r(counter))
-
-            ! First polygon index
-            !s1r = ComputeI(x, y, p1%x(p1%edges(s1, 1)), p1%y(p1%edges(s1, 1)), &
-            !    p1%x(p1%edges(s1, 2)), p1%y(p1%edges(s1, 2))) + s1 - 1 
-            s1r = ComputeI(x, y, x1(s1), y1(s1), x1(s1+1), y1(s1+1)) + s1 - 1 
-
-            ! Second polygon index
-            !s2r = ComputeI(x, y, p2%x(p2%edges(s2, 1)), p2%y(p2%edges(s2, 1)), &
-            !    p2%x(p2%edges(s2, 2)), p2%y(p2%edges(s2, 2))) + s2 - 1
-            s2r = ComputeI(x, y, x2(s2), y2(s2), x2(s2+1), y2(s2+1)) + s2 - 1
-
-        end if 
-
-        ! Housekeeping
-        !=============
 
         deallocate(tempx, tempy, temps1, temps2)
 
@@ -4326,17 +3755,12 @@ module mod_polygon
                 elseif ( (yp(j) == 0) .and. (xp(j) > 0) ) then
                     if ( (yp(j+1) > 0) ) then 
                         w(i) = w(i) + 1
-                    elseif (yp(j+1) == 0) then 
-                        ! Do nothing - we're still on the same line and 
-                        ! didn't cross
                     else 
                         w(i) = w(i) - 1
                     end if 
                 elseif ( (yp(j+1) == 0) .and. (xp(j+1) > 0) ) then 
                     if (yp(j) < 0) then 
                         w(i) = w(i) + 1
-                    elseif (yp(j) == 0) then 
-                        ! Do nothing
                     else 
                         w(i) = w(i) - 1
                     end if 
@@ -4360,7 +3784,7 @@ module mod_polygon
     end subroutine 
 
     ! Edge overlap checker
-    function CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, &
+    logical function CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, &
         x22, y22) result(isoverlapping)
 
         ! Description
@@ -4382,7 +3806,6 @@ module mod_polygon
         ! Arguments
         real(R8), intent(in)        :: x11, y11, x12, y12, x21, y21, &
             x22, y22
-        logical                     :: isoverlapping
 
         ! Auxiliary
 
@@ -4394,180 +3817,15 @@ module mod_polygon
         isoverlapping = .true. 
 
         ! x-interval
-        if ((x11+disttol < x21-disttol) .and. (x11+disttol < x22-disttol) &
-            .and. (x12+disttol < x21-disttol) .and. (x12+disttol < x22-disttol)) then 
-                isoverlapping = .false. 
-        elseif ((x21+disttol < x11-disttol) .and. (x21+disttol < x12-disttol) &
-            .and. (x22+disttol < x11-disttol) .and. (x22+disttol < x12-disttol)) then 
-                isoverlapping = .false. 
-        elseif  ((y11+disttol < y21-disttol) .and. (y11+disttol < y22-disttol) &
-            .and. (y12+disttol < y21-disttol) .and. (y12+disttol < y22-disttol)) then 
-                isoverlapping = .false. 
-        elseif ((y21+disttol < y11-disttol) .and. (y21+disttol < y12-disttol) &
-            .and. (y22+disttol < y11-disttol) .and. (y22+disttol < y12-disttol)) then 
-                isoverlapping = .false.    
-        end if
-
-       ! if ( (max(x11, x12)+disttol < min(x21, x22)-disttol) .or. &
-       !     (max(x21, x22)+disttol < min(x11, x12)-disttol) ) then 
-       !     isoverlapping = .false. 
-       ! elseif ( (max(y11, y12)+disttol < min(y21, y22)-disttol) .or. &
-       !     (max(y21, y22)+disttol < min(y11, y12)-disttol) ) then 
-       !     isoverlapping = .false.
-       ! end if 
+        if ( (max(x11, x12)+disttol < min(x21, x22)-disttol) .or. &
+            (max(x21, x22)+disttol < min(x11, x12)-disttol) ) then 
+            isoverlapping = .false. 
+        elseif ( (max(y11, y12)+disttol < min(y21, y22)-disttol) .or. &
+            (max(y21, y22)+disttol < min(y11, y12)-disttol) ) then 
+            isoverlapping = .false.
+        end if 
 
     end function
-
-    ! Edge overlap checker
-    function CheckEdgeOverlap1D(x11, y11, x12, y12, x21, y21, &
-        x22, y22) result(isoverlapping)
-
-        ! Description
-        !============
-        ! This function checks whether two edges 'overlap', in the 
-        ! sense that the boxes formed around these edges overlap. The 
-        ! boxes have edges parallel with the axes. 
-
-        ! Algorithm
-        !==========
-        ! For two boxes to not overlap, the common set of points of the 
-        ! x-interval of both boxes should be the empty set (or the same
-        ! for the y-interval). We hedge for distance precision tolerance
-        ! as defined by macheps (i.e. we make the intervals disttol 
-        ! larger on each side
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        real(R8), intent(in), dimension(:)  :: x11, y11, x12, y12
-        real(R8), intent(in)                :: x21, y21, x22, y22
-        logical, allocatable, dimension(:)  :: isoverlapping
-
-        ! Auxiliary
-
-        ! Loop
-        integer(I8)                         :: i 
-
-        ! Check boxes
-        !============
-        ! Initialize
-        allocate(isoverlapping(size(x11)))
-        isoverlapping = .true. 
-
-        ! x-interval
-        do i = 1, size(x11)
-                if ((x11(i)+disttol < x21-disttol) .and. (x11(i)+disttol < x22-disttol) &
-                .and. (x12(i)+disttol < x21-disttol) .and. (x12(i)+disttol < x22-disttol)) then 
-                    isoverlapping(i) = .false. 
-            elseif ((x21+disttol < x11(i)-disttol) .and. (x21+disttol < x12(i)-disttol) &
-                .and. (x22+disttol < x11(i)-disttol) .and. (x22+disttol < x12(i)-disttol)) then 
-                    isoverlapping(i) = .false. 
-            elseif  ((y11(i)+disttol < y21-disttol) .and. (y11(i)+disttol < y22-disttol) &
-                .and. (y12(i)+disttol < y21-disttol) .and. (y12(i)+disttol < y22-disttol)) then 
-                    isoverlapping(i) = .false. 
-            elseif ((y21+disttol < y11(i)-disttol) .and. (y21+disttol < y12(i)-disttol) &
-                .and. (y22+disttol < y11(i)-disttol) .and. (y22+disttol < y12(i)-disttol)) then 
-                    isoverlapping(i) = .false.    
-            end if
-        end do 
-        
-        !where ((x11+disttol < x21-disttol) .and. (x11+disttol < x22-disttol) &
-        !    .and. (x12+disttol < x21-disttol) .and. (x12+disttol < x22-disttol))  
-        !        isoverlapping = .false. 
-        !end where 
-        !where ((x21+disttol < x11-disttol) .and. (x21+disttol < x12-disttol) &
-        !    .and. (x22+disttol < x11-disttol) .and. (x22+disttol < x12-disttol))  
-        !        isoverlapping = .false. 
-        !end where 
-        !where  ((y11+disttol < y21-disttol) .and. (y11+disttol < y22-disttol) &
-        !    .and. (y12+disttol < y21-disttol) .and. (y12+disttol < y22-disttol))  
-        !        isoverlapping = .false. 
-        !end where 
-        !where ((y21+disttol < y11-disttol) .and. (y21+disttol < y12-disttol) &
-        !    .and. (y22+disttol < y11-disttol) .and. (y22+disttol < y12-disttol))  
-        !        isoverlapping = .false.    
-        !end where
-
-       ! if ( (max(x11, x12)+disttol < min(x21, x22)-disttol) .or. &
-       !     (max(x21, x22)+disttol < min(x11, x12)-disttol) ) then 
-       !     isoverlapping = .false. 
-       ! elseif ( (max(y11, y12)+disttol < min(y21, y22)-disttol) .or. &
-       !     (max(y21, y22)+disttol < min(y11, y12)-disttol) ) then 
-       !     isoverlapping = .false.
-       ! end if 
-
-    end function
-
-    ! Edge coincidence checker
-    subroutine CheckSegmentCoincidence(x, y, x11, y11, x12, y12, x21, &
-        y21, x22, y22)
-
-        ! Description
-        !============
-        ! Check if two segments are coincident, either at one of the two
-        ! end vertices or at both. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        real(R8), intent(in)    :: x11, y11, x12, y12, x21, y21, &
-            x22, y22 
-        real(R8), intent(out)   :: x, y
-
-        ! Auxiliary
-        real(R8)                :: nan, d11, d12, d21, d22
-
-
-        ! Compute distances
-        !==================
-        ! Distances between segment points
-        call Distance(d11, x11, y11, x21, y21)
-        call Distance(d12, x11, y11, x22, y22)
-        call Distance(d21, x12, y12, x21, y21)
-        call Distance(d22, x12, y12, x22, y22)
-
-        ! Check
-        if (( ((d11 < disttol) .and. (d22 < disttol)) &
-                .or. ((d12 < disttol) .and. (d21 < disttol)) )) then 
-            ! Edges are the same up to distance tolerance, take
-            ! average
-            x = 0.5*(x11 + x12)
-            y = 0.5*(y11 + y12)
-        else
-            
-            ! Checks
-            if (d11 < disttol) then 
-                ! First points coincide
-                x = x11;
-                y = y11;
-            elseif (d12 < disttol) then 
-                ! First point of first segment and second point of
-                ! second segment coincide
-                
-                x = x11;
-                y = y11;
-            elseif (d21 < disttol) then 
-                ! Second point of first segment and first point of
-                ! second segment coincide
-                
-                ! Intersection in single point
-                x = x12;
-                y = y12;
-            elseif (d22 < disttol) then 
-                ! Second point of first segment and first point of
-                ! second segment coincide
-                
-                x = x12;
-                y = y12;
-            else
-                ! No coincidence of nodes, set to NaN
-                x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
-                y = IEEE_VALUE(nan, IEEE_QUIET_NAN)
-            end if 
-        end if
-
-
-    end subroutine
 
     !------------------------------------------------------------------!
     !                               Writing                            !

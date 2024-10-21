@@ -95,86 +95,6 @@ module somod_userinput
 
     end type
 
-    ! Fixed vessel flux constraints
-    type, extends(optionsUDT)   :: FixedVesselFluxConOptionsUDT
-
-        ! Description
-        !============
-        ! Constraint options for fixed vessel flux. The following
-        ! fields are present:
-        !   structureIDs:   structure IDs of structures of which the 
-        !                   vertices should be constrained 
-        !   vertIDs:        IDs of specific vessel vertices (according
-        !                   to the original numbering in the 
-        !                   structure.dat file) to be constrained
-        ! 
-        ! Note that vertices are constrained to their original psi value
-
-        ! Fields
-        integer(I8), allocatable    :: structureIDs(:), vertIDs(:)
-
-    contains 
-
-        procedure :: SetDefaults    => SetDefaultFixedVesselFluxConOptions
-        procedure :: Read           => ReadFixedVesselFluxConOptions
-
-    end type
-
-    ! Vessel distance options
-    type, extends(optionsUDT)   :: VesselDistanceConOptionsUDT
-
-        ! Description
-        !============
-        ! Constraint options for vessel distance. The following
-        ! fields are present:
-        !   structureIDs:   structure IDs of structures of which the 
-        !                   vertices should be constrained 
-        !   vertIDs:        IDs of specific vessel vertices (according
-        !                   to the original numbering in the 
-        !                   structure.dat file) to be constrained
-        !   d:              desired distance from polygon
-        !   xp, yp:         polygon coordinates
-        !   plftype:        type of polygon levelset function 
-        !   resx, resy      options for closed polygon approximation
-        !   C, M, meth
-        !   offsetx, 
-        !   offsety
-        ! 
-
-        ! Fields
-        integer(I8)                 :: resx, resy, C, M
-        integer(I8), allocatable    :: structureIDs(:), vertIDs(:)
-        real(R8)                    :: offsetx, offsety, d 
-        real(R8), allocatable       :: xp(:), yp(:)
-        character(:), allocatable   :: meth, plftype
-        
-    contains 
-
-        procedure :: SetDefaults    => SetDefaultVesselDistanceConOptions
-        procedure :: Read           => ReadVesselDistanceConOptions
-
-    end type
-
-    ! Vessel upper bound options
-    type, extends(VesselDistanceConOptionsUDT) :: VesselUBOptionsUDT
-
-    contains 
-
-        procedure :: SetDefaults    => SetDefaultVesselUpperBoundConOptions
-        procedure :: Read           => ReadVesselUpperBoundConOptions
-
-    end type 
-
-    ! Vessel lower bound options
-    type, extends(VesselDistanceConOptionsUDT) :: VesselLBOptionsUDT
-
-    contains 
-
-        procedure :: SetDefaults    => SetDefaultVesselLowerBoundConOptions
-        procedure :: Read           => ReadVesselLowerBoundConOptions
-
-    end type 
-
     ! General constraints
     type, extends(optionsUDT)   :: ConstraintOptionsSOUDT 
 
@@ -187,59 +107,15 @@ module somod_userinput
         ! read in separately anyway. 
         
         ! Switches
-        integer(I8)                 :: fixedvesselpoints, &
-            fixedvesselflux, goat, vesselupperbound, vessellowerbound
+        integer(I8)                 :: fixedvesselpoints, goat
 
         ! Constraint options
         type(FixedVesselPointsConOptionsUDT)    :: fvpoptions
-        type(FixedVesselFluxConOptionsUDT)      :: fvfoptions
-        class(VesselDistanceConOptionsUDT), allocatable  :: vdoptions
-        type(VesselUBOptionsUDT)                :: vduboptions 
-        type(VesselLBOptionsUDT)                :: vdlboptions
 
     contains 
 
         procedure :: SetDefaults    => SetDefaultConstraintOptionsSO
         procedure :: Read           => ReadConstraintOptionsSO
-
-    end type
-
-    !------------------------------------------------------------------!
-    !                       HESSIAN APPROXIMATION                      !
-    !------------------------------------------------------------------!
-    ! General hessian approximation options
-    type, extends(optionsUDT)   :: HessianApproximationOptionsUDT
-
-        ! Description
-        !============
-        ! Options for the hessian approximation of the cost function.
-        ! See also the optmod_hessapprox module for more information on
-        ! which hessian approximations etc are currently available. 
-
-        ! The following fields are present:
-        ! - storagetype:    type of hessian approximation storage ('dense', 
-        !                   'sparse', or others)
-        ! - updatemethod:   method to update the hessian (may depend on 
-        !                   storage type, typically 'BFGS')
-        ! - inithess:       initial hessian type ('diagonal')
-
-        ! Options for 'diagonal' inithess:
-        ! - diagind:        diagonal indices (relative to main diagonal) 
-        !                   with non-zeros
-        ! - diagval:        values on the diagonal (for uniform values on
-        !                   separate diagonals, equal amount of values 
-        !                   as diagonal indices, for non-uniform: 
-        !                   specify equal to total number of elements)
-
-        character(:), allocatable       :: storagetype, updatemethod, &
-            inithess 
-        integer(I8), allocatable        :: diagind(:)
-        real(R8), allocatable           :: diagval(:)
-
-    contains 
-
-        procedure :: SetDefaults    => SetDefaultHessianApproximationOptionsSO
-        procedure :: Read           => ReadHessianApproximationOptionsSO
 
     end type
 
@@ -293,7 +169,6 @@ module somod_userinput
         character(:), allocatable           :: type
         logical                             :: dogoatreduction, includesolps
         type(CostFunctionOptionsPLFUDT)     :: plf 
-        type(HessianApproximationOptionsUDT)    :: hessapprox
 
     contains 
 
@@ -440,134 +315,6 @@ module somod_userinput
 
     end subroutine
 
-    ! Fixed vessel points constraints
-    subroutine SetDefaultFixedVesselFluxConOptions(options)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(FixedVesselFluxConOptionsUDT)   :: options 
-
-        ! Set defaults
-        !=============
-        if (allocated(options%structureIDs)) then 
-            deallocate(options%structureIDs)
-        end if
-        if (allocated(options%vertIDs)) then 
-            deallocate(options%vertIDs)
-        end if 
-        allocate(options%structureIDs(0), options%vertIDs(0))
-
-    end subroutine
-
-    ! Fixed vessel points constraints
-    subroutine SetDefaultVesselDistanceConOptions(options)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(VesselDistanceConOptionsUDT)   :: options 
-
-        ! Set defaults
-        !=============
-        if (allocated(options%structureIDs)) then 
-            deallocate(options%structureIDs)
-        end if
-        if (allocated(options%vertIDs)) then 
-            deallocate(options%vertIDs)
-        end if 
-        if (allocated(options%xp)) then 
-            deallocate(options%xp)
-        end if 
-        if (allocated(options%yp)) then 
-            deallocate(options%yp)
-        end if
-        allocate(options%structureIDs(0), options%vertIDs(0), &
-            options%xp(0), options%yp(0))
-
-        options%plftype = 'closedpolygon_exact'
-        options%resx = 100
-        options%resy = 100
-        options%M = 6
-        options%C = 3
-        options%meth = 'uniform'
-        options%offsetx = 0.05
-        options%offsety = 0.05
-
-    end subroutine
-
-    ! Fixed vessel points constraints
-    subroutine SetDefaultVesselUpperBoundConOptions(options)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(VesselUBOptionsUDT)   :: options 
-
-        ! Set defaults
-        !=============
-        if (allocated(options%structureIDs)) then 
-            deallocate(options%structureIDs)
-        end if
-        if (allocated(options%vertIDs)) then 
-            deallocate(options%vertIDs)
-        end if 
-        if (allocated(options%xp)) then 
-            deallocate(options%xp)
-        end if 
-        if (allocated(options%yp)) then 
-            deallocate(options%yp)
-        end if
-        allocate(options%structureIDs(0), options%vertIDs(0), &
-            options%xp(0), options%yp(0))
-
-        options%plftype = 'closedpolygon_exact'
-        options%resx = 100
-        options%resy = 100
-        options%M = 6
-        options%C = 3
-        options%meth = 'uniform'
-        options%offsetx = 0.05
-        options%offsety = 0.05
-
-    end subroutine
-
-    ! Fixed vessel points constraints
-    subroutine SetDefaultVesselLowerBoundConOptions(options)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(VesselLBOptionsUDT)   :: options 
-
-        ! Set defaults
-        !=============
-        if (allocated(options%structureIDs)) then 
-            deallocate(options%structureIDs)
-        end if
-        if (allocated(options%vertIDs)) then 
-            deallocate(options%vertIDs)
-        end if 
-        if (allocated(options%xp)) then 
-            deallocate(options%xp)
-        end if 
-        if (allocated(options%yp)) then 
-            deallocate(options%yp)
-        end if
-        allocate(options%structureIDs(0), options%vertIDs(0), &
-            options%xp(0), options%yp(0))
-
-        options%plftype = 'closedpolygon_exact'
-        options%resx = 100
-        options%resy = 100
-        options%M = 6
-        options%C = 3
-        options%meth = 'uniform'
-        options%offsetx = 0.05
-        options%offsety = 0.05
-
-    end subroutine
-
     ! General constraints
     subroutine SetDefaultConstraintOptionsSO(options)
 
@@ -580,22 +327,13 @@ module somod_userinput
         !=============
         ! Own fields
         options%fixedvesselpoints       = 0
-        options%fixedvesselflux         = 0 
         options%goat                    = 0
-        options%vesselupperbound        = 0
-        options%vessellowerbound        = 0 
 
         ! Propagate filepaths
         options%fvpoptions%inputfilepath = options%inputfilepath
-        options%fvfoptions%inputfilepath = options%inputfilepath
-        options%vduboptions%inputfilepath = options%inputfilepath 
-        options%vdlboptions%inputfilepath = options%inputfilepath
 
         ! Other constraints
         call options%fvpoptions%SetDefaults()
-        call options%fvfoptions%SetDefaults()
-        call options%vduboptions%SetDefaults()
-        call options%vdlboptions%SetDefaults()
 
     end subroutine
 
@@ -634,11 +372,9 @@ module somod_userinput
 
         ! Propagate filepaths
         options%plf%inputfilepath = options%inputfilepath
-        options%hessapprox%inputfilepath = options%inputfilepath
 
         ! Contributions
         call options%plf%SetDefaults()
-        call options%hessapprox%SetDefaults()
 
     end subroutine
 
@@ -661,25 +397,6 @@ module somod_userinput
         call options%costfunction%SetDefaults()
         call options%constraints%SetDefaults()
         call options%variables%SetDefaults()
-
-    end subroutine
-    
-    ! General cost function
-    subroutine SetDefaultHessianApproximationOptionsSO(options)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(HessianApproximationOptionsUDT)   :: options 
-
-        ! Set defaults
-        !=============
-        ! Initial hessian (identity matrix)
-        options%inithess            = 'diagonal'
-        options%diagind             = [0]
-        options%diagval             = [1.0_R8]
-        options%updatemethod        = 'no' ! no updates
-        options%storagetype         = 'sparse'
 
     end subroutine
 
@@ -853,276 +570,6 @@ module somod_userinput
 
     end subroutine
 
-    ! Fixed vessel points constraints
-    subroutine ReadFixedVesselFluxConOptions(options)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(FixedVesselFluxConOptionsUDT)  :: options 
-
-        ! Auxiliary
-        integer                         :: openstatus 
-        character(:), allocatable       :: field
-        integer, parameter              :: fid = 10 
-        logical                         :: reachedeof
-
-        ! Initialize
-        !===========
-        ! Variables
-        reachedeof = .false. 
-
-        ! Open the file, check if it exists
-        open(unit=fid, file=options%inputfilepath, status='old', &
-            iostat=openstatus)
-
-        if (openstatus > 0) then 
-            ! Something wrong when reading file - continue with default
-            ! values
-            print *, 'ReadFixedVesselFluxConOptions: could not open file, ' &
-                // 'taking default options...'
-        elseif (openstatus < 0) then 
-            ! File appears to be empty
-            print *, 'ReadFixedVesselFluxConOptions: file appears to be empty, ' &
-                // 'taking default options...'
-        end if
-        
-        ! Read options
-        !=============
-        ! Structure & vertex IDs
-        field = 'so.ec.par.fvf.structureIDs'
-        call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
-        field = 'so.ec.par.fvf.vertIDs'
-        call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
-
-        ! Housekeeping
-        !=============
-        ! Close the file
-        close(unit=fid)
-
-
-    end subroutine
-
-    ! Vessel distance constraints
-    subroutine ReadVesselDistanceConOptions(options)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(VesselDistanceConOptionsUDT)  :: options 
-
-        ! Auxiliary
-        integer                         :: openstatus 
-        character(:), allocatable       :: field
-        integer, parameter              :: fid = 10 
-        logical                         :: reachedeof
-
-        ! Initialize
-        !===========
-        ! Variables
-        reachedeof = .false. 
-
-        ! Open the file, check if it exists
-        open(unit=fid, file=options%inputfilepath, status='old', &
-            iostat=openstatus)
-
-        if (openstatus > 0) then 
-            ! Something wrong when reading file - continue with default
-            ! values
-            print *, 'ReadVesselDistanceConOptions: could not open file, ' &
-                // 'taking default options...'
-        elseif (openstatus < 0) then 
-            ! File appears to be empty
-            print *, 'ReadVesselDistanceConOptions: file appears to be empty, ' &
-                // 'taking default options...'
-        end if
-        
-        ! Read options
-        !=============
-        ! Structure & vertex IDs
-        field = 'so.ec.par.vd.structureIDs'
-        call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
-        field = 'so.ec.par.vd.vertIDs'
-        call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
-
-        ! Plf options
-        field = 'so.ec.par.vd.plftype'
-        call ExtractOptionValueCharacter(fid, field, options%plftype)
-        field = 'so.ec.par.vd.meth'
-        call ExtractOptionValueCharacter(fid, field, options%meth)
-        field = 'so.ec.par.vdlb.d'
-        call ExtractOptionValueReal0D(fid, field, options%d)
-        field = 'so.ec.par.vd.resx'
-        call ExtractOptionValueInteger0D(fid, field, options%resx)
-        field = 'so.ec.par.vd.resy'
-        call ExtractOptionValueInteger0D(fid, field, options%resy)
-        field = 'so.ec.par.vd.offsetx'
-        call ExtractOptionValueReal0D(fid, field, options%offsetx)
-        field = 'so.ec.par.vd.offsety'
-        call ExtractOptionValueReal0D(fid, field, options%offsety)
-        field = 'so.ec.par.vd.M'
-        call ExtractOptionValueInteger0D(fid, field, options%M)
-        field = 'so.ec.par.vd.C'
-        call ExtractOptionValueInteger0D(fid, field, options%C)
-        field = 'so.ec.par.vd.xp'
-        call ExtractOptionValueReal1D(fid, field, options%xp)
-        field = 'so.ec.par.vd.yp'
-        call ExtractOptionValueReal1D(fid, field, options%yp)
-
-
-        ! Housekeeping
-        !=============
-        ! Close the file
-        close(unit=fid)
-
-
-    end subroutine
-
-    ! Vessel upper boundary constraints
-    subroutine ReadVesselUpperBoundConOptions(options)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(VesselUBOptionsUDT)  :: options 
-
-        ! Auxiliary
-        integer                         :: openstatus 
-        character(:), allocatable       :: field
-        integer, parameter              :: fid = 10 
-        logical                         :: reachedeof
-
-        ! Initialize
-        !===========
-        ! Variables
-        reachedeof = .false. 
-
-        ! Open the file, check if it exists
-        open(unit=fid, file=options%inputfilepath, status='old', &
-            iostat=openstatus)
-
-        if (openstatus > 0) then 
-            ! Something wrong when reading file - continue with default
-            ! values
-            print *, 'ReadVesselUpperBoundaryConOptions: could not open file, ' &
-                // 'taking default options...'
-        elseif (openstatus < 0) then 
-            ! File appears to be empty
-            print *, 'ReadVesselUpperBoundaryConOptions: file appears to be empty, ' &
-                // 'taking default options...'
-        end if
-        
-        ! Read options
-        !=============
-        ! Structure & vertex IDs
-        field = 'so.ec.par.vdub.structureIDs'
-        call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
-        field = 'so.ec.par.vdub.vertIDs'
-        call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
-
-        ! Plf options
-        field = 'so.ec.par.vdub.plftype'
-        call ExtractOptionValueCharacter(fid, field, options%plftype)
-        field = 'so.ec.par.vdub.meth'
-        call ExtractOptionValueCharacter(fid, field, options%meth)
-        field = 'so.ec.par.vdlb.d'
-        call ExtractOptionValueReal0D(fid, field, options%d)
-        field = 'so.ec.par.vdub.resx'
-        call ExtractOptionValueInteger0D(fid, field, options%resx)
-        field = 'so.ec.par.vdub.resy'
-        call ExtractOptionValueInteger0D(fid, field, options%resy)
-        field = 'so.ec.par.vdub.offsetx'
-        call ExtractOptionValueReal0D(fid, field, options%offsetx)
-        field = 'so.ec.par.vdub.offsety'
-        call ExtractOptionValueReal0D(fid, field, options%offsety)
-        field = 'so.ec.par.vdub.M'
-        call ExtractOptionValueInteger0D(fid, field, options%M)
-        field = 'so.ec.par.vdub.C'
-        call ExtractOptionValueInteger0D(fid, field, options%C)
-        field = 'so.ec.par.vdub.xp'
-        call ExtractOptionValueReal1D(fid, field, options%xp)
-        field = 'so.ec.par.vdub.yp'
-        call ExtractOptionValueReal1D(fid, field, options%yp)
-
-        ! Housekeeping
-        !=============
-        ! Close the file
-        close(unit=fid)
-
-
-    end subroutine
-
-     ! Vessel upper boundary constraints
-    subroutine ReadVesselLowerBoundConOptions(options)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(VesselLBOptionsUDT)  :: options 
-
-        ! Auxiliary
-        integer                         :: openstatus 
-        character(:), allocatable       :: field
-        integer, parameter              :: fid = 10 
-        logical                         :: reachedeof
-
-        ! Initialize
-        !===========
-        ! Variables
-        reachedeof = .false. 
-
-        ! Open the file, check if it exists
-        open(unit=fid, file=options%inputfilepath, status='old', &
-            iostat=openstatus)
-
-        if (openstatus > 0) then 
-            ! Something wrong when reading file - continue with default
-            ! values
-            print *, 'ReadVesselLowerBoundaryConOptions: could not open file, ' &
-                // 'taking default options...'
-        elseif (openstatus < 0) then 
-            ! File appears to be empty
-            print *, 'ReadVesselLowerBoundaryConOptions: file appears to be empty, ' &
-                // 'taking default options...'
-        end if
-        
-        ! Read options
-        !=============
-        ! Structure & vertex IDs
-        field = 'so.ec.par.vdlb.structureIDs'
-        call ExtractOptionValueInteger1D(fid, field, options%structureIDs)
-        field = 'so.ec.par.vdlb.vertIDs'
-        call ExtractOptionValueInteger1D(fid, field, options%vertIDs)
-
-        ! Plf options
-        field = 'so.ec.par.vdlb.plftype'
-        call ExtractOptionValueCharacter(fid, field, options%plftype)
-        field = 'so.ec.par.vdlb.meth'
-        call ExtractOptionValueCharacter(fid, field, options%meth)
-        field = 'so.ec.par.vdlb.resx'
-        call ExtractOptionValueInteger0D(fid, field, options%resx)
-        field = 'so.ec.par.vdlb.resy'
-        call ExtractOptionValueInteger0D(fid, field, options%resy)
-        field = 'so.ec.par.vdlb.d'
-        call ExtractOptionValueReal0D(fid, field, options%d)
-        field = 'so.ec.par.vdlb.offsetx'
-        call ExtractOptionValueReal0D(fid, field, options%offsetx)
-        field = 'so.ec.par.vdlb.offsety'
-        call ExtractOptionValueReal0D(fid, field, options%offsety)
-        field = 'so.ec.par.vdlb.M'
-        call ExtractOptionValueInteger0D(fid, field, options%M)
-        field = 'so.ec.par.vdlb.C'
-        call ExtractOptionValueInteger0D(fid, field, options%C)
-
-
-        ! Housekeeping
-        !=============
-        ! Close the file
-        close(unit=fid)
-
-
-    end subroutine
-
     ! General constraints
     subroutine ReadConstraintOptionsSO(options)
 
@@ -1162,25 +609,17 @@ module somod_userinput
         ! Constraint switches
         field = 'so.ec.fixedvesselpoints'
         call ExtractOptionValueInteger0D(fid, field, options%fixedvesselpoints)
-        field = 'so.ec.fixedvesselflux'
-        call ExtractOptionValueInteger0D(fid, field, options%fixedvesselflux)
         field = 'so.ec.goat'
         call ExtractOptionValueInteger0D(fid, field, options%goat)
-        field = 'so.ec.vesselupperbound'
-        call ExtractOptionValueInteger0D(fid, field, options%vesselupperbound)
-        field = 'so.ec.vessellowerbound'
-        call ExtractOptionValueInteger0D(fid, field, options%vessellowerbound)
 
         ! Other constraint options
         call options%fvpoptions%Read()
-        call options%fvfoptions%Read()
-        call options%vduboptions%Read()
-        call options%vdlboptions%Read()
 
         ! Housekeeping
         !=============
         ! Close the file
         close(unit=fid)
+
 
     end subroutine
 
@@ -1294,7 +733,6 @@ module somod_userinput
         !===================
         ! Contributions
         call options%plf%Read()
-        call options%hessapprox%Read()
 
     end subroutine
 
@@ -1312,63 +750,6 @@ module somod_userinput
         call options%costfunction%Read()
         call options%variables%Read()
         call options%constraints%Read()
-
-    end subroutine
-
-    ! General design
-    subroutine ReadHessianApproximationOptionsSO(options)
-
-         ! Declare variables
-        !==================
-        ! Arguments
-        class(HessianApproximationOptionsUDT)    :: options 
-
-        ! Auxiliary
-        integer                         :: openstatus 
-        character(:), allocatable       :: field
-        integer, parameter              :: fid = 10 
-        logical                         :: reachedeof
-
-        ! Initialize
-        !===========
-        ! Variables
-        reachedeof = .false. 
-
-        ! Open the file, check if it exists
-        open(unit=fid, file=options%inputfilepath, status='old', &
-            iostat=openstatus)
-
-        if (openstatus > 0) then 
-            ! Something wrong when reading file - continue with default
-            ! values
-            print *, 'ReadHessianApproximationOptionsSO: could not open file, ' &
-                // 'taking default options...'
-        elseif (openstatus < 0) then 
-            ! File appears to be empty
-            print *, 'ReadHessianApproximationOptionsSO: file appears to be empty, ' &
-                // 'taking default options...'
-        end if
-        
-        ! Read options
-        !=============
-        ! Storage type etc
-        field = 'so.cfv.par.hess.storagetype'
-        call ExtractOptionValueCharacter(fid, field, options%storagetype)
-        field = 'so.cfv.par.hess.inithess'
-        call ExtractOptionValueCharacter(fid, field, options%inithess)
-        field = 'so.cfv.par.hess.updatemethod'
-        call ExtractOptionValueCharacter(fid, field, options%updatemethod)
-
-        ! Initial hessian options for diagonal 
-        field = 'so.cfv.par.hess.diagind'
-        call ExtractOptionValueInteger1D(fid, field, options%diagind)
-        field = 'so.cfv.par.hess.diagval'
-        call ExtractOptionValueReal1D(fid, field, options%diagval)
-
-        ! Housekeeping
-        !=============
-        ! Close the file
-        close(unit=fid)
 
     end subroutine
 

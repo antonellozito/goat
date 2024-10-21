@@ -195,23 +195,49 @@ module optmod_qp
         rhs(nphi+1:nphi+neq) = b
         sol = rhs
 
-        ! Compute
-        !========
-        ! Get dense hessian
-        aux = hessJ%GetFullHessian()
+        ! Check hessian type
+        !===================
+        select type(hessJ)
 
-        ! Construct the KKT system
-        K(1:nphi, 1:nphi)           = aux
-        K(1:nphi, nphi+1:nphi+neq)  = transpose(jacG)
-        K(nphi+1:nphi+neq, 1:nphi)  = jacG 
+        type is (DenseHessianApproximationUDT)
 
-        ! Solve the KKT system
-        call SolveDenseLinearSystemDI(K, rhs, sol, flag)
+            ! Construct the KKT system
+            K(1:nphi, 1:nphi)           = hessJ%val
+            K(1:nphi, nphi+1:nphi+neq)  = transpose(jacG)
+            K(nphi+1:nphi+neq, 1:nphi)  = jacG 
 
-        ! Check convergence
-        if (flag /= 0) then 
-            print *, 'SolveQPDirectEqcon: linear solver did not converge'
-        end if 
+            ! Solve the KKT system
+            call SolveDenseLinearSystemDI(K, rhs, sol, flag)
+
+            ! Check convergence
+            if (flag /= 0) then 
+                print *, 'SolveQPDirectEqcon: linear solver did not converge'
+            end if 
+
+        type is (SparseHessianApproximationUDT)
+
+            ! Convert hessian to full format
+            call hessJ%val%ConvertToFull(aux)
+
+            ! Construct the KKT system
+            K(1:nphi, 1:nphi)           = aux
+            K(1:nphi, nphi+1:nphi+neq)  = transpose(jacG)
+            K(nphi+1:nphi+neq, 1:nphi)  = jacG 
+
+            ! Solve the KKT system
+            call SolveDenseLinearSystemDI(K, rhs, sol, flag)
+
+            ! Check convergence
+            if (flag /= 0) then 
+                print *, 'SolveQPDirectEqcon: linear solver did not converge'
+            end if 
+
+        class default 
+
+            ! Throw error
+            call gdErrorHandler('SolveQPDirectEqcon: hessian class not supported, use a different solver')
+
+        end select
 
         ! Unpack the solution
         x = sol(1:nphi)
@@ -307,22 +333,47 @@ module optmod_qp
         rhs(nphi+1:nphi+neq) = b
         sol = rhs
 
-        ! Compute
-        !========
-        ! Get sparse hessian
-        aux = hessJ%GetSparseHessian()
+        ! Check hessian type
+        !===================
+        select type(hessJ)
 
-        ! Construct the KKT system
-        K = aux%Concatenate(jacG%Transpose(), 2)
-        K = K%Concatenate(jacG%Concatenate(SpZeros(neq, neq), 2), 1)
+        type is (DenseHessianApproximationUDT)
 
-        ! Solve the KKT system
-        call SolveSparseLinearSystemDI(K, rhs, sol, flag)
+            ! Convert hessian to sparse format
+            aux = ConstructMySparse(hessJ%val)
 
-        ! Check convergence
-        if (flag /= 0) then 
-            print *, 'SolveQPDirectEqcon: linear solver did not converge'
-        end if 
+            ! Construct the KKT system
+            K = aux%Concatenate(jacG%Transpose(), 2)
+            K = K%Concatenate(jacG%Concatenate(SpZeros(neq, neq), 2), 1)
+
+            ! Solve the KKT system
+            call SolveSparseLinearSystemDI(K, rhs, sol, flag)
+
+            ! Check convergence
+            if (flag /= 0) then 
+                print *, 'SolveQPDirectEqcon: linear solver did not converge'
+            end if 
+
+        type is (SparseHessianApproximationUDT)
+
+            ! Construct the KKT system
+            K = hessJ%val%Concatenate(jacG%Transpose(), 2)
+            K = K%Concatenate(jacG%Concatenate(SpZeros(neq, neq), 2), 1)
+
+            ! Solve the KKT system
+            call SolveSparseLinearSystemDI(K, rhs, sol, flag)
+
+            ! Check convergence
+            if (flag /= 0) then 
+                print *, 'SolveQPDirectEqcon: linear solver did not converge'
+            end if 
+
+        class default 
+
+            ! Throw error
+            call gdErrorHandler('SolveQPDirectEqcon: hessian class not supported, use a different solver')
+
+        end select
 
         ! Unpack the solution
         x = sol(1:nphi)
@@ -394,7 +445,24 @@ module optmod_qp
         ! Initialize
         !===========
         ! Check hessian representation
-        aux = hessJ%GetFullHessian()
+        select type(hessJ)
+
+        type is (DenseHessianApproximationUDT) 
+
+            ! Simply unpack
+            aux = hessJ%val
+
+        type is (SparseHessianApproximationUDT)
+
+            ! Construct full matrix
+            call hessJ%val%ConvertToFull(aux)
+
+        class default
+
+            ! Throw error
+            call gdErrorHandler('SolveQPDirectIneqconDense: hessian representation not supported')
+
+        end select
 
         ! Get problem dimensions
         associate(&
@@ -578,7 +646,24 @@ module optmod_qp
         ! Initialize
         !===========
         ! Check hessian representation
-        aux = hessJ%GetSparseHessian()
+        select type(hessJ)
+
+        type is (SparseHessianApproximationUDT) 
+
+            ! Simply unpack
+            aux = hessJ%val
+
+        type is (DenseHessianApproximationUDT)
+
+            ! Construct sparse matrix
+            aux = ConstructMySparse(hessJ%val)
+
+        class default
+
+            ! Throw error
+            call gdErrorHandler('SolveQPDirectIneqconSparse: hessian representation not supported')
+
+        end select
 
         ! Get problem dimensions
         associate(&

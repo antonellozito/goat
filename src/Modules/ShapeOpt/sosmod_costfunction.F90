@@ -23,16 +23,15 @@ module sosmod_costfunction
     use b2mod_main_diff, only : b2mn_init_b
     use b2us_geo_diff
     use b2us_plasma_diff
-    !use b2mod_agdr_diff, only : b2agdr_opt, b2agdr_opt_b, b2agdr_init, &
-    !    b2agdr_init_b, b2agdr_write, b2agdr_fin, b2agdr_fin_b
+    use b2mod_agdr_diff, only : b2agdr_opt, b2agdr_opt_b, b2agdr_init, &
+        b2agdr_init_b, b2agdr_write, b2agdr_fin, b2agdr_fin_b
     use b2mod_par_opt_diff
     use somod_costfunction 
     use gdmod_optimizationengine
-    use b2mod_costfunction
 
     ! Rename precision ... 
     use b2mod_types, only: R8_B25 => R8
-    use mod_precision, only: R8_G => R8, I8_G => I8
+    use mod_precision, only: R8_G => R8
 
     
 
@@ -74,6 +73,8 @@ module sosmod_costfunction
         type(geometry_diff)     :: gb ! geometry derivatives 
         type(b2state)           :: st ! state
         type(b2state_diff)      :: stb ! state derivatives
+        type(switches)          :: switches 
+        type(switches_diff)     :: switches_diff
         type(b2stateext)        :: state_ext 
         type(b2stateext_diff)   :: state_extb
         type(b2average)         :: state_avg 
@@ -157,7 +158,7 @@ module sosmod_costfunction
     end subroutine 
 
      ! Evaluation
-    subroutine EvaluateCostFunctionSOLPS(costfunction, J, gradJ, dogradient)
+    subroutine EvaluateCostFunctionSOLPS(costfunction, J, gradJ)
 
         ! Description
         !============
@@ -178,11 +179,9 @@ module sosmod_costfunction
         class(CostFunctionSOLPSUDT)                 :: costfunction 
         real(R8_G), intent(out)                  :: J 
         real(R8_G), allocatable, intent(out)     :: gradJ(:)
-        logical, intent(in)                      :: dogradient
 
         ! Auxiliary
         real(R8_B25)                        :: J1(nncf), J1b(nncf)
-        
 
         ! Initialize
         !===========
@@ -194,7 +193,7 @@ module sosmod_costfunction
             gb              => costfunction%gb,             &
             mpg             => costfunction%mpg,            &
             mpgb            => costfunction%mpgb,           &
-            st              => costfunction%st,             &
+            st              => costfunction%stb,            &
             state_ext       => costfunction%state_ext,      &
             state_extb      => costfunction%state_extb,     &
             state_avg       => costfunction%state_avg,      &
@@ -205,26 +204,14 @@ module sosmod_costfunction
         ! Evaluate
         !=========
         ! Call routine
-        if (dogradient) then
-            ! Evaluate the gradient as well 
-            call EvaluateCostFunctionGradient(switch, switchb, g, gb, &
-                mpg, mpgb, st, stb, state_ext, state_extb, state_avg, &
-                state_avgb, J1, J1b)
+        call EvaluateCostFunctionGradient(switch, switchb, g, gb, &
+            mpg, mpgb, st, stb, state_ext, state_extb, state_avg, &
+            state_avgb, J1, J1b)
 
-            ! Extract and cast into our precision format
-            J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
-            gradJ = real([gb%vxx, gb%vxy, gb%vxfpsi, gb%vxbx, gb%vxby, &
-                gb%vxffbz], kind=R8_G)
-        else
-            ! Evaluate only the cost function
-            call EvaluateCostfunction(switch, g, mpg, st, &
-                state_ext, state_avg, J1)
-
-            ! Extract and cast into our precision format
-            J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
-            gradJ = 0*real([g%vxx, g%vxy, g%vxfpsi, g%vxbx, g%vxby, &
-                g%vxffbz], kind=R8_G)
-        end if 
+        ! Extract and cast into our precision format
+        J = real(J1(0), kind=R8_G) ! assumed first entry is total cost function
+        gradJ = real([gb%vxx, gb%vxy, gb%vxfpsi, gb%vxbx, gb%vxby, &
+            gb%vxffbz], kind=R8_G)
         
         ! Housekeeping
         !=============
@@ -309,22 +296,6 @@ module sosmod_costfunction
         ! goat constraints. The contributions of the goat constraints to
         ! the hessian of the problem are not accounted for... 
 
-        ! Note: for the gradient, we need to account for the dependency
-        ! of the psi values (and first order derivatives) on the 
-        ! grid coordinates in solps. The partial derivatives are 
-        ! available through the differentiated structures (geo_diff 
-        ! types for example), but we need to differentiate again w.r.t.
-        ! the coordinates here. Additionally, we have to update the 
-        ! coordinate-dependent structures before evaluating the solps
-        ! cost function. Note that we also update the grid cell 
-        ! coordinates, even though they are recomputed afterwards in 
-        ! solps - reason is that there is a vertex ordening step that
-        ! (for solps reasons) comes before recomputation of the cell 
-        ! centers, which requires an estimate of the cell center 
-        ! coordinates. This also means that there is no gradient
-        ! contribution of the cell center coordinates that has to be
-        ! accounted for. 
-
         ! Declare variables
         !==================
         ! Arguments
@@ -348,33 +319,18 @@ module sosmod_costfunction
         type(MySparseUDT)                   :: dgradJdvar
 
         ! Auxiliary
-        integer(I8_G)                       :: flag
-        integer(I8_G), allocatable          :: tv(:)
+        integer(I8)                         :: flag
 
         real(R8_G)                                  :: Js, Jg
         real(R8_G), allocatable, dimension(:)       :: goatvariables, &
-            gradJg, gradJgoat, lambdaG, gradJs, dpsidx, dpsidy, &
-            d2psidx2, d2psidxdy, d2psidy2, gradJsolps, psi, gradR
+            gradJR, gradJgoat, lambdaG, gradJs, gradJg, dpsidx, dpsidy, &
+            d2psidx2, d2psidxdy, d2psidy2, gradJsolps
 
         type(MySparseUDT)                           :: hessJg, &
             jacGgoat, jacGdes, gradGdes, gradGgoat
 
-        ! Loop
-        integer(I8_G)                       :: i
-
-        ! Error handling
-        integer                             :: errstat
-
         ! Initialize
         !===========
-        ! Associate for ease
-        associate(nv            => goat%grid%vert%ntot, &
-            MFinterp            => goat%magneticField%interp)
-
-        ! Allocate
-        allocate(psi(nv), dpsidx(nv), dpsidy(nv), d2psidx2(nv), d2psidy2(nv), &
-            d2psidxdy(nv))
-
         ! Check inputs
         if (present(varin)) then 
             var = varin 
@@ -388,8 +344,8 @@ module sosmod_costfunction
         end if 
 
         ! Initialize others
-        allocate(gradJg(designvariables%nphi))
-        gradJg = 0
+        allocate(gradJR(designvariables%nphi))
+        gradJR = 0
 
         ! Construct goat variables
         goatvariables = [goat%designvariables%phi, goat%lambda, goat%mu]
@@ -399,9 +355,6 @@ module sosmod_costfunction
 
         ! Solve goat 
         !===========
-        
-
-        ! Try to solve
         associate(goatproblem       => costfunction%goatengine%problem)
         select type (goatproblem)
 
@@ -410,25 +363,10 @@ module sosmod_costfunction
             ! Update the problem with the latest goat
             goatproblem = goat 
 
-            ! Keep track of errors
-            call ErrorStack%StartTrack()
-
             ! Call the driver
             call costfunction%goatengine%solver%SolveOptimizationProblem(goatproblem)
 
-            ! Check if an error was found, if so: call error (softly) and 
-            ! set cost function value and gradient to inf
-            errstat = ErrorStack%ErrorState()
-            call ErrorStack%EndTrack()
-            if (errstat > 0) then 
-                call gdErrorHandler('EvaluateCostFunctionGSR: error encountered ' // &
-                    'while evaluating goat equations. Setting cost function value ' // & 
-                    'to infinity and exiting evaluation', severityin=0)
-                J = posinfval_R8()
-                return 
-            end if 
-
-            ! Update goat (only if converged...)
+            ! Update goat
             goat = goatproblem
 
         class default 
@@ -439,8 +377,6 @@ module sosmod_costfunction
         end select
         end associate
 
-        
-
         ! Compute reduced cost function
         !==============================
         ! GOAT side
@@ -448,35 +384,8 @@ module sosmod_costfunction
             goat, dogradient, dohessian, designvariables, &
             'goatvariables', goatvariables, gradJgoat)
 
-        ! Associate coordinates for ease
-        associate(x         => goat%grid%vert%x, &
-                y         => goat%grid%vert%y)
-
-        ! Evaluate magnetic field and derivatives
-        call MFinterp%Evaluate(x, y, 0, 0, psi)
-        call MFinterp%Evaluate(x, y, 1, 0, dpsidx)
-        call MFinterp%Evaluate(x, y, 0, 1, dpsidy)
-        
-        ! Update SOLPS quantities
-        costfunction%cfvsolps%g%vxX = x 
-        costfunction%cfvsolps%g%vxY = y 
-        costfunction%cfvsolps%g%vxFpsi = psi 
-        costfunction%cfvsolps%g%vxBx = dpsidx 
-        costfunction%cfvsolps%g%vxBy = dpsidy 
-
-        ! Update cell center coordinates (only necessary for vertex 
-        ! ordening, should be unnecessary in the future)
-        do i = 1, goat%grid%cell%ntot 
-            tv = GetCellVert(goat%grid%cell, i)
-            costfunction%cfvsolps%g%cvX(i) = sum(x(tv))/real(size(tv), kind=R8_G)
-            costfunction%cfvsolps%g%cvY(i) = sum(y(tv))/real(size(tv), kind=R8_G)
-        end do
-
         ! SOLPS side (gradient is w.r.t. coordinates, psi, dpsidx, dpsidy, ffbz)
-        call costfunction%cfvsolps%Evaluate(Js, gradJs, dogradient)
-
-        ! Total
-        J = Jg + Js
+        call costfunction%cfvsolps%Evaluate(Js, gradJs)
 
         ! Compute goat linearization 
         !===========================
@@ -510,9 +419,18 @@ module sosmod_costfunction
 
         ! Compute gradients
         !==================
+        ! Associate for ease
+        associate(nv            => goat%grid%vert%ntot, &
+            x                   => goat%grid%vert%x,    &
+            y                   => goat%grid%vert%y,    &
+            MFinterp            => goat%magneticField%interp)
+
         ! Compute partial derivatives of psi and dpsidx, dpsidy w.r.t. 
-        ! grid coordinates (simply 'diagonal' matrix linearization 
-        ! (dpsidx, dpsidy computed before and up to date))
+        ! grid coordinates (simply 'diagonal' matrix linearization)
+        allocate(dpsidx(nv), dpsidy(nv), d2psidx2(nv), d2psidy2(nv), &
+            d2psidxdy(nv))
+        call MFinterp%Evaluate(x, y, 1, 0, dpsidx)
+        call MFinterp%Evaluate(x, y, 0, 1, dpsidy)
         call MFinterp%Evaluate(x, y, 2, 0, d2psidx2)
         call MFinterp%Evaluate(x, y, 1, 1, d2psidxdy)
         call MFinterp%Evaluate(x, y, 0, 2, d2psidy2)
@@ -532,38 +450,19 @@ module sosmod_costfunction
 
         ! Compute gradient
         gradGdes = jacGdes%Transpose()
-        gradR = gradGdes%MatrixVectorProduct(lambdaG)
-        gradJ = gradJg + gradR
+        gradJ = gradJR + gradGdes%MatrixVectorProduct(lambdaG)
 
         ! End association
         end associate
 
         ! Compute hessian
         !================
-        if (dohessian) then 
-            ! Update the hessian approximation for the reduced part
-            call costfunction%B%Update(designvariables%phi, gradR)
-
-            ! Extract the hessian approximation and add with other 
-            ! contributions of which exact hessian is known
-            hessJ = hessJg + costfunction%B%GetSparseHessian()
-        end if 
-
-        ! Write out data for gradient verification
-        !=========================================
-        call WriteRealData('Js', Js)
-        call WriteRealData('Jg', Jg)
-        call WriteRealData('gradJ', gradJ)
-        call WriteRealData('gradJg', gradJg)
-        call WriteRealData('gradJs', gradJs)
-        call WriteRealData('gradJsolps', gradJsolps)
-
+        ! Only take the raw cost function contribution as hessian - 
+        ! perhaps replace by hessian estimator in the future? 
+        hessJ = hessJg
 
         ! Housekeeping
         !=============
-        ! Association
-        end associate
-
         ! Optional arguments
         if (present(dJdvarin)) then 
             dJdvarin = dJdvar 

@@ -9,7 +9,7 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # General options
 'goat.debug'                        '0'
-'goat.meth'                         'GG'
+'goat.meth'                         'GD'
 
 # Input file locations 
 #'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
@@ -422,31 +422,11 @@ VERSION 1.00.00
 # Core boundary and region treatment
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.cbnd.frac'               '0.1'
-'gg.tm.removecoreregions'       '0'
+'gg.tm.removecoreregions'       '1'
 
 #-------------------------------------------------------------------------#
 #                         VERTEX DISTRIBUTION OPTIONS                     #
 #-------------------------------------------------------------------------#
-# General options
-'gg.verbosity'                          '1'
-'gg.vertexconstructionmethod'           'orthogonal'
-'gg.cellconstructionmethod'             'quads_triangles'
-
-# Refinement options
-'gg.ref.meth'                           'lengthbased'
-#'gg.ref.meth'                           'no'
-'gg.ref.LB.doxp'                        '1'
-'gg.ref.LB.dovessel'                    '1'
-'gg.ref.LB.Lmininf'                     '0.001'
-'gg.ref.LB.Lmaxinf'                     '0.05'
-'gg.ref.LB.structureIDs'                '[1, 2]'
-'gg.ref.LB.Lminstructure'               '[0.0001, 0.0001]'
-'gg.ref.LB.Lmaxstructure'               '[0.005, 0.005]'
-'gg.ref.LB.decaylengthstructure'        '[0.01, 0.01]'
-'gg.ref.LB.Lminxp'                      '0.0001'
-'gg.ref.LB.Lmaxxp'                      '0.025'
-'gg.ref.LB.decaylengthxp'               '0.05'
-
 # Post-processing options
 'gg.vd.removefluxsurfaces'              '1' # Remove too narrow flux surfaces
 'gg.vd.removenarrowboundarytriangles'   '1' # Remove too narrow triangles at boundary and replace by cut cells
@@ -456,15 +436,15 @@ VERSION 1.00.00
 'gg.vd.contouring.resy'         '200'
 
 # Distribution of flux surfaces (radial)
-'gg.vd.rd.type'                         'uniform'
+'gg.vd.rd.type'                         'densitybased'
 
 # Distribution of vertices on flux surfaces (poloidal)
-'gg.vd.pd.type'                         'uniform'
+'gg.vd.pd.type'                         'densitybased'
 
 # Options for uniform distribution
 'gg.vd.pd.distribution.facelength'      '4e-2';
 
-'gg.vd.rd.distribution.fieldwidth'      '2e-2';
+'gg.vd.rd.distribution.fieldwidth'      '4e-3';
 
 # Options for density based distribution
 'gg.vd.pd.distribution.type'            'vessel_bnd_weight';

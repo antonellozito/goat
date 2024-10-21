@@ -27,9 +27,6 @@ program ShapeOptimization
     ! Modules
     !========
     use somod_userinput
-    use mod_global_environment, only: solps, SolpsPreamble
-    use mod_plotter, only: plotdir
-
 
     implicit none
 
@@ -47,13 +44,6 @@ program ShapeOptimization
     allocate(character(len('./SOoptions.dat')) :: filepath)
     filepath = './SOoptions.dat'
 
-    ! Call solps preamble
-    if (solps) then 
-        call SolpsPreamble('goat')
-    else
-        call execute_command_line('mkdir ' // plotdir)
-    end if
-
     ! Read the user input
     !====================
     ! fileID should always be SOoptions.dat
@@ -62,10 +52,6 @@ program ShapeOptimization
     ! Run driver
     !===========
     call ShapeOptDriver(filepath)
-
-    ! Print out the error stack
-    !==========================
-    call ErrorStack%Print()
 
 
 end program ShapeOptimization

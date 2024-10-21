@@ -5,7 +5,6 @@ from matplotlib import pyplot as plt
 import numpy as np
 import Datahandler as dh
 import time
-import goat_types as gt
 
 #==========================================================================#
 #                                                                          #
@@ -37,19 +36,6 @@ vesselpolygonfile = 'vesselpolygon.dat'
 gridcellsfile = 'cells_init.dat'
 gridcellsiteratefile = 'cells_iterate.dat'
 
-# Files with optimization history
-goathistoryfile = 'goat_optimization_history.dat'
-shapeopthistoryfile = 'so_optimization_history.dat'
-
-# Shape optimization paths
-fvpfile = 'so_con_fvp_vertices.dat' # fixed vessel points file
-fvffile = 'so_con_fvf_vertices.dat' # fixed vessel flux file
-origvesselpolygonfile = 'vesselpolygon_orig_so.dat' # original/initial vessel file
-currentvesselpolygonfile = 'vesselpolygon_iterate_so.dat' # current/new vessel file
-
-# Grid generation paths
-tm_beforecellsfile = 'topomesh_beforecells.dat'
-tmfile = 'topomesh.dat'
 
 #==========================================================================#
 #                                                                          #
@@ -118,6 +104,7 @@ def PlotGridCellsIterate(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+
 def MonitorGrid(datadir, num, pausetime, maxruntime):
     # Description
     #------------
@@ -151,8 +138,10 @@ def MonitorGrid(datadir, num, pausetime, maxruntime):
         except: 
             time.sleep(pausetime)
 
+
+
 #--------------------------------------------------------------------------#
-#                              Grid Optimization                           #
+#                                Optimization                              #
 #--------------------------------------------------------------------------#
 
 def PlotFluxfunctionConstraintVertices(dirpath, fignum):
@@ -217,6 +206,7 @@ def PlotFluxfunctionConstraintVertices(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+
 def PlotBoundaryConstraintVertices(dirpath, fignum):
     # Description
     #------------
@@ -250,6 +240,7 @@ def PlotBoundaryConstraintVertices(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+
 def PlotXPointConstraintVertices(dirpath, fignum):
     # Description
     #------------
@@ -279,6 +270,7 @@ def PlotXPointConstraintVertices(dirpath, fignum):
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
+
 
 def PlotEdgelengthsConstraintEdges(dirpath, fignum):
     # Description
@@ -311,6 +303,7 @@ def PlotEdgelengthsConstraintEdges(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+
 def PlotOrthogonalityConstraintEdges(dirpath, fignum):
     # Description
     #------------
@@ -342,555 +335,10 @@ def PlotOrthogonalityConstraintEdges(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
-def PlotLinefoldingConstraintEdges(dirpath, fignum):
-    # Description
-    #------------
-    # Plot the vertex pairs that belong to the linefolding constraints.
-    # This includes poloidal, radial, and vessel line folding 
-    # constraints. 
 
-    # General
-    #--------
-    # Underlying grid
-    cellfilepath = dirpath + filesep + gridcellsfile
-    vals = dh.GetPolygonCoordinates(cellfilepath)
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r',
-        label='Grid faces')
-
-    # Poloidal
-    #---------
-    # Set filepaths
-    confilepath = dirpath + filesep + 'con_lf_vpairspol.dat'
-
-    # Get the data
-    valscon = dh.GetVertexPairCoordinates(confilepath)
-
-    # Plot the data
-    PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
-        0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='b',
-        marker='o', label='Constrained edges')
-    
-    # Radial
-    #-------
-    confilepath = dirpath + filesep + 'con_lf_vpairsrad.dat'
-
-    # Get the data
-    valscon = dh.GetVertexPairCoordinates(confilepath)
-
-    # Plot the data
-    PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
-        0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='g',
-        marker='x', label='Constrained edges')
-    
-    # Vessel
-    #-------
-    confilepath = dirpath + filesep + 'con_lf_vpairsves.dat'
-
-    # Get the data
-    valscon = dh.GetVertexPairCoordinates(confilepath)
-
-    # Plot the data
-    PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
-        0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='k',
-        marker='+', label='Constrained edges')
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('Linefolding constrained edges')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-    thisaxes.legend(loc='upper right')
-
-def PlotGoatOptimizationHistory(dirpath, fignum):
-    # Description
-    #------------
-    # Plot the goat optimization history on a log(value)-iterate plot.
-    # This includes the cost function, (max) value of 
-    # constraints, the convergence history (infinity norm of 
-    # lagrangian gradient), and the linesearch step length 
-
-    # Read data
-    #----------
-    historypath = dirpath + filesep + goathistoryfile
-    [valnames, vals] = dh.ReadGeneralColumnwiseFloatData(historypath)
-
-    # Hedge for negative numbers
-    for j in range(len(vals[1,:])):
-        for i in range(len(vals[:, j])):
-            if (vals[i, j] <= 0):
-                vals[i, j] = np.nan
-
-    # Set figure
-    #-----------
-    plt.figure(fignum)
-
-    # Plot data
-    #----------
-    # First entry should be iteration counter, then convnorm, dphi, L, 
-    # J, max(G), max(H), rxf, step, tol, ...
-
-    # Convnorm
-    plt.plot(vals[:, 0], vals[:, 1], 'rx-', label='max(abs(grad L))')
-    
-    # Cost function
-    plt.plot(vals[:, 0], vals[:, 4], 'bx-', label='J')
-
-    # Equality constraints
-    plt.plot(vals[:, 0], vals[:, 5], 'gx-', label='max(G)')
-
-    # Inequality constraints
-    plt.plot(vals[:, 0], vals[:, 6], 'mx-', label='max(H)')
-
-    # Line search step length
-    plt.plot(vals[:, 0], vals[:, 8], 'kx-', label='alpha_ls')
-
-    # Set figure data
-    #----------------
-    # Set axes
-    SetAxesLimitsLogplot(plt.gca(), vals[:, 0], vals[:, [1, 4, 5, 6, 8]])
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('Goat grid deformation convergence history')
-    thisaxes.set_xlabel('iteration number')
-    thisaxes.set_ylabel('value')
-    thisaxes.set_yscale('log')
-    thisaxes.legend(loc='upper right')
-
-#--------------------------------------------------------------------------#
-#                             Grid Generation                              #
-#--------------------------------------------------------------------------#
-
-# Topological mesh plotting from file
-def PlotTopologicalMeshFromFile(dirpath, fignum):
-    filepath = dirpath + filesep + tmfile
-    topomesh = dh.ReadTopomeshFile(dirpath)
-    PlotTopologicalMesh(topomesh, fignum)
-
-# Topological mesh plotting
-def PlotTopologicalMesh(topomesh, fignum):
-    # Description
-    #------------
-    # Plot the topological mesh 
-
-    # Plot the vertices
-    #------------------
-    # Plot per vertex type
-    regular = np.where(topomesh.vert.type == gt.TMvertexregularID) 
-    bnd = np.where(topomesh.vert.type == gt.TMvertexbndID)
-    split = np.where(topomesh.vert.type == gt.TMvertexsplitID) 
-    minima = np.where(topomesh.vert.type == gt.TMvertexminID)
-    saddle = np.where(topomesh.vert.type == gt.TMvertexsaddleID)
-    maxima = np.where(topomesh.vert.type == gt.TMvertexmaxID)
-    tp1 = np.where(topomesh.vert.type == gt.TMvertextp1ID)
-    tp2 = np.where(topomesh.vert.type == gt.TMvertextp2ID)
-    PlotPoints2DWithID(topomesh.vert.x[maxima], topomesh.vert.y[maxima], topomesh.vert.ID[maxima], fignum, color='b', 
-        marker='o', label='field maxima')
-    PlotPoints2DWithID(topomesh.vert.x[saddle], topomesh.vert.y[saddle], topomesh.vert.ID[saddle], fignum, color='b', 
-        marker='x', label='field saddle')
-    PlotPoints2DWithID(topomesh.vert.x[minima], topomesh.vert.y[minima], topomesh.vert.ID[minima], fignum, color='b', 
-        marker='s', label='field minima')
-    PlotPoints2DWithID(topomesh.vert.x[tp1], topomesh.vert.y[tp1], topomesh.vert.ID[tp1], fignum, color='r', 
-        marker='o', label='field tangency point type 1')
-    PlotPoints2DWithID(topomesh.vert.x[tp2], topomesh.vert.y[tp2], topomesh.vert.ID[tp2], fignum, color='r', 
-        marker='x', label='field tangency point type 2')
-    PlotPoints2DWithID(topomesh.vert.x[regular], topomesh.vert.y[regular], topomesh.vert.ID[regular], fignum, color='k', 
-        marker='.', label='regular vertex')
-    PlotPoints2DWithID(topomesh.vert.x[bnd], topomesh.vert.y[bnd], topomesh.vert.ID[bnd], fignum, color='k', 
-        marker='.', label='bnd vertex')
-    PlotPoints2DWithID(topomesh.vert.x[split], topomesh.vert.y[split], topomesh.vert.ID[split], fignum, color='g', 
-        marker='d', label='splitted face vertex')
-    
-    # Store bounds
-    xb = [np.min(topomesh.vert.x), np.max(topomesh.vert.x)]
-    yb = [np.min(topomesh.vert.y), np.max(topomesh.vert.y)]
-    
-    # Plot the faces
-    #---------------
-    # Plot per face type
-    pf = np.where(topomesh.face.type == gt.TMfacepolID)
-    rf = np.where(topomesh.face.type == gt.TMfaceradID)
-    bndf = np.where(topomesh.face.type == gt.TMfacebndID)
-    sepf = np.where(topomesh.face.type == gt.TMfacesepID)
-
-    for i in pf[0]:
-        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
-            fignum, color='r')
-    for i in rf[0]:
-        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
-            fignum, color='g')
-    for i in bndf[0]:
-        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
-            fignum, color='k')
-    for i in sepf[0]:
-        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
-            fignum, color='m')
-        
-    # Check bounds
-    for i in np.arange(0, topomesh.face.ntot, 1):
-        xb[0] = np.min([xb[0], np.min(topomesh.face.data[i].x)])
-        xb[1] = np.max([xb[1], np.max(topomesh.face.data[i].x)])
-        yb[0] = np.min([yb[0], np.min(topomesh.face.data[i].y)])
-        yb[1] = np.max([yb[1], np.max(topomesh.face.data[i].y)])
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), xb, yb)
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('topomesh')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-    thisaxes.legend(loc='upper right')
-
-# Topological cell plotting
-def PlotTopologicalMeshCells(topomesh, fignum):
-    # Description
-    #------------
-    # Separate routine to plot topological mesh cells in order not to
-    # overburden the standard plot
-    maxcellvert = 1000
-    thisrange = np.arange(0, topomesh.cell.ntot, 1)
-    thisrange = [36]
-    for i in thisrange:
-        index = np.arange(0, len(topomesh.cell.data[i].x), len(topomesh.cell.data[i].x)/maxcellvert, dtype=int)
-        #PlotPolygons2D(topomesh.cell.data[i].x[index], topomesh.cell.data[i].y[index], fignum)
-        PlotPolygons2D(topomesh.cell.data[i].x, topomesh.cell.data[i].y, fignum)
-
-# Grid generation data plotting: face vertex distributions
-def PlotGGTMDataFaceVertexDistribution(ggtmdata, topomesh, fignum):
-    # Plot all vertices that were distributed on faces only
-   
-    # Plot per face type
-    pf = np.where(topomesh.face.type == gt.TMfacepolID)
-    rf = np.where(topomesh.face.type == gt.TMfaceradID)
-    bndf = np.where(topomesh.face.type == gt.TMfacebndID)
-    sepf = np.where(topomesh.face.type == gt.TMfacesepID)
-
-    for i in pf[0]:
-        if not (ggtmdata.face[i].ID == 0):
-            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
-                fignum, color='r', marker='.')
-    for i in rf[0]:
-        if not (ggtmdata.face[i].ID == 0):
-            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
-                fignum, color='g', marker='.')
-    for i in bndf[0]:
-        if not (ggtmdata.face[i].ID == 0):
-            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
-                fignum, color='k', marker='.')
-    for i in sepf[0]:
-        if not (ggtmdata.face[i].ID == 0):
-            PlotPolygons2D(ggtmdata.face[i].x, ggtmdata.face[i].y, 
-                fignum, color='m', marker='.')
-        
-    # Check bounds
-    xb = [np.Infinity, -np.Infinity]
-    yb = [np.Infinity, -np.Infinity]
-    for i in np.arange(0, topomesh.face.ntot, 1):
-        xb[0] = np.min([xb[0], np.min(topomesh.face.data[i].x)])
-        xb[1] = np.max([xb[1], np.max(topomesh.face.data[i].x)])
-        yb[0] = np.min([yb[0], np.min(topomesh.face.data[i].y)])
-        yb[1] = np.max([yb[1], np.max(topomesh.face.data[i].y)])
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), xb, yb)
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('topomesh face vertex distribution')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-    thisaxes.legend(loc='upper right')
-
-# Grid generation data plotting: cell vertex distributions
-def PlotGGTMDataCellVertexDistribution(ggtmdata, topomesh, fignum):
-    # Plot all vertices that were distributed on cells only
-
-    # Initialize plotting bounds
-    xb = [np.Infinity, -np.Infinity]
-    yb = [np.Infinity, -np.Infinity]
-
-    # Loop over all cells
-    for thiscell in ggtmdata.cell:
-        # Plot high field line and low field line
-        PlotPolygons2DQuiver(thiscell.hfline.x, thiscell.hfline.y, fignum, color='r')
-        PlotPolygons2DQuiver(thiscell.lfline.x, thiscell.lfline.y, fignum, color='g')
-
-        # Plot all other lines
-        for thisline in thiscell.lines: 
-            PlotPolygons2DQuiver(thisline.x, thisline.y, fignum, color='b')
-        
-    # Check bounds
-    
-    for i in np.arange(0, topomesh.face.ntot, 1):
-        xb[0] = np.min([xb[0], np.min(topomesh.face.data[i].x)])
-        xb[1] = np.max([xb[1], np.max(topomesh.face.data[i].x)])
-        yb[0] = np.min([yb[0], np.min(topomesh.face.data[i].y)])
-        yb[1] = np.max([yb[1], np.max(topomesh.face.data[i].y)])
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), xb, yb)
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('topomesh face vertex distribution')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-    thisaxes.legend(loc='upper right')
-
-# Grid generation data plotting: vertices
-def PlotGridVertices(grid, fignum):
-    # Plot vertices only
-    
-    # Initialize plotting bounds
-    xb = [min(grid.vert.x), max(grid.vert.x)]
-    yb = [min(grid.vert.y), max(grid.vert.y)]
-
-    # Make plot
-    PlotPoints2D(grid.vert.x, grid.vert.y, fignum, color='k', marker='.')
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), xb, yb)
-
-# Grid generation data plotting: faces
-def PlotGridFaces(grid, fignum):
-    # Plot faces only
-
-    # Initialize plotting bounds
-    xb = [min(grid.vert.x), max(grid.vert.x)]
-    yb = [min(grid.vert.y), max(grid.vert.y)]
-
-    # Construct face coordinates
-    xf = np.zeros(grid.face.ntot*3, dtype=float)
-    yf = np.zeros(grid.face.ntot*3, dtype=float)
-
-    for i in np.arange(0, grid.face.ntot): 
-        xf[3*i] = grid.vert.x[grid.face.v1[i]-1]
-        xf[3*i+1] = grid.vert.x[grid.face.v2[i]-1]
-        xf[3*i+2] = np.NaN 
-        yf[3*i] = grid.vert.y[grid.face.v1[i]-1]
-        yf[3*i+1] = grid.vert.y[grid.face.v2[i]-1]
-        yf[3*i+2] = np.NaN 
-    
-    # Plot
-    PlotPolygons2D(xf, yf, fignum, color='k', marker='')
-
-# Grid generation data plotting: cells
-def PlotGridCells(grid, fignum):
-    # Plot cells only
-
-    # Initialize plotting bounds
-    xb = [min(grid.vert.x), max(grid.vert.x)]
-    yb = [min(grid.vert.y), max(grid.vert.y)]
-
-    # Construct cell coordinates
-    xc = np.zeros(grid.cell.nvert + 2*grid.cell.ntot, dtype=float)
-    yc = np.zeros(grid.cell.nvert + 2*grid.cell.ntot, dtype=float)
-
-    counter = 0
-    for i in np.arange(0, grid.cell.ntot): 
-        nvc = grid.cell.vp2[i]
-        tv = grid.cell.GetVert(i)-1
-        xc[counter:counter+nvc] = grid.vert.x[tv]
-        xc[counter+nvc] = grid.vert.x[tv[0]]
-        xc[counter+nvc+1] = np.NaN
-        yc[counter:counter+nvc] = grid.vert.y[tv]
-        yc[counter+nvc] = grid.vert.y[tv[0]]
-        yc[counter+nvc+1] = np.NaN
-
-        counter = counter + nvc + 2
-    
-    # Plot
-    PlotPolygons2D(xc, yc, fignum, color='k', marker='')
-
-     # Set axes
-    SetAxesLimits2D(plt.gca(), xb, yb)
-    
-
-#--------------------------------------------------------------------------#
-#                             Shape Optimization                           #
-#--------------------------------------------------------------------------#
-
-def PlotFixedVesselPointsConstraintVertices(dirpath, fignum):
-    # Description
-    #------------
-    # Plot the vessel vertices that have their position constrained. 
-
-    # Set filepaths
-    # Set the filepaths
-    vertfilepath = dirpath + filesep + origvesselpolygonfile
-    filepath = dirpath + filesep + fvpfile 
-
-    # Get the grid data
-    vals = dh.GetPolygonCoordinates(vertfilepath)
-    PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
-        facecolors='none', label='Vertices')
-
-    # Special points
-    try: 
-        valscon = dh.GetVertexCoordinates(filepath)
-        PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='m',
-                 marker='*', label='Fixed vessel points')
-    except:
-        print('could not print fixed vessel point vertex constraints')
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('Fixed vessel points constraint vertices')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-    thisaxes.legend(loc='upper right')
-
-def PlotFixedVesselFluxConstraintVertices(dirpath, fignum):
-    # Description
-    #------------
-    # Plot the vessel vertices that have their flux value constrained. 
-
-    # Set filepaths
-    # Set the filepaths
-    vertfilepath = dirpath + filesep + origvesselpolygonfile
-    filepath = dirpath + filesep + fvffile
-
-    # Get the grid data
-    vals = dh.GetPolygonCoordinates(vertfilepath)
-    PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
-        facecolors='none', label='Vertices')
-
-    # Special points
-    try: 
-        valscon = dh.GetVertexCoordinates(filepath)
-        PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='m',
-                 marker='*', label='Fixed vessel points')
-    except:
-        print('could not print fixed vessel point vertex constraints')
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('Fixed vessel flux constraint vertices')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-    thisaxes.legend(loc='upper right')
-
-def PlotShapeOptimizationHistory(dirpath, fignum):
-        # Description
-    #------------
-    # Plot the goat optimization history on a log(value)-iterate plot.
-    # This includes the cost function, (max) value of 
-    # constraints, the convergence history (infinity norm of 
-    # lagrangian gradient), and the linesearch step length 
-
-    # Read data
-    #----------
-    historypath = dirpath + filesep + shapeopthistoryfile
-    [valnames, vals] = dh.ReadGeneralColumnwiseFloatData(historypath)
-
-    # Hedge for negative numbers
-    for j in range(len(vals[1,:])):
-        for i in range(len(vals[:, j])):
-            if (vals[i, j] <= 0):
-                vals[i, j] = np.nan
-
-    # Set figure
-    #-----------
-    plt.figure(fignum)
-
-    # Plot data
-    #----------
-    # First entry should be iteration counter, then convnorm, dphi, L, 
-    # J, max(G), max(H), rxf, step, tol, ...
-
-    # Convnorm
-    plt.plot(vals[:, 0], vals[:, 1], 'rx-', label='max(abs(grad L))')
-    
-    # Cost function
-    plt.plot(vals[:, 0], vals[:, 4], 'bx-', label='J')
-
-    # Equality constraints
-    plt.plot(vals[:, 0], vals[:, 5], 'gx-', label='max(G)')
-
-    # Inequality constraints
-    plt.plot(vals[:, 0], vals[:, 6], 'mx-', label='max(H)')
-
-    # Line search step length
-    plt.plot(vals[:, 0], vals[:, 8], 'kx-', label='alpha_ls')
-
-    # Set figure data
-    #----------------
-    # Set axes
-    SetAxesLimitsLogplot(plt.gca(), vals[:, 0], vals[:, [1, 4, 5, 6, 8]])
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('Shape optimization convergence history')
-    thisaxes.set_xlabel('iteration number')
-    thisaxes.set_ylabel('value')
-    thisaxes.set_yscale('log')
-    thisaxes.legend(loc='upper right')
-
-def PlotVesselDisplacement(dirpath, fignum):
-    # Description
-    #------------
-    # Plot the vessel displacement between original and new vessel
-
-    # Get filepath
-    filepathorig = dirpath + filesep + origvesselpolygonfile 
-    filepathnew = dirpath + filesep + vesselpolygonfile 
-
-    # Get data
-    valsorig = dh.GetPolygonCoordinates(filepathorig)
-    valsnew = dh.GetPolygonCoordinates(filepathnew)
-
-    # Plot both polygons
-    PlotPolygons2D(valsorig[:, 0], valsorig[:, 1], fignum, color='b', marker='x',
-        label='Original vessel polygon')
-    PlotPolygons2D(valsnew[:, 0], valsnew[:, 1], fignum, color='r', marker='o',
-        label='New vessel polygon')
-
-    # Plot displacement vector
-    d = valsnew - valsorig 
-    plt.quiver(valsorig[:, 0], valsorig[:, 1], d[:, 0], d[:, 1], color='g', angles='xy', scale_units='xy', scale=1)
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), valsnew[:, 0], valsnew[:, 1])
-    
 #--------------------------------------------------------------------------#
 #                                 Vessel                                   #
 #--------------------------------------------------------------------------#
-
-def PlotInitialVesselPolygon(dirpath, fignum):
-    # Description
-    # ------------
-    # Plot the initial vessel polygon
-
-    # Get filepath
-    filepath = dirpath + filesep + origvesselpolygonfile 
-
-    # Get data
-    vals = dh.GetPolygonCoordinates(filepath)
-
-    # Plot
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='b', marker='x',
-                   label='Vessel polygon')
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('Vessel polygon')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-    thisaxes.legend(loc='upper right')
 
 def PlotVesselPolygon(dirpath, fignum):
     # Description
@@ -905,7 +353,7 @@ def PlotVesselPolygon(dirpath, fignum):
     vals = dh.GetPolygonCoordinates(filepath)
 
     # Plot
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
+    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='',
                    label='Vessel polygon')
 
     # Set axes
@@ -917,66 +365,6 @@ def PlotVesselPolygon(dirpath, fignum):
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
-
-def PlotVesselIterate(dirpath, fignum):
-    # Description
-    #------------
-    # Plot the vessel polygon obtained during a shape iteration
-    # Get filepath
-    filepath = dirpath + filesep + currentvesselpolygonfile
-
-    # Get data
-    vals = dh.GetPolygonCoordinates(filepath)
-
-    # Plot
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
-                   label='Vessel polygon')
-
-    # Set axes
-    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
-
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('Vessel polygon')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-    thisaxes.legend(loc='upper right')
-
-def MonitorGridAndVessel(datadir, num, pausetime, maxruntime):
-    # Description
-    #------------
-    # This routine makes a plot that is continuously updated of the
-    # current grid and vessel
-
-    # Time interval to replot [s]
-    starttime = time.time()
-
-    # Prepare for gui event loop
-    plt.ion()
-
-    # Plot the data
-    PlotGridCellsIterate(datadir, 1)
-    PlotVesselIterate(datadir, 1)
-    thisfig = plt.gcf()
-
-    # Loop until time has passed
-    while (time.time() - starttime <= maxruntime):
-        try: 
-            # Plot the data
-            PlotGridCellsIterate(datadir, 1)
-            PlotVesselIterate(datadir, 1)
-
-            # Draw
-            thisfig.canvas.draw()
-            thisfig.canvas.flush_events()
-
-            # Pause
-            time.sleep(pausetime)
-
-            # Clear figure
-            ClearCurrentAxes()
-        except: 
-            time.sleep(pausetime)
 
 #--------------------------------------------------------------------------#
 #                               2D surface plots                           #
@@ -1021,11 +409,16 @@ def Plot2DSurfaceDataContour(filepath, fignum, **plotargs):
     # Add colorbar
 
 
+
+    
+
 #==========================================================================#
 #                                                                          #
 #                           GENERAL PLOTTING ROUTINES                      #
 #                                                                          #
 #==========================================================================#
+
+
 def PlotPolygons2D(x, y, fignum, **plotargs):
     # General polygon plotter. x and y should be np.arrays containing the
     # coordinates to plot. Fignum should contain the figure number on which
@@ -1042,23 +435,6 @@ def PlotPolygons2D(x, y, fignum, **plotargs):
     #for i, txt in enumerate(myrange):
     #    ax.annotate(txt, (x[i], y[i]))
     #plt.draw()
-
-def PlotPolygons2DQuiver(x, y, fignum, **plotargs):
-    # Same as PlotPolygons2D, but now we plot arrows between the 
-    # different nodes according to the polygon orientation
-
-    # Set the current figure
-    plt.figure(fignum)
-
-    # Plot the data as a polygon plot
-    #fig, ax = plt.subplots()
-    plt.plot(x, y, **plotargs)
-
-    # Plot displacement vector
-    dx = -(x[0:len(x)-1] - x[1:len(x)])
-    dy = -(y[0:len(y)-1] - y[1:len(y)])
-    plt.quiver(x[0:len(x)-1], y[0:len(y)-1], dx, dy, 
-        **plotargs, angles='xy', scale_units='xy', scale=1)
 
 def PlotPolygonData(filepath, fignum, **plotargs):
     # Read data
@@ -1079,6 +455,9 @@ def PlotVertexPairsData2D(filepath, fignum, **plotargs):
     # Plot
     PlotPoints2D(xf, yf, fignum, **plotargs)
 
+
+
+
 def PlotPoints2D(x, y, fignum, **plotargs):
     # General point plotter.
 
@@ -1087,16 +466,7 @@ def PlotPoints2D(x, y, fignum, **plotargs):
     plt.scatter(x, y, **plotargs)
     plt.draw()
     
-def PlotPoints2DWithID(x, y, ID, fignum, **plotargs):
-    # Set the current figure
-    fig = plt.figure(fignum)
-    plt.scatter(x, y, **plotargs)
-    ax = fig.axes
-    k = 0
-    for i, txt in enumerate(ID):
-        ax[0].annotate(txt, (x[k], y[k]))
-        k = k + 1
-    plt.draw()
+        
 
 def PlotGeneral2DSurface(x, y, z, fignum, **plotargs):
     # General z = f(x, y) surface plotter - may be expensive since
@@ -1125,33 +495,22 @@ def PlotGeneral2DContour(x, y, z, fignum, **plotargs):
     cbar = fig.colorbar(CS)
     plt.draw()
 
-def PlotGeneral2DPatch(x, y, fignum):
-    # General z = f(x, y) surface plotter - may be expensive since
-    # a triangulation is created under the hood. 
-
-    # Set the current figure
-    fig = plt.figure(fignum)
-    ax = fig.axes 
-    if len(ax) == 0:
-        ax = fig.add_subplot()
-    this = np.zeros((len(x), 2), dtype=float)
-    this[:, 0] = x 
-    this[:, 1] = y
-    ax.add_patch(mpl.patches.PathPatch(mpl.path.Path(this)))
-    plt.draw()
-
 #==========================================================================#
 #                                                                          #
 #                                 AUXILIARY                                #
 #                                                                          #
 #==========================================================================#
+
+
 def ShowFigures(*args, **kwargs):
     # Just a wrapper for plt.show()
     plt.show(*args, **kwargs)
 
+
 def ClearCurrentAxes():
     # Just a wrapper for plt.clf()
     plt.clf()
+
 
 def SetAxesLimits2D(thisaxes, xdata, ydata):
     # Automatically set the axes limits based on the x and y figure data.
@@ -1179,29 +538,6 @@ def SetAxesLimits2D(thisaxes, xdata, ydata):
 
     # Set proper scaling
     thisaxes.set_aspect(1)
-
-def SetAxesLimitsLogplot(thisaxes, xdata, ydata):
-    # Automatically set the axes limits based on the x and y figure data.
-    # Also applies true scaling
-
-    # Compute data limits - ignore NaNs
-    maxx = np.nanmax(xdata)
-    minx = np.nanmin(xdata)
-    maxy = np.nanmax(ydata)
-    miny = np.nanmin(ydata)
-
-
-    # Compute limits
-    xlim = [minx, maxx]
-    ylim = [miny, maxy]
-
-    # Set limits
-    thisaxes.set_xlim(xlim)
-    thisaxes.set_ylim(ylim)
-
-    # Set proper scaling
-    thisaxes.set_aspect(1)
-
 
 
 

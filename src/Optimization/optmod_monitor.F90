@@ -80,14 +80,11 @@ module optmod_monitor
         ! Printing procedures
         procedure :: PrintHeader        => PrintHeader 
         procedure :: PrintIterate       => PrintIterate
-        procedure :: WriteFileHeader
-        procedure :: WriteFileIterate
 
         ! Housekeeping
         procedure :: Initialize         => InitializeMonitor 
         procedure :: Allocate           => AllocateMonitor 
         procedure :: Deallocate         => DeallocateMonitor
-        
 
     end type
 
@@ -166,68 +163,6 @@ module optmod_monitor
         end associate
 
     end subroutine
-
-    ! Write header to file
-    subroutine WriteFileHeader(monitor, fid)
-
-        ! Description
-        !============
-        ! Write the header to a file that is already opened
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(OptimizationMonitorUDT)   :: monitor 
-        integer, intent(in)             :: fid 
-
-        ! Auxiliary
-        character(:), allocatable       :: myformat
-
-        ! Write
-        !======
-        allocate(myformat, source='')
-        myformat = repeat('4x, a4, 4x,', 13)
-        write (fid, '(' // myformat // ')') &
-               'it  ',  'conv', 'dphi', 'L', 'J', 'Gmax', 'Hmax', 'rxf', &
-            'step', 'tol', 'itt', 'eval', 'lst'
-
-
-    end subroutine 
-
-    ! Write iterate to file
-    subroutine WriteFileIterate(monitor, fid)
-
-        ! Description
-        !============
-        ! Write the iteration to a file that is already opened
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(OptimizationMonitorUDT)   :: monitor 
-        integer, intent(in)             :: fid 
-
-        ! Auxiliary
-        character(:), allocatable       :: myformat
-
-        ! Write
-        !======
-        ! Associate for ease
-        associate(&
-            itopt => monitor%itopt)
-        allocate(myformat, source='')
-        myformat = repeat('es12.4, 4x, ', 12)
-        write(fid, '(i8, 4x, ' // myformat // '4x)') &
-            monitor%itopt, monitor%convnorm(itopt), monitor%maxdphi, &
-            monitor%L(itopt), monitor%J(itopt), monitor%G(itopt), &
-            monitor%H(itopt), monitor%rxf, monitor%alpha(itopt), &
-            monitor%opttol, monitor%ittime, monitor%evaltime, monitor%linsolvetime
-
-        ! Housekeeping
-        !=============
-        end associate
-
-    end subroutine 
 
     ! Housekeeping
     subroutine InitializeMonitor(monitor, maxitopt, nphi, neq, nineq, & 

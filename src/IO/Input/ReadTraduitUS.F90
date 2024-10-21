@@ -21,6 +21,7 @@ subroutine ReadTraduitUS(grid, filepath)
 
     integer                     :: filespec
     integer(I8)                 :: idum(0:9), idum2(1)    
+    character(10)               :: b2fgmtryversion
     integer(I8)                 :: nc, nf, nv, nfsFc, nftCv, nftFc
     character(*)               :: filepath
 
@@ -59,12 +60,8 @@ subroutine ReadTraduitUS(grid, filepath)
     open(unit = filespec, file = filepath)
     rewind(filespec)
 
-    ! First, read the header with the versionv - just ignore that alltogether
-    call ReadSingleLine(filespec, chardummy, reachedeof)
-    if (reachedeof) then 
-        call gdErrorHandler('ReadTraduitUS: reached EOF prematurely')
-    end if 
-    ! call cfverr(filespec,b2fgmtryversion)
+    ! First, read the header with the version
+    call cfverr(filespec,b2fgmtryversion)
 
     ! Primary array dimensions
     call cfruin (filespec,6,idum,'nCi,nFc,nVx,nCg,nFs,nFt')
@@ -114,91 +111,7 @@ subroutine ReadTraduitUS(grid, filepath)
         grid%data%sglegacy%nx = idum(0)
         grid%data%sglegacy%ny = idum(1)
     end if
-
-    ! Attempt to read in x-point and OMP/IMP data etc - may not be present
-    !---------------------------------------------------------------------
-    ! nX
-    call ReadUntilFound(filespec, 'nX', reachedeof)
-    if (reachedeof) then 
-        ! Not found, issue warning and rewind
-        print *, 'ReadTraduitUS: could not find field "nX", setting to zero...'
-        grid%data%nxp = 0
-        rewind(filespec)
-    else 
-        ! Found, go one back and read in
-        backspace(filespec) ! go one back to read in amount of nX
-        call cfruin(filespec, 1, idum, 'nX')
-        grid%data%nxp = idum(0)
-    end if 
-
-    ! OMP
-    call ReadUntilFound(filespec, 'OMPr', reachedeof)
-    if (reachedeof) then 
-        ! Not found, issue warning and rewind
-        print *, 'ReadTraduitUS: could not find field "OMPr", setting to zero...'
-        rewind(filespec)
-    else 
-        ! Found, read in coordinates (assumed two)
-        backspace(filespec)
-        call cfrure(filespec, 2, grid%data%OMPr, 'OMPr')
-    end if 
-    call ReadUntilFound(filespec, 'OMPz', reachedeof)
-    if (reachedeof) then 
-        ! Not found, issue warning and rewind
-        print *, 'ReadTraduitUS: could not find field "OMPz", setting to zero...'
-        rewind(filespec)
-    else 
-        ! Found, read in coordinates (assumed two)
-        backspace(filespec)
-        call cfrure(filespec, 2, grid%data%OMPz, 'OMPz')
-    end if 
-
-    ! IMP
-    call ReadUntilFound(filespec, 'IMPr', reachedeof)
-    if (reachedeof) then 
-        ! Not found, issue warning and rewind
-        print *, 'ReadTraduitUS: could not find field "IMPr", setting to zero...'
-        rewind(filespec)
-    else 
-        ! Found, read in coordinates (assumed two)
-        backspace(filespec)
-        call cfrure(filespec, 2, grid%data%IMPr, 'IMPr')
-    end if 
-    call ReadUntilFound(filespec, 'IMPz', reachedeof)
-    if (reachedeof) then 
-        ! Not found, issue warning and rewind
-        print *, 'ReadTraduitUS: could not find field "IMPz", setting to zero...'
-        rewind(filespec)
-    else 
-        ! Found, read in coordinates (assumed two)
-        backspace(filespec)
-        call cfrure(filespec, 2, grid%data%IMPz, 'IMPz')
-    end if 
-
-    ! Xpoint(s)
-    allocate(grid%data%xpointID(grid%data%nxp))
-    call ReadUntilFound(filespec, 'Xpoint(s)', reachedeof)
-    if (reachedeof) then 
-        ! Not found, issue warning and rewind
-        print *, 'ReadTraduitUS: could not find field "Xpoint(s)", setting to zero...'
-        grid%data%xpointID = 0
-        rewind(filespec)
-    else 
-        ! Found, go one back and read in
-        backspace(filespec) 
-        call cfruin(filespec, grid%data%nxp, idum, 'Xpoint(s)')
-        grid%data%xpointID = idum(0:grid%data%nxp-1)
-    end if 
-
-    ! Rewind and reset to expected location
-    rewind(filespec)
-    call ReadUntilFound(filespec, 'vxFfbz', reachedeof)
-    if (reachedeof) then 
-        ! Something wrong, exit
-        call gdErrorHandler('ReadTraduitUS: could not reset file, check file content')
-    else
-        backspace(filespec)
-    end if
+    
 
     ! Vertex data
     !------------
