@@ -54,8 +54,8 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     ! Recompute data
     call UpdateGridData(grid, magneticField, environment)
 
-    ! Write grid (unstructured traduit format)
-    !=========================================
+    ! Write
+    !======
     ! Associate
     associate(&
         mf              => magneticField%interp,    &
@@ -258,14 +258,12 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     write(fmt, *) '(', 12, '(', Ifm, '))'  
     write(fu, fmt) fsface(1:fsfaceP(nfs, 1)+fsfaceP(nfs, 2)-1)
 
+
+
     ! Housekeeping
     !=============
     ! Close file
     close (fu)
-
-    ! Write vessel
-    !=============
-    call environment%vessel%polygonset%WriteData(goatoptions%writefilepath // '_vesselpolygonset')
 
     ! End associate
     end associate

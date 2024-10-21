@@ -65,7 +65,6 @@ module StructuredInterpolant2D
     use mod_constants
     use mod_sparseinterface
     use mod_linearsolverinterface
-    use omp_lib
 
     implicit none
     save
@@ -89,8 +88,6 @@ module StructuredInterpolant2D
         ! derivatives etc 
         ! - cellindex: nx-1 by ny-1 array containing the cell indices
         ! - n: number of terms in the interpolant
-        ! - precomputedfac: the required factorials precomputed to save
-        ! - some time during evaluation
 
         character(:), allocatable       :: meth 
         integer(I8)                     :: C, M, n
@@ -98,7 +95,6 @@ module StructuredInterpolant2D
         real(R8), allocatable           :: xgv(:), ygv(:), A(:, :), &
             refx(:), refy(:), refdx(:), refdy(:)
         integer(I8), allocatable        :: cellindex(:, :)
-        integer(I16), allocatable       :: precomputedfac(:)
 
     contains 
 
@@ -242,7 +238,7 @@ module StructuredInterpolant2D
             vertind(:, :), xstencil(:), ystencil(:), tvID(:), &
             xrange(:), yrange(:), dxstencil(:), dystencil(:), &
             cellindex(:, :)
-        integer(I16), allocatable               :: allprefac(:), precomputedfac(:)
+        integer(I16), allocatable               :: allprefac(:)
         real(R8), allocatable                   :: xg(:, :), &
             yg(:, :), cij(:, :), A(:, :), dx(:), dy(:), res(:, :), &
             temp(:, :), fvals(:, :, :), refx(:), refy(:), refdx(:), &
@@ -361,7 +357,7 @@ module StructuredInterpolant2D
         do j = 1, M+1
             do i = 1, M+1
                 ! Compute coefficient matrix entry
-                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []) 
+                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []);
                 l = 1
                 do iy = 0, M
                     do ix = 0, M
@@ -441,7 +437,7 @@ module StructuredInterpolant2D
                     end do
                     
                     ! Update k
-                    k = k + 1  
+                    k = k + 1; 
                 end do
             end do
 
@@ -502,7 +498,7 @@ module StructuredInterpolant2D
                     end do
                     
                     ! Update k
-                    k = k + 1  
+                    k = k + 1; 
                 end do
             end do
 
@@ -543,18 +539,18 @@ module StructuredInterpolant2D
         dystencil = [ [(i, i = iylb-1, 1, -1)], -[(i, i = 1, ny-iyub)] ] 
 
         ! Loop
-        ll = 1 
+        ll = 1;
         do i = 1, nxr
             ! Stencils
-            xstencil = stencil + dxstencil(ll) 
+            xstencil = stencil + dxstencil(ll);
             
-            kk = 1 
+            kk = 1;
             do j = 1, nyr
                 ! Stencils
-                ystencil = stencil + dystencil(kk) 
+                ystencil = stencil + dystencil(kk);
 
                 ! Compute coefficients
-                k = 1 
+                k = 1;
                 do jj = 1, M+1
                     do ii = 1, M+1
                         l = 1
@@ -566,13 +562,13 @@ module StructuredInterpolant2D
                         end do
 
                         ! Update k
-                        k = k + 1 
+                        k = k + 1;
                     end do
                 end do
                 
                 ! Get residuals
-                vID = vertind(xrange(i), yrange(j)) 
-                res(vID, :) = reshape(v(xstencil + xrange(i), ystencil + yrange(j)), (/nterms/)) 
+                vID = vertind(xrange(i), yrange(j));
+                res(vID, :) = reshape(v(xstencil + xrange(i), ystencil + yrange(j)), (/nterms/));
                     
                 ! Solve for boundary vertices only
                 allocate(tvID(1), temp(nterms, 1), ipiv(nterms))
@@ -583,12 +579,12 @@ module StructuredInterpolant2D
                 deallocate(tvID, temp, ipiv)
                 
                 ! Update kk
-                kk = kk + 1 
+                kk = kk + 1;
                 
             end do
             
             ! Update ll 
-            ll = ll + 1 
+            ll = ll + 1;
         end do
 
         ! Compute actual derivatives
@@ -604,25 +600,18 @@ module StructuredInterpolant2D
 
         ! Construct derivatives as fields - need to account for 
         ! factorial prefactor!
-        allocate(allprefac((M+1)**2), fvals(size(v, 1), size(v, 2), nterms), precomputedfac(2*(C+1)))
-        precomputedfac(1:2) = 1
-        do i = 3, 2*(C+1)
-            precomputedfac(i) = precomputedfac(i-1)*int(i-1, kind=I16)
-        end do 
-        interp%precomputedfac = precomputedfac
+        allocate(allprefac((M+1)**2), fvals(size(v, 1), size(v, 2), nterms))
         k = 1
         do j = 0, M
             do i  = 0, M 
-                allprefac(k) = int(precomputedfac(i+1)*precomputedfac(j+1), kind=I16)
+                allprefac(k) = int(MyFactorial(i)*MyFactorial(j), kind=I16)
                 k = k + 1
             end do 
         end do 
         fvals(:, :, :) = 0
-        !$omp parallel do default(shared)
         do k = 1, nterms
             fvals(:, :, k) = allprefac(k)*reshape(cij(:, k), (/nx,  ny/))
         end do 
-        !$omp end parallel do 
 
         ! Construct interpolation matrix
         !===============================
@@ -664,17 +653,17 @@ module StructuredInterpolant2D
                 do l = j, 2*(C+1)-1
                     do k = i, 2*(C+1)-1
                         ! Factorial prefactor
-                        prefac = real(precomputedfac(l+1), kind=R8)/real(precomputedfac(l+1-j), kind = R8)*&
-                            real(precomputedfac(k+1), kind=R8)/real(precomputedfac(k+1-i), kind = R8)
+                        prefac = real(MyFactorial(l), kind=R8)/real(MyFactorial(l-j), kind = R8)*&
+                            real(MyFactorial(k), kind=R8)/real(MyFactorial(k-i), kind = R8)
                         
                         ! Index of the term
                         termind = l*(2*(C+1)) + k + 1
         
                         ! Contribution of each point
-                        A(1+4*derivind, termind) = prefac*0**(k - i)*0**(l - j)
-                        A(2+4*derivind, termind) = prefac*1**(k - i)*0**(l - j)
-                        A(3+4*derivind, termind) = prefac*1**(k - i)*1**(l - j)
-                        A(4+4*derivind, termind) = prefac*0**(k - i)*1**(l - j)
+                        A(1+4*derivind, termind) = prefac*0**(k - i)*0**(l - j);
+                        A(2+4*derivind, termind) = prefac*1**(k - i)*0**(l - j);
+                        A(3+4*derivind, termind) = prefac*1**(k - i)*1**(l - j);
+                        A(4+4*derivind, termind) = prefac*0**(k - i)*1**(l - j);
                     end do
                 end do
 
@@ -693,7 +682,6 @@ module StructuredInterpolant2D
         cellindex = reshape([(i, i = 1, (nx-1)*(ny-1))], (/nx-1, ny-1/))
 
         ! Loop over all quads
-        !$omp parallel do default(shared) private(termind, vecind, vec)
         do i = 1, nx-1
             do j = 1, ny-1
                 ! Value vectors at four points
@@ -722,7 +710,6 @@ module StructuredInterpolant2D
                 refdy(cellindex(i, j))  = dymean
             end do
         end do
-        !$omp end parallel do
 
         ! Scale 
         derivcount  = 0
@@ -870,7 +857,6 @@ module StructuredInterpolant2D
             refy    => interp%refy, &
             refdx   => interp%refdx, &
             refdy   => interp%refdy, &
-            precfac => interp%precomputedfac, &
             cellindex => interp%cellindex)
 
         ! Get cell index of query point
@@ -894,26 +880,19 @@ module StructuredInterpolant2D
         allocate(term(nq))
         vq(:) = 0
 
-        !$omp parallel default(private) shared(derivx, derivy, &
-        !$omp xqn, yqn, thisA, interp, vq)
-        !$omp do
         do i = derivx, n 
             do j = derivy, n
                 ! Derivative index
                 indder = j*(n+1) + i + 1
 
                 ! Factorial prefactor
-                prefac = real(precfac(i+1), kind=R8)/&
-                    real(precfac(i+1-derivx), kind = R8)*&
-                    real(precfac(j+1), kind=R8)/real(precfac(j+1-derivy), kind = R8)
+                prefac = real(MyFactorial(i), kind=R8)/&
+                    real(MyFactorial(i-derivx), kind = R8)*&
+                    real(MyFactorial(j), kind=R8)/real(MyFactorial(j-derivy), kind = R8)
                 term = thisA(:, indder)*prefac*xqn**(i - derivx)*yqn**(j - derivy)
-                !$omp critical
-                vq = vq + term
-                !$omp end critical
+                vq = vq + term 
             end do 
         end do
-        !$omp end do 
-        !$omp end parallel
 
         ! Scale
         vq = vq/( (refdx(ind))**derivx * (refdy(ind))**derivy)
@@ -1104,7 +1083,7 @@ module StructuredInterpolant2D
         do j = 1, M+1
             do i = 1, M+1
                 ! Compute coefficient matrix entry
-                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []) 
+                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []);
                 l = 1
                 do iy = 0, M
                     do ix = 0, M
@@ -1210,7 +1189,7 @@ module StructuredInterpolant2D
                     end do
                     
                     ! Update k
-                    k = k + 1  
+                    k = k + 1; 
                 end do
             end do
 
@@ -1291,7 +1270,7 @@ module StructuredInterpolant2D
                     end do
                     
                     ! Update k
-                    k = k + 1  
+                    k = k + 1; 
                 end do
             end do
 
@@ -1352,18 +1331,18 @@ module StructuredInterpolant2D
         dystencil = [ [(i, i = iylb-1, 1, -1)], -[(i, i = 1, ny-iyub)] ] 
 
         ! Loop
-        ll = 1 
+        ll = 1;
         do i = 1, nxr
             ! Stencils
-            xstencil = stencil + dxstencil(ll) 
+            xstencil = stencil + dxstencil(ll);
             
-            kk = 1 
+            kk = 1;
             do j = 1, nyr
                 ! Stencils
-                ystencil = stencil + dystencil(kk) 
+                ystencil = stencil + dystencil(kk);
 
                 ! Compute coefficients
-                k = 1 
+                k = 1;
                 do jj = 1, M+1
                     do ii = 1, M+1
                         l = 1
@@ -1375,13 +1354,13 @@ module StructuredInterpolant2D
                         end do
 
                         ! Update k
-                        k = k + 1 
+                        k = k + 1;
                     end do
                 end do
                 
                 ! Get residuals
-                vID = vertind(xrange(i), yrange(j)) 
-                res(vID, :) = reshape(v(xstencil + xrange(i), ystencil + yrange(j)), (/nterms/)) 
+                vID = vertind(xrange(i), yrange(j));
+                res(vID, :) = reshape(v(xstencil + xrange(i), ystencil + yrange(j)), (/nterms/));
                     
                 ! Compute linearization
                 dresdv%row(cc1+1:cc1+nterms) = resID(vID, :)
@@ -1412,12 +1391,12 @@ module StructuredInterpolant2D
                 deallocate(tvID, temp)
                 
                 ! Update kk
-                kk = kk + 1 
+                kk = kk + 1;
                 
             end do
             
             ! Update ll 
-            ll = ll + 1 
+            ll = ll + 1;
         end do
 
         ! Compute actual derivatives
@@ -1511,10 +1490,10 @@ module StructuredInterpolant2D
                         termind = l*(2*(C+1)) + k + 1
         
                         ! Contribution of each point
-                        A(1+4*derivind, termind) = prefac*0**(k - i)*0**(l - j) 
-                        A(2+4*derivind, termind) = prefac*1**(k - i)*0**(l - j) 
-                        A(3+4*derivind, termind) = prefac*1**(k - i)*1**(l - j) 
-                        A(4+4*derivind, termind) = prefac*0**(k - i)*1**(l - j) 
+                        A(1+4*derivind, termind) = prefac*0**(k - i)*0**(l - j);
+                        A(2+4*derivind, termind) = prefac*1**(k - i)*0**(l - j);
+                        A(3+4*derivind, termind) = prefac*1**(k - i)*1**(l - j);
+                        A(4+4*derivind, termind) = prefac*0**(k - i)*1**(l - j);
                     end do
                 end do
 
@@ -1923,10 +1902,10 @@ module StructuredInterpolant2D
                         termind = l*(2*(C+1)) + k + 1
         
                         ! Contribution of each point
-                        A(1+4*derivind, termind) = tempfac*0**(k - i)*0**(l - j) 
-                        A(2+4*derivind, termind) = tempfac*1**(k - i)*0**(l - j) 
-                        A(3+4*derivind, termind) = tempfac*1**(k - i)*1**(l - j) 
-                        A(4+4*derivind, termind) = tempfac*0**(k - i)*1**(l - j) 
+                        A(1+4*derivind, termind) = tempfac*0**(k - i)*0**(l - j);
+                        A(2+4*derivind, termind) = tempfac*1**(k - i)*0**(l - j);
+                        A(3+4*derivind, termind) = tempfac*1**(k - i)*1**(l - j);
+                        A(4+4*derivind, termind) = tempfac*0**(k - i)*1**(l - j);
                     end do
                 end do
 
@@ -1955,7 +1934,7 @@ module StructuredInterpolant2D
         do j = 1, M+1
             do i = 1, M+1
                 ! Compute coefficient matrix entry
-                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []) 
+                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []);
                 l = 1
                 do jj = 0, M
                     do ii = 0, M
@@ -2368,7 +2347,7 @@ module StructuredInterpolant2D
         do j = 1, M+1
             do i = 1, M+1
                 ! Compute coefficient matrix entry
-                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []) 
+                ! A(k, :) = reshape((spread(xstencil(i)**(/ix, ix=0,M/), 1, M+1)).*(repmat( (ystencil(j).^(0:M)), M+1, 1))', 1, []);
                 l = 1
                 do jj = 0, M
                     do ii = 0, M

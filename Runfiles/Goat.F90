@@ -38,8 +38,6 @@ program Goat
     ! Modules
     !========
     use goatmod_userinput
-    use mod_global_environment, only: solps, SolpsPreamble
-    use mod_plotter, only: plotdir
 
     ! Declare variables
     !==================
@@ -48,22 +46,13 @@ program Goat
     ! Loop variables
 
     ! Auxiliary
-    type(GoatoptionsUDT)        :: goatoptions
-    character(:), allocatable   :: filepath
+    type(GoatoptionsUDT)    :: goatoptions
+    character(:), allocatable    :: filepath
 
     ! Initialize
     !===========
-    ! Set the filepath
     allocate(character(len('./GOAToptions.dat')) :: filepath)
     filepath = './GOAToptions.dat'
-
-    ! Call solps preamble
-    if (solps) then 
-        call SolpsPreamble('goat')
-    else
-        call execute_command_line('mkdir ' // plotdir)
-    end if
-
 
     ! Read the user input
     !====================
@@ -82,12 +71,6 @@ program Goat
         ! Grid deformation only
         call GDDriver(goatoptions)
 
-    case ('GG')
-
-        ! Grid generation only (experimental!)
-        print *, 'warning: GG option is still experimental! use at own risk'
-        call GGDriver(goatoptions)
-
     case ('GDtest')
 
         call GDtestdriver(goatoptions)
@@ -98,9 +81,6 @@ program Goat
         call gdErrorHandler('Goat: unknown driver option')
 
     end select 
-
-    call ErrorStack%Print()
-
 
 end program Goat
                                     

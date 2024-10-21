@@ -44,17 +44,18 @@ subroutine ConstructEnvironment(environment, environmentoptions)
 
     ! Initialize
     !===========
+    ! Set paths
+    vesseloptions%inputfilepath = environmentoptions%vesselfilepath
+
     ! Check which type of environment to construct
     select case (trim(environmentoptions%type))
 
     case ('vessel')
 
         ! Read in vessel options
-        vesseloptions%inputfilepath = environmentoptions%inputfilepath
         call vesseloptions%Set()
 
         ! Read in the vessel structure
-        vesseloptions%filepath = environmentoptions%vesselfilepath
         call ReadVessel(filespecifier, environment%vessel, vesseloptions)
 
         ! Extract the vessel data

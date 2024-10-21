@@ -101,15 +101,13 @@ module mod_diagnostics
         ! - fun:        function to be evaluated and checked
         ! - nvars:      number of variables to check
         ! - vars:       variable indices that have to be checked 
-        ! - d:          step size vector (absolute)
+        ! - d:          step size vector
         ! - nd:         number of steps
-        ! - outputfile: output file to which data should be written
 
         class(DiagnosticsFunctionUDT), allocatable      :: fun 
         integer(I8)                                     :: nvars, nd
         integer(I8), allocatable                        :: vars(:)
         real(R8), allocatable                           :: d(:)
-        character(:), allocatable                       :: outputfile
 
     contains
 
@@ -223,7 +221,7 @@ module mod_diagnostics
     !------------------------------------------------------------------!
 
     ! Constructor
-    subroutine InitializeFDchecker(FDchecker, vars, steps, outputfile) 
+    subroutine InitializeFDchecker(FDchecker, nvars, vars) 
 
         ! Description
         !============
@@ -234,55 +232,29 @@ module mod_diagnostics
 
         ! Initialize
         !===========
-        use mod_plotter, only: plotdir 
-        use mod_specialchars, only: filesepchar
         implicit none 
 
         ! Declare variables
         !==================
         ! Arguments
         class(FDcheckerUDT)             :: FDchecker 
-        integer(I8), intent(in)         :: vars(:)
-        real(R8), intent(in)            :: steps(:)
-        character(*), intent(in)        :: outputfile
-
-        ! Auxiliary
-        logical                         :: isfile 
-        integer, parameter              :: fid = 70
-        integer                         :: iostat 
+        integer(I8), intent(in)         :: nvars
+        integer(I8), intent(in)         :: vars(1:nvars)
 
         ! Initialize
         !===========
         ! Initialize
-        FDchecker%nvars = size(vars) 
-        FDchecker%nd = size(steps)
+        FDchecker%nvars = nvars 
+        FDchecker%nd = 5
 
         ! Allocate
         call FDchecker%Allocate()
 
         ! Set values
         FDchecker%vars = vars  
-        FDchecker%outputfile = plotdir // filesepchar // outputfile // '.dat'
 
-        ! Set the (absolute) step sizes 
-        FDchecker%d = steps
-
-        ! Check whether the output file exists
-        inquire(file=FDchecker%outputfile, exist=isfile)
-        if (isfile) then 
-            ! Replace the old file
-            open(unit=fid, status='old', iostat=iostat, file=FDchecker%outputfile)
-            rewind(fid)
-        else
-            ! Create new file
-            open(unit=fid, status='new', iostat=iostat, file=FDchecker%outputfile)
-        end if
-
-        write(fid, *) 'FD checker output'
-
-        ! Close
-        close(fid)
-
+        ! Set the step sizes (hard coded - these values are fine)
+        FDchecker%d = [1e-2, 1e-4, 1e-6, 1e-8, 1e-10]
 
     end subroutine
 
@@ -456,8 +428,6 @@ module mod_diagnostics
             gradref(dimx), hesscolFW(dimx), hesscolBW(dimx), &
             hesscolC(dimx), hesscolref(dimx), gradFW(dimx), &
             gradBW(dimx))
-        hessref%nrow = dimx 
-        hessref%ncol = dimx
 
         ! Compute reference and its gradient
         call FDchecker%fun%GetArguments(xref) ! current point
@@ -611,37 +581,21 @@ module mod_diagnostics
         ! Arguments
         class(FDcheckerUDT)             :: FDchecker 
 
-        ! Auxiliary
-        character(:), allocatable       :: myformat 
-        integer, parameter              :: fid = 70
-        integer                         :: iostat 
-
         ! Print
         !======
-        myformat = "(4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, &
-            & 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)"
         print *, '!===================================================!'
         print *, '!         Gradient Finite Difference checking       !'
         print *, '!===================================================!'
-        print  myformat &
+        print "(4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, &
+            & 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)" &
             ,   'var ', 'step',    'gref ',    'gFW ', 'gBW ', 'gC ', &
             'reFW', 'reBW', 'reC '
 
-        ! Write
-        !======
-        ! Open file, append (assume already created before during 
-        ! initialization step)
-        open(unit=fid, status='old', file= FDchecker%outputfile, &
-            access='sequential', position='append', iostat=iostat)
-
-        ! Write
-        write (fid, *) 'Gradient FD checks'
-        write (fid, myformat) 'var ', 'step', 'gref ', 'gFW ', 'gBW ', &
-            'gC ', 'reFW', 'reBW', 'reC '
- 
-        ! Housekeeping
-        !=============
-        close(fid)
+        ! A simple workaround to avoid unused dummy argument warnings 
+        ! during compilation
+        if (.false.) then 
+            print *, FDchecker%nvars
+        end if
 
     end subroutine
 
@@ -657,37 +611,21 @@ module mod_diagnostics
         ! Arguments
         class(FDcheckerUDT)             :: FDchecker 
 
-        ! Auxiliary
-        character(:), allocatable       :: myformat 
-        integer, parameter              :: fid = 70
-        integer                         :: iostat 
-
         ! Print
         !======
-        myformat = "(4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, &
-            & 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)"
         print *, '!===================================================!'
         print *, '!         Hessian Finite Difference checking        !'
         print *, '!===================================================!'
-        print  myformat &
+        print "(4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, &
+            & 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x, 4x, a4, 4x)" &
             ,   'var ', 'step',    'href ',    'hFW ', 'hBW ', 'hC ', &
             'reFW', 'reBW', 'reC '
 
-        ! Write
-        !======
-        ! Open file, append (assume already created before during 
-        ! initialization step)
-        open(unit=fid, status='old', file= FDchecker%outputfile, &
-            access='sequential', position='append', iostat=iostat)
-
-        ! Write
-        write (fid, *) 'Hessian FD checks'
-        write (fid, myformat) 'var ', 'step', 'href ', 'hFW ', 'hBW ', &
-            'hC ', 'reFW', 'reBW', 'reC '
- 
-        ! Housekeeping
-        !=============
-        close(fid)
+        ! A simple workaround to avoid unused dummy argument warnings 
+        ! during compilation
+        if (.false.) then 
+            print *, FDchecker%nvars
+        end if
 
     end subroutine
 
@@ -706,33 +644,18 @@ module mod_diagnostics
         integer(I8), intent(in)             :: var 
         real(R8), intent(in)                :: gref, gFW, gBW, gC, &
             reFW, reBW, reC, step 
-
-        ! Auxiliary
-        character(:), allocatable           :: myformat 
-        integer, parameter                  :: fid = 70
-        integer                             :: iostat 
         
         ! Print
         !======
-        myformat = "(i8, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2,&
-            & 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)"
-        print myformat, &
+        print "(i8, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2,&
+         & 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)", &
             var, step, gref, gFW, gBW, gC, reFW, reBW, reC
 
-        ! Write
-        !======
-        ! Open file, append (assume already created before during 
-        ! initialization step)
-            open(unit=fid, status='old', file= FDchecker%outputfile, &
-            access='sequential', position='append', iostat=iostat)
-
-        ! Write
-        write (fid, myformat) var, step, gref, gFW, gBW, gC, reFW, &
-            reBW, reC
- 
-        ! Housekeeping
-        !=============
-        close(fid)
+        ! A simple workaround to avoid unused dummy argument warnings 
+        ! during compilation
+        if (.false.) then 
+            print *, FDchecker%nvars
+        end if
 
     end subroutine
 
@@ -752,32 +675,17 @@ module mod_diagnostics
         real(R8), intent(in)                :: gref, gFW, gBW, gC, &
             reFW, reBW, reC, step 
         
-        ! Auxiliary
-        character(:), allocatable           :: myformat 
-        integer, parameter                  :: fid = 70
-        integer                             :: iostat 
-
         ! Print
         !======
-        myformat = "(i8, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2,&
-            & 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)"
-        print myformat, &
+        print "(i8, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2,&
+         & 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x, e8.2, 4x)", &
             var, step, gref, gFW, gBW, gC, reFW, reBW, reC
 
-        ! Write
-        !======
-        ! Open file, append (assume already created before during 
-        ! initialization step)
-            open(unit=fid, status='old', file= FDchecker%outputfile, &
-            access='sequential', position='append', iostat=iostat)
-
-        ! Write
-        write (fid, myformat) var, step, gref, gFW, gBW, gC, reFW, &
-            reBW, reC
- 
-        ! Housekeeping
-        !=============
-        close(fid)
+        ! A simple workaround to avoid unused dummy argument warnings 
+        ! during compilation
+        if (.false.) then 
+            print *, FDchecker%nvars
+        end if
 
     end subroutine
 

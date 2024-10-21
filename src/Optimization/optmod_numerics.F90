@@ -58,7 +58,6 @@ module optmod_numerics
 
         procedure :: SetDefaultNumParams => SetDefaultNumParamsINT
         procedure :: InitializeNumParams => InitializeGeneralNumParamsINT
-        procedure :: Read                => ReadNumOptions
 
     end type
 
@@ -89,40 +88,15 @@ module optmod_numerics
         ! - fieldprefix: all numerical options are read in assuming a 
         ! - useproblemrelaxation:   use problem-specific KKT relaxation
         !                           routine
-
-
         ! format '<fieldprefix>opt.num.<field>'. Fieldprefix can be 
-        ! empty or given (default is empty). Additional fields are 
-        ! available for diagnostics of the cost function and constraint
-        ! gradient and hessian. These include (x is cfv, eqcon or 
-        ! ineqcon, yielding options for cost function, equality 
-        ! equality constraints and inequality constraints, resp.)
-        ! - check<x>gradient, check<x>hessian   : do FD checks on
-        !   gradient and hessian
-        ! - checkoutputfile:    output file where to write results (is
-        !   appended with .dat file and with _cfv, _eqcon, _ineqcon 
-        !   resp.)
-        ! - check<x>vars:   variable IDs to check with FD
-        ! - check<x>eqs:    equation IDs to check with FD (only for 
-        !                   eqcon, ineqcon)
-        !
-        ! - FDsteps:        step sizes (absolute) for FD
-        ! It goes without saying that IDs should not exceed the number
-        ! of variables or constraints. 
+        ! empty or given (default is empty)
 
         ! Relaxation factors
         real(R8)            :: rxf
         real(R8)            :: rxfdec 
         real(R8)            :: rxfmin
         real(R8)            :: rxfdesign
-        real(R8), allocatable   :: FDsteps(:)
-        logical             :: useproblemrelaxation, checkcfvgradient, &
-            checkcfvhessian, checkeqcongradient, checkeqconhessian, &
-            checkineqcongradient, checkineqconhessian
-        integer(I8), allocatable, dimension(:)  :: checkcfvvars, &
-            checkeqconvars, checkeqconeqs, checkineqconvars, &
-            checkineqconeqs
-        character(:), allocatable       :: checkoutputfile
+        logical             :: useproblemrelaxation
 
     contains 
 
@@ -273,64 +247,6 @@ module optmod_numerics
         call num%SetDefaultNumParams()
 
         ! Override with user settings (to be implemented)
-        call num%Read()
-
-    end subroutine
-
-    
-    ! Read user data
-    subroutine ReadNumOptions(num)
-
-        ! Description
-        !============
-        ! Read in grid options from file. It is assumed that the 
-        ! filepath has been set correctly. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(NumUDT)                   :: num 
-
-        ! Auxiliary
-        integer                         :: openstatus 
-        character(:), allocatable       :: field
-        integer, parameter              :: fid = 10 
-        logical                         :: reachedeof
-
-        ! Initialize
-        !===========
-        ! Variables
-        reachedeof = .false. 
-
-        ! Open the file, check if it exists
-        open(unit=fid, file=num%inputfilepath, status='old', &
-            iostat=openstatus)
-
-        if (openstatus > 0) then 
-            ! Something wrong when reading file - continue with default
-            ! values
-            print *, 'ReadNumOptions: could not open file, ' &
-                // 'taking default options...'
-        elseif (openstatus < 0) then 
-            ! File appears to be empty
-            print *, 'ReadNumOptions: file appears to be empty, ' &
-                // 'taking default options...'
-        end if
-        
-        ! Read options
-        !=============
-        ! General
-        field = num%fieldprefix // 'opt.num.itmax'
-        call ExtractOptionValueInteger0D(fid, field, num%maxit)
-        field = num%fieldprefix // 'opt.num.verbosity'
-        call ExtractOptionValueInteger0D(fid, field, num%verbosity)
-        field = num%fieldprefix // 'opt.num.tol'
-        call ExtractOptionValueReal0D(fid, field, num%tol)
-
-        ! Housekeeping
-        !=============
-        ! Close the file
-        close(unit=fid)
 
     end subroutine
 
@@ -367,40 +283,6 @@ module optmod_numerics
         num%rxfmin          = 2e-2
         num%useproblemrelaxation    = .false.
 
-        ! FD checker options
-        num%checkoutputfile         = 'FDchecker'
-
-        num%checkcfvgradient        = .false.
-        num%checkcfvhessian         = .false. 
-        num%checkeqcongradient      = .false. 
-        num%checkeqconhessian       = .false. 
-        num%checkineqcongradient    = .false.
-        num%checkineqconhessian     = .false.
-
-        if (allocated(num%FDsteps)) then 
-            deallocate(num%FDsteps)
-        end if 
-        if (allocated(num%checkcfvvars)) then 
-            deallocate(num%checkcfvvars)
-        end if 
-        if (allocated(num%checkeqconvars)) then 
-            deallocate(num%checkeqconvars)
-        end if 
-        if (allocated(num%checkineqconvars)) then 
-            deallocate(num%checkineqconvars)
-        end if 
-        if (allocated(num%checkeqconeqs)) then 
-            deallocate(num%checkeqconeqs)
-        end if 
-        if (allocated(num%checkineqconeqs)) then 
-            deallocate(num%checkineqconeqs)
-        end if 
-
-        allocate(num%checkcfvvars(0), num%checkeqconvars(0), &
-            num%checkineqconvars(0), num%checkeqconeqs(0), &
-            num%checkineqconeqs(0), num%FDsteps(0))
-
-        
     end subroutine
 
     ! Initialize the numerics
@@ -489,37 +371,6 @@ module optmod_numerics
         call ExtractOptionValueReal0D(fid, field, num%rxfmin)
         field = num%fieldprefix // 'opt.num.rxfdesign'
         call ExtractOptionValueReal0D(fid, field, num%rxfdesign)
-        
-        ! FD checker
-        field = num%fieldprefix // 'opt.num.checkoutputfile'
-        call ExtractOptionValueCharacter(fid, field, num%checkoutputfile)
-        field = num%fieldprefix // 'opt.num.checkcfvgradient'
-        call ExtractOptionValueLogical0D(fid, field, num%checkcfvgradient)
-        field = num%fieldprefix // 'opt.num.checkeqcongradient'
-        call ExtractOptionValueLogical0D(fid, field, num%checkeqcongradient)
-        field = num%fieldprefix // 'opt.num.checkineqcongradient'
-        call ExtractOptionValueLogical0D(fid, field, num%checkineqcongradient)
-
-        field = num%fieldprefix // 'opt.num.checkcfvhessian'
-        call ExtractOptionValueLogical0D(fid, field, num%checkcfvhessian)
-        field = num%fieldprefix // 'opt.num.checkeqconhessian'
-        call ExtractOptionValueLogical0D(fid, field, num%checkeqconhessian)
-        field = num%fieldprefix // 'opt.num.checkineqconhessian'
-        call ExtractOptionValueLogical0D(fid, field, num%checkineqconhessian)
-
-        field = num%fieldprefix // 'opt.num.checkcfvvars'
-        call ExtractOptionValueInteger1D(fid, field, num%checkcfvvars)
-        field = num%fieldprefix // 'opt.num.checkeqconvars'
-        call ExtractOptionValueInteger1D(fid, field, num%checkeqconvars)
-        field = num%fieldprefix // 'opt.num.checkineqconvars'
-        call ExtractOptionValueInteger1D(fid, field, num%checkineqconvars)
-        field = num%fieldprefix // 'opt.num.checkeqconeqs'
-        call ExtractOptionValueInteger1D(fid, field, num%checkeqconeqs)
-        field = num%fieldprefix // 'opt.num.checkineqconeqs'
-        call ExtractOptionValueInteger1D(fid, field, num%checkineqconeqs)
-
-        field = num%fieldprefix // 'opt.num.FDsteps'
-        call ExtractOptionValueReal1D(fid, field, num%FDsteps)
 
         ! Housekeeping
         !=============

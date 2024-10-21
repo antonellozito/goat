@@ -15,8 +15,6 @@ module Interpolant2D_auxiliaries
     !============
     ! Load modules
     use mod_precision
-    use mod_errorhandler
-    use omp_lib
 
     implicit none
 
@@ -96,7 +94,6 @@ module Interpolant2D_auxiliaries
         ny = size(y, 1)
 
         ! Loop over all query points
-        !$omp parallel do default(shared) private(indx, indy)
         do k = 1, nq
             ! Get the bin index for x
             call GetBinIndex(xq(k), x, nx, indx)
@@ -112,7 +109,6 @@ module Interpolant2D_auxiliaries
             end if
             
         end do
-        !$omp end parallel do
 
     end subroutine
 
@@ -157,7 +153,6 @@ module Interpolant2D_auxiliaries
         ny = size(y, 1)
 
         ! Loop over all query points
-        !$omp parallel do default(shared) private(indx, indy)
         do k = 1, nq
             ! Get the bin index for x
             call GetBinIndex(xq(k), x, nx, indx)
@@ -170,7 +165,6 @@ module Interpolant2D_auxiliaries
             iy(k) = indy
             
         end do
-        !$omp end parallel do 
 
     end subroutine
 
@@ -213,41 +207,29 @@ module Interpolant2D_auxiliaries
             ! Outside of bin
             notfound = .false. 
             ind = 0
-            return 
-        end if
-
-        ! Check if there are NaNs - then return
-        if (isnan(xq)) then 
-            ind = 0
-            return 
         end if
 
         ! Check the first bin - equality holds for first value
-        if ((xq >= x(ind)) .and. (xq <= x(ind+1))) then
-            notfound = .false.
-            ind = 1
-            return 
-        else
-            ! Not found, increase index
-            ind = ind+1
+        if (notfound) then
+            if ((xq >= x(ind)) .and. (xq <= x(ind+1))) then
+                notfound = .false.
+                ind = 1
+            else
+                ! Not found, increase index
+                ind = ind+1
+            end if
         end if
 
-        do while ((ind < nx))
+        ! Loop over the remaining bins
+        do while ((notfound) .and. (ind < nx))
             if ((xq > x(ind)) .and. (xq <= x(ind+1))) then
                 ! Found, exit the loop
                 notfound = .false.
-                exit
             else 
-               ! Update ind
+                ! Update ind
                 ind = ind+1
             end if
         end do
-
-        ! Hedge for NaNs etc
-        if (notfound) then 
-            ! Should be NaN - set out of bounds
-            ind = 0
-        end if 
 
 
     end subroutine
