@@ -29,6 +29,7 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     ! Declare modules
     use gdmod_types 
     use mod_polygon
+    use mod_readwrite
 
     ! The usual
     implicit none 
@@ -40,12 +41,12 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     character(*), intent(in)    :: filepath
 
     ! Auxiliary
-    type(GridUDT)               :: grido
+    logical                     :: reachedeof
     integer(I8)                 :: idum(0:9), idum2(1), filespec   
-    character(10)               :: b2fgmtryversion
     integer(I8)                 :: nc,nf,nv ! total number of cells, faces, vertices
 
     character(120)              :: chardummy   ! dummy array
+    character(:), allocatable   :: chardummy2
     integer(I8), allocatable    :: cdummy(:,:), cdummy2(:) ! dummy array
     integer(I8), allocatable    :: fdummy(:,:), fdummy2(:, :) ! dummy array
     integer(I8), allocatable    :: vdummy(:,:) ! dummy array
@@ -81,8 +82,11 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     print *, 'reading grid in b2gmtry_us format from file: ' // filepath
     open(unit = filespec, file = filepath)
 
-    ! First, read the header with the version
-    call cfverr(filespec,b2fgmtryversion)
+    ! First, read the header with the version - just skip it...
+    call ReadSingleLine(filespec, chardummy2, reachedeof)
+    if (reachedeof) then 
+        call gdErrorHandler('ReadTraduitUS: reached EOF prematurely')
+    end if 
 
     ! Primary array dimensions
     call cfruin (filespec,7,idum,'nCi,nCg,nCv,nFc,nVx,nFs,nFt')
@@ -262,9 +266,6 @@ subroutine ReadB2fgmtryUS(grid, filepath)
             vertmap(i) = k 
         end if
     end do
-
-    ! Store original grid
-    grido = grid 
 
     ! Rebuild vertex fields
     grid%vert%ntot = grid%vert%ntot - ngv

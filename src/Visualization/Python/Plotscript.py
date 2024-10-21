@@ -2,11 +2,12 @@
 #------------
 # Simple plot script that uses the other python functionality
 import Plotter as pl 
+import Datahandler as dh 
 
 # Set paths
 #----------
 # Simulation directory
-simdir = './goatf/Examples/ASDEX_Sander'
+simdir = dh.GetDataDirectory()
 
 # Plot stuff
 #-----------

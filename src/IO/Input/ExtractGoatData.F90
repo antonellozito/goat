@@ -48,6 +48,9 @@ subroutine ExtractGoatData(grid, magneticField, environment, options)
     gridoptions%facelabelsubfrom        = options%GGtoGDfacelabelsubfrom
     gridoptions%facelabelsubto          = options%GGtoGDfacelabelsubto
 
+    ! Reset vessel reading 
+    environmentoptions%vesselfilepath = options%structurefilepath
+
     ! Read data
     !==========
     ! Read grid

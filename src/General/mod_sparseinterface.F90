@@ -27,6 +27,7 @@ module mod_sparseinterface
     !============
     ! Load modules
     use mod_precision
+    use mod_errorhandler
     use Clayer
 
     ! The usual

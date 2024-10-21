@@ -35,6 +35,7 @@ module optmod_optimizationengine
     use mod_diagnostics
     use mod_linearsolverinterface
     use mod_plotter
+    use mod_errorhandler
     use optmod_designvariables
     use optmod_costfunction
     use optmod_constraints
@@ -120,6 +121,10 @@ module optmod_optimizationengine
         procedure(RelaxProblemKKTSystemINT), deferred  :: &
             RelaxProblemKKTSystem
 
+        ! Data writing per optimization iteration
+        procedure(WriteIterationDataOptimizationProblemINT), deferred :: &
+            WriteIterationData 
+
         ! Merit function evaluation
         procedure :: EvaluateMeritFunction
         procedure :: EvaluateMeritFunctionL1
@@ -139,6 +144,8 @@ module optmod_optimizationengine
         ! problem
         character(:), allocatable                   :: inputfilepath
         character(:), allocatable                   :: inputfileprefix
+
+        type(NumUDT)                                :: num
 
     contains 
 
@@ -522,6 +529,13 @@ module optmod_optimizationengine
             type(MySparseUDT)               :: KKT
         end subroutine
 
+        ! Data output
+        subroutine WriteIterationDataOptimizationProblemINT(problem, itopt)
+            import :: OptimizationProblemUDT, I8
+            class(OptimizationProblemUDT)   :: problem 
+            integer(I8)                     :: itopt
+        end subroutine
+
         ! Solver initialization
         subroutine InitializeOptimizationSolverINT(solver)
             import :: OptimizationSolverUDT
@@ -761,6 +775,10 @@ module optmod_optimizationengine
         call problem%EvaluateInequalityConstraints(H, gradH, hessH, &
             dogradient, dohessian, mu)
 
+        ! Determine which inequality constraints are active and should
+        ! contribute
+        A = H > 0
+
         ! Compute merit function
         !=======================
         ! Compute penalty factor
@@ -815,12 +833,15 @@ module optmod_optimizationengine
         ! Initialize
         !===========
         ! Numerics
+        solver%num%inputfilepath    = solver%inputfilepath
+        solver%num%fieldprefix      = solver%inputfileprefix
         solver%numKKT%inputfilepath = solver%inputfilepath
         solver%numKKT%fieldprefix   = solver%inputfileprefix 
         solver%numLS%inputfilepath  = solver%inputfilepath
         solver%numLS%fieldprefix    = solver%inputfileprefix
         solver%numNCP%inputfilepath = solver%inputfilepath
         solver%numNCP%fieldprefix   = solver%inputfileprefix
+        call solver%num%InitializeNumParams()
         call solver%numKKT%InitializeNumParams() 
         call solver%numLS%InitializeNumParams()
         call solver%numNCP%InitializeNumParams()
@@ -882,8 +903,11 @@ module optmod_optimizationengine
             ineqconind(:), activeineqconind(:), inactiveineqconind(:)
         type(MySparseUDT)           :: hessLJ, lhs, hessLC
 
+        ! FD checkers
+        type(FDcheckerUDT)          :: FDcfv, FDeqcon, FDineqcon
+
         ! Diagnostics
-        logical                     :: checkgradients, checkhessians 
+        integer                     :: errstat
 
         ! Timing
         real(R8)                    :: t_it_s, t_it_e, &
@@ -902,8 +926,16 @@ module optmod_optimizationengine
 
         ! Initialize the monitor - only temporary here
         call problem%GetProblemDimensions(nphi, neq, nineq)
-        call problem%monitor%Initialize(solver%numKKT%maxit, nphi, neq,&
-            nineq, solver%numKKT%tol)
+        call problem%monitor%Initialize(solver%num%maxit, nphi, neq,&
+            nineq, solver%num%tol)
+
+        ! Initialize FD checkers
+        call FDcfv%Initialize(solver%numKKT%checkcfvvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_cfv')
+        call FDeqcon%Initialize(solver%numKKT%checkeqconvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_eqcon')
+        call FDineqcon%Initialize(solver%numKKT%checkineqconvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_ineqcon')
 
         ! Cost function 
         allocate(gradJ(nphi))
@@ -957,13 +989,13 @@ module optmod_optimizationengine
         ineqconind = [(k, k = nphi+neq+1, nphi+neq+nineq)]
 
         ! Diagnostics
-        checkgradients  = .false. ! check gradients in each iteration?
-        checkhessians   = .false. ! check hessians in each iteration?
+        !checkgradients  = .false. ! check gradients in each iteration?
+        !checkhessians   = .false. ! check hessians in each iteration?
 
         ! Initialize counter(s)
         itopt = 1
         problem%monitor%itopt = itopt
-        maxit = solver%numKKT%maxit
+        maxit = solver%num%maxit
 
         ! Unpack 
         associate(&
@@ -971,7 +1003,8 @@ module optmod_optimizationengine
             rxfdesign   => solver%numKKT%rxfdesign, &
             rxfdec      => solver%numKKT%rxfdec, &
             rxfmin      => solver%numKKT%rxfmin, &
-            verbosity   => solver%numKKT%verbosity)
+            verbosity   => solver%numKKT%verbosity, &
+            num         => solver%numKKT)
 
         ! Main loop
         !==========
@@ -996,20 +1029,32 @@ module optmod_optimizationengine
             problem%monitor%itopt = itopt
             problem%monitor%rxf = rxf 
 
+            ! Start tracking errors
+            call ErrorStack%StartTrack()
+
             ! Update the optimization problem 
             call problem%UpdateProblem()
 
             ! Check gradients & hessians if needed
-            if (checkgradients .or. checkhessians) then 
-                !call CheckCostFunctionLinearization(problem, &
-                !    checkgradients, checkhessians)
+            if (num%checkcfvgradient .or. num%checkcfvhessian) then 
+                call CheckCostFunctionLinearization(problem, FDcfv, &
+                    num%checkcfvgradient, num%checkcfvhessian)
+            end if 
+            if (num%checkeqcongradient .or. num%checkeqconhessian) then 
+                call CheckEqconLinearization(problem, FDeqcon, lambda, &
+                    num%checkeqcongradient, num%checkeqconhessian, &
+                    num%checkeqconeqs)
+            end if 
+            if (num%checkineqcongradient .or. num%checkineqconhessian) then 
+                call CheckIneqconLinearization(problem, FDineqcon, mu, &
+                    num%checkineqcongradient, num%checkineqconhessian, &
+                    num%checkineqconeqs)
+            end if 
+
+            !if (checkgradients .or. checkhessians) then 
                 !call CheckLagrangianLinearization(problem, solver, lambda, & 
                 !    mu, checkgradients, checkhessians)
-                call CheckEqconLinearization(problem, lambda, &
-                    checkgradients, checkhessians)
-                !call CheckIneqconLinearization(problem, lambda, &
-                !    checkgradients, checkhessians)
-            end if
+            !end if
 
             ! Evaluate cost function
             call problem%EvaluateCostFunction(J, gradJ, & 
@@ -1033,6 +1078,24 @@ module optmod_optimizationengine
                 G, gradG, hessG, lambda, &
                 H, gradH, hessH, mu, A, &
                 dogradient, dohessian)
+
+            ! Check if an error was encountered
+            errstat = ErrorStack%ErrorState()
+            call ErrorStack%EndTrack()
+            if (errstat > 0) then 
+                ! Call error, exit the loop
+                call gdErrorHandler('SolveOptimizationProblemKKT: could ' // &
+                    'not evaluate problem, exiting', severityin=0)
+                exit 
+            end if 
+
+            ! Check if NaNs are encountered in residual
+            if (any(isnan(gradL))) then 
+                ! Call error, exit the loop
+                call gdErrorHandler('SolveOptimizationProblemKKT: NaNs ' // &
+                    'detected when evaluating the problem, exiting', severityin=0)
+                exit 
+            end if 
 
             ! Check convergence
             call solver%CheckConvergenceKKT(gradL, converged, convnorm)
@@ -1124,31 +1187,30 @@ module optmod_optimizationengine
                 ! Update lagrange multipliers using least-squares approach
                 ! for active constraints
                 if ( (flag == 0) .and. (flagls == 0)) then 
-                allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
-                activeineqconind = pack(ineqconind, A)
-                inactiveineqconind = pack(ineqconind, I)
-                hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
-                hessLJ = hessLJ%DeleteRows(inactiveineqconind)
-                hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
-                hessLC = hessLC%DeleteRows(inactiveineqconind)
-                allocate(dxl(neq + count(A)))
-                !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
-                !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
-                !    dxl2, flag)
-                !dxl2 = -dxl2
-                call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
-                    MatrixVectorProduct(hessLC%Transpose(), &
-                    (rhs([phiind, eqconind, activeineqconind]) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
-                    dxl, flag)
+                    allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
+                    activeineqconind = pack(ineqconind, A)
+                    inactiveineqconind = pack(ineqconind, I)
+                    hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
+                    hessLJ = hessLJ%DeleteRows([eqconind, ineqconind])
+                    hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
+                    hessLC = hessLC%DeleteRows([eqconind, ineqconind])
+                    allocate(dxl(neq + count(A)))
+                    !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
+                    !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
+                    !    dxl2, flag)
+                    !dxl2 = -dxl2
+                    call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
+                        MatrixVectorProduct(hessLC%Transpose(), &
+                        (rhs(phiind) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
+                        dxl, flag)
 
-                !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
-                
-                dx(nphi+1:nphi+neq) = dxl(1:neq)
-                dx(activeineqconind) = dxl(neq+1:neq+count(A))
-                deallocate(dxl, activeineqconind, inactiveineqconind)
+                    !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
+                    
+                    dx(nphi+1:nphi+neq) = dxl(1:neq)
+                    dx(activeineqconind) = dxl(neq+1:neq+count(A))
+                    deallocate(dxl, activeineqconind, inactiveineqconind)
                 end if 
                 
-
             else
                 ! Check convergence of solver
                 if (flag == 0) then 
@@ -1211,6 +1273,11 @@ module optmod_optimizationengine
                 call problem%monitor%PrintIterate()
 
             end if
+
+            ! Write out the problem data
+            if (verbosity > 1) then 
+                call problem%WriteIterationData(itopt)
+            end if 
 
             ! Update the iteration counter
             itopt = itopt+1
@@ -1320,7 +1387,7 @@ module optmod_optimizationengine
         infnorm = maxval(abs(gradient))
 
         ! Compare
-        converged = infnorm < solver%numKKT%tol
+        converged = infnorm < solver%num%tol
 
     end subroutine
 
@@ -1391,7 +1458,8 @@ module optmod_optimizationengine
         integer(I8)                         :: k 
 
         ! Auxiliary variables
-        real(R8), allocatable               :: tmu(:), tH(:)
+        real(R8), allocatable               :: tmu(:), tH(:), val(:)
+        integer(I8), allocatable            :: row(:), col(:)
                                         
         ! Compute Lagrangian
         !===================
@@ -1432,57 +1500,59 @@ module optmod_optimizationengine
             hessL%nval  = hessJ%nval + hessG%nval + hessH%nval &
                         + 2*gradG%nval + 2*gradH%nval   
 
-            if (.not. allocated(hessL%val)) then
-                call hessL%Allocate()
-            end if
+            allocate(row(hessL%nval), col(hessL%nval), val(hessL%nval))
 
             ! dLdpsi2
             !--------
             ! Cost function contribution
-            hessL%val(k+1:k+hessJ%nval) = hessJ%val
-            hessL%row(k+1:k+hessJ%nval) = hessJ%row 
-            hessL%col(k+1:k+hessJ%nval) = hessJ%col 
+            val(k+1:k+hessJ%nval) = hessJ%val
+            row(k+1:k+hessJ%nval) = hessJ%row 
+            col(k+1:k+hessJ%nval) = hessJ%col 
             k = k + hessJ%nval 
 
             ! Equality constraints contribution
-            hessL%val(k+1:k+hessG%nval) = hessG%val
-            hessL%row(k+1:k+hessG%nval) = hessG%row 
-            hessL%col(k+1:k+hessG%nval) = hessG%col 
+            val(k+1:k+hessG%nval) = hessG%val
+            row(k+1:k+hessG%nval) = hessG%row 
+            col(k+1:k+hessG%nval) = hessG%col 
             k = k + hessG%nval 
 
             ! Inequality constraints contribution
-            hessL%val(k+1:k+hessH%nval) = hessH%val
-            hessL%row(k+1:k+hessH%nval) = hessH%row 
-            hessL%col(k+1:k+hessH%nval) = hessH%col 
+            val(k+1:k+hessH%nval) = hessH%val
+            row(k+1:k+hessH%nval) = hessH%row 
+            col(k+1:k+hessH%nval) = hessH%col 
             k = k + hessH%nval 
 
             ! dLdlambdadphi
             !--------------
-            hessL%val(k+1:k+gradG%nval) = gradG%val 
-            hessL%row(k+1:k+gradG%nval) = gradG%row
-            hessL%col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+            val(k+1:k+gradG%nval) = gradG%val 
+            row(k+1:k+gradG%nval) = gradG%row
+            col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
             k = k + gradG%nval 
 
             ! dLdphidlambda 
             !--------------
-            hessL%val(k+1:k+gradG%nval) = gradG%val 
-            hessL%row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
-            hessL%col(k+1:k+gradG%nval) = gradG%row  
+            val(k+1:k+gradG%nval) = gradG%val 
+            row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+            col(k+1:k+gradG%nval) = gradG%row  
             k = k + gradG%nval 
 
             ! dLdmudphi
             !----------
-            hessL%val(k+1:k+gradH%nval) = gradH%val 
-            hessL%row(k+1:k+gradH%nval) = gradH%row
-            hessL%col(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
+            val(k+1:k+gradH%nval) = gradH%val 
+            row(k+1:k+gradH%nval) = gradH%row
+            col(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
             k = k + gradH%nval 
 
             ! dLdphidmu
             !----------
-            hessL%val(k+1:k+gradH%nval) = gradH%val 
-            hessL%row(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
-            hessL%col(k+1:k+gradH%nval) = gradH%row
+            val(k+1:k+gradH%nval) = gradH%val 
+            row(k+1:k+gradH%nval) = gradH%col + hessJ%nrow + gradG%ncol
+            col(k+1:k+gradH%nval) = gradH%row
             k = k + gradH%nval 
+
+            ! Construct 
+            !==========
+            hessL = ConstructMySparse(row, col, val, hessL%nrow, hessL%ncol)
 
         end if
 
@@ -1697,6 +1767,7 @@ module optmod_optimizationengine
         logical                             :: dogradient, dohessian 
         logical, allocatable                :: A(:)
         integer(I8)                         :: flag2
+        integer                             :: errstat
 
         ! Initialize
         !===========
@@ -1770,15 +1841,28 @@ module optmod_optimizationengine
                 ! Update current iterate
                 x = x0 + alpha*dphi
 
+                ! Start tracking for possible problems
+                call ErrorStack%StartTrack()
+
                 ! Update the design
                 call problem%UpdateDesign(alpha*dphi)
 
                 ! Update the problem
                 call problem%UpdateProblem()
-                
-                ! Calculate new cost function value
-                call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
-                    mu, doderiv, meritfunction, numLS)
+
+                ! Check error status
+                errstat = ErrorStack%ErrorState()
+                call ErrorStack%EndTrack()
+                if (errstat > 0) then 
+                    ! Error encountered, set value to infinity - don't
+                    ! bother trying to compute the merit function
+                    fk = inf
+                else
+                    ! Calculate new cost function value
+                    call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                        mu, doderiv, meritfunction, numLS)
+                end if
+
                 
                 ! Check Armijo condition
                 if (fk < f0 + c1*alpha*DJf0) then 
@@ -1825,15 +1909,29 @@ module optmod_optimizationengine
                 ! Update current iterate
                 x = x0 + alpha*dphi
 
+                ! Start tracking for possible problems
+                call ErrorStack%StartTrack()
+
                 ! Update the design
                 call problem%UpdateDesign(alpha*dphi)
 
                 ! Update the problem
                 call problem%UpdateProblem()
+
+                ! Check error status
+                errstat = ErrorStack%ErrorState()
+                call ErrorStack%EndTrack()
+                if (errstat > 0) then 
+                    ! Error encountered, set value to infinity - don't
+                    ! bother trying to compute the merit function
+                    fk = inf
+                else
+                    ! Calculate new cost function value
+                    call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                        mu, doderiv, meritfunction, numLS)
+                end if
                 
-                ! Calculate new cost function value
-                call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
-                    mu, doderiv, meritfunction, numLS)
+
                 
                 ! Check Armijo & Wolfe conditions
                 if (fk > f0 + c1*alpha*DJf0) then 
@@ -1890,15 +1988,27 @@ module optmod_optimizationengine
                 ! Update current iterate
                 x = x0 + alpha*dphi
 
+                ! Start tracking for possible problems
+                call ErrorStack%StartTrack()
+
                 ! Update the design
                 call problem%UpdateDesign(alpha*dphi)
 
                 ! Update the problem
                 call problem%UpdateProblem()
-                
-                ! Calculate new cost function value
-                call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
-                    mu, doderiv, meritfunction, numLS)
+
+                ! Check error status
+                errstat = ErrorStack%ErrorState()
+                call ErrorStack%EndTrack()
+                if (errstat > 0) then 
+                    ! Error encountered, set value to infinity - don't
+                    ! bother trying to compute the merit function
+                    fk = inf
+                else
+                    ! Calculate new cost function value
+                    call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                        mu, doderiv, meritfunction, numLS)
+                end if
                 
                 ! Check Armijo condition
                 if (fk < f0 + c1*alpha*DJf0) then 
@@ -1906,6 +2016,14 @@ module optmod_optimizationengine
                     ! Sufficient decrease, terminate
                     conv = .true.
                     
+                elseif (errstat > 0) then 
+
+                    ! Error when updating problem, don't even bother 
+                    ! trying a second order correction
+
+                    ! Decrease alpha
+                    alpha = dec*alpha
+
                 else
                     
                     ! Try if we can get there by applying a second order
@@ -2035,7 +2153,8 @@ module optmod_optimizationengine
         integer(I8)                         :: k 
 
         ! Auxiliary variables
-        real(R8), allocatable               :: tmu(:)
+        real(R8), allocatable               :: tmu(:), val(:)
+        integer(I8), allocatable            :: row(:), col(:)
 
         ! Set up rhs
         !===========
@@ -2054,9 +2173,7 @@ module optmod_optimizationengine
         lhs%ncol = size(rhs, 1)
         lhs%nval = hessJ%nval + hessG%nval + hessH%nval + 2*gradG%nval &
             + 2*gradncpphi%nval + gradncpmu%nval
-        if (.not. allocated(lhs%val)) then 
-            call lhs%Allocate()
-        end if 
+        allocate(row(lhs%nval), col(lhs%nval), val(lhs%nval))
 
         ! dLdpsi2
         !--------
@@ -2064,61 +2181,61 @@ module optmod_optimizationengine
         k = 0
 
         ! Cost function contribution
-        lhs%val(k+1:k+hessJ%nval) = hessJ%val
-        lhs%row(k+1:k+hessJ%nval) = hessJ%row 
-        lhs%col(k+1:k+hessJ%nval) = hessJ%col 
+        val(k+1:k+hessJ%nval) = hessJ%val
+        row(k+1:k+hessJ%nval) = hessJ%row 
+        col(k+1:k+hessJ%nval) = hessJ%col 
         k = k + hessJ%nval 
 
         ! Equality constraints contribution
-        lhs%val(k+1:k+hessG%nval) = hessG%val
-        lhs%row(k+1:k+hessG%nval) = hessG%row 
-        lhs%col(k+1:k+hessG%nval) = hessG%col 
+        val(k+1:k+hessG%nval) = hessG%val
+        row(k+1:k+hessG%nval) = hessG%row 
+        col(k+1:k+hessG%nval) = hessG%col 
         k = k + hessG%nval 
 
         ! Inequality constraints contribution
-        lhs%val(k+1:k+hessH%nval) = hessH%val
-        lhs%row(k+1:k+hessH%nval) = hessH%row 
-        lhs%col(k+1:k+hessH%nval) = hessH%col 
+        val(k+1:k+hessH%nval) = hessH%val
+        row(k+1:k+hessH%nval) = hessH%row 
+        col(k+1:k+hessH%nval) = hessH%col 
         k = k + hessH%nval 
 
         ! dLdlambdadphi
         !--------------
-        lhs%val(k+1:k+gradG%nval) = gradG%val 
-        lhs%row(k+1:k+gradG%nval) = gradG%row 
-        lhs%col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+        val(k+1:k+gradG%nval) = gradG%val 
+        row(k+1:k+gradG%nval) = gradG%row 
+        col(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
         k = k + gradG%nval 
 
         ! dLdphidlambda 
         !--------------
-        lhs%val(k+1:k+gradG%nval) = gradG%val 
-        lhs%row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
-        lhs%col(k+1:k+gradG%nval) = gradG%row  
+        val(k+1:k+gradG%nval) = gradG%val 
+        row(k+1:k+gradG%nval) = gradG%col + hessJ%nrow
+        col(k+1:k+gradG%nval) = gradG%row  
         k = k + gradG%nval 
 
         ! dLdmudphi
         !----------
-        lhs%val(k+1:k+gradncpphi%nval) = gradncpphi%val 
-        lhs%row(k+1:k+gradncpphi%nval) = gradncpphi%row
-        lhs%col(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
+        val(k+1:k+gradncpphi%nval) = gradncpphi%val 
+        row(k+1:k+gradncpphi%nval) = gradncpphi%row
+        col(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
         k = k + gradncpphi%nval 
 
         ! dLdphidmu
         !----------
-        lhs%val(k+1:k+gradncpphi%nval) = gradncpphi%val 
-        lhs%row(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
-        lhs%col(k+1:k+gradncpphi%nval) = gradncpphi%row
+        val(k+1:k+gradncpphi%nval) = gradncpphi%val 
+        row(k+1:k+gradncpphi%nval) = gradncpphi%col + hessJ%nrow + gradG%ncol
+        col(k+1:k+gradncpphi%nval) = gradncpphi%row
         k = k + gradncpphi%nval 
 
         ! dLdmudmu
         !----------
-        lhs%val(k+1:k+gradncpmu%nval) = gradncpmu%val 
-        lhs%row(k+1:k+gradncpmu%nval) = gradncpmu%col + hessJ%nrow + gradG%ncol
-        lhs%col(k+1:k+gradncpmu%nval) = gradncpmu%row + hessJ%nrow + gradG%ncol
+        val(k+1:k+gradncpmu%nval) = gradncpmu%val 
+        row(k+1:k+gradncpmu%nval) = gradncpmu%col + hessJ%nrow + gradG%ncol
+        col(k+1:k+gradncpmu%nval) = gradncpmu%row + hessJ%nrow + gradG%ncol
         k = k + gradncpmu%nval 
 
-
-        
-
+        ! Construct sparse
+        !=================
+        lhs = ConstructMySparse(row, col, val, lhs%nrow, lhs%ncol)
 
     end subroutine
 
@@ -2145,10 +2262,13 @@ module optmod_optimizationengine
         ! Initialize
         !===========
         ! Numerics
+        solver%num%inputfilepath    = solver%inputfilepath
+        solver%num%fieldprefix      = solver%inputfileprefix
         solver%numLS%inputfilepath  = solver%inputfilepath
         solver%numLS%fieldprefix    = solver%inputfileprefix
         solver%numQN%inputfilepath  = solver%inputfilepath
         solver%numQN%fieldprefix    = solver%inputfileprefix
+        call solver%num%InitializeNumParams()
         call solver%numLS%InitializeNumParams()
         call solver%numQN%InitializeNumParams()
 
@@ -2202,7 +2322,7 @@ module optmod_optimizationengine
         infnorm = maxval(abs(gradient))
 
         ! Compare
-        converged = infnorm < solver%numQN%tol
+        converged = infnorm < solver%num%tol
 
     end subroutine
 
@@ -2218,7 +2338,7 @@ module optmod_optimizationengine
     !                           COST FUNCTION                          !
     !------------------------------------------------------------------!
     ! Stand-alone driver to check the cost function
-    subroutine CheckCostFunctionLinearization(problem, checkgradient, &
+    subroutine CheckCostFunctionLinearization(problem, FDchecker, checkgradient, &
         checkhessian)
 
         ! Description
@@ -2232,35 +2352,30 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(OptimizationProblemUDT)       :: problem 
-        logical                             :: checkgradient, &
+        logical, intent(in)                 :: checkgradient, &
             checkhessian
 
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
 
-        integer(I8)                         :: nvars, nphi, neq, nineq 
-        integer(I8), allocatable            :: vars(:)
+        integer(I8)                         :: nphi, neq, nineq 
 
         ! Initialize
         !===========
         ! Get the problem dimensions
         call problem%GetProblemDimensions(nphi, neq, nineq)
 
-        ! Set the design variables to check
-        nvars = 5
-        allocate(vars(nvars))
-        vars = [1, 1+860, 3, 3+860, 5] ! some random variables for now
-
         ! Sanity checks
-        if (any(vars > nphi)) then
+        if (any(FDchecker%vars > nphi)) then
             ! Throw error
             call gdErrorHandler('Design indices exceed the number &
                 & of design variables!')
         end if
 
         ! Initialize checker 
-        call FDchecker%Initialize(nvars, vars)
-        allocate(DFCostfunctionUDT::FDchecker%fun)
+        if (.not. allocated(FDchecker%fun)) then 
+            allocate(DFCostfunctionUDT::FDchecker%fun)
+        end if
 
         ! Associate
         associate(&
@@ -2273,6 +2388,11 @@ module optmod_optimizationengine
 
             ! Set the problem
             fun%problem = problem
+
+        class default
+
+            ! Throw error
+            call gdErrorHandler('CheckCostFunctionLinearization: unexpected cost function type')
 
         end select
 
@@ -2287,9 +2407,6 @@ module optmod_optimizationengine
         if (checkhessian) then 
             call FDchecker%CheckHessian()
         end if
-
-        ! Deallocate
-        deallocate(vars)
 
 
     end subroutine
@@ -2424,7 +2541,7 @@ module optmod_optimizationengine
         end if
 
         ! Initialize checker 
-        call FDchecker%Initialize(nvars, vars)
+        call FDchecker%Initialize(vars, real([1e-2, 1e-4, 1e-6, 1e-8], kind=R8), 'fd_check_lagrange')
         allocate(DFLagrangianUDT::FDchecker%fun)
 
         ! Associate
@@ -2649,8 +2766,8 @@ module optmod_optimizationengine
     !                       EQUALITY CONSTRAINTS                       !
     !------------------------------------------------------------------!
     ! Stand-alone driver 
-    subroutine CheckEqconLinearization(problem, lambda, checkgradient, &
-        checkhessian)
+    subroutine CheckEqconLinearization(problem, FDchecker, lambda, checkgradient, &
+        checkhessian, eqID)
 
         ! Description
         !============
@@ -2676,11 +2793,8 @@ module optmod_optimizationengine
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
 
-        integer(I8)                         :: nvars 
-        integer(I8), allocatable            :: vars(:)
-
         integer(I8)                         :: neq, neqID, nphi, nineq  
-        integer(I8), allocatable            :: eqID(:)
+        integer(I8), intent(in)             :: eqID(:)
 
         real(R8), allocatable               :: lambda(:)
 
@@ -2692,16 +2806,8 @@ module optmod_optimizationengine
         !===========
         ! Get the problem dimensions
         call problem%GetProblemDimensions(nphi, neq, nineq)
+        neqID =  size(eqID)
 
-        ! Set the constraints to check
-        neqID =  1
-        allocate(eqID(neqID))
-        eqID = [3400] !  some random numbers for now
-
-        ! Set the design variables to check
-        nvars = 4
-        allocate(vars(nvars))
-        vars = [2, 3, 64, 65] ! some random variables for now
 
         ! Sanity checks
         if (any(eqID > neq)) then
@@ -2709,7 +2815,7 @@ module optmod_optimizationengine
             call gdErrorHandler('Constraint indices exceed the number &
                 & of constraints!')
         end if
-        if (any(vars > nphi)) then
+        if (any(FDchecker%vars > nphi)) then
             ! Throw error
             call gdErrorHandler('Design indices exceed the number &
                 & of design variables!')
@@ -2717,8 +2823,9 @@ module optmod_optimizationengine
 
 
         ! Initialize checker 
-        call FDchecker%Initialize(nvars, vars)
-        allocate(DFEqconUDT::FDchecker%fun)
+        if (.not. allocated(FDchecker%fun)) then 
+            allocate(DFEqconUDT::FDchecker%fun)
+        end if 
 
         ! Associate
         associate(&
@@ -2759,14 +2866,15 @@ module optmod_optimizationengine
                 end if
             end do
 
+        class default 
+
+            ! Throw error
+            call gdErrorHandler('CheckEqonLinearization: unexpected function type')
+
         end select
 
         ! End associate
         end associate
-
-        ! Deallocate
-        deallocate(vars, eqID)
-
 
     end subroutine
 
@@ -2909,8 +3017,8 @@ module optmod_optimizationengine
     !                      INEQUALITY CONSTRAINTS                      !
     !------------------------------------------------------------------!
     ! Stand-alone driver 
-    subroutine CheckIneqconLinearization(problem, mu, checkgradient, &
-        checkhessian)
+    subroutine CheckIneqconLinearization(problem, FDchecker, mu, checkgradient, &
+        checkhessian, ineqID)
 
         ! Description
         !============
@@ -2936,11 +3044,8 @@ module optmod_optimizationengine
         ! Auxiliary
         type(FDcheckerUDT)                  :: FDchecker 
 
-        integer(I8)                         :: nvars 
-        integer(I8), allocatable            :: vars(:)
-
         integer(I8)                         :: nineq, nineqID, nphi, neq  
-        integer(I8), allocatable            :: ineqID(:)
+        integer(I8), intent(in)             :: ineqID(:)
 
         real(R8), allocatable               :: mu(:)
 
@@ -2952,15 +3057,7 @@ module optmod_optimizationengine
         !===========
         ! Get the problem dimensions
         call problem%GetProblemDimensions(nphi, neq, nineq)
-
-        ! Set the constraints to check
-        nineqID =  1
-        allocate(ineqID(nineqID))
-        ineqID = [1022] !  some random numbers for now
-
-        ! Set the design variables to check
-        vars = [915, 1045] ! some random variables for now
-        nvars = size(vars, 1)
+        nineqID =  size(ineqID)
 
         ! Sanity checks
         if (any(ineqID > nineq)) then
@@ -2968,7 +3065,7 @@ module optmod_optimizationengine
             call gdErrorHandler('Constraint indices exceed the number &
                 & of constraints!')
         end if
-        if (any(vars > nphi)) then
+        if (any(FDchecker%vars > nphi)) then
             ! Throw error
             call gdErrorHandler('Design indices exceed the number &
                 & of design variables!')
@@ -2976,8 +3073,9 @@ module optmod_optimizationengine
 
 
         ! Initialize checker 
-        call FDchecker%Initialize(nvars, vars)
-        allocate(DFIneqconUDT::FDchecker%fun)
+        if (.not. allocated(FDchecker%fun)) then
+            allocate(DFIneqconUDT::FDchecker%fun)
+        end if 
 
         ! Associate
         associate(&
@@ -2990,7 +3088,7 @@ module optmod_optimizationengine
 
             ! Set the problem
             fun%problem = problem
-            allocate(fun%mu(nineq))
+            !allocate(fun%mu(nineq))
             fun%mu = mu
 
             ! Compute errors
@@ -3018,14 +3116,15 @@ module optmod_optimizationengine
                 end if
             end do
 
+        class default 
+
+            ! Throw error
+            call gdErrorHandler('CheckIneqconLinearization: unexpected function type')
+
         end select
 
         ! End associate
         end associate
-
-        ! Deallocate
-        deallocate(vars, ineqID)
-
 
     end subroutine
 

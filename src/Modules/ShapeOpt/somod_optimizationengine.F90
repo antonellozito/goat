@@ -102,6 +102,9 @@ module somod_optimizationengine
         ! KKT relaxation
         procedure :: RelaxProblemKKTSystem => RelaxProblemKKTSystemSO
 
+        ! Data output
+        procedure :: WriteIterationData => WriteIterationDataSO 
+
         ! Additional routines
         !====================
         ! Initialization finalizer to account for cross-design/cfv/con
@@ -480,7 +483,7 @@ module somod_optimizationengine
         ! Declare variables
         !==================
         ! Arguments
-        class(OptimizationProblemSOUDT)     :: problem 
+        class(OptimizationProblemSOUDT)                 :: problem 
 
         ! Auxiliary
 
@@ -490,10 +493,39 @@ module somod_optimizationengine
         !===========
         ! Associate
 
+        ! Update cost function
+        !=====================
+        ! Hessian estimator
+        ! Check which hessian estimator to construct
+        associate(hopt => problem%designoptions%costfunction%hessapprox)
+    
+        select case (hopt%inithess)
+
+        case ('diagonal')
+
+            problem%costfunction%B = ConstructHessianApproximation(hopt%updatemethod, &
+                problem%designvariables%nphi, hopt%diagind, hopt%diagval, hopt%storagetype)
+
+        case default 
+
+            call gdErrorHandler('FinalizeInitializationSO: ' // & 
+                'unknown initial hessian option: "' // hopt%inithess // '"')
+
+        end select
+        end associate
+
         ! Update constraints
         !===================
         ! Construct constraint groups
         ! call problem%ConstructInequalityConstraintGroups()
+
+        ! Write data
+        !===========
+        ! Write the original/initial vessel polygon structure
+        call problem%goat%environment%vessel%polygonset%WriteData('vesselpolygon_orig_so')
+
+        ! Write original grid cells
+        call WriteGridCells(problem%goat%grid, 'cells_init')
 
         ! Housekeeping
         !=============
@@ -595,6 +627,7 @@ module somod_optimizationengine
         cellpath = 'cells_iterate'
         call WriteGridVertices(problem%goat%grid, vertpath) 
         call WriteGridCells(problem%goat%grid, cellpath)
+        call problem%goat%environment%vessel%polygonset%WriteData('vesselpolygon_iterate_so')
 
     end subroutine
 
@@ -818,6 +851,90 @@ module somod_optimizationengine
 
         ! Housekeeping
         !=============
+        end associate
+
+    end subroutine
+
+    ! Data writing
+    subroutine WriteIterationDataSO(problem, itopt)
+
+        ! Description
+        !============
+        ! Write out the optimization problem data in each optimization
+        ! iteration. Here, we call the goat-specific data writing 
+        ! routine and additionally write out the vessel polygon 
+        ! coordinates.
+
+        ! Modules
+        !========
+        use mod_plotter, only: plotdir 
+        use mod_specialchars, only: filesepchar
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemSOUDT)     :: problem 
+        integer(I8)                         :: itopt 
+
+        ! Auxiliary 
+        integer, parameter                      :: fid = 70
+        integer                                 :: iostat
+        logical                                 :: isfile 
+        character(:), allocatable               :: filepath 
+
+        ! Initialize
+        !===========
+        associate(&
+            vessel  => problem%goat%environment%vessel, &
+            goat    => problem%goat                     &
+            )
+
+        ! Write data
+        !===========
+        ! Goat
+        call goat%WriteIterationData(itopt)
+
+        ! Vessel data
+        call vessel%polygonset%WriteData('vesselpolygon_iterate_so')
+
+        ! Optimization output
+        !====================
+        ! Associate some fields for easier reading/writing
+        associate(grid      => goat%grid)
+
+        ! Set filepath
+        filepath = plotdir // filesepchar // 'so_optimization_history.dat'
+
+        ! Cell vertex data
+        call WriteGridCells(grid, 'cells_iterate')
+
+        ! Iteration data
+        if (itopt == 1) then 
+            ! Check if the file exists
+            inquire(file=filepath, exist=isfile)
+            if (isfile) then 
+                ! Replace old file
+                open(unit=fid, status='old', iostat=iostat, file=filepath)
+                rewind(fid)
+            else
+                ! Create new file
+                open(unit=fid, status='new', iostat=iostat, file=filepath)
+            end if
+
+            ! Write header
+            call problem%monitor%WriteFileHeader(fid)
+        else
+            ! File should already by opened, append
+            open(unit=fid, status='old', iostat=iostat, file=filepath, access='sequential', position='append')
+        end if
+
+        ! Write
+        call problem%monitor%WriteFileIterate(fid)
+        
+
+        ! Housekeeping
+        !=============
+        end associate
         end associate
 
     end subroutine

@@ -350,6 +350,8 @@ module goatmod_types
         ! - OMPcell, OMPface    : cells and faces belonging to outer mid
         !                       plane
         ! - IMPcell, IMPface    : same, but inner mid plane
+        ! - OMPr, OMPz          : points defining line segment of OMP
+        ! - IMPr, IMPz          : same but for inner mid plane
         ! - xpointID            : array containing all X-point vertex IDs
         ! - nxp                 : number of x-points
 
@@ -367,6 +369,8 @@ module goatmod_types
             IMPcell, IMPface
         integer(I8)                             :: nOMPcell, nOMPface, &
             nIMPcell, nIMPface
+        real(R8), dimension(1:2)                :: OMPr, OMPz, IMPr, &
+            IMPz
 
         ! X-point(s)
         integer(I8), allocatable                :: xpointID(:)
@@ -2064,6 +2068,9 @@ module goatmod_types
         ! Notes
         !======
         ! Note 1: the targets are NOT updated yet!
+        ! Note 2: we must construct the polygon sets using the polygon
+        ! vertices, not simply passing the new set of coordinates! This
+        ! will lead to an open polygon by default...
 
         ! Declare variables
         !==================
@@ -2073,6 +2080,7 @@ module goatmod_types
 
         ! Auxiliary
         integer(I8)                     :: flag, npv, npvtot
+        real(R8), allocatable           :: xvp(:), yvp(:)
         character(:), allocatable       :: vesselpath 
 
         ! Loop 
@@ -2088,7 +2096,7 @@ module goatmod_types
             ! Incompatible dimensions
             call gdErrorHandler('UpdateVesselCoordinates: incompatible ' // &
                 'dimensions of new coordinates and original vessel polygon')
-        end if 
+        end if  
 
         ! Adjust coordinates
         !===================
@@ -2098,9 +2106,15 @@ module goatmod_types
             ! Get number of vertices of this polygon
             npv = vessel%polygonset%polygons(i)%nv 
 
+            ! Get the coordinates
+            xvp = xv(k+1:k+npv)
+            yvp = yv(k+1:k+npv)
+
             ! Assign
             call vessel%polygonset%polygons(i)%Construct(&
-                xv(k+1:k+npv), yv(k+1:k+npv), vessel%polygonset%polygons(i)%labels)
+                xv(vessel%polygonset%polygons(i)%vert), &
+                yv(vessel%polygonset%polygons(i)%vert), &
+                vessel%polygonset%polygons(i)%labels(vessel%polygonset%polygons(i)%vert,:))
             
             ! Update counter
             k = k + npv 
@@ -2112,12 +2126,14 @@ module goatmod_types
         ! Test orientation
         call vessel%polygonset%OrientNestedClosedPolygons(flag)
 
-        ! Check
+        ! Check if vessel polygon is still a closed and simple polygon
         if (flag .ne. 0) then  
-            ! Throw error
+            ! Throw error, but do not exit program - may be dealt with upstream
             print *, 'flag: ', flag
             call gdErrorHandler('UpdateVesselCoordinates: could not orient ' // &
-                'polygons, OrientNestedClosedPolygons exited with flag above')
+                'polygons, OrientNestedClosedPolygons exited with flag above.' // &
+                'Not updating polygon levelset function any further', severityin=0)
+            return 
         end if 
 
         ! Write data

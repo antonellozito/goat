@@ -117,7 +117,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
             vID = vID + vs(i)%np 
 
             ! Add NaN
-            if (i .ne. nvs) then 
+            if (i .ne. (nvs - nexcl)) then 
                 tempx(cc+1) = NaN 
                 tempy(cc+1) = NaN 
                 templabels(cc+1, :) = 0
@@ -158,7 +158,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
         call temppol%Construct(vs(vesseloptions%TP(i))%x, vs(vesseloptions%TP(i))%y)
 
         ! Check
-        if (temppol%selfintersecting) then 
+        if (temppol%IsSelfIntersectingPolygon()) then 
             ! Throw error
             call gdErrorHandler('ExtractVesselData: target polygon is self intersecting, not supported')
         end if 

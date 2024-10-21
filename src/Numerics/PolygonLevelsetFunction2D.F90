@@ -38,6 +38,8 @@ module PolygonLevelsetFunction2D
     use Interpolant
     use mod_polygon
     use mod_sparseinterface
+    use mod_structured2Dgridding
+    use omp_lib
 
     ! The usual
     implicit none
@@ -1259,10 +1261,13 @@ module PolygonLevelsetFunction2D
 
         ! Loop 
         !=====
-        allocate(vx(np), vy(np), dvn(np), tvn(np), dx(np), dy(np), &
-            theta(np), isinvert(np), onedge(np), distedge(np), &
-            distvert(np), myones(np))
+        allocate(myones(np))
         myones = 1
+        !$omp parallel do default(none) shared(xq, yq, plf, &
+        !$omp val, minind, vind, eind, tdistvert, tcrossprod, nq, myones, inf) &
+        !$omp private(xqr, yqr, vx, vy, dvn, tvn, dx, dy, theta, isinvert, &
+        !$omp onedge, distedge, distvert, indmine, fe, signe, indminv, &
+        !$omp fv, signv, totsign, indmin)
         do iq = 1, nq
             
             ! Unpack
@@ -1315,6 +1320,7 @@ module PolygonLevelsetFunction2D
             val(iq) = val(iq)*totsign(indmin)
             
         end do 
+        !$omp end parallel do
 
         ! Construct function handle depending on type
         select case (trim(deriv))
