@@ -13,7 +13,8 @@ subroutine GGDriver(goatoptions)
     use goatmod_userinput
     use ggmod_topology2D
     use ggmod_gridgeneration2D
-    use mod_contour2D, only : ContourTracerUDT, ConstructStructuredTracer
+    use mod_contour2D, only : ContourTracerUDT, ConstructStructuredTracer, &
+        ContourUDT
     use mod_streamlinetracing2D, only: StreamlineTracerUDT, &
         ConstructStructuredStreamlineTracer
     use mod_structured2Dgridding
@@ -37,12 +38,19 @@ subroutine GGDriver(goatoptions)
     type(TopomeshUDT)           :: topomesh
     class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
     class(StreamlineTracerUDT), allocatable :: streamlinetracer
+    type(ContourUDT), allocatable           :: contours(:)
+    type(PolygonUDT), allocatable           :: pcontours(:)
+    type(PolygonSetUDT)                     :: tempps
 
+    real(R8)                                :: dv
     real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
-        yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy
+        yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy, cgv
     real(R8), parameter                     :: emptyR8(0)= 0
-    integer(I8)                             :: nv 
+    integer(I8)                             :: nv, resc
     integer(I8), parameter                  :: emptyI8(0) = 0
+
+    ! Loop
+    integer(I8)                             :: k
 
     ! Initialize
     !===========
@@ -61,8 +69,10 @@ subroutine GGDriver(goatoptions)
     !============================
     ! Determine domain bounds based on vessel and magnetic field extent
     call environment%vessel%plfvessel%ps%GetVertices(xps, yps)
-    xb = [minval([xps, magneticField%interp%xgv]), maxval([xps, magneticField%interp%xgv])]
-    yb = [minval([yps, magneticField%interp%ygv]), maxval([yps, magneticField%interp%ygv])]
+    xb = [minval([xps, magneticField%interp%xgv(2:size(magneticField%interp%xgv)-1)]), &
+        maxval([xps, magneticField%interp%xgv(2:size(magneticField%interp%xgv)-1)])]
+    yb = [minval([yps, magneticField%interp%ygv(2:size(magneticField%interp%ygv)-1)]), &
+        maxval([yps, magneticField%interp%ygv(2:size(magneticField%interp%ygv)-1)])]
 
     ! Construct a 2D structured grid for tracing (may be extended
     ! in the future for different grid types)
@@ -94,6 +104,19 @@ subroutine GGDriver(goatoptions)
         reshape(Vfx, [topomeshoptions%vresx, topomeshoptions%vresy]), &
         reshape(Vfy, [topomeshoptions%vresx, topomeshoptions%vresy]), & 
         xgv, ygv) 
+
+    ! Visualize by tracing contours
+    resc = 100
+    dv = (maxval(Vf) - minval(Vf))
+    cgv = [(k, k = 0, resc)]*(dv*0.90_R8)/real(resc, kind=R8) + minval(Vf) + dv*0.05
+    contours = fieldtracer%TraceContours(cgv)
+    allocate(pcontours(size(contours)))
+    do k = 1, size(contours)
+        call pcontours(k)%Construct(contours(k)%x, contours(k)%y)
+    end do 
+    call tempps%Construct(pcontours)
+    call tempps%WriteData('mfcontours')
+
 
     ! Generate the topological mesh
     !==============================
