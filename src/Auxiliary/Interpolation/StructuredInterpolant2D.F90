@@ -62,6 +62,7 @@ module StructuredInterpolant2D
     ! Load modules
     use Interpolant2D_auxiliaries
     use Interpolant2D
+    use Interpolant1D
     use mod_constants
     use mod_sparseinterface
     use mod_linearsolverinterface
@@ -235,18 +236,18 @@ module StructuredInterpolant2D
         integer(I8)                             :: nx, ny, &
             ixlb, ixub, iylb, iyub, nxr, nyr, vID, termind, &
             nc, vecind 
+        integer(I8), allocatable, dimension(:)  :: stencil, &
+            xstencil, ystencil, tvID, xrange, yrange, dxstencil, dystencil
+        integer(I8), allocatable, dimension(:, :) :: vertind, cellindex
+        integer(I16), allocatable, dimension(:) :: allprefac, precomputedfac
+
         real(R8)                                :: dxmean, dymean, &
             reldevx, reldevy, prefac
-
-        integer(I8), allocatable                :: stencil(:), &
-            vertind(:, :), xstencil(:), ystencil(:), tvID(:), &
-            xrange(:), yrange(:), dxstencil(:), dystencil(:), &
-            cellindex(:, :)
-        integer(I16), allocatable               :: allprefac(:), precomputedfac(:)
-        real(R8), allocatable                   :: xg(:, :), &
-            yg(:, :), cij(:, :), A(:, :), dx(:), dy(:), res(:, :), &
-            temp(:, :), fvals(:, :, :), refx(:), refy(:), refdx(:), &
-            refdy(:), rhs(:, :), vec(:), aij(:, :)
+        real(R8), allocatable, dimension(:)     :: dx, dy,  refx, refy, &
+            refdx, refdy, vec, xgvnew, ygvnew, vtemp
+        real(R8), allocatable, dimension(:, :)  :: xg, yg, cij, A, res, &
+            temp, aij, rhs, vnew 
+        real(R8), allocatable, dimension(:, :, :) :: fvals
             
 
         ! Loop
@@ -331,14 +332,56 @@ module StructuredInterpolant2D
             ! Issue warning, but this may be ok
             print *, 'ConstructSI2Duniform: non-uniformities detected' // &
                 ' in X grid vector of approx. ', reldevx, ' %. ' // &
-                ' Results may be inaccurate'
+                ' Applying linear interpolation to uniform grid.'
+
+            ! Construct new gridding vector
+            xgvnew = spread(0.0_R8, 1, nx)
+            xgvnew(1) = xgv(1)
+            vnew = v 
+            do i = 2, nx 
+                xgvnew(i) = xgvnew(i-1) + dxmean 
+            end do 
+            xgvnew(nx) = xgv(nx)
+
+            ! Interpolate values
+            !omp parallel do default(shared) private(vtemp)
+            do i = 1, ny 
+                call Interpolate1D(xgvnew, vtemp, xgv, v(:, i))
+                vnew(:, i) = vtemp
+            end do 
+            !omp end parallel do 
+
+            ! Overwrite
+            v = vnew 
+            xgv = xgvnew
             
         end if 
         if (reldevy >= tol) then 
             ! Issue warning, but this may be ok
             print *, 'ConstructSI2Duniform: non-uniformities detected' // &
                 ' in Y grid vector of approx. ', reldevx, ' %. ' // &
-                ' Results may be inaccurate'
+                ' Applying linear interpolation to uniform grid.'
+
+            ! Construct new gridding vector
+            ygvnew = spread(0.0_R8, 1, ny)
+            ygvnew(1) = ygv(1)
+            vnew = v 
+            do i = 2, ny 
+                ygvnew(i) = ygvnew(i-1) + dymean 
+            end do 
+            ygvnew(ny) = ygv(ny)
+
+            ! Interpolate values
+            !omp parallel do default(shared) private(vtemp)
+            do i = 1, nx 
+                call Interpolate1D(ygvnew, vtemp, ygv, v(i, :))
+                vnew(i, :) = vtemp
+            end do 
+            !omp end parallel do 
+
+            ! Overwrite
+            v = vnew 
+            ygv = ygvnew
             
         end if 
 

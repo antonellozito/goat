@@ -182,6 +182,7 @@ AUXILIARY_FILES =  src/Auxiliary/mod_sort.F90 \
     $(wildcard src/Auxiliary/*.F90) \
     src/Auxiliary/Interpolation/Interpolant2D_auxiliaries.F90 \
     src/Auxiliary/Interpolation/Interpolant2D.F90 \
+    src/Auxiliary/Interpolation/Interpolant1D.F90 \
     src/Auxiliary/Interpolation/BicubicSplineInterpolant.F90 \
     src/Auxiliary/Interpolation/StructuredInterpolant2D.F90 \
     $(wildcard src/Auxiliary/Interpolation/*.F90) \
