@@ -1930,7 +1930,8 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: tc, srf, erf, inderf, &
-            indsrf, tf, cind, nc, ntf, incr, nv, temp, minind, maxind
+            indsrf, tf, cind, nc, ntf, incr, nv, temp, minind, maxind, &
+            startind, endind
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
             allIDs, s1, s2, polv, tf1, tf2
@@ -1940,7 +1941,7 @@ module ggmod_gridgeneration2D
             dhf1, dhf2, dlf1, dlf2, nxc, nyc, nxfv, nyfv
         real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
             tcfv2val, tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint, &
-            nxf, nyf, nnf
+            nxf, nyf, nnf, tsegrc
         real(R8), allocatable, dimension(:, :)  :: segrrf, segrc, &
             xint, yint
         logical                                 :: isflremoved, &
@@ -2412,8 +2413,36 @@ module ggmod_gridgeneration2D
                     ! Update counter
                     cc = cc + 1 
 
+                    ! First intersection: should always be the one
+                    ! that is at the start of the contour IF it is a 
+                    ! closed polygon! Otherwise, we just take the first one...
+                    k = 1
+                    if (tube%isclosed(i)) then 
+                        tsegrc = segrcda(j, k)%Get()
+                        startind = findloc(tsegrc, 0.0_R8, 1)
+                        if (startind == 0) then 
+                            print *, 'AddToplogicalMeshCellGriddingData: ' // & 
+                                'contour does not intersect at starting point. ' // & 
+                                'contour: ', cc, 'tube: ', i 
+                            print *, 'taking first intersection...'
+                            startind = 1
+                        end if 
+                    else
+                        startind = 1
+                    end if 
+                    xint(cc, k) = xintda(j, k)%Get(startind)
+                    yint(cc, k) = yintda(j, k)%Get(startind)
+                    segc(cc, k) = segcda(j, k)%Get(startind)
+                    segrf(cc, k) = segrfda(j, k)%Get(startind)
+                    segrc(cc, k) = segrcda(j, k)%Get(startind)
+                    segrrf(cc, k) = segrrfda(j, k)%Get(startind)
+
+                    ! Set vertex ID
+                    nv = nv + 1
+                    vertexID(cc, k) = nv
+
                     ! Loop
-                    do k = 1, ntf-1 
+                    do k = 2, ntf-1 
                         ! Get first intersection
                         xint(cc, k) = xintda(j, k)%Get(1)
                         yint(cc, k) = yintda(j, k)%Get(1)
@@ -2426,35 +2455,42 @@ module ggmod_gridgeneration2D
                         nv = nv + 1
                         vertexID(cc, k) = nv
                     end do 
+
+                    ! Last intersection - can be anything with open 
+                    ! surface, but not with closed surface
+                    endind = 1
                     
                     ! Hedge for closed flux surfaces
                     if (tube%isclosed(i)) then 
                         ! Intersection with first and last radial line
                         ! should be exactly the same! Only intersection
                         ! coordinate should differ
-                        xint(cc, ntf) = xint(cc, 1)
-                        yint(cc, ntf) = yint(cc, 1)
-                        segc(cc, ntf) = segcda(j, ntf)%Get(segcda(j, ntf)%Size())
-                        segrf(cc, ntf) = segrfda(j, ntf)%Get(segrfda(j, ntf)%Size())
-                        segrc(cc, ntf) = segrcda(j, ntf)%Get(segrcda(j, ntf)%Size())
-                        segrrf(cc, ntf) = segrrfda(j, ntf)%Get(segrrfda(j, ntf)%Size())
+                        tsegrc = segrcda(cc, ntf)%Get()
+                        endind = findloc(tsegrc, real(size(tempc(j)%x)-1, kind=R8), 1)
+                        if (endind == 0) then 
+                            print *, 'AddToplogicalMeshCellGriddingData: ' // & 
+                                'closed contour does not intersect at ending point. ' // & 
+                                'contour: ', cc, 'tube: ', i 
+                            print *, 'taking first intersection...'
+                            endind = 1
+                        end if 
 
                         ! Set vertex ID - should be the same as before
                         nv = nv + 1
                         vertexID(cc, ntf) = vertexID(cc, 1)
                     else
-                        ! Get first intersection
-                        xint(cc, ntf) = xintda(j, ntf)%Get(1)
-                        yint(cc, ntf) = yintda(j, ntf)%Get(1)
-                        segc(cc, ntf) = segcda(j, ntf)%Get(1)
-                        segrf(cc, ntf) = segrfda(j, ntf)%Get(1)
-                        segrc(cc, ntf) = segrcda(j, ntf)%Get(1)
-                        segrrf(cc, ntf) = segrrfda(j, ntf)%Get(1)
 
                         ! Set vertex ID
                         nv = nv + 1
                         vertexID(cc, ntf) = nv
                     end if 
+                    xint(cc, ntf) = xintda(j, ntf)%Get(endind)
+                    yint(cc, ntf) = yintda(j, ntf)%Get(endind)
+                    segc(cc, ntf) = segcda(j, ntf)%Get(endind)
+                    segrf(cc, ntf) = segrfda(j, ntf)%Get(endind)
+                    segrc(cc, ntf) = segrcda(j, ntf)%Get(endind)
+                    segrrf(cc, ntf) = segrrfda(j, ntf)%Get(endind)
+
                 end if 
             end do 
             deallocate(keepind)
