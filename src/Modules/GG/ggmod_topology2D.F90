@@ -436,6 +436,7 @@ module ggmod_topology2D
         type(PolygonUDT)                        :: temppol
         type(PolygonUDT), allocatable           :: fxp(:), fyp(:)
         class(ContourTracerUDT), allocatable    :: fxtracer, fytracer
+        type(PolygonSetUDT)                     :: tempps
 
         ! Loop
         integer(I8)                             :: i, j, k, ec
@@ -509,6 +510,13 @@ module ggmod_topology2D
         do i = 1, nfyc 
             call fyp(i)%Construct(fyc(i)%x, fyc(i)%y)
         end do 
+
+        ! Write out data
+        call tempps%Construct(fxp)
+        call tempps%WriteData('extrema_fx_lines')
+        call tempps%Construct(fyp)
+        call tempps%WriteData('extrema_fy_lines')
+        
 
         ! Initialize intersection trackers
         allocate(fxpeid(nfxc), fxpsid(nfxc), fypeid(nfyc), fypsid(nfyc), &
@@ -1019,7 +1027,7 @@ module ggmod_topology2D
             hasbeendeleted = .false.
             do while (k < size(tf))
                 ! Check difference
-                if (abs(tf(k+1)-tf(k)) < fdifftol) then 
+                if ((abs(tf(k+1)-tf(k)) < fdifftol) .or. (tv(k+1)-tv(k) == 1)) then 
                     ! Remove values, such that subsequent ones can be
                     ! checked too
                     hasbeendeleted = .true.
@@ -1205,6 +1213,12 @@ module ggmod_topology2D
         ! contours). These contours are not trimmed beforehand since we still need
         ! to find the proper intersections with the vessel wall. 
 
+        ! Note 4: also for saddle points/cut-like boundaries, we need
+        ! to be careful when computing intersections. It is possible that
+        ! near the x-point, the separatrix intersects with a core boundary
+        ! due to inaccurate tracing of the field line contour locally. 
+        ! This needs to be hedged for by modifying the contours/lines 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -1220,7 +1234,7 @@ module ggmod_topology2D
             xout, yout, iout, jout, s1x, s1y, vesselval, s2x, s2y, &
             sortedI
         integer(I8)                             :: npsp, sizeI, sizetck, &
-            ntc
+            ntc, intersectind
         integer(I8), allocatable, dimension(:)  :: psptype, &
             sortind, pspID, delind, allcurvetypes, allfsIDs, &
             vindI, vindJ
@@ -1231,7 +1245,8 @@ module ggmod_topology2D
 
         type(ContourUDt)                        :: tempc
         type(ContourUDT), allocatable           :: tc(:), allc(:)
-        type(PolygonUDT), allocatable           :: tcp(:)
+        type(PolygonUDT), allocatable           :: tcp(:), allpc(:)
+        type(PolygonSetUDT)                     :: tempps
         type(IntegerDynamicArrayUDT)            :: curvetypes, fsIDs, &
             intI 
         type(RealDynamicArrayUDT)               :: realI 
@@ -1287,7 +1302,8 @@ module ggmod_topology2D
         ! Trace contours
         !===============
         ! Add saddle point contours
-        !$omp parallel do default(shared) private(tc) 
+        !$omp parallel do default(shared) private(tc, xout, yout, vindI, &
+        !$omp vindJ, iout, jout, delind, cc) 
         do i = 1, npsp
             if ((psptype(i) == 2) .and. tracepoints(i)) then 
                 ! Trace
@@ -1312,6 +1328,48 @@ module ggmod_topology2D
                     end if 
                 end do 
 
+                ! Check intersections with radial core boundaries
+                do j = 1, topomesh%face%ntot
+                    if ((topomesh%face%type(j) == TMfaceradID) .and. &
+                        ((topomesh%face%vert(j, 1) == i) .or. (topomesh%face%vert(j, 2) == i)) ) then 
+                        ! Loop over all contours
+                        do k = 1, size(tc)
+                            ! Check for intersections
+                            !$omp critical 
+                            call SimplePolygonIntersections(tc(k)%x, tc(k)%y, &
+                                topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get(), &
+                                xout, yout, vindI, vindJ, iout, jout)
+
+                            ! Check intersections - first one should be in x-point itself
+                            if (.not. (iout(1) == 0.0_R8)) then 
+                                call gdErrorHandler('AddTopologicalMeshContour: ' // & 
+                                    'first intersection between separatrix contour ' // & 
+                                    'and radial line should be in first ' // & 
+                                    'point of separatrix but this is not the case')
+                            end if
+
+
+                            ! If there are other intersections, adjust the face
+                            if (size(xout) > 1) then 
+                                if (topomesh%face%vert(j, 1) == i) then 
+                                    ! Face is oriented from start to end
+                                    delind = [(cc, cc = 2, vindJ(size(vindJ)))]
+                                else
+                                    delind = [(cc, cc = vindJ(1)+1, topomesh%face%x(j)%Size()-1)]
+                                end if 
+
+                                ! Delete
+                                call topomesh%face%x(j)%Remove(delind)
+                                call topomesh%face%y(j)%Remove(delind)
+
+                                ! Reconvert to polygon
+                                call topomesh%face%pol(j)%Construct(&
+                                    topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get())
+                            end if 
+                            !$omp end critical
+                        end do 
+                    end if 
+                end do
 
                 ! Add
                 !$omp critical
@@ -1346,7 +1404,7 @@ module ggmod_topology2D
                     ! be exactly the same since added as starting point in the
                     ! contouring algorithm)
                     dist = sqrt((tc(k)%x(1) - pspx(i))**2 + (tc(k)%y(1) - pspy(i))**2)
-                    if (dist >= disttol) then 
+                    if (dist > 0.0_R8) then 
                         print *, 'AddTopologicalMEshContours: tangency ' // & 
                             'contour segment found that does not start ' // & 
                             'in given tangency point. Removing...'
@@ -1400,6 +1458,7 @@ module ggmod_topology2D
                                 vindI = vindI(sortind)
                                 vindJ = vindJ(sortind)
                                 deallocate(sortind)
+                                intersectind = 1_I8
 
                                 ! Check
                                 if (any(topomesh%face%vert(j, :) == pspID(i))) then 
@@ -1453,8 +1512,10 @@ module ggmod_topology2D
                                         if (topomesh%face%vert(j, 1) == pspID(i)) then 
                                             ! keepind = [1, (cc, cc = vindJ(size(vindJ))+1, topomesh%face%x(j)%Size() )]
                                             delind = [(cc, cc = 2, vindJ(size(vindJ)))]
+                                            intersectind = size(vindJ)
                                         else
                                             delind = [(cc, cc = vindJ(1)+1, topomesh%face%x(j)%Size()-1)]
+                                            intersectind = 1_I8
                                             ! keepind = [(cc, cc = 1, vindJ(1)), topomesh%face%x(j)%Size()]
                                         end if 
 
@@ -1475,8 +1536,10 @@ module ggmod_topology2D
                             
                             ! Add to intersections
                             if (size(vindI) > 0) then 
-                                call realI%Append(iout(size(iout)))
-                                call intI%Append(vindI(size(vindI)))
+                                !call realI%Append(iout(size(iout)))
+                                !call intI%Append(vindI(size(vindI)))
+                                call realI%Append(iout(intersectind))
+                                call intI%Append(vindI(intersectind))
                             end if 
                             !$omp end critical
                         end if
@@ -1690,6 +1753,13 @@ module ggmod_topology2D
         !=========================
         ! Clean the contours (just to be sure)
         call CleanContours(allc)
+
+        allocate(allpc(size(allc)))
+        do i = 1, size(allc)
+            call allpc(i)%Construct(allc(i)%x, allc(i)%y)
+        end do 
+        call tempps%Construct(allpc)
+        call tempps%WriteData('topocontours_all_beforeinsertion')
 
         ! Add the contours
         allcurvetypes = curvetypes%Get()
@@ -2101,8 +2171,9 @@ module ggmod_topology2D
         integer(I8), intent(in)                 :: contourfsID, contourtype
 
         ! Auxiliary
+        real(R8)                                :: dist
         real(R8), allocatable, dimension(:)     :: xint, yint, s1r, s2r, &
-            tfv, ts1r
+            tfv, ts1r, tx, ty
         integer(I8)                             :: nint
         integer(I8), allocatable, dimension(:)  :: s1, s2, fID, vIDs, &
             vtypes, sortind, vf1, vf2, tvIDs, ts2, ts1
@@ -2380,12 +2451,36 @@ module ggmod_topology2D
         ! Extract faces
         call ExtractTopologicalFacesFromPolygon(cp, tvIDs, ts2, topomesh%vert%x, &
             topomesh%vert%y, vf1, vf2, xfda, yfda)
+
+        ! Hedge for too small faces
+        allocate(keepind(size(xfda)))
+        keepind = .true. 
+        do i = 1, size(xfda)
+            tx = xfda(i)%Get()
+            ty = yfda(i)%Get()
+            dist = sum(sqrt((tx(2:size(tx)) - tx(1:size(tx)-1))**2) + &
+                (ty(2:size(ty)) - ty(1:size(ty)-1))**2)
+            if (dist <= disttol) then 
+                ! Remove
+                print *, 'local face ID: ', i 
+                print *, 'vertices: ', vf1(i), vf2(i)
+                print *, 'InsertTopologicalMeshContour: not adding face ' // & 
+                    'with vertex indices as mentioned above as it is ' // & 
+                    'smaller than distance tolerance'
+                keepind(i) = .false. 
+            end if 
+        end do 
         
         ! Add to faces
         do i = 1, size(xfda)
-            call AddTopologicalMeshFace(topomesh, [vf1(i), vf2(i)], xfda(i), &
-                yfda(i), contourtype, contourfsID)
+            if (keepind(i)) then 
+                call AddTopologicalMeshFace(topomesh, [vf1(i), vf2(i)], xfda(i), &
+                    yfda(i), contourtype, contourfsID)
+            end if 
         end do 
+
+        ! Housekeeping
+        deallocate(keepind)
         
         ! Adjust existing faces
         !======================
@@ -2758,7 +2853,7 @@ module ggmod_topology2D
         !===============
         ! Evaluate derivatives
         allocate(f(ngp), fx(ngp), fy(ngp))
-        !call magneticField%interp%Evaluate(xg, yg, 0, 0, f)
+        call magneticField%interp%Evaluate(xg, yg, 0, 0, f)
         call magneticField%interp%Evaluate(xg, yg, 1, 0, fx)
         call magneticField%interp%Evaluate(xg, yg, 0, 1, fy)
 
@@ -4896,8 +4991,10 @@ module ggmod_topology2D
                 seID, eeID, ssID, esID 
             integer(I8), allocatable, dimension(:)  :: sortedsID(:), &
                 sortedeID(:)
-            real(R8)                                :: sx, sy, ex, ey
-            real(R8), allocatable, dimension(:)     :: tx, ty 
+            real(R8)                                :: sx, sy, ex, ey, &
+                dist
+            real(R8), allocatable, dimension(:)     :: tx, ty, tx2, ty2 
+            logical, allocatable, dimension(:)      :: delind
 
             ! Loop
             integer(I8)                             :: i, si, ei  
@@ -4942,18 +5039,6 @@ module ggmod_topology2D
             sortedsID = sID ! assumed already sorted!
             sortedeID = eID
 
-            ! Hedge for machine precision effects - shouldn't be necessary anymore?
-            !if (sortedsID(size(sID)) > pol%ne) then 
-            !    ! Check if it's only off by one -  otherwise it's an error
-            !    if (sortedsID(size(sID)) == pol%ne+1) then 
-            !        ! Shrink
-            !        sortedsID(size(sID)) = pol%ne 
-            !    else
-            !        call gdErrorHandler('ExtractTopologicalFacesFromPolygon: ' // & 
-            !            'segment index exceeds number of polygon edges, check input')
-            !    end if 
-            !end if 
-
             ! Treat start and end segments
             if (pol%isclosed) then 
                 ! Closed polygon
@@ -4970,13 +5055,23 @@ module ggmod_topology2D
                     v1(fc) = sortedeID(neID)
                     v2(fc) = sortedeID(1)
 
-                    ! Add face coordinates
-                    call xf(fc)%Append([xint(sortedeID(neID)), &
-                        px(sortedsID(nsID)+1:pol%ne), &
-                        px(1:sortedsID(1)), xint(sortedeID(1))])
-                    call yf(fc)%Append([yint(sortedeID(neID)), &
-                        py(sortedsID(nsID)+1:pol%ne), &  
-                        py(1:sortedsID(1)), yint(sortedeID(1))])
+                    ! Add face coordinates (hedge for exact duplicates)
+                    tx = [xint(sortedeID(neID)), px(sortedsID(nsID)+1:pol%ne)]
+                    ty = [yint(sortedeID(neID)), py(sortedsID(nsID)+1:pol%ne)]
+                    if ((tx(1) == tx(2)) .and. (ty(1) == ty(2))) then 
+                        tx = tx(2:size(tx))
+                        ty = ty(2:size(ty))
+                    end if 
+                    tx = [tx, px(1:sortedsID(1)), xint(sortedeID(1))]
+                    ty = [ty, py(1:sortedsID(1)), yint(sortedeID(1))]
+                    if ((tx(size(tx)-1) == tx(size(tx))) .and. &
+                        (ty(size(ty)-1) == ty(size(ty)))) then 
+                        tx = tx(1:size(tx)-1)
+                        ty = ty(1:size(ty)-1)
+                    end if 
+
+                    call xf(fc)%Append(tx)
+                    call yf(fc)%Append(ty)
                 else
                     ! Something weird here: intersection in exactly first node, but
                     ! only at first and not at last segment. Likely because
@@ -5003,8 +5098,15 @@ module ggmod_topology2D
                     v2(fc) = sortedeID(1) ! end vertex 
 
                     ! Add face coordinates
-                    call xf(fc)%Append([px(1:sortedsID(1)), xint(sortedeID(1))]) 
-                    call yf(fc)%Append([py(1:sortedsID(1)), yint(sortedeID(1))])
+                    tx = [px(1:sortedsID(1)), xint(sortedeID(1))]
+                    ty = [py(1:sortedsID(1)), yint(sortedeID(1))]
+                    if ((tx(size(tx)-1) == tx(size(tx))) .and. &
+                        (ty(size(ty)-1) == ty(size(ty)))) then 
+                        tx = tx(1:size(tx)-1)
+                        ty = ty(1:size(ty)-1)
+                    end if 
+                    call xf(fc)%Append(tx) 
+                    call yf(fc)%Append(ty)
                 
                 end if 
                 if ((sortedsID(nsID) == pol%ne) .and. (px(pol%ne+1) == xint(sortedeID(nsID))) & 
@@ -5021,8 +5123,14 @@ module ggmod_topology2D
                     v2(fc) = 0 ! no end vertex 
 
                     ! Add face coordinates
-                    call xf(fc)%Append([xint(sortedeID(neID)), px(sortedsID(nsID)+1:pol%ne+1)]) 
-                    call yf(fc)%Append([yint(sortedeID(neID)), py(sortedsID(nsID)+1:pol%ne+1)])
+                    tx = [xint(sortedeID(neID)), px(sortedsID(nsID)+1:pol%ne+1)]
+                    ty = [yint(sortedeID(neID)), py(sortedsID(nsID)+1:pol%ne+1)]
+                    if ((tx(1) == tx(2)) .and. (ty(1) == ty(2))) then 
+                        tx = tx(2:size(tx))
+                        ty = ty(2:size(ty))
+                    end if 
+                    call xf(fc)%Append(tx) 
+                    call yf(fc)%Append(ty)
                 
                 end if 
             end if 
@@ -5087,9 +5195,6 @@ module ggmod_topology2D
                 V1 = V1(1:fc)
                 V2 = V2(1:fc)
             end if 
-
-            
-
 
             ! Housekeeping
             !=============
