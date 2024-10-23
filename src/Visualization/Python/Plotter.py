@@ -705,7 +705,7 @@ def PlotGridCells(grid, fignum):
         counter = counter + nvc + 2
     
     # Plot
-    PlotPolygons2D(xc, yc, fignum, color='k', marker='')
+    PlotPolygons2D(xc, yc, fignum, color='k', marker='', linewidth=0.25)
 
      # Set axes
     SetAxesLimits2D(plt.gca(), xb, yb)
