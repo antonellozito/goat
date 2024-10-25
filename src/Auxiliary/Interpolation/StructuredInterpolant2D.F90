@@ -197,7 +197,8 @@ module StructuredInterpolant2D
         case default 
 
             ! Unknown case, call error handler
-            call gdErrorHandler('ConstructSI2DS: unknown construction method for 2D interpolant')
+            call gdErrorHandler('ConstructSI2DS: unknown construction method for 2D interpolant: ' // & 
+                interp%meth)
 
         end select 
 
