@@ -125,14 +125,14 @@ subroutine GGDriver(goatoptions)
 
     ! Generate the grid
     !==================
-    call GenerateUnstructuredAlignedGrid(topomesh, magneticField, &
+    call GenerateUnstructuredAlignedGrid(grid, topomesh, magneticField, &
         environment%vessel, fieldtracer, vesseltracer, streamlinetracer, &
         ggoptions)
 
     ! Write data
     !===========
     ! Grid data
-    ! call WriteGOAT(goatoptions, grid, magneticField, environment)
+    call WriteGOAT(goatoptions, grid, magneticField, environment)
 
     ! b2ag file
     !call Writeb2agdat(goatoptions, grid)
