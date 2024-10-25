@@ -18,6 +18,9 @@
 ! seem to support all the desired functionality, e.g. returning the sort
 ! index). 
 
+! Note 2: some derivatives of sorting algorithms are also provided, e.g.
+! the 'unique' function (which is here based on sorting)
+
 module mod_sort
 
     ! Initialize
@@ -29,7 +32,7 @@ module mod_sort
     ! The usual
     implicit none 
     private 
-    public :: Sort 
+    public :: Sort, Unique
 
     !==================================================================!
     !                                                                  !
@@ -49,6 +52,11 @@ module mod_sort
     interface Sort 
         module procedure Sort_I8, Sort_R8
     end interface 
+
+    ! General unique
+    interface Unique 
+        module procedure Unique_I8, Unique_R8
+    end interface
 
     contains 
 
@@ -492,6 +500,126 @@ module mod_sort
         end if 
 
 
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                         DERIVED OPERATORS                        !
+    !------------------------------------------------------------------!
+
+    ! Integer unique
+    subroutine Unique_I8(in, out, ind)
+
+        ! Description
+        !============
+        ! Returns the unique elements of an integer array. This is done
+        ! by first sorting the array, then taking the value difference
+        ! and removing elements which are not different. Optionally, 
+        ! the index vector is returned that yields out = in(ind)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)                 :: in(:) 
+        integer(I8), allocatable, intent(out)   :: out(:)
+        integer(I8), allocatable, intent(out), optional     :: ind(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: diff, in_sorted
+        logical, allocatable, dimension(:)      :: keepind
+
+        ! Loop
+        integer(I8)                             :: k 
+
+        ! Compute
+        !========
+        if (allocated(out)) then 
+            deallocate(out)
+        end if 
+
+        in_sorted = in 
+        if (present(ind)) then 
+            ! Sort
+            call Sort(in_sorted, ind=ind)
+
+            ! Compute difference
+            diff = in_sorted(2:) - in_sorted(1:size(in_sorted))
+
+            ! Eliminate
+            keepind = [.true., diff /= 0_I8]
+            allocate(out(count(keepind)))
+            out = pack(in_sorted, keepind)
+            ind = pack([(k, k = 1, size(in_sorted))], keepind)
+        else 
+            ! Sort 
+            call Sort(in_sorted)
+
+            ! Compute difference
+            diff = in_sorted(2:size(in_sorted)) - in_sorted(1:size(in_sorted)-1)
+
+            ! Eliminate
+            keepind = [.true., diff /= 0_I8]
+            allocate(out(count(keepind)))
+            out = pack(in_sorted, keepind)
+        end if 
+
+    end subroutine
+
+    ! Real unique
+    subroutine Unique_R8(in, out, ind)
+
+        ! Description
+        !============
+        ! Returns the unique elements of a real array. This is done
+        ! by first sorting the array, then taking the value difference
+        ! and removing elements which are not different. Optionally, 
+        ! the index vector is returned that yields out = in(ind)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)                                :: in(:) 
+        real(R8), allocatable, intent(out)                  :: out(:)
+        integer(I8), allocatable, intent(out), optional     :: ind(:)
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: diff, in_sorted
+        logical, allocatable, dimension(:)      :: keepind
+
+        ! Loop
+        integer(I8)                             :: k 
+
+        ! Compute
+        !========
+        if (allocated(out)) then 
+            deallocate(out)
+        end if 
+
+        in_sorted = in 
+        if (present(ind)) then 
+            ! Sort
+            call Sort(in_sorted, ind=ind)
+
+            ! Compute difference
+            diff = in_sorted(2:) - in_sorted(1:size(in_sorted))
+
+            ! Eliminate
+            keepind = [.true., diff /= 0_I8]
+            allocate(out(count(keepind)))
+            out = pack(in_sorted, keepind)
+            ind = pack([(k, k = 1, size(in_sorted))], keepind)
+        else 
+            ! Sort 
+            call Sort(in_sorted)
+
+            ! Compute difference
+            diff = in_sorted(2:) - in_sorted(1:size(in_sorted))
+
+            ! Eliminate
+            keepind = [.true., diff /= 0_I8]
+            allocate(out(count(keepind)))
+            out = pack(in_sorted, keepind)
+        end if 
 
     end subroutine
 
