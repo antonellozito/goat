@@ -88,7 +88,6 @@ module ggmod_topology2D
         integer(I8), allocatable        :: ID(:), vert(:, :), cell(:), &
             label(:), fsID(:), type(:), cellP(:, :)
         type(RealDynamicArrayUDT), allocatable  :: x(:), y(:)
-        real(R8), allocatable           :: fval(:)
         type(PolygonUDT), allocatable   :: pol(:)
         logical, allocatable            :: BF(:)
 
@@ -164,6 +163,8 @@ module ggmod_topology2D
         type(TopomeshCellUDT)   :: cell 
         type(TopomeshTubeUDT)   :: tube 
         integer(I8)             :: nfs 
+        type(IntegerDynamicArrayUDT)    :: fsID
+        type(RealDynamicArrayUDT)       :: fsfval
 
     contains 
 
@@ -357,7 +358,7 @@ module ggmod_topology2D
         call AddTopologicalMeshInterconnectionData(topomesh)
 
         ! Re-evaluate topological mesh vertex field values
-        topomesh%vert%fval = fieldtracer%Evaluate(topomesh%vert%x, topomesh%vert%y)
+        !topomesh%vert%fval = fieldtracer%Evaluate(topomesh%vert%x, topomesh%vert%y)
 
         ! Write
         !======
@@ -879,7 +880,7 @@ module ggmod_topology2D
                 fsID = 0; ! no ID, because vessel boundary
                 tx = ConstructRealDynamicArray(tc(i)%x)
                 ty = ConstructRealDynamicArray(tc(i)%y)
-                call AddTopologicalMeshFace(topomesh, facevert, tx, ty, ftype, fsID)
+                call AddTopologicalMeshFace(topomesh, facevert, tx, ty, ftype, fsID, 0.0_R8)
             end do 
         end do
 
@@ -1143,7 +1144,7 @@ module ggmod_topology2D
             ! Add faces
             do j = 1, size(xf)
                 call AddTopologicalMeshFace(topomesh, [vf1(j), vf2(j)], &
-                    xf(j), yf(j), TMfacebndID, 0)
+                    xf(j), yf(j), TMfacebndID, 0_I8, 0.0_R8)
             end do 
 
             ! Housekeeping
@@ -2175,7 +2176,7 @@ module ggmod_topology2D
         integer(I8), intent(in)                 :: contourfsID, contourtype
 
         ! Auxiliary
-        real(R8)                                :: dist
+        real(R8)                                :: dist, fsfval
         real(R8), allocatable, dimension(:)     :: xint, yint, s1r, s2r, &
             tfv, ts1r, tx, ty
         integer(I8)                             :: nint, fsID
@@ -2501,7 +2502,7 @@ module ggmod_topology2D
         do i = 1, size(xfda)
             if (keepind(i)) then 
                 call AddTopologicalMeshFace(topomesh, [vf1(i), vf2(i)], xfda(i), &
-                    yfda(i), contourtype, contourfsID)
+                    yfda(i), contourtype, contourfsID, contour%val)
             end if 
         end do 
 
@@ -2571,8 +2572,13 @@ module ggmod_topology2D
 
             ! Add to faces
             do i = 1, size(xfda)
+                if (topomesh%face%fsID(fID(k)) /= 0) then 
+                    fsfval = topomesh%fsfval%Get(topomesh%face%fsID(fID(k)))
+                else
+                    fsfval = 0.0_R8
+                end if 
                 call AddTopologicalMeshFace(topomesh, [vf1(i), vf2(i)], xfda(i), &
-                    yfda(i), topomesh%face%type(fID(k)), topomesh%face%fsID(fID(k)))
+                    yfda(i), topomesh%face%type(fID(k)), topomesh%face%fsID(fID(k)), fsfval)
             end do 
 
         end do 
@@ -2614,7 +2620,7 @@ module ggmod_topology2D
         integer(I8)                             :: nncf, nndf, np, &
             ind(1:2), nfinit
         real(R8)                                :: newvcfx(1:2), newvcfy(1:2), &
-            newvcff(1:2), newvdfx(1), newvdfy(1), newvdff(1)
+            newvcff(1:2), newvdfx(1), newvdfy(1), newvdff(1), fsfval
         
         logical, allocatable, dimension(:)      :: isclosedface, &
             isduplicateface, delind
@@ -2704,27 +2710,34 @@ module ggmod_topology2D
                         newvcfx(j), newvcfy(j), newvcff(j), &
                         TMvertexsplitID, face%fsID(i))
                 end do 
+
+                ! Get flux surface value
+                if (face%fsID(i) /= 0) then 
+                    fsfval = topomesh%fsfval%Get(face%fsID(i))
+                else
+                    fsfval = 0.0_R8
+                end if 
                 
                 ! Insert first face
                 xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = 1, ind(1))]))
                 yrda = ConstructRealDynamicArray(face%y(i)%Get([(k, k = 1, ind(1))]))
                 call AddTopologicalMeshFace(topomesh, &
                     [face%vert(i, 1), topomesh%vert%ntot-1], &
-                    xrda, yrda, face%type(i), face%fsID(i))
+                    xrda, yrda, face%type(i), face%fsID(i), fsfval)
 
                 ! Insert second face
                 xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = ind(1), ind(2))]))
                 yrda = ConstructRealDynamicArray(face%y(i)%Get([(k, k = ind(1), ind(2))]))
                 call AddTopologicalMeshFace(topomesh, &
                     [topomesh%vert%ntot-1, topomesh%vert%ntot], &
-                    xrda, yrda, face%type(i), face%fsID(i))
+                    xrda, yrda, face%type(i), face%fsID(i), fsfval)
 
                 ! Insert third face
                 xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = ind(2), face%x(i)%Size())]))
                 yrda = ConstructRealDynamicArray(face%y(i)%Get([(k, k = ind(2), face%y(i)%Size())]))
                 call AddTopologicalMeshFace(topomesh, &
                     [topomesh%vert%ntot, face%vert(i, 2)], &
-                    xrda, yrda, face%type(i), face%fsID(i))
+                    xrda, yrda, face%type(i), face%fsID(i), fsfval)
 
             elseif (isduplicateface(i)) then 
 
@@ -2750,20 +2763,28 @@ module ggmod_topology2D
                 ! Insert new vertex
                 call AddTopologicalMeshVertex(topomesh, newvdfx(1), &
                     newvdfy(1), newvdff(1), TMvertexsplitID, face%fsID(i))
-                
+
+                ! Get flux surface value
+                if (face%fsID(i) /= 0) then 
+                    fsfval = topomesh%fsfval%Get(face%fsID(i))
+                else
+                    fsfval = 0.0_R8
+                end if 
+
                 ! Insert first face
                 xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = 1, ind(1))]))
                 yrda = ConstructRealDynamicArray(face%y(i)%Get([(k, k = 1, ind(1))]))
                 call AddTopologicalMeshFace(topomesh, &
                     [face%vert(i, 1), topomesh%vert%ntot], &
-                    xrda, yrda, face%type(i), face%fsID(i))
+                    xrda, yrda, face%type(i), face%fsID(i), fsfval)
 
                 ! Insert second face
                 xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = ind(1), face%x(i)%Size())]))
                 yrda = ConstructRealDynamicArray(face%y(i)%Get([(k, k = ind(1), face%y(i)%Size())]))
+                
                 call AddTopologicalMeshFace(topomesh, &
                     [topomesh%vert%ntot, face%vert(i, 2)], &
-                    xrda, yrda, face%type(i), face%fsID(i))
+                    xrda, yrda, face%type(i), face%fsID(i), fsfval)
 
             end if 
 
@@ -3255,6 +3276,8 @@ module ggmod_topology2D
         !===========
         ! number of distinct flux surfaces
         topomesh%nfs = 0
+        topomesh%fsfval = ConstructRealDynamicArray()
+        topomesh%fsID   = ConstructIntegerDynamicArray()
 
         ! Substructures (tubes are initialized empty)
         call topomesh%vert%Initialize()
@@ -3298,7 +3321,7 @@ module ggmod_topology2D
         !===========
         tpface%ntot = 0
         allocate(tpface%ID(0), tpface%vert(0, 2), tpface%cell(0), &
-            tpface%fsID(0), tpface%x(0), tpface%y(0), tpface%fval(0), &
+            tpface%fsID(0), tpface%x(0), tpface%y(0), &
             tpface%pol(0), tpface%type(0))
 
     end subroutine
@@ -3396,12 +3419,39 @@ module ggmod_topology2D
         real(R8), intent(in)                :: x, y, F
         integer(I8), intent(in)             :: t, fsID
 
+        ! Auxiliary
+        real(R8)                            :: tF 
+
+        ! Check 
+        !======
+        ! If the flux surface ID was already added, overwrite the flux
+        ! value - this should be the same (but discretely this often
+        ! doesn't hold) 
+        tF = F 
+        if (fsID /= 0) then 
+            if ((topomesh%fsID%Size() > 0)) then 
+                if (any(topomesh%fsID%Get() == fsID)) then 
+                    ! Already exists, overwrite value
+                    tF = topomesh%fsfval%Get(fsID)
+                else
+                    ! Does not yet exist, add 
+                    call topomesh%fsID%Append(fsID)
+                    call topomesh%fsfval%Set(fsID, F)
+                end if
+            else
+                ! Does not yet exist, add 
+                call topomesh%fsID%Append(fsID)
+                call topomesh%fsfval%Set(fsID, F)
+            end if 
+        end if 
+
+
         ! Concatenate
         !============
         topomesh%vert%ntot = topomesh%vert%ntot + 1
         topomesh%vert%x = [topomesh%vert%x, x]
         topomesh%vert%y = [topomesh%vert%y, y]
-        topomesh%vert%fval = [topomesh%vert%fval, F]
+        topomesh%vert%fval = [topomesh%vert%fval, tF]
         topomesh%vert%type = [topomesh%vert%type, t]
         topomesh%vert%ID = [topomesh%vert%ID, topomesh%vert%ntot]
         topomesh%vert%fsID = [topomesh%vert%fsID, fsID]
@@ -3546,7 +3596,7 @@ module ggmod_topology2D
 
     ! Face addition
     subroutine AddTopologicalMeshFace(topomesh, facevert, x, y, &
-        t, fsID)
+        t, fsID, F)
 
         ! Description
         !============
@@ -3565,13 +3615,35 @@ module ggmod_topology2D
         class(TopomeshUDT)                  :: topomesh 
         type(RealDynamicArrayUDT)           :: x, y 
         integer(I8), intent(in)             :: t, facevert(1:2), fsID
+        real(R8), intent(in)                :: F 
 
         ! Auxiliary
         integer(I8), allocatable            :: tmp(:, :)
+        real(R8)                            :: tF 
         real(R8), allocatable               :: xt(:), yt(:), dxt(:), &
             dyt(:)
         logical, allocatable                :: delind(:)
         type(PolygonUDT)                    :: tp 
+
+        ! Check if flux surface exists
+        !=============================
+        tF = F 
+        if (fsID /= 0) then 
+            if ((topomesh%fsID%Size() > 0)) then 
+                if (any(topomesh%fsID%Get() == fsID)) then 
+                    ! Already exists, overwrite value
+                    tF = topomesh%fsfval%Get(fsID)
+                else
+                    ! Does not yet exist, add 
+                    call topomesh%fsID%Append(fsID)
+                    call topomesh%fsfval%Set(fsID, F)
+                end if
+            else
+                ! Does not yet exist, add 
+                call topomesh%fsID%Append(fsID)
+                call topomesh%fsfval%Set(fsID, F)
+            end if 
+        end if 
 
         ! Hedge for duplicate points
         !===========================
@@ -5086,12 +5158,12 @@ module ggmod_topology2D
                     ! Add face coordinates (hedge for exact duplicates)
                     tx = [xint(sortedeID(neID)), px(sortedsID(nsID)+1:pol%ne)]
                     ty = [yint(sortedeID(neID)), py(sortedsID(nsID)+1:pol%ne)]
+                    tx = [tx, px(1:sortedsID(1)), xint(sortedeID(1))]
+                    ty = [ty, py(1:sortedsID(1)), yint(sortedeID(1))]
                     if ((tx(1) == tx(2)) .and. (ty(1) == ty(2))) then 
                         tx = tx(2:size(tx))
                         ty = ty(2:size(ty))
                     end if 
-                    tx = [tx, px(1:sortedsID(1)), xint(sortedeID(1))]
-                    ty = [ty, py(1:sortedsID(1)), yint(sortedeID(1))]
                     if ((tx(size(tx)-1) == tx(size(tx))) .and. &
                         (ty(size(ty)-1) == ty(size(ty)))) then 
                         tx = tx(1:size(tx)-1)
@@ -5439,6 +5511,7 @@ module ggmod_topology2D
             fvert 
         logical, allocatable, dimension(:)      :: markv, markf, &
             appearstwice
+        real(R8)                                :: fsfval
         real(R8), allocatable, dimension(:)     :: tempx, tempy 
         type(RealDynamicArrayUDT)               :: xda, yda 
 
@@ -5566,8 +5639,14 @@ module ggmod_topology2D
                 end if 
 
                 ! Add the new face
+                if (topomesh%face%fsID(rmf1(i)) /= 0) then 
+                    fsfval = topomesh%fsfval%Get(topomesh%face%fsID(rmf1(i)))
+                else
+                    fsfval = 0.0_R8
+                end if 
                 call AddTopologicalMeshFace(topomesh, fvert, &
-                    xda, yda, topomesh%face%type(rmf1(i)), topomesh%face%fsID(rmf1(i)))
+                    xda, yda, topomesh%face%type(rmf1(i)), &
+                    topomesh%face%fsID(rmf1(i)), fsfval)
 
             end do 
 
