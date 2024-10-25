@@ -595,7 +595,7 @@ module ggmod_gridgeneration2D
         ! Extract
         call ExtractSimulationGrid(simgrid, grid, magneticField)
 
-        
+
 
         ! Visualize
         !----------
@@ -849,7 +849,7 @@ module ggmod_gridgeneration2D
                     call gdErrorHandler('d')
                 end if 
                 ! Sanity check
-                print *, hfvert 
+                ! print *, hfvert 
                 if (any(vert%type(hfvert(1)) == [TMvertextp1ID, TMvertextp2ID, &
                     TMvertexbndID, TMvertexmaxID, TMvertexminID])) then 
                     isstartingcell(i) = .true. 
@@ -1728,7 +1728,7 @@ module ggmod_gridgeneration2D
         type(GGGridUDT), intent(inout)          :: grid 
 
         ! Auxiliary
-        integer(I8)                             :: tf, vtemp
+        integer(I8)                             :: vtemp
         integer(I8), allocatable, dimension(:)  :: v1, v2, fID, &
             sortind, dv1, dv2, tsortind, tv2, tfID
         integer(I8), allocatable                :: fvert(:, :)
@@ -2233,6 +2233,10 @@ module ggmod_gridgeneration2D
                 lffaces = pack(tcf, islfface)
                 hfvert = pack(tcv, ishfvert)
                 lfvert = pack(tcv, .not. ishfvert)
+
+                if ((size(hffaces)+1 /= size(hfvert)) .or. (size(lffaces)+1 /= size(lfvert))) then 
+                    print *, 'unexpected'
+                end if 
                 
                 ! Overwrite to sort 
                 if (size(tf1) > 0) then 
