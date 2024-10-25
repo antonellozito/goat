@@ -81,6 +81,7 @@
 module ggmod_gridgeneration2D
 
     ! Load modules
+    use goatmod_types
     use mod_precision
     use mod_constants
     use mod_errorhandler
@@ -417,7 +418,7 @@ module ggmod_gridgeneration2D
     !------------------------------------------------------------------!
 
     ! Unstructured aligned grid generator
-    subroutine GenerateUnstructuredAlignedGrid(topomesh, magneticField, &
+    subroutine GenerateUnstructuredAlignedGrid(simgrid, topomesh, magneticField, &
         vessel, fieldtracer, boundarytracer, streamlinetracer, options)
 
         ! Description
@@ -453,6 +454,7 @@ module ggmod_gridgeneration2D
         type(VesselUDT)             :: vessel 
         class(ContourTracerUDT)     :: fieldtracer, boundarytracer 
         type(GGoptionsUDT)          :: options 
+        type(GridUDT)               :: simgrid
 
         ! Auxiliary
         type(GGTMDataUDT)           :: ggtmdata 
@@ -587,6 +589,13 @@ module ggmod_gridgeneration2D
 
         ! Process grid
         !=============
+
+        ! Extract the necessary gridding data
+        !====================================
+        ! Extract
+        call ExtractSimulationGrid(simgrid, grid, magneticField)
+
+        
 
         ! Visualize
         !----------
@@ -1380,6 +1389,10 @@ module ggmod_gridgeneration2D
 
         ! Note 2: no guarantees can be given on non-overlapping cells. 
 
+        ! Note 3: during construction, duplicate faces will exist since
+        ! we don't check whether the start/end line are already 
+        ! treated. We remove these faces afterwards. 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -1685,6 +1698,114 @@ module ggmod_gridgeneration2D
 
         end do 
 
+        ! Cleanup
+        !========
+        call RemoveDuplicateGridFaces(grid)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Removal of duplicate faces in grid
+    subroutine RemoveDuplicateGridFaces(grid)
+
+        ! Description
+        !============
+        ! This routine removes duplicate faces in the grid which may 
+        ! originate from the cell and face constructor(s). Here, we 
+        ! simply loop over the faces and mark faces for deletion if 
+        ! they have already been found. 
+
+        ! Note: this routine should be called directly after grid cell
+        ! and face construction, not later
+    
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGGridUDT), intent(inout)          :: grid 
+
+        ! Auxiliary
+        integer(I8)                             :: tf, vtemp
+        integer(I8), allocatable, dimension(:)  :: v1, v2, fID, &
+            sortind, dv1, dv2, tsortind, tv2, tfID
+        integer(I8), allocatable                :: fvert(:, :)
+        logical, allocatable, dimension(:)      :: delind 
+        
+        ! Loop
+        integer(I8)                             :: i, k, kold
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(f       => grid%face)
+        
+        v1 = f%v1%Get()
+        v2 = f%v2%Get()
+        allocate(fvert(f%ntot, 2))
+        fvert(:, 1) = v1
+        fvert(:, 2) = v2
+
+        ! Remove faces
+        !=============
+        ! Get face indices
+        fID = [(k, k = 1, f%ntot)]
+
+        ! Sort along rows
+        do i = 1, size(v1)
+            if (v1(i) > v2(i)) then 
+                vtemp = v1(i)
+                v1(i) = v2(i)
+                v2(i) = vtemp
+            end if 
+        end do
+
+        ! Sort faces according to first vertex
+        allocate(sortind(size(v1)))
+        call Sort(v1, ind=sortind)
+        v2 = v2(sortind)
+        fID = fID(sortind)
+
+        ! Sort v2 per segment of equal v1
+        k = 0
+        do while (k < size(v1))
+            ! Update kold
+            kold = k 
+
+            ! Get segment with all same values of v1
+            k = findloc(v1(kold+1:) /= v1(kold+1), .true., 1, back=.false.)
+
+            ! Hedge for end effects
+            if (k == 0) then 
+                k = size(v1)
+            else
+                k = k + kold - 1
+            end if 
+
+            ! Sort this segment
+            tfID = fID(kold+1:k)
+            tv2 = v2(kold+1:k)
+            allocate(tsortind(size(tfID)))
+            call Sort(tv2, ind=tsortind)
+            tfID = tfID(tsortind)
+            fID(kold+1:k) = tfID 
+            v2(kold+1:k) = tv2
+            deallocate(tsortind)
+        end do 
+
+         ! Check differences
+        dv1 = v1(2:size(v1)) - v1(1:size(v1)-1)
+        dv2 = v2(2:size(v2)) - v2(1:size(v2)-1)
+        
+        ! If both are zero, set delind to true
+        delind = [.false., (dv1 == 0) .and. (dv2 == 0)]
+
+        ! Remove faces
+        fID = pack(fID, delind)
+        call RemoveGGFace(grid, fID)
+
         ! Housekeeping
         !=============
         end associate
@@ -1754,7 +1875,7 @@ module ggmod_gridgeneration2D
         do i = 1, face%ntot
             if (any(face%type(i) == facetypes)) then 
                 ! Initialize
-                call facedata(i)%line%Initialize(face%x(i)%Get(), face%y(i)%Get())
+                call facedata(i)%line%Initialize(face%x(i)%Get(), face%y(i)%Get(), face%fsID(i))
                 
                 ! Distribute
                 call vd%DistributeOverCurve(face%x(i)%Get(), face%y(i)%Get(), &
@@ -1831,7 +1952,7 @@ module ggmod_gridgeneration2D
                 yc = face%y(i)%Get()
 
                 ! Initialize
-                call facedata(i)%line%Initialize(xc, yc)
+                call facedata(i)%line%Initialize(xc, yc, face%fsID(i))
 
                 ! Distribute
                 call vd%DistributeOverField(xc, yc, field, nv,  ldistr=dlcv)
@@ -1931,10 +2052,10 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: tc, srf, erf, inderf, &
             indsrf, tf, cind, nc, ntf, incr, nv, temp, minind, maxind, &
-            startind, endind
+            startind, endind, nfs
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
-            allIDs, s1, s2, polv, tf1, tf2
+            allIDs, s1, s2, polv, tf1, tf2, fsID
         integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
             segc, vertexID
         real(R8)                                :: hfval, lfval, &
@@ -2144,6 +2265,9 @@ module ggmod_gridgeneration2D
 
         ! Trace contours 
         !===============
+        ! Initialize flux surface counter
+        nfs = topomesh%nfs
+
         ! Loop over all tubes
         do i = 1, tube%ntot 
 
@@ -2405,7 +2529,7 @@ module ggmod_gridgeneration2D
             ! Unpack intersections
             allocate(xint(nc, ntf), yint(nc, ntf), segc(nc, ntf), &
                 segrf(nc, ntf), segrc(nc, ntf), segrrf(nc, ntf), &
-                vertexID(nc, ntf))
+                vertexID(nc, ntf), fsID(nc))
             cc = 0 
             do j = 1, size(nint, 1) 
                 ! Skip
@@ -2440,6 +2564,10 @@ module ggmod_gridgeneration2D
                     ! Set vertex ID
                     nv = nv + 1
                     vertexID(cc, k) = nv
+
+                    ! Set flux surface ID
+                    fsID(cc) = nfs + 1
+                    nfs = nfs + 1
 
                     ! Loop
                     do k = 2, ntf-1 
@@ -2543,7 +2671,7 @@ module ggmod_gridgeneration2D
                     yl = [yint(j, k), tempc(j)%y(polv), yint(j, k+1)]
 
                     ! Add 
-                    call celldata(tubec(k))%lines(j)%Initialize(xl, yl)
+                    call celldata(tubec(k))%lines(j)%Initialize(xl, yl, fsID(j))
 
                 end do 
 
@@ -2562,7 +2690,7 @@ module ggmod_gridgeneration2D
             ! Housekeeping
             deallocate(xint, yint, segc, segrf, segrc, segrrf, nint, &
                 vertexID, polc, xintda, yintda, segcda, segrfda, &
-                segrcda, segrrfda,)
+                segrcda, segrrfda, fsID)
         end do 
         
         ! Housekeeping
@@ -2782,12 +2910,95 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Vertex removal
+    subroutine RemoveGGVert(grid, delind)
+
+        ! Description
+        !============
+        ! Remove vertices of the grid (without updating interconnection)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGGridUDT)            :: grid 
+        integer(I8), intent(in)     :: delind(:)
+
+        ! Remove
+        !=======
+        call grid%vert%x%Remove(delind)
+        call grid%vert%y%Remove(delind)
+        call grid%vert%fieldlineID%Remove(delind)
+        grid%vert%ntot = grid%vert%x%Size()
+
+    end subroutine
+
+    ! Face removal
+    subroutine RemoveGGFace(grid, delind)
+
+        ! Description
+        !============
+        ! Remove faces to the grid (without updating interconnection)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGGridUDT)            :: grid 
+        integer(I8), intent(in)     :: delind(:)
+
+        ! Remove
+        !=======
+        call grid%face%v1%Remove(delind)
+        call grid%face%v2%Remove(delind)
+        call grid%face%label%Remove(delind)
+        call grid%face%region%Remove(delind)
+        grid%face%ntot = grid%face%v1%Size()
+
+    end subroutine
+
+    ! Cell removal
+    subroutine RemoveGGCell(grid, delind)
+
+        ! Description
+        !============
+        ! Remove cells to the grid (without updating interconnection).
+        ! Note: it is assumed that the vertex pointer vp1 is local, 
+        ! i.e. that it always starts from one. We adjust this value
+        ! to be immediately correct. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGGridUDT)            :: grid 
+        integer(I8), intent(in)     :: delind(:)
+
+        ! Auxiliary
+        integer(I8)                 :: lb, ub 
+        integer(I8), allocatable    :: vertdel(:)
+
+        ! Loop
+        integer(I8)                 :: i, k
+
+        ! Remove
+        !=======
+        do i = 1, size(delind)
+            lb = grid%cell%vp1%Get(delind(i))
+            ub = lb  + grid%cell%vp2%Get(delind(i))-1
+            vertdel = [(k, k = ub, lb)]
+            call grid%cell%vert%Remove(vertdel)
+        end do 
+        call grid%cell%vp1%Remove(delind)
+        call grid%cell%vp2%Remove(delind)
+        call grid%cell%region%Remove(delind)
+        grid%cell%ntot = grid%cell%vp1%Size()
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                      GGTM LINE HANDLING                          !
     !------------------------------------------------------------------!
 
     ! GGTM line initialization
-    subroutine InitializeGGTMFieldLineData(line, xl, yl)
+    subroutine InitializeGGTMFieldLineData(line, xl, yl, fsID)
 
         ! Description
         !============
@@ -2802,6 +3013,7 @@ module ggmod_gridgeneration2D
         ! Arguments
         class(GGTMFieldlineDataUDT)         :: line 
         real(R8), intent(in)                :: xl(:), yl(:)
+        integer(I8), intent(in)             :: fsID
 
         ! Loop
         integer(I8)                         :: i 
@@ -2819,6 +3031,7 @@ module ggmod_gridgeneration2D
         end do 
         line%nl = size(xl)
         line%nv = 0
+        line%fsID = fsID
 
     end subroutine
 
@@ -3738,6 +3951,653 @@ module ggmod_gridgeneration2D
     end subroutine
 
     !------------------------------------------------------------------!
+    !                             OUTPUT                               !
+    !------------------------------------------------------------------!
+
+    ! Simulation grid extraction
+    subroutine ExtractSimulationGrid(simgrid, grid, magneticField)
+
+        ! Description
+        !============
+        ! This routine extracts the necessary grid data for the 
+        ! classical 'gridudt' type used for simulations/deformation/...
+        
+        ! Notes
+        !======
+        ! Note 1: face labels etc are not yet translated to logical
+        ! values. This should be done in a separate routine
+        ! afterwards. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(out)              :: simgrid
+        type(GGGridUDT), intent(in)             :: grid 
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tv
+        real(R8), allocatable, dimension(:)     :: bpvx
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            nv      => grid%vert%ntot,  &
+            nf      => grid%face%ntot,  &
+            nc      => grid%cell%ntot   &
+            )
+        
+
+        ! Basic data
+        !===========
+        ! Sizes
+        simgrid%vert%ntot = nv 
+        simgrid%face%ntot = nf 
+        simgrid%cell%ntot = nc 
+        simgrid%cell%nvert = grid%cell%vert%Size()
+        simgrid%cell%nface = simgrid%cell%nvert ! should be exactly the same
+        simgrid%data%fluxdata%nFs = 0 ! changed later, just for initialization now
+        simgrid%data%fluxdata%nFt = 0 ! changed later, just for initialization now
+
+        ! Allocate grid
+        call AllocateGrid(simgrid)
+
+        ! Vertices
+        simgrid%vert%x              = grid%vert%x%Get()
+        simgrid%vert%y              = grid%vert%y%Get()
+        simgrid%vert%fieldlineID    = grid%vert%fieldlineID%Get()
+        simgrid%vert%ntot           = nv 
+
+        ! Faces
+        simgrid%face%vert(:, 1) = grid%face%v1%Get()
+        simgrid%face%vert(:, 2) = grid%face%v2%Get()
+        simgrid%face%label      = grid%face%label%Get()
+        simgrid%face%reg        = grid%face%region%Get()
+        simgrid%face%ntot       = nf 
+
+        ! Cells
+        simgrid%cell%vert           = grid%cell%vert%Get()
+        simgrid%cell%vertP(:, 1)    = grid%cell%vp1%Get()
+        simgrid%cell%vertP(:, 2)    = grid%cell%vp2%Get()
+        simgrid%cell%ntot           = nc 
+
+        associate(&
+            c     => simgrid%cell, &
+            v   => simgrid%vert)
+        do i = 1, nc
+            ! Get cell vertices
+            tv = GetCellVert(c, i)
+
+            ! Compute coordinates
+            c%x(i) = sum(v%x(tv))/real(size(tv), kind=R8)
+            c%y(i) = sum(v%y(tv))/real(size(tv), kind=R8)
+        end do
+        end associate
+
+        ! Magnetic field data
+        !====================
+        ! Vertices
+        call magneticField%interp%Evaluate(simgrid%vert%x, simgrid%vert%y, &
+            0, 0, simgrid%vert%psi)
+        call magneticField%interp%Evaluate(simgrid%vert%x, simgrid%vert%y, &
+            1, 0, simgrid%vert%bx)
+        call magneticField%interp%Evaluate(simgrid%vert%x, simgrid%vert%y, &
+            0, 1, simgrid%vert%by)
+        simgrid%vert%ffbz = magneticField%RBtor*2.0_R8*pi_R8
+
+        ! Faces
+        associate(&
+            fv      => simgrid%face%vert, &
+            vfID    => simgrid%vert%fieldlineID)
+        simgrid%face%aligned = 0_I8 
+        do i = 1, simgrid%face%ntot 
+            if ((vfID(fv(i, 1)) /= 0) .and. (vfID(fv(i, 2)) /= 0)) then
+                if (vfID(fv(i, 1)) == vfID(fv(i, 2))) then  
+                    simgrid%face%aligned(i) = 1_I8
+                end if 
+            end if 
+        end do 
+        end associate 
+
+        ! Cells
+        associate(&
+            c     => simgrid%cell, &
+            v     => simgrid%vert)
+        call magneticField%interp%Evaluate(c%x, c%y, 0, 0, c%psi)
+        bpvx = sqrt(v%bx**2 + v%by**2)
+        do i = 1, nc
+            ! Get cell vertices
+            tv = GetCellVert(c, i)
+
+            ! Compute poloidal and toroidal field
+            c%bp(i) = -sum(bpvx(tv))/(real(size(tv), kind=R8)*2.0_R8*c%x(i)*pi_R8)
+            c%bt(i) = sum(v%ffbz(tv))/(real(size(tv), kind=R8)*2.0_R8*c%x(i)*pi_R8)
+        end do 
+        end associate
+
+        ! Grid interconnection
+        !=====================
+        ! Classic grid interconnection data
+        call ComputeGridInterconnections(simgrid)
+
+        ! Additional grid data
+        call ComputeGridData(simgrid, magneticField)
+
+        ! Grid boundary
+        !call ComputeGridBoundaries(simgrid)
+
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Compute grid data
+    subroutine ComputeGridData(simgrid, magneticField)
+
+        ! Description
+        !============
+        ! Compute additional grid data related to flux surfaces, 
+        ! flux tubes, etc. This does not include the grid boundaries
+        ! yet -> separate routine. 
+
+        ! Note 1: in principle, this routine only requires simulation grid
+        ! data, so perhaps this can be moved to the goatmod_types module?
+
+        ! Note 2: we don't account yet for empty flux surfaces - these 
+        ! simply have zero faces/cells etc. Can be deleted later on
+
+        ! Note 3: cut cells etc should be correctly included as long as 
+        ! cells only have two boundary faces - otherwise they're not included
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)        :: simgrid 
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+
+        ! Auxiliary
+        integer(I8)                             :: nfsf, nfsftot, &
+            nftftot, nftc, si, ei, np
+        integer(I8), allocatable, dimension(:)  :: ffsID, fID, vID, &
+            sortind, polind, tfind, ftf, ftc, tcf, IDs, allcellreg, ind, &
+            nfsneig, tcv
+        integer(I8), allocatable, dimension(:, :)   :: tfnb
+        real(R8), allocatable, dimension(:)     :: vpsi, xf, yf, xc, yc, &
+            ccx, ccy, bfx, bfy, dp
+        logical, allocatable, dimension(:)      :: temp, tf, &
+            ispolygonstart, tc
+
+        ! Loop
+        integer(I8)                             :: i, j, k, cc, ncell, &
+            nface
+
+        ! Initialize
+        !===========
+        associate(&
+            fd      => simgrid%data%fluxdata,   &
+            c       => simgrid%cell,            &
+            f       => simgrid%face,            &
+            v       => simgrid%vert)
+
+        ! Flux surfaces
+        !==============
+        ! Set initial number of flux surfaces 
+        fd%nFs      = maxval(v%fieldlineID)
+        
+        ! Initialize other fields
+        if (allocated(fd%fluxsurfacefacesP)) then 
+            deallocate(fd%fluxsurfacefacesP)
+        end if 
+        allocate(fd%fluxsurfacefacesP(fd%nFs, 2))
+        fd%fluxsurfacefacesP = 0_I8
+        
+        ! Determine flux surface ID of faces
+        allocate(ffsID(f%ntot))
+        ffsID = 0 
+        do i = 1, f%ntot
+            ! Check
+            if (v%fieldlineID(f%vert(i, 1)) == v%fieldlineID(f%vert(i, 2))) then 
+                ffsID(i) = v%fieldlineID(f%vert(i, 1))
+            end if 
+        end do 
+
+        ! Extract
+        nfsftot = count(ffsID /= 0)
+        if (allocated(fd%fluxsurfacefaces)) then 
+            deallocate(fd%fluxsurfacefaces)
+        end if 
+        if (allocated(fd%fluxsurfacepsi)) then 
+            deallocate(fd%fluxsurfacepsi)
+        end if 
+        allocate(fd%fluxsurfacefaces(nfsftot), fd%fluxsurfacepsi(fd%nFs))
+        fd%fluxsurfacefaces = 0
+        fd%fluxsurfacefacesP(1, 1) = 1 
+        fID = [(k, k = 1, f%ntot)]
+        vID = [(k, k = 1, v%ntot)]
+        do i = 1, fd%nFs 
+            ! Get faces with this ID
+            temp = ffsID == i
+            nfsf = count(temp)
+
+            ! Set pointer
+            fd%fluxsurfacefacesP(i, 2) = nfsf 
+            if (i < fd%nFs) then 
+                fd%fluxsurfacefacesP(i+1, 1) = fd%fluxsurfacefacesP(i, 1) &
+                    + nfsf
+            end if 
+
+            ! Set faces
+            fd%fluxsurfacefaces(fd%fluxsurfacefacesP(i, 1):fd%fluxsurfacefacesP(i, 1)+nfsf-1) & 
+                = pack(fID, temp)
+
+            ! Set ID
+            fd%fluxsurfaceID(i) = i
+
+            ! Compute psi value as mean of vertex psi value (assumed computed)
+            allocate(vpsi(count(v%fieldlineID == i)))
+            vpsi = pack(v%psi, v%fieldlineID == i)
+            fd%fluxsurfacepsi(i) = sum(vpsi)/real(size(vpsi), kind=R8)
+            deallocate(vpsi)
+
+        end do 
+
+        ! Flux tubes
+        !===========
+        ! Get all non-aligned, non-boundary faces
+        tf = (.not. f%BF) .and. (f%cellP(:, 2) == 2) .and. (.not. (f%aligned == 1))
+
+        ! Get all single cells with two boundary faces that have the 
+        ! same non-zero flux surface ID 
+        allocate(tc(c%ntot))
+        tc = .false. 
+        do i = 1, c%ntot
+            ! Get cell faces
+            tcf = GetCellFace(c, i)
+            tcf = pack(tcf, f%BF(tcf) .and. (.not. (f%aligned(tcf) == 1)))
+
+            ! Get unique vertex ID without zeros
+            if (size(tcf) == 2) then 
+                call Unique([v%fieldlineID(f%vert(tcf, 1)), &
+                    v%fieldlineID(f%vert(tcf, 2))], IDs)
+                IDs = pack(IDs, IDs /= 0)
+                if (size(IDs) == 2) then 
+                    tc(i) = .true.
+                end if
+            end if
+        end do  
+
+        ! Construct the face neighbour
+        allocate(tfnb(count(tf), 2))
+        tfnb = 0
+        cc = 0
+        do i = 1, f%ntot 
+            if (tf(i)) then 
+                cc = cc + 1
+                tfnb(cc, 1:f%cellP(i, 2)) = GetFaceCell(f, i)
+            end if 
+        end do 
+
+        ! Sort the edges (assumed no branching)
+        allocate(sortind(size(tfnb, 1)), ispolygonstart(size(tfnb, 1)))
+        call SortPolygonEdges(tfnb, count(tf), sortind, ispolygonstart)
+        allocate(polind(count(ispolygonstart)))
+        polind = pack([(k, k = 1, size(tfnb, 1))], ispolygonstart)
+        polind = [polind, size(tfnb, 1)+1]
+
+        ! Sort faces
+        allocate(tfind(count(tf)))
+        tfind = pack(fID, tf)
+        tfind = tfind(sortind)
+
+        ! Extract tubes
+        nftftot = 2*count(tf)  + 2*count(tc) ! overestimation
+        np = count(ispolygonstart)
+        fd%nFt = np + count(tc)
+        if (allocated(fd%fluxtubefacesP)) then 
+            deallocate(fd%fluxtubefacesP)
+        end if 
+        if (allocated(fd%fluxtubefaces)) then 
+            deallocate(fd%fluxtubefaces)
+        end if 
+        if (allocated(fd%fluxtubefsIDs)) then 
+            deallocate(fd%fluxtubefsIDs)
+        end if 
+        if (allocated(fd%fluxtuberegID)) then 
+            deallocate(fd%fluxtuberegID)
+        end if 
+        if (allocated(fd%fluxtubecellsP)) then 
+            deallocate(fd%fluxtubecellsP)
+        end if 
+        if (allocated(fd%fluxtubecells)) then 
+            deallocate(fd%fluxtubecells)
+        end if 
+        if (allocated(fd%isclosedft)) then 
+            deallocate(fd%isclosedft)
+        end if 
+        allocate(fd%fluxtubefacesP(fd%nFt, 2), fd%fluxtubefaces(nftftot), &
+            fd%fluxtubefsIDs(fd%nFt, 2), fd%fluxtuberegID(fd%nFt), &
+            fd%fluxtubecellsP(fd%nFt, 2), fd%fluxtubecells(count(tf)*2+count(tc)), &
+            fd%isclosedft(fd%nFt))
+        fd%fluxtubefacesP = 0
+        if (fd%nFs > 0) then 
+            fd%fluxtubefacesP(1, 1) = 1
+        end if 
+        if (fd%nFt > 0) then 
+            fd%fluxtubecellsP(1, 1) = 1
+        end if 
+        fd%fluxtubefaces = 0
+        fd%fluxtubefsIDs = 0
+        fd%fluxtuberegID = 0
+        fd%isclosedft = .false.
+
+        ncell = 0
+        nface = 0
+        do i = 1, np
+            ! Get index
+            si = polind(i)
+            ei = polind(i+1)-1
+
+            ! Get cells
+            nftc = ei - si + 2
+            allocate(ftc(nftc))
+            call ExtractPolygonVertices(tfnb(si:ei, :), nftc-1, ftc)
+
+            ! Check for closed tubes
+            if (ftc(1) /= ftc(nftc)) then 
+                ! Add cells
+                fd%fluxtubecells(ncell+1:ncell+nftc) = ftc 
+                fd%fluxtubecellsP(i, 2) = nftc 
+                if (i < fd%nFt) then 
+                    fd%fluxtubecellsP(i+1, 1) = fd%fluxtubecellsP(i, 1) + nftc 
+                end if 
+                c%ft(ftc) = i 
+
+                ! Update counters
+                ncell = ncell + nftc
+
+                ! Get inner faces
+                ftf = tfind(si:ei)
+
+                ! Find boundary face(s) of first cell
+                tcf = GetCellFace(c, ftc(1))
+
+                ! Remove non-boundary and aligned faces
+                tcf = pack(tcf, f%BF(tcf) .and. (.not. (f%aligned(tcf) == 1)))
+
+                ! Check
+                if (size(tcf) == 1) then
+                    ! Standard case, add face 
+                    ftf = [tcf, ftf]
+                elseif (size(tcf) < 1) then 
+                    ! Unexpected, but not an issue
+                    print *, 'ComputeGridData: flux tube: ', i, &
+                        ' is not closed but the starting cell (number: ', ftc(1), &
+                        ' ) has no boundary faces. Not adding face'
+                elseif (size(tcf) > 1) then 
+                    ! Unexpected, may be an issue
+                    print *, 'ComputeGridData: flux tube: ', i, &
+                        ' is not closed but the starting cell (number: ', ftc(1), &
+                        ' ) has multiple boundary faces. Not adding face'
+                end if 
+
+                ! Find boundary face(s) of last cell
+                tcf = GetCellFace(c, ftc(nftc))
+
+                ! Remove non-boundary faces
+                tcf = pack(tcf, f%BF(tcf) .and. (.not. (f%aligned(tcf) == 1)))
+
+                ! Check
+                if (size(tcf) == 1) then
+                    ! Standard case, add face 
+                    ftf = [ftf, tcf]
+                elseif (size(tcf) < 1) then 
+                    ! Unexpected, but not an issue
+                    print *, 'ComputeGridData: flux tube: ', i, &
+                        ' is not closed but the ending cell (number: ', ftc(1), &
+                        ' ) has no boundary faces. Not adding face'
+                elseif (size(tcf) > 1) then 
+                    ! Unexpected, may be an issue
+                    print *, 'ComputeGridData: flux tube: ', i, &
+                        ' is not closed but the ending cell (number: ', ftc(1), &
+                        ' ) has multiple boundary faces. Not adding face'
+                end if 
+            else 
+                ! Closed tube
+                fd%isclosedft(i) = .true. 
+
+                ! Add cells (don't take last one, is duplicate)
+                fd%fluxtubecells(ncell+1:ncell+nftc-1) = ftc(1:nftc-1)
+                fd%fluxtubecellsP(i, 2) = nftc-1
+                if (i < fd%nFt) then 
+                    fd%fluxtubecellsP(i+1, 1) = fd%fluxtubecellsP(i, 1) + nftc-1 
+                end if 
+                c%ft(ftc(1:nftc-1)) = i
+
+                ! Update counters
+                ncell = ncell + nftc - 1
+
+                ! Get faces
+                ftf = tfind(si:ei)
+
+            end if 
+
+            ! Get vertex IDs (without zero IDs)
+            call Unique(v%fieldlineID([f%vert(ftf, 1), f%vert(ftf, 2)]), IDs)
+
+            ! Remove zero IDs
+            IDs = pack(IDs, IDs /= 0_I8)
+
+            ! Sanity check
+            if (size(IDs) /= 2) then 
+                ! This should actually not happen
+                print *, 'ComputeGridData: flux tube ', i, ' has ', size(IDs), &
+                    ' non-zero IDs, unexpected. Setting flux surface IDs to zero'
+                fd%fluxtubefsIDs(i, :) = 0
+            else 
+                ! Add
+                fd%fluxtubefsIDs(i, :) = IDs 
+            end if 
+
+            ! Get flux tube region
+            allcellreg = c%reg(ftc)
+
+            ! Check
+            if (any(allcellreg(1) /= allcellreg)) then 
+                ! Print warning
+                print *, 'ComputeGridData: multiple cell regions detected ' // & 
+                    'for flux tube: ', i, '. Taking first cell region...'
+
+            end if 
+            fd%fluxtuberegID(i) = allcellreg(1)
+
+            ! Add faces
+            fd%fluxtubefaces(nface+1:nface+size(ftf)) = ftf 
+            fd%fluxtubefacesP(i, 2) = size(ftf)
+            if (i < fd%nFt) then 
+                fd%fluxtubefacesP(i+1, 1) = fd%fluxtubefacesP(i, 1) + size(ftf)
+            end if 
+
+            ! Update counters
+            nface = nface + size(ftf)
+
+            ! Housekeeping
+            deallocate(ftc)
+
+        end do 
+
+        ! Add single cell tubes
+        cc = np
+        do i = 1, c%ntot
+            if (tc(i)) then 
+                ! Update counter
+                cc = cc + 1
+
+                ! Add cell
+                fd%fluxtubecells(ncell+1:ncell+1) = i
+                fd%fluxtubecellsP(cc, 2) = 1
+                if (cc < fd%nFt) then 
+                    fd%fluxtubecellsP(cc+1, 1) = fd%fluxtubecellsP(cc, 1) + 1
+                end if 
+
+                ! Get faces
+                tcf = GetCellFace(c, i)
+                tcf = pack(tcf, f%BF(tcf))
+                
+                ! Add
+                fd%fluxtubefaces(nface+1:nface+2) = tcf 
+                fd%fluxtubefacesP(cc, 2) = 2
+                if (cc < fd%nFt) then 
+                    fd%fluxtubefacesP(cc+1, 1) = fd%fluxtubefacesP(cc, 1) + 2
+                end if 
+
+                ! Get flux surface IDs
+                call Unique([v%fieldlineID(f%vert(tcf, 1)), &
+                    v%fieldlineID(f%vert(tcf, 2))], IDs)
+                IDs = pack(IDs, IDs /= 0)  
+                fd%fluxtubefsIDS(cc, :) = IDs 
+
+                ! Set cell ft region
+                c%ft(i) = cc
+
+                ! Set fluxtube region ID
+                fd%fluxtuberegID(cc) = c%reg(i)
+
+                ! Update counters
+                nface = nface + 2
+                ncell = ncell + 1
+
+            end if  
+        end do 
+
+        ! Trim
+        fd%fluxtubefaces = fd%fluxtubefaces(1:nface)
+        fd%fluxtubecells = fd%fluxtubecells(1:ncell)
+
+        ! Additional data
+        !================
+        ! Flux tube neighbours & tangency points
+        if (allocated(fd%fluxsurfaceneig)) then 
+            deallocate(fd%fluxsurfaceneig)
+        end if 
+        if (allocated(fd%fluxsurfaceneigP)) then 
+            deallocate(fd%fluxsurfaceneigP)
+        end if 
+        allocate(fd%fluxsurfaceneigP(fd%nFs, 2))
+        fd%fluxsurfaceneigP = 0
+
+        ! Compute pointer
+        fd%fluxsurfaceneigP(1, 1 ) = 1
+        do i = 1, fd%nFt
+            ! Get flux tube faces
+            tcf = GetFTFace(fd, i)
+
+            ! Get unique IDs
+            call Unique([v%fieldlineID(f%vert(tcf, 1)), &
+                v%fieldlineID(f%vert(tcf, 2))], IDs)
+            IDs = pack(IDs, IDs /= 0)
+
+            ! Update counters
+            fd%fluxsurfaceneigP(IDs, 2) = fd%fluxsurfaceneigP(IDs, 2) + 1
+        end do 
+        do i = 2, fd%nFs
+            fd%fluxsurfaceneigP(i, 1) = fd%fluxsurfaceneigP(i-1, 1) + &
+                fd%fluxsurfaceneigP(i-1, 2)
+        end do 
+
+        ! Compute neighbours
+        allocate(fd%fluxsurfaceneig(sum(fd%fluxsurfaceneigP(:, 2))))
+        allocate(nfsneig(fd%nFs))
+        nfsneig = 0
+        do i = 1, fd%nFt 
+            ! Get flux tube faces
+            tcf = GetFTFace(fd, i)
+
+            ! Get unique IDs
+            call Unique([v%fieldlineID(f%vert(tcf, 1)), &
+                v%fieldlineID(f%vert(tcf, 2))], IDs)
+            IDs = pack(IDs, IDs /= 0)
+
+            ! Add
+            ind = fd%fluxsurfaceneigP(IDs, 1) + nfsneig(IDs)
+            fd%fluxsurfaceneig(ind) = IDs 
+
+            ! Update
+            nfsneig(IDs) = nfsneig(IDs) + 1
+        end do 
+
+        ! Check orientation
+        !==================
+        ! Note: previous algorithm should already result in sorted flux
+        ! tube cells and faces - only need to check orientation w.r.t. 
+        ! magnetic field
+        do i = 1, fd%nFt 
+            ! Get faces, cells
+            ftf = GetFTFace(fd, i)
+            ftc = GetFTCell(fd, i)
+
+            ! Compute face and cell center coordinates
+            allocate(xf(size(ftf)), yf(size(ftf)), xc(size(ftc)), yc(size(ftc)))
+            do j = 1, size(ftf)
+                xf(j) = 0.5*sum(v%x(f%vert(ftf(j), :)))
+                yf(j) = 0.5*sum(v%y(f%vert(ftf(j), :)))
+            end do 
+            do j = 1, size(ftc)
+                tcv = GetCellVert(c, ftc(j))
+                xc(j) = sum(v%x(tcv))/(real(size(tcv), kind=R8))
+                yc(j) = sum(v%y(tcv))/(real(size(tcv), kind=R8))
+            end do 
+
+            ! Compute magnetic field vector at face centers
+            allocate(bfx(size(xf)), bfy(size(xf)))
+            call magneticField%interp%Evaluate(xf, yf, 1, 0, bfy)
+            call magneticField%interp%Evaluate(xf, yf, 0, 1, bfx)
+            bfx = -bfx 
+
+            ! Compute cell connector
+            ccx = xc(2:size(xc)) - xc(1:size(xc)-1)
+            ccy = yc(2:size(yc)) - yc(1:size(yc)-1)
+
+            ! Compute dot product between inner faces and cell connector
+            if (fd%isclosedft(i)) then 
+                ! Close the tube
+                ccx = [ccx, ccx(1)]
+                ccy = [ccy, ccy(1)]
+                dp = (ccx*bfx + ccy*bfy)
+            else
+                dp = (ccx*bfx(2:size(ftf)-1) + ccy*bfy(2:size(ftf)-1))
+            end if 
+
+            ! Switch if necessary
+            if (sum(dp) < 0) then 
+                ftf = ftf(size(ftf):1:-1)
+                ftc = ftc(size(ftc):1:-1)
+                fd%fluxtubefaces(fd%fluxtubefacesP(i, 1):&
+                    fd%fluxtubefacesP(i, 1)+fd%fluxtubefacesP(i, 2)-1) = ftf 
+                fd%fluxtubecells(fd%fluxtubecellsP(i, 1):&
+                    fd%fluxtubecellsP(i, 1)+fd%fluxtubecellsP(i, 2)-1) = ftc
+            end if  
+
+            ! Housekeeping
+            deallocate(xf, yf, xc, yc, bfx, bfy)
+
+        end do
+
+        print *, fd%nFt
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
+    !------------------------------------------------------------------!
     !                           AUXILIARY                              !
     !------------------------------------------------------------------!
 
@@ -3778,8 +4638,9 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)     :: tx, ty, xl, yl, dlcv, &
             tdlcv
         integer(I8)                             :: startv, endv, &
-            thisf, thisfind, nextv
-        integer(I8), allocatable, dimension(:)  :: bndf, bndv, tvID
+            thisf, thisfind, nextv, fsID
+        integer(I8), allocatable, dimension(:)  :: bndf, bndv, tvID, &
+            allfsID
         logical                                 :: doflip
         logical, allocatable, dimension(:)      :: isnotfound 
 
@@ -3873,7 +4734,7 @@ module ggmod_gridgeneration2D
             ! Just a sanity check
             if (size(bndv) == 1) then 
                 ! Set the line data
-                call line%Initialize(vert%x(bndv), vert%y(bndv))
+                call line%Initialize(vert%x(bndv), vert%y(bndv), vert%fsID(bndv(1)))
                 call line%AddVertexCoordinates([0.0_R8])
                 call line%AddVertexIDs(bndv)
                 call line%UpdateLineData(topomesh, ggtmdata)
@@ -4013,8 +4874,17 @@ module ggmod_gridgeneration2D
             
         end if 
 
+        ! Check which flux surface ID we should take, and issue warning
+        ! if these are not the same
+        allfsID = topomesh%face%fsID(bndf)
+        if (any(allfsID(1) /= allfsID)) then 
+            print *, 'ExtractTMCellAlignedBoundary: not all faces have the ' // & 
+                'same flux surface ID (IDs: ', allfsID, ', taking first one'
+        end if 
+        fsID = allfsID(1)
+
         ! Construct line
-        call line%Initialize(xl, yl)
+        call line%Initialize(xl, yl, fsID)
         dlcv(1) = 0 ! ensure start point lies on start
         dlcv(size(dlcv)) = line%dllc(line%nl) ! ensure end point lies on line end
         call line%AddVertexCoordinates(dlcv)

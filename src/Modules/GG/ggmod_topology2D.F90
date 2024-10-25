@@ -57,7 +57,7 @@ module ggmod_topology2D
 
         integer(I8)                     :: ntot ! total number of vertices
         integer(I8), allocatable        :: ID(:), face(:), cell(:), &
-            flags(:), type(:), faceP(:, :), cellP(:, :)
+            flags(:), type(:), faceP(:, :), cellP(:, :), fsID(:)
         real(R8), allocatable           :: x(:), y(:), fval(:)
         logical, allocatable            :: BV(:)
 
@@ -306,6 +306,7 @@ module ggmod_topology2D
                     if (topomesh%vert%type(j) == TMvertexsaddleID) then 
                         if (abs(topomesh%vert%fval(i)-topomesh%vert%fval(j)) < options%ffieldtol) then 
                             topomesh%vert%fval(j) = topomesh%vert%fval(i)
+                            topomesh%vert%fsID(j) = topomesh%vert%fsID(i)
                         end if 
                     end if 
                 end do 
@@ -640,7 +641,8 @@ module ggmod_topology2D
         ! Loop to add
         do i = 1, ec 
             call AddTopologicalMeshVertex(topomesh, xe(i), ye(i), fe(i), &
-                typee(i))
+                typee(i), topomesh%nfs+1)
+            topomesh%nfs = topomesh%nfs+1
         end do
 
         ! Reconstruct faces
@@ -832,7 +834,8 @@ module ggmod_topology2D
                 ttype = TMvertextp2ID
             end if 
             call AddTopologicalMeshVertex(topomesh, tpx(i), tpy(i), &
-                tpf(i), ttype)
+                tpf(i), ttype, topomesh%nfs+1)
+            topomesh%nfs = topomesh%nfs + 1
         end do
 
         ! Loop
@@ -1133,7 +1136,8 @@ module ggmod_topology2D
             ! Add vertices
             do j = 1, ntp 
                 call AddTopologicalMeshVertex(topomesh, tx(j), ty(j), &
-                    tf(j), tt(j))
+                    tf(j), tt(j), topomesh%nfs+1)
+                topomesh%nfs = topomesh%nfs + 1
             end do 
 
             ! Add faces
@@ -2174,7 +2178,7 @@ module ggmod_topology2D
         real(R8)                                :: dist
         real(R8), allocatable, dimension(:)     :: xint, yint, s1r, s2r, &
             tfv, ts1r, tx, ty
-        integer(I8)                             :: nint
+        integer(I8)                             :: nint, fsID
         integer(I8), allocatable, dimension(:)  :: s1, s2, fID, vIDs, &
             vtypes, sortind, vf1, vf2, tvIDs, ts2, ts1
         logical                                 :: alreadyadded, &
@@ -2383,10 +2387,32 @@ module ggmod_topology2D
 
             ! Add the vertex (if not already present)
             if (.not. alreadyadded) then 
+                ! Check flux surface ID
+                fsID = 0
+                if (contourfsID /= 0 ) then 
+                    ! Sanity check
+                    if (topomesh%face%fsID(fID(i)) /= 0) then 
+                        ! Normally contours shouldn't intersect... 
+                        print *, 'InsertTopologicalMeshContour: contour with fsID ', &
+                            contourfsID, ' intersects with face ', fID(i), &
+                            ' with fsID ', topomesh%face%fsID(fID(i)), ' - unexpected.' // & 
+                            ' Taking face ID'
+                        
+                        ! Take face ID for contour
+                        fsID = topomesh%face%fsID(fID(i))
+                    else 
+                        ! Take contour ID
+                        fsID = contourfsID
+                    end if 
+                else 
+                    ! Take face ID
+                    fsID = topomesh%face%fsID(fID(i))
+                end if 
+
                 allocate(tfv(1))
                 call magneticField%interp%Evaluate([xinti], [yinti], 0, 0, tfv)
                 call AddTopologicalMeshVertex(topomesh, xinti, yinti, &
-                    tfv(1), vtypes(i))
+                    tfv(1), vtypes(i), fsID)
                 ! Add ID as well 
                 vIDs(i) = topomesh%vert%ntot
                 deallocate(tfv)
@@ -2676,7 +2702,7 @@ module ggmod_topology2D
                 do j = 1, 2
                     call AddTopologicalMeshVertex(topomesh, &
                         newvcfx(j), newvcfy(j), newvcff(j), &
-                        TMvertexsplitID)
+                        TMvertexsplitID, face%fsID(i))
                 end do 
                 
                 ! Insert first face
@@ -2723,7 +2749,7 @@ module ggmod_topology2D
                 
                 ! Insert new vertex
                 call AddTopologicalMeshVertex(topomesh, newvdfx(1), &
-                    newvdfy(1), newvdff(1), TMvertexsplitID);
+                    newvdfy(1), newvdff(1), TMvertexsplitID, face%fsID(i))
                 
                 ! Insert first face
                 xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = 1, ind(1))]))
@@ -3253,7 +3279,7 @@ module ggmod_topology2D
         !===========
         tpvert%ntot = 0
         allocate(tpvert%ID(0), tpvert%x(0), tpvert%y(0), tpvert%fval(0), &
-            tpvert%type(0))
+            tpvert%type(0), tpvert%fsID(0))
 
     end subroutine 
 
@@ -3354,7 +3380,7 @@ module ggmod_topology2D
     end subroutine
 
     ! Vertex addition
-    subroutine AddTopologicalMeshVertex(topomesh, x, y, F, t)
+    subroutine AddTopologicalMeshVertex(topomesh, x, y, F, t, fsID)
 
         ! Description
         !============
@@ -3368,7 +3394,7 @@ module ggmod_topology2D
         ! Arguments
         class(TopomeshUDT)                  :: topomesh 
         real(R8), intent(in)                :: x, y, F
-        integer(I8), intent(in)             :: t 
+        integer(I8), intent(in)             :: t, fsID
 
         ! Concatenate
         !============
@@ -3378,6 +3404,7 @@ module ggmod_topology2D
         topomesh%vert%fval = [topomesh%vert%fval, F]
         topomesh%vert%type = [topomesh%vert%type, t]
         topomesh%vert%ID = [topomesh%vert%ID, topomesh%vert%ntot]
+        topomesh%vert%fsID = [topomesh%vert%fsID, fsID]
 
     end subroutine
 
@@ -4760,6 +4787,7 @@ module ggmod_topology2D
         topomesh%vert%y     = pack(topomesh%vert%y, keepvert)
         topomesh%vert%fval  = pack(topomesh%vert%fval, keepvert)
         topomesh%vert%type  = pack(topomesh%vert%type, keepvert) 
+        topomesh%vert%fsID  = pack(topomesh%vert%fsID, keepvert)
 
         ! Adjust faces
         !=============
