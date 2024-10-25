@@ -257,6 +257,8 @@ module goatmod_types
         !                   is the start index in the fluxtubefaces 
         !                   array, and the second the amount of faces of
         !                   the flux tube.
+        ! - fluxtubefsIDs   : flux surface IDs that bound the flux tube
+        !                   (nFt-by-2)
         ! - fluxtubefaces   : nFv(number of faces)-by-1 array containing 
         !                   the face numbers that correspond to flux 
         !                   tubes. 
@@ -279,11 +281,15 @@ module goatmod_types
         integer(I8), allocatable            :: fluxtubecells(:)
         integer(I8), allocatable            :: fluxtubefacesP(:,:)
         integer(I8), allocatable            :: fluxtubefaces(:)
+        integer(I8), allocatable            :: fluxtubefsIDs(:, :), &
+            fluxtuberegID(:)
+        logical, allocatable                :: isclosedft(:)
 
         ! Arrays, flux surface data
         integer(I8), allocatable            :: fluxsurfacefacesP(:,:)
         integer(I8), allocatable            :: fluxsurfacefaces(:)
         integer(I8), allocatable            :: fluxsurfaceID(:)
+        integer(I8), allocatable            :: fluxsurfaceneig(:), fluxsurfaceneigP(:, :)
         real(R8), allocatable               :: fluxsurfacepsi(:)
 
 
