@@ -492,8 +492,9 @@ contains
 
         ! Description
         !============
-        ! Set the value of a single element on a specified location. It
-        ! is not checked whether this location is valid. 
+        ! Set the value of a single element on a specified location. If
+        ! the location is larger than the current array size, the array
+        ! is extended with zeros up to the required array size. 
 
         ! Declare variables
         !==================
@@ -504,6 +505,9 @@ contains
 
         ! Set 
         !====
+        if (rda%Size() < loc) then 
+            call rda%Append(spread(0.0_R8, 1, loc - rda%Size()))
+        end if 
         rda%val(loc) = val
 
     end subroutine
@@ -513,8 +517,9 @@ contains
 
         ! Description
         !============
-        ! Set the value of multiple elements on a specified location. It
-        ! is not checked whether this location is valid. 
+        ! Set the value of multiple elements on a specified location. If
+        ! the location is larger than the current array size, the array
+        ! is extended with zeros up to the required array size. 
 
         ! Declare variables
         !==================
@@ -525,6 +530,9 @@ contains
 
         ! Set 
         !====
+        if (rda%Size() < maxval(loc)) then 
+            call rda%Append(spread(0.0_R8, 1, maxval(loc) - rda%Size()))
+        end if 
         rda%val(loc) = val
         
     end subroutine
@@ -1045,8 +1053,9 @@ contains
 
         ! Description
         !============
-        ! Set the value of a single element on a specified location. It
-        ! is not checked whether this location is valid. 
+        ! Set the value of a single element on a specified location. If
+        ! the location is larger than the current array size, the array
+        ! is extended with zeros up to the required array size. 
 
         ! Declare variables
         !==================
@@ -1057,6 +1066,9 @@ contains
 
         ! Set 
         !====
+        if (ida%Size() < loc) then 
+            call ida%Append(spread(0_I8, 1, loc - ida%Size()))
+        end if 
         ida%val(loc) = val
 
     end subroutine
@@ -1066,8 +1078,9 @@ contains
 
         ! Description
         !============
-        ! Set the value of multiple elements on a specified location. It
-        ! is not checked whether this location is valid. 
+        ! Set the value of multiple elements on a specified location. If
+        ! the location is larger than the current array size, the array
+        ! is extended with zeros up to the required array size. 
 
         ! Declare variables
         !==================
@@ -1078,6 +1091,9 @@ contains
 
         ! Set 
         !====
+        if (ida%Size() < maxval(loc)) then 
+            call ida%Append(spread(0_I8, 1, maxval(loc) - ida%Size()))
+        end if 
         ida%val(loc) = val
         
     end subroutine
