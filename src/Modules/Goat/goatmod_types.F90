@@ -416,6 +416,7 @@ module goatmod_types
         ! - R:              nR-by-1 array with R-coordinates
         ! - Z:              nZ-by-1 array with Z-coordinates
         ! - Psi:            nR-by-nZ array with magnetic flux values
+        ! - RBtor:          product of major radius and toroidal field (constant)
 
         ! Coordinates
         integer(I8)                 :: nR = 0 
@@ -423,6 +424,7 @@ module goatmod_types
         real(R8), allocatable       :: R(:)
         real(R8), allocatable       :: Z(:)
         real(R8), allocatable       :: Psi(:,:)
+        real(R8)                    :: RBtor 
         
         ! Interpolant
         type(StructuredInterpolant2DUDT)    :: interp

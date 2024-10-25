@@ -250,6 +250,8 @@ module goatmod_userinput
         ! - interpmeth  interpolant method ('uniformgrid' for data given 
         !               on a uniform grid, 'centered' for default 
         !               non-uniform grids. 
+        ! - RBtor       product of torodial magnetic field and major 
+        !               radius (assumed constants here)
 
         
         character(:), allocatable   :: readmeth
@@ -257,6 +259,7 @@ module goatmod_userinput
         character(:), allocatable   :: interpmeth 
 
         integer(I8)                 :: interpC, interpM
+        real(R8)                    :: RBtor
 
     contains
     
@@ -655,6 +658,8 @@ module goatmod_userinput
         options%interpmeth              = 'uniformgrid' 
         options%interpC                 = 3
         options%interpM                 = 6
+
+        options%RBtor                   = 0
 
     end subroutine
 
@@ -1180,6 +1185,10 @@ module goatmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%interpM)
         field = 'goat.mf.interpmeth'
         call ExtractOptionValueCharacter(fid, field, options%interpmeth)
+
+        ! RBtor
+        field  = 'goat.mf.RBtor'
+        call ExtractOptionValueReal0D(fid, field, options%RBtor)
 
         ! Housekeeping
         !=============
