@@ -167,7 +167,7 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     call cfruin (filespec, nf,     grid%data%fluxdata%fluxsurfacefaces,  'fsFc')
     call cfruin (filespec, nf,     grid%face%reg, 'fcReg')
     call cfruin (filespec, nc,     grid%cell%reg, 'cvReg')
-    call cfruin (filespec, grid%data%fluxdata%nFt,     grid%data%regions%fluxtuberegID, 'ftReg')
+    call cfruin (filespec, grid%data%fluxdata%nFt,     grid%data%fluxdata%fluxtuberegID, 'ftReg')
     call cfrure (filespec, grid%cell%nface,  facedummy,'intcellP') ! not used
     call cfrure (filespec, grid%cell%nface,  facedummy,'intcellR') ! not used
     deallocate(fdummy2)

@@ -289,23 +289,6 @@ module goatmod_types
 
     end type
 
-    ! Region data
-    type RegionDataUDT
-
-        ! Description
-        !============
-        ! Data type to collect all information on which cells/verts/face
-        ! belongs to which grid region. 
-        ! Fields:
-        !
-        ! - fluxtuberegID       : fluxdata%nFt-by-1 array containing 
-        !                       the region IDs for each flux tube
-
-        ! Arrays
-        integer(I8), allocatable            :: fluxtuberegID(:)
-
-    end type
-
     ! Structured grid data (to be removed in the future)
     type StructuredGridDataUDT
 
@@ -344,8 +327,6 @@ module goatmod_types
         !
         ! - fluxdata            : UDT with all flux data such as flux
         !                       flux tube data, flux surfaces, ... 
-        ! - regions             : UDT with all data to which region
-        !                       cells, faces, ... belong
         ! - sglegacy            : data from legacy structured grids
         ! - OMPcell, OMPface    : cells and faces belonging to outer mid
         !                       plane
@@ -357,9 +338,6 @@ module goatmod_types
 
         ! Flux data
         type(FluxDataUDT)           :: fluxdata
-
-        ! Region data
-        type(RegionDataUDT)         :: regions
 
         ! Legacy data of structured grid
         type(StructuredGridDataUDT) :: sglegacy
@@ -789,9 +767,6 @@ module goatmod_types
         ! Flux data
         call AllocateFluxData(data%fluxdata,grid)
 
-        ! Region data
-        call AllocateRegionData(data%regions,grid)
-
     end subroutine
 
     ! Flux data substructure
@@ -828,31 +803,6 @@ module goatmod_types
         allocate(fluxdata%fluxsurfacefaces(grid%face%ntot))
         allocate(fluxdata%fluxsurfaceID(grid%vert%ntot))
         allocate(fluxdata%fluxsurfacepsi(fluxdata%nFs))
-
-    end subroutine
-
-    ! Region data substrucure
-    subroutine AllocateRegionData(regions,grid)
-
-        ! Description
-        !============
-        ! Allocat the region data grid substructure. The following 
-        ! fields should be present:
-        !
-        ! - grid%cell%ntot
-        ! - grid%face%ntot
-        ! - grid%data%fluxdata%nFt
-
-        ! The usual
-        implicit none
-
-        ! Declare variables
-        type(RegionDataUDT)         :: regions
-        type(GridUDT)               :: grid
-
-        ! Allocate
-        !=========
-        allocate(regions%fluxtuberegID(grid%data%fluxdata%nFt))
 
     end subroutine
 

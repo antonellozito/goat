@@ -104,7 +104,7 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
         ftcellP         => grid%data%fluxdata%fluxtubecellsP,       &
         ftface          => grid%data%fluxdata%fluxtubefaces,        &
         ftfaceP         => grid%data%fluxdata%fluxtubefacesP,       &
-        ftreg           => grid%data%regions%fluxtuberegID,         &
+        ftreg           => grid%data%fluxdata%fluxtuberegID,        &
         nfs             => grid%data%fluxdata%nfs,                  &
         fsface          => grid%data%fluxdata%fluxsurfacefaces,     &
         fsfaceP         => grid%data%fluxdata%fluxsurfacefacesP,    &

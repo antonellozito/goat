@@ -307,7 +307,7 @@ subroutine ReadTraduitUS(grid, filepath)
     grid%data%fluxdata%fluxtubecellsP(ftlist, 2) = ftdatai(:, 2)
     grid%data%fluxdata%fluxtubefacesP(ftlist, 1) = ftdatai(:, 3)
     grid%data%fluxdata%fluxtubefacesP(ftlist, 2) = ftdatai(:, 4)
-    grid%data%regions%fluxtuberegID(ftlist) = ftdatai(:, 5)
+    grid%data%fluxdata%fluxtuberegID(ftlist) = ftdatai(:, 5)
 
     ! Flux surfaces
     !--------------
