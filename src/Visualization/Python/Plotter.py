@@ -151,6 +151,36 @@ def MonitorGrid(datadir, num, pausetime, maxruntime):
         except: 
             time.sleep(pausetime)
 
+def PlotGridFaceLabels(grid, fignum):
+    # Description
+    #------------
+    # Plot facelabels of an unstructured simulation grid
+
+    # Compute face locations
+    xf = 0.5*(grid.vert.x[grid.face.v1-1] + grid.vert.x[grid.face.v2-1])
+    yf = 0.5*(grid.vert.y[grid.face.v1-1] + grid.vert.y[grid.face.v2-1])
+
+    # Only plot non-zero labels
+    ind = np.nonzero(grid.face.label)
+
+    # Plot
+    PlotPoints2DWithID(xf[ind], yf[ind], grid.face.label[ind], fignum) 
+
+def PlotGridFaceRegions(grid, fignum):
+    # Description
+    #------------
+    # Plot facelabels of an unstructured simulation grid
+
+    # Compute face locations
+    xf = 0.5*(grid.vert.x[grid.face.v1-1] + grid.vert.x[grid.face.v2-1])
+    yf = 0.5*(grid.vert.y[grid.face.v1-1] + grid.vert.y[grid.face.v2-1])
+
+    # Only plot non-zero labels
+    ind = np.nonzero(grid.face.region)
+
+    # Plot
+    PlotPoints2DWithID(xf[ind], yf[ind], grid.face.region[ind], fignum) 
+
 #--------------------------------------------------------------------------#
 #                              Grid Optimization                           #
 #--------------------------------------------------------------------------#
@@ -544,7 +574,7 @@ def PlotTopologicalMesh(topomesh, fignum):
     thisaxes.set_title('topomesh')
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
-    thisaxes.legend(loc='upper right')
+    # thisaxes.legend(loc='upper right')
 
 # Topological cell plotting
 def PlotTopologicalMeshCells(topomesh, fignum):
@@ -1094,7 +1124,7 @@ def PlotPoints2DWithID(x, y, ID, fignum, **plotargs):
     ax = fig.axes
     k = 0
     for i, txt in enumerate(ID):
-        ax[0].annotate(txt, (x[k], y[k]))
+        ax[0].text(x[k], y[k], str(txt), size=12)
         k = k + 1
     plt.draw()
 
@@ -1125,20 +1155,28 @@ def PlotGeneral2DContour(x, y, z, fignum, **plotargs):
     cbar = fig.colorbar(CS)
     plt.draw()
 
-def PlotGeneral2DPatch(x, y, fignum):
-    # General z = f(x, y) surface plotter - may be expensive since
-    # a triangulation is created under the hood. 
+def PlotGeneral2DPatch(verts, val, fignum):
+    # Create a patchplot by creating a polygon collection
 
     # Set the current figure
     fig = plt.figure(fignum)
+
+    # Create the polygon collection
+    poly = mpl.collections.PolyCollection(verts, closed=True, array=val, edgecolor='k', linewidth=0.25, cmap='viridis')
+    
+    # Get the current axes
     ax = fig.axes 
     if len(ax) == 0:
         ax = fig.add_subplot()
-    this = np.zeros((len(x), 2), dtype=float)
-    this[:, 0] = x 
-    this[:, 1] = y
-    ax.add_patch(mpl.patches.PathPatch(mpl.path.Path(this)))
-    plt.draw()
+    else:
+        ax = ax[0] 
+
+    # Add the collection
+    ax.add_collection(poly, autolim=True)
+    ax.autoscale_view()
+
+    # Set colorbar
+    fig.colorbar(poly, ax=ax)
 
 #==========================================================================#
 #                                                                          #
@@ -1201,6 +1239,49 @@ def SetAxesLimitsLogplot(thisaxes, xdata, ydata):
 
     # Set proper scaling
     thisaxes.set_aspect(1)
+
+def GetColorsFromValue(val, minval, maxval):
+    # Set colormap
+    colormaptype = 'viridis'
+    cm = mpl.colormaps[colormaptype]
+
+    # Compute the color values
+    norm = mpl.colors.Normalize(vmin=minval, vmax=maxval)
+    valc = norm(val)
+    this = mpl.cm.ScalarMappable(norm=norm, cmap=cm)
+    col = this.to_rgba(valc, alpha=None, bytes=False, norm=True)
+
+    return col
+
+
+def PlotCellBasedQuantity2D(grid, val, fignum):
+    # Description
+    #------------
+    # Make a patchplot of a cell based quantity
+
+    # Check
+    if (len(val) != grid.cell.ntot):
+        raise ValueError('PlotCellBasedQuantity2D: ' \
+            'value length is not equal to number of grid cells')
+        
+    
+    # Construct cell polygon collection
+    verts = []
+
+    counter = 0
+    for i in np.arange(0, grid.cell.ntot): 
+        nvc = grid.cell.vp2[i]
+        tv = grid.cell.GetVert(i)-1
+        
+        verts.append(list(zip(grid.vert.x[tv], grid.vert.y[tv])))
+        counter = counter + nvc + 2
+
+    # Make patchplot
+    PlotGeneral2DPatch(verts, val, fignum)
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), grid.cell.x, grid.cell.y)
+
 
 
 
