@@ -51,7 +51,6 @@ def GetVertexCoordinates(filepath):
     # Return values
     return vals[0:cc, 1:3]
 
-
 def GetPolygonCoordinates(filepath):
     # Description
     #------------
@@ -84,7 +83,6 @@ def GetPolygonCoordinates(filepath):
 
     # Return values
     return vals[0:cc, 0:2]
-
 
 def GetVertexPairCoordinates(filepath):
     # Description
@@ -833,6 +831,309 @@ def ReadGGGridDataFile(filepath):
     # Return
     return grid
 
+def ReadTraduitOutB2us(filepath):
+    # Description
+    #------------
+    # This routine reads in the grid data in unstructured traduit file
+    # into a 'Grid' object. 
+
+    # Initialize
+    grid = gt.Grid()
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read dimensions
+    #----------------
+    # Start at top of file
+    i = 0
+    while i < len(alllines):
+        if "nCi,nFc,nVx,nCg,nFs,nFt" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read dimensions
+    values = alllines[i].split()
+    nc = np.fromstring(values[0], dtype=int, count=1, sep =' '); nc = nc[0]
+    nf = np.fromstring(values[1], dtype=int, count=1, sep =' '); nf = nf[0]
+    nv = np.fromstring(values[2], dtype=int, count=1, sep =' '); nv = nv[0]
+    nfs = np.fromstring(values[4], dtype=int, count=1, sep =' '); nfs = nfs[0]
+    nft = np.fromstring(values[5], dtype=int, count=1, sep =' '); nft = nft[0]
+
+    # Read secondary dimensions (continue from previous line)
+    while i < len(alllines):
+        if "nCmxVx,nCmxFc,nFmxCv,nVmxCv,nVmxFc" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read dimensions
+    values = alllines[i].split()
+    ncv = np.fromstring(values[0], dtype=int, count=1, sep =' '); ncv = ncv[0]
+    ncf = np.fromstring(values[1], dtype=int, count=1, sep =' '); ncf = ncf[0]
+
+    # Initialize the grid (except flux surfaces etc - later on)
+    grid.vert.Initialize(nv)
+    grid.face.Initialize(nf)
+    grid.cell.Initialize(nc, ncv, ncf)
+    grid.ft.Initialize(nft)
+    grid.fs.Initialize(nfs)
+
+    # Initialize vertex structure
+    grid.vert.Initialize(nv)
+
+    # Read vertex data
+    #-----------------
+    # Continue from last line
+    while i < len(alllines):
+        if "*cf: Vx vxX vxY vxPsi vxBx vxBy vxFfbz" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nv):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' '); ID = ID[0]
+        x = np.fromstring(values[1], dtype=float, count=1, sep =' '); x = x[0]
+        y = np.fromstring(values[2], dtype=float, count=1, sep =' '); y = y[0]
+        psi = np.fromstring(values[3], dtype=float, count=1, sep =' '); psi = psi[0]
+        bx = np.fromstring(values[4], dtype=float, count=1, sep =' '); bx = bx[0]
+        by = np.fromstring(values[5], dtype=float, count=1, sep =' '); by = by[0]
+        ffbz = np.fromstring(values[6], dtype=int, count=1, sep =' '); ffbz = ffbz[0]
+        grid.vert.ID[ID-1] = ID
+        grid.vert.x[ID-1] = x
+        grid.vert.y[ID-1] = y
+        grid.vert.bx[ID-1] = bx
+        grid.vert.by[ID-1] = by
+        grid.vert.psi[ID-1] = psi
+        grid.vert.ffbz[ID-1] = ffbz
+
+    # Read cell data
+    #---------------
+    # Continue from last line
+    while i < len(alllines):
+        if "*cf: cv cvVxP(:,1) cvVxP(:,2) cvX cvY psi bp bt cflags(:) cvReg cvFt" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nc):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' '); ID = ID[0]
+        vp1 = np.fromstring(values[1], dtype=int, count=1, sep =' '); vp1 = vp1[0]
+        vp2 = np.fromstring(values[2], dtype=int, count=1, sep =' '); vp2 = vp2[0]
+        x = np.fromstring(values[3], dtype=float, count=1, sep =' '); x = x[0]
+        y = np.fromstring(values[4], dtype=float, count=1, sep =' '); y = y[0]
+        psi = np.fromstring(values[5], dtype=float, count=1, sep =' '); psi = psi[0]
+        bp = np.fromstring(values[6], dtype=float, count=1, sep =' '); bp = bp[0]
+        bt = np.fromstring(values[7], dtype=float, count=1, sep =' '); bt = bt[0]
+        cflags = np.fromstring(values[8], dtype=int, count=1, sep =' '); cflags = cflags[0]
+        cvreg = np.fromstring(values[9], dtype=int, count=1, sep =' '); cvreg = cvreg[0]
+        cvft = np.fromstring(values[10], dtype=int, count=1, sep =' '); cvft = cvft[0]
+        
+        grid.cell.ID[ID-1] = ID
+        ID = ID-1
+        grid.cell.vp1[ID] = vp1-1 # Need to account for 0-based indexing
+        grid.cell.vp2[ID] = vp2
+        grid.cell.x[ID] = x
+        grid.cell.y[ID] = y
+        grid.cell.psi[ID] = psi
+        grid.cell.bp[ID] = bp
+        grid.cell.bt[ID] = bt
+        grid.cell.cflags[ID] = cflags
+        grid.cell.region[ID] = cvreg
+        grid.cell.ft[ID] = cvft
+
+    # Update i 
+    i = i + nc
+
+    # Vertex and face pointers are the same
+    grid.cell.fp1 = grid.cell.vp1
+    grid.cell.fp2 = grid.cell.vp2
+
+    # Skip next line for reading cell vertices
+    i = i + 1
+
+    # Read cell vertices
+    k = 0
+    while k < ncv:
+        values = alllines[i].split()
+        for j in np.arange(0, len(values)):
+            ID = np.fromstring(values[j], dtype=int, count=1, sep =' '); ID = ID[0]
+            grid.cell.vert[k] = ID
+            k = k + 1
+        i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read cell faces
+    k = 0
+    while k < ncf:
+        values = alllines[i].split()
+        for j in np.arange(0, len(values)):
+            ID = np.fromstring(values[j], dtype=int, count=1, sep =' '); ID = ID[0]
+            grid.cell.face[k] = ID
+            k = k + 1
+        i = i + 1
+
+    # Read face data
+    #---------------
+    # Continue from last line
+    while i < len(alllines):
+        if "*cf: fc fcVx(:,1) fcVx(:,2) fcLbl fcReg fcAligned" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nf):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' '); ID = ID[0]
+        vp1 = np.fromstring(values[1], dtype=int, count=1, sep =' '); vp1 = vp1[0]
+        vp2 = np.fromstring(values[2], dtype=int, count=1, sep =' '); vp2 = vp2[0]
+        label = np.fromstring(values[3], dtype=int, count=1, sep =' '); label = label[0]
+        region = np.fromstring(values[4], dtype=int, count=1, sep =' '); region = region[0]
+        aligned = np.fromstring(values[5], dtype=int, count=1, sep =' '); aligned = aligned[0]
+
+        grid.face.ID[ID-1] = ID
+        ID = ID-1
+        grid.face.v1[ID] = vp1
+        grid.face.v2[ID] = vp2
+        grid.face.label[ID] = label
+        grid.face.region[ID] = region
+        grid.face.aligned[ID] = aligned
+
+    # Update i 
+    i = i + nf
+
+    # Flux tube
+    #----------
+    # Continue from last line
+    while i < len(alllines):
+        if "*cf: ft ftCvP(:,1) ftCvP(:,2) ftFcP(:,1) ftFcP(:,2) ftReg" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nft):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' '); ID = ID[0]
+        cp1 = np.fromstring(values[1], dtype=int, count=1, sep =' '); cp1 = cp1[0]
+        cp2 = np.fromstring(values[2], dtype=int, count=1, sep =' '); cp2 = cp2[0]
+        fp1 = np.fromstring(values[3], dtype=int, count=1, sep =' '); fp1 = fp1[0]
+        fp2 = np.fromstring(values[4], dtype=int, count=1, sep =' '); fp2 = fp2[0]
+        region = np.fromstring(values[5], dtype=int, count=1, sep =' '); region = region[0]
+
+        grid.ft.ID[ID-1] = ID
+        ID = ID-1
+        grid.ft.cp1[ID] = cp1-1 # Need to account for 0-based indexing
+        grid.ft.cp2[ID] = cp2
+        grid.ft.fp1[ID] = fp1-1 # Need to account for 0-based indexing
+        grid.ft.fp2[ID] = fp2
+        grid.ft.region[ID] = region
+
+    # Update
+    i = i + nft 
+
+    # Compute and initialize face and cell data
+    nftf = grid.ft.fp1[nft-1]+grid.ft.fp2[nft-1]
+    nftc = grid.ft.cp1[nft-1]+grid.ft.cp2[nft-1]
+    grid.ft.InitializeCellData(nftc)
+    grid.ft.InitializeFaceData(nftf)
+
+    # Skip header and read
+    i = i + 1
+    k = 0
+    while k < nftc:
+        values = alllines[i].split()
+        for j in np.arange(0, len(values)):
+            ID = np.fromstring(values[j], dtype=int, count=1, sep =' '); ID = ID[0]
+            grid.ft.cell[k] = ID
+            k = k + 1
+        i = i + 1
+    
+
+    # Update and read
+    i = i + 1
+    k = 0
+    while k < nftf:
+        values = alllines[i].split()
+        for j in np.arange(0, len(values)):
+            ID = np.fromstring(values[j], dtype=int, count=1, sep =' '); ID = ID[0]
+            grid.ft.face[k] = ID
+            k = k + 1
+        i = i + 1
+    
+
+    # Flux surfaces
+    #--------------
+    # Continue from last line
+    while i < len(alllines):
+        if "*cf: fs fsFcP(:,1) fsFcP(:,2) fsPsi" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nfs):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' '); ID = ID[0]
+        fp1 = np.fromstring(values[1], dtype=int, count=1, sep =' '); fp1 = fp1[0]
+        fp2 = np.fromstring(values[2], dtype=int, count=1, sep =' '); fp2 = fp2[0]
+        psi = np.fromstring(values[3], dtype=float, count=1, sep =' '); psi = psi[0]
+
+        grid.fs.ID[ID-1] = ID
+        ID = ID-1
+        grid.fs.fp1[ID] = fp1-1 # Need to account for 0-based indexing
+        grid.fs.fp2[ID] = fp2
+        grid.fs.psi[ID] = psi
+
+    # Update
+    i = i + nfs 
+
+    # Compute and initialize face data
+    nfsf = grid.fs.fp1[nfs-1]+grid.fs.fp2[nfs-1]
+    grid.fs.InitializeFaceData(nfsf)
+
+    # Skip header and read
+    i = i + 1
+    k = 0
+    while k < nfsf:
+        values = alllines[i].split()
+        for j in np.arange(0, len(values)):
+            ID = np.fromstring(values[j], dtype=int, count=1, sep =' '); ID = ID[0]
+            grid.fs.face[k] = ID
+            k = k + 1
+        i = i + 1
+
+    # Return
+    return grid
 
 
 
