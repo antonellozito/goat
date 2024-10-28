@@ -452,3 +452,295 @@ class GGGrid:
         self.vert = GGVert()
         self.face = GGFace() 
         self.cell = GGCell()
+
+#----------------------------------------------------------------------#
+#                        SIMULATION GRID                               #
+#----------------------------------------------------------------------#
+        
+# Grid vertices
+class Vert:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+
+        # Coordinates
+        self.x = np.zeros(0, dtype=float)
+        self.y = np.zeros(0, dtype=float)
+
+        # Magnetic field
+        self.psi = np.zeros(0, dtype=float)
+        self.bxv = np.zeros(0, dtype=float)
+        self.byv = np.zeros(0, dtype=float)
+        self.ffbz = np.zeros(0, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(0, dtype=int)
+
+        # Fieldline ID
+        self.fieldlineID = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nv):
+        # Number
+        self.ntot = nv 
+
+        # Coordinates
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
+
+        # Magnetic field
+        self.psi = np.zeros(nv, dtype=float)
+        self.bx = np.zeros(nv, dtype=float)
+        self.by = np.zeros(nv, dtype=float)
+        self.ffbz = np.zeros(nv, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(nv, dtype=int)
+
+        # Fieldline ID
+        self.fieldlineID = np.zeros(nv, dtype=int)
+
+# Grid faces
+class Face:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0 
+
+        # Vertices
+        self.v1 = np.zeros(0, dtype=int)
+        self.v2 = np.zeros(0, dtype=int)
+
+        # Labels
+        self.label = np.zeros(0, dtype=int)
+        self.region = np.zeros(0, dtype=int)
+        
+        # Magnetic field
+        self.aligned = np.zeros(0, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nf):
+        # Number
+        self.ntot = nf
+
+        # Vertices
+        self.v1 = np.zeros(nf, dtype=int)
+        self.v2 = np.zeros(nf, dtype=int)
+
+        # Labels
+        self.label = np.zeros(nf, dtype=int)
+        self.region = np.zeros(nf, dtype=int)
+        
+        # Magnetic field
+        self.aligned = np.zeros(nf, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(nf, dtype=int)
+
+# Grid cells
+class Cell:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+        self.nvert = 0
+        self.nface = 0
+
+        # Vertex pointer
+        self.vp1 = np.zeros(0, dtype=int)
+        self.vp2 = np.zeros(0, dtype=int)
+
+        # Face pointer
+        self.fp1 = np.zeros(0, dtype=int)
+        self.fp2 = np.zeros(0, dtype=int)
+        
+        # Vertices
+        self.vert = np.zeros(0, dtype=int)
+
+        # Faces
+        self.face = np.zeros(0, dtype=int)
+
+        # Coordinates
+        self.x  = np.zeros(0, dtype=float)
+        self.y  = np.zeros(0, dtype=float)
+
+        # Magnetic Field
+        self.bt = np.zeros(0, dtype=float)
+        self.bp = np.zeros(0, dtype=float)
+        self.psi   = np.zeros(0, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(0, dtype=int)
+
+        # Region etc
+        self.cflags = np.zeros(0, dtype=int)
+        self.region = np.zeros(0, dtype=int)
+        self.ft     = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nc, ncv, ncf):
+        # Number
+        self.ntot = nc
+        self.nvert = ncv
+        self.nface = ncf
+
+        # Vertex pointer
+        self.vp1 = np.zeros(nc, dtype=int)
+        self.vp2 = np.zeros(nc, dtype=int)
+
+        # Face pointer
+        self.fp1 = np.zeros(nc, dtype=int)
+        self.fp2 = np.zeros(nc, dtype=int)
+        
+        # Vertices
+        self.vert = np.zeros(ncv, dtype=int)
+
+        # Faces
+        self.face = np.zeros(ncf, dtype=int)
+
+        # Coordinates
+        self.x  = np.zeros(nc, dtype=float)
+        self.y  = np.zeros(nc, dtype=float)
+
+        # Magnetic Field
+        self.bt = np.zeros(nc, dtype=float)
+        self.bp = np.zeros(nc, dtype=float)
+        self.psi   = np.zeros(nc, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(nc, dtype=int)
+
+        # Region etc
+        self.cflags = np.zeros(nc, dtype=int)
+        self.region = np.zeros(nc, dtype=int)
+        self.ft     = np.zeros(nc, dtype=int)
+
+    # Vertex getter
+    def GetVert(self, i):
+        return self.vert[self.vp1[i]:self.vp1[i]+self.vp2[i]]
+    
+    # Face getter
+    def GetFace(self, i):
+        return self.face[self.fp1[i]:self.fp1[i]+self.fp2[i]]
+
+# Grid flux surfaces
+class FluxSurf:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+        self.nface = 0
+
+        # Faces
+        self.fp1 = np.zeros(0, dtype=int)
+        self.fp2 = np.zeros(0, dtype=int)
+        self.psi = np.zeros(0, dtype=float)
+        self.face = np.zeros(0, dtype=int)
+
+        # ID
+        self.ID = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nfs):
+        # Number
+        self.ntot = nfs 
+
+        # Faces
+        self.fp1 = np.zeros(nfs, dtype=int)
+        self.fp2 = np.zeros(nfs, dtype=int)
+
+        # ID
+        self.ID = np.zeros(nfs, dtype=int)
+
+        # Magnetic field
+        self.psi = np.zeros(nfs, dtype=float)
+
+    def InitializeFaceData(self, nfsf):
+        self.nface = nfsf 
+        self.face = np.zeros(nfsf, dtype=int)
+
+    # Face getter
+    def GetFace(self, i):
+        return self.face[self.fp1[i]:self.fp1[i]+self.fp2[i]]
+    
+# Grid flux tubes
+class FluxTube:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+        self.nface = 0
+        self.ncell = 0
+
+        # Faces
+        self.fp1 = np.zeros(0, dtype=int)
+        self.fp2 = np.zeros(0, dtype=int)
+        self.face = np.zeros(0, dtype=int)
+
+        # Cells
+        self.cp1 = np.zeros(0, dtype=int)
+        self.cp2 = np.zeros(0, dtype=int)
+        self.cell = np.zeros(0, dtype=int)
+
+        # Region
+        self.region = np.zeros(0, dtype=int)
+
+        # ID
+        self.ID = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nft):
+        # Number
+        self.ntot = nft
+
+        # Faces
+        self.fp1 = np.zeros(nft, dtype=int)
+        self.fp2 = np.zeros(nft, dtype=int)
+
+        # Cells
+        self.cp1 = np.zeros(nft, dtype=int)
+        self.cp2 = np.zeros(nft, dtype=int)
+
+        # Region
+        self.region = np.zeros(nft, dtype=int)
+
+        # ID
+        self.ID = np.zeros(nft, dtype=int)
+
+    def InitializeFaceData(self, nftf):
+        self.nface = nftf
+        self.face = np.zeros(nftf, dtype=int)
+
+    def InitializeCellData(self, nftc):
+        self.ncell = nftc
+        self.cell = np.zeros(nftc, dtype=int)
+
+    # Face getter
+    def GetFace(self, i):
+        return self.face[self.fp1[i]:self.fp1[i]+self.fp2[i]]
+    
+    # Cell getter
+    def GetFace(self, i):
+        return self.cell[self.cp1[i]:self.cp1[i]+self.cp2[i]]
+
+# Grid
+class Grid:
+    # Init
+    def __init__(self):
+        # Fields
+        self.vert = Vert()
+        self.face = Face() 
+        self.cell = Cell()
+        self.fs = FluxSurf()
+        self.ft = FluxTube()
+
+    # Interconnections
+    def ComputeInterconnections(self):
+        # Description
+        #------------
+        # Compute grid interconnections derived from basic quantities 
+        # that are read in (cell faces etc)
