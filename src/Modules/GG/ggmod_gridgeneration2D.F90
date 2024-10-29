@@ -525,11 +525,11 @@ module ggmod_gridgeneration2D
         !=========================================
         ! Poloidal faces
         call DistributeVerticesTopologicalMeshFaces(ggtmdata, topomesh, &
-            poloidalvertexdistributor, [TMfacepolID, TMfacesepID])
+            poloidalvertexdistributor, TMfacealignedID)
 
         ! Relevant radial faces of tubes
         call DistributeVerticesTopologicalMeshTubes(ggtmdata, &
-            topomesh, radialvertexdistributor, magneticFieldDF, [TMfaceradID, TMfacebndID])
+            topomesh, radialvertexdistributor, magneticFieldDF, TMfacenonalignedID)
 
         ! Generate initial grid
         !======================
@@ -761,7 +761,7 @@ module ggmod_gridgeneration2D
 
         ! Modules
         !========
-        use mod_definitions, only: TMfacepolID, TMfacesepID, &
+        use mod_definitions, only: TMfacealignedID, &
             TMvertexbndID, TMvertextp1ID, TMvertextp2ID
 
 
@@ -865,7 +865,7 @@ module ggmod_gridgeneration2D
 
             ! If we got here, there should be at least one face. 
             do j = 1, size(hffaces)
-                if (face%BF(hffaces(j)) .and. any(face%type(hffaces(j)) == [TMfacepolID, TMfacesepID])) then 
+                if (face%BF(hffaces(j)) .and. any(face%type(hffaces(j)) == TMfacealignedID)) then 
                     ! This is a potential starting face
                     isstartingface(hffaces(j)) = .true. 
                 end if 
@@ -2171,7 +2171,7 @@ module ggmod_gridgeneration2D
                 islfface = .false. 
                 do k = 1, size(tcf)
                     ! Check if the face is of poloidal/sep type
-                    if (any(face%type(tcf(k)) == [TMfacepolID, TMfacesepID])) then 
+                    if (any(face%type(tcf(k)) == TMfacealignedID)) then 
                         dhf1 = abs(tcfv1val(k) - hfval)
                         dhf2 = abs(tcfv2val(k) - hfval)
                         dlf1 = abs(tcfv1val(k) - lfval)

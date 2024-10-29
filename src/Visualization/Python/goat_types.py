@@ -737,10 +737,3 @@ class Grid:
         self.cell = Cell()
         self.fs = FluxSurf()
         self.ft = FluxTube()
-
-    # Interconnections
-    def ComputeInterconnections(self):
-        # Description
-        #------------
-        # Compute grid interconnections derived from basic quantities 
-        # that are read in (cell faces etc)

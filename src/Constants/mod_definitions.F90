@@ -39,6 +39,11 @@ module mod_definitions
     integer(I8), parameter :: TMfaceradID = 1, TMfacepolID = 2, TMfacebndID = 3, &
         TMfacesepID = 4, TMfacecoreID = 5
 
+    ! Joint IDs
+    integer(I8), parameter, dimension(*) :: &
+        TMfacealignedID = [TMfacepolID, TMfacesepID, TMfacecoreID], &
+        TMfacenonalignedID = [TMfaceradID, TMfacebndID]
+
     ! Definitions for SOLPS
     !======================
     integer(I8), parameter :: SOLPScoreregID = 1, SOLPScoreregIDincr = 4, &
