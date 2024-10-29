@@ -81,6 +81,7 @@
 module ggmod_gridgeneration2D
 
     ! Load modules
+    
     use goatmod_types
     use mod_precision
     use mod_constants
@@ -91,10 +92,7 @@ module ggmod_gridgeneration2D
     use interpolant1D, only: Interpolate1D
     use mod_polygon
     use mod_sort
-    use mod_definitions, only: TMvertexbndID, TMvertexmaxID, &
-        TMvertexminID, TMvertexsaddleID, TMvertextp1ID, &
-        TMvertextp2ID, TMfacepolID, TMfaceradID, TMfacebndID, &
-        TMvertexsplitID, TMfacesepID
+    use mod_definitions
     use mod_linearsolverinterface, only: SolveDenseLinearSystemDI
     use goatmod_types, only : magneticFieldUDT, VesselUDT, GridUDT
     use goatmod_userinput, only : GGoptionsUDT
@@ -106,7 +104,7 @@ module ggmod_gridgeneration2D
     use omp_lib
     implicit none
     private 
-    public :: GenerateUnstructuredAlignedGrid
+    public :: GenerateUnstructuredAlignedGrid, TranslateGridLabels
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -2233,10 +2231,6 @@ module ggmod_gridgeneration2D
                 lffaces = pack(tcf, islfface)
                 hfvert = pack(tcv, ishfvert)
                 lfvert = pack(tcv, .not. ishfvert)
-
-                if ((size(hffaces)+1 /= size(hfvert)) .or. (size(lffaces)+1 /= size(lfvert))) then 
-                    print *, 'unexpected'
-                end if 
                 
                 ! Overwrite to sort 
                 if (size(tf1) > 0) then 
@@ -4027,6 +4021,7 @@ module ggmod_gridgeneration2D
         simgrid%cell%vert           = grid%cell%vert%Get()
         simgrid%cell%vertP(:, 1)    = grid%cell%vp1%Get()
         simgrid%cell%vertP(:, 2)    = grid%cell%vp2%Get()
+        simgrid%cell%reg            = grid%cell%region%Get()
         simgrid%cell%ntot           = nc 
 
         associate(&
@@ -4592,11 +4587,111 @@ module ggmod_gridgeneration2D
 
         end do
 
-        print *, fd%nFt
 
         ! Housekeeping
         !=============
         end associate
+
+
+    end subroutine
+
+    ! Label translation
+    subroutine TranslateGridLabels(simgrid, topomesh, formattype)
+
+        ! Description
+        !============
+        ! This routine translates the gridding labels from the grid
+        ! generator format to a format of choice (this can be e.g. 
+        ! the grid deformation or solps format). Definitions of face
+        ! labels and cell flags should be given in mod_definitions.F90
+
+        ! Note: information will likely be lost during this step, which 
+        ! is exactly the reason why we can't translate back... 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)    :: simgrid 
+        type(TopomeshUDT), intent(in)   :: topomesh 
+        character(*), intent(in)        :: formattype ! destination format
+
+
+        ! Checks
+        !=======
+        select case (formattype)
+
+        case ('solps')
+
+            ! Call translator
+            call TranslateGridLabelsSOLPS(simgrid, topomesh)
+
+        case default
+            
+            call gdErrorHandler('TranslateGridLabels: format type: ' // formattype &
+                // ' not implemented')
+
+        end select
+
+    end subroutine
+
+    subroutine TranslateGridLabelsSOLPS(simgrid, topomesh)
+
+        ! Description
+        !============
+        ! Not all rules are known yet, but in order to at least 
+        ! simplify the amount of boundaries we get, we do the following:
+        ! - face labels:
+        !       Internal boundaries: labels are set to zero
+        !       Non-TP vessel boundaries: concatenated where possible, negative label (random)
+        !       TP vessel boundaries: concatenated, negative label (random)
+        !       Core boundaries: concatenated, negative label (random)
+        !       Other outer flux boundaries: concatenated, negative label (random)
+        ! - cell regions:
+        !       Core parts: SOLPScoreregID + SOLPScoreregIDincr
+        !       Other parts: all but core part value
+        ! - cell flags: 
+        !       Internal cells: SOLPSinternalcellID
+        !       Boundary cells: SOLPSbndcellID
+
+        ! Note: it is assumed that the initial face labels identify the
+        ! topological mesh boundary ID
+
+        ! Declare modules
+        !================
+        use mod_definitions, only: SOLPScoreregID, SOLPScoreregIDincr, &
+            SOLPSinternalcellID, SOLPSbndcellID
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)                :: simgrid 
+        type(TopomeshUDT), intent(in)               :: topomesh
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)      :: IFlabels, &
+            TPlabels, bndlabels, fl_orig, fl_new, Clabels, &
+            nonTPlabels
+        logical, allocatable, dimension(:)          :: temp
+
+        ! Loop
+
+        ! Map
+        !====
+        ! Face labels
+        !------------
+        ! Store original face labels
+        fl_orig = simgrid%face%label
+        fl_new = fl_orig
+
+        ! Create basic mappings
+        IFlabels = topomesh%GetInternalFaceIDs()
+        Clabels = topomesh%GetCoreFaceIDs()
+        TPlabels = topomesh%GetTargetFaceIDs()
+
+        ! Create derived mappings
+        bndlabels = topomesh%GetBoundaryFaceIDs()
+        call Setdiff(TPlabels, bndlabels, nonTPlabels)
+        
 
 
     end subroutine

@@ -718,6 +718,16 @@ module goatmod_types
             cell%bt(cell%ntot), cell%x(cell%ntot), cell%y(cell%ntot), &
             cell%cflags(cell%ntot), cell%reg(cell%ntot), cell%ft(cell%ntot))
 
+        ! Initialize
+        cell%psi    = 0
+        cell%bp     = 0
+        cell%bt     = 0
+        cell%x      = 0
+        cell%y      = 0
+        cell%cflags = 0
+        cell%reg    = 0
+        cell%ft     = 0
+
     end subroutine
 
     ! Boundary substructure

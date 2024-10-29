@@ -32,7 +32,7 @@ module mod_sort
     ! The usual
     implicit none 
     private 
-    public :: Sort, Unique
+    public :: Sort, Unique, Setdiff
 
     !==================================================================!
     !                                                                  !
@@ -56,6 +56,11 @@ module mod_sort
     ! General unique
     interface Unique 
         module procedure Unique_I8, Unique_R8
+    end interface
+
+    ! General set difference
+    interface Setdiff 
+        module procedure Setdiff_I8
     end interface
 
     contains 
@@ -620,6 +625,81 @@ module mod_sort
             allocate(out(count(keepind)))
             out = pack(in_sorted, keepind)
         end if 
+
+    end subroutine
+
+    ! Integer setdiff
+    subroutine Setdiff_I8(a, b, out, ind)
+
+        ! Description
+        !============
+        ! Compute the set difference between sets a and b (i.e. we return
+        ! only the elements of a that are not in b). The result will be 
+        ! sorted and unique. if ind is present, the index is returned
+        ! that would yield out = a(ind). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in), dimension(:)   :: a, b 
+        integer(I8), intent(out), dimension(:), allocatable  :: out 
+        integer(I8), intent(out), allocatable, optional :: ind(:)
+
+        ! Auxiliary
+        integer(I8)                             :: na
+        integer(I8), allocatable, dimension(:)  :: c, &
+            sortind, c_orig, cu, uniqueind
+        logical, allocatable, dimension(:)      :: ina, inb, keepind
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Get size
+        na = size(a)
+
+        ! Sort
+        !=====
+        c = [a, b]
+        c_orig = c 
+        allocate(sortind(size(c)))
+        call Sort(c, ind=sortind, ascend=.true.)
+        call Unique(c, cu, ind=uniqueind)
+        sortind = sortind(uniqueind)
+        c = cu
+
+        ! Eliminate
+        !==========
+        ! Initialize
+        allocate(keepind(size(c)))
+        keepind = .true. 
+        ina = sortind <= na 
+        inb = sortind > na
+
+        ! Remove elements from b
+        where(inb) keepind = .false.
+
+        ! Remove elements from b that appear in a
+        i = 1
+        do while (i < size(c))
+            if (ina(i)) then 
+                if (inb(i+1)) then 
+                    if (c(i) == c(i+1)) then 
+                        keepind(i) = .false. 
+                    end if 
+                end if 
+            end if 
+        end do 
+
+        ! Set output
+        allocate(out(count(keepind)))
+        out = pack(c, keepind)
+        if (present(ind)) then 
+            allocate(ind(count(keepind)))
+            ind = pack(sortind, keepind)
+        end if 
+
 
     end subroutine
 

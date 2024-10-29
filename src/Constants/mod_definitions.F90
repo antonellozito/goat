@@ -35,9 +35,14 @@ module mod_definitions
         TMvertexsplitID = -1
 
     ! Topological mesh boundary IDs (1: radial face, 2: poloidal face, &
-    ! 3: boundary face, 4: separatrix/saddle point)
+    ! 3: boundary face, 4: separatrix/saddle point, 5: inserted core boundary)
     integer(I8), parameter :: TMfaceradID = 1, TMfacepolID = 2, TMfacebndID = 3, &
-        TMfacesepID = 4
+        TMfacesepID = 4, TMfacecoreID = 5
+
+    ! Definitions for SOLPS
+    !======================
+    integer(I8), parameter :: SOLPScoreregID = 1, SOLPScoreregIDincr = 4, &
+        SOLPSbndcellID = 3, SOLPSinternalcellID = 1
 
    
 end module

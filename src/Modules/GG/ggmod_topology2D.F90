@@ -27,7 +27,7 @@ module ggmod_topology2D
     use mod_definitions, only: TMvertexbndID, TMvertexmaxID, &
         TMvertexminID, TMvertexsaddleID, TMvertextp1ID, &
         TMvertextp2ID, TMfacepolID, TMfaceradID, TMfacebndID, &
-        TMvertexsplitID, TMfacesepID
+        TMvertexsplitID, TMfacesepID, TMfacecoreID
     use mod_linearsolverinterface, only: SolveDenseLinearSystemDI
     use goatmod_types, only : magneticFieldUDT, VesselUDT
     use goatmod_userinput, only : TopomeshOptionsUDT
@@ -170,6 +170,11 @@ module ggmod_topology2D
 
         ! Initialize
         procedure :: Initialize         => InitializeTopologicalMesh 
+
+        ! Getters
+        procedure :: GetInternalFaceIDs, GetBoundaryFaceIDs, &
+            GetTargetFaceIDs, GetSeparatrixFaceIDs, GetVesselFaceIDs, &
+            GetCoreFaceIDs
     end type 
 
     contains 
@@ -1924,7 +1929,7 @@ module ggmod_topology2D
 
             ! Concatenate
             allc = [allc, tc]
-            contourtypes = [contourtypes, spread(2_I8, 1, size(tc))]
+            contourtypes = [contourtypes, spread(TMfacecoreID, 1, size(tc))]
 
             ! Add flux surface ID
             nfs = nfs + 1
@@ -5091,10 +5096,8 @@ module ggmod_topology2D
                 seID, eeID, ssID, esID 
             integer(I8), allocatable, dimension(:)  :: sortedsID(:), &
                 sortedeID(:)
-            real(R8)                                :: sx, sy, ex, ey, &
-                dist
-            real(R8), allocatable, dimension(:)     :: tx, ty, tx2, ty2 
-            logical, allocatable, dimension(:)      :: delind
+            real(R8)                                :: sx, sy, ex, ey
+            real(R8), allocatable, dimension(:)     :: tx, ty
 
             ! Loop
             integer(I8)                             :: i, si, ei  
@@ -5741,6 +5744,173 @@ module ggmod_topology2D
             tvfe = [tvf(size(tvf)), tvf, tvf(1)]
             res = [tvfe(tfind), tvfe(tfind+2)]
         end if 
+    end function
+
+    ! ID getters
+    function GetInternalFaceIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! Get all internal face IDs (simply faces with two cell 
+        ! neighbours)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Loop
+        integer(I8)                 :: k 
+
+        ! Get
+        !====
+        allocate(ID(count(.not. topomesh%face%BF)))
+        ID = pack([(k, k = 1, topomesh%face%ntot)], .not. topomesh%face%BF)
+
+    end function
+
+    function GetBoundaryFaceIDs(topomesh) result(ID)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Loop
+        integer(I8)                 :: k 
+
+        ! Get
+        !====
+        allocate(ID(count(topomesh%face%BF)))
+        ID = pack([(k, k = 1, topomesh%face%ntot)], topomesh%face%BF)
+
+    end function
+
+    function GetSeparatrixFaceIDs(topomesh) result(ID)
+
+        ! Description
+        !=============
+        ! Get all face IDs that are separatrix parts
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        logical, allocatable        :: temp(:)
+
+        ! Loop
+        integer(I8)                 :: k 
+
+        ! Get
+        !====
+        temp = topomesh%face%type == TMfacesepID
+        allocate(ID(count(temp)))
+        ID = pack([(k, k = 1, topomesh%face%ntot)], temp)
+
+    end function
+
+    function GetCoreFaceIDs(topomesh) result(ID)
+
+        ! Description
+        !=============
+        ! Get all face IDs that are core parts
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        logical, allocatable        :: temp(:)
+
+        ! Loop
+        integer(I8)                 :: k 
+
+        ! Get
+        !====
+        temp = topomesh%face%type == TMfacecoreID
+        allocate(ID(count(temp)))
+        ID = pack([(k, k = 1, topomesh%face%ntot)], temp)
+
+    end function
+
+    function GetVesselFaceIDs(topomesh) result(ID)
+
+        ! Description
+        !=============
+        ! Get all face IDs that are vessel parts (i.e. type TMfacebndID)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        logical, allocatable        :: temp(:)
+
+        ! Loop
+        integer(I8)                 :: k 
+
+        ! Get
+        !====
+        temp = topomesh%face%type == TMfacebndID
+        allocate(ID(count(temp)))
+        ID = pack([(k, k = 1, topomesh%face%ntot)], temp)
+
+    end function
+
+    function GetTargetFaceIDs(topomesh) result(ID)
+
+        ! Description
+        !=============
+        ! Get all face IDs that are vessel parts (i.e. type TMfacebndID)
+        ! and of which at least one vertex lies on a separatrix face.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tempID, tv
+        logical, allocatable, dimension(:)      :: temp
+
+        ! Loop
+        integer(I8)                 :: i, j, k 
+
+        ! Get
+        !====
+        ! Find vessel faces
+        tempID = topomesh%GetVesselFaceIDs()
+
+        ! Check which vessel faces have a separatrix vertex
+        allocate(temp(size(tempID)))
+        temp = .false. 
+        do i = 1, size(tempID)
+            ! Get face vertices
+            tv = topomesh%face%vert(tempID(i), :)
+
+            ! Check
+            do j = 1, size(tv)
+                if (any(topomesh%face%type(topomesh%vert%GetFace(tv(j))) == TMfacesepID)) then 
+                    temp = .true.
+                    exit 
+                end if 
+            end do 
+        end do 
+
+        ! Get indices
+        allocate(ID(count(temp)))
+        ID = pack([(k, k = 1, size(tempID))], temp)
+
     end function
 
     !------------------------------------------------------------------!
