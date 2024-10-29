@@ -4014,6 +4014,7 @@ module ggmod_gridgeneration2D
         simgrid%face%vert(:, 1) = grid%face%v1%Get()
         simgrid%face%vert(:, 2) = grid%face%v2%Get()
         simgrid%face%label      = grid%face%label%Get()
+        simgrid%face%TMfacelabel    = simgrid%face%label ! assumed the same for now
         simgrid%face%reg        = grid%face%region%Get()
         simgrid%face%ntot       = nf 
 
@@ -4664,19 +4665,35 @@ module ggmod_gridgeneration2D
         type(TopomeshUDT), intent(in)               :: topomesh
 
         ! Auxiliary
+        integer(I8)                                 :: ne 
         integer(I8), allocatable, dimension(:)      :: IFlabels, &
             TPlabels, bndlabels, fl_orig, fl_new, Clabels, &
-            nonTPlabels, facelabelmapping
-        logical, allocatable, dimension(:)          :: temp
+            nonTPlabels, facelabelmapping, allfID, tfID, &
+            sortindex, ind, solpslabels, psind, sortind
+        integer(I8), allocatable                    :: edges(:, :)
+        logical, allocatable, dimension(:)          :: temp, &
+            ispolygonstart, isbranchingpolygon
+        type(PolygonSetUDT)                         :: tempps
 
         ! Loop
+        integer(I8)                                 :: i, j, k, flc, &
+            flcinc
+
+        ! Initialize
+        !===========
+        ! Face label counter and face label increment
+        flc = 0 
+        flcinc = -1 ! we set negative face labels
+
+        ! Set solps temporary labels
+        solpslabels = [(k, k = 1, 3)]
 
         ! Map
         !====
         ! Face labels
         !------------
         ! Store original face labels
-        fl_orig = simgrid%face%label
+        fl_orig = simgrid%face%TMfacelabel
         fl_new = fl_orig
 
         ! Get basic IDs
@@ -4685,14 +4702,60 @@ module ggmod_gridgeneration2D
         TPlabels = topomesh%GetTargetFaceIDs()
 
         ! Get derived IDs
-        bndlabels = topomesh%GetBoundaryFaceIDs()
-        call Setdiff(TPlabels, bndlabels, nonTPlabels)
+        bndlabels = topomesh%GetVesselFaceIDs()
+        call Setdiff(bndlabels, TPlabels, nonTPlabels)
 
-        ! Create mapping
+        ! Create (temporary) mapping
         allocate(facelabelmapping(0:maxval(fl_orig))) ! start from zero for ease
         facelabelmapping = 0
         facelabelmapping(IFlabels) = 0
-        facelabelmapping(Clabels) = 0
+        facelabelmapping(Clabels) = solpslabels(1)
+        facelabelmapping(TPlabels) = solpslabels(2)
+        facelabelmapping(nonTPlabels) = solpslabels(3)
+
+        ! Map
+        fl_new = facelabelmapping(fl_orig)
+        do i = 1, simgrid%face%ntot
+            if (facelabelmapping(simgrid%face%label(i)) == 0) then 
+                simgrid%face%label(i) = 0
+            end if 
+        end do 
+
+        ! Extract the polygon set for each set of boundaries and set 
+        ! a different label for each simple polygon
+        allfID = [(k, k = 1, simgrid%face%ntot)]
+
+        ! Loop over all labels
+        do j = 1, size(solpslabels)
+            ! Get number of faces
+            ne = count(fl_new == solpslabels(j))
+
+            ! Extract faces
+            allocate(tfID(ne), edges(ne, 2), sortindex(ne), &
+                ispolygonstart(ne), isbranchingpolygon(ne)) ! 
+            tfID = pack(allfID, fl_new == solpslabels(j))
+            edges = simgrid%face%vert(tfID, :)
+            call SortPolygonEdges(edges, ne, sortindex, ispolygonstart, &
+                isbranchingpolygon)
+            allocate(psind(count(ispolygonstart)))
+
+            ! Set labels for each distinct polygon piece
+            psind = pack([(k, k = 1, ne)], ispolygonstart)
+            psind = [psind, ne+1]
+            do i = 1, count(ispolygonstart)
+                ! Update the face label
+                flc = flc + flcinc 
+
+                ! Get indices
+                ind = [(k, k = psind(i), psind(i+1)-1)]
+
+                ! Set label
+                simgrid%face%label(tfID(sortindex(ind))) = flc 
+
+            end do 
+            deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
+        end do 
+
 
         
 
