@@ -32,7 +32,7 @@ module mod_sort
     ! The usual
     implicit none 
     private 
-    public :: Sort, Unique, Setdiff
+    public :: Sort, Unique, Setdiff, CountOccurrence
 
     !==================================================================!
     !                                                                  !
@@ -61,6 +61,11 @@ module mod_sort
     ! General set difference
     interface Setdiff 
         module procedure Setdiff_I8
+    end interface
+
+    ! General element occurrence counter
+    interface CountOccurrence
+        module procedure CountOccurrence_I8
     end interface
 
     contains 
@@ -701,6 +706,86 @@ module mod_sort
         end if 
 
 
+    end subroutine
+
+    ! Integer occurrence counter
+    subroutine CountOccurrence_I8(in, oc, el, sortindoc, sortindel)
+
+        ! Description
+        !============
+        ! This routine counts how many times a certain element appears.
+        ! To this end, we follow a similar approach as the unique 
+        ! function and first sort the array to afterwards count the 
+        ! number of sequently same elements (instead of removing them).
+        ! The (unique) elements are returned in the 'el' array, and the
+        ! number of occurrences 'oc' are returned for this sorted array.
+        ! If one wants to map the occurences back to the original 
+        ! array 'in' (which includes the doubles), one can use the 'sortindoc'
+        ! optional output argument (then oc_in = oc(sortindoc) and in = el(sortindel))
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), dimension(:), intent(in)                           :: in 
+        integer(I8), dimension(:), intent(out), allocatable             :: oc, el 
+        integer(I8), dimension(:), intent(out), allocatable, optional   :: &
+            sortindel, sortindoc
+
+        ! Auxiliary
+        integer(I8)                                 :: nel 
+        integer(I8), dimension(:), allocatable      :: in_sorted, &
+            sortind, diff, indoc, uniqueind
+        logical, dimension(:), allocatable          :: keepind
+
+        ! Loop
+        integer(I8)                                 :: i, k
+
+        ! Count
+        !======
+        ! Initialize
+        in_sorted = in 
+        allocate(sortind(size(in)))
+
+        ! Sort
+        call Sort(in_sorted, ind=sortind, ascend=.true.)
+        indoc = sortind 
+
+        ! Compute difference
+        diff = in_sorted(2:size(in_sorted)) - in_sorted(1:size(in_sorted)-1)
+
+        ! Count
+        keepind = [.true., diff /= 0_I8]
+        nel = count(keepind)
+        allocate(oc(nel), el(nel), uniqueind(nel))
+        uniqueind = pack(sortind, keepind)
+        oc = 0
+        el = 0
+        if (nel > 0) then 
+            oc(1) = 1
+            el(1) = in_sorted(1)
+            indoc(1) = 1
+        end if 
+        k = 1
+        do i = 1, size(diff)
+            if (diff(i) /= 0_I8) then 
+                ! Update element counter and add element
+                k = k + 1
+                el(k) = in_sorted(i+1)
+                oc(k) = oc(k) + 1
+            else
+                oc(k) = oc(k) + 1
+            end if 
+            indoc(i+1) = k
+        end do 
+
+        ! Output
+        if (present(sortindel)) then 
+            sortindel = sortind 
+        end if 
+        if (present(sortindoc)) then 
+            sortindoc = indoc(sortind)
+        end if 
+        
     end subroutine
 
 end module

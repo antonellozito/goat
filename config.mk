@@ -158,7 +158,9 @@ CCFLAGS = $(CCFLAGS_DEF) $(COMPDIRVARS)
 MAIN_RUNFILE = MainRunFileGridDeformation.F90
 
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
-GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_plotter.F90 src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 $(wildcard src/General/*.F90)
+GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_plotter.F90 \
+    src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 src/General/mod_sort.F90 $(wildcard src/General/*.F90)  
+    
     
 
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
@@ -177,8 +179,7 @@ MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
     src/Modules/GG/ggmod_gridgeneration2D.F90
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
-AUXILIARY_FILES =  src/Auxiliary/mod_sort.F90 \
-    src/Auxiliary/mod_structured2Dgridding.F90 \
+AUXILIARY_FILES =  src/Auxiliary/mod_structured2Dgridding.F90 \
     $(wildcard src/Auxiliary/*.F90) \
     src/Auxiliary/Interpolation/Interpolant2D_auxiliaries.F90 \
     src/Auxiliary/Interpolation/Interpolant2D.F90 \
