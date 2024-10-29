@@ -2710,8 +2710,8 @@ module mod_polygon
                     ! All edges were found, exit
                     polygonfound = .true. 
                 else if (count(mask) > 1) then
-                    ! Unknown error, call error handler
-                    call gdErrorHandler('SortPolygonEdges: branching polygon detected, not supported')
+                    ! The current vertx is a branching vertex, exit
+                    polygonfound = .true.
                 else
                     ! Get the next edge
                     allocate(temparray(1)) ! avoid rank conflicts

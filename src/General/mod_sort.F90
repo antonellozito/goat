@@ -553,7 +553,7 @@ module mod_sort
             call Sort(in_sorted, ind=ind)
 
             ! Compute difference
-            diff = in_sorted(2:) - in_sorted(1:size(in_sorted))
+            diff = in_sorted(2:) - in_sorted(1:size(in_sorted)-1)
 
             ! Eliminate
             keepind = [.true., diff /= 0_I8]
@@ -611,7 +611,7 @@ module mod_sort
             call Sort(in_sorted, ind=ind)
 
             ! Compute difference
-            diff = in_sorted(2:) - in_sorted(1:size(in_sorted))
+            diff = in_sorted(2:) - in_sorted(1:size(in_sorted)-1)
 
             ! Eliminate
             keepind = [.true., diff /= 0_I8]
@@ -691,10 +691,11 @@ module mod_sort
             if (ina(i)) then 
                 if (inb(i+1)) then 
                     if (c(i) == c(i+1)) then 
-                        keepind(i) = .false. 
+                        keepind(i:i+1) = .false. 
                     end if 
                 end if 
             end if 
+            i = i + 1
         end do 
 
         ! Set output

@@ -545,6 +545,7 @@ def PlotTopologicalMesh(topomesh, fignum):
     rf = np.where(topomesh.face.type == gt.TMfaceradID)
     bndf = np.where(topomesh.face.type == gt.TMfacebndID)
     sepf = np.where(topomesh.face.type == gt.TMfacesepID)
+    coref = np.where(topomesh.face.type == gt.TMfacecoreID)
 
     for i in pf[0]:
         PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
@@ -558,6 +559,9 @@ def PlotTopologicalMesh(topomesh, fignum):
     for i in sepf[0]:
         PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
             fignum, color='m')
+    for i in coref[0]:
+        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
+            fignum, color='r')
         
     # Check bounds
     for i in np.arange(0, topomesh.face.ntot, 1):

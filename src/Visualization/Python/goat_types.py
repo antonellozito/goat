@@ -38,6 +38,7 @@ TMfaceradID = 1
 TMfacepolID = 2
 TMfacebndID = 3
 TMfacesepID = 4
+TMfacecoreID = 5
 
 #----------------------------------------------------------------------#
 #                        TOPOLOGICAL MESH                              #

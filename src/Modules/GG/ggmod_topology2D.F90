@@ -5880,7 +5880,7 @@ module ggmod_topology2D
         integer(I8), allocatable    :: ID(:)
 
         ! Auxiliary
-        integer(I8), allocatable, dimension(:)  :: tempID, tv
+        integer(I8), allocatable, dimension(:)  :: tempID, tv, tvf
         logical, allocatable, dimension(:)      :: temp
 
         ! Loop
@@ -5900,8 +5900,9 @@ module ggmod_topology2D
 
             ! Check
             do j = 1, size(tv)
-                if (any(topomesh%face%type(topomesh%vert%GetFace(tv(j))) == TMfacesepID)) then 
-                    temp = .true.
+                tvf = topomesh%vert%GetFace(tv(j))
+                if (any(topomesh%face%type(tvf) == TMfacesepID)) then 
+                    temp(i) = .true.
                     exit 
                 end if 
             end do 
@@ -5909,7 +5910,7 @@ module ggmod_topology2D
 
         ! Get indices
         allocate(ID(count(temp)))
-        ID = pack([(k, k = 1, size(tempID))], temp)
+        ID = pack(tempID, temp)
 
     end function
 

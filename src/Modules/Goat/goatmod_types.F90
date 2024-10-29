@@ -118,6 +118,7 @@ module goatmod_types
         ! - BF              : logical index that is true if the face
         !                   is a boundary face
         ! - label           : face labels
+        ! - TMfacelabel     : face label corresponding to topomesh ID (only when GG is used)
         ! - reg             : face regions
         ! - aligned         : integer that is 1 if the face is aligned
 
@@ -126,7 +127,7 @@ module goatmod_types
         integer(I8), allocatable            :: vert(:,:)
 
         integer(I8), allocatable            :: cell(:), label(:), &
-            reg(:), aligned(:)
+            reg(:), aligned(:), TMfacelabel(:)
         integer(I8), allocatable            :: cellP(:, :)
         integer(I8)                         :: ncell = 0
 
@@ -672,7 +673,7 @@ module goatmod_types
 
         ! Other
         allocate(face%aligned(face%ntot), face%label(face%ntot), &
-            face%reg(face%ntot))
+            face%reg(face%ntot), face%TMfacelabel(face%ntot))
 
     end subroutine
 
