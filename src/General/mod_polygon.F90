@@ -89,6 +89,7 @@ module mod_polygon
     use mod_errorhandler
     use, intrinsic :: ieee_arithmetic
     use mod_plotter
+    use mod_sort
 
     ! The usual
     implicit none
@@ -404,7 +405,7 @@ module mod_polygon
             tempedges(:, :), tempvert(:), ps(:), pe(:), &
             templabels(:, :)
 
-        logical, allocatable        :: ispolygonstart(:)
+        logical, allocatable        :: ispolygonstart(:), isbranchingpolygon(:)
 
         ! Loop
         integer(I8)                 :: i, k
@@ -421,12 +422,13 @@ module mod_polygon
         ne = size(edges, 1)
 
         ! Allocate
-        allocate(sortindex(ne), ispolygonstart(ne))
+        allocate(sortindex(ne), ispolygonstart(ne), isbranchingpolygon(ne))
 
         ! Extract polygon edges
         !======================
         ! Sort
-        call SortPolygonEdges(edges, ne, sortindex, ispolygonstart)
+        call SortPolygonEdges(edges, ne, sortindex, ispolygonstart, &
+            isbranchingpolygon)
         allocate(sortededges, source=edges)
         sortededges = edges(sortindex, :)
 
@@ -2405,7 +2407,8 @@ module mod_polygon
     end subroutine
 
     ! Polygon edge sorter
-    subroutine SortPolygonEdges(pein, ne, sortindex, ispolygonstart)
+    subroutine SortPolygonEdges(pein, ne, sortindex, ispolygonstart, &
+            isbranchingpolygon)
 
         ! Description
         !============
@@ -2417,6 +2420,16 @@ module mod_polygon
         ! Multiple open and closed polygons are supported. The logical 
         ! 'ispolygonstart' indicates which of the (sorted!) edges is the 
         ! start of a new polygon. 
+
+        ! Update: added support for branching polygons. These are 
+        ! returned as separate polygon parts. If one wants to check if
+        ! it is a branching polygon or not, one can check if there are any true
+        ! indices in 'isbranchingpolygon'. Note that the branching polygons are
+        ! represented by an ensemble of non-branching polygons and can therefore be
+        ! reconstructed if necessary. Retrieving all parts of a branching polygon
+        ! has to be done 'manually' by checking for each branching polygon which
+        ! vertices it has in common with another one. Support for this might be
+        ! added in the future. 
     
         ! Arguments
         !==========
@@ -2432,6 +2445,8 @@ module mod_polygon
         !                   index of a new polygon. The edges of this 
         !                   polygon are all edges between this true value 
         !                   and the next. 
+        ! - isbranchingpolygon  : np-by-1 array indicating if the polygon
+        !                       is branching or not
     
         ! Algorithm
         !==========
@@ -2452,8 +2467,8 @@ module mod_polygon
         !       vertex.
         !
         !       If more than two:
-        !       throw error: this indicates branching and is not yet 
-        !       supported.
+        !       branching polygon, this vertex has to be a starting 
+        !       (or ending) vertex. 
         !        
         ! 2)    Find the edges of the current polygon. 
         !
@@ -2483,7 +2498,7 @@ module mod_polygon
         
         ! Output
         integer(I8), dimension(ne)      :: sortindex 
-        logical, dimension(ne)          :: ispolygonstart
+        logical, dimension(ne)          :: ispolygonstart, isbranchingpolygon
     
         ! Mixed
     
@@ -2495,11 +2510,13 @@ module mod_polygon
         integer(I8)                 :: nv, nremedges, nextremedge, &
                                     tc1, tc2
     
+        logical                     :: allbranchingfound
         logical, allocatable        :: isedgesorted(:), isremedgesorted(:), &
-                                    mask(:)
+            mask(:), isbranchingvertex(:, :), remisbranching(:, :)
     
         integer(I8), allocatable    :: remedges(:,:), edgeID(:), &
-                                    remedgeID(:), temparray(:)
+            remedgeID(:), temparray(:), allv(:), oc(:), el(:), sortind(:), &
+            alloc(:)
     
         ! Main program
         !=============
@@ -2519,13 +2536,23 @@ module mod_polygon
         allocate(isedgesorted(ne)) ! logical to indicate if edge has been sorted
         allocate(edgeID(ne))
     
-        ispolygonstart(:) = .false.
-        isedgesorted(:) = .false.
+        ispolygonstart = .false.
+        isedgesorted = .false.
+        isbranchingpolygon = .false. 
         edgeID(:) = (/ (i, i=1,ne,1) /)
         allfound = .false. ! while loop variable
         spind = 1 ! sorted polygon index
+
+        ! Check if branching polygons exist by counting occurrence
+        allv = [pein(:, 1), pein(:, 2)]
+        call CountOccurrence(allv, oc, el, sortindoc=sortind)
+        alloc = oc(sortind)
+        allocate(isbranchingvertex(ne, 2))
+        isbranchingvertex(:, 1) = alloc(1:ne) > 2_I8
+        isbranchingvertex(:, 2) = alloc(ne+1:2*ne) > 2_I8
     
         ! Loop
+        allbranchingfound = count(isbranchingvertex) == 0
         do while (allfound .eqv. .false.)
             ! Set the polygon starting index
             ispolygonstart(spind) = .true.
@@ -2536,17 +2563,79 @@ module mod_polygon
             allocate(remedgeID(nremedges))
             allocate(isremedgesorted(nremedges))
             allocate(mask(nremedges))
+            allocate(remisbranching(nremedges, 2))
     
             ! Get the remaining edges
             remedges(:,1) = pack(pein(:,1), (isedgesorted .eqv. .false.))
             remedges(:,2) = pack(pein(:,2), (isedgesorted .eqv. .false.))
             remedgeID(:) = pack(edgeID, (isedgesorted .eqv. .false.))
+            remisbranching(:, 1) = pack(isbranchingvertex(:, 1), .not. isedgesorted)
+            remisbranching(:, 2) = pack(isbranchingvertex(:, 2), .not. isedgesorted)
             isremedgesorted(:) = .false.
     
-            ! Find a starting vertex
+            ! Find a starting vertex of a branching vertex
             startfound = .false. 
             k = 1
+            do while ((startfound .eqv. .false.) .and. (k <= nremedges) .and. &
+                .not. allbranchingfound)
+
+                ! Check if there are any branching edges among the 
+                ! remaining edges
+                if (remisbranching(k, 1)) then 
+
+                    ! Found starting point
+                    startfound = .true. 
+                    nv = remedges(k, 2)
+
+                    ! Set as branching polygon
+                    isbranchingpolygon(remedgeID(k)) = .true.
+                    
+                    ! Add the current edge
+                    sortindex(spind) = remedgeID(k)
+    
+                    ! Set edge as sorted
+                    isremedgesorted(k) = .true.
+    
+                    ! Update indices
+                    k = k+1
+                    spind = spind+1
+
+                elseif (remisbranching(k, 2)) then 
+
+                    ! Found starting point
+                    startfound = .true. 
+                    nv = remedges(k, 1)
+
+                    ! Set as branching polygon
+                    isbranchingpolygon(remedgeID(k)) = .true.
+                    
+                    ! Add the current edge
+                    sortindex(spind) = remedgeID(k)
+    
+                    ! Set edge as sorted
+                    isremedgesorted(k) = .true.
+    
+                    ! Update indices
+                    k = k+1
+                    spind = spind+1
+
+                else 
+                    ! Next edge
+                    k = k + 1
+                end if
+
+                ! Check
+                if (.not. startfound) then 
+                    ! Found all branching polygons
+                    allbranchingfound = .true. 
+                end if 
+            end do 
+
+            ! If no starting vertex was found, find the starting vertex 
+            ! of a non-branching polygon
+            k = 1
             do while ((startfound .eqv. .false.) .and. (k <= nremedges))
+
                 ! Count how many times the current edge vertices occur
                 tc1 = count(remedges(:,1) == remedges(k,1)) & 
                     + count(remedges(:,2) == remedges(k,1))
@@ -2663,6 +2752,7 @@ module mod_polygon
             deallocate(remedgeID)
             deallocate(isremedgesorted)
             deallocate(mask)
+            deallocate(remisbranching)
     
         end do
     

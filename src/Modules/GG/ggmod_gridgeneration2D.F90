@@ -4130,7 +4130,7 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)     :: vpsi, xf, yf, xc, yc, &
             ccx, ccy, bfx, bfy, dp
         logical, allocatable, dimension(:)      :: temp, tf, &
-            ispolygonstart, tc
+            ispolygonstart, tc, isbranchingpolygon
 
         ! Loop
         integer(I8)                             :: i, j, k, cc, ncell, &
@@ -4243,8 +4243,9 @@ module ggmod_gridgeneration2D
         end do 
 
         ! Sort the edges (assumed no branching)
-        allocate(sortind(size(tfnb, 1)), ispolygonstart(size(tfnb, 1)))
-        call SortPolygonEdges(tfnb, count(tf), sortind, ispolygonstart)
+        allocate(sortind(size(tfnb, 1)), ispolygonstart(size(tfnb, 1)), &
+            isbranchingpolygon(size(tfnb, 1)))
+        call SortPolygonEdges(tfnb, count(tf), sortind, ispolygonstart, isbranchingpolygon)
         allocate(polind(count(ispolygonstart)))
         polind = pack([(k, k = 1, size(tfnb, 1))], ispolygonstart)
         polind = [polind, size(tfnb, 1)+1]
@@ -4653,13 +4654,8 @@ module ggmod_gridgeneration2D
         !       Internal cells: SOLPSinternalcellID
         !       Boundary cells: SOLPSbndcellID
 
-        ! Note: it is assumed that the initial face labels identify the
+        ! Note 1: it is assumed that the initial face labels identify the
         ! topological mesh boundary ID
-
-        ! Declare modules
-        !================
-        use mod_definitions, only: SOLPScoreregID, SOLPScoreregIDincr, &
-            SOLPSinternalcellID, SOLPSbndcellID
 
         ! Declare variables
         !==================
@@ -4670,7 +4666,7 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8), allocatable, dimension(:)      :: IFlabels, &
             TPlabels, bndlabels, fl_orig, fl_new, Clabels, &
-            nonTPlabels
+            nonTPlabels, facelabelmapping
         logical, allocatable, dimension(:)          :: temp
 
         ! Loop
@@ -4683,14 +4679,21 @@ module ggmod_gridgeneration2D
         fl_orig = simgrid%face%label
         fl_new = fl_orig
 
-        ! Create basic mappings
+        ! Get basic IDs
         IFlabels = topomesh%GetInternalFaceIDs()
         Clabels = topomesh%GetCoreFaceIDs()
         TPlabels = topomesh%GetTargetFaceIDs()
 
-        ! Create derived mappings
+        ! Get derived IDs
         bndlabels = topomesh%GetBoundaryFaceIDs()
         call Setdiff(TPlabels, bndlabels, nonTPlabels)
+
+        ! Create mapping
+        allocate(facelabelmapping(0:maxval(fl_orig))) ! start from zero for ease
+        facelabelmapping = 0
+        facelabelmapping(IFlabels) = 0
+        facelabelmapping(Clabels) = 0
+
         
 
 
