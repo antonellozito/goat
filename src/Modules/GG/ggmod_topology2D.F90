@@ -174,7 +174,7 @@ module ggmod_topology2D
         ! Getters
         procedure :: GetInternalFaceIDs, GetBoundaryFaceIDs, &
             GetTargetFaceIDs, GetSeparatrixFaceIDs, GetVesselFaceIDs, &
-            GetCoreFaceIDs
+            GetCoreFaceIDs, GetCoreCellIDs
     end type 
 
     contains 
@@ -5911,6 +5911,55 @@ module ggmod_topology2D
         ! Get indices
         allocate(ID(count(temp)))
         ID = pack(tempID, temp)
+
+    end function
+
+    function GetCoreCellIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! Get the IDs of cells that are core regions. These either have
+        ! a core boundary as a face, or they have a maximum/minimum as
+        ! a vertex.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                  :: topomesh 
+        integer(I8), allocatable            :: ID(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tcf, tcv 
+        logical, allocatable, dimension(:)      :: keepind
+
+        ! Loop
+        integer(I8)                         :: i, k
+
+        ! Loop
+        !=====
+        ! Initialize
+        allocate(keepind(topomesh%cell%ntot))
+        keepind = .false. 
+
+        ! Loop
+        do i = 1, topomesh%cell%ntot 
+            ! Check faces & vert
+            tcf = topomesh%cell%GetFace(i)
+            tcv = topomesh%cell%GetVert(i)
+
+            ! Check
+            if (any(topomesh%face%type(tcf) == TMfacecoreID)) then 
+                keepind(i) = .true. 
+            end if 
+            if ((any(topomesh%vert%type(tcv) == TMvertexmaxID)) .or. &
+                (any(topomesh%vert%type(tcv) == TMvertexminID))) then 
+                    keepind(i) = .true.
+            end if 
+        end do 
+
+        ! Extract IDs
+        allocate(ID(count(keepind)))
+        ID = pack([(k, k = 1, topomesh%cell%ntot)], keepind)
 
     end function
 

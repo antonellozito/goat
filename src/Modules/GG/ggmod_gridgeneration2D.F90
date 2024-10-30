@@ -4669,7 +4669,8 @@ module ggmod_gridgeneration2D
         integer(I8), allocatable, dimension(:)      :: IFlabels, &
             TPlabels, bndlabels, fl_orig, fl_new, Clabels, &
             nonTPlabels, facelabelmapping, allfID, tfID, &
-            sortindex, ind, solpslabels, psind, sortind
+            sortindex, ind, solpslabels, psind, coreIDs, &
+            cellregionmapping
         integer(I8), allocatable                    :: edges(:, :)
         logical, allocatable, dimension(:)          :: temp, &
             ispolygonstart, isbranchingpolygon
@@ -4677,7 +4678,7 @@ module ggmod_gridgeneration2D
 
         ! Loop
         integer(I8)                                 :: i, j, k, flc, &
-            flcinc
+            flcinc, coreIDc, regIDc
 
         ! Initialize
         !===========
@@ -4702,7 +4703,7 @@ module ggmod_gridgeneration2D
         TPlabels = topomesh%GetTargetFaceIDs()
 
         ! Get derived IDs
-        bndlabels = topomesh%GetVesselFaceIDs()
+        bndlabels = topomesh%GetBoundaryFaceIDs()
         call Setdiff(bndlabels, TPlabels, nonTPlabels)
 
         ! Create (temporary) mapping
@@ -4756,8 +4757,33 @@ module ggmod_gridgeneration2D
             deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
         end do 
 
+        ! Cell regions
+        !-------------
+        ! Get core IDs
+        coreIDs = topomesh%GetCoreCellIDs()
 
-        
+        ! Compute mapping
+        allocate(cellregionmapping(0:maxval(simgrid%cell%reg)))
+        cellregionmapping = 0
+        coreIDc = SOLPScoreregID
+        regIDc = 1
+        do i = 1, maxval(simgrid%cell%reg)
+            if (any(i == coreIDs)) then 
+                ! Core region
+                cellregionmapping(i) = coreIDc 
+                coreIDc = coreIDc + SOLPScoreregIDincr
+            else
+                ! Check if we should update the region ID
+                if ((regIDc == coreIDc) .or. &
+                    (mod(regIDc, SOLPScoreregIDincr)-solpscoreregID) == 0) then 
+                    ! Assumed solpscoreregIDincr larger than one
+                    regIDc = regIDc + 1
+                end if 
+                cellregionmapping(i) = regIDc 
+                regIDc = regIDc + 1
+            end if 
+        end do 
+        simgrid%cell%reg = cellregionmapping(simgrid%cell%reg)
 
 
     end subroutine
