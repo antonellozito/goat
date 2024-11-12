@@ -18,13 +18,13 @@ print('VisualizeGoatOutput: reading from directory: ' + datadir)
 # Design
 #-------
 # Plot the grid
-plotter.PlotGridCells(datadir, 1)
+plotter.PlotGridCellsFromFile(datadir, 1)
 plotter.PlotGridCellsIterate(datadir, 0)
 plotter.PlotVesselPolygon(datadir, -1)
 
 # Optimization history
 #---------------------
-plotter.PlotGoatOptimizationHistory(datadir, 2)
+# plotter.PlotGoatOptimizationHistory(datadir, 2)
 
 # Show figures
 #-------------
