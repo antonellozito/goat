@@ -62,7 +62,7 @@ tmfile = 'topomesh.dat'
 #--------------------------------------------------------------------------#
 
 
-def PlotGridCells(dirpath, fignum):
+def PlotGridCellsFromFile(dirpath, fignum):
     # Description
     #------------
     # Plot the grid cells once by reading in the grid cell polygon data as

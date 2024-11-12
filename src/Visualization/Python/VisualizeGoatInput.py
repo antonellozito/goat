@@ -18,7 +18,7 @@ print('VisualizeGoatInput: reading from directory: ' + datadir)
 # Design
 #-------
 # Plot the grid
-plotter.PlotGridCells(datadir, 1)
+plotter.PlotGridCellsFromFile(datadir, 1)
 plotter.PlotGridCellsIterate(datadir, 0)
 plotter.PlotVesselPolygon(datadir, -1)
 

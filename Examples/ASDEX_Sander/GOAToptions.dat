@@ -419,10 +419,15 @@ VERSION 1.00.00
 'gg.tm.vessel.resy'             '1200'
 'gg.tm.vessel.donewton'         '0'
 
+'gg.tm.contour.npmin'           '10'
+'gg.tm.contour.npmax'           '10000'
+'gg.tm.contour.dl'              '0.1'
+
 # Core boundary and region treatment
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.cbnd.frac'               '0.1'
 'gg.tm.removecoreregions'       '0'
+'gg.tm.removewidegridregions'   '1'
 
 #-------------------------------------------------------------------------#
 #                         VERTEX DISTRIBUTION OPTIONS                     #
@@ -433,8 +438,8 @@ VERSION 1.00.00
 'gg.cellconstructionmethod'             'quads_triangles'
 
 # Refinement options
-'gg.ref.meth'                           'lengthbased'
-#'gg.ref.meth'                           'no'
+#'gg.ref.meth'                           'lengthbased'
+'gg.ref.meth'                           'no'
 'gg.ref.LB.doxp'                        '1'
 'gg.ref.LB.dovessel'                    '1'
 'gg.ref.LB.Lmininf'                     '0.001'
@@ -454,12 +459,18 @@ VERSION 1.00.00
 # Contour resolution 
 'gg.vd.contouring.resx'         '100'
 'gg.vd.contouring.resy'         '200'
+'gg.vd.contouring.coarsen'      '1'
+
+# Orthogonal line tracer options (only if orthogonal based GG is used)
+'gg.vd.orthlinetracing.step'    '5' # relative step size (larger = less accurate but faster)
+'gg.vd.orthlinetracing.nsteps'  '500' # maximal number of steps to take 
+
 
 # Distribution of flux surfaces (radial)
 'gg.vd.rd.type'                         'uniform'
 
 # Distribution of vertices on flux surfaces (poloidal)
-'gg.vd.pd.type'                         'uniform'
+'gg.vd.pd.type'                         'densitybased'
 
 # Options for uniform distribution
 'gg.vd.pd.distribution.facelength'      '4e-2';
@@ -467,8 +478,8 @@ VERSION 1.00.00
 'gg.vd.rd.distribution.fieldwidth'      '2e-2';
 
 # Options for density based distribution
-'gg.vd.pd.distribution.type'            'vessel_bnd_weight';
-'gg.vd.pd.distribution.lengthparam'     '0.05';
+'gg.vd.pd.distribution.plftype'            'target';
+'gg.vd.pd.distribution.decaylengthplf'     '0.25';
 'gg.vd.pd.distribution.densityatvessel' '250';
 'gg.vd.pd.distribution.densityatinf'    '10';
 

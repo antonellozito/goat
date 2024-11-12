@@ -582,8 +582,7 @@ module mod_sort
         !============
         ! Returns the unique elements of a real array. This is done
         ! by first sorting the array, then taking the value difference
-        ! and removing elements which are not different. Optionally, 
-        ! the index vector is returned that yields out = in(ind)
+        ! and removing elements which are not different.
 
         ! Declare variables
         !==================
@@ -634,7 +633,7 @@ module mod_sort
     end subroutine
 
     ! Integer setdiff
-    subroutine Setdiff_I8(a, b, out, ind)
+    subroutine Setdiff_I8(a, b, out)
 
         ! Description
         !============
@@ -648,31 +647,34 @@ module mod_sort
         ! Arguments
         integer(I8), intent(in), dimension(:)   :: a, b 
         integer(I8), intent(out), dimension(:), allocatable  :: out 
-        integer(I8), intent(out), allocatable, optional :: ind(:)
 
         ! Auxiliary
         integer(I8)                             :: na
         integer(I8), allocatable, dimension(:)  :: c, &
-            sortind, c_orig, cu, uniqueind
+            sortind, c_orig, cu, uniqueind, au, bu
         logical, allocatable, dimension(:)      :: ina, inb, keepind
 
         ! Loop
         integer(I8)                             :: i 
 
-        ! Initialize
-        !===========
-        ! Get size
-        na = size(a)
 
         ! Sort
         !=====
-        c = [a, b]
+        ! Take unique of a and b
+        call Unique(a, au)
+        call Unique(b, bu)
+
+        ! Get size
+        na = size(au)
+
+        ! Concatente
+        c = [au, bu]
         c_orig = c 
         allocate(sortind(size(c)))
         call Sort(c, ind=sortind, ascend=.true.)
-        call Unique(c, cu, ind=uniqueind)
-        sortind = sortind(uniqueind)
-        c = cu
+        !call Unique(c, cu, ind=uniqueind)
+        !sortind = sortind(uniqueind)
+        !c = cu
 
         ! Eliminate
         !==========
@@ -682,18 +684,11 @@ module mod_sort
         ina = sortind <= na 
         inb = sortind > na
 
-        ! Remove elements from b
-        where(inb) keepind = .false.
-
-        ! Remove elements from b that appear in a
+        ! Remove elements 
         i = 1
         do while (i < size(c))
-            if (ina(i)) then 
-                if (inb(i+1)) then 
-                    if (c(i) == c(i+1)) then 
-                        keepind(i:i+1) = .false. 
-                    end if 
-                end if 
+            if (c(i) == c(i+1)) then 
+                keepind(i:i+1) = .false. 
             end if 
             i = i + 1
         end do 
@@ -701,11 +696,6 @@ module mod_sort
         ! Set output
         allocate(out(count(keepind)))
         out = pack(c, keepind)
-        if (present(ind)) then 
-            allocate(ind(count(keepind)))
-            ind = pack(sortind, keepind)
-        end if 
-
 
     end subroutine
 

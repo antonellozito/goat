@@ -286,6 +286,44 @@ module DistributionFunction
 
     end type
 
+    ! Coordinates and PLF, 2D
+    type, extends(DistributionFunctionUDT)  :: CoordinatesPLF2DDistanceDFUDT
+        
+        ! Description
+        !============
+        ! Distribution function based on coordinates (like 
+        ! Coordiantes2DDistanceDFUDT), but now there's an additional
+        ! background distribution based on a polygon levelset function.
+        ! The function being evaluated is:
+        !
+        !   F(x, y) = sum_i (a_i exp(-d(x, y, xi, yi)/d_i)) + b + 
+        !               a_plf*exp(-d_plf(x, y)/d_plf)
+        !   
+        ! Here, the first term originates from the specified points, 
+        ! where for each point the distance is taken and divided through
+        ! a decay distance d_i. b is the value far away from the plf and
+        ! point. The last term is then the contribution of the plf, and,
+        ! in absence of any points, a_plf then represents the value at
+        ! zero distance. 
+
+        ! Fields:
+        real(R8)                                :: b0, a_plf, d_plf
+        real(R8), allocatable                   :: xa(:), ya(:), &
+            coef(:), d0(:), a0(:)
+        class(PolygonLevelsetFunction2DUDT), allocatable    :: plf 
+
+        character(:), allocatable               :: meth
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize     => InitializeCoordinatesPLF2DDistanceDF
+
+        ! Evaluation
+        procedure :: Evaluate       => EvaluateCoordinatesPLF2DDistanceDF
+
+    end type
+
     !==================================================================!
     !                                                                  !
     !                            INTERFACES                            !
@@ -1453,6 +1491,210 @@ module DistributionFunction
             ! Value
             v = v + c(i)*exp(-d/d0(i))
         end do
+
+        ! Add constant component
+        v = v + b0
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                      COORDINATES AND PLF, 2D                     !
+    !------------------------------------------------------------------!
+
+    ! Constructor
+    function ConstructCoordinatesPLF2DDistanceDF(plf, valplf, decaylengthplf, &
+        xp, yp, val0, valinf, decaylengthp) result(distribution)
+
+        ! Description
+        !============
+        ! Construct the distributor - simply a wrapper for the 
+        ! initialization function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DistributionFunctionUDT), allocatable     :: distribution 
+        real(R8), intent(in)                            :: val0(:), valinf, &
+            decaylengthp(:), xp(:), yp(:), valplf, decaylengthplf
+        class(PolygonLevelsetFunction2DUDT), intent(in) :: plf 
+
+        ! Initialize
+        !===========
+        allocate(CoordinatesPLF2DDistanceDFUDT::distribution)
+
+        select type(distribution)
+
+        type is (CoordinatesPLF2DDistanceDFUDT)
+
+            ! Call initializer
+            call distribution%Initialize(plf, valplf, decaylengthplf, &
+                xp, yp, val0, valinf, decaylengthp)
+
+        end select
+
+    end function 
+
+    ! Initialization
+    subroutine InitializeCoordinatesPLF2DDistanceDF(distribution, &
+        plf, valplf, decaylengthplf, xp, yp, val0, valinf, decaylengthp)
+
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CoordinatesPLF2DDistanceDFUDT)            :: distribution 
+        real(R8), intent(in)                            :: val0(:), valinf, &
+            decaylengthp(:), xp(:), yp(:), valplf, decaylengthplf
+        class(PolygonLevelsetFunction2DUDT), intent(in) :: plf 
+
+        ! Auxiliary
+        integer(I8)                                     :: flag, na
+
+        real(R8), parameter                             :: myone = 1
+        real(R8)                                        :: tempd
+        real(R8), allocatable                           :: d(:), b(:), &
+            A(:, :), sol(:), vplf(:)
+
+        ! Loop
+        integer(I8)                                     :: i, j
+
+        ! Set fields
+        !===========
+        ! Data
+        distribution%xa = xp 
+        distribution%ya = yp
+        distribution%a0 = val0
+        distribution%b0 = valinf 
+        distribution%d0 = decaylengthp
+
+        distribution%plf = plf 
+        distribution%d_plf = decaylengthplf
+        distribution%a_plf = valplf
+
+        ! Associate
+        associate(&
+            a0      => distribution%a0,     &
+            b0      => distribution%b0,     &
+            d0      => distribution%d0,     &
+            a_plf   => distribution%a_plf,  &
+            d_plf   => distribution%d_plf,  &
+            plf     => distribution%plf     &
+            )
+
+        ! Construct attractor function
+        !=============================
+        ! Determine number of attractor points
+        na = size(xp, 1)
+
+        ! Allocate
+        allocate(d(na), b(na), A(na, na))
+
+        ! Evaluate plf at point locations (to subtract later)
+        allocate(vplf(na))
+        call plf%Evaluate(xp, yp, 0, 0, vplf)
+
+        ! Construct rhs to compute attractor coefficients
+        b = a0 - b0 - a_plf*exp(-abs(vplf)/d_plf)
+
+        ! Compute lhs to compute attractor coefficients
+        A = 0
+        do j = 1, na
+            do i = 1, na
+                if (i /= j) then 
+                    tempd = sqrt( (xp(i) - xp(j))**2 + (yp(i) - yp(j))**2)
+                    A(i, j) = exp(-tempd/d0(j))
+                else 
+                    A(i, j) = 1.0_R8
+                end if 
+            end do 
+        end do
+
+        ! Call solver
+        allocate(sol(size(b)))
+        call SolveDenseLinearSystemDI(A, b, sol, flag)
+        if (flag /= 0) then
+            ! Call error
+            call gdErrorHandler('InitializeCoordinatesPLF2DDistanceDF: ' // &
+                'could not determine attractor function coefficients ' // &
+                'due to non-converging linear solver')
+        end if 
+
+        ! Add
+        !====
+        distribution%coef   = sol 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Evaluation
+    subroutine EvaluateCoordinatesPLF2DDistanceDF(distribution, x, y, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CoordinatesPLF2DDistanceDFUDT)    :: distribution 
+        real(R8), intent(in)                    :: x(:), y(:)
+        real(R8), intent(out)                   :: v(size(x))
+
+        ! Auxiliary
+        real(R8), parameter                     :: myone = 1
+        real(R8)                                :: d(size(x))
+        real(R8), allocatable, dimension(:)     :: vplf
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Check sizes
+        if ( (size(v) /= size(x)) .or. (size(x) /= size(y))) then 
+            ! Throw error
+            call gdErrorHandler('EvaluatePolygonsetField2DDistanceDF: incompatible sizes in input')
+        end if 
+
+        ! Associate
+        associate(&
+            a0      => distribution%a0,     & 
+            a_plf   => distribution%a_plf,  &
+            d_plf   => distribution%d_plf,  &
+            plf     => distribution%plf,    &
+            c       => distribution%coef,   & 
+            b0      => distribution%b0,     & 
+            d0      => distribution%d0,     &
+            xa      => distribution%xa,     &
+            ya      => distribution%ya      &
+        )
+
+        ! Evaluate
+        !=========
+        ! Evaluate field values in coordinates
+        v = 0
+
+        ! Point contributions
+        do i = 1, size(xa)
+            ! Distance 
+            d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
+
+            ! Value
+            v = v + c(i)*exp(-d/d0(i))
+        end do
+
+        ! PLF contributions
+        allocate(vplf(size(x)))
+        call plf%Evaluate(x, y, 0, 0, vplf)
+        v = v + a_plf*exp(-abs(vplf)/d_plf)
 
         ! Add constant component
         v = v + b0

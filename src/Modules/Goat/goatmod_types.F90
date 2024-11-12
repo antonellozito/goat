@@ -816,6 +816,7 @@ module goatmod_types
         allocate(fluxdata%fluxtubecells(grid%cell%ntot)) 
         allocate(fluxdata%fluxtubefacesP(fluxdata%nFt,2))
         allocate(fluxdata%fluxtubefaces(grid%face%ntot)) 
+        allocate(fluxdata%fluxtuberegID(fluxdata%nFt))
 
         ! Flux surface data
         allocate(fluxdata%fluxsurfacefacesP(fluxdata%nFs,2))

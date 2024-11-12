@@ -15,6 +15,7 @@ module ggmod_vertexdistribution2D
     use mod_precision
     use mod_errorhandler
     use Interpolant1D
+    use StructuredInterpolant2D
     use mod_lagrangefunctions
     use mod_constants, only: nanval_R8
     use DistributionFunction, only: DistributionFunctionUDT
@@ -22,7 +23,8 @@ module ggmod_vertexdistribution2D
     private 
 
     public :: VertexDistributor2DUDT, ConstructUniformVertexDistributor, &
-        FieldDistributor1DUDT, ConstructUniformFieldDistributor
+        FieldDistributor1DUDT, ConstructUniformFieldDistributor, &
+        ConstructDensityBasedVertexDistributor
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -78,6 +80,85 @@ module ggmod_vertexdistribution2D
 
         ! Distribution over given field
         procedure :: DistributeOverField    => DistributeVerticesUniformOverField
+
+    end type
+
+    ! Uniform vertex distributor
+    type, extends(VertexDistributor2DUDT) :: DensityBasedVertexDistributor2DUDT
+
+        ! Description
+        !============
+        ! Construct a distributor that works density based. Here, it is assumed
+        ! that a 'density' distribution (e.g. in #/m) is given in 'options'. The
+        ! distribution is then integrated along the polygon, which determines the
+        ! number of vertices to be distributed thereon. The location is then
+        ! obtained by finding the location at which the accumulated mass equals
+        ! 1/N times the total mass of the system. Hence, where the density is
+        ! higher, the vertices will be concentrated.
+        
+        ! For integration of the density, we work per segment and use a polynomial
+        ! representation of order 'vd.order'. In higher than linear order cases, we
+        ! introduce additional nodes in an equidistant fashion. By parameterization
+        ! per segment, we obtain a single coefficient matrix to be inverted for
+        ! each segment. This can all be done in pre-processing and should therefore
+        ! be quite efficient (only one matrix inversion for all to be interpolated
+        ! quantities). As basis function, we us Lagrange polynomials. These have
+        ! the nice feature that at any given point, all basis functions vanish
+        ! except for one, which is equal to one, such that we can immediately see
+        ! that the coefficients should be equal to the density at those points.
+        ! Hence, the inverse of this system is trivial. In other words:
+        !
+        !   rho(s) = sum(rho_i l_i)
+        !
+        ! where l_i is the i-th Lagrange polynomial. This polynomial is given by:
+        !
+        !   l_i(s) = prod( (x - x_m)(x_i - x_m) ) for m = 0..k, m != i
+        !
+        ! If desired, one can also write the Lagrange polynomial in the form of
+        ! l_i = prod( 1/(x_i - x_m) ) sum_i a_i x^i, which is convenient for
+        ! integration/differentiation. Here, the a_i are computed recursively
+        ! (perhaps there's a closed and elegant formulation but haven't found that
+        ! one yet). If we start with the 'constant' part (m = 0) and move further
+        ! to m = M, then, we can find each set of coefficients of m+1 as function
+        ! of the coefficients of m (note: we assume here that i is skipped, but do
+        ! not reflect this in notation):
+        !
+        !   a_j^m+1 = a_j-1^m (-x_m+1) + (a_j^m)
+        !
+        ! For example:
+        !
+        !   m   |   a_0^m   a_1^m-1     ...
+        !   0   |   1       0     0     ...
+        !   1   |   1       -x_1    0
+        !   2   |   1       -(x_1 + x_2)    x_1 x_2
+        !   3   |   1       -(x_1 + x_2 + x_3)  x_1 x_2 + x_1 x_3 + x_2 x_3     -x_1 x_2 x_3
+        !
+        ! For the definition of l_i above, this would result for example for l_1
+        ! and M = 3 in:
+        !
+        !   m   |   a_0^m   a_1^m-1     ...
+        !   0   |   1       0     0     ...
+        !   ----------------------------------
+        !   2   |   1       -(x_2)
+        !   3   |   1       -(x_2 + x_3)  x_2 x_3
+        !
+        ! Finally, we note that here, the coefficients will immediately include the
+        ! product prefactor (i.e. we cosider b_i = a_i prod( 1/(x_i - x_m) ) )
+
+        integer(I8)                                     :: order 
+        class(DistributionFunctionUDT), allocatable     :: densityfunction
+        real(R8), allocatable, dimension(:)             :: xi
+        real(R8), allocatable, dimension(:, :)          :: lagcoef, intlagcoef
+
+        real(R8)                        :: d, fd
+
+    contains 
+
+        ! Distribution over given coordinates
+        procedure :: DistributeOverCurve    => DistributeVerticesDensityBasedOverCurve
+
+        ! Distribution over given field
+        procedure :: DistributeOverField    => DistributeVerticesDensityBasedOverField
 
     end type
 
@@ -222,6 +303,52 @@ module ggmod_vertexdistribution2D
         end select 
 
     end function 
+
+    ! Density-based vertex distributor
+    function ConstructDensityBasedVertexDistributor(distribution, order) result(vd)
+
+        ! Description
+        !============
+        ! Construct a density-based vertex distribution function based
+        ! on the density distribution which is given in 'distribution'. 
+        ! For proper performance, the distribution function should be
+        ! (strictly) positive everywhere. This cannot be checked 
+        ! explicitly beforehand, but during evaluation this may be 
+        ! checked. 
+ 
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VertexDistributor2DUDT), allocatable  :: vd 
+        class(DistributionFunctionUDT), intent(in)  :: distribution
+        integer(I8), intent(in)                     :: order
+
+        
+        ! Loop
+        integer(I8)                                 :: k
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(DensityBasedVertexDistributor2DUDT::vd)
+
+        ! Initialize
+        select type(vd)
+
+        type is (DensityBasedVertexDistributor2DUDT)
+
+            ! Set some fields
+            vd%order = order
+            vd%densityfunction = distribution
+
+            ! Construct the lagrangian basis functions
+            vd%xi = real([(k, k = 0, vd%order)], kind=R8)/(real(vd%order, kind=R8))
+            call ConstructLagrangianBasisFunctions(vd%order, vd%xi, &
+                vd%lagcoef, vd%intlagcoef)
+
+        end select
+
+    end function
 
     ! Uniform field distributor
     function ConstructUniformFieldDistributor(d, fd) result(vd)
@@ -416,6 +543,288 @@ module ggmod_vertexdistribution2D
         if (present(xv) .and. (present(yv))) then 
             call DistributeVerticesLine(xc, yc, dl, distr, xv, yv)
         end if 
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                 DENSITY BASED VERTEX DISTRIBUTOR                 !
+    !------------------------------------------------------------------!
+
+    ! Curve based distributor
+    subroutine DistributeVerticesDensityBasedOverCurve(vd, xc, yc, nv, xv, yv, &
+        ldistr)
+
+        ! Description
+        !============
+        ! Distribute the vertex coordinates xv, yv non-uniformly over the
+        ! curve given by the coordinates xc, yc. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DensityBasedVertexDistributor2DUDT)   :: vd 
+        real(R8), intent(in)                :: xc(:), yc(:)
+        real(R8), allocatable, intent(out), optional  :: xv(:), yv(:)
+        integer(I8), intent(out)            :: nv 
+        real(R8), allocatable, intent(out), optional :: ldistr(:)
+
+        ! Auxiliary
+        real(R8)                            :: l, Mtot
+        real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, temp, &
+            Mi, Mdistr, dll, dllc, dlc
+        real(R8), allocatable, dimension(:, :)  :: xi, yi, rhoi 
+        integer(I8), allocatable, dimension(:)  :: pxi
+
+        ! Loop
+        integer(I8)                         :: i, k 
+
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (size(xc) /= size(yc)) then 
+            call gdErrorHandler('DistributeDensityBasedOverCurve: curve ' // & 
+                'coordinates have incompatible dimensions')
+        end if 
+        if (present(xv)) then 
+            if (allocated(xv)) then 
+                deallocate(xv)
+            end if 
+        end if 
+        if (present(yv)) then 
+            if (allocated(yv)) then 
+                deallocate(yv)
+            end if 
+        end if 
+
+        ! Associate
+        associate(&
+            xb          => vd%xi, &
+            rho         => vd%densityfunction, &
+            coef        => vd%lagcoef,  &
+            intcoef     => vd%intlagcoef) 
+
+        ! Precompute
+        !===========
+        ! Compute curve quantities
+        dx = xc(2:) - xc(1:size(xc)-1)
+        dy = yc(2:) - yc(1:size(yc)-1)  
+        dl = sqrt(dx**2 + dy**2)
+        l = sum(dl)
+
+        ! Compute lagrange interpolation 
+        xi = spread(xb, 1, size(dx))
+        yi = spread(xb, 1, size(dy))
+        do i = 1, size(dx)
+            xi(i, :) = xi(i, :)*dx(i) + xc(i)
+            yi(i, :) = yi(i, :)*dy(i) + yc(i)
+        end do 
+        allocate(temp(size(xi)))
+        call rho%Evaluate(reshape(xi, [size(xi)]), reshape(yi, [size(yi)]), temp)
+        rhoi = reshape(temp, [size(xi, 1), size(xi, 2)])
+        pxi = [(k, k = 0, vd%order)]
+
+        ! Compute number of vertices
+        !===========================
+        ! Compute mass of each segment
+        allocate(Mi(size(dx)))
+        do i = 1, size(dx)
+            Mi(i) = sum(rhoi(i, :)*sum(coef, 2)*dl(i))
+        end do
+
+        ! Compute total mass
+        Mtot = sum(Mi)
+
+        ! Determine total number of vertices (at least two)
+        nv = max(ceiling(Mtot), 2)
+
+        ! Determine vertex distribution
+        !==============================
+        ! Determine mass distribution 
+        allocate(Mdistr(size(xc)))
+        Mdistr = 0
+        do i = 1, size(xc)-1
+            Mdistr(i+1) = Mdistr(i) + Mi(i)
+        end do 
+        Mdistr(size(Mdistr)) = Mtot 
+
+        ! Compute distribution
+        distr = real([(k, k = 0, nv-1)], kind=R8)*(Mtot/(nv-1))
+        distr(size(distr)) = Mtot ! just to make sure
+        distr(1) = 0
+
+        ! Distribute - simply interpolate linearly for now
+        if (present(xv) .and. present(yv)) then 
+            call DistributeVerticesLine(xc, yc, Mdistr, distr, xv, yv)
+        end if 
+
+        ! Return length distribution
+        if (present(ldistr)) then 
+            ! This has to be the length distribution!
+            dll = sqrt(dx**2 + dy**2)
+            dllc = spread(0, 1, size(xc))
+            dlc = spread(0, 1, size(xc))
+            do k = 1, size(xc)-1
+                dllc(k+1) = dllc(k) + dll(k)
+            end do 
+            do k = 1, size(xc)-1
+                dlc(k+1) = dlc(k) + dl(k)
+            end do 
+            ldistr = distr 
+            call Interpolate1D(distr, ldistr, Mdistr, dllc)
+        end if 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Field based distributor
+    subroutine DistributeVerticesDensityBasedOverField(vd, xc, yc, field, nv, &
+        xv, yv, ldistr)
+
+        ! Description
+        !============
+        ! Distribute the vertices over the given curve xc, yc based on 
+        ! uniform distance in terms of the field values fc that are defined
+        ! on the curve coordinates. fc is made monotonic by building the
+        ! interpolation coordinate as the sum of the absolute value of
+        ! the difference in fc (which is therefore always monotonic). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DensityBasedVertexDistributor2DUDT)   :: vd 
+        class(DistributionFunctionUDT), intent(in)  :: field 
+        real(R8), intent(in)                :: xc(:), yc(:)
+        integer(I8), intent(out)            :: nv 
+        real(R8), allocatable, intent(out), optional    :: ldistr(:), xv(:), yv(:)
+
+        ! Auxiliary
+        real(R8)                            :: l, signcor, Mtot 
+        real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, fc, &
+            dllc, dlc, dll, temp, df, Mi, Mdistr
+        real(R8), allocatable, dimension(:, :)  :: xi, yi, rhoi 
+        integer(I8), allocatable, dimension(:)  :: pxi 
+
+        ! Loop
+        integer(I8)                         :: i, k 
+
+        ! Initialize
+        !===========
+        ! Checks
+        if (size(xc) /= size(yc)) then 
+            call gdErrorHandler('DistributeUniformOverCurve: curve ' // & 
+                'coordinates have incompatible dimensions')
+        end if 
+        if (present(xv)) then 
+            if (allocated(xv)) then 
+                deallocate(xv)
+            end if 
+        end if 
+        if (present(yv)) then 
+            if (allocated(yv)) then 
+                deallocate(yv)
+            end if 
+        end if
+
+        ! Associate
+        associate(&
+            xb          => vd%xi, &
+            rho         => vd%densityfunction, &
+            coef        => vd%lagcoef,  &
+            intcoef     => vd%intlagcoef) 
+
+        ! Precompute
+        !===========
+        ! Compute curve quantities
+        dx = xc(2:) - xc(1:size(xc)-1)
+        dy = yc(2:) - yc(1:size(yc)-1) 
+        allocate(fc(size(xc)))
+        call field%Evaluate(xc, yc, fc) 
+        df = abs(fc(2:) - fc(1:size(fc)-1))
+        dl = sqrt(dx**2 + dy**1)
+        l = sum(dl)
+
+        ! Check
+        if (all(df <= 0)) then 
+            signcor = -1.0_R8
+        elseif (all(df >= 0)) then 
+            signcor = 1.0_R8
+        else
+            ! Non-monotonic, print warning
+            print *, 'DistributeVerticesDensityBasedOverField: ' // & 
+                'field distribution is non-monotonic'
+            signcor = 1.0_R8
+        end if 
+
+        ! Compute lagrange interpolation 
+        xi = spread(xb, 1, size(dx))
+        yi = spread(xb, 1, size(dy))
+        do i = 1, size(dx)
+            xi(i, :) = xi(i, :)*dx(i) + xc(i)
+            yi(i, :) = yi(i, :)*dy(i) + yc(i)
+        end do 
+        allocate(temp(size(xi)))
+        call rho%Evaluate(reshape(xi, [size(xi)]), reshape(yi, [size(yi)]), temp)
+        rhoi = reshape(temp, [size(xi, 1), size(xi, 2)])
+        pxi = [(k, k = 0, vd%order)]
+
+        ! Compute number of vertices
+        !===========================
+        ! Compute mass of each segment
+        allocate(Mi(size(dx)))
+        do i = 1, size(dx)
+            Mi(i) = sum(rhoi(i, :)*reshape(coef, [size(coef)])*dl(i))
+        end do
+
+        ! Correct for sign
+        Mi = Mi*signcor
+
+        ! Compute total mass
+        Mtot = sum(Mi)
+
+        ! Determine total number of vertices (at least two)
+        nv = max(ceiling(abs(Mtot)), 2)
+
+        ! Determine vertex distribution
+        !==============================
+        ! Determine mass distribution 
+        allocate(Mdistr(size(xc)))
+        Mdistr = 0
+        do i = 1, size(xc)-1
+            Mdistr(i+1) = Mdistr(i) + Mi(i)
+        end do 
+
+        ! Compute distribution
+        distr = real([(k, k = 0, nv-1)], kind=R8)*(Mtot/(nv-1))
+        distr(size(distr)) = Mtot ! just to make sure
+
+        ! Distribute - simply interpolate linearly for now
+        if (present(xv) .and. present(yv)) then 
+            call DistributeVerticesLine(xc, yc, Mdistr, distr, xv, yv)
+        end if 
+
+        ! Return length distribution
+        if (present(ldistr)) then 
+            ! This has to be the length distribution!
+            dll = sqrt(dx**2 + dy**2)
+            dllc = spread(0, 1, size(xc))
+            dlc = spread(0, 1, size(xc))
+            do k = 1, size(xc)-1
+                dllc(k+1) = dllc(k) + dll(k)
+            end do 
+            do k = 1, size(xc)-1
+                dlc(k+1) = dlc(k) + dl(k)
+            end do 
+            ldistr = distr 
+            call Interpolate1D(distr, ldistr, dlc, dllc)
+        end if 
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
     
