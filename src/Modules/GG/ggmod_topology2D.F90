@@ -174,7 +174,7 @@ module ggmod_topology2D
         ! Getters
         procedure :: GetInternalFaceIDs, GetBoundaryFaceIDs, &
             GetTargetFaceIDs, GetSeparatrixFaceIDs, GetVesselFaceIDs, &
-            GetCoreFaceIDs, GetCoreCellIDs
+            GetCoreFaceIDs, GetCoreCellIDs, GetWideGridCellIDs
     end type 
 
     contains 
@@ -288,7 +288,7 @@ module ggmod_topology2D
         ! Update the field tracer 
         fieldtracer = ConstructStructuredTracer(&
             reshape(Vf, [size(xgv), size(ygv)]), xgv, ygv, &
-            xtp, ytp, Ftp, IDs)
+            xtp, ytp, Ftp, IDs, fieldtracer%npmin, fieldtracer%npmax, fieldtracer%dl)
 
         ! Extrema
         call AddTopologicalMeshExtrema(topomesh, fieldtracer, &
@@ -5884,7 +5884,7 @@ module ggmod_topology2D
         logical, allocatable, dimension(:)      :: temp
 
         ! Loop
-        integer(I8)                 :: i, j, k 
+        integer(I8)                 :: i, j
 
         ! Get
         !====
@@ -5960,6 +5960,62 @@ module ggmod_topology2D
         ! Extract IDs
         allocate(ID(count(keepind)))
         ID = pack([(k, k = 1, topomesh%cell%ntot)], keepind)
+
+    end function
+
+    function GetWideGridCellIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns all the cells that are consider to be a 
+        ! 'wide grid' cell. This includes basically all cells that 
+        ! are not next to a separatrix, or cells that have an extremum.
+        ! Note that if no core boundaries are added and the grid extends
+        ! to an extremum, even the typical 'core' cell is a wide grid
+        ! cell!
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        integer(I8), allocatable, dimension(:)  :: ID 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tcf, tcv
+        logical, allocatable, dimension(:)      :: keepind
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Keeper
+        allocate(keepind(topomesh%cell%ntot))
+        keepind = .true. 
+
+        ! Determine
+        !==========
+        do i = 1, topomesh%cell%ntot 
+            ! Get faces and vertices of this cell
+            tcf = topomesh%cell%GetFace(i)
+            tcv = topomesh%cell%GetVert(i)
+
+            ! Any extrema?
+            if ((any(topomesh%vert%type(tcv) == TMvertexmaxID)) .or. & 
+                (any(topomesh%vert%type(tcv) == TMvertexminID))) then 
+                keepind(i) = .false. 
+                cycle
+            end if 
+
+            ! Any separatrix parts? 
+            if (.not. (any(topomesh%face%type(tcf) == TMfacesepID))) then 
+                keepind(i) = .false.
+            end if 
+        end do 
+
+        ! Get IDs
+        allocate(ID(count(keepind)))
+        ID = pack([(i, i = 1, topomesh%cell%ntot)], keepind)
 
     end function
 
