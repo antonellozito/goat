@@ -92,18 +92,20 @@ subroutine GGDriver(goatoptions)
     ! Field contours
     fieldtracer = ConstructStructuredTracer(&
         reshape(Vf, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-        emptyR8, emptyR8, emptyR8, emptyi8)
+        emptyR8, emptyR8, emptyR8, emptyi8, topomeshoptions%npmin, &
+        topomeshoptions%npmax, topomeshoptions%dl)
 
     ! Vessel contours
     vesseltracer = ConstructStructuredTracer(&
         reshape(Vv, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-        emptyR8, emptyR8, emptyR8, emptyI8)
+        emptyR8, emptyR8, emptyR8, emptyI8, topomeshoptions%npmin, &
+        topomeshoptions%npmax, topomeshoptions%dl)
 
     ! Orthogonal lines
     streamlinetracer = ConstructStructuredStreamlineTracer(&
         reshape(Vfx, [topomeshoptions%vresx, topomeshoptions%vresy]), &
         reshape(Vfy, [topomeshoptions%vresx, topomeshoptions%vresy]), & 
-        xgv, ygv) 
+        xgv, ygv, step=ggoptions%orthtracerstep, nsteps=ggoptions%orthtracernsteps) 
 
     ! Visualize by tracing contours
     resc = 100

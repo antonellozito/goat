@@ -96,8 +96,10 @@ module mod_contour2D
         ! For easier redefinition of tracing values, routines should be
         ! specified that return the location on which the field value
         ! should be known, and a routine that sets the values again. 
+        real(R8)                                :: dl 
         real(R8), allocatable, dimension(:)     :: xs, ys, vs
-        integer(I8), allocatable, dimension(:)  :: order, IDs 
+        integer(I8)                             :: npmin, npmax
+        integer(I8), allocatable, dimension(:)  :: order, IDs
 
     contains 
 
@@ -118,6 +120,9 @@ module mod_contour2D
 
         ! Field value getter
         procedure(GetTracerValuesINT), deferred     :: GetValues
+
+        ! Coarsening of contours
+        procedure :: CoarsenContours
 
     end type
 
@@ -288,7 +293,8 @@ module mod_contour2D
     end function
 
     ! Structured tracer constructor
-    function ConstructStructuredTracer(V, X, Y, xs, ys, vs, IDs) result(tracer)
+    function ConstructStructuredTracer(V, X, Y, xs, ys, vs, IDs, &
+        npmin, npmax, dl) result(tracer)
 
         ! Description
         !============
@@ -300,8 +306,9 @@ module mod_contour2D
         ! Arguments
         class(ContourTracerUDT), allocatable    :: tracer 
         real(R8), intent(in), dimension(:)      :: X, Y, xs, ys, vs 
-        real(R8), intent(in)                    :: V(:, :)
+        real(R8), intent(in)                    :: V(:, :), dl
         integer(I8), intent(in), dimension(:)   :: IDs
+        integer(I8), intent(in)                 :: npmin, npmax
 
         ! Auxiliary
         integer(I8), allocatable                :: order(:)
@@ -320,6 +327,17 @@ module mod_contour2D
 
         type is (StructuredContourTracerUDT)
 
+            tracer%dl = dl 
+            if (npmin <= 2) then 
+                tracer%npmin = 3
+            else
+                tracer%npmin = npmin
+            end if 
+            if (npmax <= 2) then 
+                tracer%npmax = 3
+            else
+                tracer%npmax = npmax
+            end if 
             tracer%V = V 
             tracer%X = X 
             tracer%Y = Y 
@@ -2824,6 +2842,83 @@ module mod_contour2D
         end do 
         !$omp end parallel do
     end subroutine 
+
+    ! Contour coarsening
+    subroutine CoarsenContours(tracer, contours)
+
+        ! Description
+        !============
+        ! This routine coarsens (or refines, depending on dl) the 
+        ! contour line such that the points are at equidistant distance
+        ! dl, respecting a minimal number of points npmin or maximal npmax. 
+        ! Redistribution/tracing of points is done by interpolating the
+        ! coordinates with the desired length distribution.
+        
+        ! Modules
+        !========
+        use Interpolant1D
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(ContourTracerUDT)                 :: tracer
+        class(ContourUDT), intent(inout)        :: contours(:)
+
+        ! Auxiliary
+        integer(I8)                             :: ncp, tnp
+        real(R8)                                :: tdl, l, dlmin, dlmax
+        real(R8), allocatable, dimension(:)     :: tx, ty, dx, dy, &
+            dlc, distr, dll
+
+        ! Loop
+        integer(I8)                             :: i, j, k 
+        
+        ! Associate
+        !==========
+        associate(&
+            npmin           => tracer%npmin, &
+            npmax           => tracer%npmax, &
+            dl              => tracer%dl)
+
+        ! Compute
+        !========
+        do i = 1, size(contours)
+            ! Compute contour metrics
+            ncp = size(contours(i)%x)
+            dx = contours(i)%x(2:ncp) - contours(i)%x(1:ncp-1)
+            dy = contours(i)%y(2:ncp) - contours(i)%y(1:ncp-1)
+            dll = sqrt(dx**2 + dy**2)
+            allocate(dlc(ncp))
+            dlc = 0
+            do j = 2, ncp
+                dlc(j) = dlc(j-1) + dll(j-1)
+            end do 
+            l = sum(dll)
+            dlc(ncp) = l
+
+            ! Compute desired length
+            dlmin = l/(npmax-1)
+            dlmax = l/(npmin-1)
+            tdl = max(min(dlmax, dl), dlmin)
+            tnp = ceiling(l/tdl)+1
+
+            ! Compute
+            distr = real([(k, k = 0, tnp-1)], kind=R8)*l/(tnp-1)
+            distr(1) = 0.0_R8
+            distr(tnp) = l
+            call Interpolate1D(distr, tx, dlc, contours(i)%x)
+            call Interpolate1D(distr, ty, dlc, contours(i)%y)
+            contours(i)%x = tx 
+            contours(i)%y = ty
+
+            ! Housekeeping
+            deallocate(dlc)
+        end do
+
+        ! Housekeeping
+        !=============
+        end associate
+    end subroutine
 
     ! InTriangle routine
     subroutine InTriangle(v1, v2, v3, x, y, xp, yp, in, on)

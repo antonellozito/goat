@@ -367,11 +367,15 @@ module goatmod_userinput
         !                       core)
         ! - removewidegridregions: remove all regions that are not next    
         !                           to a separatrix 
+        ! - npmin, npmax, dl    : minimal and maximal number of points
+        !                       of contours (when doing coarsening) and
+        !                       desired uniform edge length
 
-        integer(I8)             :: fresx, fresy, vresx, vresy
+        integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
+            npmax
         logical                 :: addcoreboundaries, removecoreregions, &
             fdonewton, vdonewton, removewidegridregions
-        real(R8)                :: coreboundariesfrac, ffieldtol
+        real(R8)                :: coreboundariesfrac, ffieldtol, dl 
     contains 
 
         procedure :: Read           => ReadTopomeshOptions
@@ -406,10 +410,8 @@ module goatmod_userinput
         !                   'densitybased' for non-uniform distribution 
         !                   based on predefined node density distribution
         !                   function 
-        ! - vdpdtype:       (for 'densitybased') distribution type, 
-        !                   typically 'vessel_bnd_weight'
         ! - vdpdfacelength: length of face for 'uniform' distribution 
-        ! - vdpdlengthparam:    decay length from vessel for 
+        ! - vdpddecaylength:    decay length from vessel for 
         !                       'densitybased' option
         ! - vdpdx, y, d, val:   parameters to add attraction points for
         !                       densitybased option: x, y are 
@@ -423,10 +425,8 @@ module goatmod_userinput
         ! largely the same as poloidal one (but then vdr instead of vdp)
         ! but some differences
         ! - vdrtype:        (same as vdptype)
-        ! - vdrdtype:       distribution function type, here typically 
-        !                   'magneticfield_separatrix_psi_weight'
         ! - vdrdfieldwidth: desired field with for uniform distribution
-        ! - vdrdlengthparam:    decay length parameter 
+        ! - vdrddecaylength:    decay length parameter 
         ! - vdrddensityatseparatrix:    desired density at separatrix
         ! - vdrddensityatinf:           density far from separatrix
 
@@ -479,23 +479,24 @@ module goatmod_userinput
         
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
-            refLBdovessel
+            refLBdovessel, vdpdincludexp, coarsencontours
         integer(I8)                 :: gcresx, gcresy, &
-            verbosity
+            verbosity, orthtracernsteps
         integer(I8), allocatable, dimension(:)  :: refLBstructureIDs, &
             refLBvertIDs
-        real(R8)                    :: vdpdfacelength, vdpdlengthparam, &
-            vdpddensityatvessel, vdpddensityatinf, vdrdfieldwidth, &
-            vdrdlengthparam, vdrddensityatseparatrix, vdrddensityatinf, &
+        real(R8)                    :: vdpdfacelength, vdpddecaylengthplf, &
+            vdpddecaylengthxp, vdpddensityatvessel, vdpddensityatxp, &
+            vdpddensityatinf, vdrdfieldwidth, &
+            vdrddecaylength, vdrddensityatseparatrix, vdrddensityatinf, &
             remfspsitol, remfspsirattol, rembndtriaminangle, &
             remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
-            refLBLmaxxp, refLBdecaylengthxp
+            refLBLmaxxp, refLBdecaylengthxp, orthtracerstep
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
             vdpdval, refLBLminstructure, refLBLminvert, refLBLmaxstructure, &
             refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
-            cellconstructionmethod, refmeth
+            cellconstructionmethod, refmeth, vdpplftype
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -745,6 +746,11 @@ module goatmod_userinput
         options%vresx = 100
         options%vresy = 100
 
+        ! Contouring (general)
+        options%npmin = 10
+        options%npmax = 10000
+        options%dl = 1e-3
+
         ! Refining options for extrema (field)
         options%fdonewton = .true. 
         options%ffieldtol = 1e-8 
@@ -777,15 +783,19 @@ module goatmod_userinput
         ! Contouring options in grid generator
         options%gcresx = 100 
         options%gcresy = 100
+        options%coarsencontours = .false.
 
         ! Options for poloidal vertex distribution
         options%vdptype             = 'densitybased'
-        options%vdpdtype            = 'vessel_bnd_weight'
+        options%vdpplftype          = 'target'
         options%vdpdfacelength      = 4e-2 
-        options%vdpdlengthparam     = 0.05
+        options%vdpddecaylengthplf  = 0.05
+        options%vdpddecaylengthxp   = 0.05
+        options%vdpdincludexp       = .false.
         allocate(options%vdpdx(0), options%vdpdy(0), options%vdpdd(0), &
             options%vdpdval(0))
         options%vdpddensityatvessel = 250.0_R8
+        options%vdpddensityatxp     = 250.0_R8
         options%vdpddensityatinf    = 10.0_R8
 
         ! Grid generation approach
@@ -807,11 +817,13 @@ module goatmod_userinput
             options%refLBvertIDs(0), options%refLBLminstructure(0), &
             options%refLBLmaxstructure(0))
 
+        options%orthtracerstep = 0.5
+        options%orthtracernsteps = 2000
+
         ! Options for radial vertex distribution
         options%vdrtype             = 'densitybased'
-        options%vdrdtype            = 'magneticfield_separatrix_psi_weight'
         options%vdrdfieldwidth      = 4e-3
-        options%vdrdlengthparam     = 0.005
+        options%vdrddecaylength     = 0.005
         options%vdrddensityatseparatrix     = 2500.0_R8
         options%vdrddensityatinf            = 250.0_R8
 
@@ -1382,6 +1394,12 @@ module goatmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%vresx)
         field = 'gg.tm.vessel.resy'
         call ExtractOptionValueInteger0D(fid, field, options%vresy)
+        field = 'gg.tm.contour.npmin'
+        call ExtractOptionValueInteger0D(fid, field, options%npmin)
+        field = 'gg.tm.contour.npmax'
+        call ExtractOptionValueInteger0D(fid, field, options%npmax)
+        field = 'gg.tm.contour.dl'
+        call ExtractOptionValueReal0D(fid, field, options%dl)
 
         ! Refinement
         field = 'gg.tm.field.donewton'
@@ -1494,16 +1512,28 @@ module goatmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%gcresx)
         field = 'gg.vd.contouring.resy'
         call ExtractOptionValueInteger0D(fid, field, options%gcresy)
+        field = 'gg.vd.contouring.coarsen'
+        call ExtractOptionValueLogical0D(fid, field, options%coarsencontours)
+
+        ! Orthogonal line tracer options
+        field = 'gg.vd.orthlinetracing.step'
+        call ExtractOptionValueReal0D(fid, field, options%orthtracerstep)
+        field = 'gg.vd.orthlinetracing.nsteps'
+        call ExtractOptionValueInteger0D(fid, field, options%orthtracernsteps)
 
         ! Options for poloidal vertex distribution
         field = 'gg.vd.pd.type'
         call ExtractOptionValueCharacter(fid, field, options%vdptype)
-        field = 'gg.vd.pd.distribution.type'
-        call ExtractOptionValueCharacter(fid, field, options%vdpdtype)
+        field = 'gg.vd.pd.distribution.plftype'
+        call ExtractOptionValueCharacter(fid, field, options%vdpplftype)
         field = 'gg.vd.pd.distribution.facelength'
         call ExtractOptionValueReal0D(fid, field, options%vdpdfacelength)
-        field = 'gg.vd.pd.distribution.lengthparam'
-        call ExtractOptionValueReal0D(fid, field, options%vdpdlengthparam)
+        field = 'gg.vd.pd.distribution.decaylengthplf'
+        call ExtractOptionValueReal0D(fid, field, options%vdpddecaylengthplf)
+        field = 'gg.vd.pd.distribution.decaylengthxp'
+        call ExtractOptionValueReal0D(fid, field, options%vdpddecaylengthxp)
+        field = 'gg.vd.pd.distribution.vdpdincludexp'
+        call ExtractOptionValueLogical0D(fid, field, options%vdpdincludexp)
         field = 'gg.vd.pd.distribution.points.x'
         call ExtractOptionValueReal1D(fid, field, options%vdpdx)
         field = 'gg.vd.pd.distribution.points.y'
@@ -1514,6 +1544,8 @@ module goatmod_userinput
         call ExtractOptionValueReal1D(fid, field, options%vdpdval)
         field = 'gg.vd.pd.distribution.densityatvessel'
         call ExtractOptionValueReal0D(fid, field, options%vdpddensityatvessel)
+        field = 'gg.vd.pd.distribution.densityatxp'
+        call ExtractOptionValueReal0D(fid, field, options%vdpddensityatxp)
         field = 'gg.vd.pd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdpddensityatinf)
 
@@ -1521,12 +1553,10 @@ module goatmod_userinput
         ! Options for radial vertex distribution
         field = 'gg.vd.rd.type'
         call ExtractOptionValueCharacter(fid, field, options%vdrtype)
-        field = 'gg.vd.rd.distribution.type'
-        call ExtractOptionValueCharacter(fid, field, options%vdrdtype)
         field = 'gg.vd.rd.distribution.fieldwidth'
         call ExtractOptionValueReal0D(fid, field, options%vdrdfieldwidth)
-        field = 'gg.vd.rd.distribution.lengthparam'
-        call ExtractOptionValueReal0D(fid, field, options%vdrdlengthparam)
+        field = 'gg.vd.rd.distribution.decaylength'
+        call ExtractOptionValueReal0D(fid, field, options%vdrddecaylength)
         field = 'gg.vd.rd.distribution.densityatseparatrix'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatseparatrix)
         field = 'gg.vd.rd.distribution.densityatinf'
