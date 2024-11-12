@@ -173,8 +173,8 @@ module goatmod_types
         integer(I8)                         :: ntot = 0, ngc
         
         real(R8), allocatable, dimension(:) :: psi, bp, bt, x, y
-        integer(I8), allocatable, dimension(:)  :: cflags(:), reg(:), &
-            ft(:)
+        integer(I8), allocatable, dimension(:)  :: cflags, reg, &
+            ft
     end type
 
     ! Boundary structure

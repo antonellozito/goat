@@ -4753,13 +4753,13 @@ module ggmod_gridgeneration2D
         integer(I8)                                 :: ne 
         integer(I8), allocatable, dimension(:)      :: IFlabels, &
             TPlabels, bndlabels, fl_orig, fl_new, Clabels, &
-            nonTPlabels, facelabelmapping, allfID, tfID, &
+            facelabelmapping, allfID, tfID, &
             sortindex, ind, solpslabels, psind, coreIDs, &
-            cellregionmapping
+            cellregionmapping, veslabels, WGlabels, OFlabels, tfc
         integer(I8), allocatable                    :: edges(:, :)
-        logical, allocatable, dimension(:)          :: temp, &
+        logical, allocatable, dimension(:)          :: &
             ispolygonstart, isbranchingpolygon
-        type(PolygonSetUDT)                         :: tempps
+        ! type(PolygonSetUDT)                         :: tempps
 
         ! Loop
         integer(I8)                                 :: i, j, k, flc, &
@@ -4772,7 +4772,7 @@ module ggmod_gridgeneration2D
         flcinc = -1 ! we set negative face labels
 
         ! Set solps temporary labels
-        solpslabels = [(k, k = 1, 3)]
+        solpslabels = [(k, k = 1, 4)]
 
         ! Map
         !====
@@ -4872,6 +4872,31 @@ module ggmod_gridgeneration2D
             end if 
         end do 
         simgrid%cell%reg = cellregionmapping(simgrid%cell%reg)
+
+        ! Cell flags
+        !-----------
+        ! Initialize to zero
+        simgrid%cell%cflags = 0
+
+        ! Set boundary and internal cell flags
+        do i = 1, simgrid%face%ntot 
+            ! Get neighbour cells
+            tfc = GetFaceCell(simgrid%face, i)
+
+            ! Check if boundary face
+            if (size(tfc) == 1) then
+                simgrid%cell%cflags(tfc) = SOLPSbndcellID
+            elseif (size(tfc) == 2) then 
+                simgrid%cell%cflags(tfc) = SOLPSinternalcellID 
+            else
+                ! Call error
+                print *, 'face: ', i, 'cells: ', tfc
+                call gdErrorHandler('TranslateGridLabelsSOLPS: face does ' // & 
+                    'not have one or two cells, check grid interconnection')
+            end if 
+
+        end do
+        
 
 
     end subroutine
