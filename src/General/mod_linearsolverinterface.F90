@@ -474,7 +474,7 @@ module mod_linearsolverinterface
 
         ! Auxiliary
         integer(I8), allocatable        :: ipiv(:)
-        integer                         :: neq, info, infoinv, nb
+        integer                         :: neq, info, infoinv, nb, lda
         double precision, allocatable   :: rhs(:), lhs(:, :), work(:)
 
         ! Initialize
@@ -494,7 +494,8 @@ module mod_linearsolverinterface
 
         ! Call the solver (make sure input is in right format!)
         allocate(ipiv(neq))
-        call dgesv(neq, 1, lhs, neq, ipiv, rhs, neq, info)
+        lda = max(neq, 1)
+        call dgesv(neq, 1, lhs, lda, ipiv, rhs, lda, info)
 
         ! Check if converged
         if (info .ne. 0) then
@@ -544,7 +545,7 @@ module mod_linearsolverinterface
 
         ! Auxiliary
         integer(I8), allocatable        :: ipiv(:)
-        integer                         :: neq, info, infoinv, nb
+        integer                         :: neq, info, infoinv, nb, lda
         double precision, allocatable   :: rhs(:, :), lhs(:, :), work(:)
 
         ! Initialize
@@ -564,7 +565,8 @@ module mod_linearsolverinterface
 
         ! Call the solver (make sure input is in right format!)
         allocate(ipiv(neq))
-        call dgesv(neq, size(b, 2), lhs, neq, ipiv, rhs, neq, info)
+        lda = max(neq, 1)
+        call dgesv(neq, size(b, 2), lhs, lda, ipiv, rhs, lda, info)
 
         ! Check if converged
         if (info .ne. 0) then

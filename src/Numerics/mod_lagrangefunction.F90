@@ -146,7 +146,7 @@ module mod_lagrangefunctions
             end do
             
             ! Add
-            a(i+1, :) = tp*ai(order+1:1:-11); ! because x^i will go from i = 0..M, not M .. 0
+            a(i+1, :) = tp*ai(order+1:1:-1) ! because x^i will go from i = 0..M, not M .. 0
             aint(i+1, :) = a(i+1, :)/([(k, k = 1, order+1)])
         end do 
 
