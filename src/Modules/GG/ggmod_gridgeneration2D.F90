@@ -455,14 +455,20 @@ module ggmod_gridgeneration2D
         type(GridUDT)               :: simgrid
 
         ! Auxiliary
+        real(R8)                    :: valplf
+        real(R8), allocatable, dimension(:)         :: xp, yp, dp, valp
         type(GGTMDataUDT)           :: ggtmdata 
         class(VertexDistributor2DUDT), allocatable      :: &
             poloidalvertexdistributor, radialvertexdistributor
         class(DistributionFunctionUDT), allocatable     :: & 
-            magneticFieldDF 
+            magneticFieldDF, vdpdensityfunction
         class(StreamlineTracerUDT), intent(inout)   :: streamlinetracer
         class(GGTMLineRefiner2DUDT), allocatable    :: GGTMlinerefiner
+        class(PolygonLevelsetFunction2DUDT), allocatable    :: vdpplf
         type(GGGridUDT)             :: grid 
+
+        ! Loop
+        integer(I8)                 :: i
 
         ! Initialize
         !===========
@@ -488,6 +494,76 @@ module ggmod_gridgeneration2D
             ! Construct uniform distributor with facelength 'options%vdpdfacelength'
             poloidalvertexdistributor = ConstructUniformVertexDistributor(&
                 options%vdpdfacelength, options%vdrdfieldwidth)
+
+        case ('densitybased')
+
+            ! Construct distribution function based on vessel and 
+            ! additional points. 
+
+            ! Associate for ease
+            associate(&
+                decaylengthplf  => options%vdpddecaylengthplf,  &
+                decaylengthxp   => options%vdpddecaylengthxp,   &
+                valxp           => options%vdpddensityatxp,     &
+                valinf          => options%vdpddensityatinf     &
+            )
+
+            ! Check which levelset function to use
+            select case(options%vdpplftype)
+
+            case ('vessel')
+
+                vdpplf = vessel%plfvessel
+                valplf = options%vdpddensityatvessel
+
+            case ('target')
+
+                vdpplf = vessel%plftarget
+                valplf = options%vdpddensityatvessel
+
+            case ('none')
+
+                ! Just take vessel PLF but set weight to zero
+                vdpplf = vessel%plftarget 
+                valplf = 0.0_R8
+                
+            case default
+
+                call gdErrorHandler('GenerateUnstructuredAlignedGrid: ' // & 
+                    'unknown polygon levelset function choice: ' // options%vdpplftype)
+
+            end select
+
+            ! Check which points to use
+            xp      = options%vdpdx 
+            yp      = options%vdpdy 
+            valp    = options%vdpdval 
+            dp      = options%vdpdd
+
+            if (options%vdpdincludexp) then 
+                ! Add all X-points
+                do i = 1, topomesh%vert%ntot 
+                    if (topomesh%vert%type(i) == TMvertexsaddleID) then 
+                        xp = [xp, topomesh%vert%x(i)]
+                        yp = [yp, topomesh%vert%y(i)]
+                        valp = [valp, options%vdpddensityatxp]
+                        dp = [dp, options%vdpddecaylengthxp]
+                    end if 
+                end do 
+            end if 
+
+            ! Construct density function
+            vdpdensityfunction = ConstructCoordinatesPLF2DDistanceDF(&
+                vdpplf, valplf, decaylengthplf, xp, yp, valp, valinf, dp)
+
+            ! Construct density based distribution function
+            poloidalvertexdistributor = ConstructDensityBasedVertexDistributor(vdpdensityfunction, 1_I8)
+
+            ! Housekeeping
+            !=============
+            deallocate(xp, yp, valp, dp)
+            end associate
+
 
         case default 
 
@@ -535,7 +611,7 @@ module ggmod_gridgeneration2D
         !======================
         ! Construct the required topological cell data
         call AddTopologicalMeshCellGriddingData(ggtmdata, topomesh, &
-            fieldtracer, magneticField)
+            fieldtracer, magneticField, options)
 
         ! Distribute vertices 
         select case (options%ggmethod)
@@ -1081,7 +1157,9 @@ module ggmod_gridgeneration2D
                     ! - The second intersection should be with the
                     ! ending boundary
                     addpoint = .true.
-                    if (size(stype) < 2) then 
+                    if (size(s11r) == 0) then 
+                        addpoint = .false.
+                    elseif (size(stype) < 2) then 
                         ! Only one intersection found - don't add
                         addpoint = .false.
                     elseif (stype(1) /= 1 .or. s11r(1) /= 0) then ! .or. s1(1) /= 0
@@ -1999,7 +2077,7 @@ module ggmod_gridgeneration2D
 
     ! Cell data
     subroutine AddTopologicalMeshCellGriddingData(ggtmdata, topomesh, &
-        fieldtracer, magneticField)
+        fieldtracer, magneticField, options)
 
         ! Description
         !============
@@ -2046,6 +2124,7 @@ module ggmod_gridgeneration2D
         class(TopomeshUDT), intent(in)          :: topomesh 
         class(ContourTracerUDT), intent(in)     :: fieldtracer 
         type(MagneticFieldUDT), intent(in)      :: magneticField
+        type(GGOptionsUDT), intent(in)          :: options
 
         ! Auxiliary
         integer(I8)                             :: tc, srf, erf, inderf, &
@@ -2297,6 +2376,11 @@ module ggmod_gridgeneration2D
 
             ! Clean
             call CleanContours(tempc)
+
+            ! Coarsen
+            if (options%coarsencontours) then 
+                call fieldtracer%CoarsenContours(tempc)
+            end if 
 
             ! Check if contours make sense and reformat if necessary
             allIDs = tempc%ID
@@ -3788,7 +3872,7 @@ module ggmod_gridgeneration2D
                         if (isprevfacelegal) then 
                             isprevfacelegal = isprevfacelegal &
                                 .and. (.not. newkeepvert(cc)) &
-                                .and. (.not. newiscoarselegal(cc-1))
+                                .and. (newiscoarselegal(cc-1))
                         end if  
                         
                         ! Check which face to merge with
@@ -4024,6 +4108,7 @@ module ggmod_gridgeneration2D
         simgrid%cell%vertP(:, 2)    = grid%cell%vp2%Get()
         simgrid%cell%reg            = grid%cell%region%Get()
         simgrid%cell%ntot           = nc 
+        simgrid%cell%ngc            = 0
 
         associate(&
             c     => simgrid%cell, &
@@ -4704,7 +4789,9 @@ module ggmod_gridgeneration2D
 
         ! Get derived IDs
         bndlabels = topomesh%GetBoundaryFaceIDs()
-        call Setdiff(bndlabels, TPlabels, nonTPlabels)
+        veslabels = topomesh%GetVesselFaceIDs()
+        call Setdiff(bndlabels, [veslabels, Clabels], OFlabels)
+        call Setdiff(veslabels, TPlabels, WGlabels)
 
         ! Create (temporary) mapping
         allocate(facelabelmapping(0:maxval(fl_orig))) ! start from zero for ease
@@ -4712,7 +4799,8 @@ module ggmod_gridgeneration2D
         facelabelmapping(IFlabels) = 0
         facelabelmapping(Clabels) = solpslabels(1)
         facelabelmapping(TPlabels) = solpslabels(2)
-        facelabelmapping(nonTPlabels) = solpslabels(3)
+        facelabelmapping(OFlabels) = solpslabels(3)
+        facelabelmapping(WGlabels) = solpslabels(4)
 
         ! Map
         fl_new = facelabelmapping(fl_orig)
