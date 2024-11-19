@@ -54,7 +54,8 @@ module PolygonLevelsetFunction2D
         PLF2DClosedExactOptionsUDT, PLF2DClosedApproximationOptionsUDT
 
     ! Routines
-    public InitializePolygonLevelsetFunction2D
+    public InitializePolygonLevelsetFunction2D, InitializePLF2DGeneral, &
+        InitializePLF2DClosedExact, InitializePLF2DClosedApproximation
 
     !==================================================================!
     !                                                                  !
@@ -320,6 +321,9 @@ module PolygonLevelsetFunction2D
 
         ! Initialize
         !===========
+        if (allocated(plf)) then 
+            deallocate(plf)
+        end if 
         select type (options)
 
         type is (PLF2DGeneralOptionsUDT)
