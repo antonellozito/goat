@@ -1135,7 +1135,249 @@ def ReadTraduitOutB2us(filepath):
     # Return
     return grid
 
+def ReadStructureFile(filepath):
+    # Description
+    #------------
+    # This function reads a structure.dat file and returns the structure
 
+    # Open file
+    thisfile = open(filepath)
+
+    # Read all lines
+    alllines = thisfile.readlines()
+
+    # Read total number of structures
+    values = alllines[0].split()
+    ns = np.fromstring(values[0], dtype=int, count=1, sep =' '); ns = ns[0]
+
+    # Initialize
+    structure = [gt.Structure() for i in np.arange(0, ns, 1)]
+
+    # Read
+    lind = 2 # skip header
+    for i in np.arange(0, ns, 1):
+        # Read structure header to get the structure ID
+        values = alllines[lind].split()
+        sID = np.fromstring(values[1], dtype=int, count=1, sep =' '); sID = sID[0]-1
+
+        # Update line index
+        lind = lind + 1
+
+        # Read number of structure coordinates
+        values = alllines[lind].split()
+        nc = np.fromstring(values[0], dtype=int, count=1, sep =' '); nc = nc[0]
+
+        # Read coordinates
+        lind = lind + 1
+        tx = np.zeros(abs(nc))
+        ty = np.zeros(abs(nc))
+        for j in np.arange(0, abs(nc), 1):
+            # Read
+            values = alllines[lind].split()
+            xp = np.fromstring(values[0], dtype=float, count=1, sep =' '); xp = xp[0]
+            yp = np.fromstring(values[1], dtype=float, count=1, sep =' '); yp = yp[0]
+            tx[j] = xp
+            ty[j] = yp 
+
+            # Update counter
+            lind = lind + 1
+        
+        # Make structure
+        structure[sID].Initialize(abs(nc), tx, ty)
+
+    # Return
+    return structure
+
+def WriteStructureFile(dirpath, structure):
+    # Description
+    #------------
+    # write a set of structures with specified, x, y coordinates and
+    # number of points n (and indication if open or closed by sign of
+    # n, negative: open, positive: closed) to a file specified by 
+    # dirpath/structure.dat (only dirpath should be given)
+
+    thisfile = open(dirpath + r"/structure.dat", "w")
+
+    # Write total number of structures
+    thisfile.write("             " + str(len(structure)) + "\n")
+
+    # Write header
+    thisfile.write("$structures\n")
+
+    # Loop over all structures
+    k = 1
+    for i in structure:
+        # Write structure header
+        thisfile.write("Structure    " + str(k) + "\n")
+
+        # Write number
+        thisfile.write("             " + str(i.n) + "\n")
+        
+        # Loop over coordinates
+        for j in np.arange(0, abs(i.n), 1):
+            thisfile.write(str(i.x[j]) + "    " + str(i.y[j]) + " \n")
+
+        # Update counter
+        k = k + 1
+
+    # Write final end
+    thisfile.write("$end\n")
+
+    # Close the file
+    thisfile.close()
+
+def ReadRZPsiFile(filepath):
+    # Description
+    #------------
+    # Read in an rzpsi file and return the coordinate vectors R, Z and
+    # the values Psi, where Psi[i, j] yields the Psi value at R[i], Z[j]
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # First line is empty
+    lind = 1
+
+    # Read R, Z sizes
+    values = alllines[lind].split()
+    nR = np.fromstring(values[0], dtype=int, count=1, sep =' '); nR = nR[0]
+    nZ = np.fromstring(values[1], dtype=int, count=1, sep =' '); nZ = nZ[0]
+
+    # Skip the next two lines
+    lind = lind + 2
+
+    # Read R coordinate
+    lind = lind + 1
+    R = np.zeros(nR)
+    k = 0
+    while k < nR:
+        # Read line
+        values = alllines[lind].split()
+        for j in values:
+            R[k] = j 
+            k = k + 1
+
+        # Go to next line
+        lind = lind + 1
+
+    # Skip the next two lines
+    lind = lind + 2
+
+    # Read Z coordinate
+    Z = np.zeros(nZ)
+    k = 0
+    while k < nZ:
+        # Read line
+        values = alllines[lind].split()
+        for j in values:
+            Z[k] = j 
+            k = k + 1
+
+        # Go to next line
+        lind = lind + 1
+
+    # Skip next two lines
+    lind = lind + 2
+
+    # Read Psi values
+    Psi = np.zeros([nR, nZ])
+    i = 0
+    j = 0
+    k = 0
+    while k < nR*nZ:
+        # Read
+        values = alllines[lind].split() 
+        for p in values:
+            # Add value
+            Psi[i, j] = p
+            
+            # Determine new i, j indices
+            if (i == nR-1):
+                i = 0
+                j = j + 1
+            else:
+                i = i + 1
+
+            k = k + 1
+
+        # Update couner
+        lind = lind + 1
+
+    # Return
+    return [R, Z, Psi]
+
+def WriteRZPsiFile(dirpath, R, Z, Psi):
+    # Description
+    #------------
+    # Write out an rzpsi.dat file to the filepath specified as dirpath +
+    # 'rzpsi.dat'
+
+    # Define number of values per line
+    nvpl = 6
+
+    # Open file
+    thisfile = open(dirpath + r"/rzpsi.dat", "w")
+
+    # Write initial white line
+    thisfile.write("\n")
+
+    # Write sizes
+    thisfile.write(str(R.size) + "    " + str(Z.size) + "\n")
+
+    # R coordinate data
+    thisfile.write("$r \n")
+    thisfile.write("nr=" + str(R.size) + "\n")
+    k = 0
+    while k < R.size:
+        thisstr = ""
+        if k + nvpl < R.size:
+            tv = np.zeros(nvpl)
+        else:
+            tv = np.zeros(R.size-k)
+        for i in np.arange(0, tv.size, 1):
+            thisstr = thisstr + np.format_float_scientific(R[k], precision=8) + "  "
+            k = k + 1
+        thisstr = thisstr + "\n"
+        thisfile.write(thisstr)
+
+    # Z coordinate data
+    thisfile.write("$z \n")
+    thisfile.write("nz=" + str(Z.size) + "\n")
+    k = 0
+    while k < Z.size:
+        thisstr = ""
+        if k + nvpl < Z.size:
+            tv = np.zeros(nvpl)
+        else:
+            tv = np.zeros(Z.size-k)
+        for i in np.arange(0, tv.size, 1):
+            thisstr = thisstr + np.format_float_scientific(Z[k], precision=8) + "  "
+            k = k + 1
+        thisstr = thisstr + "\n"
+        thisfile.write(thisstr)
+
+    # Psi data
+    thisfile.write("\n")
+    thisfile.write("$psi \n")
+    thispsi = np.reshape(Psi, Psi.size, order='F')
+    k = 0
+    while k < thispsi.size:
+        thisstr = ""
+        if k + nvpl < thispsi.size:
+            tv = np.zeros(nvpl)
+        else:
+            tv = np.zeros(thispsi.size-k)
+        for i in np.arange(0, tv.size, 1):
+           thisstr = thisstr + np.format_float_scientific(thispsi[k], precision=8) + "  "
+           k = k + 1
+        thisstr = thisstr + "\n"
+        thisfile.write(thisstr)
+
+    # Close the file
+    thisfile.close()      
 
 
 

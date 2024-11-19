@@ -39,6 +39,30 @@ TMfacepolID = 2
 TMfacebndID = 3
 TMfacesepID = 4
 TMfacecoreID = 5
+TMfacePFID = 6
+
+#----------------------------------------------------------------------#
+#                               I/O                                    #
+#----------------------------------------------------------------------#
+
+# Structure format
+class Structure:
+    def __init__(self):
+        # Total number of coordinates (negative if open contour)
+        self.n = 0
+
+        # Coordinates
+        self.x = np.zeros(0, dtype=float)
+        self.y = np.zeros(0, dtype=float)
+
+    def Initialize(self, ntot, x, y):
+        assert ntot == len(x)
+        assert ntot == len(y)
+        self.n = -ntot 
+        if x[0] == x[len(x)-1] and y[0] == y[len(y)-1]:
+            self.n =  ntot 
+        self.x = x 
+        self.y = y
 
 #----------------------------------------------------------------------#
 #                        TOPOLOGICAL MESH                              #

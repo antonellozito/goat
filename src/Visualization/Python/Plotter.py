@@ -546,6 +546,7 @@ def PlotTopologicalMesh(topomesh, fignum):
     bndf = np.where(topomesh.face.type == gt.TMfacebndID)
     sepf = np.where(topomesh.face.type == gt.TMfacesepID)
     coref = np.where(topomesh.face.type == gt.TMfacecoreID)
+    PFf = np.where(topomesh.face.type ==  gt.TMfacePFID)
 
     for i in pf[0]:
         PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
@@ -562,6 +563,9 @@ def PlotTopologicalMesh(topomesh, fignum):
     for i in coref[0]:
         PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
             fignum, color='r')
+    for i in PFf[0]:
+        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
+            fignum, color='g')
         
     # Check bounds
     for i in np.arange(0, topomesh.face.ntot, 1):
@@ -1012,6 +1016,20 @@ def MonitorGridAndVessel(datadir, num, pausetime, maxruntime):
         except: 
             time.sleep(pausetime)
 
+def PlotStructure(structure, fignum, **plotargs):
+    # Description
+    #------------
+    # Plot the structure polygons
+    for i in structure:
+        PlotPolygons2D(i.x, i.y, fignum, **plotargs)
+
+def PlotStructureFromFile(dirpath, fignum):
+    # Read the structure
+    structure = dh.ReadStructureFile(dirpath)
+
+    # Plot
+    PlotStructure(structure, fignum, color='k', linewidth='2')
+
 #--------------------------------------------------------------------------#
 #                               2D surface plots                           #
 #--------------------------------------------------------------------------#
@@ -1181,6 +1199,77 @@ def PlotGeneral2DPatch(verts, val, fignum):
 
     # Set colorbar
     fig.colorbar(poly, ax=ax)
+
+def PlotStructured2DSurface(x, y, val, fignum, **plotargs):
+    # Description
+    #------------
+    # Plot structured 2D data given by the values 'val', where val[i, j]
+    # represents the value at x[i], y[j]. Note that under the hood, we 
+    # simply call the more general plotting version. This is likely 
+    # inefficient but I don't care
+
+    # Construct plotting points
+    xp = np.zeros(val.size)
+    yp = np.zeros(val.size)
+    vp = np.zeros(val.size)
+    k = 0
+    for j in np.arange(val.shape[1]):
+        for i in np.arange(val.shape[0]):
+            xp[k] = x[i]
+            yp[k] = y[j]
+            vp[k] = val[i, j]
+            k = k + 1
+
+    # Plot
+    PlotGeneral2DSurface(xp, yp, vp, fignum, **plotargs)
+
+def PlotStructured2DContour(x, y, val, fignum, **plotargs):
+    # Description
+    #------------
+    # Plot structured 2D data given by the values 'val', where val[i, j]
+    # represents the value at x[i], y[j]. Note that under the hood, we 
+    # simply call the more general plotting version. This is likely 
+    # inefficient but I don't care
+
+    # Construct plotting points
+    xp = np.zeros(val.size)
+    yp = np.zeros(val.size)
+    vp = np.zeros(val.size)
+    k = 0
+    for j in np.arange(val.shape[1]):
+        for i in np.arange(val.shape[0]):
+            xp[k] = x[i]
+            yp[k] = y[j]
+            vp[k] = val[i, j]
+            k = k + 1
+
+    # Plot
+    PlotGeneral2DContour(xp, yp, vp, fignum, **plotargs)
+
+def PlotStructured2DContourf(x, y, val, fignum, **plotargs):
+    # Description
+    #------------
+    # Plot structured 2D data given by the values 'val', where val[i, j]
+    # represents the value at x[i], y[j]. Note that under the hood, we 
+    # simply call the more general plotting version. This is likely 
+    # inefficient but I don't care
+
+    # Construct plotting points
+    xp = np.zeros(val.size)
+    yp = np.zeros(val.size)
+    vp = np.zeros(val.size)
+    k = 0
+    for j in np.arange(val.shape[1]):
+        for i in np.arange(val.shape[0]):
+            xp[k] = x[i]
+            yp[k] = y[j]
+            vp[k] = val[i, j]
+            k = k + 1
+
+    # Plot
+    PlotGeneral2DContourf(xp, yp, vp, fignum, **plotargs)
+
+
 
 #==========================================================================#
 #                                                                          #
