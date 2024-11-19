@@ -4129,10 +4129,11 @@ module ggmod_gridgeneration2D
         call magneticField%interp%Evaluate(simgrid%vert%x, simgrid%vert%y, &
             0, 0, simgrid%vert%psi)
         call magneticField%interp%Evaluate(simgrid%vert%x, simgrid%vert%y, &
-            1, 0, simgrid%vert%bx)
+            1, 0, simgrid%vert%by)
         call magneticField%interp%Evaluate(simgrid%vert%x, simgrid%vert%y, &
-            0, 1, simgrid%vert%by)
+            0, 1, simgrid%vert%bx)
         simgrid%vert%ffbz = magneticField%RBtor*2.0_R8*pi_R8
+        simgrid%vert%bx = -simgrid%vert%bx
 
         ! Faces
         associate(&
@@ -4730,7 +4731,7 @@ module ggmod_gridgeneration2D
         ! - face labels:
         !       Internal boundaries: labels are set to zero
         !       Non-TP vessel boundaries: concatenated where possible, negative label (random)
-        !       TP vessel boundaries: concatenated, negative label (random)
+        !       TP vessel boundaries: concatenated, but per target (i.e. each target gets a unique ID)
         !       Core boundaries: concatenated, negative label (random)
         !       Other outer flux boundaries: concatenated, negative label (random)
         ! - cell regions:
@@ -4750,15 +4751,18 @@ module ggmod_gridgeneration2D
         type(TopomeshUDT), intent(in)               :: topomesh
 
         ! Auxiliary
-        integer(I8)                                 :: ne 
+        integer(I8)                                 :: ne, &
+            TPlabel
         integer(I8), allocatable, dimension(:)      :: IFlabels, &
             TPlabels, bndlabels, fl_orig, fl_new, Clabels, &
             facelabelmapping, allfID, tfID, &
             sortindex, ind, solpslabels, psind, coreIDs, &
-            cellregionmapping, veslabels, WGlabels, OFlabels, tfc
+            cellregionmapping, veslabels, WGlabels, OFlabels, tfc, &
+            allsepIDs, tfv, tfsepv
         integer(I8), allocatable                    :: edges(:, :)
         logical, allocatable, dimension(:)          :: &
-            ispolygonstart, isbranchingpolygon
+            ispolygonstart, isbranchingpolygon, islabelfound, &
+            keepvert
         ! type(PolygonSetUDT)                         :: tempps
 
         ! Loop
@@ -4772,7 +4776,8 @@ module ggmod_gridgeneration2D
         flcinc = -1 ! we set negative face labels
 
         ! Set solps temporary labels
-        solpslabels = [(k, k = 1, 4)]
+        solpslabels = [(k, k = 1, 3)]
+        TPlabel = maxval(solpslabels)+1
 
         ! Map
         !====
@@ -4798,9 +4803,89 @@ module ggmod_gridgeneration2D
         facelabelmapping = 0
         facelabelmapping(IFlabels) = 0
         facelabelmapping(Clabels) = solpslabels(1)
-        facelabelmapping(TPlabels) = solpslabels(2)
-        facelabelmapping(OFlabels) = solpslabels(3)
-        facelabelmapping(WGlabels) = solpslabels(4)
+        facelabelmapping(OFlabels) = solpslabels(2)
+        facelabelmapping(WGlabels) = solpslabels(3)
+
+        ! Deal with targets to comply to idiot SOLPS conventions
+        allsepIDs = topomesh%GetSeparatrixFluxSurfaceIDs()
+        allocate(islabelfound(topomesh%face%ntot))
+        islabelfound = .false.
+        do j = 1, size(TPlabels)
+            ! Check if the label was found already, otherwise continue
+            if (islabelfound(TPlabels(j))) then 
+                cycle 
+            end if 
+
+            ! Get vertices of this face
+            tfv = topomesh%face%vert(TPlabels(j), :)
+
+            ! Get vertex/vertices with separatrix IDS 
+            allocate(keepvert(size(tfv)))
+            keepvert = .false.
+            do i = 1, size(tfv)
+                if (any(topomesh%vert%fsID(tfv(i)) == allsepIDs)) then 
+                    keepvert(i) = .true.
+                end if
+            end do
+
+            ! Sanity check
+            if (count(keepvert) == 0) then 
+                call gdErrorHandler('Translate GridLabelsSOLPS: target ' // & 
+                    'boundary does not have a separatrix vertex, this ' // & 
+                    'is likely a bug')
+            end if 
+
+            ! Keep only separatrix vertices
+            allocate(tfsepv(count(keepvert)))
+            tfsepv = pack(tfv, keepvert)
+
+            ! Check with which other target plates this part connects 
+            ! through its separatrix vertices
+            do i = 1, size(TPlabels)
+                ! Skip the same face
+                if (i == j) then 
+                    cycle
+                end if
+
+                ! Get face vertices
+                tfv = topomesh%face%vert(TPlabels(i), :)
+
+                ! Check
+                if(any(tfv(1) == tfsepv) .or. any(tfv(2) == tfsepv)) then 
+                    ! Check if the facelabel mapping is already initialized
+                    ! for one of the faces 
+                    if (facelabelmapping(TPlabels(i)) == 0 .and. facelabelmapping(TPlabels(j)) == 0) then 
+                        ! Both zero, define new label
+                        facelabelmapping(TPlabels(i)) = TPlabel
+                        facelabelmapping(TPlabels(j)) = TPlabel
+
+                        ! Update
+                        solpslabels = [solpslabels, TPlabel]
+                        TPlabel = TPlabel + 1
+                        
+                    elseif (facelabelmapping(TPlabels(i)) /= 0 .and. facelabelmapping(TPlabels(j)) == 0) then 
+                        ! Overwrite
+                        facelabelmapping(TPlabels(j)) = facelabelmapping(TPlabels(i))
+                        
+                    elseif (facelabelmapping(TPlabels(j)) /= 0 .and. facelabelmapping(TPlabels(i)) == 0) then 
+                        ! Overwrite
+                        facelabelmapping(TPlabels(i)) = facelabelmapping(TPlabels(j))
+
+                    else 
+                        ! This shouldn't happen, print warning and choose one
+                        print *, 'faces: ', i, j
+                        print *, 'TranslateGridLabelsSOLPS: both faces ' // & 
+                            'already have a target label, this should not ' // & 
+                            'happen and may be a bug. We continue and ' // & 
+                            'overwrite one of the labels'
+                        facelabelmapping(TPlabels(j)) = facelabelmapping(TPlabels(i))
+                    end if
+                end if 
+            end do 
+
+            ! Housekeeping
+            deallocate(keepvert, tfsepv)
+        end do 
 
         ! Map
         fl_new = facelabelmapping(fl_orig)
@@ -4845,6 +4930,8 @@ module ggmod_gridgeneration2D
             deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
         end do 
 
+        
+
         ! Cell regions
         !-------------
         ! Get core IDs
@@ -4875,8 +4962,8 @@ module ggmod_gridgeneration2D
 
         ! Cell flags
         !-----------
-        ! Initialize to zero
-        simgrid%cell%cflags = 0
+        ! Initialize to internal cell
+        simgrid%cell%cflags = SOLPSinternalcellID
 
         ! Set boundary and internal cell flags
         do i = 1, simgrid%face%ntot 
@@ -4887,7 +4974,7 @@ module ggmod_gridgeneration2D
             if (size(tfc) == 1) then
                 simgrid%cell%cflags(tfc) = SOLPSbndcellID
             elseif (size(tfc) == 2) then 
-                simgrid%cell%cflags(tfc) = SOLPSinternalcellID 
+                ! do nothing
             else
                 ! Call error
                 print *, 'face: ', i, 'cells: ', tfc
