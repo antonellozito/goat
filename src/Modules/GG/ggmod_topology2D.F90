@@ -1815,7 +1815,6 @@ module ggmod_topology2D
                                 deallocate(vesselval)
                             end if 
                             allocate(vesselval(size(s1x)))
-                            vesselval2 = bndtracer%Evaluate(s1x, s1y)
                             call vessel%plfvessel%Evaluate(s1x, s1y, 0, 0, vesselval)
 
                             ! Check if in vessel
