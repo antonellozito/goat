@@ -361,10 +361,15 @@ module goatmod_userinput
         !                   are considered to have exactly the same field
         !                   value)
         ! - addcoreboundaries   : adds additional core boundaries
+        ! - addPFboundaries     : adds additional private flux like 
+        !                       boundaries (at tangency points of which 
+        !                       contour doesn't enter vessel)
         ! - removecoreregions   : remove the innermost core regions
         ! - coreboundariesfrac  : fraction in field value between core 
-        !                       and connecting X-point (0: X-point, 1: 
-        !                       core)
+        !                       and connecting X-point (1: tangency point, 0: 
+        !                       other PF boundary, e.g. separatrix)
+        ! - PFboundariesfrac    : fraction in field value between outer 
+        !                       PF boundary and tangency point
         ! - removewidegridregions: remove all regions that are not next    
         !                           to a separatrix 
         ! - npmin, npmax, dl    : minimal and maximal number of points
@@ -374,8 +379,9 @@ module goatmod_userinput
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax
         logical                 :: addcoreboundaries, removecoreregions, &
-            fdonewton, vdonewton, removewidegridregions
-        real(R8)                :: coreboundariesfrac, ffieldtol, dl 
+            fdonewton, vdonewton, removewidegridregions, addPFboundaries
+        real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
+            PFboundariesfrac
     contains 
 
         procedure :: Read           => ReadTopomeshOptions
@@ -761,6 +767,8 @@ module goatmod_userinput
         ! Boundary options
         options%addcoreboundaries = .true. 
         options%coreboundariesfrac = 0.2
+        options%addPFboundaries = .true. 
+        options%PFboundariesfrac = 0.2
         options%removecoreregions = .true. 
         options%removewidegridregions = .true. 
 
@@ -1412,12 +1420,16 @@ module goatmod_userinput
         ! Boundaries
         field = 'gg.tm.addcoreboundaries'
         call ExtractOptionValueLogical0D(fid, field, options%addcoreboundaries)
+        field = 'gg.tm.addPFboundaries'
+        call ExtractOptionValueLogical0D(fid, field, options%addPFboundaries)
         field = 'gg.tm.removecoreregions'
         call ExtractOptionValueLogical0D(fid, field, options%removecoreregions)
         field = 'gg.tm.removewidegridregions'
         call ExtractOptionValueLogical0D(fid, field, options%removewidegridregions)
         field = 'gg.tm.cbnd.frac'
         call ExtractOptionValueReal0D(fid, field, options%coreboundariesfrac)
+        field = 'gg.tm.PFbnd.frac'
+        call ExtractOptionValueReal0D(fid, field, options%PFboundariesfrac)
 
         ! Housekeeping
         !=============
