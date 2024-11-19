@@ -425,9 +425,11 @@ VERSION 1.00.00
 
 # Core boundary and region treatment
 'gg.tm.addcoreboundaries'       '1'
+'gg.tm.addPFboundaries'         '1'
 'gg.tm.cbnd.frac'               '0.1'
-'gg.tm.removecoreregions'       '0'
-'gg.tm.removewidegridregions'   '1'
+'gg.tm.PFbnd.frac'              '0.1'
+'gg.tm.removecoreregions'       '1'
+'gg.tm.removewidegridregions'   '0'
 
 #-------------------------------------------------------------------------#
 #                         VERTEX DISTRIBUTION OPTIONS                     #
