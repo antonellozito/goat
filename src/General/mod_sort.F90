@@ -651,7 +651,7 @@ module mod_sort
         ! Auxiliary
         integer(I8)                             :: na
         integer(I8), allocatable, dimension(:)  :: c, &
-            sortind, c_orig, cu, uniqueind, au, bu
+            sortind, c_orig, au, bu
         logical, allocatable, dimension(:)      :: ina, inb, keepind
 
         ! Loop
