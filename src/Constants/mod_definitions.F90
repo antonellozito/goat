@@ -35,13 +35,14 @@ module mod_definitions
         TMvertexsplitID = -1
 
     ! Topological mesh boundary IDs (1: radial face, 2: poloidal face, &
-    ! 3: boundary face, 4: separatrix/saddle point, 5: inserted core boundary)
+    ! 3: boundary face, 4: separatrix/saddle point, 5: inserted core boundary, &
+    ! 6: inserted PF boundary)
     integer(I8), parameter :: TMfaceradID = 1, TMfacepolID = 2, TMfacebndID = 3, &
-        TMfacesepID = 4, TMfacecoreID = 5
+        TMfacesepID = 4, TMfacecoreID = 5, TMfacePFID = 6
 
     ! Joint IDs
     integer(I8), parameter, dimension(*) :: &
-        TMfacealignedID = [TMfacepolID, TMfacesepID, TMfacecoreID], &
+        TMfacealignedID = [TMfacepolID, TMfacesepID, TMfacecoreID, TMfacePFID], &
         TMfacenonalignedID = [TMfaceradID, TMfacebndID]
 
     ! Definitions for SOLPS
