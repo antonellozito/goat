@@ -293,6 +293,9 @@ module mod_polygon
         startind    = [1, nanloc+1]
         endind      = [nanloc-1, nx] 
         nvpp        = endind - startind + 1
+        if (allocated(polygonset%polygons)) then 
+            deallocate(polygonset%polygons)
+        end if 
         allocate(polygonset%polygons(polygonset%np))
 
         ! Check if all polygons have more than one vertex 
@@ -2972,6 +2975,11 @@ module mod_polygon
         where ((d1 < disttol)) frac = 0 ! first point is the same
         where ((d2 < disttol)) frac = 1 ! second point is the same
         where ( .not. (d1 < disttol) .and. .not. (d2 < disttol)) frac = d1/de
+        where(frac > 1.0_R8) frac = 1.0_R8
+        where(frac < 0.0_R8) frac = 0.0_R8
+        !if (any(frac > 1.0_R8) .or. any(frac < 0.0_R8) ) then 
+        !    print *, 'roundoff errors detected'
+        !end if 
 
     end function 
 
@@ -3378,9 +3386,8 @@ module mod_polygon
         call Distance(d1, x, y, x11, y11) 
         call Distance(d2, x, y, x12, y12)
         if ( (d1 < disttol) .or. (d2 < disttol) ) then 
-            return 
-        end if 
-        if (dotprod > 0) then 
+            ! Lies on vertex here, still need to check other segment
+        elseif (dotprod > 0) then 
             x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
             y = x 
             return
@@ -3391,9 +3398,8 @@ module mod_polygon
         call Distance(d1, x, y, x21, y21) 
         call Distance(d2, x, y, x22, y22)
         if ( (d1 < disttol) .or. (d2 < disttol) ) then 
-            return 
-        end if 
-        if (dotprod > 0) then 
+            ! Lies on vertex here
+        elseif (dotprod > 0) then 
             x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
             y = x 
             return 
