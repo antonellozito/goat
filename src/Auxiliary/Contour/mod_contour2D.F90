@@ -30,12 +30,12 @@ module mod_contour2D
         StructuredContourTracerUDT, ConstructStructuredTracer, CleanContours
 
     ! Module parameters
-    integer, parameter  :: npq          = 2 ! number of padding quads for 2D tracer to determine saddle points
+    integer, parameter  :: npq          = 4 ! number of padding quads for 2D tracer to determine saddle points
     integer, parameter  :: verbosity    = 0 ! verbosity level (0: only true errors, 1: additional messages)
     real(R8), parameter :: pert         = 1e-13 ! perturbation value 
     real(R8), parameter :: spvalabstol  = 1e-13 ! absolute tolerance in field value to determine if value is equal to saddlepoint value
     real(R8), parameter :: spvalreltol  = 1e-10 ! relative tolerance for ^ 
-    real(R8), parameter :: disttol      = 1e-10 ! distance tolerance (absolute) for face lengths (deleted if lower)
+    real(R8), parameter :: disttol      = 1e-8 ! distance tolerance (absolute) for face lengths (deleted if lower)
 
     !==================================================================!
     !                                                                  !
@@ -1095,6 +1095,10 @@ module mod_contour2D
             tx = x1 + frac*(x2 - x1)
             ty = y1 + frac*(y2 - y1)
 
+            if (isnan(tx) .or. isnan(ty)) then 
+                print *, 'nans detected in contours'
+            end if 
+
             ! Add point to contour
             call xc%Append(tx)
             call yc%Append(ty)
@@ -1455,6 +1459,12 @@ module mod_contour2D
                     
                     ! Subtract
                     if (quadc(iic, jjc) == 0) then 
+                        if ((iic == siic) .and. (jjc == sjjc)) then 
+                            ! Found strating point, append first coordinate and exit
+                            call xc%Append(xc%Get(1))
+                            call yc%Append(yc%Get(1))
+                            exit
+                        end if 
                         call gdErrorHandler('TraceSingleContourStructured2D: ' // & 
                         'could not subtract counter, this is a bug')
                     end if 
@@ -1842,6 +1852,9 @@ module mod_contour2D
                 frac = (tv - V1)/(V2 - V1)
                 tx = x1 + frac*(x2 - x1)
                 ty = y1 + frac*(y2 - y1)
+                if ((frac < 0.0_R8) .or. (frac > 1.0_R8)) then 
+                    print *, 'frac not in bounds'
+                end if 
 
                 ! Check if we hit a boundary face
                 if ((iic == nx) .or. (iic == 0) .or. (jjc == ny) .or. (jjc == 0)) then 
@@ -2472,6 +2485,10 @@ module mod_contour2D
                 doexit = .true.
                 return 
             end if 
+
+            ! Update saddle point structure
+            spstruct(isp) = thissp
+            spstruct(isp)%hasftri = hasftri
 
         end do
         
