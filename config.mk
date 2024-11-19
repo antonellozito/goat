@@ -112,6 +112,7 @@ SUITESPARSEPATH = /usr/include/suitesparse
 
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
 CFLAGS_DEF = -c -pg -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized -fopenmp
+CFLAGS_DEF_NO_OMP = -c -pg -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized 
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
@@ -130,6 +131,7 @@ CCFLAGS_PERF = -c -Wall -O2
 ## %=======
 ## LFLAGS			: linking flags to be used (apart from libraries)
 LFLAGS_DEF =   -pg -fcheck=all -fopenmp
+LFLAGS_DEF_NO_OMP =   -pg -fcheck=all
 ## LFLAGS_DEBUG 	: linking flags for debugging
 LFLAGS_DEBUG = -pg -g -fcheck=all
 
