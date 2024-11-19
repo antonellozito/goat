@@ -101,11 +101,26 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
     ! Set NaN
     nan = IEEE_VALUE(nan, IEEE_QUIET_NAN)
 
-    ! Get maximal vertex ID label
+    ! Get maximal vertex ID label - if available
     vID = 0
-    do i = 1, ps%np 
-        vID = max(maxval(ps%polygons(i)%labels(:, 3)), vID)
-    end do 
+    if (size(ps%polygons(1)%labels, 2) >= 3) then 
+        do i = 1, ps%np 
+            vID = max(maxval(ps%polygons(i)%labels(:, 3)), vID)
+        end do 
+    else
+        ! Throw warning
+        print *, 'ConstructVesselPolygonSet: polygons do not have ' // & 
+            'all labels, constructing vessel structure and vertex labels ' // & 
+            'based on polygons'
+        do i = 1, ps%np
+            deallocate(ps%polygons(i)%labels)
+            allocate(ps%polygons(i)%labels(ps%polygons(i)%nv, 3))
+            ps%polygons(i)%labels(:, 1) = i 
+            ps%polygons(i)%labels(:, 2) = 0
+            ps%polygons(i)%labels(:, 3) = [(k, k = vID+1, vID+ps%polygons(i)%nv)]
+            vID = vID + ps%polygons(i)%nv 
+        end do 
+    end if 
 
     ! Determine intersections
     !========================
