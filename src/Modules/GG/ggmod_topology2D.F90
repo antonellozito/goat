@@ -226,6 +226,8 @@ module ggmod_topology2D
         class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
 
         ! Auxiliary
+        real(R8)                                :: dxfracmin, dyfracmin, &
+            dv
         real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
             yps, xg, yg, Vf, xgv, ygv
         real(R8), parameter                     :: emptyR8(0)= 0
@@ -240,6 +242,10 @@ module ggmod_topology2D
 
         ! Initialize
         !===========
+        ! Initialize data
+        dxfracmin = 1e-4_R8
+        dyfracmin = 1e-4_R8
+
         ! Initialize topomesh 
         call topomesh%Initialize()
 
@@ -279,7 +285,7 @@ module ggmod_topology2D
         IDs = pack(topomesh%vert%ID, &
             (topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
         call ConstructRefined2DStructuredGrid(xg, yg, xgv, ygv, xb, yb, &
-            options%vresx, options%vresy, [xtp, xe], [ytp, ye], 5, 5)  
+            options%vresx, options%vresy, [xtp, xe], [ytp, ye], 5, 5, dxfracmin, dyfracmin)  
 
         ! Evaluate magnetic field and vessel
         allocate(Vf(size(xg)))

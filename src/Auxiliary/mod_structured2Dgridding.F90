@@ -80,7 +80,7 @@ module mod_structured2Dgridding
     ! Structured non-uniform 2D grid with possible refinement near given
     ! points
     subroutine ConstructRefined2DStructuredGrid(xg, yg, xgv, ygv, &
-        xb, yb, resx, resy, xp, yp, padx, pady)
+        xb, yb, resx, resy, xp, yp, padx, pady, dxfracmin, dyfracmin)
 
         ! Description
         !============
@@ -109,25 +109,42 @@ module mod_structured2Dgridding
             xgv(:), ygv(:)
         real(R8), intent(in)                    :: xb(1:2), yb(1:2), &
             xp(:), yp(:)
+        real(R8), intent(inout)                 :: dxfracmin, dyfracmin
         integer(I8), intent(in)                 :: resx, resy, padx, pady 
 
         ! Auxiliary
         real(R8)                                :: minx, miny, maxx, &
-            maxy, sx, sy 
+            maxy, sx, sy, dxmin, dymin
         real(R8), allocatable, dimension(:)     :: xgvp, &
-            ygvp, dxgvp, dygvp
+            ygvp, dxgvp, dygvp, xgvpnew, ygvpnew
         integer(I8)                             :: nxp, nyp
         integer(I8), allocatable, dimension(:)  :: nsx, nsy
-        logical, allocatable, dimension(:)      :: keep
+        logical, allocatable, dimension(:)      :: keep, coarsen 
 
         ! Loop
-        integer(I8)                             :: i, k, xc, yc 
+        integer(I8)                             :: i, k, xc, yc, cc 
 
         ! Initialize
         !===========
         ! Check input
         nxp = size(xp)
         nyp = size(yp)
+
+        if (dxfracmin > 0.1_R8) then 
+            ! This seems much to high, cap
+            print *, 'given dxfracmin: ', dxfracmin
+            print *, 'ConstructRefined2DStructuredGrid: dxfracmin ' // & 
+                'unrealistically high, capping to 0.1'
+            dxfracmin = 0.1_R8
+        end if 
+        if (dyfracmin > 0.1_R8) then 
+            ! This seems much to high, cap
+            print *, 'given dyfracmin: ', dyfracmin
+            print *, 'ConstructRefined2DStructuredGrid: dyfracmin ' // & 
+                'unrealistically high, capping to 0.1'
+            dyfracmin = 0.1_R8
+        end if 
+            
     
 
         ! Construct gridding vectors
@@ -142,6 +159,10 @@ module mod_structured2Dgridding
         sx = maxx - minx
         sy = maxy - miny
 
+        ! Minimal distance
+        dxmin = sx*dxfracmin 
+        dymin = sy*dyfracmin
+
         ! Add additional points & padding in x-direction
         if (size(xp) > 0) then 
             ! Initialize
@@ -150,11 +171,24 @@ module mod_structured2Dgridding
             
             ! Compute distance between seeding points
             dxgvp = xgvp(2:nxp+2) - xgvp(1:nxp+1)
-            
+
             ! Check for almost zero distance, eliminate
-            keep = dxgvp > disttol
+            keep = dxgvp > dxmin
             dxgvp = pack(dxgvp, keep)  
             xgvp = pack(xgvp, [keep, .true.])
+
+            ! Add padding points around additional points (except minx, maxx)
+            allocate(xgvpnew(3*(size(xgvp)-2)+2))
+            xgvpnew(1) = xgvp(1)
+            xgvpnew(size(xgvpnew)) = xgvp(size(xgvp))
+            k = 1
+            do i = 2, size(xgvp)-1
+                xgvpnew(k+1:k+3) = [-2*padx*dxmin, 0.0_R8, 2*padx*dxmin] + xgvp(i)
+                k = k + 3
+            end do  
+            xgvp = xgvpnew
+            call Sort(xgvp, ascend=.true.)
+            dxgvp = xgvp(2:size(xgvp)) - xgvp(1:size(xgvp)-1)
             
             ! Compute number of segments
             nsx = floor(dxgvp/(sx/resx))+1
@@ -176,6 +210,53 @@ module mod_structured2Dgridding
             xgv = real([(k, k = 0, resx)], kind=R8)*sx + minx 
             
         end if
+#ifdef whatev
+
+        ! Check for minimal distance
+        dxgvp = xgv(2:size(xgv)) - xgv(1:size(xgv)-1)
+        do while (.true.)
+            coarsen = dxgvp < dxmin
+            if (.not. any(coarsen)) then 
+                exit 
+            end if 
+            cc = 1
+            dxgvpnew = dxgvp 
+            k = 1
+            if (any (coarsen(1:size(coarsen)-1) .and. (coarsen(2:size(coarsen))))) then 
+                do while (k < size(dxgvp)) 
+                    if (coarsen(k) .and. coarsen(k+1)) then 
+                        coarsen(k:k+1) = .false.
+                        dxgvpnew(cc) = dxgvp(k) + dxgvp(k+1)
+                        k = k + 2
+                        cc = cc + 1
+                    else 
+                        dxgvpnew(cc) = dxgvp(k)
+                        k = k + 1
+                        cc = cc + 1
+                    end if 
+                end do
+            else
+                do while (k < size(dxgvp))
+                    if (coarsen(k) .or. coarsen(k+1)) then 
+                        dxgvpnew(cc) = dxgvp(k) + dxgvp(k+1)
+                        k = k + 2
+                        cc = cc + 1
+                    else 
+                        dxgvpnew(cc) = dxgvp(k)
+                        k = k + 1
+                        cc = cc + 1
+                    end if 
+                end do
+            end if 
+            dxgvp = dxgvpnew(1:cc-1)
+        end do
+        deallocate(xgv)
+        allocate(xgv(size(dxgvp)+1))
+        xgv(1) = minx 
+        do i = 1, size(dxgvp)
+            xgv(i+1) = xgv(i) + dxgvp(i)
+        end do 
+#endif
 
         ! Add additional points & padding in y-direction
         if (size(yp) > 0) then 
@@ -187,10 +268,23 @@ module mod_structured2Dgridding
             dygvp = ygvp(2:nyp+2) - ygvp(1:nyp+1)
             
             ! Check for almost zero distance, eliminate
-            keep = dygvp > disttol
+            keep = dygvp > dymin
             dygvp = pack(dygvp, keep)  
             ygvp = pack(ygvp, [keep, .true.])
-            
+
+            ! Add padding points around additional points (except minx, maxx)
+            allocate(ygvpnew(3*(size(ygvp)-2)+2))
+            ygvpnew(1) = ygvp(1)
+            ygvpnew(size(ygvpnew)) = ygvp(size(ygvp))
+            k = 1
+            do i = 2, size(ygvp)-1
+                ygvpnew(k+1:k+3) = [-2*pady*dymin, 0.0_R8, 2*pady*dymin] + ygvp(i)
+                k = k + 3
+            end do  
+            ygvp = ygvpnew
+            call Sort(ygvp, ascend=.true.)
+            dygvp = ygvp(2:size(ygvp)) - ygvp(1:size(ygvp)-1)
+
             ! Compute number of segments
             nsy = floor(dygvp/(sy/resy))+1
             
@@ -211,6 +305,51 @@ module mod_structured2Dgridding
             ygv = real([(k, k = 0, resy)], kind=R8)*sy + miny
             
         end if
+#ifdef whatev
+        ! Check for minimal distance
+        dygvp = ygv(2:size(ygv)) - ygv(1:size(ygv)-1)
+        do while (.true.)
+            coarsen = dygvp < dymin
+            if (.not. any(coarsen)) then 
+                exit 
+            end if 
+            cc = 1
+            dygvpnew = dygvp 
+            k = 1
+            if (any (coarsen(1:size(coarsen)-1) .and. (coarsen(2:size(coarsen))))) then 
+                do while (k < size(dygvp))
+                    if (coarsen(k) .and. coarsen(k+1)) then 
+                        dygvpnew(cc) = dygvp(k) + dygvp(k+1)
+                        k = k + 2
+                        cc = cc + 1
+                    else 
+                        dygvpnew(cc) = dygvp(k)
+                        k = k + 1
+                        cc = cc + 1
+                    end if 
+                end do
+            else 
+                do while (k < size(dygvp))
+                    if (coarsen(k) .or. coarsen(k+1)) then 
+                        dygvpnew(cc) = dygvp(k) + dygvp(k+1)
+                        k = k + 2
+                        cc = cc + 1
+                    else 
+                        dygvpnew(cc) = dygvp(k)
+                        k = k + 1
+                        cc = cc + 1
+                    end if 
+                end do
+            end if 
+            dygvp = dygvpnew(1:cc-1)
+        end do
+        deallocate(ygv)
+        allocate(ygv(size(dygvp)+1))
+        ygv(1) = miny 
+        do i = 1, size(dygvp)
+            ygv(i+1) = ygv(i) + dygvp(i)
+        end do 
+#endif
 
         ! Construct grid
         allocate(xg(size(xgv)*size(ygv)), yg(size(xgv)*size(ygv)))
