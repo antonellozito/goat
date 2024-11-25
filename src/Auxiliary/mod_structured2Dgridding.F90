@@ -119,10 +119,10 @@ module mod_structured2Dgridding
             ygvp, dxgvp, dygvp, xgvpnew, ygvpnew
         integer(I8)                             :: nxp, nyp
         integer(I8), allocatable, dimension(:)  :: nsx, nsy
-        logical, allocatable, dimension(:)      :: keep, coarsen 
+        logical, allocatable, dimension(:)      :: keep 
 
         ! Loop
-        integer(I8)                             :: i, k, xc, yc, cc 
+        integer(I8)                             :: i, k, xc, yc 
 
         ! Initialize
         !===========
