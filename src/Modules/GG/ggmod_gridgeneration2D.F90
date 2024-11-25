@@ -860,8 +860,8 @@ module ggmod_gridgeneration2D
             stype, sortind, newID, updatedfaces, allIDs, vertmap
         logical                                     :: addpoint
         logical, allocatable, dimension(:)          :: iscelldone, &
-            isfacedone, isstartingcell, isstartingface, istopoverthf, &
-            istopovertlf, isvertexdeleted, keepvert
+            isfacedone, isstartingcell, isstartingface, istopovertlf, &
+            istopoverthf, isvertexdeleted, keepvert
         real(R8)                                    :: xb(1:2), yb(1:2)
         real(R8), allocatable, dimension(:)         :: xt, yt, &
             x1, x2, x3, x4, y1, y2, y3, y4, s11r, s12r, s21r, s22r, &
@@ -2129,21 +2129,22 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: tc, srf, erf, inderf, &
             indsrf, tf, cind, nc, ntf, incr, nv, temp, minind, maxind, &
-            startind, endind, nfs
+            startind, endind, nfs, tfloc, tfc, nthf, ntlf
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
-            allIDs, s1, s2, polv, tf1, tf2, fsID
+            allIDs, s1, s2, polv, tf1, tf2, fsID, sortind, thf, tlf
         integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
             segc, vertexID
         real(R8)                                :: hfval, lfval, &
-            dhf1, dhf2, dlf1, dlf2, nxc, nyc, nxfv, nyfv
+            dhf1, dhf2, dlf1, dlf2, nxc, nyc, nxfv, nyfv, txf, tyf, &
+            ntxf
         real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
             tcfv2val, tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint, &
-            nxf, nyf, nnf, tsegrc
+            nxf, nyf, nnf, tsegrc, tsegrrf
         real(R8), allocatable, dimension(:, :)  :: segrrf, segrc, &
             xint, yint
         logical                                 :: isflremoved, &
-            isintersectremoved
+            isintersectremoved, issrf, doflip, changesign
         logical, allocatable, dimension(:)      :: ishfface, islfface, &
             ishfvert, iscontourfound, keepind
         type(ContourUDT), allocatable           :: tempc(:)
@@ -2360,15 +2361,57 @@ module ggmod_gridgeneration2D
             tx = facedata(tf)%line%xv
             ty = facedata(tf)%line%yv
 
+            ! Get cell belonging to this face
+            tfloc = findloc(tubef, tf, 1, back=.false.)
+
+            ! Rearrange to ensure start from distribution face
+            if (tfloc /= 1) then 
+                tubec = [tubec(tfloc:size(tubec)), tubec(1:tfloc-1)]
+                
+            end if 
+
+            ! Check & rearrange to ensure start from distribution face
+            if (tfloc == 0) then 
+                ! This should not happen
+                print *, 'tube: ', i, 'face: ', tf 
+                call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // &
+                    'could not find distribution face in tube, this is a bug' )
+            elseif (tfloc == size(tubec)+1) then
+                ! Need to flip 
+                ! Faces
+                tubef = tubef(size(tubef):1:-1)
+
+                ! Cells
+                tubec = tubec(size(tubec):1:-1)
+            elseif (tfloc /= 1) then 
+                ! Can simply shift
+                print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    'not yet verified'
+                ! Faces
+                tubef = [tubef(tfloc:size(tubef)), tubef(1:tfloc-1)]
+
+                ! Cells
+                tubec = [tubec(tfloc:size(tubec)), tubec(1:tfloc-1)]
+
+            else 
+                ! Nothing to do, move along
+
+            end if 
+            tfc = tubec(1)
+
             !  Make sure we trace from high to low field value
             if (allocated(tfval)) then 
                 deallocate(tfval)
             end if 
             allocate(tfval(size(tx)))
-            call magneticField%interp%Evaluate(tx, ty, 0, 0, tfval)
+            tfval = fieldtracer%Evaluate(tx, ty)
+            ! call magneticField%interp%Evaluate(tx, ty, 0, 0, tfval)
             if (tfval(1) < tfval(size(tfval))) then 
                 tx = tx(size(tx):1:-1)
                 ty = ty(size(ty):1:-1)
+            end if 
+            if (any(topomesh%face%vert(tf, :) == 242) .or. any(topomesh%face%vert(tf, :) == 243)) then 
+                print *, 'hm'
             end if 
 
             ! Trace
@@ -2382,6 +2425,225 @@ module ggmod_gridgeneration2D
                 call fieldtracer%CoarsenContours(tempc)
             end if 
 
+            ! Precompute face normals for each flux surface for 
+            ! determining orientation
+            nxf = -(facedata(tf)%line%yl(2:) - facedata(tf)%line%yl(1:size(facedata(tf)%line%yl)-1))
+            nyf = (facedata(tf)%line%xl(2:) - facedata(tf)%line%xl(1:size(facedata(tf)%line%xl)-1))
+            nnf = sqrt(nxf**2 + nyf**2)
+            nxf = nxf/nnf
+            nyf = nyf/nnf
+
+            ! Make sure it goes from high field to low field
+            !if (tfval(1) < tfval(size(tfval))) then 
+            !    nxf = -nxf(size(nxf):1:-1) 
+            !    nyf = -nyf(size(nyf):1:-1) 
+            !end if
+
+            ! Find high field/low field face that has the same vertex
+            thf = celldata(tfc)%hffaces
+            nthf = size(thf)
+            tlf = celldata(tfc)%lffaces 
+            ntlf = size(tlf)
+            issrf = .false. 
+            if (celldata(tfc)%srf == tf) then 
+                issrf = .true.
+            end if 
+            doflip = .false.
+            changesign = .false.
+            if (nthf > 0) then 
+                ! Check with high field face (should be first or last face)
+                associate(hf1       => facedata(thf(1))%line, &
+                    hf2             => facedata(thf(nthf))%line)
+
+                if (topomesh%face%vert(thf(1), 1) == topomesh%face%vert(tf, 1)) then 
+                    ! Take first edge of high field line
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (hf1%xl(2) - hf1%xl(1))
+                    tyf = (hf1%yl(2) - hf1%yl(1))
+                elseif (topomesh%face%vert(thf(1), 1) == topomesh%face%vert(tf, 2)) then
+                    ! Take first edge of high field line, flip 
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (hf1%xl(2) - hf1%xl(1))
+                    tyf = (hf1%yl(2) - hf1%yl(1))
+                    nxf = nxf(size(nxf):1:-1) 
+                    nyf = nyf(size(nyf):1:-1) 
+                    doflip = .true.
+                elseif (topomesh%face%vert(thf(1), 2) == topomesh%face%vert(tf, 1)) then
+                    ! Take last edge of high field line
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (hf1%xl(hf1%nl-1) - hf1%xl(hf1%nl))
+                    tyf = (hf1%yl(hf1%nl-1) - hf1%yl(hf1%nl))
+                elseif (topomesh%face%vert(thf(1), 2) == topomesh%face%vert(tf, 2)) then
+                    ! Take last edge of high field line, flipe
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (hf1%xl(hf1%nl-1) - hf1%xl(hf1%nl))
+                    tyf = (hf1%yl(hf1%nl-1) - hf1%yl(hf1%nl))
+                    nxf = nxf(size(nxf):1:-1) 
+                    nyf = nyf(size(nyf):1:-1) 
+                    doflip = .true.
+                elseif (topomesh%face%vert(thf(nthf), 1) == topomesh%face%vert(tf, 1)) then 
+                    ! Take first edge of high field line
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (hf2%xl(2) - hf2%xl(1))
+                    tyf = (hf2%yl(2) - hf2%yl(1))
+                elseif (topomesh%face%vert(thf(nthf), 1) == topomesh%face%vert(tf, 2)) then
+                    ! Take first edge of high field line, flip 
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (hf2%xl(2) - hf2%xl(1))
+                    tyf = (hf2%yl(2) - hf2%yl(1))
+                    nxf = nxf(size(nxf):1:-1) 
+                    nyf = nyf(size(nyf):1:-1) 
+                    doflip = .true.
+                elseif (topomesh%face%vert(thf(nthf), 2) == topomesh%face%vert(tf, 1)) then
+                    ! Take last edge of high field line
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (hf2%xl(hf2%nl-1) - hf2%xl(hf2%nl))
+                    tyf = (hf2%yl(hf2%nl-1) - hf2%yl(hf2%nl))
+                elseif (topomesh%face%vert(thf(nthf), 2) == topomesh%face%vert(tf, 2)) then
+                    ! Take last edge of high field line, flip
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (hf2%xl(hf2%nl-1) - hf2%xl(hf2%nl))
+                    tyf = (hf2%yl(hf2%nl-1) - hf2%yl(hf2%nl))
+                    nxf = nxf(size(nxf):1:-1) 
+                    nyf = nyf(size(nyf):1:-1) 
+                    doflip = .true.
+                else
+                    ! No correspondence between vertices found, throw error
+                    call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
+                        'Could not find any corresponding vertices, this is a bug')
+                end if 
+
+                ! Check orientation
+                !if (issrf) then 
+                !    txf = -txf
+                !    tyf = -tyf
+                !end if 
+                ntxf = sqrt(txf**2 + tyf**2)
+                txf = txf/ntxf 
+                tyf = tyf/ntxf
+                if ((nxf(1)*txf + nyf(1)*tyf) < 0.0_R8) then 
+                    nxf = -nxf 
+                    nyf = -nyf 
+                    changesign = .true.
+                end if 
+
+                end associate
+    
+            elseif (size(tlf) > 0) then 
+                ! Check with high field face (should be first or last face)
+                associate(lf1       => facedata(tlf(1))%line, &
+                    lf2             => facedata(tlf(ntlf))%line)
+                if (topomesh%face%vert(tlf(1), 1) == topomesh%face%vert(tf, 2)) then 
+                    ! Take first edge of high field line
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (lf1%xl(2) - lf1%xl(1))
+                    tyf = (lf1%yl(2) - lf1%yl(1))
+                elseif (topomesh%face%vert(tlf(1), 1) == topomesh%face%vert(tf, 1)) then
+                    ! Take first edge of high field line, flip 
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (lf1%xl(2) - lf1%xl(1))
+                    tyf = (lf1%yl(2) - lf1%yl(1))
+                    nxf = nxf(size(nxf):1:-1) 
+                    nyf = nyf(size(nyf):1:-1) 
+                    doflip = .true.
+                elseif (topomesh%face%vert(tlf(1), 2) == topomesh%face%vert(tf, 2)) then
+                    ! Take last edge of high field line
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (lf1%xl(lf1%nl-1) - lf1%xl(lf1%nl))
+                    tyf = (lf1%yl(lf1%nl-1) - lf1%yl(lf1%nl))
+                elseif (topomesh%face%vert(tlf(1), 2) == topomesh%face%vert(tf, 1)) then
+                    ! Take last edge of high field line, flipe
+                    print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    'not yet verified'
+                    txf = (lf1%xl(lf1%nl-1) - lf1%xl(lf1%nl))
+                    tyf = (lf1%yl(lf1%nl-1) - lf1%yl(lf1%nl))
+                    nxf = nxf(size(nxf):1:-1) 
+                    nyf = nyf(size(nyf):1:-1) 
+                    doflip = .true.
+                elseif (topomesh%face%vert(tlf(ntlf), 1) == topomesh%face%vert(tf, 2)) then 
+                    ! Take first edge of high field line
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (lf2%xl(2) - lf2%xl(1))
+                    tyf = (lf2%yl(2) - lf2%yl(1))
+                elseif (topomesh%face%vert(tlf(ntlf), 1) == topomesh%face%vert(tf, 1)) then
+                    ! Take first edge of high field line, flip 
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (lf2%xl(2) - lf2%xl(1))
+                    tyf = (lf2%yl(2) - lf2%yl(1))
+                    nxf = nxf(size(nxf):1:-1) 
+                    nyf = nyf(size(nyf):1:-1) 
+                    doflip = .true.
+                elseif (topomesh%face%vert(tlf(ntlf), 2) == topomesh%face%vert(tf, 2)) then
+                    ! Take last edge of high field line
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (lf2%xl(lf2%nl-1) - lf2%xl(lf2%nl))
+                    tyf = (lf2%yl(lf2%nl-1) - lf2%yl(lf2%nl))
+                elseif (topomesh%face%vert(tlf(ntlf), 2) == topomesh%face%vert(tf, 1)) then
+                    ! Take last edge of high field line, flip
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
+                    txf = (lf2%xl(lf2%nl-1) - lf2%xl(lf2%nl))
+                    tyf = (lf2%yl(lf2%nl-1) - lf2%yl(lf2%nl))
+                    nxf = nxf(size(nxf):1:-1) 
+                    nyf = nyf(size(nyf):1:-1) 
+                    doflip = .true.
+                else
+                    ! No correspondence between vertices found, throw error
+                    call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
+                        'Could not find any corresponding vertices, this is a bug')
+                end if 
+
+                ! Check orientation
+                !if (issrf) then 
+                !    txf = -txf
+                !    tyf = -tyf
+                !end if 
+                ntxf = sqrt(txf**2 + tyf**2)
+                txf = txf/ntxf 
+                tyf = tyf/ntxf
+                if ((nxf(size(nxf))*txf + nyf(size(nyf))*tyf) < 0.0_R8) then 
+                    nxf = -nxf 
+                    nyf = -nyf 
+                    changesign = .true.
+                end if 
+
+                end associate
+            else 
+                ! Cell with only tangency points, not supported
+                call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // &
+                    'cell has no actual faces for high and low field boundaries, ' // & 
+                    'not supported')
+            end if 
+
+            ! Recompute face normals, now with (coarser) vertex values
+            nxf = -(facedata(tf)%line%yv(2:) - facedata(tf)%line%yv(1:size(facedata(tf)%line%yv)-1))
+            nyf = (facedata(tf)%line%xv(2:) - facedata(tf)%line%xv(1:size(facedata(tf)%line%xv)-1))
+            nnf = sqrt(nxf**2 + nyf**2)
+            nxf = nxf/nnf
+            nyf = nyf/nnf
+            if (doflip) then 
+                nxf = nxf(size(nxf):1:-1)
+                nyf = nyf(size(nyf):1:-1)
+            end if 
+            if (changesign) then 
+                nxf = -nxf
+                nyf = -nyf
+            end if 
+            
             ! Check if contours make sense and reformat if necessary
             allIDs = tempc%ID
             allocate(iscontourfound(size(tx)-2)) ! normally, IDs go from 1 to number of points
@@ -2391,16 +2653,16 @@ module ggmod_gridgeneration2D
             if (tube%isclosed(i)) then 
                 ! Precompute face normals for each flux surface for 
                 ! determining orientation
-                nxf = -(facedata(tf)%line%yv(2:) - facedata(tf)%line%yv(1:size(facedata(tf)%line%yv)-1))
-                nyf = (facedata(tf)%line%xv(2:) - facedata(tf)%line%xv(1:size(facedata(tf)%line%xv)-1))
-                nnf = sqrt(nxf**2 + nyf**2)
-                nxf = nxf/nnf
-                nyf = nyf/nnf
+                !nxf = -(facedata(tf)%line%yv(2:) - facedata(tf)%line%yv(1:size(facedata(tf)%line%yv)-1))
+                !nyf = (facedata(tf)%line%xv(2:) - facedata(tf)%line%xv(1:size(facedata(tf)%line%xv)-1))
+                !nnf = sqrt(nxf**2 + nyf**2)
+                !nxf = nxf/nnf
+                !nyf = nyf/nnf
 
-                if (tfval(1) < tfval(size(tfval))) then 
-                    nxf = -nxf(size(nxf):1:-1) 
-                    nyf = -nyf(size(nyf):1:-1) 
-                end if
+                !if (tfval(1) < tfval(size(tfval))) then 
+                !    nxf = -nxf(size(nxf):1:-1) 
+                !    nyf = -nyf(size(nyf):1:-1) 
+                !end if
 
                 ! Closed contour: only one contour value expected
                 do j = 1, size(tempc)
@@ -2447,6 +2709,27 @@ module ggmod_gridgeneration2D
                                 call gdErrorHandler('AddTopologicalMeshCellGriddingData :' // & 
                                     'expected single closed contour, but found multiple')
                             end if 
+
+                            ! Set found tot rue
+                            iscontourfound(c1%ID) = .true.
+
+                            ! Ensure proper orientation
+                            nxc = c1%x(2) - c1%x(1)
+                            nyc = c1%y(2) -  c1%y(1)
+                            nxfv = 0.5*(nxf(j) + nxf(j+1))
+                            nyfv = 0.5*(nyf(j) + nyf(j+1))
+                            if ((nxc*nxfv + nyc*nyfv) < 0) then 
+                                ! Flip the contour
+                               c1%x =c1%x(size(tempc(j)%x):1:-1)
+                               c1%y =c1%y(size(tempc(j)%y):1:-1)
+                                temp =c1%startsaddle
+                               c1%startsaddle =c1%endsaddle
+                               c1%endsaddle = temp
+                            end if 
+
+                            ! Adjust 
+                            tempc(j) = c1
+
                         else
                             ! Open contour, should only have two parts
                             if (count(c1%ID == allIDS) < 2) then 
@@ -2581,7 +2864,17 @@ module ggmod_gridgeneration2D
                         isintersectremoved = .true. 
                     end if 
                 else
-                    if (any(nint(j, :) > 1)) then 
+                    if (tempc(j)%isclosed) then 
+                        ! Two intersections are expected in the first
+                        ! face only
+                        if (any(nint(j, 2:ntf) > 1)) then 
+                            ! Simply set warning message
+                            isintersectremoved = .true. 
+                        end if 
+                        if (nint(j, 1) > 2) then 
+                            isintersectremoved = .true. 
+                        end if 
+                    elseif (any(nint(j, :) > 1)) then 
                         ! Simply set warning message
                         isintersectremoved = .true. 
                     end if 
@@ -2623,7 +2916,7 @@ module ggmod_gridgeneration2D
                     ! that is at the start of the contour IF it is a 
                     ! closed polygon! Otherwise, we just take the first one...
                     k = 1
-                    if (tube%isclosed(i)) then 
+                    if (tempc(j)%isclosed) then 
                         tsegrc = segrcda(j, k)%Get()
                         startind = findloc(tsegrc, 0.0_R8, 1)
                         if (startind == 0) then 
@@ -2748,9 +3041,15 @@ module ggmod_gridgeneration2D
                     else 
                         polv = [(cc, cc = segc(j, k)-2, segc(j, k+1)+1, incr)]
                     end if 
-                    !polv = polc(j)%vert(segc(j, k)+2:segc(j, k+1)-1:incr)
                     xl = [xint(j, k), tempc(j)%x(polv), xint(j, k+1)]
                     yl = [yint(j, k), tempc(j)%y(polv), yint(j, k+1)]
+                    if (.not. issrf) then 
+                        ! we've traced from end to start, need to flip
+                        xl = [xl(size(xl):1:-1)]
+                        yl = [yl(size(yl):1:-1)]
+                    end if 
+                    !polv = polc(j)%vert(segc(j, k)+2:segc(j, k+1)-1:incr)
+                    
 
                     ! Add 
                     call celldata(tubec(k))%lines(j)%Initialize(xl, yl, fsID(j))
@@ -2767,6 +3066,24 @@ module ggmod_gridgeneration2D
                 celldata(tubec(k))%srflabel = face%label(tubef(k))
                 celldata(tubec(k))%erflabel = face%label(tubef(k+1))
 
+            end do 
+
+            ! Adjust distributions of other tube faces
+            do j = 1, ntf
+                ! Get intersections
+                tsegrrf = segrrf(:, j)
+                txint = xint(:, j)
+                tyint = yint(:, j)
+
+                ! Sort
+                sortind = [(k, k= 1, size(tsegrrf))]
+                call Sort(tsegrrf, ind=sortind)
+                txint = txint(sortind)
+                tyint = tyint(sortind)
+
+                ! Reconstruct line
+                call facedata(tubef(j))%line%AddVertexCoordinates([0.0_R8, &
+                    tsegrrf, real(facedata(tubef(j))%line%nl-1, kind=R8)])
             end do 
 
             ! Housekeeping
