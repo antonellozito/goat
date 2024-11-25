@@ -87,7 +87,7 @@ module ggmod_topology2D
         ! contain a (simple) polygon that describes the spatial layout
         ! of the face. 
 
-        integer(I8)                     :: ntot ! total number of vertices
+        integer(I8)                     :: ntot, nfc ! total number of vertices
         integer(I8), allocatable        :: ID(:), vert(:, :), cell(:), &
             label(:), fsID(:), type(:), cellP(:, :)
         type(RealDynamicArrayUDT), allocatable  :: x(:), y(:)
@@ -111,7 +111,7 @@ module ggmod_topology2D
         !============
         ! Topological mesh cell
 
-        integer(I8)                     :: ntot ! total number of vertices
+        integer(I8)                     :: ntot, ntotv, ntotf ! total number of vertices
         integer(I8), allocatable        :: ID(:), vert(:), vertP(:, :), &
             face(:), faceP(:, :), flags(:)
     contains 
@@ -300,6 +300,7 @@ module ggmod_topology2D
         ! Evaluate magnetic field and vessel
         allocate(Vf(size(xg)))
         call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
+        call magneticField%interp%Evaluate(xtp, ytp, 0, 0, Ftp)
 
         ! Update the field tracer 
         fieldtracer = ConstructStructuredTracer(&
@@ -997,10 +998,10 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)     :: val, dval, tx, ty, &
             tf, nxpe, nype, nxp, nyp, normprod, dFdx, dFdy
         logical                                 :: hasbeendeleted
-        logical, allocatable                    :: extrloc(:)
+        logical, allocatable                    :: extrloc(:), keepind(:)
         type(RealDynamicArrayUDT), allocatable  :: xf(:), yf(:)
         type(ContourUDT), allocatable           :: bndcontours(:)
-        type(PolygonUDT), allocatable           :: bndpol(:)
+        type(PolygonUDT), allocatable           :: bndpol(:), realbndpol(:)
         type(PolygonSetUDT)                     :: bndps
 
         ! Loop
@@ -1025,17 +1026,32 @@ module ggmod_topology2D
         ! Construct boundary polygonset
         !==============================
         ! Construct polygons from boundary
-        allocate(bndpol(size(bndcontours)))
+        allocate(bndpol(size(bndcontours)), keepind(size(bndcontours)))
+        keepind = .true. 
         do i = 1, size(bndcontours)
             ! Construct
             call bndpol(i)%Construct(bndcontours(i)%x, bndcontours(i)%y)
 
-            ! Check for closedness, if not -> error
+            ! Check for closedness, if not -> warning and remove
             if (.not. bndpol(i)%isclosed) then 
-                call gdErrorHandler('AddTopologicalMeshTangencyPoints2: boundary polygon ' // & 
-                    'is not closed, not supported. Check input')
+                print *, 'AddTopologicalMeshTangencyPoints2: ' //&
+                    'boundary polygon part is not closed and will not be ' // &
+                    'added'
+                print *, 'part: ', i
+                keepind(i) = .false. 
+                !call gdErrorHandler('AddTopologicalMeshTangencyPoints2: boundary polygon ' // & 
+                !    'is not closed, not supported. Check input')
             end if 
         end do 
+
+        ! Get only closed polygons
+        allocate(realbndpol(count(keepind)))
+        realbndpol = pack(bndpol, keepind)
+        if (size(realbndpol) == 0) then 
+            call gdErrorHandler('AddTopologicalMeshTangencyPoints2: no ' // & 
+                'closed boundary polygons found, check input')
+        end if 
+        bndpol = realbndpol
 
         ! Construct polygonset
         call bndps%Construct(bndpol)
@@ -1288,29 +1304,28 @@ module ggmod_topology2D
         type(TopomeshOptionsUDT), intent(in)    :: options 
 
         ! Auxiliary
-        real(R8)                                :: dist
+        real(R8)                                :: dist, startsr, endsr
         real(R8), allocatable, dimension(:)     :: pspx, pspy, pspf, &
-            xout, yout, iout, jout, s1x, s1y, vesselval, s2x, s2y, &
-            sortedI, vesselval2
-        integer(I8)                             :: npsp, sizeI, sizetck, &
-            ntc, intersectind, nstc
+            xout, yout, iout, jout, tscr, tsfr, tx, ty, tsrfh, tsrsh
+        integer(I8)                             :: npsp, &
+            intersectind, nstc, ntpc, nint, startind, endind, indtpc
         integer(I8), allocatable, dimension(:)  :: psptype, &
-            sortind, pspID, delind, allcurvetypes, allfsIDs, &
-            vindI, vindJ, notdelind, vindIfh, vindIsh
-        logical                                 :: deletefirstpart, &
-            deletestart, deleteend, intfacestart, intcstart, dointersect
+            sortind, pspID, allcurvetypes, allfsIDs, &
+            vindI, vindJ, notdelind, vindIfh, vindIsh, tsc, tfaceind, &
+            tsf, tcontourind, tcstartind, tcendind
+        logical                                 :: intfacestart, &
+            intcstart, dointersect
         logical, allocatable, dimension(:)      :: tracepoints, keepind, &
-            isinpolyg, ispseudosaddlepoint
+            ispseudosaddlepoint, isnbface, rmind, isstartingcontour, &
+            isendingcontour
 
-        type(ContourUDt)                        :: tempc
-        type(ContourUDT), allocatable           :: tc(:), allc(:)
-        type(PolygonUDT), allocatable           :: tcp(:), allpc(:)
+        type(ContourUDT), allocatable           :: tc(:), allc(:), alltpc(:)
+        type(PolygonUDT), allocatable           :: allpc(:)
         type(PolygonSetUDT)                     :: tempps
-        type(IntegerDynamicArrayUDT)            :: curvetypes, fsIDs, &
-            intI 
-        type(RealDynamicArrayUDT)               :: realI 
-        type(PolygonSetUDT)                             :: bndps
-        type(PolygonUDT), allocatable, dimension(:)     :: bndpol
+        type(IntegerDynamicArrayUDT)            :: curvetypes, fsIDs
+        type(IntegerDynamicArrayUDT), allocatable       :: sc(:), &
+            faceind(:), sf(:), contourind(:)
+        type(RealDynamicArrayUDT), allocatable          :: scr(:), sfr(:)
 
         ! Loop 
         integer(I8)                             :: i, j, k, cc
@@ -1364,8 +1379,9 @@ module ggmod_topology2D
         ! Trace contours
         !===============
         ! Add saddle point contours
+        !--------------------------
         !$omp parallel do default(shared) private(tc, xout, yout, vindI, &
-        !$omp vindJ, iout, jout, delind, cc, intfacestart, intcstart, &
+        !$omp vindJ, iout, jout, cc, intfacestart, intcstart, &
         !$omp dointersect, nstc, vindIfh, vindIsh, sortind) 
         do i = 1, npsp
             if ((psptype(i) == TMvertexsaddleID) .and. tracepoints(i)) then 
@@ -1482,26 +1498,34 @@ module ggmod_topology2D
                                 sortind = [(k, k = 1, size(xout))]
                                 call Sort(iout, ind=sortind, ascend=.true.)
                                 vindI = vindI(sortind)
+                                iout = iout(sortind)
                                 
                                 ! Sort the intersections according to face
                                 sortind = [(k, k = 1, size(xout))]
                                 call Sort(jout, ind=sortind, ascend=.true.)
                                 vindJ = vindJ(sortind)
+                                jout = jout(sortind)
 
                                 ! If there are other intersections, adjust the face and the contour
                                 if (size(xout) > 1) then 
                                     ! Face
                                     !-----
+                                    tx = topomesh%face%x(j)%Get()
+                                    ty = topomesh%face%y(j)%Get()
                                     if (intfacestart) then 
                                         ! Face is oriented from start to end
-                                        delind = [(cc, cc = 2, maxval(vindJ))]
+                                        call DeleteCurveSegment(tx, ty, [maxval(jout)], 'start', [0.1_R8, 0.1_R8], .true., .true.)
+                                        ! delind = [(cc, cc = 2, maxval(vindJ))]
                                     else
-                                        delind = [(cc, cc = vindJ(1)+1, topomesh%face%x(j)%Size()-1)]
+                                        call DeleteCurveSegment(tx, ty, [jout(1)], 'end', [0.1_R8, 0.1_R8], .true., .true.)
+                                        ! delind = [(cc, cc = vindJ(1)+1, topomesh%face%x(j)%Size()-1)]
                                     end if 
 
                                     ! Delete
-                                    call topomesh%face%x(j)%Remove(delind)
-                                    call topomesh%face%y(j)%Remove(delind)
+                                    !call topomesh%face%x(j)%Remove(delind)
+                                    !call topomesh%face%y(j)%Remove(delind)
+                                    call topomesh%face%x(j)%Set(tx)
+                                    call topomesh%face%y(j)%Set(ty)
 
                                     ! Reconvert to polygon
                                     call topomesh%face%pol(j)%Construct(&
@@ -1584,17 +1608,18 @@ module ggmod_topology2D
         !$omp end parallel do
 
         ! Add tangency point contours
-        !$omp parallel do default(private) shared(psptype, tracepoints, &
-        !$omp pspx, pspy, curvetypes, topomesh, vessel, fsIDs, fieldtracer, &
-        !$omp pspf, pspID, allc, bndtracer)
+        !----------------------------
+        ! First, trace all contours
+        allocate(alltpc(0))
+        !$omp parallel do default(shared) private(tc, keepind, dist)
         do i = 1, npsp
-            if ((psptype(i) == 5) .and. tracepoints(i)) then 
-                ! Trace
+            if ((psptype(i) == TMvertextp2ID) .and. tracepoints(i)) then 
+                ! Trace contour
                 tc = fieldtracer%TraceContours([pspx(i)], [pspy(i)])
 
                 ! Process
                 call CleanContours(tc)
-                
+
                 ! Checks
                 allocate(keepind(size(tc)))
                 keepind = .true.
@@ -1609,399 +1634,483 @@ module ggmod_topology2D
                             'in given tangency point. Removing...'
                         keepind(k) = .false.
                     end if
-                end do 
-                
+                    if (tc(k)%startsaddle /= pspID(i)) then
+                        ! Normally this should come from the contour 
+                        ! tracer, but we can add it afterwards as well 
+                        print *, 'AddTopologicalMeshContours: tangency ' // &
+                            'contour segment found that starts in given ' // & 
+                            'tangency point, but that does not have the ' // &
+                            'starting saddle point ID as tangency point. ' // & 
+                            'adjusting starting ID...'
+                        tc(k)%startsaddle = pspID(i)
+                    end if 
+                    if (tc(k)%isclosed .and. (tc(k)%endsaddle /= pspID(i))) then 
+                        ! Ensure start and end saddle point are the same
+                        tc(k)%endsaddle = pspID(i)
+                    end if 
+                end do
+
                 ! Remove
                 tc = pack(tc, keepind)
                 deallocate(keepind)
 
-                ! Compute intersections with boundary faces
-                ntc = size(tc)
-                allocate(tcp(ntc))
-                !
-                do k = 1, ntc
-                    ! Grow dynamically because I'm lazy
-                    intI = ConstructIntegerDynamicArray()
-                    realI = ConstructRealDynamicArray()
-                    deletefirstpart = .false.
-                    
-                    ! Construct polygon
-                    call tcp(k)%Construct(tc(k)%x, tc(k)%y)
-
-                    ! Loop over all faces
-                    do j = 1, topomesh%face%ntot
-                        if (topomesh%face%type(j) == 3) then 
-                            ! If we have an intersection with a face that has this saddle point
-                            ! as one of its vertices, we must remove parts of the intersection
-                            ! (should always skip one boundary segment for intersection, since
-                            ! adjacent points should be other tangency points right now
-                            ! of type 4)
-
-                            ! Check for intersections
-                            dointersect = .true.
-                            if ((topomesh%face%vert(j, 1) == tc(k)%startsaddle)) then
-                                intfacestart = .true.
-                                intcstart = .true.
-                            elseif ((topomesh%face%vert(j, 2) == tc(k)%startsaddle)) then
-                                intfacestart = .false.
-                                intcstart = .true.
-                            elseif ((topomesh%face%vert(j, 1) == tc(k)%endsaddle)) then
-                                intfacestart = .true.
-                                intcstart = .false.
-                            elseif ((topomesh%face%vert(j, 2) == tc(k)%endsaddle)) then
-                                intfacestart = .false.
-                                intcstart = .false.
-                            else 
-                                ! No intersection found - cycle
-                                dointersect = .false. 
-                            end if 
-                            
-                            
-                            ! Compute intersections
-                            if (dointersect) then 
-                                !$omp critical
-                                call SimplePolygonIntersections(tc(k)%x, tc(k)%y, &
-                                    topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get(), &
-                                    xout, yout, vindI, vindJ, iout, jout)
-                                !call PolygonIntersections(tcp(k), topomesh%face%pol(j), &
-                                !    xout, yout, vindI, vindJ, iout, jout)
-                                
-                                ! Check
-                                if (size(xout) > 0) then 
-                                    ! Sort based on continuous polygon coordinate
-                                    if (allocated(sortind)) then 
-                                        deallocate(sortind)
-                                    end if 
-                                    allocate(sortind(size(jout)))
-                                    call Sort(iout, ind=sortind)
-                                    jout = jout(sortind)
-                                    vindI = vindI(sortind)
-                                    vindJ = vindJ(sortind)
-                                    deallocate(sortind)
-                                    intersectind = 1_I8
-
-                                    ! Check
-                                    if (any(topomesh%face%vert(j, :) == pspID(i))) then 
-                                        ! First intersection should be at starting point
-                                        if (iout(1) > 0) then 
-                                            call gdErrorHandler( & 
-                                                'AddTopologicalMeshContours: ' // & 
-                                                ' expected intersection in tangency ' // &
-                                                'point but did not find it')
-                                        end if
-                                        
-                                        ! Delete first intersection
-                                        allocate(keepind(size(vindI)))
-                                        keepind = .true. 
-                                        keepind(1) = .false. 
-                                        if (tcp(k)%isclosed) then 
-                                            ! Also delete last intersection
-                                            keepind(size(vindI)) = .false. 
-                                        end if
-                                        vindI = pack(vindI, keepind)
-                                        vindJ = pack(vindJ, keepind)
-                                        iout = pack(iout, keepind)
-                                        jout = pack(jout, keepind)
-                                        
-                                        ! Check others
-                                        if (size(vindI) > 0) then 
-                                            
-                                            ! Display a message
-                                            print *, 'AddTopologicalMeshContours: ' // & 
-                                                'tangency point contour of vertex nr ', &
-                                                i, ' intersects prematurely with boundary, ' // & 
-                                                ' adjusting contour and boundary segment'
-                                            print *, 'AddTopologicalMeshContours: ' // & 
-                                                'found ', size(vindI), &
-                                                ' additional intersections, removing...'
-                                            
-                                            ! Set deletion to true
-                                            deletefirstpart = .true.
-                                            
-                                            ! Issue warning: code not yet verified for
-                                            ! more than one intersection (honestly
-                                            ! don't think this should happen but you
-                                            ! never know)
-                                            if (size(vindI) > 1) then 
-                                                print *, 'AddTopologicalMeshContours: ' // & 
-                                                    'code not yet verified ' // & 
-                                                    'for multiple intersections'
-                                            end if 
-                                            
-                                            ! Check which part to delete from face data
-                                            if (topomesh%face%vert(j, 1) == pspID(i)) then 
-                                                ! keepind = [1, (cc, cc = vindJ(size(vindJ))+1, topomesh%face%x(j)%Size() )]
-                                                delind = [(cc, cc = 2, vindJ(size(vindJ)))]
-                                                intersectind = size(vindJ)
-                                            else
-                                                delind = [(cc, cc = vindJ(1)+1, topomesh%face%x(j)%Size()-1)]
-                                                intersectind = 1_I8
-                                                ! keepind = [(cc, cc = 1, vindJ(1)), topomesh%face%x(j)%Size()]
-                                            end if 
-
-                                            ! Delete
-                                            
-                                            call topomesh%face%x(j)%Remove(delind)
-                                            call topomesh%face%y(j)%Remove(delind)
-                                            
-                                            ! Reconvert to polygon
-                                            call topomesh%face%pol(j)%Construct(&
-                                                topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get())
-
-                                            call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-
-                                            ! Update vessel description
-                                            !allocate(bndpol(count(topomesh%face%type == TMfacebndID)))
-                                            !bndpol = pack(topomesh%face%pol, topomesh%face%type == TMfacebndID)
-                                            !call bndps%Construct(bndpol)
-                                            !call ConstructVesselPolygonSet(vessel, bndps)
-                                        end if
-                                        deallocate(keepind)
-                                    end if
-                                    
-                                end if
-                                
-                                
-                                ! Add to intersections
-                                if (size(vindI) > 0) then 
-                                    !call realI%Append(iout(size(iout)))
-                                    !call intI%Append(vindI(size(vindI)))
-                                    call realI%Append(iout(intersectind))
-                                    call intI%Append(vindI(intersectind))
-                                end if 
-                                !$omp end critical
-                            end if 
-                        end if
-                    end do
-                    
-                    
-                    
-                    ! Remove contour parts that lie outside of the vessel
-                    sortedI = realI%Get()
-                    vindI = intI%Get()
-                    allocate(sortind(size(vindI)))
-                    call Sort(sortedI, ind=sortind) ! Normally, first one will always be one to be deleted
-                    vindI = vindI(sortind)
-                    deallocate(sortind)
-
-                    ! Trim contour data
-                    sizeI = size(sortedI)
-                    sizetck = size(tc(k)%x)
-                    if (tcp(k)%isclosed) then 
-                        ! If no other intersections than end points ->  continue
-                        if (sizeI > 0) then 
-                            
-                            ! Need to determine how to trim closed contour.
-                            ! going from both sides, we need to keep the first
-                            ! segment inside of the vessel. We check using 
-                            ! the vessel plf value, 
-                            ! so this may be inaccurate when number of points is
-                            ! too low per segment...
-                            
-                            ! Check first part
-                            s1x = tc(k)%x(2:vindI(1))
-                            s1y = tc(k)%y(2:vindI(1))
-                            call Write2DPolygonData(s1x, s1y, 'temppol')
-                            if (size(s1x) <= 3) then 
-                                ! Issue warning
-                                print *, 'AddTopologicalMeshContour: ' // & 
-                                    'low amount of vertices for closed ' // & 
-                                    'polygon tangency segment, may not ' // & 
-                                    'be able to correctly identify segments'
-                            end if
-                            
-                            ! Evaluate
-                            if (allocated(vesselval)) then 
-                                deallocate(vesselval)
-                            end if 
-                            allocate(vesselval(size(s1x)))
-                            call vessel%plfvessel%Evaluate(s1x, s1y, 0, 0, vesselval)
-
-                            ! Check if in vessel
-                            isinpolyg = vesselval <= 0
-                            if (all(isinpolyg)) then 
-                                deletestart = .false.
-                            elseif (.not. any(isinpolyg)) then 
-                                deletestart = .true. 
-                            else
-                                ! Need to check
-                                print *, 'AddTopologicalMeshContour: not ' // & 
-                                    'all points of closed contour start lie in ' // & 
-                                    'or outside vessel, following majority'
-                                if (count(isinpolyg) > count(.not. isinpolyg)) then 
-                                    deletestart = .false.
-                                else
-                                    deletestart = .true.
-                                end if 
-                            end if 
-
-                            ! Housekeeping
-                            deallocate(vesselval)
-                            
-                            ! Check last part
-                            s2x = tc(k)%x(vindI(sizeI)+1:sizetck-1)
-                            s2y = tc(k)%y(vindI(sizeI)+1:sizetck-1)
-                            if (size(s2x) <= 3) then 
-                                ! Issue warning
-                                print *, 'AddTopologicalMeshContour: ' // &
-                                    'low amount of vertices for closed ' // &
-                                    'polygon tangency segment, may not be ' // &
-                                    'able to correctly identify segments'
-                            end if 
-                            
-                            ! Evaluate
-                            allocate(vesselval(size(s2x)))
-                            call vessel%plfvessel%Evaluate(s2x, s2y, 0, 0, vesselval)
-
-                            ! Check if in vessel
-                            isinpolyg = vesselval <= 0
-                            if (all(isinpolyg)) then 
-                                deleteend = .false.
-                            elseif (.not. any(isinpolyg)) then 
-                                deleteend = .true.
-                            else
-                                ! Need to check
-                                print *, 'AddTopologicalMeshContour: not ' // & 
-                                    'all points of closed contour end lie in ' // & 
-                                    'or outside vessel, following majority'
-                                if (count(isinpolyg) > count(.not. isinpolyg)) then 
-                                    deleteend = .false.
-                                else
-                                    deleteend = .true.
-                                end if 
-                            end if
-                            
-                            ! Trim and add
-                            if (sizeI == 1) then 
-                                if (deletestart .and. .not. deleteend) then 
-                                    s1x = [tc(k)%x(sizetck:vindI(1)+1:-1), &
-                                        tc(k)%x(1)]
-                                    s1y = [tc(k)%y(sizetck:vindI(1)+1:-1), &
-                                        tc(k)%y(1)]
-                                elseif (deleteend .and. .not. deletestart) then 
-                                    s1x = [tc(k)%y(1:vindI(1)), &
-                                        tc(k)%x(sizetck)]
-                                    s1y = [tc(k)%y(1:vindI(1)), &
-                                        tc(k)%y(sizetck)]
-                                else
-                                    ! This shouldn't be happening
-                                    call gdErrorHandler('AddTopologicalMeshContours: ' // & 
-                                        'unknown error when checking closed ' // & 
-                                        'tangency contour (1 intersection), this is likely ' // & 
-                                        'a bug') 
-                                end if 
-                                tc(k)%x = s1x
-                                tc(k)%y = s1y
-                            elseif (sizeI == 2) then 
-                                ! Not yet properly verified, print warning
-                                print *, 'AddTopologicalMeshContour: ' // & 
-                                    'multiple intersections for closed ' // &
-                                    'tangency contour detected. This part ' // &
-                                    ' of the routine is not yet verified, ' // & 
-                                    ' proceed with caution'
-                                
-                                ! Either both start and end to be removed, or both
-                                ! to be added
-                                if (deletestart .and. deleteend) then 
-                                    s1x = tc(k)%x(vindI(1):vindI(2)+1)
-                                    s1y = tc(k)%y(vindI(1):vindI(2)+1)
-                                    tc(k)%x = s1x
-                                    tc(k)%y = s1y
-                                    tc(k)%startsaddle = 0
-                                    tc(k)%endsaddle = 0
-                                elseif (.not. deletestart .and. .not. deleteend) then 
-                                    s1x = tc(k)%x(1:vindI(1)+1)
-                                    s1y = tc(k)%y(1:vindI(1)+1)
-                                    s2x = tc(k)%x(sizetck:vindI(sizeI):-1)
-                                    s2y = tc(k)%y(sizetck:vindI(sizeI):-1)
-                                    tc(k)%x = s1x
-                                    tc(k)%y = s1y
-                                    tc(k)%endsaddle = 0
-                                    tempc = tc(k)
-                                    tempc%x = s2x 
-                                    tempc%y = s2y 
-                                    tc = [tc, tempc]
-                                    
-                                else
-                                    print *, 'topomesh vertex: ', i
-                                    call gdErrorHandler('AddTopologicalMeshContours: ' // & 
-                                        'unknown error when checking closed ' // & 
-                                        'tangency contour (2 intersections), this is likely ' // & 
-                                        'a bug') 
-                                end if 
-                            else
-                                ! Multiple intersections, need at least 
-                                ! an additional contour
-                                tempc = tc(k) 
-
-                                ! Check which parts to delete
-                                if (deletestart) then 
-                                    s1x = [tc(k)%x(1), tc(k)%x(vindI(1)+1:vindI(2)+1)]
-                                    s1y = [tc(k)%y(1), tc(k)%y(vindI(1)+1:vindI(2)+1)]
-                                    tc(k)%endsaddle = 0
-                                else
-                                    s1x = tc(k)%x(1:vindI(1)+1)
-                                    s1y = tc(k)%y(1:vindI(1)+1)
-                                    tc(k)%endsaddle = 0
-                                end if
-                                
-                                if (deleteend) then 
-                                    s2x = [tc(k)%x(sizetck), &
-                                        tc(k)%x(vindI(sizeI):vindI(sizeI-1):-1)]
-                                    s2y = [tc(k)%y(sizetck), &
-                                        tc(k)%y(vindI(sizeI):vindI(sizeI-1):-1)]
-                                    tempc%endsaddle = 0
-                                    
-                                else
-                                    s2x = tc(k)%x(sizetck:vindI(sizeI):-1)
-                                    s2y = tc(k)%y(sizetck:vindI(sizeI):-1)
-                                    tempc%endsaddle = 0
-                                end if
-                                
-                                ! Add
-                                tc(k)%x = s1x
-                                tc(k)%y = s1y
-                                tempc%x = s2x
-                                tempc%y = s2y
-                                tc = [tc, tempc]
-                                
-                            end if 
-                        end if 
-                    else
-                        ! Open contour
-                        ! Check
-                        if (size(vindI) < 1) then 
-                            call gdErrorHandler('AddTopologicalMeshContour: '// & 
-                                'at least one intersection of contour ' // & 
-                                'with other boundary expected')
-                        end if
-                        
-                        ! Delete
-                        if (deletefirstpart) then 
-                            tc(k)%x = [tc(k)%x(1), &
-                                tc(k)%x(vindI(1)+1:vindI(2)+1)]
-                            tc(k)%y = [tc(k)%y(1), &
-                                tc(k)%y(vindI(1)+1:vindI(2)+1)]
-                        else
-                            tc(k)%x = tc(k)%x(1:vindI(1)+1)
-                            tc(k)%y = tc(k)%y(1:vindI(1)+1)
-                        end if 
-                    end if 
-                end do
-                deallocate(tcp)
-           
                 ! Add
                 !$omp critical
-                allc = [allc, tc]
+                alltpc = [alltpc, tc]
                 call curvetypes%Append(spread(TMfacepolID, 1, size(tc)))
                 
                 ! Add flux surface ID
-                nfs = nfs + 1
-                call fsIDs%Append(spread(nfs, 1, size(tc)))
+                call fsIDs%Append(spread(i, 1, size(tc)))
                 !$omp end critical
             end if 
         end do 
         !$omp end parallel do 
+
+        ! Compute all intersections with other faces
+        ntpc = size(alltpc)
+        allocate(sc(ntpc), scr(ntpc), faceind(ntpc), sf(topomesh%face%ntot), &
+            sfr(topomesh%face%ntot), contourind(topomesh%face%ntot))
+        do i = 1, ntpc
+            sc(i) = ConstructIntegerDynamicArray()
+            scr(i) = ConstructRealDynamicArray()
+            faceind(i) = ConstructIntegerDynamicArray()
+        end do 
+        do i = 1, topomesh%face%ntot
+            sf(i) = ConstructIntegerDynamicArray()
+            sfr(i) = ConstructRealDynamicArray()
+            contourind(i) = ConstructIntegerDynamicArray()
+        end do 
+
+        ! Loop
+        !$omp parallel do default(shared) private(xout, yout, vindI, vindJ, &
+        !$omp iout, jout)
+        do i = 1, ntpc
+            do j = 1, topomesh%face%ntot
+                if (topomesh%face%type(j) == TMfacebndID) then 
+                    ! Compute intersections
+                    call SimplePolygonIntersections(alltpc(i)%x, alltpc(i)%y, &
+                        topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get(), &
+                        xout, yout, vindI, vindJ, iout, jout)
+
+                    ! Add, if any
+                    if (allocated(xout)) then 
+                        if (size(xout) > 0) then 
+                            !$omp critical
+                            ! Add intersection data to contour
+                            call sc(i)%Append(vindI)
+                            call scr(i)%Append(iout)
+                            call faceind(i)%Append(spread(j, 1, size(vindI)))
+
+                            ! Add intersection data to face
+                            call sf(j)%Append(vindJ)
+                            call sfr(j)%Append(jout)
+                            call contourind(j)%Append(spread(i, 1, size(vindI))) 
+                            !$omp end critical
+                        end if 
+                    end if
+                end if
+            end do 
+        end do
+        !$omp end parallel do 
+
+        ! Process contours
+        do i = 1, ntpc
+            ! Unpack
+            tsc = sc(i)%Get()
+            tfaceind = faceind(i)%Get()
+            tscr = scr(i)%Get()
+            nint = size(tsc)
+            nstc = size(alltpc(i)%x)-1
+
+            ! Sort 
+            sortind = [(k, k = 1, nint)]
+            call Sort(tscr, ind=sortind, ascend=.true.)
+            tsc = tsc(sortind)
+            tfaceind = tfaceind(sortind)
+
+            ! Check
+            if (tscr(1) /= 0.0_R8) then 
+                ! First intersection should always be in tangency point
+                call gdErrorHandler('AddTopologicalMeshContours: first ' // & 
+                    'intersection of tangency point contour is not in  ' // & 
+                    'tangency point itself' )
+            end if 
+            if (alltpc(i)%isclosed) then 
+                ! Last intersection should also be in tangency point
+                if (tscr(nint) /= size(alltpc(i)%x)-1) then 
+                    call gdErrorHandler('AddTopologicalMeshContours: last ' // & 
+                    'intersection of closed tangency point contour is not in  ' // & 
+                    'tangency point itself' )
+                end if 
+            end if 
+
+            ! Determine which intersections were in a 'neighbouring' face
+            ! (i.e. a boundary face that has the tangency point)
+            allocate(isnbface(nint))
+            isnbface = .false.
+            do j = 1, nint
+                if (any(topomesh%face%vert(tfaceind(j), :) == alltpc(i)%startsaddle)) then 
+                    isnbface(j) = .true.
+                end if 
+            end do             
+
+            ! Determine which part(s) of contour(s) to keep
+            if (alltpc(i)%isclosed) then ! closed contour
+                ! This is much more tricky, need to check additional cases
+                if (all(isnbface)) then 
+                    ! No intersections with other boundaries
+                    if (nint == 2) then 
+                        ! Simply in start and end - add full contour, so 
+                        ! do nothing
+                    else
+                        ! Here, we don't have much more to go on than 
+                        ! assuming that these intersections are somewhere
+                        ! in the start/end nodes of the contour and that
+                        ! we can partition based on that. This is of course
+                        ! not a general way and may fail if the amount of
+                        ! contour points is too low
+                        ! Print a warning
+                        print *, 'AddTopologicalMeshContours: multiple ' // & 
+                            'intersections found for closed contour with ' // & 
+                            'only neighbouring boundary faces, attempting to ' // &
+                            'split contour by partitioning intersection into ' // & 
+                            'intersections at start and end. This may not result ' // & 
+                            'in desired behavior... (vertex: ', alltpc(i)%startsaddle, ')'
+
+                        ! Determine start & end intersections
+                        allocate(vindIfh(count(tsc < nstc/2)), &
+                            vindIsh(count(tsc >= nstc/2)))
+                        allocate(tsrfh(size(vindIfh)), tsrsh(size(vindIsh)))
+                        vindIfh = pack(tsc, tsc < nstc/2)
+                        vindIsh = pack(tsc, tsc >= nstc/2)
+                        tsrfh = pack(tscr, tsc < nstc/2)
+                        tsrsh = pack(tscr, tsc >= nstc/2)
+
+                        ! Determine start index
+                        if (size(vindIfh) > 0) then 
+                            startind = maxval(vindIfh)
+                            startsr = maxval(tsrfh)
+                        else
+                            startind = 2
+                            startsr = 0.0_R8
+                        end if 
+
+                        ! Determine end index
+                        if (size(vindIsh) > 0) then 
+                            endind = minval(vindIsh)+1
+                            endsr = minval(tsrsh)
+                        else
+                            endind = nstc
+                            endsr = real(nstc, kind=R8)
+                        end if 
+                        
+                        ! Adjust contour
+                        if (startsr /= 0.0_R8 .and. endsr /= real(nstc, kind=R8)) then 
+                            call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                                [startsr, endsr], 'both', [0.1_R8, 0.1_R8], .true., .true.)
+                        elseif (startsr /= 0.0_R8) then 
+                            call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                                [startsr], 'start', [0.1_R8, 0.1_R8], .true., .true.)
+                        elseif (endsr /= real(nstc, kind=R8)) then 
+                            call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                                [endsr], 'end', [0.1_R8, 0.1_R8], .true., .true.)
+                        end if 
+                        !alltpc(i)%x = alltpc(i)%x([1, (k, k = startind, endind), nstc+1])
+                        !alltpc(i)%y = alltpc(i)%y([1, (k, k = startind, endind), nstc+1])
+
+                        ! Housekeeping
+                        deallocate(vindIfh, vindIsh, tsrfh, tsrsh)
+                    end if
+                else
+                    ! At least one intersection with another boundary. 
+                    ! Note: here we do want to keep the intersection 
+                    ! with these other boundaries in the contour!
+                    ! Need to find first and second segment 
+
+                    ! First segment
+                    endind = findloc(isnbface, .false., 1, back=.false.)
+
+                    ! Add this segment as additional contour
+                    alltpc = [alltpc, alltpc(i)]
+                    indtpc = size(alltpc)
+                    alltpc(indtpc)%isclosed = .false.
+                    alltpc(indtpc)%endsaddle = 0 ! doesn't end anymore in saddle point
+                    if (tscr(endind-1) == 0.0_R8) then 
+                        call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
+                            [tscr(endind)], 'end', [0.0_R8], .true., .false.)
+                    else
+                        ! Also need to delete a first part
+                        call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
+                            [tscr(endind-1:endind)], 'both', [0.1_R8, 0.0_R8], .true., .false.)
+                    end if 
+                    !call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
+                    !    [tscr(endind)], 'end', [0.0_R8], .true., .false.)
+                    !alltpc(indtpc)%x = alltpc(i)%x([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
+                    !alltpc(indtpc)%y = alltpc(i)%y([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
+
+                    ! Append flux surface ID etc as well!
+                    call curvetypes%Append(curvetypes%Get(size(allc) + i))
+                    call fsIDs%Append(fsIDs%Get(size(allc) + i))
+
+                    ! Second segment
+                    startind = findloc(isnbface, .false., 1, back=.true.)
+
+                    ! Add this segment by adjusting existing contour
+                    alltpc(i)%isclosed = .false.
+                    alltpc(i)%startsaddle = 0 ! doesn't start anymore in saddle point
+                    if (tscr(startind+1) == real(nstc, kind=R8)) then 
+                        call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                            [tscr(startind)], 'start', [0.0_R8], .false., .true.)
+                    else
+                        ! Also need to delete last part
+                        call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                            [tscr(startind:startind+1)], 'both', [0.0_R8, 0.1_R8], .false., .true.)
+                    end if
+                    !alltpc(i)%x = alltpc(i)%x([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
+                    !alltpc(i)%y = alltpc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
+                    
+                end if 
+
+            else ! open contour
+                ! Check which intersection is the last intersection with
+                ! the neighbouring boundary (should be first one)
+                intersectind = findloc(isnbface, .true., 1, back=.true.)
+
+                ! Sanity checks
+                if (intersectind == 0) then 
+                    call gdErrorHandler('AddTopologicalMeshContours: ' // & 
+                        'tangency point contour intersects in tangency point ' // & 
+                        'but not in neighbouring face - this is likely a bug')
+                end if 
+                if (any(.not. isnbface(1:intersectind))) then 
+                    ! Issue warning - we got intersections of the contour
+                    ! with non-neighbour faces inbetween - this is unexpected
+                    print *, 'AddTopologicalMeshContours: intersections ' // & 
+                        'found for tangency point ', alltpc(i)%startsaddle, &
+                        'that occur inbetween intersections with contour and ' // & 
+                        'neighbouring boundary face. Unexpected, intersections ' // & 
+                        'are removed'
+                end if 
+
+                ! Keep only this part of the contour coordinates
+                call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                    [tscr(intersectind)], 'start', [0.1_R8, 0.1_R8], .true., .true.)
+                !notdelind = [(k, k = 2, tsc(intersectind))]
+                !alltpc(i)%x = alltpc(i)%x(notdelind)
+                !alltpc(i)%y = alltpc(i)%y(notdelind)
+            end if 
+
+            ! Housekeeping
+            deallocate(isnbface)
+
+        end do 
+
+        ! Process faces
+        do i = 1, topomesh%face%ntot 
+            if (topomesh%face%type(i) == TMfacebndID) then 
+                ! Unpack
+                tsf = sf(i)%Get()
+                tsfr = sfr(i)%Get()
+                tcontourind = contourind(i)%Get()
+                nint = size(tsf)
+
+                ! Sort
+                sortind = [(k, k = 1, nint)]
+                call Sort(tsfr, ind=sortind, ascend=.true.)
+                tsf = tsf(sortind)
+                tcontourind = tcontourind(sortind)
+
+                ! Check intersections
+                if (nint > 0) then 
+                    ! Check which intersections should be removed
+                    allocate(rmind(nint))
+                    rmind = .false.
+
+                    do j = 1, nint
+                        if (&
+                            any(topomesh%face%vert(i, :) == alltpc(tcontourind(j))%startsaddle) .or. &
+                            any(topomesh%face%vert(i, :) == alltpc(tcontourind(j))%endsaddle)) then 
+                            rmind(j) = .true.
+                        end if
+                    end do 
+
+                    ! Check how to remove intersections 
+                    if (all(topomesh%vert%type(topomesh%face%vert(i, : )) == TMvertextp2ID)) then 
+                        !print *, 'face ID: ', i
+                        !print *, 'face vertices: ', topomesh%face%vert(i, :) 
+                        !call gdErrorHandler('AddTopologicalMeshContours: ' // & 
+                        !    'boundary detected with two type 2 tangency points, ' // & 
+                        !    'this is likely a bug')
+
+                        ! Sanity checks
+                        if ((tsfr(1) /= 0.0_R8) .or. (tsfr(nint) /= topomesh%face%x(i)%Size()-1)) then 
+                            print *, 'face ID: ', i
+                            print *, 'face vertices: ', topomesh%face%vert(i, :) 
+                            call gdErrorHandler('AddTopologicalMeshContours: ' //& 
+                                'face should intersect with tangency point ' // & 
+                                'at start and end, but not all intersections found')
+                        end if 
+
+                        ! Check which contours have the start and end
+                        ! vertex as a starting/ending point
+                        isstartingcontour = tsfr == 0.0_R8
+                        isendingcontour = tsfr == topomesh%face%x(i)%Size()-1
+                        allocate(tcstartind(count(isstartingcontour)), tcendind(count(isendingcontour)))
+                        tcstartind = pack(tcontourind, isstartingcontour)
+                        tcendind = pack(tcontourind, isendingcontour)
+
+                        ! Check which intersections these are, these
+                        ! give limits for face trimming
+                        startind = 0
+                        endind = nint+1 
+                        k = 1
+                        do while (k <= nint)
+                            if (.not. any(tcontourind(k) == tcstartind)) then 
+                                ! Exit the loop
+                                exit 
+                            else
+                                ! Update counters
+                                k = k + 1
+                                startind = startind + 1
+                            end if 
+                        end do 
+                        k = nint 
+                        do while (k > 0)
+                            if (.not. any(tcontourind(k) == tcendind)) then 
+                                ! Exit the loop
+                                exit
+                            else
+                                ! Update counters
+                                k = k - 1
+                                endind = endind - 1
+                            end if 
+                        end do 
+
+                        ! Trim face
+                        tx = topomesh%face%x(i)%Get()
+                        ty = topomesh%face%y(i)%Get()
+                        if (tsfr(startind) /= 0.0_R8 .and. tsfr(endind) /= real(topomesh%face%x(i)%Size()-1)) then 
+                            call DeleteCurveSegment(tx, ty, tsfr([startind, endind]), &
+                                'both', [0.1_R8, 0.1_R8], .true., .true.)
+                        elseif (tsfr(startind) /= 0.0_R8) then 
+                            call DeleteCurveSegment(tx, ty, tsfr([startind]), &
+                                'start', [0.1_R8, 0.1_R8], .true., .true.)
+                        elseif (tsfr(endind) /= real(topomesh%face%x(i)%Size()-1, kind=R8)) then 
+                            call DeleteCurveSegment(tx, ty, tsfr([endind]), &
+                                'end', [0.1_R8, 0.1_R8], .true., .true.)
+                        end if 
+
+                            ! Reconstruct polygon
+                        call topomesh%face%pol(i)%Construct(&
+                            topomesh%face%x(i)%Get(), topomesh%face%y(i)%Get())
+                        call topomesh%face%x(i)%Set(tx)
+                        call topomesh%face%y(i)%Set(ty)
+                        !call topomesh%face%x(i)%Remove([(k, k = 2, tsf(startind)+1), &
+                        !    (k, k = tsf(endind+1), topomesh%face%x(i)%Size()-1)])
+                        !call topomesh%face%y(i)%Remove([(k, k = 2, tsf(startind)+1), &
+                        !    (k, k = tsf(endind+1), topomesh%face%y(i)%Size()-1)])
+
+                        ! Reconstruct polygon
+                        call topomesh%face%pol(i)%Construct(&
+                            topomesh%face%x(i)%Get(), topomesh%face%y(i)%Get())
+
+                        ! Housekeeping
+                        deallocate(tcstartind, tcendind)
+
+                    elseif (topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertextp2ID) then
+
+                        ! Sanity checks
+                        if (tsfr(1) /= 0.0_R8) then
+                            print *, 'face ID: ', i
+                            print *, 'face vertices: ', topomesh%face%vert(i, :) 
+                            call gdErrorHandler('AddTopologicalMeshContours: ' //& 
+                                'face should intersect with tangency point ' // & 
+                                'initially, but no intersection found')
+                        end if 
+
+                        ! Find location
+                        startind = findloc(rmind, .true., 1, back=.true.)
+
+                        ! Sanity check
+                        if (startind == 0) then 
+                            ! This shouldn't happen
+                            call gdErrorHandler('AddTopologicalMeshContours: ' // & 
+                                'face has intersections but none to be removed - unexpected')
+                        end if 
+
+                        ! Trim face
+                        if (tsfr(startind) /= 0.0_R8) then 
+                            tx = topomesh%face%x(i)%Get()
+                            ty = topomesh%face%y(i)%Get()
+                            call DeleteCurveSegment(tx, ty, tsfr([startind]), &
+                                'start', [0.1_R8, 0.1_R8], .true., .true.)
+                            call topomesh%face%x(i)%Set(tx)
+                            call topomesh%face%y(i)%Set(ty)
+
+                            ! Reconstruct polygon
+                            call topomesh%face%pol(i)%Construct(&
+                                topomesh%face%x(i)%Get(), topomesh%face%y(i)%Get())
+                        end if 
+
+                        !call topomesh%face%x(i)%Remove([(k, k = 2, tsf(startind)+1)])
+                        !call topomesh%face%y(i)%Remove([(k, k = 2, tsf(startind)+1)])
+
+                        
+
+                    elseif (topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertextp2ID) then
+
+                        ! Sanity checks
+                        if (tsfr(nint) /= topomesh%face%x(i)%Size()-1) then
+                            print *, 'face ID: ', i
+                            print *, 'face vertices: ', topomesh%face%vert(i, :) 
+                            call gdErrorHandler('AddTopologicalMeshContours: ' //& 
+                                'face should intersect with tangency point ' // & 
+                                'initially, but no intersection found')
+                        end if 
+
+                        ! Find location
+                        startind = findloc(rmind, .true., 1, back=.false.)
+
+                        ! Sanity check
+                        if (startind == 0) then 
+                            ! This shouldn't happen
+                            call gdErrorHandler('AddTopologicalMeshContours: ' // & 
+                                'face has intersections but none to be removed - unexpected')
+                        end if 
+
+                        ! Trim face
+                        if (tsfr(startind) < real(topomesh%face%x(i)%Size()-1, kind=R8)) then 
+                            tx = topomesh%face%x(i)%Get()
+                            ty = topomesh%face%y(i)%Get()
+                            call DeleteCurveSegment(tx, ty, tsfr([startind]), &
+                                'end', [0.1_R8, 0.1_R8], .true., .true.)
+                            call topomesh%face%x(i)%Set(tx)
+                            call topomesh%face%y(i)%Set(ty)
+
+                            ! Reconstruct polygon
+                            call topomesh%face%pol(i)%Construct(&
+                                topomesh%face%x(i)%Get(), topomesh%face%y(i)%Get())
+                        end if 
+                        !call topomesh%face%x(i)%Remove([(k, k = tsf(startind), topomesh%face%x(i)%Size()-1)])
+                        !call topomesh%face%y(i)%Remove([(k, k = tsf(startind), topomesh%face%y(i)%Size()-1)])
+
+                        
+                    else
+                        ! This can happen, just skip since we shouldn't 
+                        ! adjust anything here
+                    end if
+
+                    ! Housekeeping
+                    deallocate(rmind)
+
+                end if 
+
+                
+            end if 
+        end do 
+
+        ! Add contours (IDs etc should be done already...)
+        allc = [allc, alltpc]
 
         ! Add to the topology mesh
         !=========================
@@ -2114,6 +2223,9 @@ module ggmod_topology2D
             end if 
 
             ! Choose face with closest field value
+            if (allocated(tfv)) then 
+                deallocate(tfv)
+            end if 
             allocate(tfv(size(tf)))
             do j = 1, size(tf)
                 if (topomesh%face%vert(tf(j), 1) == i) then 
@@ -3915,7 +4027,7 @@ module ggmod_topology2D
 
     end subroutine
 
-    subroutine InitializeTopologicalMeshVertex(tpvert)
+    subroutine InitializeTopologicalMeshVertex(tpvert, nv)
 
         ! Description
         !============
@@ -3925,16 +4037,30 @@ module ggmod_topology2D
         !==================
         ! Arguments
         class(TopomeshVertUDT)      :: tpvert 
+        integer(I8), intent(in), optional   :: nv 
 
         ! Initialize
         !===========
-        tpvert%ntot = 0
-        allocate(tpvert%ID(0), tpvert%x(0), tpvert%y(0), tpvert%fval(0), &
-            tpvert%type(0), tpvert%fsID(0))
+        if (present(nv)) then 
+            tpvert%ntot = nv 
+        else
+            tpvert%ntot = 0
+        end if 
+        if (allocated(tpvert%ID)) then 
+            ! Assume all allocated
+            deallocate(tpvert%ID, tpvert%x, tpvert%y, tpvert%fval, &
+                tpvert%type, tpvert%fsID, tpvert%BV)
+        end if 
+        associate(ntot  => tpvert%ntot)
+        allocate(tpvert%ID(ntot), tpvert%x(ntot), tpvert%y(ntot), &
+            tpvert%fval(ntot), tpvert%type(ntot), tpvert%fsID(ntot), &
+            tpvert%BV(ntot))
+
+        end associate
 
     end subroutine 
 
-    subroutine InitializeTopologicalMeshFace(tpface)
+    subroutine InitializeTopologicalMeshFace(tpface, nf, nfc)
 
         ! Description
         !============
@@ -3944,17 +4070,39 @@ module ggmod_topology2D
         !==================
         ! Arguments
         class(TopomeshFaceUDT)      :: tpface
+        integer(I8), intent(in), optional   :: nf, nfc
 
         ! Initialize
         !===========
-        tpface%ntot = 0
-        allocate(tpface%ID(0), tpface%vert(0, 2), tpface%cell(0), &
-            tpface%fsID(0), tpface%x(0), tpface%y(0), &
-            tpface%pol(0), tpface%type(0))
+        if (present(nf)) then 
+            tpface%ntot = nf
+        else
+            tpface%ntot = 0
+        end if
+        if (present(nfc)) then 
+            tpface%nfc = nfc
+        else 
+            tpface%nfc = 0
+        end if 
+        associate(ntot  => tpface%ntot, ntotc   => tpface%nfc)
+        if (allocated(tpface%ID)) then 
+            ! assume all allocated
+            deallocate(tpface%ID, tpface%vert, tpface%cell, &
+                tpface%fsID, tpface%x, tpface%y, &
+                tpface%pol, tpface%type, tpface%cellP, tpface%label, &
+                tpface%BF)
+        end if 
+        allocate(tpface%ID(ntot), tpface%vert(ntot, 2), tpface%cell(ntotc), &
+            tpface%fsID(ntot), tpface%x(ntot), tpface%y(ntot), &
+            tpface%pol(ntot), tpface%type(ntot), tpface%cellP(ntot, 2), &
+            tpface%label(ntot), tpface%BF(ntot))
+
+        ! Housekeeping
+        end associate
 
     end subroutine
 
-    subroutine InitializeTopologicalMeshCell(tpcell)
+    subroutine InitializeTopologicalMeshCell(tpcell, nc, ncv, ncf)
 
         ! Description
         !============
@@ -3964,11 +4112,35 @@ module ggmod_topology2D
         !==================
         ! Arguments
         class(TopomeshCellUDT)      :: tpcell
+        integer(I8), intent(in), optional   :: nc, ncv, ncf
 
         ! Initialize
         !===========
-        tpcell%ntot = 0
-        allocate(tpcell%ID(0))
+        if (present(nc)) then 
+            tpcell%ntot = nc
+        else
+            tpcell%ntot = 0
+        end if 
+        if (present(ncv)) then 
+            tpcell%ntotv = ncv 
+        else 
+            tpcell%ntotv = 0
+        end if 
+        if (present(ncf)) then 
+            tpcell%ntotf = ncf 
+        else
+            tpcell%ntotf = 0
+        end if 
+
+        if (allocated(tpcell%ID)) then 
+            ! Assume all allocated
+            deallocate(tpcell%ID, tpcell%vert, tpcell%vertP, tpcell%face,  &
+                tpcell%faceP, tpcell%flags)
+        end if 
+        associate(ntot  => tpcell%ntot, ntotf   => tpcell%ntotf, ntotv  => tpcell%ntotv)
+        allocate(tpcell%ID(ntot), tpcell%vert(ntotv), tpcell%vertP(ntot, 2), &
+            tpcell%face(ntotf),  tpcell%faceP(ntot, 2), tpcell%flags(ntot))
+        end associate
 
     end subroutine
 
@@ -4995,7 +5167,7 @@ module ggmod_topology2D
         integer(I8)                             :: thistf, thisc, &
             nextc, tc
         integer(I8), allocatable, dimension(:)  :: tf, thesecells, &
-            tfc, thiscf
+            tfc, thiscf, tv
         logical                                 :: isclosed, addtube, &
             singlefacetube
         logical, allocatable, dimension(:)      :: hasfacetype, &
@@ -5041,6 +5213,11 @@ module ggmod_topology2D
             thesecells = pack([(k, k = 1, cell%ntot)], .not. hasfaces)
             print *, 'The following cells do not have exactly two ' // & 
                 'tube faces and will not be part of a tube: ',  thesecells
+            print *, 'Vertices of these cells:'
+            do i = 1, size(thesecells)
+                tv = GetTMCellVert(topomesh%cell, thesecells(i))
+                print *, 'vertices: ', tv 
+            end do 
             deallocate(thesecells)
         end if 
 
@@ -5108,7 +5285,7 @@ module ggmod_topology2D
             do while (.true. .and. (.not. singlefacetube)) 
                 ! Add the current face before already found faces (to keep correct
                 ! order)
-                call tubef%Append(thistf)
+                call tubef%Insert(thistf, 1)
                 
                 ! Is the face a boundary face? 
                 if (face%BF(thistf)) then 
@@ -5166,7 +5343,7 @@ module ggmod_topology2D
                 ! Is the face the same face as we started from? (closed tube)
                 if (thistf == tf(1)) then 
                     isclosed = .true.
-                    call tubef%Insert(thistf, 1) ! add in front
+                    call tubef%Append(tf(2)) ! add at end
 
                     ! Exit
                     exit 
@@ -5310,8 +5487,12 @@ module ggmod_topology2D
         class(TopomeshUDT)                      :: topomesh 
 
         ! Auxiliary
+        integer(I8)                             :: thisfsID
         integer(I8), allocatable                :: tempvcells(:, :)
-        integer(I8), allocatable, dimension(:)  :: ncpv, vcount, tv
+        integer(I8), allocatable, dimension(:)  :: ncpv, vcount, tv, &
+            newfsID, tfv
+        real(R8)                                :: tfsfval
+        real(R8), allocatable, dimension(:)     :: fsfval, newfsfval
 
         ! Loop
         integer(I8)                             :: i, j
@@ -5408,6 +5589,79 @@ module ggmod_topology2D
                 v%BV(f%vert(i, :)) = .true. 
             end if 
         end do 
+
+        ! Reconstruct fsID of vertices to be compliant to faces (note: 
+        ! type 1 tangency points get their own flux surface ID)
+        fsfval = topomesh%fsfval%Get() !store original values, for faces
+        newfsfval = fsfval
+        allocate(newfsID(topomesh%nfs))
+        newfsID = 0
+        topomesh%nfs = 0
+        v%fsID = 0 ! reset
+        do i = 1, v%ntot
+            if (v%type(i) == TMvertextp1ID) then 
+                ! Update counter
+                topomesh%nfs = topomesh%nfs + 1
+
+                ! Add ID (value should remain the same)
+                if (v%fsID(i) /= 0) then 
+                    ! unexpected, print warning
+                    print *, 'AddTopologicalMeshInterconnectionData: ' // & 
+                        'tangency point vertex: ', i, ' already had an ID, unexpected. ' // & 
+                        'Overwriting...'
+                end if 
+                v%fsID(i) = topomesh%nfs
+            end if
+        end do  
+        do i = 1, f%ntot 
+            if (f%fsID(i) /= 0) then 
+                ! Get the current value
+                tfsfval = fsfval(f%fsID(i))
+
+                ! Set the new flux surface ID - check if this flux 
+                ! surface was already used before
+                if (newfsID(f%fsID(i)) == 0) then 
+                    topomesh%nfs = topomesh%nfs + 1
+                    thisfsID = topomesh%nfs 
+                    newfsID(f%fsID(i)) = thisfsID
+                else
+                    thisfsID = newfsID(f%fsID(i))
+                end if 
+                newfsfval(thisfsID) = tfsfval 
+
+                ! Get vertices of this face
+                tfv = f%vert(i, :) 
+
+                ! Set first vertex
+                if ((v%fsID(tfv(1)) /= 0) .and. (v%fsID(tfv(1)) /= thisfsID)) then 
+                    ! Unexpected, print warning
+                    print *, 'AddTopologicalMeshInterconnectionData: ' // & 
+                        'vertex: ', tfv(1), ' already had an ID, unexpected. ' // & 
+                        'Overwriting...'
+                end if 
+                v%fsID(tfv(1)) = thisfsID
+                v%fval(tfv(1)) = tfsfval
+
+                ! Set second vertex
+                if ((v%fsID(tfv(2)) /= 0) .and. (v%fsID(tfv(2)) /= thisfsID)) then 
+                    ! Unexpected, print warning
+                    print *, 'AddTopologicalMeshInterconnectionData: ' // & 
+                        'vertex: ', tfv(2), ' already had an ID, unexpected. ' // & 
+                        'Overwriting...'
+                end if 
+                v%fsID(tfv(2)) = thisfsID
+                v%fval(tfv(2)) = tfsfval
+            end if 
+        end do 
+
+        ! Reset the topological mesh flux surface data
+        topomesh%fsfval = ConstructRealDynamicArray(newfsfval)
+        do i = 1, f%ntot
+            if (f%fsID(i) /= 0) then 
+                f%fsID(i) = newfsID(f%fsID(i))
+            end if 
+        end do 
+                    
 
         ! Tubes
         !======
@@ -6694,6 +6948,9 @@ module ggmod_topology2D
         ! Note: by construction, the cell faces should already be 
         ! sorted correctly! 
 
+        ! Note: we should hedge for possible duplicate faces since 
+        ! disc regions are allowed
+
         ! Declare variables
         !==================
         ! Arguments
@@ -6704,8 +6961,8 @@ module ggmod_topology2D
         logical(I8), allocatable, intent(out)   :: doflip(:)
 
         ! Auxiliary
-        integer(I8)                             :: startvert
-        integer(I8), allocatable, dimension(:)  :: tf, tfv
+        integer(I8)                             :: startvert, sf
+        integer(I8), allocatable, dimension(:)  :: tf, tfv, tdiff
 
         ! Loop
         integer(I8)                             :: i 
@@ -6728,6 +6985,21 @@ module ggmod_topology2D
         end if 
         allocate(doflip(size(sortedfaces)))
         doflip = .false.
+
+        ! Determine starting face as non-duplicate face (then all the rest
+        ! should go fine in principle)
+        tdiff = tf(2:size(tf)) - tf(1:size(tf)-1)
+        sf = findloc(tdiff /= 0, .true., 1)
+        if (sf == 1) then 
+            ! Nothing to see here, move along
+        elseif (sf == 2) then 
+            ! Shift the first face backwards
+            tf = [tf(2:size(tf)), tf(1)]
+        else
+            ! Unexpected, throw error
+            call gdErrorHandler('SortTopologicalMeshCellFaces: more than two faces ' // & 
+                'appear to be the same for this cell, unexpected')
+        end if 
 
         ! Loop
         !=====
@@ -6927,6 +7199,168 @@ module ggmod_topology2D
         eig(2) = ((a+b) - det)/2.0_R8
 
     end function 
+
+    ! Coordinate trimmer
+    subroutine DeleteCurveSegment(x, y, sr, loc, dloffset, keepstartpoint, &
+        keependpoint)
+
+        ! Description
+        !============
+        ! An auxiliary routine that deletes a segment of a curve, defined
+        ! by its x, y coordinates. The segment that is deleted is defined 
+        ! by 'loc', which can be 'start', 'end', or 'both'. 'sr' is then the
+        ! length coordinate (curve length goes from 0 to number of segments) at which the 
+        ! cutoff is defined. Typically, this length originates from an 
+        ! intersection routine. an 'offset' can be defined (0 <= offset <= 1) 
+        ! which gives the relative distance that should be kept between the
+        ! intersection position and the next vertex. If 'loc' is 'both', 
+        ! then offset and sr is expected to be a 1-by-2
+        ! array. Finally, the boolean 'keependpoints' determines whether
+        ! the start and end of the curve should be conserved or deleted.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), allocatable, dimension(:), intent(inout)  :: x, y
+        real(R8), dimension(:), intent(in)                  :: sr 
+        character(*), intent(in)                            :: loc 
+        real(R8), intent(in)                                :: dloffset(:) 
+        logical, intent(in)                                 :: keepstartpoint 
+        logical, intent(in)                                 :: keependpoint 
+
+        ! Auxiliary
+        real(R8), dimension(:), allocatable     :: offset
+        real(R8), allocatable, dimension(:)     :: actualsr, &
+            dlc, xint, yint
+        integer(I8)                             :: ns
+        integer(I8), allocatable, dimension(:)  :: keepind
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Delete segment
+        !===============
+        ! Initialize
+        actualsr = sr 
+
+        ! Project offset within bounds if necessary
+        offset = dloffset
+        where (dloffset >= 1.0_R8) offset = 1.0_R8
+        where (dloffset <= 0.0_R8) offset = 0.0_R8
+        where (dloffset < 1.0_R8 .and. dloffset > 0.0_R8) offset = dloffset
+
+        ! Compute length distribution
+        dlc = [(i, i = 0, size(x)-1)]
+        ns = size(dlc)-1
+
+        ! Check case
+        select case (loc)
+
+        case ('start')
+
+            ! Check sr
+            if (sr(1) == real(ceiling(sr(1)), kind=R8)) then 
+                ! Intersection exactly at end node, set segment index
+                actualsr(1) = sr(1) + offset(1)
+            else
+                if (offset(1) == 1.0_R8) then
+                    actualsr(1) = real(ceiling(sr(1)), kind=R8)
+                else
+                    actualsr(1) = sr(1) + (ceiling(sr(1)) - sr(1))*offset(1)
+                end if 
+            end if 
+
+            ! Compute intersection coordinates
+            call Interpolate1D(actualsr(1:1), xint, dlc, x)
+            call Interpolate1D(actualsr(1:1), yint, dlc, y)
+
+            ! Compute which points to keep 
+            keepind = [(i, i = ceiling(actualsr(1))+1, ns)]
+
+            ! Compute new coordinates
+            if (keepstartpoint) then 
+                x = [x(1), xint(1), x(keepind)]
+                y = [y(1), yint(1), y(keepind)]
+            else
+                x = [xint(1), x(keepind)]
+                y = [yint(1), y(keepind)]
+            end if 
+
+        case ('end')
+
+            ! Check sr
+            if (sr(1) == real(floor(sr(1)), kind=R8)) then 
+                ! Intersection exactly at end node, set segment index
+                actualsr(1) = sr(1) - offset(1)
+            else
+                actualsr(1) = sr(1) - (sr(1) - floor(sr(1)))*offset(1)
+            end if 
+
+            ! Compute intersection coordinates
+            call Interpolate1D(actualsr(1:1), xint, dlc, x)
+            call Interpolate1D(actualsr(1:1), yint, dlc, y)
+
+            ! Compute which points to keep 
+            keepind = [(i, i = 1, floor(actualsr(1)))]
+
+            ! Compute new coordinates
+            if (keependpoint) then 
+                x = [x(keepind), xint, x(ns+1)]
+                y = [y(keepind), yint, y(ns+1)]
+            else
+                x = [x(keepind), xint]
+                y = [y(keepind), yint]
+            end if 
+
+        case ('both')
+
+            ! Check sr
+            if (sr(1) == real(ceiling(sr(1)), kind=R8)) then 
+                ! Intersection exactly at end node, set segment index
+                actualsr(1) = sr(1) + offset(1)
+            else
+                if (offset(1) == 1.0_R8) then
+                    actualsr(1) = real(ceiling(sr(1)), kind=R8)
+                else
+                    actualsr(1) = sr(1) + (ceiling(sr(1)) - sr(1))*offset(1)
+                end if 
+            end if
+            if (sr(2) == real(floor(sr(2)), kind=R8)) then 
+                ! Intersection exactly at end node, set segment index
+                actualsr(2) = sr(2) - offset(2)
+            else
+                actualsr(2) = sr(2) - (sr(2) - floor(sr(2)))*offset(2)
+            end if 
+
+            ! Compute intersection coordinates
+            call Interpolate1D(actualsr, xint, dlc, x)
+            call Interpolate1D(actualsr, yint, dlc, y)
+
+            ! Compute which points to keep 
+            keepind = [(i, i = ceiling(actualsr(1))+1, floor(actualsr(2)))]
+
+            ! Compute new coordinates
+            if (keepstartpoint .and. keependpoint) then 
+                x = [x(1), xint(1), x(keepind), xint(2), x(ns+1)]
+                y = [y(1), yint(1), y(keepind), yint(2), y(ns+1)]
+            elseif (keepstartpoint) then 
+                x = [x(1), xint(1), x(keepind), xint(2)]
+                y = [y(1), yint(1), y(keepind), yint(2)]
+            elseif (keependpoint) then 
+                x = [xint(1), x(keepind), xint(2), x(ns+1)]
+                y = [yint(1), y(keepind), yint(2), y(ns+1)]
+            else
+                x = [xint(1), x(keepind), xint(2)]
+                y = [yint(1), y(keepind), yint(2)]
+            end if 
+
+        case default 
+
+            call gdErrorHandler('DetermineCurveSegment: unknown location')
+
+        end select
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                               I/O                                !
