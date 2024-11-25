@@ -122,8 +122,12 @@ subroutine GGDriver(goatoptions)
 
     ! Generate the topological mesh
     !==============================
-    call ConstructTopologicalMesh(environment%vessel, magneticField, &
-        topomeshoptions, topomesh, fieldtracer, vesseltracer)
+    if (topomeshoptions%readexistingTM) then 
+        call ReadTopologicalMesh(topomesh, topomeshoptions%TMfilepath)
+    else 
+        call ConstructTopologicalMesh(environment%vessel, magneticField, &
+            topomeshoptions, topomesh, fieldtracer, vesseltracer)
+    end if 
 
     ! Generate the grid
     !==================

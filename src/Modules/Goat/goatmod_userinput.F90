@@ -375,13 +375,18 @@ module goatmod_userinput
         ! - npmin, npmax, dl    : minimal and maximal number of points
         !                       of contours (when doing coarsening) and
         !                       desired uniform edge length
+        ! - readexistingTM:     read in an existing topomesh file, 
+        !                       for which the full path is defined in  
+        !                       TMfilepath
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax
         logical                 :: addcoreboundaries, removecoreregions, &
-            fdonewton, vdonewton, removewidegridregions, addPFboundaries
+            fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
+            readexistingTM
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac
+        character(:), allocatable   :: TMfilepath
     contains 
 
         procedure :: Read           => ReadTopomeshOptions
@@ -744,6 +749,10 @@ module goatmod_userinput
 
         ! Set defaults
         !=============
+        ! I/O
+        options%readexistingTM = .false. 
+        options%TMfilepath = 'topomesh.dat'
+        
         ! Contouring (field)
         options%fresx = 100
         options%fresy = 100
@@ -1393,6 +1402,12 @@ module goatmod_userinput
         
         ! Read options
         !=============
+        ! I/O
+        field = 'gg.tm.readexistingTM'
+        call ExtractOptionValueLogical0D(fid, field, options%readexistingTM)
+        field = 'gg.tm.TMfilepath'
+        call ExtractOptionValueCharacter(fid, field, options%TMfilepath)
+
         ! Resolution 
         field = 'gg.tm.field.resx'
         call ExtractOptionValueInteger0D(fid, field, options%fresx)

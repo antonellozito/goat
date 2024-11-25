@@ -37,7 +37,7 @@ module ggmod_topology2D
     implicit none
     private 
     public :: TopomeshUDT, ConstructTopologicalMesh, TraceExtrema2D, &
-        TraceTangencyPoints2D
+        TraceTangencyPoints2D, ReadTopologicalMesh, WriteTopologicalMesh
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -6990,7 +6990,8 @@ module ggmod_topology2D
         ! Auxiliary
         integer                                 :: fu, BVval, cvsize, &
             cfsize
-        real(R8), allocatable, dimension(:)     :: xf, yf
+        integer(I8), allocatable, dimension(:)  :: tID
+        real(R8), allocatable, dimension(:)     :: xf, yf, tfval
         character(:), allocatable               :: dir
         logical, allocatable, dimension(:)      :: BV, BF
         type(RealDynamicArrayUDT), allocatable  :: xcda(:), ycda(:)
@@ -7025,10 +7026,16 @@ module ggmod_topology2D
         if (.not. allocated(v%BV)) then 
             allocate(BV(v%ntot))
             BV = .false.
-        else 
+        elseif (size(v%BV) /= v%ntot) then 
+            allocate(BV(v%ntot))
+            BV = .false.
+        else
             BV = v%BV
         end if 
         if (.not. allocated(f%BF)) then 
+            allocate(BF(f%ntot))
+            BF = .false.
+        elseif (size(f%BF) /= f%ntot) then 
             allocate(BF(f%ntot))
             BF = .false.
         else 
@@ -7042,14 +7049,14 @@ module ggmod_topology2D
         write (fu, *) v%ntot
 
         ! Basic vertex data
-        write (fu, *) 'ID, x, y, type, fval, BV'
+        write (fu, *) 'ID, x, y, type, fsID, fval, BV'
         do i = 1, v%ntot
             if (BV(i)) then 
                 BVval = 1
             else 
                 BVval = 0
             end if
-            write (fu, *) v%ID(i), v%x(i), v%y(i), v%type(i), v%fval(i), BVval
+            write (fu, *) v%ID(i), v%x(i), v%y(i), v%type(i), v%fsID(i), v%fval(i), BVval
         end do 
 
         ! Write face data
@@ -7146,6 +7153,20 @@ module ggmod_topology2D
             end do 
         end do 
 
+        ! Write flux surface data
+        !========================
+        ! Header and sizes
+        write (fu, *) 'flux surfaces'
+        write (fu, *) topomesh%nfs 
+        
+        ! Data
+        write (fu, *) 'ID, fval'
+        tID = topomesh%fsID%Get()
+        tfval = topomesh%fsfval%Get()
+        do i = 1, size(tID)
+            write (fu, *) tID(i), tfval(i)
+        end do 
+
         ! Write tube data
         !================
         ! Header and sizes
@@ -7179,6 +7200,206 @@ module ggmod_topology2D
         ! Others
         end associate
         close(fu)
+
+    end subroutine
+
+    ! Topological mesh data reader 
+    subroutine ReadTopologicalMesh(topomesh, filepath)
+
+        ! Description
+        !============
+        ! This routine reads in the topological mesh data of an 
+        ! existing topological mesh (which is assumed to be correctly
+        ! set up) and adds any additional interconnection data that is 
+        ! not directly available in the file itself.
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_readwrite
+        use mod_inputfileparser
+
+        ! Arguments
+        class(TopomeshUDT), intent(out)         :: topomesh
+        character(*), intent(in)                :: filepath 
+
+        ! Auxiliary
+        integer                                 :: fu, BVval, &
+            nfc, ncc
+        real(R8), allocatable, dimension(:)     :: xf, yf, tfval 
+        integer(I8), allocatable, dimension(:)  :: tID
+        character(:), allocatable               :: thisline
+        logical                                 :: reachedeof
+
+        ! Loop
+        integer(I8)                             :: i, j 
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            v       => topomesh%vert,   &
+            f       => topomesh%face,   &
+            c       => topomesh%cell,   &
+            t       => topomesh%tube    &
+        )
+
+        ! Open file
+        open (action='read', file=trim(filepath), newunit=fu, &
+             status='old')
+
+        ! Initialize
+        call topomesh%Initialize()
+
+        ! Vertices
+        !=========
+        ! Read until header found
+        call ReadUntilFound(fu, 'vertices', reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadTopologicalMesh: could not find vertices')
+        end if 
+
+        ! Read number of vertices
+        read(fu, *) v%ntot
+
+        ! Initialize vertices 
+        call v%Initialize(nv=v%ntot)
+
+        ! Basic vertex data
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, v%ntot
+            read(fu, *) v%ID(i), v%x(i), v%y(i), v%type(i), v%fsID(i), v%fval(i), BVval
+            if (BVval == 1) then 
+                v%BV(i) = .true.
+            else
+                v%BV(i) = .false.
+            end if 
+        end do 
+
+
+        ! Faces
+        !======
+        ! Read until header found
+        call ReadUntilFound(fu, 'faces', reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadTopologicalMesh: could not find faces')
+        end if 
+
+        ! Read number of faces
+        read(fu, *) f%ntot
+
+        ! Initialize vertices 
+        call f%Initialize(nf=f%ntot)
+
+        ! Read basic data
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, f%ntot
+            ! Read
+            read(fu, *) f%ID(i), f%fsID(i), f%type(i), f%vert(i, 1), &
+                f%vert(i, 2), BVval, nfc
+            if (BVval == 1) then 
+                f%BF(i) = .true.
+            else
+                f%BF(i) = .false.
+            end if 
+
+            ! Initialize
+            f%x(i) = ConstructRealDynamicArray(spread(0.0_R8, 1, nfc))
+            f%y(i) = ConstructRealDynamicArray(spread(0.0_R8, 1, nfc))
+        end do 
+
+        ! Read face coordinates
+        call ReadSingleLine(fu, thisline, reachedeof) ! skip the header
+        do i = 1, f%ntot 
+            ! Read header
+            call ReadSingleLine(fu, thisline, reachedeof) 
+
+            ! Read coordinates
+            xf = f%x(i)%Get()
+            yf = f%y(i)%Get()
+            do j = 1, f%x(i)%Size()
+                read(fu, *) xf(j), yf(j)
+            end do 
+            call f%x(i)%Set(xf)
+            call f%y(i)%Set(yf)
+        end do 
+
+        ! Cells
+        !======
+        ! Read until header found
+        call ReadUntilFound(fu, 'cells', reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadTopologicalMesh: could not find cells')
+        end if 
+
+        ! Read number of faces
+        read(fu, *) c%ntot, c%ntotv, c%ntotf 
+
+        ! Initialize vertices 
+        call c%Initialize(nc=c%ntot, ncv=c%ntotv, ncf=c%ntotf)
+
+        ! Basic data
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, c%ntot 
+            read(fu, *) c%ID(i), ncc
+        end do 
+
+        ! Cell vertices
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, c%ntotv
+            read (fu, *) c%vert(i)
+        end do 
+
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, c%ntot
+            read(fu, *) c%vertP(i, 1), c%vertP(i, 2)
+        end do 
+
+        ! Cell faces
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, c%ntotf
+            read (fu, *) c%face(i)
+        end do 
+
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, c%ntot
+            read(fu, *) c%faceP(i, 1), c%faceP(i, 2)
+        end do 
+
+        ! Flux surface data
+        !==================
+        ! Read until header found
+        call ReadUntilFound(fu, 'flux surfaces', reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadTopologicalMesh: could not find flux surfaces')
+        end if 
+
+        ! Read number of surfaces
+        read(fu, *) topomesh%nfs 
+
+        ! Allocate
+        allocate(tfval(topomesh%nfs), tID(topomesh%nfs))
+
+        ! Read 
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, topomesh%nfs
+            read(fu, *) tID(i), tfval(i)
+        end do 
+        topomesh%fsID = ConstructIntegerDynamicArray(tID)
+        topomesh%fsfval = ConstructRealDynamicArray(tfval)
+
+        ! Add interconnection data
+        !=========================
+        call AddTopologicalMeshInterconnectionData(topomesh)
+
+        ! Housekeeping
+        !=============
+        ! Deallocate again
+
+        ! Others
+        end associate
+        close(fu)
+
 
     end subroutine
 
