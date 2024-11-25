@@ -525,6 +525,17 @@ module mod_contour2D
                 tempcontours(j)%ID = i 
             end do
 
+            ! Check if closed
+            do j = 1, size(tempcontours)
+                if (tempcontours(j)%x(1) == tempcontours(j)%x(size(tempcontours(j)%x)) .and. &
+                    tempcontours(j)%y(1) == tempcontours(j)%y(size(tempcontours(j)%y))) then 
+                    tempcontours(j)%isclosed = .true.
+                else
+                    tempcontours(j)%isclosed = .false.
+                end if 
+            end do 
+
+
             ! Add contours
             !$omp critical
             contours = AddContours(contours, tempcontours)
@@ -700,6 +711,16 @@ module mod_contour2D
             do j = 1, size(tempcontours)
                 tempcontours(j)%ID = i 
             end do
+
+            ! Check if closed
+            do j = 1, size(tempcontours)
+                if (tempcontours(j)%x(1) == tempcontours(j)%x(size(tempcontours(j)%x)) .and. &
+                    tempcontours(j)%y(1) == tempcontours(j)%y(size(tempcontours(j)%y))) then 
+                    tempcontours(j)%isclosed = .true.
+                else
+                    tempcontours(j)%isclosed = .false.
+                end if 
+            end do 
 
             ! Add contours
             !$omp critical
