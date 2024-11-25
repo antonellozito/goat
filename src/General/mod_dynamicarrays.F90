@@ -115,9 +115,11 @@ module mod_dynamicarrays
         ! Element setter
         procedure   :: SetSingleElement      => SetSingleElementRDA
         procedure   :: SetMultipleElements   => SetMultipleElementsRDA
-        procedure   :: SetAllElements        => SetAllElementsRDA
+        procedure   :: SetAllElementsScalar  => SetAllElementsScalarRDA
+        procedure   :: SetAllElementsArray   => SetAllElementsArrayRDA
         generic     :: Set                   => &
-            SetSingleElement, SetMultipleElements, SetAllElements
+            SetSingleElement, SetMultipleElements, SetAllElementsScalar, &
+            SetAllElementsArray
         
         ! Number of element getter
         procedure   :: Size                  => GetSizeRDA
@@ -171,9 +173,11 @@ module mod_dynamicarrays
         ! Element setter
         procedure   :: SetSingleElement      => SetSingleElementIDA
         procedure   :: SetMultipleElements   => SetMultipleElementsIDA
-        procedure   :: SetAllElements        => SetAllElementsIDA
+        procedure   :: SetAllElementsScalar  => SetAllElementsScalarIDA
+        procedure   :: SetAllElementsArray   => SetAllElementsArrayIDA
         generic     :: Set                   => &
-            SetSingleElement, SetMultipleElements, SetAllElements
+            SetSingleElement, SetMultipleElements, SetAllElementsScalar, &
+            SetAllElementsArray
 
         ! Number of element getter
         procedure   :: Size                  => GetSizeIDA
@@ -416,6 +420,7 @@ contains
 
         ! Remove
         !=======
+        ! Split 
         ! Set mask
         allocate(mask(size(rda%val)))
         mask = .true.
@@ -538,7 +543,7 @@ contains
     end subroutine
 
     ! All element setter
-    subroutine SetAllElementsRDA(rda, val) 
+    subroutine SetAllElementsScalarRDA(rda, val) 
 
         ! Description
         !============
@@ -549,6 +554,24 @@ contains
         ! Arguments
         class(RealDynamicArrayUDT)  :: rda 
         real(rk)                    :: val
+
+        ! Set 
+        !====
+        rda%val = val
+        
+    end subroutine
+
+    subroutine SetAllElementsArrayRDA(rda, val) 
+
+        ! Description
+        !============
+        ! Set the value of all elements to the current array 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(RealDynamicArrayUDT)  :: rda 
+        real(rk), dimension(:)      :: val
 
         ! Set 
         !====
@@ -949,6 +972,9 @@ contains
 
         ! Remove
         !=======
+        if (loc > size(ida%val)) then 
+            call gdErrorHandler('RemoveSingleElementIDA: index is out of bounds')
+        end if 
         ! Split up array
         temp1 = ida%val(1:loc-1)
         temp2 = ida%val(loc+1:size(ida%val))
@@ -978,6 +1004,9 @@ contains
         ! Remove
         !=======
         ! Set mask
+        if (any(loc > size(ida%val))) then 
+            call gdErrorHandler('RemoveSingleElementIDA: index is out of bounds')
+        end if 
         allocate(mask(size(ida%val)))
         mask = .true.
         mask(loc) = .false. 
@@ -1099,7 +1128,7 @@ contains
     end subroutine
 
     ! All element setter
-    subroutine SetAllElementsIDA(ida, val) 
+    subroutine SetAllElementsScalarIDA(ida, val) 
 
         ! Description
         !============
@@ -1110,6 +1139,24 @@ contains
         ! Arguments
         class(IntegerDynamicArrayUDT)  :: ida 
         integer(ik)                    :: val
+
+        ! Set 
+        !====
+        ida%val = val
+        
+    end subroutine
+
+    subroutine SetAllElementsArrayIDA(ida, val) 
+
+        ! Description
+        !============
+        ! Set the value of all elements to a single scalar value
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayUDT)  :: ida 
+        integer(ik), dimension(:)      :: val
 
         ! Set 
         !====
