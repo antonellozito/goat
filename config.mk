@@ -172,6 +172,14 @@ DRIVER_FILES = $(wildcard src/Drivers/Goat/*.F90)
 SODRIVER_FILES = $(wildcard src/Drivers/ShapeOpt/*.F90)
 
 ## MODULE_FILES			: Module filenames (.F90, .F) - sequence matters
+MODULE_FILES_GOAT =  $(wildcard src/Modules/Goat/*.F90)
+MODULE_FILES_GD = src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
+    src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
+    $(wildcard src/Modules/GD/*.F90)
+MODULE_FILES_GG = src/Modules/GG/ggmod_topology2D.F90 src/Modules/GG/ggmod_vertexdistribution2D.F90 \
+    src/Modules/GG/ggmod_gridgeneration2D.F90
+MODULE_FILES_B25 = $(wildcard src/Modules/*.F)
+
 MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
     src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\

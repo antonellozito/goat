@@ -163,10 +163,21 @@ $(BUILDDIR)/General: $(GENERAL_FILES)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
 	touch $(BUILDDIR)/General
 	
-## Modules			: compile modules 
-$(BUILDDIR)/Modules: $(MODULE_FILES)
+## Modules			: compile modules
+$(BUILDDIR)/Modules_goat: $(MODULE_FILES_GOAT)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
-	touch $(BUILDDIR)/Modules
+	touch $(BUILDDIR)/Modules_goat
+$(BUILDDIR)/Modules_GD: $(MODULE_FILES_GD)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Modules_GD
+$(BUILDDIR)/Modules_GG: $(MODULE_FILES_GG)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Modules_GG
+$(BUILDDIR)/Modules_B25: $(MODULE_FILES_B25)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Modules_B25
+$(BUILDDIR)/Modules: $(BUILDDIR)/Modules_goat $(BUILDDIR)/Modules_GD \
+	$(BUILDDIR)/Modules_GG $(BUILDDIR)/Modules_B25
 
 ## Auxiliary			: compile auxiliary routines
 $(BUILDDIR)/Auxiliary: $(AUXILIARY_FILES)
