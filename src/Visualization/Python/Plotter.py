@@ -534,6 +534,23 @@ def PlotTopologicalMesh(topomesh, fignum):
     PlotPoints2DWithID(topomesh.vert.x[split], topomesh.vert.y[split], topomesh.vert.ID[split], fignum, color='g', 
         marker='d', label='splitted face vertex')
     
+    PlotPoints2D(topomesh.vert.x[maxima], topomesh.vert.y[maxima],  fignum, color='b', 
+        marker='o', label='field maxima')
+    PlotPoints2D(topomesh.vert.x[saddle], topomesh.vert.y[saddle],  fignum, color='b', 
+        marker='x', label='field saddle')
+    PlotPoints2D(topomesh.vert.x[minima], topomesh.vert.y[minima],  fignum, color='b', 
+        marker='s', label='field minima')
+    PlotPoints2D(topomesh.vert.x[tp1], topomesh.vert.y[tp1],  fignum, color='r', 
+        marker='o', label='field tangency point type 1')
+    PlotPoints2D(topomesh.vert.x[tp2], topomesh.vert.y[tp2],  fignum, color='r', 
+        marker='x', label='field tangency point type 2')
+    PlotPoints2D(topomesh.vert.x[regular], topomesh.vert.y[regular], fignum, color='k', 
+        marker='.', label='regular vertex')
+    PlotPoints2D(topomesh.vert.x[bnd], topomesh.vert.y[bnd],  fignum, color='k', 
+        marker='.', label='bnd vertex')
+    PlotPoints2D(topomesh.vert.x[split], topomesh.vert.y[split],  fignum, color='g', 
+        marker='d', label='splitted face vertex')
+    
     # Store bounds
     xb = [np.min(topomesh.vert.x), np.max(topomesh.vert.x)]
     yb = [np.min(topomesh.vert.y), np.max(topomesh.vert.y)]
@@ -716,6 +733,9 @@ def PlotGridFaces(grid, fignum):
     
     # Plot
     PlotPolygons2D(xf, yf, fignum, color='k', marker='')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
 
 # Grid generation data plotting: cells
 def PlotGridCells(grid, fignum):

@@ -240,8 +240,9 @@ def ReadTopomeshFile(filepath):
         topomesh.vert.x[j] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
         topomesh.vert.y[j] = np.fromstring(values[2], dtype=float, count=1, sep=' ')
         topomesh.vert.type[j] = np.fromstring(values[3], dtype=int, count=1, sep=' ')
-        topomesh.vert.fval[j] = np.fromstring(values[4], dtype=float, count=1, sep=' ')
-        topomesh.vert.BV[j] = np.fromstring(values[5], dtype=int, count=1, sep=' ')
+        topomesh.vert.fsID[j] = np.fromstring(values[4], dtype=int, count=1, sep=' ')
+        topomesh.vert.fval[j] = np.fromstring(values[5], dtype=float, count=1, sep=' ')
+        topomesh.vert.BV[j] = np.fromstring(values[6], dtype=int, count=1, sep=' ')
 
     # Read face data
     #---------------

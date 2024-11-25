@@ -82,6 +82,7 @@ class TopomeshVert:
         # ID
         self.ID = np.zeros(0, dtype=int)
         self.type = np.zeros(0, dtype=int)
+        self.fsID = np.zeros(0, dtype=int)
 
         # Field value
         self.fval = np.zeros(0, dtype=float)
@@ -101,6 +102,7 @@ class TopomeshVert:
         # ID
         self.ID = np.zeros(ntot, dtype=int)
         self.type = np.zeros(ntot, dtype=int)
+        self.fsID = np.zeros(ntot, dtype=int)
 
         # Field value
         self.fval = np.zeros(ntot, dtype=float)
