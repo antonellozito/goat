@@ -3079,26 +3079,88 @@ module mod_polygon
         ! Compute intersection
         !=====================
         ! Hedge for small dx when computing slope 
-        if (abs(dx1) > disttol) then 
-            r1 = dy1/dx1 
-            if (abs(dx2) > disttol) then 
-                ! Two non-parallel, non-vertical and non-horizontal lines
-                r2 = dy2/dx2 
-                x = (r1*x11 - r2*x21 -y11 + y21)/(r1 - r2)
-                y = r1*(x - x11) + y11
-            else 
-                ! Second line is vertical line, first one is non-vertical
-                x = x21
-                y = r1*(x - x11) + y11
-            end if 
+        if (abs(dx1) > abs(dx2)) then 
+            if (abs(dx1) > disttol) then 
+                r1 = dy1/dx1 
+                if (abs(dx2) > disttol) then 
+                    ! Two non-parallel, non-vertical and non-horizontal lines
+                    r2 = dy2/dx2 
+                    x = (r1*x11 - r2*x21 -y11 + y21)/(r1 - r2)
+                    y = r1*(x - x11) + y11
+                else 
+                    ! Second line is vertical line, first one is non-vertical
+                    x = x21
+                    y = r1*(x - x11) + y11
+                end if 
 
+            else
+                ! Both lines are parallel - should've been captured before actually
+                ! Compute normal
+                nx = -(y11 - y12)
+                ny = (x11 - x12)
+                nn = sqrt(nx**2 + ny**2)
+
+                ! Compute vector between lines
+                vx = (x11 - x21)
+                vy = (y11 - y21)
+
+                ! Compute the distance
+                dist = abs( vx*nx/nn + vy*ny/nn )
+
+                ! Check 
+                if (dist < disttol) then 
+                    ! collinear lines, return inf
+                    x = IEEE_VALUE(inf, IEEE_positive_inf)
+                    y = x 
+                else 
+                    ! Parallel lines, return nan
+                    x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+                    y = x 
+                end if 
+                return 
+            end if 
         else
-            ! First line is vertical line, second is non-vertical 
-            ! (otherwise, det would have been zero)
-            x = x11 
-            r2 = dy2/dx2 
-            y = r2*(x - x21) + y21
+            if (abs(dx2) > disttol) then 
+                r2 = dy2/dx2
+                if (abs(dx1) > disttol) then 
+                    ! Two non-parallel, non-vertical and non-horizontal lines
+                    r1 = dy1/dx1 
+                    x = (r1*x11 - r2*x21 -y11 + y21)/(r1 - r2)
+                    y = r2*(x - x21) + y21
+                else 
+                    ! First line is vertical line, second one is non-vertical
+                    x = x11
+                    y = r2*(x - x21) + y21
+                end if 
+
+            else
+                ! Both lines are parallel - should've been captured before actually
+                ! Compute normal
+                nx = -(y11 - y12)
+                ny = (x11 - x12)
+                nn = sqrt(nx**2 + ny**2)
+
+                ! Compute vector between lines
+                vx = (x11 - x21)
+                vy = (y11 - y21)
+
+                ! Compute the distance
+                dist = abs( vx*nx/nn + vy*ny/nn )
+
+                ! Check 
+                if (dist < disttol) then 
+                    ! collinear lines, return inf
+                    x = IEEE_VALUE(inf, IEEE_positive_inf)
+                    y = x 
+                else 
+                    ! Parallel lines, return nan
+                    x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+                    y = x 
+                end if 
+                return 
+            end if 
         end if 
+
 
     end subroutine
 
