@@ -2680,10 +2680,11 @@ module ggmod_gridgeneration2D
                     iscontourfound(tempc(j)%ID) = .true. 
 
                     ! Ensure proper orientation
+                    associate(tID       => tempc(j)%ID)
                     nxc = tempc(j)%x(2) - tempc(j)%x(1)
                     nyc = tempc(j)%y(2) - tempc(j)%y(1)
-                    nxfv = 0.5*(nxf(j) + nxf(j+1))
-                    nyfv = 0.5*(nyf(j) + nyf(j+1))
+                    nxfv = 0.5*(nxf(tID) + nxf(tID+1)) ! need to work with ID here, since contours may be open etc
+                    nyfv = 0.5*(nyf(tID) + nyf(tID+1))
                     if ((nxc*nxfv + nyc*nyfv) < 0) then 
                         ! Flip the contour
                         tempc(j)%x = tempc(j)%x(size(tempc(j)%x):1:-1)
@@ -2692,6 +2693,7 @@ module ggmod_gridgeneration2D
                         tempc(j)%startsaddle = tempc(j)%endsaddle
                         tempc(j)%endsaddle = temp
                     end if 
+                    end associate
 
                 end do
 
@@ -2714,10 +2716,11 @@ module ggmod_gridgeneration2D
                             iscontourfound(c1%ID) = .true.
 
                             ! Ensure proper orientation
+                            associate(tID   => tempc(j)%ID)
                             nxc = c1%x(2) - c1%x(1)
                             nyc = c1%y(2) -  c1%y(1)
-                            nxfv = 0.5*(nxf(j) + nxf(j+1))
-                            nyfv = 0.5*(nyf(j) + nyf(j+1))
+                            nxfv = 0.5*(nxf(tID) + nxf(tID+1)) ! need to work with ID here, since contours may be open etc
+                            nyfv = 0.5*(nyf(tID) + nyf(tID+1))
                             if ((nxc*nxfv + nyc*nyfv) < 0) then 
                                 ! Flip the contour
                                c1%x =c1%x(size(tempc(j)%x):1:-1)
@@ -2726,6 +2729,7 @@ module ggmod_gridgeneration2D
                                c1%startsaddle =c1%endsaddle
                                c1%endsaddle = temp
                             end if 
+                            end associate
 
                             ! Adjust 
                             tempc(j) = c1
@@ -4658,6 +4662,8 @@ module ggmod_gridgeneration2D
         allocate(tfind(count(tf)))
         tfind = pack(fID, tf)
         tfind = tfind(sortind)
+        tfnb(:, 1) = tfnb(sortind, 1)
+        tfnb(:, 2) = tfnb(sortind, 2)
 
         ! Extract tubes
         nftftot = 2*count(tf)  + 2*count(tc) ! overestimation
