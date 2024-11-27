@@ -247,7 +247,6 @@ def ReadTopomeshFile(filepath):
     # Read face data
     #---------------
     # Get the 'faces' header
-    i = 0
     while i < len(alllines): 
         if "faces" in alllines[i]:
             break 
@@ -363,7 +362,7 @@ def ReadTopomeshFile(filepath):
     # Get header position
     i = 0
     while i < len(alllines): 
-        if "cell vertices" in alllines[i]:
+        if "cell vertexlist" in alllines[i]:
             break 
         else: 
             i = i + 1
