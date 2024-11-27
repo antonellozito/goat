@@ -417,7 +417,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(1, thisp)) 
                         pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         sv = si(2, thisp) + 1
-                        ev = si(1, thisp) - 1
+                        ev = si(1, thisp) 
                     else 
                         ! Flip
                         doflip = .true. 
@@ -428,7 +428,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(1, thisp)) 
                         pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         sv = si(1, thisp) + 1
-                        ev = si(2, thisp) - 1
+                        ev = si(2, thisp) 
                     end if 
                 elseif ( pi(2, thisp) == nextp) then 
                     ! Second intersection, check si
@@ -441,7 +441,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(2, thisp)) 
                         pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         sv = si(1, thisp) + 1 
-                        ev = si(2, thisp) - 1
+                        ev = si(2, thisp) 
                     else 
                         ! Flip
                         doflip = .true. 
@@ -452,7 +452,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(2, thisp))
                         pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         sv = si(2, thisp) + 1
-                        ev = si(1, thisp) - 1
+                        ev = si(1, thisp) 
                     end if 
                 else 
                     ! Unexpected error
