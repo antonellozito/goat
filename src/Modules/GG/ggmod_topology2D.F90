@@ -195,7 +195,7 @@ module ggmod_topology2D
 
     ! Main constructor
     subroutine ConstructTopologicalMesh(vessel, magneticField, options, &
-        topomesh, fieldtracer, vesseltracer)
+        topomesh, fieldtracer, vesseltracer, streamlinetracer)
 
         ! Description
         !============
@@ -228,6 +228,7 @@ module ggmod_topology2D
         type(magneticFieldUDT), intent(in)      :: magneticField 
         type(TopomeshOptionsUDT), intent(in)    :: options
         class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
+        class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
 
         ! Auxiliary
         real(R8)                                :: dxfracmin, dyfracmin, &
@@ -329,19 +330,11 @@ module ggmod_topology2D
         call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
 
         ! Remove parts that do not lie inside the vessel
-        call TrimTopologicalMesh(topomesh, magneticField, vessel)
+        newvessel = vessel
+        call TrimTopologicalMesh(topomesh, magneticField, newvessel)
 
             ! Do temporary writing
         call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
-
-        ! Construct the boundary representation again (but now as closed exact)
-        newvessel = vessel
-        allocate(bndpol(count(topomesh%face%type == TMfacebndID)))
-        bndpol = pack(topomesh%face%pol, topomesh%face%type == TMfacebndID)
-        call bndps%Construct(bndpol)
-        call ConstructVesselPolygonSet(newvessel, bndps)
-        allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
-        call InitializePolygonLevelsetFunction2D(newvessel%plfvessel, newvessel%polygonset, bndplfoptions)
 
         ! Process points
         !===============
@@ -359,25 +352,36 @@ module ggmod_topology2D
             end if 
         end do 
 
-        ! Compute and add intersections with contours
-        !============================================
-        ! Necessary contours
+        ! Compute necessary contours
+        !===========================
+        ! Add contours and intersections
         call AddTopologicalMeshContours(topomesh, magneticField, newvessel, &
             fieldtracer, vesseltracer, options)
 
-            ! Do temporary writing
+        ! Do temporary writing
         call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
 
+        ! Eliminate limiter-like configurations
+        !======================================
+        ! Eliminate
+        call RemoveTopologicalMeshLimiterRegions(topomesh, magneticField, &
+            fieldtracer, streamlinetracer, options)
+
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+
+        ! Compute additional contours
+        !============================
         ! Core boundaries? 
         if (options%addcoreboundaries) then 
             call AddTopologicalMeshCoreBoundaries(topomesh, magneticField, &
-                vessel, fieldtracer, options)
+                newvessel, fieldtracer, options)
         end if 
 
         ! 'PF' boundaries?
         if (options%addPFboundaries) then 
             call AddTopologicalMeshPFBoundaries(topomesh, magneticField, &
-                vessel, fieldtracer, options)
+                newvessel, fieldtracer, options)
         end if
 
         ! Simplify
@@ -1327,6 +1331,10 @@ module ggmod_topology2D
             faceind(:), sf(:), contourind(:)
         type(RealDynamicArrayUDT), allocatable          :: scr(:), sfr(:)
 
+        type(PolygonSetUDT)                             :: bndps
+        type(PolygonUDT), allocatable, dimension(:)     :: bndpol
+        class(PLF2DOptionsUDT), allocatable     :: bndplfoptions
+
         ! Loop 
         integer(I8)                             :: i, j, k, cc
         
@@ -1535,13 +1543,6 @@ module ggmod_topology2D
                                     !--------
                                     ! Need to hedge for closed contour
                                     if (tc(k)%isclosed) then
-                                        ! Issue warning
-                                        print *, 'vertex: ', i 
-                                        print *, 'AddTopologicalMeshContours: ' // & 
-                                            'multiple intersections with ' // & 
-                                            'closed separatrix found, attempting ' // & 
-                                            'to adjust separatrix and radial line' 
-
                                         ! Sanity check
                                         if ((iout(1) /= 0.0_R8) .or. &
                                             (iout(size(iout)) /= size(tc(k)%x)-1)) then 
@@ -1551,6 +1552,22 @@ module ggmod_topology2D
                                                 'closed contour does not intersect in both ' // &
                                                 'start and en points, check input')
                                         end if
+
+                                        ! Check if there are exactly two
+                                        ! intersections - in that case, 
+                                        ! this is simply a radial line
+                                        ! intersecting with a closed 
+                                        ! contour
+                                        if (size(iout) /= 2) then 
+                                            ! If not, issue warning
+                                            print *, 'vertex: ', i 
+                                            print *, 'AddTopologicalMeshContours: ' // & 
+                                                'multiple intersections with ' // & 
+                                                'closed separatrix found, attempting ' // & 
+                                                'to adjust separatrix and radial line' 
+                                        end if 
+
+                                        
 
                                         ! Take only intersections that 
                                         ! are not in end points
@@ -1573,8 +1590,10 @@ module ggmod_topology2D
                                             ! Intersection only at second half
                                             notdelind = [(cc, cc = 1, minval(vindIsh)-1), nstc]
                                         else
-                                            ! Shouldn't happen 
-                                            call gdErrorHandler('Unknown error')
+                                            ! Only two intersections in 
+                                            ! start and end, move along
+                                            notdelind = [(cc, cc = 1, size(tc(k)%x))]
+
                                         end if 
 
                                     elseif (intcstart) then 
@@ -1763,6 +1782,8 @@ module ggmod_topology2D
                         ! Simply in start and end - add full contour, so 
                         ! do nothing
                     else
+                        ! Here, we need to look at which face IDs the 
+                        ! intersections have, since it is 
                         ! Here, we don't have much more to go on than 
                         ! assuming that these intersections are somewhere
                         ! in the start/end nodes of the contour and that
@@ -1837,11 +1858,11 @@ module ggmod_topology2D
                     alltpc(indtpc)%endsaddle = 0 ! doesn't end anymore in saddle point
                     if (tscr(endind-1) == 0.0_R8) then 
                         call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
-                            [tscr(endind)], 'end', [0.0_R8], .true., .false.)
+                            [tscr(endind)], 'end', [-0.1_R8], .true., .false.)
                     else
                         ! Also need to delete a first part
                         call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
-                            [tscr(endind-1:endind)], 'both', [0.1_R8, 0.0_R8], .true., .false.)
+                            [tscr(endind-1:endind)], 'both', [0.1_R8, -0.1_R8], .true., .false.)
                     end if 
                     !call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
                     !    [tscr(endind)], 'end', [0.0_R8], .true., .false.)
@@ -1860,11 +1881,11 @@ module ggmod_topology2D
                     alltpc(i)%startsaddle = 0 ! doesn't start anymore in saddle point
                     if (tscr(startind+1) == real(nstc, kind=R8)) then 
                         call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
-                            [tscr(startind)], 'start', [0.0_R8], .false., .true.)
+                            [tscr(startind)], 'start', [-0.1_R8], .false., .true.)
                     else
                         ! Also need to delete last part
                         call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
-                            [tscr(startind:startind+1)], 'both', [0.0_R8, 0.1_R8], .false., .true.)
+                            [tscr(startind:startind+1)], 'both', [-0.1_R8, 0.1_R8], .false., .true.)
                     end if
                     !alltpc(i)%x = alltpc(i)%x([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
                     !alltpc(i)%y = alltpc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
@@ -2132,6 +2153,14 @@ module ggmod_topology2D
                 allc(i), allcurvetypes(i), allfsIDs(i))
         end do 
 
+        ! Update the vessel description again
+        allocate(bndpol(count(topomesh%face%type == TMfacebndID)))
+        bndpol = pack(topomesh%face%pol, topomesh%face%type == TMfacebndID)
+        call bndps%Construct(bndpol)
+        call ConstructVesselPolygonSet(vessel, bndps)
+        allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
+        call InitializePolygonLevelsetFunction2D(vessel%plfvessel, vessel%polygonset, bndplfoptions)
+
         ! Trim the topological mesh
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
@@ -2169,7 +2198,7 @@ module ggmod_topology2D
         ! Arguments
         class(TopomeshUDT)                      :: topomesh 
         type(magneticFieldUDT), intent(in)      :: magneticField
-        type(VesselUDT), intent(in)             :: vessel 
+        type(VesselUDT), intent(inout)          :: vessel 
         class(ContourTracerUDT), intent(in)     :: fieldtracer 
         type(TopomeshOptionsUDT), intent(in)    :: options
 
@@ -2342,7 +2371,7 @@ module ggmod_topology2D
         ! Arguments
         class(TopomeshUDT)                      :: topomesh 
         type(magneticFieldUDT), intent(in)      :: magneticField
-        type(VesselUDT), intent(in)             :: vessel 
+        type(VesselUDT), intent(inout)          :: vessel 
         class(ContourTracerUDT), intent(in)     :: fieldtracer 
         type(TopomeshOptionsUDT), intent(in)    :: options
 
@@ -2627,6 +2656,265 @@ module ggmod_topology2D
     end subroutine
 #endif 
 
+    ! Limiter region removal
+    subroutine RemoveTopologicalMeshLimiterRegions(topomesh, &
+        magneticField, fieldtracer, streamlinetracer, options)
+
+        ! Description
+        !============
+        ! This routine removes limiter-like regions (i.e. regions that 
+        ! form disc cells, but that do not have any radial face, so 
+        ! basically a minimum/maximum without radial line) by 
+        ! introducing a connection between an extremum and a limiting
+        ! tangency point. This connection is a streamline if it is
+        ! found, otherwise it is a straight line between extremum and
+        ! tangency point (this may perform poorly though, a warning will
+        ! be issued). It is assumed that the necessary contours have 
+        ! already been added, but that no core or other unnecessary 
+        ! contours are present, nor that any regions have been removed. 
+        ! We do assume that all remaining points are within the vessel
+        ! boundary. 
+
+        ! The algorithm is as follows: 
+        ! 1) check which vertices are extrema without any faces 
+        ! -> these are extrema in limiter-like configurations. 
+        ! 2) retrace from these extrema a df/dx line (or df/dy line) 
+        ! 3) check with which tangency point contour this line crosses 
+        ! first -> that is the limiting tangency point
+        ! 4) trace from the tangency point a streamline to the extremum
+        ! 5) add that line as a face to the topological mesh
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        class(ContourTracerUDT), intent(inout)  :: fieldtracer
+        class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
+        class(TopomeshOptionsUDT), intent(in)   :: options 
+
+        ! Auxiliary
+        logical                                 :: hasfaces
+        logical, allocatable, dimension(:)      :: islimiterextremum
+        integer(I8)                             :: ngp, nle, faceID, &
+            thistp
+        integer(I8), allocatable, dimension(:)  :: sface, sfc, tfID, &
+            tpfsID
+        real(R8)                                :: xb(1:2), yb(1:2)
+        real(R8), allocatable, dimension(:)     :: fx, fy, xg, yg, xs, &
+            ys, Fs, IDs, xint, yint, srface, srfc, tsrfc
+        class(ContourTracerUDT), allocatable    :: fxtracer, fytracer
+        type(ContourUDT), allocatable           :: fxc(:), fyc(:), fc(:)
+        type(StreamlineUDT), allocatable        :: streamlines(:)
+        type(IntegerDynamicArrayUDT)            :: intfID
+        type(RealDynamicArrayUDT)               :: intsrfc
+        class(RealDynamicArrayUDT), allocatable :: tx, ty
+        class(StreamlineTracerUDT), allocatable :: mystreamlinetracer
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Associate for ease
+        associate(&
+            vert        => topomesh%vert, &
+            face        => topomesh%face)        
+
+        ! Initialize
+        allocate(islimiterextremum(vert%ntot))
+        islimiterextremum = .false. 
+
+        ! Tracer bounds
+        xb(1:2) = [minval(magneticField%R), maxval(magneticField%R)]
+        yb(1:2) = [minval(magneticField%Z), maxval(magneticField%Z)]
+
+        ! Copy and adjust tracer
+        mystreamlinetracer = streamlinetracer 
+
+        ! Set step size
+        mystreamlinetracer%step = 0.1
+        mystreamlinetracer%nsteps = 2000
+
+        ! Determine limiter exterma
+        !==========================
+        ! Loop over all vertices
+        do i = 1, vert%ntot 
+            ! Check if extremum
+            if (.not. any(topomesh%vert%type(i) == [TMvertexmaxID, TMvertexminID])) then 
+                ! Skip
+                cycle 
+            end if 
+
+            ! Check if this extremum has faces
+            j = 1
+            hasfaces = .false. 
+            do while (j <= face%ntot)
+                if (any(face%vert(j, :) == i)) then 
+                    hasfaces = .true.
+                    exit
+                else
+                    j = j + 1
+                end if 
+            end do 
+            if (hasfaces) then 
+                ! Skip
+                cycle 
+            end if 
+
+            ! Extremum without faces found, set to true
+            islimiterextremum(i) = .true.
+        end do 
+
+        ! Check if we should continue
+        nle = count(islimiterextremum)
+        if (nle == 0) then 
+            return 
+        end if 
+
+        ! Initialize tracers
+        !===================
+        ! If we got here, limiter extrema were found. Initializing tracers
+        ! Extract grid coordinates
+        call fieldtracer%GetCoordinates(xg, yg)
+        ngp = size(xg)
+
+        ! Evaluate
+        allocate(fx(ngp), fy(ngp))
+        call magneticField%interp%Evaluate(xg, yg, 1, 0, fx)
+        call magneticField%interp%Evaluate(xg, yg, 0, 1, fy)
+
+        ! Construct new tracers - set only limiter extrema as saddle points
+        fxtracer = fieldtracer
+        fytracer = fieldtracer 
+        if (allocated(fxtracer%xs)) then 
+            deallocate(fxtracer%xs, fxtracer%ys, fxtracer%vs, &
+                fxtracer%order, fxtracer%IDs)
+        end if 
+        allocate(fxtracer%xs(0), fxtracer%ys(0), fxtracer%vs(0), &
+            fxtracer%order(0), fxtracer%IDs(0))
+        if (allocated(fytracer%xs)) then 
+            deallocate(fytracer%xs, fytracer%ys, fytracer%vs, &
+            fytracer%order, fytracer%IDs)
+        end if 
+        allocate(fytracer%xs(0), fytracer%ys(0), fytracer%vs(0), &
+            fytracer%order(0), fytracer%IDs(0))
+        call fxtracer%SetValues(fx)
+        call fytracer%SetValues(fy)
+
+        ! Construct faces
+        !================
+        ! Get all flux surface IDs that belong to type 1 tangency points
+        allocate(tpfsID(count(vert%type == TMvertextp2ID)))
+        tpfsID = pack(vert%fsID, vert%type == TMvertextp2ID)
+
+        ! Loop over all vertices
+        do i = 1, vert%ntot
+            ! Check if this is a limiter extremum
+            if (.not. islimiterextremum(i)) then 
+                ! Skip
+                cycle
+            end if 
+
+            ! Trace the contour lines from this point
+            fxc = fxtracer%TraceContours([vert%x(i)], [vert%y(i)]) ! not exactly df/dx = 0 but ok
+            fyc = fytracer%TraceContours([vert%x(i)], [vert%y(i)])
+
+            ! Hedge for possible non-allocation 
+            if (.not. allocated(fxc)) then 
+                allocate(fxc(0))
+            end if 
+            if (.not. allocated(fyc)) then 
+                allocate(fyc(0))
+            end if
+
+            ! Keep only lines that start/end in this 
+
+            ! Check
+            if (size(fxc) == 0 .and. size(fyc) == 0) then 
+                ! Strange, no lines found
+                call gdErrorHandler('RemoveTopologicalMeshLimiterRegions: ' // &
+                    'could not find any df/dx=0 or df/dy=0 lines in extremum, ' // &
+                    'unexpected. Could be a bug')
+            end if 
+            fc = [fxc, fyc]
+
+            ! For the first of these lines, find intersections with any 
+            ! tangency point contour lines
+            intfID = ConstructIntegerDynamicArray()
+            intsrfc = ConstructRealDynamicArray()
+            do j = 1, face%ntot
+                if (any(face%fsID(j) == tpfsID)) then 
+                    ! Look for intersections
+                    call SimplePolygonIntersections(face%x(j)%Get(), &
+                        face%y(j)%Get(), fc(1)%x, fc(1)%y, xint, yint, &
+                        sface, sfc, srface, srfc)
+
+                    ! Check if any found
+                    if (size(xint) > 0) then 
+                        ! Append 
+                        call intfID%Append(j)
+                        call intsrfc%Append(minval(srfc)) ! just take minimal value
+                    end if 
+                end if 
+            end do 
+
+            ! If no intersections found -> throw error
+            if (intfID%Size() == 0) then 
+                call gdErrorHandler('RemoveTopologicalMeshLimiterRegions: ' // & 
+                    'no intersections with any tangency point contour found, this ' // & 
+                    'may be a bug')
+            end if 
+
+            ! Find intersection closest to extremum (i.e. the one with 
+            ! smallest segment index)
+            tsrfc = intsrfc%Get()
+            tfID = intfID%Get()
+            faceID = tfID(minloc(tsrfc, 1))
+
+            ! Find the corresponding tangency point
+            thistp = findloc(vert%type == TMvertextp2ID .and. &
+                vert%fsID == face%fsID(faceID), .true., 1)
+
+            ! Trace a contour line from this point to the extremum
+            if (vert%type(i) == TMvertexminID) then 
+                ! Need to go downhill, so against the gradient
+                streamlines = mystreamlinetracer%TraceStreamlines([vert%x(thistp)], &
+                    [vert%y(thistp)], xb, yb, [-1_I8])
+            else
+                ! Need to go uphill, with the gradient
+                streamlines = mystreamlinetracer%TraceStreamlines([vert%x(thistp)], &
+                    [vert%y(thistp)], xb, yb, [1_I8])
+            end if 
+
+            ! Checks
+            if (size(streamlines) /= 1) then 
+                ! Print warning and simply connect tangency point and extremum
+                print *, 'extremum vertex: ', i, 'tangeny vertex: ', thistp
+                print *, 'RemoveTopologicalMeshLimiterRegions: ' // & 
+                    'could not trace streamline from tangency point to ' // &
+                    'extremum, adding straight line between these points'
+
+                ! Add straight line
+                tx = ConstructRealDynamicArray([vert%x(thistp), vert%x(i)])
+                ty = ConstructRealDynamicArray([vert%y(thistp), vert%y(i)])
+                call AddTopologicalMeshFace(topomesh, [thistp, i], &
+                    tx, ty, TMfaceradID, 0_I8, 0.0_R8)
+            else
+                ! Append the extremum to the streamline
+                tx = ConstructRealDynamicArray([streamlines(1)%x, vert%x(i)])
+                ty = ConstructRealDynamicArray([streamlines(1)%y, vert%y(i)])
+
+                ! Add
+                call AddTopologicalMeshFace(topomesh, [thistp, i], &
+                    tx, ty, TMfaceradID, 0_I8, 0.0_R8)
+            end if 
+        end do
+
+        ! Housekeeping
+        end associate
+
+    end subroutine
     ! Core region removal
     subroutine RemoveTopologicalMeshCoreRegions(topomesh)
 
@@ -3490,7 +3778,7 @@ module ggmod_topology2D
                 
                 ! Split up the face into parts with approx. equal number of
                 ! vertices. 
-                ind(1) = np/2
+                ind(1) = np/2+1
                 
                 ! Get vertex coordinates
                 newvdfx = face%x(i)%Get(ind(1))
@@ -6243,12 +6531,17 @@ module ggmod_topology2D
         ! Arguments
         class(TopomeshUDT)                      :: topomesh 
         type(magneticFieldUDT), intent(in)      :: magneticField 
-        type(VesselUDT), intent(in)             :: vessel 
+        type(VesselUDT), intent(inout)          :: vessel 
 
         ! Auxiliary
         real(R8), allocatable, dimension(:)     :: Vv
         logical, allocatable, dimension(:)      :: outbnd, rmvert, &
             rmface
+        type(PolygonUDT), allocatable           :: bndpol(:)
+        type(PolygonSetUDT)                     :: bndps 
+        class(PLF2DOptionsUDT), allocatable     :: bndplfoptions 
+        
+
 
         ! Loop
         integer(I8)                             :: i 
@@ -6259,6 +6552,15 @@ module ggmod_topology2D
         associate(&
             plf         => vessel%plfvessel,      &
             mfinterp    => magneticField%interp)
+
+        ! Rebuild the vessel description to be sure
+            allocate(bndpol(count(topomesh%face%type == TMfacebndID)))
+            bndpol = pack(topomesh%face%pol, topomesh%face%type == TMfacebndID)
+            call bndps%Construct(bndpol)
+            call ConstructVesselPolygonSet(vessel, bndps)
+            allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
+            call InitializePolygonLevelsetFunction2D(vessel%plfvessel, &
+                vessel%polygonset, bndplfoptions)
 
         ! Vertices
         !=========
@@ -6310,6 +6612,8 @@ module ggmod_topology2D
         ! Remove
         call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
         call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+        call plf%ps%WriteData('vesselpolygon')
+        ! call plf%Visualize('vesselplf', nxin=1000, nyin=1000)
 
         ! Check remaining faces 
         deallocate(rmface)
@@ -6330,6 +6634,7 @@ module ggmod_topology2D
                     rmface(i) = .true.
                 elseif (all(outbnd(2:size(outbnd)-1)) .and. (size(outbnd) > 2)) then 
                     ! Remove, but display message
+                    print *, 'face ID: ', i, 'face vertices: ', topomesh%face%vert(i, 1), topomesh%face%vert(i, 2)
                     print *, 'TrimTopologicalMesh: boundary removed ' // & 
                         'which still had first two points in domain'
                 elseif ((.not. any(outbnd(2:size(outbnd)-1))) .and. (size(outbnd) > 2)) then 
@@ -7245,9 +7550,9 @@ module ggmod_topology2D
 
         ! Project offset within bounds if necessary
         offset = dloffset
-        where (dloffset >= 1.0_R8) offset = 1.0_R8
-        where (dloffset <= 0.0_R8) offset = 0.0_R8
-        where (dloffset < 1.0_R8 .and. dloffset > 0.0_R8) offset = dloffset
+        !where (dloffset >= 1.0_R8) offset = 1.0_R8
+        !where (dloffset <= 0.0_R8) offset = 0.0_R8
+        !where (dloffset < 1.0_R8 .and. dloffset > 0.0_R8) offset = dloffset
 
         ! Compute length distribution
         dlc = [(i, i = 0, size(x)-1)]
@@ -7275,7 +7580,7 @@ module ggmod_topology2D
             call Interpolate1D(actualsr(1:1), yint, dlc, y)
 
             ! Compute which points to keep 
-            keepind = [(i, i = ceiling(actualsr(1))+1, ns)]
+            keepind = [(i, i = ceiling(actualsr(1))+1, ns+1)]
 
             ! Compute new coordinates
             if (keepstartpoint) then 
@@ -7378,12 +7683,16 @@ module ggmod_topology2D
         !============
         ! 'vertices' 
         ! <vert%ntot> 
-        ! 'ID, x, y, type, fval, BV'
-        ! <ID, x, y, type, fval, BV (as zero or one)>
+        ! 'ID, x, y, type, fsID, fval, BV'
+        ! <ID, x, y, type, fsID, fval, BV (as zero or one)>
+        ! 'vertex face pointer'
+        ! <vertex%faceP(:, 1), vertex%faceP(:, 2)>
+        ! 'vertex faces'
+        ! <vertex%face>
         ! 'faces'
         ! <face%ntot> 
         ! 'ID, fsID, type, vert1, vert2, BF, nc'
-        ! <ID, fsID, type, vert(:, 1), vert(:, 2), BF, face%x%size()>
+        ! <ID, fsID, type, vert(:, 1), vert(:, 2), BF, face%x%size(), label>
         ! 'face <nf>' <repeated for each face including header>
         ! <x, y> 
         ! 'cells'
@@ -7493,6 +7802,19 @@ module ggmod_topology2D
             write (fu, *) v%ID(i), v%x(i), v%y(i), v%type(i), v%fsID(i), v%fval(i), BVval
         end do 
 
+        ! Vertex face data
+        if (allocated(v%faceP) .and. allocated(v%face)) then 
+            write (fu, *) 'vertex face pointer'
+            do i = 1, v%ntot
+                write (fu, *) v%faceP(i, 1), v%faceP(i, 2)
+            end do 
+
+            write (fu, *) 'vertex facelist'
+            do i = 1, size(v%face)
+                write (fu, *) v%face(i)
+            end do 
+        end if 
+
         ! Write face data
         !================
         ! Number of faces
@@ -7554,7 +7876,7 @@ module ggmod_topology2D
         end do 
 
         ! Cell vertices
-        write (fu, *) 'cell vertices'
+        write (fu, *) 'cell vertexlist'
         do i = 1, cvsize
             write (fu, *) c%vert(i)
         end do 
@@ -7564,7 +7886,7 @@ module ggmod_topology2D
         end do 
 
         ! Cell faces
-        write (fu, *) 'cell faces'
+        write (fu, *) 'cell facelist'
         do i = 1, cfsize
             write (fu, *) c%face(i)
         end do 
@@ -7608,7 +7930,7 @@ module ggmod_topology2D
         write (fu, *) t%ntot, t%nface, t%ncell 
 
         ! Tube faces
-        write (fu, *) 'tube faces'
+        write (fu, *) 'tube facelist'
         do i = 1, t%nface
             write (fu, *) t%face(i)
         end do 
@@ -7710,6 +8032,24 @@ module ggmod_topology2D
             end if 
         end do 
 
+        ! Vertex face data
+        call ReadSingleLine(fu, thisline, reachedeof)
+        if (allocated(v%faceP)) then 
+            deallocate(v%faceP)
+        end if
+        allocate(v%faceP(v%ntot, 2))
+        v%faceP = 0
+        do i = 1, v%ntot 
+            read(fu, *) v%faceP(i, 1), v%faceP(i, 2)
+        end do 
+        if (allocated(v%face)) then 
+            deallocate(v%face)
+        end if
+        allocate(v%face(sum(v%faceP(:, 2))))
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, size(v%face)
+            read(fu, *) v%face(i)
+        end do 
 
         ! Faces
         !======
@@ -7756,6 +8096,7 @@ module ggmod_topology2D
             end do 
             call f%x(i)%Set(xf)
             call f%y(i)%Set(yf)
+            call f%pol(i)%Construct(xf, yf)
         end do 
 
         ! Cells
@@ -7824,6 +8165,7 @@ module ggmod_topology2D
 
         ! Add interconnection data
         !=========================
+        call AddTopologicalMeshData(topomesh)
         call AddTopologicalMeshInterconnectionData(topomesh)
 
         ! Housekeeping
