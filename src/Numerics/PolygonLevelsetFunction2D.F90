@@ -378,7 +378,8 @@ module PolygonLevelsetFunction2D
     end subroutine
 
     ! Visualization
-    subroutine VisualizePolygonLevelsetFunction2D(plf, savefilepath)
+    subroutine VisualizePolygonLevelsetFunction2D(plf, savefilepath, &
+            nxin, nyin)
 
         ! Description
         !============
@@ -393,6 +394,7 @@ module PolygonLevelsetFunction2D
         ! Arguments
         class(PolygonLevelsetFunction2DUDT)      :: plf 
         character(*), intent(in)                 :: savefilepath
+        integer(I8), intent(in), optional        :: nxin, nyin
         
         ! Auxiliary
         integer(I8)                         :: nx, ny
@@ -407,8 +409,16 @@ module PolygonLevelsetFunction2D
         ! Construct a 2D grid
         !====================
         ! Set mesh size
-        nx = 200
-        ny = 400
+        if (present(nxin)) then 
+            nx = nxin 
+        else 
+            nx = 200
+        end if 
+        if (present(nyin)) then 
+            ny = nyin 
+        else
+            ny = 200
+        end if 
 
         ! Allocate
         allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny), &
