@@ -529,7 +529,11 @@ module mod_contour2D
             do j = 1, size(tempcontours)
                 if (tempcontours(j)%x(1) == tempcontours(j)%x(size(tempcontours(j)%x)) .and. &
                     tempcontours(j)%y(1) == tempcontours(j)%y(size(tempcontours(j)%y))) then 
-                    tempcontours(j)%isclosed = .true.
+                    if (size(tempcontours(j)%x) > 1) then 
+                        tempcontours(j)%isclosed = .true.
+                    else
+                        tempcontours(j)%isclosed = .false.
+                    end if 
                 else
                     tempcontours(j)%isclosed = .false.
                 end if 
@@ -716,7 +720,11 @@ module mod_contour2D
             do j = 1, size(tempcontours)
                 if (tempcontours(j)%x(1) == tempcontours(j)%x(size(tempcontours(j)%x)) .and. &
                     tempcontours(j)%y(1) == tempcontours(j)%y(size(tempcontours(j)%y))) then 
-                    tempcontours(j)%isclosed = .true.
+                    if (size(tempcontours(j)%x) > 1) then 
+                        tempcontours(j)%isclosed = .true.
+                    else
+                        tempcontours(j)%isclosed = .false.
+                    end if 
                 else
                     tempcontours(j)%isclosed = .false.
                 end if 
@@ -1876,6 +1884,10 @@ module mod_contour2D
                 if ((frac < 0.0_R8) .or. (frac > 1.0_R8)) then 
                     print *, 'frac not in bounds'
                 end if 
+                
+                ! Add point to contour
+                call xc%Append(tx)
+                call yc%Append(ty)
 
                 ! Check if we hit a boundary face
                 if ((iic == nx) .or. (iic == 0) .or. (jjc == ny) .or. (jjc == 0)) then 
@@ -1885,10 +1897,6 @@ module mod_contour2D
 
                 ! Subtract
                 quadc(iic, jjc) = quadc(iic, jjc) - 1
-                
-                ! Add point to contour
-                call xc%Append(tx)
-                call yc%Append(ty)
                 
                 ! Check if the next quad contains a saddle point -> add and
                 ! stop
@@ -2923,6 +2931,10 @@ module mod_contour2D
         do i = 1, size(contours)
             ! Compute contour metrics
             ncp = size(contours(i)%x)
+            if (ncp <= 1) then 
+                ! skip
+                cycle
+            end if 
             dx = contours(i)%x(2:ncp) - contours(i)%x(1:ncp-1)
             dy = contours(i)%y(2:ncp) - contours(i)%y(1:ncp-1)
             dll = sqrt(dx**2 + dy**2)
