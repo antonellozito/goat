@@ -107,6 +107,17 @@ if (-s ${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}.local) then
   source ${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}.local
 endif
 
+# Set some aliases 
+alias gtop "cd ${GOATTOP}"
+alias pgdinput "python3 ${GOAT_VISUALIZATION}/VisualizeGDInput.py"
+alias pgdoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGDOutput.py"
+alias mg "python3 ${GOAT_VISUALIZATION}/MonitorGrid.py"
+alias psoinput "python3 ${GOAT_VISUALIZATION}/VisualizeShapeOptInput.py"
+alias psooutput "python3 ${GOAT_VISUALIZATION}/VisualizeShapeOptOutput.py"
+alias mgv "python3 ${GOAT_VISUALIZATION}/MonitorGridAndVessel.py"
+alias pgginput "python3 ${GOAT_VISUALIZATION}/VisualizeGGInput.py"
+alias pggoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGGOutput.py"
+
 # Create environment cache for faster loading (setenv, unsetenv, and aliases)
 set setup_post = `mktemp`
 env | sed -ne "/^[ }]\|=()/b; s/\([^=]*\)=\(.*\)/setenv \1 '\2'/p" \
@@ -121,14 +132,3 @@ rm -f $setup_pre $setup_post $alias_pre
 
 # List loaded modules
 module list
-
-# Set some aliases 
-alias gtop "cd ${GOATTOP}"
-alias pgdinput "python3 ${GOAT_VISUALIZATION}/VisualizeGDInput.py"
-alias pgdoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGDOutput.py"
-alias mg "python3 ${GOAT_VISUALIZATION}/MonitorGrid.py"
-alias psoinput "python3 ${GOAT_VISUALIZATION}/VisualizeShapeOptInput.py"
-alias psooutput "python3 ${GOAT_VISUALIZATION}/VisualizeShapeOptOutput.py"
-alias mgv "python3 ${GOAT_VISUALIZATION}/MonitorGridAndVessel.py"
-alias pgginput "python3 ${GOAT_VISUALIZATION}/VisualizeGGInput.py"
-alias pggoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGGOutput.py"
