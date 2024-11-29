@@ -181,6 +181,13 @@ def PlotGridFaceRegions(grid, fignum):
     # Plot
     PlotPoints2DWithID(xf[ind], yf[ind], grid.face.region[ind], fignum) 
 
+def PlotGridVertFieldlineID(grid, fignum):
+    # Description
+    #------------
+    # plot vertex fieldline IDs (may be heavy)
+
+    # Plot
+    PlotPoints2DWithID(grid.vert.x, grid.vert.y, grid.vert.fieldlineID, fignum) 
 #--------------------------------------------------------------------------#
 #                              Grid Optimization                           #
 #--------------------------------------------------------------------------#
@@ -1040,8 +1047,21 @@ def PlotStructure(structure, fignum, **plotargs):
     # Description
     #------------
     # Plot the structure polygons
+    minx = np.inf
+    maxx = -np.inf
+    miny = np.inf
+    maxy = -np.inf
     for i in structure:
         PlotPolygons2D(i.x, i.y, fignum, **plotargs)
+        minx = np.min([minx, np.min(i.x)])
+        maxx = np.max([maxx, np.max(i.x)])
+        miny = np.min([miny, np.min(i.y)])
+        maxy = np.max([maxy, np.max(i.y)])
+
+    # Set limits
+    # Set axes
+    SetAxesLimits2D(plt.gca(), [minx, maxx], [miny, maxy])
+
 
 def PlotStructureFromFile(dirpath, fignum):
     # Read the structure

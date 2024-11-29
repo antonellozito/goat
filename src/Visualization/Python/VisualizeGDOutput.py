@@ -13,7 +13,7 @@ import Datahandler as dh
 datadir = dh.GetDataDirectory()
 
 # Print
-print('VisualizeGoatOutput: reading from directory: ' + datadir)
+print('VisualizeGDOutput: reading from directory: ' + datadir)
 
 # Design
 #-------

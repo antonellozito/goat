@@ -58,11 +58,13 @@ setenv COMPILER gfortran
 
 # Set some aliases 
 alias gtop "cd ${GOATTOP}"
-alias gpinput "python3 ${GOAT_VISUALIZATION}/VisualizeGoatInput.py"
-alias gpoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGoatOutput.py"
-alias gpmg "python3 ${GOAT_VISUALIZATION}/MonitorGrid.py"
-alias sopinput "python3 ${GOAT_VISUALIZATION}/VisualizeShapeOptInput.py"
-alias sopoutput "python3 ${GOAT_VISUALIZATION}/VisualizeShapeOptOutput.py"
-alias sopmgv "python3 ${GOAT_VISUALIZATION}/MonitorGridAndVessel.py"
+alias pgdinput "python3 ${GOAT_VISUALIZATION}/VisualizeGDInput.py"
+alias pgdoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGDOutput.py"
+alias mg "python3 ${GOAT_VISUALIZATION}/MonitorGrid.py"
+alias psoinput "python3 ${GOAT_VISUALIZATION}/VisualizeShapeOptInput.py"
+alias psooutput "python3 ${GOAT_VISUALIZATION}/VisualizeShapeOptOutput.py"
+alias mgv "python3 ${GOAT_VISUALIZATION}/MonitorGridAndVessel.py"
+alias pgginput "python3 ${GOAT_VISUALIZATION}/VisualizeGGInput.py"
+alias pggoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGGOutput.py"
 
 

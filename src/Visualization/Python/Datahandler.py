@@ -1132,6 +1132,18 @@ def ReadTraduitOutB2us(filepath):
             k = k + 1
         i = i + 1
 
+    # Construct vertex field line ID
+    for j in np.arange(0, nfs):
+        tf = grid.fs.face[grid.fs.fp1[j]:grid.fs.fp1[j]+grid.fs.fp2[j]]
+        tv1 = grid.face.v1[tf-1]
+        tv2 = grid.face.v2[tf-1]
+        for k in tv1:
+            grid.vert.fieldlineID[k-1] = j
+        for k in tv2:
+            grid.vert.fieldlineID[k-1] = j
+
+
+
     # Return
     return grid
 
