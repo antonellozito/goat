@@ -2129,7 +2129,7 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: tc, srf, erf, inderf, &
             indsrf, tf, cind, nc, ntf, incr, nv, temp, minind, maxind, &
-            startind, endind, nfs, tfloc, tfc, nthf, ntlf
+            startind, endind, nfs, tfloc, tfc, nthf, ntlf, minindloc
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
             allIDs, s1, s2, polv, tf1, tf2, fsID, sortind, thf, tlf
@@ -2275,6 +2275,7 @@ module ggmod_gridgeneration2D
                 ! Extract in a sorted way
                 minind = min(indsrf, inderf)
                 maxind = max(indsrf, inderf)
+                minindloc = minloc([indsrf, inderf], 1)
                 if (minind == maxind) then 
                     ! Sanity check failed, this shouldn't happen even 
                     ! if both start and end radial face are the same,
@@ -2285,6 +2286,19 @@ module ggmod_gridgeneration2D
                 end if 
                 tf1 = [tcf(maxind+1:), tcf(:minind-1)]
                 tf2 = tcf(minind+1:maxind-1)
+
+                ! Sort to make sure tf1 and tf2 always go from starting to ending radial face
+                if (minindloc == 1) then 
+                    ! tf2 is correctly sorted, need to flip tf1
+                    if (size(tf1) > 0) then 
+                        tf1 = tf1(size(tf1):1:-1)
+                    end if 
+                else
+                    ! tf1 is correctly sorted, need to flip tf2
+                    if (size(tf2) > 0) then 
+                        tf2 = tf2(size(tf2):1:-1)
+                    end if 
+                end if 
 
                 ! Sanity checks
                 if (count(.not. ishfface .and. .not. islfface) /= 2) then 
@@ -2564,8 +2578,8 @@ module ggmod_gridgeneration2D
                     tyf = (lf1%yl(lf1%nl-1) - lf1%yl(lf1%nl))
                 elseif (topomesh%face%vert(tlf(1), 2) == topomesh%face%vert(tf, 1)) then
                     ! Take last edge of high field line, flipe
-                    print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
-                    'not yet verified'
+                    !print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
+                    !'not yet verified'
                     txf = (lf1%xl(lf1%nl-1) - lf1%xl(lf1%nl))
                     tyf = (lf1%yl(lf1%nl-1) - lf1%yl(lf1%nl))
                     nxf = nxf(size(nxf):1:-1) 
@@ -5468,14 +5482,15 @@ module ggmod_gridgeneration2D
         allocate(isnotfound(size(bndf)))
         isnotfound = .true. 
 
-        ! Get the starting aligned face (should be first or last face) - 
-        ! if it's the last face, flip the boundary order for ease
+        ! Get the starting aligned face (should be first face)
         thisfind = 1
         if (findloc(face%vert(bndf(1), :), startv, 1) /= 0) then 
             ! No flipping of bndf needed
         elseif (findloc(face%vert(bndf(size(bndf)), :), startv, 1) /= 0) then 
             ! Need to flip bndf
-            bndf = bndf(size(bndf):1:-1)
+            !bndf = bndf(size(bndf):1:-1)
+            call gdErrorHandler('ExtractTMCellAlignedBoundary: first face ' // & 
+                'should contain starting vertex')
         else
             ! Shouldn't happen
             call gdErrorHandler('ExtractTMCellAlignedBoundary: both start and ' // & 
@@ -5571,22 +5586,23 @@ module ggmod_gridgeneration2D
         ! then we need to ensure a correct orientation (positive dot 
         ! product with radial line that is sorted from high field to
         ! low field)
-        if (startv == endv) then 
+
+        !if (startv == endv) then 
             ! Get vector along line
-            nxl = xl(2) - xl(1)
-            nyl = yl(2) - yl(1)
+        !    nxl = xl(2) - xl(1)
+        !    nyl = yl(2) - yl(1)
 
             ! Compute dot product and check
-            if ((nxl*nxsrf + nyl*nysrf) < 0) then 
-                xl = xl(size(xl):1:-1)
-                yl = yl(size(yl):1:-1)
-                thisfl = sum(sqrt((xl(2:) - xl(1:size(xl)-1))**2 + &
-                    (yl(2:) - yl(1:size(yl)-1))**2))
-                dlcv = thisfl - dlcv(size(dlcv):1:-1)
-                tvID = tvID(size(tvID):1:-1)
-            end if 
-            
-        end if 
+        !    if ((nxl*nxsrf + nyl*nysrf) < 0) then 
+        !        xl = xl(size(xl):1:-1)
+        !        yl = yl(size(yl):1:-1)
+        !        thisfl = sum(sqrt((xl(2:) - xl(1:size(xl)-1))**2 + &
+        !           (yl(2:) - yl(1:size(yl)-1))**2))
+        !        dlcv = thisfl - dlcv(size(dlcv):1:-1)
+        !        tvID = tvID(size(tvID):1:-1)
+        !    end if 
+         !   
+        !end if 
 
         ! Check which flux surface ID we should take, and issue warning
         ! if these are not the same

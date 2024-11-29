@@ -1366,14 +1366,14 @@ module ggmod_topology2D
         ! Check for saddle points that are connected - don't trace twice
         allocate(tracepoints(npsp))
         tracepoints = .true.
-        do i = 1, npsp-1
-            do j = i+1, npsp
-                if ((topomesh%vert%fsID(i) == topomesh%vert%fsID(j)) .and. &
-                    (psptype(i) == TMvertexsaddleID) .and. (psptype(j) == TMvertexsaddleID)) then 
-                    tracepoints(j) = .false.
-                end if 
-            end do 
-        end do
+        !do i = 1, npsp-1
+        !    do j = i+1, npsp
+        !        if ((topomesh%vert%fsID(i) == topomesh%vert%fsID(j)) .and. &
+        !            (psptype(i) == TMvertexsaddleID) .and. (psptype(j) == TMvertexsaddleID)) then 
+        !            tracepoints(j) = .false.
+        !        end if 
+        !    end do 
+        !end do
 
         ! Add saddle points to field tracer - only tangency points and
         ! extrema, no other 'regular' vertices
@@ -1388,9 +1388,7 @@ module ggmod_topology2D
         !===============
         ! Add saddle point contours
         !--------------------------
-        !$omp parallel do default(shared) private(tc, xout, yout, vindI, &
-        !$omp vindJ, iout, jout, cc, intfacestart, intcstart, &
-        !$omp dointersect, nstc, vindIfh, vindIsh, sortind) 
+         
         do i = 1, npsp
             if ((psptype(i) == TMvertexsaddleID) .and. tracepoints(i)) then 
                 ! Trace
@@ -1402,20 +1400,23 @@ module ggmod_topology2D
                 ! Check if any other saddle points were encountered 
                 ! during tracing. If so, do not trace these anymore 
                 ! (leads to duplicate faces)
-                !do j = 1, size(tc)
-                !    if (tc(j)%startsaddle /= 0) then
-                !        if (psptype(tc(j)%startsaddle) == TMvertexsaddleID) then  
-                !            tracepoints(tc(j)%startsaddle) = .false. 
-                !        end if 
-                !    end if 
-                !    if (tc(j)%endsaddle /= 0) then
-                !        if (psptype(tc(j)%endsaddle) == TMvertexsaddleID) then  
-                !            tracepoints(tc(j)%endsaddle) = .false. 
-                !        end if 
-                !    end if 
-                !end do 
+                do j = 1, size(tc)
+                    if (tc(j)%startsaddle /= 0) then
+                        if (psptype(tc(j)%startsaddle) == TMvertexsaddleID) then  
+                            tracepoints(tc(j)%startsaddle) = .false. 
+                        end if 
+                    end if 
+                    if (tc(j)%endsaddle /= 0) then
+                        if (psptype(tc(j)%endsaddle) == TMvertexsaddleID) then  
+                            tracepoints(tc(j)%endsaddle) = .false. 
+                        end if 
+                    end if 
+                end do 
 
                 ! Check intersections with radial core boundaries
+                !$omp parallel do default(shared) private(xout, yout, vindI, &
+                !$omp vindJ, iout, jout, cc, intfacestart, intcstart, &
+                !$omp dointersect, nstc, vindIfh, vindIsh, sortind)
                 do j = 1, topomesh%face%ntot
                     ! Check where exactly it (should) intersect
                     if ((topomesh%face%type(j) == TMfaceradID)) then 
@@ -1595,6 +1596,7 @@ module ggmod_topology2D
                                             notdelind = [(cc, cc = 1, size(tc(k)%x))]
 
                                         end if 
+                                        deallocate(vindIfh, vindIsh)
 
                                     elseif (intcstart) then 
                                         ! Contour is oriented from start to end
@@ -1612,19 +1614,18 @@ module ggmod_topology2D
                         end do 
                     end if 
                 end do
+                !$omp end parallel do
 
                 ! Add
-                !$omp critical
                 allc = [allc, tc]
                 call curvetypes%Append(spread(TMfacesepID, 1, size(tc)))
                 
                 ! Add flux surface ID
                 nfs = nfs + 1
                 call fsIDs%Append(spread(nfs, 1, size(tc)))
-                !$omp end critical
             end if 
         end do
-        !$omp end parallel do
+        
 
         ! Add tangency point contours
         !----------------------------
