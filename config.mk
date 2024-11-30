@@ -87,7 +87,9 @@ EXT_DIFF = .adj_shape
 DIFF = yes
 DIFFDIR = src/differentiation/adjoint_shape
 endif
-
+ifdef GOAT_DEBUG
+EXT_DEBUG = .debug
+endif
 ##
 ## % Compiler
 ## %=========
@@ -111,7 +113,7 @@ BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_I
 SUITESPARSEPATH = /usr/include/suitesparse
 
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS_DEF = -c -pg -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized -fopenmp
+CFLAGS_DEF = -c -pg -fopenmp
 CFLAGS_DEF_NO_OMP = -c -pg -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized 
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
@@ -124,7 +126,7 @@ CFLAGS_PERF = -c -O2 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fopenm
 ## CC           : Compiler to be used for C
 CC = gcc 
 
-CCFLAGS_DEF = -pg -c -g -Wall -O0 
+CCFLAGS_DEF = -pg -c
 CCFLAGS_PERF = -c -Wall -O2
 
 ## % Linker
@@ -146,12 +148,22 @@ LFLAGS_OMP_DEBUG = -pg -g -fopenmp
 #==========
 # Set the CFLAGS
 CFLAGS = $(CFLAGS_DEF) $(COMPDIRVARS)
+ifdef GOAT_DEBUG
+CFLAGS += -g -O0 -Wall -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized
+else
+CFLAGS += -O3
+endif
 
 # Set the linking flags
 LFLAGS = $(LFLAGS_DEF)
 
 # Set CFLAGS for C compiler
 CCFLAGS = $(CCFLAGS_DEF) $(COMPDIRVARS)
+ifdef GOAT_DEBUG
+CCFLAGS += -g -Wall -O0 
+else
+CCFLAGS += -O3
+endif
 
 ##
 ## % Files
