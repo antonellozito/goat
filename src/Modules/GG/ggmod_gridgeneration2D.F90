@@ -330,13 +330,24 @@ module ggmod_gridgeneration2D
         !============
         ! This type has several routines to refine the vertex 
         ! distribution on a GGTM line type. Construction of the 
-        ! type is deferred to a dedicated function. 
+        ! type is deferred to a dedicated function. Options for line 
+        ! refinement that are specific to a certain refiner can be 
+        ! set by calling the 'UpdateRefinementOptions' routine (which is
+        ! deferred) that takes as input a GGTMCellData structure and the
+        ! topological mesh (see also abstract interface of the 
+        ! routine). This should be enough information to update the 
+        ! desired refinement (otherwise to be extended in the future). 
+        ! It is thus assumed that all refinement options are stored in 
+        ! the refiner itself
 
     contains 
 
         ! Refine line (single line based)
         procedure(RefineGGTMLineSingleINT), deferred :: RefineLineSingle
         generic :: Refine   => RefineLineSingle
+
+        ! Update refinement options
+        procedure(UpdateRefinementOptionsINT), deferred :: UpdateRefinementOptions
 
     end type
 
@@ -354,6 +365,9 @@ module ggmod_gridgeneration2D
         ! Refine line
         procedure :: RefineLineSingle   => RefineLineSingleNoRef
 
+        ! Update refinement options
+        procedure :: UpdateRefinementOptions    => UpdateRefinementOptionsNoRef
+
     end type
 
     ! Length based refiner 
@@ -362,7 +376,7 @@ module ggmod_gridgeneration2D
         ! Description
         !============
         ! This refiner is based on a minimal and maximal length 
-        ! distribution. 
+        ! distribution.
         character(:), allocatable                       :: meth 
         class(DistributionFunctionUDT), allocatable     :: Lmin, Lmax 
 
@@ -370,6 +384,9 @@ module ggmod_gridgeneration2D
 
         ! Refine line
         procedure :: RefineLineSingle   => RefineLineSingleLB 
+
+        ! Update refinement options
+        procedure :: UpdateRefinementOptions    => UpdateRefinementOptionsLB
 
     end type
 
@@ -392,6 +409,17 @@ module ggmod_gridgeneration2D
             type(GGTMFieldlineDataUDT), intent(inout)   :: line
             integer(I8), intent(inout)                  :: vertID 
             logical, intent(in)                         :: keepvert(:) 
+
+        end subroutine
+
+        ! Update refinement options
+        subroutine UpdateRefinementOptionsINT(refiner, celldata, &
+            topomesh)
+
+            import :: GGTMLineRefiner2DUDT, GGTMCellDataUDT, TopomeshUDT
+            class(GGTMLineRefiner2DUDT)                 :: refiner 
+            type(GGTMCellDataUDT), intent(in)           :: celldata 
+            type(TopomeshUDT), intent(in)               :: topomesh
 
         end subroutine
 
@@ -771,6 +799,10 @@ module ggmod_gridgeneration2D
         !==================
         do i = 1, cell%ntot
 
+            ! Update the refiner
+            call GGTMLineRefiner%UpdateRefinementOptions(celldata(i), &
+                topomesh)
+
             ! Check which method to use
             select case (options%ggmethod)
 
@@ -779,7 +811,7 @@ module ggmod_gridgeneration2D
                 ! Simply grid the cell in an independent way - don't 
                 ! regrid 
                 call DistributeVerticesSingleTMCellIndependent(i, vertID, &
-                    .false., .false., ggtmdata, topomesh, vd)
+                    .false., .false., ggtmdata, topomesh, vd, GGTMLineRefiner)
 
             case ('orthogonal')
 
@@ -1066,6 +1098,10 @@ module ggmod_gridgeneration2D
 
             ! Add cell vertices
             !------------------
+            ! Update the refiner
+            call GGTMLineRefiner%UpdateRefinementOptions(celldata(tc), &
+                topomesh)
+
             ! Check which method to use
             select case (options%ggmethod)
 
@@ -1074,7 +1110,7 @@ module ggmod_gridgeneration2D
                 ! Simply grid the cell in an independent way - don't 
                 ! regrid 
                 call DistributeVerticesSingleTMCellIndependent(tc, vertID, &
-                    .false., .true., ggtmdata, topomesh, vd)
+                    .false., .true., ggtmdata, topomesh, vd, GGTMLinerefiner)
 
             case ('orthogonal')
 
@@ -1146,7 +1182,7 @@ module ggmod_gridgeneration2D
 
     ! Single cell crap gridder
     subroutine DistributeVerticesSingleTMCellIndependent(tc, vertID, &
-        dohfline, dolfline, ggtmdata, topomesh, vd)
+        dohfline, dolfline, ggtmdata, topomesh, vd, GGTMlinerefiner)
 
         ! Description
         !============
@@ -1171,13 +1207,15 @@ module ggmod_gridgeneration2D
         logical, intent(in)                         :: dohfline, &
             dolfline
         class(VertexDistributor2DUDT), intent(in)   :: vd
+        class(GGTMLineRefiner2DUDT), intent(in)     :: GGTMlinerefiner
 
         ! Auxiliary
         integer(I8)                                 :: nv 
-        integer(I8), allocatable, dimension(:)      :: srfvID, erfvID
+        integer(I8), allocatable, dimension(:)      :: srfvID, erfvID, &
+            updatedfaces
         real(R8), allocatable, dimension(:)         :: dlcv
         logical, allocatable, dimension(:)          :: istopoverthf, &
-            istopovertlf
+            istopovertlf, keepvert
         type(GGTMFieldlineDataUDT), allocatable     :: tclines(:)
 
         ! Loop
@@ -1248,6 +1286,8 @@ module ggmod_gridgeneration2D
 
         ! Compute vertices
         do i = 1, size(tclines)
+            ! Initial distribution
+            !---------------------
             ! Skip if it is a tangency point
             if (size(tclines(i)%xl) == 1) then 
                 cycle 
@@ -1268,6 +1308,20 @@ module ggmod_gridgeneration2D
 
             ! Update total number of vertices
             vertID = vertID+nv-2
+
+            ! Refinement
+            !-----------
+            ! Refine/coarsen
+            keepvert = IsTopomeshVert(tclines(i)%vert, topomesh) ! keep vertices if topomesh vert
+            keepvert(1) = .true. ! keep first and last vertex anyway
+            keepvert(size(keepvert)) = .true. 
+            call GGTMLinerefiner%Refine(tclines(i), vertID, keepvert)
+
+            ! Update line data (face labels, facedata if last line, ...)
+            call tclines(i)%UpdateLineData(topomesh, ggtmdata)
+
+            ! Update GGTM data
+            call tclines(i)%UpdateGGTMData(topomesh, ggtmdata, updatedfaces)
 
         end do 
 
@@ -4130,6 +4184,10 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    !------------------------------------------------------------------!
+    !                      GGTM LINE REFINERS                          !
+    !------------------------------------------------------------------!
+
     ! Refiner initialization
     function InitializeGGTMLineRefiner(topomesh, &
         magneticField, vessel, fieldtracer, boundarytracer, &
@@ -4292,6 +4350,40 @@ module ggmod_gridgeneration2D
 
 
     end function 
+
+    ! Refiner option updating, dummy
+    subroutine UpdateRefinementOptionsNoRef(refiner, celldata, topomesh)
+
+        ! Nothing to do here, move along
+        class(GGTMLineRefinerNoRefUDT)          :: refiner 
+        type(GGTMCellDataUDT), intent(in)       :: celldata 
+        type(TopomeshUDT), intent(in)           :: topomesh
+
+    end subroutine
+
+    ! Refiner option updating, length-based
+    subroutine UpdateRefinementOptionsLB(refiner, celldata, topomesh)
+
+        ! Description
+        !============
+        ! Update the length distribution options for the length based 
+        ! refiner. 
+
+        ! Note: currently we don't yet update the length distribution
+        ! itself, though this may be done for each different cell. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)           :: refiner 
+        type(GGTMCellDataUDT), intent(in)       :: celldata 
+        type(TopomeshUDT), intent(in)           :: topomesh
+
+        ! Update variables
+        !=================
+        ! Check celldata input
+
+    end subroutine
 
     ! Length-based refiner constructor
     function ConstructGGTMLineRefinerLB(Lmin, Lmax, meth) result(refiner)
