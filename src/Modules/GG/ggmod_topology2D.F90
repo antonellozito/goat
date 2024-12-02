@@ -242,9 +242,7 @@ module ggmod_topology2D
         integer(I8), allocatable, dimension(:)  :: typee, IDs
         integer(I8), parameter                  :: emptyI8(0) = 0
         type(VesselUDT)                         :: newvessel
-        type(PolygonSetUDT)                             :: bndps, tempps
-        type(PolygonUDT), allocatable, dimension(:)     :: bndpol
-        class(PLF2DOptionsUDT), allocatable     :: bndplfoptions
+        type(PolygonSetUDT)                     :: tempps
         type(ContourUDT), allocatable           :: contours(:)
         type(PolygonUDT), allocatable           :: pcontours(:)
 
@@ -2381,8 +2379,7 @@ module ggmod_topology2D
         integer(I8), allocatable, dimension(:)  :: tf, tfv, s1, s2, &
             contourtypes, fsIDs, sepfsIDs
         real(R8)                                :: thisfval, traceval
-        real(R8), allocatable, dimension(:)     :: xint, yint, tx, ty, &
-            tfval, xtrace, ytrace
+        real(R8), allocatable, dimension(:)     :: xint, yint
         logical                                 :: skipvertex
         logical, allocatable, dimension(:)      :: keepind, hasfv
         type(ContourUDT), allocatable           :: tc(:), allc(:)
@@ -2702,8 +2699,8 @@ module ggmod_topology2D
         integer(I8), allocatable, dimension(:)  :: sface, sfc, tfID, &
             tpfsID
         real(R8)                                :: xb(1:2), yb(1:2)
-        real(R8), allocatable, dimension(:)     :: fx, fy, xg, yg, xs, &
-            ys, Fs, IDs, xint, yint, srface, srfc, tsrfc
+        real(R8), allocatable, dimension(:)     :: fx, fy, xg, yg, &
+            xint, yint, srface, srfc, tsrfc
         class(ContourTracerUDT), allocatable    :: fxtracer, fytracer
         type(ContourUDT), allocatable           :: fxc(:), fyc(:), fc(:)
         type(StreamlineUDT), allocatable        :: streamlines(:)
