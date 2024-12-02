@@ -53,8 +53,59 @@ setenv GOAT_EXECUTABLES ${GOATTOP}/executables
 setenv GOAT_VISUALIZATION ${GOATTOP}/src/Visualization/Python
 setenv PATH "${GOAT_SCRIPTPATHS}:${GOAT_EXECUTABLES}:${PATH}"
 
-# Set default environment variables
-setenv COMPILER gfortran
+# Set HOST_NAME and COMPILER, which will determine setup files to be used
+#------------------------------------------------------------------------
+setenv COMPILER gfortran # only gfortran compiler supported (for now)
+
+if ( $?GOAT_HOST_NAME_FORCE ) then
+  setenv HOST_NAME $GOAT_HOST_NAME_FORCE
+  echo "Running at $HOST_NAME (set by GOAT_HOST_NAME_FORCE)"
+else if (-s ${GOATTOP}/SETUP/setup.csh.HOST_NAME.local) then
+  echo Loading SETUP/setup.csh.HOST_NAME.local.
+  source ${GOATTOP}/SETUP/setup.csh.HOST_NAME.local
+else
+  if (-s ${GOATTOP}/whereami) then
+    set iamat=`${GOATTOP}/whereami|tail -1`
+    echo Running at $iamat.
+  else
+    set iamat="UNKNOWN"
+  endif
+  switch ($iamat)
+  case "*UNKNOWN":
+    setenv HOST_NAME UNKNOWN
+    breaksw
+  default:
+    setenv HOST_NAME ${iamat}
+  endsw
+endif
+
+# Load environment cache if it exists and the setup files have not changed
+set setup=${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}
+if ((-f $setup.env.local.${USER}) && \
+    ( -M $setup.env.local.${USER} ) >= ( -M $setup ) && \
+    ( -M $setup.env.local.${USER} ) >= ( -M ${GOATTOP}/setup.csh ) && \
+    (!(-f ${GOATTOP}/SETUP/setup.csh.local) || \
+      ( -M $setup.env.local.${USER} ) >= ( -M ${GOATTOP}/SETUP/setup.csh.local )) && \
+    (!(-f $setup.local) || ( -M $setup.env.local.${USER} ) >= ( -M $setup.local ))) then
+    echo "Loading cached SETUP/setup.csh.${HOST_NAME}.${COMPILER}.env.local.${USER}."
+    source $setup.env.local.${USER}
+    exit 0
+else
+    set setup_pre = `mktemp` alias_pre = `mktemp` && alias >! $alias_pre
+    env|sed -ne "/^[ }]\|=(/b; s/\([^=]*\)=\(.*\)/setenv \1 '\2'/p" >! $setup_pre
+endif
+
+# Setup files for combination of HOST_NAME and COMPILER, + local modifications if present
+if (-s ${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}) then
+  echo Loading SETUP/setup.csh.${HOST_NAME}.${COMPILER}.
+  source ${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}
+else
+  echo File SETUP/setup.csh.${HOST_NAME}.${COMPILER} not found!
+endif
+if (-s ${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}.local) then
+  echo Loading SETUP/setup.csh.${HOST_NAME}.${COMPILER}.local.
+  source ${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}.local
+endif
 
 # Set some aliases 
 alias gtop "cd ${GOATTOP}"
@@ -67,4 +118,17 @@ alias mgv "python3 ${GOAT_VISUALIZATION}/MonitorGridAndVessel.py"
 alias pgginput "python3 ${GOAT_VISUALIZATION}/VisualizeGGInput.py"
 alias pggoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGGOutput.py"
 
+# Create environment cache for faster loading (setenv, unsetenv, and aliases)
+set setup_post = `mktemp`
+env | sed -ne "/^[ }]\|=()/b; s/\([^=]*\)=\(.*\)/setenv \1 '\2'/p" \
+   -e '1i# Generated environment cache. Do not edit!' >! $setup_post
+grep -F -v -f $setup_pre $setup_post >! $setup.env.local.${USER}
+sed -i -e "s/setenv/unsetenv/; s/ '.*'//" $setup_pre $setup_post
+grep -F -v -f $setup_post $setup_pre >> $setup.env.local.${USER}
+alias | grep -F -v -f $alias_pre | sed -e 's/^/alias /' \
+    -e "/\t(.*[;|&].*)/{s/\t(/\t'(/;s/)"'$'"/)'/;b}" \
+    -e "s/\t\([^(].*\)/\t'\1'/" -e 's/\t(/\t/;s/)$//' >> $setup.env.local.${USER}
+rm -f $setup_pre $setup_post $alias_pre
 
+# List loaded modules
+module list

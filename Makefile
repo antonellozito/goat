@@ -3,6 +3,13 @@
 # up the compilation and linking steps etc by moving all .o and .mod
 # files into a build directory that is constructed during compilation
 
+ifeq ($(MAKECMDGOALS), goat_debug)
+    GOAT_DEBUG = TRUE
+    EXEC_NAME = goat_debug.exe
+else
+    EXEC_NAME = goat.exe
+endif
+
 # Include the config file
 include config.mk
 
@@ -60,10 +67,12 @@ BUILDDIR :=./builds/$(BUILDDIR)
 goat: $(addprefix $(BUILDDIR)/, $(GOAT_TARGETS)) $(BUILDDIR)/goat.o
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
-	$(FC) $(LFLAGS) -o $(BUILDDIR)/goat.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/$(EXEC_NAME) $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include; 
 	rm $(BUILDDIR)/Goat.o; 
-	cp $(BUILDDIR)/goat.exe ./executables/.
+	cp $(BUILDDIR)/$(EXEC_NAME) ./executables/.
+
+goat_debug: goat
 
 goattranslator: $(addprefix $(BUILDDIR)/,$(GOATTRANSLATOR_TARGETS) ) $(BUILDDIR)/goattranslator.o 
 	-mv -f *.o $(BUILDDIR);  
