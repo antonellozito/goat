@@ -442,6 +442,7 @@ VERSION 1.00.00
 'gg.verbosity'                          '1'
 'gg.vertexconstructionmethod'           'orthogonal'
 'gg.cellconstructionmethod'             'quads_triangles'
+'gg.TMcellgriddingorder'                'sequential'
 
 # Refinement options
 'gg.ref.meth'                           'lengthbased'
