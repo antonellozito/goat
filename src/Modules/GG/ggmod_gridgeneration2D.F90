@@ -173,9 +173,9 @@ module ggmod_gridgeneration2D
         ! 'lines' for each cell. Additionally, the face indices that 
         ! are on the high field side are stored in hffaces, the low field
         ! in lffaces (similar for vertices of the cell). These arrays
-        ! are not sorted yet in any particular order (will have to check
-        ! face orientation anyway when making the grid)
-
+        ! are sorted from start to end radial face. Additionally, we 
+        ! include any user-defined refinement/mesh size/... options 
+        ! here. 
         type(GGTMFieldlineDataUDT), allocatable     :: lines(:)
         type(GGTMFieldlineDataUDT)                  :: hfline, lfline
         integer(I8)                                 :: srflabel, erflabel, &
@@ -614,23 +614,25 @@ module ggmod_gridgeneration2D
             fieldtracer, magneticField, options)
 
         ! Distribute vertices 
-        select case (options%ggmethod)
+        select case (options%TMcellgriddingorder)
 
         case ('independent')
 
             call DistributeVerticesIndependent(ggtmdata, topomesh, grid, &
-                poloidalvertexdistributor)
+                poloidalvertexdistributor, magneticField, streamlinetracer, &
+                GGTMlinerefiner, options)
 
-        case ('orthogonal')
+        case ('sequential')
 
-            call DistributeVerticesOrthogonal(ggtmdata, topomesh, grid, &
+            call DistributeVerticesSequential(ggtmdata, topomesh, grid, &
                 poloidalvertexdistributor, magneticField, streamlinetracer, &
                 GGTMlinerefiner, options)
 
         case default 
 
             call gdErrorHandler('GenerateUnstructuredAlignedGrid: ' // & 
-                'unknown distribution method: ' // options%ggmethod)
+                'unknown topological mesh cell distribution order option: ' & 
+                 // options%TMcellgriddingorder)
 
         end select
 
@@ -682,9 +684,9 @@ module ggmod_gridgeneration2D
     !                         GRID GENERATION                          !
     !------------------------------------------------------------------!
 
-    ! Independent gridder
-    subroutine DistributeVerticesIndependent(ggtmdata, &
-        topomesh, grid, vd)
+    ! Independent gridder (loop for multiple cells)
+    subroutine DistributeVerticesIndependent(ggtmdata, topomesh, grid, &
+        vd, magneticField, streamlinetracer, GGTMlinerefiner, options)
 
         ! Description
         !============
@@ -702,12 +704,18 @@ module ggmod_gridgeneration2D
         class(TopomeshUDT), intent(in)              :: topomesh 
         class(GGGridUDT), intent(inout)             :: grid 
         class(VertexDistributor2DUDT), intent(in)   :: vd
+        type(MagneticFieldUDT), intent(in)          :: magneticField
+        class(StreamlineTracerUDT), intent(in)      :: streamlinetracer
+        class(GGTMLineRefiner2DUDT), intent(in)     :: GGTMlinerefiner
+        type(GGoptionsUDT), intent(in)              :: options
 
         ! Auxiliary
         integer(I8)                                 :: nv, vertID
-        integer(I8), allocatable, dimension(:)      :: tvID, srfvID, &
-            erfvID
-        real(R8), allocatable, dimension(:)         :: dlcv
+        integer(I8), allocatable, dimension(:)      :: tvID, allIDs, &
+            vertmap
+        logical, allocatable, dimension(:)          :: isvertexdeleted, &
+            keepvert
+
 
         ! Loop
         integer(I8)                                 :: i, j, k
@@ -741,57 +749,94 @@ module ggmod_gridgeneration2D
             tvID = [face%vert(i, 1), (k, k = vertID+1, vertID+nv), face%vert(i, 2)]
             call facedata(i)%line%AddVertexIDs(tvID)
 
+            ! Update 
+            vertID = vertID + nv
+
             ! Update line data
             call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
 
-            ! Update 
-            vertID = vertID + nv
-            grid%vert%ntot = grid%vert%ntot + nv
+            ! Refine (only aligned faces!)
+            if (any(face%type(i) == TMfacealignedID)) then 
+                keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
+                call GGTMlinerefiner%Refine(facedata(i)%line, vertID, keepvert)
+                
+
+                ! Update
+                call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
+            end if 
+            
         end do
 
         ! Add cell vertices
         !==================
         do i = 1, cell%ntot
 
-            ! Get cell starting and ending radial line vertices
-            srfvID = facedata(celldata(i)%srf)%line%vert
-            if (celldata(i)%flipsrf) then 
-                srfvID = srfvID(size(srfvID):1:-1)
-            end if 
-            erfvID = facedata(celldata(i)%erf)%line%vert
-            if (celldata(i)%fliperf) then 
-                erfvID = erfvID(size(erfvID):1:-1)
-            end if 
+            ! Check which method to use
+            select case (options%ggmethod)
 
-            ! Distribute lines
-            do j = 1, size(celldata(i)%lines)
-                ! Distribute over line
-                call vd%DistributeOverCurve(celldata(i)%lines(j)%xl, &
-                    celldata(i)%lines(j)%yl, nv, ldistr=dlcv)
-                call celldata(i)%lines(j)%AddVertexCoordinates(dlcv)
+            case ('independent')
 
-                ! Set vertex ID
-                call celldata(i)%lines(j)%AddVertexIDs([srfvID(j+1), &
-                    (k, k = vertID+1, vertID+nv-2), erfvID(j+1)])
+                ! Simply grid the cell in an independent way - don't 
+                ! regrid 
+                call DistributeVerticesSingleTMCellIndependent(i, vertID, &
+                    .false., .false., ggtmdata, topomesh, vd)
 
-                ! Update line data
-                call celldata(i)%lines(j)%UpdateLineData(topomesh, &
-                    ggtmdata)
+            case ('orthogonal')
 
-                ! Update total number of vertices
-                vertID = vertID+nv-2
-                grid%vert%ntot = grid%vert%ntot + nv-2
-            end do 
+                ! Grid in an orthogonal way, possibly with refinement,
+                ! but not updating original line distribution...
+                call DistributeVerticesSingleTMCellOrthogonal(i, vertID, &
+                    .false., ggtmdata, topomesh, grid, vd, &
+                    magneticField, streamlinetracer, GGTMlinerefiner)
 
-            ! Extract high field line
-            call ExtractTMCellAlignedBoundary(celldata(i), 'high', ggtmdata, &
-                topomesh, celldata(i)%hfline)
+            case default
 
-            ! Extract low field line
-            call ExtractTMCellAlignedBoundary(celldata(i), 'low', ggtmdata, &
-                topomesh, celldata(i)%lfline) 
+                ! Unknown
+                call gdErrorHandler('DistributeVerticesIndependent: ' // &
+                    'unknown vertex distribution method: ' // options%ggmethod)
+
+            end select
 
         end do 
+
+        ! Post-process
+        !=============
+        ! Still need to account for deleted/overwritten vertices
+        allocate(isvertexdeleted(vertID))
+        isvertexdeleted = .true. 
+        do i = 1, cell%ntot 
+            ! Check if vertices are present
+            isvertexdeleted(celldata(i)%hfline%vert) = .false.
+            isvertexdeleted(celldata(i)%lfline%vert) = .false.
+            do j = 1, size(celldata(i)%lines) 
+                isvertexdeleted(celldata(i)%lines(j)%vert) = .false.
+            end do
+        end do 
+
+        ! Get all IDs and construct mapping
+        allIDs = pack([(k, k = 1, vertID)], .not. isvertexdeleted)
+        allocate(vertmap(vertID))
+        vertmap = 0_I8
+        vertmap(allIDs) = [(k, k = 1, count(.not. isvertexdeleted))]
+
+        ! Check if any topological mesh vertices were deleted (should not happen)
+        if (any(isvertexdeleted(1:topomesh%vert%ntot))) then 
+            call gdErrorHandler('DistributeVerticesOrthogonal: ' // & 
+                'topological mesh vertices were deleted, this is a bug')
+        end if 
+
+        ! Loop and adjust IDs
+        do i = 1, cell%ntot 
+            ! Remap
+            celldata(i)%hfline%vert = vertmap(celldata(i)%hfline%vert)
+            celldata(i)%lfline%vert = vertmap(celldata(i)%lfline%vert)
+            do j = 1, size(celldata(i)%lines) 
+                celldata(i)%lines(j)%vert = vertmap(celldata(i)%lines(j)%vert)
+            end do
+        end do 
+
+        ! Update number of grid vertices
+        grid%vert%ntot = count(.not. isvertexdeleted)
 
         ! Housekeeping
         !=============
@@ -799,8 +844,8 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
-    ! Orthogonal gridder
-    subroutine DistributeVerticesOrthogonal(ggtmdata, topomesh, &
+    ! Sequential gridder
+    subroutine DistributeVerticesSequential(ggtmdata, topomesh, &
         grid, vd, magneticField, streamlinetracer, GGTMlinerefiner, options)
 
         ! Description
@@ -855,24 +900,14 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                                 :: nv, vertID, tc
-        integer(I8), allocatable, dimension(:)      :: tvID, srfvID, &
-            erfvID, s11, s12, s21, s22, s31, s32, s41, s42, &
-            stype, sortind, newID, updatedfaces, allIDs, vertmap
-        logical                                     :: addpoint
+        integer(I8), allocatable, dimension(:)      :: tvID, &
+            allIDs, vertmap
         logical, allocatable, dimension(:)          :: iscelldone, &
-            isfacedone, isstartingcell, isstartingface, istopovertlf, &
-            istopoverthf, isvertexdeleted, keepvert
-        real(R8)                                    :: xb(1:2), yb(1:2)
-        real(R8), allocatable, dimension(:)         :: xt, yt, &
-            x1, x2, x3, x4, y1, y2, y3, y4, s11r, s12r, s21r, s22r, &
-            s31r, s32r, s41r, s42r, s1r, temps2r, tempx, tempy, newtx, &
-            newty, news2r, newdlcv
-
-        type(GGTMFieldlineDataUDT), allocatable     :: tclines(:)
-        type(StreamlineUDT), allocatable            :: orthlines(:)
+            isfacedone, isstartingcell, isstartingface, &
+            isvertexdeleted, keepvert
 
         ! Loop
-        integer(I8)                                 :: i, j, k, nnew
+        integer(I8)                                 :: i, j, k
 
         ! Initialize
         !===========
@@ -1029,247 +1064,33 @@ module ggmod_gridgeneration2D
                 end if 
             end do 
 
-            ! Extract high field line
-            call ExtractTMCellAlignedBoundary(celldata(tc), 'high', ggtmdata, &
-                topomesh, celldata(tc)%hfline)
+            ! Add cell vertices
+            !------------------
+            ! Check which method to use
+            select case (options%ggmethod)
 
-            ! Extract low field line (will be overwritten later)
-            call ExtractTMCellAlignedBoundary(celldata(tc), 'low', ggtmdata, &
-                topomesh, celldata(tc)%lfline) 
-            
-            ! Unpack
-            associate(&
-                hfline          => celldata(tc)%hfline,     &
-                lfline          => celldata(tc)%lfline,     &
-                lines           => celldata(tc)%lines       &
-            )
+            case ('independent')
 
-            ! Initialize
-            istopoverthf = (hfline%vert /=0 ) .and. (hfline%vert <= vert%ntot)
-            istopovertlf = (lfline%vert /=0 ) .and. (lfline%vert <= vert%ntot)
+                ! Simply grid the cell in an independent way - don't 
+                ! regrid 
+                call DistributeVerticesSingleTMCellIndependent(tc, vertID, &
+                    .false., .true., ggtmdata, topomesh, vd)
 
-            ! Sanity checks
-            if (any(hfline%vert == 0)) then
-                ! This shouldn't be happening
-                call gdErrorHandler('DistributeVerticesOrthogonal: '// & 
-                    'high field line as vertex IDs that are zero, which ' // & 
-                    'indicates a cell has been taken of which the high ' // &
-                    'field line was not yet fully gridded. This is a bug')
-            end if 
+            case ('orthogonal')
 
-            ! Get cell starting and ending radial line vertices
-            srfvID = facedata(celldata(tc)%srf)%line%vert
-            if (celldata(tc)%flipsrf) then 
-                srfvID = srfvID(size(srfvID):1:-1)
-            end if 
-            erfvID = facedata(celldata(tc)%erf)%line%vert
-            if (celldata(tc)%fliperf) then 
-                erfvID = erfvID(size(erfvID):1:-1)
-            end if 
+                ! Grid in an orthogonal way, possibly with refinement,
+                ! but not updating original line distribution...
+                call DistributeVerticesSingleTMCellOrthogonal(tc, vertID, &
+                    .true., ggtmdata, topomesh, grid, vd, &
+                    magneticField, streamlinetracer, GGTMlinerefiner)
 
-            ! Determine cell vertices
-            !------------------------
-            ! Concatenate lines for ease
-            tclines = [celldata(tc)%hfline, celldata(tc)%lines, celldata(tc)%lfline]
+            case default
 
-            ! Compute intersections
-            do i = 2, size(tclines)
-                ! Skip if it is a tangency point
-                if (size(tclines(i)%xl) == 1) then 
-                    cycle 
-                end if 
+                ! Unknown
+                call gdErrorHandler('DistributeVerticesIndependent: ' // &
+                    'unknown vertex distribution method: ' // options%ggmethod)
 
-                ! Trace field lines starting from previous distribution
-                xt = tclines(i-1)%xv
-                yt = tclines(i-1)%yv 
-                xb = [minval([tclines(i)%xl, tclines(i-1)%xl]), &
-                    maxval([tclines(i)%xl, tclines(i-1)%xl])]
-                yb = [minval([tclines(i)%yl, tclines(i-1)%yl]), &
-                    maxval([tclines(i)%yl, tclines(i-1)%yl])]
-                orthlines = streamlinetracer%TraceStreamlines(xt, yt, &
-                    xb, yb, spread(-1_I8, 1, size(xt))) ! normally, gradient goes from low to high, so need to reverse sign
-
-                ! Initialize potential new coordinates
-                allocate(newtx(size(orthlines)), newty(size(orthlines)), &
-                    news2r(size(orthlines)), newID(size(orthlines)))
-                nnew = 0
-
-                ! Find intersections with all other boundaries
-                !$omp parallel default(private) shared(orthlines, vertID, tclines, newtx, nnew, newty, news2r, newID, i) 
-                !$omp do 
-                do j = 1, size(orthlines)
-                    ! Intersections with starting boundary (should only
-                    ! intersect in first point)
-                    if (tclines(i-1)%nv == 1) then 
-                        ! Previous boundary was point - start and end
-                        ! should be the same
-                        if ((tclines(i-1)%xv(1) == orthlines(j)%x(1)) .and. &
-                            (tclines(i-1)%xv(1) == orthlines(j)%x(1))) then 
-                            x1 = tclines(i-1)%xv
-                            y1 = tclines(i-1)%yv 
-                            allocate(s11(size(x1)), s12(size(x1)), &
-                                s11r(size(x1)), s12r(size(x1)))
-                            s11 = 1_I8
-                            s12 = 1_I8
-                            s11r = 0_R8
-                            s12r = 0_R8
-                        else 
-                            call gdErrorHandler('DistributeVerticesOrthogonal: ' // & 
-                                'starting point of radial line should be ' // &
-                                'the same as tangency point')
-                        end if 
-                    else
-                        call SimplePolygonIntersections(orthlines(j)%x, &
-                        orthlines(j)%y, tclines(i-1)%xl, tclines(i-1)%yl, &
-                        x1, y1, s11, s12, s11r, s12r)
-                    end if 
-                    
-                    ! Intersections with ending boundary
-                    call SimplePolygonIntersections(orthlines(j)%x, &
-                        orthlines(j)%y, tclines(i)%xl, tclines(i)%yl, &
-                        x2, y2, s21, s22, s21r, s22r)
-                    
-                    ! Intersections with side boundary 1
-                    call SimplePolygonIntersections(orthlines(j)%x, &
-                        orthlines(j)%y, [tclines(i-1)%xl(1), tclines(i)%xl(1)], &
-                        [tclines(i-1)%yl(1), tclines(i)%yl(1)], &
-                        x3, y3, s31, s32, s31r, s32r)
-                    
-                    ! Intersections with side boundary 2
-                    call SimplePolygonIntersections(orthlines(j)%x, &
-                        orthlines(j)%y, [tclines(i-1)%xl(tclines(i-1)%nl), tclines(i)%xl(tclines(i)%nl)], &
-                        [tclines(i-1)%yl(tclines(i-1)%nl), tclines(i)%yl(tclines(i)%nl)], &
-                        x4, y4, s41, s42, s41r, s42r)
-                    
-                    ! Sort
-                    stype = [spread(1_I8, 1, size(x1)), &
-                        spread(2_I8, 1, size(x2)), spread(3_I8, 1, size(x3)), &
-                        spread(4_I8, 1, size(x4))]
-                    s1r = [s11r, s21r, s31r, s41r]
-                    allocate(sortind(size(s1r)))
-                    sortind = 0_I8
-                    call Sort(s1r, ind=sortind, ascend=.true.)
-                    stype = stype(sortind)
-                    
-                    ! Checks:
-                    ! - The first intersection should be in the point
-                    ! itself
-                    ! - The second intersection should be with the
-                    ! ending boundary
-                    addpoint = .true.
-                    if (size(s11r) == 0) then 
-                        addpoint = .false.
-                    elseif (size(stype) < 2) then 
-                        ! Only one intersection found - don't add
-                        addpoint = .false.
-                    elseif (stype(1) /= 1 .or. s11r(1) /= 0) then ! .or. s1(1) /= 0
-                        ! We expect that the first point is an
-                        ! intersection with the first boundary
-                        addpoint = .false.
-                    elseif (stype(2) /= 2) then 
-                        ! The second point should intersect with the
-                        ! second boundary
-                        addpoint = .false.
-                    end if 
-                    
-                    ! Add the point if allowed
-                    
-                    if (addpoint) then 
-                        
-                        
-                        ! Get point
-                        tempx = [x1, x2, x3, x4]
-                        tempy = [y1, y2, y3, y4]
-                        temps2r = [s12r, s22r, s32r, s42r]
-                        tempx = tempx(sortind)
-                        tempy = tempy(sortind)
-                        temps2r = temps2r(sortind)
-                        
-                        
-                        !$omp critical
-                        ! Update counter
-                        nnew = nnew + 1
-
-                        ! Add
-                        newtx(nnew) = tempx(2)
-                        newty(nnew) = tempy(2)
-                        news2r(nnew) = temps2r(2)
-                        newID(nnew) = vertID+1
-                        vertID = vertID+1
-                        !$omp end critical
-                    end if
-                    
-                    ! Housekeeping
-                    deallocate(s11, s12, s11r, s12r, sortind)
-                    
-                end do 
-                !$omp end do
-                !$omp end parallel
-                
-                ! Trim
-                newtx = newtx(1:nnew)
-                newty = newty(1:nnew)
-                news2r = news2r(1:nnew)
-                newID = newID(1:nnew)
-
-                ! Add topological mesh vertices for last line (make sure 
-                ! to include first and last vertex...)
-                allocate(newdlcv(size(news2r)))
-                newdlcv = 0_R8
-                if (i == size(tclines)) then 
-                    call Interpolate1D(news2r, newdlcv, &
-                        real([(k, k = 0, tclines(i)%nl-1)], kind=R8), tclines(i)%dllc)
-                    newdlcv = [newdlcv, pack(tclines(i)%dlcv, istopovertlf)]
-                    newID = [newID, pack(tclines(i)%vert, istopovertlf)]
-                else
-                    call Interpolate1D(news2r, newdlcv, &
-                        real([(k, k = 0, tclines(i)%nl-1)], kind=R8), tclines(i)%dllc)
-                    newdlcv = [0.0_R8, newdlcv, tclines(i)%dllc(tclines(i)%nl)]
-                    newID = [srfvID(i), newID, erfvID(i)]
-                end if 
-
-                ! Sort
-                allocate(sortind(size(newdlcv)))
-                sortind = 0_I8
-                call Sort(newdlcv, ind=sortind, ascend=.true.)
-                newID = newID(sortind)
-                
-                ! Add points
-                call tclines(i)%AddVertexCoordinates(newdlcv, ecbased=.false.)
-                call tclines(i)%AddVertexIDs(newID)
-
-                ! Refine/coarsen
-                keepvert = IsTopomeshVert(tclines(i)%vert, topomesh) ! keep vertices if topomesh vert
-                keepvert(1) = .true. ! keep first and last vertex anyway
-                keepvert(size(keepvert)) = .true. 
-                call GGTMLinerefiner%Refine(tclines(i), vertID, keepvert)
-
-                ! Update line data (face labels, facedata if last line, ...)
-                call tclines(i)%UpdateLineData(topomesh, ggtmdata)
-
-                ! Update GGTM data
-                call tclines(i)%UpdateGGTMData(topomesh, ggtmdata, updatedfaces)
-
-                ! Housekeeping
-                deallocate(newtx, newty, newID, news2r, sortind, newdlcv)
-
-            end do
-
-            ! Extract line data again
-            !------------------------
-            ! Extract high field line
-            call ExtractTMCellAlignedBoundary(celldata(tc), 'high', ggtmdata, &
-                topomesh, celldata(tc)%hfline)
-
-            ! Extract low field line (will be overwritten later)
-            call ExtractTMCellAlignedBoundary(celldata(tc), 'low', ggtmdata, &
-                topomesh, celldata(tc)%lfline) 
-
-            ! Set cell line data
-            celldata(tc)%lines = tclines(2:size(tclines)-1)
-
-            ! Housekeeping
-            end associate
+            end select
 
             ! Check termination 
             !------------------
@@ -1319,6 +1140,501 @@ module ggmod_gridgeneration2D
 
         ! Housekeeping
         !=============
+        end associate
+
+    end subroutine
+
+    ! Single cell crap gridder
+    subroutine DistributeVerticesSingleTMCellIndependent(tc, vertID, &
+        dohfline, dolfline, ggtmdata, topomesh, vd)
+
+        ! Description
+        !============
+        ! Distribute the grid cells on a single topological mesh cell in 
+        ! an independent way. This means that grid vertices are 
+        ! distributed first on all field lines after which cells and 
+        ! faces are generated. Although we only grid one cell, we need
+        ! to pass the entire ggtmdata structure since we may need
+        ! to update data afterwards that is not local to the cell. 
+        ! The cell index to be gridded should thus be given as input.
+        ! Additionally, one can specifiy whether the high field and 
+        ! low field lines of the cell should be regridded (existing
+        ! distributions are then overwritten, so handle with care!)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)                     :: tc
+        integer(I8), intent(inout)                  :: vertID 
+        type(GGTMDataUDT), intent(inout)            :: ggtmdata
+        class(TopomeshUDT), intent(in)              :: topomesh
+        logical, intent(in)                         :: dohfline, &
+            dolfline
+        class(VertexDistributor2DUDT), intent(in)   :: vd
+
+        ! Auxiliary
+        integer(I8)                                 :: nv 
+        integer(I8), allocatable, dimension(:)      :: srfvID, erfvID
+        real(R8), allocatable, dimension(:)         :: dlcv
+        logical, allocatable, dimension(:)          :: istopoverthf, &
+            istopovertlf
+        type(GGTMFieldlineDataUDT), allocatable     :: tclines(:)
+
+        ! Loop
+        integer(I8)                                 :: i, k 
+
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert            => topomesh%vert,   &
+            face            => topomesh%face,   &
+            facedata        => ggtmdata%face,   &
+            cell            => topomesh%cell,   &
+            celldata        => ggtmdata%cell    &
+            )
+
+        ! Extract data
+        !=============
+        ! Extract high field line
+        call ExtractTMCellAlignedBoundary(celldata(tc), 'high', ggtmdata, &
+        topomesh, celldata(tc)%hfline)
+
+        ! Extract low field line (will be overwritten later)
+        call ExtractTMCellAlignedBoundary(celldata(tc), 'low', ggtmdata, &
+            topomesh, celldata(tc)%lfline) 
+        
+        ! Unpack
+        associate(&
+            hfline          => celldata(tc)%hfline,     &
+            lfline          => celldata(tc)%lfline,     &
+            lines           => celldata(tc)%lines       &
+        )
+
+        ! Initialize
+        istopoverthf = (hfline%vert /=0 ) .and. (hfline%vert <= vert%ntot)
+        istopovertlf = (lfline%vert /=0 ) .and. (lfline%vert <= vert%ntot)
+
+        ! Sanity checks
+        if (any(hfline%vert == 0)) then
+            ! This shouldn't be happening
+            call gdErrorHandler('DistributeVerticesOrthogonal: '// & 
+                'high field line as vertex IDs that are zero, which ' // & 
+                'indicates a cell has been taken of which the high ' // &
+                'field line was not yet fully gridded. This is a bug')
+        end if 
+
+        ! Get cell starting and ending radial line vertices
+        srfvID = facedata(celldata(tc)%srf)%line%vert
+        if (celldata(tc)%flipsrf) then 
+            srfvID = srfvID(size(srfvID):1:-1)
+        end if 
+        erfvID = facedata(celldata(tc)%erf)%line%vert
+        if (celldata(tc)%fliperf) then 
+            erfvID = erfvID(size(erfvID):1:-1)
+        end if 
+
+        ! Determine cell vertices
+        !------------------------
+        ! Concatenate lines for ease
+        tclines = celldata(tc)%lines
+        if (dohfline) then 
+            tclines = [celldata(tc)%hfline, celldata(tc)%lines]
+        end if 
+        if (dolfline) then 
+            tclines = [celldata(tc)%lines, celldata(tc)%lfline]
+        end if 
+
+        ! Compute vertices
+        do i = 1, size(tclines)
+            ! Skip if it is a tangency point
+            if (size(tclines(i)%xl) == 1) then 
+                cycle 
+            end if 
+
+            ! Distribute over line
+            call vd%DistributeOverCurve(tclines(i)%xl, &
+                tclines(i)%yl, nv, ldistr=dlcv)
+            call tclines(i)%AddVertexCoordinates(dlcv)
+
+            ! Set vertex ID
+            call tclines(i)%AddVertexIDs([srfvID(i+1), &
+                (k, k = vertID+1, vertID+nv-2), erfvID(i+1)])
+
+            ! Update line data
+            call tclines(i)%UpdateLineData(topomesh, &
+                ggtmdata)
+
+            ! Update total number of vertices
+            vertID = vertID+nv-2
+
+        end do 
+
+        ! Extract line data again
+        !------------------------
+        ! Extract high field line
+        call ExtractTMCellAlignedBoundary(celldata(tc), 'high', ggtmdata, &
+            topomesh, celldata(tc)%hfline)
+
+        ! Extract low field line (will be overwritten later)
+        call ExtractTMCellAlignedBoundary(celldata(tc), 'low', ggtmdata, &
+            topomesh, celldata(tc)%lfline) 
+
+        ! Set cell line data
+        if (dohfline .and. dolfline) then 
+            celldata(tc)%lines = tclines(2:size(tclines)-1)
+        elseif (dohfline) then 
+            celldata(tc)%lines = tclines(2:size(tclines))
+        elseif (dolfline) then 
+            celldata(tc)%lines = tclines(1:size(tclines)-1)
+        else
+            celldata(tc)%lines = tclines
+        end if 
+
+        ! Housekeeping
+        end associate
+        end associate
+
+    end subroutine
+
+    ! Single cell orthogonal gridder 
+    subroutine DistributeVerticesSingleTMCellOrthogonal(tc, vertID, &
+        dolfline, ggtmdata, topomesh, grid, vd, &
+        magneticField, streamlinetracer, GGTMlinerefiner)
+
+        ! Description
+        !============
+        ! Construct the grid in an orthogonal way by gridding cells in 
+        ! a specific order. This order is determined as follows:
+        ! - a cell can be gridded if its high field line is fully 
+        !   gridded OR if the cell is a boundary cell where the high
+        !   field line is the grid boundary
+        ! - after each cell is gridded, the low field boundary vertex
+        !   distribution is regenerated based on the previous one, and
+        !   propagated to the faces. 
+        ! Note that we always grid from high field to low field. 
+
+        ! The vertex distribution is therefore determined by 
+        ! the initial vertex distribution on the high field faces. 
+        ! Refinement/coarsening can be done in principle in different 
+        ! ways, but here we simply take a maximal length distribution
+        ! and deduce from that a minimal desired length as well. 
+
+        ! Note 1: we exploit the fact that the topological mesh vertices
+        ! are added first, so we can easily check if a vertex is a 
+        ! topological vertex by checking if ID <= topomesh.vert.ntot
+
+        ! Note 2: we assume that the streamline tracer is based on 
+        ! gradient data of the magnetic field, which points from low
+        ! to high value (therefore, we need to trace in the backward
+        ! direction since we go from high to low)
+
+        ! Note 3: we don't explicitly keep track of all deleted vertices,
+        ! as this would be cumbersome. Instead, at the end we check which
+        ! vertex IDs are still present and remap those such that the 
+        ! numbering goes from 1 to grid%vert%ntot again. 
+
+        ! Modules
+        !========
+        use mod_definitions, only: TMfacealignedID, &
+            TMvertexbndID, TMvertextp1ID, TMvertextp2ID
+
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)                     :: tc 
+        integer(I8), intent(inout)                  :: vertID
+        logical, intent(in)                         :: dolfline
+        class(GGTMDataUDT)                          :: ggtmdata 
+        class(TopomeshUDT), intent(in)              :: topomesh 
+        class(GGGridUDT), intent(inout)             :: grid 
+        class(VertexDistributor2DUDT), intent(in)   :: vd
+        type(MagneticFieldUDT), intent(in)          :: magneticField
+        class(StreamlineTracerUDT), intent(in)      :: streamlinetracer
+        class(GGTMLineRefiner2DUDT), intent(in)     :: GGTMlinerefiner
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)      :: srfvID, &
+            erfvID, s11, s12, s21, s22, s31, s32, s41, s42, &
+            stype, sortind, newID, updatedfaces
+        logical                                     :: addpoint
+        logical, allocatable, dimension(:)          ::  istopovertlf, &
+            istopoverthf, keepvert
+        real(R8)                                    :: xb(1:2), yb(1:2)
+        real(R8), allocatable, dimension(:)         :: xt, yt, &
+            x1, x2, x3, x4, y1, y2, y3, y4, s11r, s12r, s21r, s22r, &
+            s31r, s32r, s41r, s42r, s1r, temps2r, tempx, tempy, newtx, &
+            newty, news2r, newdlcv
+
+        type(GGTMFieldlineDataUDT), allocatable     :: tclines(:)
+        type(StreamlineUDT), allocatable            :: orthlines(:)
+
+        ! Loop
+        integer(I8)                                 :: i, j, k, nnew
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert            => topomesh%vert,   &
+            face            => topomesh%face,   &
+            facedata        => ggtmdata%face,   &
+            cell            => topomesh%cell,   &
+            celldata        => ggtmdata%cell    &
+            )
+
+        ! Extract high field line
+        call ExtractTMCellAlignedBoundary(celldata(tc), 'high', ggtmdata, &
+            topomesh, celldata(tc)%hfline)
+
+        ! Extract low field line (will be overwritten later)
+        call ExtractTMCellAlignedBoundary(celldata(tc), 'low', ggtmdata, &
+            topomesh, celldata(tc)%lfline) 
+        
+        ! Unpack
+        associate(&
+            hfline          => celldata(tc)%hfline,     &
+            lfline          => celldata(tc)%lfline,     &
+            lines           => celldata(tc)%lines       &
+        )
+
+        ! Initialize
+        istopoverthf = (hfline%vert /=0 ) .and. (hfline%vert <= vert%ntot)
+        istopovertlf = (lfline%vert /=0 ) .and. (lfline%vert <= vert%ntot)
+
+        ! Sanity checks
+        if (any(hfline%vert == 0)) then
+            ! This shouldn't be happening
+            call gdErrorHandler('DistributeVerticesOrthogonal: '// & 
+                'high field line as vertex IDs that are zero, which ' // & 
+                'indicates a cell has been taken of which the high ' // &
+                'field line was not yet fully gridded. This is a bug')
+        end if 
+
+        ! Get cell starting and ending radial line vertices
+        srfvID = facedata(celldata(tc)%srf)%line%vert
+        if (celldata(tc)%flipsrf) then 
+            srfvID = srfvID(size(srfvID):1:-1)
+        end if 
+        erfvID = facedata(celldata(tc)%erf)%line%vert
+        if (celldata(tc)%fliperf) then 
+            erfvID = erfvID(size(erfvID):1:-1)
+        end if 
+
+        ! Determine cell vertices
+        !------------------------
+        ! Concatenate lines for ease
+        tclines = [celldata(tc)%hfline, celldata(tc)%lines]
+        if (dolfline) then 
+            tclines = [tclines, celldata(tc)%lfline]
+        end if
+        
+        ! Compute intersections
+        do i = 2, size(tclines)
+            ! Skip if it is a tangency point
+            if (size(tclines(i)%xl) == 1) then 
+                cycle 
+            end if 
+
+            ! Trace field lines starting from previous distribution
+            xt = tclines(i-1)%xv
+            yt = tclines(i-1)%yv 
+            xb = [minval([tclines(i)%xl, tclines(i-1)%xl]), &
+                maxval([tclines(i)%xl, tclines(i-1)%xl])]
+            yb = [minval([tclines(i)%yl, tclines(i-1)%yl]), &
+                maxval([tclines(i)%yl, tclines(i-1)%yl])]
+            orthlines = streamlinetracer%TraceStreamlines(xt, yt, &
+                xb, yb, spread(-1_I8, 1, size(xt))) ! normally, gradient goes from low to high, so need to reverse sign
+
+            ! Initialize potential new coordinates
+            allocate(newtx(size(orthlines)), newty(size(orthlines)), &
+                news2r(size(orthlines)), newID(size(orthlines)))
+            nnew = 0
+
+            ! Find intersections with all other boundaries
+            !$omp parallel default(private) shared(orthlines, vertID, tclines, newtx, nnew, newty, news2r, newID, i) 
+            !$omp do 
+            do j = 1, size(orthlines)
+                ! Intersections with starting boundary (should only
+                ! intersect in first point)
+                if (tclines(i-1)%nv == 1) then 
+                    ! Previous boundary was point - start and end
+                    ! should be the same
+                    if ((tclines(i-1)%xv(1) == orthlines(j)%x(1)) .and. &
+                        (tclines(i-1)%xv(1) == orthlines(j)%x(1))) then 
+                        x1 = tclines(i-1)%xv
+                        y1 = tclines(i-1)%yv 
+                        allocate(s11(size(x1)), s12(size(x1)), &
+                            s11r(size(x1)), s12r(size(x1)))
+                        s11 = 1_I8
+                        s12 = 1_I8
+                        s11r = 0_R8
+                        s12r = 0_R8
+                    else 
+                        call gdErrorHandler('DistributeVerticesOrthogonal: ' // & 
+                            'starting point of radial line should be ' // &
+                            'the same as tangency point')
+                    end if 
+                else
+                    call SimplePolygonIntersections(orthlines(j)%x, &
+                    orthlines(j)%y, tclines(i-1)%xl, tclines(i-1)%yl, &
+                    x1, y1, s11, s12, s11r, s12r)
+                end if 
+                
+                ! Intersections with ending boundary
+                call SimplePolygonIntersections(orthlines(j)%x, &
+                    orthlines(j)%y, tclines(i)%xl, tclines(i)%yl, &
+                    x2, y2, s21, s22, s21r, s22r)
+                
+                ! Intersections with side boundary 1
+                call SimplePolygonIntersections(orthlines(j)%x, &
+                    orthlines(j)%y, [tclines(i-1)%xl(1), tclines(i)%xl(1)], &
+                    [tclines(i-1)%yl(1), tclines(i)%yl(1)], &
+                    x3, y3, s31, s32, s31r, s32r)
+                
+                ! Intersections with side boundary 2
+                call SimplePolygonIntersections(orthlines(j)%x, &
+                    orthlines(j)%y, [tclines(i-1)%xl(tclines(i-1)%nl), tclines(i)%xl(tclines(i)%nl)], &
+                    [tclines(i-1)%yl(tclines(i-1)%nl), tclines(i)%yl(tclines(i)%nl)], &
+                    x4, y4, s41, s42, s41r, s42r)
+                
+                ! Sort
+                stype = [spread(1_I8, 1, size(x1)), &
+                    spread(2_I8, 1, size(x2)), spread(3_I8, 1, size(x3)), &
+                    spread(4_I8, 1, size(x4))]
+                s1r = [s11r, s21r, s31r, s41r]
+                allocate(sortind(size(s1r)))
+                sortind = 0_I8
+                call Sort(s1r, ind=sortind, ascend=.true.)
+                stype = stype(sortind)
+                
+                ! Checks:
+                ! - The first intersection should be in the point
+                ! itself
+                ! - The second intersection should be with the
+                ! ending boundary
+                addpoint = .true.
+                if (size(s11r) == 0) then 
+                    addpoint = .false.
+                elseif (size(stype) < 2) then 
+                    ! Only one intersection found - don't add
+                    addpoint = .false.
+                elseif (stype(1) /= 1 .or. s11r(1) /= 0) then ! .or. s1(1) /= 0
+                    ! We expect that the first point is an
+                    ! intersection with the first boundary
+                    addpoint = .false.
+                elseif (stype(2) /= 2) then 
+                    ! The second point should intersect with the
+                    ! second boundary
+                    addpoint = .false.
+                end if 
+                
+                ! Add the point if allowed
+                
+                if (addpoint) then 
+                    
+                    
+                    ! Get point
+                    tempx = [x1, x2, x3, x4]
+                    tempy = [y1, y2, y3, y4]
+                    temps2r = [s12r, s22r, s32r, s42r]
+                    tempx = tempx(sortind)
+                    tempy = tempy(sortind)
+                    temps2r = temps2r(sortind)
+                    
+                    
+                    !$omp critical
+                    ! Update counter
+                    nnew = nnew + 1
+
+                    ! Add
+                    newtx(nnew) = tempx(2)
+                    newty(nnew) = tempy(2)
+                    news2r(nnew) = temps2r(2)
+                    newID(nnew) = vertID+1
+                    vertID = vertID+1
+                    !$omp end critical
+                end if
+                
+                ! Housekeeping
+                deallocate(s11, s12, s11r, s12r, sortind)
+                
+            end do 
+            !$omp end do
+            !$omp end parallel
+            
+            ! Trim
+            newtx = newtx(1:nnew)
+            newty = newty(1:nnew)
+            news2r = news2r(1:nnew)
+            newID = newID(1:nnew)
+
+            ! Add topological mesh vertices for last line (make sure 
+            ! to include first and last vertex...)
+            allocate(newdlcv(size(news2r)))
+            newdlcv = 0_R8
+            if ((i == size(tclines)) .and. dolfline) then 
+                call Interpolate1D(news2r, newdlcv, &
+                    real([(k, k = 0, tclines(i)%nl-1)], kind=R8), tclines(i)%dllc)
+                newdlcv = [newdlcv, pack(tclines(i)%dlcv, istopovertlf)]
+                newID = [newID, pack(tclines(i)%vert, istopovertlf)]
+            else
+                call Interpolate1D(news2r, newdlcv, &
+                    real([(k, k = 0, tclines(i)%nl-1)], kind=R8), tclines(i)%dllc)
+                newdlcv = [0.0_R8, newdlcv, tclines(i)%dllc(tclines(i)%nl)]
+                newID = [srfvID(i), newID, erfvID(i)]
+            end if 
+
+            ! Sort
+            allocate(sortind(size(newdlcv)))
+            sortind = 0_I8
+            call Sort(newdlcv, ind=sortind, ascend=.true.)
+            newID = newID(sortind)
+            
+            ! Add points
+            call tclines(i)%AddVertexCoordinates(newdlcv, ecbased=.false.)
+            call tclines(i)%AddVertexIDs(newID)
+
+            ! Refine/coarsen
+            keepvert = IsTopomeshVert(tclines(i)%vert, topomesh) ! keep vertices if topomesh vert
+            keepvert(1) = .true. ! keep first and last vertex anyway
+            keepvert(size(keepvert)) = .true. 
+            call GGTMLinerefiner%Refine(tclines(i), vertID, keepvert)
+
+            ! Update line data (face labels, facedata if last line, ...)
+            call tclines(i)%UpdateLineData(topomesh, ggtmdata)
+
+            ! Update GGTM data
+            call tclines(i)%UpdateGGTMData(topomesh, ggtmdata, updatedfaces)
+
+            ! Housekeeping
+            deallocate(newtx, newty, newID, news2r, sortind, newdlcv)
+
+        end do
+
+        ! Extract line data again
+        !------------------------
+        ! Extract high field line
+        call ExtractTMCellAlignedBoundary(celldata(tc), 'high', ggtmdata, &
+            topomesh, celldata(tc)%hfline)
+
+        ! Extract low field line (will be overwritten later)
+        call ExtractTMCellAlignedBoundary(celldata(tc), 'low', ggtmdata, &
+            topomesh, celldata(tc)%lfline) 
+
+        ! Set cell line data
+        if (dolfline) then 
+            celldata(tc)%lines = tclines(2:size(tclines)-1)
+        else
+            celldata(tc)%lines = tclines(2:size(tclines))
+        end if 
+        
+        
+        ! Housekeeping
+        !=============
+        end associate
         end associate
 
     end subroutine
@@ -5361,8 +5677,7 @@ module ggmod_gridgeneration2D
         class(GGTMDataUDT)                      :: ggtmdata 
 
         ! Auxiliary
-        real(R8)                                :: nxsrf, nysrf, nxl, &
-            nyl, thisfl
+        real(R8)                                :: nxsrf, nysrf, thisfl
         real(R8), allocatable, dimension(:)     :: tx, ty, xl, yl, dlcv, &
             tdlcv
         integer(I8)                             :: startv, endv, &

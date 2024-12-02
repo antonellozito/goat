@@ -408,13 +408,19 @@ module goatmod_userinput
         ! - verbosity       the higher, the more information is 
         !                   printed out (default: 1, 0 suppresses all)
         ! - ggmethod        method how to construct the grid. Can be 
-        !                   'independent' (treating each topological
-        !                    cell independently) or 'orthogonal' (
+        !                   'independent' (treating each flux surface
+        !                    independently) or 'orthogonal' (
         !                   yields largely orthogonal grid, but needs 
         !                   dependency between mesh cells)
         ! - cellconstructionmethod: method how to determine grid cells
         !                   starting from given vertex distribution. 
         !                   'quads_triangles' is recommended one
+        ! - TMcellgriddingorder:    order in which to grid the 
+        !                   topological mesh cells. Can be 'independent'
+        !                   (then it is  pretty much random) or 
+        !                   'sequential' -> that one is the recommended
+        !                   one. Here, initial distributions are 
+        !                   propagated through
         ! 
         ! Vertex distribution, poloidal direction:
         ! - vdptype:        'uniform' for uniform distribution, 
@@ -507,7 +513,7 @@ module goatmod_userinput
             refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
-            cellconstructionmethod, refmeth, vdpplftype
+            cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -819,6 +825,7 @@ module goatmod_userinput
         options%verbosity           = 1
         options%ggmethod            = 'independent'
         options%cellconstructionmethod  = 'quads_triangles'
+        options%TMcellgriddingorder = 'sequential'
 
         ! Refinement options ('orthogonal' ggmethod only)
         options%refmeth         = 'no'      
@@ -1501,6 +1508,8 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%ggmethod)
         field  = 'gg.cellconstructionmethod'
         call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)
+        field = 'gg.TMcellgriddingorder'
+        call ExtractOptionValueCharacter(fid, field, options%TMcellgriddingorder)
 
         ! Refinement options (general)
         field = 'gg.ref.meth'
