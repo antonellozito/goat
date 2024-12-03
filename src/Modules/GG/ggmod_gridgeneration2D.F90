@@ -167,6 +167,10 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)     :: dlBLstart, dlBLend
 
     contains 
+
+        ! Initializer to avoid issues
+        procedure :: Initialize         => InitializeGGTMLineRefinementOptions
+
     end type
     
     ! Face data
@@ -2020,13 +2024,13 @@ module ggmod_gridgeneration2D
                             ! Check that we're not marching further than
                             ! allowed (not an issue for the initial 
                             ! BL since we start there...)
-                            if (k1 > (n1-ncBLend) .and. .not. (k2 > (n2-ncBLend))) then 
+                            if (k1 > (n1-ncBLend-1) .and. .not. (k2 > (n2-ncBLend-1))) then 
                                 ! Need to add triangle from k2:k2+1
                                 indmin = 1
-                            elseif (.not. (k1 > (n1-ncBLend)) .and. k2 > (n2-ncBLend)) then
+                            elseif (.not. (k1 > (n1-ncBLend-1)) .and. k2 > (n2-ncBLend-1)) then
                                 ! Need to add triangle from k1:k1+1
                                 indmin = 2
-                            elseif ((k1 > (n1-ncBLend)) .and. (k2 > (n2-ncBLend))) then 
+                            elseif ((k1 > (n1-ncBLend-1)) .and. (k2 > (n2-ncBLend-1))) then 
                                 ! Ensure quad 
                                 indmin = 3 
                             end if 
@@ -3614,11 +3618,16 @@ module ggmod_gridgeneration2D
         !==================
         ! If we got here, this means that we didn't read in an existing
         ! file
+
+        ! Initialize
+        do i = 1, size(celldata)
+            call celldata(i)%linerefoptions%Initialize()
+        end do
         
         ! Boundary layer 
         !---------------
         ! Vessel faces
-        if (options%refBLdotarget) then 
+        if (options%refBLdovessel) then 
             ! Get all vessel boundaries of the topological mesh
             vesselfaceIDs = topomesh%GetVesselFaceIDs()
 
@@ -3628,9 +3637,6 @@ module ggmod_gridgeneration2D
                 if (any(celldata(i)%srf == vesselfaceIDs)) then 
                     ! Overwrite defaults
                     celldata(i)%linerefoptions%doBLstart = .true. 
-                else
-                    celldata(i)%linerefoptions%doBLstart = .false. 
-                    
                 end if 
 
                 ! Add data anyway
@@ -3641,9 +3647,6 @@ module ggmod_gridgeneration2D
                 if (any(celldata(i)%erf == vesselfaceIDs)) then 
                     ! Overwrite defaults
                     celldata(i)%linerefoptions%doBLend = .true. 
-                else
-                    celldata(i)%linerefoptions%doBLend = .false. 
-                    
                 end if 
 
                 ! Add data anyway
@@ -3663,9 +3666,6 @@ module ggmod_gridgeneration2D
                 if (any(celldata(i)%srf == targetfaceIDs)) then 
                     ! Overwrite defaults
                     celldata(i)%linerefoptions%doBLstart = .true. 
-                else
-                    celldata(i)%linerefoptions%doBLstart = .false. 
-                    
                 end if 
 
                 ! Add data anyway
@@ -3676,9 +3676,6 @@ module ggmod_gridgeneration2D
                 if (any(celldata(i)%erf == targetfaceIDs)) then 
                     ! Overwrite defaults
                     celldata(i)%linerefoptions%doBLend = .true. 
-                else
-                    celldata(i)%linerefoptions%doBLend = .false. 
-                    
                 end if 
 
                 ! Add data anyway
@@ -3799,6 +3796,35 @@ module ggmod_gridgeneration2D
         call grid%vert%Initialize(storagetype)
         call grid%face%Initialize(storagetype)
         call grid%cell%Initialize(storagetype)
+
+    end subroutine
+
+    subroutine InitializeGGTMLineRefinementOptions(options)
+
+        ! Description
+        !============
+        ! Option initializer. Initially, every option is set to false.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMFieldlineRefinementOptionsUDT)    :: options 
+
+        ! Set defaults
+        !=============
+        ! Boundary layer options
+        options%doBLstart = .false.
+        options%ncBLstart = 0
+        options%doBLend = .false. 
+        options%ncBLend = 0
+        if (allocated(options%dlBLstart)) then 
+            deallocate(options%dlBLstart)
+        end if 
+        if (allocated(options%dlBLend)) then 
+            deallocate(options%dlBLend)
+        end if 
+        allocate(options%dlBLstart(options%ncBLstart), &
+            options%dlBLend(options%ncBLend))
 
     end subroutine
 
