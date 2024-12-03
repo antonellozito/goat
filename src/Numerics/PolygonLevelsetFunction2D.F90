@@ -976,7 +976,7 @@ module PolygonLevelsetFunction2D
         !===========
         ! Check polygonset 
         call ps%OrientNestedClosedPolygons(flag)
-        if (flag > 0) then 
+        if (flag > 1) then 
             ! Polygon set does not comply, throw error
             call gdErrorHandler('InitializePLF2DClosedExact: polygon set should be closed and non-intersecting')
         end if 
