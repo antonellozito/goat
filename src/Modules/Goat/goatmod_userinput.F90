@@ -408,13 +408,19 @@ module goatmod_userinput
         ! - verbosity       the higher, the more information is 
         !                   printed out (default: 1, 0 suppresses all)
         ! - ggmethod        method how to construct the grid. Can be 
-        !                   'independent' (treating each topological
-        !                    cell independently) or 'orthogonal' (
+        !                   'independent' (treating each flux surface
+        !                    independently) or 'orthogonal' (
         !                   yields largely orthogonal grid, but needs 
         !                   dependency between mesh cells)
         ! - cellconstructionmethod: method how to determine grid cells
         !                   starting from given vertex distribution. 
         !                   'quads_triangles' is recommended one
+        ! - TMcellgriddingorder:    order in which to grid the 
+        !                   topological mesh cells. Can be 'independent'
+        !                   (then it is  pretty much random) or 
+        !                   'sequential' -> that one is the recommended
+        !                   one. Here, initial distributions are 
+        !                   propagated through
         ! 
         ! Vertex distribution, poloidal direction:
         ! - vdptype:        'uniform' for uniform distribution, 
@@ -487,12 +493,20 @@ module goatmod_userinput
         !                   polygon construction)
         ! - refLBLminstructure  minimal length on structure i (etc, 
         !                   similar for vertices)
+
+        ! - refBLdotarget   do BL refinement at targets
+        ! - refBLdovessel   do BL refinement at far vessel boundaries
+        ! - refBLnctarget   number of desired boundary layer cells at 
+        !                   the target (similar for vessel)
+        ! - refBLdltarget   desired lengths for these cells (if only    
+        !                   single value, assumed all cells same size)
         
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
-            refLBdovessel, vdpdincludexp, coarsencontours
+            refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
+            refBLdovessel, readexistingrefdata
         integer(I8)                 :: gcresx, gcresy, &
-            verbosity, orthtracernsteps
+            verbosity, orthtracernsteps, refBLnctarget, refBLncvessel
         integer(I8), allocatable, dimension(:)  :: refLBstructureIDs, &
             refLBvertIDs
         real(R8)                    :: vdpdfacelength, vdpddecaylengthplf, &
@@ -504,10 +518,12 @@ module goatmod_userinput
             refLBLmaxxp, refLBdecaylengthxp, orthtracerstep
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
             vdpdval, refLBLminstructure, refLBLminvert, refLBLmaxstructure, &
-            refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert
+            refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert, &
+            refBLdltarget, refBLdlvessel
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
-            cellconstructionmethod, refmeth, vdpplftype
+            cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
+            refdatafile
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -819,8 +835,11 @@ module goatmod_userinput
         options%verbosity           = 1
         options%ggmethod            = 'independent'
         options%cellconstructionmethod  = 'quads_triangles'
+        options%TMcellgriddingorder = 'sequential'
+        options%readexistingrefdata = .false. 
+        options%refdatafile         = 'refdataTMcells'
 
-        ! Refinement options ('orthogonal' ggmethod only)
+        ! Refinement options ('lengthbased' refinement options only)
         options%refmeth         = 'no'      
         options%refLBdoxp       = .true. 
         options%refLBdovessel   = .false. 
@@ -833,6 +852,16 @@ module goatmod_userinput
             options%refLBdecaylengthvert(0), options%refLBstructureIDs(0), &
             options%refLBvertIDs(0), options%refLBLminstructure(0), &
             options%refLBLmaxstructure(0))
+
+        ! Boundary layer options
+        options%refBLdotarget   = .false. 
+        options%refBLdovessel   = .false. 
+        options%refBLnctarget   = 0
+        options%refBLncvessel   = 0
+        allocate(options%refBLdltarget(options%refBLnctarget), &
+            options%refBLdlvessel(options%refBLncvessel))
+        options%refBLdltarget   = 0.001_R8 ! in m 
+        options%refBLdlvessel   = 0.01_R8 ! in m 
 
         options%orthtracerstep = 0.5
         options%orthtracernsteps = 2000
@@ -1501,6 +1530,8 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%ggmethod)
         field  = 'gg.cellconstructionmethod'
         call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)
+        field = 'gg.TMcellgriddingorder'
+        call ExtractOptionValueCharacter(fid, field, options%TMcellgriddingorder)
 
         ! Refinement options (general)
         field = 'gg.ref.meth'
@@ -1533,6 +1564,20 @@ module goatmod_userinput
         call ExtractOptionValueInteger1D(fid, field, options%refLBstructureIDs)
         field  = 'gg.ref.LB.vertIDs'   
         call ExtractOptionValueInteger1D(fid, field, options%refLBvertIDs)
+
+        ! Boundary layer options (only for length-based ref)
+        field = 'gg.ref.BL.dotarget'
+        call ExtractOptionValueLogical0D(fid, field, options%refBLdotarget)
+        field = 'gg.ref.BL.dovessel'
+        call ExtractOptionValueLogical0D(fid, field, options%refBLdovessel)
+        field = 'gg.ref.BL.nctarget'
+        call ExtractOptionValueInteger0D(fid, field, options%refBLnctarget)
+        field = 'gg.ref.BL.ncvessel'
+        call ExtractOptionValueInteger0D(fid, field, options%refBLncvessel)
+        field = 'gg.ref.BL.dltarget'
+        call ExtractOptionValueReal1D(fid, field, options%refBLdltarget)
+        field = 'gg.ref.BL.dlvessel'
+        call ExtractOptionValueReal1D(fid, field, options%refBLdlvessel)
 
         ! Contouring options in grid generator
         field = 'gg.vd.contouring.resx'

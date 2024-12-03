@@ -425,7 +425,7 @@ VERSION 1.00.00
 
 'gg.tm.contour.npmin'           '10'
 'gg.tm.contour.npmax'           '10000'
-'gg.tm.contour.dl'              '0.1'
+'gg.tm.contour.dl'              '0.01'
 
 # Core boundary and region treatment
 'gg.tm.addcoreboundaries'       '0'
