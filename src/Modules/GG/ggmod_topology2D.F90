@@ -406,6 +406,10 @@ module ggmod_topology2D
         if (options%removewidegridregions) then 
             call RemoveTopologicalMeshWideGridRegions(topomesh)
         end if 
+        if (options%removenoncoreregions) then 
+            call RemoveTopologicalMeshNonCoreRegions(topomesh)
+        end if
+
 
         ! Compute interconnection data
         call AddTopologicalMeshInterconnectionData(topomesh)
@@ -3029,6 +3033,75 @@ module ggmod_topology2D
                 delc(i)     = .false. 
                 delf(tcf)   = .false.
                 tcv         = topomesh%cell%GetVert(i)
+                delv(tcv)   = .false.
+            end if 
+        end do
+
+        ! Delete
+        !=======
+        ! Vertices
+        call RemoveTopologicalMeshVertexLogical(topomesh, delv)
+
+        ! Faces
+        call RemoveTopologicalMeshFaceLogical(topomesh, delf)
+
+        ! Cells
+        call RemoveTopologicalMeshCellLogical(topomesh, delc)
+
+        ! Update again
+        !=============
+        ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Data
+        call AddTopologicalMeshData(topomesh)
+
+    end subroutine
+
+    ! Remove all-but core regions (for Anthony)
+    subroutine RemoveTopologicalMeshNonCoreRegions(topomesh)
+
+        ! Description
+        !============
+        ! This routine removes all regions that don't have either a 
+        ! core boundary (inserted) or a maximum/minimum as boundary.
+        ! This should yield the desired output for devices such as 
+        ! e.g. TOMAS that are almost perfectly circular
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)              :: topomesh 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tcf, tcv
+        logical, allocatable, dimension(:)      :: delv, delf, delc
+
+        ! Loop
+        integer(I8)                         :: i
+
+        ! Initialize
+        !===========
+        ! Mark cells, vertices, faces for deletion
+        allocate(delc(topomesh%cell%ntot), delv(topomesh%vert%ntot), &
+            delf(topomesh%face%ntot))
+        delc = .true. ! default true
+        delv = .true.
+        delf = .true.
+
+        do i = 1, topomesh%cell%ntot 
+            ! Get faces
+            tcf = topomesh%cell%GetFace(i)
+
+            ! Get vertices
+            tcv = topomesh%cell%GetVert(i)
+
+            ! Check if there is a core face or extremum, then keep cell
+            if (any(topomesh%face%type(tcf) == TMfacecoreID) .or. &
+                any(topomesh%vert%type(tcv) == TMvertexminID) .or. &
+                any(topomesh%vert%type(tcv) == TMvertexmaxID)) then 
+                delc(i)     = .false. 
+                delf(tcf)   = .false.
                 delv(tcv)   = .false.
             end if 
         end do

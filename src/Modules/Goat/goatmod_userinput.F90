@@ -383,7 +383,7 @@ module goatmod_userinput
             npmax
         logical                 :: addcoreboundaries, removecoreregions, &
             fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
-            readexistingTM
+            readexistingTM, removenoncoreregions
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac
         character(:), allocatable   :: TMfilepath
@@ -796,6 +796,7 @@ module goatmod_userinput
         options%PFboundariesfrac = 0.2
         options%removecoreregions = .true. 
         options%removewidegridregions = .true. 
+        options%removenoncoreregions = .false.
 
     end subroutine 
 
@@ -1474,6 +1475,8 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%coreboundariesfrac)
         field = 'gg.tm.PFbnd.frac'
         call ExtractOptionValueReal0D(fid, field, options%PFboundariesfrac)
+        field = 'gg.tm.removenoncoreregions'
+        call ExtractOptionValueLogical0D(fid, field, options%removenoncoreregions)
 
         ! Housekeeping
         !=============
