@@ -150,6 +150,24 @@ module ggmod_gridgeneration2D
         procedure :: UpdateGGTMData
 
     end type
+
+    ! Field line refinement options
+    type :: GGTMFieldlineRefinementOptionsUDT 
+
+        ! Description
+        !============
+        ! This structure contains all refinement options for refining
+        ! a GGTM line with any GGTM line refiner. These options should
+        ! be added as a structure to the GGTMCellData structure, such 
+        ! that this data transfer can be done smoothly
+
+        ! Data for length-based refinement
+        logical                                 :: doBLstart, doBLend 
+        integer(I8)                             :: ncBLstart, ncBLend 
+        real(R8), allocatable, dimension(:)     :: dlBLstart, dlBLend
+
+    contains 
+    end type
     
     ! Face data
     type :: GGTMFaceDataUDT
@@ -177,6 +195,7 @@ module ggmod_gridgeneration2D
         ! include any user-defined refinement/mesh size/... options 
         ! here. 
         type(GGTMFieldlineDataUDT), allocatable     :: lines(:)
+        type(GGTMFieldlineRefinementOptionsUDT)     :: linerefoptions
         type(GGTMFieldlineDataUDT)                  :: hfline, lfline
         integer(I8)                                 :: srflabel, erflabel, &
             srf, erf, region
@@ -376,8 +395,24 @@ module ggmod_gridgeneration2D
         ! Description
         !============
         ! This refiner is based on a minimal and maximal length 
-        ! distribution.
-        character(:), allocatable                       :: meth 
+        ! distribution. Additionally, one can specify a boundary layer 
+        ! at each side of the face where a specified length (or set of 
+        ! lengths) is specified. 
+
+        ! List of options:
+        ! - meth            method of refining/coarsening, currently
+        !                   only 'classic' which simply splits up a face
+        !                   in two or merges a face with a neighbouring 
+        !                   face (boundary layers are not included)
+        ! - doBLstart       do starting (or ending if doBLend) boundary
+        !                   layer
+        ! - ncBLstart       number of boundary layer cells 
+        ! - dlBLstart       size of boundary layer cells 
+        character(:), allocatable           :: meth 
+        logical                             :: doBLstart, &
+            doBLend
+        integer(I8)                         :: ncBLstart, ncBLend 
+        real(R8), allocatable, dimension(:) :: dlBLstart, dlBLend 
         class(DistributionFunctionUDT), allocatable     :: Lmin, Lmax 
 
     contains 
@@ -1874,6 +1909,14 @@ module ggmod_gridgeneration2D
             lines = [celldata(i)%hfline, celldata(i)%lines, &
                 celldata(i)%lfline]
 
+            ! Associate
+            associate(&
+                doBLstart     => celldata(i)%linerefoptions%doBLstart,     &
+                doBLend       => celldata(i)%linerefoptions%doBLend  ,     &
+                ncBLstart     => celldata(i)%linerefoptions%ncBLstart,     &
+                ncBLend       => celldata(i)%linerefoptions%ncBLend        &
+                )
+
             ! Loop over all lines
             do j = 1, size(lines)-1
                 ! Unpack
@@ -1963,57 +2006,84 @@ module ggmod_gridgeneration2D
                     ! Here, purely based on length of added aligned face
                     doquad = .false.
                     if ((k1 < n1) .and. (k2 < n2)) then 
+
+                        ! Check if we can/should insert a boundary layer
+                        ! of quads
+                        indmin = 0
+                        if (doBLstart) then 
+                            if ((k1 < ncBLstart+1) .and. (k2 < ncBLstart+1)) then 
+                                ! Ensure quad 
+                                indmin = 3 
+                            end if 
+                        end if
+                        if (doBLend .and. (indmin == 0)) then 
+                            ! Check that we're not marching further than
+                            ! allowed (not an issue for the initial 
+                            ! BL since we start there...)
+                            if (k1 > (n1-ncBLend) .and. .not. (k2 > (n2-ncBLend))) then 
+                                ! Need to add triangle from k2:k2+1
+                                indmin = 1
+                            elseif (.not. (k1 > (n1-ncBLend)) .and. k2 > (n2-ncBLend)) then
+                                ! Need to add triangle from k1:k1+1
+                                indmin = 2
+                            elseif ((k1 > (n1-ncBLend)) .and. (k2 > (n2-ncBLend))) then 
+                                ! Ensure quad 
+                                indmin = 3 
+                            end if 
+                        end if
+
+                        if (indmin == 0) then 
                                 
-                        ! Compute angle of face normal with magnetic field
-                        dx1 = l2%xv(k2+1) - l1%xv(k1)
-                        dy1 = l2%yv(k2+1) - l1%yv(k1)
-                        dx2 = l1%xv(k1+1) - l2%xv(k2)
-                        dy2 = l1%yv(k1+1) - l2%yv(k2)
-                        dx3 = l2%xv(k2+1) - l1%xv(k1+1)
-                        dy3 = l2%yv(k2+1) - l1%yv(k1+1)
+                            ! Compute angle of face normal with magnetic field
+                            dx1 = l2%xv(k2+1) - l1%xv(k1)
+                            dy1 = l2%yv(k2+1) - l1%yv(k1)
+                            dx2 = l1%xv(k1+1) - l2%xv(k2)
+                            dy2 = l1%yv(k1+1) - l2%yv(k2)
+                            dx3 = l2%xv(k2+1) - l1%xv(k1+1)
+                            dy3 = l2%yv(k2+1) - l1%yv(k1+1)
 
-                        call magneticField%interp%Evaluate(&
-                            [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
-                            [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
-                            0, 1, bxf)
-                        call magneticField%interp%Evaluate(&
-                            [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
-                            [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
-                            1, 0, byf)
-                        bxf = -bxf ! adjust sign
+                            call magneticField%interp%Evaluate(&
+                                [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
+                                [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
+                                0, 1, bxf)
+                            call magneticField%interp%Evaluate(&
+                                [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
+                                [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
+                                1, 0, byf)
+                            bxf = -bxf ! adjust sign
 
-                        alpha1 = abs(atan( (-dy1*byf(1) -dx1*bxf(1))/(-dy1*bxf(1) + dx1*byf(1))))
-                        alpha2 = abs(atan( (-dy2*byf(2) -dx2*bxf(2))/(-dy2*bxf(2) + dx2*byf(2))))
-                        alpha3 = abs(atan( (-dy3*byf(3) -dx3*bxf(3))/(-dy3*bxf(3) + dx3*byf(3))))
-                        
-
-
-                        ! Check if we still need to hedge for intersecting
-                        ! lines
-                        if (k1 > mink1) then 
-                            isintersectingl1 = .false.
-                        end if 
-                        if (k2 > mink2) then 
-                            isintersectingl2 = .false.
-                        end if
-
-                        ! Check which triangles are allowed
-                        if (isintersectingl1) then 
-                            ! First line is intersected by starting face:
-                            ! triangles should be built using second line
-                            alpha1 = posinfval_R8()
-                            alpha3 = posinfval_R8()
+                            alpha1 = abs(atan( (-dy1*byf(1) -dx1*bxf(1))/(-dy1*bxf(1) + dx1*byf(1))))
+                            alpha2 = abs(atan( (-dy2*byf(2) -dx2*bxf(2))/(-dy2*bxf(2) + dx2*byf(2))))
+                            alpha3 = abs(atan( (-dy3*byf(3) -dx3*bxf(3))/(-dy3*bxf(3) + dx3*byf(3))))
                             
-                        elseif (isintersectingl2) then 
-                            ! Second line is intersected by starting face:
-                            ! triangles should be built using first line
-                            alpha2 = posinfval_R8()
-                            alpha3 = posinfval_R8()
-                        end if
-                        
-                        ! Find face that makes the smallest angle
-                        indmin = minloc([alpha1, alpha2, alpha3], 1)
-                        
+
+
+                            ! Check if we still need to hedge for intersecting
+                            ! lines
+                            if (k1 > mink1) then 
+                                isintersectingl1 = .false.
+                            end if 
+                            if (k2 > mink2) then 
+                                isintersectingl2 = .false.
+                            end if
+
+                            ! Check which triangles are allowed
+                            if (isintersectingl1) then 
+                                ! First line is intersected by starting face:
+                                ! triangles should be built using second line
+                                alpha1 = posinfval_R8()
+                                alpha3 = posinfval_R8()
+                                
+                            elseif (isintersectingl2) then 
+                                ! Second line is intersected by starting face:
+                                ! triangles should be built using first line
+                                alpha2 = posinfval_R8()
+                                alpha3 = posinfval_R8()
+                            end if
+                            
+                            ! Find face that makes the smallest angle
+                            indmin = minloc([alpha1, alpha2, alpha3], 1)
+                        end if 
                         ! Add the face
                         if (indmin == 3) then 
                             ! Add third face, quad
@@ -2127,6 +2197,8 @@ module ggmod_gridgeneration2D
                         exit
                     end if 
 
+                    
+
                 end do
 
                 ! Add to grid
@@ -2141,6 +2213,9 @@ module ggmod_gridgeneration2D
                     tempcellvertP, tempcellregion, tempfaceregion)
                 end associate
             end do 
+
+            ! Housekeeping
+            end associate
 
         end do 
 
@@ -3479,6 +3554,11 @@ module ggmod_gridgeneration2D
                 vertexID, polc, xintda, yintda, segcda, segrfda, &
                 segrcda, segrrfda, fsID)
         end do 
+
+        ! Add refinement data
+        !====================
+        call AddTopologicalMeshCellLineRefinementData(ggtmdata, &
+            topomesh, options)
         
         ! Housekeeping
         !=============
@@ -3486,6 +3566,137 @@ module ggmod_gridgeneration2D
 
 
     end subroutine 
+
+    ! Cell data for refining lines 
+    subroutine AddTopologicalMeshCellLineRefinementData(ggtmdata, topomesh, &
+        options)
+
+        ! Description
+        !============
+        ! This routine adds any additional data for line refinement. It 
+        ! is assumed that the gridding data is already added, so we can
+        ! use the topological mesh to more easily identify refinement 
+        ! options etc. This routine writes out at the end a file 
+        ! containing all refinement options for each cell. If desired,
+        ! the user can adjust that information to influence the grid 
+        ! generator by changing the file data and changing the method 
+        ! to 'existing' and defining the filepath of the data. Typically 
+        ! one would generate an initial set of data (or an original grid) 
+        ! and later adjust that one. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata 
+        class(TopomeshUDT), intent(in)          :: topomesh
+        type(GGoptionsUDT), intent(in)          :: options 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: targetfaceIDs, &
+            vesselfaceIDs, wgfaceIDs
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Associate for ease
+        associate(&
+            celldata        => ggtmdata%cell)
+
+        ! Check if we simply read in the exisintg file
+        if (options%readexistingrefdata) then 
+            call gdErrorHandler('Reading not yet implemented')
+            return
+        end if 
+
+        ! Determine options
+        !==================
+        ! If we got here, this means that we didn't read in an existing
+        ! file
+        
+        ! Boundary layer 
+        !---------------
+        ! Vessel faces
+        if (options%refBLdotarget) then 
+            ! Get all vessel boundaries of the topological mesh
+            vesselfaceIDs = topomesh%GetVesselFaceIDs()
+
+            ! Check for each cell
+            do i = 1, size(celldata)
+                ! Check starting radial face
+                if (any(celldata(i)%srf == vesselfaceIDs)) then 
+                    ! Overwrite defaults
+                    celldata(i)%linerefoptions%doBLstart = .true. 
+                else
+                    celldata(i)%linerefoptions%doBLstart = .false. 
+                    
+                end if 
+
+                ! Add data anyway
+                celldata(i)%linerefoptions%ncBLstart = options%refBLncvessel
+                celldata(i)%linerefoptions%dlBLstart = options%refBLdlvessel
+
+                ! Check the ending radial face
+                if (any(celldata(i)%erf == vesselfaceIDs)) then 
+                    ! Overwrite defaults
+                    celldata(i)%linerefoptions%doBLend = .true. 
+                else
+                    celldata(i)%linerefoptions%doBLend = .false. 
+                    
+                end if 
+
+                ! Add data anyway
+                celldata(i)%linerefoptions%ncBLend = options%refBLncvessel
+                celldata(i)%linerefoptions%dlBLend = options%refBLdlvessel
+            end do 
+        end if 
+
+        ! Target faces (will overwrite existing vessel faces as intended)
+        if (options%refBLdotarget) then 
+            ! Get all target boundaries of the topological mesh
+            targetfaceIDs = topomesh%GetTargetFaceIDs()
+
+            ! Check for each cell
+            do i = 1, size(celldata)
+                ! Check starting radial face
+                if (any(celldata(i)%srf == targetfaceIDs)) then 
+                    ! Overwrite defaults
+                    celldata(i)%linerefoptions%doBLstart = .true. 
+                else
+                    celldata(i)%linerefoptions%doBLstart = .false. 
+                    
+                end if 
+
+                ! Add data anyway
+                celldata(i)%linerefoptions%ncBLstart = options%refBLnctarget
+                celldata(i)%linerefoptions%dlBLstart = options%refBLdltarget
+
+                ! Check the ending radial face
+                if (any(celldata(i)%erf == targetfaceIDs)) then 
+                    ! Overwrite defaults
+                    celldata(i)%linerefoptions%doBLend = .true. 
+                else
+                    celldata(i)%linerefoptions%doBLend = .false. 
+                    
+                end if 
+
+                ! Add data anyway
+                celldata(i)%linerefoptions%ncBLend = options%refBLnctarget
+                celldata(i)%linerefoptions%dlBLend = options%refBLdltarget
+            end do 
+        end if 
+
+        
+
+        ! Write out options
+        !==================
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                       GRID DATA ROUTINES                         !
@@ -4379,9 +4590,15 @@ module ggmod_gridgeneration2D
         type(GGTMCellDataUDT), intent(in)       :: celldata 
         type(TopomeshUDT), intent(in)           :: topomesh
 
-        ! Update variables
-        !=================
-        ! Check celldata input
+        ! Update boundary layer
+        !======================
+        ! Propagate options
+        refiner%doBLstart   = celldata%linerefoptions%doBLstart 
+        refiner%doBLend     = celldata%linerefoptions%doBLend 
+        refiner%ncBLstart   = celldata%linerefoptions%ncBLstart 
+        refiner%ncBLend     = celldata%linerefoptions%ncBLend 
+        refiner%dlBLstart   = celldata%linerefoptions%dlBLstart 
+        refiner%dlBLend     = celldata%linerefoptions%dlBLend 
 
     end subroutine
 
@@ -4402,9 +4619,23 @@ module ggmod_gridgeneration2D
  
         ! Initialize
         !===========
+        ! General refinement data
         refiner%Lmin = Lmin 
         refiner%Lmax = Lmax 
         refiner%meth = meth
+
+        ! Boundary layer (simply set to zero currently)
+        refiner%doBLstart = .false. 
+        refiner%doBLend = .false. 
+        if (allocated(refiner%dlBLstart)) then 
+            deallocate(refiner%dlBLstart)
+        end if 
+        if (allocated(refiner%dlBLend)) then 
+            deallocate(refiner%dlBLend)
+        end if 
+        allocate(refiner%dlBLstart(0), refiner%dlBLend(0))
+        refiner%ncBLstart = 0
+        refiner%ncBLend = 0
 
     end function
 
@@ -4463,6 +4694,12 @@ module ggmod_gridgeneration2D
         ! to the maximal length (i.e. we will refine rather than coarsen)
         ! since this is often more important for simulations etc. 
 
+        ! Note: we now also support imposing a boundary layer of cells.
+        ! If the boundary layer would exceed the length of the line, then
+        ! cells are deleted until the length is matched (it is possible
+        ! no boundary layer is then imposed). Also, if nodes should be
+        ! kept that are in the range of the boundary layer, then 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -4473,20 +4710,37 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         logical                                     :: ismerged, &
-            isnextfacelegal, isprevfacelegal
+            isnextfacelegal, isprevfacelegal, dostart
         logical, allocatable, dimension(:)          :: isreflegal, &
             iscoarselegal, thiskeepvert, newkeepvert, refineface, &
-            coarsenface,  newisreflegal, newiscoarselegal, iscoarsenedface
+            coarsenface,  newisreflegal, newiscoarselegal, iscoarsenedface, &
+            keepind, keepvertBLstart, iscoarselegalBLstart, &
+            isreflegalBLstart, keepvertBLend, iscoarselegalBLend, &
+            isreflegalBLend
+        real(R8)                                    :: lline, &
+            lBLstart, lBLend
         real(R8), allocatable, dimension(:)         :: dll, &
-            Lmaxvert, Lminvert, newdll, newdllc
+            Lmaxvert, Lminvert, newdll, newdllc, dlcBLstart, &
+            dlcBLend, tempdlcBLstart, tempdlcBLend
+        integer(I8)                                 :: minind
         integer(I8), allocatable, dimension(:)      :: thisvertID, &
-            newvertID
+            newvertID, thisvertIDBLstart, sortind, thisvertIDBLend
 
         ! Loop
-        integer(I8)                                 :: i, cc 
+        integer(I8)                                 :: i, k, cc 
 
         ! Initialize
         !===========
+        ! Associate
+        associate(&
+            doBLstart       => refiner%doBLstart,   &
+            doBLend         => refiner%doBLend,     &
+            dlBLstart       => refiner%dlBLstart,   &
+            dlBLend         => refiner%dlBLend,     &
+            ncBLstart       => refiner%ncBLstart,   &
+            ncBLend         => refiner%ncBLend      &
+            )
+
         ! Ensure proper dimensions
         if (size(keepvert) /= size(line%vert)) then 
             call gdErrorHandler('RefineLineSingleLB: keepvert does not '// & 
@@ -4507,6 +4761,182 @@ module ggmod_gridgeneration2D
         do i = 2, size(newdllc)
             newdllc(i) = newdllc(i-1) + dll(i-1)
         end do 
+        lline = newdllc(size(newdllc))
+
+        ! Initialize boundary layer distributions
+        if (doBLstart) then 
+            ! Check if the length allows it
+            allocate(dlcBLstart(ncBLstart+1))
+            dlcBLstart = 0
+            do i = 2, size(dlcBLstart)
+                dlcBLstart(i) = dlcBLstart(i-1) + dlBLstart(i-1)
+            end do 
+            lBLstart = dlcBLstart(ncBLstart+1)
+        else
+            allocate(dlcBLstart(0))
+            lBLstart = 0
+        end if 
+        if (doBLend) then 
+            ! Check if the length allows it
+            allocate(dlcBLend(ncBLend+1))
+            dlcBLend = lline
+            do i = size(dlcBLend)-1, 1, -1 
+                dlcBLend(i) = dlcBLend(i+1) - dlBLend(i)
+            end do 
+            lBLend = lline - dlcBLend(1)
+        else
+            allocate(dlcBLend(0))
+            lBLend = 0
+        end if 
+
+        ! Adjust boundary layer distribution if necessary
+        dostart = .true. 
+        do while (lBLstart + lBLend > lline)  
+            if (dostart .and. lBLstart > 0.0_R8) then
+                dlcBLstart = dlcBLstart(1:size(dlcBLstart)-1)
+                lBLstart = dlcBLstart(size(dlcBLstart))
+                dostart = .false.
+            elseif (.not. dostart .and. lBLend > 0.0_R8) then 
+                dlcBLend = dlcBLend(2:size(dlcBLend))
+                lBLend = lline - dlcBLend(1)
+                dostart = .true. 
+            elseif (lBLstart == 0.0_R8 .and. lBLend == 0.0_R8) then 
+                exit ! we should in fact not reach this if lline >= 0
+            elseif (dostart) then 
+                dostart = .false. 
+            elseif (.not. dostart) then 
+                dostart = .true. 
+            end if 
+        end do 
+
+        ! Adjust initial distribution, which vertices to keep etc
+        if (size(dlcBLstart) > 0) then 
+            ! Delete nodes that are inside boundary layer (unless they 
+            ! are kept, then they replace)
+            keepind = newdllc > lBLstart
+
+            ! Check if any vertices are kept in the boundary layer part.
+            ! If yes, check how to insert them (they replace a BL vert)
+            k = 1
+            tempdlcBLstart = dlcBLstart
+            allocate(keepvertBLstart(ncBLstart+1), iscoarselegalBLstart(ncBLstart), &
+                isreflegalBLstart(ncBLstart), thisvertIDBLstart(ncBLstart+1))
+            keepvertBLstart         = .true.
+            thisvertIDBLstart       = [(k, k = vertID+1, vertID+ncBLstart+2)]
+            vertID = vertID + ncBLstart + 2
+            iscoarselegalBLstart    = .false.
+            isreflegalBLstart       = .false.
+            do while (.not. keepind(k))
+                if (thiskeepvert(k)) then 
+                    ! Need to keep this vertex
+                    if (all(tempdlcBLstart == Posinfval_R8())) then 
+                        ! Append
+                        print *, 'RefineSingleLB: code not verified'
+                        dlcBLstart              = [dlcBLstart, newdllc(k)]
+                        keepvertBLstart         = [keepvertBLstart, .true.]
+                        thisvertIDBLstart       = [thisvertIDBLstart, thisvertID(k)]
+                        iscoarselegalBLstart    = [iscoarselegalBLstart, .false.]
+                        isreflegalBLstart       = [isreflegalBLstart, .false.]    
+
+                    else
+                        ! Check which vertex to replace
+                        minind = minloc(abs(tempdlcBLstart - newdllc(k)), 1)
+                        tempdlcBLstart(minind) = Posinfval_R8()
+                        dlcBLstart(minind) = newdllc(k)
+                        thisvertIDBLstart(minind) = thisvertID(k)
+                    end if 
+                    
+                else
+                    ! Overwrite this vertex
+                    ! (nothing to do)
+
+                end if 
+                
+                ! Increment counter
+                k = k + 1
+            end do
+
+            ! Sort
+            allocate(sortind(size(dlcBLstart)))
+            sortind = [(k, k = 1, size(dlcBLstart))]
+            call Sort(dlcBLstart, ind=sortind, ascend=.true.)
+            thisvertIDBLstart = thisvertIDBLstart(sortind)
+            deallocate(sortind)
+
+            ! Rebuild 
+            newdllc = [dlcBLstart, pack(newdllc, keepind)]
+            thiskeepvert = [keepvertBLstart, pack(thiskeepvert, keepind)]
+            thisvertID = [thisvertIDBLstart, pack(thisvertID, keepind)]
+            iscoarselegal = [iscoarselegalBLstart, pack(iscoarselegal, keepind(2:))]
+            isreflegal = [isreflegalBLStart, pack(isreflegal, keepind(2:))]
+        end if 
+        if (size(dlcBLend) > 0) then 
+            ! Delete nodes that are inside boundary layer (unless they 
+            ! are kept, then they replace)
+            keepind = newdllc < (lline - lBLend)
+
+            ! Check if any vertices are kept in the boundary layer part.
+            ! If yes, check how to insert them (they replace a BL vert)
+            k = size(newdllc)
+            tempdlcBLend = dlcBLend
+            allocate(keepvertBLend(ncBLend+1), iscoarselegalBLend(ncBLend), &
+                isreflegalBLend(ncBLend), thisvertIDBLend(ncBLend+1))
+            keepvertBLend         = .true.
+            thisvertIDBLend       = [(k, k = vertID+1, vertID+ncBLend+2)]
+            vertID = vertID + ncBLend + 2
+            iscoarselegalBLend    = .false.
+            isreflegalBLend       = .false.
+            do while (.not. keepind(k))
+                if (thiskeepvert(k)) then 
+                    ! Need to keep this vertex
+                    if (all(tempdlcBLend == Posinfval_R8())) then 
+                        ! Append (will sort later anyway)
+                        print *, 'RefineSingleLB: code not verified'
+                        dlcBLend              = [dlcBLend, newdllc(k)]
+                        keepvertBLend         = [keepvertBLend, .true.]
+                        thisvertIDBLend       = [thisvertIDBLend, thisvertID(k)]
+                        iscoarselegalBLend    = [iscoarselegalBLend, .false.]
+                        isreflegalBLend       = [isreflegalBLend, .false.]    
+
+                    else
+                        ! Check which vertex to replace
+                        minind = minloc(abs(tempdlcBLend - newdllc(k)), 1)
+                        tempdlcBLend(minind) = Posinfval_R8()
+                        dlcBLend(minind) = newdllc(k)
+                        thisvertIDBLend(minind) = thisvertID(k)
+                    end if 
+                    
+                else
+                    ! Overwrite this vertex
+                    ! (nothing to do)
+
+                end if 
+                
+                ! Decrement counter
+                k = k - 1
+            end do
+
+            ! Sort
+            allocate(sortind(size(dlcBLend)))
+            sortind = [(k, k = 1, size(dlcBLend))]
+            call Sort(dlcBLend, ind=sortind, ascend=.true.)
+            thisvertIDBLend = thisvertIDBLend(sortind)
+            deallocate(sortind)
+
+            ! Rebuild 
+            newdllc         = [pack(newdllc, keepind), dlcBLend]
+            thiskeepvert    = [pack(thiskeepvert, keepind), keepvertBLend]
+            thisvertID      = [pack(thisvertID, keepind), thisvertIDBLend]
+            iscoarselegal   = [pack(iscoarselegal, keepind(1:size(keepind)-1)), iscoarselegalBLend]
+            isreflegal      = [pack(isreflegal, keepind(1:size(keepind)-1)), isreflegalBLend]
+        end if
+
+        ! Rebuild
+        dll = newdllc(2:size(newdllc)) - newdllc(1:size(newdllc)-1)
+        call line%AddVertexCoordinates(newdllc)
+        if (any(thisvertID == 0)) then 
+            print *, thisvertID
+        end if 
 
         ! Loop
         !=====
@@ -4772,6 +5202,10 @@ module ggmod_gridgeneration2D
         !===========================
         call line%AddVertexCoordinates(newdllc)
         call line%AddVertexIDs(thisvertID)
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
