@@ -3651,7 +3651,8 @@ module ggmod_gridgeneration2D
 
                 ! Add data anyway
                 celldata(i)%linerefoptions%ncBLend = options%refBLncvessel
-                celldata(i)%linerefoptions%dlBLend = options%refBLdlvessel
+                celldata(i)%linerefoptions%dlBLend = &
+                    options%refBLdlvessel(size(options%refBLdlvessel):1:-1) ! need to flip
             end do 
         end if 
 
@@ -3680,7 +3681,8 @@ module ggmod_gridgeneration2D
 
                 ! Add data anyway
                 celldata(i)%linerefoptions%ncBLend = options%refBLnctarget
-                celldata(i)%linerefoptions%dlBLend = options%refBLdltarget
+                celldata(i)%linerefoptions%dlBLend = &
+                    options%refBLdltarget(size(options%refBLdltarget):1:-1) ! need to flip
             end do 
         end if 
 
@@ -4748,7 +4750,8 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)         :: dll, &
             Lmaxvert, Lminvert, newdll, newdllc, dlcBLstart, &
             dlcBLend, tempdlcBLstart, tempdlcBLend
-        integer(I8)                                 :: minind
+        integer(I8)                                 :: minind, &
+            ncBLstart, ncBLend
         integer(I8), allocatable, dimension(:)      :: thisvertID, &
             newvertID, thisvertIDBLstart, sortind, thisvertIDBLend
 
@@ -4762,9 +4765,7 @@ module ggmod_gridgeneration2D
             doBLstart       => refiner%doBLstart,   &
             doBLend         => refiner%doBLend,     &
             dlBLstart       => refiner%dlBLstart,   &
-            dlBLend         => refiner%dlBLend,     &
-            ncBLstart       => refiner%ncBLstart,   &
-            ncBLend         => refiner%ncBLend      &
+            dlBLend         => refiner%dlBLend      &
             )
 
         ! Ensure proper dimensions
@@ -4772,6 +4773,10 @@ module ggmod_gridgeneration2D
             call gdErrorHandler('RefineLineSingleLB: keepvert does not '// & 
                 'have same number of elements as line%vert, check input')
         end if 
+
+        ! Initialize
+        ncBLstart = refiner%ncBLstart
+        ncBLend = refiner%ncBLend
 
         ! Set initial logicals
         allocate(iscoarselegal(line%nv-1))
@@ -4836,6 +4841,8 @@ module ggmod_gridgeneration2D
         end do 
 
         ! Adjust initial distribution, which vertices to keep etc
+        ncBLstart = size(dlcBLstart)-1
+        ncBLend = size(dlcBLend)-1
         if (size(dlcBLstart) > 0) then 
             ! Delete nodes that are inside boundary layer (unless they 
             ! are kept, then they replace)
@@ -4990,6 +4997,9 @@ module ggmod_gridgeneration2D
             coarsenface = .false.
             refineface = .false.
 
+            if (size(isreflegal) /= size(dll)) then 
+                print *, 'size error'
+            end if
             ! Determine which faces to refine/coarsen
             where (((dll > Lmaxvert(1:line%nv-1)) .or. (dll > Lmaxvert(2:line%nv))) &
                 .and. isreflegal) 
@@ -4999,7 +5009,7 @@ module ggmod_gridgeneration2D
             where (((dll < Lminvert(1:line%nv-1)) .or. (dll < Lminvert(2:line%nv))) &
                 .and. iscoarselegal &
                 .and. .not. (thiskeepvert(1:line%nv-1) .and. thiskeepvert(2:line%nv)) &
-                .and. .not. ([.false., .not. iscoarselegal(1:line%nv-2)] .and. [iscoarselegal(2:line%nv-1), .false.]))
+                .and. .not. ([.not. iscoarselegal(1:line%nv-2), .false.] .and. [.false., iscoarselegal(2:line%nv-1)]))
                 coarsenface = .true.
                 isreflegal = .false.
             end where
