@@ -9,19 +9,23 @@ import numpy as np
 
 # Define magnetic field
 def MagneticField(x, y):
-    psi = np.sin(2*np.pi*x) + np.sin(2*np.pi*y)
+    #psi = np.sin(2*np.pi*x) + np.sin(2*np.pi*y)
+    #return psi
+    psi = np.sqrt((x - 0.78)**2 + y**2) 
     return psi
+
+    
 
 writedir = './goatf/src/Visualization'
 
 
 # Construct R, Z coordinates
-resx = 100
-resy = 200
-Lx = 3.4
-Ly = 4.4
-Lxoffset = -0.2
-Lyoffset = -0.2
+resx = 400
+resy = 400
+Lx = 4.0
+Ly = 4.0
+Lxoffset = -0.0
+Lyoffset = -2.0
 R = (np.arange(0, resx+1, 1))/float(resx)*Lx + Lxoffset 
 Z = (np.arange(0, resy+1, 1))/float(resy)*Ly + Lyoffset 
 nR = resx + 1
