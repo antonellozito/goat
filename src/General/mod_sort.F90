@@ -657,6 +657,16 @@ module mod_sort
         ! Loop
         integer(I8)                             :: i 
 
+        ! Hedge for limit cases
+        !======================
+        if (size(b) == 0) then 
+            call Unique(a, out)
+            return 
+        end if 
+        if (size(a) == 0) then 
+            out = a 
+            return 
+        end if 
 
         ! Sort
         !=====
