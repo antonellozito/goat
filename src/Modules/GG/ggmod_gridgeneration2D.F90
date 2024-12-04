@@ -3610,7 +3610,7 @@ module ggmod_gridgeneration2D
 
         ! Check if we simply read in the exisintg file
         if (options%readexistingrefdata) then 
-            call gdErrorHandler('Reading not yet implemented')
+            call ReadTopologicalMeshCellLineRefinementData(ggtmdata, options%refdatafile)
             return
         end if 
 
@@ -3686,10 +3686,9 @@ module ggmod_gridgeneration2D
             end do 
         end if 
 
-        
-
         ! Write out options
         !==================
+        call WriteTopologicalMeshCellLineRefinementData(ggtmdata, 'refdataTMcells')
 
         ! Housekeeping
         !=============
@@ -6838,6 +6837,218 @@ module ggmod_gridgeneration2D
         ! Deallocate again
 
         ! Others
+        end associate
+        close(fu)
+
+    end subroutine
+
+    ! TM refinement data writing
+    subroutine WriteTopologicalMeshCellLineRefinementData(ggtmdata, &
+        filename)
+
+        ! Description
+        !============
+        ! This routine writes out the refinement data into a file 
+        ! specified by 'filename' into the output directory. This file 
+        ! may be modified by the user and read in in order to have more
+        ! control over the refinement. Structure is as follows:
+
+        ! <header> 
+        ! 'celldata'
+        ! <cell%ntot>
+        ! 'ID, doBLstart, doBLend, ncBLstart, ncBLend'
+        ! <the above for each cell per line>
+        ! 'dlBLstart' (in order of celldata, one row per cell)
+        ! <dlBLstart>
+        ! 'dlBLend' (in order of celldata, one row per cell)
+        ! <dlBLend>
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+
+        ! Arguments
+        class(GGTMDataUDT), intent(in)          :: ggtmdata
+        character(*), intent(in)                :: filename 
+
+        ! Auxiliary
+        integer                                 :: fu
+        character(:), allocatable               :: dir
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            c       => ggtmdata%cell    &
+        )
+
+        ! Construct writing directory
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Write header
+        write(fu, *) 'VERSION3.00.00'
+
+        ! Write scalar cell data
+        !=======================
+        ! Write header
+        write(fu, *) 'celldata'
+
+        ! Write total number of cells
+        write(fu, *) size(c)
+
+        ! Write scalar data
+        write(fu, *) 'ID, doBLstart, doBLend, ncBLstart, ncBLend'
+        do i = 1, size(c)
+            associate(r     => c(i)%linerefoptions)
+            write(fu, *) i, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend 
+            end associate
+        end do
+
+        ! write array cell data
+        !======================
+        ! Write boundary layer data
+        !--------------------------
+        ! Write dlBLstart
+        write (fu, *) 'dlBLstart'
+        do i = 1, size(c)
+            ! Write header
+            write(fu, *) c(i)%linerefoptions%dlBLstart
+        end do
+
+        ! Write dlBLstart
+        write (fu, *) 'dlBLend'
+        do i = 1, size(c)
+            ! Write header
+            write(fu, *) c(i)%linerefoptions%dlBLend
+        end do
+        
+        ! Housekeeping
+        !=============
+        end associate
+        close(fu)
+
+    end subroutine
+
+    ! TM refinement data reading
+    subroutine ReadTopologicalMeshCellLineRefinementData(ggtmdata, &
+        filename)
+
+        ! Description
+        !============
+        ! This routine reads the refinement data from a file 
+        ! specified by 'filename' from the output directory. This file 
+        ! may be modified by the user and read in in order to have more
+        ! control over the refinement. Structure is as follows:
+
+        ! <header> 
+        ! 'celldata'
+        ! <cell%ntot>
+        ! 'ID, doBLstart, doBLend, ncBLstart, ncBLend'
+        ! <the above for each cell per line>
+        ! 'dlBLstart' (in order of celldata, one row per cell)
+        ! <dlBLstart>
+        ! 'dlBLend' (in order of celldata, one row per cell)
+        ! <dlBLend>
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+        use mod_readwrite
+        use mod_inputfileparser
+
+        ! Arguments
+        class(GGTMDataUDT), intent(inout)       :: ggtmdata
+        character(*), intent(in)                :: filename 
+
+        ! Auxiliary
+        integer                                 :: fu
+        integer(I8)                             :: nc, cID
+        real(R8), allocatable, dimension(:)     :: temp
+        character(:), allocatable               :: thisline
+        logical                                 :: reachedeof
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            c       => ggtmdata%cell    &
+        )
+
+        ! Construct reading directory
+
+        ! Open file
+        open (action='read', file=trim(filename), newunit=fu, &
+             status='unknown')
+
+        ! Read header
+        call ReadUntilFound(fu, 'celldata', reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadTopologicalMeshCellLineRefinementData: ' // & 
+                'could not find cell data in file')
+        end if 
+
+        ! Read number of cells - just for check, since celldata should 
+        ! be allocated already
+        read(fu, *) nc 
+
+        ! Check
+        if (nc /= size(c)) then 
+            call gdErrorHandler('ReadTopologicalMeshCellLineRefinementData: ' // & 
+                'cell data does not have the same dimensions as current ' // & 
+                'cell data, check input')
+        end if 
+
+        
+        ! Read scalar cell data
+        !======================
+        ! Read header
+        call ReadSingleLine(fu, thisline, reachedeof)
+
+        ! Read scalar data
+        do i = 1, size(c)
+            associate(r     => c(i)%linerefoptions)
+            read(fu, *) cID, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend 
+            end associate
+        end do
+
+        ! Read array cell data
+        !=====================
+        ! Read boundary layer data
+        !-------------------------
+        ! Read dlBLstart
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, size(c)
+            allocate(temp(c(i)%linerefoptions%ncBLstart))
+            read(fu, *) temp 
+            c(i)%linerefoptions%dlBLstart  = temp 
+            deallocate(temp)
+        end do
+
+        ! Read dlBLstart
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, size(c)
+            allocate(temp(c(i)%linerefoptions%ncBLend))
+            read(fu, *) temp 
+            c(i)%linerefoptions%dlBLend = temp 
+            deallocate(temp)
+        end do
+        
+        ! Housekeeping
+        !=============
         end associate
         close(fu)
 
