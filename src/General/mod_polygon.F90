@@ -2411,7 +2411,7 @@ module mod_polygon
 
     ! Polygon edge sorter
     subroutine SortPolygonEdges(pein, ne, sortindex, ispolygonstart, &
-            isbranchingpolygon)
+            isbranchingpolygon, polygonID)
 
         ! Description
         !============
@@ -2450,6 +2450,9 @@ module mod_polygon
         !                   and the next. 
         ! - isbranchingpolygon  : np-by-1 array indicating if the polygon
         !                       is branching or not
+        ! - polygonID           :: np-by-1 array with polygon IDs 
+        !                       (optional). Useful to reconstruct branching
+        !                       polygons
     
         ! Algorithm
         !==========
@@ -2496,18 +2499,19 @@ module mod_polygon
         ! Declare variables
         !==================
         ! Input
-        integer(I8), dimension(ne,1:2)  :: pein ! polygon edges 
-        integer                         :: ne
+        integer(I8), dimension(ne,1:2), intent(in)  :: pein ! polygon edges 
+        integer(I8), intent(in)                     :: ne
         
         ! Output
         integer(I8), dimension(ne)      :: sortindex 
         logical, dimension(ne)          :: ispolygonstart, isbranchingpolygon
+        integer(I8), allocatable, optional  :: polygonID(:)
     
         ! Mixed
     
         ! Loop
         logical                 :: allfound, startfound, polygonfound
-        integer(I8)             :: i, k, spind
+        integer(I8)             :: i, j, k, spind
     
         ! Auxiliary
         integer(I8)                 :: nv, nremedges, nextremedge, &
@@ -2515,11 +2519,14 @@ module mod_polygon
     
         logical                     :: allbranchingfound
         logical, allocatable        :: isedgesorted(:), isremedgesorted(:), &
-            mask(:), isbranchingvertex(:, :), remisbranching(:, :)
+            mask(:), isbranchingvertex(:, :), remisbranching(:, :), &
+            hasbv(:), sortedisbranchingvertex(:, :), pvb(:)
     
+        integer(I8)                 :: pID, ind 
         integer(I8), allocatable    :: remedges(:,:), edgeID(:), &
             remedgeID(:), temparray(:), allv(:), oc(:), el(:), sortind(:), &
-            alloc(:)
+            alloc(:), ps(:), tv(:), tvu(:), tvID(:), sortededges(:, :), &
+            pe(:), pse(:, :), pee(:, :), pv(:), sortind2(:)
     
         ! Main program
         !=============
@@ -2536,6 +2543,7 @@ module mod_polygon
         end if
     
         ! Initialize
+        pID = 1
         allocate(isedgesorted(ne)) ! logical to indicate if edge has been sorted
         allocate(edgeID(ne))
     
@@ -2545,10 +2553,11 @@ module mod_polygon
         edgeID(:) = (/ (i, i=1,ne,1) /)
         allfound = .false. ! while loop variable
         spind = 1 ! sorted polygon index
+        sortindex = 0
 
         ! Check if branching polygons exist by counting occurrence
         allv = [pein(:, 1), pein(:, 2)]
-        call CountOccurrence(allv, oc, el, sortindoc=sortind)
+        call CountOccurrence(allv, oc, el, sortindoc=sortind, sortindel=sortind2)
         alloc = oc(sortind)
         allocate(isbranchingvertex(ne, 2))
         isbranchingvertex(:, 1) = alloc(1:ne) > 2_I8
@@ -2758,6 +2767,129 @@ module mod_polygon
             deallocate(remisbranching)
     
         end do
+
+        ! Check if we need to determine polygon IDs
+        if (present(polygonID)) then 
+            ! Allocate
+            if (allocated(polygonID)) then 
+                deallocate(polygonID)
+            end if 
+            allocate(polygonID(ne))
+            polygonID = 0
+
+            ! Check
+            if (.not. any(isbranchingpolygon)) then 
+                ! Easy
+                do i = 1, ne
+                    if (ispolygonstart(i)) then 
+                        polygonID(i) = pID 
+                        pID = pID + 1
+                    end if 
+                end do 
+            else
+                ! Not so easy - need to check polygon vertices etc. 
+                ! Luckily, we know that each branching polygon part 
+                ! should start in a branching polygon vertex
+
+                ! Sort the edges 
+                allocate(sortededges(ne, 2))
+                sortededges(:, 1) = pein(sortindex, 1)
+                sortededges(:, 2) = pein(sortindex, 2)
+                sortedisbranchingvertex = isbranchingvertex
+                sortedisbranchingvertex(:, 1) = isbranchingvertex(sortindex, 1)
+                sortedisbranchingvertex(:, 2) = isbranchingvertex(sortindex, 2)
+                
+                ! Get all polygon start/end indices
+                allocate(ps(count(ispolygonstart)))
+                ps = pack([(k, k = 1, ne)], ispolygonstart)
+                pe = [ps(2:size(ps))-1, ne]
+
+                ! Get starting and ending edges
+                allocate(pse(count(ispolygonstart), 2), &
+                    pee(count(ispolygonstart), 2)) 
+                pse(:, 1) = sortededges(ps, 1)
+                pse(:, 2) = sortededges(ps, 2)
+                pee(:, 1) = sortededges(pe, 1)
+                pee(:, 2) = sortededges(pe, 2)
+
+                ! Get the unique IDs of polygon branching vertices
+                tv = [pack(pein(:, 1), isbranchingvertex(:, 1)), &
+                    pack(pein(:, 2), isbranchingvertex(:, 2))]
+                call Unique(tv, tvu)
+
+                ! Initialize the branching vertex ID
+                allocate(tvID(size(tvu)))
+                tvID = 0 
+
+                ! Start 'tracing' 
+                do i = 1, size(tvu)
+                    ! Check if ID was set
+                    if (tvID(i) == 0) then
+                        ! Set ID
+                        tvID(i) = pID 
+
+                        ! Update counter
+                        pID = pID + 1
+                    end if 
+
+                    ! Check which polygons have this vertex
+                    hasbv = pse(:, 1) == tvu(i) .or. pse(:, 2) == tvu(i) &
+                        .or. pee(:, 1) == tvu(i) .or. pee(:, 2) == tvu(i)
+                    
+                    ! Loop
+                    do j = 1, size(ps)
+                        if (hasbv(j)) then 
+                            ! Check 
+                            if (polygonID(ps(j)) == 0 .or. polygonID(ps(j)) == tvID(i)) then 
+                                ! Simply add
+                                polygonID(ps(j)) = tvID(i)
+
+                                ! Check if other vertices are also 
+                                ! branching vertices to propagate IDs
+                                pvb = [sortedisbranchingvertex(ps(j), :), &
+                                    sortedisbranchingvertex(pe(j), :)]
+                                pv = [sortededges(ps(j), :), sortededges(pe(j), :)]
+                                do k = 1, size(pv)
+                                    if (pvb(k)) then 
+                                        ind = findloc(tvu, pv(k), 1)
+                                     
+                                        if (ind == 0) then 
+                                            call gdErrorHandler('unexpected error')
+                                        end if 
+
+                                        ! Check if ID is non-zero - then throw error
+                                        if (tvID(ind) == 0 .or. tvID(ind) == tvID(i)) then
+                                            tvID(ind) = tvID(i)
+                                        else
+                                            ! Something weird going wrong here
+                                            call gdErrorHandler('SortPolygonEdges: ' // & 
+                                                'different branching polygons seem to ' // & 
+                                                'have common vertices, unexpected')
+                                        end if 
+                                    end if
+                                end do 
+                            else 
+                                ! Something weird going wrong here
+                                call gdErrorHandler('SortPolygonEdges: ' // & 
+                                'different branching polygons seem to ' // & 
+                                'have common vertices, unexpected')
+                            end if 
+                        end if 
+                    end do 
+                    
+                end do 
+
+                ! Set polygon IDs for non-branching polygons
+                do i = 1, ne
+                    if (ispolygonstart(i) .and. polygonID(i) == 0) then 
+                        polygonID(i) = pID
+                        pID = pID + 1
+                    end if 
+                end do
+
+                
+            end if 
+        end if 
     
     end subroutine
 
