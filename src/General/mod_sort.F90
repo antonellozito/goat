@@ -792,7 +792,8 @@ module mod_sort
             sortindel = sortind 
         end if 
         if (present(sortindoc)) then 
-            sortindoc = indoc(sortind)
+            sortindoc = indoc ! for initialization only
+            sortindoc(sortind) = indoc
         end if 
         
     end subroutine
