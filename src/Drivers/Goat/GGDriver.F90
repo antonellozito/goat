@@ -38,19 +38,14 @@ subroutine GGDriver(goatoptions)
     type(TopomeshUDT)           :: topomesh
     class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
     class(StreamlineTracerUDT), allocatable :: streamlinetracer
-    type(ContourUDT), allocatable           :: contours(:)
-    type(PolygonUDT), allocatable           :: pcontours(:)
-    type(PolygonSetUDT)                     :: tempps
 
-    real(R8)                                :: dv
     real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
-        yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy, cgv
+        yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy
     real(R8), parameter                     :: emptyR8(0)= 0
-    integer(I8)                             :: nv, resc
+    integer(I8)                             :: nv
     integer(I8), parameter                  :: emptyI8(0) = 0
 
     ! Loop
-    integer(I8)                             :: k
 
     ! Initialize
     !===========
@@ -108,16 +103,16 @@ subroutine GGDriver(goatoptions)
         xgv, ygv, step=ggoptions%orthtracerstep, nsteps=ggoptions%orthtracernsteps) 
 
     ! Visualize by tracing contours
-    resc = 100
-    dv = (maxval(Vf) - minval(Vf))
-    cgv = [(k, k = 0, resc)]*(dv*0.90_R8)/real(resc, kind=R8) + minval(Vf) + dv*0.05
-    contours = fieldtracer%TraceContours(cgv)
-    allocate(pcontours(size(contours)))
-    do k = 1, size(contours)
-        call pcontours(k)%Construct(contours(k)%x, contours(k)%y)
-    end do 
-    call tempps%Construct(pcontours)
-    call tempps%WriteData('mfcontours')
+    !resc = 100
+    !dv = (maxval(Vf) - minval(Vf))
+    !cgv = [(k, k = 0, resc)]*(dv*0.90_R8)/real(resc, kind=R8) + minval(Vf) + dv*0.05
+    !contours = fieldtracer%TraceContours(cgv)
+    !allocate(pcontours(size(contours)))
+    !do k = 1, size(contours)
+    !    call pcontours(k)%Construct(contours(k)%x, contours(k)%y)
+    !end do 
+    !call tempps%Construct(pcontours)
+    !call tempps%WriteData('mfcontours')
 
 
     ! Generate the topological mesh

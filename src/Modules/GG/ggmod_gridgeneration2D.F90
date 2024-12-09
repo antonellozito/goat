@@ -3597,7 +3597,7 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:)  :: targetfaceIDs, &
-            vesselfaceIDs, wgfaceIDs
+            vesselfaceIDs
 
         ! Loop
         integer(I8)                             :: i 
