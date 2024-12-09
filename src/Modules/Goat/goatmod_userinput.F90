@@ -360,6 +360,10 @@ module goatmod_userinput
         !                   difference is below tolerance, two extrema 
         !                   are considered to have exactly the same field
         !                   value)
+        ! - doadaptations       : general switch to apply or not apply
+        !                       adaptations to the basic topological 
+        !                       mesh (all things like core/PF boundaries, 
+        !                       optional region removal, tube merging, ...)
         ! - addcoreboundaries   : adds additional core boundaries
         ! - addPFboundaries     : adds additional private flux like 
         !                       boundaries (at tangency points of which 
@@ -378,14 +382,23 @@ module goatmod_userinput
         ! - readexistingTM:     read in an existing topomesh file, 
         !                       for which the full path is defined in  
         !                       TMfilepath
+        ! - mergetangencypointtubes     merge tubes that are too small 
+        !                       and that have tangency point tubes 
+        !                       as neighbours. 'too small' is based on 
+        !                       the (absolute) difference in flux values
+        !                       of the tube's radial face vertices
+        ! - dpsimintangencypointtubes   minimal delta psi for tangency 
+        !                       point tubes (if below, we attempt to 
+        !                       merge)
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax
         logical                 :: addcoreboundaries, removecoreregions, &
             fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
-            readexistingTM, removenoncoreregions
+            readexistingTM, removenoncoreregions, mergetangencypointtubes, &
+            doadaptations
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
-            PFboundariesfrac
+            PFboundariesfrac, dpsimintangencypointtubes
         character(:), allocatable   :: TMfilepath
     contains 
 
@@ -789,14 +802,17 @@ module goatmod_userinput
         ! Refining options for extrema (vessel)
         options%vdonewton = .true.
 
-        ! Boundary options
-        options%addcoreboundaries = .true. 
-        options%coreboundariesfrac = 0.2
-        options%addPFboundaries = .true. 
-        options%PFboundariesfrac = 0.2
-        options%removecoreregions = .true. 
-        options%removewidegridregions = .true. 
-        options%removenoncoreregions = .false.
+        ! Additional options
+        options%doadaptations               = .true.
+        options%addcoreboundaries           = .true. 
+        options%coreboundariesfrac          = 0.2
+        options%addPFboundaries             = .true. 
+        options%PFboundariesfrac            = 0.2
+        options%removecoreregions           = .true. 
+        options%removewidegridregions       = .true. 
+        options%removenoncoreregions        = .false.
+        options%mergetangencypointtubes     = .false.
+        options%dpsimintangencypointtubes   = 100_R8 ! some absurd large value
 
     end subroutine 
 
@@ -838,7 +854,7 @@ module goatmod_userinput
         options%cellconstructionmethod  = 'quads_triangles'
         options%TMcellgriddingorder = 'sequential'
         options%readexistingrefdata = .false. 
-        options%refdatafile         = 'refdataTMcells'
+        options%refdatafile         = './output/refdataTMcells.dat'
 
         ! Refinement options ('lengthbased' refinement options only)
         options%refmeth         = 'no'      
@@ -1462,7 +1478,9 @@ module goatmod_userinput
         field = 'gg.tm.fieldtol'
         call ExtractOptionValueReal0D(fid, field, options%ffieldtol)
 
-        ! Boundaries
+        ! Additional options
+        field = 'gg.tm.doadaptations'
+        call ExtractOptionValueLogical0D(fid, field, options%doadaptations)
         field = 'gg.tm.addcoreboundaries'
         call ExtractOptionValueLogical0D(fid, field, options%addcoreboundaries)
         field = 'gg.tm.addPFboundaries'
@@ -1477,6 +1495,10 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%PFboundariesfrac)
         field = 'gg.tm.removenoncoreregions'
         call ExtractOptionValueLogical0D(fid, field, options%removenoncoreregions)
+        field = 'gg.tm.mergetangencypointtubes'
+        call ExtractOptionValueLogical0D(fid, field, options%mergetangencypointtubes)
+        field = 'gg.tm.dpsimintangencypointtubes'
+        call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
 
         ! Housekeeping
         !=============
@@ -1539,6 +1561,10 @@ module goatmod_userinput
         ! Refinement options (general)
         field = 'gg.ref.meth'
         call ExtractOptionValueCharacter(fid, field, options%refmeth) 
+        field = 'gg.ref.readexistingrefdata'
+        call ExtractOptionValueLogical0D(fid, field, options%readexistingrefdata) 
+        field = 'gg.ref.refdatafile'
+        call ExtractOptionValueCharacter(fid, field, options%refdatafile) 
 
         ! Length-based refinement options
         field  = 'gg.ref.LB.doxp'

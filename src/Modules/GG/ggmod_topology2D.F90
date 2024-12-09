@@ -113,7 +113,7 @@ module ggmod_topology2D
 
         integer(I8)                     :: ntot, ntotv, ntotf ! total number of vertices
         integer(I8), allocatable        :: ID(:), vert(:), vertP(:, :), &
-            face(:), faceP(:, :), flags(:)
+            face(:), faceP(:, :), flags(:), tube(:)
     contains 
 
         ! Initializer
@@ -136,13 +136,19 @@ module ggmod_topology2D
         ! Note that these tubes can only be constructed as a 
         ! post-processing step after topological mesh construction. The
         ! cell faces and cells present in the 'cell' and 'face' structure
-        ! are sorted after construction.  
+        ! are sorted after construction. Additionally, we store the 
+        ! aligned faces and vertices from both sides in separate arrays,
+        ! in this case in bndface1 (with pointer bndface1P), bndface2, &
+        ! bndvert1, bndvert2. It should be noted that these faces and 
+        ! vertices are not sorted in any particular direction (this is 
+        ! non-trivial, since tube boundaries may be branching polygons)
 
         integer(I8)                                 :: ncell, nface, ntot 
-        integer(I8), allocatable, dimension(:)      :: cell, face 
-        integer(I8), allocatable, dimension(:,: )   :: cellP, faceP
+        integer(I8), allocatable, dimension(:)      :: cell, face,  &
+            bndf1, bndf2, bndv1, bndv2, ftneig1, ftneig2
+        integer(I8), allocatable, dimension(:, :)   :: cellP, faceP, &
+            bndf1P, bndf2P, bndv1P, bndv2P, ftneig1P, ftneig2P
         logical, allocatable, dimension(:)          :: isclosed 
-
 
     contains
     
@@ -155,6 +161,9 @@ module ggmod_topology2D
         ! Getter
         procedure :: GetFace        => GetTMTubeFace
         procedure :: GetCell        => GetTMTubeCell
+        procedure :: GetBndFace     => GetTMTubeBndFace
+        procedure :: GetBndVert     => GetTMTubeBndVert
+        procedure :: GetNeig        => GetTMTubeNeig
 
     end type 
 
@@ -224,7 +233,69 @@ module ggmod_topology2D
         !==================
         ! Arguments
         type(TopomeshUDT)                       :: topomesh
-        type(VesselUDT), intent(in)             :: vessel
+        type(VesselUDT), intent(inout)          :: vessel
+        type(magneticFieldUDT), intent(in)      :: magneticField 
+        type(TopomeshOptionsUDT), intent(in)    :: options
+        class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
+        class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
+
+        ! Construct basic mesh
+        !=====================
+        ! Check if we construct from scratch or load in a file
+        if (options%readexistingTM) then 
+            ! Read
+            call ReadTopologicalMesh(topomesh, options%TMfilepath)
+        else
+            ! Construct from scratch
+            call ConstructBasicTopologicalMesh(vessel, magneticField, options, &
+                topomesh, fieldtracer, vesseltracer, streamlinetracer)
+        end if
+
+        ! Apply adaptations
+        !==================
+        if (options%doadaptations) then 
+            call ModifyTopologicalMesh(vessel, magneticField, options, &
+                topomesh, fieldtracer, vesseltracer, streamlinetracer)
+        end if 
+
+        ! Write
+        !======
+        call WriteTopologicalMesh(topomesh, 'topomesh')
+
+    end subroutine
+
+    ! Basic topological mesh constructor
+    subroutine ConstructBasicTopologicalMesh(vessel, magneticField, options, &
+        topomesh, fieldtracer, vesseltracer, streamlinetracer)
+
+        ! Description
+        !============
+        ! This routine generates the topological mesh based on the given magnetic
+        ! field and vessel geometry. 
+
+        ! Algorithm
+        !==========
+        ! 1) Compute points of interest (minima, maxima, saddle points, tangency
+        ! points) 
+        ! 2) Create a reduced topological mesh of the extrema to generate the cuts
+        ! (should contain vertices and faces, not cells) - this forms the initial
+        ! basis of the final topological mesh
+        ! 3) Find the vessel boundary, introduce the tangency points and compute
+        ! additional contours starting from those tangency points.
+        ! 4) Compute all intersections between the current faces, introduce these
+        ! as new vertices (and keep track of type). Intersections in end points are
+        ! assumed to be known already and not added twice
+        ! 5) Construct the topological mesh cells
+
+        ! Modules
+        !========
+        use mod_structured2Dgridding
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(TopomeshUDT)                       :: topomesh
+        type(VesselUDT), intent(inout)          :: vessel
         type(magneticFieldUDT), intent(in)      :: magneticField 
         type(TopomeshOptionsUDT), intent(in)    :: options
         class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
@@ -237,17 +308,14 @@ module ggmod_topology2D
             yps, xg, yg, Vf, xgv, ygv
         real(R8), parameter                     :: emptyR8(0)= 0
         real(R8), allocatable, dimension(:)     :: xtp, ytp, Ftp, &
-            xe, ye, fe, cgv
-        integer(I8)                             :: nv, ntp, resc 
+            xe, ye, fe
+        integer(I8)                             :: nv, ntp 
         integer(I8), allocatable, dimension(:)  :: typee, IDs
         integer(I8), parameter                  :: emptyI8(0) = 0
         type(VesselUDT)                         :: newvessel
-        type(PolygonSetUDT)                     :: tempps
-        type(ContourUDT), allocatable           :: contours(:)
-        type(PolygonUDT), allocatable           :: pcontours(:)
 
         ! Loop
-        integer(I8)                             :: i, j, k
+        integer(I8)                             :: i, j
 
         ! Initialize
         !===========
@@ -306,19 +374,19 @@ module ggmod_topology2D
             reshape(Vf, [size(xgv), size(ygv)]), xgv, ygv, &
             xtp, ytp, Ftp, IDs, fieldtracer%npmin, fieldtracer%npmax, fieldtracer%dl)
         
-        ! Visualize by tracing contours
-        resc = 100
-        dv = (maxval(Vf) - minval(Vf))
-        cgv = [(k, k = 0, resc)]*(dv*0.90_R8)/real(resc, kind=R8) + minval(Vf) + dv*0.05
-        contours = fieldtracer%TraceContours(cgv)
-        allocate(pcontours(size(contours)))
-        !$omp parallel do default(shared)
-        do k = 1, size(contours)
-            call pcontours(k)%Construct(contours(k)%x, contours(k)%y)
-        end do 
-        !$omp end parallel do
-        call tempps%Construct(pcontours)
-        call tempps%WriteData('mfcontours')
+        !! Visualize by tracing contours
+        !resc = 100
+        !dv = (maxval(Vf) - minval(Vf))
+        !cgv = [(k, k = 0, resc)]*(dv*0.90_R8)/real(resc, kind=R8) + minval(Vf) + dv*0.05
+        !contours = fieldtracer%TraceContours(cgv)
+        !allocate(pcontours(size(contours)))
+        !!$omp parallel do default(shared)
+        !do k = 1, size(contours)
+        !    call pcontours(k)%Construct(contours(k)%x, contours(k)%y)
+        !end do 
+        !!$omp end parallel do
+        !call tempps%Construct(pcontours)
+        !call tempps%WriteData('mfcontours')
 
         ! Extrema
         call AddTopologicalMeshExtrema(topomesh, fieldtracer, &
@@ -365,21 +433,70 @@ module ggmod_topology2D
         call RemoveTopologicalMeshLimiterRegions(topomesh, magneticField, &
             fieldtracer, streamlinetracer, options)
 
+        ! Simplify
+        call SimplifyTopologicalMeshFaces(topomesh)
+
         ! Do temporary writing
         call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+
+        ! Add necessary data
+        !===================
+        ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Data 
+        call AddTopologicalMeshData(topomesh)
+
+        ! Add cells
+        call AddTopologicalMeshCells(topomesh)        
+
+        ! Compute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
+
+        ! Write
+        !======
+        ! Overwrite vessel structure
+        vessel = newvessel
+
+        ! Write topological mesh
+        call WriteTopologicalMesh(topomesh, 'topomesh_base')
+
+    end subroutine
+
+    ! Main modifier
+    subroutine ModifyTopologicalMesh(vessel, magneticField, options, &
+        topomesh, fieldtracer, vesseltracer, streamlinetracer)
+
+        ! Description
+        !============
+        ! This routine contains all possible modifications that may be
+        ! applied to a basic topological mesh. Though it is not recommended, one might 
+        ! try to apply these modifications to an already modified mesh 
+        ! if desired. No guarantees on result though (most of these 
+        ! operations are irreversible)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(TopomeshUDT)                       :: topomesh
+        type(VesselUDT), intent(inout)          :: vessel
+        type(magneticFieldUDT), intent(in)      :: magneticField 
+        type(TopomeshOptionsUDT), intent(in)    :: options
+        class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
+        class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
 
         ! Compute additional contours
         !============================
         ! Core boundaries? 
         if (options%addcoreboundaries) then 
             call AddTopologicalMeshCoreBoundaries(topomesh, magneticField, &
-                newvessel, fieldtracer, options)
+                vessel, fieldtracer, options)
         end if 
 
         ! 'PF' boundaries?
         if (options%addPFboundaries) then 
             call AddTopologicalMeshPFBoundaries(topomesh, magneticField, &
-                newvessel, fieldtracer, options)
+                vessel, fieldtracer, options)
         end if
 
         ! Simplify
@@ -410,16 +527,8 @@ module ggmod_topology2D
             call RemoveTopologicalMeshNonCoreRegions(topomesh)
         end if
 
-
         ! Compute interconnection data
         call AddTopologicalMeshInterconnectionData(topomesh)
-
-        ! Re-evaluate topological mesh vertex field values
-        !topomesh%vert%fval = fieldtracer%Evaluate(topomesh%vert%x, topomesh%vert%y)
-
-        ! Write
-        !======
-        call WriteTopologicalMesh(topomesh, 'topomesh')
 
     end subroutine
 
@@ -2917,6 +3026,7 @@ module ggmod_topology2D
         end associate
 
     end subroutine
+    
     ! Core region removal
     subroutine RemoveTopologicalMeshCoreRegions(topomesh)
 
@@ -3124,6 +3234,211 @@ module ggmod_topology2D
 
         ! Data
         call AddTopologicalMeshData(topomesh)
+
+    end subroutine
+
+    ! Flux tube merging
+    subroutine MergeTopologicalMeshFluxTubes(topomesh, options)
+
+        ! Description
+        !============
+        ! This routine merges topological mesh tubes if it is possible 
+        ! and if it is desired by the user. Typically, only two adjacent
+        ! tubes are merged at the same time. This operation results in 
+        ! the deletion of cells, vertices, and flux surfaces, and the 
+        ! construction of new cells. To apply this operation, the 
+        ! topological mesh must be fully constructed with all additional
+        ! interconnection information. This information is later 
+        ! reconstructed, meaning that cells are retraced etc (this is 
+        ! actually done after each tube merging, otherwise it's 
+        ! impossible to proceed). 
+
+        ! The currently supported types of merging are:
+        ! - merging of tubes that share a tangency point contour as 
+        !   boundary, and where one side has a single tube and the other
+        !   side has two tubes, of which at least one is a single cell 
+        !   tube with a tangency point (type 1) boundary (i.e. no real
+        !   other flux surface boundary but a point). This sounds awfully
+        !   specific, and it is, but it represents one of the most 
+        !   common cases that requires coarsening (especially at nearly
+        !   aligned walls etc that have many tangency points)
+
+        ! See dedicated subroutines/documentation below for more information
+        
+        ! Algorithm
+        !==========
+        ! Merging of tangency point contours:
+        !   1)  loop over all tubes until we reached the final tube and 
+        !       did not apply a merging operation
+        !   2)  Check if the current tube is eligible (a tube is eligible
+        !       if the maximal difference in psi value of its vertices is
+        !       below the specified threshold)
+        !   3)  Check if we can merge the tube by deleting one of its 
+        !       boundary face sets. This is possible if the tube only has
+        !       two tube neighbours, and at least one neigbour is a 
+        !       boundary tube (i.e. it has no boundary faces at one
+        !       side)
+        !   4)  To merge, the bounding faces are removed from the 
+        !       topological mesh. The boundary vertices of these faces are
+        !       kept, but are set to the regular boundary type. 
+        !       Non-boundary vertices are deleted.
+        !       If both tubes are boundary tubes, we can only keep 
+        !       one of the tangency points that form the other boundary.
+        !       The other one becomes a regular boundary vertex. This
+        !       will allow to apply the SimplifyTopologicalMesh operation
+        !       to simplify boundaries. The choice of which vertex to 
+        !       take will 
+        !   5)  All cell data etc is reconstructed after each tube merge
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(inout)       :: topomesh
+        type(TopomeshOptionsUDT), intent(in)    :: options 
+
+        ! Auxiliary
+        logical                                 :: marked, &
+            passedcheck
+        logical, allocatable, dimension(:)      :: delf, delv
+        integer(I8), allocatable, dimension(:)  :: tf, tfv, tnb, &
+            tfmerge, tnbmerge
+        real(R8)                                :: dpsi
+        real(R8), allocatable, dimension(:)     :: fval
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert        => topomesh%vert,   &
+            face        => topomesh%face,   &
+            cell        => topomesh%cell,   &
+            tube        => topomesh%tube    &
+            )
+
+        ! Set logicals
+        allocate(delv(vert%ntot), delf(face%ntot))
+        delv = .false.
+        delf = .false.
+
+        ! Merge tubes
+        !============
+        ! Tangency point tubes
+        !---------------------
+        if (options%mergetangencypointtubes) then 
+            ! Loop over all tubes to find eligible tubes for merging
+            do while (i <= tube%ntot)
+                ! Initialize
+                marked = .false. 
+
+                ! Get tube radial faces &flux value limits
+                tf = tube%GetFace(i)
+                tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                dpsi = maxval(fval) - minval(fval)
+
+                ! Check
+                if (dpsi >= options%dpsimintangencypointtubes) then 
+                    ! Skip
+                    cycle
+                end if 
+
+                ! See if the tube can be merged on side one
+                passedcheck = .true.
+                if (.not. marked .and. (tube%ftneig1P(i, 2) > 0)) then 
+                    ! Get the tube neighbours on that side
+                    tnb = tube%GetNeig(i, 1_I8)
+
+                    ! Check if there are only two neighbours
+                    if (size(tnb) /= 2) then 
+                        passedcheck = .false. 
+                    end if 
+
+                    ! Check if at least one neighbour is a boundary 
+                    ! tube (i.e. it doesn't have any other boundaries)
+                    if ((tube%ftneig1P(tnb(1), 2) /= 0) .and. &
+                        (tube%ftneig1P(tnb(2), 2) /= 0)) then
+                        passedcheck = .false.  
+                    end if
+
+                    ! Check if we can merge
+                    if (passedcheck) then 
+                        ! Set merged to true
+                        marked = .true.
+
+                        ! Get merge data
+                        tfmerge = tube%GetBndFace(i, 1_I8)
+                        tnbmerge = tnb
+
+                    end if 
+
+                end if 
+
+                ! See if the tube can be merged on side two
+                if (.not. marked .and. (tube%ftneig2P(i, 2) > 0)) then 
+                end if
+
+                ! If marked for merging, apply merging operation
+                if (marked) then 
+                    ! Reset counter 
+                    i = 1
+
+                    ! Mark faces and vertices for removal
+                    delf = .false. 
+                    delv = .false.
+                    delf(tfmerge) = .true. 
+                    do j = 1, size(tfmerge)
+                        ! Get face vertices
+                        tfv = face%vert(tfmerge(j), :)
+
+                        ! Check vertex type
+                        if (any(vert%type(tfv(1)) == [TMvertexbndID, TMvertextp2ID])) then 
+                            ! Don't delete, but reset type
+                            vert%type(tfv(1)) = TMvertexbndID
+                        else
+                            ! Mark for deletion
+                            delv(tfv(1)) = .true.
+                        end if
+                        if (any(vert%type(tfv(2)) == [TMvertexbndID, TMvertextp2ID])) then 
+                            ! Don't delete, but reset type
+                            vert%type(tfv(2)) = TMvertexbndID
+                        else
+                            ! Mark for deletion
+                            delv(tfv(2)) = .true.
+                        end if
+                    end do 
+
+                    ! Remove faces
+                    call RemoveTopologicalMeshFaceLogical(topomesh, delf)
+
+                    ! Remove vertices
+                    call RemoveTopologicalMeshVertexLogical(topomesh, delv)
+
+                    ! Recompute all interconnections, cells, etc
+                    ! Vertex faces
+                    call AddTopologicalMeshVertexFaces(topomesh)
+
+                    ! Data
+                    call AddTopologicalMeshData(topomesh)
+
+                    ! Add cells
+                    call AddTopologicalMeshCells(topomesh)
+
+                    ! Compute interconnection data
+                    call AddTopologicalMeshInterconnectionData(topomesh)
+
+                else
+                    i = i + 1
+                end if 
+                
+            end do
+        end if 
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
@@ -3675,7 +3990,7 @@ module ggmod_topology2D
                 call AddTopologicalMeshFace(topomesh, [vf1(i), vf2(i)], xfda(i), &
                     yfda(i), topomesh%face%type(fID(k)), topomesh%face%fsID(fID(k)), fsfval)
 
-                call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                ! call WriteTopologicalMesh(topomesh, 'topomesh_temp')
             end do 
 
         end do 
@@ -4382,7 +4697,7 @@ module ggmod_topology2D
         call topomesh%vert%Initialize()
         call topomesh%face%Initialize()
         call topomesh%cell%Initialize()
-        call topomesh%tube%Initialize(0, 0, 0)
+        call topomesh%tube%Initialize(0, 0, 0, 0, 0, 0, 0)
 
     end subroutine
 
@@ -4503,7 +4818,8 @@ module ggmod_topology2D
 
     end subroutine
 
-    subroutine InitializeTopologicalMeshTube(tptube, ntot, nface, ncell)
+    subroutine InitializeTopologicalMeshTube(tptube, ntot, nface, ncell, &
+        nf1, nf2, nv1, nv2)
 
         ! Description
         !============
@@ -4513,7 +4829,8 @@ module ggmod_topology2D
         !==================
         ! Arguments
         class(TopomeshTubeUDT)      :: tptube 
-        integer(I8), intent(in)     :: ntot, nface, ncell 
+        integer(I8), intent(in)     :: ntot, nface, ncell, nv1, nv2, &
+            nf1, nf2
 
         ! Initialize
         !===========
@@ -4522,7 +4839,9 @@ module ggmod_topology2D
         tptube%ncell = ncell
         allocate(tptube%cell(ncell), tptube%face(nface), &
             tptube%cellP(ntot, 2), tptube%faceP(ntot, 2), &
-            tptube%isclosed(ntot))
+            tptube%isclosed(ntot), tptube%bndf1(nf1), tptube%bndf2(nf2), &
+            tptube%bndv1(nv1), tptube%bndv2(nv2), tptube%bndf1P(ntot, 2), &
+            tptube%bndf2P(ntot, 2), tptube%bndv1P(ntot, 2), tptube%bndv2P(ntot, 2))
 
     end subroutine
 
@@ -4557,6 +4876,30 @@ module ggmod_topology2D
         end if 
         if (allocated(tptube%isclosed)) then 
             deallocate(tptube%isclosed)
+        end if 
+        if (allocated(tptube%bndf1)) then 
+            deallocate(tptube%bndf1)
+        end if 
+        if (allocated(tptube%bndf2)) then 
+            deallocate(tptube%bndf2)
+        end if 
+        if (allocated(tptube%bndv1)) then 
+            deallocate(tptube%bndv1)
+        end if 
+        if (allocated(tptube%bndv2)) then 
+            deallocate(tptube%bndv2)
+        end if 
+        if (allocated(tptube%bndf1P)) then 
+            deallocate(tptube%bndf1P)
+        end if 
+        if (allocated(tptube%bndf2P)) then 
+            deallocate(tptube%bndf2P)
+        end if 
+        if (allocated(tptube%bndv1P)) then 
+            deallocate(tptube%bndv1P)
+        end if 
+        if (allocated(tptube%bndv2P)) then 
+            deallocate(tptube%bndv2P)
         end if 
 
     end subroutine
@@ -5524,15 +5867,20 @@ module ggmod_topology2D
 
         ! Auxiliary
         integer(I8)                             :: thistf, thisc, &
-            nextc, tc
+            nextc, tc, ne, si1, si2, cpID
         integer(I8), allocatable, dimension(:)  :: tf, thesecells, &
-            tfc, thiscf, tv
+            tfc, thiscf, tv, tfbnd, sortindex, sortedbndfaces, tf1, tf2, &
+            tv1, tv2, polygonID
+        integer(I8), allocatable, dimension(:, :)   :: bndfacevert, tfv
         logical                                 :: isclosed, addtube, &
             singlefacetube
         logical, allocatable, dimension(:)      :: hasfacetype, &
-            hasfaces, iscellnotfound
+            hasfaces, iscellnotfound, ispolygonstart, isbranchingpolygon
         type(IntegerDynamicArrayUDT)            :: tubef, tubec, &
-            ntubef, ntubec, isclosedtube, alltubef, alltubec
+            ntubef, ntubec, isclosedtube, alltubef, alltubec, &
+            tubebndf, alltubebndf1, alltubebndf2, ntubebndf1, ntubebndf2, &
+            alltubebndv1, alltubebndv2, ntubebndv1, ntubebndv2, &
+            temptf1, temptf2
 
         ! Loop
         integer(I8)                             :: i, k, ct
@@ -5585,11 +5933,19 @@ module ggmod_topology2D
         ! Initialize
         iscellnotfound = hasfaces
         ct = 0
-        ntubef = ConstructIntegerDynamicArray()
-        ntubec = ConstructIntegerDynamicArray()
-        alltubef = ConstructIntegerDynamicArray()
-        alltubec = ConstructIntegerDynamicArray()
-        isclosedtube = ConstructIntegerDynamicArray()
+        ntubef          = ConstructIntegerDynamicArray()
+        ntubec          = ConstructIntegerDynamicArray()
+        alltubef        = ConstructIntegerDynamicArray()
+        alltubebndf1    = ConstructIntegerDynamicArray()
+        alltubebndf2    = ConstructIntegerDynamicArray()
+        alltubebndv1    = ConstructIntegerDynamicArray()
+        alltubebndv2    = ConstructIntegerDynamicArray()
+        ntubebndv1      = ConstructIntegerDynamicArray()
+        ntubebndv2      = ConstructIntegerDynamicArray()
+        ntubebndf1      = ConstructIntegerDynamicArray()
+        ntubebndf2      = ConstructIntegerDynamicArray()
+        alltubec        = ConstructIntegerDynamicArray()
+        isclosedtube    = ConstructIntegerDynamicArray()
 
         ! Loop
         do while (.true.)
@@ -5603,17 +5959,25 @@ module ggmod_topology2D
             iscellnotfound(tc) = .false.
             
             ! Initialize a new tube
-            tubef = ConstructIntegerDynamicArray()
-            tubec = ConstructIntegerDynamicArray()
-            isclosed = .false. 
-            singlefacetube = .false.
-            addtube = .true.
+            tubef           = ConstructIntegerDynamicArray()
+            tubec           = ConstructIntegerDynamicArray()
+            tubebndf        = ConstructIntegerDynamicArray()
+            
+            isclosed        = .false. 
+            singlefacetube  = .false.
+            addtube         = .true.
 
             ! Append the cell
             call tubec%Append(tc)
             
             ! Get the faces
             tf = GetTMCellFace(cell, tc)
+
+            ! Get the bounding faces
+            allocate(tfbnd(count(.not. hasfacetype(tf))))
+            tfbnd = pack(tf, .not. hasfacetype(tf))
+            call tubebndf%Append(tfbnd)
+            deallocate(tfbnd)
             
             ! Get only faces that have the type
             tf = pack(tf, hasfacetype(tf))
@@ -5640,7 +6004,7 @@ module ggmod_topology2D
                 call tubef%Append(tf)
             end if 
             
-            ! Loop untill all flux tube cells found from one side
+            ! Loop until all flux tube cells found from one side
             do while (.true. .and. (.not. singlefacetube)) 
                 ! Add the current face before already found faces (to keep correct
                 ! order)
@@ -5685,8 +6049,16 @@ module ggmod_topology2D
                 end if 
                 iscellnotfound(thisc) = .false.
                 
-                ! Find the next face
+                ! Get cell faces
                 thiscf = GetTMCellFace(cell, thisc)
+
+                ! Add bounding faces
+                allocate(tfbnd(count(.not. hasfacetype(thiscf))))
+                tfbnd = pack(thiscf, .not. hasfacetype(thiscf))
+                call tubebndf%Append(tfbnd)
+                deallocate(tfbnd)
+
+                ! Find next face
                 thiscf = pack(thiscf, hasfacetype(thiscf) .and. thiscf /= thistf)
                 
                 ! Sanity check
@@ -5762,8 +6134,16 @@ module ggmod_topology2D
                 end if 
                 iscellnotfound(thisc) = .false.
                 
-                ! Find the next face
+                ! Get cell faces
                 thiscf = GetTMCellFace(cell, thisc)
+
+                ! Add bounding faces
+                allocate(tfbnd(count(.not. hasfacetype(thiscf))))
+                tfbnd = pack(thiscf, .not. hasfacetype(thiscf))
+                call tubebndf%Append(tfbnd)
+                deallocate(tfbnd)
+
+                ! Find the next face
                 thiscf = pack(thiscf, hasfacetype(thiscf) .and. thiscf /= thistf)
                 
                 ! Sanity check
@@ -5796,6 +6176,182 @@ module ggmod_topology2D
                 call alltubef%Append(tubef%Get())
                 call alltubec%Append(tubec%Get())
 
+                ! Get 'polygons' from bounding faces
+                ne = tubebndf%Size() 
+                bndfacevert = face%vert(tubebndf%Get(), :)
+                allocate(sortindex(ne), ispolygonstart(ne), isbranchingpolygon(ne))
+                call SortPolygonEdges(bndfacevert, ne, sortindex, &
+                    ispolygonstart, isbranchingpolygon, polygonID)
+                bndfacevert(:, 1) = bndfacevert(sortindex, 1)
+                bndfacevert(:, 2) = bndfacevert(sortindex, 2)
+                sortedbndfaces = tubebndf%Get(sortindex)
+                
+                
+                ! Checks
+                if (any(isbranchingpolygon) .and. ne > 0) then 
+                    ! Branching polygons, need to see which ones belong
+                    ! together (max 2)
+                    if (maxval(polygonID) > 2) then 
+                        call gdErrorHandler('AddTopologicalMeshTubes: ' // & 
+                            'tube has more than two branching polygons as ' // & 
+                            'boundary, unexpected')
+                    end if
+
+                    ! Extract polygon faces
+                    cpID = 0
+                    temptf1 = ConstructIntegerDynamicArray()
+                    temptf2 = ConstructIntegerDynamicArray()
+                    do i = 1, ne
+                        ! Get the polygon ID if it is a start
+                        if (ispolygonstart(i)) then 
+                            cpID = polygonID(i)
+                        end if 
+
+                        ! Add face
+                        if (cpID == 1_I8) then 
+                            call temptf1%Append(sortedbndfaces(i))
+                        elseif (cpID == 2_I8) then 
+                            call temptf2%Append(sortedbndfaces(i))
+                        else
+                            ! We shouldn't get here
+                            call gdErrorHandler('Unexpected error')
+                        end if 
+                    end do 
+
+                    ! At least the first polygon should exist
+                    call alltubebndf1%Append(temptf1%Get())
+                    call ntubebndf1%Append(temptf1%Size())
+
+                    ! Extract vertices of first set 
+                    allocate(tv1(size(tf1)+1))
+                    call ExtractPolygonVertices(bndfacevert(1:si2-1, :), &
+                        size(tf1), tv1)
+                    call alltubebndv1%Append(tv1)
+                    call ntubebndv1%Append(size(tv1))
+                    deallocate(tv1)
+
+                    
+                    ! Check if the second set exists
+                    if (temptf2%Size() > 0) then 
+                        ! Extract faces
+                        call alltubebndf2%Append(temptf2%Get())
+                        call ntubebndf2%Append(temptf2%Size())
+
+                        ! Extract vertices of second set 
+                        allocate(tv2(size(tf2)+1))
+                        call ExtractPolygonVertices(bndfacevert(si2:ne, :), &
+                            size(tf2), tv2)
+                        call alltubebndv2%Append(tv2)
+                        call ntubebndv2%Append(size(tv2))
+                        deallocate(tv2)
+                    else
+                        ! Append a zero
+                        call ntubebndf2%Append(0_I8)
+
+                        ! Extract vertices
+                        call ntubebndv2%Append(1_I8)
+                        tf = tubef%Get()
+                        tfv = face%vert(tf, :) 
+                        if (all(tfv(1, 1) == tfv(:, 1) .or. tfv(1, 1) == tfv(:, 2))) then 
+                            call alltubebndv2%Append(tfv(1, 1))
+                        elseif (all(tfv(1, 2) == tfv(:, 1) .or. tfv(1, 2) == tfv(:, 2))) then
+                            call alltubebndv2%Append(tfv(1, 2))
+                        else
+                            ! This shouldn't happen
+                            call gdErrorHandler('AddTopologicalMeshTubes: ' // &
+                                'found only one set of faces, but could not ' // & 
+                                'find a common point of all tube faces as ' // & 
+                                'other boundary side. Unexpected.')
+                        end if 
+                    end if 
+
+                else 
+                    ! Simple polygons, do sanity checks
+                    if ((count(ispolygonstart) < 1) .and. (ne > 0)) then 
+                        ! May be supported in the future
+                        call gdErrorHandler('AddTopologicalMeshTubes: ' // & 
+                            'tube does not have at least one aligned face, ' // & 
+                            'not supported.')
+                    elseif ((count(ispolygonstart) > 2) .and. (ne > 0)) then 
+                        ! Weird 
+                        call gdErrorHandler('AddTopologicalMeshTubes: ' // & 
+                            'tube has more than two aligned face boundaries, ' // & 
+                            'unexpected.')
+                    end if 
+
+                    ! Extract boundary faces and vertices
+                    if (count(ispolygonstart) == 2) then 
+                        ! Get starting indices (normally first one is always true)
+                        si1 = 1
+                        si2 = findloc(ispolygonstart, .true., 1, back=.true.)
+
+                        ! Add first set
+                        tf1 = sortedbndfaces(si1:si2-1)
+                        call alltubebndf1%Append(tf1)
+                        call ntubebndf1%Append(size(tf1))
+
+                        ! Add second set
+                        tf2 = sortedbndfaces(si2:ne)
+                        call alltubebndf2%Append(tf2)
+                        call ntubebndf2%Append(size(tf2))
+
+                        ! Extract vertices of first set 
+                        allocate(tv1(size(tf1)+1))
+                        call ExtractPolygonVertices(bndfacevert(1:si2-1, 1:2), &
+                            size(tf1), tv1)
+                        call alltubebndv1%Append(tv1)
+                        call ntubebndv1%Append(size(tv1))
+                        deallocate(tv1)
+
+                        ! Extract vertices of second set 
+                        allocate(tv2(size(tf2)+1))
+                        call ExtractPolygonVertices(bndfacevert(si2:ne, 1:2), &
+                            size(tf2), tv2)
+                        call alltubebndv2%Append(tv2)
+                        call ntubebndv2%Append(size(tv2))
+                        deallocate(tv2)
+
+                    elseif (count(ispolygonstart) == 1) then 
+                        ! Only one segment, need to search for tangency point
+                        ! vertex (should be one vertex in common with all 
+                        ! tube radial faces)
+
+                        ! Add first set
+                        tf1 = sortedbndfaces
+                        call alltubebndf1%Append(tf1)
+                        call ntubebndf1%Append(size(tf1))
+
+                        ! 'Add' second set
+                        call ntubebndf2%Append(0_I8)
+
+                        ! Extract vertices of first set 
+                        allocate(tv1(size(tf1)+1))
+                        call ExtractPolygonVertices(bndfacevert, &
+                            size(tf1), tv1)
+                        call alltubebndv1%Append(tv1)
+                        call ntubebndv1%Append(size(tv1))
+                        deallocate(tv1)
+
+                        ! Extract vertices of second set 
+                        call ntubebndv2%Append(1_I8)
+                        tf = tubef%Get()
+                        tfv = face%vert(tf, :) 
+                        if (all(tfv(1, 1) == tfv(:, 1) .or. tfv(1, 1) == tfv(:, 2))) then 
+                            call alltubebndv2%Append(tfv(1, 1))
+                        elseif (all(tfv(1, 2) == tfv(:, 1) .or. tfv(1, 2) == tfv(:, 2))) then
+                            call alltubebndv2%Append(tfv(1, 2))
+                        else
+                            ! This shouldn't happen
+                            call gdErrorHandler('AddTopologicalMeshTubes: ' // &
+                                'found only one set of faces, but could not ' // & 
+                                'find a common point of all tube faces as ' // & 
+                                'other boundary side. Unexpected.')
+                        end if 
+                    end if 
+                end if 
+
+                ! Housekeeping
+                deallocate(sortindex, ispolygonstart, isbranchingpolygon)
             end if 
             
         end do 
@@ -5806,21 +6362,213 @@ module ggmod_topology2D
         call topomesh%tube%Deallocate()
 
         ! Reallocate
-        call topomesh%tube%Initialize(ct, alltubef%Size(), alltubec%Size())
+        call topomesh%tube%Initialize(ct, alltubef%Size(), alltubec%Size(), &
+            alltubebndf1%Size(), alltubebndf2%Size(), alltubebndv1%Size(), &
+            alltubebndv2%Size())
 
         ! Set fields
-        topomesh%tube%face = alltubef%Get()
-        topomesh%tube%cell = alltubec%Get()
-        topomesh%tube%isclosed = isclosedtube%Get() == 1_I8
-        topomesh%tube%faceP(:, 2) = ntubef%Get()
-        topomesh%tube%cellp(:, 2) = ntubec%Get()
-        topomesh%tube%faceP(1, 1) = 1
-        topomesh%tube%cellP(1, 1) = 1
+        topomesh%tube%face      = alltubef%Get()
+        topomesh%tube%cell      = alltubec%Get()
+        topomesh%tube%bndf1     = alltubebndf1%Get()
+        topomesh%tube%bndf2     = alltubebndf2%Get()
+        topomesh%tube%bndv1     = alltubebndv1%Get()
+        topomesh%tube%bndv2     = alltubebndv2%Get()
+        topomesh%tube%isclosed  = isclosedtube%Get() == 1_I8
+
+        topomesh%tube%faceP(:, 2)   = ntubef%Get()
+        topomesh%tube%cellp(:, 2)   = ntubec%Get()
+        topomesh%tube%bndf1P(:, 2)  = ntubebndf1%Get()
+        topomesh%tube%bndf2P(:, 2)  = ntubebndf2%Get()
+        topomesh%tube%bndv1P(:, 2)  = ntubebndv1%Get()
+        topomesh%tube%bndv2P(:, 2)  = ntubebndv2%Get()
+        topomesh%tube%faceP(1, 1)   = 1
+        topomesh%tube%cellP(1, 1)   = 1
+        topomesh%tube%bndf1P(1, 1)  = 1
+        topomesh%tube%bndf2P(1, 1)  = 1
+        topomesh%tube%bndv1P(1, 1)  = 1
+        topomesh%tube%bndv2P(1, 1)  = 1
+
         do i = 2, topomesh%tube%ntot 
             topomesh%tube%faceP(i, 1) = topomesh%tube%faceP(i-1, 1) + &     
                 topomesh%tube%faceP(i-1, 2)
             topomesh%tube%cellP(i, 1) = topomesh%tube%cellP(i-1, 1) + &     
                 topomesh%tube%cellP(i-1, 2)    
+            topomesh%tube%bndf1P(i, 1) = topomesh%tube%bndf1P(i-1, 1) + &     
+                topomesh%tube%bndf1P(i-1, 2)
+            topomesh%tube%bndf2P(i, 1) = topomesh%tube%bndf2P(i-1, 1) + &     
+                topomesh%tube%bndf2P(i-1, 2)    
+            topomesh%tube%bndv1P(i, 1) = topomesh%tube%bndv1P(i-1, 1) + &     
+                topomesh%tube%bndv1P(i-1, 2)
+            topomesh%tube%bndv2P(i, 1) = topomesh%tube%bndv2P(i-1, 1) + &     
+                topomesh%tube%bndv2P(i-1, 2)    
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Flux tube data addition
+    subroutine AddTopologicalMeshTubeData(topomesh)
+
+        ! Description
+        !============
+        ! This routine adds additional data to the topological mesh 
+        ! tubes, such as which cells are in a tube (cell%tube) and which
+        ! neighbours a tube has
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(inout)       :: topomesh 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: ttc, tf1, tf2, tc, &
+            tf1u, tf2u
+
+        type(IntegerDynamicArrayUDT)            :: ftneig1, ftneig2
+
+        ! Loop
+        integer(I8)                             :: i, j, k, nnb1, nnb2
+
+        ! Initialize
+        !===========
+        ! Associate for ease
+        associate(&
+            tube        => topomesh%tube, &
+            cell        => topomesh%cell, &
+            face        => topomesh%face, &
+            vert        => topomesh%vert)
+
+        ! Allocate 
+        if (allocated(tube%ftneig1)) then 
+            deallocate(tube%ftneig1)
+        end if 
+        if (allocated(tube%ftneig2)) then 
+            deallocate(tube%ftneig2)
+        end if 
+        if (allocated(tube%ftneig1P)) then 
+            deallocate(tube%ftneig1P)
+        end if 
+        if (allocated(tube%ftneig2P)) then 
+            deallocate(tube%ftneig2P)
+        end if 
+        if (allocated(cell%tube)) then 
+            deallocate(cell%tube)
+        end if 
+        allocate(cell%tube(cell%ntot))
+        allocate(tube%ftneig1P(tube%ntot, 2), tube%ftneig2P(tube%ntot, 2))
+
+        ! Initialize
+        ftneig1     = ConstructIntegerDynamicArray()
+        ftneig2     = ConstructIntegerDynamicArray()
+        cell%tube       = 0
+        tube%ftneig1P = 0
+        tube%ftneig2P = 0
+        if (tube%ntot > 1) then 
+            tube%ftneig1P(1, 1) = 1_I8
+            tube%ftneig2P(1, 1) = 1_I8
+        end if  
+        
+        ! Cell tubes
+        !===========
+        do i = 1, tube%ntot
+            ! Get tube cells
+            ttc = tube%GetCell(i)
+
+            ! Check
+            if (any(cell%tube(ttc) /= 0)) then 
+                print *, 'AddTopologicalMeshTubeData: some cells belong ' // &
+                    'to multiple tubes, unexpected. Overwriting and continuing...'
+            end if 
+
+            ! Set cell tube
+            cell%tube(ttc) = i
+        end do 
+
+        ! Tube neighbours
+        !================
+        ! Initialize
+        nnb1 = 0
+        nnb2 = 0
+
+        ! Loop
+        do i = 1, tube%ntot
+            ! Get tube faces from first side
+            tf1 = tube%GetBndFace(i, 1_I8)
+            if (size(tf1) > 0) then 
+                ! Loop over all face
+                do j = 1, size(tf1)
+                    ! Get the face cells
+                    tc = face%GetCell(tf1(j))
+
+                    ! Check if any cell tube IDs are not equal to the 
+                    ! current ID. If so, add neighbour
+                    do k = 1, size(tc)
+                        if (cell%tube(tc(k)) /= i) then 
+                            call ftneig1%Append(cell%tube(tc(k)))
+                            tube%ftneig1P(i, 2) = tube%ftneig1P(i, 2) + 1
+                        end if
+                    end do
+                end do
+            end if 
+
+            ! Get tube faces from second side
+            tf2 = tube%GetBndFace(i, 1_I8)
+            if (size(tf2) > 0) then 
+                ! Loop over all face
+                do j = 1, size(tf2)
+                    ! Get the face cells
+                    tc = face%GetCell(tf2(j))
+
+                    ! Check if any cell tube IDs are not equal to the 
+                    ! current ID. If so, add neighbour
+                    do k = 1, size(tc)
+                        if (cell%tube(tc(k)) /= i) then 
+                            call ftneig2%Append(cell%tube(tc(k)))
+                            tube%ftneig2P(i, 2) = tube%ftneig2P(i, 2) + 1
+                        end if
+                    end do
+                end do
+            end if 
+        end do 
+
+        ! Build (preliminary)
+        tube%ftneig1 = ftneig1%Get()
+        tube%ftneig2 = ftneig2%Get()
+        do i = 2, tube%ntot
+            tube%ftneig1P(i, 1) = tube%ftneig1P(i-1, 1) + tube%ftneig1P(i-1, 2)
+            tube%ftneig2P(i, 1) = tube%ftneig2P(i-1, 1) + tube%ftneig2P(i-1, 2)
+        end do 
+
+        ! Reduce to unique set for each tube
+        ftneig1 = ConstructIntegerDynamicArray()
+        ftneig2 = ConstructIntegerDynamicArray()
+        do i = 1, tube%ntot
+            ! Get tube neighbours (this is possible now)
+            tf1 = tube%GetNeig(i, 1_I8)
+            tf2 = tube%GetNeig(i, 2_I8)
+
+            ! Determine unique set
+            call Unique(tf1, tf1u)
+            call Unique(tf2, tf2u)
+
+            ! Append
+            call ftneig1%Append(tf1u)
+            call ftneig2%Append(tf2u)
+
+            ! Set pointer counter, but only of this tube
+            tube%ftneig1P(i, 2) = size(tf1u)
+            tube%ftneig2P(i, 2) = size(tf2u)
+        end do 
+
+        ! Build (final)
+        tube%ftneig1 = ftneig1%Get()
+        tube%ftneig2 = ftneig2%Get()
+        do i = 2, tube%ntot
+            tube%ftneig1P(i, 1) = tube%ftneig1P(i-1, 1) + tube%ftneig1P(i-1, 2)
+            tube%ftneig2P(i, 1) = tube%ftneig2P(i-1, 1) + tube%ftneig2P(i-1, 2)
         end do 
 
         ! Housekeeping
@@ -6026,6 +6774,9 @@ module ggmod_topology2D
         !======
         ! Flux tubes 
         call AddTopologicalMeshTubes(topomesh, [TMfaceradID, TMfacebndID])
+
+        ! Additional tube interconnection data
+        ! call AddTopologicalMeshTubeData(topomesh)
 
         ! Housekeeping
         !=============
@@ -6967,6 +7718,42 @@ module ggmod_topology2D
         class(TopomeshTubeUDT)      :: tube 
         integer(I8), allocatable    :: res(:)
         res = tube%face(tube%faceP(i, 1):(tube%faceP(i, 1) + tube%faceP(i, 2) - 1))
+    end function
+
+    function GetTMTubeBndFace(tube, i, j) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i, j
+        integer(I8), allocatable    :: res(:)
+        
+        if (j == 1) then 
+            res = tube%bndf1(tube%bndf1P(i, 1):(tube%bndf1P(i, 1) + tube%bndf1P(i, 2) - 1))
+        else 
+            res = tube%bndf2(tube%bndf2P(i, 1):(tube%bndf2P(i, 1) + tube%bndf2P(i, 2) - 1))
+        end if 
+    end function
+
+    function GetTMTubeBndVert(tube, i, j) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i, j
+        integer(I8), allocatable    :: res(:)
+
+        if (j == 1) then 
+            res = tube%bndv1(tube%bndv1P(i, 1):(tube%bndv1P(i, 1) + tube%bndv1P(i, 2) - 1))
+        else 
+            res = tube%bndv2(tube%bndv2P(i, 1):(tube%bndv2P(i, 1) + tube%bndv2P(i, 2) - 1))
+        end if 
+    end function
+
+    function GetTMTubeNeig(tube, i, j) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i, j
+        integer(I8), allocatable    :: res(:)
+
+        if (j == 1) then 
+            res = tube%ftneig1(tube%ftneig1P(i, 1):(tube%ftneig1P(i, 1) + tube%ftneig1P(i, 2) - 1))
+        else 
+            res = tube%ftneig2(tube%ftneig2P(i, 1):(tube%ftneig2P(i, 1) + tube%ftneig2P(i, 2) - 1))
+        end if 
     end function
 
     function GetTMVertFaceNeig(vert, i, tf) result(res)
