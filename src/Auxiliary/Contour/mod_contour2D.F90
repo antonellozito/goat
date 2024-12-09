@@ -2880,6 +2880,11 @@ module mod_contour2D
                 contours(i)%y(1:size(contours(i)%y)-1)
             allocate(delind(size(dx)))
             delind = (abs(dx) <= disttol) .and. (abs(dy) <= disttol)
+            ! Don't delete the last point, delete the former instead
+            if (delind(size(dx))) then 
+                delind(size(dx)) = .false.
+                delind(size(dx)-1) = .true.
+            end if 
             if (any(delind)) then 
                 contours(i)%x = pack(contours(i)%x, [.true., .not. delind])
                 contours(i)%y = pack(contours(i)%y, [.true., .not. delind])
