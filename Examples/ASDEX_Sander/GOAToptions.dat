@@ -410,7 +410,8 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # Read exising file? 
 'gg.tm.readexistingTM'          '1'
-'gg.tm.TMfilepath'              './output/topomesh.dat'
+'gg.tm.TMfilepath'              './output/topomesh_base.dat'
+'gg.tm.doadaptations'           '1'
 
 # Magnetic field: tracing & resolution (description is determined by GD options)
 'gg.tm.field.resx'              '300'
@@ -427,13 +428,15 @@ VERSION 1.00.00
 'gg.tm.contour.npmax'           '10000'
 'gg.tm.contour.dl'              '0.01'
 
-# Core boundary and region treatment
+# Topological mesh adaptations
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '1'
 'gg.tm.cbnd.frac'               '0.1'
 'gg.tm.PFbnd.frac'              '0.1'
 'gg.tm.removecoreregions'       '1'
 'gg.tm.removewidegridregions'   '0'
+'gg.tm.mergetangencypointtubes' '1'
+'gg.tm.dpsimintangencypointtubes'   '1e-2'
 
 #-------------------------------------------------------------------------#
 #                         VERTEX DISTRIBUTION OPTIONS                     #
@@ -458,6 +461,11 @@ VERSION 1.00.00
 'gg.ref.LB.Lminxp'                      '0.0001'
 'gg.ref.LB.Lmaxxp'                      '0.025'
 'gg.ref.LB.decaylengthxp'               '0.05'
+
+# Boundary layer options (only for length based refinement for now)
+'gg.ref.BL.dotarget'                    '1'
+'gg.ref.BL.nctarget'                  '2'
+'gg.ref.BL.dltarget'                  '[0.001, 0.001]'
 
 # Post-processing options
 'gg.vd.removefluxsurfaces'              '1' # Remove too narrow flux surfaces
