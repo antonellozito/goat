@@ -303,8 +303,7 @@ module ggmod_topology2D
         class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
 
         ! Auxiliary
-        real(R8)                                :: dxfracmin, dyfracmin, &
-            dv
+        real(R8)                                :: dxfracmin, dyfracmin
         real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
             yps, xg, yg, Vf, xgv, ygv
         real(R8), parameter                     :: emptyR8(0)= 0
@@ -1658,7 +1657,8 @@ module ggmod_topology2D
                                     ty = topomesh%face%y(j)%Get()
                                     if (intfacestart) then 
                                         ! Face is oriented from start to end
-                                        call DeleteCurveSegment(tx, ty, [maxval(jout)], 'start', [distfrac, distfrac], .true., .true.)
+                                        call DeleteCurveSegment(tx, ty, [maxval(jout)], 'start', &
+                                            [distfrac, distfrac], .true., .true.)
                                         ! delind = [(cc, cc = 2, maxval(vindJ))]
                                     else
                                         call DeleteCurveSegment(tx, ty, [jout(1)], 'end', [distfrac, distfrac], .true., .true.)
@@ -6901,7 +6901,8 @@ module ggmod_topology2D
 
                     ! Extract vertices of first set 
                     allocate(tv1(size(tf1)+1))
-                    call ExtractPolygonVertices(bndfacevert(1:si2-1, :), &
+                    bndfacevert = face%vert(tf1, :)
+                    call ExtractPolygonVertices(bndfacevert, &
                         size(tf1), tv1)
                     call alltubebndv1%Append(tv1)
                     call ntubebndv1%Append(size(tv1))
@@ -6921,6 +6922,7 @@ module ggmod_topology2D
 
                         ! Extract vertices of second set 
                         allocate(tv2(size(tf2)+1))
+                        bndfacevert = face%vert(tf2, :)
                         call ExtractPolygonVertices(bndfacevert(si2:ne, :), &
                             size(tf2), tv2)
                         call alltubebndv2%Append(tv2)
@@ -7276,12 +7278,8 @@ module ggmod_topology2D
         class(TopomeshUDT)                      :: topomesh 
 
         ! Auxiliary
-        integer(I8)                             :: thisfsID
         integer(I8), allocatable                :: tempvcells(:, :)
-        integer(I8), allocatable, dimension(:)  :: ncpv, vcount, tv, &
-            newfsID, tfv
-        real(R8)                                :: tfsfval
-        real(R8), allocatable, dimension(:)     :: fsfval, newfsfval
+        integer(I8), allocatable, dimension(:)  :: ncpv, vcount, tv
 
         ! Loop
         integer(I8)                             :: i, j
@@ -7536,7 +7534,7 @@ module ggmod_topology2D
         ! Auxiliary
         integer(I8), allocatable            :: tmp(:, :), diffIDf(:), &
             tcf(:)
-        logical, allocatable, dimension(:)  :: keepface, keepfc
+        logical, allocatable, dimension(:)  :: keepface
 
         ! Loop
         integer(I8)                         :: i 
