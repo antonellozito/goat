@@ -139,10 +139,11 @@ module mod_polygon
         procedure :: IsSimplePolygon
         procedure :: IsSelfIntersectingPolygon
         procedure :: Inpolygon
-        procedure :: Flip           => FlipPolygon
-        procedure :: SelfIntersections   => PolygonSelfIntersections
+        procedure :: Flip               => FlipPolygon
+        procedure :: SelfIntersections  => PolygonSelfIntersections
+        procedure :: GetSurfaceArea     => ComputePolygonSurfaceArea
         procedure, private  :: GetPolygonVertexID
-        generic   :: GetVert        => GetPolygonVertexID
+        generic   :: GetVert            => GetPolygonVertexID
 
     end type 
 
@@ -4858,6 +4859,58 @@ module mod_polygon
 
 
     end subroutine
+
+    ! Polygon surface area
+    function ComputePolygonSurfaceArea(polygon) result(out)
+
+        ! Description
+        !============
+        ! Simple function that computes the (signed) surface area 
+        ! enclosed by the polygon. For this, we employ the simple
+        ! trapezoidal rule for integration, which is exact for 
+        ! piecewise-linear polygons. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)                       :: polygon 
+        real(R8)                                :: out 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: dx, yf 
+
+        ! Compute
+        !========
+        dx = polygon%x(polygon%vert) - polygon%x([polygon%vert(2:polygon%nv), polygon%vert(1)])
+        yf = polygon%y(polygon%vert) + polygon%y([polygon%vert(2:polygon%nv), polygon%vert(1)])
+        out = 0.5*sum(-dx*yf)
+
+
+
+    end function
+
+    function ComputeSimplePolygonSurfaceArea(x, y) result(out)
+
+        ! Description
+        !============
+        ! Same as function for polygon, but now with simple x, y input
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in), dimension(:)      :: x, y
+        real(R8)                                :: out 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: dx, yf 
+
+        ! Compute
+        !========
+        dx = x - [x(2:size(x)), x(1)]
+        yf = y + [y(2:size(y)), y(1)]
+        out = 0.5*sum(-dx*yf)
+
+    end function
 
     !------------------------------------------------------------------!
     !                               Writing                            !
