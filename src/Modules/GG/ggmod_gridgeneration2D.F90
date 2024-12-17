@@ -151,6 +151,21 @@ module ggmod_gridgeneration2D
 
     end type
 
+    ! Field line pair data
+    type :: GGTMFieldlinePairDataUDT
+
+        ! Data type that contains data on pairs of field lines, such as 
+        ! line-of-sight etc
+        integer(I8), allocatable, dimension(:)  :: l1minLOS, l1maxLOS, &
+            l2minLOS, l2maxLOS
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize     => InitializeGGTMFieldlinePairData
+
+    end type
+
     ! Field line refinement options
     type :: GGTMFieldlineRefinementOptionsUDT 
 
@@ -197,8 +212,12 @@ module ggmod_gridgeneration2D
         ! in lffaces (similar for vertices of the cell). These arrays
         ! are sorted from start to end radial face. Additionally, we 
         ! include any user-defined refinement/mesh size/... options 
-        ! here. 
+        ! here. Also line pair data is stored (this is computed in a 
+        ! post-process step in PostProcessVertexDistribution) for grid
+        ! face/cell construction etc after an initial vertex distribution
+        ! has been constructed
         type(GGTMFieldlineDataUDT), allocatable     :: lines(:)
+        type(GGTMFieldlinePairDataUDT), allocatable :: linepairs(:)
         type(GGTMFieldlineRefinementOptionsUDT)     :: linerefoptions
         type(GGTMFieldlineDataUDT)                  :: hfline, lfline
         integer(I8)                                 :: srflabel, erflabel, &
@@ -703,6 +722,9 @@ module ggmod_gridgeneration2D
 
         end select
 
+        ! Post-process the distribution
+        call PostProcessVertexDistribution(ggtmdata)
+
         ! Write data
         call WriteGGTMData(ggtmdata, 'ggtmdata_after_vertexdistribution')
 
@@ -972,7 +994,7 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                                 :: nv, vertID, tc
         integer(I8), allocatable, dimension(:)      :: tvID, &
-            allIDs, vertmap
+            allIDs, vertmap, tfc
         logical, allocatable, dimension(:)          :: iscelldone, &
             isfacedone, isstartingcell, isstartingface, &
             isvertexdeleted, keepvert
@@ -1079,8 +1101,24 @@ module ggmod_gridgeneration2D
             call facedata(i)%line%AddVertexIDs(tvID)
             call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
 
+            
+
             ! Check if we should refine
             if (isstartingface(i)) then 
+                ! Get face cells to update refinement data
+                tfc = face%GetCell(i)
+
+                if (size(tfc) > 1) then 
+                    ! Print warning
+                    print *, 'DistributeVerticesSequential: multiple cells ' // & 
+                        'found for face ', i, ', setting refinement options according ' // & 
+                        'to first cell'
+                end if 
+                
+                ! Update the refiner
+                call GGTMLineRefiner%UpdateRefinementOptions(celldata(tfc(1)), &
+                    topomesh)
+
                 ! Refine
                 keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
                 call GGTMlinerefiner%Refine(facedata(i)%line, vertID, keepvert)
@@ -1732,6 +1770,79 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Vertex distribution post-processing
+    subroutine PostProcessVertexDistribution(ggtmdata)
+
+        ! Description
+        !============
+        ! This routine applies any post-processing operation to the 
+        ! initial vertex distribution determined beforehand. The 
+        ! routine should be called *before* adding the grid vertices, 
+        ! since possibly vertices may still be deleted/adjusted 
+        ! depending on circumstances. 
+
+        ! Currently, we apply the following checks/add the following 
+        ! information:
+        ! - line-of-sight data:     data on LOS is added for vertices 
+        !                           to facilitate cell construction in 
+        !                           ConstructCellsQuadTria
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMDataUDT), intent(inout)            :: ggtmdata 
+
+        ! Loop
+        integer(I8)                                 :: i, j 
+
+        ! Initialize
+        !===========
+        ! Check if all necessary data is properly initialized
+        do i = 1, size(ggtmdata%cell)
+            ! Associate for ease
+            associate(tc    => ggtmdata%cell(i))
+
+            ! Check line pair allocation
+            if (allocated(tc%linepairs)) then 
+                deallocate(tc%linepairs)
+            end if 
+            allocate(tc%linepairs(size(tc%lines)+1))
+
+            ! Initialize
+            if (size(tc%lines) > 0) then 
+                do  j = 1, size(tc%linepairs)
+                    if (j == 1) then 
+                        ! First line: hfline
+                        call tc%linepairs(j)%Initialize(tc%hfline%nv, &
+                            tc%lines(j)%nv)
+                    elseif (j == size(tc%linepairs)) then 
+                        ! Last line: lfline
+                        call tc%linepairs(j)%Initialize(&
+                            tc%lines(j-1)%nv, tc%lfline%nv)
+                    else
+                        ! Regular
+                        call tc%linepairs(j)%Initialize(&
+                            tc%lines(j-1)%nv, tc%lines(j)%nv)
+                    end if
+                end do 
+            else
+                call tc%linepairs(1)%Initialize(&
+                    tc%hfline%nv, tc%lfline%nv)
+            end if 
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Add LOS
+        !========
+        call DetermineLOSlimits(ggtmdata)
+        
+        ! Housekeeping
+        !=============
+
+    end subroutine
+
     ! Grid vertex constructor
     subroutine ConstructGridVertices(ggtmdata, grid, topomesh)
 
@@ -1888,15 +1999,18 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         real(R8)                                :: dx1, dy1, &
             alpha1, dx2, dy2, alpha2, dx3, dy3, alpha3, bxf(1:3), byf(1:3)
-        real(R8), allocatable, dimension(:)     :: xint, yint
+        real(R8), allocatable, dimension(:)     :: xint, yint, dx, dy, &
+            dp, bx, by
         integer(I8)                             :: nf, nc, ncv, mink1, &
-            mink2, v1, v3, v2, v4, tff(1:2), indmin
+            mink2, v1, v3, v2, v4, tff(1:2), indmin, tracingdir
         integer(I8), allocatable, dimension(:)  :: tempfacelabels, &
             tempcellvert, s1, s2, tempfaceregion, tempcellregion
         integer(I8), allocatable, dimension(:, :)   :: tempfacevert, &
             tempcellvertP
         logical                                 :: isintersectingl1, &
-            isintersectingl2, doquad, issameface
+            isintersectingl2, doquad, issameface, islegaltria1, &
+            islegaltria2, islegalquad
+        type(GGTMFieldlineDataUDT)              :: thisline
         type(GGTMFieldlineDataUDT), allocatable :: lines(:)
 
         ! Loop
@@ -1912,6 +2026,30 @@ module ggmod_gridgeneration2D
             ! Concatenate lines for ease
             lines = [celldata(i)%hfline, celldata(i)%lines, &
                 celldata(i)%lfline]
+
+            ! Check tracing direction based on first line vertices
+            if (size(lines(1)%xv) > 1) then
+                thisline = lines(1)
+            elseif (size(lines(2)%xv) > 1) then 
+                thisline = lines(2)
+            else 
+                call gdErrorHandler('ConstructCellsQuadTria: could not find' // & 
+                    'line that is longer than a single point, not supported')
+            end if 
+            dx = thisline%xv(2:thisline%nv) - thisline%xv(1:thisline%nv-1)
+            dy = thisline%yv(2:thisline%nv) - thisline%yv(1:thisline%nv-1)
+            allocate(bx(size(dx)), by(size(dy)))
+            call magneticField%interp%Evaluate(thisline%xv(1:thisline%nv-1), thisline%yv(1:thisline%nv-1), 1, 0, by)
+            call magneticField%interp%Evaluate(thisline%xv(1:thisline%nv-1), thisline%yv(1:thisline%nv-1), 0, 1, bx)
+            bx = -bx
+            dp = dx*bx + dy*by
+
+            if (dp(1) >= 0.0_R8) then 
+                tracingdir = 1_I8 
+            else
+                tracingdir = -1_I8 
+            end if 
+            deallocate(bx, by)
 
             ! Associate
             associate(&
@@ -2003,6 +2141,29 @@ module ggmod_gridgeneration2D
 
                     ! Determine which face to take
                     !-----------------------------
+                    ! Check which faces are legal
+                    call DetermineLegalCellsQuadTria(islegaltria1, &
+                        islegaltria2, islegalquad, l1, l2, k1, k2, &
+                        tracingdir, magneticField, celldata(i)%linerefoptions, &
+                        celldata(i)%linepairs(j))
+
+                    ! If none are legal, then throw warning for 
+                    ! overlapping cells and reset
+                    if (.not. any([islegaltria1, islegaltria2, islegalquad])) then 
+                        ! We don't have a fix for this yet...
+                        print *, 'ConstructCellsQuadTria: could not ' // & 
+                            'find non-overlapping cell. Overlapping ' // &
+                            'cells will be present in the grid...'
+                        print *, 'cell: ', i, 'line: ', j, 'first vertex ID: ', &
+                            l1%vert(1), 'first coordinates: ', l1%xv(1), l1%yv(1)
+
+                        ! Reset to continue...
+                        islegaltria1 = .true. 
+                        islegaltria2 = .true. 
+                        islegalquad = .true. 
+
+                    end if 
+
                     ! First two vertices are always the same
                     v1 = l1%vert(k1)
                     v3 = l2%vert(k2)
@@ -2011,83 +2172,67 @@ module ggmod_gridgeneration2D
                     doquad = .false.
                     if ((k1 < n1) .and. (k2 < n2)) then 
 
-                        ! Check if we can/should insert a boundary layer
-                        ! of quads
-                        indmin = 0
-                        if (doBLstart) then 
-                            if ((k1 < ncBLstart+1) .and. (k2 < ncBLstart+1)) then 
-                                ! Ensure quad 
-                                indmin = 3 
-                            end if 
-                        end if
-                        if (doBLend .and. (indmin == 0)) then 
-                            ! Check that we're not marching further than
-                            ! allowed (not an issue for the initial 
-                            ! BL since we start there...)
-                            if (k1 > (n1-ncBLend-1) .and. .not. (k2 > (n2-ncBLend-1))) then 
-                                ! Need to add triangle from k2:k2+1
-                                indmin = 1
-                            elseif (.not. (k1 > (n1-ncBLend-1)) .and. k2 > (n2-ncBLend-1)) then
-                                ! Need to add triangle from k1:k1+1
-                                indmin = 2
-                            elseif ((k1 > (n1-ncBLend-1)) .and. (k2 > (n2-ncBLend-1))) then 
-                                ! Ensure quad 
-                                indmin = 3 
-                            end if 
-                        end if
-
-                        if (indmin == 0) then 
                                 
-                            ! Compute angle of face normal with magnetic field
-                            dx1 = l2%xv(k2+1) - l1%xv(k1)
-                            dy1 = l2%yv(k2+1) - l1%yv(k1)
-                            dx2 = l1%xv(k1+1) - l2%xv(k2)
-                            dy2 = l1%yv(k1+1) - l2%yv(k2)
-                            dx3 = l2%xv(k2+1) - l1%xv(k1+1)
-                            dy3 = l2%yv(k2+1) - l1%yv(k1+1)
+                        ! Compute angle of face normal with magnetic field
+                        dx1 = l2%xv(k2+1) - l1%xv(k1)
+                        dy1 = l2%yv(k2+1) - l1%yv(k1)
+                        dx2 = l1%xv(k1+1) - l2%xv(k2)
+                        dy2 = l1%yv(k1+1) - l2%yv(k2)
+                        dx3 = l2%xv(k2+1) - l1%xv(k1+1)
+                        dy3 = l2%yv(k2+1) - l1%yv(k1+1)
 
-                            call magneticField%interp%Evaluate(&
-                                [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
-                                [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
-                                0, 1, bxf)
-                            call magneticField%interp%Evaluate(&
-                                [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
-                                [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
-                                1, 0, byf)
-                            bxf = -bxf ! adjust sign
+                        
 
-                            alpha1 = abs(atan( (-dy1*byf(1) -dx1*bxf(1))/(-dy1*bxf(1) + dx1*byf(1))))
-                            alpha2 = abs(atan( (-dy2*byf(2) -dx2*bxf(2))/(-dy2*bxf(2) + dx2*byf(2))))
-                            alpha3 = abs(atan( (-dy3*byf(3) -dx3*bxf(3))/(-dy3*bxf(3) + dx3*byf(3))))
-                            
+                        call magneticField%interp%Evaluate(&
+                            [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
+                            [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
+                            0, 1, bxf)
+                        call magneticField%interp%Evaluate(&
+                            [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
+                            [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
+                            1, 0, byf)
+                        bxf = -bxf ! adjust sign
 
-
-                            ! Check if we still need to hedge for intersecting
-                            ! lines
-                            if (k1 > mink1) then 
-                                isintersectingl1 = .false.
-                            end if 
-                            if (k2 > mink2) then 
-                                isintersectingl2 = .false.
-                            end if
-
-                            ! Check which triangles are allowed
-                            if (isintersectingl1) then 
-                                ! First line is intersected by starting face:
-                                ! triangles should be built using second line
-                                alpha1 = posinfval_R8()
-                                alpha3 = posinfval_R8()
-                                
-                            elseif (isintersectingl2) then 
-                                ! Second line is intersected by starting face:
-                                ! triangles should be built using first line
-                                alpha2 = posinfval_R8()
-                                alpha3 = posinfval_R8()
-                            end if
-                            
-                            ! Find face that makes the smallest angle
-                            indmin = minloc([alpha1, alpha2, alpha3], 1)
+                        alpha1 = abs(atan( (-dy1*byf(1) -dx1*bxf(1))/(-dy1*bxf(1) + dx1*byf(1))))
+                        alpha2 = abs(atan( (-dy2*byf(2) -dx2*bxf(2))/(-dy2*bxf(2) + dx2*byf(2))))
+                        alpha3 = abs(atan( (-dy3*byf(3) -dx3*bxf(3))/(-dy3*bxf(3) + dx3*byf(3))))
+                        
+                        ! Check if we still need to hedge for intersecting
+                        ! lines
+                        if (k1 > mink1) then 
+                            isintersectingl1 = .false.
                         end if 
+                        if (k2 > mink2) then 
+                            isintersectingl2 = .false.
+                        end if
+
+
+                        ! Check which triangles are allowed
+                        if (isintersectingl1) then 
+                            ! First line is intersected by starting face:
+                            ! triangles should be built using second line
+                            alpha1 = posinfval_R8()
+                            alpha3 = posinfval_R8()
+                            
+                        elseif (isintersectingl2) then 
+                            ! Second line is intersected by starting face:
+                            ! triangles should be built using first line
+                            alpha2 = posinfval_R8()
+                            alpha3 = posinfval_R8()
+                        end if
+                        if (.not. islegaltria1) then 
+                            alpha1 = posinfval_R8()
+                        end if 
+                        if (.not. islegaltria2) then 
+                            alpha2 = posinfval_R8()
+                        end if 
+                        if (.not. islegalquad) then 
+                            alpha3 = posinfval_R8()
+                        end if 
+                        
+                        ! Find face that makes the smallest angle
+                        indmin = minloc([alpha1, alpha2, alpha3], 1)
+
                         ! Add the face
                         if (indmin == 3) then 
                             ! Add third face, quad
@@ -2233,6 +2378,828 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Auxiliary function for ConstructCellsQuadTria to determine legal
+    ! triangles/quads
+    subroutine DetermineLegalCellsQuadTria(islegaltria1, islegaltria2, &
+        islegalquad, l1, l2, k1, k2, tracingdir, magneticField, refoptions, &
+        lpdata)
+
+        ! Description
+        !============
+        ! This is an auxiliary subroutine that should only be used by 
+        ! constructors of quads/triangles to determine if a triangle or
+        ! quad is legal vor construction. For this, the current two 
+        ! gridding lines must be given in l1, l2, and the current node
+        ! positions in k1, k2 (resp.). Refinement options shall be 
+        ! parsed through the refoptions structure. The routine accounts
+        ! for specifications in this refoptions struct, but may override
+        ! certain desired features if e.g. overlapping cells would be 
+        ! inserted this way. Do note that in no way this routine can 
+        ! guarantee non-overlapping cells, although it will catch most 
+        ! of them (typically not if at the start of the face the cells
+        ! already overlap due to flux surface/bnd shape). 
+
+        ! Additional required inputs are:
+        ! - tracingdir:     1 if we go along the magnetic field in 
+        !                   increasing k1, k2 direction, -1 otherwise
+        ! - magneticField:  magnetic field object to evaluate 
+        !                   magnetic field vector (used to deambigue 
+        !                   non-convex cases)
+
+        ! Candidate faces are:
+        ! Face pair 1: vertex k1 and vertex k2+1, vertex k2, k2+1
+        ! (triangle 1)
+        
+        ! Face pair 2: vertex k1+1 and vertex k2, vertex k1, k1+1
+        ! (triangle 2)
+        
+        ! Face pair 3: k1+1, k2+1 (quad)
+
+        ! Notes
+        !======
+        ! Note 1: it is assumed that no intersections exist between 
+        ! the lines and any starting/ending radial faces. If this is not
+        ! the case, output may be unexpected.
+        
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMFieldlineDataUDT), intent(in)          :: l1, l2 
+        integer(I8), intent(in)                         :: k1, k2, tracingdir
+        type(GGTMFieldlineRefinementOptionsUDT), intent(in)     :: refoptions
+        logical, intent(out)                            :: islegaltria1, &
+            islegaltria2, islegalquad
+        type(MagneticFieldUDT), intent(in)              :: magneticField 
+        type(GGTMFieldlinePairDataUDT), intent(in)      :: lpdata
+
+        ! Auxiliary
+        real(R8)                        :: dx(1:7), dy(1:7), beta(1:4), &
+            bx(1:3), by(1:3), dp(1:2), xs, ys
+        real(R8), allocatable, dimension(:)     :: xint, yint
+        integer(I8), allocatable, dimension(:)  :: sint
+        logical, allocatable, dimension(:)      :: keepind
+
+
+        ! Auxiliary
+        logical                         :: doBLquad, doBLendcheck
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            n1            => size(l1%xv),              &
+            n2            => size(l2%xv),              &
+            doBLstart     => refoptions%doBLstart,     &
+            doBLend       => refoptions%doBLend  ,     &
+            ncBLstart     => refoptions%ncBLstart,     &
+            ncBLend       => refoptions%ncBLend        &
+            )
+
+        ! Set initial logical
+        doBLquad        = .false. ! true if we should do a boundary layer quad
+        doBLendcheck    = .true.
+        islegaltria1    = .true.
+        islegaltria2    = .true.
+        islegalquad     = .true.
+
+        ! Precompute data
+        !================
+        ! Compute vectors:
+        ! 1: k1 -> k2+1
+        ! 2: k2 -> k1+1
+        ! 3: k1+1 -> k2+1
+        ! 4: k1 -> k2
+        ! 5: k1 -> k1+1
+        ! 6: k2 -> k2+1
+        ! 7: normal vector of 4, in tracing direction
+        ! b: magnetic field vector in face center of 4
+        
+        if (k2 < n2) then 
+            dx(1) = l2%xv(k2+1) - l1%xv(k1)
+            dy(1) = l2%yv(k2+1) - l1%yv(k1)
+            dx(6) = l2%xv(k2+1) - l2%xv(k2)
+            dy(6) = l2%yv(k2+1) - l2%yv(k2)
+        end if 
+        if (k1 < n1) then 
+            dx(2) = l1%xv(k1+1) - l2%xv(k2)
+            dy(2) = l1%yv(k1+1) - l2%yv(k2)
+            dx(5) = l1%xv(k1+1) - l1%xv(k1)
+            dy(5) = l1%yv(k1+1) - l1%yv(k1)
+        end if 
+        if ((k1 < n1) .and. (k2 < n2)) then 
+            dx(3) = l2%xv(k2+1) - l1%xv(k1+1)
+            dy(3) = l2%yv(k2+1) - l1%yv(k1+1)
+        end if 
+        dx(4) = l2%xv(k2) - l1%xv(k1)
+        dy(4) = l2%yv(k2) - l1%yv(k1)
+        dx(7) = -dy(4) ! just initial value
+        dy(7) = dx(4) ! just initial value
+
+        call magneticField%interp%Evaluate([l1%xv(k1), l2%xv(k2)], &
+            [l1%yv(k1), l2%yv(k2)], 1, 0, by(2:3))
+        call magneticField%interp%Evaluate([l1%xv(k1), l2%xv(k2)], &
+            [l1%yv(k1), l2%yv(k2)], 0, 1, bx(2:3))
+        bx = -bx
+        bx(1) = 0.5*(bx(2) + bx(3))
+        by(1) = 0.5*(by(2) + by(3))
+
+        if ((dx(7)*bx(1) + dy(7)*by(1)) >= 0.0_R8) then 
+            ! normal is currently along magnetic field direction
+            if (tracingdir < 0_I8) then 
+                ! Need to switch, we're tracing opposite to mf direction
+                dx(7) = -dx(7)
+                dy(7) = -dy(7)
+            end if 
+        else
+            ! normal is currently opposite to magnetic field direction
+            if (tracingdir > 0_I8) then 
+                ! Need to switch, we're tracing along mf direction
+                dx(7) = -dx(7)
+                dy(7) = -dy(7)
+            end if 
+        end if
+
+        ! Compute angles:
+        ! beta1: 5 -> 4
+        ! beta2: 5 -> 1
+        ! beta3: 6 -> -4 (so 4 but opposite direction)
+        ! beta4: 6 -> 2
+        if ((k1 < n1) .and. (k2 < n2)) then 
+            beta(1) = atan2(dx(5)*dy(4) - dy(5)*dx(4), dx(5)*dx(4) + dy(5)*dy(4))
+            beta(2) = atan2(dx(5)*dy(1) - dy(5)*dx(1), dx(5)*dx(1) + dy(5)*dy(1))
+            beta(3) = atan2(-dx(6)*dy(4) + dy(6)*dx(4), -dx(6)*dx(4) - dy(6)*dy(4))
+            beta(4) = atan2(dx(6)*dy(2) - dy(6)*dx(2), dx(6)*dx(2) + dy(6)*dy(2))
+        end if 
+
+        ! Compute dot products
+        ! dp1: 5, 7
+        ! dp2: 6, 7
+        if (k1 < n1) then 
+            dp(1) = dx(5)*dx(7) + dy(5)*dy(7)
+        end if 
+        if (k2 < n2) then 
+            dp(2) = dx(6)*dx(7) + dy(6)*dy(7)
+        end if 
+
+        ! Ensure that angles are computed inside the tube by checking
+        ! dot products
+        if ((k1 < n1) .and. (k2 < n2)) then 
+            if (dp(1) > 0 .and. dp(2) > 0) then 
+                ! Do nothing
+            elseif (dp(1) < 0 .and. dp(2) > 0) then 
+                ! We know that l2 is properly oriented. The sign of 
+                ! the angle beta3 should be opposite to the sign of
+                ! beta1 - if not, add/subtract 2*pi
+                if (beta(3) > 0 .and. beta(1) > 0) then 
+                    beta(1) = beta(1) - 2*pi_R8
+                    if (beta(2) > 0) then 
+                        beta(2) = beta(2) - 2*pi_R8
+                    end if 
+                elseif (beta(3) < 0 .and. beta(1) < 0) then 
+                    beta(1) = beta(1) + 2*pi_R8
+                    if (beta(2) > 0) then 
+                        beta(2) = beta(2) + 2*pi_R8
+                    end if 
+                end if 
+            elseif (dp(2) < 0 .and. dp(1) > 0) then 
+                ! We know that l1 is properly oriented. The sign of 
+                ! the angle beta3 should be opposite to the sign of
+                ! beta1 - if not, add/subtract 2*pi
+                if (beta(3) > 0 .and. beta(1) > 0) then 
+                    beta(3) = beta(3) - 2*pi_R8
+                    if (beta(4) > 0) then 
+                        beta(4) = beta(4) - 2*pi_R8
+                    end if 
+                elseif (beta(3) < 0 .and. beta(1) < 0) then 
+                    beta(3) = beta(3) + 2*pi_R8
+                    if (beta(4) > 0) then 
+                        beta(4) = beta(4) + 2*pi_R8
+                    end if 
+                end if 
+            else
+                call Write2DPolygonData(l1%xv, l1%yv, 'l1')
+                call Write2DPolygonData(l2%xv, l2%yv, 'l2')
+                call WriteVertexData([k1, k2], [l1%xv(k1), l2%xv(k2)], &
+                    [l1%xv(k1), l2%xv(k2)], 'kdata')
+                ! This shouldn't happen, both dot products negative
+                call gdErrorHandler('DetermineLegalCellsQuadTria: both ' // & 
+                    'dot products are negative, check if tracing direction ' // & 
+                    'was correctly computed')
+            end if 
+        end if 
+
+        ! Checks
+        !=======
+        ! Are we at the end of one of the lines?
+        if ((k1 < n1) .and. (k2 < n2)) then ! no
+
+            ! Boundary layer checks
+            !----------------------
+            ! Check if we can/should insert a boundary layer
+            ! of quads -> should be given precedence 
+            if (doBLstart) then 
+                if ((k1 < ncBLstart+1) .and. (k2 < ncBLstart+1)) then 
+                    ! Ensure quad 
+                    doBLquad = .true. 
+                    doBLendcheck = .false. 
+                end if 
+            end if
+            if (doBLend .and. doBLendcheck) then 
+                ! Check that we're not marching further than
+                ! allowed (not an issue for the initial 
+                ! BL since we start there...)
+                if (k1 > (n1-ncBLend-1) .and. .not. (k2 > (n2-ncBLend-1))) then 
+                    ! Need to add triangle from k2:k2+1
+                    doBLquad = .false. 
+                elseif (.not. (k1 > (n1-ncBLend-1)) .and. k2 > (n2-ncBLend-1)) then
+                    ! Need to add triangle from k1:k1+1
+                    doBLquad = .false. 
+                elseif ((k1 > (n1-ncBLend-1)) .and. (k2 > (n2-ncBLend-1))) then 
+                    ! Ensure quad 
+                    doBLquad = .true. 
+                end if 
+            end if
+
+            ! Compute checks
+            !---------------
+            ! triangle 1: first check is on convexity. If dp2 < 0, then 
+            !   the triangle will lie outside of the tube and is 
+            !   therefore not legal. If dp2 > 0, then beta2 > beta1 if 
+            !   beta2 > 0 to be legal, if beta1 < 0, then beta2 < beta1.
+            ! triangle 2: similar to triangle 1, but now dp2 -> dp1, 
+            !   beta1 -> beta3, beta2 -> beta4
+            ! quad: if either dp1 or dp2 is smaller than zero (both is 
+            !   unexpected), we don't allow quads (would be non-convex)
+            !   unless explicitly forced by boundary layer and if other
+            !   checks pass. If the quad face intersects with the 
+            !   previous face (vector 4), then it is illegal to make 
+            !   a quad, even with boundary layers. 
+
+            ! Triangle 1
+            if (dp(2) <= 0) then 
+                islegaltria1 = .false.
+            else
+                if (beta(1) > 0) then 
+                    if (beta(2) > beta(1)) then
+                        islegaltria1 = .false.
+                    end if 
+                else
+                    if (beta(2) < beta(1)) then 
+                        islegaltria1 = .false.
+                    end if 
+                end if  
+            end if  
+
+            ! Triangle 2
+            if (dp(1) <= 0) then 
+                islegaltria2 = .false.
+            else
+                if (beta(3) > 0) then 
+                    if (beta(4) > beta(3)) then
+                        islegaltria2 = .false.
+                    end if 
+                else
+                    if (beta(4) < beta(3)) then 
+                        islegaltria2 = .false.
+                    end if 
+                end if 
+            end if  
+
+            ! Quad
+            if (dp(1) < 0 .or. dp(2) < 0) then 
+                if (doBLquad) then 
+                    ! Check intersection with previous edge
+                    call SegmentIntersections(xs, ys, l1%xv(k1), l1%yv(k1), &
+                        l2%xv(k2), l2%yv(k2), l1%xv(k1+1), l1%yv(k1+1), &
+                        l2%xv(k2+1), l2%yv(k2+1))
+
+                    if (.not. isnan(xs)) then 
+                        ! Intersection found, set to false
+                        islegalquad = .false. 
+                    end if 
+                else
+                    ! Default set to false
+                    islegalquad = .false. 
+                end if
+                
+                ! Always legal otherwise
+            end if    
+            
+        elseif ((k1 == n1) .and. (k2 < n2)) then 
+            ! Only triangle 1 can be formed
+            islegaltria2    = .false.
+            islegalquad     = .false.
+
+            ! Still need to check if this doesn't lead to overlap etc
+            ! - can be used upstream for warnings etc
+            if (dp(2) <= 0) then 
+                islegaltria1 = .false.
+            end if  
+
+        elseif ((k1 < n1) .and. (k2 == n2)) then 
+            ! Only triangle 2 can be formed
+            islegaltria1    = .false.
+            islegalquad     = .false.
+
+            ! Still need to check if this doesn't lead to overlap etc
+            ! - can be used upstream for warnings etc
+            if (dp(1) <= 0) then 
+                islegaltria2 = .false.
+            end if  
+            
+        else
+            ! This shouldn't happen
+            call gdErrorHandler('Something wrong in quad gridder')
+        end if 
+
+        ! Compute non-local checks
+        !-------------------------
+        ! Here, we see if the faces that are formed do not
+        ! intersect with other (non-tangent) faces. We only perform 
+        ! these checks for faces that are still legal
+
+        ! Check on k1+1, k2+1 eligibility by checking min(maxLOS)
+        !if (k2 < n2) then
+        !    if (any((lpdata%l1maxLOS(k1:l1%nv)) < k2+1)) then 
+        !        islegalquad = .false.
+        !        islegaltria1 = .false.
+        !    end if 
+        !end if 
+        !if (k1 < n1) then
+        !    if (any((lpdata%l2maxLOS(k2:l2%nv)) < k1+1)) then 
+        !        islegalquad = .false.
+        !        islegaltria2 = .false.
+        !    end if 
+        !end if
+
+
+        ! Check for intersections with remaining part of curve 1
+        if (k1 < n1-1) then 
+            ! First triangle
+            if (k2 < n2) then 
+                if (islegaltria1) then 
+                    ! Compute intersections
+                    call SegmentSimplePolygonIntersections(l1%xv(k1+1:l1%nv), &
+                            l1%yv(k1+1:l1%nv), l1%xv(k1), l1%yv(k1), &
+                            l2%xv(k2+1), l2%yv(k2+1), xint, yint, sint)
+
+                    ! Eliminate any intersections with edges that have
+                    ! a vertex in common
+                    if (size(xint) > 0) then 
+                        allocate(keepind(size(sint)))
+                        keepind = .true.
+                        where (l1%vert(k1+sint) == l1%vert(k1) .or. &
+                            l1%vert(k1+sint + 1) == l1%vert(k1))
+                            keepind = .false. 
+                        end where 
+                        xint = pack(xint, keepind)
+                        deallocate(keepind)
+                    end if 
+
+                    ! Check
+                    if (size(xint) > 0) then 
+                        ! Eliminate edges with the same vertices
+                        islegaltria1 = .false. 
+                    end if 
+                end if
+            end if 
+
+            ! Second triangle
+            if (islegaltria2) then 
+                call SegmentSimplePolygonIntersections(l1%xv(k1+2:l1%nv), &
+                    l1%yv(k1+2:l1%nv), l1%xv(k1+1), l1%yv(k1+1), &
+                    l2%xv(k2), l2%yv(k2), xint, yint, sint)
+
+                ! Eliminate any intersections with edges that have
+                ! a vertex in common
+                if (size(xint) > 0) then 
+                    allocate(keepind(size(sint)))
+                    keepind = .true.
+                    where (l1%vert(k1+sint+1) == l1%vert(k1+1) .or. &
+                        l1%vert(k1+sint+2) == l1%vert(k1+1))
+                        keepind = .false. 
+                    end where 
+                    xint = pack(xint, keepind)
+                    deallocate(keepind)
+                end if 
+
+                ! Check
+                if (size(xint) > 0) then 
+                    islegaltria2 = .false. 
+                end if 
+            end if
+
+            ! Quad
+            if (k2 < n2) then 
+                ! Check intersections of quad face with other faces
+                if (islegalquad) then 
+                    call SegmentSimplePolygonIntersections(l1%xv(k1+2:l1%nv), &
+                        l1%yv(k1+2:l1%nv), l1%xv(k1+1), l1%yv(k1+1), &
+                        l2%xv(k2+1), l2%yv(k2+1), xint, yint, sint)
+
+                    ! Eliminate any intersections with edges that have
+                    ! a vertex in common
+                    if (size(xint) > 0) then 
+                        allocate(keepind(size(sint)))
+                        keepind = .true.
+                        where (l1%vert(k1+sint+1) == l1%vert(k1+1) .or. &
+                            l1%vert(k1+sint+2) == l1%vert(k1+1))
+                            keepind = .false. 
+                        end where 
+                        xint = pack(xint, keepind)
+                        deallocate(keepind)
+                    end if 
+
+                    if (size(xint) > 0) then 
+                        islegalquad = .false. 
+                        islegaltria1 = .false.
+                    end if 
+                end if
+
+                ! Check intersection of next tria 1 with L1
+                if (k2 < n2-1) then 
+                    if (islegalquad) then 
+                        ! Compute intersections
+                        call SegmentSimplePolygonIntersections(l1%xv(k1+2:l1%nv), &
+                                l1%yv(k1+2:l1%nv), l1%xv(k1+1), l1%yv(k1+1), &
+                                l2%xv(k2+2), l2%yv(k2+2), xint, yint, sint)
+    
+                        ! Eliminate any intersections with edges that have
+                        ! a vertex in common
+                        if (size(xint) > 0) then 
+                            allocate(keepind(size(sint)))
+                            keepind = .true.
+                            where (l1%vert(k1+sint+1) == l1%vert(k1+1) .or. &
+                                l1%vert(k1+sint + 2) == l1%vert(k1+1))
+                                keepind = .false. 
+                            end where 
+                            xint = pack(xint, keepind)
+                            deallocate(keepind)
+                        end if 
+    
+                        ! Check
+                        if (size(xint) > 0) then 
+                            islegalquad = .false. 
+                        end if 
+                    end if
+                end if 
+            end if 
+        end if 
+
+        ! Check for intersections with remaining part of curve 2
+        if (k2 < n2-1) then 
+            ! First triangle
+            if (islegaltria1) then 
+                call SegmentSimplePolygonIntersections(l2%xv(k2+2:l2%nv), &
+                    l2%yv(k2+2:l2%nv), l1%xv(k1), l1%yv(k1), &
+                    l2%xv(k2+1), l2%yv(k2+1), xint, yint, sint)
+
+                ! Eliminate any intersections with edges that have
+                ! a vertex in common
+                if (size(xint) > 0) then 
+                    allocate(keepind(size(sint)))
+                    keepind = .true.
+                    where (l2%vert(k2+sint+1) == l2%vert(k2+1) .or. &
+                        l2%vert(k2+sint+2) == l2%vert(k2+1))
+                        keepind = .false. 
+                    end where 
+                    xint = pack(xint, keepind)
+                    deallocate(keepind)
+                end if 
+
+                ! Check
+                if (size(xint) > 0) then 
+                    islegaltria1 = .false. 
+                end if 
+            end if
+
+            ! Second triangle
+            if (k1 < n1) then 
+                if (islegaltria2) then 
+                    call SegmentSimplePolygonIntersections(l2%xv(k2+1:l2%nv), &
+                        l2%yv(k2+1:l2%nv), l1%xv(k1+1), l1%yv(k1+1), &
+                        l2%xv(k2), l2%yv(k2), xint, yint, sint)
+
+                    ! Eliminate any intersections with edges that have
+                    ! a vertex in common
+                    if (size(xint) > 0) then 
+                        allocate(keepind(size(sint)))
+                        keepind = .true.
+                        where (l2%vert(k2+sint) == l2%vert(k2) .or. &
+                            l2%vert(k2+sint+1) == l2%vert(k2))
+                            keepind = .false. 
+                        end where 
+                        xint = pack(xint, keepind)
+                        deallocate(keepind)
+                    end if 
+
+                    ! Check
+                    if (size(xint) > 0) then 
+                        islegaltria2 = .false. 
+                    end if 
+                end if
+            end if 
+
+            ! Quad
+            if (k1 < n1) then 
+
+                ! Check for quad face intersections
+                if (islegalquad) then 
+                    call SegmentSimplePolygonIntersections(l2%xv(k2+2:l2%nv), &
+                        l2%yv(k2+2:l2%nv), l1%xv(k1+1), l1%yv(k1+1), &
+                        l2%xv(k2+1), l2%yv(k2+1), xint, yint, sint)
+
+                    !Eliminate any intersections with edges that have
+                    ! a vertex in common
+                    if (size(xint) > 0) then 
+                        allocate(keepind(size(sint)))
+                        keepind = .true.
+                        where (l2%vert(k2+sint+1) == l2%vert(k2+1) .or. &
+                            l2%vert(k2+sint+2) == l2%vert(k2+1))
+                            keepind = .false. 
+                        end where 
+                        xint = pack(xint, keepind)
+                        deallocate(keepind)
+                    end if 
+    
+                    ! Check
+                    if (size(xint) > 0) then 
+                        islegalquad = .false. 
+                        islegaltria2 = .false.
+                    end if 
+                end if
+
+                ! Check if next triangle 2 intersects
+                if (k1 < n1-1) then 
+                    if (islegalquad) then 
+                        call SegmentSimplePolygonIntersections(l2%xv(k2+2:l2%nv), &
+                            l2%yv(k2+2:l2%nv), l1%xv(k1+2), l1%yv(k1+2), &
+                            l2%xv(k2+1), l2%yv(k2+1), xint, yint, sint)
+    
+                        ! Eliminate any intersections with edges that have
+                        ! a vertex in common
+                        if (size(xint) > 0) then 
+                            allocate(keepind(size(sint)))
+                            keepind = .true.
+                            where (l2%vert(k2+sint+1) == l2%vert(k2+1) .or. &
+                                l2%vert(k2+sint+2) == l2%vert(k2+1))
+                                keepind = .false. 
+                            end where 
+                            xint = pack(xint, keepind)
+                            deallocate(keepind)
+                        end if 
+    
+                        ! Check
+                        if (size(xint) > 0) then 
+                            islegalquad = .false. 
+                        end if 
+                    end if
+                end if 
+            end if 
+        end if 
+            
+        ! Final checks
+        !=============
+        ! Check if we should write debugging output
+        if (.not. all ([islegaltria1, islegaltria2, islegalquad])) then 
+            call Write2DPolygonData(l1%xv, l1%yv, 'l1')
+            call Write2DPolygonData(l2%xv, l2%yv, 'l2')
+            call WriteVertexData([k1, k2], [l1%xv(k1), l2%xv(k2)], &
+                [l1%xv(k1), l2%xv(k2)], 'kdata')
+        end if 
+
+        ! Override triangle legality if boundary layer is set to true
+        ! and quad is legal
+        if (islegalquad .and. doBLquad) then 
+            islegaltria1 = .false. 
+            islegaltria2 = .false.
+        end if 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Line-of-sight determination for line pairs to determine possible
+    ! cell shapes etc
+    subroutine DetermineLOSlimits(ggtmdata)
+
+        ! Description
+        !============
+        ! This routine determines the line-of-sight for each line pair 
+        ! of each cell, which can be used during cell generation to 
+        ! determine whether a cell can be formed or not, or during 
+        ! grid construction to determine if more local refinement is
+        ! needed. The line-of-sight limits are determined between 
+        ! two lines, l1, l2, as follows:
+        !
+        ! - minLOS for l1, vertex k1: the vertex index k2, starting from 
+        !   the first line, which forms the first face (k1, k2) that does
+        !   not intersect either l1 or l2 (i.e. k1, k2-1 intersects). 
+        ! - maxLOS for l1, vertex k1: similar to minLOS, but now the 
+        !   vertex pair (k1, k2) is the last one, starting from minLOS, 
+        !   that does not intersect with l1 or l2 (i.e. k1, k2+1 interects)
+        ! - similar definitions hold for l2 of course
+        ! - for each of these edges, there's the additional requirement
+        !   that it has to be facing to the interior of the domain 
+        !   determined by the line pairs. 
+        
+        ! Notes
+        !======
+        ! Note 1: it is assumed that all line data is initialized and 
+        ! has proper (initial) dimensions. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)                      :: ggtmdata 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: xint, yint, xint1, &
+            xint2
+        integer(I8), allocatable, dimension(:)  :: sint
+        type(GGTMFieldlineDataUDT)              :: l1, l2
+
+        ! Loop  
+        integer(I8)                             :: i, j, k1, k2
+
+        ! Initialize
+        !===========
+        allocate(xint(0), xint1(0), xint2(0))
+
+        ! Determine LOS
+        !==============
+        do i = 1, size(ggtmdata%cell)
+            ! Associate
+            associate(tc        => ggtmdata%cell(i))
+
+            ! Loop over all line pairs
+            do j = 1, size(tc%linepairs)
+                ! Check
+                if (size(tc%lines) > 0) then 
+                    if (j == 1) then 
+                        ! l1 is hfline
+                        l1 = tc%hfline
+                        l2 = tc%lines(j)
+                    elseif (j == size(tc%linepairs)) then 
+                        ! l2 is lfline
+                        l1 = tc%lines(j-1)
+                        l2 = tc%lfline 
+                    else
+                        ! Regular case
+                        l1 = tc%lines(j-1)
+                        l2 = tc%lines(j)
+                    end if 
+                else
+                    ! l1 is hfline, l2 is lfline
+                    l1 = tc%hfline
+                    l2 = tc%lfline
+                end if 
+
+                ! Determine LOS for l1
+                do k1 = 1, l1%nv 
+                    ! minLOS
+                    k2 = 1
+                    do while (k2 <= l2%nv)
+                        ! Compute segment intersections
+                        if (k1 > 1) then 
+                            ! Check for intersections in l1(1:k1-1)
+                            call SegmentSimplePolygonIntersections(l1%xv(1:k1-1), &
+                                l1%yv(1:k1-1), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
+                                xint1, yint, sint)
+                        end if 
+                        if (k1 < l1%nv) then 
+                            ! Check for intersections in l1(k1+1:nv)
+                            call SegmentSimplePolygonIntersections(l1%xv(k1+1:l1%nv), &
+                                l1%yv(k1+1:l1%nv), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
+                                xint2, yint, sint)
+                        end if 
+
+                        ! Check
+                        if (size(xint1) == 0 .and. size(xint2) == 0) then 
+                            exit
+                        else 
+                            ! Update k2
+                            k2 = k2 + 1
+                        end if
+                    end do 
+
+                    ! Set the minimal value
+                    tc%linepairs(j)%l1minLOS(k1) = k2
+
+                    ! maxLOS
+                    k2 = tc%linepairs(j)%l1minLOS(k1) ! start from minLOS
+                    do while (k2 <= l2%nv)
+                        ! Compute segment intersections 
+                        if (k1 > 1) then 
+                            ! Check for intersections in l1(1:k1-1)
+                            call SegmentSimplePolygonIntersections(l1%xv(1:k1-1), &
+                                l1%yv(1:k1-1), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
+                                xint, yint, sint)
+                            
+                            if (size(xint) > 0) then 
+                                ! Exit the loop
+                                exit
+                            end if  
+                        end if 
+                        if (k1 < l1%nv) then 
+                            ! Check for intersections in l1(k1+1:nv)
+                            call SegmentSimplePolygonIntersections(l1%xv(k1+1:l1%nv), &
+                                l1%yv(k1+1:l1%nv), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
+                                xint, yint, sint)
+                            
+                            if (size(xint) > 0) then 
+                                ! Exit the loop
+                                exit
+                            end if  
+                        end if 
+
+                        ! If we got here, update k2
+                        k2 = k2 + 1
+                    end do 
+
+                    ! Set the maximal value
+                    tc%linepairs(j)%l1maxLOS(k1) = k2
+
+                end do 
+
+                ! Determine LOS for l2
+                do k2 = 1, l2%nv 
+                    ! minLOS
+                    k1 = 1
+                    do while (k1 <= l1%nv)
+                        ! Compute segment intersections
+                        if (k2 > 1) then 
+                            ! Check for intersections in l1(1:k1-1)
+                            call SegmentSimplePolygonIntersections(l2%xv(1:k2-1), &
+                                l2%yv(1:k2-1), l2%xv(k2), l2%yv(k2), l1%xv(k1), l1%yv(k1), &
+                                xint1, yint, sint)
+                        end if 
+                        if (k1 < l1%nv) then 
+                            ! Check for intersections in l1(k1+1:nv)
+                            call SegmentSimplePolygonIntersections(l2%xv(k2+1:l2%nv), &
+                                l2%yv(k2+1:l2%nv), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
+                                xint2, yint, sint)
+                        end if 
+
+                        ! Check
+                        if (size(xint1) == 0 .and. size(xint2) == 0) then 
+                            exit
+                        else 
+                            ! Update k1
+                            k1 = k1 + 1
+                        end if
+                    end do 
+
+                    ! Set the minimal value
+                    tc%linepairs(j)%l2minLOS(k2) = k1
+
+                    ! maxLOS
+                    k1 = tc%linepairs(j)%l2minLOS(k2) ! start from minLOS
+                    do while (k1 <= l1%nv)
+                        ! Compute segment intersections 
+                        if (k2 > 1) then 
+                            ! Check for intersections in l1(1:k1-1)
+                            call SegmentSimplePolygonIntersections(l2%xv(1:k2-1), &
+                                l2%yv(1:k2-1), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
+                                xint, yint, sint)
+                            
+                            if (size(xint) > 0) then 
+                                ! Exit the loop
+                                exit
+                            end if  
+                        end if 
+                        if (k1 < l1%nv) then 
+                            ! Check for intersections in l1(k1+1:nv)
+                            call SegmentSimplePolygonIntersections(l2%xv(k2+1:l2%nv), &
+                                l2%yv(k2+1:l2%nv), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
+                                xint, yint, sint)
+                            
+                            if (size(xint) > 0) then 
+                                ! Exit the loop
+                                exit
+                            end if  
+                        end if 
+
+                        ! If we got here, update k1
+                        k1 = k1 + 1
+                    end do 
+
+                    ! Set the maximal value
+                    tc%linepairs(j)%l2maxLOS(k2) = k1
+                end do 
+            end do 
+
+
+            ! Housekeeping
+            end associate
+        end do 
+
+
+    end subroutine
+
     ! Removal of duplicate faces in grid
     subroutine RemoveDuplicateGridFaces(grid)
 
@@ -2337,6 +3304,48 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    !------------------------------------------------------------------!
+    !                         GRID ADAPTATION                          !
+    !------------------------------------------------------------------!
+#ifdef debug
+    ! Removal of flux surfaces within a topomesh tube
+    subroutine RemoveSmallFluxTubes(options)
+
+        ! Description
+        !============
+        ! This routine can be used to remove flux tubes that are 
+        ! 'too small' (in whatever measure available) by removing a 
+        ! flux surface. The only limitation is that we cannot remove 
+        ! flux surfaces that are part of the topological mesh (i.e. 
+        ! we can only remove flux surfaces within a topological flux 
+        ! tube). Currently, the following cases are dealt with:
+        ! - flux surfaces with a delta Psi smaller than a predefined 
+        !   value
+        ! - intersecting flux surfaces (e.g. due to coarse approximation
+        !   or numerics)
+
+        ! For this adaptation, it is assumed that the initial vertex
+        ! distribution was already done (so we can check on actual 
+        ! intersections between faces). When deleting vertices/surfaces,
+        ! we don't recompute all vertex IDs etc again - this should be 
+        ! done afterwards (typically after all adaptations have been 
+        ! done)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+
+        ! Auxiliary
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! 
+
+    end subroutine
+#endif
     !------------------------------------------------------------------!
     !                  TOPOMESH GRID DATA ROUTINES                     !
     !------------------------------------------------------------------!
@@ -2586,16 +3595,16 @@ module ggmod_gridgeneration2D
             segc, vertexID
         real(R8)                                :: hfval, lfval, &
             dhf1, dhf2, dlf1, dlf2, nxc, nyc, nxfv, nyfv, txf, tyf, &
-            ntxf
+            ntxf, tmaxval
         real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
             tcfv2val, tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint, &
-            nxf, nyf, nnf, tsegrc, tsegrrf
+            nxf, nyf, nnf, tsegrc, tsegrrf, dlcv, newdlcv, newtfval
         real(R8), allocatable, dimension(:, :)  :: segrrf, segrc, &
             xint, yint
         logical                                 :: isflremoved, &
             isintersectremoved, issrf, doflip, changesign
         logical, allocatable, dimension(:)      :: ishfface, islfface, &
-            ishfvert, iscontourfound, keepind
+            ishfvert, iscontourfound, keepind, isdescending
         type(ContourUDT), allocatable           :: tempc(:)
         type(contourUDT)                        :: c1, c2
         type(RealDynamicArrayUDT), allocatable, dimension(:, :)     :: &
@@ -2814,15 +3823,10 @@ module ggmod_gridgeneration2D
 
             ! Initialize
             !-----------
+            ! Get tube cells and faces
             tubef = tube%GetFace(i)
             tubec = tube%GetCell(i)
-
-            ! Trace contours
-            !---------------
-            ! Get initial vertex distribution (skip start and end points)
             tf = tubedata(i)%distributionface
-            tx = facedata(tf)%line%xv
-            ty = facedata(tf)%line%yv
 
             ! Get cell belonging to this face
             tfloc = findloc(tubef, tf, 1, back=.false.)
@@ -2830,7 +3834,6 @@ module ggmod_gridgeneration2D
             ! Rearrange to ensure start from distribution face
             if (tfloc /= 1) then 
                 tubec = [tubec(tfloc:size(tubec)), tubec(1:tfloc-1)]
-                
             end if 
 
             ! Check & rearrange to ensure start from distribution face
@@ -2862,21 +3865,70 @@ module ggmod_gridgeneration2D
             end if 
             tfc = tubec(1)
 
-            !  Make sure we trace from high to low field value
+            ! Trace contours
+            !---------------
+            ! Get initial vertex distribution 
+            tx = facedata(tf)%line%xv
+            ty = facedata(tf)%line%yv
+            dlcv = facedata(tf)%line%dlcv
+
+            ! Make sure we trace from high to low field value and 
+            ! ensure that values are monotonous and within the hf and 
+            ! lf bound
             if (allocated(tfval)) then 
                 deallocate(tfval)
             end if 
             allocate(tfval(size(tx)))
             tfval = fieldtracer%Evaluate(tx, ty)
-            ! call magneticField%interp%Evaluate(tx, ty, 0, 0, tfval)
             if (tfval(1) < tfval(size(tfval))) then 
-                tx = tx(size(tx):1:-1)
-                ty = ty(size(ty):1:-1)
-            end if 
-            if (any(topomesh%face%vert(tf, :) == 242) .or. any(topomesh%face%vert(tf, :) == 243)) then 
-                print *, 'hm'
+                tfval = tfval(size(tfval):1:-1)
+                dlcv = dlcv(size(dlcv):1:-1)
             end if 
 
+            ! Eliminate values outside of bounds
+            allocate(keepind(size(tfval)))
+            keepind = .true.
+            where ((tfval > tfval(1) ).or. (tfval < tfval(size(tfval))))
+                keepind = .false. 
+            end where
+            allocate(newtfval(count(keepind)),newdlcv(count(keepind)))
+            newtfval = pack(tfval, keepind)
+            newdlcv = pack(dlcv, keepind)
+
+            ! Eliminate parts that are not (strictly) descending
+            allocate(isdescending(size(newtfval)))
+            isdescending = .true. 
+            tmaxval = newtfval(1)
+            do j = 2, size(newtfval) ! this should work since we eliminated out of bounds values
+                if (newtfval(j) < tmaxval) then 
+                    tmaxval = newtfval(j)
+                else
+                    isdescending(j) = .false. 
+                end if 
+            end do 
+            if (isdescending(size(isdescending))) then 
+                isdescending(size(isdescending)-1) = .true.
+                isdescending(size(isdescending)) = .false.
+            end if 
+            newdlcv = pack(newdlcv, isdescending)
+            
+            ! Sort from high to low values
+            !if (allocated(sortind)) then 
+            !    deallocate(sortind)
+            !end if 
+            !allocate(sortind(size(newtfval)))
+            !call Sort(newtfval, ind=sortind, ascend=.false.)
+            !newdlcv = newdlcv(sortind)
+
+            ! Redistribute
+            call facedata(tf)%line%AddVertexCoordinates(newdlcv)
+            tx = facedata(tf)%line%xv
+            ty = facedata(tf)%line%yv
+
+            ! Housekeeping
+            deallocate(newdlcv, newtfval, keepind, isdescending)
+
+            
             ! Trace
             tempc = fieldtracer%TraceContours(tx(2:size(tx)-1), ty(2:size(ty)-1))
 
@@ -2892,6 +3944,8 @@ module ggmod_gridgeneration2D
             ! determining orientation
             nxf = -(facedata(tf)%line%yl(2:) - facedata(tf)%line%yl(1:size(facedata(tf)%line%yl)-1))
             nyf = (facedata(tf)%line%xl(2:) - facedata(tf)%line%xl(1:size(facedata(tf)%line%xl)-1))
+            nxf = [nxf, nxf(size(nxf))]
+            nyf = [nyf, nyf(size(nyf))]
             nnf = sqrt(nxf**2 + nyf**2)
             nxf = nxf/nnf
             nyf = nyf/nnf
@@ -3093,11 +4147,26 @@ module ggmod_gridgeneration2D
             end if 
 
             ! Recompute face normals, now with (coarser) vertex values
+            !nxf = -(facedata(tf)%line%yl(2:) - facedata(tf)%line%yl(1:size(facedata(tf)%line%yl)-1))
+            !nyf = (facedata(tf)%line%xl(2:) - facedata(tf)%line%xl(1:size(facedata(tf)%line%xl)-1))
+            !nxf = [nxf, nxf(size(nxf))]
+            !nyf = [nyf, nyf(size(nyf))]
+            !nnf = sqrt(nxf**2 + nyf**2)
+            !nxf = nxf/nnf
+            !nyf = nyf/nnf
+            !nxf2 = nxf()
+            !call Interpolate1D(facedata(tf)%line%dlcv, nxf2, facedata(tf)%line%dllc, nxf)
+            !call Interpolate1D(facedata(tf)%line%dlcv, nyf2, facedata(tf)%line%dllc, nyf)
+            !nnf2 = sqrt(nxf2**2 + nyf2**2)
+            !nxf2 = nxf2/nnf2
+            !nyf2 = nyf2/nnf2
             nxf = -(facedata(tf)%line%yv(2:) - facedata(tf)%line%yv(1:size(facedata(tf)%line%yv)-1))
             nyf = (facedata(tf)%line%xv(2:) - facedata(tf)%line%xv(1:size(facedata(tf)%line%xv)-1))
             nnf = sqrt(nxf**2 + nyf**2)
             nxf = nxf/nnf
             nyf = nyf/nnf
+            !nxf = nxf2 
+            !nyf = nyf2
             if (doflip) then 
                 nxf = nxf(size(nxf):1:-1)
                 nyf = nyf(size(nyf):1:-1)
@@ -3394,7 +4463,22 @@ module ggmod_gridgeneration2D
                             startind = 1
                         end if 
                     else
-                        startind = 1
+                        ! Find intersection that is closest in distance
+                        ! to the original tracing starting point (we 
+                        ! should actually find that one up to some 
+                        ! precision)
+                        if (nint(j, k) == 1)  then 
+                            ! Trivial case
+                            startind = 1
+                        else
+                            ! Get all coordinates
+                            txint = xintda(j, k)%Get()
+                            tyint = yintda(j, k)%Get()
+
+                            ! Check which is closest
+                            startind = minloc((txint - tx(j+1))**2 + &
+                                (tyint - ty(j+1))**2, 1)
+                        end if 
                     end if 
                     xint(cc, k) = xintda(j, k)%Get(startind)
                     yint(cc, k) = yintda(j, k)%Get(startind)
@@ -4419,6 +5503,46 @@ module ggmod_gridgeneration2D
         ! Housekeeping
         !=============
         end associate
+
+    end subroutine
+
+    ! GGTM line pair initialization
+    subroutine InitializeGGTMFieldlinePairData(linepair, nvl1, nvl2)
+
+        ! Description
+        !============
+        ! Initialize the line pair data given the number of vertices in 
+        ! line 1 and line 2, resp. nvl1, nvl2
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMFieldlinePairDataUDT)         :: linepair 
+        integer(I8), intent(in)                 :: nvl1, nvl2
+
+        ! Initialize
+        !===========
+        ! Check allocation status
+        if (allocated(linepair%l1minLOS)) then 
+            deallocate(linepair%l1minLOS)
+        end if 
+        if (allocated(linepair%l2minLOS)) then 
+            deallocate(linepair%l2minLOS)
+        end if 
+        if (allocated(linepair%l1maxLOS)) then 
+            deallocate(linepair%l1maxLOS)
+        end if 
+        if (allocated(linepair%l2maxLOS)) then 
+            deallocate(linepair%l2maxLOS)
+        end if 
+
+        ! Allocate and initialize
+        allocate(linepair%l1minLOS(nvl1), linepair%l1maxLOS(nvl1), &
+            linepair%l2minLOS(nvl2), linepair%l2maxLOS(nvl2))
+        linepair%l1minLOS = 0_I8
+        linepair%l1maxLOS = 0_I8
+        linepair%l2minLOS = 0_I8
+        linepair%l2maxLOS = 0_I8
 
     end subroutine
 

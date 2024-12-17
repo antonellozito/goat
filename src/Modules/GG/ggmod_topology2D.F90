@@ -2301,7 +2301,7 @@ module ggmod_topology2D
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
-        call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)    
+        call SplitTopologicalMeshFaces(topomesh)    
         
         ! Housekeeping
         !=============
@@ -2473,7 +2473,7 @@ module ggmod_topology2D
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
-        call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
+        call SplitTopologicalMeshFaces(topomesh)
 
     end subroutine 
 
@@ -2670,7 +2670,7 @@ module ggmod_topology2D
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
-        call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
+        call SplitTopologicalMeshFaces(topomesh)
 
     end subroutine 
 
@@ -2786,7 +2786,7 @@ module ggmod_topology2D
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
-        call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
+        call SplitTopologicalMeshFaces(topomesh)
 
     end subroutine
 #endif 
@@ -3328,7 +3328,7 @@ module ggmod_topology2D
         integer(I8), allocatable, dimension(:)  :: tf, tfv, tnb, &
             tfmerge, tnbmerge, tfvu, tfradmerge, tvfvID, tvfvIDu, &
             tvf
-        real(R8)                                :: dpsi
+        real(R8)                                :: dpsi, dpsinb1, dpsinb2
         real(R8), allocatable, dimension(:)     :: fval
 
         ! Loop
@@ -3366,55 +3366,90 @@ module ggmod_topology2D
                 delv = .false.
                 delf = .false.
 
-                ! Get tube radial faces &flux value limits
-                tf = tube%GetFace(i)
-                tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                if (any(vert%fsID(tfv) == 0)) then 
-                    print *, tfv
-                end if 
-                fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                dpsi = maxval(fval) - minval(fval)
-
-                ! Check
-                if (dpsi >= options%dpsimintangencypointtubes) then 
-                    ! Skip
-                    i = i + 1
-                    cycle
-                end if 
-
                 ! See if the tube can be merged on side one
                 passedcheck = .true.
                 if (.not. marked .and. (tube%ftneig1P(i, 2) > 0)) then 
                     ! Get the tube neighbours on that side
                     tnb = tube%GetNeig(i, 1_I8)
 
-                    ! Check if there are only two neighbours
-                    if (size(tnb) /= 2) then 
-                        passedcheck = .false. 
-                    end if 
+                    ! Check the amount of neighbours
+                    if (size(tnb) == 2) then 
 
-                    ! Check if at least one neighbour is a boundary 
-                    ! tube (i.e. it doesn't have any other boundaries)
-                    if (passedcheck) then 
+                        ! Check if at least one neighbour is a boundary 
+                        ! tube (i.e. it doesn't have any other boundaries)
                         if ((tube%ftneig1P(tnb(1), 2) /= 0 .and. tube%ftneig2P(tnb(1), 2) /= 0) .and. &
                             (tube%ftneig1P(tnb(2), 2) /= 0 .and. tube%ftneig2P(tnb(2), 2) /= 0)) then
                             passedcheck = .false.  
                         end if
+
+                        ! Check tube dpsi
+                        tf = tube%GetFace(i)
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsi = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(1))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb1 = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(2))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb2 = maxval(fval) - minval(fval)
+
+                        if (all([dpsi, dpsinb1, dpsinb2] >= options%dpsimintangencypointtubes)) then 
+                            passedcheck = .false.
+                        end if 
+
+                        ! Check if we can merge
+                        if (passedcheck) then 
+                            ! Set merged to true
+                            marked = .true.
+
+                            ! Get merge data
+                            tfmerge = tube%GetBndFace(i, 1_I8)
+                            tnbmerge = tnb
+                            tfradmerge = [tube%GetFace(tnb(1)), &
+                                tube%GetFace(tnb(2))]
+
+                        end if 
+
+                    elseif (size(tnb) == 1) then 
+
+                        ! Check if this neighbour has maximally one
+                        ! other neighbour on each side
+                        if ((tube%ftneig1P(tnb(1), 2) > 1 .or. tube%ftneig2P(tnb(1), 2) > 1)) then
+                            passedcheck = .false.  
+                        end if
+
+                        ! Check tube dpsi
+                        tf = tube%GetFace(i)
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsi = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(1))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb1 = maxval(fval) - minval(fval)
+
+                        if (all([dpsi, dpsinb1] >= options%dpsimintangencypointtubes)) then 
+                            passedcheck = .false.
+                        end if 
+
+                        ! Check if we can merge
+                        if (passedcheck) then 
+                            ! Set merged to true
+                            marked = .true.
+
+                            ! Get merge data
+                            tfmerge = tube%GetBndFace(i, 1_I8)
+                            tnbmerge = tnb
+                            tfradmerge = tube%GetFace(tnb(1))
+
+                        end if 
                     end if 
-
-                    ! Check if we can merge
-                    if (passedcheck) then 
-                        ! Set merged to true
-                        marked = .true.
-
-                        ! Get merge data
-                        tfmerge = tube%GetBndFace(i, 1_I8)
-                        tnbmerge = tnb
-                        tfradmerge = [tube%GetFace(tnb(1)), &
-                            tube%GetFace(tnb(2))]
-
-                    end if 
-
                 end if 
 
                 ! See if the tube can be merged on side two
@@ -3422,31 +3457,83 @@ module ggmod_topology2D
                     ! Get the tube neighbours on that side
                     tnb = tube%GetNeig(i, 2_I8)
 
-                    ! Check if there are only two neighbours
-                    if (size(tnb) /= 2) then 
-                        passedcheck = .false. 
-                    end if 
+                    ! Check the amount of neighbours
+                    if (size(tnb) == 2) then 
 
-                    ! Check if at least one neighbour is a boundary 
-                    ! tube (i.e. it doesn't have any other boundaries)
-                    if (passedcheck) then 
+                        ! Check if at least one neighbour is a boundary 
+                        ! tube (i.e. it doesn't have any other boundaries)
                         if ((tube%ftneig1P(tnb(1), 2) /= 0 .and. tube%ftneig2P(tnb(1), 2) /= 0) .and. &
                             (tube%ftneig1P(tnb(2), 2) /= 0 .and. tube%ftneig2P(tnb(2), 2) /= 0)) then
                             passedcheck = .false.  
                         end if
-                    end if 
 
-                    ! Check if we can merge
-                    if (passedcheck) then 
-                        ! Set merged to true
-                        marked = .true.
+                        ! Check tube dpsi
+                        tf = tube%GetFace(i)
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsi = maxval(fval) - minval(fval)
 
-                        ! Get merge data
-                        tfmerge = tube%GetBndFace(i, 2_I8)
-                        tnbmerge = tnb
-                        tfradmerge = [tube%GetFace(tnb(1)), &
-                            tube%GetFace(tnb(2))]
+                        tf = tube%GetFace(tnb(1))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb1 = maxval(fval) - minval(fval)
 
+                        tf = tube%GetFace(tnb(2))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb2 = maxval(fval) - minval(fval)
+
+                        if (all([dpsi, dpsinb1, dpsinb2] >= options%dpsimintangencypointtubes)) then 
+                            passedcheck = .false.
+                        end if 
+
+                        ! Check if we can merge
+                        if (passedcheck) then 
+                            ! Set merged to true
+                            marked = .true.
+
+                            ! Get merge data
+                            tfmerge = tube%GetBndFace(i, 2_I8)
+                            tnbmerge = tnb
+                            tfradmerge = [tube%GetFace(tnb(1)), &
+                                tube%GetFace(tnb(2))]
+
+                        end if 
+
+                    elseif (size(tnb) == 1) then 
+
+                        ! Check if this neighbour has maximally one
+                        ! other neighbour on each side
+                        if ((tube%ftneig1P(tnb(1), 2) > 1 .or. tube%ftneig2P(tnb(1), 2) > 1)) then
+                            passedcheck = .false.  
+                        end if
+
+                        ! Check tube dpsi
+                        tf = tube%GetFace(i)
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsi = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(1))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb1 = maxval(fval) - minval(fval)
+
+                        if (all([dpsi, dpsinb1] >= options%dpsimintangencypointtubes)) then 
+                            passedcheck = .false.
+                        end if 
+
+                        ! Check if we can merge
+                        if (passedcheck) then 
+                            ! Set merged to true
+                            marked = .true.
+
+                            ! Get merge data
+                            tfmerge = tube%GetBndFace(i, 2_I8)
+                            tnbmerge = tnb
+                            tfradmerge = tube%GetFace(tnb(1))
+
+                        end if 
                     end if 
                 end if
 
@@ -3497,6 +3584,8 @@ module ggmod_topology2D
                     ! Simplify
                     call SimplifyTopologicalMeshFaces(topomesh)
 
+                    !!! To be replaced by garbage point collector?
+
                     ! Check if the tangency points are currently located
                     ! in between two flux surfaces with different ID. 
                     ! In that case, 'delete' one of them
@@ -3530,6 +3619,9 @@ module ggmod_topology2D
                     ! Simplify again
                     call SimplifyTopologicalMeshFaces(topomesh)
 
+                    ! Split faces if necessary
+                    call SplitTopologicalMeshFaces(topomesh)   
+
                     ! Recompute all interconnections, cells, etc
                     ! Vertex faces
                     call AddTopologicalMeshVertexFaces(topomesh)
@@ -3546,7 +3638,7 @@ module ggmod_topology2D
                     ! Compute interconnection data
                     call AddTopologicalMeshInterconnectionData(topomesh)
 
-                    call WriteTopologicalMesh(topomesh, 'topomesh_temp.dat')
+                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
 
                 else
                     i = i + 1
@@ -4126,7 +4218,7 @@ module ggmod_topology2D
     end subroutine 
 
     ! Topological mesh face splitting
-    subroutine SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
+    subroutine SplitTopologicalMeshFaces(topomesh)
 
         ! Description
         !============
@@ -4147,8 +4239,6 @@ module ggmod_topology2D
         !==================
         ! Arguments
         class(TopomeshUDT)                      :: topomesh 
-        type(magneticFieldUDT)                  :: magneticField
-        type(VesselUDT)                         :: vessel 
 
         ! Auxiliary 
         integer(I8)                             :: nncf, nndf, np, &
@@ -4235,15 +4325,6 @@ module ggmod_topology2D
                 ! Get vertex coordinates
                 newvcfx = face%x(i)%Get(ind)
                 newvcfy = face%y(i)%Get(ind)
-                call magneticField%interp%Evaluate(newvcfx, newvcfy, &
-                    0, 0, newvcff)
-                
-                ! Insert new vertices
-                do j = 1, 2
-                    call AddTopologicalMeshVertex(topomesh, &
-                        newvcfx(j), newvcfy(j), newvcff(j), &
-                        TMvertexsplitID, face%fsID(i))
-                end do 
 
                 ! Get flux surface value
                 if (face%fsID(i) /= 0) then 
@@ -4251,6 +4332,14 @@ module ggmod_topology2D
                 else
                     fsfval = 0.0_R8
                 end if 
+                newvcff = fsfval
+                
+                ! Insert new vertices
+                do j = 1, 2
+                    call AddTopologicalMeshVertex(topomesh, &
+                        newvcfx(j), newvcfy(j), newvcff(j), &
+                        TMvertexsplitID, face%fsID(i))
+                end do       
                 
                 ! Insert first face
                 xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = 1, ind(1))]))
@@ -4291,12 +4380,6 @@ module ggmod_topology2D
                 ! Get vertex coordinates
                 newvdfx = face%x(i)%Get(ind(1))
                 newvdfy = face%y(i)%Get(ind(1))
-                call magneticField%interp%Evaluate(newvdfx, newvdfy, &
-                    0, 0, newvdff)
-                
-                ! Insert new vertex
-                call AddTopologicalMeshVertex(topomesh, newvdfx(1), &
-                    newvdfy(1), newvdff(1), TMvertexsplitID, face%fsID(i))
 
                 ! Get flux surface value
                 if (face%fsID(i) /= 0) then 
@@ -4304,6 +4387,11 @@ module ggmod_topology2D
                 else
                     fsfval = 0.0_R8
                 end if 
+                newvcff = fsfval
+                
+                ! Insert new vertex
+                call AddTopologicalMeshVertex(topomesh, newvdfx(1), &
+                    newvdfy(1), newvdff(1), TMvertexsplitID, face%fsID(i))
 
                 ! Insert first face
                 xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = 1, ind(1))]))
@@ -6806,6 +6894,11 @@ module ggmod_topology2D
                     call alltubebndf1%Append(temptf1%Get())
                     call ntubebndf1%Append(temptf1%Size())
 
+                    ! Add first set
+                    tf1 = temptf1%Get()
+                    call alltubebndf1%Append(tf1)
+                    call ntubebndf1%Append(size(tf1))
+
                     ! Extract vertices of first set 
                     allocate(tv1(size(tf1)+1))
                     call ExtractPolygonVertices(bndfacevert(1:si2-1, :), &
@@ -6820,6 +6913,11 @@ module ggmod_topology2D
                         ! Extract faces
                         call alltubebndf2%Append(temptf2%Get())
                         call ntubebndf2%Append(temptf2%Size())
+
+                        ! Add second set
+                        tf2 = temptf2%Get()
+                        call alltubebndf2%Append(tf)
+                        call ntubebndf2%Append(size(tf2))
 
                         ! Extract vertices of second set 
                         allocate(tv2(size(tf2)+1))
@@ -7283,82 +7381,7 @@ module ggmod_topology2D
 
         ! Reconstruct fsID of vertices to be compliant to faces (note: 
         ! type 1 tangency points get their own flux surface ID)
-#ifdef debug
-        fsfval = topomesh%fsfval%Get() !store original values, for faces
-        newfsfval = fsfval
-        allocate(newfsID(topomesh%nfs))
-        newfsID = 0
-        topomesh%nfs = 0
-        do i = 1, v%ntot
-            if (any(v%type(i) == [TMvertexmaxID, TMvertexminID, TMvertextp1ID])) then 
-                ! Update counter
-                topomesh%nfs = topomesh%nfs + 1
 
-                ! Check
-                if (v%fsID(i) /= 0) then 
-                    ! Add value
-                    newfsfval(topomesh%nfs) = fsfval(v%fsID(i))
-
-                    ! Reset ID
-                    v%fsID(i) = topomesh%nfs
-                else
-                    ! This shouldn't be possible, all these vertices
-                    ! should have a flux surface ID
-                    print *, 'vertex: ', i 
-                    call gdErrorHandler('AddTopologicalMeshInterconnectionData: ' // & 
-                        'tangency/minimum/maximum vertex did not have an ID, unexpected. ')
-                end if 
-            end if
-        end do  
-        do i = 1, f%ntot 
-            if (f%fsID(i) /= 0) then 
-                ! Get the current value
-                tfsfval = fsfval(f%fsID(i))
-
-                ! Set the new flux surface ID - check if this flux 
-                ! surface was already used before
-                if (newfsID(f%fsID(i)) == 0) then 
-                    topomesh%nfs = topomesh%nfs + 1
-                    thisfsID = topomesh%nfs 
-                    newfsID(f%fsID(i)) = thisfsID
-                else
-                    thisfsID = newfsID(f%fsID(i))
-                end if 
-                newfsfval(thisfsID) = tfsfval 
-
-                ! Get vertices of this face
-                tfv = f%vert(i, :) 
-
-                ! Set first vertex
-                if ((v%fsID(tfv(1)) /= 0) .and. (v%fsID(tfv(1)) /= thisfsID)) then 
-                    ! Unexpected, print warning
-                    print *, 'AddTopologicalMeshInterconnectionData: ' // & 
-                        'vertex: ', tfv(1), ' already had an ID, unexpected. ' // & 
-                        'Overwriting...'
-                end if 
-                v%fsID(tfv(1)) = thisfsID
-                v%fval(tfv(1)) = tfsfval
-
-                ! Set second vertex
-                if ((v%fsID(tfv(2)) /= 0) .and. (v%fsID(tfv(2)) /= thisfsID)) then 
-                    ! Unexpected, print warning
-                    print *, 'AddTopologicalMeshInterconnectionData: ' // & 
-                        'vertex: ', tfv(2), ' already had an ID, unexpected. ' // & 
-                        'Overwriting...'
-                end if 
-                v%fsID(tfv(2)) = thisfsID
-                v%fval(tfv(2)) = tfsfval
-            end if 
-        end do 
-
-        ! Reset the topological mesh flux surface data
-        topomesh%fsfval = ConstructRealDynamicArray(newfsfval)
-        do i = 1, f%ntot
-            if (f%fsID(i) /= 0) then 
-                f%fsID(i) = newfsID(f%fsID(i))
-            end if 
-        end do 
-#endif
                     
 
         ! Tubes
