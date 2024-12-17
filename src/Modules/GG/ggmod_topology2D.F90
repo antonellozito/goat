@@ -4331,6 +4331,458 @@ module ggmod_topology2D
 
     end subroutine 
 
+    ! Topomesh trimming
+    subroutine TrimTopologicalMesh(topomesh, magneticField, vessel)
+
+        ! Description
+        !============
+        ! This function removes boundaries and vertices from a topological mesh if
+        ! those vertices and boundaries lie outside of the domain. To determine the
+        ! latter, the vessel levelset function is checked, which is
+        ! positive when points are outside of the boundary. Any points that lie on
+        ! the boundary should be identified as tangency points (type 4 or 5) or
+        ! other type of boundary points (type 6).
+
+        ! All other points are removed. We assume that all intersections of faces with
+        ! the boundary have been computed and that all segments are added as
+        ! separate faces.
+
+        ! Faces that do not have a start and end vertex are removed per definition.
+        ! If a start or end vertex has been deleted, also the faces that have this
+        ! start or end vertex will be deleted. For other faces, it is checked if
+        ! the majority of points lies inside the vessel, excluding start and end
+        ! vertices (they may lie exactly on the vessel or should be deleted already
+        ! if they lie outside of the vessel). If all vertices (except end points)
+        ! lie outside the vessel, there is no ambiguity and the face is deleted.
+        ! If the first node near the start/end points are still inside
+        ! the vessel, but the rest outside, it is assumed that this is due to mesh
+        ! accuracy (a message will be displayed). If more than one node on each
+        ! side is detected, a warning is issued and the face is not deleted. This
+        ! may be due to not having computed and inserted all intersections, or due
+        ! to misuse of this routine. 
+
+        ! Notes
+        !======
+        ! Note 1: actually, we could also check based on the start and end vertex
+        ! type whether we should consider a certain boundary for deletion (actually
+        ! only boundaries with 'regular' intersections or tangency points). Now, we
+        ! simply check all boundaries. 
+
+        ! Note 2: we rely on the face identifiers to not consider boundary faces.
+        ! This is necessary, since boundary faces may lie just on or off the vessel
+        ! contour, depending on how accurate it was traced. Therefore, this routine
+        ! is likely to fail for these boundaries (as expected...). Boundary faces
+        ! are expected to be of type 3. 
+
+        ! Note 3: separatrix segments (type 4) that do not have a 
+        ! saddle point at either end are removed as well, since they
+        ! are not strictly necessary in the topological mesh. Splitting
+        ! points are also allowed of course. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        type(magneticFieldUDT), intent(in)      :: magneticField 
+        type(VesselUDT), intent(inout)          :: vessel 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: Vv
+        logical, allocatable, dimension(:)      :: outbnd, rmvert, &
+            rmface
+        type(PolygonUDT), allocatable           :: bndpol(:)
+        type(PolygonSetUDT)                     :: bndps 
+        class(PLF2DOptionsUDT), allocatable     :: bndplfoptions 
+        
+
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            plf         => vessel%plfvessel,      &
+            mfinterp    => magneticField%interp)
+
+        ! Rebuild the vessel description to be sure
+            allocate(bndpol(count(topomesh%face%type == TMfacebndID)))
+            bndpol = pack(topomesh%face%pol, topomesh%face%type == TMfacebndID)
+            call bndps%Construct(bndpol)
+            call ConstructVesselPolygonSet(vessel, bndps)
+            allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
+            call InitializePolygonLevelsetFunction2D(vessel%plfvessel, &
+                vessel%polygonset, bndplfoptions)
+
+        ! Vertices
+        !=========
+        ! Check if in boundary
+        allocate(Vv(topomesh%vert%ntot))
+        call plf%Evaluate(topomesh%vert%x, topomesh%vert%y, 0, 0, Vv)
+        outbnd = Vv >= 0
+
+        ! Check if we should remove it
+        rmvert = outbnd .and. (topomesh%vert%type /= TMvertextp1ID) .and. &
+            (topomesh%vert%type /= TMvertextp2ID) .and. (topomesh%vert%type /= TMvertexbndID)
+
+        ! Remove these vertices
+        call RemoveTopologicalMeshVertexLogical(topomesh, rmvert)
+
+        ! Faces
+        !======
+        ! Start by removing faces with zero start or end vertex
+        rmface = (topomesh%face%vert(:, 1) == 0) .or. &
+            (topomesh%face%vert(:, 2) == 0)
+
+        ! Also remove separatrix faces without saddle points or splitting points
+        do i = 1, topomesh%face%ntot
+            if (topomesh%face%type(i) == TMfacesepID) then 
+                ! Set to true, will be set to false if saddle point present
+                rmface(i) = .true. 
+                if (topomesh%face%vert(i, 1) /= 0) then 
+                    if ((topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsaddleID) .or. &
+                        (topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsplitID)) then 
+                        rmface(i) = .false. 
+                    end if 
+                else 
+                    ! Make sure is removed because of zero vertex
+                    rmface(i) = .true.
+                    
+                end if 
+                if (topomesh%face%vert(i, 2) /= 0) then 
+                    if ((topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsaddleID) .or. &
+                        (topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsplitID)) then 
+                        rmface(i) = .false. 
+                    end if 
+                else 
+                    ! Make sure is removed because of zero vertex
+                    rmface(i) = .true.
+                end if 
+            end if 
+        end do 
+
+        ! Remove
+        call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+        call plf%ps%WriteData('vesselpolygon')
+        ! call plf%Visualize('vesselplf', nxin=1000, nyin=1000)
+
+        ! Check remaining faces 
+        deallocate(rmface)
+        allocate(rmface(topomesh%face%ntot))
+        rmface = .false. 
+        do i = 1, topomesh%face%ntot
+            if (topomesh%face%type(i) /= TMfacebndID) then 
+                ! Points in boundary (exclude end points)?
+                deallocate(Vv)
+                allocate(Vv(size(topomesh%face%x(i)%Get())))
+                call plf%Evaluate(topomesh%face%x(i)%Get(), &
+                    topomesh%face%y(i)%Get(), 0, 0, Vv)
+                outbnd = Vv(2:size(Vv)-1) >= 0
+                
+                ! Check
+                if (all(outbnd)) then 
+                    ! Remove, no issue
+                    rmface(i) = .true.
+                elseif (all(outbnd(2:size(outbnd)-1)) .and. (size(outbnd) > 2)) then 
+                    ! Remove, but display message
+                    print *, 'face ID: ', i, 'face vertices: ', topomesh%face%vert(i, 1), topomesh%face%vert(i, 2)
+                    print *, 'TrimTopologicalMesh: boundary removed ' // & 
+                        'which still had first two points in domain'
+                elseif ((.not. any(outbnd(2:size(outbnd)-1))) .and. (size(outbnd) > 2)) then 
+                    ! Do not remove, nothing to do here
+                else
+                    ! Check if we simply had a very short boundary
+                    if (size(outbnd) <= 2) then 
+                        print *, 'TrimTopologicalMesh: face detected ' // & 
+                            'with at most four points, may not be ' // & 
+                            'properly diagnosed for removal. Try ' // & 
+                            'increasing number of points by increasing ' //& 
+                            'contour mesh resolution'
+                    else
+                        ! Points detected inside and outside - throw warning
+                        print *, 'TrimTopologicalMesh: face detected ' // & 
+                            'that has multiple points inside and outside ' // & 
+                            'of domain. May result in unexpected outcome. Check input'
+
+                        if (count(.not. outbnd) < count(outbnd)) then 
+                            rmface(i) = .true.
+                        end if 
+                    end if 
+                end if 
+            end if 
+        end do
+
+        ! Remove
+        call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Topomesh simplification
+    subroutine SimplifyTopologicalMeshFaces(topomesh)
+
+        ! Description
+        !============
+        ! This routine attempts to simplify the topological mesh by 
+        ! merging faces (and hence deleting vertices) if they would
+        ! form a single, unique face again. To achieve this, we loop 
+        ! over all vertices and check the following conditions:
+        ! - does the vertex only appear in two separate boundaries?
+        ! - are those two boundaries of the same type?
+        ! - is the vertex a regular or boundary vertex?
+        ! If all these conditions are met, the neighbouring faces may
+        ! be safely merged into a single face. Normally, this merging 
+        ! shouldn't be necessary, unless e.g. separatrix parts are 
+        ! removed during topological mesh trimming. This routine should
+        ! therefore be called after adding all boundaries to the 
+        ! topological mesh, but before adding cells and other data. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+
+        ! Auxiliary
+        integer(I8)                             :: nforig, tf(1:2)
+        integer(I8), allocatable, dimension(:)  :: rmvID, rmf1, rmf2, &
+            fvert 
+        logical, allocatable, dimension(:)      :: markv, markf, &
+            appearstwice
+        real(R8)                                :: fsfval
+        real(R8), allocatable, dimension(:)     :: tempx, tempy 
+        type(RealDynamicArrayUDT)               :: xda, yda 
+
+        ! Loop 
+        integer(I8)                             :: i, k 
+
+        ! Initialize
+        !===========
+        ! Keep looping until exit condition reached
+        do while (.true.) 
+
+            ! Store original sizes
+            nforig = topomesh%face%ntot
+
+            ! Mark vertices and faces for removal
+            allocate(markv(topomesh%vert%ntot), markf(topomesh%face%ntot), &
+                rmvID(0), rmf1(0), rmf2(0))
+            markv = .false. 
+            markf = .false.
+            do i = 1, topomesh%vert%ntot
+                ! Is it a regular or boundary vertex?
+                if ((.not. topomesh%vert%type(i) == TMvertexbndID) .and. &
+                    (.not. topomesh%vert%type(i) == 0)) then 
+                    cycle 
+                end if 
+
+                ! If it is, does it only appear twice in face%vert?
+                appearstwice = ((topomesh%face%vert(:, 1) == i) .or. (topomesh%face%vert(:, 2) == i))
+                if (.not. (count(appearstwice) == 2)) then 
+                    cycle 
+                end if 
+                tf = pack([(k, k = 1, topomesh%face%ntot)], appearstwice)
+
+                ! Are both faces not yet marked for deletion?
+                if (any(markf(tf))) then 
+                    cycle ! do in a next iteration
+                end if 
+
+                ! Do both boundaries have the same type and flux surface
+                ! ID? 
+                if (.not. (topomesh%face%type(tf(1)) == topomesh%face%type(tf(2)))) then 
+                    cycle
+                end if 
+                if (.not. (topomesh%face%fsID(tf(1)) == topomesh%face%fsID(tf(2)))) then 
+                    cycle
+                end if 
+
+                ! If we got here, we passed all checks. Mark for merging
+                ! and deletion
+                markv(i) = .true.
+                markf(tf) = .true. 
+                rmvID = [rmvID, i]
+                rmf1 = [rmf1, tf(1)]
+                rmf2 = [rmf2, tf(2)]
+
+            end do 
+
+            ! Check exit condition
+            if (count(markv) == 0) then 
+                exit 
+            end if 
+
+            ! Merge faces
+            !============
+            do i = 1, size(rmf1)
+                ! Check vertices
+                if (topomesh%face%vert(rmf1(i), 2) == rmvID(i)) then 
+                    ! First face is in good position 
+                    xda = topomesh%face%x(rmf1(i))
+                    yda = topomesh%face%y(rmf1(i))
+                    if (topomesh%face%vert(rmf2(i), 1) == rmvID(i)) then 
+                        ! Simply append 
+                        fvert = [topomesh%face%vert(rmf1(i), 1), &
+                            topomesh%face%vert(rmf2(i), 2)]
+                        call xda%Append(topomesh%face%x(rmf2(i))%Get())
+                        call yda%Append(topomesh%face%y(rmf2(i))%Get())
+
+                    elseif (topomesh%face%vert(rmf2(i), 2) == rmvID(i)) then 
+                        ! Need to flip second face
+                        fvert = [topomesh%face%vert(rmf1(i), 1), &
+                            topomesh%face%vert(rmf2(i), 1)]
+                        tempx = topomesh%face%x(rmf2(i))%Get()
+                        tempy = topomesh%face%y(rmf2(i))%Get()
+                        call xda%Append(tempx(size(tempx):1:-1))
+                        call yda%Append(tempy(size(tempy):1:-1))
+
+                    else 
+                        ! This is a bug
+                        call gdErrorHandler('SimplifyTopologicalMesh: ' // &
+                            'bug detected')
+                    end if 
+                elseif (topomesh%face%vert(rmf1(i), 1) == rmvID(i)) then 
+                    ! Need to flip first face
+                    tempx = topomesh%face%x(rmf1(i))%Get()
+                    tempy = topomesh%face%y(rmf1(i))%Get()
+                    tempx = tempx(size(tempx):1:-1)
+                    tempy = tempy(size(tempy):1:-1)
+                    xda = ConstructRealDynamicArray(tempx)
+                    yda = ConstructRealDynamicArray(tempy)
+                    if (topomesh%face%vert(rmf2(i), 1) == rmvID(i)) then 
+                        ! Simply append 
+                        fvert = [topomesh%face%vert(rmf1(i), 2), &
+                            topomesh%face%vert(rmf2(i), 2)]
+                        call xda%Append(topomesh%face%x(rmf2(i))%Get())
+                        call yda%Append(topomesh%face%y(rmf2(i))%Get())
+
+                    elseif (topomesh%face%vert(rmf2(i), 2) == rmvID(i)) then 
+                        ! Need to flip second face
+                        fvert = [topomesh%face%vert(rmf1(i), 2), &
+                            topomesh%face%vert(rmf2(i), 1)]
+                        tempx = topomesh%face%x(rmf2(i))%Get()
+                        tempy = topomesh%face%y(rmf2(i))%Get()
+                        call xda%Append(tempx(size(tempx):1:-1))
+                        call yda%Append(tempy(size(tempy):1:-1))
+                        
+                    else 
+                        ! This is a bug
+                        call gdErrorHandler('SimplifyTopologicalMesh: ' // &
+                            'bug detected')
+                    end if 
+                else 
+                    ! This is a bug
+                    call gdErrorHandler('SimplifyTopologicalMesh: ' // &
+                        'bug detected')
+                end if 
+
+                ! Add the new face
+                if (topomesh%face%fsID(rmf1(i)) /= 0) then 
+                    fsfval = topomesh%fsfval%Get(topomesh%face%fsID(rmf1(i)))
+                else
+                    fsfval = 0.0_R8
+                end if 
+                call AddTopologicalMeshFace(topomesh, fvert, &
+                    xda, yda, topomesh%face%type(rmf1(i)), &
+                    topomesh%face%fsID(rmf1(i)), fsfval)
+
+            end do 
+
+            ! Extend the face deletion vertices
+            markf = [markf, spread(.false., 1, topomesh%face%ntot - nforig)]
+
+            ! Delete the faces
+            call RemoveTopologicalMeshFaceLogical(topomesh, markf)
+
+            ! Delete the vertices
+            call RemoveTopologicalMeshVertexLogical(topomesh, markv)
+
+            ! Recompute some required data
+            call AddTopologicalMeshVertexFaces(topomesh)
+
+            ! Data
+            call AddTopologicalMeshData(topomesh)
+
+            ! Housekeeping
+            deallocate(markv, markf, rmvID, rmf1, rmf2)
+
+        end do 
+
+    end subroutine 
+
+    ! Garbage tangency point removal
+    subroutine RemoveGarbageTangencyPoints(topomesh)
+
+        ! Description
+        !============
+        ! This routine identifies 'garbage' tangency points and removes
+        ! them by changing their type and applying the topomesh
+        ! simplification algorithm (SimplifyTopologicalMeshFaces). 
+        ! Garbage tangency points are defined as type 1 tangency points
+        ! that are not limited on both sides by the same flux surface.
+        ! This assumes that contours have been added to the topomesh!
+
+        ! Note: no additional interconnection data is updated
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tvf, tvfvID, tvfvIDu
+
+        ! Loop
+        integer(I8)                             :: j 
+
+        ! Initialize
+        !===========
+        associate(&
+            vert        => topomesh%vert,   &
+            face        => topomesh%face)
+
+        ! Check
+        !======
+        do j = 1, vert%ntot
+            if (vert%type(j) == TMvertextp1ID) then 
+                ! Check
+                tvf = vert%GetFace(j)
+
+                ! Sanity check
+                if (size(tvf) /= 2) then 
+                    ! Write out some data for debugging
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                    print *, 'vertex: ', j
+                    call gdErrorHandler('RemoveGarbageTangencyPoints: ' // & 
+                        'type 1 tangency point does not have ' // & 
+                        'exactly two faces, unexpected. Check mesh in topomesh_error.dat')
+                end if 
+
+                ! Get all unique flux surface IDs of these vertices
+                tvfvID = vert%fsID([face%vert(tvf, 1), face%vert(tvf, 2)])
+                call Unique(tvfvID, tvfvIDu)
+                if (size(tvfvIDu) > 2) then 
+                    ! Set vertex type to simple boundary vertex
+                    ! for deletion later on in simplification 
+                    ! step
+                    vert%type(j) = TMvertexbndID
+                end if 
+            end if 
+        end do 
+
+        ! Simplify 
+        call SimplifyTopologicalMeshFaces(topomesh)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                   EQUILIBRIUM CHARACTERIZATION                   !
     !------------------------------------------------------------------!
