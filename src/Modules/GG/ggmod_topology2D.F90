@@ -424,6 +424,12 @@ module ggmod_topology2D
         call AddTopologicalMeshContours(topomesh, magneticField, newvessel, &
             fieldtracer, vesseltracer, options)
 
+        ! Vertex faces (preliminary, for garbage tangency point removal)
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Remove garbage tangency points
+        call RemoveGarbageTangencyPoints(topomesh)
+
         ! Do temporary writing
         call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
 
