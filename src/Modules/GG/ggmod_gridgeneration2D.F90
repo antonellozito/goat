@@ -194,8 +194,10 @@ module ggmod_gridgeneration2D
         ! Description
         !============
         ! Contains additional face data, including the grid vertices
-        ! xv, yv - now stored as a GGTMFieldlineData type
+        ! xv, yv - now stored as a GGTMFieldlineData type. Also contains
+        ! line refinement options (similar to celldata%linerefoptions)
         type(GGTMFieldlineDataUDT)              :: line 
+        type(GGTMFieldlineRefinementOptionsUDT) :: linerefoptions
 
     end type 
 
@@ -238,6 +240,7 @@ module ggmod_gridgeneration2D
 
         real(R8), allocatable, dimension(:)     :: fval
         integer(I8)                             :: distributionface
+        type(GGTMFieldlineRefinementOptionsUDT) :: linerefoptions
 
     end type 
 
@@ -471,13 +474,14 @@ module ggmod_gridgeneration2D
         end subroutine
 
         ! Update refinement options
-        subroutine UpdateRefinementOptionsINT(refiner, celldata, &
+        subroutine UpdateRefinementOptionsINT(refiner, refoptions, &
             topomesh)
 
-            import :: GGTMLineRefiner2DUDT, GGTMCellDataUDT, TopomeshUDT
-            class(GGTMLineRefiner2DUDT)                 :: refiner 
-            type(GGTMCellDataUDT), intent(in)           :: celldata 
-            type(TopomeshUDT), intent(in)               :: topomesh
+            import :: GGTMLineRefiner2DUDT, GGTMFieldlineRefinementOptionsUDT, &
+                TopomeshUDT
+            class(GGTMLineRefiner2DUDT)                         :: refiner 
+            type(GGTMFieldlineRefinementOptionsUDT), intent(in) :: refoptions 
+            type(TopomeshUDT), intent(in)                       :: topomesh
 
         end subroutine
 
@@ -549,7 +553,8 @@ module ggmod_gridgeneration2D
         class(DistributionFunctionUDT), allocatable     :: & 
             magneticFieldDF, vdpdensityfunction
         class(StreamlineTracerUDT), intent(inout)   :: streamlinetracer
-        class(GGTMLineRefiner2DUDT), allocatable    :: GGTMlinerefiner
+        class(GGTMLineRefiner2DUDT), allocatable    :: GGTMlinerefinerpol, &
+            GGTMlinerefinerrad
         class(PolygonLevelsetFunction2DUDT), allocatable    :: vdpplf
         type(GGGridUDT)             :: grid 
 
@@ -570,8 +575,8 @@ module ggmod_gridgeneration2D
         ! Temporary grid structure
         call grid%Initialize('standard')
 
-        ! Set up vertex distribution
-        !===========================
+        ! Set up vertex distribution 'actors'
+        !====================================
         ! Poloidal vertex distributor
         select case (options%vdptype)
 
@@ -678,27 +683,44 @@ module ggmod_gridgeneration2D
 
         end select
 
-        ! Refiner
-        GGTMlinerefiner = InitializeGGTMLineRefiner(topomesh, &
+        ! Refiner (poloidal)
+        GGTMlinerefinerpol = InitializeGGTMLineRefiner(topomesh, &
             magneticField, vessel, fieldtracer, boundarytracer, &
-            poloidalvertexdistributor, radialvertexdistributor, options)
+            poloidalvertexdistributor, radialvertexdistributor, options, &
+            'poloidal')
+
+        ! Refiner (radial)
+        GGTMlinerefinerrad = InitializeGGTMLineRefiner(topomesh, &
+            magneticField, vessel, fieldtracer, boundarytracer, &
+            poloidalvertexdistributor, radialvertexdistributor, options, &
+            'radial')
+
+
+        ! Add gridding data (and additional refinement options)
+        call AddTopologicalMeshGriddingData(ggtmdata, topomesh, &
+            fieldtracer, magneticField, options)
 
         ! Distribute vertices on topological faces
         !=========================================
+        ! Initialize the vertex counter (normally, all topomesh vertices 
+        ! are added)
+        grid%vert%ntot = topomesh%vert%ntot
+
         ! Poloidal faces
-        call DistributeVerticesTopologicalMeshFaces(ggtmdata, topomesh, &
-            poloidalvertexdistributor, TMfacealignedID)
+        call DistributeVerticesTopologicalMeshFaces(grid, ggtmdata, topomesh, &
+            poloidalvertexdistributor, GGTMlinerefinerpol, TMfacealignedID)
 
         ! Relevant radial faces of tubes
-        call DistributeVerticesTopologicalMeshTubes(ggtmdata, &
-            topomesh, radialvertexdistributor, magneticFieldDF, TMfacenonalignedID)
+        call DistributeVerticesTopologicalMeshTubes(grid, ggtmdata, &
+            topomesh, radialvertexdistributor, GGTMlinerefinerrad, &
+            magneticFieldDF, TMfacenonalignedID)
 
         ! Generate initial grid
         !======================
-        ! Construct the required topological cell data
-        call AddTopologicalMeshCellGriddingData(ggtmdata, topomesh, &
+        ! Trace contours
+        call TraceTopologicalMeshTubeContours(grid, ggtmdata, topomesh, &
             fieldtracer, magneticField, options)
-
+        
         ! Distribute vertices 
         select case (options%TMcellgriddingorder)
 
@@ -706,13 +728,13 @@ module ggmod_gridgeneration2D
 
             call DistributeVerticesIndependent(ggtmdata, topomesh, grid, &
                 poloidalvertexdistributor, magneticField, streamlinetracer, &
-                GGTMlinerefiner, options)
+                GGTMlinerefinerpol, options)
 
         case ('sequential')
 
             call DistributeVerticesSequential(ggtmdata, topomesh, grid, &
                 poloidalvertexdistributor, magneticField, streamlinetracer, &
-                GGTMlinerefiner, options)
+                GGTMlinerefinerpol, options)
 
         case default 
 
@@ -781,7 +803,7 @@ module ggmod_gridgeneration2D
         !============
         ! This routine generates for each topological cell a grid in 
         ! an independent way. It is assumed that grid coordinates are
-        ! already present on all topological mesh faces, but that no 
+        ! already present on all topological mesh faces and that
         ! vertex indices have been assigned. This is done as a first
         ! step in this routine. Afterwards, vertices are distributed
         ! per grid cell over the lines defined there. 
@@ -822,10 +844,8 @@ module ggmod_gridgeneration2D
 
         ! Add topological mesh vertices
         !==============================
-        ! Only update counter, vertices are added afterwards
-        grid%vert%ntot = grid%vert%ntot + vert%ntot
-
-        ! Set vertID
+        ! Set vertID - assumed this was already initialized in a previous
+        ! step
         vertID = grid%vert%ntot
 
         ! Add face vertices
@@ -861,7 +881,7 @@ module ggmod_gridgeneration2D
         do i = 1, cell%ntot
 
             ! Update the refiner
-            call GGTMLineRefiner%UpdateRefinementOptions(celldata(i), &
+            call GGTMLineRefiner%UpdateRefinementOptions(celldata(i)%linerefoptions, &
                 topomesh)
 
             ! Check which method to use
@@ -1021,11 +1041,8 @@ module ggmod_gridgeneration2D
         isstartingcell = .false.
         isstartingface = .false.
 
-        ! Add topological mesh vertices
-        !==============================
-        ! Keep track of topological mesh vertices
         ! Set vertID
-        vertID = vert%ntot
+        vertID = grid%vert%ntot
 
         ! Preprocess
         !===========
@@ -1084,6 +1101,8 @@ module ggmod_gridgeneration2D
             end associate 
         end do
 
+
+#ifdef debug
         ! Add face vertices
         !==================
         ! Do for all, but only refine starting faces! 
@@ -1116,8 +1135,8 @@ module ggmod_gridgeneration2D
                 end if 
                 
                 ! Update the refiner
-                call GGTMLineRefiner%UpdateRefinementOptions(celldata(tfc(1)), &
-                    topomesh)
+                call GGTMLineRefiner%UpdateRefinementOptions(&
+                    celldata(tfc(1))%linerefoptions, topomesh)
 
                 ! Refine
                 keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
@@ -1127,7 +1146,7 @@ module ggmod_gridgeneration2D
                 call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
             end if 
         end do
-
+#endif
         ! Add cell vertices
         !==================
         do while (.true.)
@@ -1176,8 +1195,8 @@ module ggmod_gridgeneration2D
             ! Add cell vertices
             !------------------
             ! Update the refiner
-            call GGTMLineRefiner%UpdateRefinementOptions(celldata(tc), &
-                topomesh)
+            call GGTMLineRefiner%UpdateRefinementOptions(&
+                celldata(tc)%linerefoptions, topomesh)
 
             ! Check which method to use
             select case (options%ggmethod)
@@ -2044,7 +2063,7 @@ module ggmod_gridgeneration2D
             bx = -bx
             dp = dx*bx + dy*by
 
-            if (dp(1) >= 0.0_R8) then 
+            if (sum(dp) >= 0.0_R8) then 
                 tracingdir = 1_I8 
             else
                 tracingdir = -1_I8 
@@ -2154,8 +2173,8 @@ module ggmod_gridgeneration2D
                         print *, 'ConstructCellsQuadTria: could not ' // & 
                             'find non-overlapping cell. Overlapping ' // &
                             'cells will be present in the grid...'
-                        print *, 'cell: ', i, 'line: ', j, 'first vertex ID: ', &
-                            l1%vert(1), 'first coordinates: ', l1%xv(1), l1%yv(1)
+                        print *, 'cell: ', i, 'line: ', j, 'near vertex ID: ', &
+                            l1%vert(k1), 'coordinates: ', l1%xv(k1), l1%yv(k1)
 
                         ! Reset to continue...
                         islegaltria1 = .true. 
@@ -2583,9 +2602,10 @@ module ggmod_gridgeneration2D
                 call WriteVertexData([k1, k2], [l1%xv(k1), l2%xv(k2)], &
                     [l1%xv(k1), l2%xv(k2)], 'kdata')
                 ! This shouldn't happen, both dot products negative
-                call gdErrorHandler('DetermineLegalCellsQuadTria: both ' // & 
+                print *, 'DetermineLegalCellsQuadTria: both ' // & 
                     'dot products are negative, check if tracing direction ' // & 
-                    'was correctly computed')
+                    'was correctly computed. Returning...'
+                return
             end if 
         end if 
 
@@ -2612,9 +2632,13 @@ module ggmod_gridgeneration2D
                 if (k1 > (n1-ncBLend-1) .and. .not. (k2 > (n2-ncBLend-1))) then 
                     ! Need to add triangle from k2:k2+1
                     doBLquad = .false. 
+                    islegalquad = .false.
+                    islegaltria2 = .false.
                 elseif (.not. (k1 > (n1-ncBLend-1)) .and. k2 > (n2-ncBLend-1)) then
                     ! Need to add triangle from k1:k1+1
                     doBLquad = .false. 
+                    islegalquad = .false.
+                    islegaltria1 = .false.
                 elseif ((k1 > (n1-ncBLend-1)) .and. (k2 > (n2-ncBLend-1))) then 
                     ! Ensure quad 
                     doBLquad = .true. 
@@ -3370,8 +3394,8 @@ module ggmod_gridgeneration2D
     end subroutine 
     
     ! Vertex distribution over faces
-    subroutine DistributeVerticesTopologicalMeshFaces(ggtmdata, topomesh, &
-        vd, facetypes)
+    subroutine DistributeVerticesTopologicalMeshFaces(grid, ggtmdata, topomesh, &
+        vd, GGTMlinerefiner, facetypes)
 
         ! Description
         !============
@@ -3383,17 +3407,21 @@ module ggmod_gridgeneration2D
         ! Declare variables
         !==================
         ! Arguments
+        class(GGGridUDT), intent(inout)         :: grid
         class(GGTMDataUDT)                      :: ggtmdata 
         class(TopomeshUDT), intent(in)          :: topomesh 
         class(VertexDistributor2DUDT), intent(in)   :: vd 
+        class(GGTMLineRefiner2DUDT), intent(in) :: GGTMlinerefiner
         integer(I8), intent(in)                 :: facetypes(:)
 
         ! Auxiliary
         integer(I8)                             :: nv 
+        integer(I8), allocatable, dimension(:)  :: tvID
+        logical, allocatable, dimension(:)      :: keepvert
         real(R8), allocatable, dimension(:)     :: dlcv 
 
         ! Loop
-        integer(I8)                             :: i 
+        integer(I8)                             :: i, k
 
         ! Initialize
         !===========
@@ -3421,8 +3449,27 @@ module ggmod_gridgeneration2D
                 
                 ! Add vertex coordinates
                 call facedata(i)%line%AddVertexCoordinates(dlcv)
-                !facedata%faceflags(i) = ConstructIntegerDynamicArray(spread())
-                !facedata(i).faceflags = ones(numel(facedata(i).vx)-1, size(face.flags, 2)).*face.flags(i, :);
+
+                ! Add IDs
+                tvID = [face%vert(i, 1), (k, k = grid%vert%ntot+1, grid%vert%ntot + size(dlcv)-2), face%vert(i, 2)]
+                call facedata(i)%line%AddVertexIDs(tvID)
+
+                ! Update line data
+                call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
+
+                ! Update vertex counter
+                grid%vert%ntot = grid%vert%ntot + size(dlcv) - 2
+
+                ! Update the refiner
+                call GGTMLineRefiner%UpdateRefinementOptions(&
+                    facedata(i)%linerefoptions, topomesh)
+
+                ! Refine
+                keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
+                call GGTMlinerefiner%Refine(facedata(i)%line, grid%vert%ntot, keepvert)
+
+                ! Update
+                call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
             end if 
         end do 
 
@@ -3433,8 +3480,8 @@ module ggmod_gridgeneration2D
     end subroutine 
 
     ! Vertex distribution over tubes
-    subroutine DistributeVerticesTopologicalMeshTubes(ggtmdata, topomesh, &
-        vd, field, facetypes)
+    subroutine DistributeVerticesTopologicalMeshTubes(grid, ggtmdata, topomesh, &
+        vd, GGTMlinerefiner, field, facetypes)
 
         ! Description
         !============
@@ -3451,20 +3498,23 @@ module ggmod_gridgeneration2D
         ! Declare variables
         !==================
         ! Arguments
+        class(GGGridUDT), intent(inout)         :: grid
         class(GGTMDataUDT)                      :: ggtmdata 
         class(TopomeshUDT), intent(in)          :: topomesh 
         class(VertexDistributor2DUDT), intent(in)    :: vd 
         class(DistributionFunctionUDT), intent(in)  :: field 
+        class(GGTMLineRefiner2DUDT), intent(in) :: GGTMlinerefiner
         integer(I8), intent(in)                 :: facetypes(:)
 
         ! Auxiliary
         integer(I8)                             :: nv, nfl, nflmax, &
             tfmax
-        integer(I8), allocatable, dimension(:)  :: tf
+        integer(I8), allocatable, dimension(:)  :: tf, tvID
+        logical, allocatable, dimension(:)      :: keepvert
         real(R8), allocatable, dimension(:)     :: xc, yc, dlcv
 
         ! Loop
-        integer(I8)                             :: i, j  
+        integer(I8)                             :: i, j, k  
 
         ! Initialize
         !===========
@@ -3477,27 +3527,6 @@ module ggmod_gridgeneration2D
             tubedata    => ggtmdata%tube    &
             )
 
-        ! Distribute over faces
-        !======================
-        do i = 1, face%ntot 
-            if (any(face%type(i) == facetypes)) then 
-                ! Unpack
-                xc = face%x(i)%Get()
-                yc = face%y(i)%Get()
-
-                ! Initialize
-                call facedata(i)%line%Initialize(xc, yc, face%fsID(i))
-
-                ! Distribute
-                call vd%DistributeOverField(xc, yc, field, nv,  ldistr=dlcv)
-                dlcv(1) = 0
-                dlcv(size(dlcv)) = facedata(i)%line%dllc(size(facedata(i)%line%dllc))
-
-                ! Add data
-                call facedata(i)%line%AddVertexCoordinates(dlcv)
-
-            end if 
-        end do 
 
         ! Determine tube distribution
         !============================
@@ -3508,6 +3537,50 @@ module ggmod_gridgeneration2D
             ! Initialize
             nfl = 0
             nflmax = 0
+            
+            
+
+            ! Loop for the first time to construct initial distribution
+            do k = 1, size(tf)
+                ! Unpack
+                j = tf(k)
+                xc = face%x(j)%Get()
+                yc = face%y(j)%Get()
+
+                ! Initialize
+                call facedata(j)%line%Initialize(xc, yc, face%fsID(j))
+
+                ! Update the refiner
+                call GGTMLineRefiner%UpdateRefinementOptions(&
+                    facedata(j)%linerefoptions, topomesh)
+
+                ! Distribute
+                call vd%DistributeOverField(xc, yc, field, nv,  ldistr=dlcv)
+                dlcv(1) = 0
+                dlcv(size(dlcv)) = facedata(j)%line%dllc(size(facedata(j)%line%dllc))
+
+                ! Add data
+                call facedata(j)%line%AddVertexCoordinates(dlcv)
+
+                ! Add vertex IDs
+                tvID = [face%vert(j, 1), (k, k = grid%vert%ntot+1, grid%vert%ntot + size(dlcv) - 2), face%vert(j, 2)]
+                call facedata(j)%line%AddVertexIDs(tvID)
+
+                ! Update data
+                call facedata(j)%line%UpdateLineData(topomesh, ggtmdata)
+
+                ! Update vertex ID
+                grid%vert%ntot = grid%vert%ntot + size(dlcv) - 2
+
+                ! Refine 
+                keepvert = IsTopomeshVert(facedata(j)%line%vert, topomesh)
+                call GGTMlinerefiner%Refine(facedata(j)%line, grid%vert%ntot, keepvert)
+
+                ! Update
+                call facedata(j)%line%UpdateLineData(topomesh, ggtmdata)
+    
+            end do 
+
 
             ! Loop
             do j = 1, size(tf)
@@ -3520,12 +3593,9 @@ module ggmod_gridgeneration2D
             end do 
 
             ! Add maximal distribution to tube
-            tubedata(i)%distributionface = tfmax
+            tubedata(i)%distributionface = tf(1)
 
         end do 
-
-        ! Overwrite
-        !==========
 
         ! Housekeeping
         !=============
@@ -3534,7 +3604,7 @@ module ggmod_gridgeneration2D
     end subroutine 
 
     ! Cell data
-    subroutine AddTopologicalMeshCellGriddingData(ggtmdata, topomesh, &
+    subroutine AddTopologicalMeshGriddingData(ggtmdata, topomesh, &
         fieldtracer, magneticField, options)
 
         ! Description
@@ -3586,38 +3656,21 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: tc, srf, erf, inderf, &
-            indsrf, tf, cind, nc, ntf, incr, nv, temp, minind, maxind, &
-            startind, endind, nfs, tfloc, tfc, nthf, ntlf, minindloc
+            indsrf, minind, maxind, minindloc
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
-            allIDs, s1, s2, polv, tf1, tf2, fsID, sortind, thf, tlf
-        integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
-            segc, vertexID
+            tf1, tf2
         real(R8)                                :: hfval, lfval, &
-            dhf1, dhf2, dlf1, dlf2, nxc, nyc, nxfv, nyfv, txf, tyf, &
-            ntxf, tmaxval
+            dhf1, dhf2, dlf1, dlf2
         real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
-            tcfv2val, tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint, &
-            nxf, nyf, nnf, tsegrc, tsegrrf, dlcv, newdlcv, newtfval
-        real(R8), allocatable, dimension(:, :)  :: segrrf, segrc, &
-            xint, yint
-        logical                                 :: isflremoved, &
-            isintersectremoved, issrf, doflip, changesign
+            tcfv2val
         logical, allocatable, dimension(:)      :: ishfface, islfface, &
-            ishfvert, iscontourfound, keepind, isdescending
-        type(ContourUDT), allocatable           :: tempc(:)
-        type(contourUDT)                        :: c1, c2
-        type(RealDynamicArrayUDT), allocatable, dimension(:, :)     :: &
-            xintda, yintda, segrrfda, segrcda
-        type(IntegerDynamicArrayUDT), allocatable, dimension(:, :)     :: &
-            segcda, segrfda
-        type(PolygonUDT), allocatable           :: polc(:)
+            ishfvert, isdescending
 
         ! Diagnostics
-        real(R8)                                :: tstart, tend 
 
         ! Loop
-        integer(I8)                             :: i, j, k, cc
+        integer(I8)                             :: i, j, k
 
         ! Initialize
         !===========
@@ -3632,9 +3685,6 @@ module ggmod_gridgeneration2D
             tube        => topomesh%tube,   &
             tubedata    => ggtmdata%tube    &
             )
-
-        ! Initialize
-        nv = topomesh%vert%ntot
 
         ! Determine cell boundaries
         !==========================
@@ -3813,6 +3863,113 @@ module ggmod_gridgeneration2D
             end do 
         end do 
 
+    
+        ! Add refinement data
+        !====================
+        call AddTopologicalMeshLineRefinementData(ggtmdata, &
+            topomesh, options)
+        
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine 
+
+    ! Topological mesh tube contours
+    subroutine TraceTopologicalMeshTubeContours(grid, ggtmdata, topomesh, &
+        fieldtracer, magneticField, options)
+
+        ! Description
+        !============
+        ! This routine traces the field contours using the field tracer
+        ! for each topological mesh tube. 
+
+        ! Notes
+        !======
+        ! Note 1: it is assumed that the tube cell and face data is
+        ! properly sorted (some sanity checks are done) and that the
+        ! initial distributions on the topomesh tube are set.
+
+        ! Note 2: in principle, only one intersection of a radial line
+        ! with a poloidal line should be found. However, in some cases
+        ! it may happen that there are multiple intersections or no 
+        ! intersections at all. In the first case, if there are still 
+        ! intersections with other radial lines, we simply take one 
+        ! of the intersections. This will likely lead to some 
+        ! approximation of the actual geometry (in case of boundary 
+        ! faces) or approximation of the radial line. Since we do this
+        ! consistently the same, it shouldn't yield issues for the 
+        ! final grid as long as the resulting geometry is not too extreme.
+        ! If no intersection is found with one of the radial lines of
+        ! the flux tube, the flux surface is removed from the grid and
+        ! not considered anymore. This may be the case if topological 
+        ! regions have not been determined accurately (e.g. at 
+        ! tangency points) and that therefore some contours do not 
+        ! intersect some radial lines. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGGridUDT), intent(inout)         :: grid
+        class(GGTMDataUDT)                      :: ggtmdata 
+        class(TopomeshUDT), intent(in)          :: topomesh 
+        class(ContourTracerUDT), intent(in)     :: fieldtracer 
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        type(GGOptionsUDT), intent(in)          :: options
+
+        ! Auxiliary
+        integer(I8)                             :: tc, srf, erf, inderf, &
+            indsrf, tf, cind, nc, ntf, incr, nv, temp, minind, maxind, &
+            startind, endind, nfs, tfloc, tfc, nthf, ntlf, minindloc
+        integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
+            tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
+            allIDs, s1, s2, polv, tf1, tf2, fsID, sortind, thf, tlf
+        integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
+            segc, vertexID, temp2
+        real(R8)                                :: hfval, lfval, &
+            dhf1, dhf2, dlf1, dlf2, nxc, nyc, nxfv, nyfv, txf, tyf, &
+            ntxf, tmaxval
+        real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
+            tcfv2val, tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint, &
+            nxf, nyf, nnf, tsegrc, tsegrrf, dlcv, newdlcv, newtfval
+        real(R8), allocatable, dimension(:, :)  :: segrrf, segrc, &
+            xint, yint
+        logical                                 :: isflremoved, &
+            isintersectremoved, issrf, doflip, changesign
+        logical, allocatable, dimension(:)      :: ishfface, islfface, &
+            ishfvert, iscontourfound, keepind, isdescending
+        type(ContourUDT), allocatable           :: tempc(:)
+        type(contourUDT)                        :: c1, c2
+        type(RealDynamicArrayUDT), allocatable, dimension(:, :)     :: &
+            xintda, yintda, segrrfda, segrcda
+        type(IntegerDynamicArrayUDT), allocatable, dimension(:, :)     :: &
+            segcda, segrfda
+        type(PolygonUDT), allocatable           :: polc(:)
+
+        ! Diagnostics
+        real(R8)                                :: tstart, tend 
+
+        ! Loop
+        integer(I8)                             :: i, j, k, cc
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert        => topomesh%vert,   &
+            vertdata    => ggtmdata%vert,   &
+            face        => topomesh%face,   &
+            facedata    => ggtmdata%face,   &
+            cell        => topomesh%cell,   &
+            celldata    => ggtmdata%cell,   &
+            tube        => topomesh%tube,   &
+            tubedata    => ggtmdata%tube    &
+            )
+
+        ! Initialize
+        nv = grid%vert%ntot
+
         ! Trace contours 
         !===============
         ! Initialize flux surface counter
@@ -3850,14 +4007,27 @@ module ggmod_gridgeneration2D
                 ! Cells
                 tubec = tubec(size(tubec):1:-1)
             elseif (tfloc /= 1) then 
-                ! Can simply shift
+                ! Can simply shift IF not closed! otherwise, we need to 
+                ! adjust the last face
                 print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
                     'not yet verified'
+                print *, tubef(tfloc), tf
+                print *, 'faces before shift: ', tubef
+                print *, 'cells before shift: ', tubec
                 ! Faces
-                tubef = [tubef(tfloc:size(tubef)), tubef(1:tfloc-1)]
+                if (tubef(1) /= tubef(size(tubef))) then 
+                    tubef = [tubef(tfloc:size(tubef)), tubef(1:tfloc-1)]
+                    tubec = [tubec(tfloc:size(tubec)), tubec(1:tfloc-1)]
+                else
+                    tubef = [tubef(tfloc:size(tubef)), tubef(1:tfloc-1)]
+                    tubef(size(tubef)) = tubef(1)
+                    tubec = [tubec(tfloc:size(tubec)), tubec(1:tfloc-1)]
+                end if 
+                print *, 'faces after shift: ', tubef
+                print *, 'cells after shift: ', tubec
 
                 ! Cells
-                tubec = [tubec(tfloc:size(tubec)), tubec(1:tfloc-1)]
+                
 
             else 
                 ! Nothing to do, move along
@@ -3906,9 +4076,9 @@ module ggmod_gridgeneration2D
                     isdescending(j) = .false. 
                 end if 
             end do 
-            if (isdescending(size(isdescending))) then 
-                isdescending(size(isdescending)-1) = .true.
-                isdescending(size(isdescending)) = .false.
+            if (.not. isdescending(size(isdescending))) then 
+                isdescending(size(isdescending)-1) = .false.
+                isdescending(size(isdescending)) = .true.
             end if 
             newdlcv = pack(newdlcv, isdescending)
             
@@ -4440,7 +4610,11 @@ module ggmod_gridgeneration2D
             ! Unpack intersections
             allocate(xint(nc, ntf), yint(nc, ntf), segc(nc, ntf), &
                 segrf(nc, ntf), segrc(nc, ntf), segrrf(nc, ntf), &
-                vertexID(nc, ntf), fsID(nc))
+                vertexID(nc, ntf), fsID(nc), temp2(nc, ntf))
+            !do j = 1, size(nint, 2)
+            !    temp2(:, j) = pack(nint(:, j), keepind)
+            !end do 
+            !nint = temp2
             cc = 0 
             do j = 1, size(nint, 1) 
                 ! Skip
@@ -4452,7 +4626,7 @@ module ggmod_gridgeneration2D
                     ! that is at the start of the contour IF it is a 
                     ! closed polygon! Otherwise, we just take the first one...
                     k = 1
-                    if (tempc(j)%isclosed) then 
+                    if (tempc(cc)%isclosed) then 
                         tsegrc = segrcda(j, k)%Get()
                         startind = findloc(tsegrc, 0.0_R8, 1)
                         if (startind == 0) then 
@@ -4520,13 +4694,14 @@ module ggmod_gridgeneration2D
                         ! should be exactly the same! Only intersection
                         ! coordinate should differ
                         tsegrc = segrcda(cc, ntf)%Get()
-                        endind = findloc(tsegrc, real(size(tempc(j)%x)-1, kind=R8), 1)
+                        endind = findloc(tsegrc, real(size(tempc(cc)%x)-1, kind=R8), 1)
                         if (endind == 0) then 
                             print *, 'AddToplogicalMeshCellGriddingData: ' // & 
                                 'closed contour does not intersect at ending point. ' // & 
                                 'contour: ', cc, 'tube: ', i 
                             print *, 'taking first intersection...'
                             endind = 1
+                            call Write2DPolygonData(tempc(cc)%x, tempc(cc)%y, 'l1')
                         end if 
 
                         ! Set vertex ID - should be the same as before
@@ -4635,28 +4810,32 @@ module ggmod_gridgeneration2D
                 ! Reconstruct line
                 call facedata(tubef(j))%line%AddVertexCoordinates([0.0_R8, &
                     tsegrrf, real(facedata(tubef(j))%line%nl-1, kind=R8)])
+
+                ! Add IDs
+                call facedata(tubef(j))%line%AddVertexIDs(&
+                    [face%vert(tubef(j), 1), vertexID(:, j), face%vert(tubef(j), 2)])
+
+                ! Update line data
+                call facedata(tubef(j))%line%UpdateLineData(topomesh, ggtmdata)
+                
             end do 
 
             ! Housekeeping
             deallocate(xint, yint, segc, segrf, segrc, segrrf, nint, &
                 vertexID, polc, xintda, yintda, segcda, segrfda, &
-                segrcda, segrrfda, fsID)
+                segrcda, segrrfda, fsID, temp2)
         end do 
 
-        ! Add refinement data
-        !====================
-        call AddTopologicalMeshCellLineRefinementData(ggtmdata, &
-            topomesh, options)
-        
         ! Housekeeping
         !=============
+        ! Update
+        grid%vert%ntot = nv
         end associate
 
-
-    end subroutine 
+    end subroutine
 
     ! Cell data for refining lines 
-    subroutine AddTopologicalMeshCellLineRefinementData(ggtmdata, topomesh, &
+    subroutine AddTopologicalMeshLineRefinementData(ggtmdata, topomesh, &
         options)
 
         ! Description
@@ -4670,7 +4849,10 @@ module ggmod_gridgeneration2D
         ! generator by changing the file data and changing the method 
         ! to 'existing' and defining the filepath of the data. Typically 
         ! one would generate an initial set of data (or an original grid) 
-        ! and later adjust that one. 
+        ! and later adjust that one.
+        
+        ! The refinement options here are propagated to any other 
+        ! topological mesh object (faces, tubes, ...).
 
         ! Declare variables
         !==================
@@ -4681,20 +4863,28 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:)  :: targetfaceIDs, &
-            vesselfaceIDs
+            vesselfaceIDs, tf, strikepointIDs, tv1, tv2
 
         ! Loop
-        integer(I8)                             :: i 
+        integer(I8)                             :: i, j
 
         ! Initialize
         !===========
         ! Associate for ease
         associate(&
-            celldata        => ggtmdata%cell)
+            celldata        => ggtmdata%cell,   &
+            facedata        => ggtmdata%face,   &
+            tubedata        => ggtmdata%tube,   &
+            tube            => topomesh%tube,   &
+            face            => topomesh%face,   &
+            vert            => topomesh%vert)
 
         ! Check if we simply read in the exisintg file
         if (options%readexistingrefdata) then 
-            call ReadTopologicalMeshCellLineRefinementData(ggtmdata, options%refdatafile)
+            ! Read
+            call ReadTopologicalMeshLineRefinementData(ggtmdata, options%refdatafile)
+
+            ! Propagate
             return
         end if 
 
@@ -4707,9 +4897,12 @@ module ggmod_gridgeneration2D
         do i = 1, size(celldata)
             call celldata(i)%linerefoptions%Initialize()
         end do
+        do i = 1, size(tubedata)
+            call tubedata(i)%linerefoptions%Initialize()
+        end do 
         
-        ! Boundary layer 
-        !---------------
+        ! Boundary layer, poloidal
+        !-------------------------
         ! Vessel faces
         if (options%refBLdovessel) then 
             ! Get all vessel boundaries of the topological mesh
@@ -4770,10 +4963,252 @@ module ggmod_gridgeneration2D
             end do 
         end if 
 
+        ! Boundary layer, radial
+        !-----------------------
+        ! Target faces (will overwrite existing vessel faces as intended)
+        if (options%radrefBLdosp) then 
+            ! Get all target boundaries of the topological mesh
+            targetfaceIDs = topomesh%GetTargetFaceIDs()
+
+            ! Get all strike points of the topological mesh
+            strikepointIDs = topomesh%GetStrikePointIDs()
+
+            ! Check for each tube ('start' is the first boundary, 'end'
+            ! is the second) 
+            do i = 1, tube%ntot
+                ! Get first and second tube boundary vertices
+                tv1 = tube%GetBndVert(i, 1_I8)
+                tv2 = tube%GetBndVert(i, 2_I8)
+
+                ! Check if any are strike point IDs
+                do j = 1, size(tv1)
+                    if (any(tv1(j) == strikepointIDs) .or. vert%type(tv1(j)) == TMvertexsaddleID) then 
+                        ! Do boundary layer at start
+                        tubedata(i)%linerefoptions%doBLstart = .true. 
+                    end if 
+                end do 
+                do j = 1, size(tv2)
+                    if (any(tv2(j) == strikepointIDs) .or. vert%type(tv2(j)) == TMvertexsaddleID) then 
+                        ! Do boundary layer at start
+                        tubedata(i)%linerefoptions%doBLend = .true. 
+                    end if 
+                end do 
+
+                ! Add data anyway
+                tubedata(i)%linerefoptions%ncBLstart = options%radrefBLncsp
+                tubedata(i)%linerefoptions%dlBLstart = options%radrefBLdlsp
+                tubedata(i)%linerefoptions%ncBLend = options%radrefBLncsp
+                tubedata(i)%linerefoptions%dlBLend = options%radrefBLdlsp(&
+                    size(options%radrefBLdlsp):1:-1)
+
+            end do 
+        end if 
+
+        ! Propagate options to faces
+        !===========================
+        call PropagateTopologicalMeshLineRefinementData(ggtmdata, topomesh)
+
         ! Write out options
         !==================
-        call WriteTopologicalMeshCellLineRefinementData(ggtmdata, 'refdataTMcells')
+        call WriteTopologicalMeshLineRefinementData(ggtmdata, 'refdataTM')
 
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Topomesh refinement data propagation
+    subroutine PropagateTopologicalMeshLineRefinementData(ggtmdata, topomesh)
+
+        ! Description
+        !============
+        ! This routine propagates the topological mesh data from cells
+        ! and tubes to faces (and, if required, other objects of the 
+        ! topomesh)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT), intent(inout)       :: ggtmdata 
+        class(TopomeshUDT), intent(in)          :: topomesh
+
+        ! Auxiliary
+        integer(I8)                             :: nhf, nlf
+        integer(I8), allocatable, dimension(:)  :: tfc, tv1, tv2, tf
+
+        
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Associate for ease
+        associate(&
+            celldata        => ggtmdata%cell,   &
+            tubedata        => ggtmdata%tube,   &
+            facedata        => ggtmdata%face,   &
+            cell            => topomesh%cell,   &
+            face            => topomesh%face,   &
+            tube            => topomesh%tube,   &
+            vert            => topomesh%vert)
+
+        ! Initialize
+        do i = 1, size(facedata)
+            call facedata(i)%linerefoptions%Initialize()
+        end do
+
+        ! Propagate to faces
+        !===================
+        ! Boundary layer data (cells)
+        !----------------------------
+        ! Only need to propagate to aligned faces at start/end of cell
+        do i = 1, size(celldata)
+            ! Associate
+            associate(&
+                refoptions  => celldata(i)%linerefoptions,  & 
+                hf      => celldata(i)%hffaces, &
+                lf      => celldata(i)%lffaces, &
+                srf     => celldata(i)%srf,     &
+                erf     => celldata(i)%erf      &
+                )
+
+            ! Initialize
+            nhf = size(hf)
+            nlf = size(lf)
+
+            ! Check boundary layer at cell start
+            if (refoptions%doBLstart) then 
+                ! Check hf face
+                if (nhf > 0) then 
+                    if (any(face%vert(hf(1), 1) == face%vert(srf, :))) then 
+                        ! Set start
+                        facedata(hf(1))%linerefoptions%doBLstart = refoptions%doBLstart
+                        facedata(hf(1))%linerefoptions%ncBLstart = refoptions%ncBLstart
+                        facedata(hf(1))%linerefoptions%dlBLstart = refoptions%dlBLstart
+                    else
+                        ! Set end
+                        facedata(hf(1))%linerefoptions%doBLend = refoptions%doBLstart
+                        facedata(hf(1))%linerefoptions%ncBLend = refoptions%ncBLstart
+                        facedata(hf(1))%linerefoptions%dlBLend = refoptions%dlBLstart
+                    end if 
+                end if
+
+                ! Check lf face
+                if (nlf > 0) then 
+                    if (any(face%vert(lf(1), 1) == face%vert(srf, :))) then 
+                        ! Set start
+                        facedata(lf(1))%linerefoptions%doBLstart = refoptions%doBLstart
+                        facedata(lf(1))%linerefoptions%ncBLstart = refoptions%ncBLstart
+                        facedata(lf(1))%linerefoptions%dlBLstart = refoptions%dlBLstart
+                    else
+                        ! Set end
+                        facedata(lf(1))%linerefoptions%doBLend = refoptions%doBLstart
+                        facedata(lf(1))%linerefoptions%ncBLend = refoptions%ncBLstart
+                        facedata(lf(1))%linerefoptions%dlBLend = refoptions%dlBLstart
+                    end if 
+                end if 
+            end if 
+
+            ! Check boundary layer at cell end
+            if (refoptions%doBLend) then 
+                ! Check hf face
+                if (nhf > 0) then 
+                    if (any(face%vert(hf(nhf), 1) == face%vert(erf, :))) then 
+                        ! Set start
+                        facedata(hf(nhf))%linerefoptions%doBLstart = refoptions%doBLend
+                        facedata(hf(nhf))%linerefoptions%ncBLstart = refoptions%ncBLend
+                        facedata(hf(nhf))%linerefoptions%dlBLstart = refoptions%dlBLend
+                    else
+                        ! Set end
+                        facedata(hf(nhf))%linerefoptions%doBLend = refoptions%doBLend
+                        facedata(hf(nhf))%linerefoptions%ncBLend = refoptions%ncBLend
+                        facedata(hf(nhf))%linerefoptions%dlBLend = refoptions%dlBLend
+                    end if 
+                end if
+
+                ! Check lf face
+                if (nlf > 0) then 
+                    if (any(face%vert(lf(nlf), 1) == face%vert(erf, :))) then 
+                        ! Set start
+                        facedata(lf(nlf))%linerefoptions%doBLstart = refoptions%doBLend
+                        facedata(lf(nlf))%linerefoptions%ncBLstart = refoptions%ncBLend
+                        facedata(lf(nlf))%linerefoptions%dlBLstart = refoptions%dlBLend
+                    else
+                        ! Set end
+                        facedata(lf(nlf))%linerefoptions%doBLend = refoptions%doBLend
+                        facedata(lf(nlf))%linerefoptions%ncBLend = refoptions%ncBLend
+                        facedata(lf(nlf))%linerefoptions%dlBLend = refoptions%dlBLend
+                    end if 
+                end if 
+            end if 
+
+            ! Housekeeping
+            end associate
+        end do 
+
+        ! Boundary layer data (tubes)
+        !----------------------------
+        ! Only need to propagate to radial faces of tubes
+        do i = 1, size(tubedata)
+            ! Associate for ease
+            associate(refoptions    => tubedata(i)%linerefoptions)
+            
+            ! Get tube faces
+            tf = tube%GetFace(i)
+
+            ! Get tube boundary vertices
+            tv1 = tube%GetBndVert(i, 1_I8)
+            tv2 = tube%GetBndVert(i, 2_I8)
+
+            ! For each face, check if BL should be applied
+            if (refoptions%doBLstart) then 
+                do j = 1, size(tf)
+                    ! Check face vertices
+                    if (any(face%vert(tf(j), 1) == tv1)) then 
+                        facedata(tf(j))%linerefoptions%doBLstart = .true. 
+                        facedata(tf(j))%linerefoptions%ncBLstart = refoptions%ncBLstart
+                        facedata(tf(j))%linerefoptions%dlBLstart = refoptions%dlBLstart
+                    elseif (any(face%vert(tf(j), 2) == tv1)) then
+                        facedata(tf(j))%linerefoptions%doBLend = .true. 
+                        facedata(tf(j))%linerefoptions%ncBLend = refoptions%ncBLstart
+                        facedata(tf(j))%linerefoptions%dlBLend = refoptions%dlBLstart(size(refoptions%dlBLstart):1:-1)
+                    else
+                        ! This shouldn't happen
+                        call gdErrorHandler('PropagateTopologicalMeshLineRefinementData: ' // & 
+                            'radial face of tube does not have a vertex in common ' // & 
+                            'with tube boundary vertices - this is a bug')
+                    end if 
+                end do 
+            end if 
+
+            ! For each face, check if BL should be applied
+            if (refoptions%doBLend) then 
+                do j = 1, size(tf)
+                    ! Check face vertices
+                    if (any(face%vert(tf(j), 1) == tv2)) then 
+                        facedata(tf(j))%linerefoptions%doBLstart = .true. 
+                        facedata(tf(j))%linerefoptions%ncBLstart = refoptions%ncBLend
+                        facedata(tf(j))%linerefoptions%dlBLstart = refoptions%dlBLend(size(refoptions%dlBLend):1:-1)
+                    elseif (any(face%vert(tf(j), 2) == tv2)) then
+                        facedata(tf(j))%linerefoptions%doBLend = .true. 
+                        facedata(tf(j))%linerefoptions%ncBLend = refoptions%ncBLend
+                        facedata(tf(j))%linerefoptions%dlBLend = refoptions%dlBLend
+                    else
+                        ! This shouldn't happen
+                        call gdErrorHandler('PropagateTopologicalMeshLineRefinementData: ' // & 
+                            'radial face of tube does not have a vertex in common ' // & 
+                            'with tube boundary vertices - this is a bug')
+                    end if 
+                end do 
+            end if 
+
+
+            ! Housekeeping
+            end associate
+
+        end do 
+        
         ! Housekeeping
         !=============
         end associate
@@ -5553,8 +5988,8 @@ module ggmod_gridgeneration2D
     ! Refiner initialization
     function InitializeGGTMLineRefiner(topomesh, &
         magneticField, vessel, fieldtracer, boundarytracer, &
-        poloidalvertexdistributor, radialvertexdistributor, options)& 
-        result(GGTMlinerefiner)
+        poloidalvertexdistributor, radialvertexdistributor, options, &
+        direction) result(GGTMlinerefiner)
 
         ! Description
         !============
@@ -5575,9 +6010,11 @@ module ggmod_gridgeneration2D
         class(VertexDistributor2DUDT), intent(in)      :: &
             poloidalvertexdistributor, radialvertexdistributor
         class(GGTMLineRefiner2DUDT), allocatable    :: GGTMlinerefiner
+        character(*), intent(in)                :: direction
 
         ! Auxiliary
-        integer(I8), allocatable, dimension(:, :)   :: labels(:, :)
+        integer(I8), allocatable, dimension(:)      :: tv
+        integer(I8), allocatable, dimension(:, :)   :: labels
         logical, allocatable, dimension(:)          :: includevesselvertex
         real(R8), allocatable, dimension(:)         :: xp, yp, &
             valpLmin, valpLmax, decaylength, xv, yv, tempLmin, tempLmax, &
@@ -5621,84 +6058,120 @@ module ggmod_gridgeneration2D
 
             ! Check how to generate min and max distributions - note: 
             ! currently, we only do point-based distribution methods
+
+            select case (direction)
+
+            case ('poloidal')
         
-            ! Check which points to include
-            allocate(xp(0), yp(0), valpLmin(0), valpLmax(0), decaylength(0))
+                ! Check which points to include
+                allocate(xp(0), yp(0), valpLmin(0), valpLmax(0), decaylength(0))
 
-            ! Include x-point regions?
-            if (options%refLBdoxp) then 
-                ! Add all x-points
-                do i = 1, topomesh%vert%ntot 
-                    if (topomesh%vert%type(i) == TMvertexsaddleID) then 
-                        xp = [xp, topomesh%vert%x(i)]
-                        yp = [yp, topomesh%vert%y(i)]
-                        valpLmin = [valpLmin, options%refLBLminxp]
-                        valpLmax = [valpLmax, options%refLBLmaxxp]
-                        decaylength = [decaylength, options%refLBdecaylengthxp]
-                    end if 
-                end do 
-            end if 
+                ! Include x-point regions?
+                if (options%refLBdoxp) then 
+                    ! Add all x-points
+                    do i = 1, topomesh%vert%ntot 
+                        if (topomesh%vert%type(i) == TMvertexsaddleID) then 
+                            xp = [xp, topomesh%vert%x(i)]
+                            yp = [yp, topomesh%vert%y(i)]
+                            valpLmin = [valpLmin, options%refLBLminxp]
+                            valpLmax = [valpLmax, options%refLBLmaxxp]
+                            decaylength = [decaylength, options%refLBdecaylengthxp]
+                        end if 
+                    end do 
+                end if 
 
-            ! Include vessel vertices (e.g. targets)?
-            if (options%refLBdovessel) then 
-                ! Get labels & coordinates
-                call vessel%polygonset%GetLabels(labels)
-                call vessel%polygonset%GetVertices(xv, yv)
-                allocate(includevesselvertex(size(xv)), tempLmin(size(xv)), &
-                    tempLmax(size(yv)), tempdecaylength(size(xv)))
-                includevesselvertex = .false. 
-                tempLmin = 0
-                tempLmax = 0
-                tempdecaylength = 0
+                ! Include vessel vertices (e.g. targets)?
+                if (options%refLBdovessel) then 
+                    ! Get labels & coordinates
+                    call vessel%polygonset%GetLabels(labels)
+                    call vessel%polygonset%GetVertices(xv, yv)
+                    allocate(includevesselvertex(size(xv)), tempLmin(size(xv)), &
+                        tempLmax(size(yv)), tempdecaylength(size(xv)))
+                    includevesselvertex = .false. 
+                    tempLmin = 0
+                    tempLmax = 0
+                    tempdecaylength = 0
 
-                ! Add per vessel structure
-                do i = 1, size(options%refLBstructureIDs)
-                    ! Unpack ID
-                    associate(tID       => options%refLBstructureIDs(i))
+                    ! Add per vessel structure
+                    do i = 1, size(options%refLBstructureIDs)
+                        ! Unpack ID
+                        associate(tID       => options%refLBstructureIDs(i))
 
-                    ! Check vertices
-                    where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) 
-                        includevesselvertex = .true. 
-                        tempLmin = options%refLBLminstructure(i)
-                        tempLmax = options%refLBLmaxstructure(i)
-                        tempdecaylength = options%refLBdecaylengthstructure(i)
-                    end where 
-        
-                    ! Housekeeping
-                    end associate
-                end do 
+                        ! Check vertices
+                        where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) 
+                            includevesselvertex = .true. 
+                            tempLmin = options%refLBLminstructure(i)
+                            tempLmax = options%refLBLmaxstructure(i)
+                            tempdecaylength = options%refLBdecaylengthstructure(i)
+                        end where 
+            
+                        ! Housekeeping
+                        end associate
+                    end do 
 
-                ! Add per separate vessel vertex ID
-                do i = 1, size(options%refLBvertIDs)
-                    ! Unpack ID
-                    associate(tID       => options%refLBvertIDs(i))
-        
-                    ! Check vertices
-                    where( (labels(:, 3) == tID)) 
-                        includevesselvertex = .true. 
-                        tempLmin = options%refLBLminvert(i)
-                        tempLmax = options%refLBLmaxvert(i)
-                        tempdecaylength = options%refLBdecaylengthvert(i)
-                    end where
-        
-                    ! Housekeeping
-                    end associate
-                end do
+                    ! Add per separate vessel vertex ID
+                    do i = 1, size(options%refLBvertIDs)
+                        ! Unpack ID
+                        associate(tID       => options%refLBvertIDs(i))
+            
+                        ! Check vertices
+                        where( (labels(:, 3) == tID)) 
+                            includevesselvertex = .true. 
+                            tempLmin = options%refLBLminvert(i)
+                            tempLmax = options%refLBLmaxvert(i)
+                            tempdecaylength = options%refLBdecaylengthvert(i)
+                        end where
+            
+                        ! Housekeeping
+                        end associate
+                    end do
 
-                ! Include
-                xp = [xp, pack(xv, includevesselvertex)]
-                yp = [yp, pack(yv, includevesselvertex)]
-                valpLmin = [valpLmin, pack(tempLmin, includevesselvertex)]
-                valpLmax = [valpLmax, pack(tempLmax, includevesselvertex)]
-                decaylength = [decaylength, pack(tempdecaylength, includevesselvertex)]
+                    ! Include
+                    xp = [xp, pack(xv, includevesselvertex)]
+                    yp = [yp, pack(yv, includevesselvertex)]
+                    valpLmin = [valpLmin, pack(tempLmin, includevesselvertex)]
+                    valpLmax = [valpLmax, pack(tempLmax, includevesselvertex)]
+                    decaylength = [decaylength, pack(tempdecaylength, includevesselvertex)]
 
-            end if 
+                end if 
 
-            ! Construct distribution functions
-            call Lmin%Initialize(xp, yp, valpLmin, options%refLBLmininf, &
-                decaylength)
-            call Lmax%Initialize(xp, yp, valpLmax, options%refLBLmaxinf, &
-                decaylength)
+                ! Construct distribution functions
+                call Lmin%Initialize(xp, yp, valpLmin, options%refLBLmininf, &
+                    decaylength)
+                call Lmax%Initialize(xp, yp, valpLmax, options%refLBLmaxinf, &
+                    decaylength)
+
+            case ('radial') 
+
+                ! Check which points to include
+                allocate(xp(0), yp(0), valpLmin(0), valpLmax(0), decaylength(0))
+
+                ! Include x-point regions?
+                if (options%radrefLBdosp) then 
+                    ! Add all strike points
+                    tv = topomesh%GetStrikePointIDs()
+                    xp = [xp, topomesh%vert%x(tv)]
+                    yp = [yp, topomesh%vert%y(tv)]
+                    valpLmin = [valpLmin, spread(options%radrefLBLminsp, 1, size(tv))]
+                    valpLmax = [valpLmax, spread(options%radrefLBLmaxsp, 1, size(tv))]
+                    decaylength = [decaylength, spread(options%radrefLBdecaylengthsp, 1, size(tv))]
+
+                end if
+
+                ! Construct distribution functions
+                call Lmin%Initialize(xp, yp, valpLmin, options%radrefLBLmininf, &
+                    decaylength)
+                call Lmax%Initialize(xp, yp, valpLmax, options%radrefLBLmaxinf, &
+                    decaylength)
+
+            case default
+
+                call gdErrorHandler('InitializeGGTMLineRefiner: direction ' // & 
+                    ' "' // direction // '" not implemented')
+
+            end select
+
+            
 
             ! Construct refiner
             GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic')
@@ -5714,17 +6187,17 @@ module ggmod_gridgeneration2D
     end function 
 
     ! Refiner option updating, dummy
-    subroutine UpdateRefinementOptionsNoRef(refiner, celldata, topomesh)
+    subroutine UpdateRefinementOptionsNoRef(refiner, refoptions, topomesh)
 
         ! Nothing to do here, move along
-        class(GGTMLineRefinerNoRefUDT)          :: refiner 
-        type(GGTMCellDataUDT), intent(in)       :: celldata 
-        type(TopomeshUDT), intent(in)           :: topomesh
+        class(GGTMLineRefinerNoRefUDT)                      :: refiner 
+        type(GGTMFieldlineRefinementOptionsUDT), intent(in) :: refoptions 
+        type(TopomeshUDT), intent(in)                       :: topomesh
 
     end subroutine
 
     ! Refiner option updating, length-based
-    subroutine UpdateRefinementOptionsLB(refiner, celldata, topomesh)
+    subroutine UpdateRefinementOptionsLB(refiner, refoptions, topomesh)
 
         ! Description
         !============
@@ -5737,19 +6210,18 @@ module ggmod_gridgeneration2D
         ! Declare variables
         !==================
         ! Arguments
-        class(GGTMLineRefinerLB2DUDT)           :: refiner 
-        type(GGTMCellDataUDT), intent(in)       :: celldata 
-        type(TopomeshUDT), intent(in)           :: topomesh
+        class(GGTMLineRefinerLB2DUDT)                       :: refiner 
+        type(GGTMFieldlineRefinementOptionsUDT), intent(in) :: refoptions 
+        type(TopomeshUDT), intent(in)                       :: topomesh
 
         ! Update boundary layer
         !======================
-        ! Propagate options
-        refiner%doBLstart   = celldata%linerefoptions%doBLstart 
-        refiner%doBLend     = celldata%linerefoptions%doBLend 
-        refiner%ncBLstart   = celldata%linerefoptions%ncBLstart 
-        refiner%ncBLend     = celldata%linerefoptions%ncBLend 
-        refiner%dlBLstart   = celldata%linerefoptions%dlBLstart 
-        refiner%dlBLend     = celldata%linerefoptions%dlBLend 
+        refiner%doBLstart   = refoptions%doBLstart 
+        refiner%doBLend     = refoptions%doBLend 
+        refiner%ncBLstart   = refoptions%ncBLstart 
+        refiner%ncBLend     = refoptions%ncBLend 
+        refiner%dlBLstart   = refoptions%dlBLstart 
+        refiner%dlBLend     = refoptions%dlBLend 
 
     end subroutine
 
@@ -7967,7 +8439,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! TM refinement data writing
-    subroutine WriteTopologicalMeshCellLineRefinementData(ggtmdata, &
+    subroutine WriteTopologicalMeshLineRefinementData(ggtmdata, &
         filename)
 
         ! Description
@@ -7979,6 +8451,14 @@ module ggmod_gridgeneration2D
 
         ! <header> 
         ! 'celldata'
+        ! <cell%ntot>
+        ! 'ID, doBLstart, doBLend, ncBLstart, ncBLend'
+        ! <the above for each cell per line>
+        ! 'dlBLstart' (in order of celldata, one row per cell)
+        ! <dlBLstart>
+        ! 'dlBLend' (in order of celldata, one row per cell)
+        ! <dlBLend>
+        ! 'tubedata'
         ! <cell%ntot>
         ! 'ID, doBLstart, doBLend, ncBLstart, ncBLend'
         ! <the above for each cell per line>
@@ -8008,6 +8488,7 @@ module ggmod_gridgeneration2D
         !===========
         ! Unpack
         associate(&
+            t       => ggtmdata%tube,   & 
             c       => ggtmdata%cell    &
         )
 
@@ -8054,6 +8535,40 @@ module ggmod_gridgeneration2D
             ! Write header
             write(fu, *) c(i)%linerefoptions%dlBLend
         end do
+
+        ! Write scalar tube data
+        !=======================
+        ! Write header
+        write(fu, *) 'tubedata'
+
+        ! Write total number of tubes
+        write(fu, *) size(t)
+
+        ! Write scalar data
+        write(fu, *) 'ID, doBLstart, doBLend, ncBLstart, ncBLend'
+        do i = 1, size(t)
+            associate(r     => t(i)%linerefoptions)
+            write(fu, *) i, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend 
+            end associate
+        end do
+
+        ! write array tube data
+        !======================
+        ! Write boundary layer data
+        !--------------------------
+        ! Write dlBLstart
+        write (fu, *) 'dlBLstart'
+        do i = 1, size(t)
+            ! Write header
+            write(fu, *) t(i)%linerefoptions%dlBLstart
+        end do
+
+        ! Write dlBLstart
+        write (fu, *) 'dlBLend'
+        do i = 1, size(t)
+            ! Write header
+            write(fu, *) t(i)%linerefoptions%dlBLend
+        end do
         
         ! Housekeeping
         !=============
@@ -8063,7 +8578,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! TM refinement data reading
-    subroutine ReadTopologicalMeshCellLineRefinementData(ggtmdata, &
+    subroutine ReadTopologicalMeshLineRefinementData(ggtmdata, &
         filename)
 
         ! Description
@@ -8097,7 +8612,7 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer                                 :: fu
-        integer(I8)                             :: nc, cID
+        integer(I8)                             :: nc, cID, nt
         real(R8), allocatable, dimension(:)     :: temp
         character(:), allocatable               :: thisline
         logical                                 :: reachedeof
@@ -8109,6 +8624,7 @@ module ggmod_gridgeneration2D
         !===========
         ! Unpack
         associate(&
+            t       => ggtmdata%tube,   &
             c       => ggtmdata%cell    &
         )
 
@@ -8118,6 +8634,8 @@ module ggmod_gridgeneration2D
         open (action='read', file=trim(filename), newunit=fu, &
              status='unknown')
 
+        ! Read cell data
+        !===============
         ! Read header
         call ReadUntilFound(fu, 'celldata', reachedeof)
         if (reachedeof) then 
@@ -8138,7 +8656,7 @@ module ggmod_gridgeneration2D
 
         
         ! Read scalar cell data
-        !======================
+        !----------------------
         ! Read header
         call ReadSingleLine(fu, thisline, reachedeof)
 
@@ -8150,9 +8668,7 @@ module ggmod_gridgeneration2D
         end do
 
         ! Read array cell data
-        !=====================
-        ! Read boundary layer data
-        !-------------------------
+        !---------------------
         ! Read dlBLstart
         call ReadSingleLine(fu, thisline, reachedeof)
         do i = 1, size(c)
@@ -8168,6 +8684,59 @@ module ggmod_gridgeneration2D
             allocate(temp(c(i)%linerefoptions%ncBLend))
             read(fu, *) temp 
             c(i)%linerefoptions%dlBLend = temp 
+            deallocate(temp)
+        end do
+
+        ! Read tube data
+        !===============
+        ! Read header
+        call ReadUntilFound(fu, 'tubedata', reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadTopologicalMeshCellLineRefinementData: ' // & 
+                'could not find tube data in file')
+        end if 
+
+        ! Read number of tubes - just for check, since celldata should 
+        ! be allocated already
+        read(fu, *) nt
+
+        ! Check
+        if (nc /= size(t)) then 
+            call gdErrorHandler('ReadTopologicalMeshCellLineRefinementData: ' // & 
+                'tube data does not have the same dimensions as current ' // & 
+                'tube data, check input')
+        end if 
+
+        
+        ! Read scalar tube data
+        !----------------------
+        ! Read header
+        call ReadSingleLine(fu, thisline, reachedeof)
+
+        ! Read scalar data
+        do i = 1, size(t)
+            associate(r     => t(i)%linerefoptions)
+            read(fu, *) cID, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend 
+            end associate
+        end do
+
+        ! Read array tube data
+        !---------------------
+        ! Read dlBLstart
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, size(t)
+            allocate(temp(t(i)%linerefoptions%ncBLstart))
+            read(fu, *) temp 
+            t(i)%linerefoptions%dlBLstart  = temp 
+            deallocate(temp)
+        end do
+
+        ! Read dlBLstart
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, size(t)
+            allocate(temp(t(i)%linerefoptions%ncBLend))
+            read(fu, *) temp 
+            t(i)%linerefoptions%dlBLend = temp 
             deallocate(temp)
         end do
         

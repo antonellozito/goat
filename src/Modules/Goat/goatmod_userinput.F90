@@ -490,7 +490,7 @@ module goatmod_userinput
         !                           'lengthbased' (ref based on min and
         !                           max length distributions) 
         
-        ! Refinement options for lengthbased option (this is currently 
+        ! (poloidal) Refinement options for lengthbased option (this is currently 
         ! based on exponential decay functions defined in points):
         ! - refLBlmininf    minimal length at infinity
         ! - refLBLmaxinf    maximal length at infinity
@@ -511,15 +511,31 @@ module goatmod_userinput
         ! - refBLdovessel   do BL refinement at far vessel boundaries
         ! - refBLnctarget   number of desired boundary layer cells at 
         !                   the target (similar for vessel)
-        ! - refBLdltarget   desired lengths for these cells (if only    
-        !                   single value, assumed all cells same size)
+        ! - refBLdltarget   desired lengths for these cells 
+
+        ! (Radial) refinement options for lengthbased refiner:
+        !   mostly the same refinement options as the poloidal direction,
+        !   but names now have 'rad' in front. 
+        ! - radrefLBlmininf    minimal length at infinity (in [m]!)
+        ! - radrefLBLmaxinf    maximal length at infinity
+        ! - radrefLBdosp:      refine near strike points (x-points are added)
+        ! - radrefLBLminsp     minimal length on strike point
+        ! - radrefLBLmaxsp     maximal length on strike point
+        ! - radrefLBdecaylengthsp  decaylength on strike point (larger - wider influence)
+        
+        ! - radrefBLdosp    do BL refinement at strike points
+        ! - radrefBLncsp   number of desired boundary layer cells at 
+        !                   the strike point 
+        ! - radrefBLdlsp   desired lengths for these cells
+
         
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
             refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
-            refBLdovessel, readexistingrefdata
+            refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp
         integer(I8)                 :: gcresx, gcresy, &
-            verbosity, orthtracernsteps, refBLnctarget, refBLncvessel
+            verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
+            radrefBLncsp
         integer(I8), allocatable, dimension(:)  :: refLBstructureIDs, &
             refLBvertIDs
         real(R8)                    :: vdpdfacelength, vdpddecaylengthplf, &
@@ -528,15 +544,17 @@ module goatmod_userinput
             vdrddecaylength, vdrddensityatseparatrix, vdrddensityatinf, &
             remfspsitol, remfspsirattol, rembndtriaminangle, &
             remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
-            refLBLmaxxp, refLBdecaylengthxp, orthtracerstep
+            refLBLmaxxp, refLBdecaylengthxp, orthtracerstep, &
+            radrefLBLmininf, radrefLBLmaxinf, radrefLBLminsp, &
+            radrefLBLmaxsp, radrefLBdecaylengthsp
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
             vdpdval, refLBLminstructure, refLBLminvert, refLBLmaxstructure, &
             refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert, &
-            refBLdltarget, refBLdlvessel
+            refBLdltarget, refBLdlvessel, radrefBLdlsp
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
             cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
-            refdatafile
+            refdatafile, radrefmeth
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -854,9 +872,9 @@ module goatmod_userinput
         options%cellconstructionmethod  = 'quads_triangles'
         options%TMcellgriddingorder = 'sequential'
         options%readexistingrefdata = .false. 
-        options%refdatafile         = './output/refdataTMcells.dat'
+        options%refdatafile         = './output/refdataTM.dat'
 
-        ! Refinement options ('lengthbased' refinement options only)
+        ! Poloidal refinement options ('lengthbased' refinement options only)
         options%refmeth         = 'no'      
         options%refLBdoxp       = .true. 
         options%refLBdovessel   = .false. 
@@ -869,8 +887,17 @@ module goatmod_userinput
             options%refLBdecaylengthvert(0), options%refLBstructureIDs(0), &
             options%refLBvertIDs(0), options%refLBLminstructure(0), &
             options%refLBLmaxstructure(0))
+        
+        ! Radial refinement options
+        options%radrefmeth         = 'no'      
+        options%radrefLBdosp       = .true. 
+        options%radrefLBLmininf    = 0.0_R8
+        options%radrefLBLmaxinf    = 100_R8 ! some absurd big number
+        options%radrefLBLminsp     = 0.0_R8
+        options%radrefLBLmaxsp     = 100_R8 ! some absurd big number  
+        options%radrefLBdecaylengthsp = 0.1_R8 
 
-        ! Boundary layer options
+        ! Poloidal boundary layer options
         options%refBLdotarget   = .false. 
         options%refBLdovessel   = .false. 
         options%refBLnctarget   = 0
@@ -880,6 +907,13 @@ module goatmod_userinput
         options%refBLdltarget   = 0.001_R8 ! in m 
         options%refBLdlvessel   = 0.01_R8 ! in m 
 
+        ! Radial boundary layer options
+        options%radrefBLdosp    = .false. 
+        options%radrefBLncsp    = 0
+        allocate(options%radrefBLdlsp(options%radrefBLncsp))
+        options%radrefBLdlsp       = 0.001_R8 ! in m 
+
+        ! Streamline tracer options
         options%orthtracerstep = 0.5
         options%orthtracernsteps = 2000
 
@@ -1561,12 +1595,14 @@ module goatmod_userinput
         ! Refinement options (general)
         field = 'gg.ref.meth'
         call ExtractOptionValueCharacter(fid, field, options%refmeth) 
+        field = 'gg.radref.meth'
+        call ExtractOptionValueCharacter(fid, field, options%radrefmeth) 
         field = 'gg.ref.readexistingrefdata'
         call ExtractOptionValueLogical0D(fid, field, options%readexistingrefdata) 
         field = 'gg.ref.refdatafile'
         call ExtractOptionValueCharacter(fid, field, options%refdatafile) 
 
-        ! Length-based refinement options
+        ! Length-based refinement options (poloidal)
         field  = 'gg.ref.LB.doxp'
         call ExtractOptionValueLogical0D(fid, field, options%refLBdoxp)
         field  = 'gg.ref.LB.dovessel'
@@ -1594,7 +1630,22 @@ module goatmod_userinput
         field  = 'gg.ref.LB.vertIDs'   
         call ExtractOptionValueInteger1D(fid, field, options%refLBvertIDs)
 
-        ! Boundary layer options (only for length-based ref)
+        ! Refinement options (radial)
+        field  = 'gg.radref.LB.dosp'
+        call ExtractOptionValueLogical0D(fid, field, options%radrefLBdosp)
+        field  = 'gg.radref.LB.Lmininf'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBLmininf)
+        field  = 'gg.radref.LB.Lmaxinf'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBLmaxinf)
+        
+        field  = 'gg.radref.LB.Lminxp'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBLminsp)
+        field  = 'gg.radref.LB.Lmaxxp'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBLmaxsp)
+        field  = 'gg.radref.LB.decaylengthxp'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBdecaylengthsp)
+
+        ! Boundary layer options (only for length-based ref, poloidal)
         field = 'gg.ref.BL.dotarget'
         call ExtractOptionValueLogical0D(fid, field, options%refBLdotarget)
         field = 'gg.ref.BL.dovessel'
@@ -1607,6 +1658,14 @@ module goatmod_userinput
         call ExtractOptionValueReal1D(fid, field, options%refBLdltarget)
         field = 'gg.ref.BL.dlvessel'
         call ExtractOptionValueReal1D(fid, field, options%refBLdlvessel)
+
+        ! Boundary layer options (only for length-based ref, radial)
+        field = 'gg.radref.BL.dosp'
+        call ExtractOptionValueLogical0D(fid, field, options%radrefBLdosp)
+        field = 'gg.radref.BL.ncsp'
+        call ExtractOptionValueInteger0D(fid, field, options%radrefBLncsp)
+        field = 'gg.radref.BL.dlsp'
+        call ExtractOptionValueReal1D(fid, field, options%radrefBLdlsp)
 
         ! Contouring options in grid generator
         field = 'gg.vd.contouring.resx'
