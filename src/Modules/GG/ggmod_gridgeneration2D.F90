@@ -1012,12 +1012,12 @@ module ggmod_gridgeneration2D
         type(GGoptionsUDT), intent(in)              :: options
 
         ! Auxiliary
-        integer(I8)                                 :: nv, vertID, tc
-        integer(I8), allocatable, dimension(:)      :: tvID, &
-            allIDs, vertmap, tfc
+        integer(I8)                                 :: vertID, tc
+        integer(I8), allocatable, dimension(:)      :: &
+            allIDs, vertmap
         logical, allocatable, dimension(:)          :: iscelldone, &
             isfacedone, isstartingcell, isstartingface, &
-            isvertexdeleted, keepvert
+            isvertexdeleted
 
         ! Loop
         integer(I8)                                 :: i, j, k
@@ -1102,51 +1102,7 @@ module ggmod_gridgeneration2D
         end do
 
 
-#ifdef debug
-        ! Add face vertices
-        !==================
-        ! Do for all, but only refine starting faces! 
-        do i = 1, face%ntot
-            ! Compute number of new vertices
-            nv = size(facedata(i)%line%xv) - 2 
 
-            ! Set ID
-            tvID = [face%vert(i, 1), (k, k = vertID+1, vertID+nv), face%vert(i, 2)]
-
-            ! Update 
-            vertID = vertID + nv
-
-            ! Set data
-            call facedata(i)%line%AddVertexIDs(tvID)
-            call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
-
-            
-
-            ! Check if we should refine
-            if (isstartingface(i)) then 
-                ! Get face cells to update refinement data
-                tfc = face%GetCell(i)
-
-                if (size(tfc) > 1) then 
-                    ! Print warning
-                    print *, 'DistributeVerticesSequential: multiple cells ' // & 
-                        'found for face ', i, ', setting refinement options according ' // & 
-                        'to first cell'
-                end if 
-                
-                ! Update the refiner
-                call GGTMLineRefiner%UpdateRefinementOptions(&
-                    celldata(tfc(1))%linerefoptions, topomesh)
-
-                ! Refine
-                keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
-                call GGTMlinerefiner%Refine(facedata(i)%line, vertID, keepvert)
-
-                ! Update
-                call facedata(i)%line%UpdateLineData(topomesh, ggtmdata)
-            end if 
-        end do
-#endif
         ! Add cell vertices
         !==================
         do while (.true.)
@@ -3665,7 +3621,7 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
             tcfv2val
         logical, allocatable, dimension(:)      :: ishfface, islfface, &
-            ishfvert, isdescending
+            ishfvert
 
         ! Diagnostics
 
@@ -3919,26 +3875,24 @@ module ggmod_gridgeneration2D
         type(GGOptionsUDT), intent(in)          :: options
 
         ! Auxiliary
-        integer(I8)                             :: tc, srf, erf, inderf, &
-            indsrf, tf, cind, nc, ntf, incr, nv, temp, minind, maxind, &
-            startind, endind, nfs, tfloc, tfc, nthf, ntlf, minindloc
-        integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
-            tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
-            allIDs, s1, s2, polv, tf1, tf2, fsID, sortind, thf, tlf
+        integer(I8)                             :: &
+            tf, cind, nc, ntf, incr, nv, temp, &
+            startind, endind, nfs, tfloc, tfc, nthf, ntlf
+        integer(I8), allocatable, dimension(:)  :: tubec, tubef, &
+            allIDs, s1, s2, polv, fsID, sortind, thf, tlf
         integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
             segc, vertexID, temp2
-        real(R8)                                :: hfval, lfval, &
-            dhf1, dhf2, dlf1, dlf2, nxc, nyc, nxfv, nyfv, txf, tyf, &
-            ntxf, tmaxval
-        real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
-            tcfv2val, tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint, &
+        real(R8)                                :: &
+            nxc, nyc, nxfv, nyfv, txf, tyf, ntxf, tmaxval
+        real(R8), allocatable, dimension(:)     :: &
+            tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint, &
             nxf, nyf, nnf, tsegrc, tsegrrf, dlcv, newdlcv, newtfval
         real(R8), allocatable, dimension(:, :)  :: segrrf, segrc, &
             xint, yint
         logical                                 :: isflremoved, &
             isintersectremoved, issrf, doflip, changesign
-        logical, allocatable, dimension(:)      :: ishfface, islfface, &
-            ishfvert, iscontourfound, keepind, isdescending
+        logical, allocatable, dimension(:)      :: &
+            iscontourfound, keepind, isdescending
         type(ContourUDT), allocatable           :: tempc(:)
         type(contourUDT)                        :: c1, c2
         type(RealDynamicArrayUDT), allocatable, dimension(:, :)     :: &
@@ -4863,7 +4817,7 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:)  :: targetfaceIDs, &
-            vesselfaceIDs, tf, strikepointIDs, tv1, tv2
+            vesselfaceIDs, strikepointIDs, tv1, tv2
 
         ! Loop
         integer(I8)                             :: i, j
@@ -5035,7 +4989,7 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: nhf, nlf
-        integer(I8), allocatable, dimension(:)  :: tfc, tv1, tv2, tf
+        integer(I8), allocatable, dimension(:)  :: tv1, tv2, tf
 
         
         ! Loop
