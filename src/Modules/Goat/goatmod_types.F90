@@ -1011,7 +1011,7 @@ module goatmod_types
         ! Data structures 
         v = grid%vert
         f = grid%face
-        c = grid%cell 
+        c = grid%cell  
     
         ! Checks
         if (size(f%vert,2) /= 2) then
@@ -1850,6 +1850,9 @@ module goatmod_types
             grid%cell%x(i) = sum(grid%vert%x(tv))/size(tv)
             grid%cell%y(i) = sum(grid%vert%y(tv))/size(tv)
         end do 
+
+        ! Amount of guard cells (not present here, simply amount of boundary faces)
+        grid%cell%ngc = count(grid%face%BF)
 
         ! Magnetic field at cell centers
         call mf%Evaluate(grid%cell%x, grid%cell%y, 0, 0, grid%cell%psi)
