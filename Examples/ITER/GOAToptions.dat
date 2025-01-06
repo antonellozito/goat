@@ -411,7 +411,7 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # Read exising file? 
 'gg.tm.readexistingTM'          '1'
-'gg.tm.TMfilepath'              './output/topomesh.dat'
+'gg.tm.TMfilepath'              './output/topomesh_base.dat'
 
 # Magnetic field: tracing & resolution (description is determined by GD options)
 'gg.tm.field.resx'              '1200'
@@ -426,15 +426,18 @@ VERSION 1.00.00
 
 'gg.tm.contour.npmin'           '10'
 'gg.tm.contour.npmax'           '10000'
-'gg.tm.contour.dl'              '0.05'
+'gg.tm.contour.dl'              '0.02'
 
 # Core boundary and region treatment
+'gg.tm.doadaptations'           '1'
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '0'
 'gg.tm.cbnd.frac'               '0.1'
 'gg.tm.PFbnd.frac'              '0.1'
 'gg.tm.removecoreregions'       '1'
 'gg.tm.removewidegridregions'   '0'
+'gg.tm.mergetangencypointtubes' '1'
+'gg.tm.dpsimintangencypointtubes'   '0.5'
 
 #-------------------------------------------------------------------------#
 #                         VERTEX DISTRIBUTION OPTIONS                     #
@@ -446,16 +449,16 @@ VERSION 1.00.00
 'gg.TMcellgriddingorder'                'sequential'
 
 # Refinement options
-'gg.ref.readexistingrefdata'            '1'
+'gg.ref.readexistingrefdata'            '0'
 'gg.ref.meth'                           'lengthbased'
 #'gg.ref.meth'                           'no'
 'gg.ref.LB.doxp'                        '0'
 'gg.ref.LB.dovessel'                    '0'
-'gg.ref.LB.Lmininf'                     '0.02'
-'gg.ref.LB.Lmaxinf'                     '0.05'
+'gg.ref.LB.Lmininf'                     '0.05'
+'gg.ref.LB.Lmaxinf'                     '0.1'
 'gg.ref.LB.structureIDs'                '[1, 2]'
 'gg.ref.LB.Lminstructure'               '[0.0001, 0.0001]'
-'gg.ref.LB.Lmaxstructure'               '[0.005, 0.005]'
+'gg.ref.LB.Lmaxstructure'               '[0.01, 0.01]'
 'gg.ref.LB.decaylengthstructure'        '[0.1, 0.1]'
 'gg.ref.LB.Lminxp'                      '0.0001'
 'gg.ref.LB.Lmaxxp'                      '0.025'
@@ -463,11 +466,11 @@ VERSION 1.00.00
 
 # Boundary layer options (only for length based refinement for now)
 'gg.ref.BL.dotarget'                    '1'
-'gg.ref.BL.nctarget'                  '7'
-'gg.ref.BL.dltarget'                  '[0.001, 0.002, 0.004, 0.006, 0.008, 0.012, 0.016]'
-'gg.ref.BL.dovessel'                    '1'
-'gg.ref.BL.ncvessel'                  '7'
-'gg.ref.BL.dlvessel'                  '[0.001, 0.002, 0.004, 0.006, 0.008, 0.012, 0.016]'
+'gg.ref.BL.nctarget'                  '8'
+'gg.ref.BL.dltarget'                  '[0.001, 0.002, 0.004, 0.006, 0.008, 0.012, 0.016, 0.032]'
+'gg.ref.BL.dovessel'                    '0'
+'gg.ref.BL.ncvessel'                  '8'
+'gg.ref.BL.dlvessel'                  '[0.001, 0.002, 0.004, 0.006, 0.008, 0.012, 0.016, 0.032]'
 
 # Post-processing options
 'gg.vd.removefluxsurfaces'              '1' # Remove too narrow flux surfaces
@@ -492,7 +495,7 @@ VERSION 1.00.00
 # Options for uniform distribution
 'gg.vd.pd.distribution.facelength'      '1e-2';
 
-'gg.vd.rd.distribution.fieldwidth'      '2.5e-1';
+'gg.vd.rd.distribution.fieldwidth'      '1.25e-1';
 
 # Options for density based distribution
 'gg.vd.pd.distribution.plftype'            'target';
