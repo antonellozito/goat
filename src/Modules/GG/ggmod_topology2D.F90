@@ -1381,6 +1381,7 @@ module ggmod_topology2D
         !
         ! - tangency points with contour in the vessel (type 5)
         ! - saddle points (type 2)
+        ! - split points on boundaries 
         !
         ! At this point, no contours for maxima/minima (types 1, 3) or for other
         ! tangency points (type 4) are added. This can be done in a later step for
@@ -1461,7 +1462,8 @@ module ggmod_topology2D
             ispseudosaddlepoint, isnbface, rmind, isstartingcontour, &
             isendingcontour
 
-        type(ContourUDT), allocatable           :: tc(:), allc(:), alltpc(:)
+        type(ContourUDT), allocatable           :: tc(:), allc(:), alltpc(:), &
+            allbsvc(:)
         type(PolygonUDT), allocatable           :: allpc(:)
         type(PolygonSetUDT)                     :: tempps
         type(IntegerDynamicArrayUDT)            :: curvetypes, fsIDs
@@ -1491,7 +1493,8 @@ module ggmod_topology2D
             (topomesh%vert%type == TMvertexminID) .or. &
             (topomesh%vert%type == TMvertexsaddleID) .or. & 
             (topomesh%vert%type == TMvertextp1ID) .or. & 
-            (topomesh%vert%type == TMvertextp2ID)
+            (topomesh%vert%type == TMvertextp2ID) .or. &
+            (topomesh%vert%type == TMvertexsplitID)
         npsp = count(ispseudosaddlepoint)
         allocate(pspx(npsp), pspy(npsp), pspf(npsp), psptype(npsp), &
             pspID(npsp))
@@ -1525,8 +1528,7 @@ module ggmod_topology2D
         ! Trace contours
         !===============
         ! Add saddle point contours
-        !--------------------------
-         
+        !-------------------------- 
         do i = 1, npsp
             if ((psptype(i) == TMvertexsaddleID) .and. tracepoints(i)) then 
                 ! Trace
@@ -1764,7 +1766,6 @@ module ggmod_topology2D
                 call fsIDs%Append(spread(nfs, 1, size(tc)))
             end if 
         end do
-        
 
         ! Add tangency point contours
         !----------------------------
@@ -2273,6 +2274,9 @@ module ggmod_topology2D
         ! Add contours (IDs etc should be done already...)
         allc = [allc, alltpc]
 
+        
+
+
         ! Add to the topology mesh
         !=========================
         ! Clean the contours (just to be sure)
@@ -2300,12 +2304,116 @@ module ggmod_topology2D
         call ConstructVesselPolygonSet(vessel, bndps)
         allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
         call InitializePolygonLevelsetFunction2D(vessel%plfvessel, vessel%polygonset, bndplfoptions)
+        deallocate(bndpol)
 
         ! Trim the topological mesh
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
-        call SplitTopologicalMeshFaces(topomesh)    
+        call SplitTopologicalMeshFaces(topomesh)   
+        
+        ! Boundary split vertex contours
+        !===============================
+        ! Reinitialize
+        ! Initialize the contour structure & dynamic arrays
+        deallocate(allc, allpc)
+        allocate(allc(0))
+        curvetypes = ConstructIntegerDynamicArray()
+        fsIDs = ConstructIntegerDynamicArray()
+
+        ! First, trace all contours
+        allocate(allbsvc(0))
+        !$omp parallel do default(shared) private(tc, keepind, dist)
+        do i = 1, topomesh%vert%ntot
+            if ((topomesh%vert%type(i) == TMvertexsplitID) .and. &
+                topomesh%vert%fsID(i) == 0) then 
+                ! Trace contour
+                tc = fieldtracer%TraceContours([topomesh%vert%x(i)], [topomesh%vert%y(i)])
+
+                ! Process
+                call CleanContours(tc)
+
+                ! Checks
+                allocate(keepind(size(tc)))
+                keepind = .true.
+                do k = 1, size(tc)
+                    ! Is the starting point the actual given start point? (should
+                    ! be exactly the same since added as starting point in the
+                    ! contouring algorithm)
+                    dist = sqrt((tc(k)%x(1) - topomesh%vert%x(i))**2 + &
+                        (tc(k)%y(1) - topomesh%vert%y(i))**2)
+                    if (dist > 0.0_R8) then 
+                        print *, 'AddTopologicalMEshContours: split vertex ' // & 
+                            'contour segment found that does not start ' // & 
+                            'in given tangency point. Removing...'
+                        keepind(k) = .false.
+                    end if
+                    if (tc(k)%startsaddle /= i) then
+                        ! Normally this should come from the contour 
+                        ! tracer, but we can add it afterwards as well 
+                        print *, 'AddTopologicalMeshContours: split vertex ' // &
+                            'contour segment found that starts in given ' // & 
+                            'point, but that does not have the ' // &
+                            'starting saddle point ID as tangency point. ' // & 
+                            'adjusting starting ID...'
+                        tc(k)%startsaddle = i
+                    end if 
+                    if (tc(k)%isclosed .and. (tc(k)%endsaddle /= i)) then 
+                        ! Ensure start and end saddle point are the same
+                        tc(k)%endsaddle = i
+                    end if 
+                end do
+
+                ! Remove
+                tc = pack(tc, keepind)
+                deallocate(keepind)
+
+                ! Add
+                !$omp critical
+                allbsvc = [allbsvc, tc]
+                call curvetypes%Append(spread(TMfacepolID, 1, size(tc)))
+                
+                ! Add flux surface ID
+                topomesh%nfs = topomesh%nfs + 1
+                topomesh%vert%fsID(i) = topomesh%nfs
+                topomesh%vert%type(i) = TMvertexbndID
+                topomesh%vert%fval(i:i) = fieldtracer%Evaluate([topomesh%vert%x(i)], [topomesh%vert%y(i)])
+                call fsIDs%Append(spread(topomesh%nfs, 1, size(tc)))
+                !$omp end critical
+            end if 
+        end do 
+        !$omp end parallel do 
+
+        ! Add contours (IDs etc should be done already...)
+        allc = [allc, allbsvc]
+
+        ! Add to the topology mesh
+        !=========================
+        ! Clean the contours (just to be sure)
+        if (size(allc) > 0) then 
+            call CleanContours(allc)
+
+            allocate(allpc(size(allc)))
+            do i = 1, size(allc)
+                call allpc(i)%Construct(allc(i)%x, allc(i)%y)
+            end do 
+            call tempps%Construct(allpc)
+            call tempps%WriteData('topocontours_all_beforeinsertion2')
+
+            ! Add the contours
+            allcurvetypes = curvetypes%Get()
+            allfsIDs = fsIDs%Get()
+            do i = 1, size(allc)
+                call InsertTopologicalMeshContour(topomesh, magneticField, &
+                    allc(i), allcurvetypes(i), allfsIDs(i))
+            end do 
+
+            ! Trim the topological mesh
+            call TrimTopologicalMesh(topomesh, magneticField, vessel)
+
+            ! Split boundaries
+            call SplitTopologicalMeshFaces(topomesh)   
+        end if
         
         ! Housekeeping
         !=============
@@ -4880,7 +4988,7 @@ module ggmod_topology2D
                 ! Get all unique flux surface IDs of these vertices
                 tvfvID = vert%fsID([face%vert(tvf, 1), face%vert(tvf, 2)])
                 call Unique(tvfvID, tvfvIDu)
-                if (size(tvfvIDu) > 2) then 
+                if (size(tvfvIDu) > 2 .and. .not. any(tvfvIDu == 0_I8)) then 
                     ! Set vertex type to simple boundary vertex
                     ! for deletion later on in simplification 
                     ! step
@@ -6189,12 +6297,22 @@ module ggmod_topology2D
             ! Check
             if (tf == 0) then 
                 ! Check
-                if (any(fc > 0)) then 
-                    call gdErrorHandler('AddTopologicalMeshCells: ' // & 
-                        'could not find next face')
+                if (any(fc > 0)) then
+                    ! Check if there are any internal faces to begin with
+                    if (count(.not. face%BF) == 0) then 
+                        print *, 'AddTopologicalMeshCells: case without any ' // & 
+                            'internal faces detected'
+
+                        ! Find the next face (any next face)
+                        tf = findloc( (fc > 0)  , .true., 1)
+                    else
+                        call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                            'could not find next face')
+                    end if 
+                else
+                    ! All faces added, exit
+                    exit 
                 end if 
-                ! All faces added, exit
-                exit 
             end if 
             
             ! Do not subtract a counter - we need to end up in this face again.
@@ -6276,7 +6394,7 @@ module ggmod_topology2D
             end if
             
             ! Set current vertex
-            tv = face%vert(tf, tvind);
+            tv = face%vert(tf, tvind)
             startvert = tv
             starttvind = tvind
         
@@ -6597,7 +6715,7 @@ module ggmod_topology2D
         end do 
         do i = 1, cc
             topomesh%cell%vert(&
-                topomesh%cell%vertP(i, 1):topomesh%cell%vertP(i, 2)+topomesh%cell%vertP(i, 2)-1) = & 
+                topomesh%cell%vertP(i, 1):topomesh%cell%vertP(i, 1)+topomesh%cell%vertP(i, 2)-1) = & 
                 cellvert(i)%Get()
             topomesh%cell%face(&
                 topomesh%cell%faceP(i, 1):topomesh%cell%faceP(i, 1)+topomesh%cell%faceP(i, 2)-1) = & 
@@ -7212,12 +7330,14 @@ module ggmod_topology2D
         topomesh%tube%bndf2P(:, 2)  = ntubebndf2%Get()
         topomesh%tube%bndv1P(:, 2)  = ntubebndv1%Get()
         topomesh%tube%bndv2P(:, 2)  = ntubebndv2%Get()
-        topomesh%tube%faceP(1, 1)   = 1
-        topomesh%tube%cellP(1, 1)   = 1
-        topomesh%tube%bndf1P(1, 1)  = 1
-        topomesh%tube%bndf2P(1, 1)  = 1
-        topomesh%tube%bndv1P(1, 1)  = 1
-        topomesh%tube%bndv2P(1, 1)  = 1
+        if (topomesh%tube%ntot > 0) then 
+            topomesh%tube%faceP(1, 1)   = 1
+            topomesh%tube%cellP(1, 1)   = 1
+            topomesh%tube%bndf1P(1, 1)  = 1
+            topomesh%tube%bndf2P(1, 1)  = 1
+            topomesh%tube%bndv1P(1, 1)  = 1
+            topomesh%tube%bndv2P(1, 1)  = 1
+        end if 
 
         do i = 2, topomesh%tube%ntot 
             topomesh%tube%faceP(i, 1) = topomesh%tube%faceP(i-1, 1) + &     
@@ -8999,8 +9119,9 @@ module ggmod_topology2D
         yb = [minval([yps, magneticField%interp%ygv]), maxval([yps, magneticField%interp%ygv])]
 
         ! Construct refined grid based on tangency points and extrema
-        includevert = (topomesh%vert%type == TMvertextp1ID) .or. &
-            (topomesh%vert%type == TMvertextp2ID) .or. (topomesh%vert%type == TMvertexsaddleID)
+        !includevert = (topomesh%vert%type == TMvertextp1ID) .or. &
+        !    (topomesh%vert%type == TMvertextp2ID) .or. (topomesh%vert%type == TMvertexsaddleID)
+        includevert = topomesh%vert%type == TMvertexsaddleID
         ntp = count(includevert)
         allocate(xtp(ntp), ytp(ntp), Ftp(ntp), IDs(ntp))
         xtp = pack(topomesh%vert%x, includevert)
