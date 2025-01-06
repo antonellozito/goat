@@ -219,8 +219,12 @@ subroutine ReadTraduitUS(grid, filepath)
     end do
 
     ! Add to grid
-    grid%vert%x(vlist) = vdata(:, 1)
-    grid%vert%y(vlist) = vdata(:, 2)
+    grid%vert%x(vlist)      = vdata(:, 1)
+    grid%vert%y(vlist)      = vdata(:, 2)
+    grid%vert%psi(vlist)    = vdata(:, 3)
+    grid%vert%bx(vlist)     = vdata(:, 4)
+    grid%vert%by(vlist)     = vdata(:, 5)
+    grid%vert%ffbz(vlist)   = vdata(:, 6)
 
     ! Cell data
     !----------
@@ -243,6 +247,12 @@ subroutine ReadTraduitUS(grid, filepath)
     grid%cell%vertP(clist, 2)          = cdatai1(:, 2)
     grid%cell%reg(clist)               = cdatai2(:, 2)
     grid%cell%ft(clist)                = cdatai2(:, 3)
+    grid%cell%cflags(clist)            = cdatai2(:, 1)
+    grid%cell%x(clist)                 = cdata(:, 1)
+    grid%cell%y(clist)                 = cdata(:, 2)
+    grid%cell%psi(clist)               = cdata(:, 3)
+    grid%cell%bp(clist)                = cdata(:, 4)
+    grid%cell%bt(clist)                = cdata(:, 5)
 
     ! Cell vertices and faces
     call cfruin (filespec, grid%cell%nvert, grid%cell%vert,  'cvVx')
