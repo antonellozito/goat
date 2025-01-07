@@ -1135,6 +1135,23 @@ def PlotPolygons2D(x, y, fignum, **plotargs):
     #    ax.annotate(txt, (x[i], y[i]))
     #plt.draw()
 
+def PlotFilledPolygons2D(x, y, fignum, **plotargs):
+    # General polygon plotter. x and y should be np.arrays containing the
+    # coordinates to plot. Fignum should contain the figure number on which
+    # to plot the data.
+
+    # Set the current figure
+    plt.figure(fignum)
+
+    # Plot the data as a polygon plot
+    #fig, ax = plt.subplots()
+    plt.fill(x, y, **plotargs)
+    
+    #myrange = range(len(x))
+    #for i, txt in enumerate(myrange):
+    #    ax.annotate(txt, (x[i], y[i]))
+    #plt.draw()
+
 def PlotPolygons2DQuiver(x, y, fignum, **plotargs):
     # Same as PlotPolygons2D, but now we plot arrows between the 
     # different nodes according to the polygon orientation
@@ -1414,6 +1431,31 @@ def PlotCellBasedQuantity2D(grid, val, fignum):
 
     # Set axes
     SetAxesLimits2D(plt.gca(), grid.cell.x, grid.cell.y)
+
+def PlotTMCellBasedQuantity(topomesh, val, fignum):
+    # Description
+    #------------
+    # Make a patchplot of a cell based quantity
+
+    # Check
+    if (len(val) != topomesh.cell.ntot):
+        raise ValueError('PlotCellBasedQuantity2D: ' \
+            'value length is not equal to number of grid cells')
+        
+    
+    # Construct cell polygon collection
+    verts = []
+
+    for i in np.arange(0, topomesh.cell.ntot): 
+        
+        verts.append(list(zip(topomesh.cell.data[i].x, topomesh.cell.data[i].y)))
+
+    # Make patchplot
+    PlotGeneral2DPatch(verts, val, fignum)
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), topomesh.vert.x, topomesh.vert.y)
+
 
 
 
