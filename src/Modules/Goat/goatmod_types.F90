@@ -1840,9 +1840,8 @@ module goatmod_types
         !========
         ! Magnetic field at vertices
         call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 0, grid%vert%psi)
-        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 1, grid%vert%bx)
-        call mf%Evaluate(grid%vert%x, grid%vert%y, 1, 0, grid%vert%by)
-        grid%vert%bx = -grid%vert%bx
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 1, 0, grid%vert%bx) 
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 1, grid%vert%by) 
 
         ! Cell centers
         do i = 1, nc 
