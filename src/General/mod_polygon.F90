@@ -2934,11 +2934,11 @@ module mod_polygon
         ! Declare variables
         !==================
         ! Input
-        integer(I8), dimension(ne,1:2)  :: pe ! polygon edges 
+        integer(I8), dimension(:, :), intent(in)  :: pe ! polygon edges 
         integer                         :: ne
         
         ! Output
-        integer(I8), dimension(ne+1)    :: pv
+        integer(I8), dimension(:), intent(inout)    :: pv
     
         ! Mixed
     
@@ -2951,10 +2951,16 @@ module mod_polygon
         ! Main program
         !=============
         ! Check
+        if (size(pe, 1) /= ne) then 
+            call gdErrorHandler('ExtractPolygonVertices: ne should equal number of edges')
+        end if 
         if (size(pe,2) /= 2) then
             ! Throw error
             call gdErrorHandler('ExtractPolygonVertices: input argument pe should be a ne-by-2 integer array')
     
+        end if
+        if (size(pv) /= ne+1) then 
+            call gdErrorHandler('ExtractPolygonVertices: pv should have dimension ne+1')
         end if
     
         ! Initialize
