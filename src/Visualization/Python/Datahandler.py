@@ -659,6 +659,78 @@ def ReadGGTMDataFile(filepath):
         else: 
             i = i + 1 
 
+    # Get header position
+    while i < len(alllines): 
+        if "cell tubes" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Update counter
+    i = i + 1
+
+    # Read tube data
+    counter = 0
+    while (i < len(alllines)) and (counter < nc):
+        # Read until we find 'cell'
+        if "cell" in alllines[i]:
+            # Get cell ID
+            values = alllines[i].split()
+            fID = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+            fID = fID[0] - 1 
+            counter = counter + 1
+            i = i + 1
+
+            # Read nl+1 tube hf and lf lines
+            ggtmdata.cell[fID].Initialize(ggtmdata.cell[fID].nl-2, ggtmdata.cell[fID].ID)
+            for k in np.arange(0, ggtmdata.cell[fID].nl+1, 1):
+                # Update position
+                i = i + 1
+
+                # Read size of line
+                values = alllines[i].split()
+
+                # Initialize hfline
+                nvhf = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                nvhf = nvhf[0]
+                xhf = np.zeros(nvhf, dtype=float)
+                yhf = np.zeros(nvhf, dtype=float)
+                vhf = np.zeros(nvhf, dtype=int)
+
+                # Read 
+                for cc in np.arange(0, nvhf, 1): 
+                    values = alllines[i+cc+1].split()
+                    vhf[cc] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                    xhf[cc] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+                    yhf[cc] = np.fromstring(values[2], dtype=float, count=1, sep=' ')
+
+                # Update position
+                i = i + nvhf + 2
+                
+                # Initialize lfline
+                values = alllines[i].split()
+                nvlf = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                nvlf = nvlf[0]
+                xlf = np.zeros(nvlf, dtype=float)
+                ylf = np.zeros(nvlf, dtype=float)
+                vlf = np.zeros(nvlf, dtype=int)
+
+                # Read 
+                for cc in np.arange(0, nvlf, 1): 
+                    values = alllines[i+cc+1].split()
+                    vlf[cc] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+                    xlf[cc] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+                    ylf[cc] = np.fromstring(values[2], dtype=float, count=1, sep=' ')
+
+                # Add tube
+                ggtmdata.cell[fID].AddTube(k, xhf, yhf, vhf, xlf, ylf, vlf)
+
+                # Update position
+                i = i + nvlf + 1
+
+        else: 
+            i = i + 1 
+
     # Return
     return ggtmdata
 

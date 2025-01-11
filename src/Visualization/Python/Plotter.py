@@ -679,12 +679,14 @@ def PlotGGTMDataCellVertexDistribution(ggtmdata, topomesh, fignum):
     # Loop over all cells
     for thiscell in ggtmdata.cell:
         # Plot high field line and low field line
-        PlotPolygons2DQuiver(thiscell.hfline.x, thiscell.hfline.y, fignum, color='r')
-        PlotPolygons2DQuiver(thiscell.lfline.x, thiscell.lfline.y, fignum, color='g')
+        nt = len(thiscell.tubes)-1
+        PlotPolygons2DQuiver(thiscell.tubes[0].hfline.x, thiscell.tubes[0].hfline.y, fignum, color='r')
+        PlotPolygons2DQuiver(thiscell.tubes[nt].lfline.x, thiscell.tubes[nt].lfline.y, fignum, color='g')
 
         # Plot all other lines
-        for thisline in thiscell.lines: 
-            PlotPolygons2DQuiver(thisline.x, thisline.y, fignum, color='b')
+        for thistube in thiscell.tubes: 
+            PlotPolygons2DQuiver(thistube.hfline.x, thistube.hfline.y, fignum, color='b')
+            PlotPolygons2DQuiver(thistube.lfline.x, thistube.lfline.y, fignum, color='b')
         
     # Check bounds
     
