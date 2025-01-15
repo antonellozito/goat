@@ -682,7 +682,6 @@ def ReadGGTMDataFile(filepath):
             i = i + 1
 
             # Read nl+1 tube hf and lf lines
-            ggtmdata.cell[fID].Initialize(ggtmdata.cell[fID].nl-2, ggtmdata.cell[fID].ID)
             for k in np.arange(0, ggtmdata.cell[fID].nl+1, 1):
                 # Update position
                 i = i + 1

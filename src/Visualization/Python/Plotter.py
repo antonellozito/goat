@@ -741,7 +741,7 @@ def PlotGridFaces(grid, fignum):
         yf[3*i+2] = np.NaN 
     
     # Plot
-    PlotPolygons2D(xf, yf, fignum, color='k', marker='')
+    PlotPolygons2D(xf, yf, fignum, color='k', marker='', linewidth=0.25)
 
     # Set axes
     SetAxesLimits2D(plt.gca(), xb, yb)
@@ -1205,7 +1205,7 @@ def PlotPoints2DWithID(x, y, ID, fignum, **plotargs):
     ax = fig.axes
     k = 0
     for i, txt in enumerate(ID):
-        ax[0].text(x[k], y[k], str(txt), size=12)
+        ax[0].text(x[k], y[k], str(txt), size=10)
         k = k + 1
     plt.draw()
 
