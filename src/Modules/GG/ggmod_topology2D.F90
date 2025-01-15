@@ -3516,14 +3516,18 @@ module ggmod_topology2D
 
                         ! Check if we can merge
                         if (passedcheck) then 
-                            ! Set merged to true
-                            marked = .true.
-
                             ! Get merge data
                             tfmerge = tube%GetBndFace(i, 1_I8)
                             tnbmerge = tnb
                             tfradmerge = [tube%GetFace(tnb(1)), &
                                 tube%GetFace(tnb(2))]
+
+                            ! Check for non-mergeable surfaces (separatrix basicall)
+                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                                marked = .false.
+                            else
+                                marked = .true.
+                            end if
 
                         end if 
 
@@ -3552,13 +3556,18 @@ module ggmod_topology2D
 
                         ! Check if we can merge
                         if (passedcheck) then 
-                            ! Set merged to true
-                            marked = .true.
 
                             ! Get merge data
                             tfmerge = tube%GetBndFace(i, 1_I8)
                             tnbmerge = tnb
                             tfradmerge = tube%GetFace(tnb(1))
+
+                            ! Check for non-mergeable surfaces (separatrix basicall)
+                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                                marked = .false.
+                            else
+                                marked = .true.
+                            end if
 
                         end if 
                     end if 
@@ -3601,14 +3610,18 @@ module ggmod_topology2D
 
                         ! Check if we can merge
                         if (passedcheck) then 
-                            ! Set merged to true
-                            marked = .true.
-
                             ! Get merge data
                             tfmerge = tube%GetBndFace(i, 2_I8)
                             tnbmerge = tnb
                             tfradmerge = [tube%GetFace(tnb(1)), &
                                 tube%GetFace(tnb(2))]
+
+                            ! Check for non-mergeable surfaces (separatrix basicall)
+                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                                marked = .false.
+                            else
+                                marked = .true.
+                            end if
 
                         end if 
 
@@ -3637,13 +3650,18 @@ module ggmod_topology2D
 
                         ! Check if we can merge
                         if (passedcheck) then 
-                            ! Set merged to true
-                            marked = .true.
 
                             ! Get merge data
                             tfmerge = tube%GetBndFace(i, 2_I8)
                             tnbmerge = tnb
                             tfradmerge = tube%GetFace(tnb(1))
+
+                            ! Check for non-mergeable surfaces (separatrix basicall)
+                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                                marked = .false.
+                            else
+                                marked = .true.
+                            end if
 
                         end if 
                     end if 
@@ -9113,15 +9131,19 @@ module ggmod_topology2D
 
         ! Grid
         !=====
+        ! Initialize
+        dxfracmin = 1e-4_R8 
+        dyfracmin = 1e-4_R8
+
         ! Determine domain bounds based on vessel and magnetic field extent
         call vessel%plfvessel%ps%GetVertices(xps, yps)
         xb = [minval([xps, magneticField%interp%xgv]), maxval([xps, magneticField%interp%xgv])]
         yb = [minval([yps, magneticField%interp%ygv]), maxval([yps, magneticField%interp%ygv])]
 
         ! Construct refined grid based on tangency points and extrema
-        !includevert = (topomesh%vert%type == TMvertextp1ID) .or. &
-        !    (topomesh%vert%type == TMvertextp2ID) .or. (topomesh%vert%type == TMvertexsaddleID)
-        includevert = topomesh%vert%type == TMvertexsaddleID
+        includevert = (topomesh%vert%type == TMvertextp1ID) .or. &
+            (topomesh%vert%type == TMvertextp2ID) .or. (topomesh%vert%type == TMvertexsaddleID)
+        ! includevert = topomesh%vert%type == TMvertexsaddleID
         ntp = count(includevert)
         allocate(xtp(ntp), ytp(ntp), Ftp(ntp), IDs(ntp))
         xtp = pack(topomesh%vert%x, includevert)
