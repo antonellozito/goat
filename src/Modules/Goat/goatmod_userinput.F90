@@ -459,6 +459,13 @@ module goatmod_userinput
         ! - vdrddecaylength:    decay length parameter 
         ! - vdrddensityatseparatrix:    desired density at separatrix
         ! - vdrddensityatinf:           density far from separatrix
+ 
+        ! Options for extending flux tubes with vessel parts (so-called 
+        ! 'cut cells')
+        ! - extendtptubes:          extend tubes at the tangency point
+        !                           side to include (part of) the 
+        !                           vessel from both side of type 1
+        !                           tangency points
 
         ! Options for flux surface removal
         ! - removefluxsurfaces:     switch to remove or not
@@ -532,7 +539,8 @@ module goatmod_userinput
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
             refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
-            refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp
+            refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
+            extendtptubes
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp
@@ -923,6 +931,9 @@ module goatmod_userinput
         options%vdrddecaylength     = 0.005
         options%vdrddensityatseparatrix     = 2500.0_R8
         options%vdrddensityatinf            = 250.0_R8
+
+        ! Options for flux tube extensions
+        options%extendtptubes       = .true. 
 
         ! Options for flux surface removal 
         options%removefluxsurfaces = .true.
@@ -1638,11 +1649,11 @@ module goatmod_userinput
         field  = 'gg.radref.LB.Lmaxinf'
         call ExtractOptionValueReal0D(fid, field, options%radrefLBLmaxinf)
         
-        field  = 'gg.radref.LB.Lminxp'
+        field  = 'gg.radref.LB.Lminsp'
         call ExtractOptionValueReal0D(fid, field, options%radrefLBLminsp)
-        field  = 'gg.radref.LB.Lmaxxp'
+        field  = 'gg.radref.LB.Lmaxsp'
         call ExtractOptionValueReal0D(fid, field, options%radrefLBLmaxsp)
-        field  = 'gg.radref.LB.decaylengthxp'
+        field  = 'gg.radref.LB.decaylengthsp'
         call ExtractOptionValueReal0D(fid, field, options%radrefLBdecaylengthsp)
 
         ! Boundary layer options (only for length-based ref, poloidal)
@@ -1709,7 +1720,6 @@ module goatmod_userinput
         field = 'gg.vd.pd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdpddensityatinf)
 
-
         ! Options for radial vertex distribution
         field = 'gg.vd.rd.type'
         call ExtractOptionValueCharacter(fid, field, options%vdrtype)
@@ -1721,6 +1731,10 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatseparatrix)
         field = 'gg.vd.rd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatinf)
+
+        ! Options for extending flux tubes
+        field = 'gg.adap.extendtptubes'
+        call ExtractOptionValueLogical0D(fid, field, options%extendtptubes)
 
         ! Options for flux surface removal 
         field = 'gg.vd.removefluxsurfaces'
