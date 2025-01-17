@@ -2638,7 +2638,7 @@ module mod_polygon
                 end if
 
                 ! Check
-                if (.not. startfound) then 
+                if (.not. startfound .and. k >= nremedges) then 
                     ! Found all branching polygons
                     allbranchingfound = .true. 
                 end if 
