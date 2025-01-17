@@ -1532,7 +1532,8 @@ module ggmod_gridgeneration2D
             s11, s12, s21, s22, s31, s32, s41, s42, &
             stype, sortind, newID
         logical                                     :: addpoint
-        logical, allocatable, dimension(:)          ::  keepvert, newisnodevert
+        logical, allocatable, dimension(:)          ::  keepvert, newisnodevert, &
+            updateseg
         real(R8)                                    :: xb(1:2), yb(1:2)
         real(R8), allocatable, dimension(:)         :: xt, yt, &
             x1, x2, x3, x4, y1, y2, y3, y4, s11r, s12r, s21r, s22r, &
@@ -1576,7 +1577,9 @@ module ggmod_gridgeneration2D
             keepvert = hfline%isnodevert
             call GGTMLinerefiner%Refine(hfline, vertID, keepvert)
 
-            ! Update segment data
+            ! Update segments, but only those that are not aligned 
+            ! (i.e. no fsID)
+            updateseg = hfline%fsID == 0
             call hfline%UpdateSegmentData(ggtmdata)
             
             ! Skip if the lfline is a vertex
@@ -1636,16 +1639,32 @@ module ggmod_gridgeneration2D
                     x2, y2, s21, s22, s21r, s22r)
                 
                 ! Intersections with side boundary 1
-                call SimplePolygonIntersections(orthlines(j)%x, &
-                    orthlines(j)%y, [hfline%xl(1), lfline%xl(1)], &
-                    [hfline%yl(1), lfline%yl(1)], &
-                    x3, y3, s31, s32, s31r, s32r)
+                if (hfline%vert(1) /= lfline%vert(1)) then 
+                    call SimplePolygonIntersections(orthlines(j)%x, &
+                        orthlines(j)%y, [hfline%xl(1), lfline%xl(1)], &
+                        [hfline%yl(1), lfline%yl(1)], &
+                        x3, y3, s31, s32, s31r, s32r)
+                else
+                    ! Point - no intersections
+                    x3 = spread(0_R8, 1, 0)
+                    y3 = spread(0_R8, 1, 0)
+                    s31r = spread(0_R8, 1, 0)
+                    s32r = spread(0_R8, 1, 0)
+                end if 
                 
                 ! Intersections with side boundary 2
-                call SimplePolygonIntersections(orthlines(j)%x, &
-                    orthlines(j)%y, [hfline%xl(hfline%nl), lfline%xl(lfline%nl)], &
-                    [hfline%yl(hfline%nl), lfline%yl(lfline%nl)], &
-                    x4, y4, s41, s42, s41r, s42r)
+                if (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)) then 
+                    call SimplePolygonIntersections(orthlines(j)%x, &
+                        orthlines(j)%y, [hfline%xl(hfline%nl), lfline%xl(lfline%nl)], &
+                        [hfline%yl(hfline%nl), lfline%yl(lfline%nl)], &
+                        x4, y4, s41, s42, s41r, s42r)
+                else
+                    ! Point - no intersections
+                    x4 = spread(0_R8, 1, 0)
+                    y4 = spread(0_R8, 1, 0)
+                    s41r = spread(0_R8, 1, 0)
+                    s42r = spread(0_R8, 1, 0)
+                end if 
                 
                 ! Sort
                 stype = [spread(1_I8, 1, size(x1)), &
@@ -1833,7 +1852,7 @@ module ggmod_gridgeneration2D
         logical, allocatable, dimension(:)      :: isvertfound
 
         ! Loop
-        integer(I8)                             :: i, j, k
+        integer(I8)                             :: i, j, k, cc
 
         ! Initialize
         !===========
@@ -1847,6 +1866,7 @@ module ggmod_gridgeneration2D
         allocate(xv(grid%vert%ntot), yv(grid%vert%ntot), &
             isvertfound(grid%vert%ntot), fieldlineID(grid%vert%ntot))
         isvertfound = .false. 
+        fieldlineID = 0 ! initialize
 
         ! Determine vertices
         !===================
@@ -1868,8 +1888,12 @@ module ggmod_gridgeneration2D
                     xv(tvID) = seg(tube%hfline%segID(k))%xv
                     yv(tvID) = seg(tube%hfline%segID(k))%yv
                     
-                    ! Set field line ID
-                    fieldlineID(tvID) = seg(tube%hfline%segID(k))%fsID
+                    ! Set field line ID (check)
+                    do cc = 1, size(tvID)
+                        if (fieldlineID(tvID(cc)) == 0) then 
+                            fieldlineID(tvID(cc)) =   seg(tube%hfline%segID(k))%fsID
+                        end if 
+                    end do 
                 end do 
 
                 ! Loop over low field line segments
@@ -1885,7 +1909,11 @@ module ggmod_gridgeneration2D
                     yv(tvID) = seg(tube%lfline%segID(k))%yv
                     
                     ! Set field line ID
-                    fieldlineID(tvID) = seg(tube%lfline%segID(k))%fsID
+                    do cc = 1, size(tvID)
+                        if (fieldlineID(tvID(cc)) == 0) then 
+                            fieldlineID(tvID(cc)) =   seg(tube%lfline%segID(k))%fsID
+                        end if 
+                    end do 
                 end do 
 
                 ! Housekeeping
@@ -2058,7 +2086,8 @@ module ggmod_gridgeneration2D
                 ! Hedge for last vertices being the same
                 dolasttriangle = .false. 
                 if (l1%vert(n1) == l2%vert(n2)) then 
-                    ! Last cell should be treated as triangle
+                    ! Last cell should be treated as triangle IF we don't
+                    ! have a single triangle
                     dolasttriangle = .true.
 
                     ! Make sure to skip in main loop
@@ -2103,6 +2132,14 @@ module ggmod_gridgeneration2D
                     ! Update k1, k2
                     k1 = k1 + 1
                     k2 = k2 + 1
+
+                    ! Check if we should really add the last triangle
+                    if (dolasttriangle .and. (l1%nv == 2 .and. l2%nv == 3) &
+                        .or. (l1%nv == 3 .and. l2%nv == 2)) then 
+                        ! Start and end triangle are the same...
+                        dolasttriangle = .false.
+                    end if 
+                        
                 
                 else
                     ! Add the first face 
@@ -3845,7 +3882,7 @@ module ggmod_gridgeneration2D
                 lffaces = pack(tcf, islfface)
                 hfvert = pack(tcv, ishfvert)
                 lfvert = pack(tcv, .not. ishfvert)
-                
+
                 ! Overwrite to sort 
                 if (size(tf1) > 0) then 
                     if (any([ishfface(maxind+1:), ishfface(:minind-1)])) then 
@@ -5963,6 +6000,12 @@ module ggmod_gridgeneration2D
                 'incompatible input dimensions')
         end if 
 
+        if (size(dlcv) > 1) then
+            if (any(abs(dlcv(2:) - dlcv(1:size(dlcv)-1)) < disttol)) then 
+                print *, 'AddVerticesGGTMSegment: coinciding vertices'
+            end if
+        end if
+
         ! Add
         !====
         ! Check
@@ -6592,7 +6635,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! GGTM segment data updater
-    subroutine UpdateSegmentData(line, ggtmdata)
+    subroutine UpdateSegmentData(line, ggtmdata, doseg)
 
         ! Description
         !============
@@ -6612,6 +6655,8 @@ module ggmod_gridgeneration2D
         integer(I8)                                 :: tvind(1:2), segID
         integer(I8), allocatable, dimension(:)      :: vertID
         real(R8), allocatable, dimension(:)         :: tdlcv
+        logical, allocatable, dimension(:)          :: adjustseg
+        logical, allocatable, dimension(:), optional, intent(in)    :: doseg
 
         ! Loop
         integer(I8)                                 :: i 
@@ -6622,6 +6667,19 @@ module ggmod_gridgeneration2D
         associate(&
             seg       => ggtmdata%seg     &
             )
+
+        ! Check
+        if (present(doseg)) then 
+            adjustseg = doseg 
+            if (size(adjustseg) /= line%ns) then 
+                call gdErrorHandler('UpdateSegmentData: incompatible ' // &
+                    'dimension of optional argument doseg')
+            end if 
+        else
+            allocate(adjustseg(line%ns))
+            adjustseg = .true.
+        end if 
+
 
         ! Update vertices
         !================
@@ -6655,7 +6713,9 @@ module ggmod_gridgeneration2D
             end if 
 
             ! Add vertices 
-            call seg(segID)%AddVertices(tdlcv, vertID)
+            if (adjustseg(i)) then 
+                call seg(segID)%AddVertices(tdlcv, vertID)
+            endif
         end do 
         
         ! Housekeeping
@@ -7981,7 +8041,7 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)     :: vpsi, xf, yf, xc, yc, &
             ccx, ccy, bfx, bfy, dp
         logical, allocatable, dimension(:)      :: temp, tf, &
-            ispolygonstart, tc, isbranchingpolygon
+            ispolygonstart, tc, isbranchingpolygon, hasbndf1, hasbndf2
 
         ! Loop
         integer(I8)                             :: i, j, k, cc, ncell, &
@@ -8097,9 +8157,18 @@ module ggmod_gridgeneration2D
         allocate(sortind(size(tfnb, 1)), ispolygonstart(size(tfnb, 1)), &
             isbranchingpolygon(size(tfnb, 1)))
         call SortPolygonEdges(tfnb, count(tf), sortind, ispolygonstart, isbranchingpolygon)
+        isbranchingpolygon = isbranchingpolygon(sortind)
         allocate(polind(count(ispolygonstart)))
         polind = pack([(k, k = 1, size(tfnb, 1))], ispolygonstart)
         polind = [polind, size(tfnb, 1)+1]
+        if (count(isbranchingpolygon) > 0) then 
+            ! This shouldn't happen
+            print *, count(isbranchingpolygon)
+            print *, pack(polind, isbranchingpolygon((polind(1:size(polind)-1))))
+            !call gdErrorHandler('ComputeGridData: branching flux ' // & 
+            !    'tubes detected, this is a bug')
+        end if 
+        
 
         ! Sort faces
         allocate(tfind(count(tf)))
@@ -8136,7 +8205,9 @@ module ggmod_gridgeneration2D
         allocate(fd%fluxtubefacesP(fd%nFt, 2), fd%fluxtubefaces(nftftot), &
             fd%fluxtubefsIDs(fd%nFt, 2), fd%fluxtuberegID(fd%nFt), &
             fd%fluxtubecellsP(fd%nFt, 2), fd%fluxtubecells(count(tf)*2+count(tc)), &
-            fd%isclosedft(fd%nFt))
+            fd%isclosedft(fd%nFt), hasbndf1(fd%nFt), hasbndf2(fd%nFt))
+        hasbndf1 = .true.
+        hasbndf2 = .true.
         fd%fluxtubefacesP = 0
         if (fd%nFs > 0) then 
             fd%fluxtubefacesP(1, 1) = 1
@@ -8189,11 +8260,13 @@ module ggmod_gridgeneration2D
                     ftf = [tcf, ftf]
                 elseif (size(tcf) < 1) then 
                     ! Unexpected, but not an issue
+                    hasbndf1(i) = .false.
                     print *, 'ComputeGridData: flux tube: ', i, &
                         ' is not closed but the starting cell (number: ', ftc(1), &
                         ' ) has no boundary faces. Not adding face'
                 elseif (size(tcf) > 1) then 
                     ! Unexpected, may be an issue
+                    hasbndf1(i) = .false.
                     print *, 'ComputeGridData: flux tube: ', i, &
                         ' is not closed but the starting cell (number: ', ftc(1), &
                         ' ) has multiple boundary faces. Not adding face'
@@ -8211,11 +8284,13 @@ module ggmod_gridgeneration2D
                     ftf = [ftf, tcf]
                 elseif (size(tcf) < 1) then 
                     ! Unexpected, but not an issue
+                    hasbndf2(i) = .false.
                     print *, 'ComputeGridData: flux tube: ', i, &
                         ' is not closed but the ending cell (number: ', ftc(1), &
                         ' ) has no boundary faces. Not adding face'
                 elseif (size(tcf) > 1) then 
                     ! Unexpected, may be an issue
+                    hasbndf2(i) = .false.
                     print *, 'ComputeGridData: flux tube: ', i, &
                         ' is not closed but the ending cell (number: ', ftc(1), &
                         ' ) has multiple boundary faces. Not adding face'
@@ -8423,7 +8498,15 @@ module ggmod_gridgeneration2D
                 ccy = [ccy, ccy(1)]
                 dp = (ccx*bfx + ccy*bfy)
             else
-                dp = (ccx*bfx(2:size(ftf)-1) + ccy*bfy(2:size(ftf)-1))
+                if (hasbndf1(i) .and. hasbndf2(i)) then 
+                    dp = (ccx*bfx(2:size(ftf)-1) + ccy*bfy(2:size(ftf)-1))
+                elseif (hasbndf1(i) .and. .not. hasbndf2(i)) then 
+                    dp = (ccx*bfx(2:size(ftf)) + ccy*bfy(2:size(ftf)))
+                elseif (.not. hasbndf1(i) .and. hasbndf2(i)) then 
+                    dp = (ccx*bfx(1:size(ftf)-1) + ccy*bfy(1:size(ftf)-1))
+                else
+                    dp = (ccx*bfx + ccy*bfy)
+                end if 
             end if 
 
             ! Switch if necessary
