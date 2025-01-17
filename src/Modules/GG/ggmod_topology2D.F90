@@ -431,6 +431,9 @@ module ggmod_topology2D
         ! Vertex faces (preliminary, for garbage tangency point removal)
         call AddTopologicalMeshVertexFaces(topomesh)
 
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+
         ! Remove garbage tangency points
         call RemoveGarbageTangencyPoints(topomesh)
 
@@ -2053,10 +2056,18 @@ module ggmod_topology2D
                         'neighbouring boundary face. Unexpected, intersections ' // & 
                         'are removed'
                 end if 
+                if (intersectind == size(isnbface)) then 
+                    ! Unexpected, only intersections in neighbouring faces 
+                    ! but not in other boundary face
+                    call gdErrorHandler('AddTopologicalMeshContours: ' // & 
+                        'tangency point contour intersects in tangency point ' // & 
+                        'and neighbouring face but not in other boundary ' // &
+                        'faces - unexpected')
+                end if 
 
                 ! Keep only this part of the contour coordinates
                 call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
-                    [tscr(intersectind)], 'start', [distfrac, distfrac], .true., .true.)
+                    [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .true., .false.)
                 !notdelind = [(k, k = 2, tsc(intersectind))]
                 !alltpc(i)%x = alltpc(i)%x(notdelind)
                 !alltpc(i)%y = alltpc(i)%y(notdelind)
@@ -2310,6 +2321,7 @@ module ggmod_topology2D
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
         call SplitTopologicalMeshFaces(topomesh)   
         
         ! Boundary split vertex contours
@@ -3719,7 +3731,8 @@ module ggmod_topology2D
                     ! Check if the tangency points are currently located
                     ! in between two flux surfaces with different ID. 
                     ! In that case, 'delete' one of them
-                    do j = 1, vert%ntot
+                    j = 1
+                    do while (j <= vert%ntot)
                         if (vert%type(j) == TMvertextp1ID) then 
                             ! Check
                             tvf = vert%GetFace(j)
@@ -3742,8 +3755,17 @@ module ggmod_topology2D
                                 ! for deletion later on in simplification 
                                 ! step
                                 vert%type(j) = TMvertexbndID
+
+                                ! Simplify
+                                call SimplifyTopologicalMeshFaces(topomesh)
+
+                                ! Reset counter 
+                                j = 0
                             end if 
                         end if 
+
+                        ! Update counter
+                        j = j + 1
                     end do 
 
                     ! Simplify again
@@ -4372,7 +4394,8 @@ module ggmod_topology2D
 
         ! Auxiliary 
         integer(I8)                             :: nncf, nndf, np, &
-            ind(1:2), nfinit
+            ind(1:2), nfinit, tf
+        integer(I8), allocatable, dimension(:)  :: faceID
         real(R8)                                :: newvcfx(1:2), newvcfy(1:2), &
             newvcff(1:2), newvdfx(1), newvdfy(1), newvdff(1), fsfval
         
@@ -4399,8 +4422,9 @@ module ggmod_topology2D
         isclosedface = face%vert(:, 1) == face%vert(:, 2);
 
         ! Open faces
-        allocate(isduplicateface(ntot))
+        allocate(isduplicateface(ntot), faceID(ntot))
         isduplicateface = .false. 
+        faceID = 0
         do i = 1, ntot-1
             do j = i+1, ntot
                 ! Skip closed faces - should be dealt with separately, even if
@@ -4410,6 +4434,7 @@ module ggmod_topology2D
                     if (any(face%vert(i, 1) == face%vert(j, :)) .and. &
                         any(face%vert(i, 2) == face%vert(j, :))) then 
                         isduplicateface(j) = .true.
+                        faceID(j) = i
                     end if 
                 end if
             end do 
@@ -4494,8 +4519,20 @@ module ggmod_topology2D
 
             elseif (isduplicateface(i)) then 
 
+                ! Check which face to split - preference to aligned faces
+                ! instead of boundary faces (these may be contour parts
+                ! etc)
+
+                if (face%type(i) /= TMfacebndID) then 
+                    tf = i
+                elseif (face%type(faceID(i)) /= TMfacebndID) then 
+                    tf = faceID(i)
+                else
+                    tf = i ! default
+                end if 
+
                 ! Get number of points of this face
-                np = face%x(i)%Size()
+                np = face%x(tf)%Size()
                 if (np < 3) then  ! end points should be the same and duplicate
                     ! Issue message: we cannot split up this boundary
                     call gdErrorHandler('SplitTopologicalMeshFaces: ' // & 
@@ -4508,12 +4545,12 @@ module ggmod_topology2D
                 ind(1) = np/2+1
                 
                 ! Get vertex coordinates
-                newvdfx = face%x(i)%Get(ind(1))
-                newvdfy = face%y(i)%Get(ind(1))
+                newvdfx = face%x(tf)%Get(ind(1))
+                newvdfy = face%y(tf)%Get(ind(1))
 
                 ! Get flux surface value
-                if (face%fsID(i) /= 0) then 
-                    fsfval = topomesh%fsfval%Get(face%fsID(i))
+                if (face%fsID(tf) /= 0) then 
+                    fsfval = topomesh%fsfval%Get(face%fsID(tf))
                 else
                     fsfval = 0.0_R8
                 end if 
@@ -4521,22 +4558,22 @@ module ggmod_topology2D
                 
                 ! Insert new vertex
                 call AddTopologicalMeshVertex(topomesh, newvdfx(1), &
-                    newvdfy(1), newvdff(1), TMvertexsplitID, face%fsID(i))
+                    newvdfy(1), newvdff(1), TMvertexsplitID, face%fsID(tf))
 
                 ! Insert first face
-                xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = 1, ind(1))]))
-                yrda = ConstructRealDynamicArray(face%y(i)%Get([(k, k = 1, ind(1))]))
+                xrda = ConstructRealDynamicArray(face%x(tf)%Get([(k, k = 1, ind(1))]))
+                yrda = ConstructRealDynamicArray(face%y(tf)%Get([(k, k = 1, ind(1))]))
                 call AddTopologicalMeshFace(topomesh, &
                     [face%vert(i, 1), topomesh%vert%ntot], &
-                    xrda, yrda, face%type(i), face%fsID(i), fsfval)
+                    xrda, yrda, face%type(tf), face%fsID(tf), fsfval)
 
                 ! Insert second face
-                xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = ind(1), face%x(i)%Size())]))
-                yrda = ConstructRealDynamicArray(face%y(i)%Get([(k, k = ind(1), face%y(i)%Size())]))
+                xrda = ConstructRealDynamicArray(face%x(tf)%Get([(k, k = ind(1), face%x(tf)%Size())]))
+                yrda = ConstructRealDynamicArray(face%y(tf)%Get([(k, k = ind(1), face%y(tf)%Size())]))
                 
                 call AddTopologicalMeshFace(topomesh, &
                     [topomesh%vert%ntot, face%vert(i, 2)], &
-                    xrda, yrda, face%type(i), face%fsID(i), fsfval)
+                    xrda, yrda, face%type(tf), face%fsID(tf), fsfval)
 
             end if 
 
@@ -4982,6 +5019,12 @@ module ggmod_topology2D
         associate(&
             vert        => topomesh%vert,   &
             face        => topomesh%face)
+
+        ! Simplify to be sure
+        call SimplifyTopologicalMeshFaces(topomesh)
+
+        ! Reconstruct vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
 
         ! Checks
         !=======
