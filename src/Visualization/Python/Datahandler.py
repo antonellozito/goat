@@ -1209,9 +1209,9 @@ def ReadTraduitOutB2us(filepath):
         tv1 = grid.face.v1[tf-1]
         tv2 = grid.face.v2[tf-1]
         for k in tv1:
-            grid.vert.fieldlineID[k-1] = j
+            grid.vert.fieldlineID[k-1] = j+1
         for k in tv2:
-            grid.vert.fieldlineID[k-1] = j
+            grid.vert.fieldlineID[k-1] = j+1
 
 
 
