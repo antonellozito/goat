@@ -51,6 +51,41 @@ def GetVertexCoordinates(filepath):
     # Return values
     return vals[0:cc, 1:3]
 
+def GetVertexCoordinatesWithID(filepath):
+    # Description
+    #------------
+    # This routine reads a formatted file where the vertex IDs and
+    # coordinates (2D) are stored as [ID, x, y] columns. White/empty lines
+    # are ignored.
+
+    # Read in vertex coordinates from the vertices.dat file
+    thisfile = open(filepath)
+
+    alllines = thisfile.readlines()
+
+    # Remove header
+    del alllines[0]
+    vals = np.zeros([len(alllines), 2], dtype=float)
+    IDs = np.zeros([len(alllines), 1], dtype=int)
+
+    # Read in vertex data
+    cc = 0
+
+    for i in alllines:
+        if i == '\n':  # empty string
+            pass
+            # Don't read in
+        else:
+            # Read
+            values = i.split()
+            IDs[cc] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+            vals[cc, 0] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+            vals[cc, 1] = np.fromstring(values[2], dtype=float, count=1, sep=' ')
+            cc = cc + 1
+
+    # Return values
+    return IDs, vals
+
 def GetPolygonCoordinates(filepath):
     # Description
     #------------

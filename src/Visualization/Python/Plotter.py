@@ -728,20 +728,43 @@ def PlotGridFaces(grid, fignum):
     xb = [min(grid.vert.x), max(grid.vert.x)]
     yb = [min(grid.vert.y), max(grid.vert.y)]
 
-    # Construct face coordinates
-    xf = np.zeros(grid.face.ntot*3, dtype=float)
-    yf = np.zeros(grid.face.ntot*3, dtype=float)
+    # Construct aligned and non-aligned face coordinates
+    try:
+        aligned = np.nonzero(grid.face.aligned)
+        aligned = aligned[0]
+        nonaligned = np.nonzero(grid.face.aligned-1) # a bit of a hack but eh
+        nonaligned = nonaligned[0]
+    except:
+        aligned = np.arange(0, grid.face.ntot, 1, dtype=int)
+        nonaligned = aligned
+    xfal = np.zeros(len(aligned)*3, dtype=float)
+    yfal = np.zeros(len(aligned)*3, dtype=float)
+    xfnonal = np.zeros(len(nonaligned)*3, dtype=float)
+    yfnonal = np.zeros(len(nonaligned)*3, dtype=float)
 
-    for i in np.arange(0, grid.face.ntot): 
-        xf[3*i] = grid.vert.x[grid.face.v1[i]-1]
-        xf[3*i+1] = grid.vert.x[grid.face.v2[i]-1]
-        xf[3*i+2] = np.NaN 
-        yf[3*i] = grid.vert.y[grid.face.v1[i]-1]
-        yf[3*i+1] = grid.vert.y[grid.face.v2[i]-1]
-        yf[3*i+2] = np.NaN 
+    cc = 0
+    for i in aligned: 
+        xfal[3*cc] = grid.vert.x[grid.face.v1[i]-1]
+        xfal[3*cc+1] = grid.vert.x[grid.face.v2[i]-1]
+        xfal[3*cc+2] = np.NaN 
+        yfal[3*cc] = grid.vert.y[grid.face.v1[i]-1]
+        yfal[3*cc+1] = grid.vert.y[grid.face.v2[i]-1]
+        yfal[3*cc+2] = np.NaN
+        cc = cc + 1 
+
+    cc = 0
+    for i in nonaligned: 
+        xfnonal[3*cc] = grid.vert.x[grid.face.v1[i]-1]
+        xfnonal[3*cc+1] = grid.vert.x[grid.face.v2[i]-1]
+        xfnonal[3*cc+2] = np.NaN 
+        yfnonal[3*cc] = grid.vert.y[grid.face.v1[i]-1]
+        yfnonal[3*cc+1] = grid.vert.y[grid.face.v2[i]-1]
+        yfnonal[3*cc+2] = np.NaN 
+        cc = cc + 1 
     
-    # Plot
-    PlotPolygons2D(xf, yf, fignum, color='k', marker='', linewidth=0.25)
+    # Plot faces
+    PlotPolygons2D(xfal, yfal, fignum, color='r', marker='', linewidth=0.25)
+    PlotPolygons2D(xfnonal, yfnonal, fignum, color='k', marker='', linewidth=0.25)
 
     # Set axes
     SetAxesLimits2D(plt.gca(), xb, yb)
