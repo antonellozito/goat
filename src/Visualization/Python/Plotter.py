@@ -1076,16 +1076,23 @@ def PlotStructure(structure, fignum, **plotargs):
     maxx = -np.inf
     miny = np.inf
     maxy = -np.inf
+    cc = 1
     for i in structure:
-        PlotPolygons2D(i.x, i.y, fignum, **plotargs)
+        PlotPolygons2D(i.x, i.y, fignum, **plotargs, label='structure ' + str(cc))
+        ID = np.arange(1, len(i.x)+1, 1) 
+        PlotPoints2DWithID(i.x, i.y, ID, fignum, **plotargs)
         minx = np.min([minx, np.min(i.x)])
         maxx = np.max([maxx, np.max(i.x)])
         miny = np.min([miny, np.min(i.y)])
         maxy = np.max([maxy, np.max(i.y)])
+        cc = cc + 1
 
     # Set limits
     # Set axes
     SetAxesLimits2D(plt.gca(), [minx, maxx], [miny, maxy])
+    thisaxes = plt.gca()
+    thisaxes.legend()
+
 
 
 def PlotStructureFromFile(dirpath, fignum):
