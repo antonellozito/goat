@@ -537,7 +537,8 @@ module ggmod_topology2D
 
         ! Merge tubes?
         if (options%mergetangencypointtubes) then 
-            call MergeTopologicalMeshFluxTubes(topomesh, options)
+            call MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
+                vessel, fieldtracer, options)
         end if
 
         ! Remove parts if desired
@@ -1465,8 +1466,7 @@ module ggmod_topology2D
             ispseudosaddlepoint, isnbface, rmind, isstartingcontour, &
             isendingcontour
 
-        type(ContourUDT), allocatable           :: tc(:), allc(:), alltpc(:), &
-            allbsvc(:)
+        type(ContourUDT), allocatable           :: tc(:), allc(:), alltpc(:)
         type(PolygonUDT), allocatable           :: allpc(:)
         type(PolygonSetUDT)                     :: tempps
         type(IntegerDynamicArrayUDT)            :: curvetypes, fsIDs
@@ -2326,9 +2326,56 @@ module ggmod_topology2D
         
         ! Boundary split vertex contours
         !===============================
-        ! Reinitialize
+        call AddBoundarySplitVertexContours(topomesh, magneticField, vessel, &
+            fieldtracer)
+        
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine 
+
+    ! Boundary split vertex contours
+    subroutine AddBoundarySplitVertexContours(topomesh, magneticField, vessel, &
+        fieldtracer)
+
+        ! Description
+        !============
+        ! This routine adds contours that start from a split vertex 
+        ! located on a boundary. These are necessary to deal with 
+        ! boundaries that have been split and would result in 
+        ! non-conforming flux tubes (perhaps expanding the flux tube
+        ! concept will be necessary at some point...)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        type(MagneticFieldUDT),intent(in)       :: magneticField 
+        type(VesselUDT), intent(inout)          :: vessel
+        class(ContourTracerUDT), intent(inout)  :: fieldtracer 
+
+        ! Auxiliary
+        real(R8)                                :: dist
+        integer(I8), allocatable, dimension(:)  :: allcurvetypes, allfsIDs
+        logical, allocatable, dimension(:)      :: keepind
+
+        type(ContourUDT), allocatable           :: tc(:), allc(:), &
+            allbsvc(:)
+        type(PolygonUDT), allocatable           :: allpc(:)
+        type(PolygonSetUDT)                     :: tempps
+        type(IntegerDynamicArrayUDT)            :: curvetypes, fsIDs
+
+
+        ! Loop 
+        integer(I8)                             :: i, k
+        
+        ! Initialize
+        !===========
+        ! Associate
+        associate(nfs       => topomesh%nfs)
+
         ! Initialize the contour structure & dynamic arrays
-        deallocate(allc, allpc)
         allocate(allc(0))
         curvetypes = ConstructIntegerDynamicArray()
         fsIDs = ConstructIntegerDynamicArray()
@@ -2431,7 +2478,7 @@ module ggmod_topology2D
         !=============
         end associate
 
-    end subroutine 
+    end subroutine
 
     ! Core boundary contours
     subroutine AddTopologicalMeshCoreBoundaries(topomesh, magneticField, &
@@ -3386,7 +3433,8 @@ module ggmod_topology2D
     end subroutine
 
     ! Flux tube merging
-    subroutine MergeTopologicalMeshFluxTubes(topomesh, options)
+    subroutine MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
+        vessel, fieldtracer, options)
 
         ! Description
         !============
@@ -3443,6 +3491,9 @@ module ggmod_topology2D
         ! Arguments
         class(TopomeshUDT), intent(inout)       :: topomesh
         type(TopomeshOptionsUDT), intent(in)    :: options 
+        type(MagneticFieldUDT),intent(in)       :: magneticField 
+        type(VesselUDT), intent(inout)          :: vessel
+        class(ContourTracerUDT), intent(inout)  :: fieldtracer
 
         ! Auxiliary
         logical                                 :: marked, &
@@ -3773,6 +3824,12 @@ module ggmod_topology2D
 
                     ! Split faces if necessary
                     call SplitTopologicalMeshFaces(topomesh)   
+
+                    ! Add contours for split boundary vertices in case they emerge
+                    call AddBoundarySplitVertexContours(topomesh, &
+                        magneticField, vessel, fieldtracer)
+
+                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
 
                     ! Recompute all interconnections, cells, etc
                     ! Vertex faces
@@ -6782,6 +6839,8 @@ module ggmod_topology2D
                 topomesh%cell%faceP(i, 1):topomesh%cell%faceP(i, 1)+topomesh%cell%faceP(i, 2)-1) = & 
                 cellface(i)%Get()
         end do 
+        topomesh%cell%ntotv = size(topomesh%cell%vert)
+        topomesh%cell%ntotf = size(topomesh%cell%face)
 
         ! Housekeeping
         !=============
@@ -7909,7 +7968,14 @@ module ggmod_topology2D
         topomesh%face%fsID      = pack(topomesh%face%fsID, keepface)
         topomesh%face%type      = pack(topomesh%face%type, keepface)
         topomesh%face%ID        = pack(topomesh%face%ID, keepface)
-        topomesh%face%pol       = pack(topomesh%face%pol, keepface)        
+        topomesh%face%pol       = pack(topomesh%face%pol, keepface)  
+        
+        if (allocated(topomesh%face%cell)) then 
+            deallocate(topomesh%face%cell)
+        end if 
+        if (allocated(topomesh%face%cellP)) then 
+            deallocate(topomesh%face%cellP)
+        end if 
 
         ! Update cell face IDs
         do i = 1, nc
@@ -7987,6 +8053,8 @@ module ggmod_topology2D
             topomesh%cell%faceP(i, 1) = topomesh%cell%faceP(i-1, 1) + &
                 topomesh%cell%faceP(i-1, 2)
         end do
+        topomesh%cell%ntotv = size(topomesh%cell%vert)
+        topomesh%cell%ntotf = size(topomesh%cell%face)
 
     end subroutine
 
@@ -9402,20 +9470,34 @@ module ggmod_topology2D
         ! Write cell data
         !================
         ! Number of cells, number of cell vertices, number of cell faces
-        if (allocated(c%vert)) then 
-            cvsize = size(c%vert)
+        if (allocated(c%vert) .and. isuptodate) then 
+            if ((size(c%vert) == c%ntotv) .and. .not. (any(c%vert == 0))) then 
+                cvsize = size(c%vert)
+            else
+                cvsize = 0
+                isuptodate = .false.
+            end if 
         else
             cvsize = 0
             isuptodate = .false.
         end if 
-        if (allocated(c%face)) then 
-            cfsize = size(c%face)
+        if (allocated(c%face) .and. isuptodate) then 
+            if (size(c%face) == c%ntotf) then 
+                cfsize = size(c%face)
+            else
+                cfsize = 0
+                isuptodate = .false.
+            end if 
         else
             cfsize = 0
             isuptodate = .false.
         end if 
         write (fu, *) 'cells'
-        write (fu, *) c%ntot, cvsize, cfsize
+        if (isuptodate) then 
+            write (fu, *) c%ntot, cvsize, cfsize
+        else
+            write (fu, *) 0_I8, cvsize, cfsize
+        end if 
 
         ! Print additional data
         if (isuptodate) then 
