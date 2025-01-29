@@ -549,21 +549,37 @@ module ggmod_gridgeneration2D
         ! - doBLstart       do starting (or ending if doBLend) boundary
         !                   layer
         ! - ncBLstart       number of boundary layer cells 
-        ! - dlBLstart       size of boundary layer cells 
-        character(:), allocatable           :: meth 
+        ! - dlBLstart       size of boundary layer cells (in length units 
+        !                   specified by lengthtype!)
+        ! - lengthtype      type of length to consider when doing 
+        !                   refinement. Can be 'euler' (default classic
+        !                   length), 'radial' (length, projected
+        !                   radially and in absolute value)
+        ! - field           field description (magnetic field like) on 
+        !                    which field related lengths are based
+        ! - linedllc        line length distribution, but in terms of 
+        !                   lengthtype
+        character(:), allocatable           :: meth, lengthtype 
         logical                             :: doBLstart, &
             doBLend
         integer(I8)                         :: ncBLstart, ncBLend 
-        real(R8), allocatable, dimension(:) :: dlBLstart, dlBLend 
+        real(R8), allocatable, dimension(:) :: dlBLstart, dlBLend, &
+            linedllc 
         class(DistributionFunctionUDT), allocatable     :: Lmin, Lmax 
+        type(MagneticFieldUDT)              :: field
 
     contains 
 
         ! Refine line
-        procedure :: RefineLineSingle   => RefineLineSingleLB 
+        procedure :: RefineLineSingle               => RefineLineSingleLB
 
         ! Update refinement options
-        procedure :: UpdateRefinementOptions    => UpdateRefinementOptionsLB
+        procedure :: UpdateRefinementOptions        => UpdateRefinementOptionsLB
+
+        ! Auxiliary
+        procedure :: GetLineEdgeLength              => GetLineEdgeLengthLB
+        procedure :: AddLineVertexCoordinates       => AddLineVertexCoordinatesLB   
+        procedure :: InitializeLineData             => InitializeLineDataLB
 
     end type
 
@@ -892,16 +908,14 @@ module ggmod_gridgeneration2D
         ! Write intermediate file
         call grid%WriteData('grid_after_cellconstruction')
 
-        ! Add interconnections
-        ![grid] = ComputeGridInterconnections(grid);
-
-        ! Process grid
-        !=============
-
         ! Extract the necessary gridding data
         !====================================
         ! Extract
         call ExtractSimulationGrid(simgrid, grid, magneticField)
+
+        ! Diagnostics
+        !============
+        call RunGridDiagnostics(simgrid)
 
 
 
@@ -1528,6 +1542,7 @@ module ggmod_gridgeneration2D
         class(GGTMLineRefiner2DUDT), intent(in)     :: GGTMlinerefiner
 
         ! Auxiliary
+        integer(I8)                                 :: tf
         integer(I8), allocatable, dimension(:)      :: &
             s11, s12, s21, s22, s31, s32, s41, s42, &
             stype, sortind, newID
@@ -1570,24 +1585,64 @@ module ggmod_gridgeneration2D
                 lfline      => tubes(i)%lfline      &
                 )
 
-            ! Update the hfline 
-            call hfline%UpdateLineData(ggtmdata)
+            ! Check if we need to update the original hfline
+            if (i == 1) then 
+                
+                ! Update the aligned parts of the hf line
+                do j = 1, size(celldata(tc)%hffaces)
+                    ! Unpack
+                    tf = celldata(tc)%hffaces(j)
 
-            ! Refine/coarsen
-            keepvert = hfline%isnodevert
-            call GGTMLinerefiner%Refine(hfline, vertID, keepvert)
+                    ! Update the face data to propagate previous distribution
+                    call facedata(tf)%line%UpdateLineData(ggtmdata) 
 
-            ! Update segments, but only those that are not aligned 
-            ! (i.e. no fsID)
-            updateseg = hfline%fsID == 0
-            call hfline%UpdateSegmentData(ggtmdata)
+                    ! Update the refiner
+                    call GGTMLineRefiner%UpdateRefinementOptions(&
+                        facedata(tf)%linerefoptions, topomesh)
+
+                    ! Refine
+                    keepvert = IsTopomeshVert(facedata(tf)%line%vert, topomesh)
+                    call GGTMlinerefiner%Refine(facedata(tf)%line, vertID, keepvert)
+
+                    ! Update segment data
+                    call facedata(tf)%line%UpdateSegmentData(ggtmdata) 
+                    
+                end do 
+
+                ! Update refinement data 
+                call GGTMLineRefiner%UpdateRefinementOptions(&
+                celldata(tc)%linerefoptions, topomesh)
+
+                ! Refine/coarsen non-aligned parts
+                keepvert = hfline%isnodevert
+                call GGTMLinerefiner%Refine(hfline, vertID, keepvert)
+
+                ! Update segments, but only those that are not aligned 
+                ! (i.e. no fsID)
+                updateseg = hfline%fsID == 0
+                call hfline%UpdateSegmentData(ggtmdata, updateseg)
+                call hfline%UpdateLineData(ggtmdata)
+
+            else
+
+                ! Update line data
+                call hfline%UpdateLineData(ggtmdata)
+
+                ! Refine/coarsen 
+                keepvert = hfline%isnodevert
+                call GGTMLinerefiner%Refine(hfline, vertID, keepvert)
+
+                ! Update segments
+                call hfline%UpdateSegmentData(ggtmdata)
+
+            end if 
             
             ! Skip if the lfline is a vertex
             if (seg(lfline%segID(1))%isvertex) then 
                 cycle
             end if 
 
-            ! Trace field lines starting from the hfline
+            ! Trace streamlines starting from the hfline
             xt = hfline%xv
             yt = hfline%yv 
             xb = [minval([lfline%xl, hfline%xl]), &
@@ -1607,6 +1662,20 @@ module ggmod_gridgeneration2D
             !$omp newtx, nnew, newty, news2r, newID, i) 
             !$omp do 
             do j = 1, size(orthlines)
+                ! Initialize
+                addpoint = .true. 
+
+                ! Check for starting and ending point being the same
+                if (j == 1) then 
+                    if (hfline%vert(1) == lfline%vert(1)) then 
+                        addpoint = .false. 
+                    end if 
+                elseif (j == hfline%nv) then 
+                    if (hfline%vert(hfline%nv) == lfline%vert(lfline%nv)) then 
+                        addpoint = .false. 
+                    end if 
+                end if 
+
                 ! Intersections with starting boundary (should only
                 ! intersect in first point)
                 if (seg(hfline%segID(1))%isvertex) then 
@@ -1644,6 +1713,16 @@ module ggmod_gridgeneration2D
                         orthlines(j)%y, [hfline%xl(1), lfline%xl(1)], &
                         [hfline%yl(1), lfline%yl(1)], &
                         x3, y3, s31, s32, s31r, s32r)
+
+                    ! Check for intersections in starting point (may happen
+                    ! if j == 1 or j == size(orhtlines))
+                    if (j == 1 .or. j == size(orthlines)) then 
+                        x3 = pack(x3, s31r /= 0_R8)
+                        y3 = pack(x3, s31r /= 0_R8)
+                        s32r = pack(x3, s31r /= 0_R8)
+                        s31r = pack(x3, s31r /= 0_R8)
+                    end if
+
                 else
                     ! Point - no intersections
                     x3 = spread(0_R8, 1, 0)
@@ -1658,6 +1737,15 @@ module ggmod_gridgeneration2D
                         orthlines(j)%y, [hfline%xl(hfline%nl), lfline%xl(lfline%nl)], &
                         [hfline%yl(hfline%nl), lfline%yl(lfline%nl)], &
                         x4, y4, s41, s42, s41r, s42r)
+
+                    ! Check for intersections in starting point (may happen
+                    ! if j == 1 or j == size(orhtlines))
+                    if (j == 1 .or. j == size(orthlines)) then 
+                        x4 = pack(x4, s41r /= 0_R8)
+                        y4 = pack(x4, s41r /= 0_R8)
+                        s42r = pack(x4, s41r /= 0_R8)
+                        s41r = pack(x4, s41r /= 0_R8)
+                    end if
                 else
                     ! Point - no intersections
                     x4 = spread(0_R8, 1, 0)
@@ -1680,22 +1768,27 @@ module ggmod_gridgeneration2D
                 ! - The first intersection should be in the point
                 ! itself
                 ! - The second intersection should be with the
-                ! ending boundary
-                addpoint = .true.
-                if (size(s11r) == 0) then 
-                    addpoint = .false.
-                elseif (size(stype) < 2) then 
-                    ! Only one intersection found - don't add
-                    addpoint = .false.
-                elseif (stype(1) /= 1 .or. s11r(1) /= 0) then ! .or. s1(1) /= 0
-                    ! We expect that the first point is an
-                    ! intersection with the first boundary
-                    addpoint = .false.
-                elseif (stype(2) /= 2) then 
-                    ! The second point should intersect with the
-                    ! second boundary
-                    addpoint = .false.
-                end if 
+                ! ending boundary and should not be in its start or end
+                if (addpoint) then 
+                    if (size(s11r) == 0) then 
+                        addpoint = .false.
+                    elseif (size(stype) < 2) then 
+                        ! Only one intersection found - don't add
+                        call Write2DPolygonData(orthlines(j)%x, orthlines(j)%y, 'l1')
+                        call Write2DPolygonData(lfline%xl, lfline%yl, 'l2')
+                        call Write2DPolygonData(hfline%xl, hfline%yl, 'l3')
+                        call Write2DPolygonData(hfline%xv, hfline%yv, 'l4')
+                        addpoint = .false.
+                    elseif (stype(1) /= 1 .or. s11r(1) /= 0) then ! .or. s1(1) /= 0
+                        ! We expect that the first point is an
+                        ! intersection with the first boundary
+                        addpoint = .false.
+                    elseif (stype(2) /= 2) then 
+                        ! The second point should intersect with the
+                        ! second boundary
+                        addpoint = .false.
+                    end if 
+                end if
                 
                 ! Add the point if allowed
                 
@@ -1756,13 +1849,55 @@ module ggmod_gridgeneration2D
             ! Add points
             call lfline%AddVertexCoordinates(newdlcv, ecbased=.false.)
             call lfline%AddVertexIDs(newID, newisnodevert)
-
+        
             ! Refine/coarsen
             keepvert = lfline%isnodevert
             call GGTMLinerefiner%Refine(lfline, vertID, keepvert)
 
-            ! Update segment data
+            ! Update segments
             call lfline%UpdateSegmentData(ggtmdata)
+
+            ! Check if its the final line
+            if (i == size(tubes)) then 
+                ! Update the aligned parts of the lf line
+                do j = 1, size(celldata(tc)%lffaces)
+                    ! Unpack
+                    tf = celldata(tc)%lffaces(j)
+
+                    ! Update the face data to propagate previous distribution
+                    call facedata(tf)%line%UpdateLineData(ggtmdata) 
+
+                    ! Update the refiner
+                    call GGTMLineRefiner%UpdateRefinementOptions(&
+                        facedata(tf)%linerefoptions, topomesh)
+
+                    ! Refine
+                    keepvert = IsTopomeshVert(facedata(tf)%line%vert, topomesh)
+                    call GGTMlinerefiner%Refine(facedata(tf)%line, vertID, keepvert)
+
+                    ! Update segment data
+                    call facedata(tf)%line%UpdateSegmentData(ggtmdata) 
+                    
+                end do 
+
+                ! Update line data
+                call lfline%UpdateLineData(ggtmdata)
+
+                ! Update refinement data 
+                call GGTMLineRefiner%UpdateRefinementOptions(&
+                    celldata(tc)%linerefoptions, topomesh)
+
+                ! Refine/coarsen non-aligned parts
+                keepvert = lfline%isnodevert
+                call GGTMLinerefiner%Refine(lfline, vertID, keepvert)
+
+                ! Update segments, but only those that are not aligned 
+                ! (i.e. no fsID)
+                updateseg = lfline%fsID == 0
+                call lfline%UpdateSegmentData(ggtmdata, updateseg)
+                call lfline%UpdateLineData(ggtmdata)
+
+            end if 
 
             ! Housekeeping
             deallocate(newtx, newty, newID, news2r, sortind, newdlcv)
@@ -2132,6 +2267,13 @@ module ggmod_gridgeneration2D
                     ! Update k1, k2
                     k1 = k1 + 1
                     k2 = k2 + 1
+
+                    if (k1 > n1) then 
+                        k1 = n1 
+                    end if 
+                    if (k2 > n2) then 
+                        k2 = n2
+                    end if 
 
                     ! Check if we should really add the last triangle
                     if (dolasttriangle .and. (l1%nv == 2 .and. l2%nv == 3) &
@@ -3957,6 +4099,14 @@ module ggmod_gridgeneration2D
         ! tangency points) and that therefore some contours do not 
         ! intersect some radial lines. 
 
+        ! Note 3: it is possible that, due to a difference in contour 
+        ! tracer resolution, fieldlines may intersect with other 
+        ! field lines or lines present in the topological mesh. These 
+        ! lines will be removed afterwards - this may be avoided by 
+        ! reconstructing everything from scratch and not loading
+        ! anything in. Then, the topomesh resolution should be 
+        ! consistent between topomesh and grid generation stage. 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -3972,7 +4122,8 @@ module ggmod_gridgeneration2D
             tf, cind, nc, ntf, incr, nv, temp, &
             startind, endind, nfs, tfloc, tfc, nthf, ntlf
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, &
-            allIDs, s1, s2, polv, fsID, sortind, thf, tlf, tvertexID
+            allIDs, s1, s2, polv, fsID, sortind, thf, tlf, tvertexID, &
+            tf1, tf2, allnbtf
         integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
             segc, vertexID, temp2
         real(R8)                                :: &
@@ -4032,6 +4183,9 @@ module ggmod_gridgeneration2D
             tubef = tube%GetFace(i)
             tubec = tube%GetCell(i)
             tf = tubedata(i)%distributionface
+            tf1 = tube%GetBndFace(i, 1)
+            tf2 = tube%GetBndFace(i, 2)
+            allnbtf = [tf1, tf2]
 
             ! Get cell belonging to this face
             tfloc = findloc(tubef, tf, 1, back=.false.)
@@ -4129,6 +4283,8 @@ module ggmod_gridgeneration2D
                 isdescending(size(isdescending)) = .true.
             end if 
             newdlcv = pack(newdlcv, isdescending)
+
+            ! Eliminate lines 
             
             ! Sort from high to low values
             !if (allocated(sortind)) then 
@@ -4553,6 +4709,44 @@ module ggmod_gridgeneration2D
             ! Housekeeping
             deallocate(keepind, iscontourfound)
 
+            ! Check contour-tube intersections
+            !---------------------------------
+            ! Initialize
+            allocate(keepind(size(tempc)))
+            keepind = .true. 
+
+            ! Check if contour lines intersect with the tube boundary 
+            ! faces
+            do j = 1, size(tempc)
+                ! Check for intersections with aligned faces
+                do k = 1, size(allnbtf)
+                    txint = spread(0, 1, 0)
+                    call SimplePolygonIntersections(tempc(j)%x, tempc(j)%y, &
+                        face%x(allnbtf(k))%Get(), face%y(allnbtf(k))%Get(), &
+                        txint, tyint, s1, s2, sr1, sr2)
+                    if (size(txint) > 0) then 
+                        keepind(j) = .false. 
+                        exit ! no need to check further
+                    end if 
+                end do 
+            end do
+
+            ! Remove contours
+            if (any(.not. keepind)) then 
+                ! Issue message
+                print *, 'TraceTopologicalMeshTubeContours: some contours ' // & 
+                    'intersect with tube boundaries, probably due to ' // & 
+                    'different contouring resolution between gridding ' // &
+                    'and topomesh construction. Removing these contours...'
+
+                ! Remove
+                tempc = pack(tempc, keepind)
+            end if 
+                
+
+            ! Housekeeping
+            deallocate(keepind)
+
             ! Compute intersections 
             !----------------------
             nc = size(tempc)
@@ -4933,7 +5127,9 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: nt, startsegID, &
             endsegID 
+        integer(I8), allocatable, dimension(:)  :: tc, s1, s21
         integer(I8), allocatable, dimension(:)  :: allsegID
+        real(R8), allocatable, dimension(:)     :: xint, yint
 
         ! Loop
         integer(I8)                             :: i, j, k 
@@ -4944,6 +5140,7 @@ module ggmod_gridgeneration2D
         associate(&
             facedata        => ggtmdata%face,   &
             celldata        => ggtmdata%cell,   &
+            tube            => topomesh%tube,   &
             cell            => topomesh%cell    &
             )
 
@@ -5168,9 +5365,136 @@ module ggmod_gridgeneration2D
             ! Shallow angle tubes
             !--------------------
 
+
             ! Housekeeping
             end associate
         end do 
+
+        ! Check intersections 
+        !====================
+        ! Lines of tube may intersect with the starting or ending
+        ! field line - to be removed in entire tube
+#ifdef debug
+        allocate(xint(0), yint(0), s1(0), s2(0))
+        do i = 1, tube%ntot
+            ! Initialize
+            tc = tube(i)%GetCell(i)
+            nft = size(celldata(tc(1))%tubes) ! number of tubes
+            allocate(keepind(nft))
+            keepind = .true.
+
+            ! Loop over all cells of this tube
+            do j = 1, size(tc)
+                ! Sanity check
+                if (nft /= size(celldata(tc(j))%tubes)) then 
+                    print *, 'tube: ', i, 'cell: ', j
+                    call gdErrorHandler('ConstructTopologicalMEshCellFluxTubes: ' // & 
+                        'cell within same topological mesh tube has different ' // & 
+                        'number of flux tubes, not supported')
+                end if 
+
+                ! Associate for ease
+                associate(ct        => celldata(tc(j))%tubes)
+
+                ! Check intersections of lfline (except if final tube)
+                nct = size(ct)
+                do k = 1, nct
+                    if (k < nct) then 
+                        ! Intersections with first hfline
+                        if (keepind(k)) then 
+                            call SimplePolygonIntersections(ct(k)%lfline%xl, &
+                                ct(k)%lfline%yl, ct(1)%hfline%xl, ct(1)%hfline%yl, &
+                                xint, yint, s1, s2)
+
+                            ! Check
+                            if (size(xint) > 0) then 
+                                keepind(k) = .false. 
+                            end if 
+                        end if 
+
+                        ! Intersections with last lfline
+                        if (keepind(k)) then 
+                            call SimplePolygonIntersections(ct(k)%lfline%xl, &
+                                ct(k)%lfline%yl, ct(nct)%lfline%xl, ct(nct)%lfline%yl, &
+                                xint, yint, s1, s2)
+
+                            ! Check
+                            if (size(xint) > 0) then 
+                                keepind(k) = .false. 
+                            end if 
+                        end if 
+
+                    else
+                        ! Intersections with first hfline
+                        if (keepind(k)) then 
+                            call SimplePolygonIntersections(ct(k)%hfline%xl, &
+                                ct(k)%hfline%yl, ct(1)%hfline%xl, ct(1)%hfline%yl, &
+                                xint, yint, s1, s2)
+
+                            ! Check
+                            if (size(xint) > 0) then 
+                                keepind(k) = .false. 
+                            end if 
+                        end if 
+
+                        ! Intersections with last lfline
+                        if (keepind(k)) then 
+                            call SimplePolygonIntersections(ct(k)%hfline%xl, &
+                                ct(k)%hfline%yl, ct(nct)%lfline%xl, ct(nct)%lfline%yl, &
+                                xint, yint, s1, s2)
+
+                            ! Check
+                            if (size(xint) > 0) then 
+                                keepind(k) = .false. 
+                            end if 
+                        end if 
+
+                    end if 
+                end do
+
+                ! Housekeeping
+                end associate
+
+            end do 
+
+            ! Check if any were deleted
+            if (any(.not. keepind)) then 
+                ! Issue message
+                print *, 'Deleting tubes for cell: ', tc(j), 'since they ' // & 
+                    'intersect with the cell boundaries'
+
+                ! Check for exceptional cases
+                if (size(keepind) == 1 .and. .not. keepind(1)) then 
+                    ! Only one tube that should be deleted -> cell 
+                    ! boundaries intersect
+                    print *, 'Cell ', tc(j), 'has only one tube of ' // & 
+                        'which the boundaries intersect, cannot delete. ' // & 
+                        'Grid will have intersecting cells...'
+                    
+                    ! Set to true again to prevent deletion
+                    keepind = .true. 
+                end if 
+                    
+
+                ! Check if we still need to delete
+                if (any(.not. keepind)) then 
+                    ! Check which tubes to merge
+                    k = findloc(keepind, .false., 1)
+                    do while (k < nct) 
+                        ! Get the tube indices
+                        t1 = k 
+                        t2 = findloc(keepind(k+1:size(keepind)), 1, .true.)
+                        if (t2 == 0) then 
+                            ! Should be last one to merge with
+                            t2 = nct 
+                        end if
+                    end do 
+                end if
+                
+            end if 
+
+        end do
+#endif 
 
         ! Housekeeping
         !=============
@@ -5407,7 +5731,8 @@ module ggmod_gridgeneration2D
         !===================
         ! Boundary layer data (cells)
         !----------------------------
-        ! Only need to propagate to aligned faces at start/end of cell
+        ! Propagate options to aligned faces at start/end of cell.
+        ! Preference for BL imposition is imposed implicitly
         do i = 1, size(celldata)
             ! Associate
             associate(&
@@ -5495,6 +5820,8 @@ module ggmod_gridgeneration2D
             ! Housekeeping
             end associate
         end do 
+
+        ! Propagate options to hf and lf refoptions
 
         ! Boundary layer data (tubes)
         !----------------------------
@@ -7158,6 +7485,10 @@ module ggmod_gridgeneration2D
                 call Lmax%Initialize(xp, yp, valpLmax, options%refLBLmaxinf, &
                     decaylength)
 
+                ! Construct refiner
+                GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic', &
+                options%reflengthtype, magneticField)
+
             case ('radial') 
 
                 ! Check which points to include
@@ -7181,17 +7512,16 @@ module ggmod_gridgeneration2D
                 call Lmax%Initialize(xp, yp, valpLmax, options%radrefLBLmaxinf, &
                     decaylength)
 
+                ! Construct refiner
+                GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic', &
+                options%radreflengthtype, magneticField)
+
             case default
 
                 call gdErrorHandler('InitializeGGTMLineRefiner: direction ' // & 
                     ' "' // direction // '" not implemented')
 
             end select
-
-            
-
-            ! Construct refiner
-            GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic')
 
 
         class default 
@@ -7243,7 +7573,8 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Length-based refiner constructor
-    function ConstructGGTMLineRefinerLB(Lmin, Lmax, meth) result(refiner)
+    function ConstructGGTMLineRefinerLB(Lmin, Lmax, meth, lengthtype, &
+        magneticField) result(refiner)
 
         ! Description
         !============
@@ -7255,14 +7586,17 @@ module ggmod_gridgeneration2D
         ! Arguments
         type(GGTMLineRefinerLB2DUDT)                :: refiner 
         class(DistributionFunctionUDT), intent(in)  :: Lmin, Lmax
-        character(*), intent(in)                    :: meth 
+        character(*), intent(in)                    :: meth, lengthtype 
+        type(MagneticFieldUDT), intent(in)          :: magneticField
  
         ! Initialize
         !===========
         ! General refinement data
-        refiner%Lmin = Lmin 
-        refiner%Lmax = Lmax 
-        refiner%meth = meth
+        refiner%Lmin        = Lmin 
+        refiner%Lmax        = Lmax 
+        refiner%meth        = meth
+        refiner%lengthtype  = lengthtype 
+        refiner%field       = magneticField
 
         ! Boundary layer (simply set to zero currently)
         refiner%doBLstart = .false. 
@@ -7387,6 +7721,7 @@ module ggmod_gridgeneration2D
         end if 
 
         ! Initialize
+        call refiner%InitializeLineData(line)
         ncBLstart = refiner%ncBLstart
         ncBLend = refiner%ncBLend
 
@@ -7398,12 +7733,8 @@ module ggmod_gridgeneration2D
         thisvertID = line%vert
 
         ! Initial distribution
-        dll = line%dlcv(2:line%nv) - line%dlcv(1:line%nv-1)
-        allocate(newdllc(size(dll)+1))
-        newdllc = spread(0.0_R8, 1, size(dll)+1)
-        do i = 2, size(newdllc)
-            newdllc(i) = newdllc(i-1) + dll(i-1)
-        end do 
+        newdllc = refiner%GetLineEdgeLength(line)
+        dll = newdllc(2:size(newdllc)) - newdllc(1:size(newdllc)-1)
         lline = newdllc(size(newdllc))
 
         ! Initialize boundary layer distributions
@@ -7578,7 +7909,8 @@ module ggmod_gridgeneration2D
 
         ! Rebuild
         dll = newdllc(2:size(newdllc)) - newdllc(1:size(newdllc)-1)
-        call line%AddVertexCoordinates(newdllc)
+        call refiner%AddLineVertexCoordinates(line, newdllc)
+        ! call line%AddVertexCoordinates(newdllc)
         if (any(thisvertID == 0)) then 
             print *, thisvertID
         end if 
@@ -7828,7 +8160,8 @@ module ggmod_gridgeneration2D
                 do i = 2, size(newdllc)
                     newdllc(i) = dll(i-1) + newdllc(i-1)
                 end do 
-                call line%AddVertexCoordinates(newdllc)
+                call refiner%AddLineVertexCoordinates(line, newdllc)
+                ! call line%AddVertexCoordinates(newdllc)
 
                 ! Housekeeping
                 deallocate(newvertID, newdll, newkeepvert, newisreflegal, &
@@ -7848,12 +8181,169 @@ module ggmod_gridgeneration2D
 
         ! Construct line coordinates
         !===========================
-        call line%AddVertexCoordinates(newdllc)
+        call refiner%AddLineVertexCoordinates(line, newdllc)
+        ! call line%AddVertexCoordinates(newdllc)
         call line%AddVertexIDs(thisvertID, thiskeepvert)
 
         ! Housekeeping
         !=============
         end associate
+
+    end subroutine
+
+    ! Line initialization
+    subroutine InitializeLineDataLB(refiner, line)
+
+        ! Description
+        !============
+        ! Initialize any line-based data for the refiner. To be called
+        ! only once at the beginning of each refinement loop. In this 
+        ! case, the line length coordinate in terms of the specified 
+        ! length measure is computed and stored.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)           :: refiner
+        type(GGTMFieldLineDataUDT), intent(in)  :: line 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: dx, dy, xf, yf, bx, &
+            by, bn, dll, dllc
+
+        ! Loop 
+        integer(I8)                             :: i 
+
+        ! Compute
+        !========
+        select case (refiner%lengthtype)
+
+        case ('euler')
+
+            ! Easy
+            refiner%linedllc = line%dllc 
+
+        case ('radial')
+
+            ! Initialize
+            dx = line%xl(2:line%nl) - line%xl(1:line%nl-1)
+            dy = line%yl(2:line%nl) - line%yl(1:line%nl-1) 
+            xf = 0.5*(line%xl(2:line%nl) + line%xl(1:line%nl-1))
+            yf = 0.5*(line%yl(2:line%nl) + line%yl(1:line%nl-1)) 
+            allocate(bx(line%nl-1), by(line%nl-1))
+            call refiner%field%interp%Evaluate(xf, yf, 1, 0, bx)
+            call refiner%field%interp%Evaluate(xf, yf, 0, 1, by)
+            bn = sqrt(bx**2 + by**2)
+            bx = bx/bn 
+            by = by/bn 
+
+            ! Project and take absolute value
+            dll = abs(dx*bx + dy*by) 
+            
+            ! Compute accumulative length
+            allocate(dllc(line%nl))
+            dllc = 0_R8
+            do i = 2, line%nl
+                dllc(i) = dllc(i-1) + dll(i-1)
+            end do 
+            refiner%linedllc = dllc
+
+        case default 
+            
+            call gdErrorHandler('InitializeLineDataLB: length ' // & 
+                'method "' // refiner%lengthtype // '" not implemented')
+
+        end select
+
+
+    end subroutine
+
+    ! Line length getter, length based
+    function GetLineEdgeLengthLB(refiner, line) result(dlcv)
+
+        ! Description
+        !============
+        ! Wrapper to get line edge lengths. The wrapper here is 
+        ! necessary to allow different length definitions and not only
+        ! the eulerian length given by the line's dll field. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)               :: refiner 
+        type(GGTMFieldlineDataUDT), intent(in)      :: line 
+        real(R8), allocatable, dimension(:)         :: dlcv
+
+
+        ! Determine length
+        !=================
+        select case (refiner%lengthtype)
+
+        case ('euler')
+
+            ! Simply return line%dlcv
+            dlcv = line%dlcv
+
+        case ('radial')
+
+            ! Need to interpolate 
+            call Interpolate1D(line%dlcv, dlcv, line%dllc, refiner%linedllc)
+            
+        case default 
+            
+            call gdErrorHandler('RefineLineSingleLB: length ' // & 
+                'method "' // refiner%lengthtype // '" not implemented')
+
+        end select
+
+    end function
+
+    ! Line coordinate setter
+    subroutine AddLineVertexCoordinatesLB(refiner, line, dlcv)
+
+        ! Description
+        !============
+        ! Add the line vertex coordinates based on the new length 
+        ! coordinates given in dlcv which are in terms of the refiner
+        ! length type. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)               :: refiner 
+        type(GGTMFieldlineDataUDT), intent(in)      :: line 
+        real(R8), dimension(:), intent(in)          :: dlcv
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)         :: newdlcv
+
+
+        ! Determine length
+        !=================
+        select case (refiner%lengthtype)
+
+        case ('euler')
+
+            ! Simply call line method
+            call line%AddVertexCoordinates(dlcv)
+
+        case ('radial')
+
+            ! Need to interpolate first
+            call Interpolate1D(dlcv, newdlcv, refiner%linedllc, line%dllc)
+            newdlcv(1) = 0_R8
+            newdlcv(size(newdlcv)) = line%dllc(size(line%dllc))
+            
+            ! Call line method
+            call line%AddVertexCoordinates(newdlcv)
+            
+        case default 
+            
+            call gdErrorHandler('RefineLineSingleLB: length ' // & 
+                'method "' // refiner%lengthtype // '" not implemented')
+
+        end select
+
 
     end subroutine
 
@@ -8855,6 +9345,112 @@ module ggmod_gridgeneration2D
 
         
 
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                          DIAGNOSTICS                             !
+    !------------------------------------------------------------------!
+
+    ! Main diagnostics driver
+    subroutine RunGridDiagnostics(simgrid)
+
+        ! Description
+        !============
+        ! This routine runs some diagnostics on the grid, which print 
+        ! out useful information for debugging/checking where the grid
+        ! is of poor quality. Currently, these entail:
+        ! - face intersections
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GridUDT), intent(in)          :: simgrid 
+
+        ! Diagnostics
+        !============
+        ! Face intersections
+        call CheckFaceIntersections(simgrid, 'gg_faceintersections')
+
+    end subroutine
+    
+    ! Face intersections
+    subroutine CheckFaceIntersections(simgrid, writefile) 
+
+        ! Description
+        !============
+        ! This routine checks if non-adjacent faces of the grid 
+        ! intersect (adjacent faces will always intersect in the common
+        ! vertex). Normally, two faces can only intersect at one point
+        ! unless they are coinciding. These faces are flagged as well.
+        ! The list of face IDs and the intersection coordinates is 
+        ! written out in a file.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GridUDT), intent(in)              :: simgrid 
+        character(*), intent(in)                :: writefile
+
+        ! Auxiliary
+        real(R8)                                :: xint, yint
+        real(R8), allocatable, dimension(:)     :: allxint, &
+            allyint 
+        integer(I8), allocatable, dimension(:)  :: faceIDs
+
+        ! Loop 
+        integer(I8)                             :: i, j 
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            fv      => simgrid%face%vert,   &
+            xv      => simgrid%vert%x,      &
+            yv      => simgrid%vert%y,      &
+            nf      => simgrid%face%ntot    &
+            )
+        
+        ! Initialize
+        allocate(allxint(0), allyint(0), faceIDs(0))
+
+        ! Compute
+        !========
+        do i = 1, nf 
+            do j = i+1, nf 
+                if (any(fv(i, 1) == fv(j, :)) .or. any(fv(i, 2) == fv(j, :))) then 
+                    ! Don't do anything - neighbouring face
+                else 
+                    ! Compmute segment-segment intersection
+                    call SegmentIntersections(xint, yint, xv(fv(i, 1)), &
+                        yv(fv(i, 1)), xv(fv(i, 2)), yv(fv(i, 2)), xv(fv(j, 1)), &
+                        yv(fv(j, 1)), xv(fv(j, 2)), yv(fv(j, 2)))
+
+                    if (.not. isnan(xint)) then 
+                        allxint = [allxint, xint, xint]
+                        allyint = [allyint, yint, yint]
+                        faceIDs = [faceIDs, i, j]
+                    end if 
+                end if
+            end do 
+        end do 
+
+        ! Write
+        !======
+        ! Write to file
+        call WriteVertexData(faceIDs, allxint, allyint, writefile)
+        
+        ! Write to terminal
+        if (size(faceIDs) > 0) then 
+            print *, 'CheckFaceIntersections: some faces are intersecting, ' // & 
+                'IDs and intersection coordinates are written in ' // &
+                ' "' // writefile // '".'
+        end if 
+
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 

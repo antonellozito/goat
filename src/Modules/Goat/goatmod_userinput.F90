@@ -496,6 +496,10 @@ module goatmod_userinput
         !                           (no additional refinement), 
         !                           'lengthbased' (ref based on min and
         !                           max length distributions) 
+        ! - reflengthtype:          which type of length to consider. 
+        !                           'euler' is classical eulerian length 
+        !                           (L2 norm), 'radial' is projected in 
+        !                           radial direction (and absolute value taken)
         
         ! (poloidal) Refinement options for lengthbased option (this is currently 
         ! based on exponential decay functions defined in points):
@@ -562,7 +566,7 @@ module goatmod_userinput
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
             cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
-            refdatafile, radrefmeth
+            refdatafile, radrefmeth, reflengthtype, radreflengthtype
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -884,6 +888,7 @@ module goatmod_userinput
 
         ! Poloidal refinement options ('lengthbased' refinement options only)
         options%refmeth         = 'no'      
+        options%reflengthtype   = 'euler'   
         options%refLBdoxp       = .true. 
         options%refLBdovessel   = .false. 
         options%refLBLmininf    = 0.0_R8
@@ -897,7 +902,8 @@ module goatmod_userinput
             options%refLBLmaxstructure(0))
         
         ! Radial refinement options
-        options%radrefmeth         = 'no'      
+        options%radrefmeth         = 'no'   
+        options%radreflengthtype   = 'euler'   
         options%radrefLBdosp       = .true. 
         options%radrefLBLmininf    = 0.0_R8
         options%radrefLBLmaxinf    = 100_R8 ! some absurd big number
@@ -1606,6 +1612,8 @@ module goatmod_userinput
         ! Refinement options (general)
         field = 'gg.ref.meth'
         call ExtractOptionValueCharacter(fid, field, options%refmeth) 
+        field = 'gg.ref.LB.lengthtype'
+        call ExtractOptionValueCharacter(fid, field, options%reflengthtype)
         field = 'gg.radref.meth'
         call ExtractOptionValueCharacter(fid, field, options%radrefmeth) 
         field = 'gg.ref.readexistingrefdata'
@@ -1642,6 +1650,8 @@ module goatmod_userinput
         call ExtractOptionValueInteger1D(fid, field, options%refLBvertIDs)
 
         ! Refinement options (radial)
+        field  = 'gg.radref.LB.lengthtype'
+        call ExtractOptionValueCharacter(fid, field, options%radreflengthtype)
         field  = 'gg.radref.LB.dosp'
         call ExtractOptionValueLogical0D(fid, field, options%radrefLBdosp)
         field  = 'gg.radref.LB.Lmininf'
