@@ -1300,7 +1300,7 @@ module PolygonLevelsetFunction2D
             dy = yqr - yp
             theta = atan2(dx*nypv(:, 1) - dy*nxpv(:, 1), dx*nxpv(:, 1) + dy*nypv(:, 1))
             where (theta < 0) theta = theta + 2*pi_R8
-            isinvert = theta < theta0
+            isinvert = theta <= theta0
 
             ! Hedge for vertices lying exactly on polygonset vertex
             where ((dx == 0) .and. (dy == 0)) isinvert = .true. 
