@@ -352,7 +352,7 @@ module ggmod_topology2D
         !=================================
         ! Tangency points & vessel geometry
         call AddTopologicalMeshTangencyPoints2(topomesh, vesseltracer, &
-            magneticField)
+            vessel, magneticField, options)
 
         ! Construct refined grid based on tangency points and extrema
         ntp = count((topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
@@ -426,7 +426,7 @@ module ggmod_topology2D
         !===========================
         ! Add contours and intersections
         call AddTopologicalMeshContours(topomesh, magneticField, newvessel, &
-            fieldtracer, vesseltracer, options)
+            fieldtracer, options)
 
         ! Vertex faces (preliminary, for garbage tangency point removal)
         call AddTopologicalMeshVertexFaces(topomesh)
@@ -1091,7 +1091,7 @@ module ggmod_topology2D
 
     ! 2D tangency points
     subroutine AddTopologicalMeshTangencyPoints2(topomesh, &
-        boundarytracer, magneticField)
+        boundarytracer, vessel, magneticField, options)
 
         ! Description
         !============
@@ -1134,6 +1134,8 @@ module ggmod_topology2D
         class(TopomeshUDT), intent(inout)       :: topomesh
         class(ContourTracerUDT), intent(in)     :: boundarytracer
         type(MagneticFieldUDT), intent(in)      :: magneticField 
+        type(TopomeshOptionsUDT), intent(in)    :: options
+        type(VesselUDT), intent(in)             :: vessel
 
         ! Auxiliary
         integer(I8)                             :: flag, ntp
@@ -1144,7 +1146,8 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)     :: val, dval, tx, ty, &
             tf, nxpe, nype, nxp, nyp, normprod, dFdx, dFdy
         logical                                 :: hasbeendeleted
-        logical, allocatable                    :: extrloc(:), keepind(:)
+        logical, allocatable                    :: extrloc(:), keepind(:), &
+            doflip(:)
         type(RealDynamicArrayUDT), allocatable  :: xf(:), yf(:)
         type(ContourUDT), allocatable           :: bndcontours(:)
         type(PolygonUDT), allocatable           :: bndpol(:), realbndpol(:)
@@ -1157,59 +1160,66 @@ module ggmod_topology2D
         !===========
         ! Initialize dynamic arrays
 
-        ! Trace contours
-        !---------------
-        ! Boundary
-        bndcontours = boundarytracer%TraceContours([0.0_R8])
-        
-        ! Sanity check
-        if (size(bndcontours) == 0) then 
-            ! Throw error - no boundary polygon
-            call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not trace ' // & 
-                'boundary contour, check input')
-        end if 
-
         ! Construct boundary polygonset
         !==============================
-        ! Construct polygons from boundary
-        allocate(bndpol(size(bndcontours)), keepind(size(bndcontours)))
-        keepind = .true. 
-        do i = 1, size(bndcontours)
-            ! Construct
-            call bndpol(i)%Construct(bndcontours(i)%x, bndcontours(i)%y)
-
-            ! Check for closedness, if not -> warning and remove
-            if (.not. bndpol(i)%isclosed) then 
-                print *, 'AddTopologicalMeshTangencyPoints2: ' //&
-                    'boundary polygon part is not closed and will not be ' // &
-                    'added'
-                print *, 'part: ', i
-                keepind(i) = .false. 
-                !call gdErrorHandler('AddTopologicalMeshTangencyPoints2: boundary polygon ' // & 
-                !    'is not closed, not supported. Check input')
+        ! Check if we just use the existing vessel polygon set or if
+        ! we retrace 
+        if (options%dotpvesselbased) then
+            ! Unpack
+            bndps = vessel%polygonset
+            bndpol = bndps%polygons
+        else
+            ! Boundary contours
+            bndcontours = boundarytracer%TraceContours([0.0_R8])
+            
+            ! Sanity check
+            if (size(bndcontours) == 0) then 
+                ! Throw error - no boundary polygon
+                call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not trace ' // & 
+                    'boundary contour, check input')
             end if 
-        end do 
 
-        ! Get only closed polygons
-        allocate(realbndpol(count(keepind)))
-        realbndpol = pack(bndpol, keepind)
-        if (size(realbndpol) == 0) then 
-            call gdErrorHandler('AddTopologicalMeshTangencyPoints2: no ' // & 
-                'closed boundary polygons found, check input')
-        end if 
-        bndpol = realbndpol
+            
+            ! Construct polygons from boundary
+            allocate(bndpol(size(bndcontours)), keepind(size(bndcontours)))
+            keepind = .true. 
+            do i = 1, size(bndcontours)
+                ! Construct
+                call bndpol(i)%Construct(bndcontours(i)%x, bndcontours(i)%y)
 
-        ! Construct polygonset
-        call bndps%Construct(bndpol)
+                ! Check for closedness, if not -> warning and remove
+                if (.not. bndpol(i)%isclosed) then 
+                    print *, 'AddTopologicalMeshTangencyPoints2: ' //&
+                        'boundary polygon part is not closed and will not be ' // &
+                        'added'
+                    print *, 'part: ', i
+                    keepind(i) = .false. 
+                    !call gdErrorHandler('AddTopologicalMeshTangencyPoints2: boundary polygon ' // & 
+                    !    'is not closed, not supported. Check input')
+                end if 
+            end do 
 
-        ! Orient
-        call bndps%OrientNestedClosedPolygons(flag)
+            ! Get only closed polygons
+            allocate(realbndpol(count(keepind)))
+            realbndpol = pack(bndpol, keepind)
+            if (size(realbndpol) == 0) then 
+                call gdErrorHandler('AddTopologicalMeshTangencyPoints2: no ' // & 
+                    'closed boundary polygons found, check input')
+            end if 
+            bndpol = realbndpol
 
-        ! Check if successful
-        if (flag /= 0) then
-            call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not orient ' // & 
-                'boundary polygons, check input')
-        end if 
+            ! Construct polygonset
+            call bndps%Construct(bndpol)
+
+            ! Orient
+            call bndps%OrientNestedClosedPolygons(flag)
+
+            ! Check if successful
+            if (flag /= 0) then
+                call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not orient ' // & 
+                    'boundary polygons, check input')
+            end if 
+        end if
 
         ! Compute tangency points
         !========================
@@ -1247,7 +1257,7 @@ module ggmod_topology2D
             hasbeendeleted = .false.
             do while (k < size(tf))
                 ! Check difference
-                if ((abs(tf(k+1)-tf(k)) < fdifftol) .or. (tv(k+1)-tv(k) == 1)) then 
+                if ((abs(tf(k+1)-tf(k)) < fdifftol) .or. (tv(k+1)-tv(k) == 1)) then ! 
                     ! Remove values, such that subsequent ones can be
                     ! checked too
                     hasbeendeleted = .true.
@@ -1290,10 +1300,24 @@ module ggmod_topology2D
             call magneticField%interp%Evaluate(tx, ty, 1, 0, dFdx)
             call magneticField%interp%Evaluate(tx, ty, 0, 1, dFdy)
 
-            nxpe = [p%nx, p%nx(1)]
+            ! Get normals of edges
+            nxpe = [p%nx, p%nx(1)] 
             nype = [p%ny, p%ny(1)]
+
+            ! Check orientation - default polygon orientation is inward pointing,
+            ! we need outward pointing
+            doflip = [p%edges(:, 1) == p%vert(1:p%ne)] ! if equal, then the normal points inwards and we need to flip
+            doflip = [doflip, doflip(1)]
+            where (doflip)
+                nxpe = -nxpe
+                nype = -nype 
+            end where
+
+            ! Get normals at vertices
             nxp = 0.5*(nxpe(extrlocind-1) + nxpe(extrlocind))
             nyp = 0.5*(nype(extrlocind-1) + nype(extrlocind))
+
+            ! Compute dot product
             normprod = dFdx*nxp + dFdy*nyp
 
             ! Determine type and add
@@ -1372,7 +1396,7 @@ module ggmod_topology2D
 
     ! Necessary contours
     subroutine AddTopologicalMeshContours(topomesh, magneticField, vessel, &
-        fieldtracer, bndtracer, options)
+        fieldtracer, options)
 
         ! Description
         !============
@@ -1447,7 +1471,7 @@ module ggmod_topology2D
         class(TopomeshUDT)                      :: topomesh 
         type(MagneticFieldUDT),intent(in)       :: magneticField 
         type(VesselUDT), intent(inout)          :: vessel
-        class(ContourTracerUDT), intent(inout)  :: fieldtracer, bndtracer 
+        class(ContourTracerUDT), intent(inout)  :: fieldtracer 
         type(TopomeshOptionsUDT), intent(in)    :: options 
 
         ! Auxiliary
@@ -2328,6 +2352,8 @@ module ggmod_topology2D
         !===============================
         call AddBoundarySplitVertexContours(topomesh, magneticField, vessel, &
             fieldtracer)
+
+        call SimplifyTopologicalMeshFaces(topomesh)
         
         ! Housekeeping
         !=============

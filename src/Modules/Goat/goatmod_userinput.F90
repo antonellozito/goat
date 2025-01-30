@@ -275,7 +275,7 @@ module goatmod_userinput
         ! - readmeth:   'read_structure' for structure.dat files. Only
         !               method that is currently supported.
         ! - filepath:   path to the file to be read
-        ! - refine:     set to 1 to do refinement of vessel (insert 
+        ! - refine:     set to true to do refinement of vessel (insert 
         !               more nodes)
         ! - maxdist:    maximum distance between two nodes. If larger,
         !               nodes will be added in between when refine == 1
@@ -306,7 +306,7 @@ module goatmod_userinput
         character(:), allocatable       :: filepath
 
         real(R8)                        :: maxdist
-        integer(I8)                     :: refine
+        logical                         :: refine
         integer(I8), allocatable        :: TP(:), TPind(:), exclude(:)
 
         ! Vessel representation options
@@ -355,6 +355,8 @@ module goatmod_userinput
         !                   extrema of the field
         ! - fdonewton       : option to refine extrema with newton 
         !                   solver (may not always converge!)
+        ! - dotpvesselbased : do tangency point determination purely 
+        !                   based on current vessel polygons 
         ! - v(...)          : same options but for vessel 
         ! - ffieldtol       : tolerance on field value of extrema (if 
         !                   difference is below tolerance, two extrema 
@@ -396,7 +398,7 @@ module goatmod_userinput
         logical                 :: addcoreboundaries, removecoreregions, &
             fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
             readexistingTM, removenoncoreregions, mergetangencypointtubes, &
-            doadaptations
+            doadaptations, dotpvesselbased
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac, dpsimintangencypointtubes
         character(:), allocatable   :: TMfilepath
@@ -752,7 +754,7 @@ module goatmod_userinput
         options%filepath    = './structure.dat'
 
         ! Refinement options
-        options%refine      = 1
+        options%refine      = .false.
         options%maxdist     = 0.01
 
         ! Target plates
@@ -833,6 +835,7 @@ module goatmod_userinput
         options%vdonewton = .true.
 
         ! Additional options
+        options%dotpvesselbased             = .false.
         options%doadaptations               = .true.
         options%addcoreboundaries           = .true. 
         options%coreboundariesfrac          = 0.2
@@ -1372,7 +1375,7 @@ module goatmod_userinput
 
         ! Refinement
         field = 'goat.vessel.refinevessel'
-        call ExtractOptionValueInteger0D(fid, field, options%refine)
+        call ExtractOptionValueLogical0D(fid, field, options%refine)
         field = 'goat.vessel.maxvesseldist'
         call ExtractOptionValueReal0D(fid, field, options%maxdist)
         
@@ -1530,6 +1533,8 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%ffieldtol)
 
         ! Additional options
+        field = 'gg.tm.dotpvesselbased'
+        call ExtractOptionValueLogical0D(fid, field, options%dotpvesselbased)
         field = 'gg.tm.doadaptations'
         call ExtractOptionValueLogical0D(fid, field, options%doadaptations)
         field = 'gg.tm.addcoreboundaries'
