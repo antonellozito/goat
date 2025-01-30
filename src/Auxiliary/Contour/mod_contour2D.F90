@@ -36,6 +36,7 @@ module mod_contour2D
     real(R8), parameter :: spvalabstol  = 1e-13 ! absolute tolerance in field value to determine if value is equal to saddlepoint value
     real(R8), parameter :: spvalreltol  = 1e-10 ! relative tolerance for ^ 
     real(R8), parameter :: disttol      = 1e-8 ! distance tolerance (absolute) for face lengths (deleted if lower)
+    logical, parameter  :: allowextrap  = .true. ! allow extrapolation in evaluation subroutine
 
     !==================================================================!
     !                                                                  !
@@ -775,7 +776,8 @@ module mod_contour2D
         integer(I8)                     :: iisq, jjsq, nx, ny
         integer(I8), allocatable        :: superquadflags(:, :), IDs(:)
         real(R8)                        :: x0, y0, tv1, tv2
-        real(R8), allocatable, dimension(:)     :: xs, ys, vs, X, Y
+        real(R8), allocatable, dimension(:)     :: xs, ys, vs, X, Y, &
+            xqbin, yqbin
         real(R8), allocatable, dimension(:, :)  :: V
         logical                         :: issaddlepoint
         logical, allocatable            :: superquadfacexflags(:, :), &
@@ -817,6 +819,17 @@ module mod_contour2D
 
         ! Compute values
         !===============
+        ! Check for bounds
+        xqbin = xv 
+        yqbin = yv
+        if (allowextrap) then 
+            ! Project on nearest coordinates
+            where (xqbin < minval(X)) xqbin = minval(X)
+            where (xqbin > maxval(X)) xqbin = maxval(X)
+            where (yqbin < minval(Y)) yqbin = minval(Y)
+            where (yqbin > maxval(Y)) yqbin = maxval(Y)
+        end if
+
         ! Loop 
         do i = 1, nx 
             ! Unpack
@@ -824,8 +837,8 @@ module mod_contour2D
             y0 = yv(i)
 
             ! Get starting location
-            iisq = findloc(x0 > X, .true., 1, back=.true.)
-            jjsq = findloc(y0 > Y, .true., 1, back=.true.)
+            iisq = findloc(xqbin(i) >= X, .true., 1, back=.true.)
+            jjsq = findloc(yqbin(i) >= Y, .true., 1, back=.true.)
 
             ! Out of bounds?
             if ((iisq == 0) .or. (jjsq == 0) .or. (iisq == size(X)) .or. (jjsq == size(Y))) then 
