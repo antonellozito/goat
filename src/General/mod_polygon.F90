@@ -125,13 +125,19 @@ module mod_polygon
 
     contains 
 
+        ! Construction 
         procedure :: Allocate       => AllocatePolygon
         procedure :: Deallocate     => DeallocatePolygon
         procedure, private  :: ConstructPolygon 
         procedure, private  :: ConstructPolygonNolabels
         generic   :: Construct      => ConstructPolygon, ConstructPolygonNolabels
         procedure :: Initialize     => InitializePolygon 
+
+        ! Updating
         procedure :: UpdateCoordinates      => UpdatePolygonVertexCoordinates
+        procedure :: Refine         => RefinePolygonUniform
+
+        ! Metric computation & auxiliaries
         procedure :: ComputeMetrics => ComputePolygonMetrics
         procedure :: SetVert        => SetPolygonVertices
         procedure :: RemoveDuplicatePoints
@@ -170,6 +176,7 @@ module mod_polygon
         ! Operations
         procedure :: SelfIntersections      => PolygonSetSelfIntersections
         procedure :: OrientNestedClosedPolygons
+        procedure :: Refine         => RefinePolygonSetUniform
 
         ! Data access
         procedure, private  :: GetPolygonSetEdgesCoordinates, &
@@ -474,6 +481,34 @@ module mod_polygon
         end do
 
         
+
+    end subroutine
+
+    ! Polygon set refiner (uniform)
+    subroutine RefinePolygonSetUniform(polygonset, dlmax)
+
+        ! Description
+        !============
+        ! This routine refines each of the polygons in the polygonset 
+        ! in a uniform way. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        real(R8), intent(in)                :: dlmax 
+
+        ! Auxiliary
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Refine
+        !=======
+        ! Simply call polygon refiner for each polygon...
+        do i = 1, polygonset%np
+            call polygonset%polygons(i)%Refine(dlmax)
+        end do
 
     end subroutine
 
@@ -1677,6 +1712,109 @@ module mod_polygon
 
     end subroutine
 
+    ! Polygon refiner
+    subroutine RefinePolygonUniform(polygon, dlmax)
+
+        ! Description
+        !============
+        ! This routine refines the edges of an existing polygon by 
+        ! inserting additional points at edges that are too long. 
+        ! The maximal length that an edge should be is determined by 
+        ! dlmax. Refinement is done in a uniform way.
+
+        ! Note: the labels of original vertices are retained, but 
+        ! the new vertices' labels are simply initialized to zero since
+        ! there is not an easy way to propagate these. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)                       :: polygon 
+        real(R8), intent(in)                    :: dlmax
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:,: )   :: newlabels
+        integer(I8), allocatable, dimension(:)      :: nne
+
+        real(R8), allocatable, dimension(:)     :: le, newx, newy, &
+            dxe, dye, frac, dx, dy, x, y
+
+        ! Loop
+        integer(I8)                             :: i, vc, k
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            edges       => polygon%edges,   &
+            ne          => polygon%ne,      &
+            nv          => polygon%nv,      &
+            labels      => polygon%labels,  &
+            vert        => polygon%vert,    &
+            xv          => polygon%x,       &
+            yv          => polygon%y        &
+            )
+
+        ! Precompute
+        x = xv(vert)
+        y = yv(vert)
+        dxe = x(2:ne+1) - x(1:ne)
+        dye = y(2:ne+1) - y(1:ne)
+        le = sqrt( dxe**2 + dye**2 )
+        nne = floor(le/dlmax)
+
+        ! Initialize new edges
+        allocate(newx(sum(nne)+ne+1), newy(sum(nne)+ne+1), &
+            newlabels(sum(nne)+ne+1, size(labels, 2)))
+
+        ! Construct
+        !==========
+        ! Initialize vertex
+        vc = 0
+        
+        ! First coordinate
+        vc = vc + 1
+        newx(vc) = x(1) 
+        newy(vc) = y(1)
+        newlabels(vc, :) = labels(1, :)
+
+        ! Loop over all old edges
+        do i = 1, ne 
+
+            if (nne(i) > 0) then 
+                ! Compute segment coordinates
+                frac = real([(k, k = 1, nne(i))], kind=R8)/real(nne(i)+1, kind=R8)
+                dx = frac*dxe(i)
+                dy = frac*dye(i)
+
+                ! Add
+                newx(vc+1:vc+nne(i)) = newx(vc) + dx 
+                newy(vc+1:vc+nne(i)) = newy(vc) + dy 
+                newlabels(vc+1:vc+nne(i), :) = 0_I8
+
+                ! Update counter
+                vc = vc + nne(i)
+
+            end if 
+
+            ! Last coordinate
+            vc = vc + 1
+            newx(vc) = x(i+1) 
+            newy(vc) = y(i+1)
+            newlabels(vc, :) = labels(vert(i+1), :)
+
+        end do
+
+        ! Construct polygon
+        !==================
+        call polygon%Construct(newx, newy, newlabels)
+
+        ! Housekeeping
+        end associate
+        
+
+    end subroutine
+    
     ! Allocator
     subroutine AllocatePolygon(polygon)
 
