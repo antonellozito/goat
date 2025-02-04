@@ -156,12 +156,15 @@ module ggmod_gridgeneration2D
         ! two entries, as do vert etc, but the TMfaceID will correspond
         ! (normally) to the topological mesh vertex index. 
 
+        ! Note: segments can be closed, but they have very limited 
+        ! support. Errors will be thrown.
+
         real(R8), allocatable, dimension(:)         :: xv, yv, xl, yl, &
             dll, dllc, dlcv
         integer(I8), allocatable, dimension(:)      :: vert
         integer(I8)                                 :: nv, nl, sv, ev, &
             fsID, TMfaceID
-        logical                                     :: isvertex
+        logical                                     :: isvertex, isclosed
 
     contains 
 
@@ -170,6 +173,9 @@ module ggmod_gridgeneration2D
 
         ! Vertex coordinates addition
         procedure :: AddVertices    => AddVerticesGGTMSegment
+
+        ! Cleaning (removal of small edges)
+        procedure :: Clean          => CleanGGTMSegment
 
         ! Segment flipping 
         procedure :: Flip           => FlipGGTMSegment
@@ -882,7 +888,7 @@ module ggmod_gridgeneration2D
         end select
 
         ! Post-process the distribution
-        call PostProcessVertexDistribution(ggtmdata)
+        call PostProcessVertexDistribution(ggtmdata, topomesh, grid)
 
         ! Write data
         call WriteGGTMData(ggtmdata, 'ggtmdata_after_vertexdistribution')
@@ -1911,7 +1917,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Vertex distribution post-processing
-    subroutine PostProcessVertexDistribution(ggtmdata)
+    subroutine PostProcessVertexDistribution(ggtmdata, topomesh, grid)
 
         ! Description
         !============
@@ -1923,6 +1929,10 @@ module ggmod_gridgeneration2D
 
         ! Currently, we apply the following checks/add the following 
         ! information:
+        ! - tube intersections:     we check whether the lines of a 
+        !                           tube, *after* vertex construction, 
+        !                           intersect. These tubes are removed
+        !                           to prevent overlapping cells
         ! - line-of-sight data:     data on LOS is added for vertices 
         !                           to facilitate cell construction in 
         !                           ConstructCellsQuadTria
@@ -1931,14 +1941,33 @@ module ggmod_gridgeneration2D
         !==================
         ! Arguments
         type(GGTMDataUDT), intent(inout)            :: ggtmdata 
+        class(TopomeshUDT), intent(in)              :: topomesh
+        type(GGGridUDT), intent(inout)              :: grid
+        
+        ! Auxiliary
+        integer(I8)                             :: nft, nct, t1, t2
+        integer(I8), allocatable, dimension(:)  :: tc, s1, s2, allIDs, &
+            vertmap
+        real(R8), allocatable, dimension(:)     :: xint, yint
+        logical                                 :: vertexwasdeleted
+        logical, allocatable, dimension(:)      :: keepind, &
+            isvertexdeleted
 
         ! Loop
-        integer(I8)                                 :: i
+        integer(I8)                             :: i, j, k, cc
 
         ! Initialize
         !===========
+        ! Unpack for ease
+        associate(&
+            facedata        => ggtmdata%face,   &
+            celldata        => ggtmdata%cell,   &
+            tube            => topomesh%tube,   &
+            cell            => topomesh%cell    &
+            )
+
         ! Check if all necessary data is properly initialized
-        do i = 1, size(ggtmdata%cell)
+        do i = 1, size(celldata)
             ! Associate for ease
             associate(tc    => ggtmdata%cell(i))
 
@@ -1953,12 +1982,257 @@ module ggmod_gridgeneration2D
             end associate
         end do
 
+        ! Initialize
+        vertexwasdeleted = .false. 
+
+        ! Check intersections 
+        !====================
+        ! Lines of tube may intersect with the starting or ending
+        ! field line - to be removed in entire tube
+        allocate(xint(0), yint(0), s1(0), s2(0))
+        do i = 1, tube%ntot
+            ! Initialize
+            tc = tube%GetCell(i)
+            nft = size(celldata(tc(1))%tubes) ! number of tubes
+            allocate(keepind(nft))
+            keepind = .true.
+
+            ! Loop over all cells of this tube
+            do j = 1, size(tc)
+                ! Sanity check
+                if (nft /= size(celldata(tc(j))%tubes)) then 
+                    print *, 'tube: ', i, 'cell: ', j
+                    call gdErrorHandler('ConstructTopologicalMEshCellFluxTubes: ' // & 
+                        'cell within same topological mesh tube has different ' // & 
+                        'number of flux tubes, not supported')
+                end if 
+
+                ! Associate for ease
+                associate(ct        => celldata(tc(j))%tubes)
+
+                ! Check intersections of lfline (except if final tube)
+                nct = size(ct)
+                do k = 1, nct
+                    ! Associate for ease
+                    associate(&
+                        hfline1     => ct(1)%hfline,    &
+                        lfline1     => ct(1)%lfline,    &
+                        hflinen     => ct(nct)%hfline,  &
+                        lflinen     => ct(nct)%lfline,  &
+                        hflinek     => ct(k)%hfline,    &
+                        lflinek     => ct(k)%lfline     &
+                        )
+
+                    if (k < nct) then 
+                        ! Intersections with first hfline
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(lflinek, hflinek, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false. 
+                            end if 
+                        end if 
+
+                        ! Intersections with last lfline
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(lflinek, lflinen, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false. 
+                            end if 
+                        end if 
+
+                    elseif (nct > 1) then ! don't do if only one flux tube
+                        ! Intersections with first hfline
+                        if (keepind(k)) then 
+                            call GGTMLineIntersections(hflinek, hfline1, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then 
+                                keepind(k) = .false. 
+                            end if 
+                        end if 
+
+                        ! Intersections with last lfline
+                        if (keepind(k)) then 
+                            call GGTMLineIntersections(hflinek, lflinen, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then 
+                                keepind(k) = .false. 
+                            end if 
+                        end if 
+
+                    end if 
+
+                    ! Housekeeping
+                    end associate
+                end do
+
+                ! Housekeeping
+                end associate
+
+            end do 
+
+            
+            ! Check if any were deleted
+            if (any(.not. keepind)) then 
+                ! Issue message
+                print *, 'Deleting tubes for cells: ', tc, 'since they ' // & 
+                    'intersect with the cell boundaries'
+
+                ! Set logical
+                vertexwasdeleted = .true. 
+
+                ! Check for exceptional cases
+                if (size(keepind) == 1 .and. .not. keepind(1)) then 
+                    ! Only one tube that should be deleted -> cell 
+                    ! boundaries intersect
+                    print *, 'Cell ', tc(j), 'has only one tube of ' // & 
+                        'which the boundaries intersect, cannot delete. ' // & 
+                        'Grid will have intersecting cells...'
+                    
+                    ! Set to true again to prevent deletion
+                    keepind = .true. 
+                end if 
+
+                ! Sanity checks - tubes to be deleted should always come
+                ! in pairs
+                if (size(keepind) > 1) then 
+                    ! Check first
+                    if (.not. keepind(1)) then 
+                        if (keepind(2)) then 
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'only one tube marked for deletion, unexpected')
+                        end if 
+                    end if 
+
+                    ! Check last
+                    if (.not. keepind(nft)) then 
+                        if (keepind(nft-1)) then 
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'only one tube marked for deletion, unexpected')
+                        end if 
+                    end if 
+
+                    ! Check others
+                    k = 2
+                    do while (k < nft)
+                        if (.not. keepind(k)) then 
+                            if (keepind(k-1) .and. keepind(k+1)) then 
+                                call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'only one tube marked for deletion, unexpected')
+                            end if 
+                        end if
+                        k = k + 1
+                    end do
+                end if 
+                        
+                ! Check if we still need to delete
+                if (any(.not. keepind)) then 
+                    ! Check which tubes to merge
+                    t1 = 0
+                    t2 = 0
+                    do while (t1 < nct) 
+                        ! Check
+                        if (t2 == nct) then 
+                            exit
+                        end if 
+
+                        ! Get the tube indices
+                        t1 = findloc(keepind(t2+1:size(keepind)), .false., 1) + t2
+                        if (t1 == t2) then 
+                            ! No more start is found, exit
+                            exit 
+                        end if 
+
+                        t2 = findloc(keepind(t1+1:size(keepind)), .true., 1) + t1
+                        if (t2 == t1) then 
+                            ! Should be last one to merge with
+                            t2 = nct 
+                        end if
+
+                        ! Loop over each cell to adjust (first tube is 
+                        ! adjusted)
+                        do cc = 1, size(tc)
+                            ! Take hfline and lfline
+                            celldata(tc(cc))%tubes(t1)%lfline = celldata(tc(cc))%tubes(t2)%lfline
+                        end do 
+
+                        ! Adjust keepind for first tube (is adapted tube)
+                        keepind(t1) = .true. 
+
+                    end do 
+
+                    ! Remove
+                    do cc = 1, size(tc)
+                        celldata(tc(cc))%tubes = pack(celldata(tc(cc))%tubes, keepind)
+                        celldata(tc(cc))%lines = pack(celldata(tc(cc))%lines, keepind(2:size(keepind)))
+                    end do 
+                end if
+            end if 
+
+            ! Housekeeping
+            deallocate(keepind)
+        end do
+
+        ! Update vertex numbering
+        !========================
+        if (vertexwasdeleted) then 
+            ! Initialize
+            allocate(isvertexdeleted(grid%vert%ntot))
+            isvertexdeleted = .true. 
+            do i = 1, cell%ntot 
+                ! Check if vertices are present & ensure properly updated lines
+                do j = 1, size(celldata(i)%tubes)
+                    call celldata(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
+                    call celldata(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
+                    isvertexdeleted(celldata(i)%tubes(j)%hfline%vert) = .false.
+                    isvertexdeleted(celldata(i)%tubes(j)%lfline%vert) = .false.
+                end do
+            end do 
+
+            ! Get all IDs and construct mapping
+            allIDs = pack([(k, k = 1, grid%vert%ntot)], .not. isvertexdeleted)
+            allocate(vertmap(grid%vert%ntot))
+            vertmap = 0_I8
+            vertmap(allIDs) = [(k, k = 1, count(.not. isvertexdeleted))]
+
+            ! Loop and adjust IDs - first segments, then tubes
+            do i = 1, ggtmdata%nseg 
+                ggtmdata%seg(i)%vert = vertmap(ggtmdata%seg(i)%vert)
+                ggtmdata%seg(i)%sv = vertmap(ggtmdata%seg(i)%sv)
+                ggtmdata%seg(i)%ev = vertmap(ggtmdata%seg(i)%ev)
+            end do 
+            do i = 1, cell%ntot 
+                ! Update
+                do j = 1, size(celldata(i)%tubes)
+                    call celldata(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
+                    call celldata(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
+                end do 
+            end do 
+
+            ! Update number of grid vertices
+            grid%vert%ntot = count(.not. isvertexdeleted)
+        end if  
+
         ! Add LOS
         !========
         call DetermineLOSlimits(ggtmdata)
         
         ! Housekeeping
         !=============
+        end associate
 
     end subroutine
 
@@ -2483,15 +2757,15 @@ module ggmod_gridgeneration2D
                     
                     ! Check stop criterium
                     if ((k1 >= n1) .and. (k2 >= n2)) then 
-                        ! Check if the last non-aligned face was equal to the first one
-                        issameface = (tempfacevert(nf-1, 1) == tempfacevert(1, 1) ) .and. &
-                            (tempfacevert(nf-1, 2) == tempfacevert(1, 2))
-                        issameface = issameface .or. (tempfacevert(nf-1, 2) == tempfacevert(1, 1) ) .and. &
-                            (tempfacevert(nf-1, 1) == tempfacevert(1, 2))
-                        if (issameface) then 
-                            ! Don't add the last face
-                            nf = nf-1
-                        end if 
+                        !! Check if the last non-aligned face was equal to the first one
+                        !issameface = (tempfacevert(nf-1, 1) == tempfacevert(1, 1) ) .and. &
+                        !    (tempfacevert(nf-1, 2) == tempfacevert(1, 2))
+                        !issameface = issameface .or. (tempfacevert(nf-1, 2) == tempfacevert(1, 1) ) .and. &
+                        !    (tempfacevert(nf-1, 1) == tempfacevert(1, 2))
+                        !if (issameface) then 
+                        !    ! Don't add the last face
+                        !    nf = nf-1
+                        !end if 
                         exit
                     end if 
 
@@ -3783,6 +4057,23 @@ module ggmod_gridgeneration2D
                 end if 
             end do 
 
+            ! Project the distribution to the first face of the tube
+            j = tf(1)
+            associate(tdlcv         => facedata(tfmax)%line%dlcv)
+            dlcv = tdlcv/tdlcv(size(tdlcv))*facedata(j)%line%dlcv(size(facedata(j)%line%dlcv))
+            dlcv(1) = 0
+            dlcv(size(dlcv)) = facedata(j)%line%dllc(size(facedata(j)%line%dllc))
+            end associate
+
+            ! Add data
+            call facedata(j)%line%AddVertexCoordinates(dlcv)
+
+            ! Add vertex IDs
+            tvID = [face%vert(j, 1), (k, k = grid%vert%ntot+1, grid%vert%ntot + size(dlcv) - 2), face%vert(j, 2)]
+            call facedata(j)%line%AddVertexIDs(tvID, &
+                [.true., spread(.false., 1, size(dlcv)-2), .true.])
+            
+
             ! Add maximal distribution to tube
             tubedata(i)%distributionface = tf(1)
 
@@ -5029,6 +5320,11 @@ module ggmod_gridgeneration2D
                         ! Double the size
                         ggtmdata%seg = [ggtmdata%seg, ggtmdata%seg]
                     end if 
+                    if (vertexID(j, k) == vertexID(j, k+1)) then 
+                        ! Closed segment, ensure the same to machine precision
+                        xl(size(xl)) = xl(1)
+                        yl(size(yl)) = yl(1)
+                    end if 
                     call ggtmdata%seg(nseg)%Initialize(xl, yl, fsID(j), &
                         0_I8, vertexID(j, k), vertexID(j, k+1))
 
@@ -5126,13 +5422,12 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: nt, startsegID, &
-            endsegID 
-        integer(I8), allocatable, dimension(:)  :: tc, s1, s21
+            endsegID, nft, nct, t1, t2
+        integer(I8), allocatable, dimension(:)  :: tc
         integer(I8), allocatable, dimension(:)  :: allsegID
-        real(R8), allocatable, dimension(:)     :: xint, yint
 
         ! Loop
-        integer(I8)                             :: i, j, k 
+        integer(I8)                             :: i, j, k
 
         ! Initialize
         !===========
@@ -5361,7 +5656,6 @@ module ggmod_gridgeneration2D
                 end if 
             end if 
                 
-
             ! Shallow angle tubes
             !--------------------
 
@@ -5369,133 +5663,7 @@ module ggmod_gridgeneration2D
             ! Housekeeping
             end associate
         end do 
-
-        ! Check intersections 
-        !====================
-        ! Lines of tube may intersect with the starting or ending
-        ! field line - to be removed in entire tube
-#ifdef debug
-        allocate(xint(0), yint(0), s1(0), s2(0))
-        do i = 1, tube%ntot
-            ! Initialize
-            tc = tube(i)%GetCell(i)
-            nft = size(celldata(tc(1))%tubes) ! number of tubes
-            allocate(keepind(nft))
-            keepind = .true.
-
-            ! Loop over all cells of this tube
-            do j = 1, size(tc)
-                ! Sanity check
-                if (nft /= size(celldata(tc(j))%tubes)) then 
-                    print *, 'tube: ', i, 'cell: ', j
-                    call gdErrorHandler('ConstructTopologicalMEshCellFluxTubes: ' // & 
-                        'cell within same topological mesh tube has different ' // & 
-                        'number of flux tubes, not supported')
-                end if 
-
-                ! Associate for ease
-                associate(ct        => celldata(tc(j))%tubes)
-
-                ! Check intersections of lfline (except if final tube)
-                nct = size(ct)
-                do k = 1, nct
-                    if (k < nct) then 
-                        ! Intersections with first hfline
-                        if (keepind(k)) then 
-                            call SimplePolygonIntersections(ct(k)%lfline%xl, &
-                                ct(k)%lfline%yl, ct(1)%hfline%xl, ct(1)%hfline%yl, &
-                                xint, yint, s1, s2)
-
-                            ! Check
-                            if (size(xint) > 0) then 
-                                keepind(k) = .false. 
-                            end if 
-                        end if 
-
-                        ! Intersections with last lfline
-                        if (keepind(k)) then 
-                            call SimplePolygonIntersections(ct(k)%lfline%xl, &
-                                ct(k)%lfline%yl, ct(nct)%lfline%xl, ct(nct)%lfline%yl, &
-                                xint, yint, s1, s2)
-
-                            ! Check
-                            if (size(xint) > 0) then 
-                                keepind(k) = .false. 
-                            end if 
-                        end if 
-
-                    else
-                        ! Intersections with first hfline
-                        if (keepind(k)) then 
-                            call SimplePolygonIntersections(ct(k)%hfline%xl, &
-                                ct(k)%hfline%yl, ct(1)%hfline%xl, ct(1)%hfline%yl, &
-                                xint, yint, s1, s2)
-
-                            ! Check
-                            if (size(xint) > 0) then 
-                                keepind(k) = .false. 
-                            end if 
-                        end if 
-
-                        ! Intersections with last lfline
-                        if (keepind(k)) then 
-                            call SimplePolygonIntersections(ct(k)%hfline%xl, &
-                                ct(k)%hfline%yl, ct(nct)%lfline%xl, ct(nct)%lfline%yl, &
-                                xint, yint, s1, s2)
-
-                            ! Check
-                            if (size(xint) > 0) then 
-                                keepind(k) = .false. 
-                            end if 
-                        end if 
-
-                    end if 
-                end do
-
-                ! Housekeeping
-                end associate
-
-            end do 
-
-            ! Check if any were deleted
-            if (any(.not. keepind)) then 
-                ! Issue message
-                print *, 'Deleting tubes for cell: ', tc(j), 'since they ' // & 
-                    'intersect with the cell boundaries'
-
-                ! Check for exceptional cases
-                if (size(keepind) == 1 .and. .not. keepind(1)) then 
-                    ! Only one tube that should be deleted -> cell 
-                    ! boundaries intersect
-                    print *, 'Cell ', tc(j), 'has only one tube of ' // & 
-                        'which the boundaries intersect, cannot delete. ' // & 
-                        'Grid will have intersecting cells...'
-                    
-                    ! Set to true again to prevent deletion
-                    keepind = .true. 
-                end if 
-                    
-
-                ! Check if we still need to delete
-                if (any(.not. keepind)) then 
-                    ! Check which tubes to merge
-                    k = findloc(keepind, .false., 1)
-                    do while (k < nct) 
-                        ! Get the tube indices
-                        t1 = k 
-                        t2 = findloc(keepind(k+1:size(keepind)), 1, .true.)
-                        if (t2 == 0) then 
-                            ! Should be last one to merge with
-                            t2 = nct 
-                        end if
-                    end do 
-                end if
-                
-            end if 
-
-        end do
-#endif 
-
+        
         ! Housekeeping
         !=============
         end associate
@@ -6275,9 +6443,10 @@ module ggmod_gridgeneration2D
             segment%dllc(i+1) = segment%dllc(i) + segment%dll(i)
         end do 
         segment%dlcv = [0.0_R8, segment%dllc(segment%nl)]
-
+        
         ! Check
         segment%isvertex = .false. 
+        segment%isclosed = .false.
         if (sv == ev) then 
             if (size(xl) == 2) then 
                 if (xl(1) == xl(2) .and. yl(1) == yl(2)) then 
@@ -6287,12 +6456,90 @@ module ggmod_gridgeneration2D
                         'start and end vertex are the same, but coordinates are not')
                 end if 
             else
-                ! Could in principle be a closed segment, but we don't
-                ! support this in any of the other routines - throw error
-                call gdErrorHandler('InitializeGGTMSegment: ' // & 
-                    'closed segment detected, not supported')
+                if (xl(1) == xl(size(xl)) .and. (yl(1) == yl(size(yl)))) then 
+                    segment%isclosed = .true. 
+                else
+                    ! Weird
+                    call gdErrorHandler('InitializeGGTMSegment: start and ' // & 
+                        'end vertex are the same, but coordinates are ' // & 
+                        'not. Unexpected')
+                end if
             end if 
         end if 
+
+        ! Clean
+        call segment%Clean()
+
+        ! Checks
+        if (any(segment%dlcv(2:)-segment%dlcv(1:segment%nv-1) < disttol) .and. .not. segment%isvertex) then 
+            print *, 'InitializeGGTMSegment: vertices form very small face ' // & 
+                '(smaller than predefined disttol)'
+        end if 
+        if (any(segment%dll < disttol) .and. .not. segment%isvertex) then 
+            print *, 'InitializeGGTMSegment: GGTM segment is extremely small ' // & 
+                '(smaller than predefined disttol)'
+        end if 
+
+    end subroutine
+
+    ! Segment cleaning (removal of almost coinciding points)
+    subroutine CleanGGTMSegment(segment)
+
+        ! Description
+        !============
+        ! This routine removes vertices (except end points) to remove
+        ! edges with distance smaller than disttol. To be used 
+        ! when constructing a new edge. It is assumed that an initial
+        ! length distribution etc is already determined. Note that this
+        ! routine only considers the original coordinates xl, yl and that
+        ! the vertex distribution is not adjusted!
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMSegmentUDT)               :: segment
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)  :: keepvert 
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Check
+        !======
+        ! Hedge for vertex segments
+        if (segment%isvertex) then 
+            return 
+        end if 
+
+        ! Check for almost coinciding vertices
+        keepvert = [segment%dll > disttol, .true.]
+        if (.not. keepvert(1)) then 
+            if (segment%nl > 2) then ! don't do if only two points
+                keepvert(2) = .false. 
+            end if 
+            keepvert(1) = .true. 
+        end if 
+        if (all(keepvert)) then 
+            ! Nothing to do, return
+            return
+        end if 
+
+        ! Rebuild
+        !========
+        segment%xl = pack(segment%xl, keepvert)
+        segment%yl = pack(segment%yl, keepvert)
+        segment%nl = size(segment%xl)
+
+        ! Compute
+        segment%dll = sqrt((segment%xl(2:) - segment%xl(1:size(segment%xl)-1))**2 &
+            + (segment%yl(2:) - segment%yl(1:size(segment%yl)-1))**2)
+        segment%dllc = segment%xl 
+        segment%dllc = 0.0_R8
+        do i = 1, size(segment%xl)-1
+            segment%dllc(i+1) = segment%dllc(i) + segment%dll(i)
+        end do 
+        segment%dlcv = [0.0_R8, segment%dllc(segment%nl)]
 
     end subroutine
 
@@ -6475,6 +6722,13 @@ module ggmod_gridgeneration2D
                     'vertex segments is not yet supported')
             end if 
 
+            ! Check that there are no closed segments, not yet supported
+            if (any([seg(segID)%isclosed])) then 
+                call gdErrorHandler('InitializeGGTMFieldlineData: ' // & 
+                    'field line with multiple segments of which some are ' // & 
+                    'closed segments is not yet supported')
+            end if 
+
             ! Need to check common vertex with next segment
             if (seg(segID(1))%ev == seg(segID(2))%sv .or. &
                 seg(segID(1))%ev == seg(segID(2))%ev) then 
@@ -6619,6 +6873,14 @@ module ggmod_gridgeneration2D
         if (ggtmdata%seg(segmentID)%isvertex) then 
             call gdErrorHandler('AppendGGTMFieldLineSegment: ' // &
                 'segment is vertex segment, appending of these ' // &
+                'segments is not yet supported')
+        end if 
+
+        ! Though technically possible here, we do not allow extension 
+        ! with closed segments (will error in line rebuilding stage)
+        if (ggtmdata%seg(segmentID)%isclosed) then 
+            call gdErrorHandler('AppendGGTMFieldLineSegment: ' // &
+                'segment is closed segment, appending of these ' // &
                 'segments is not yet supported')
         end if 
 
@@ -6920,7 +7182,8 @@ module ggmod_gridgeneration2D
         if (count(line%dlcv >= line%dllc(line%nl)) > 1) then 
             print *, 'weird'
         end if
-        where (line%dlcv >= line%dllc(line%nl)) line%dlcv = line%dllc(line%nl)     
+        where (line%dlcv >= line%dllc(line%nl)) line%dlcv = line%dllc(line%nl) 
+        
         
         if (allocated(line%xv)) then 
             deallocate(line%xv, line%yv)
@@ -7289,6 +7552,85 @@ module ggmod_gridgeneration2D
         linepair%l2maxLOS = 0_I8
         linepair%srflabel = 0_I8
         linepair%erflabel = 0_I8
+
+    end subroutine
+
+    ! GGTM line intersections
+    subroutine GGTMLineIntersections(l1, l2, xint, yint, s1, s2, s1r, s2r, &
+        vertbased)
+
+        ! Description
+        !============
+        ! More or less a wrapper for intersections between GGTM lines.
+        ! However, intersections at end points are ignored if the vertex
+        ! IDs are the same there. Intersections are computed based on xl
+        ! and yl, not on the vertex coordinates (reason why we can check
+        ! vertices, is because by definition the first and last vertex
+        ! have to lie on the first and last point of the line). 
+
+        ! Note: this routine is particularly useful when checking
+        ! intersections between field lines to determine to remove a tube
+        ! or field line. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMFieldlineDataUDT), intent(in)      :: l1, l2 
+        real(R8), allocatable, dimension(:), intent(out)    :: xint, yint
+        integer(I8), allocatable, dimension(:), intent(out) :: s1, s2 
+        real(R8), allocatable, dimension(:), intent(out), optional  :: s1r, s2r 
+        logical, intent(in), optional                       :: vertbased
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)         :: s1raux, s2raux
+        logical, allocatable, dimension(:)          :: keepx
+
+        ! Compute 
+        !========
+        ! Intersections
+        if (present(vertbased)) then 
+            if (vertbased) then
+                call SimplePolygonIntersections(l1%xv, l1%yv, l2%xv, l2%yv, &
+                    xint, yint, s1, s2, s1raux, s2raux) 
+            else
+                call SimplePolygonIntersections(l1%xl, l1%yl, l2%xl, l2%yl, &
+                    xint, yint, s1, s2, s1raux, s2raux)
+            end if
+        else
+            call SimplePolygonIntersections(l1%xl, l1%yl, l2%xl, l2%yl, &
+                xint, yint, s1, s2, s1raux, s2raux)
+        end if
+        
+
+        ! Process
+        if (size(xint) > 0) then
+            ! First, hedge for intersections exactly 
+            ! in end point ->  simply cut cell tube
+            allocate(keepx(size(xint)))
+            keepx = .true. 
+            if (l1%vert(1) == l2%vert(1)) then 
+                where (xint == l1%xl(1) .and. &
+                    yint == l1%yl(1)) keepx = .false. 
+            end if 
+            if (l1%vert(l1%nv) == l2%vert(l2%nv)) then 
+                where (xint == l1%xl(l1%nl) .and. &
+                    yint == l1%yl(l1%nl)) keepx = .false. 
+            end if 
+
+            ! Remove intersections
+            xint = pack(xint, keepx)
+            yint = pack(yint, keepx)
+            s1 = pack(s1, keepx)
+            s2 = pack(s2, keepx)
+            s1raux = pack(s1raux, keepx)
+            s2raux = pack(s2raux, keepx)
+        end if 
+
+        ! Check optional arguments
+        if (present(s1r) .and. present(s2r)) then 
+            s1r = s1raux 
+            s2r = s2raux 
+        end if 
 
     end subroutine
 
@@ -7944,6 +8286,7 @@ module ggmod_gridgeneration2D
             if (size(isreflegal) /= size(dll)) then 
                 print *, 'size error'
             end if
+
             ! Determine which faces to refine/coarsen
             where (((dll > Lmaxvert(1:line%nv-1)) .or. (dll > Lmaxvert(2:line%nv))) &
                 .and. isreflegal) 
@@ -7959,9 +8302,15 @@ module ggmod_gridgeneration2D
             end where
                 
             ! Check exit conditions
-            if ((.not. any(refineface)) .and. (.not. any(coarsenface))) then 
+            if ((.not. any(refineface)) .and. (.not. any(coarsenface))) then
+                if (any(dll < disttol)) then 
+                    print *, minloc(dll)
+                end if  
                 exit
             end if 
+            if (any(dll < disttol.and. .not. coarsenface)) then 
+                print *, minloc(dll)
+            end if  
 
             ! Refine/coarsen
             !---------------
@@ -8024,8 +8373,7 @@ module ggmod_gridgeneration2D
                         isprevfacelegal = (cc > 1) 
                         if (isprevfacelegal) then 
                             isprevfacelegal = isprevfacelegal &
-                                .and. (.not. newkeepvert(cc)) &
-                                .and. (newiscoarselegal(cc-1))
+                                .and. (.not. newkeepvert(cc))
                         end if  
                         
                         ! Check which face to merge with
@@ -8153,7 +8501,13 @@ module ggmod_gridgeneration2D
                 thisvertID = newvertID(1:cc)
                 isreflegal = newisreflegal(1:cc-1) 
                 iscoarselegal = newiscoarselegal(1:cc-1)
+                if (any(newdll(1:cc-1) < disttol)) then 
+                    print *, minloc(newdll)
+                end if 
                 dll = newdll(1:cc-1)
+                if (any(dll < disttol)) then 
+                    print *, minloc(dll)
+                end if 
                 deallocate(newdllc)
                 allocate(newdllc(size(dll)+1))
                 newdllc = 0_R8
@@ -8181,6 +8535,9 @@ module ggmod_gridgeneration2D
 
         ! Construct line coordinates
         !===========================
+        if (any(dll <= disttol)) then 
+            print *, 'weird'
+        end if 
         call refiner%AddLineVertexCoordinates(line, newdllc)
         ! call line%AddVertexCoordinates(newdllc)
         call line%AddVertexIDs(thisvertID, thiskeepvert)
@@ -9416,6 +9773,7 @@ module ggmod_gridgeneration2D
 
         ! Compute
         !========
+        !$omp parallel do default(private) shared(simgrid, allxint, allyint, faceIDs)
         do i = 1, nf 
             do j = i+1, nf 
                 if (any(fv(i, 1) == fv(j, :)) .or. any(fv(i, 2) == fv(j, :))) then 
@@ -9427,13 +9785,16 @@ module ggmod_gridgeneration2D
                         yv(fv(j, 1)), xv(fv(j, 2)), yv(fv(j, 2)))
 
                     if (.not. isnan(xint)) then 
+                        !$omp critical 
                         allxint = [allxint, xint, xint]
                         allyint = [allyint, yint, yint]
                         faceIDs = [faceIDs, i, j]
+                        !$omp end critical
                     end if 
                 end if
             end do 
         end do 
+        !$omp end parallel do
 
         ! Write
         !======
