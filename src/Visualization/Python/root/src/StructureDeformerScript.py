@@ -2,17 +2,17 @@
 #------------
 # Simple script to deform structures. Very basic, one has to implement
 # ones own deformations etc manually. 
-import Datahandler as dh 
-import Plotter as pl
+from src import Datahandler as dh 
+from src import Plotter as pl
 import numpy as np
-import goat_types as gt
-import StructureDeformer as sd 
+from src import goat_types as gt
+from src import StructureDeformer as sd 
 import copy
 import os 
 
 # Load structure
-structuredir = './goatf/Examples/JT60SA/Baseline/structure_original.dat'
-writedir  = './goatf/Examples/JT60SA/Baseline'
+structuredir = './goatf/Examples/JT60SA/Baseline/structure.dat'
+writedir  = './goatf/Examples/JT60SA/10degrees6cm'
 topomeshdir = './goatf/Examples/JT60SA/Baseline/output/topomesh.dat'
 structure = dh.ReadStructureFile(structuredir)
 newstructure = copy.deepcopy(structure)
@@ -27,7 +27,7 @@ pl.PlotStructure(structure, 0)
 # 4: translate entire vessel
 
 # Operations to apply translations and rotations
-ApplyDeformations = False
+ApplyDeformations = True
 if ApplyDeformations:
     operations = [4, 1, 1]
     structIDs = [0, 2, 2]
@@ -35,7 +35,7 @@ if ApplyDeformations:
 
     xdata = [-0.5, structure[1].x[4], structure[1].x[4]]
     ydata = [-0.3, structure[1].y[4], structure[1].y[4]]
-    zdata = [0.06, 0, 0]
+    zdata = [0.06, 10, 10]
 
 # Operations to adjust original structure
 else:

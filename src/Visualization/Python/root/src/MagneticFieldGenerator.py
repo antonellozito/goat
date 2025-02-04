@@ -3,10 +3,10 @@
 # Simple script to generate our own magnetic fields based on analytic
 # descriptions. Writes out an rzpsi file using the datahandler 
 # module
-import Datahandler as dh 
-import Plotter as pl
+from src import Datahandler as dh 
+from src import Plotter as pl
 import numpy as np
-import goat_types as gt
+from src import goat_types as gt
 
 # Define magnetic field
 def MagneticField(x, y):
