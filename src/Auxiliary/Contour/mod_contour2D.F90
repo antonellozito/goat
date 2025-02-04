@@ -760,11 +760,8 @@ module mod_contour2D
         ! evaluation is done using simple bilinear interpolation, 
         ! consistent with how contours are traced in the tracer.
         
-        ! Note: we are likely not discretely consistent within 
-        ! saddle point regions... we may alleviate this by using the 
-        ! routine to start in a saddle point, check which triangle we 
-        ! have, and then do barycentric interpolation 
-
+        ! Note: when we arrive at a saddle point structure, we use 
+        ! barycentric interpolation, which should be consistent 
         ! Declare variables
         !==================
         ! Arguments
@@ -782,6 +779,7 @@ module mod_contour2D
         logical                         :: issaddlepoint
         logical, allocatable            :: superquadfacexflags(:, :), &
             superquadfaceyflags(:, :)
+        type(sp2DUDT)                   :: thissp
         type(sp2DUDt), allocatable      :: spstruct(:)
 
         ! Loop
@@ -862,14 +860,21 @@ module mod_contour2D
                 ! Skip remainder of loop
                 cycle
             end if 
-            if (superquadflags(iisq, jjsq) > 0) then 
-                val(i) = 0
-            end if 
 
-            ! Compute value at starting quad by bilinear interpolation
-            tv1 = (V(iisq+1, jjsq) - V(iisq, jjsq))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq)
-            tv2 = (V(iisq+1, jjsq+1) - V(iisq, jjsq+1))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq+1)
-            val(i) = (tv2 - tv1)/(Y(jjsq+1) - Y(jjsq))*(y0 - Y(jjsq)) + tv1
+            ! In a saddle point region?
+            if (superquadflags(iisq, jjsq) > 0) then 
+                ! Get saddle point structure
+                thissp = spstruct(superquadflags(iisq, jjsq))
+
+                ! Evaluate
+                val(i) = EvaluateFromSaddlePoint(x0, y0, thissp, X, Y)
+
+            else
+                ! Compute value at starting quad by bilinear interpolation
+                tv1 = (V(iisq+1, jjsq) - V(iisq, jjsq))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq)
+                tv2 = (V(iisq+1, jjsq+1) - V(iisq, jjsq+1))/(X(iisq+1) - X(iisq))*(x0 - X(iisq)) + V(iisq, jjsq+1)
+                val(i) = (tv2 - tv1)/(Y(jjsq+1) - Y(jjsq))*(y0 - Y(jjsq)) + tv1
+            end if 
         
 
         end do 
@@ -1612,10 +1617,17 @@ module mod_contour2D
             allocate(contours(0))
         end if 
 
-        ! Compute value at starting quad by bilinear interpolation
-        tv1 = (V(iisq+1, jjsq) - V(iisq, jjsq))/(X(iisq+1) - X(iisq))*(x0p - X(iisq)) + V(iisq, jjsq)
-        tv2 = (V(iisq+1, jjsq+1) - V(iisq, jjsq+1))/(X(iisq+1) - X(iisq))*(x0p - X(iisq)) + V(iisq, jjsq+1)
-        tv = (tv2 - tv1)/(Y(jjsq+1) - Y(jjsq))*(y0p - Y(jjsq)) + tv1
+        ! Check if we start in a saddle point
+        if ((superquadflags(iisq, jjsq) /= 0) .and. .not. issaddlepoint) then 
+            ! Call dedicated evaluator
+            tv = EvaluateFromSaddlePoint(x0p, y0p, &
+                spstruct(superquadflags(iisq, jjsq)), X, Y)
+        else
+            ! Compute value at starting quad by bilinear interpolation
+            tv1 = (V(iisq+1, jjsq) - V(iisq, jjsq))/(X(iisq+1) - X(iisq))*(x0p - X(iisq)) + V(iisq, jjsq)
+            tv2 = (V(iisq+1, jjsq+1) - V(iisq, jjsq+1))/(X(iisq+1) - X(iisq))*(x0p - X(iisq)) + V(iisq, jjsq+1)
+            tv = (tv2 - tv1)/(Y(jjsq+1) - Y(jjsq))*(y0p - Y(jjsq)) + tv1
+        end if 
         
         ! Check if the current point is an x-point. 
         issaddlepoint = .false.
@@ -1935,8 +1947,18 @@ module mod_contour2D
                     ! Exit?
                     if (doexit) then 
                         ! Mark this saddle point as potential starting quads
-                        where ((superquadflags == superquadflags(iic, jjc)) &
-                            .and. (quadc > 0)) startquads = .true.  
+                        ! - unless the saddle point we end up in is 
+                        ! the starting saddle quad
+                        if (superquadflags(iic, jjc) /= 0) then
+                            if (superquadflags(iic, jjc) /= superquadflags(iisq, jjsq)) then 
+                                where ((superquadflags == superquadflags(iic, jjc)) &
+                                    .and. (quadc > 0)) startquads = .true.  
+                            else
+                                ! Ensure we don't start again at this quad
+                                where ((superquadflags == superquadflags(iic, jjc)) &
+                                    .and. (quadc > 0)) startquads = .false.  
+                            end if 
+                        end if 
                         exit 
                     end if 
                     
@@ -2748,6 +2770,73 @@ module mod_contour2D
 
     end subroutine
 
+    ! Evaluate in saddle point
+    function EvaluateFromSaddlePoint(xp, yp, thissp, X, Y) result(val)
+
+        ! Description
+        !============
+        ! Evaluate the field value for a point that lies (presumably)
+        ! inside a saddle point region. This requires barycentric
+        ! interpolation to be consistent with the linear interpolation 
+        ! that is done on triangle edges. First, we check which 
+        ! triangle the point belongs to (if none, we throw an error). 
+        ! Then, we determine the barycentric coordinates and interpolate
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)                        :: xp, yp, X(:), Y(:)
+        type(sp2DUDT), intent(in)                   :: thissp
+        real(R8)                                    :: val 
+
+        ! Auxiliary
+        integer(I8)                                 :: ctri, v1, v2, v3
+        real(R8)                                    :: lambda1, lambda2, &
+            lambda3
+        real(R8), allocatable, dimension(:)         :: xt, yt
+        logical, allocatable, dimension(:)          :: in, on
+
+        ! Checks
+        !=======
+        ! Get triangle vertex coordinates
+        xt = [thissp%x, X(thissp%ixpoints(2:))]
+        yt = [thissp%y, Y(thissp%iypoints(2:))]
+
+        ! Get triangle
+        call InTriangle(thissp%tri(:, 1), thissp%tri(:, 2), thissp%tri(:, 3), &
+            xt, yt, xp, yp, in, on)
+        ctri = findloc(in .or. on, .true., 1)
+
+        ! Check if it was found
+        if (ctri == 0) then 
+            call gdErrorHandler('EvaluateFromSaddlePoint: triangle ' // & 
+                'could not be found, check if point actually lies in saddle point region')
+        end if 
+
+        ! Get triangle vertices
+        v1 = thissp%tri(ctri, 1)
+        v2 = thissp%tri(ctri, 2)
+        v3 = thissp%tri(ctri, 3)
+
+        ! Interpolate
+        !============
+        ! Compute barycentric coordinates
+        call Cart2Bary(xp, yp, xt(v1), yt(v1), xt(v2), yt(v2), xt(v3), &
+            yt(v3), lambda1, lambda2, lambda3)
+
+        ! Sanity check
+        if (lambda1 < 0_R8 .or. lambda2 < 0_R8 .or. lambda3 < 0_R8) then 
+            print *, 'EvaluateFromSaddlePoint: point should lie in triangle, ' // & 
+                'but negative barycentric coordinates present. May be a ' // &
+                'bug '
+        end if 
+        
+        ! Compute value
+        val = lambda1*thissp%valpoints(v1) + lambda2*thissp%valpoints(v2) + &
+            lambda3*thissp%valpoints(v3)
+
+    end function 
+
     ! Quad flag determination
     function GetQuadFlags(hasvv, superquadflags) result(quadflags)
 
@@ -3085,6 +3174,48 @@ module mod_contour2D
 
         end do 
         !$omp end parallel do
+
+    end subroutine
+
+    ! Barycentric coordinate conversion
+    subroutine Cart2Bary(x, y, x1, y1, x2, y2, x3, y3, lambda1, lambda2, lambda3)
+
+        ! Description
+        !============
+        ! Convert cartesian coordinates (x, y) to barycentric 
+        ! coordinates (lambda1, lambda2, lambda3) for the triangle
+        ! given by points (1, 2, 3). Lambda1 then corresponds to the 
+        ! weight of the first vertex, etc. Conversion is based on the
+        ! following coordinate transformation (basic equations plus 
+        ! normalization of lambdas):
+        !
+        ! x = lambda1*x1 + lambda2*x2 + lambda3*x3
+        ! y = lambda1*y1 + lambda2*y2 + lambda3*y3
+        ! lambda3 = 1 - lambda1 - lambda2
+        ! 
+        ! Inverting this system yields, with r = (x, y) etc:
+        ! 
+        ! lambda1 = (r - r3) x (r2 - r3)/(r1 - r3) x (r2 - r3)
+        ! lambda2 = (r - r3) x (r3 - r1)/(r1 - r3) x (r2 - r3)
+        ! lambda3 = 1 - lambda1 - lambda2
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)            :: x, y, x1, y1, x2, y2, x3, y3
+        real(R8), intent(out)           :: lambda1, lambda2, lambda3
+
+        ! Auxiliary
+        real(R8)                        :: cp1, cp2, cp3
+
+        ! Compute
+        !========
+        cp1 = (x - x3)*(y2 - y3) - (x2 - x3)*(y - y3)
+        cp2 = (x - x3)*(y3 - y1) - (x3 - x1)*(y - y3)
+        cp3 = (x1 - x3)*(y2 - y3) - (x2 - x3)*(y1 - y3)
+        lambda1 = cp1/cp3
+        lambda2 = cp2/cp3
+        lambda3 = 1 - lambda1 - lambda2
 
     end subroutine
 
