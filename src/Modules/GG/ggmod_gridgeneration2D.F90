@@ -2033,7 +2033,7 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
-                                keepind(k) = .false. 
+                                keepind(k) = .false.
                             end if 
                         end if 
 
@@ -2112,16 +2112,18 @@ module ggmod_gridgeneration2D
                     ! Check first
                     if (.not. keepind(1)) then 
                         if (keepind(2)) then 
-                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                                'only one tube marked for deletion, unexpected')
+                            keepind(2) = .false.
+                            !call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                            !    'only one tube marked for deletion, unexpected')
                         end if 
                     end if 
 
                     ! Check last
                     if (.not. keepind(nft)) then 
                         if (keepind(nft-1)) then 
-                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                                'only one tube marked for deletion, unexpected')
+                            keepind(nft-1) = .false.
+                            !call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                            !    'only one tube marked for deletion, unexpected')
                         end if 
                     end if 
 
@@ -2160,6 +2162,9 @@ module ggmod_gridgeneration2D
                         if (t2 == t1) then 
                             ! Should be last one to merge with
                             t2 = nct 
+                        else
+                            ! Need to subtract 1 since t2 is now a tube to be kept
+                            t2 = t2 - 1
                         end if
 
                         ! Loop over each cell to adjust (first tube is 
