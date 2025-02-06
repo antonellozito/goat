@@ -50,7 +50,7 @@ echo 'Running at goat top directory: '  ${GOATTOP}
 # Add scripts to the path variable
 setenv GOAT_SCRIPTPATHS ${GOATTOP}/scripts
 setenv GOAT_EXECUTABLES ${GOATTOP}/executables
-setenv GOAT_VISUALIZATION ${GOATTOP}/src/Visualization/Python/src
+setenv GOAT_VISUALIZATION ${GOATTOP}/src/Visualization/Python/root
 setenv PATH "${GOAT_SCRIPTPATHS}:${GOAT_EXECUTABLES}:${PATH}"
 
 # Set HOST_NAME and COMPILER, which will determine setup files to be used
