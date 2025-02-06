@@ -1181,6 +1181,7 @@ module goatmod_types
                         if (fcount(tf) > 2) then
                             print *, 'face ID: ', tf
                             print *, 'neighbours: ', tempfcell(tf,:), i
+                            print *, 'vert: ', f%vert(tf, 1), f%vert(tf, 2)
                             call gdErrorHandler(& 
                             'ComputeGridInterconnections: too many ' &
                                 // 'neighbours for this face')
