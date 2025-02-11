@@ -976,7 +976,7 @@ module PolygonLevelsetFunction2D
         !===========
         ! Check polygonset 
         call ps%OrientNestedClosedPolygons(flag)
-        if (flag > 0) then 
+        if (flag > 1) then 
             ! Polygon set does not comply, throw error
             call gdErrorHandler('InitializePLF2DClosedExact: polygon set should be closed and non-intersecting')
         end if 
@@ -1300,7 +1300,7 @@ module PolygonLevelsetFunction2D
             dy = yqr - yp
             theta = atan2(dx*nypv(:, 1) - dy*nxpv(:, 1), dx*nxpv(:, 1) + dy*nypv(:, 1))
             where (theta < 0) theta = theta + 2*pi_R8
-            isinvert = theta < theta0
+            isinvert = theta <= theta0
 
             ! Hedge for vertices lying exactly on polygonset vertex
             where ((dx == 0) .and. (dy == 0)) isinvert = .true. 
@@ -1429,7 +1429,7 @@ module PolygonLevelsetFunction2D
                     vq(iq) = nxp(eind(iq))
                 else
                     if (tdistvert(iq) == 0.0) then 
-                        vq(iq) = 0
+                        vq(iq) = 1
                     else
                         vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(xp(vind(iq)) - xq(iq))
                     end if 
@@ -1513,7 +1513,7 @@ module PolygonLevelsetFunction2D
                     vq(iq) = nyp(eind(iq))
                 else
                     if (tdistvert(iq) == 0.0) then 
-                        vq(iq) = 0
+                        vq(iq) = 1
                     else
                         vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(yp(vind(iq)) - yq(iq))
                     end if

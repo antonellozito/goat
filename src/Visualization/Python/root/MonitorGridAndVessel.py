@@ -1,5 +1,5 @@
-import Plotter as plotter
-import Datahandler as dh
+from src import Plotter as plotter
+from src import Datahandler as dh
 
 pausetime = 1
 maxtime = 1000

@@ -84,6 +84,7 @@ module StructuredInterpolant2D
         ! - C, M: order of the interpolant and order of the
         ! approximation method to compute derivatives for the 
         ! interpolant construction
+        ! - allowextrapolation: logical to check if we can extrapolate
         ! - xgv, ygv: grid vectors
         ! - A: interpolation coefficients
         ! - refx, refy, refdx, refdy: reference values used to compute
@@ -95,6 +96,7 @@ module StructuredInterpolant2D
 
         character(:), allocatable       :: meth 
         integer(I8)                     :: C, M, n
+        logical                         :: allowextrapolation
 
         real(R8), allocatable           :: xgv(:), ygv(:), A(:, :), &
             refx(:), refy(:), refdx(:), refdy(:)
@@ -146,6 +148,7 @@ module StructuredInterpolant2D
         interp%meth = meth 
         interp%C    = C 
         interp%M    = M
+        interp%allowextrapolation = .true.
         
     end subroutine 
 
@@ -882,7 +885,7 @@ module StructuredInterpolant2D
 
         integer(I8), allocatable                :: ind(:), ind_orig(:) 
         real(R8), allocatable                   :: xqn(:), yqn(:), &
-            term(:), thisA(:, :)
+            term(:), thisA(:, :), xqbin(:), yqbin(:)
 
         ! Loop
         integer(I8)                             :: i, j, indder
@@ -917,8 +920,20 @@ module StructuredInterpolant2D
             precfac => interp%precomputedfac, &
             cellindex => interp%cellindex)
 
+        ! If we allow 'extrapolation', we project the coordinates onto
+        ! the box where the structured interpolant is defined to get 
+        ! the indices
+        xqbin = xq 
+        yqbin = yq 
+        if (interp%allowextrapolation) then 
+            where (xqbin < minval(xv)) xqbin = minval(xv)
+            where (xqbin > maxval(xv)) xqbin = maxval(xv)
+            where (yqbin < minval(yv)) yqbin = minval(yv)
+            where (yqbin > maxval(yv)) yqbin = maxval(yv)
+        end if 
+
         ! Get cell index of query point
-        call GetIndex(xq, yq, xv, yv, ind)
+        call GetIndex(xqbin, yqbin, xv, yv, ind)
 
         ! Set zero indices temporarily to one (set to NaN later)
         allocate(ind_orig, source=ind)

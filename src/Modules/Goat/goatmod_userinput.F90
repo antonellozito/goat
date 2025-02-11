@@ -275,7 +275,7 @@ module goatmod_userinput
         ! - readmeth:   'read_structure' for structure.dat files. Only
         !               method that is currently supported.
         ! - filepath:   path to the file to be read
-        ! - refine:     set to 1 to do refinement of vessel (insert 
+        ! - refine:     set to true to do refinement of vessel (insert 
         !               more nodes)
         ! - maxdist:    maximum distance between two nodes. If larger,
         !               nodes will be added in between when refine == 1
@@ -306,7 +306,7 @@ module goatmod_userinput
         character(:), allocatable       :: filepath
 
         real(R8)                        :: maxdist
-        integer(I8)                     :: refine
+        logical                         :: refine
         integer(I8), allocatable        :: TP(:), TPind(:), exclude(:)
 
         ! Vessel representation options
@@ -355,11 +355,17 @@ module goatmod_userinput
         !                   extrema of the field
         ! - fdonewton       : option to refine extrema with newton 
         !                   solver (may not always converge!)
+        ! - dotpvesselbased : do tangency point determination purely 
+        !                   based on current vessel polygons 
         ! - v(...)          : same options but for vessel 
         ! - ffieldtol       : tolerance on field value of extrema (if 
         !                   difference is below tolerance, two extrema 
         !                   are considered to have exactly the same field
         !                   value)
+        ! - doadaptations       : general switch to apply or not apply
+        !                       adaptations to the basic topological 
+        !                       mesh (all things like core/PF boundaries, 
+        !                       optional region removal, tube merging, ...)
         ! - addcoreboundaries   : adds additional core boundaries
         ! - addPFboundaries     : adds additional private flux like 
         !                       boundaries (at tangency points of which 
@@ -378,14 +384,23 @@ module goatmod_userinput
         ! - readexistingTM:     read in an existing topomesh file, 
         !                       for which the full path is defined in  
         !                       TMfilepath
+        ! - mergetangencypointtubes     merge tubes that are too small 
+        !                       and that have tangency point tubes 
+        !                       as neighbours. 'too small' is based on 
+        !                       the (absolute) difference in flux values
+        !                       of the tube's radial face vertices
+        ! - dpsimintangencypointtubes   minimal delta psi for tangency 
+        !                       point tubes (if below, we attempt to 
+        !                       merge)
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax
         logical                 :: addcoreboundaries, removecoreregions, &
             fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
-            readexistingTM
+            readexistingTM, removenoncoreregions, mergetangencypointtubes, &
+            doadaptations, dotpvesselbased
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
-            PFboundariesfrac
+            PFboundariesfrac, dpsimintangencypointtubes
         character(:), allocatable   :: TMfilepath
     contains 
 
@@ -408,13 +423,19 @@ module goatmod_userinput
         ! - verbosity       the higher, the more information is 
         !                   printed out (default: 1, 0 suppresses all)
         ! - ggmethod        method how to construct the grid. Can be 
-        !                   'independent' (treating each topological
-        !                    cell independently) or 'orthogonal' (
+        !                   'independent' (treating each flux surface
+        !                    independently) or 'orthogonal' (
         !                   yields largely orthogonal grid, but needs 
         !                   dependency between mesh cells)
         ! - cellconstructionmethod: method how to determine grid cells
         !                   starting from given vertex distribution. 
         !                   'quads_triangles' is recommended one
+        ! - TMcellgriddingorder:    order in which to grid the 
+        !                   topological mesh cells. Can be 'independent'
+        !                   (then it is  pretty much random) or 
+        !                   'sequential' -> that one is the recommended
+        !                   one. Here, initial distributions are 
+        !                   propagated through
         ! 
         ! Vertex distribution, poloidal direction:
         ! - vdptype:        'uniform' for uniform distribution, 
@@ -440,6 +461,17 @@ module goatmod_userinput
         ! - vdrddecaylength:    decay length parameter 
         ! - vdrddensityatseparatrix:    desired density at separatrix
         ! - vdrddensityatinf:           density far from separatrix
+ 
+        ! Options for extending flux tubes with vessel parts (so-called 
+        ! 'cut cells')
+        ! - extendtptubes:          extend tubes at the tangency point
+        !                           side to include (part of) the 
+        !                           vessel from both side of type 1
+        !                           tangency points
+        ! - extendvesseltubes:      extend any tube at the vessel edges
+        !                           that complies to the marking criterion
+        ! - evtmaxvessellength:     maximum L2-based vessel segment 
+        !                           length before tube is extended
 
         ! Options for flux surface removal
         ! - removefluxsurfaces:     switch to remove or not
@@ -452,7 +484,7 @@ module goatmod_userinput
 
         ! Options for boundary triangle removal
         ! - removenarrowboundarytriangles:  switch
-        ! - rembndtriacriterion:    criterion for removal, typically 
+        ! - rembndtùriacriterion:    criterion for removal, typically 
         !                           'angle' (if too small, remove triangle)
         ! - rmbndtriaminangle:      minimal angle [rad] (too small - removed)
         !                           input is in degrees!
@@ -470,8 +502,12 @@ module goatmod_userinput
         !                           (no additional refinement), 
         !                           'lengthbased' (ref based on min and
         !                           max length distributions) 
+        ! - reflengthtype:          which type of length to consider. 
+        !                           'euler' is classical eulerian length 
+        !                           (L2 norm), 'radial' is projected in 
+        !                           radial direction (and absolute value taken)
         
-        ! Refinement options for lengthbased option (this is currently 
+        ! (poloidal) Refinement options for lengthbased option (this is currently 
         ! based on exponential decay functions defined in points):
         ! - refLBlmininf    minimal length at infinity
         ! - refLBLmaxinf    maximal length at infinity
@@ -487,12 +523,37 @@ module goatmod_userinput
         !                   polygon construction)
         ! - refLBLminstructure  minimal length on structure i (etc, 
         !                   similar for vertices)
+
+        ! - refBLdotarget   do BL refinement at targets
+        ! - refBLdovessel   do BL refinement at far vessel boundaries
+        ! - refBLnctarget   number of desired boundary layer cells at 
+        !                   the target (similar for vessel)
+        ! - refBLdltarget   desired lengths for these cells 
+
+        ! (Radial) refinement options for lengthbased refiner:
+        !   mostly the same refinement options as the poloidal direction,
+        !   but names now have 'rad' in front. 
+        ! - radrefLBlmininf    minimal length at infinity (in [m]!)
+        ! - radrefLBLmaxinf    maximal length at infinity
+        ! - radrefLBdosp:      refine near strike points (x-points are added)
+        ! - radrefLBLminsp     minimal length on strike point
+        ! - radrefLBLmaxsp     maximal length on strike point
+        ! - radrefLBdecaylengthsp  decaylength on strike point (larger - wider influence)
+        
+        ! - radrefBLdosp    do BL refinement at strike points
+        ! - radrefBLncsp   number of desired boundary layer cells at 
+        !                   the strike point 
+        ! - radrefBLdlsp   desired lengths for these cells
+
         
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
-            refLBdovessel, vdpdincludexp, coarsencontours
+            refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
+            refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
+            extendtptubes, extendvesseltubes 
         integer(I8)                 :: gcresx, gcresy, &
-            verbosity, orthtracernsteps
+            verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
+            radrefBLncsp
         integer(I8), allocatable, dimension(:)  :: refLBstructureIDs, &
             refLBvertIDs
         real(R8)                    :: vdpdfacelength, vdpddecaylengthplf, &
@@ -501,13 +562,17 @@ module goatmod_userinput
             vdrddecaylength, vdrddensityatseparatrix, vdrddensityatinf, &
             remfspsitol, remfspsirattol, rembndtriaminangle, &
             remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
-            refLBLmaxxp, refLBdecaylengthxp, orthtracerstep
+            refLBLmaxxp, refLBdecaylengthxp, orthtracerstep, &
+            radrefLBLmininf, radrefLBLmaxinf, radrefLBLminsp, &
+            radrefLBLmaxsp, radrefLBdecaylengthsp, evtmaxvessellength
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
             vdpdval, refLBLminstructure, refLBLminvert, refLBLmaxstructure, &
-            refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert
+            refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert, &
+            refBLdltarget, refBLdlvessel, radrefBLdlsp
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
-            cellconstructionmethod, refmeth, vdpplftype
+            cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
+            refdatafile, radrefmeth, reflengthtype, radreflengthtype
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -693,7 +758,7 @@ module goatmod_userinput
         options%filepath    = './structure.dat'
 
         ! Refinement options
-        options%refine      = 1
+        options%refine      = .false.
         options%maxdist     = 0.01
 
         ! Target plates
@@ -773,13 +838,18 @@ module goatmod_userinput
         ! Refining options for extrema (vessel)
         options%vdonewton = .true.
 
-        ! Boundary options
-        options%addcoreboundaries = .true. 
-        options%coreboundariesfrac = 0.2
-        options%addPFboundaries = .true. 
-        options%PFboundariesfrac = 0.2
-        options%removecoreregions = .true. 
-        options%removewidegridregions = .true. 
+        ! Additional options
+        options%dotpvesselbased             = .false.
+        options%doadaptations               = .true.
+        options%addcoreboundaries           = .true. 
+        options%coreboundariesfrac          = 0.2
+        options%addPFboundaries             = .true. 
+        options%PFboundariesfrac            = 0.2
+        options%removecoreregions           = .true. 
+        options%removewidegridregions       = .true. 
+        options%removenoncoreregions        = .false.
+        options%mergetangencypointtubes     = .false.
+        options%dpsimintangencypointtubes   = 100_R8 ! some absurd large value
 
     end subroutine 
 
@@ -819,9 +889,13 @@ module goatmod_userinput
         options%verbosity           = 1
         options%ggmethod            = 'independent'
         options%cellconstructionmethod  = 'quads_triangles'
+        options%TMcellgriddingorder = 'sequential'
+        options%readexistingrefdata = .false. 
+        options%refdatafile         = './output/refdataTM.dat'
 
-        ! Refinement options ('orthogonal' ggmethod only)
+        ! Poloidal refinement options ('lengthbased' refinement options only)
         options%refmeth         = 'no'      
+        options%reflengthtype   = 'euler'   
         options%refLBdoxp       = .true. 
         options%refLBdovessel   = .false. 
         options%refLBLmininf    = 0.0_R8
@@ -833,7 +907,34 @@ module goatmod_userinput
             options%refLBdecaylengthvert(0), options%refLBstructureIDs(0), &
             options%refLBvertIDs(0), options%refLBLminstructure(0), &
             options%refLBLmaxstructure(0))
+        
+        ! Radial refinement options
+        options%radrefmeth         = 'no'   
+        options%radreflengthtype   = 'euler'   
+        options%radrefLBdosp       = .true. 
+        options%radrefLBLmininf    = 0.0_R8
+        options%radrefLBLmaxinf    = 100_R8 ! some absurd big number
+        options%radrefLBLminsp     = 0.0_R8
+        options%radrefLBLmaxsp     = 100_R8 ! some absurd big number  
+        options%radrefLBdecaylengthsp = 0.1_R8 
 
+        ! Poloidal boundary layer options
+        options%refBLdotarget   = .false. 
+        options%refBLdovessel   = .false. 
+        options%refBLnctarget   = 0
+        options%refBLncvessel   = 0
+        allocate(options%refBLdltarget(options%refBLnctarget), &
+            options%refBLdlvessel(options%refBLncvessel))
+        options%refBLdltarget   = 0.001_R8 ! in m 
+        options%refBLdlvessel   = 0.01_R8 ! in m 
+
+        ! Radial boundary layer options
+        options%radrefBLdosp    = .false. 
+        options%radrefBLncsp    = 0
+        allocate(options%radrefBLdlsp(options%radrefBLncsp))
+        options%radrefBLdlsp       = 0.001_R8 ! in m 
+
+        ! Streamline tracer options
         options%orthtracerstep = 0.5
         options%orthtracernsteps = 2000
 
@@ -843,6 +944,11 @@ module goatmod_userinput
         options%vdrddecaylength     = 0.005
         options%vdrddensityatseparatrix     = 2500.0_R8
         options%vdrddensityatinf            = 250.0_R8
+
+        ! Options for flux tube extensions
+        options%extendtptubes       = .true. 
+        options%extendvesseltubes   = .false. 
+        options%evtmaxvessellength  = 0.2
 
         ! Options for flux surface removal 
         options%removefluxsurfaces = .true.
@@ -1275,7 +1381,7 @@ module goatmod_userinput
 
         ! Refinement
         field = 'goat.vessel.refinevessel'
-        call ExtractOptionValueInteger0D(fid, field, options%refine)
+        call ExtractOptionValueLogical0D(fid, field, options%refine)
         field = 'goat.vessel.maxvesseldist'
         call ExtractOptionValueReal0D(fid, field, options%maxdist)
         
@@ -1432,7 +1538,11 @@ module goatmod_userinput
         field = 'gg.tm.fieldtol'
         call ExtractOptionValueReal0D(fid, field, options%ffieldtol)
 
-        ! Boundaries
+        ! Additional options
+        field = 'gg.tm.dotpvesselbased'
+        call ExtractOptionValueLogical0D(fid, field, options%dotpvesselbased)
+        field = 'gg.tm.doadaptations'
+        call ExtractOptionValueLogical0D(fid, field, options%doadaptations)
         field = 'gg.tm.addcoreboundaries'
         call ExtractOptionValueLogical0D(fid, field, options%addcoreboundaries)
         field = 'gg.tm.addPFboundaries'
@@ -1445,6 +1555,12 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%coreboundariesfrac)
         field = 'gg.tm.PFbnd.frac'
         call ExtractOptionValueReal0D(fid, field, options%PFboundariesfrac)
+        field = 'gg.tm.removenoncoreregions'
+        call ExtractOptionValueLogical0D(fid, field, options%removenoncoreregions)
+        field = 'gg.tm.mergetangencypointtubes'
+        call ExtractOptionValueLogical0D(fid, field, options%mergetangencypointtubes)
+        field = 'gg.tm.dpsimintangencypointtubes'
+        call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
 
         ! Housekeeping
         !=============
@@ -1501,12 +1617,22 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%ggmethod)
         field  = 'gg.cellconstructionmethod'
         call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)
+        field = 'gg.TMcellgriddingorder'
+        call ExtractOptionValueCharacter(fid, field, options%TMcellgriddingorder)
 
         ! Refinement options (general)
         field = 'gg.ref.meth'
         call ExtractOptionValueCharacter(fid, field, options%refmeth) 
+        field = 'gg.ref.LB.lengthtype'
+        call ExtractOptionValueCharacter(fid, field, options%reflengthtype)
+        field = 'gg.radref.meth'
+        call ExtractOptionValueCharacter(fid, field, options%radrefmeth) 
+        field = 'gg.ref.readexistingrefdata'
+        call ExtractOptionValueLogical0D(fid, field, options%readexistingrefdata) 
+        field = 'gg.ref.refdatafile'
+        call ExtractOptionValueCharacter(fid, field, options%refdatafile) 
 
-        ! Length-based refinement options
+        ! Length-based refinement options (poloidal)
         field  = 'gg.ref.LB.doxp'
         call ExtractOptionValueLogical0D(fid, field, options%refLBdoxp)
         field  = 'gg.ref.LB.dovessel'
@@ -1533,6 +1659,45 @@ module goatmod_userinput
         call ExtractOptionValueInteger1D(fid, field, options%refLBstructureIDs)
         field  = 'gg.ref.LB.vertIDs'   
         call ExtractOptionValueInteger1D(fid, field, options%refLBvertIDs)
+
+        ! Refinement options (radial)
+        field  = 'gg.radref.LB.lengthtype'
+        call ExtractOptionValueCharacter(fid, field, options%radreflengthtype)
+        field  = 'gg.radref.LB.dosp'
+        call ExtractOptionValueLogical0D(fid, field, options%radrefLBdosp)
+        field  = 'gg.radref.LB.Lmininf'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBLmininf)
+        field  = 'gg.radref.LB.Lmaxinf'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBLmaxinf)
+        
+        field  = 'gg.radref.LB.Lminsp'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBLminsp)
+        field  = 'gg.radref.LB.Lmaxsp'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBLmaxsp)
+        field  = 'gg.radref.LB.decaylengthsp'
+        call ExtractOptionValueReal0D(fid, field, options%radrefLBdecaylengthsp)
+
+        ! Boundary layer options (only for length-based ref, poloidal)
+        field = 'gg.ref.BL.dotarget'
+        call ExtractOptionValueLogical0D(fid, field, options%refBLdotarget)
+        field = 'gg.ref.BL.dovessel'
+        call ExtractOptionValueLogical0D(fid, field, options%refBLdovessel)
+        field = 'gg.ref.BL.nctarget'
+        call ExtractOptionValueInteger0D(fid, field, options%refBLnctarget)
+        field = 'gg.ref.BL.ncvessel'
+        call ExtractOptionValueInteger0D(fid, field, options%refBLncvessel)
+        field = 'gg.ref.BL.dltarget'
+        call ExtractOptionValueReal1D(fid, field, options%refBLdltarget)
+        field = 'gg.ref.BL.dlvessel'
+        call ExtractOptionValueReal1D(fid, field, options%refBLdlvessel)
+
+        ! Boundary layer options (only for length-based ref, radial)
+        field = 'gg.radref.BL.dosp'
+        call ExtractOptionValueLogical0D(fid, field, options%radrefBLdosp)
+        field = 'gg.radref.BL.ncsp'
+        call ExtractOptionValueInteger0D(fid, field, options%radrefBLncsp)
+        field = 'gg.radref.BL.dlsp'
+        call ExtractOptionValueReal1D(fid, field, options%radrefBLdlsp)
 
         ! Contouring options in grid generator
         field = 'gg.vd.contouring.resx'
@@ -1576,7 +1741,6 @@ module goatmod_userinput
         field = 'gg.vd.pd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdpddensityatinf)
 
-
         ! Options for radial vertex distribution
         field = 'gg.vd.rd.type'
         call ExtractOptionValueCharacter(fid, field, options%vdrtype)
@@ -1588,6 +1752,14 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatseparatrix)
         field = 'gg.vd.rd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatinf)
+
+        ! Options for extending flux tubes
+        field = 'gg.adap.extendtptubes'
+        call ExtractOptionValueLogical0D(fid, field, options%extendtptubes)
+        field = 'gg.adap.extendvesseltubes'
+        call ExtractOptionValueLogical0D(fid, field, options%extendvesseltubes)
+        field = 'gg.adap.evt.maxvessellength'
+        call ExtractOptionValueReal0D(fid, field, options%evtmaxvessellength)
 
         ! Options for flux surface removal 
         field = 'gg.vd.removefluxsurfaces'

@@ -1011,7 +1011,7 @@ module goatmod_types
         ! Data structures 
         v = grid%vert
         f = grid%face
-        c = grid%cell 
+        c = grid%cell  
     
         ! Checks
         if (size(f%vert,2) /= 2) then
@@ -1181,6 +1181,7 @@ module goatmod_types
                         if (fcount(tf) > 2) then
                             print *, 'face ID: ', tf
                             print *, 'neighbours: ', tempfcell(tf,:), i
+                            print *, 'vert: ', f%vert(tf, 1), f%vert(tf, 2)
                             call gdErrorHandler(& 
                             'ComputeGridInterconnections: too many ' &
                                 // 'neighbours for this face')
@@ -1840,9 +1841,8 @@ module goatmod_types
         !========
         ! Magnetic field at vertices
         call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 0, grid%vert%psi)
-        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 1, grid%vert%bx)
-        call mf%Evaluate(grid%vert%x, grid%vert%y, 1, 0, grid%vert%by)
-        grid%vert%bx = -grid%vert%bx
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 1, 0, grid%vert%bx) 
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 1, grid%vert%by) 
 
         ! Cell centers
         do i = 1, nc 
@@ -1850,6 +1850,9 @@ module goatmod_types
             grid%cell%x(i) = sum(grid%vert%x(tv))/size(tv)
             grid%cell%y(i) = sum(grid%vert%y(tv))/size(tv)
         end do 
+
+        ! Amount of guard cells (not present here, simply amount of boundary faces)
+        grid%cell%ngc = count(grid%face%BF)
 
         ! Magnetic field at cell centers
         call mf%Evaluate(grid%cell%x, grid%cell%y, 0, 0, grid%cell%psi)

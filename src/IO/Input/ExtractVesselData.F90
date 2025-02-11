@@ -50,14 +50,15 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     type(VesselOptionsUDT), intent(in)  :: vesseloptions
 
     ! Loop variables
-    integer(I8)                         :: i, k, status
+    integer(I8)                         :: i, j, k, status, ks, ke, pc
 
     ! Auxiliary variables 
     type(PolygonSetUDT)                 :: tempps 
     type(PolygonUDT)                    :: temppol
     integer(I8)                         :: nvp, cc, nexcl, nTP, tne, &
-        vID   
-    integer(I8), allocatable            :: tv(:), templabels(:, :)
+        vID, tl, flag
+    integer(I8), allocatable            :: tv(:), templabels(:, :), &
+        vesselIDmap(:)
     real(R8), allocatable               :: tempx(:), &
         tempy(:), tx(:), ty(:), xp(:), yp(:), tvx(:), tvy(:), tnxp(:), &
         tnyp(:), tnnp(:), tnx(:), tny(:), tnn(:)
@@ -96,20 +97,26 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     end do
 
     ! Allocate (account for NaNs)
+    allocate(vesselIDmap(nvs - nexcl))
     allocate(tempx(nvp+nvs-1-nexcl), tempy(nvp+nvs-1-nexcl))
     allocate(templabels(size(tempx), 3))
     templabels = 0
     
     ! Set vertices
     cc = 0
+    pc = 0
     do i = 1, nvs 
         if (.not. any(vesseloptions%exclude == i)) then 
+            ! Mapping 
+            pc = pc + 1
+            vesselIDmap(pc) = vs(i)%ID
+
             ! Coordinates
             tempx(cc+1:cc+vs(i)%np) = vs(i)%x
             tempy(cc+1:cc+vs(i)%np) = vs(i)%y
             
             ! Labels
-            templabels(cc+1:cc+vs(i)%np, 1) = vs(i)%ID 
+            templabels(cc+1:cc+vs(i)%np, 1) = pc !vs(i)%ID ! Initial label is polygon-based, will be mapped back later
             templabels(cc+1:cc+vs(i)%np, 3) = [(k, k = vID+1, vID+vs(i)%np)]
 
             ! Update counters
@@ -132,6 +139,175 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     ! Construct vessel polygon set 
     call ConstructVesselPolygonSet(vessel, tempps)
 
+    ! Refine vessel polygonset
+    !=========================
+    if (vesseloptions%refine) then 
+        ! Call refiner 
+        call vessel%polygonset%Refine(vesseloptions%maxdist)
+
+        ! Update labels - normally, labels are kept the same on original
+        ! nodes but zero elsewhere. 
+        do i = 1, vessel%polygonset%np
+
+            ! Associate for ease
+            associate(tp    => vessel%polygonset%polygons(i))
+
+            ! Get polygon vertices
+            tv = tp%vert
+
+            ! Adjust labels by checking common non-zero labels between
+            ! original vertices. Normally, first vertex should always be
+            ! an original vertex
+            ke = 1
+            ks = 0
+            do while (.true.)
+                ! Starting index
+                ks = ke 
+
+                ! Sanity check
+                if (all(tp%labels(tv(ks), :) == 0_i8)) then 
+                    call gdErrorHandler('ExtractVesselData: original vertex ' // & 
+                        'has no labels assigned after refinement, unexpected')
+                end if 
+
+                ! Check exit conditions
+                if (ks >= size(tv)) then 
+                    exit 
+                end if 
+
+                ! Ending index
+                ke = findloc(tp%labels(tv(ks+1:tp%ne+1), 3) /= 0, .true., 1, back=.false.) + ks
+
+                ! Sanity check
+                if (ke == ks) then 
+                    call gdErrorHandler('ExtractVesselData: could not ' // & 
+                        'find ending vertex, unexpected')
+                end if 
+
+                if (all(tp%labels(tv(ke), :) == 0_i8)) then 
+                    call gdErrorHandler('ExtractVesselData: original vertex ' // & 
+                        'has no labels assigned after refinement, unexpected')
+                end if 
+
+                ! Check for common labels
+                associate(&
+                    sl      => tp%labels(tv(ks), 1:2),  &
+                    el      => tp%labels(tv(ke), 1:2)   &
+                    )
+
+                ! Sanity checks
+                if (all(sl == 0) .or. all(el == 0)) then 
+                    call gdErrorHandler('ExtractVesselData: original vertex ' // & 
+                        'has no target labels after refinement, unexpected')
+                end if 
+
+                tl = 0
+                if (sl(2) == 0 .and. el(2) == 0) then
+                    ! Check
+                    if (sl(1) /= el(1) .and. (ke - ks > 1)) then ! fine if there are no refined vertices in between
+                        ! Weird, but continue
+                        print *, 'ExtractVesselData: no common labels ' // & 
+                            'between subsequent vertices found, unexpected. ' // & 
+                            'Taking first vertex label...' 
+                    end if 
+
+                    ! Assign
+                    tl = sl(1)
+                elseif ((sl(2) == 0) .and. (el(2) /= 0)) then 
+                    ! Check
+                    if (all(sl(1) /= el) .and. (ke - ks > 1)) then ! fine if there are no refined vertices in between
+                        ! Weird, but continue
+                        print *, 'ExtractVesselData: no common labels ' // & 
+                            'between subsequent vertices found, unexpected. ' // & 
+                            'Taking first vertex label...' 
+                    end if 
+
+                    ! Assign
+                    tl = sl(1)
+                elseif ((sl(2) /= 0) .and. (el(2) == 0)) then 
+                        ! Check
+                        if (all(el(1) /= sl) .and. (ke - ks > 1)) then ! fine if there are no refined vertices in between
+                            ! Weird, but continue
+                            print *, 'ExtractVesselData: no common labels ' // & 
+                                'between subsequent vertices found, unexpected. ' // & 
+                                'Taking first vertex label...' 
+                        end if 
+    
+                        ! Assign
+                        tl = el(1)
+                else
+                    ! Both are non-zero, need to check common one
+                    if (any(sl(1) == el) .and. any(sl(2) == el)) then 
+                        if (sl(1) /= sl(2)) then 
+                            ! Cannot distinguish, issue warning
+                            print *, 'ExtractVesselData: both labels ' // & 
+                                'between subsequent vertices are present. ' // & 
+                                'Cannot distinguish, taking first vertex label...' 
+                        end if 
+                        tl = sl(1)
+                    elseif (any(sl(1) == el) .and. .not. any(sl(2) == el)) then 
+                        tl = sl(1)
+                    elseif (any(sl(2) == el) .and. .not. any(sl(1) == el)) then 
+                        tl = sl(2)
+                    else
+                        ! Could not find a common label - unexpected
+                        print *, 'ExtractVesselData: no common labels ' // & 
+                            'between subsequent vertices found, unexpected. ' // & 
+                            'Taking first vertex label...' 
+                        tl = sl(1)
+                    end if 
+
+                end if 
+
+                ! Assign labels
+                tp%labels(tv(ks+1:ke-1), 1) = tl 
+
+                ! Housekeeping
+                end associate
+            end do 
+        
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Test orientation
+        call vessel%polygonset%OrientNestedClosedPolygons(flag)
+
+        ! Check
+        if (flag .ne. 0) then  
+            ! Throw error
+            print *, 'flag: ', flag
+            call gdErrorHandler('ConstructVesselPolygon: could not ' // & 
+                'orient polygons, OrientNestedClosedPolygons exited with flag above')
+        end if 
+
+        ! Write data
+        call vessel%polygonset%WriteData('vesselpolygon')
+    end if 
+
+    ! Remap the labels
+    !=================
+    do i = 1, vessel%polygonset%np 
+        ! Initialize
+        associate(tp    => vessel%polygonset%polygons(i)) 
+
+        ! Remap if nonzero
+        where (tp%labels(:, 1) /= 0) tp%labels(:, 1) = vesselIDmap(tp%labels(:, 1))
+        where (tp%labels(:, 2) /= 0) tp%labels(:, 2) = vesselIDmap(tp%labels(:, 2))
+
+        ! Add vertex IDs 
+        do j = 1, tp%nv
+            if (tp%labels(j, 3) == 0) then 
+                vID = vID + 1
+                tp%labels(j, 3) = vID 
+            end if 
+        end do 
+
+        ! Housekeeping
+        end associate 
+    end do
+
+
     ! Target polygon representation
     !==============================
     ! Check how many targets there are
@@ -147,6 +323,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
                 'check input')
         end if
     end if
+
 
     ! Allocate
     allocate(vessel%targetpolygons(nTP))

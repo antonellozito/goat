@@ -267,6 +267,20 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     !=============
     call environment%vessel%polygonset%WriteData(goatoptions%writefilepath // '_vesselpolygonset')
 
+    ! Write grid in .ogr format
+    !==========================
+    ! For divgeo
+    open (action='write', file=goatoptions%writefilepath // '.ogr', newunit=fu, &
+        status='unknown')
+
+    do i = 1, nf
+        ! Coordinates in mm!
+        write (fu, *) xv(facevert(i, 1))*1000, yv(facevert(i, 1))*1000
+        write (fu, *) xv(facevert(i, 2))*1000, yv(facevert(i, 2))*1000
+        write (fu, *) ' '
+    end do 
+
+    close (fu)
     ! End associate
     end associate
 
