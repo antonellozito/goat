@@ -42,7 +42,8 @@ subroutine ExtractGridData(grid, meth, gridoptions)
     integer(I8), allocatable    :: &
         sortindex(:), temparray(:,:), tempfaces(:), segstart(:)
 
-    logical, allocatable        :: mask(:), ispolygonstart(:)
+    logical, allocatable        :: mask(:), ispolygonstart(:), &
+        isbranchingpolygon(:)
 
     integer(I8), allocatable    :: facevec(:) ! simply 1:grid%face%ntot
     integer(I8)                 :: segend
@@ -140,14 +141,15 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
             ! Determine number of boundaries by sorting
             allocate(sortindex(nfpb))
-            allocate(ispolygonstart(nfpb))
+            allocate(ispolygonstart(nfpb), isbranchingpolygon(nfpb))
             allocate(temparray(nfpb, 2))
             temparray(:, :) = grid%face%vert(tempfaces, :)
-            call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart)
+            call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart, &
+                isbranchingpolygon)
             nbnd = nbnd + count(ispolygonstart)
 
             ! Housekeeping
-            deallocate(tempfaces, sortindex, ispolygonstart, temparray)
+            deallocate(tempfaces, sortindex, ispolygonstart, temparray, isbranchingpolygon)
 
         end do 
 
@@ -169,11 +171,12 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
             ! Sort the boundary faces
             allocate(sortindex(nfpb), ispolygonstart(nfpb), &
-                tempfaces(nfpb), temparray(nfpb,2))
+                tempfaces(nfpb), temparray(nfpb,2), isbranchingpolygon(nfpb))
 
             tempfaces = pack(facevec, mask)
             temparray(:,:) = grid%face%vert(tempfaces, :)
-            call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart)
+            call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart, &
+                isbranchingpolygon)
             tempfaces = tempfaces(sortindex)
             
             ! Loop over all found boundary segments
@@ -209,7 +212,7 @@ subroutine ExtractGridData(grid, meth, gridoptions)
 
             ! Deallocate
             deallocate(sortindex, ispolygonstart, temparray, tempfaces, &
-                segstart)
+                segstart, isbranchingpolygon)
         end do
 
         ! Make a plot to check

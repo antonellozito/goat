@@ -88,6 +88,7 @@ module mod_polygon
     use mod_precision
     use, intrinsic :: ieee_arithmetic
     use mod_plotter
+    use mod_sort
 
     ! The usual
     implicit none
@@ -123,13 +124,19 @@ module mod_polygon
 
     contains 
 
+        ! Construction 
         procedure :: Allocate       => AllocatePolygon
         procedure :: Deallocate     => DeallocatePolygon
         procedure, private  :: ConstructPolygon 
         procedure, private  :: ConstructPolygonNolabels
         generic   :: Construct      => ConstructPolygon, ConstructPolygonNolabels
         procedure :: Initialize     => InitializePolygon 
+
+        ! Updating
         procedure :: UpdateCoordinates      => UpdatePolygonVertexCoordinates
+        procedure :: Refine         => RefinePolygonUniform
+
+        ! Metric computation & auxiliaries
         procedure :: ComputeMetrics => ComputePolygonMetrics
         procedure :: SetVert        => SetPolygonVertices
         procedure :: RemoveDuplicatePoints
@@ -137,10 +144,11 @@ module mod_polygon
         procedure :: IsSimplePolygon
         procedure :: IsSelfIntersectingPolygon
         procedure :: Inpolygon
-        procedure :: Flip           => FlipPolygon
-        procedure :: SelfIntersections   => PolygonSelfIntersections
+        procedure :: Flip               => FlipPolygon
+        procedure :: SelfIntersections  => PolygonSelfIntersections
+        procedure :: GetSurfaceArea     => ComputePolygonSurfaceArea
         procedure, private  :: GetPolygonVertexID
-        generic   :: GetVert        => GetPolygonVertexID
+        generic   :: GetVert            => GetPolygonVertexID
 
     end type 
 
@@ -167,6 +175,7 @@ module mod_polygon
         ! Operations
         procedure :: SelfIntersections      => PolygonSetSelfIntersections
         procedure :: OrientNestedClosedPolygons
+        procedure :: Refine         => RefinePolygonSetUniform
 
         ! Data access
         procedure, private  :: GetPolygonSetEdgesCoordinates, &
@@ -291,6 +300,9 @@ module mod_polygon
         startind    = [1, nanloc+1]
         endind      = [nanloc-1, nx] 
         nvpp        = endind - startind + 1
+        if (allocated(polygonset%polygons)) then 
+            deallocate(polygonset%polygons)
+        end if 
         allocate(polygonset%polygons(polygonset%np))
 
         ! Check if all polygons have more than one vertex 
@@ -403,7 +415,7 @@ module mod_polygon
             tempedges(:, :), tempvert(:), ps(:), pe(:), &
             templabels(:, :)
 
-        logical, allocatable        :: ispolygonstart(:)
+        logical, allocatable        :: ispolygonstart(:), isbranchingpolygon(:)
 
         ! Loop
         integer(I8)                 :: i, k
@@ -420,12 +432,13 @@ module mod_polygon
         ne = size(edges, 1)
 
         ! Allocate
-        allocate(sortindex(ne), ispolygonstart(ne))
+        allocate(sortindex(ne), ispolygonstart(ne), isbranchingpolygon(ne))
 
         ! Extract polygon edges
         !======================
         ! Sort
-        call SortPolygonEdges(edges, ne, sortindex, ispolygonstart)
+        call SortPolygonEdges(edges, ne, sortindex, ispolygonstart, &
+            isbranchingpolygon)
         allocate(sortededges, source=edges)
         sortededges = edges(sortindex, :)
 
@@ -467,6 +480,34 @@ module mod_polygon
         end do
 
         
+
+    end subroutine
+
+    ! Polygon set refiner (uniform)
+    subroutine RefinePolygonSetUniform(polygonset, dlmax)
+
+        ! Description
+        !============
+        ! This routine refines each of the polygons in the polygonset 
+        ! in a uniform way. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset 
+        real(R8), intent(in)                :: dlmax 
+
+        ! Auxiliary
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Refine
+        !=======
+        ! Simply call polygon refiner for each polygon...
+        do i = 1, polygonset%np
+            call polygonset%polygons(i)%Refine(dlmax)
+        end do
 
     end subroutine
 
@@ -1649,6 +1690,109 @@ module mod_polygon
 
     end subroutine
 
+    ! Polygon refiner
+    subroutine RefinePolygonUniform(polygon, dlmax)
+
+        ! Description
+        !============
+        ! This routine refines the edges of an existing polygon by 
+        ! inserting additional points at edges that are too long. 
+        ! The maximal length that an edge should be is determined by 
+        ! dlmax. Refinement is done in a uniform way.
+
+        ! Note: the labels of original vertices are retained, but 
+        ! the new vertices' labels are simply initialized to zero since
+        ! there is not an easy way to propagate these. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)                       :: polygon 
+        real(R8), intent(in)                    :: dlmax
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:,: )   :: newlabels
+        integer(I8), allocatable, dimension(:)      :: nne
+
+        real(R8), allocatable, dimension(:)     :: le, newx, newy, &
+            dxe, dye, frac, dx, dy, x, y
+
+        ! Loop
+        integer(I8)                             :: i, vc, k
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            edges       => polygon%edges,   &
+            ne          => polygon%ne,      &
+            nv          => polygon%nv,      &
+            labels      => polygon%labels,  &
+            vert        => polygon%vert,    &
+            xv          => polygon%x,       &
+            yv          => polygon%y        &
+            )
+
+        ! Precompute
+        x = xv(vert)
+        y = yv(vert)
+        dxe = x(2:ne+1) - x(1:ne)
+        dye = y(2:ne+1) - y(1:ne)
+        le = sqrt( dxe**2 + dye**2 )
+        nne = floor(le/dlmax)
+
+        ! Initialize new edges
+        allocate(newx(sum(nne)+ne+1), newy(sum(nne)+ne+1), &
+            newlabels(sum(nne)+ne+1, size(labels, 2)))
+
+        ! Construct
+        !==========
+        ! Initialize vertex
+        vc = 0
+        
+        ! First coordinate
+        vc = vc + 1
+        newx(vc) = x(1) 
+        newy(vc) = y(1)
+        newlabels(vc, :) = labels(1, :)
+
+        ! Loop over all old edges
+        do i = 1, ne 
+
+            if (nne(i) > 0) then 
+                ! Compute segment coordinates
+                frac = real([(k, k = 1, nne(i))], kind=R8)/real(nne(i)+1, kind=R8)
+                dx = frac*dxe(i)
+                dy = frac*dye(i)
+
+                ! Add
+                newx(vc+1:vc+nne(i)) = newx(vc) + dx 
+                newy(vc+1:vc+nne(i)) = newy(vc) + dy 
+                newlabels(vc+1:vc+nne(i), :) = 0_I8
+
+                ! Update counter
+                vc = vc + nne(i)
+
+            end if 
+
+            ! Last coordinate
+            vc = vc + 1
+            newx(vc) = x(i+1) 
+            newy(vc) = y(i+1)
+            newlabels(vc, :) = labels(vert(i+1), :)
+
+        end do
+
+        ! Construct polygon
+        !==================
+        call polygon%Construct(newx, newy, newlabels)
+
+        ! Housekeeping
+        end associate
+        
+
+    end subroutine
+    
     ! Allocator
     subroutine AllocatePolygon(polygon)
 
@@ -2387,7 +2531,8 @@ module mod_polygon
     end subroutine
 
     ! Polygon edge sorter
-    subroutine SortPolygonEdges(pein, ne, sortindex, ispolygonstart)
+    subroutine SortPolygonEdges(pein, ne, sortindex, ispolygonstart, &
+            isbranchingpolygon, polygonID)
 
         ! Description
         !============
@@ -2399,6 +2544,16 @@ module mod_polygon
         ! Multiple open and closed polygons are supported. The logical 
         ! 'ispolygonstart' indicates which of the (sorted!) edges is the 
         ! start of a new polygon. 
+
+        ! Update: added support for branching polygons. These are 
+        ! returned as separate polygon parts. If one wants to check if
+        ! it is a branching polygon or not, one can check if there are any true
+        ! indices in 'isbranchingpolygon'. Note that the branching polygons are
+        ! represented by an ensemble of non-branching polygons and can therefore be
+        ! reconstructed if necessary. Retrieving all parts of a branching polygon
+        ! has to be done 'manually' by checking for each branching polygon which
+        ! vertices it has in common with another one. Support for this might be
+        ! added in the future. 
     
         ! Arguments
         !==========
@@ -2414,6 +2569,11 @@ module mod_polygon
         !                   index of a new polygon. The edges of this 
         !                   polygon are all edges between this true value 
         !                   and the next. 
+        ! - isbranchingpolygon  : np-by-1 array indicating if the polygon
+        !                       is branching or not
+        ! - polygonID           :: np-by-1 array with polygon IDs 
+        !                       (optional). Useful to reconstruct branching
+        !                       polygons
     
         ! Algorithm
         !==========
@@ -2434,8 +2594,8 @@ module mod_polygon
         !       vertex.
         !
         !       If more than two:
-        !       throw error: this indicates branching and is not yet 
-        !       supported.
+        !       branching polygon, this vertex has to be a starting 
+        !       (or ending) vertex. 
         !        
         ! 2)    Find the edges of the current polygon. 
         !
@@ -2460,28 +2620,34 @@ module mod_polygon
         ! Declare variables
         !==================
         ! Input
-        integer(I8), dimension(ne,1:2)  :: pein ! polygon edges 
-        integer                         :: ne
+        integer(I8), dimension(ne,1:2), intent(in)  :: pein ! polygon edges 
+        integer(I8), intent(in)                     :: ne
         
         ! Output
         integer(I8), dimension(ne)      :: sortindex 
-        logical, dimension(ne)          :: ispolygonstart
+        logical, dimension(ne)          :: ispolygonstart, isbranchingpolygon
+        integer(I8), allocatable, optional  :: polygonID(:)
     
         ! Mixed
     
         ! Loop
         logical                 :: allfound, startfound, polygonfound
-        integer(I8)             :: i, k, spind
+        integer(I8)             :: i, j, k, spind
     
         ! Auxiliary
         integer(I8)                 :: nv, nremedges, nextremedge, &
                                     tc1, tc2
     
+        logical                     :: allbranchingfound
         logical, allocatable        :: isedgesorted(:), isremedgesorted(:), &
-                                    mask(:)
+            mask(:), isbranchingvertex(:, :), remisbranching(:, :), &
+            hasbv(:), sortedisbranchingvertex(:, :), pvb(:)
     
+        integer(I8)                 :: pID, ind 
         integer(I8), allocatable    :: remedges(:,:), edgeID(:), &
-                                    remedgeID(:), temparray(:)
+            remedgeID(:), temparray(:), allv(:), oc(:), el(:), sortind(:), &
+            alloc(:), ps(:), tv(:), tvu(:), tvID(:), sortededges(:, :), &
+            pe(:), pse(:, :), pee(:, :), pv(:), sortind2(:)
     
         ! Main program
         !=============
@@ -2498,16 +2664,28 @@ module mod_polygon
         end if
     
         ! Initialize
+        pID = 1
         allocate(isedgesorted(ne)) ! logical to indicate if edge has been sorted
         allocate(edgeID(ne))
     
-        ispolygonstart(:) = .false.
-        isedgesorted(:) = .false.
+        ispolygonstart = .false.
+        isedgesorted = .false.
+        isbranchingpolygon = .false. 
         edgeID(:) = (/ (i, i=1,ne,1) /)
         allfound = .false. ! while loop variable
         spind = 1 ! sorted polygon index
+        sortindex = 0
+
+        ! Check if branching polygons exist by counting occurrence
+        allv = [pein(:, 1), pein(:, 2)]
+        call CountOccurrence(allv, oc, el, sortindoc=sortind, sortindel=sortind2)
+        alloc = oc(sortind)
+        allocate(isbranchingvertex(ne, 2))
+        isbranchingvertex(:, 1) = alloc(1:ne) > 2_I8
+        isbranchingvertex(:, 2) = alloc(ne+1:2*ne) > 2_I8
     
         ! Loop
+        allbranchingfound = count(isbranchingvertex) == 0
         do while (allfound .eqv. .false.)
             ! Set the polygon starting index
             ispolygonstart(spind) = .true.
@@ -2518,17 +2696,79 @@ module mod_polygon
             allocate(remedgeID(nremedges))
             allocate(isremedgesorted(nremedges))
             allocate(mask(nremedges))
+            allocate(remisbranching(nremedges, 2))
     
             ! Get the remaining edges
             remedges(:,1) = pack(pein(:,1), (isedgesorted .eqv. .false.))
             remedges(:,2) = pack(pein(:,2), (isedgesorted .eqv. .false.))
             remedgeID(:) = pack(edgeID, (isedgesorted .eqv. .false.))
+            remisbranching(:, 1) = pack(isbranchingvertex(:, 1), .not. isedgesorted)
+            remisbranching(:, 2) = pack(isbranchingvertex(:, 2), .not. isedgesorted)
             isremedgesorted(:) = .false.
     
-            ! Find a starting vertex
+            ! Find a starting vertex of a branching vertex
             startfound = .false. 
             k = 1
+            do while ((startfound .eqv. .false.) .and. (k <= nremedges) .and. &
+                .not. allbranchingfound)
+
+                ! Check if there are any branching edges among the 
+                ! remaining edges
+                if (remisbranching(k, 1)) then 
+
+                    ! Found starting point
+                    startfound = .true. 
+                    nv = remedges(k, 2)
+
+                    ! Set as branching polygon
+                    isbranchingpolygon(remedgeID(k)) = .true.
+                    
+                    ! Add the current edge
+                    sortindex(spind) = remedgeID(k)
+    
+                    ! Set edge as sorted
+                    isremedgesorted(k) = .true.
+    
+                    ! Update indices
+                    k = k+1
+                    spind = spind+1
+
+                elseif (remisbranching(k, 2)) then 
+
+                    ! Found starting point
+                    startfound = .true. 
+                    nv = remedges(k, 1)
+
+                    ! Set as branching polygon
+                    isbranchingpolygon(remedgeID(k)) = .true.
+                    
+                    ! Add the current edge
+                    sortindex(spind) = remedgeID(k)
+    
+                    ! Set edge as sorted
+                    isremedgesorted(k) = .true.
+    
+                    ! Update indices
+                    k = k+1
+                    spind = spind+1
+
+                else 
+                    ! Next edge
+                    k = k + 1
+                end if
+
+                ! Check
+                if (.not. startfound .and. k >= nremedges) then 
+                    ! Found all branching polygons
+                    allbranchingfound = .true. 
+                end if 
+            end do 
+
+            ! If no starting vertex was found, find the starting vertex 
+            ! of a non-branching polygon
+            k = 1
             do while ((startfound .eqv. .false.) .and. (k <= nremedges))
+
                 ! Count how many times the current edge vertices occur
                 tc1 = count(remedges(:,1) == remedges(k,1)) & 
                     + count(remedges(:,2) == remedges(k,1))
@@ -2603,8 +2843,8 @@ module mod_polygon
                     ! All edges were found, exit
                     polygonfound = .true. 
                 else if (count(mask) > 1) then
-                    ! Unknown error, call error handler
-                    call gdErrorHandler('SortPolygonEdges: branching polygon detected, not supported')
+                    ! The current vertx is a branching vertex, exit
+                    polygonfound = .true.
                 else
                     ! Get the next edge
                     allocate(temparray(1)) ! avoid rank conflicts
@@ -2645,8 +2885,132 @@ module mod_polygon
             deallocate(remedgeID)
             deallocate(isremedgesorted)
             deallocate(mask)
+            deallocate(remisbranching)
     
         end do
+
+        ! Check if we need to determine polygon IDs
+        if (present(polygonID)) then 
+            ! Allocate
+            if (allocated(polygonID)) then 
+                deallocate(polygonID)
+            end if 
+            allocate(polygonID(ne))
+            polygonID = 0
+
+            ! Check
+            if (.not. any(isbranchingpolygon)) then 
+                ! Easy
+                do i = 1, ne
+                    if (ispolygonstart(i)) then 
+                        polygonID(i) = pID 
+                        pID = pID + 1
+                    end if 
+                end do 
+            else
+                ! Not so easy - need to check polygon vertices etc. 
+                ! Luckily, we know that each branching polygon part 
+                ! should start in a branching polygon vertex
+
+                ! Sort the edges 
+                allocate(sortededges(ne, 2))
+                sortededges(:, 1) = pein(sortindex, 1)
+                sortededges(:, 2) = pein(sortindex, 2)
+                sortedisbranchingvertex = isbranchingvertex
+                sortedisbranchingvertex(:, 1) = isbranchingvertex(sortindex, 1)
+                sortedisbranchingvertex(:, 2) = isbranchingvertex(sortindex, 2)
+                
+                ! Get all polygon start/end indices
+                allocate(ps(count(ispolygonstart)))
+                ps = pack([(k, k = 1, ne)], ispolygonstart)
+                pe = [ps(2:size(ps))-1, ne]
+
+                ! Get starting and ending edges
+                allocate(pse(count(ispolygonstart), 2), &
+                    pee(count(ispolygonstart), 2)) 
+                pse(:, 1) = sortededges(ps, 1)
+                pse(:, 2) = sortededges(ps, 2)
+                pee(:, 1) = sortededges(pe, 1)
+                pee(:, 2) = sortededges(pe, 2)
+
+                ! Get the unique IDs of polygon branching vertices
+                tv = [pack(pein(:, 1), isbranchingvertex(:, 1)), &
+                    pack(pein(:, 2), isbranchingvertex(:, 2))]
+                call Unique(tv, tvu)
+
+                ! Initialize the branching vertex ID
+                allocate(tvID(size(tvu)))
+                tvID = 0 
+
+                ! Start 'tracing' 
+                do i = 1, size(tvu)
+                    ! Check if ID was set
+                    if (tvID(i) == 0) then
+                        ! Set ID
+                        tvID(i) = pID 
+
+                        ! Update counter
+                        pID = pID + 1
+                    end if 
+
+                    ! Check which polygons have this vertex
+                    hasbv = pse(:, 1) == tvu(i) .or. pse(:, 2) == tvu(i) &
+                        .or. pee(:, 1) == tvu(i) .or. pee(:, 2) == tvu(i)
+                    
+                    ! Loop
+                    do j = 1, size(ps)
+                        if (hasbv(j)) then 
+                            ! Check 
+                            if (polygonID(ps(j)) == 0 .or. polygonID(ps(j)) == tvID(i)) then 
+                                ! Simply add
+                                polygonID(ps(j)) = tvID(i)
+
+                                ! Check if other vertices are also 
+                                ! branching vertices to propagate IDs
+                                pvb = [sortedisbranchingvertex(ps(j), :), &
+                                    sortedisbranchingvertex(pe(j), :)]
+                                pv = [sortededges(ps(j), :), sortededges(pe(j), :)]
+                                do k = 1, size(pv)
+                                    if (pvb(k)) then 
+                                        ind = findloc(tvu, pv(k), 1)
+                                     
+                                        if (ind == 0) then 
+                                            call gdErrorHandler('unexpected error')
+                                        end if 
+
+                                        ! Check if ID is non-zero - then throw error
+                                        if (tvID(ind) == 0 .or. tvID(ind) == tvID(i)) then
+                                            tvID(ind) = tvID(i)
+                                        else
+                                            ! Something weird going wrong here
+                                            call gdErrorHandler('SortPolygonEdges: ' // & 
+                                                'different branching polygons seem to ' // & 
+                                                'have common vertices, unexpected')
+                                        end if 
+                                    end if
+                                end do 
+                            else 
+                                ! Something weird going wrong here
+                                call gdErrorHandler('SortPolygonEdges: ' // & 
+                                'different branching polygons seem to ' // & 
+                                'have common vertices, unexpected')
+                            end if 
+                        end if 
+                    end do 
+                    
+                end do 
+
+                ! Set polygon IDs for non-branching polygons
+                do i = 1, ne
+                    if (ispolygonstart(i) .and. polygonID(i) == 0) then 
+                        polygonID(i) = pID
+                        pID = pID + 1
+                    end if 
+                end do
+
+                
+            end if 
+        end if 
     
     end subroutine
 
@@ -2690,11 +3054,11 @@ module mod_polygon
         ! Declare variables
         !==================
         ! Input
-        integer(I8), dimension(ne,1:2)  :: pe ! polygon edges 
+        integer(I8), dimension(:, :), intent(in)  :: pe ! polygon edges 
         integer                         :: ne
         
         ! Output
-        integer(I8), dimension(ne+1)    :: pv
+        integer(I8), dimension(:), intent(inout)    :: pv
     
         ! Mixed
     
@@ -2707,10 +3071,16 @@ module mod_polygon
         ! Main program
         !=============
         ! Check
+        if (size(pe, 1) /= ne) then 
+            call gdErrorHandler('ExtractPolygonVertices: ne should equal number of edges')
+        end if 
         if (size(pe,2) /= 2) then
             ! Throw error
             call gdErrorHandler('ExtractPolygonVertices: input argument pe should be a ne-by-2 integer array')
     
+        end if
+        if (size(pv) /= ne+1) then 
+            call gdErrorHandler('ExtractPolygonVertices: pv should have dimension ne+1')
         end if
     
         ! Initialize
@@ -2828,6 +3198,50 @@ module mod_polygon
 
     end subroutine
 
+    ! Continuous index computation
+    function ComputeI(x, y, x1, y1, x2, y2) result(frac)
+
+        ! Description
+        !============
+        ! Compute the relative distance on the edge where a vertex (x, y) lies. It
+        ! is assumed that x, y truly lies on the edge, i.e. this routine will give
+        ! wrong results if x, y is not on the edge with points (x1, y1), (x2, y2).
+        ! Note that also the order of the points matters. 
+
+        ! We hedge for points on one of the two nodes by comparing vertex values
+        ! with disttol (this should be conform how the intersections are computed
+        ! in SegmentIntersections).
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in), dimension(:)  :: x, y, x1, y1, x2, y2
+        real(R8), allocatable               :: frac(:)
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:) :: d1, d2, de
+
+        ! Check
+        !======
+        ! Check for equal distance
+        call Distance(d1, x, y, x1, y1)
+        call Distance(d2, x, y, x2, y2)
+        call Distance(de, x1, y1, x2, y2)
+
+        ! Compute frac
+        !=============
+        allocate(frac(size(x)))
+        where ((d1 < disttol)) frac = 0 ! first point is the same
+        where ((d2 < disttol)) frac = 1 ! second point is the same
+        where ( .not. (d1 < disttol) .and. .not. (d2 < disttol)) frac = d1/de
+        where(frac > 1.0_R8) frac = 1.0_R8
+        where(frac < 0.0_R8) frac = 0.0_R8
+        !if (any(frac > 1.0_R8) .or. any(frac < 0.0_R8) ) then 
+        !    print *, 'roundoff errors detected'
+        !end if 
+
+    end function 
+
     ! Intersection between two lines with points x11, x12, x21, x22 
     subroutine LineIntersections(x, y, x11, y11, x12, y12, x21, y21, &
         x22, y22)
@@ -2924,26 +3338,88 @@ module mod_polygon
         ! Compute intersection
         !=====================
         ! Hedge for small dx when computing slope 
-        if (abs(dx1) > disttol) then 
-            r1 = dy1/dx1 
-            if (abs(dx2) > disttol) then 
-                ! Two non-parallel, non-vertical and non-horizontal lines
-                r2 = dy2/dx2 
-                x = (r1*x11 - r2*x21 -y11 + y21)/(r1 - r2)
-                y = r1*(x - x11) + y11
-            else 
-                ! Second line is vertical line, first one is non-vertical
-                x = x21
-                y = r1*(x - x11) + y11
-            end if 
+        if (abs(dx1) > abs(dx2)) then 
+            if (abs(dx1) > disttol) then 
+                r1 = dy1/dx1 
+                if (abs(dx2) > disttol) then 
+                    ! Two non-parallel, non-vertical and non-horizontal lines
+                    r2 = dy2/dx2 
+                    x = (r1*x11 - r2*x21 -y11 + y21)/(r1 - r2)
+                    y = r1*(x - x11) + y11
+                else 
+                    ! Second line is vertical line, first one is non-vertical
+                    x = x21
+                    y = r1*(x - x11) + y11
+                end if 
 
+            else
+                ! Both lines are parallel - should've been captured before actually
+                ! Compute normal
+                nx = -(y11 - y12)
+                ny = (x11 - x12)
+                nn = sqrt(nx**2 + ny**2)
+
+                ! Compute vector between lines
+                vx = (x11 - x21)
+                vy = (y11 - y21)
+
+                ! Compute the distance
+                dist = abs( vx*nx/nn + vy*ny/nn )
+
+                ! Check 
+                if (dist < disttol) then 
+                    ! collinear lines, return inf
+                    x = IEEE_VALUE(inf, IEEE_positive_inf)
+                    y = x 
+                else 
+                    ! Parallel lines, return nan
+                    x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+                    y = x 
+                end if 
+                return 
+            end if 
         else
-            ! First line is vertical line, second is non-vertical 
-            ! (otherwise, det would have been zero)
-            x = x11 
-            r2 = dy2/dx2 
-            y = r2*(x - x21) + y21
+            if (abs(dx2) > disttol) then 
+                r2 = dy2/dx2
+                if (abs(dx1) > disttol) then 
+                    ! Two non-parallel, non-vertical and non-horizontal lines
+                    r1 = dy1/dx1 
+                    x = (r1*x11 - r2*x21 -y11 + y21)/(r1 - r2)
+                    y = r2*(x - x21) + y21
+                else 
+                    ! First line is vertical line, second one is non-vertical
+                    x = x11
+                    y = r2*(x - x21) + y21
+                end if 
+
+            else
+                ! Both lines are parallel - should've been captured before actually
+                ! Compute normal
+                nx = -(y11 - y12)
+                ny = (x11 - x12)
+                nn = sqrt(nx**2 + ny**2)
+
+                ! Compute vector between lines
+                vx = (x11 - x21)
+                vy = (y11 - y21)
+
+                ! Compute the distance
+                dist = abs( vx*nx/nn + vy*ny/nn )
+
+                ! Check 
+                if (dist < disttol) then 
+                    ! collinear lines, return inf
+                    x = IEEE_VALUE(inf, IEEE_positive_inf)
+                    y = x 
+                else 
+                    ! Parallel lines, return nan
+                    x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+                    y = x 
+                end if 
+                return 
+            end if 
         end if 
+
 
     end subroutine
 
@@ -3209,9 +3685,8 @@ module mod_polygon
         call Distance(d1, x, y, x11, y11) 
         call Distance(d2, x, y, x12, y12)
         if ( (d1 < disttol) .or. (d2 < disttol) ) then 
-            return 
-        end if 
-        if (dotprod > 0) then 
+            ! Lies on vertex here, still need to check other segment
+        elseif (dotprod > 0) then 
             x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
             y = x 
             return
@@ -3222,9 +3697,8 @@ module mod_polygon
         call Distance(d1, x, y, x21, y21) 
         call Distance(d2, x, y, x22, y22)
         if ( (d1 < disttol) .or. (d2 < disttol) ) then 
-            return 
-        end if 
-        if (dotprod > 0) then 
+            ! Lies on vertex here
+        elseif (dotprod > 0) then 
             x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
             y = x 
             return 
@@ -3824,6 +4298,209 @@ module mod_polygon
             (max(y21, y22)+disttol < min(y11, y12)-disttol) ) then 
             isoverlapping = .false.
         end if 
+
+    end function
+
+    ! Edge overlap checker
+    function CheckEdgeOverlap1D(x11, y11, x12, y12, x21, y21, &
+        x22, y22) result(isoverlapping)
+
+        ! Description
+        !============
+        ! This function checks whether two edges 'overlap', in the 
+        ! sense that the boxes formed around these edges overlap. The 
+        ! boxes have edges parallel with the axes. 
+
+        ! Algorithm
+        !==========
+        ! For two boxes to not overlap, the common set of points of the 
+        ! x-interval of both boxes should be the empty set (or the same
+        ! for the y-interval). We hedge for distance precision tolerance
+        ! as defined by macheps (i.e. we make the intervals disttol 
+        ! larger on each side
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in), dimension(:)  :: x11, y11, x12, y12
+        real(R8), intent(in)                :: x21, y21, x22, y22
+        logical, allocatable, dimension(:)  :: isoverlapping
+
+        ! Auxiliary
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Check boxes
+        !============
+        ! Initialize
+        allocate(isoverlapping(size(x11)))
+        isoverlapping = .true. 
+
+        ! x-interval
+        do i = 1, size(x11)
+                if ((x11(i)+disttol < x21-disttol) .and. (x11(i)+disttol < x22-disttol) &
+                .and. (x12(i)+disttol < x21-disttol) .and. (x12(i)+disttol < x22-disttol)) then 
+                    isoverlapping(i) = .false. 
+            elseif ((x21+disttol < x11(i)-disttol) .and. (x21+disttol < x12(i)-disttol) &
+                .and. (x22+disttol < x11(i)-disttol) .and. (x22+disttol < x12(i)-disttol)) then 
+                    isoverlapping(i) = .false. 
+            elseif  ((y11(i)+disttol < y21-disttol) .and. (y11(i)+disttol < y22-disttol) &
+                .and. (y12(i)+disttol < y21-disttol) .and. (y12(i)+disttol < y22-disttol)) then 
+                    isoverlapping(i) = .false. 
+            elseif ((y21+disttol < y11(i)-disttol) .and. (y21+disttol < y12(i)-disttol) &
+                .and. (y22+disttol < y11(i)-disttol) .and. (y22+disttol < y12(i)-disttol)) then 
+                    isoverlapping(i) = .false.    
+            end if
+        end do 
+        
+        !where ((x11+disttol < x21-disttol) .and. (x11+disttol < x22-disttol) &
+        !    .and. (x12+disttol < x21-disttol) .and. (x12+disttol < x22-disttol))  
+        !        isoverlapping = .false. 
+        !end where 
+        !where ((x21+disttol < x11-disttol) .and. (x21+disttol < x12-disttol) &
+        !    .and. (x22+disttol < x11-disttol) .and. (x22+disttol < x12-disttol))  
+        !        isoverlapping = .false. 
+        !end where 
+        !where  ((y11+disttol < y21-disttol) .and. (y11+disttol < y22-disttol) &
+        !    .and. (y12+disttol < y21-disttol) .and. (y12+disttol < y22-disttol))  
+        !        isoverlapping = .false. 
+        !end where 
+        !where ((y21+disttol < y11-disttol) .and. (y21+disttol < y12-disttol) &
+        !    .and. (y22+disttol < y11-disttol) .and. (y22+disttol < y12-disttol))  
+        !        isoverlapping = .false.    
+        !end where
+
+       ! if ( (max(x11, x12)+disttol < min(x21, x22)-disttol) .or. &
+       !     (max(x21, x22)+disttol < min(x11, x12)-disttol) ) then 
+       !     isoverlapping = .false. 
+       ! elseif ( (max(y11, y12)+disttol < min(y21, y22)-disttol) .or. &
+       !     (max(y21, y22)+disttol < min(y11, y12)-disttol) ) then 
+       !     isoverlapping = .false.
+       ! end if 
+
+    end function
+
+    ! Edge coincidence checker
+    subroutine CheckSegmentCoincidence(x, y, x11, y11, x12, y12, x21, &
+        y21, x22, y22)
+
+        ! Description
+        !============
+        ! Check if two segments are coincident, either at one of the two
+        ! end vertices or at both. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)    :: x11, y11, x12, y12, x21, y21, &
+            x22, y22 
+        real(R8), intent(out)   :: x, y
+
+        ! Auxiliary
+        real(R8)                :: nan, d11, d12, d21, d22
+
+
+        ! Compute distances
+        !==================
+        ! Distances between segment points
+        call Distance(d11, x11, y11, x21, y21)
+        call Distance(d12, x11, y11, x22, y22)
+        call Distance(d21, x12, y12, x21, y21)
+        call Distance(d22, x12, y12, x22, y22)
+
+        ! Check
+        if (( ((d11 < disttol) .and. (d22 < disttol)) &
+                .or. ((d12 < disttol) .and. (d21 < disttol)) )) then 
+            ! Edges are the same up to distance tolerance, take
+            ! average
+            x = 0.5*(x11 + x12)
+            y = 0.5*(y11 + y12)
+        else
+            
+            ! Checks
+            if (d11 < disttol) then 
+                ! First points coincide
+                x = x11;
+                y = y11;
+            elseif (d12 < disttol) then 
+                ! First point of first segment and second point of
+                ! second segment coincide
+                
+                x = x11;
+                y = y11;
+            elseif (d21 < disttol) then 
+                ! Second point of first segment and first point of
+                ! second segment coincide
+                
+                ! Intersection in single point
+                x = x12;
+                y = y12;
+            elseif (d22 < disttol) then 
+                ! Second point of first segment and first point of
+                ! second segment coincide
+                
+                x = x12;
+                y = y12;
+            else
+                ! No coincidence of nodes, set to NaN
+                x = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+                y = IEEE_VALUE(nan, IEEE_QUIET_NAN)
+            end if 
+        end if
+
+
+    end subroutine
+
+    ! Polygon surface area
+    function ComputePolygonSurfaceArea(polygon) result(out)
+
+        ! Description
+        !============
+        ! Simple function that computes the (signed) surface area 
+        ! enclosed by the polygon. For this, we employ the simple
+        ! trapezoidal rule for integration, which is exact for 
+        ! piecewise-linear polygons. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)                       :: polygon 
+        real(R8)                                :: out 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: dx, yf 
+
+        ! Compute
+        !========
+        dx = polygon%x(polygon%vert) - polygon%x([polygon%vert(2:polygon%nv), polygon%vert(1)])
+        yf = polygon%y(polygon%vert) + polygon%y([polygon%vert(2:polygon%nv), polygon%vert(1)])
+        out = 0.5*sum(-dx*yf)
+
+
+
+    end function
+
+    function ComputeSimplePolygonSurfaceArea(x, y) result(out)
+
+        ! Description
+        !============
+        ! Same as function for polygon, but now with simple x, y input
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in), dimension(:)      :: x, y
+        real(R8)                                :: out 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: dx, yf 
+
+        ! Compute
+        !========
+        dx = x - [x(2:size(x)), x(1)]
+        yf = y + [y(2:size(y)), y(1)]
+        out = 0.5*sum(-dx*yf)
 
     end function
 

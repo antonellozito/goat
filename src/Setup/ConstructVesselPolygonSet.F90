@@ -69,7 +69,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
 
     ! Auxiliary
     integer(I8)                 :: ni, nfinpol, thisp, firstpolygon, &
-        c1, c2, nvest, nvv, tempnv, nextp, sv, ev, flag, vID
+        c1, c2, nvest, nvv, tempnv, nextp, sv, ev, flag, vID, indis, indie
     logical                     :: polygonnotfound, doflip  
     real(R8)                    :: nan, xs, ys, xe, ye 
 
@@ -101,11 +101,26 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
     ! Set NaN
     nan = IEEE_VALUE(nan, IEEE_QUIET_NAN)
 
-    ! Get maximal vertex ID label
+    ! Get maximal vertex ID label - if available
     vID = 0
-    do i = 1, ps%np 
-        vID = max(maxval(ps%polygons(i)%labels(:, 3)), vID)
-    end do 
+    if (size(ps%polygons(1)%labels, 2) >= 3) then 
+        do i = 1, ps%np 
+            vID = max(maxval(ps%polygons(i)%labels(:, 3)), vID)
+        end do 
+    else
+        ! Throw warning
+        print *, 'ConstructVesselPolygonSet: polygons do not have ' // & 
+            'all labels, constructing vessel structure and vertex labels ' // & 
+            'based on polygons'
+        do i = 1, ps%np
+            deallocate(ps%polygons(i)%labels)
+            allocate(ps%polygons(i)%labels(ps%polygons(i)%nv, 3))
+            ps%polygons(i)%labels(:, 1) = i 
+            ps%polygons(i)%labels(:, 2) = 0
+            ps%polygons(i)%labels(:, 3) = [(k, k = vID+1, vID+ps%polygons(i)%nv)]
+            vID = vID + ps%polygons(i)%nv 
+        end do 
+    end if 
 
     ! Determine intersections
     !========================
@@ -263,7 +278,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                     ! the first one again
                     c2 = count( (thisp == p1) .and. (p2 == firstpolygon) )
                     c1 = count( (thisp == p2) .and. (p1 == firstpolygon) ) 
-                    if ( (c1 + c2) == 1) then 
+                    if ( (c1 + c2) >= 1) then ! might be 2 as well in the case of exactly two polygons
                         ! Ok, exit the loop
                         polygonnotfound = .false. 
                     else 
@@ -371,6 +386,204 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
             ! Update counter
             nvv = nvv + tempnv 
 
+        elseif (npol(i) == 2) then  ! special case, needs special treatment
+
+            ! Print warning, this code part is not yet thoroughly tested
+            print *, 'ConstructVesselPolygonSet: code part for two segments is not ' // & 
+                'yet properly tested'
+
+            ! Get polygons
+            thisp = polcat(1, i)
+            nextp = polcat(2, i)
+
+            ! First polygon
+            !--------------
+            ! Get polygons
+            thisp = polcat(1, i)
+            nextp = polcat(2, i)
+            doflip = .false. 
+
+            ! First intersection, check si
+            indis = indi(2, thisp)
+            indie = indi(1, thisp)
+            if (si(1, thisp) >= si(2, thisp) ) then 
+                ! Don't flip
+                xs = xi(indis) ! start 
+                ys = yi(indis) 
+                pis = [p1(indis), p2(indis)]
+                xe = xi(indie) ! end 
+                ye = yi(indie) 
+                pie = [p1(indie), p2(indie)]
+                sv = si(2, thisp) + 1
+                ev = si(1, thisp) 
+            else 
+                ! Flip
+                doflip = .true. 
+                xs = xi(indis) ! start 
+                ys = yi(indis) 
+                pis = [p1(indis), p2(indis)]
+                xe = xi(indie) ! end 
+                ye = yi(indie) 
+                pie = [p1(indie), p2(indie)]
+                sv = si(1, thisp) + 1
+                ev = si(2, thisp) 
+            end if 
+
+            ! Add
+                ! Starting point
+            tempx(nvv+1) = xs 
+            tempy(nvv+1) = ys 
+            templabels(nvv+1, 1:2) = pis
+            templabels(nvv+1, 3) = vID+1
+
+            ! Update counters
+            nvv     = nvv + 1
+            vID     = vID + 1
+
+            ! Polygon points
+            tempnv = ev - sv + 1 
+            
+            if (doflip) then 
+                tempx(nvv+1:nvv+tempnv) = &
+                    ps%polygons(thisp)%x(ps%polygons(thisp)%vert(ev:sv:-1))
+                tempy(nvv+1:nvv+tempnv) = &
+                    ps%polygons(thisp)%y(ps%polygons(thisp)%vert(ev:sv:-1))
+                templabels(nvv+1:nvv+tempnv, :) = &
+                    ps%polygons(thisp)%labels(ps%polygons(thisp)%vert(ev:sv:-1), :)
+            else 
+                tempx(nvv+1:nvv+tempnv) = ps%polygons(thisp)%x(ps%polygons(thisp)%vert(sv:ev))
+                tempy(nvv+1:nvv+tempnv) = ps%polygons(thisp)%y(ps%polygons(thisp)%vert(sv:ev))
+                templabels(nvv+1:nvv+tempnv, :) = ps%polygons(thisp)%labels(ps%polygons(thisp)%vert(sv:ev), :)
+            end if
+
+            ! Hedge for zero/negative length
+            if (tempnv < 0) then 
+                tempnv = 0
+            end if
+            nvv = nvv+tempnv
+
+            ! End point
+            tempx(nvv+1) = xe
+            tempy(nvv+1) = ye 
+            templabels(nvv+1, 1:2) = pie
+            templabels(nvv+1, 3) = vID+1
+
+            ! Update counters
+            nvv = nvv + 1 
+            vID = vID + 1
+
+            ! Second polygon
+            !---------------
+            ! Get polygons
+            thisp = polcat(2, i)
+            nextp = polcat(1, i)
+            doflip = .false. 
+
+            ! Check intersection index
+            if (indie == indi(1, thisp)) then 
+                indis = indi(1, thisp)
+                indie = indi(2, thisp)
+
+                if (si(1, thisp) <= si(2, thisp) ) then 
+                    ! Don't flip
+                    xs = xi(indis) ! start 
+                    ys = yi(indis) 
+                    pis = [p1(indis), p2(indis)]
+                    xe = xi(indie) ! end 
+                    ye = yi(indie) 
+                    pie = [p1(indie), p2(indie)]
+                    sv = si(1, thisp) + 1
+                    ev = si(2, thisp) 
+                else 
+                    ! Flip
+                    doflip = .true. 
+                    xs = xi(indis) ! start 
+                    ys = yi(indis) 
+                    pis = [p1(indis), p2(indis)]
+                    xe = xi(indie) ! end 
+                    ye = yi(indie) 
+                    pie = [p1(indie), p2(indie)]
+                    sv = si(2, thisp) + 1
+                    ev = si(1, thisp) 
+                end if 
+
+            elseif (indis == indi(1, thisp)) then 
+                indis = indi(2, thisp)
+                indie = indi(1, thisp)
+
+                if (si(1, thisp) >= si(2, thisp) ) then 
+                    ! Don't flip
+                    xs = xi(indis) ! start 
+                    ys = yi(indis) 
+                    pis = [p1(indis), p2(indis)]
+                    xe = xi(indie) ! end 
+                    ye = yi(indie) 
+                    pie = [p1(indie), p2(indie)]
+                    sv = si(2, thisp) + 1
+                    ev = si(1, thisp) 
+                else 
+                    ! Flip
+                    doflip = .true. 
+                    xs = xi(indis) ! start 
+                    ys = yi(indis) 
+                    pis = [p1(indis), p2(indis)]
+                    xe = xi(indie) ! end 
+                    ye = yi(indie) 
+                    pie = [p1(indie), p2(indie)]
+                    sv = si(1, thisp) + 1
+                    ev = si(2, thisp) 
+                end if 
+            else
+                ! This shouldn't happen
+                call gdErrorHandler('Unknown error')
+            end if 
+
+            ! Add
+            ! Starting point
+            tempx(nvv+1) = xs 
+            tempy(nvv+1) = ys 
+            templabels(nvv+1, 1:2) = pis
+            templabels(nvv+1, 3) = vID+1
+
+            ! Update counters
+            nvv     = nvv + 1
+            vID     = vID + 1
+
+            ! Polygon points
+            tempnv = ev - sv + 1 
+            
+            if (doflip) then 
+                tempx(nvv+1:nvv+tempnv) = &
+                    ps%polygons(thisp)%x(ps%polygons(thisp)%vert(ev:sv:-1))
+                tempy(nvv+1:nvv+tempnv) = &
+                    ps%polygons(thisp)%y(ps%polygons(thisp)%vert(ev:sv:-1))
+                templabels(nvv+1:nvv+tempnv, :) = &
+                    ps%polygons(thisp)%labels(ps%polygons(thisp)%vert(ev:sv:-1), :)
+            else 
+                tempx(nvv+1:nvv+tempnv) = ps%polygons(thisp)%x(ps%polygons(thisp)%vert(sv:ev))
+                tempy(nvv+1:nvv+tempnv) = ps%polygons(thisp)%y(ps%polygons(thisp)%vert(sv:ev))
+                templabels(nvv+1:nvv+tempnv, :) = ps%polygons(thisp)%labels(ps%polygons(thisp)%vert(sv:ev), :)
+            end if
+
+            ! Hedge for zero/negative length
+            if (tempnv < 0) then 
+                tempnv = 0
+            end if
+            nvv = nvv+tempnv
+
+            ! End point
+            tempx(nvv+1) = xe
+            tempy(nvv+1) = ye 
+            templabels(nvv+1, 1:2) = pie
+            templabels(nvv+1, 3) = vID+1
+
+            ! Update counters
+            nvv = nvv + 1 
+            vID = vID + 1
+
+
+
+
         else ! Loop over all segments
             do j = 1, npol(i)
                 ! Get the current polygon
@@ -402,7 +615,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(1, thisp)) 
                         pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         sv = si(2, thisp) + 1
-                        ev = si(1, thisp) - 1
+                        ev = si(1, thisp) 
                     else 
                         ! Flip
                         doflip = .true. 
@@ -413,7 +626,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(1, thisp)) 
                         pie = [p1(indi(1, thisp)), p2(indi(1, thisp))]
                         sv = si(1, thisp) + 1
-                        ev = si(2, thisp) - 1
+                        ev = si(2, thisp) 
                     end if 
                 elseif ( pi(2, thisp) == nextp) then 
                     ! Second intersection, check si
@@ -426,7 +639,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(2, thisp)) 
                         pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         sv = si(1, thisp) + 1 
-                        ev = si(2, thisp) - 1
+                        ev = si(2, thisp) 
                     else 
                         ! Flip
                         doflip = .true. 
@@ -437,7 +650,7 @@ subroutine ConstructVesselPolygonSet(vessel, ps)
                         ye = yi(indi(2, thisp))
                         pie = [p1(indi(2, thisp)), p2(indi(2, thisp))]
                         sv = si(2, thisp) + 1
-                        ev = si(1, thisp) - 1
+                        ev = si(1, thisp) 
                     end if 
                 else 
                     ! Unexpected error

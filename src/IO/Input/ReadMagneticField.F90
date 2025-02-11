@@ -59,6 +59,9 @@ subroutine ReadMagneticField(magneticField, mfoptions, filepath)
 
     end select
 
+    ! Add additional data
+    magneticField%RBtor = mfoptions%RBtor
+
     ! Housekeeping
     !=============
     close(filespecifier)

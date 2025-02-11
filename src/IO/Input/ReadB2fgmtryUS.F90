@@ -70,7 +70,7 @@ subroutine ReadB2fgmtryUS(grid, filepath)
 
     logical, allocatable, dimension(:)      :: isnoghostvert, keepvertface, &
         keepvertcell, isnoguardcell, keepcellface, keepcellvert, &
-        ispolygonstart 
+        ispolygonstart, isbranchingpolygon
 
     ! Loop
     integer(I8)                 :: i, j, k
@@ -163,7 +163,7 @@ subroutine ReadB2fgmtryUS(grid, filepath)
     call cfruin (filespec, nf,     grid%data%fluxdata%fluxsurfacefaces,  'fsFc')
     call cfruin (filespec, nf,     grid%face%reg, 'fcReg')
     call cfruin (filespec, nc,     grid%cell%reg, 'cvReg')
-    call cfruin (filespec, grid%data%fluxdata%nFt,     grid%data%regions%fluxtuberegID, 'ftReg')
+    call cfruin (filespec, grid%data%fluxdata%nFt,     grid%data%fluxdata%fluxtuberegID, 'ftReg')
     call cfrure (filespec, grid%cell%nface,  facedummy,'intcellP') ! not used
     call cfrure (filespec, grid%cell%nface,  facedummy,'intcellR') ! not used
     deallocate(fdummy2)
@@ -427,8 +427,9 @@ subroutine ReadB2fgmtryUS(grid, filepath)
         tcfv = grid%face%vert(tcf, :)
 
         ! Sort
-        allocate(sortindex(size(tcf)), ispolygonstart(size(tcf)))
-        call SortPolygonEdges(tcfv, size(tcf), sortindex, ispolygonstart)
+        allocate(sortindex(size(tcf)), ispolygonstart(size(tcf)), isbranchingpolygon(size(tcf)))
+        call SortPolygonEdges(tcfv, size(tcf), sortindex, ispolygonstart, &
+            isbranchingpolygon)
         tcfv = tcfv(sortindex, :)
 
         ! Check
@@ -452,7 +453,7 @@ subroutine ReadB2fgmtryUS(grid, filepath)
             tv(1:size(tcf))
 
         ! Housekeeping
-        deallocate(tv, sortindex, ispolygonstart)
+        deallocate(tv, sortindex, ispolygonstart, isbranchingpolygon)
 
     end do
 

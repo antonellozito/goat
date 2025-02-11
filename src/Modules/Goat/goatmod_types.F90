@@ -118,6 +118,7 @@ module goatmod_types
         ! - BF              : logical index that is true if the face
         !                   is a boundary face
         ! - label           : face labels
+        ! - TMfacelabel     : face label corresponding to topomesh ID (only when GG is used)
         ! - reg             : face regions
         ! - aligned         : integer that is 1 if the face is aligned
 
@@ -126,7 +127,7 @@ module goatmod_types
         integer(I8), allocatable            :: vert(:,:)
 
         integer(I8), allocatable            :: cell(:), label(:), &
-            reg(:), aligned(:)
+            reg(:), aligned(:), TMfacelabel(:)
         integer(I8), allocatable            :: cellP(:, :)
         integer(I8)                         :: ncell = 0
 
@@ -172,8 +173,8 @@ module goatmod_types
         integer(I8)                         :: ntot = 0, ngc
         
         real(R8), allocatable, dimension(:) :: psi, bp, bt, x, y
-        integer(I8), allocatable, dimension(:)  :: cflags(:), reg(:), &
-            ft(:)
+        integer(I8), allocatable, dimension(:)  :: cflags, reg, &
+            ft
     end type
 
     ! Boundary structure
@@ -257,6 +258,8 @@ module goatmod_types
         !                   is the start index in the fluxtubefaces 
         !                   array, and the second the amount of faces of
         !                   the flux tube.
+        ! - fluxtubefsIDs   : flux surface IDs that bound the flux tube
+        !                   (nFt-by-2)
         ! - fluxtubefaces   : nFv(number of faces)-by-1 array containing 
         !                   the face numbers that correspond to flux 
         !                   tubes. 
@@ -279,30 +282,17 @@ module goatmod_types
         integer(I8), allocatable            :: fluxtubecells(:)
         integer(I8), allocatable            :: fluxtubefacesP(:,:)
         integer(I8), allocatable            :: fluxtubefaces(:)
+        integer(I8), allocatable            :: fluxtubefsIDs(:, :), &
+            fluxtuberegID(:)
+        logical, allocatable                :: isclosedft(:)
 
         ! Arrays, flux surface data
         integer(I8), allocatable            :: fluxsurfacefacesP(:,:)
         integer(I8), allocatable            :: fluxsurfacefaces(:)
         integer(I8), allocatable            :: fluxsurfaceID(:)
+        integer(I8), allocatable            :: fluxsurfaceneig(:), fluxsurfaceneigP(:, :)
         real(R8), allocatable               :: fluxsurfacepsi(:)
 
-
-    end type
-
-    ! Region data
-    type RegionDataUDT
-
-        ! Description
-        !============
-        ! Data type to collect all information on which cells/verts/face
-        ! belongs to which grid region. 
-        ! Fields:
-        !
-        ! - fluxtuberegID       : fluxdata%nFt-by-1 array containing 
-        !                       the region IDs for each flux tube
-
-        ! Arrays
-        integer(I8), allocatable            :: fluxtuberegID(:)
 
     end type
 
@@ -344,8 +334,6 @@ module goatmod_types
         !
         ! - fluxdata            : UDT with all flux data such as flux
         !                       flux tube data, flux surfaces, ... 
-        ! - regions             : UDT with all data to which region
-        !                       cells, faces, ... belong
         ! - sglegacy            : data from legacy structured grids
         ! - OMPcell, OMPface    : cells and faces belonging to outer mid
         !                       plane
@@ -355,9 +343,6 @@ module goatmod_types
 
         ! Flux data
         type(FluxDataUDT)           :: fluxdata
-
-        ! Region data
-        type(RegionDataUDT)         :: regions
 
         ! Legacy data of structured grid
         type(StructuredGridDataUDT) :: sglegacy
@@ -434,6 +419,7 @@ module goatmod_types
         ! - R:              nR-by-1 array with R-coordinates
         ! - Z:              nZ-by-1 array with Z-coordinates
         ! - Psi:            nR-by-nZ array with magnetic flux values
+        ! - RBtor:          product of major radius and toroidal field (constant)
 
         ! Coordinates
         integer(I8)                 :: nR = 0 
@@ -441,6 +427,7 @@ module goatmod_types
         real(R8), allocatable       :: R(:)
         real(R8), allocatable       :: Z(:)
         real(R8), allocatable       :: Psi(:,:)
+        real(R8)                    :: RBtor 
         
         ! Interpolant
         type(StructuredInterpolant2DUDT)    :: interp
@@ -682,7 +669,7 @@ module goatmod_types
 
         ! Other
         allocate(face%aligned(face%ntot), face%label(face%ntot), &
-            face%reg(face%ntot))
+            face%reg(face%ntot), face%TMfacelabel(face%ntot))
 
     end subroutine
 
@@ -727,6 +714,16 @@ module goatmod_types
         allocate(cell%psi(cell%ntot), cell%bp(cell%ntot), &
             cell%bt(cell%ntot), cell%x(cell%ntot), cell%y(cell%ntot), &
             cell%cflags(cell%ntot), cell%reg(cell%ntot), cell%ft(cell%ntot))
+
+        ! Initialize
+        cell%psi    = 0
+        cell%bp     = 0
+        cell%bt     = 0
+        cell%x      = 0
+        cell%y      = 0
+        cell%cflags = 0
+        cell%reg    = 0
+        cell%ft     = 0
 
     end subroutine
 
@@ -785,9 +782,6 @@ module goatmod_types
         ! Flux data
         call AllocateFluxData(data%fluxdata,grid)
 
-        ! Region data
-        call AllocateRegionData(data%regions,grid)
-
     end subroutine
 
     ! Flux data substructure
@@ -818,37 +812,13 @@ module goatmod_types
         allocate(fluxdata%fluxtubecells(grid%cell%ntot)) 
         allocate(fluxdata%fluxtubefacesP(fluxdata%nFt,2))
         allocate(fluxdata%fluxtubefaces(grid%face%ntot)) 
+        allocate(fluxdata%fluxtuberegID(fluxdata%nFt))
 
         ! Flux surface data
         allocate(fluxdata%fluxsurfacefacesP(fluxdata%nFs,2))
         allocate(fluxdata%fluxsurfacefaces(grid%face%ntot))
         allocate(fluxdata%fluxsurfaceID(grid%vert%ntot))
         allocate(fluxdata%fluxsurfacepsi(fluxdata%nFs))
-
-    end subroutine
-
-    ! Region data substrucure
-    subroutine AllocateRegionData(regions,grid)
-
-        ! Description
-        !============
-        ! Allocat the region data grid substructure. The following 
-        ! fields should be present:
-        !
-        ! - grid%cell%ntot
-        ! - grid%face%ntot
-        ! - grid%data%fluxdata%nFt
-
-        ! The usual
-        implicit none
-
-        ! Declare variables
-        type(RegionDataUDT)         :: regions
-        type(GridUDT)               :: grid
-
-        ! Allocate
-        !=========
-        allocate(regions%fluxtuberegID(grid%data%fluxdata%nFt))
 
     end subroutine
 
@@ -1037,7 +1007,7 @@ module goatmod_types
         ! Data structures 
         v = grid%vert
         f = grid%face
-        c = grid%cell 
+        c = grid%cell  
     
         ! Checks
         if (size(f%vert,2) /= 2) then
@@ -1207,6 +1177,7 @@ module goatmod_types
                         if (fcount(tf) > 2) then
                             print *, 'face ID: ', tf
                             print *, 'neighbours: ', tempfcell(tf,:), i
+                            print *, 'vert: ', f%vert(tf, 1), f%vert(tf, 2)
                             call gdErrorHandler(& 
                             'ComputeGridInterconnections: too many ' &
                                 // 'neighbours for this face')
@@ -1866,8 +1837,8 @@ module goatmod_types
         !========
         ! Magnetic field at vertices
         call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 0, grid%vert%psi)
-        call mf%Evaluate(grid%vert%x, grid%vert%y, 1, 0, grid%vert%bx)
-        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 1, grid%vert%by)
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 1, 0, grid%vert%bx) 
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 1, grid%vert%by) 
 
         ! Cell centers
         do i = 1, nc 
@@ -1875,6 +1846,9 @@ module goatmod_types
             grid%cell%x(i) = sum(grid%vert%x(tv))/size(tv)
             grid%cell%y(i) = sum(grid%vert%y(tv))/size(tv)
         end do 
+
+        ! Amount of guard cells (not present here, simply amount of boundary faces)
+        grid%cell%ngc = count(grid%face%BF)
 
         ! Magnetic field at cell centers
         call mf%Evaluate(grid%cell%x, grid%cell%y, 0, 0, grid%cell%psi)

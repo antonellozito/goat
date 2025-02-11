@@ -54,8 +54,8 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     ! Recompute data
     call UpdateGridData(grid, magneticField, environment)
 
-    ! Write
-    !======
+    ! Write grid (unstructured traduit format)
+    !=========================================
     ! Associate
     associate(&
         mf              => magneticField%interp,    &
@@ -104,7 +104,7 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
         ftcellP         => grid%data%fluxdata%fluxtubecellsP,       &
         ftface          => grid%data%fluxdata%fluxtubefaces,        &
         ftfaceP         => grid%data%fluxdata%fluxtubefacesP,       &
-        ftreg           => grid%data%regions%fluxtuberegID,         &
+        ftreg           => grid%data%fluxdata%fluxtuberegID,        &
         nfs             => grid%data%fluxdata%nfs,                  &
         fsface          => grid%data%fluxdata%fluxsurfacefaces,     &
         fsfaceP         => grid%data%fluxdata%fluxsurfacefacesP,    &
@@ -258,13 +258,29 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     write(fmt, *) '(', 12, '(', Ifm, '))'  
     write(fu, fmt) fsface(1:fsfaceP(nfs, 1)+fsfaceP(nfs, 2)-1)
 
-
-
     ! Housekeeping
     !=============
     ! Close file
     close (fu)
 
+    ! Write vessel
+    !=============
+    call environment%vessel%polygonset%WriteData(goatoptions%writefilepath // '_vesselpolygonset')
+
+    ! Write grid in .ogr format
+    !==========================
+    ! For divgeo
+    open (action='write', file=goatoptions%writefilepath // '.ogr', newunit=fu, &
+        status='unknown')
+
+    do i = 1, nf
+        ! Coordinates in mm!
+        write (fu, *) xv(facevert(i, 1))*1000, yv(facevert(i, 1))*1000
+        write (fu, *) xv(facevert(i, 2))*1000, yv(facevert(i, 2))*1000
+        write (fu, *) ' '
+    end do 
+
+    close (fu)
     ! End associate
     end associate
 

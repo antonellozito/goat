@@ -30,6 +30,7 @@ module mod_plotter
     !============
     ! Load modules
     use mod_precision
+    use mod_specialchars, only: filesepchar
     use, intrinsic :: ieee_arithmetic, only: IEEE_Value, IEEE_QUIET_NAN
 
     ! The usual
@@ -38,11 +39,18 @@ module mod_plotter
     public 
 
     ! Define the (relative) file directory where the plot are located
-    character(len=*), parameter     :: plotdir = './'
+    character(*), parameter     :: plotdir = './output'
 
     ! Define the (general) plot filename and data filename
     character(:), allocatable                 :: plotfile
     character(:), allocatable                 :: datafile
+
+    ! Interfaces
+    interface WriteRealData 
+        module procedure WriteRealData0D
+        module procedure WriteRealData1D 
+        module procedure WriteRealData2D
+    end interface
 
     contains 
 
@@ -361,8 +369,8 @@ module mod_plotter
         character(*)         :: funname
 
         ! Set output
-        plt = trim(plotdir) // trim(funname) // '.plt'
-        dat = trim(plotdir) // trim(funname) // '.dat'
+        plt = trim(plotdir) // filesepchar // trim(funname) // '.plt'
+        dat = trim(plotdir) // filesepchar // trim(funname) // '.dat'
 
     end subroutine
 
@@ -383,7 +391,7 @@ module mod_plotter
         integer(I8),  intent(in)                    :: ID(:)
         real(R8),              intent(in)           :: x(:), y(:) 
         integer                                     :: i, fu
-        character(:), allocatable, intent(in)       :: filepath 
+        character(*), intent(in)                    :: filepath 
 
         ! Initialize
         !===========
@@ -457,7 +465,7 @@ module mod_plotter
         ! Declare variables
         !==================
         ! Arguments
-        real(R8), allocatable, intent(in)           :: x(:), y(:) 
+        real(R8), intent(in)           :: x(:), y(:) 
         integer                                     :: i, fu
         character(*),  intent(in)       :: filepath 
 
@@ -554,5 +562,106 @@ module mod_plotter
         close (fu)
 
     end subroutine
+
+    ! Real data writing routines
+    subroutine WriteRealData0D(filepath, val)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(*), intent(in)        :: filepath 
+        real(R8), intent(in)            :: val 
+
+        ! Auxiliary
+        integer                         :: fu
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile, datafile, filepath)
+
+        ! Write
+        !======
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='unknown')
+            
+        ! Header
+        write (fu, *) 'val'
+    
+        ! Data
+        write(fu, *) val 
+        
+        close (fu)
+
+
+    end subroutine
+
+    subroutine WriteRealData1D(filepath, val)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(*), intent(in)        :: filepath 
+        real(R8), intent(in)            :: val(:)
+
+        ! Auxiliary
+        integer                         :: i, fu
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile, datafile, filepath)
+
+        ! Write
+        !======
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='unknown')
+            
+        ! Header
+        write (fu, *) 'val'
+    
+        ! Data 
+        do i = 1, size(val)
+            write (fu, *) val(i)
+        end do
+    
+        close (fu)
+
+
+    end subroutine
+
+    subroutine WriteRealData2D(filepath, val)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(*), intent(in)        :: filepath 
+        real(R8), intent(in)            :: val(:, :)
+
+        ! Auxiliary
+        integer                         :: i, fu
+
+        ! Initialize
+        !===========
+        ! Set the correct directories
+        call SetGnuplotNames(plotfile, datafile, filepath)
+
+        ! Write
+        !======
+        open (action='write', file=trim(datafile), newunit=fu, &
+             status='unknown')
+            
+        ! Header
+        write (fu, *) repeat('val ', size(val, 2))
+    
+        ! Data 
+        do i = 1, size(val, 1)
+            write (fu, *) val(i, :)
+        end do
+    
+        close (fu)
+
+    end subroutine
+
 
 end module

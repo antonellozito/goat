@@ -62,6 +62,7 @@ module StructuredInterpolant2D
     ! Load modules
     use Interpolant2D_auxiliaries
     use Interpolant2D
+    use Interpolant1D
     use mod_constants
     use mod_sparseinterface
     use mod_linearsolverinterface
@@ -82,6 +83,7 @@ module StructuredInterpolant2D
         ! - C, M: order of the interpolant and order of the
         ! approximation method to compute derivatives for the 
         ! interpolant construction
+        ! - allowextrapolation: logical to check if we can extrapolate
         ! - xgv, ygv: grid vectors
         ! - A: interpolation coefficients
         ! - refx, refy, refdx, refdy: reference values used to compute
@@ -91,6 +93,7 @@ module StructuredInterpolant2D
 
         character(:), allocatable       :: meth 
         integer(I8)                     :: C, M, n
+        logical                         :: allowextrapolation
 
         real(R8), allocatable           :: xgv(:), ygv(:), A(:, :), &
             refx(:), refy(:), refdx(:), refdy(:)
@@ -141,6 +144,7 @@ module StructuredInterpolant2D
         interp%meth = meth 
         interp%C    = C 
         interp%M    = M
+        interp%allowextrapolation = .true.
         
     end subroutine 
 
@@ -192,7 +196,8 @@ module StructuredInterpolant2D
         case default 
 
             ! Unknown case, call error handler
-            call gdErrorHandler('ConstructSI2DS: unknown construction method for 2D interpolant')
+            call gdErrorHandler('ConstructSI2DS: unknown construction method for 2D interpolant: ' // & 
+                interp%meth)
 
         end select 
 
@@ -231,18 +236,18 @@ module StructuredInterpolant2D
         integer(I8)                             :: nx, ny, &
             ixlb, ixub, iylb, iyub, nxr, nyr, vID, termind, &
             nc, vecind 
+        integer(I8), allocatable, dimension(:)  :: stencil, &
+            xstencil, ystencil, tvID, xrange, yrange, dxstencil, dystencil
+        integer(I8), allocatable, dimension(:, :) :: vertind, cellindex
+        integer(I16), allocatable, dimension(:) :: allprefac, precomputedfac
+
         real(R8)                                :: dxmean, dymean, &
             reldevx, reldevy, prefac
-
-        integer(I8), allocatable                :: stencil(:), &
-            vertind(:, :), xstencil(:), ystencil(:), tvID(:), &
-            xrange(:), yrange(:), dxstencil(:), dystencil(:), &
-            cellindex(:, :)
-        integer(I16), allocatable               :: allprefac(:)
-        real(R8), allocatable                   :: xg(:, :), &
-            yg(:, :), cij(:, :), A(:, :), dx(:), dy(:), res(:, :), &
-            temp(:, :), fvals(:, :, :), refx(:), refy(:), refdx(:), &
-            refdy(:), rhs(:, :), vec(:), aij(:, :)
+        real(R8), allocatable, dimension(:)     :: dx, dy,  refx, refy, &
+            refdx, refdy, vec, xgvnew, ygvnew, vtemp
+        real(R8), allocatable, dimension(:, :)  :: xg, yg, cij, A, res, &
+            temp, aij, rhs, vnew 
+        real(R8), allocatable, dimension(:, :, :) :: fvals
             
 
         ! Loop
@@ -327,14 +332,56 @@ module StructuredInterpolant2D
             ! Issue warning, but this may be ok
             print *, 'ConstructSI2Duniform: non-uniformities detected' // &
                 ' in X grid vector of approx. ', reldevx, ' %. ' // &
-                ' Results may be inaccurate'
+                ' Applying linear interpolation to uniform grid.'
+
+            ! Construct new gridding vector
+            xgvnew = spread(0.0_R8, 1, nx)
+            xgvnew(1) = xgv(1)
+            vnew = v 
+            do i = 2, nx 
+                xgvnew(i) = xgvnew(i-1) + dxmean 
+            end do 
+            xgvnew(nx) = xgv(nx)
+
+            ! Interpolate values
+            !omp parallel do default(shared) private(vtemp)
+            do i = 1, ny 
+                call Interpolate1D(xgvnew, vtemp, xgv, v(:, i))
+                vnew(:, i) = vtemp
+            end do 
+            !omp end parallel do 
+
+            ! Overwrite
+            v = vnew 
+            xgv = xgvnew
             
         end if 
         if (reldevy >= tol) then 
             ! Issue warning, but this may be ok
             print *, 'ConstructSI2Duniform: non-uniformities detected' // &
                 ' in Y grid vector of approx. ', reldevx, ' %. ' // &
-                ' Results may be inaccurate'
+                ' Applying linear interpolation to uniform grid.'
+
+            ! Construct new gridding vector
+            ygvnew = spread(0.0_R8, 1, ny)
+            ygvnew(1) = ygv(1)
+            vnew = v 
+            do i = 2, ny 
+                ygvnew(i) = ygvnew(i-1) + dymean 
+            end do 
+            ygvnew(ny) = ygv(ny)
+
+            ! Interpolate values
+            !omp parallel do default(shared) private(vtemp)
+            do i = 1, nx 
+                call Interpolate1D(ygvnew, vtemp, ygv, v(i, :))
+                vnew(i, :) = vtemp
+            end do 
+            !omp end parallel do 
+
+            ! Overwrite
+            v = vnew 
+            ygv = ygvnew
             
         end if 
 
@@ -825,7 +872,7 @@ module StructuredInterpolant2D
 
         integer(I8), allocatable                :: ind(:), ind_orig(:) 
         real(R8), allocatable                   :: xqn(:), yqn(:), &
-            term(:), thisA(:, :)
+            term(:), thisA(:, :), xqbin(:), yqbin(:)
 
         ! Loop
         integer(I8)                             :: i, j, indder
@@ -859,8 +906,20 @@ module StructuredInterpolant2D
             refdy   => interp%refdy, &
             cellindex => interp%cellindex)
 
+        ! If we allow 'extrapolation', we project the coordinates onto
+        ! the box where the structured interpolant is defined to get 
+        ! the indices
+        xqbin = xq 
+        yqbin = yq 
+        if (interp%allowextrapolation) then 
+            where (xqbin < minval(xv)) xqbin = minval(xv)
+            where (xqbin > maxval(xv)) xqbin = maxval(xv)
+            where (yqbin < minval(yv)) yqbin = minval(yv)
+            where (yqbin > maxval(yv)) yqbin = maxval(yv)
+        end if 
+
         ! Get cell index of query point
-        call GetIndex(xq, yq, xv, yv, ind)
+        call GetIndex(xqbin, yqbin, xv, yv, ind)
 
         ! Set zero indices temporarily to one (set to NaN later)
         allocate(ind_orig, source=ind)

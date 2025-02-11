@@ -1674,7 +1674,11 @@ module gdmod_constraints
         isfsxp(:) = .false.
         isfstp(:) = .false. 
         isfsxp(fsxpind) = .true.
-        isfstp(fstpind) = .true.
+        do i = 1, size(fstpind)
+            if (fstpind(i) /= 0) then 
+                isfstp(fstpind(i)) = .true.
+            end if 
+        end do
 
         ! Check for doubles in x-point flux surfaces
         allocate(isdouble(nxpind))
@@ -1756,15 +1760,24 @@ module gdmod_constraints
                     nspc = nspc + 1
                     
                     ! Add all vertices on this flux surface (tp first)
-                    allocate(tv(count(fieldlineID == fstpind(i))))
-                    tv = pack(vID, fieldlineID == fstpind(i))
-                    constraints%specialpoints(nspc)%ID = [xpind(i), pack(tv, tv .ne. tpind(i))]
-                    constraints%specialpoints(nspc)%nID = size(constraints%specialpoints(nspc)%ID, 1)
-                    constraints%specialpoints(nspc)%fsID = fstpind(i)
-                    isconstrainedv(tv) = .true.
-                    cc(tv) = cc(tv) + 1
-                    deallocate(tv)
-                    
+                    if (fstpind(i) /= 0) then 
+                        allocate(tv(count(fieldlineID == fstpind(i))))
+                        tv = pack(vID, fieldlineID == fstpind(i))
+                        constraints%specialpoints(nspc)%ID = [tpind(i), pack(tv, tv .ne. tpind(i))]
+                        constraints%specialpoints(nspc)%nID = size(constraints%specialpoints(nspc)%ID, 1)
+                        constraints%specialpoints(nspc)%fsID = fstpind(i)
+                        isconstrainedv(tv) = .true.
+                        cc(tv) = cc(tv) + 1
+                        deallocate(tv)
+                    else
+                        tv = tpind(i:i)
+                        constraints%specialpoints(nspc)%ID = [tv]
+                        constraints%specialpoints(nspc)%nID = size(constraints%specialpoints(nspc)%ID, 1)
+                        constraints%specialpoints(nspc)%fsID = fstpind(i)
+                        isconstrainedv(tv) = .true.
+                        cc(tv) = cc(tv) + 1
+                        deallocate(tv)
+                    end if 
                 end if 
             end do 
         end if
@@ -1787,7 +1800,8 @@ module gdmod_constraints
 
                     ! Set mask
                     mask(tv) = .true. 
-                    mask = mask .and. .not. ( (cc >= maxcc) .or. (istp))
+                    mask = mask .and. .not. ( (cc >= maxcc) .or. (istp) &
+                        .or. isconstrainedv) .and. (vert%fieldlineID == 0_I8)
                     where (mask) isfixedpoint = .true.
                     deallocate(tv)
 
@@ -6159,6 +6173,11 @@ module gdmod_constraints
 
                     ! Get the fieldline IDs of these vertices
                     tvID = fieldlineID(grid%Bnd(i)%vert)
+
+                    ! Skip if there is a zero ID - tangency point
+                    if (any(tvID == 0_I8)) then 
+                        cycle 
+                    end if 
 
                     ! Check which ones occur
                     doesIDoccur = .false.

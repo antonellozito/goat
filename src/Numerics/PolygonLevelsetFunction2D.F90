@@ -52,7 +52,8 @@ module PolygonLevelsetFunction2D
         PLF2DClosedExactOptionsUDT, PLF2DClosedApproximationOptionsUDT
 
     ! Routines
-    public InitializePolygonLevelsetFunction2D
+    public InitializePolygonLevelsetFunction2D, InitializePLF2DGeneral, &
+        InitializePLF2DClosedExact, InitializePLF2DClosedApproximation
 
     !==================================================================!
     !                                                                  !
@@ -318,6 +319,9 @@ module PolygonLevelsetFunction2D
 
         ! Initialize
         !===========
+        if (allocated(plf)) then 
+            deallocate(plf)
+        end if 
         select type (options)
 
         type is (PLF2DGeneralOptionsUDT)
@@ -372,7 +376,8 @@ module PolygonLevelsetFunction2D
     end subroutine
 
     ! Visualization
-    subroutine VisualizePolygonLevelsetFunction2D(plf, savefilepath)
+    subroutine VisualizePolygonLevelsetFunction2D(plf, savefilepath, &
+            nxin, nyin)
 
         ! Description
         !============
@@ -387,6 +392,7 @@ module PolygonLevelsetFunction2D
         ! Arguments
         class(PolygonLevelsetFunction2DUDT)      :: plf 
         character(*), intent(in)                 :: savefilepath
+        integer(I8), intent(in), optional        :: nxin, nyin
         
         ! Auxiliary
         integer(I8)                         :: nx, ny
@@ -401,8 +407,16 @@ module PolygonLevelsetFunction2D
         ! Construct a 2D grid
         !====================
         ! Set mesh size
-        nx = 200
-        ny = 400
+        if (present(nxin)) then 
+            nx = nxin 
+        else 
+            nx = 200
+        end if 
+        if (present(nyin)) then 
+            ny = nyin 
+        else
+            ny = 200
+        end if 
 
         ! Allocate
         allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny), &
@@ -960,7 +974,7 @@ module PolygonLevelsetFunction2D
         !===========
         ! Check polygonset 
         call ps%OrientNestedClosedPolygons(flag)
-        if (flag > 0) then 
+        if (flag > 1) then 
             ! Polygon set does not comply, throw error
             call gdErrorHandler('InitializePLF2DClosedExact: polygon set should be closed and non-intersecting')
         end if 
@@ -1281,7 +1295,7 @@ module PolygonLevelsetFunction2D
             dy = yqr - yp
             theta = atan2(dx*nypv(:, 1) - dy*nxpv(:, 1), dx*nxpv(:, 1) + dy*nypv(:, 1))
             where (theta < 0) theta = theta + 2*pi_R8
-            isinvert = theta < theta0
+            isinvert = theta <= theta0
 
             ! Hedge for vertices lying exactly on polygonset vertex
             where ((dx == 0) .and. (dy == 0)) isinvert = .true. 
@@ -1409,7 +1423,7 @@ module PolygonLevelsetFunction2D
                     vq(iq) = nxp(eind(iq))
                 else
                     if (tdistvert(iq) == 0.0) then 
-                        vq(iq) = 0
+                        vq(iq) = 1
                     else
                         vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(xp(vind(iq)) - xq(iq))
                     end if 
@@ -1493,7 +1507,7 @@ module PolygonLevelsetFunction2D
                     vq(iq) = nyp(eind(iq))
                 else
                     if (tdistvert(iq) == 0.0) then 
-                        vq(iq) = 0
+                        vq(iq) = 1
                     else
                         vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(yp(vind(iq)) - yq(iq))
                     end if
