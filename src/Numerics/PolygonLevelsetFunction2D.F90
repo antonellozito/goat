@@ -1429,7 +1429,7 @@ module PolygonLevelsetFunction2D
                     vq(iq) = nxp(eind(iq))
                 else
                     if (tdistvert(iq) == 0.0) then 
-                        vq(iq) = 0
+                        vq(iq) = 1
                     else
                         vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(xp(vind(iq)) - xq(iq))
                     end if 
@@ -1513,7 +1513,7 @@ module PolygonLevelsetFunction2D
                     vq(iq) = nyp(eind(iq))
                 else
                     if (tdistvert(iq) == 0.0) then 
-                        vq(iq) = 0
+                        vq(iq) = 1
                     else
                         vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(yp(vind(iq)) - yq(iq))
                     end if
