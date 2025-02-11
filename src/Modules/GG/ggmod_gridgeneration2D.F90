@@ -10465,7 +10465,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Label translation
-    subroutine TranslateGridLabels(simgrid, topomesh, formattype)
+    subroutine TranslateGridLabels(simgrid, topomesh, vessel, formattype)
 
         ! Description
         !============
@@ -10481,6 +10481,7 @@ module ggmod_gridgeneration2D
         !==================
         ! Arguments
         type(GridUDT), intent(inout)    :: simgrid 
+        type(VesselUDT), intent(in)     :: vessel
         type(TopomeshUDT), intent(in)   :: topomesh 
         character(*), intent(in)        :: formattype ! destination format
 
@@ -10492,7 +10493,7 @@ module ggmod_gridgeneration2D
         case ('solps')
 
             ! Call translator
-            call TranslateGridLabelsSOLPS(simgrid, topomesh)
+            call TranslateGridLabelsSOLPS(simgrid, topomesh, vessel)
 
         case ('no')
 
@@ -10507,7 +10508,7 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
-    subroutine TranslateGridLabelsSOLPS(simgrid, topomesh)
+    subroutine TranslateGridLabelsSOLPS(simgrid, topomesh, vessel)
 
         ! Description
         !============
@@ -10515,10 +10516,10 @@ module ggmod_gridgeneration2D
         ! simplify the amount of boundaries we get, we do the following:
         ! - face labels:
         !       Internal boundaries: labels are set to zero
-        !       Non-TP vessel boundaries: concatenated where possible, negative label (random)
-        !       TP vessel boundaries: concatenated, but per target (i.e. each target gets a unique ID)
+        !       Non-vessel boundaries: concatenated where possible, negative label 
+        !       vessel boundaries: labels are given based on original 
+        !       structure (positive)
         !       Core boundaries: concatenated, negative label (random)
-        !       Other outer flux boundaries: concatenated, negative label (random)
         ! - cell regions:
         !       Core parts: SOLPScoreregID + SOLPScoreregIDincr
         !       Other parts: all but core part value
@@ -10535,6 +10536,7 @@ module ggmod_gridgeneration2D
         ! Declare variables
         !==================
         ! Arguments
+        type(VesselUDT), intent(in)                 :: vessel
         type(GridUDT), intent(inout)                :: simgrid 
         type(TopomeshUDT), intent(in)               :: topomesh
 
@@ -10546,8 +10548,9 @@ module ggmod_gridgeneration2D
             facelabelmapping, allfID, tfID, &
             sortindex, ind, solpslabels, psind, coreIDs, &
             cellregionmapping, veslabels, WGlabels, OFlabels, tfc, &
-            allsepIDs, tfv, tfsepv, allTPlabels
-        integer(I8), allocatable                    :: edges(:, :)
+            allsepIDs, tfv, tfsepv, allTPlabels, uveslabels
+        integer(I8), allocatable                    :: edges(:, :), &
+            veslabels(:, :)
         logical, allocatable, dimension(:)          :: &
             ispolygonstart, isbranchingpolygon, islabelfound, &
             keepvert
@@ -10559,6 +10562,9 @@ module ggmod_gridgeneration2D
 
         ! Initialize
         !===========
+        ! Allocate
+        allocate(reslabels(0))
+        
         ! Face label counter and face label increment
         flc = 0 
         flcinc = -1 ! we set negative face labels
@@ -10566,6 +10572,15 @@ module ggmod_gridgeneration2D
         ! Set solps temporary labels
         solpslabels = [(k, k = 1, 3)]
         TPlabel = maxval(solpslabels)+1
+
+        ! Get vessel vertex labels (first one, structures)
+        call vessel%polygonset%GetLabels(veslabels)
+        
+        ! Take unique value of first labels
+        call Unique(veslabels(:, 1), uveslabels)
+
+        ! Add labels already
+
 
         ! Map
         !====
