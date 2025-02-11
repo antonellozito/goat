@@ -507,6 +507,7 @@ module goatmod_types
         class(PolygonShapeFunctionUDT), allocatable     :: psf
         class(PolygonLevelsetFunction2DUDT), allocatable   :: plfvessel, &
             plftarget
+        type(PolygonLevelsetFunction2DClosedExactUDT)   :: exactplfvessel
 
     contains 
 

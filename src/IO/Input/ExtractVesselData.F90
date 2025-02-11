@@ -454,6 +454,7 @@ subroutine ExtractVesselData(vessel, vesseloptions)
     ! Construct
     call InitializePolygonLevelsetFunction2D(vessel%plfvessel, vessel%polygonset, plfoptions)
     call InitializePolygonLevelsetFunction2D(vessel%plftarget, vessel%targetps, plfoptions)
+    call vessel%exactplfvessel%Initialize(vessel%polygonset)
 
     end associate 
 
