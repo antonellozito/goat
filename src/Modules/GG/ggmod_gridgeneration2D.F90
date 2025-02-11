@@ -235,6 +235,8 @@ module ggmod_gridgeneration2D
 
         ! Splitting into segments at vertex
         procedure :: SplitAtVertex  => SplitGGTMFieldLineAtVertex
+        procedure :: SplitAtVertices => SplitGGTMFieldLineAtVertices
+        procedure :: SplitAtNodes   => SplitGGTMFieldLineAtSegmentNodes
 
         ! Vertex addition
         procedure :: AddVertexCoordinates 
@@ -250,6 +252,7 @@ module ggmod_gridgeneration2D
         ! Getters
         procedure :: GetSegmentFaceIndices  => GetGGTMFieldLineSegmentFaceIndices
         procedure :: GetSegmentVertIndices  => GetGGTMFieldLineSegmentVertINdices
+
     end type
 
     ! Field line pair data
@@ -264,11 +267,14 @@ module ggmod_gridgeneration2D
         integer(I8)                 :: srflabel, erflabel
         integer(I8), allocatable, dimension(:)  :: l1minLOS, l1maxLOS, &
             l2minLOS, l2maxLOS
+        logical                     :: isextendedstart, isextendedend
 
     contains 
 
         ! Initialization
         procedure :: Initialize     => InitializeGGTMFieldlinePairData
+
+        ! 
 
     end type
 
@@ -2023,12 +2029,11 @@ module ggmod_gridgeneration2D
                         lflinek     => ct(k)%lfline     &
                         )
 
-                    if (k < nct) then 
-                        ! Intersections with first hfline
+                    if (k == 1) then 
+                        ! Only need to check the lfline
                         if (keepind(k)) then 
-                            ! Use dedicated routine to hedge for end point
-                            ! intersections
-                            call GGTMLineIntersections(lflinek, hflinek, &
+                            ! Compute intersections
+                            call GGTMLineIntersections(ggtmdata, lflinek, hfline1, &
                                 xint, yint, s1, s2, vertbased=.true.)
 
                             ! Check
@@ -2037,44 +2042,95 @@ module ggmod_gridgeneration2D
                             end if 
                         end if 
 
-                        ! Intersections with last lfline
+                        if (nct > 1) then 
+                            if (keepind(k)) then 
+                                ! Use dedicated routine to hedge for end point
+                                ! intersections
+                                call GGTMLineIntersections(ggtmdata, lflinek, lflinen, &
+                                    xint, yint, s1, s2, vertbased=.true.)
+
+                                ! Check
+                                if (size(xint) > 0) then
+                                    keepind(k) = .false.
+                                end if 
+                            end if 
+                        end if 
+                    elseif (k == nct .and. nct > 1) then 
+                        ! Only need to check the hfline
                         if (keepind(k)) then 
                             ! Use dedicated routine to hedge for end point
                             ! intersections
-                            call GGTMLineIntersections(lflinek, lflinen, &
+                            call GGTMLineIntersections(ggtmdata, hflinek, hfline1, &
                                 xint, yint, s1, s2, vertbased=.true.)
 
                             ! Check
                             if (size(xint) > 0) then
-                                keepind(k) = .false. 
+                                keepind(k) = .false.
                             end if 
                         end if 
 
-                    elseif (nct > 1) then ! don't do if only one flux tube
-                        ! Intersections with first hfline
                         if (keepind(k)) then 
-                            call GGTMLineIntersections(hflinek, hfline1, &
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, hflinek, lflinen, &
                                 xint, yint, s1, s2, vertbased=.true.)
 
                             ! Check
-                            if (size(xint) > 0) then 
-                                keepind(k) = .false. 
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
                             end if 
                         end if 
-
-                        ! Intersections with last lfline
+                    else
+                        ! Standard case, check both lines
                         if (keepind(k)) then 
-                            call GGTMLineIntersections(hflinek, lflinen, &
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, lflinek, hfline1, &
                                 xint, yint, s1, s2, vertbased=.true.)
 
                             ! Check
-                            if (size(xint) > 0) then 
-                                keepind(k) = .false. 
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
                             end if 
                         end if 
 
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, lflinek, lflinen, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
+                            end if 
+                        end if 
+
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, hflinek, hfline1, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
+                            end if 
+                        end if 
+
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, hflinek, lflinen, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
+                            end if 
+                        end if 
                     end if 
-
+                    
                     ! Housekeeping
                     end associate
                 end do
@@ -2414,8 +2470,7 @@ module ggmod_gridgeneration2D
         integer(I8), allocatable, dimension(:, :)   :: tempfacevert, &
             tempcellvertP
         logical                                 :: &
-            doquad, issameface, islegaltria1, &
-            islegaltria2, islegalquad, dolasttriangle
+            doquad, islegaltria1, islegaltria2, islegalquad, dolasttriangle
         type(GGTMFieldlineDataUDT)              :: thisline
 
         ! Loop
@@ -5419,7 +5474,7 @@ module ggmod_gridgeneration2D
         !==================
         ! Arguments
         type(GGGridUDT), intent(inout)          :: grid
-        class(GGTMDataUDT), intent(inout)       :: ggtmdata
+        type(GGTMDataUDT), intent(inout)       :: ggtmdata
         class(TopomeshUDT), intent(in)          :: topomesh 
         class(ContourTracerUDT), intent(in)     :: fieldtracer 
         type(MagneticFieldUDT), intent(in)      :: magneticField 
@@ -5427,9 +5482,11 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: nt, startsegID, &
-            endsegID, nft, nct, t1, t2
-        integer(I8), allocatable, dimension(:)  :: tc
-        integer(I8), allocatable, dimension(:)  :: allsegID
+            endsegID, vind1, vind2, tsegID
+        integer(I8), allocatable, dimension(:)  :: tc, srfvert, erfvert, &
+            allsegID, uerfvert, usrfvert
+        logical, allocatable, dimension(:)      :: dostart, doend
+        real(R8)                                :: dl 
 
         ! Loop
         integer(I8)                             :: i, j, k
@@ -5438,11 +5495,14 @@ module ggmod_gridgeneration2D
         !===========
         ! Unpack for ease
         associate(&
+            seg             => ggtmdata%seg,    &
             facedata        => ggtmdata%face,   &
             celldata        => ggtmdata%cell,   &
             tube            => topomesh%tube,   &
             cell            => topomesh%cell    &
             )
+
+        ! Check if we need to split at 
 
         ! Construct basic tubes
         !======================
@@ -5472,6 +5532,11 @@ module ggmod_gridgeneration2D
 
             ! Construct tubes
             !----------------
+            ! Initialize
+            do j = 1, nt 
+                call tc%tubes(j)%Initialize()
+            end do 
+
             ! First tube, starts with hfline
             tc%tubes(1)%hfline = tc%hfline
             if (nt > 1) then 
@@ -5511,7 +5576,10 @@ module ggmod_gridgeneration2D
             !-----------
             ! Associate for ease
             associate(&
+                vertID  => grid%vert%ntot,      &
                 tc      => celldata(i),         &
+                srfline     => facedata(celldata(i)%srf)%line,   &
+                erfline     => facedata(celldata(i)%erf)%line,   &
                 tubes   => celldata(i)%tubes    &
                 )
 
@@ -5589,6 +5657,10 @@ module ggmod_gridgeneration2D
                             'first segment does not come from starting or ' // & 
                             'ending radial face of cell')
                     end if 
+
+                    ! Set as extended
+                    tubes(1)%isextendedstart = .true.
+                    tubes(1)%isextendedend = .true.
                 end if 
 
                 ! Check last tube
@@ -5658,11 +5730,122 @@ module ggmod_gridgeneration2D
                             'first segment does not come from starting or ' // & 
                             'ending radial face of cell')
                     end if 
+
+                    ! Set as extended
+                    tubes(nt)%isextendedstart = .true.
+                    tubes(nt)%isextendedend = .true.
                 end if 
             end if 
                 
-            ! Shallow angle tubes
-            !--------------------
+            ! Other vessel tubes
+            !-------------------
+            if (options%extendvesseltubes) then
+                ! Initialize
+                allocate(dostart(nt), doend(nt), srfvert(2*nt), erfvert(2*nt))
+                dostart = .false. 
+                doend = .false. 
+                srfvert = 0
+                erfvert = 0
+
+                ! Determine which tubes to treat
+                do j = 1, nt
+                    ! Associate for ease
+                    associate(&
+                        thfline         => tubes(j)%hfline, &
+                        tlfline         => tubes(j)%lfline  &
+                    )
+
+                    ! Start
+                    !------
+                    ! Check if we can extend start  
+                    if (.not. tubes(j)%isextendedstart .and. &
+                        topomesh%face%type(tc%srf) == TMfacebndID) then 
+                        ! Get length of segment
+                        vind1 = findloc(srfline%vert, thfline%vert(1), 1)
+                        vind2 = findloc(srfline%vert, tlfline%vert(1), 1)
+                        if (vind1 == 0 .or. vind2 == 0) then 
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'could not find vertices in start radial face, unexpected')
+                        end if 
+                        dl = abs(srfline%dlcv(vind1) - srfline%dlcv(vind2))
+
+                        ! Check if it is too large
+                        if (dl > options%evtmaxvessellength) then 
+                            dostart(j) = .true.
+                            srfvert(2*j-1) = thfline%vert(1)
+                            srfvert(2*j) = tlfline%vert(1) 
+                        end if 
+
+                    end if 
+
+                    ! Check if we can extend end  
+                    if (.not. tubes(j)%isextendedend .and. &
+                        topomesh%face%type(tc%erf) == TMfacebndID) then 
+                        ! Get length of segment
+                        vind1 = findloc(erfline%vert, thfline%vert(thfline%nv), 1)
+                        vind2 = findloc(erfline%vert, tlfline%vert(tlfline%nv), 1)
+                        if (vind1 == 0 .or. vind2 == 0) then 
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'could not find vertices in end radial face, unexpected')
+                        end if 
+                        dl = abs(erfline%dlcv(vind1) - erfline%dlcv(vind2))
+
+                        ! Check if it is too large
+                        if (dl > options%evtmaxvessellength) then 
+                            doend(j) = .true.
+                            erfvert(2*j-1) = thfline%vert(thfline%nv)
+                            erfvert(2*j) = tlfline%vert(tlfline%nv) 
+                        end if 
+
+                    end if 
+
+                    ! Housekeeping
+                    end associate
+                end do
+
+                ! Split the radial faces at these vertices
+                call Unique(pack(erfvert, erfvert /= 0), uerfvert)
+                call Unique(pack(srfvert, srfvert /= 0), usrfvert)
+                call srfline%SplitAtVertices(usrfvert, ggtmdata)
+                call erfline%SplitAtVertices(uerfvert, ggtmdata)
+
+                ! Extend the tubes
+                do j = 1, nt 
+                    if (dostart(j)) then 
+                        ! Get segment ID for extension
+                        tsegID = GetSegmentIDFromVertices(srfline, ggtmdata, &
+                            srfvert(2*j-1), srfvert(2*j))
+
+                        ! Sanity check
+                        if (tsegID == 0) then 
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'could not find starting segment, unexpected')
+                        end if 
+
+                        ! Extend the tube
+                        call ExtendTubeWithSegment(i, tubes(j), tsegID, &
+                            ggtmdata, .true., vertID)
+                    end if 
+                    if (doend(j)) then 
+                        ! Get segment ID for extension
+                        tsegID = GetSegmentIDFromVertices(erfline, ggtmdata, &
+                            erfvert(2*j-1), erfvert(2*j))
+
+                        ! Sanity check
+                        if (tsegID == 0) then 
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'could not find starting segment, unexpected')
+                        end if 
+
+                        ! Extend the tube
+                        call ExtendTubeWithSegment(i, tubes(j), tsegID, &
+                            ggtmdata, .false., vertID)
+                    end if 
+                end do
+
+                ! Housekeeping
+                deallocate(srfvert, erfvert, dostart, doend)
+            end if 
 
 
             ! Housekeeping
@@ -6670,8 +6853,51 @@ module ggmod_gridgeneration2D
         segment%xv = temp%xv(temp%nv:1:-1)
         segment%yv = temp%yv(temp%nv:1:-1)
         segment%vert = temp%vert(temp%nv:1:-1)
+        segment%sv = temp%ev 
+        segment%ev = temp%sv
 
     end subroutine
+
+    ! Segment getter from vertices
+    function GetSegmentIDFromVertices(line, ggtmdata, v1, v2) result(segID)
+
+        ! Description
+        !============
+        ! Simple function that returns the segment ID (index) from 
+        ! ggtmdata that has v1, v2 as either start or end index (if 
+        ! multiple, which should in fact not happen, the first 
+        ! one encountered is returned). If none is found, segID is zero.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMFieldlineDataUDT), intent(in)      :: line
+        type(GGTMDataUDt), intent(in)               :: ggtmdata
+        integer(I8), intent(in)                     :: v1, v2
+        integer(I8)                                 :: segID 
+
+        ! Auxiliary
+
+        ! Loop
+        integer(I8)                                 :: i 
+
+        ! Determine seg ID
+        !=================
+        i = 0
+        segID = 0
+        do while (i < line%ns)
+            ! Update counter 
+            i = i + 1
+
+            ! Check
+            if (any(ggtmdata%seg(line%segID(i))%ev == [v1, v2]) .and. &
+                any(ggtmdata%seg(line%segID(i))%sv == [v1, v2])) then 
+                segID = line%segID(i)
+                exit
+            end if 
+        end do
+
+    end function
 
     !------------------------------------------------------------------!
     !                      GGTM LINE HANDLING                          !
@@ -6874,6 +7100,11 @@ module ggmod_gridgeneration2D
 
         ! Checks
         !=======
+        if (segmentID <= 0) then 
+            call gdErrorHandler('AppendGGTMFieldLineSegment: ' // &
+                'segment ID must be > 0')
+        end if 
+
         ! Vertex segments are not supported
         if (ggtmdata%seg(segmentID)%isvertex) then 
             call gdErrorHandler('AppendGGTMFieldLineSegment: ' // &
@@ -7119,6 +7350,350 @@ module ggmod_gridgeneration2D
                 'find original start and end vertex of line, this ' // & 
                 'is a bug')
         end if 
+
+    end subroutine
+
+    ! GGTM line splitting, multiple vertices
+    subroutine SplitGGTMFieldLineAtVertices(line, vID, ggtmdata)
+
+        ! Description
+        !============
+        ! This routines splits a line at a vertex into (at least) two 
+        ! segments. If the vertex ID is a node vertex, nothing is done.
+        ! Otherwise, two new segments are constructed and added to the
+        ! line. No other operations on the line itself are performed, 
+        ! except for adding the segments.  
+
+        ! Note: old segments are not yet deleted nor are other lines
+        ! updated! Perhaps need to track this in the future...
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMFieldLineDataUDT)             :: line
+        integer(I8), intent(in)                 :: vID(:) 
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata
+
+        ! Auxiliary
+        integer(I8)                             :: segvind(1:2), &
+            indlstart, indlend, sv, ev, nv, startv, endv, &
+            nsegvID, vindsegstart, vindsegend, segID
+        integer(I8), allocatable, dimension(:)  :: tvertID, newsegID, &
+            vind, tvID, segvID, linesegID, linevind
+        real(R8), allocatable, dimension(:)     :: xl, yl, tdlcv, &
+            txl, tyl
+        type(GGTMSegmentUDT)                    :: tseg
+        type(GGTMSegmentUDT), allocatable       :: tempseg(:)
+        logical                                 :: isnodestart, isnodeend
+        logical, allocatable, dimension(:)      :: isvertonnode, wasverttreated, &
+            isvertonseg
+
+        ! Loop
+        integer(I8)                             :: i, j, k
+
+        ! Checks
+        !=======
+        ! Initialize
+        nv = size(vID)
+        sv = line%vert(1)
+        ev = line%vert(line%nv)
+
+        ! Update segment data to be sure
+        call line%UpdateSegmentData(ggtmdata)
+
+        ! Hedge for vertex lines
+        if (ggtmdata%seg(line%segID(1))%isvertex) then 
+            ! Print warning and return
+            print *, 'SplitGGTMFieldLineAtVertices: line to be split is ' // & 
+                'a vertex, not splitting and continuing...'
+            return 
+        end if 
+
+        ! Hedge for no vertices present
+        if (nv == 0) then 
+            return 
+        end if 
+
+        ! Determine vertex index
+        allocate(vind(nv))
+        do i = 1, nv
+            vind(i) = findloc(line%vert, vID(i), 1)
+        end do 
+        if (any(vind == 0)) then 
+            call gdErrorHandler('SplitGGTMFieldLineAtVertices: line does ' // & 
+                'not contain specified vertex, check input')
+        end if 
+
+        ! Sort
+        call Sort(vind, ascend=.true.)
+
+        !! Check for outermost points
+        !if (vind(1) /= 1) then
+        !    ! Append
+        !    vind = [1, vind]
+        !    nv = nv + 1
+        !end if 
+        !if (vind(nv) /= line%nv) then 
+        !    vind = [vind, line%nv]
+        !    nv = nv + 1
+        !end if
+
+        ! Get vertex IDs
+        tvID = line%vert(vind)
+
+        ! Further initialization
+        isvertonnode = line%isnodevert(vind) 
+        wasverttreated = isvertonnode 
+        allocate(newsegID(nv-1))
+        newsegID = 0
+        allocate(linesegID(0))
+
+        ! Construct segments
+        !===================
+        ! Loop over existing segments
+        do i = 1, line%ns
+
+            ! Determine vertices on segment
+            !------------------------------
+            ! Get segment
+            tseg = ggtmdata%seg(line%segID(i))
+
+            ! Flip if necessary to get it in the same direction as the
+            ! line
+            if (line%flipseg(i)) then 
+                call tseg%Flip()
+            end if 
+
+            ! Check which vertices we need to split on this segment
+            segvind = line%GetSegmentVertIndices(i)
+            isvertonseg = (vind >= segvind(1)) .and. (vind <= segvind(2))
+            startv = findloc(isvertonseg , .true., 1, back=.false.)
+            endv = findloc(isvertonseg, .true., 1, back=.true.)
+
+            ! Check if there is any vertex on this segment
+            if (endv == 0 .and. startv == 0) then 
+                ! Add the segment to the list of the face
+                linesegID = [linesegID, line%segID(i)]
+
+                ! Skip remainder of the loop
+                cycle
+            elseif ((endv == 0 .and. startv /= 0) .or. (endv == 0 .and. startv /= 0)) then
+                ! Sanity check failed
+                call gdErrorHandler('SplitGGTMFieldLineAtVertices: ' // & 
+                    'only start or end found, this is a bug ')
+            end if 
+
+            ! If endv is one more than startv, and both are node vertices, 
+            ! then the segment already exists and does not have to be splitted.
+            ! Check if both vertices are already node vertices, then skip
+            if (line%isnodevert(vind(startv)) .and. line%isnodevert(vind(endv)) .and. &
+                (endv - startv == 1)) then 
+                ! Add the segment to the list of the face
+                linesegID = [linesegID, line%segID(i)]
+
+                ! Skip remainder of the loop
+                cycle
+            end if 
+
+            ! Get the current vertices to split
+            segvID = tvID(startv:endv)
+            nsegvID = size(segvID)
+            linevind = vind(startv:endv)
+
+            ! Check if the start and end vertices of the segment are
+            ! already included, otherwise append
+            if (segvID(1) /= tseg%sv) then 
+                segvID = [tseg%sv, segvID]
+                nsegvID = nsegvID + 1
+                linevind = [findloc(line%vert, tseg%sv, 1, back=.false.), linevind]
+                if (linevind(1) == 0) then 
+                    call gdErrorHandler('SplitGGTMFieldLineAtVertices: ' // & 
+                        'could not find segment vertex in line vertices, this is a bug')
+                end if 
+            end if 
+            if (segvID(nsegvID) /= tseg%ev) then 
+                segvID = [segvID, tseg%ev]
+                nsegvID = nsegvID + 1
+                linevind = [linevind, findloc(line%vert, tseg%ev, 1, back=.false.)]
+                if (linevind(size(linevind)) == 0) then 
+                    call gdErrorHandler('SplitGGTMFieldLineAtVertices: ' // & 
+                        'could not find segment vertex in line vertices, this is a bug')
+                end if 
+            end if 
+
+            ! Split segment
+            !--------------
+            ! Initialize segment index
+            segID = ggtmdata%nseg 
+
+            ! Increase size of ggtmdata
+            allocate(tempseg(nsegvID-1))
+            ggtmdata%seg = [ggtmdata%seg, tempseg]
+            linesegID = [linesegID, [(k, k = ggtmdata%nseg+1, ggtmdata%nseg+size(tempseg))]]
+            ggtmdata%nseg = ggtmdata%nseg + size(tempseg)
+            deallocate(tempseg)
+            
+
+            ! Extract coordinates
+            xl = tseg%xl
+            yl = tseg%yl
+
+            ! Loop over all new segments to be constructed
+            do j = 1, nsegvID-1
+
+                ! Check where the vertex is located in this segment
+                vindsegstart = findloc(tseg%vert, segvID(j), 1)
+                vindsegend = findloc(tseg%vert, segvID(j+1), 1)
+
+                ! Sanity check
+                if (vindsegstart == 0 .or. vindsegend == 0) then 
+                    call gdErrorHandler('SplitGGTMFieldLineAtVertices: segment does ' // & 
+                        'not contain specified vertex, check input')
+                end if 
+
+                ! Check if the vertices lie on a node (approx.)
+                indlstart = findloc(abs(tseg%dllc - tseg%dlcv(vindsegstart)) < disttol, .true., 1)
+                indlend = findloc(abs(tseg%dllc - tseg%dlcv(vindsegend)) < disttol, .true., 1)
+                isnodestart = .false.
+                isnodeend = .false.
+                if (indlstart /= 0) then 
+                    isnodestart = .true. 
+                else
+                    indlstart = findloc(tseg%dllc > tseg%dlcv(vindsegstart), .true., 1, back=.false.)
+                end if 
+                if (indlend /= 0) then 
+                    isnodeend = .true.
+                else
+                    indlend = findloc(tseg%dllc < tseg%dlcv(vindsegend), .true., 1, back=.true.)
+                end if 
+
+                ! Sanity check
+                if (indlstart == 0 .or. indlend == 0) then 
+                    call gdErrorHandler('SplitGGTMFieldLineAtVertices: segment does ' // & 
+                        'not contain dlcv specified vertex, unexpected')
+                end if 
+
+                ! Construct segment coordinates
+                txl = xl(indlstart:indlend)
+                tyl = yl(indlstart:indlend)
+                if (.not. isnodestart) then 
+                    txl = [line%xv(linevind(j)), txl]
+                    tyl = [line%yv(linevind(j)), tyl]
+                end if 
+                if (.not. isnodeend) then 
+                    txl = [txl, line%xv(linevind(j+1))]
+                    tyl = [tyl, line%yv(linevind(j+1))]
+                end if 
+
+                ! Initialize segment coordinates
+                segID = segID + 1
+                call ggtmdata%seg(segID)%Initialize(txl, tyl, &
+                    tseg%fsID, tseg%TMfaceID, segvID(j), segvID(j+1))
+
+                ! Initialize segment vertices
+                tdlcv = line%dlcv(linevind(j)+1:linevind(j+1)-1) - line%dlcv(linevind(j))
+                tvertID = line%vert(linevind(j)+1:linevind(j+1)-1)
+                call ggtmdata%seg(segID)%AddVertices(tdlcv, tvertID)
+
+            end do 
+        end do
+
+        ! Reconstruct line
+        !=================
+        ! Reconstruct based on new segment IDs
+        call line%Initialize(ggtmdata, linesegID)
+
+        ! Check if we need to flip
+        if (line%vert(1) == sv .and. line%vert(line%nv) == ev) then 
+            ! All good
+        elseif (line%vert(1) == ev .and. line%vert(line%nv) == sv) then 
+            ! All good, but flip
+            call line%Flip()
+        else
+            ! All bad
+            call gdErrorHandler('splitGGTMFieldLineAtVertex: could not ' // & 
+                'find original start and end vertex of line, this ' // & 
+                'is a bug')
+        end if 
+
+    end subroutine
+
+    ! GGTM line splitting, multiple nodes of a segment
+    subroutine SplitGGTMFieldLineAtSegmentNodes(line, segID, nodeind, &
+        ggtmdata, vertID, newvertID)
+
+        ! Description
+        !============
+        ! This routine splits a line at a node position (so xl, yl 
+        ! coordinates) of a certain vertex (i.e. the nodeind is relative
+        ! index w.r.t. the nodes of the segment in segID). It is assumed
+        ! that this nodeID makes sense. Since splitting at a node will 
+        ! likely introduce a new vertex in the grid, the current (maximal)
+        ! amount of grid nodes should be passed through 'vertID', which 
+        ! will increase in case new vertices are introduced. The new 
+        ! vertex IDs, in sequence of the given nodeind, will be returned
+        ! in 'newvertID' for reference. 
+
+        ! Note: under the hood, this function simply calls the SplitAtVertices
+        ! routine after introducing a new vertex at the segID
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMFieldLineDataUDT)             :: line 
+        integer(I8), intent(in)                 :: segID 
+        integer(I8), intent(in), dimension(:)   :: nodeind 
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata
+        integer(I8), intent(inout)              :: vertID 
+        integer(I8), intent(out), dimension(:), allocatable  :: newvertID
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: newvert, sortind
+        real(R8), allocatable, dimension(:)     :: ltot, newdlcv
+        logical, allocatable, dimension(:)      :: isnodevert
+
+        ! Loop 
+        integer(I8)                             :: i, k 
+
+        ! Insert vertex
+        !==============
+        ! Check
+        if (.not. any(line%segID == segID)) then 
+            call gdErrorHandler('SplitGGTMFieldLineAtSegmentNodes: ' // & 
+                'segment is not part of the line')
+        end if
+
+        ! Determine location in line
+        ltot = ggtmdata%seg(segID)%dllc(nodeind)
+        i = 1
+        do while (line%segID(i) /= segID)
+            ! Add segment length
+            ltot = ltot + ggtmdata%seg(line%segID(i))%dllc(ggtmdata%seg(line%segID(i))%nl)
+
+            ! Update
+            i = i + 1
+        end do 
+
+        ! Construct new vertices
+        newvertID = [(k, k = vertID+1, vertID+size(nodeind))]
+        newdlcv = [line%dlcv, ltot]
+        isnodevert = [line%isnodevert, spread(.false., 1, size(nodeind))] ! these should not lie on nodes
+        newvert = [line%vert, newvertID]
+        vertID = vertID + size(nodeind)
+
+        ! Sort
+        allocate(sortind(size(newdlcv)))
+        call Sort(newdlcv, ind=sortind)
+        newvert = newvert(sortind)
+
+        ! Add
+        call line%AddVertexCoordinates(newdlcv)
+        call line%AddVertexIDs(newvert, isnodevert)
+        call line%UpdateSegmentData(ggtmdata)
+
+        ! Split at vertices
+        !==================
+        call line%SplitAtVertices(newvertID, ggtmdata)
 
     end subroutine
 
@@ -7519,18 +8094,16 @@ module ggmod_gridgeneration2D
     end function
 
     ! GGTM line pair initialization
-    subroutine InitializeGGTMFieldlinePairData(linepair, nvl1, nvl2)
+    subroutine InitializeGGTMFieldlinePairData(linepair)
 
         ! Description
         !============
-        ! Initialize the line pair data given the number of vertices in 
-        ! line 1 and line 2, resp. nvl1, nvl2
+        ! Initialize the line pair data 
 
         ! Declare variables
         !==================
         ! Arguments
         class(GGTMFieldlinePairDataUDT)         :: linepair 
-        integer(I8), intent(in)                 :: nvl1, nvl2
 
         ! Initialize
         !===========
@@ -7549,24 +8122,26 @@ module ggmod_gridgeneration2D
         end if 
 
         ! Allocate and initialize
-        allocate(linepair%l1minLOS(nvl1), linepair%l1maxLOS(nvl1), &
-            linepair%l2minLOS(nvl2), linepair%l2maxLOS(nvl2))
+        allocate(linepair%l1minLOS(0), linepair%l1maxLOS(0), &
+            linepair%l2minLOS(0), linepair%l2maxLOS(0))
         linepair%l1minLOS = 0_I8
         linepair%l1maxLOS = 0_I8
         linepair%l2minLOS = 0_I8
         linepair%l2maxLOS = 0_I8
         linepair%srflabel = 0_I8
         linepair%erflabel = 0_I8
+        linepair%isextendedstart = .false. 
+        linepair%isextendedend = .false.
 
     end subroutine
 
-    ! GGTM line intersections
-    subroutine GGTMLineIntersections(l1, l2, xint, yint, s1, s2, s1r, s2r, &
+    ! GGTM segment intersections
+    subroutine GGTMSegmentIntersections(l1, l2, xint, yint, s1, s2, s1r, s2r, &
         vertbased)
 
         ! Description
         !============
-        ! More or less a wrapper for intersections between GGTM lines.
+        ! More or less a wrapper for intersections between GGTM segments.
         ! However, intersections at end points are ignored if the vertex
         ! IDs are the same there. Intersections are computed based on xl
         ! and yl, not on the vertex coordinates (reason why we can check
@@ -7580,7 +8155,7 @@ module ggmod_gridgeneration2D
         ! Declare variables
         !==================
         ! Arguments
-        type(GGTMFieldlineDataUDT), intent(in)      :: l1, l2 
+        type(GGTMSegmentUDT), intent(in)      :: l1, l2 
         real(R8), allocatable, dimension(:), intent(out)    :: xint, yint
         integer(I8), allocatable, dimension(:), intent(out) :: s1, s2 
         real(R8), allocatable, dimension(:), intent(out), optional  :: s1r, s2r 
@@ -7613,11 +8188,11 @@ module ggmod_gridgeneration2D
             ! in end point ->  simply cut cell tube
             allocate(keepx(size(xint)))
             keepx = .true. 
-            if (l1%vert(1) == l2%vert(1)) then 
+            if (any(l1%vert(1) == [l2%vert(1), l2%vert(l2%nv)])) then 
                 where (xint == l1%xl(1) .and. &
                     yint == l1%yl(1)) keepx = .false. 
             end if 
-            if (l1%vert(l1%nv) == l2%vert(l2%nv)) then 
+            if (any(l1%vert(l1%nv) == [l2%vert(1), l2%vert(l2%nv)])) then 
                 where (xint == l1%xl(l1%nl) .and. &
                     yint == l1%yl(l1%nl)) keepx = .false. 
             end if 
@@ -7636,6 +8211,511 @@ module ggmod_gridgeneration2D
             s1r = s1raux 
             s2r = s2raux 
         end if 
+
+    end subroutine
+
+    ! GGTM line intersections
+    subroutine GGTMLineIntersections(ggtmdata, l1, l2, xint, yint, s1, s2, s1r, s2r, &
+        vertbased)
+
+        ! Description
+        !============
+        ! More or less a wrapper for intersections between GGTM lines.
+        ! However, intersections at segment end points are ignored if the vertex
+        ! IDs are the same there. Intersections are computed based on xl
+        ! and yl, not on the vertex coordinates (reason why we can check
+        ! vertices, is because by definition the first and last vertex
+        ! have to lie on the first and last point of the line). 
+
+        ! Note: this routine is particularly useful when checking
+        ! intersections between field lines to determine to remove a tube
+        ! or field line. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMDataUDT), intent(in)               :: ggtmdata
+        type(GGTMFieldLineDataUDT), intent(in)      :: l1, l2 
+        real(R8), allocatable, dimension(:), intent(out)    :: xint, yint
+        integer(I8), allocatable, dimension(:), intent(out) :: s1, s2 
+        real(R8), allocatable, dimension(:), intent(out), optional  :: s1r, s2r 
+        logical, intent(in), optional                       :: vertbased
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)         :: s1raux, s2raux, &
+            tempx, tempy, temps1r, temps2r
+        integer(I8), allocatable, dimension(:)      :: temps1, temps2
+        logical, allocatable, dimension(:)          :: keepx
+
+        ! Loop
+        integer(I8)                                 :: i, j 
+
+        ! Initialize
+        !=========
+        allocate(s1(0), s2(0), xint(0), yint(0), s1raux(0), &
+            s2raux(0))
+
+        ! Compute 
+        !========
+        ! Intersections
+        do i = 1, l1%ns 
+            ! Unpack
+            associate(seg1      => ggtmdata%seg(l1%segID(i)))
+            do j = 1, l2%ns 
+                associate(seg2      => ggtmdata%seg(l2%segID(j)))
+                
+                ! Compute intersections
+                call GGTMSegmentIntersections(seg1, seg2, tempx, tempy, &
+                    temps1, temps2, temps1r, temps2r, vertbased)
+
+                ! Append
+                xint = [xint, tempx]
+                yint = [yint, tempy]
+                s1 = [s1, temps1]
+                s2 = [s2, temps2]
+                s1raux = [s1raux, temps1r]
+                s2raux = [s2raux, temps2r]
+
+                ! Housekeeping
+                end associate
+            end do 
+            end associate
+        end do 
+        
+        ! Check optional arguments
+        if (present(s1r) .and. present(s2r)) then 
+            s1r = s1raux 
+            s2r = s2raux 
+        end if 
+
+    end subroutine
+
+    ! GGTM tube extension
+    subroutine ExtendTubeWithSegment(cellID, tube, segID, ggtmdata, start, vertID)
+
+        ! Description
+        !============
+        ! This routine extends an existing tube either at the start or 
+        ! end (determined by 'start') with the segment with ID 'segID'. 
+        ! Vertex segments are not allowed. Hereto, we need to check
+        ! the geometry of the segment w.r.t. the geometry of the tube 
+        ! lines, in order to have a decent grid later on. We distinguish 
+        ! some particular cases based on the angle between the last line
+        ! edge and the first segment edge:
+        ! - if the lf angle is larger than 90° and the hf angle is 
+        !   smaller (or vice versa), add the segment to the line with 
+        !   the largest angle. If both are exactly 90°, pick one (doesn't)
+        !   matter, but shouldn't occur actually, since this will lead to 
+        !   collapsing of faces and hence bad grids). 
+        ! - if both angles are smaller than 90°, recompute the angles 
+        !   based on a straight segment and redo (this should result in 
+        !   the first use case). 
+        ! - if both angles are larger than 90°, both lines get part of 
+        !   the segment.
+        ! Note that we can do the checks just based on the sign of the 
+        ! dot product.
+
+        ! If a line gets a part of the segment, we may have to split the 
+        ! segment:
+        ! - if only one line gets a part, we split the segment in two. 
+        ! - if both lines get a part, it will either be two or three 
+        ! - segments. 
+        ! Splitting is based on geometry considerations. Currently, the 
+        ! splitting point is determined as the location where the sign 
+        ! of the scalar product between segment edge tangent vectors and 
+        ! the last line edge tangent vector becomes negative. This might 
+        ! lead to bad vertex distributions locally and to cell overlap. 
+
+        ! Note: currently, we don't properly keep track of all the 
+        ! segments that may be generated. Normally, this is also not 
+        ! necessary anymore since tube extension is the last step 
+        ! we can take to modify the lines on which vertices are 
+        ! distributed. Also, it is typically not possible to extend 
+        ! the tube further than this. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMFieldLinePairDataUDT), intent(inout)   :: tube 
+        integer(I8), intent(in)                         :: segID, cellID
+        integer(I8), intent(inout)                      :: vertID
+        type(GGTMDataUDT), intent(inout)                :: ggtmdata 
+        logical, intent(in)                             :: start 
+
+        ! Auxiliary
+        integer(I8)                             :: newsegID, ind, indhf, &
+            indlf, newhfvert, newlfvert
+        integer(I8), allocatable, dimension(:)  :: newvertID
+        real(R8)                                :: hftx, hfty, lftx, lfty
+        real(R8), allocatable, dimension(:)     :: segtx, segty, hfdp, &
+            lfdp
+        logical                                 :: doflip
+
+        ! Checks
+        !=======
+        ! Sanity checks
+        if (start .and. tube%isextendedstart) then 
+            print *, 'ExtendTubeWithSegment: start has already been ' // &
+                'extended, returning...'
+            return 
+        end if 
+        if (.not. start .and. tube%isextendedend) then 
+            print *, 'ExtendTubeWithSegment: end has already been ' // &
+                'extended, returning...'
+            return 
+        end if 
+        if (segID <= 0) then 
+            call gdErrorHandler('ExtendTubeWithSegment: segID should be ' // & 
+                'greater than 0')
+        end if
+        
+        ! Compute data
+        !=============
+        ! Get segment
+        associate(&
+            srfline     => ggtmdata%face(ggtmdata%cell(cellID)%srf)%line,    &
+            erfline     => ggtmdata%face(ggtmdata%cell(cellID)%erf)%line,    & 
+            tseg        => ggtmdata%seg(segID),     &
+            hfline      => tube%hfline,         &
+            lfline      => tube%lfline          &
+            )
+
+        ! Compute dot products and other data - we orient the segment data
+        ! from hfline to lfline
+        doflip = .false.
+        if (start) then 
+            ! Get segment tangents in hfline starting point
+            if (tseg%sv == hfline%vert(1)) then 
+                segtx = tseg%xl(2:tseg%nl) - tseg%xl(1:tseg%nl-1)
+                segty = tseg%yl(2:tseg%nl) - tseg%yl(1:tseg%nl-1)
+            elseif (tseg%ev == hfline%vert(1)) then 
+                doflip = .true.
+                segtx = -tseg%xl(tseg%nl:2:-1) + tseg%xl(tseg%nl-1:1:-1)
+                segty = -tseg%yl(tseg%nl:2:-1) + tseg%yl(tseg%nl-1:1:-1)
+            else
+                call gdErrorHandler('ExtendTubeWithSegment: segment ' // & 
+                    'does not have starting vertex of hfline, unexpected')
+            end if 
+
+            ! Compute line tangents
+            hftx = hfline%xl(2) - hfline%xl(1)
+            hfty = hfline%yl(2) - hfline%yl(1)
+            lftx = lfline%xl(2) - lfline%xl(1)
+            lfty = lfline%yl(2) - lfline%yl(1)
+
+            ! Compute dot products
+            hfdp = -(hftx*segtx + hfty*segty)
+            lfdp = lftx*segtx + lfty*segty 
+        else
+            if (tseg%sv == hfline%vert(hfline%nv)) then 
+                segtx = tseg%xl(2:tseg%nl) - tseg%xl(1:tseg%nl-1)
+                segty = tseg%yl(2:tseg%nl) - tseg%yl(1:tseg%nl-1)
+            elseif (tseg%ev == hfline%vert(hfline%nv)) then 
+                doflip = .true.
+                segtx = -tseg%xl(tseg%nl:2:-1) + tseg%xl(tseg%nl-1:1:-1)
+                segty = -tseg%yl(tseg%nl:2:-1) + tseg%yl(tseg%nl-1:1:-1)
+            else
+                call gdErrorHandler('ExtendTubeWithSegment: segment ' // & 
+                    'does not have ending vertex of hfline, unexpected')
+            end if 
+
+            ! Compute line tangents
+            hftx = hfline%xl(hfline%nl) - hfline%xl(hfline%nl-1)
+            hfty = hfline%yl(hfline%nl) - hfline%yl(hfline%nl-1)
+            lftx = lfline%xl(lfline%nl) - lfline%xl(lfline%nl-1)
+            lfty = lfline%yl(lfline%nl) - lfline%yl(lfline%nl-1)
+
+            ! Compute dot products
+            hfdp = hftx*segtx + hfty*segty
+            lfdp = -(lftx*segtx + lfty*segty)
+        end if 
+
+        ! Extend
+        !=======
+        if (start) then 
+            if (hfdp(1) >= 0 .and. lfdp(size(lfdp)) <= 0) then ! Extend the hfline
+
+                ! Print warning that this code was not yet verified
+                print *, 'ExtendTubeWithSegment: code part not yet verified'
+
+                
+                ! Check if we can take the segment as a whole
+                if (all(hfdp > 0)) then 
+                    ! Just append the segment
+                    call hfline%AppendSegment(segID, ggtmdata, .false.)
+                else
+                    ! Construct a new segment by finding the first location 
+                    ! where the sign switches
+                    ind = findloc(hfdp <= 0, .true., 1, back=.false.)
+
+                    ! Split the line at this node
+                    call srfline%SplitAtNodes(segID, [ind], &
+                        ggtmdata, vertID, newvertID)
+
+                    ! Get the segment that has the split vertex and the new
+                    ! vertex
+                    newsegID = GetSegmentIDFromVertices(srfline, ggtmdata, newvertID(1), &
+                        hfline%vert(1))
+                    
+                    ! Append this segment
+                    call hfline%AppendSegment(newsegID, ggtmdata, .false.)
+                end if 
+            
+            elseif (lfdp(size(lfdp)) >= 0 .and. hfdp(1) <= 0) then ! Extend the lfline
+
+                ! Print warning that this code was not yet verified
+                print *, 'ExtendTubeWithSegment: code part not yet verified'
+
+                
+                ! Check if we can take the segment as a whole
+                if (all(lfdp > 0)) then 
+                    ! Just append the segment
+                    call lfline%AppendSegment(segID, ggtmdata, .false.)
+                else
+                    ! Construct a new segment by finding the first location 
+                    ! where the sign switches
+                    ind = findloc(lfdp <= 0, .true., 1, back=.true.)
+
+                    ! Split the line at this node
+                    call srfline%SplitAtNodes(segID, [ind], &
+                        ggtmdata, vertID, newvertID)
+
+                    ! Get the segment that has the split vertex and the new
+                    ! vertex
+                    newsegID = GetSegmentIDFromVertices(srfline, ggtmdata, newvertID(1), &
+                        lfline%vert(1))
+                    
+                    ! Append this segment
+                    call lfline%AppendSegment(newsegID, ggtmdata, .false.)
+                end if 
+            
+            elseif (hfdp(1) <= 0 .and. lfdp(size(lfdp)) <= 0) then ! Recompute
+
+                ! Print warning that this code was not yet verified
+                print *, 'ExtendTubeWithSegment: code part not yet verified'
+
+                ! Adjust the segment and update the line
+                call tseg%Initialize(tseg%xl([1, tseg%nl]), &
+                    tseg%yl([1, tseg%nl]), tseg%fsID, tseg%TMfaceID, &
+                    tseg%sv, tseg%ev)
+                call srfline%UpdateLineData(ggtmdata)
+
+                ! Recompute the dot product
+                ! Get segment tangents in hfline starting point
+                if (tseg%sv == hfline%vert(1)) then 
+                    segtx = tseg%xl(2:tseg%nl) - tseg%xl(1:tseg%nl-1)
+                    segty = tseg%yl(2:tseg%nl) - tseg%yl(1:tseg%nl-1)
+                elseif (tseg%ev == hfline%vert(1)) then 
+                    doflip = .true.
+                    segtx = -tseg%xl(tseg%nl:2:-1) + tseg%xl(tseg%nl-1:1:-1)
+                    segty = -tseg%yl(tseg%nl:2:-1) + tseg%yl(tseg%nl-1:1:-1)
+                else
+                    call gdErrorHandler('ExtendTubeWithSegment: segment ' // & 
+                        'does not have starting vertex of hfline, unexpected')
+                end if 
+
+                ! Compute line tangents
+                hftx = hfline%xl(2) - hfline%xl(1)
+                hfty = hfline%yl(2) - hfline%yl(1)
+                lftx = lfline%xl(2) - lfline%xl(1)
+                lfty = lfline%yl(2) - lfline%yl(1)
+
+                ! Compute dot products
+                hfdp = -(hftx*segtx + hfty*segty)
+                lfdp = lftx*segtx + lfty*segty
+                    
+                ! Extend
+                if (hfdp(1) >= 0) then 
+                    call hfline%AppendSegment(segID, ggtmdata, .false.)
+                else
+                    call lfline%AppendSegment(segID, ggtmdata, .false.)
+                end if
+
+            else ! Need to split the line at different points
+
+                ! Print warning that this code was not yet verified
+                print *, 'ExtendTubeWithSegment: code part not yet verified'
+
+                ! Construct a new segment by finding the first location 
+                ! where the sign switches
+                indhf = findloc(hfdp <= 0, .true., 1, back=.false.)
+                indlf = findloc(lfdp <= 0, .true., 1, back=.true.)
+
+                ! Check how many segments we get
+                if (indhf == indlf) then 
+                    ! Just one segment
+                    call srfline%SplitAtNodes(segID, [indhf], &
+                        ggtmdata, vertID, newvertID)
+                    newhfvert = newvertID(1)
+                    newlfvert = newvertID(1)
+                else
+                    ! Two segments
+                    call srfline%SplitAtNodes(segID, [indhf, indlf], &
+                        ggtmdata, vertID, newvertID)
+                    newhfvert = newvertID(1)
+                    newlfvert = newvertID(2)
+                end if
+
+                ! Get the segment that has the split vertex and the new
+                ! vertex for the hfline
+                newsegID = GetSegmentIDFromVertices(srfline, ggtmdata, newhfvert, &
+                    hfline%vert(1))
+                
+                ! Append this segment
+                call hfline%AppendSegment(newsegID, ggtmdata, .false.)
+
+                ! Get the segment that has the split vertex and the new
+                ! vertex for the lfline
+                newsegID = GetSegmentIDFromVertices(srfline, ggtmdata, newlfvert, &
+                    lfline%vert(1))
+                
+                ! Append this segment
+                call lfline%AppendSegment(newsegID, ggtmdata, .false.)
+
+            end if   
+        else
+            if (hfdp(1) >= 0 .and. lfdp(size(lfdp)) <= 0) then ! Extend the hfline
+
+                ! Print warning that this code was not yet verified
+                print *, 'ExtendTubeWithSegment: code part not yet verified'
+                
+                ! Check if we can take the segment as a whole
+                if (all(hfdp > 0)) then 
+                    ! Just append the segment
+                    call hfline%AppendSegment(segID, ggtmdata, .true.)
+                else
+                    ! Construct a new segment by finding the first location 
+                    ! where the sign switches
+                    ind = findloc(hfdp <= 0, .true., 1, back=.false.)
+
+                    ! Split the line at this node
+                    call erfline%SplitAtNodes(segID, [ind], &
+                        ggtmdata, vertID, newvertID)
+
+                    ! Get the segment that has the split vertex and the new
+                    ! vertex
+                    newsegID = GetSegmentIDFromVertices(erfline, ggtmdata, newvertID(1), &
+                        hfline%vert(hfline%nv))
+                    
+                    ! Append this segment
+                    call hfline%AppendSegment(newsegID, ggtmdata, .true.)
+                end if 
+            
+            elseif (lfdp(size(lfdp)) >= 0 .and. hfdp(1) <= 0) then ! Extend the lfline
+
+                ! Print warning that this code was not yet verified
+                print *, 'ExtendTubeWithSegment: code part not yet verified'
+                
+                ! Check if we can take the segment as a whole
+                if (all(lfdp > 0)) then 
+                    ! Just append the segment
+                    call lfline%AppendSegment(segID, ggtmdata, .true.)
+                else
+                    ! Construct a new segment by finding the first location 
+                    ! where the sign switches
+                    ind = findloc(lfdp <= 0, .true., 1, back=.true.)
+
+                    ! Split the line at this node
+                    call erfline%SplitAtNodes(segID, [ind], &
+                        ggtmdata, vertID, newvertID)
+
+                    ! Get the segment that has the split vertex and the new
+                    ! vertex
+                    newsegID = GetSegmentIDFromVertices(erfline, ggtmdata, newvertID(1), &
+                        lfline%vert(lfline%nv))
+                    
+                    ! Append this segment
+                    call lfline%AppendSegment(newsegID, ggtmdata, .true.)
+                end if 
+            
+            elseif (hfdp(1) <= 0 .and. lfdp(size(lfdp)) <= 0) then ! Recompute
+
+                ! Print warning that this code was not yet verified
+                print *, 'ExtendTubeWithSegment: code part not yet verified'
+
+                ! Adjust the segment and update the line
+                call tseg%Initialize(tseg%xl([1, tseg%nl]), &
+                    tseg%yl([1, tseg%nl]), tseg%fsID, tseg%TMfaceID, &
+                    tseg%sv, tseg%ev)
+                call erfline%UpdateLineData(ggtmdata)
+
+                ! Recompute the dot product
+                ! Get segment tangents in hfline starting point
+                if (tseg%sv == hfline%vert(hfline%nv)) then 
+                    segtx = tseg%xl(2:tseg%nl) - tseg%xl(1:tseg%nl-1)
+                    segty = tseg%yl(2:tseg%nl) - tseg%yl(1:tseg%nl-1)
+                elseif (tseg%ev == hfline%vert(hfline%nv)) then 
+                    doflip = .true.
+                    segtx = -tseg%xl(tseg%nl:2:-1) + tseg%xl(tseg%nl-1:1:-1)
+                    segty = -tseg%yl(tseg%nl:2:-1) + tseg%yl(tseg%nl-1:1:-1)
+                else
+                    call gdErrorHandler('ExtendTubeWithSegment: segment ' // & 
+                        'does not have ending vertex of hfline, unexpected')
+                end if 
+
+                ! Compute line tangents
+                hftx = hfline%xl(2) - hfline%xl(1)
+                hfty = hfline%yl(2) - hfline%yl(1)
+                lftx = lfline%xl(2) - lfline%xl(1)
+                lfty = lfline%yl(2) - lfline%yl(1)
+
+                ! Compute dot products
+                hfdp = hftx*segtx + hfty*segty
+                lfdp = -(lftx*segtx + lfty*segty)
+                    
+                ! Extend
+                if (hfdp(1) >= 0) then 
+                    call hfline%AppendSegment(segID, ggtmdata, .true.)
+                else
+                    call lfline%AppendSegment(segID, ggtmdata, .true.)
+                end if
+
+            else ! Need to split the line at different points
+
+                ! Construct a new segment by finding the first location 
+                ! where the sign switches
+                indhf = findloc(hfdp <= 0, .true., 1, back=.false.)
+                indlf = findloc(lfdp <= 0, .true., 1, back=.true.)
+                indlf = indlf + 1
+                indhf = indhf - 1
+
+                ! Check how many segments we get
+                if (indhf == indlf) then 
+                    ! Just one segment
+                    call erfline%SplitAtNodes(segID, [indhf], &
+                        ggtmdata, vertID, newvertID)
+                    newhfvert = newvertID(1)
+                    newlfvert = newvertID(1)
+                else
+                    ! Two segments
+                    call erfline%SplitAtNodes(segID, [indhf, indlf], &
+                        ggtmdata, vertID, newvertID)
+                    newhfvert = newvertID(1)
+                    newlfvert = newvertID(2)
+                end if
+
+                ! Get the segment that has the split vertex and the new
+                ! vertex for the hfline
+                newsegID = GetSegmentIDFromVertices(erfline, ggtmdata, newhfvert, &
+                    hfline%vert(hfline%nv))
+                
+                ! Append this segment
+                call hfline%AppendSegment(newsegID, ggtmdata, .true.)
+
+                ! Get the segment that has the split vertex and the new
+                ! vertex for the lfline
+                newsegID = GetSegmentIDFromVertices(erfline, ggtmdata, newlfvert, &
+                    lfline%vert(lfline%nv))
+                
+                ! Append this segment
+                call lfline%AppendSegment(newsegID, ggtmdata, .true.)
+
+            end if   
+        end if 
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 

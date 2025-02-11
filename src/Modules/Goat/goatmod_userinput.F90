@@ -468,6 +468,10 @@ module goatmod_userinput
         !                           side to include (part of) the 
         !                           vessel from both side of type 1
         !                           tangency points
+        ! - extendvesseltubes:      extend any tube at the vessel edges
+        !                           that complies to the marking criterion
+        ! - evtmaxvessellength:     maximum L2-based vessel segment 
+        !                           length before tube is extended
 
         ! Options for flux surface removal
         ! - removefluxsurfaces:     switch to remove or not
@@ -480,7 +484,7 @@ module goatmod_userinput
 
         ! Options for boundary triangle removal
         ! - removenarrowboundarytriangles:  switch
-        ! - rembndtriacriterion:    criterion for removal, typically 
+        ! - rembndtùriacriterion:    criterion for removal, typically 
         !                           'angle' (if too small, remove triangle)
         ! - rmbndtriaminangle:      minimal angle [rad] (too small - removed)
         !                           input is in degrees!
@@ -546,7 +550,7 @@ module goatmod_userinput
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
             refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
-            extendtptubes
+            extendtptubes, extendvesseltubes 
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp
@@ -560,7 +564,7 @@ module goatmod_userinput
             remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
             refLBLmaxxp, refLBdecaylengthxp, orthtracerstep, &
             radrefLBLmininf, radrefLBLmaxinf, radrefLBLminsp, &
-            radrefLBLmaxsp, radrefLBdecaylengthsp
+            radrefLBLmaxsp, radrefLBdecaylengthsp, evtmaxvessellength
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
             vdpdval, refLBLminstructure, refLBLminvert, refLBLmaxstructure, &
             refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert, &
@@ -943,6 +947,8 @@ module goatmod_userinput
 
         ! Options for flux tube extensions
         options%extendtptubes       = .true. 
+        options%extendvesseltubes   = .false. 
+        options%evtmaxvessellength  = 0.2
 
         ! Options for flux surface removal 
         options%removefluxsurfaces = .true.
@@ -1750,6 +1756,10 @@ module goatmod_userinput
         ! Options for extending flux tubes
         field = 'gg.adap.extendtptubes'
         call ExtractOptionValueLogical0D(fid, field, options%extendtptubes)
+        field = 'gg.adap.extendvesseltubes'
+        call ExtractOptionValueLogical0D(fid, field, options%extendvesseltubes)
+        field = 'gg.adap.evt.maxvessellength'
+        call ExtractOptionValueReal0D(fid, field, options%evtmaxvessellength)
 
         ! Options for flux surface removal 
         field = 'gg.vd.removefluxsurfaces'
