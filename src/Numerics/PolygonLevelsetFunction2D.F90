@@ -1006,7 +1006,7 @@ module PolygonLevelsetFunction2D
         ! Compute additional data
         !========================
         ! Compute number of labels
-        nl = size(pol(1)%label)
+        nl = size(pol(1)%labels, 2)
 
         ! Get edge data
         call ps%GetEdges(xe, ye) ! may still change
@@ -1035,7 +1035,7 @@ module PolygonLevelsetFunction2D
             ! Coordinates
             tempx = pol(i)%x(pol(i)%vert)
             tempy = pol(i)%y(pol(i)%vert)
-            tempvertlabel = pol(i)%label(pol(i)%vert, :)
+            tempvertlabel = pol(i)%labels(pol(i)%vert, :)
 
             txp1 = tempx(1:ne)
             txp2 = tempx(2:ne+1)
@@ -1074,7 +1074,7 @@ module PolygonLevelsetFunction2D
             xp(ce+1:ce+ne+1) = tempx 
             yp(ce+1:ce+ne+1) = tempy 
             vertlabelp(ce+1:ce+ne+1, :) = tempvertlabel
-            edgelabelp(ce+1:ce+ne, :) = tempedgelabel
+            edgelabelp(ce2+1:ce2+ne, :) = tempedgelabel
             nxpv(ce+1:ce+ne+1, :) = tempnx ! normals should be oriented outwards already
             nypv(ce+1:ce+ne+1, :) = tempny 
             nx(ce2+1:ce2+ne) = tnxp !pol(i)%nx/pol(i)%nn 
@@ -1736,24 +1736,14 @@ module PolygonLevelsetFunction2D
         ! Arguments
         class(PolygonLevelsetFunction2DClosedExactUDT)  :: plf 
         real(R8), intent(in)                        :: xq(:), yq(:)
-        real(R8), allocatable, intent(out)          :: vq(:, :) 
-        integer(I8), intent(in)                     :: derivx, derivy 
-
-        ! Optional arguments
-        character(*), intent(in), optional      :: varin 
-        real(R8), intent(in), optional          :: valuesin(:)
-        type(MySparseUDT), optional             :: dplfdvarin
-
-        character(:), allocatable               :: var 
-        real(R8), allocatable                   :: values(:)
-        type(MySparseUDT)                       :: dplfdvar
+        integer(I8), allocatable, intent(out)       :: vq(:, :) 
 
         ! Auxiliary
         character(:), allocatable               :: deriv, derivxc, &
             derivyc
 
         integer(I8)                             :: nq, np, npe, &
-            indmine, indminv, indmin, nval, ne, npsc
+            indmine, indminv, indmin, nval, ne, npsc, nl
         integer(I8), allocatable                :: eind(:), vind(:), &
             minind(:), psvert(:), psedges(:, :)
 
@@ -1804,7 +1794,7 @@ module PolygonLevelsetFunction2D
         npe = size(xp1, 1)
         np = size(xp, 1)
         nq = size(xq, 1)
-        nl = size(vertlabel, 2)
+        nl = size(vl, 2)
 
         ! Initialize
         allocate(vq(nq, nl))
@@ -1823,7 +1813,7 @@ module PolygonLevelsetFunction2D
         allocate(myones(np))
         myones = 1
         !$omp parallel do default(none) shared(xq, yq, plf, &
-        !$omp val, minind, vind, eind, tdistvert, tcrossprod, nq, myones, inf) &
+        !$omp val, minind, vind, eind, tdistvert, tcrossprod, nq, myones, inf, vq) &
         !$omp private(xqr, yqr, vx, vy, dvn, tvn, dx, dy, theta, isinvert, &
         !$omp onedge, distedge, distvert, indmine, fe, signe, indminv, &
         !$omp fv, signv, totsign, indmin)
@@ -1878,9 +1868,9 @@ module PolygonLevelsetFunction2D
             minind(iq) = indmin 
             val(iq) = val(iq)*totsign(indmin)
             if (indmin == 1) then 
-                vq(iq, :) = edgelabel(indmine, :)
+                vq(iq, :) = el(indmine, :)
             else
-                vq(iq, :) = vertlabel(indminv, :)
+                vq(iq, :) = vl(indminv, :)
             end if 
             
         end do 
