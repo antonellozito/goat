@@ -923,7 +923,7 @@ module ggmod_gridgeneration2D
         ! Extract the necessary gridding data
         !====================================
         ! Extract
-        call ExtractSimulationGrid(simgrid, grid, magneticField)
+        call ExtractSimulationGrid(simgrid, grid, magneticField, topomesh)
 
         ! Diagnostics
         !============
@@ -9794,7 +9794,7 @@ module ggmod_gridgeneration2D
     !------------------------------------------------------------------!
 
     ! Simulation grid extraction
-    subroutine ExtractSimulationGrid(simgrid, grid, magneticField)
+    subroutine ExtractSimulationGrid(simgrid, grid, magneticField, topomesh)
 
         ! Description
         !============
@@ -9813,6 +9813,7 @@ module ggmod_gridgeneration2D
         type(GridUDT), intent(out)              :: simgrid
         type(GGGridUDT), intent(in)             :: grid 
         type(MagneticFieldUDT), intent(in)      :: magneticField
+        class(TopomeshUDT), intent(in)          :: topomesh
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:)  :: tv
@@ -9928,6 +9929,7 @@ module ggmod_gridgeneration2D
 
         ! Additional grid data
         call ComputeGridData(simgrid, magneticField)
+        call ComputeTopologicalData(simgrid, topomesh)
 
         ! Grid boundary
         !call ComputeGridBoundaries(simgrid)
@@ -10464,6 +10466,45 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Compute topological data
+    subroutine ComputeTopologicalData(simgrid, topomesh)
+
+        ! Description
+        !============
+        ! This routine adds desired topological data to the grid, such 
+        ! as the X point IDs, strike point IDs, ... These are 
+        ! added to the simgrid. 
+
+        ! Note: it is currently assumed that all topomesh vertices 
+        ! appear in the grid with unaltered numbering. Normally, this 
+        ! should be the case (if this ever would not be the case anymore,
+        ! then one can identify the vertices by doing distance checks 
+        ! probably)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)            :: simgrid
+        type(TopomeshUDT), intent(in)           :: topomesh
+
+        ! Auxiliary
+
+        ! Compute
+        !========
+        ! Determine topological mesh type
+        simgrid%data%topoflag = IdentifyTopologicalMeshType(topomesh)
+
+        ! X-points, strike points, O-points
+        simgrid%data%xpointID = topomesh%GetXPointIDs()
+        simgrid%data%spointID = topomesh%GetStrikePointIDs()
+        simgrid%data%opointID = topomesh%GetOPointIDs()
+        simgrid%data%nxp = size(simgrid%data%xpointID)
+        simgrid%data%nsp = size(simgrid%data%spointID)
+        simgrid%data%nop = size(simgrid%data%opointID)
+
+
+    end subroutine
+
     ! Label translation
     subroutine TranslateGridLabels(simgrid, topomesh, vessel, formattype)
 
@@ -10548,39 +10589,46 @@ module ggmod_gridgeneration2D
             facelabelmapping, allfID, tfID, &
             sortindex, ind, solpslabels, psind, coreIDs, &
             cellregionmapping, veslabels, WGlabels, OFlabels, tfc, &
-            allsepIDs, tfv, tfsepv, allTPlabels, uveslabels
+            allsepIDs, tfv, tfsepv, allTPlabels, uvesstructlabels, &
+            reslabels
         integer(I8), allocatable                    :: edges(:, :), &
-            veslabels(:, :)
+            vesstructlabels(:, :), flabels(:, :)
+        real(R8), allocatable, dimension(:)         :: xf, yf
         logical, allocatable, dimension(:)          :: &
             ispolygonstart, isbranchingpolygon, islabelfound, &
-            keepvert
+            keepvert, isvesselface
         ! type(PolygonSetUDT)                         :: tempps
 
         ! Loop
         integer(I8)                                 :: i, j, k, flc, &
-            flcinc, coreIDc, regIDc
+            flcinc, coreIDc, regIDc, flccoreinc, flccore
 
         ! Initialize
         !===========
         ! Allocate
         allocate(reslabels(0))
-        
+
+        ! Initialize
+        isvesselface = simgrid%face%BF ! adjusted later
+
         ! Face label counter and face label increment
         flc = 0 
         flcinc = -1 ! we set negative face labels
+        flccoreinc = -4 ! we set different core labels
+        flccore = SOLPScorefclblID
 
         ! Set solps temporary labels
         solpslabels = [(k, k = 1, 3)]
         TPlabel = maxval(solpslabels)+1
 
         ! Get vessel vertex labels (first one, structures)
-        call vessel%polygonset%GetLabels(veslabels)
+        call vessel%polygonset%GetLabels(vesstructlabels)
         
         ! Take unique value of first labels
-        call Unique(veslabels(:, 1), uveslabels)
+        call Unique(vesstructlabels(:, 1), uvesstructlabels)
 
-        ! Add labels already
-
+        ! Add labels already 
+        reslabels = [reslabels, uvesstructlabels]
 
         ! Map
         !====
@@ -10702,8 +10750,57 @@ module ggmod_gridgeneration2D
         ! a different label for each simple polygon
         allfID = [(k, k = 1, simgrid%face%ntot)]
 
-        ! Loop over all labels
-        do j = 1, size(solpslabels)
+        ! Deal with core boundaries separately (should be 
+        ! first solps label)
+        ! Get number of faces
+        j = 1
+        ne = count(fl_new == solpslabels(j))
+
+        ! Extract faces
+        allocate(tfID(ne), edges(ne, 2), sortindex(ne), &
+            ispolygonstart(ne), isbranchingpolygon(ne)) ! 
+        tfID = pack(allfID, fl_new == solpslabels(j))
+        edges = simgrid%face%vert(tfID, :)
+        call SortPolygonEdges(edges, ne, sortindex, ispolygonstart, &
+            isbranchingpolygon)
+        allocate(psind(count(ispolygonstart)))
+
+        ! Set labels for each distinct polygon piece
+        psind = pack([(k, k = 1, ne)], ispolygonstart)
+        psind = [psind, ne+1]
+        do i = 1, count(ispolygonstart)
+
+            ! Sanity check
+            do while (any(abs(reslabels) == abs(flccore)))  
+                ! Print warning
+                print *, 'ID: ', flccore
+                print *, 'TranslateGridLabelsSOLPS: warning: core boundary ID ' // &
+                    'already used for other non-core and predefined boundary'
+
+                ! Update counter
+                flccore = flccore + flccoreinc
+            end do 
+
+            ! Add to reserved face labels
+            reslabels = [reslabels, flccore]
+
+            ! Get indices
+            ind = [(k, k = psind(i), psind(i+1)-1)]
+
+            ! Set label
+            simgrid%face%label(tfID(sortindex(ind))) = flccore 
+
+            ! Update the face label
+            flccore = flccore + flccoreinc
+
+            ! Update vessel faces
+            isvesselface(tfID(sortindex(ind))) = .false.
+
+        end do 
+        deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
+
+        ! Loop over remaining labels
+        do j = 2, size(solpslabels)
             ! Get number of faces
             ne = count(fl_new == solpslabels(j))
 
@@ -10723,17 +10820,46 @@ module ggmod_gridgeneration2D
                 ! Update the face label
                 flc = flc + flcinc 
 
+                ! Avoid adding any reserved labels
+                do while (any(abs(flc) == abs(reslabels)))
+                    flc = flc + flcinc
+                end do 
+
                 ! Get indices
                 ind = [(k, k = psind(i), psind(i+1)-1)]
 
                 ! Set label
                 simgrid%face%label(tfID(sortindex(ind))) = flc 
 
+                ! Update vessel faces
+                if (j == 2) then 
+                    isvesselface(tfID(sortindex(ind))) = .false.
+                end if 
             end do 
             deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
         end do 
 
+        ! Overwrite vessel region labels
+        !-------------------------------
+        ! Unpack for ease
+        associate(&
+            xv      => simgrid%vert%x,    &
+            yv      => simgrid%vert%y,    &
+            fv      => simgrid%face%vert  &
+            )
         
+        ! Compute face coordinates
+        xf = 0.5*(xv(fv(:, 1)) + xv(fv(:, 2)))
+        yf = 0.5*(yv(fv(:, 1)) + yv(fv(:, 2)))
+
+        ! Interpolate
+        call vessel%exactplfvessel%EvaluateLabel(xf, yf, flabels)
+
+        ! Extract
+        where (isvesselface) simgrid%face%label = abs(flabels(:, 1))
+        
+        ! Housekeeping
+        end associate
 
         ! Cell regions
         !-------------

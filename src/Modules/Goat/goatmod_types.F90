@@ -340,8 +340,14 @@ module goatmod_types
         ! - IMPcell, IMPface    : same, but inner mid plane
         ! - OMPr, OMPz          : points defining line segment of OMP
         ! - IMPr, IMPz          : same but for inner mid plane
+        ! - topoflag            : flag indicating the topological mesh 
+        !                       type (see also mod_definitions)
         ! - xpointID            : array containing all X-point vertex IDs
         ! - nxp                 : number of x-points
+        ! - spointID            : array containing all strike point vertex IDs
+        ! - nsp                 : number of strike points
+        ! - opointID            : O point IDs (in the grid)
+        ! - nop                 : number of o points
 
         ! Flux data
         type(FluxDataUDT)           :: fluxdata
@@ -349,6 +355,9 @@ module goatmod_types
         ! Legacy data of structured grid
         type(StructuredGridDataUDT) :: sglegacy
 
+        ! Topological mesh type
+        integer(I8)                             :: topoflag
+        
         ! OMP & IMP
         integer(I8), allocatable, dimension(:)  :: OMPcell, OMPface, &
             IMPcell, IMPface
@@ -357,9 +366,10 @@ module goatmod_types
         real(R8), dimension(1:2)                :: OMPr, OMPz, IMPr, &
             IMPz
 
-        ! X-point(s)
-        integer(I8), allocatable                :: xpointID(:)
-        integer(I8)                             :: nxp
+        ! X-point(s), strike points, o points
+        integer(I8), allocatable, dimension(:)  :: xpointID, &
+            spointID, opointID
+        integer(I8)                             :: nxp, nsp, nop
 
     end type
 

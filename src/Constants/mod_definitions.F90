@@ -47,8 +47,13 @@ module mod_definitions
 
     ! Definitions for SOLPS
     !======================
-    integer(I8), parameter :: SOLPScoreregID = 1, SOLPScoreregIDincr = 4, &
-        SOLPSbndcellID = 3, SOLPSinternalcellID = 1
+    ! Version
+    character(*), parameter :: SOLPSversion = '03.002.000'
 
+    ! Solver-related
+    integer(I8), parameter :: SOLPScoreregID = 1, SOLPScoreregIDincr = 4, &
+        SOLPSbndcellID = 3, SOLPSinternalcellID = 1, SOLPScorefclblID = -21
    
+    ! Topological mesh identification number
+    integer(I8), parameter :: TMTopSN = 1, TMTopDN = 2, TMTopGeneral = 0
 end module

@@ -24,10 +24,7 @@ module ggmod_topology2D
     use mod_contour2D
     use mod_polygon
     use mod_sort
-    use mod_definitions, only: TMvertexbndID, TMvertexmaxID, &
-        TMvertexminID, TMvertexsaddleID, TMvertextp1ID, &
-        TMvertextp2ID, TMfacepolID, TMfaceradID, TMfacebndID, &
-        TMvertexsplitID, TMfacesepID, TMfacecoreID, TMfacePFID
+    use mod_definitions
     use mod_linearsolverinterface, only: SolveDenseLinearSystemDI
     use goatmod_types, only : magneticFieldUDT, VesselUDT
     use goatmod_userinput, only : TopomeshOptionsUDT
@@ -37,7 +34,8 @@ module ggmod_topology2D
     implicit none
     private 
     public :: TopomeshUDT, ConstructTopologicalMesh, TraceExtrema2D, &
-        TraceTangencyPoints2D, ReadTopologicalMesh, WriteTopologicalMesh
+        TraceTangencyPoints2D, ReadTopologicalMesh, WriteTopologicalMesh, &
+        IdentifyTopologicalMeshType
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -188,7 +186,8 @@ module ggmod_topology2D
         procedure :: GetInternalFaceIDs, GetBoundaryFaceIDs, &
             GetTargetFaceIDs, GetSeparatrixFaceIDs, GetVesselFaceIDs, &
             GetCoreFaceIDs, GetCoreCellIDs, GetWideGridCellIDs, &
-            GetSeparatrixFluxSurfaceIDs, GetStrikePointIDs
+            GetSeparatrixFluxSurfaceIDs, GetStrikePointIDs, GetXPOintIDs, &
+            GetOPointIDs
     end type 
 
     contains 
@@ -8798,7 +8797,178 @@ module ggmod_topology2D
         ID = pack([(j, j = 1, topomesh%vert%ntot)], temp)
 
     end function
+
+    function GetXPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns all the X-point (saddle point) IDs
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        integer(I8), allocatable, dimension(:)  :: ID
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)      :: isXP
+
+        ! Loop
+        integer(I8)                             :: k
+
+        ! Find X-points
+        !==============
+        isXP = topomesh%vert%type == TMvertexsaddleID
+        allocate(ID(count(isXP)))
+        ID = pack([(k, k = 1, size(isXP))], isXP)
+
+    end function
+
+    function GetOPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns all the O-points (extrema) point) IDs
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        integer(I8), allocatable, dimension(:)  :: ID
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)      :: isOP
+
+        ! Loop
+        integer(I8)                             :: k
+
+        ! Find X-points
+        !==============
+        isOP = (topomesh%vert%type == TMvertexminID) .or. &
+            (topomesh%vert%type == TMvertexmaxID)
+        allocate(ID(count(isOP)))
+        ID = pack([(k, k = 1, size(isOP))], isOP)
+
+    end function
  
+    ! Topological mesh identification 
+    function IdentifyTopologicalMeshType(topomesh) result(TMlabel)
+
+        ! Description
+        !============
+        ! This function attempts to identify the topological mesh type
+        ! and returns the topological mesh identification number 
+        ! (see mod_definitions of the definition thereof). This is not 
+        ! really required by goat itself, but is rather a convenience
+        ! tool for later simulation etc and face label mapping. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)              :: topomesh
+        integer(I8)                     :: TMlabel
+
+        ! Auxiliary
+        logical                                 :: issinglenull, &
+            isdoublenull
+        integer(I8)                             :: nxp, nop, nwgc, nsp, &
+            ncc
+        integer(I8), allocatable, dimension(:)  :: xp, op, wgc, sp, cc
+
+        ! Initialize
+        !===========
+        ! Set initial label to default label
+        TMlabel = TMTopGeneral
+
+        ! Get all X-points
+        xp = topomesh%GetXPointIDs()
+        nxp = size(xp)
+
+        ! Get all O-points
+        op = topomesh%GetOPointIDs()
+        nop = size(op)
+
+        ! Strike points
+        sp = topomesh%GetStrikePointIDs()
+        nsp = size(sp)
+
+        ! Get all wide grid cells
+        wgc = topomesh%GetWideGridCellIDs()        
+        nwgc = size(wgc)
+
+        ! Core cells
+        cc = topomesh%GetCoreCellIDs()
+        ncc = size(cc)
+
+        ! Initialize
+        issinglenull = .true.
+        isdoublenull = .true.
+
+        ! Single null
+        !============        
+        ! X-point and O-point checks
+        if (nxp /= 1 .or. nop /= 0) then 
+            issinglenull = .false.
+        end if 
+
+        ! Strike point checks
+        if (nsp /= 2) then 
+            issinglenull = .false. 
+        end if 
+
+        ! Number of wide and narrow grid cells
+        if (nwgc > 0) then 
+            issinglenull = .false.
+        elseif (topomesh%cell%ntot /= 3) then
+            issinglenull = .false.
+        end if 
+
+        ! Core cells
+        if (ncc /= 1) then 
+            issinglenull = .false.
+        end if 
+
+        ! Double null
+        !============
+        ! X-point and O-point checks
+        if (nxp /= 2 .or. nop /= 0) then 
+            isdoublenull = .false.
+        end if 
+
+        ! Strike point checks
+        if (nsp /= 4) then 
+            isdoublenull = .false. 
+        end if 
+
+        ! Number of wide and narrow grid cells
+        if (nwgc > 0) then 
+            isdoublenull = .false.
+        elseif (topomesh%cell%ntot /= 3) then
+            isdoublenull = .false.
+        end if 
+
+        ! Core cells
+        if (ncc /= 2) then 
+            isdoublenull = .false.
+        end if 
+
+        ! Determine flag
+        !===============
+        ! Sanity checks
+        if (count([issinglenull, isdoublenull]) > 1) then 
+            ! Probably we missed something in the definition then
+            print *, 'IdentifyTopologicalMeshType: multiple topologies ' // & 
+                'appear valid, this is likely a bug. Setting flag to ' // & 
+                'general flag...'
+
+        elseif (issinglenull) then 
+            TMlabel = TMTopSN
+        elseif (isdoublenull) then 
+            TMlabel = TMTopDN
+        end if 
+
+    end function
+
     !------------------------------------------------------------------!
     !                 TOPOLOGICAL MESH CELL OPERATORS                  !
     !------------------------------------------------------------------!

@@ -19,6 +19,7 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     use goatmod_userinput
     use mod_std_formatspecs
     use mod_constants
+    use mod_definitions
 
     ! The usual
     !==========
@@ -69,7 +70,12 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
         nvertcell       => grid%vert%ncell,     &
         nvertface       => grid%vert%nface,     &
         Xpoint          => grid%data%xpointID,  &
+        Opoint          => grid%data%opointID,  &
+        Spoint          => grid%data%spointID,  &
+        topoflag        => grid%data%topoflag,  &
         nX              => grid%data%nxp,       &
+        nO              => grid%data%nop,       &
+        nS              => grid%data%nsp,       &
         nf              => grid%face%ntot,      &
         facevert        => grid%face%vert,      &
         labelf          => grid%face%label,     &
@@ -116,7 +122,7 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
         )
 
     ! Version
-    version = 'VERSION03.002.000 Matlab traduit.out.b2us'
+    version = 'VERSION' // SOLPSversion // ' traduit.out.b2us'
     write(fu, '(a)') version 
 
     ! General grid information
@@ -143,30 +149,50 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
         write(fu, fmt) sgnx, sgny, sgncut
     end if 
 
-    ! X-point(s) information
-    if (goatoptions%write_Xpointdata) then 
-        tempstring = '*cf:    int                1    nX'
-        write(fu, '(a)' ) tempstring
-        fmt = '('//Ifm//')'
-        write(fu, fmt) nX
-    end if 
+#ifdef debug 
+    ! Topological flag
+    tempstring = '*cf:    int                1    topoflag'
+    write(fu, '(a)' ) tempstring
+    fmt = '(1'//Ifm//')'
+    write(fu, fmt) topoflag
+
+    ! Topological points information
+    tempstring = '*cf:    int                3    nX,nO,nS'
+    write(fu, '(a)' ) tempstring
+    fmt = '(3'//Ifm//')'
+    write(fu, fmt) nX, nO, nS
 
     ! OMP and IMP lengths
-    if (goatoptions%write_OMPdata) then 
-        tempstring = '*cf:    int                4    ncvOMP,ncvIMP,nfcOMP,nfcIMP'
-        write(fu, '(a)' ) tempstring
-        fmt = '(4'//Ifm//')'
-        write(fu, fmt) ncvOMP, ncvIMP, nfcOMP, nfcIMP 
-    end if 
+    !if (goatoptions%write_OMPdata) then 
+    !    tempstring = '*cf:    int                4    ncvOMP,ncvIMP,nfcOMP,nfcIMP'
+    !    write(fu, '(a)' ) tempstring
+    !    fmt = '(4'//Ifm//')'
+    !    write(fu, fmt) ncvOMP, ncvIMP, nfcOMP, nfcIMP 
+    !end if 
+
+    ! X-point data
+    write(fu, '(2a8,i12,4x,a8)') '*cf:    ','int     ', nX, 'Xpoints '
+    do i = 1, nX 
+        fmt = '('//Ifm//')' 
+        write (fu, fmt) Xpoint(i)
+    end do 
+
+    ! O-point data
+    write(fu, '(2a8,i12,4x,a8)') '*cf:    ','int     ', nO, 'Opoints '
+    do i = 1, nO 
+        fmt = '('//Ifm//')' 
+        write (fu, fmt) Opoint(i)
+    end do 
+
+    ! S-point data
+    write(fu, '(2a8,i12,4x,a8)') '*cf:    ','int     ', nS, 'Spoints '
+    do i = 1, nS 
+        fmt = '('//Ifm//')' 
+        write (fu, fmt) Spoint(i)
+    end do
+#endif 
 
     ! Vertex information
-    if (goatoptions%write_Xpointdata) then 
-        tempstring = repeat(' ', 1000)
-        write(tempstring, '(a)') '*cf:    int                ', nX, '    Xpoint(s)'
-        fmt = '('//repeat(Ifm, nX)//')'
-        write(fu, fmt) trim(tempstring), Xpoint
-    end if
-
     tempstring = '*cf: Vx vxX vxY vxPsi vxBx vxBy vxFfbz'
     write(fu, '(a)' ) tempstring 
     fmt = '('//Ifm// ',' //repeat(spacefm // Rfm // ',', 5)// spacefm // Rfm //')'
