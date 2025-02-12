@@ -57,6 +57,7 @@ ifdef USE_OPENMP
 EXT_OPENMP = .openmp
 endif
 ifdef SOLPS_DEBUG
+GOAT_DEBUG = yes
 EXT_DEBUG = .debug
 IMAS_AMNS_DEBUG = yes
 else
