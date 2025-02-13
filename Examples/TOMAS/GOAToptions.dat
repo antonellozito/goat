@@ -462,11 +462,12 @@ VERSION 1.00.00
 'gg.ref.LB.decaylengthxp'               '0.5'
 
 # Refinement options
-'gg.radref.meth'                           'no'
-#'gg.radref.meth'                           'no'
+'gg.radref.meth'                           'lengthbased'
+'gg.radref.LB.lengthtype'                  'radial' # or Euler
+#'gg.radref.meth'                          'no'
 'gg.radref.LB.dosp'                        '1'
-'gg.radref.LB.Lmininf'                     '0.005'
-'gg.radref.LB.Lmaxinf'                     '0.012'
+'gg.radref.LB.Lmininf'                     '0.001'
+'gg.radref.LB.Lmaxinf'                     '0.005'
 'gg.radref.LB.Lminsp'                      '0.05'
 'gg.radref.LB.Lmaxsp'                      '0.02'
 'gg.radref.LB.decaylengthsp'               '0.5'
@@ -484,6 +485,11 @@ VERSION 1.00.00
 'gg.radref.BL.dosp'                '0'
 'gg.radref.BL.ncsp'                '4'
 'gg.radref.BL.dlsp'                '[0.0020, 0.003, 0.004, 0.006]'
+
+# Adaptations
+'gg.adap.extendtptubes'                 '1' # Extend tangency points tubes
+'gg.adap.extendvesseltubes'             '0' # Extend vessel tubes
+'gg.adap.evtmaxvessellength'            '0.2'
 
 
 # Post-processing options
