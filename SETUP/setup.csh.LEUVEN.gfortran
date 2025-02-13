@@ -4,3 +4,4 @@ module load SuiteSparse
 module load OpenBLAS
 module load matplotlib
 module load ArmForge/22.1.2
+module load GCC/11.3.0
