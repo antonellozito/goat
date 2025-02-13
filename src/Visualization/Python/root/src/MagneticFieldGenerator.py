@@ -3,15 +3,18 @@
 # Simple script to generate our own magnetic fields based on analytic
 # descriptions. Writes out an rzpsi file using the datahandler 
 # module
-import Datahandler as dh 
-import Plotter as pl
+from src import Datahandler as dh 
+from src import Plotter as pl
 import numpy as np
+from src import goat_types as gt
 
 # Define magnetic field
 def MagneticField(x, y):
     #psi = np.sin(2*np.pi*x) + np.sin(2*np.pi*y)
     #return psi
-    psi = np.sqrt((x - 0.78)**2 + y**2) 
+    Btor = 0.08666
+    # psi = np.sqrt((x - 0.78)**2 + y**2) 
+    psi = 0.001*Btor*x + 0.0000001*Btor*y
     return psi
 
     
@@ -31,6 +34,19 @@ Z = (np.arange(0, resy+1, 1))/float(resy)*Ly + Lyoffset
 nR = resx + 1
 nZ = resy + 1
 Psi = np.zeros([nR, nZ])
+
+Rmaj = 0.78 
+Rmin = 0.26
+theta = np.arange(0, 101, 1)/100.0*2*np.pi
+xv = Rmaj + Rmin*np.cos(theta)
+yv = Rmin*np.sin(theta)
+
+# Construct structures
+structures = [gt.Structure() for i in np.arange(0, 1, 1)]
+structures[0].Initialize(len(xv), xv, yv)
+
+# Write output
+dh.WriteStructureFile(writedir, structures)
 
 # Compute
 for j in np.arange(0, nZ, 1):

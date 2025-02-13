@@ -280,6 +280,20 @@ class GGTMLine:
         self.y = yc 
         self.vert = vc
 
+# GGTM tubes
+class GGTMTube: 
+    # Definition
+    def __init__(self):
+        # Lines
+        self.hfline = GGTMLine()
+        self.lfline = GGTMLine()
+
+    # Initializer
+    def Initialize(self, hfvert, hfx, hfy, lfvert, lfx, lfy):
+        # Initialize lines
+        self.hfline.AddCoordinates(hfx, hfy, hfvert)
+        self.lfline.AddCoordinates(lfx, lfy, lfvert)
+
 # GGTM faces
 class GGTMFace:
     # Definition
@@ -328,6 +342,7 @@ class GGTMCell:
         # Lines
         self.nl = 0
         self.lines = GGTMLine()
+        self.tubes = GGTMTube()
 
         # ID
         self.ID = 0
@@ -338,6 +353,7 @@ class GGTMCell:
         # Coordinates
         self.nl = nl
         self.lines = [GGTMLine() for i in range(nl)]
+        self.tubes = [GGTMTube() for i in range(nl+1)] # need to account for lfline and hfline being stored differently
 
         # ID
         self.ID = ID
@@ -346,6 +362,11 @@ class GGTMCell:
     def AddLineCoordinates(self, lineindex, xl, yl, vl):
         # Add face coordinates
         self.lines[lineindex].AddCoordinates(xl, yl, vl)
+
+    # Adding tube lines
+    def AddTube(self, tubeindex, hfx, hfy, hfvert, lfx, lfy, lfvert):
+        # Add tube line coordinates
+        self.tubes[tubeindex].Initialize(hfvert, hfx, hfy, lfvert, lfx, lfy)
 
 # GGTM data class
 class GGTMData:

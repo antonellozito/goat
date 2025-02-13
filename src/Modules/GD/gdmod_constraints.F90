@@ -6311,6 +6311,11 @@ module gdmod_constraints
                     ! Get the fieldline IDs of these vertices
                     tvID = fieldlineID(grid%Bnd(i)%vert)
 
+                    ! Skip if there is a zero ID - tangency point
+                    if (any(tvID == 0_I8)) then 
+                        cycle 
+                    end if 
+
                     ! Check which ones occur
                     doesIDoccur = .false.
                     doesIDoccur(tvID) = .true. 

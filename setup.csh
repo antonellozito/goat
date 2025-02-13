@@ -50,7 +50,7 @@ echo 'Running at goat top directory: '  ${GOATTOP}
 # Add scripts to the path variable
 setenv GOAT_SCRIPTPATHS ${GOATTOP}/scripts
 setenv GOAT_EXECUTABLES ${GOATTOP}/executables
-setenv GOAT_VISUALIZATION ${GOATTOP}/src/Visualization/Python
+setenv GOAT_VISUALIZATION ${GOATTOP}/src/Visualization/Python/root
 setenv PATH "${GOAT_SCRIPTPATHS}:${GOAT_EXECUTABLES}:${PATH}"
 
 # Set HOST_NAME and COMPILER, which will determine setup files to be used
@@ -131,4 +131,4 @@ alias | grep -F -v -f $alias_pre | sed -e 's/^/alias /' \
 rm -f $setup_pre $setup_post $alias_pre
 
 # List loaded modules
-module list
+#module list

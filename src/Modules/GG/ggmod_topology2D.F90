@@ -24,10 +24,7 @@ module ggmod_topology2D
     use mod_contour2D
     use mod_polygon
     use mod_sort
-    use mod_definitions, only: TMvertexbndID, TMvertexmaxID, &
-        TMvertexminID, TMvertexsaddleID, TMvertextp1ID, &
-        TMvertextp2ID, TMfacepolID, TMfaceradID, TMfacebndID, &
-        TMvertexsplitID, TMfacesepID, TMfacecoreID, TMfacePFID
+    use mod_definitions
     use mod_linearsolverinterface, only: SolveDenseLinearSystemDI
     use goatmod_types, only : magneticFieldUDT, VesselUDT
     use goatmod_userinput, only : TopomeshOptionsUDT
@@ -37,11 +34,13 @@ module ggmod_topology2D
     implicit none
     private 
     public :: TopomeshUDT, ConstructTopologicalMesh, TraceExtrema2D, &
-        TraceTangencyPoints2D, ReadTopologicalMesh, WriteTopologicalMesh
+        TraceTangencyPoints2D, ReadTopologicalMesh, WriteTopologicalMesh, &
+        IdentifyTopologicalMeshType
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
     real(R8), parameter, private        :: disttol = 1e-12 ! distance tolerance
+    real(R8), parameter, private        :: distfrac = 1e-3 ! distance fraction when removing edge vertices
 
     !==================================================================!
     !                                                                  !
@@ -113,7 +112,7 @@ module ggmod_topology2D
 
         integer(I8)                     :: ntot, ntotv, ntotf ! total number of vertices
         integer(I8), allocatable        :: ID(:), vert(:), vertP(:, :), &
-            face(:), faceP(:, :), flags(:)
+            face(:), faceP(:, :), flags(:), tube(:)
     contains 
 
         ! Initializer
@@ -136,13 +135,19 @@ module ggmod_topology2D
         ! Note that these tubes can only be constructed as a 
         ! post-processing step after topological mesh construction. The
         ! cell faces and cells present in the 'cell' and 'face' structure
-        ! are sorted after construction.  
+        ! are sorted after construction. Additionally, we store the 
+        ! aligned faces and vertices from both sides in separate arrays,
+        ! in this case in bndface1 (with pointer bndface1P), bndface2, &
+        ! bndvert1, bndvert2. It should be noted that these faces and 
+        ! vertices are not sorted in any particular direction (this is 
+        ! non-trivial, since tube boundaries may be branching polygons)
 
         integer(I8)                                 :: ncell, nface, ntot 
-        integer(I8), allocatable, dimension(:)      :: cell, face 
-        integer(I8), allocatable, dimension(:,: )   :: cellP, faceP
+        integer(I8), allocatable, dimension(:)      :: cell, face,  &
+            bndf1, bndf2, bndv1, bndv2, ftneig1, ftneig2
+        integer(I8), allocatable, dimension(:, :)   :: cellP, faceP, &
+            bndf1P, bndf2P, bndv1P, bndv2P, ftneig1P, ftneig2P
         logical, allocatable, dimension(:)          :: isclosed 
-
 
     contains
     
@@ -155,6 +160,9 @@ module ggmod_topology2D
         ! Getter
         procedure :: GetFace        => GetTMTubeFace
         procedure :: GetCell        => GetTMTubeCell
+        procedure :: GetBndFace     => GetTMTubeBndFace
+        procedure :: GetBndVert     => GetTMTubeBndVert
+        procedure :: GetNeig        => GetTMTubeNeig
 
     end type 
 
@@ -178,7 +186,8 @@ module ggmod_topology2D
         procedure :: GetInternalFaceIDs, GetBoundaryFaceIDs, &
             GetTargetFaceIDs, GetSeparatrixFaceIDs, GetVesselFaceIDs, &
             GetCoreFaceIDs, GetCoreCellIDs, GetWideGridCellIDs, &
-            GetSeparatrixFluxSurfaceIDs
+            GetSeparatrixFluxSurfaceIDs, GetStrikePointIDs, GetXPOintIDs, &
+            GetOPointIDs
     end type 
 
     contains 
@@ -224,30 +233,92 @@ module ggmod_topology2D
         !==================
         ! Arguments
         type(TopomeshUDT)                       :: topomesh
-        type(VesselUDT), intent(in)             :: vessel
+        type(VesselUDT), intent(inout)          :: vessel
+        type(magneticFieldUDT), intent(in)      :: magneticField 
+        type(TopomeshOptionsUDT), intent(in)    :: options
+        class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
+        class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
+
+        ! Construct basic mesh
+        !=====================
+        ! Check if we construct from scratch or load in a file
+        if (options%readexistingTM) then 
+            ! Read
+            call ReadTopologicalMesh(topomesh, options%TMfilepath)
+
+            ! Update the field tracer
+            call UpdateTracersFromTopomesh(topomesh, fieldtracer, &
+                magneticField, vessel, options)
+        else
+            ! Construct from scratch
+            call ConstructBasicTopologicalMesh(vessel, magneticField, options, &
+                topomesh, fieldtracer, vesseltracer, streamlinetracer)
+        end if
+
+        ! Apply adaptations
+        !==================
+        if (options%doadaptations) then 
+            call ModifyTopologicalMesh(vessel, magneticField, options, &
+                topomesh, fieldtracer, vesseltracer, streamlinetracer)
+        end if 
+
+        ! Write
+        !======
+        call WriteTopologicalMesh(topomesh, 'topomesh')
+
+    end subroutine
+
+    ! Basic topological mesh constructor
+    subroutine ConstructBasicTopologicalMesh(vessel, magneticField, options, &
+        topomesh, fieldtracer, vesseltracer, streamlinetracer)
+
+        ! Description
+        !============
+        ! This routine generates the topological mesh based on the given magnetic
+        ! field and vessel geometry. 
+
+        ! Algorithm
+        !==========
+        ! 1) Compute points of interest (minima, maxima, saddle points, tangency
+        ! points) 
+        ! 2) Create a reduced topological mesh of the extrema to generate the cuts
+        ! (should contain vertices and faces, not cells) - this forms the initial
+        ! basis of the final topological mesh
+        ! 3) Find the vessel boundary, introduce the tangency points and compute
+        ! additional contours starting from those tangency points.
+        ! 4) Compute all intersections between the current faces, introduce these
+        ! as new vertices (and keep track of type). Intersections in end points are
+        ! assumed to be known already and not added twice
+        ! 5) Construct the topological mesh cells
+
+        ! Modules
+        !========
+        use mod_structured2Dgridding
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(TopomeshUDT)                       :: topomesh
+        type(VesselUDT), intent(inout)          :: vessel
         type(magneticFieldUDT), intent(in)      :: magneticField 
         type(TopomeshOptionsUDT), intent(in)    :: options
         class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
         class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
 
         ! Auxiliary
-        real(R8)                                :: dxfracmin, dyfracmin, &
-            dv
+        real(R8)                                :: dxfracmin, dyfracmin
         real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
             yps, xg, yg, Vf, xgv, ygv
         real(R8), parameter                     :: emptyR8(0)= 0
         real(R8), allocatable, dimension(:)     :: xtp, ytp, Ftp, &
-            xe, ye, fe, cgv
-        integer(I8)                             :: nv, ntp, resc 
+            xe, ye, fe
+        integer(I8)                             :: nv, ntp 
         integer(I8), allocatable, dimension(:)  :: typee, IDs
         integer(I8), parameter                  :: emptyI8(0) = 0
         type(VesselUDT)                         :: newvessel
-        type(PolygonSetUDT)                     :: tempps
-        type(ContourUDT), allocatable           :: contours(:)
-        type(PolygonUDT), allocatable           :: pcontours(:)
 
         ! Loop
-        integer(I8)                             :: i, j, k
+        integer(I8)                             :: i, j
 
         ! Initialize
         !===========
@@ -280,7 +351,7 @@ module ggmod_topology2D
         !=================================
         ! Tangency points & vessel geometry
         call AddTopologicalMeshTangencyPoints2(topomesh, vesseltracer, &
-            magneticField)
+            vessel, magneticField, options)
 
         ! Construct refined grid based on tangency points and extrema
         ntp = count((topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
@@ -306,19 +377,19 @@ module ggmod_topology2D
             reshape(Vf, [size(xgv), size(ygv)]), xgv, ygv, &
             xtp, ytp, Ftp, IDs, fieldtracer%npmin, fieldtracer%npmax, fieldtracer%dl)
         
-        ! Visualize by tracing contours
-        resc = 100
-        dv = (maxval(Vf) - minval(Vf))
-        cgv = [(k, k = 0, resc)]*(dv*0.90_R8)/real(resc, kind=R8) + minval(Vf) + dv*0.05
-        contours = fieldtracer%TraceContours(cgv)
-        allocate(pcontours(size(contours)))
-        !$omp parallel do default(shared)
-        do k = 1, size(contours)
-            call pcontours(k)%Construct(contours(k)%x, contours(k)%y)
-        end do 
-        !$omp end parallel do
-        call tempps%Construct(pcontours)
-        call tempps%WriteData('mfcontours')
+        !! Visualize by tracing contours
+        !resc = 100
+        !dv = (maxval(Vf) - minval(Vf))
+        !cgv = [(k, k = 0, resc)]*(dv*0.90_R8)/real(resc, kind=R8) + minval(Vf) + dv*0.05
+        !contours = fieldtracer%TraceContours(cgv)
+        !allocate(pcontours(size(contours)))
+        !!$omp parallel do default(shared)
+        !do k = 1, size(contours)
+        !    call pcontours(k)%Construct(contours(k)%x, contours(k)%y)
+        !end do 
+        !!$omp end parallel do
+        !call tempps%Construct(pcontours)
+        !call tempps%WriteData('mfcontours')
 
         ! Extrema
         call AddTopologicalMeshExtrema(topomesh, fieldtracer, &
@@ -354,7 +425,16 @@ module ggmod_topology2D
         !===========================
         ! Add contours and intersections
         call AddTopologicalMeshContours(topomesh, magneticField, newvessel, &
-            fieldtracer, vesseltracer, options)
+            fieldtracer, options)
+
+        ! Vertex faces (preliminary, for garbage tangency point removal)
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+
+        ! Remove garbage tangency points
+        call RemoveGarbageTangencyPoints(topomesh)
 
         ! Do temporary writing
         call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
@@ -365,21 +445,70 @@ module ggmod_topology2D
         call RemoveTopologicalMeshLimiterRegions(topomesh, magneticField, &
             fieldtracer, streamlinetracer, options)
 
+        ! Simplify
+        call SimplifyTopologicalMeshFaces(topomesh)
+
         ! Do temporary writing
         call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+
+        ! Add necessary data
+        !===================
+        ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Data 
+        call AddTopologicalMeshData(topomesh)
+
+        ! Add cells
+        call AddTopologicalMeshCells(topomesh)        
+
+        ! Compute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
+
+        ! Write
+        !======
+        ! Overwrite vessel structure
+        vessel = newvessel
+
+        ! Write topological mesh
+        call WriteTopologicalMesh(topomesh, 'topomesh_base')
+
+    end subroutine
+
+    ! Main modifier
+    subroutine ModifyTopologicalMesh(vessel, magneticField, options, &
+        topomesh, fieldtracer, vesseltracer, streamlinetracer)
+
+        ! Description
+        !============
+        ! This routine contains all possible modifications that may be
+        ! applied to a basic topological mesh. Though it is not recommended, one might 
+        ! try to apply these modifications to an already modified mesh 
+        ! if desired. No guarantees on result though (most of these 
+        ! operations are irreversible)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(TopomeshUDT)                       :: topomesh
+        type(VesselUDT), intent(inout)          :: vessel
+        type(magneticFieldUDT), intent(in)      :: magneticField 
+        type(TopomeshOptionsUDT), intent(in)    :: options
+        class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
+        class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
 
         ! Compute additional contours
         !============================
         ! Core boundaries? 
         if (options%addcoreboundaries) then 
             call AddTopologicalMeshCoreBoundaries(topomesh, magneticField, &
-                newvessel, fieldtracer, options)
+                vessel, fieldtracer, options)
         end if 
 
         ! 'PF' boundaries?
         if (options%addPFboundaries) then 
             call AddTopologicalMeshPFBoundaries(topomesh, magneticField, &
-                newvessel, fieldtracer, options)
+                vessel, fieldtracer, options)
         end if
 
         ! Simplify
@@ -399,6 +528,18 @@ module ggmod_topology2D
         ! Add cells
         call AddTopologicalMeshCells(topomesh)
 
+        ! Recompute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
+
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+
+        ! Merge tubes?
+        if (options%mergetangencypointtubes) then 
+            call MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
+                vessel, fieldtracer, options)
+        end if
+
         ! Remove parts if desired
         if (options%removecoreregions) then 
             call RemoveTopologicalMeshCoreRegions(topomesh)
@@ -406,16 +547,14 @@ module ggmod_topology2D
         if (options%removewidegridregions) then 
             call RemoveTopologicalMeshWideGridRegions(topomesh)
         end if 
+        if (options%removenoncoreregions) then 
+            call RemoveTopologicalMeshNonCoreRegions(topomesh)
+        end if
 
-        ! Compute interconnection data
+        
+
+        ! Recompute interconnection data
         call AddTopologicalMeshInterconnectionData(topomesh)
-
-        ! Re-evaluate topological mesh vertex field values
-        !topomesh%vert%fval = fieldtracer%Evaluate(topomesh%vert%x, topomesh%vert%y)
-
-        ! Write
-        !======
-        call WriteTopologicalMesh(topomesh, 'topomesh')
 
     end subroutine
 
@@ -698,9 +837,13 @@ module ggmod_topology2D
 
         ! Loop to add
         do i = 1, ec 
-            call AddTopologicalMeshVertex(topomesh, xe(i), ye(i), fe(i), &
-                typee(i), topomesh%nfs+1)
+            ! Update ID
             topomesh%nfs = topomesh%nfs+1
+
+            ! Add vertex
+            call AddTopologicalMeshVertex(topomesh, xe(i), ye(i), fe(i), &
+                typee(i), topomesh%nfs)
+            
         end do
 
         ! Reconstruct faces
@@ -947,7 +1090,7 @@ module ggmod_topology2D
 
     ! 2D tangency points
     subroutine AddTopologicalMeshTangencyPoints2(topomesh, &
-        boundarytracer, magneticField)
+        boundarytracer, vessel, magneticField, options)
 
         ! Description
         !============
@@ -990,6 +1133,8 @@ module ggmod_topology2D
         class(TopomeshUDT), intent(inout)       :: topomesh
         class(ContourTracerUDT), intent(in)     :: boundarytracer
         type(MagneticFieldUDT), intent(in)      :: magneticField 
+        type(TopomeshOptionsUDT), intent(in)    :: options
+        type(VesselUDT), intent(in)             :: vessel
 
         ! Auxiliary
         integer(I8)                             :: flag, ntp
@@ -1000,7 +1145,8 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)     :: val, dval, tx, ty, &
             tf, nxpe, nype, nxp, nyp, normprod, dFdx, dFdy
         logical                                 :: hasbeendeleted
-        logical, allocatable                    :: extrloc(:), keepind(:)
+        logical, allocatable                    :: extrloc(:), keepind(:), &
+            doflip(:)
         type(RealDynamicArrayUDT), allocatable  :: xf(:), yf(:)
         type(ContourUDT), allocatable           :: bndcontours(:)
         type(PolygonUDT), allocatable           :: bndpol(:), realbndpol(:)
@@ -1013,59 +1159,66 @@ module ggmod_topology2D
         !===========
         ! Initialize dynamic arrays
 
-        ! Trace contours
-        !---------------
-        ! Boundary
-        bndcontours = boundarytracer%TraceContours([0.0_R8])
-        
-        ! Sanity check
-        if (size(bndcontours) == 0) then 
-            ! Throw error - no boundary polygon
-            call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not trace ' // & 
-                'boundary contour, check input')
-        end if 
-
         ! Construct boundary polygonset
         !==============================
-        ! Construct polygons from boundary
-        allocate(bndpol(size(bndcontours)), keepind(size(bndcontours)))
-        keepind = .true. 
-        do i = 1, size(bndcontours)
-            ! Construct
-            call bndpol(i)%Construct(bndcontours(i)%x, bndcontours(i)%y)
-
-            ! Check for closedness, if not -> warning and remove
-            if (.not. bndpol(i)%isclosed) then 
-                print *, 'AddTopologicalMeshTangencyPoints2: ' //&
-                    'boundary polygon part is not closed and will not be ' // &
-                    'added'
-                print *, 'part: ', i
-                keepind(i) = .false. 
-                !call gdErrorHandler('AddTopologicalMeshTangencyPoints2: boundary polygon ' // & 
-                !    'is not closed, not supported. Check input')
+        ! Check if we just use the existing vessel polygon set or if
+        ! we retrace 
+        if (options%dotpvesselbased) then
+            ! Unpack
+            bndps = vessel%polygonset
+            bndpol = bndps%polygons
+        else
+            ! Boundary contours
+            bndcontours = boundarytracer%TraceContours([0.0_R8])
+            
+            ! Sanity check
+            if (size(bndcontours) == 0) then 
+                ! Throw error - no boundary polygon
+                call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not trace ' // & 
+                    'boundary contour, check input')
             end if 
-        end do 
 
-        ! Get only closed polygons
-        allocate(realbndpol(count(keepind)))
-        realbndpol = pack(bndpol, keepind)
-        if (size(realbndpol) == 0) then 
-            call gdErrorHandler('AddTopologicalMeshTangencyPoints2: no ' // & 
-                'closed boundary polygons found, check input')
-        end if 
-        bndpol = realbndpol
+            
+            ! Construct polygons from boundary
+            allocate(bndpol(size(bndcontours)), keepind(size(bndcontours)))
+            keepind = .true. 
+            do i = 1, size(bndcontours)
+                ! Construct
+                call bndpol(i)%Construct(bndcontours(i)%x, bndcontours(i)%y)
 
-        ! Construct polygonset
-        call bndps%Construct(bndpol)
+                ! Check for closedness, if not -> warning and remove
+                if (.not. bndpol(i)%isclosed) then 
+                    print *, 'AddTopologicalMeshTangencyPoints2: ' //&
+                        'boundary polygon part is not closed and will not be ' // &
+                        'added'
+                    print *, 'part: ', i
+                    keepind(i) = .false. 
+                    !call gdErrorHandler('AddTopologicalMeshTangencyPoints2: boundary polygon ' // & 
+                    !    'is not closed, not supported. Check input')
+                end if 
+            end do 
 
-        ! Orient
-        call bndps%OrientNestedClosedPolygons(flag)
+            ! Get only closed polygons
+            allocate(realbndpol(count(keepind)))
+            realbndpol = pack(bndpol, keepind)
+            if (size(realbndpol) == 0) then 
+                call gdErrorHandler('AddTopologicalMeshTangencyPoints2: no ' // & 
+                    'closed boundary polygons found, check input')
+            end if 
+            bndpol = realbndpol
 
-        ! Check if successful
-        if (flag /= 0) then
-            call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not orient ' // & 
-                'boundary polygons, check input')
-        end if 
+            ! Construct polygonset
+            call bndps%Construct(bndpol)
+
+            ! Orient
+            call bndps%OrientNestedClosedPolygons(flag)
+
+            ! Check if successful
+            if (flag /= 0) then
+                call gdErrorHandler('AddTopologicalMeshTangencyPoints2: could not orient ' // & 
+                    'boundary polygons, check input')
+            end if 
+        end if
 
         ! Compute tangency points
         !========================
@@ -1103,7 +1256,7 @@ module ggmod_topology2D
             hasbeendeleted = .false.
             do while (k < size(tf))
                 ! Check difference
-                if ((abs(tf(k+1)-tf(k)) < fdifftol) .or. (tv(k+1)-tv(k) == 1)) then 
+                if ((abs(tf(k+1)-tf(k)) < fdifftol) .or. (tv(k+1)-tv(k) == 1)) then ! 
                     ! Remove values, such that subsequent ones can be
                     ! checked too
                     hasbeendeleted = .true.
@@ -1146,10 +1299,24 @@ module ggmod_topology2D
             call magneticField%interp%Evaluate(tx, ty, 1, 0, dFdx)
             call magneticField%interp%Evaluate(tx, ty, 0, 1, dFdy)
 
-            nxpe = [p%nx, p%nx(1)]
+            ! Get normals of edges
+            nxpe = [p%nx, p%nx(1)] 
             nype = [p%ny, p%ny(1)]
+
+            ! Check orientation - default polygon orientation is inward pointing,
+            ! we need outward pointing
+            doflip = [p%edges(:, 1) == p%vert(1:p%ne)] ! if equal, then the normal points inwards and we need to flip
+            doflip = [doflip, doflip(1)]
+            where (doflip)
+                nxpe = -nxpe
+                nype = -nype 
+            end where
+
+            ! Get normals at vertices
             nxp = 0.5*(nxpe(extrlocind-1) + nxpe(extrlocind))
             nyp = 0.5*(nype(extrlocind-1) + nype(extrlocind))
+
+            ! Compute dot product
             normprod = dFdx*nxp + dFdy*nyp
 
             ! Determine type and add
@@ -1228,7 +1395,7 @@ module ggmod_topology2D
 
     ! Necessary contours
     subroutine AddTopologicalMeshContours(topomesh, magneticField, vessel, &
-        fieldtracer, bndtracer, options)
+        fieldtracer, options)
 
         ! Description
         !============
@@ -1241,6 +1408,7 @@ module ggmod_topology2D
         !
         ! - tangency points with contour in the vessel (type 5)
         ! - saddle points (type 2)
+        ! - split points on boundaries 
         !
         ! At this point, no contours for maxima/minima (types 1, 3) or for other
         ! tangency points (type 4) are added. This can be done in a later step for
@@ -1302,7 +1470,7 @@ module ggmod_topology2D
         class(TopomeshUDT)                      :: topomesh 
         type(MagneticFieldUDT),intent(in)       :: magneticField 
         type(VesselUDT), intent(inout)          :: vessel
-        class(ContourTracerUDT), intent(inout)  :: fieldtracer, bndtracer 
+        class(ContourTracerUDT), intent(inout)  :: fieldtracer 
         type(TopomeshOptionsUDT), intent(in)    :: options 
 
         ! Auxiliary
@@ -1351,7 +1519,8 @@ module ggmod_topology2D
             (topomesh%vert%type == TMvertexminID) .or. &
             (topomesh%vert%type == TMvertexsaddleID) .or. & 
             (topomesh%vert%type == TMvertextp1ID) .or. & 
-            (topomesh%vert%type == TMvertextp2ID)
+            (topomesh%vert%type == TMvertextp2ID) .or. &
+            (topomesh%vert%type == TMvertexsplitID)
         npsp = count(ispseudosaddlepoint)
         allocate(pspx(npsp), pspy(npsp), pspf(npsp), psptype(npsp), &
             pspID(npsp))
@@ -1385,8 +1554,7 @@ module ggmod_topology2D
         ! Trace contours
         !===============
         ! Add saddle point contours
-        !--------------------------
-         
+        !-------------------------- 
         do i = 1, npsp
             if ((psptype(i) == TMvertexsaddleID) .and. tracepoints(i)) then 
                 ! Trace
@@ -1521,10 +1689,11 @@ module ggmod_topology2D
                                     ty = topomesh%face%y(j)%Get()
                                     if (intfacestart) then 
                                         ! Face is oriented from start to end
-                                        call DeleteCurveSegment(tx, ty, [maxval(jout)], 'start', [0.1_R8, 0.1_R8], .true., .true.)
+                                        call DeleteCurveSegment(tx, ty, [maxval(jout)], 'start', &
+                                            [distfrac, distfrac], .true., .true.)
                                         ! delind = [(cc, cc = 2, maxval(vindJ))]
                                     else
-                                        call DeleteCurveSegment(tx, ty, [jout(1)], 'end', [0.1_R8, 0.1_R8], .true., .true.)
+                                        call DeleteCurveSegment(tx, ty, [jout(1)], 'end', [distfrac, distfrac], .true., .true.)
                                         ! delind = [(cc, cc = vindJ(1)+1, topomesh%face%x(j)%Size()-1)]
                                     end if 
 
@@ -1623,7 +1792,6 @@ module ggmod_topology2D
                 call fsIDs%Append(spread(nfs, 1, size(tc)))
             end if 
         end do
-        
 
         ! Add tangency point contours
         !----------------------------
@@ -1827,13 +1995,13 @@ module ggmod_topology2D
                         ! Adjust contour
                         if (startsr /= 0.0_R8 .and. endsr /= real(nstc, kind=R8)) then 
                             call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
-                                [startsr, endsr], 'both', [0.1_R8, 0.1_R8], .true., .true.)
+                                [startsr, endsr], 'both', [distfrac, distfrac], .true., .true.)
                         elseif (startsr /= 0.0_R8) then 
                             call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
-                                [startsr], 'start', [0.1_R8, 0.1_R8], .true., .true.)
+                                [startsr], 'start', [distfrac, distfrac], .true., .true.)
                         elseif (endsr /= real(nstc, kind=R8)) then 
                             call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
-                                [endsr], 'end', [0.1_R8, 0.1_R8], .true., .true.)
+                                [endsr], 'end', [distfrac, distfrac], .true., .true.)
                         end if 
                         !alltpc(i)%x = alltpc(i)%x([1, (k, k = startind, endind), nstc+1])
                         !alltpc(i)%y = alltpc(i)%y([1, (k, k = startind, endind), nstc+1])
@@ -1857,11 +2025,11 @@ module ggmod_topology2D
                     alltpc(indtpc)%endsaddle = 0 ! doesn't end anymore in saddle point
                     if (tscr(endind-1) == 0.0_R8) then 
                         call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
-                            [tscr(endind)], 'end', [-0.1_R8], .true., .false.)
+                            [tscr(endind)], 'end', [-distfrac], .true., .false.)
                     else
                         ! Also need to delete a first part
                         call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
-                            [tscr(endind-1:endind)], 'both', [0.1_R8, -0.1_R8], .true., .false.)
+                            [tscr(endind-1:endind)], 'both', [distfrac, -distfrac], .true., .false.)
                     end if 
                     !call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
                     !    [tscr(endind)], 'end', [0.0_R8], .true., .false.)
@@ -1880,11 +2048,11 @@ module ggmod_topology2D
                     alltpc(i)%startsaddle = 0 ! doesn't start anymore in saddle point
                     if (tscr(startind+1) == real(nstc, kind=R8)) then 
                         call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
-                            [tscr(startind)], 'start', [-0.1_R8], .false., .true.)
+                            [tscr(startind)], 'start', [-distfrac], .false., .true.)
                     else
                         ! Also need to delete last part
                         call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
-                            [tscr(startind:startind+1)], 'both', [-0.1_R8, 0.1_R8], .false., .true.)
+                            [tscr(startind:startind+1)], 'both', [-distfrac, distfrac], .false., .true.)
                     end if
                     !alltpc(i)%x = alltpc(i)%x([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
                     !alltpc(i)%y = alltpc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
@@ -1911,10 +2079,18 @@ module ggmod_topology2D
                         'neighbouring boundary face. Unexpected, intersections ' // & 
                         'are removed'
                 end if 
+                if (intersectind == size(isnbface)) then 
+                    ! Unexpected, only intersections in neighbouring faces 
+                    ! but not in other boundary face
+                    call gdErrorHandler('AddTopologicalMeshContours: ' // & 
+                        'tangency point contour intersects in tangency point ' // & 
+                        'and neighbouring face but not in other boundary ' // &
+                        'faces - unexpected')
+                end if 
 
                 ! Keep only this part of the contour coordinates
                 call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
-                    [tscr(intersectind)], 'start', [0.1_R8, 0.1_R8], .true., .true.)
+                    [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .true., .false.)
                 !notdelind = [(k, k = 2, tsc(intersectind))]
                 !alltpc(i)%x = alltpc(i)%x(notdelind)
                 !alltpc(i)%y = alltpc(i)%y(notdelind)
@@ -2011,13 +2187,13 @@ module ggmod_topology2D
                         ty = topomesh%face%y(i)%Get()
                         if (tsfr(startind) /= 0.0_R8 .and. tsfr(endind) /= real(topomesh%face%x(i)%Size()-1)) then 
                             call DeleteCurveSegment(tx, ty, tsfr([startind, endind]), &
-                                'both', [0.1_R8, 0.1_R8], .true., .true.)
+                                'both', [distfrac, distfrac], .true., .true.)
                         elseif (tsfr(startind) /= 0.0_R8) then 
                             call DeleteCurveSegment(tx, ty, tsfr([startind]), &
-                                'start', [0.1_R8, 0.1_R8], .true., .true.)
+                                'start', [distfrac, distfrac], .true., .true.)
                         elseif (tsfr(endind) /= real(topomesh%face%x(i)%Size()-1, kind=R8)) then 
                             call DeleteCurveSegment(tx, ty, tsfr([endind]), &
-                                'end', [0.1_R8, 0.1_R8], .true., .true.)
+                                'end', [distfrac, distfrac], .true., .true.)
                         end if 
 
                             ! Reconstruct polygon
@@ -2063,7 +2239,7 @@ module ggmod_topology2D
                             tx = topomesh%face%x(i)%Get()
                             ty = topomesh%face%y(i)%Get()
                             call DeleteCurveSegment(tx, ty, tsfr([startind]), &
-                                'start', [0.1_R8, 0.1_R8], .true., .true.)
+                                'start', [distfrac, distfrac], .true., .true.)
                             call topomesh%face%x(i)%Set(tx)
                             call topomesh%face%y(i)%Set(ty)
 
@@ -2103,7 +2279,7 @@ module ggmod_topology2D
                             tx = topomesh%face%x(i)%Get()
                             ty = topomesh%face%y(i)%Get()
                             call DeleteCurveSegment(tx, ty, tsfr([startind]), &
-                                'end', [0.1_R8, 0.1_R8], .true., .true.)
+                                'end', [distfrac, distfrac], .true., .true.)
                             call topomesh%face%x(i)%Set(tx)
                             call topomesh%face%y(i)%Set(ty)
 
@@ -2132,6 +2308,9 @@ module ggmod_topology2D
         ! Add contours (IDs etc should be done already...)
         allc = [allc, alltpc]
 
+        
+
+
         ! Add to the topology mesh
         !=========================
         ! Clean the contours (just to be sure)
@@ -2159,18 +2338,172 @@ module ggmod_topology2D
         call ConstructVesselPolygonSet(vessel, bndps)
         allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
         call InitializePolygonLevelsetFunction2D(vessel%plfvessel, vessel%polygonset, bndplfoptions)
+        deallocate(bndpol)
 
         ! Trim the topological mesh
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
-        call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)    
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+        call SplitTopologicalMeshFaces(topomesh)   
+        
+        ! Boundary split vertex contours
+        !===============================
+        call AddBoundarySplitVertexContours(topomesh, magneticField, vessel, &
+            fieldtracer)
+
+        call SimplifyTopologicalMeshFaces(topomesh)
         
         ! Housekeeping
         !=============
         end associate
 
     end subroutine 
+
+    ! Boundary split vertex contours
+    subroutine AddBoundarySplitVertexContours(topomesh, magneticField, vessel, &
+        fieldtracer)
+
+        ! Description
+        !============
+        ! This routine adds contours that start from a split vertex 
+        ! located on a boundary. These are necessary to deal with 
+        ! boundaries that have been split and would result in 
+        ! non-conforming flux tubes (perhaps expanding the flux tube
+        ! concept will be necessary at some point...)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        type(MagneticFieldUDT),intent(in)       :: magneticField 
+        type(VesselUDT), intent(inout)          :: vessel
+        class(ContourTracerUDT), intent(inout)  :: fieldtracer 
+
+        ! Auxiliary
+        real(R8)                                :: dist
+        integer(I8), allocatable, dimension(:)  :: allcurvetypes, allfsIDs
+        logical, allocatable, dimension(:)      :: keepind
+
+        type(ContourUDT), allocatable           :: tc(:), allc(:), &
+            allbsvc(:)
+        type(PolygonUDT), allocatable           :: allpc(:)
+        type(PolygonSetUDT)                     :: tempps
+        type(IntegerDynamicArrayUDT)            :: curvetypes, fsIDs
+
+
+        ! Loop 
+        integer(I8)                             :: i, k
+        
+        ! Initialize
+        !===========
+        ! Associate
+        associate(nfs       => topomesh%nfs)
+
+        ! Initialize the contour structure & dynamic arrays
+        allocate(allc(0))
+        curvetypes = ConstructIntegerDynamicArray()
+        fsIDs = ConstructIntegerDynamicArray()
+
+        ! First, trace all contours
+        allocate(allbsvc(0))
+        !$omp parallel do default(shared) private(tc, keepind, dist)
+        do i = 1, topomesh%vert%ntot
+            if ((topomesh%vert%type(i) == TMvertexsplitID) .and. &
+                topomesh%vert%fsID(i) == 0) then 
+                ! Trace contour
+                tc = fieldtracer%TraceContours([topomesh%vert%x(i)], [topomesh%vert%y(i)])
+
+                ! Process
+                call CleanContours(tc)
+
+                ! Checks
+                allocate(keepind(size(tc)))
+                keepind = .true.
+                do k = 1, size(tc)
+                    ! Is the starting point the actual given start point? (should
+                    ! be exactly the same since added as starting point in the
+                    ! contouring algorithm)
+                    dist = sqrt((tc(k)%x(1) - topomesh%vert%x(i))**2 + &
+                        (tc(k)%y(1) - topomesh%vert%y(i))**2)
+                    if (dist > 0.0_R8) then 
+                        print *, 'AddTopologicalMEshContours: split vertex ' // & 
+                            'contour segment found that does not start ' // & 
+                            'in given tangency point. Removing...'
+                        keepind(k) = .false.
+                    end if
+                    if (tc(k)%startsaddle /= i) then
+                        ! Normally this should come from the contour 
+                        ! tracer, but we can add it afterwards as well 
+                        print *, 'AddTopologicalMeshContours: split vertex ' // &
+                            'contour segment found that starts in given ' // & 
+                            'point, but that does not have the ' // &
+                            'starting saddle point ID as tangency point. ' // & 
+                            'adjusting starting ID...'
+                        tc(k)%startsaddle = i
+                    end if 
+                    if (tc(k)%isclosed .and. (tc(k)%endsaddle /= i)) then 
+                        ! Ensure start and end saddle point are the same
+                        tc(k)%endsaddle = i
+                    end if 
+                end do
+
+                ! Remove
+                tc = pack(tc, keepind)
+                deallocate(keepind)
+
+                ! Add
+                !$omp critical
+                allbsvc = [allbsvc, tc]
+                call curvetypes%Append(spread(TMfacepolID, 1, size(tc)))
+                
+                ! Add flux surface ID
+                topomesh%nfs = topomesh%nfs + 1
+                topomesh%vert%fsID(i) = topomesh%nfs
+                topomesh%vert%type(i) = TMvertexbndID
+                topomesh%vert%fval(i:i) = fieldtracer%Evaluate([topomesh%vert%x(i)], [topomesh%vert%y(i)])
+                call fsIDs%Append(spread(topomesh%nfs, 1, size(tc)))
+                !$omp end critical
+            end if 
+        end do 
+        !$omp end parallel do 
+
+        ! Add contours (IDs etc should be done already...)
+        allc = [allc, allbsvc]
+
+        ! Add to the topology mesh
+        !=========================
+        ! Clean the contours (just to be sure)
+        if (size(allc) > 0) then 
+            call CleanContours(allc)
+
+            allocate(allpc(size(allc)))
+            do i = 1, size(allc)
+                call allpc(i)%Construct(allc(i)%x, allc(i)%y)
+            end do 
+            call tempps%Construct(allpc)
+            call tempps%WriteData('topocontours_all_beforeinsertion2')
+
+            ! Add the contours
+            allcurvetypes = curvetypes%Get()
+            allfsIDs = fsIDs%Get()
+            do i = 1, size(allc)
+                call InsertTopologicalMeshContour(topomesh, magneticField, &
+                    allc(i), allcurvetypes(i), allfsIDs(i))
+            end do 
+
+            ! Trim the topological mesh
+            call TrimTopologicalMesh(topomesh, magneticField, vessel)
+
+            ! Split boundaries
+            call SplitTopologicalMeshFaces(topomesh)   
+        end if
+        
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
 
     ! Core boundary contours
     subroutine AddTopologicalMeshCoreBoundaries(topomesh, magneticField, &
@@ -2336,7 +2669,7 @@ module ggmod_topology2D
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
-        call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
+        call SplitTopologicalMeshFaces(topomesh)
 
     end subroutine 
 
@@ -2533,7 +2866,7 @@ module ggmod_topology2D
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
-        call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
+        call SplitTopologicalMeshFaces(topomesh)
 
     end subroutine 
 
@@ -2649,7 +2982,7 @@ module ggmod_topology2D
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
-        call SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
+        call SplitTopologicalMeshFaces(topomesh)
 
     end subroutine
 #endif 
@@ -2913,6 +3246,7 @@ module ggmod_topology2D
         end associate
 
     end subroutine
+    
     ! Core region removal
     subroutine RemoveTopologicalMeshCoreRegions(topomesh)
 
@@ -3051,6 +3385,508 @@ module ggmod_topology2D
 
         ! Data
         call AddTopologicalMeshData(topomesh)
+
+    end subroutine
+
+    ! Remove all-but core regions (for Anthony)
+    subroutine RemoveTopologicalMeshNonCoreRegions(topomesh)
+
+        ! Description
+        !============
+        ! This routine removes all regions that don't have either a 
+        ! core boundary (inserted) or a maximum/minimum as boundary.
+        ! This should yield the desired output for devices such as 
+        ! e.g. TOMAS that are almost perfectly circular
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)              :: topomesh 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tcf, tcv
+        logical, allocatable, dimension(:)      :: delv, delf, delc
+
+        ! Loop
+        integer(I8)                         :: i
+
+        ! Initialize
+        !===========
+        ! Mark cells, vertices, faces for deletion
+        allocate(delc(topomesh%cell%ntot), delv(topomesh%vert%ntot), &
+            delf(topomesh%face%ntot))
+        delc = .true. ! default true
+        delv = .true.
+        delf = .true.
+
+        do i = 1, topomesh%cell%ntot 
+            ! Get faces
+            tcf = topomesh%cell%GetFace(i)
+
+            ! Get vertices
+            tcv = topomesh%cell%GetVert(i)
+
+            ! Check if there is a core face or extremum, then keep cell
+            if (any(topomesh%face%type(tcf) == TMfacecoreID) .or. &
+                any(topomesh%vert%type(tcv) == TMvertexminID) .or. &
+                any(topomesh%vert%type(tcv) == TMvertexmaxID)) then 
+                delc(i)     = .false. 
+                delf(tcf)   = .false.
+                delv(tcv)   = .false.
+            end if 
+        end do
+
+        ! Delete
+        !=======
+        ! Vertices
+        call RemoveTopologicalMeshVertexLogical(topomesh, delv)
+
+        ! Faces
+        call RemoveTopologicalMeshFaceLogical(topomesh, delf)
+
+        ! Cells
+        call RemoveTopologicalMeshCellLogical(topomesh, delc)
+
+        ! Update again
+        !=============
+        ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Data
+        call AddTopologicalMeshData(topomesh)
+
+    end subroutine
+
+    ! Flux tube merging
+    subroutine MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
+        vessel, fieldtracer, options)
+
+        ! Description
+        !============
+        ! This routine merges topological mesh tubes if it is possible 
+        ! and if it is desired by the user. Typically, only two adjacent
+        ! tubes are merged at the same time. This operation results in 
+        ! the deletion of cells, vertices, and flux surfaces, and the 
+        ! construction of new cells. To apply this operation, the 
+        ! topological mesh must be fully constructed with all additional
+        ! interconnection information. This information is later 
+        ! reconstructed, meaning that cells are retraced etc (this is 
+        ! actually done after each tube merging, otherwise it's 
+        ! impossible to proceed). 
+
+        ! The currently supported types of merging are:
+        ! - merging of tubes that share a tangency point contour as 
+        !   boundary, and where one side has a single tube and the other
+        !   side has two tubes, of which at least one is a single cell 
+        !   tube with a tangency point (type 1) boundary (i.e. no real
+        !   other flux surface boundary but a point). This sounds awfully
+        !   specific, and it is, but it represents one of the most 
+        !   common cases that requires coarsening (especially at nearly
+        !   aligned walls etc that have many tangency points)
+
+        ! See dedicated subroutines/documentation below for more information
+        
+        ! Algorithm
+        !==========
+        ! Merging of tangency point contours:
+        !   1)  loop over all tubes until we reached the final tube and 
+        !       did not apply a merging operation
+        !   2)  Check if the current tube is eligible (a tube is eligible
+        !       if the maximal difference in psi value of its vertices is
+        !       below the specified threshold)
+        !   3)  Check if we can merge the tube by deleting one of its 
+        !       boundary face sets. This is possible if the tube only has
+        !       two tube neighbours, and at least one neigbour is a 
+        !       boundary tube (i.e. it has no boundary faces at one
+        !       side)
+        !   4)  To merge, the bounding faces are removed from the 
+        !       topological mesh. The boundary vertices of these faces are
+        !       kept, but are set to the regular boundary type. 
+        !       Non-boundary vertices are deleted.
+        !       If both tubes are boundary tubes, we can only keep 
+        !       one of the tangency points that form the other boundary.
+        !       The other one becomes a regular boundary vertex. This
+        !       will allow to apply the SimplifyTopologicalMesh operation
+        !       to simplify boundaries. The choice of which vertex to 
+        !       take will 
+        !   5)  All cell data etc is reconstructed after each tube merge
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(inout)       :: topomesh
+        type(TopomeshOptionsUDT), intent(in)    :: options 
+        type(MagneticFieldUDT),intent(in)       :: magneticField 
+        type(VesselUDT), intent(inout)          :: vessel
+        class(ContourTracerUDT), intent(inout)  :: fieldtracer
+
+        ! Auxiliary
+        logical                                 :: marked, &
+            passedcheck
+        logical, allocatable, dimension(:)      :: delf, delv
+        integer(I8)                             :: thisind
+        integer(I8), allocatable, dimension(:)  :: tf, tfv, tnb, &
+            tfmerge, tnbmerge, tfvu, tfradmerge, tvfvID, tvfvIDu, &
+            tvf
+        real(R8)                                :: dpsi, dpsinb1, dpsinb2
+        real(R8), allocatable, dimension(:)     :: fval
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert        => topomesh%vert,   &
+            face        => topomesh%face,   &
+            cell        => topomesh%cell,   &
+            tube        => topomesh%tube    &
+            )
+
+        
+
+        ! Merge tubes
+        !============
+        ! Tangency point tubes
+        !---------------------
+        if (options%mergetangencypointtubes) then 
+            ! Loop over all tubes to find eligible tubes for merging
+            i = 1
+            do while (i <= tube%ntot)
+                
+                ! Initialize
+                marked = .false. 
+
+                ! Set logicals
+                if (allocated(delv)) then 
+                    deallocate(delv, delf)
+                end if
+                allocate(delv(vert%ntot), delf(face%ntot))
+                delv = .false.
+                delf = .false.
+
+                ! See if the tube can be merged on side one
+                passedcheck = .true.
+                if (.not. marked .and. (tube%ftneig1P(i, 2) > 0)) then 
+                    ! Get the tube neighbours on that side
+                    tnb = tube%GetNeig(i, 1_I8)
+
+                    ! Check the amount of neighbours
+                    if (size(tnb) == 2) then 
+
+                        ! Check if at least one neighbour is a boundary 
+                        ! tube (i.e. it doesn't have any other boundaries)
+                        if ((tube%ftneig1P(tnb(1), 2) /= 0 .and. tube%ftneig2P(tnb(1), 2) /= 0) .and. &
+                            (tube%ftneig1P(tnb(2), 2) /= 0 .and. tube%ftneig2P(tnb(2), 2) /= 0)) then
+                            passedcheck = .false.  
+                        end if
+
+                        ! Check tube dpsi
+                        tf = tube%GetFace(i)
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsi = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(1))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb1 = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(2))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb2 = maxval(fval) - minval(fval)
+
+                        if (all([dpsi, dpsinb1, dpsinb2] >= options%dpsimintangencypointtubes)) then 
+                            passedcheck = .false.
+                        end if 
+
+                        ! Check if we can merge
+                        if (passedcheck) then 
+                            ! Get merge data
+                            tfmerge = tube%GetBndFace(i, 1_I8)
+                            tnbmerge = tnb
+                            tfradmerge = [tube%GetFace(tnb(1)), &
+                                tube%GetFace(tnb(2))]
+
+                            ! Check for non-mergeable surfaces (separatrix basicall)
+                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                                marked = .false.
+                            else
+                                marked = .true.
+                            end if
+
+                        end if 
+
+                    elseif (size(tnb) == 1) then 
+
+                        ! Check if this neighbour has maximally one
+                        ! other neighbour on each side
+                        if ((tube%ftneig1P(tnb(1), 2) > 1 .or. tube%ftneig2P(tnb(1), 2) > 1)) then
+                            passedcheck = .false.  
+                        end if
+
+                        ! Check tube dpsi
+                        tf = tube%GetFace(i)
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsi = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(1))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb1 = maxval(fval) - minval(fval)
+
+                        if (all([dpsi, dpsinb1] >= options%dpsimintangencypointtubes)) then 
+                            passedcheck = .false.
+                        end if 
+
+                        ! Check if we can merge
+                        if (passedcheck) then 
+
+                            ! Get merge data
+                            tfmerge = tube%GetBndFace(i, 1_I8)
+                            tnbmerge = tnb
+                            tfradmerge = tube%GetFace(tnb(1))
+
+                            ! Check for non-mergeable surfaces (separatrix basicall)
+                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                                marked = .false.
+                            else
+                                marked = .true.
+                            end if
+
+                        end if 
+                    end if 
+                end if 
+
+                ! See if the tube can be merged on side two
+                if (.not. marked .and. (tube%ftneig2P(i, 2) > 0)) then 
+                    ! Get the tube neighbours on that side
+                    tnb = tube%GetNeig(i, 2_I8)
+
+                    ! Check the amount of neighbours
+                    if (size(tnb) == 2) then 
+
+                        ! Check if at least one neighbour is a boundary 
+                        ! tube (i.e. it doesn't have any other boundaries)
+                        if ((tube%ftneig1P(tnb(1), 2) /= 0 .and. tube%ftneig2P(tnb(1), 2) /= 0) .and. &
+                            (tube%ftneig1P(tnb(2), 2) /= 0 .and. tube%ftneig2P(tnb(2), 2) /= 0)) then
+                            passedcheck = .false.  
+                        end if
+
+                        ! Check tube dpsi
+                        tf = tube%GetFace(i)
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsi = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(1))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb1 = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(2))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb2 = maxval(fval) - minval(fval)
+
+                        if (all([dpsi, dpsinb1, dpsinb2] >= options%dpsimintangencypointtubes)) then 
+                            passedcheck = .false.
+                        end if 
+
+                        ! Check if we can merge
+                        if (passedcheck) then 
+                            ! Get merge data
+                            tfmerge = tube%GetBndFace(i, 2_I8)
+                            tnbmerge = tnb
+                            tfradmerge = [tube%GetFace(tnb(1)), &
+                                tube%GetFace(tnb(2))]
+
+                            ! Check for non-mergeable surfaces (separatrix basicall)
+                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                                marked = .false.
+                            else
+                                marked = .true.
+                            end if
+
+                        end if 
+
+                    elseif (size(tnb) == 1) then 
+
+                        ! Check if this neighbour has maximally one
+                        ! other neighbour on each side
+                        if ((tube%ftneig1P(tnb(1), 2) > 1 .or. tube%ftneig2P(tnb(1), 2) > 1)) then
+                            passedcheck = .false.  
+                        end if
+
+                        ! Check tube dpsi
+                        tf = tube%GetFace(i)
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsi = maxval(fval) - minval(fval)
+
+                        tf = tube%GetFace(tnb(1))
+                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
+                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
+                        dpsinb1 = maxval(fval) - minval(fval)
+
+                        if (all([dpsi, dpsinb1] >= options%dpsimintangencypointtubes)) then 
+                            passedcheck = .false.
+                        end if 
+
+                        ! Check if we can merge
+                        if (passedcheck) then 
+
+                            ! Get merge data
+                            tfmerge = tube%GetBndFace(i, 2_I8)
+                            tnbmerge = tnb
+                            tfradmerge = tube%GetFace(tnb(1))
+
+                            ! Check for non-mergeable surfaces (separatrix basicall)
+                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                                marked = .false.
+                            else
+                                marked = .true.
+                            end if
+
+                        end if 
+                    end if 
+                end if
+
+                ! If marked for merging, apply merging operation
+                if (marked) then 
+                    ! Reset counter 
+                    i = 1
+
+                    ! Mark faces and vertices for removal
+                    delf = .false. 
+                    delv = .false.
+                    delf(tfmerge) = .true. 
+                    do j = 1, size(tfmerge)
+                        ! Get face vertices
+                        tfv = face%vert(tfmerge(j), :)
+
+                        ! Check vertex type
+                        if (any(vert%type(tfv(1)) == [TMvertexbndID, TMvertextp2ID])) then 
+                            ! Don't delete, but reset type
+                            vert%type(tfv(1)) = TMvertexbndID
+                        else
+                            ! Mark for deletion
+                            delv(tfv(1)) = .true.
+                        end if
+                        if (any(vert%type(tfv(2)) == [TMvertexbndID, TMvertextp2ID])) then 
+                            ! Don't delete, but reset type
+                            vert%type(tfv(2)) = TMvertexbndID
+                        else
+                            ! Mark for deletion
+                            delv(tfv(2)) = .true.
+                        end if
+                    end do 
+
+                    ! Check if two (or more) type 1 tangency points were present.
+                    ! If so, delete one of both (perhaps)
+                    call Unique([face%vert(tfradmerge, 1), face%vert(tfradmerge, 2)], tfvu)
+                    do while (count(vert%type(tfvu) == TMvertextp1ID) > 1)
+                        thisind = findloc(vert%type(tfvu), TMvertextp1ID, 1)
+                        vert%type(tfvu(thisind)) = TMvertexbndID
+                    end do 
+
+                    ! Remove faces
+                    call RemoveTopologicalMeshFaceLogical(topomesh, delf)
+
+                    ! Remove vertices
+                    call RemoveTopologicalMeshVertexLogical(topomesh, delv)
+
+                    ! Simplify
+                    call SimplifyTopologicalMeshFaces(topomesh)
+
+                    !!! To be replaced by garbage point collector?
+
+                    ! Check if the tangency points are currently located
+                    ! in between two flux surfaces with different ID. 
+                    ! In that case, 'delete' one of them
+                    j = 1
+                    do while (j <= vert%ntot)
+                        if (vert%type(j) == TMvertextp1ID) then 
+                            ! Check
+                            tvf = vert%GetFace(j)
+
+                            ! Sanity check
+                            if (size(tvf) /= 2) then 
+                                ! Write out some data for debugging
+                                call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                                print *, 'vertex: ', j
+                                call gdErrorHandler('MergeTopologicalMeshFluxTubes: ' // & 
+                                    'type 1 tangency point does not have ' // & 
+                                    'exactly two faces, unexpected. Check mesh in topomesh_error.dat')
+                            end if 
+
+                            ! Get all unique flux surface IDs of these vertices
+                            tvfvID = vert%fsID([face%vert(tvf, 1), face%vert(tvf, 2)])
+                            call Unique(tvfvID, tvfvIDu)
+                            if (size(tvfvIDu) > 2) then 
+                                ! Set vertex type to simple boundary vertex
+                                ! for deletion later on in simplification 
+                                ! step
+                                vert%type(j) = TMvertexbndID
+
+                                ! Simplify
+                                call SimplifyTopologicalMeshFaces(topomesh)
+
+                                ! Reset counter 
+                                j = 0
+                            end if 
+                        end if 
+
+                        ! Update counter
+                        j = j + 1
+                    end do 
+
+                    ! Simplify again
+                    call SimplifyTopologicalMeshFaces(topomesh)
+
+                    ! Split faces if necessary
+                    call SplitTopologicalMeshFaces(topomesh)   
+
+                    ! Add contours for split boundary vertices in case they emerge
+                    call AddBoundarySplitVertexContours(topomesh, &
+                        magneticField, vessel, fieldtracer)
+
+                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+
+                    ! Recompute all interconnections, cells, etc
+                    ! Vertex faces
+                    call AddTopologicalMeshVertexFaces(topomesh)
+
+                    ! Data
+                    call AddTopologicalMeshData(topomesh)
+
+                    ! Add cells
+                    call AddTopologicalMeshCells(topomesh)
+
+                    ! Data (recompute)
+                    call AddTopologicalMeshData(topomesh)
+
+                    ! Compute interconnection data
+                    call AddTopologicalMeshInterconnectionData(topomesh)
+
+                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+
+                else
+                    i = i + 1
+                end if 
+
+                ! Housekeeping
+                deallocate(delv, delf)
+                
+            end do
+        end if 
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
@@ -3602,7 +4438,7 @@ module ggmod_topology2D
                 call AddTopologicalMeshFace(topomesh, [vf1(i), vf2(i)], xfda(i), &
                     yfda(i), topomesh%face%type(fID(k)), topomesh%face%fsID(fID(k)), fsfval)
 
-                call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                ! call WriteTopologicalMesh(topomesh, 'topomesh_temp')
             end do 
 
         end do 
@@ -3616,7 +4452,7 @@ module ggmod_topology2D
     end subroutine 
 
     ! Topological mesh face splitting
-    subroutine SplitTopologicalMeshFaces(topomesh, magneticField, vessel)
+    subroutine SplitTopologicalMeshFaces(topomesh)
 
         ! Description
         !============
@@ -3637,12 +4473,11 @@ module ggmod_topology2D
         !==================
         ! Arguments
         class(TopomeshUDT)                      :: topomesh 
-        type(magneticFieldUDT)                  :: magneticField
-        type(VesselUDT)                         :: vessel 
 
         ! Auxiliary 
         integer(I8)                             :: nncf, nndf, np, &
-            ind(1:2), nfinit
+            ind(1:2), nfinit, tf
+        integer(I8), allocatable, dimension(:)  :: faceID
         real(R8)                                :: newvcfx(1:2), newvcfy(1:2), &
             newvcff(1:2), newvdfx(1), newvdfy(1), newvdff(1), fsfval
         
@@ -3669,8 +4504,9 @@ module ggmod_topology2D
         isclosedface = face%vert(:, 1) == face%vert(:, 2);
 
         ! Open faces
-        allocate(isduplicateface(ntot))
+        allocate(isduplicateface(ntot), faceID(ntot))
         isduplicateface = .false. 
+        faceID = 0
         do i = 1, ntot-1
             do j = i+1, ntot
                 ! Skip closed faces - should be dealt with separately, even if
@@ -3680,6 +4516,7 @@ module ggmod_topology2D
                     if (any(face%vert(i, 1) == face%vert(j, :)) .and. &
                         any(face%vert(i, 2) == face%vert(j, :))) then 
                         isduplicateface(j) = .true.
+                        faceID(j) = i
                     end if 
                 end if
             end do 
@@ -3725,15 +4562,6 @@ module ggmod_topology2D
                 ! Get vertex coordinates
                 newvcfx = face%x(i)%Get(ind)
                 newvcfy = face%y(i)%Get(ind)
-                call magneticField%interp%Evaluate(newvcfx, newvcfy, &
-                    0, 0, newvcff)
-                
-                ! Insert new vertices
-                do j = 1, 2
-                    call AddTopologicalMeshVertex(topomesh, &
-                        newvcfx(j), newvcfy(j), newvcff(j), &
-                        TMvertexsplitID, face%fsID(i))
-                end do 
 
                 ! Get flux surface value
                 if (face%fsID(i) /= 0) then 
@@ -3741,6 +4569,14 @@ module ggmod_topology2D
                 else
                     fsfval = 0.0_R8
                 end if 
+                newvcff = fsfval
+                
+                ! Insert new vertices
+                do j = 1, 2
+                    call AddTopologicalMeshVertex(topomesh, &
+                        newvcfx(j), newvcfy(j), newvcff(j), &
+                        TMvertexsplitID, face%fsID(i))
+                end do       
                 
                 ! Insert first face
                 xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = 1, ind(1))]))
@@ -3765,8 +4601,20 @@ module ggmod_topology2D
 
             elseif (isduplicateface(i)) then 
 
+                ! Check which face to split - preference to aligned faces
+                ! instead of boundary faces (these may be contour parts
+                ! etc)
+
+                if (face%type(i) /= TMfacebndID) then 
+                    tf = i
+                elseif (face%type(faceID(i)) /= TMfacebndID) then 
+                    tf = faceID(i)
+                else
+                    tf = i ! default
+                end if 
+
                 ! Get number of points of this face
-                np = face%x(i)%Size()
+                np = face%x(tf)%Size()
                 if (np < 3) then  ! end points should be the same and duplicate
                     ! Issue message: we cannot split up this boundary
                     call gdErrorHandler('SplitTopologicalMeshFaces: ' // & 
@@ -3779,36 +4627,35 @@ module ggmod_topology2D
                 ind(1) = np/2+1
                 
                 ! Get vertex coordinates
-                newvdfx = face%x(i)%Get(ind(1))
-                newvdfy = face%y(i)%Get(ind(1))
-                call magneticField%interp%Evaluate(newvdfx, newvdfy, &
-                    0, 0, newvdff)
-                
-                ! Insert new vertex
-                call AddTopologicalMeshVertex(topomesh, newvdfx(1), &
-                    newvdfy(1), newvdff(1), TMvertexsplitID, face%fsID(i))
+                newvdfx = face%x(tf)%Get(ind(1))
+                newvdfy = face%y(tf)%Get(ind(1))
 
                 ! Get flux surface value
-                if (face%fsID(i) /= 0) then 
-                    fsfval = topomesh%fsfval%Get(face%fsID(i))
+                if (face%fsID(tf) /= 0) then 
+                    fsfval = topomesh%fsfval%Get(face%fsID(tf))
                 else
                     fsfval = 0.0_R8
                 end if 
+                newvcff = fsfval
+                
+                ! Insert new vertex
+                call AddTopologicalMeshVertex(topomesh, newvdfx(1), &
+                    newvdfy(1), newvdff(1), TMvertexsplitID, face%fsID(tf))
 
                 ! Insert first face
-                xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = 1, ind(1))]))
-                yrda = ConstructRealDynamicArray(face%y(i)%Get([(k, k = 1, ind(1))]))
+                xrda = ConstructRealDynamicArray(face%x(tf)%Get([(k, k = 1, ind(1))]))
+                yrda = ConstructRealDynamicArray(face%y(tf)%Get([(k, k = 1, ind(1))]))
                 call AddTopologicalMeshFace(topomesh, &
                     [face%vert(i, 1), topomesh%vert%ntot], &
-                    xrda, yrda, face%type(i), face%fsID(i), fsfval)
+                    xrda, yrda, face%type(tf), face%fsID(tf), fsfval)
 
                 ! Insert second face
-                xrda = ConstructRealDynamicArray(face%x(i)%Get([(k, k = ind(1), face%x(i)%Size())]))
-                yrda = ConstructRealDynamicArray(face%y(i)%Get([(k, k = ind(1), face%y(i)%Size())]))
+                xrda = ConstructRealDynamicArray(face%x(tf)%Get([(k, k = ind(1), face%x(tf)%Size())]))
+                yrda = ConstructRealDynamicArray(face%y(tf)%Get([(k, k = ind(1), face%y(tf)%Size())]))
                 
                 call AddTopologicalMeshFace(topomesh, &
                     [topomesh%vert%ntot, face%vert(i, 2)], &
-                    xrda, yrda, face%type(i), face%fsID(i), fsfval)
+                    xrda, yrda, face%type(tf), face%fsID(tf), fsfval)
 
             end if 
 
@@ -3827,6 +4674,600 @@ module ggmod_topology2D
         end associate
 
     end subroutine 
+
+    ! Topomesh trimming
+    subroutine TrimTopologicalMesh(topomesh, magneticField, vessel)
+
+        ! Description
+        !============
+        ! This function removes boundaries and vertices from a topological mesh if
+        ! those vertices and boundaries lie outside of the domain. To determine the
+        ! latter, the vessel levelset function is checked, which is
+        ! positive when points are outside of the boundary. Any points that lie on
+        ! the boundary should be identified as tangency points (type 4 or 5) or
+        ! other type of boundary points (type 6).
+
+        ! All other points are removed. We assume that all intersections of faces with
+        ! the boundary have been computed and that all segments are added as
+        ! separate faces.
+
+        ! Faces that do not have a start and end vertex are removed per definition.
+        ! If a start or end vertex has been deleted, also the faces that have this
+        ! start or end vertex will be deleted. For other faces, it is checked if
+        ! the majority of points lies inside the vessel, excluding start and end
+        ! vertices (they may lie exactly on the vessel or should be deleted already
+        ! if they lie outside of the vessel). If all vertices (except end points)
+        ! lie outside the vessel, there is no ambiguity and the face is deleted.
+        ! If the first node near the start/end points are still inside
+        ! the vessel, but the rest outside, it is assumed that this is due to mesh
+        ! accuracy (a message will be displayed). If more than one node on each
+        ! side is detected, a warning is issued and the face is not deleted. This
+        ! may be due to not having computed and inserted all intersections, or due
+        ! to misuse of this routine. 
+
+        ! Notes
+        !======
+        ! Note 1: actually, we could also check based on the start and end vertex
+        ! type whether we should consider a certain boundary for deletion (actually
+        ! only boundaries with 'regular' intersections or tangency points). Now, we
+        ! simply check all boundaries. 
+
+        ! Note 2: we rely on the face identifiers to not consider boundary faces.
+        ! This is necessary, since boundary faces may lie just on or off the vessel
+        ! contour, depending on how accurate it was traced. Therefore, this routine
+        ! is likely to fail for these boundaries (as expected...). Boundary faces
+        ! are expected to be of type 3. 
+
+        ! Note 3: separatrix segments (type 4) that do not have a 
+        ! saddle point at either end are removed as well, since they
+        ! are not strictly necessary in the topological mesh. Splitting
+        ! points are also allowed of course. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+        type(magneticFieldUDT), intent(in)      :: magneticField 
+        type(VesselUDT), intent(inout)          :: vessel 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: Vv
+        logical, allocatable, dimension(:)      :: outbnd, rmvert, &
+            rmface
+        type(PolygonUDT), allocatable           :: bndpol(:)
+        type(PolygonSetUDT)                     :: bndps 
+        class(PLF2DOptionsUDT), allocatable     :: bndplfoptions 
+        
+
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            plf         => vessel%plfvessel,      &
+            mfinterp    => magneticField%interp)
+
+        ! Rebuild the vessel description to be sure
+            allocate(bndpol(count(topomesh%face%type == TMfacebndID)))
+            bndpol = pack(topomesh%face%pol, topomesh%face%type == TMfacebndID)
+            call bndps%Construct(bndpol)
+            call ConstructVesselPolygonSet(vessel, bndps)
+            allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
+            call InitializePolygonLevelsetFunction2D(vessel%plfvessel, &
+                vessel%polygonset, bndplfoptions)
+
+        ! Vertices
+        !=========
+        ! Check if in boundary
+        allocate(Vv(topomesh%vert%ntot))
+        call plf%Evaluate(topomesh%vert%x, topomesh%vert%y, 0, 0, Vv)
+        outbnd = Vv >= 0
+
+        ! Check if we should remove it
+        rmvert = outbnd .and. (topomesh%vert%type /= TMvertextp1ID) .and. &
+            (topomesh%vert%type /= TMvertextp2ID) .and. (topomesh%vert%type /= TMvertexbndID)
+
+        ! Remove these vertices
+        call RemoveTopologicalMeshVertexLogical(topomesh, rmvert)
+
+        ! Faces
+        !======
+        ! Start by removing faces with zero start or end vertex
+        rmface = (topomesh%face%vert(:, 1) == 0) .or. &
+            (topomesh%face%vert(:, 2) == 0)
+
+        ! Also remove separatrix faces without saddle points or splitting points
+        do i = 1, topomesh%face%ntot
+            if (topomesh%face%type(i) == TMfacesepID) then 
+                ! Set to true, will be set to false if saddle point present
+                rmface(i) = .true. 
+                if (topomesh%face%vert(i, 1) /= 0) then 
+                    if ((topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsaddleID) .or. &
+                        (topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsplitID)) then 
+                        rmface(i) = .false. 
+                    end if 
+                else 
+                    ! Make sure is removed because of zero vertex
+                    rmface(i) = .true.
+                    
+                end if 
+                if (topomesh%face%vert(i, 2) /= 0) then 
+                    if ((topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsaddleID) .or. &
+                        (topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsplitID)) then 
+                        rmface(i) = .false. 
+                    end if 
+                else 
+                    ! Make sure is removed because of zero vertex
+                    rmface(i) = .true.
+                end if 
+            end if 
+        end do 
+
+        ! Remove
+        call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+        call plf%ps%WriteData('vesselpolygon')
+        ! call plf%Visualize('vesselplf', nxin=1000, nyin=1000)
+
+        ! Check remaining faces 
+        deallocate(rmface)
+        allocate(rmface(topomesh%face%ntot))
+        rmface = .false. 
+        do i = 1, topomesh%face%ntot
+            if (topomesh%face%type(i) /= TMfacebndID) then 
+                ! Points in boundary (exclude end points)?
+                deallocate(Vv)
+                allocate(Vv(size(topomesh%face%x(i)%Get())))
+                call plf%Evaluate(topomesh%face%x(i)%Get(), &
+                    topomesh%face%y(i)%Get(), 0, 0, Vv)
+                outbnd = Vv(2:size(Vv)-1) >= 0
+                
+                ! Check
+                if (all(outbnd)) then 
+                    ! Remove, no issue
+                    rmface(i) = .true.
+                elseif (all(outbnd(2:size(outbnd)-1)) .and. (size(outbnd) > 2)) then 
+                    ! Remove, but display message
+                    print *, 'face ID: ', i, 'face vertices: ', topomesh%face%vert(i, 1), topomesh%face%vert(i, 2)
+                    print *, 'TrimTopologicalMesh: boundary removed ' // & 
+                        'which still had first two points in domain'
+                elseif ((.not. any(outbnd(2:size(outbnd)-1))) .and. (size(outbnd) > 2)) then 
+                    ! Do not remove, nothing to do here
+                else
+                    ! Check if we simply had a very short boundary
+                    if (size(outbnd) <= 2) then 
+                        print *, 'TrimTopologicalMesh: face detected ' // & 
+                            'with at most four points, may not be ' // & 
+                            'properly diagnosed for removal. Try ' // & 
+                            'increasing number of points by increasing ' //& 
+                            'contour mesh resolution'
+                    else
+                        ! Points detected inside and outside - throw warning
+                        print *, 'TrimTopologicalMesh: face detected ' // & 
+                            'that has multiple points inside and outside ' // & 
+                            'of domain. May result in unexpected outcome. Check input'
+
+                        if (count(.not. outbnd) < count(outbnd)) then 
+                            rmface(i) = .true.
+                        end if 
+                    end if 
+                end if 
+            end if 
+        end do
+
+        ! Remove
+        call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Topomesh simplification
+    subroutine SimplifyTopologicalMeshFaces(topomesh)
+
+        ! Description
+        !============
+        ! This routine attempts to simplify the topological mesh by 
+        ! merging faces (and hence deleting vertices) if they would
+        ! form a single, unique face again. To achieve this, we loop 
+        ! over all vertices and check the following conditions:
+        ! - does the vertex only appear in two separate boundaries?
+        ! - are those two boundaries of the same type?
+        ! - is the vertex a regular or boundary vertex?
+        ! If all these conditions are met, the neighbouring faces may
+        ! be safely merged into a single face. Normally, this merging 
+        ! shouldn't be necessary, unless e.g. separatrix parts are 
+        ! removed during topological mesh trimming. This routine should
+        ! therefore be called after adding all boundaries to the 
+        ! topological mesh, but before adding cells and other data. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh 
+
+        ! Auxiliary
+        integer(I8)                             :: nforig, tf(1:2)
+        integer(I8), allocatable, dimension(:)  :: rmvID, rmf1, rmf2, &
+            fvert 
+        logical, allocatable, dimension(:)      :: markv, markf, &
+            appearstwice
+        real(R8)                                :: fsfval
+        real(R8), allocatable, dimension(:)     :: tempx, tempy 
+        type(RealDynamicArrayUDT)               :: xda, yda 
+
+        ! Loop 
+        integer(I8)                             :: i, k 
+
+        ! Initialize
+        !===========
+        ! Keep looping until exit condition reached
+        do while (.true.) 
+
+            ! Store original sizes
+            nforig = topomesh%face%ntot
+
+            ! Mark vertices and faces for removal
+            allocate(markv(topomesh%vert%ntot), markf(topomesh%face%ntot), &
+                rmvID(0), rmf1(0), rmf2(0))
+            markv = .false. 
+            markf = .false.
+            do i = 1, topomesh%vert%ntot
+                ! Is it a regular or boundary vertex?
+                if ((.not. topomesh%vert%type(i) == TMvertexbndID) .and. &
+                    (.not. topomesh%vert%type(i) == 0)) then 
+                    cycle 
+                end if 
+
+                ! If it is, does it only appear twice in face%vert?
+                appearstwice = ((topomesh%face%vert(:, 1) == i) .or. (topomesh%face%vert(:, 2) == i))
+                if (.not. (count(appearstwice) == 2)) then 
+                    cycle 
+                end if 
+                tf = pack([(k, k = 1, topomesh%face%ntot)], appearstwice)
+
+                ! Are both faces not yet marked for deletion?
+                if (any(markf(tf))) then 
+                    cycle ! do in a next iteration
+                end if 
+
+                ! Do both boundaries have the same type and flux surface
+                ! ID? 
+                if (.not. (topomesh%face%type(tf(1)) == topomesh%face%type(tf(2)))) then 
+                    cycle
+                end if 
+                if (.not. (topomesh%face%fsID(tf(1)) == topomesh%face%fsID(tf(2)))) then 
+                    cycle
+                end if 
+
+                ! If we got here, we passed all checks. Mark for merging
+                ! and deletion
+                markv(i) = .true.
+                markf(tf) = .true. 
+                rmvID = [rmvID, i]
+                rmf1 = [rmf1, tf(1)]
+                rmf2 = [rmf2, tf(2)]
+
+            end do 
+
+            ! Check exit condition
+            if (count(markv) == 0) then 
+                exit 
+            end if 
+
+            ! Merge faces
+            !============
+            do i = 1, size(rmf1)
+                ! Check vertices
+                if (topomesh%face%vert(rmf1(i), 2) == rmvID(i)) then 
+                    ! First face is in good position 
+                    xda = topomesh%face%x(rmf1(i))
+                    yda = topomesh%face%y(rmf1(i))
+                    if (topomesh%face%vert(rmf2(i), 1) == rmvID(i)) then 
+                        ! Simply append 
+                        fvert = [topomesh%face%vert(rmf1(i), 1), &
+                            topomesh%face%vert(rmf2(i), 2)]
+                        call xda%Append(topomesh%face%x(rmf2(i))%Get())
+                        call yda%Append(topomesh%face%y(rmf2(i))%Get())
+
+                    elseif (topomesh%face%vert(rmf2(i), 2) == rmvID(i)) then 
+                        ! Need to flip second face
+                        fvert = [topomesh%face%vert(rmf1(i), 1), &
+                            topomesh%face%vert(rmf2(i), 1)]
+                        tempx = topomesh%face%x(rmf2(i))%Get()
+                        tempy = topomesh%face%y(rmf2(i))%Get()
+                        call xda%Append(tempx(size(tempx):1:-1))
+                        call yda%Append(tempy(size(tempy):1:-1))
+
+                    else 
+                        ! This is a bug
+                        call gdErrorHandler('SimplifyTopologicalMesh: ' // &
+                            'bug detected')
+                    end if 
+                elseif (topomesh%face%vert(rmf1(i), 1) == rmvID(i)) then 
+                    ! Need to flip first face
+                    tempx = topomesh%face%x(rmf1(i))%Get()
+                    tempy = topomesh%face%y(rmf1(i))%Get()
+                    tempx = tempx(size(tempx):1:-1)
+                    tempy = tempy(size(tempy):1:-1)
+                    xda = ConstructRealDynamicArray(tempx)
+                    yda = ConstructRealDynamicArray(tempy)
+                    if (topomesh%face%vert(rmf2(i), 1) == rmvID(i)) then 
+                        ! Simply append 
+                        fvert = [topomesh%face%vert(rmf1(i), 2), &
+                            topomesh%face%vert(rmf2(i), 2)]
+                        call xda%Append(topomesh%face%x(rmf2(i))%Get())
+                        call yda%Append(topomesh%face%y(rmf2(i))%Get())
+
+                    elseif (topomesh%face%vert(rmf2(i), 2) == rmvID(i)) then 
+                        ! Need to flip second face
+                        fvert = [topomesh%face%vert(rmf1(i), 2), &
+                            topomesh%face%vert(rmf2(i), 1)]
+                        tempx = topomesh%face%x(rmf2(i))%Get()
+                        tempy = topomesh%face%y(rmf2(i))%Get()
+                        call xda%Append(tempx(size(tempx):1:-1))
+                        call yda%Append(tempy(size(tempy):1:-1))
+                        
+                    else 
+                        ! This is a bug
+                        call gdErrorHandler('SimplifyTopologicalMesh: ' // &
+                            'bug detected')
+                    end if 
+                else 
+                    ! This is a bug
+                    call gdErrorHandler('SimplifyTopologicalMesh: ' // &
+                        'bug detected')
+                end if 
+
+                ! Add the new face
+                if (topomesh%face%fsID(rmf1(i)) /= 0) then 
+                    fsfval = topomesh%fsfval%Get(topomesh%face%fsID(rmf1(i)))
+                else
+                    fsfval = 0.0_R8
+                end if 
+                call AddTopologicalMeshFace(topomesh, fvert, &
+                    xda, yda, topomesh%face%type(rmf1(i)), &
+                    topomesh%face%fsID(rmf1(i)), fsfval)
+
+            end do 
+
+            ! Extend the face deletion vertices
+            markf = [markf, spread(.false., 1, topomesh%face%ntot - nforig)]
+
+            ! Delete the faces
+            call RemoveTopologicalMeshFaceLogical(topomesh, markf)
+
+            ! Delete the vertices
+            call RemoveTopologicalMeshVertexLogical(topomesh, markv)
+
+            ! Recompute some required data
+            call AddTopologicalMeshVertexFaces(topomesh)
+
+            ! Data
+            call AddTopologicalMeshData(topomesh)
+
+            ! Housekeeping
+            deallocate(markv, markf, rmvID, rmf1, rmf2)
+
+        end do 
+
+    end subroutine 
+
+    ! Garbage tangency point removal
+    subroutine RemoveGarbageTangencyPoints(topomesh)
+
+        ! Description
+        !============
+        ! This routine identifies 'garbage' tangency points and removes
+        ! them by changing their type and applying the topomesh
+        ! simplification algorithm (SimplifyTopologicalMeshFaces). 
+        ! Garbage tangency points are defined as type 1 tangency points
+        ! that are not limited on both sides by the same flux surface.
+        ! This assumes that contours have been added to the topomesh!
+
+        ! We now additionally remove boundary points that result in 
+        ! garbage behavior related to tangency points. In particular, 
+        ! we check type 2 tangency points and see if they have
+        ! a face which is a boundary face that has a regular boundary
+        ! point with the same flux surface ID. This should normally not
+        ! happen and indicates that the tangency point contour originally
+        ! intersected with the boundary, but that the intersection 
+        ! removal was not successful. This happens very rarily though...
+
+        ! Note: no additional interconnection data is updated
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+
+        ! Auxiliary
+        integer(I8)                             :: ntvfal, tv1, tv2
+        integer(I8), allocatable, dimension(:)  :: tvf, tvfvID, tvfvIDu, &
+            tvf1, tvf2
+        logical, allocatable, dimension(:)      :: delf, delv
+
+        ! Loop
+        integer(I8)                             :: j, k
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert        => topomesh%vert,   &
+            face        => topomesh%face)
+
+        ! Simplify to be sure
+        call SimplifyTopologicalMeshFaces(topomesh)
+
+        ! Reconstruct vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Checks
+        !=======
+        ! Type 1 tangency point garbage
+        !------------------------------
+        ! Check which TPs should be removed
+        do j = 1, vert%ntot
+            if (vert%type(j) == TMvertextp1ID) then 
+                ! Check
+                tvf = vert%GetFace(j)
+
+                ! Sanity check
+                if (size(tvf) /= 2) then 
+                    ! Write out some data for debugging
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                    print *, 'vertex: ', j
+                    call gdErrorHandler('RemoveGarbageTangencyPoints: ' // & 
+                        'type 1 tangency point does not have ' // & 
+                        'exactly two faces, unexpected. Check mesh in topomesh_error.dat')
+                end if 
+
+                ! Get all unique flux surface IDs of these vertices
+                tvfvID = vert%fsID([face%vert(tvf, 1), face%vert(tvf, 2)])
+                call Unique(tvfvID, tvfvIDu)
+                if (size(tvfvIDu) > 2 .and. .not. any(tvfvIDu == 0_I8)) then 
+                    ! Set vertex type to simple boundary vertex
+                    ! for deletion later on in simplification 
+                    ! step
+                    vert%type(j) = TMvertexbndID
+                    print *, 'RemoveGarbageTangencyPoints: removing vertex (type 1) ', j
+                end if 
+            end if 
+        end do 
+
+        ! Simplify 
+        call SimplifyTopologicalMeshFaces(topomesh)
+
+        ! Reconstruct vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Type 2 tangency point garbage
+        !------------------------------
+        ! Initialize
+        allocate(delv(vert%ntot), delf(face%ntot))
+        delv = .false.
+        delf = .false.
+
+        ! Check which boundary tangency points should be removed
+        do j = 1, vert%ntot
+            if (vert%type(j) == TMvertextp2ID) then 
+                ! Get the faces of this vertex
+                tvf = vert%GetFace(j)
+
+                ! Check if there are two faces with the same flux 
+                ! surface ID. If not, we need to check boundary faces
+                ntvfal = count(face%fsID(tvf) == vert%fsID(j))
+                if (ntvfal < 2) then 
+                    ! Get boundary faces, should be two
+                    tvf = pack(tvf, face%type(tvf) == TMfacebndID)
+
+                    ! Check
+                    if (size(tvf) /= 2) then 
+                        call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                        print *, 'vertex: ', j 
+                        call gdErrorHandler('RemoveGarbageTangencyPoints: ' // & 
+                            'type 2 tangency points does not have exactly ' // & 
+                            'two boundaries, check topomesh in topomesh_error')
+                    end if 
+
+                    ! Check the flux surface ID of non-tangency point vertices
+                    ! of both faces
+                    if (face%vert(tvf(1), 1) == j) then 
+                        tv1 = face%vert(tvf(1), 2)
+                    else
+                        tv1 = face%vert(tvf(1), 1)
+                    end if 
+                    if (face%vert(tvf(2), 1) == j) then 
+                        tv2 = face%vert(tvf(2), 2)
+                    else
+                        tv2 = face%vert(tvf(2), 1)
+                    end if 
+
+                    ! Check first vertex
+                    if (vert%fsID(tv1) == vert%fsID(j)) then 
+                        ! Mark for deletion
+                        delv(tv1) = .true.
+                        delf(tvf(1)) = .true.
+
+                        ! Print
+                        print *, 'RemoveGarbageTangencyPoints: removing ', &
+                            'vertex ', tv1
+
+                        ! Get other faces of this vertex
+                        tvf1 = vert%GetFace(tv1)
+                        tvf1 = pack(tvf1, tvf1 /= tvf(1))
+
+                        ! Adjust the vertex of these faces
+                        do k = 1, size(tvf1)
+                            ! Adjust the end point
+                            if (face%vert(tvf1(k), 1) == tv1) then 
+                                face%vert(tvf1(k), 1) = j 
+                                call face%x(tvf1(k))%Set(1, vert%x(j))
+                                call face%y(tvf1(k))%Set(1, vert%y(j))
+                            else
+                                face%vert(tvf1(k), 2) = j 
+                                call face%x(tvf1(k))%Set(face%x(tvf1(k))%Size(), vert%x(j))
+                                call face%y(tvf1(k))%Set(face%y(tvf1(k))%Size(), vert%y(j))
+                            end if
+
+                            ! Reconstruct the polygon
+                            call face%pol(tvf1(k))%Construct(face%x(tvf1(k))%Get(), &
+                                    face%y(tvf1(k))%Get())
+                        end do 
+                    end if
+
+                    ! Check second vertex
+                    if (vert%fsID(tv2) == vert%fsID(j)) then 
+                        ! Mark for deletion
+                        delv(tv2) = .true.
+                        delf(tvf(2)) = .true.
+
+                        ! Print
+                        print *, 'RemoveGarbageTangencyPoints: removing ', &
+                            'vertex ', tv2
+
+                        ! Get other faces of this vertex
+                        tvf2 = vert%GetFace(tv2)
+                        tvf2 = pack(tvf2, tvf2 /= tvf(2))
+
+                        ! Adjust the vertex of these faces
+                        do k = 1, size(tvf2)
+                            ! Adjust the end point
+                            if (face%vert(tvf2(k), 1) == tv2) then 
+                                face%vert(tvf2(k), 1) = j 
+                                call face%x(tvf2(k))%Set(1, vert%x(j))
+                                call face%y(tvf2(k))%Set(1, vert%y(j))
+                            else
+                                face%vert(tvf2(k), 2) = j 
+                                call face%x(tvf2(k))%Set(face%x(tvf2(k))%Size(), vert%x(j))
+                                call face%y(tvf2(k))%Set(face%y(tvf2(k))%Size(), vert%y(j))
+                            end if
+
+                            ! Reconstruct the polygon
+                            call face%pol(tvf2(k))%Construct(face%x(tvf2(k))%Get(), &
+                                    face%y(tvf2(k))%Get())
+                        end do 
+                    end if
+                end if 
+            end if 
+        end do
+
+        ! Remove
+        call RemoveTopologicalMeshVertexLogical(topomesh, delv)
+        call RemoveTopologicalMeshFaceLogical(topomesh, delf)
+
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                   EQUILIBRIUM CHARACTERIZATION                   !
@@ -4309,7 +5750,7 @@ module ggmod_topology2D
         call topomesh%vert%Initialize()
         call topomesh%face%Initialize()
         call topomesh%cell%Initialize()
-        call topomesh%tube%Initialize(0, 0, 0)
+        call topomesh%tube%Initialize(0, 0, 0, 0, 0, 0, 0)
 
     end subroutine
 
@@ -4430,7 +5871,8 @@ module ggmod_topology2D
 
     end subroutine
 
-    subroutine InitializeTopologicalMeshTube(tptube, ntot, nface, ncell)
+    subroutine InitializeTopologicalMeshTube(tptube, ntot, nface, ncell, &
+        nf1, nf2, nv1, nv2)
 
         ! Description
         !============
@@ -4440,7 +5882,8 @@ module ggmod_topology2D
         !==================
         ! Arguments
         class(TopomeshTubeUDT)      :: tptube 
-        integer(I8), intent(in)     :: ntot, nface, ncell 
+        integer(I8), intent(in)     :: ntot, nface, ncell, nv1, nv2, &
+            nf1, nf2
 
         ! Initialize
         !===========
@@ -4449,7 +5892,9 @@ module ggmod_topology2D
         tptube%ncell = ncell
         allocate(tptube%cell(ncell), tptube%face(nface), &
             tptube%cellP(ntot, 2), tptube%faceP(ntot, 2), &
-            tptube%isclosed(ntot))
+            tptube%isclosed(ntot), tptube%bndf1(nf1), tptube%bndf2(nf2), &
+            tptube%bndv1(nv1), tptube%bndv2(nv2), tptube%bndf1P(ntot, 2), &
+            tptube%bndf2P(ntot, 2), tptube%bndv1P(ntot, 2), tptube%bndv2P(ntot, 2))
 
     end subroutine
 
@@ -4484,6 +5929,30 @@ module ggmod_topology2D
         end if 
         if (allocated(tptube%isclosed)) then 
             deallocate(tptube%isclosed)
+        end if 
+        if (allocated(tptube%bndf1)) then 
+            deallocate(tptube%bndf1)
+        end if 
+        if (allocated(tptube%bndf2)) then 
+            deallocate(tptube%bndf2)
+        end if 
+        if (allocated(tptube%bndv1)) then 
+            deallocate(tptube%bndv1)
+        end if 
+        if (allocated(tptube%bndv2)) then 
+            deallocate(tptube%bndv2)
+        end if 
+        if (allocated(tptube%bndf1P)) then 
+            deallocate(tptube%bndf1P)
+        end if 
+        if (allocated(tptube%bndf2P)) then 
+            deallocate(tptube%bndf2P)
+        end if 
+        if (allocated(tptube%bndv1P)) then 
+            deallocate(tptube%bndv1P)
+        end if 
+        if (allocated(tptube%bndv2P)) then 
+            deallocate(tptube%bndv2P)
         end if 
 
     end subroutine
@@ -4971,12 +6440,22 @@ module ggmod_topology2D
             ! Check
             if (tf == 0) then 
                 ! Check
-                if (any(fc > 0)) then 
-                    call gdErrorHandler('AddTopologicalMeshCells: ' // & 
-                        'could not find next face')
+                if (any(fc > 0)) then
+                    ! Check if there are any internal faces to begin with
+                    if (count(.not. face%BF) == 0) then 
+                        print *, 'AddTopologicalMeshCells: case without any ' // & 
+                            'internal faces detected'
+
+                        ! Find the next face (any next face)
+                        tf = findloc( (fc > 0)  , .true., 1)
+                    else
+                        call gdErrorHandler('AddTopologicalMeshCells: ' // & 
+                            'could not find next face')
+                    end if 
+                else
+                    ! All faces added, exit
+                    exit 
                 end if 
-                ! All faces added, exit
-                exit 
             end if 
             
             ! Do not subtract a counter - we need to end up in this face again.
@@ -5058,7 +6537,7 @@ module ggmod_topology2D
             end if
             
             ! Set current vertex
-            tv = face%vert(tf, tvind);
+            tv = face%vert(tf, tvind)
             startvert = tv
             starttvind = tvind
         
@@ -5349,7 +6828,18 @@ module ggmod_topology2D
             deallocate(topomesh%cell%faceP)
         end if 
 
-        topomesh%cell%ntot = cc;
+        topomesh%cell%ntot = cc
+        topomesh%cell%ID = [(i, i = 1, cc)]
+        if(allocated(topomesh%cell%flags)) then 
+            deallocate(topomesh%cell%flags)
+        end if 
+        allocate(topomesh%cell%flags(cc))
+        topomesh%cell%flags = 0_I8
+        if (allocated(topomesh%cell%tube)) then 
+            deallocate(topomesh%cell%tube)
+        end if
+        allocate(topomesh%cell%tube(cc))
+        topomesh%cell%tube = 0_I8
         allocate(topomesh%cell%vertP(cc, 2))
         allocate(topomesh%cell%faceP(cc, 2))
         topomesh%cell%vertP(1, 1) = 1
@@ -5368,12 +6858,14 @@ module ggmod_topology2D
         end do 
         do i = 1, cc
             topomesh%cell%vert(&
-                topomesh%cell%vertP(i, 1):topomesh%cell%vertP(i, 2)+topomesh%cell%vertP(i, 2)-1) = & 
+                topomesh%cell%vertP(i, 1):topomesh%cell%vertP(i, 1)+topomesh%cell%vertP(i, 2)-1) = & 
                 cellvert(i)%Get()
             topomesh%cell%face(&
                 topomesh%cell%faceP(i, 1):topomesh%cell%faceP(i, 1)+topomesh%cell%faceP(i, 2)-1) = & 
                 cellface(i)%Get()
         end do 
+        topomesh%cell%ntotv = size(topomesh%cell%vert)
+        topomesh%cell%ntotf = size(topomesh%cell%face)
 
         ! Housekeeping
         !=============
@@ -5394,7 +6886,9 @@ module ggmod_topology2D
         !   internal. (i.e. tangency points and regular boundary points)
         ! - face:
         !   * BF, IF: logical (nf-by-1) for boundary or internal face. Boundary
-        !   faces are those faces with type 3, all the rest are internal. 
+        !   faces are those faces with type 3, all the rest are internal (unless
+        !   cells have already been computed and we can check the amount of 
+        !   cells per face)
 
         ! Note: it is assumed that all necessary contours/faces have 
         ! been added already
@@ -5402,10 +6896,10 @@ module ggmod_topology2D
         ! Declare variables
         !==================
         ! Arguments
-        class(TopomeshUDT)                  :: topomesh 
+        class(TopomeshUDT)                      :: topomesh 
 
         ! Loop
-        integer(I8)                         :: i 
+        integer(I8)                             :: i 
 
         ! Vertices
         !=========
@@ -5418,6 +6912,14 @@ module ggmod_topology2D
         !======
         ! Logicals
         topomesh%face%BF = (topomesh%face%type == TMfacebndID)
+        
+
+        ! Check if cells are present
+        if (allocated(topomesh%face%cellP)) then 
+            if (size(topomesh%face%cellP, 1) == topomesh%face%ntot) then 
+                topomesh%face%BF = topomesh%face%cellP(:, 2) == 1
+            end if 
+        end if 
 
         ! Labels
         if (allocated(topomesh%face%label)) then 
@@ -5443,6 +6945,8 @@ module ggmod_topology2D
         ! the output is the empty struct. If some cells remain (i.e. some tubes
         ! could not be constructed), a message is shown. 
 
+        ! Note: 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -5451,15 +6955,20 @@ module ggmod_topology2D
 
         ! Auxiliary
         integer(I8)                             :: thistf, thisc, &
-            nextc, tc
+            nextc, tc, ne, si1, si2, cpID
         integer(I8), allocatable, dimension(:)  :: tf, thesecells, &
-            tfc, thiscf, tv
+            tfc, thiscf, tv, tfbnd, sortindex, sortedbndfaces, tf1, tf2, &
+            tv1, tv2, polygonID
+        integer(I8), allocatable, dimension(:, :)   :: bndfacevert, tfv
         logical                                 :: isclosed, addtube, &
             singlefacetube
         logical, allocatable, dimension(:)      :: hasfacetype, &
-            hasfaces, iscellnotfound
+            hasfaces, iscellnotfound, ispolygonstart, isbranchingpolygon
         type(IntegerDynamicArrayUDT)            :: tubef, tubec, &
-            ntubef, ntubec, isclosedtube, alltubef, alltubec
+            ntubef, ntubec, isclosedtube, alltubef, alltubec, &
+            tubebndf, alltubebndf1, alltubebndf2, ntubebndf1, ntubebndf2, &
+            alltubebndv1, alltubebndv2, ntubebndv1, ntubebndv2, &
+            temptf1, temptf2
 
         ! Loop
         integer(I8)                             :: i, k, ct
@@ -5512,11 +7021,19 @@ module ggmod_topology2D
         ! Initialize
         iscellnotfound = hasfaces
         ct = 0
-        ntubef = ConstructIntegerDynamicArray()
-        ntubec = ConstructIntegerDynamicArray()
-        alltubef = ConstructIntegerDynamicArray()
-        alltubec = ConstructIntegerDynamicArray()
-        isclosedtube = ConstructIntegerDynamicArray()
+        ntubef          = ConstructIntegerDynamicArray()
+        ntubec          = ConstructIntegerDynamicArray()
+        alltubef        = ConstructIntegerDynamicArray()
+        alltubebndf1    = ConstructIntegerDynamicArray()
+        alltubebndf2    = ConstructIntegerDynamicArray()
+        alltubebndv1    = ConstructIntegerDynamicArray()
+        alltubebndv2    = ConstructIntegerDynamicArray()
+        ntubebndv1      = ConstructIntegerDynamicArray()
+        ntubebndv2      = ConstructIntegerDynamicArray()
+        ntubebndf1      = ConstructIntegerDynamicArray()
+        ntubebndf2      = ConstructIntegerDynamicArray()
+        alltubec        = ConstructIntegerDynamicArray()
+        isclosedtube    = ConstructIntegerDynamicArray()
 
         ! Loop
         do while (.true.)
@@ -5530,17 +7047,25 @@ module ggmod_topology2D
             iscellnotfound(tc) = .false.
             
             ! Initialize a new tube
-            tubef = ConstructIntegerDynamicArray()
-            tubec = ConstructIntegerDynamicArray()
-            isclosed = .false. 
-            singlefacetube = .false.
-            addtube = .true.
+            tubef           = ConstructIntegerDynamicArray()
+            tubec           = ConstructIntegerDynamicArray()
+            tubebndf        = ConstructIntegerDynamicArray()
+            
+            isclosed        = .false. 
+            singlefacetube  = .false.
+            addtube         = .true.
 
             ! Append the cell
             call tubec%Append(tc)
             
             ! Get the faces
             tf = GetTMCellFace(cell, tc)
+
+            ! Get the bounding faces
+            allocate(tfbnd(count(.not. hasfacetype(tf))))
+            tfbnd = pack(tf, .not. hasfacetype(tf))
+            call tubebndf%Append(tfbnd)
+            deallocate(tfbnd)
             
             ! Get only faces that have the type
             tf = pack(tf, hasfacetype(tf))
@@ -5567,7 +7092,7 @@ module ggmod_topology2D
                 call tubef%Append(tf)
             end if 
             
-            ! Loop untill all flux tube cells found from one side
+            ! Loop until all flux tube cells found from one side
             do while (.true. .and. (.not. singlefacetube)) 
                 ! Add the current face before already found faces (to keep correct
                 ! order)
@@ -5612,8 +7137,16 @@ module ggmod_topology2D
                 end if 
                 iscellnotfound(thisc) = .false.
                 
-                ! Find the next face
+                ! Get cell faces
                 thiscf = GetTMCellFace(cell, thisc)
+
+                ! Add bounding faces
+                allocate(tfbnd(count(.not. hasfacetype(thiscf))))
+                tfbnd = pack(thiscf, .not. hasfacetype(thiscf))
+                call tubebndf%Append(tfbnd)
+                deallocate(tfbnd)
+
+                ! Find next face
                 thiscf = pack(thiscf, hasfacetype(thiscf) .and. thiscf /= thistf)
                 
                 ! Sanity check
@@ -5689,8 +7222,16 @@ module ggmod_topology2D
                 end if 
                 iscellnotfound(thisc) = .false.
                 
-                ! Find the next face
+                ! Get cell faces
                 thiscf = GetTMCellFace(cell, thisc)
+
+                ! Add bounding faces
+                allocate(tfbnd(count(.not. hasfacetype(thiscf))))
+                tfbnd = pack(thiscf, .not. hasfacetype(thiscf))
+                call tubebndf%Append(tfbnd)
+                deallocate(tfbnd)
+
+                ! Find the next face
                 thiscf = pack(thiscf, hasfacetype(thiscf) .and. thiscf /= thistf)
                 
                 ! Sanity check
@@ -5723,6 +7264,188 @@ module ggmod_topology2D
                 call alltubef%Append(tubef%Get())
                 call alltubec%Append(tubec%Get())
 
+                ! Get 'polygons' from bounding faces
+                ne = tubebndf%Size() 
+                bndfacevert = face%vert(tubebndf%Get(), :)
+                allocate(sortindex(ne), ispolygonstart(ne), isbranchingpolygon(ne))
+                call SortPolygonEdges(bndfacevert, ne, sortindex, &
+                    ispolygonstart, isbranchingpolygon, polygonID)
+                bndfacevert(:, 1) = bndfacevert(sortindex, 1)
+                bndfacevert(:, 2) = bndfacevert(sortindex, 2)
+                sortedbndfaces = tubebndf%Get(sortindex)
+                
+                
+                ! Checks
+                if (any(isbranchingpolygon) .and. ne > 0) then 
+                    ! Branching polygons, need to see which ones belong
+                    ! together (max 2)
+                    if (maxval(polygonID) > 2) then 
+                        call gdErrorHandler('AddTopologicalMeshTubes: ' // & 
+                            'tube has more than two branching polygons as ' // & 
+                            'boundary, unexpected')
+                    end if
+
+                    ! Extract polygon faces
+                    cpID = 0
+                    temptf1 = ConstructIntegerDynamicArray()
+                    temptf2 = ConstructIntegerDynamicArray()
+                    do i = 1, ne
+                        ! Get the polygon ID if it is a start
+                        if (ispolygonstart(i)) then 
+                            cpID = polygonID(i)
+                        end if 
+
+                        ! Add face
+                        if (cpID == 1_I8) then 
+                            call temptf1%Append(sortedbndfaces(i))
+                        elseif (cpID == 2_I8) then 
+                            call temptf2%Append(sortedbndfaces(i))
+                        else
+                            ! We shouldn't get here
+                            call gdErrorHandler('Unexpected error')
+                        end if 
+                    end do 
+
+                    ! At least the first polygon should exist
+                    call alltubebndf1%Append(temptf1%Get())
+                    call ntubebndf1%Append(temptf1%Size())
+
+                    ! Add first set
+                    tf1 = temptf1%Get()
+
+                    ! Extract vertices of first set - unsorted here...
+                    allocate(tv1(size(tf1)+1))
+                    bndfacevert = face%vert(tf1, :)
+                    call Unique([bndfacevert(:, 1), bndfacevert(:, 2)], tv1)
+                    call alltubebndv1%Append(tv1)
+                    call ntubebndv1%Append(size(tv1))
+                    deallocate(tv1)
+
+                    
+                    ! Check if the second set exists
+                    if (temptf2%Size() > 0) then 
+                        ! Extract faces
+                        call alltubebndf2%Append(temptf2%Get())
+                        call ntubebndf2%Append(temptf2%Size())
+
+                        ! Add second set
+                        tf2 = temptf2%Get()
+
+                        ! Extract vertices of second set 
+                        allocate(tv2(size(tf2)+1))
+                        bndfacevert = face%vert(tf2, :)
+                        call Unique([bndfacevert(:, 1), bndfacevert(:, 2)], tv2)
+                        call alltubebndv2%Append(tv2)
+                        call ntubebndv2%Append(size(tv2))
+                        deallocate(tv2)
+                    else
+                        ! Append a zero
+                        call ntubebndf2%Append(0_I8)
+
+                        ! Extract vertices
+                        call ntubebndv2%Append(1_I8)
+                        tf = tubef%Get()
+                        tfv = face%vert(tf, :) 
+                        if (all(tfv(1, 1) == tfv(:, 1) .or. tfv(1, 1) == tfv(:, 2))) then 
+                            call alltubebndv2%Append(tfv(1, 1))
+                        elseif (all(tfv(1, 2) == tfv(:, 1) .or. tfv(1, 2) == tfv(:, 2))) then
+                            call alltubebndv2%Append(tfv(1, 2))
+                        else
+                            ! This shouldn't happen
+                            call gdErrorHandler('AddTopologicalMeshTubes: ' // &
+                                'found only one set of faces, but could not ' // & 
+                                'find a common point of all tube faces as ' // & 
+                                'other boundary side. Unexpected.')
+                        end if 
+                    end if 
+
+                else 
+                    ! Simple polygons, do sanity checks
+                    if ((count(ispolygonstart) < 1) .and. (ne > 0)) then 
+                        ! May be supported in the future
+                        call gdErrorHandler('AddTopologicalMeshTubes: ' // & 
+                            'tube does not have at least one aligned face, ' // & 
+                            'not supported.')
+                    elseif ((count(ispolygonstart) > 2) .and. (ne > 0)) then 
+                        ! Weird 
+                        call gdErrorHandler('AddTopologicalMeshTubes: ' // & 
+                            'tube has more than two aligned face boundaries, ' // & 
+                            'unexpected.')
+                    end if 
+
+                    ! Extract boundary faces and vertices
+                    if (count(ispolygonstart) == 2) then 
+                        ! Get starting indices (normally first one is always true)
+                        si1 = 1
+                        si2 = findloc(ispolygonstart, .true., 1, back=.true.)
+
+                        ! Add first set
+                        tf1 = sortedbndfaces(si1:si2-1)
+                        call alltubebndf1%Append(tf1)
+                        call ntubebndf1%Append(size(tf1))
+
+                        ! Add second set
+                        tf2 = sortedbndfaces(si2:ne)
+                        call alltubebndf2%Append(tf2)
+                        call ntubebndf2%Append(size(tf2))
+
+                        ! Extract vertices of first set 
+                        allocate(tv1(size(tf1)+1))
+                        call ExtractPolygonVertices(bndfacevert(1:si2-1, 1:2), &
+                            size(tf1), tv1)
+                        call alltubebndv1%Append(tv1)
+                        call ntubebndv1%Append(size(tv1))
+                        deallocate(tv1)
+
+                        ! Extract vertices of second set 
+                        allocate(tv2(size(tf2)+1))
+                        call ExtractPolygonVertices(bndfacevert(si2:ne, 1:2), &
+                            size(tf2), tv2)
+                        call alltubebndv2%Append(tv2)
+                        call ntubebndv2%Append(size(tv2))
+                        deallocate(tv2)
+
+                    elseif (count(ispolygonstart) == 1) then 
+                        ! Only one segment, need to search for tangency point
+                        ! vertex (should be one vertex in common with all 
+                        ! tube radial faces)
+
+                        ! Add first set
+                        tf1 = sortedbndfaces
+                        call alltubebndf1%Append(tf1)
+                        call ntubebndf1%Append(size(tf1))
+
+                        ! 'Add' second set
+                        call ntubebndf2%Append(0_I8)
+
+                        ! Extract vertices of first set 
+                        allocate(tv1(size(tf1)+1))
+                        call ExtractPolygonVertices(bndfacevert, &
+                            size(tf1), tv1)
+                        call alltubebndv1%Append(tv1)
+                        call ntubebndv1%Append(size(tv1))
+                        deallocate(tv1)
+
+                        ! Extract vertices of second set 
+                        call ntubebndv2%Append(1_I8)
+                        tf = tubef%Get()
+                        tfv = face%vert(tf, :) 
+                        if (all(tfv(1, 1) == tfv(:, 1) .or. tfv(1, 1) == tfv(:, 2))) then 
+                            call alltubebndv2%Append(tfv(1, 1))
+                        elseif (all(tfv(1, 2) == tfv(:, 1) .or. tfv(1, 2) == tfv(:, 2))) then
+                            call alltubebndv2%Append(tfv(1, 2))
+                        else
+                            ! This shouldn't happen
+                            call gdErrorHandler('AddTopologicalMeshTubes: ' // &
+                                'found only one set of faces, but could not ' // & 
+                                'find a common point of all tube faces as ' // & 
+                                'other boundary side. Unexpected.')
+                        end if 
+                    end if 
+                end if 
+
+                ! Housekeeping
+                deallocate(sortindex, ispolygonstart, isbranchingpolygon)
             end if 
             
         end do 
@@ -5733,21 +7456,215 @@ module ggmod_topology2D
         call topomesh%tube%Deallocate()
 
         ! Reallocate
-        call topomesh%tube%Initialize(ct, alltubef%Size(), alltubec%Size())
+        call topomesh%tube%Initialize(ct, alltubef%Size(), alltubec%Size(), &
+            alltubebndf1%Size(), alltubebndf2%Size(), alltubebndv1%Size(), &
+            alltubebndv2%Size())
 
         ! Set fields
-        topomesh%tube%face = alltubef%Get()
-        topomesh%tube%cell = alltubec%Get()
-        topomesh%tube%isclosed = isclosedtube%Get() == 1_I8
-        topomesh%tube%faceP(:, 2) = ntubef%Get()
-        topomesh%tube%cellp(:, 2) = ntubec%Get()
-        topomesh%tube%faceP(1, 1) = 1
-        topomesh%tube%cellP(1, 1) = 1
+        topomesh%tube%face      = alltubef%Get()
+        topomesh%tube%cell      = alltubec%Get()
+        topomesh%tube%bndf1     = alltubebndf1%Get()
+        topomesh%tube%bndf2     = alltubebndf2%Get()
+        topomesh%tube%bndv1     = alltubebndv1%Get()
+        topomesh%tube%bndv2     = alltubebndv2%Get()
+        topomesh%tube%isclosed  = isclosedtube%Get() == 1_I8
+
+        topomesh%tube%faceP(:, 2)   = ntubef%Get()
+        topomesh%tube%cellp(:, 2)   = ntubec%Get()
+        topomesh%tube%bndf1P(:, 2)  = ntubebndf1%Get()
+        topomesh%tube%bndf2P(:, 2)  = ntubebndf2%Get()
+        topomesh%tube%bndv1P(:, 2)  = ntubebndv1%Get()
+        topomesh%tube%bndv2P(:, 2)  = ntubebndv2%Get()
+        if (topomesh%tube%ntot > 0) then 
+            topomesh%tube%faceP(1, 1)   = 1
+            topomesh%tube%cellP(1, 1)   = 1
+            topomesh%tube%bndf1P(1, 1)  = 1
+            topomesh%tube%bndf2P(1, 1)  = 1
+            topomesh%tube%bndv1P(1, 1)  = 1
+            topomesh%tube%bndv2P(1, 1)  = 1
+        end if 
+
         do i = 2, topomesh%tube%ntot 
             topomesh%tube%faceP(i, 1) = topomesh%tube%faceP(i-1, 1) + &     
                 topomesh%tube%faceP(i-1, 2)
             topomesh%tube%cellP(i, 1) = topomesh%tube%cellP(i-1, 1) + &     
                 topomesh%tube%cellP(i-1, 2)    
+            topomesh%tube%bndf1P(i, 1) = topomesh%tube%bndf1P(i-1, 1) + &     
+                topomesh%tube%bndf1P(i-1, 2)
+            topomesh%tube%bndf2P(i, 1) = topomesh%tube%bndf2P(i-1, 1) + &     
+                topomesh%tube%bndf2P(i-1, 2)    
+            topomesh%tube%bndv1P(i, 1) = topomesh%tube%bndv1P(i-1, 1) + &     
+                topomesh%tube%bndv1P(i-1, 2)
+            topomesh%tube%bndv2P(i, 1) = topomesh%tube%bndv2P(i-1, 1) + &     
+                topomesh%tube%bndv2P(i-1, 2)    
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Flux tube data addition
+    subroutine AddTopologicalMeshTubeData(topomesh)
+
+        ! Description
+        !============
+        ! This routine adds additional data to the topological mesh 
+        ! tubes, such as which cells are in a tube (cell%tube) and which
+        ! neighbours a tube has
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(inout)       :: topomesh 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: ttc, tf1, tf2, tc, &
+            tf1u, tf2u
+
+        type(IntegerDynamicArrayUDT)            :: ftneig1, ftneig2
+
+        ! Loop
+        integer(I8)                             :: i, j, k, nnb1, nnb2
+
+        ! Initialize
+        !===========
+        ! Associate for ease
+        associate(&
+            tube        => topomesh%tube, &
+            cell        => topomesh%cell, &
+            face        => topomesh%face, &
+            vert        => topomesh%vert)
+
+        ! Allocate 
+        if (allocated(tube%ftneig1)) then 
+            deallocate(tube%ftneig1)
+        end if 
+        if (allocated(tube%ftneig2)) then 
+            deallocate(tube%ftneig2)
+        end if 
+        if (allocated(tube%ftneig1P)) then 
+            deallocate(tube%ftneig1P)
+        end if 
+        if (allocated(tube%ftneig2P)) then 
+            deallocate(tube%ftneig2P)
+        end if 
+        if (allocated(cell%tube)) then 
+            deallocate(cell%tube)
+        end if 
+        allocate(cell%tube(cell%ntot))
+        allocate(tube%ftneig1P(tube%ntot, 2), tube%ftneig2P(tube%ntot, 2))
+
+        ! Initialize
+        ftneig1     = ConstructIntegerDynamicArray()
+        ftneig2     = ConstructIntegerDynamicArray()
+        cell%tube       = 0
+        tube%ftneig1P = 0
+        tube%ftneig2P = 0
+        if (tube%ntot > 1) then 
+            tube%ftneig1P(1, 1) = 1_I8
+            tube%ftneig2P(1, 1) = 1_I8
+        end if  
+        
+        ! Cell tubes
+        !===========
+        do i = 1, tube%ntot
+            ! Get tube cells
+            ttc = tube%GetCell(i)
+
+            ! Check
+            if (any(cell%tube(ttc) /= 0)) then 
+                print *, 'AddTopologicalMeshTubeData: some cells belong ' // &
+                    'to multiple tubes, unexpected. Overwriting and continuing...'
+            end if 
+
+            ! Set cell tube
+            cell%tube(ttc) = i
+        end do 
+
+        ! Tube neighbours
+        !================
+        ! Initialize
+        nnb1 = 0
+        nnb2 = 0
+
+        ! Loop
+        do i = 1, tube%ntot
+            ! Get tube faces from first side
+            tf1 = tube%GetBndFace(i, 1_I8)
+            if (size(tf1) > 0) then 
+                ! Loop over all face
+                do j = 1, size(tf1)
+                    ! Get the face cells
+                    tc = face%GetCell(tf1(j))
+
+                    ! Check if any cell tube IDs are not equal to the 
+                    ! current ID. If so, add neighbour
+                    do k = 1, size(tc)
+                        if (cell%tube(tc(k)) /= i) then 
+                            call ftneig1%Append(cell%tube(tc(k)))
+                            tube%ftneig1P(i, 2) = tube%ftneig1P(i, 2) + 1
+                        end if
+                    end do
+                end do
+            end if 
+
+            ! Get tube faces from second side
+            tf2 = tube%GetBndFace(i, 2_I8)
+            if (size(tf2) > 0) then 
+                ! Loop over all face
+                do j = 1, size(tf2)
+                    ! Get the face cells
+                    tc = face%GetCell(tf2(j))
+
+                    ! Check if any cell tube IDs are not equal to the 
+                    ! current ID. If so, add neighbour
+                    do k = 1, size(tc)
+                        if (cell%tube(tc(k)) /= i) then 
+                            call ftneig2%Append(cell%tube(tc(k)))
+                            tube%ftneig2P(i, 2) = tube%ftneig2P(i, 2) + 1
+                        end if
+                    end do
+                end do
+            end if 
+        end do 
+
+        ! Build (preliminary)
+        tube%ftneig1 = ftneig1%Get()
+        tube%ftneig2 = ftneig2%Get()
+        do i = 2, tube%ntot
+            tube%ftneig1P(i, 1) = tube%ftneig1P(i-1, 1) + tube%ftneig1P(i-1, 2)
+            tube%ftneig2P(i, 1) = tube%ftneig2P(i-1, 1) + tube%ftneig2P(i-1, 2)
+        end do 
+
+        ! Reduce to unique set for each tube
+        ftneig1 = ConstructIntegerDynamicArray()
+        ftneig2 = ConstructIntegerDynamicArray()
+        do i = 1, tube%ntot
+            ! Get tube neighbours (this is possible now)
+            tf1 = tube%GetNeig(i, 1_I8)
+            tf2 = tube%GetNeig(i, 2_I8)
+
+            ! Determine unique set
+            call Unique(tf1, tf1u)
+            call Unique(tf2, tf2u)
+
+            ! Append
+            call ftneig1%Append(tf1u)
+            call ftneig2%Append(tf2u)
+
+            ! Set pointer counter, but only of this tube
+            tube%ftneig1P(i, 2) = size(tf1u)
+            tube%ftneig2P(i, 2) = size(tf2u)
+        end do 
+
+        ! Build (final)
+        tube%ftneig1 = ftneig1%Get()
+        tube%ftneig2 = ftneig2%Get()
+        do i = 2, tube%ntot
+            tube%ftneig1P(i, 1) = tube%ftneig1P(i-1, 1) + tube%ftneig1P(i-1, 2)
+            tube%ftneig2P(i, 1) = tube%ftneig2P(i-1, 1) + tube%ftneig2P(i-1, 2)
         end do 
 
         ! Housekeeping
@@ -5773,12 +7690,8 @@ module ggmod_topology2D
         class(TopomeshUDT)                      :: topomesh 
 
         ! Auxiliary
-        integer(I8)                             :: thisfsID
         integer(I8), allocatable                :: tempvcells(:, :)
-        integer(I8), allocatable, dimension(:)  :: ncpv, vcount, tv, &
-            newfsID, tfv
-        real(R8)                                :: tfsfval
-        real(R8), allocatable, dimension(:)     :: fsfval, newfsfval
+        integer(I8), allocatable, dimension(:)  :: ncpv, vcount, tv
 
         ! Loop
         integer(I8)                             :: i, j
@@ -5878,81 +7791,16 @@ module ggmod_topology2D
 
         ! Reconstruct fsID of vertices to be compliant to faces (note: 
         ! type 1 tangency points get their own flux surface ID)
-        fsfval = topomesh%fsfval%Get() !store original values, for faces
-        newfsfval = fsfval
-        allocate(newfsID(topomesh%nfs))
-        newfsID = 0
-        topomesh%nfs = 0
-        v%fsID = 0 ! reset
-        do i = 1, v%ntot
-            if (v%type(i) == TMvertextp1ID) then 
-                ! Update counter
-                topomesh%nfs = topomesh%nfs + 1
 
-                ! Add ID (value should remain the same)
-                if (v%fsID(i) /= 0) then 
-                    ! unexpected, print warning
-                    print *, 'AddTopologicalMeshInterconnectionData: ' // & 
-                        'tangency point vertex: ', i, ' already had an ID, unexpected. ' // & 
-                        'Overwriting...'
-                end if 
-                v%fsID(i) = topomesh%nfs
-            end if
-        end do  
-        do i = 1, f%ntot 
-            if (f%fsID(i) /= 0) then 
-                ! Get the current value
-                tfsfval = fsfval(f%fsID(i))
-
-                ! Set the new flux surface ID - check if this flux 
-                ! surface was already used before
-                if (newfsID(f%fsID(i)) == 0) then 
-                    topomesh%nfs = topomesh%nfs + 1
-                    thisfsID = topomesh%nfs 
-                    newfsID(f%fsID(i)) = thisfsID
-                else
-                    thisfsID = newfsID(f%fsID(i))
-                end if 
-                newfsfval(thisfsID) = tfsfval 
-
-                ! Get vertices of this face
-                tfv = f%vert(i, :) 
-
-                ! Set first vertex
-                if ((v%fsID(tfv(1)) /= 0) .and. (v%fsID(tfv(1)) /= thisfsID)) then 
-                    ! Unexpected, print warning
-                    print *, 'AddTopologicalMeshInterconnectionData: ' // & 
-                        'vertex: ', tfv(1), ' already had an ID, unexpected. ' // & 
-                        'Overwriting...'
-                end if 
-                v%fsID(tfv(1)) = thisfsID
-                v%fval(tfv(1)) = tfsfval
-
-                ! Set second vertex
-                if ((v%fsID(tfv(2)) /= 0) .and. (v%fsID(tfv(2)) /= thisfsID)) then 
-                    ! Unexpected, print warning
-                    print *, 'AddTopologicalMeshInterconnectionData: ' // & 
-                        'vertex: ', tfv(2), ' already had an ID, unexpected. ' // & 
-                        'Overwriting...'
-                end if 
-                v%fsID(tfv(2)) = thisfsID
-                v%fval(tfv(2)) = tfsfval
-            end if 
-        end do 
-
-        ! Reset the topological mesh flux surface data
-        topomesh%fsfval = ConstructRealDynamicArray(newfsfval)
-        do i = 1, f%ntot
-            if (f%fsID(i) /= 0) then 
-                f%fsID(i) = newfsID(f%fsID(i))
-            end if 
-        end do 
                     
 
         ! Tubes
         !======
         ! Flux tubes 
         call AddTopologicalMeshTubes(topomesh, [TMfaceradID, TMfacebndID])
+
+        ! Additional tube interconnection data
+        call AddTopologicalMeshTubeData(topomesh)
 
         ! Housekeeping
         !=============
@@ -5987,7 +7835,7 @@ module ggmod_topology2D
         logical, allocatable, dimension(:)      :: keepvert
 
         ! Loop 
-        integer(I8)                             :: i
+        integer(I8)                             :: i, j
 
         ! Initialize
         !===========
@@ -6058,11 +7906,15 @@ module ggmod_topology2D
             tv = GetTMCellVert(topomesh%cell, i)
             
             ! Check
-            where (rmvert(tv)) 
-                tv = 0
-            elsewhere
-                tv = tv - diffID(tv)
-            end where
+            do j = 1, size(tv)
+                if (tv(j) /= 0) then
+                    if (rmvert(tv(j))) then 
+                        tv(j) = 0
+                    else
+                        tv(j) = tv(j) - diffID(tv(j))
+                    end if 
+                end if
+            end do 
             !tv(delind(tv)) = 0;
             !tv(tv ~= 0) = tv(tv ~= 0) - diffID(tv(tv ~= 0));
             
@@ -6128,6 +7980,7 @@ module ggmod_topology2D
         !=======
         ! Update IDs
         topomesh%face%ID = topomesh%face%ID - diffIDf
+
         ! Remove data
         topomesh%face%ntot = count(keepface)
         tmp = topomesh%face%vert 
@@ -6140,8 +7993,14 @@ module ggmod_topology2D
         topomesh%face%fsID      = pack(topomesh%face%fsID, keepface)
         topomesh%face%type      = pack(topomesh%face%type, keepface)
         topomesh%face%ID        = pack(topomesh%face%ID, keepface)
-        topomesh%face%pol       = pack(topomesh%face%pol, keepface)
-
+        topomesh%face%pol       = pack(topomesh%face%pol, keepface)  
+        
+        if (allocated(topomesh%face%cell)) then 
+            deallocate(topomesh%face%cell)
+        end if 
+        if (allocated(topomesh%face%cellP)) then 
+            deallocate(topomesh%face%cellP)
+        end if 
 
         ! Update cell face IDs
         do i = 1, nc
@@ -6219,6 +8078,8 @@ module ggmod_topology2D
             topomesh%cell%faceP(i, 1) = topomesh%cell%faceP(i-1, 1) + &
                 topomesh%cell%faceP(i-1, 2)
         end do
+        topomesh%cell%ntotv = size(topomesh%cell%vert)
+        topomesh%cell%ntotf = size(topomesh%cell%face)
 
     end subroutine
 
@@ -6476,383 +8337,6 @@ module ggmod_topology2D
 
     end subroutine 
 
-    ! Topomesh trimming
-    subroutine TrimTopologicalMesh(topomesh, magneticField, vessel)
-
-        ! Description
-        !============
-        ! This function removes boundaries and vertices from a topological mesh if
-        ! those vertices and boundaries lie outside of the domain. To determine the
-        ! latter, the vessel levelset function is checked, which is
-        ! positive when points are outside of the boundary. Any points that lie on
-        ! the boundary should be identified as tangency points (type 4 or 5) or
-        ! other type of boundary points (type 6).
-
-        ! All other points are removed. We assume that all intersections of faces with
-        ! the boundary have been computed and that all segments are added as
-        ! separate faces.
-
-        ! Faces that do not have a start and end vertex are removed per definition.
-        ! If a start or end vertex has been deleted, also the faces that have this
-        ! start or end vertex will be deleted. For other faces, it is checked if
-        ! the majority of points lies inside the vessel, excluding start and end
-        ! vertices (they may lie exactly on the vessel or should be deleted already
-        ! if they lie outside of the vessel). If all vertices (except end points)
-        ! lie outside the vessel, there is no ambiguity and the face is deleted.
-        ! If the first node near the start/end points are still inside
-        ! the vessel, but the rest outside, it is assumed that this is due to mesh
-        ! accuracy (a message will be displayed). If more than one node on each
-        ! side is detected, a warning is issued and the face is not deleted. This
-        ! may be due to not having computed and inserted all intersections, or due
-        ! to misuse of this routine. 
-
-        ! Notes
-        !======
-        ! Note 1: actually, we could also check based on the start and end vertex
-        ! type whether we should consider a certain boundary for deletion (actually
-        ! only boundaries with 'regular' intersections or tangency points). Now, we
-        ! simply check all boundaries. 
-
-        ! Note 2: we rely on the face identifiers to not consider boundary faces.
-        ! This is necessary, since boundary faces may lie just on or off the vessel
-        ! contour, depending on how accurate it was traced. Therefore, this routine
-        ! is likely to fail for these boundaries (as expected...). Boundary faces
-        ! are expected to be of type 3. 
-
-        ! Note 3: separatrix segments (type 4) that do not have a 
-        ! saddle point at either end are removed as well, since they
-        ! are not strictly necessary in the topological mesh. Splitting
-        ! points are also allowed of course. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(TopomeshUDT)                      :: topomesh 
-        type(magneticFieldUDT), intent(in)      :: magneticField 
-        type(VesselUDT), intent(inout)          :: vessel 
-
-        ! Auxiliary
-        real(R8), allocatable, dimension(:)     :: Vv
-        logical, allocatable, dimension(:)      :: outbnd, rmvert, &
-            rmface
-        type(PolygonUDT), allocatable           :: bndpol(:)
-        type(PolygonSetUDT)                     :: bndps 
-        class(PLF2DOptionsUDT), allocatable     :: bndplfoptions 
-        
-
-
-        ! Loop
-        integer(I8)                             :: i 
-
-        ! Initialize
-        !===========
-        ! Unpack
-        associate(&
-            plf         => vessel%plfvessel,      &
-            mfinterp    => magneticField%interp)
-
-        ! Rebuild the vessel description to be sure
-            allocate(bndpol(count(topomesh%face%type == TMfacebndID)))
-            bndpol = pack(topomesh%face%pol, topomesh%face%type == TMfacebndID)
-            call bndps%Construct(bndpol)
-            call ConstructVesselPolygonSet(vessel, bndps)
-            allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
-            call InitializePolygonLevelsetFunction2D(vessel%plfvessel, &
-                vessel%polygonset, bndplfoptions)
-
-        ! Vertices
-        !=========
-        ! Check if in boundary
-        allocate(Vv(topomesh%vert%ntot))
-        call plf%Evaluate(topomesh%vert%x, topomesh%vert%y, 0, 0, Vv)
-        outbnd = Vv >= 0
-
-        ! Check if we should remove it
-        rmvert = outbnd .and. (topomesh%vert%type /= TMvertextp1ID) .and. &
-            (topomesh%vert%type /= TMvertextp2ID) .and. (topomesh%vert%type /= TMvertexbndID)
-
-        ! Remove these vertices
-        call RemoveTopologicalMeshVertexLogical(topomesh, rmvert)
-
-        ! Faces
-        !======
-        ! Start by removing faces with zero start or end vertex
-        rmface = (topomesh%face%vert(:, 1) == 0) .or. &
-            (topomesh%face%vert(:, 2) == 0)
-
-        ! Also remove separatrix faces without saddle points or splitting points
-        do i = 1, topomesh%face%ntot
-            if (topomesh%face%type(i) == TMfacesepID) then 
-                ! Set to true, will be set to false if saddle point present
-                rmface(i) = .true. 
-                if (topomesh%face%vert(i, 1) /= 0) then 
-                    if ((topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsaddleID) .or. &
-                        (topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsplitID)) then 
-                        rmface(i) = .false. 
-                    end if 
-                else 
-                    ! Make sure is removed because of zero vertex
-                    rmface(i) = .true.
-                    
-                end if 
-                if (topomesh%face%vert(i, 2) /= 0) then 
-                    if ((topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsaddleID) .or. &
-                        (topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsplitID)) then 
-                        rmface(i) = .false. 
-                    end if 
-                else 
-                    ! Make sure is removed because of zero vertex
-                    rmface(i) = .true.
-                end if 
-            end if 
-        end do 
-
-        ! Remove
-        call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
-        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-        call plf%ps%WriteData('vesselpolygon')
-        ! call plf%Visualize('vesselplf', nxin=1000, nyin=1000)
-
-        ! Check remaining faces 
-        deallocate(rmface)
-        allocate(rmface(topomesh%face%ntot))
-        rmface = .false. 
-        do i = 1, topomesh%face%ntot
-            if (topomesh%face%type(i) /= TMfacebndID) then 
-                ! Points in boundary (exclude end points)?
-                deallocate(Vv)
-                allocate(Vv(size(topomesh%face%x(i)%Get())))
-                call plf%Evaluate(topomesh%face%x(i)%Get(), &
-                    topomesh%face%y(i)%Get(), 0, 0, Vv)
-                outbnd = Vv(2:size(Vv)-1) >= 0
-                
-                ! Check
-                if (all(outbnd)) then 
-                    ! Remove, no issue
-                    rmface(i) = .true.
-                elseif (all(outbnd(2:size(outbnd)-1)) .and. (size(outbnd) > 2)) then 
-                    ! Remove, but display message
-                    print *, 'face ID: ', i, 'face vertices: ', topomesh%face%vert(i, 1), topomesh%face%vert(i, 2)
-                    print *, 'TrimTopologicalMesh: boundary removed ' // & 
-                        'which still had first two points in domain'
-                elseif ((.not. any(outbnd(2:size(outbnd)-1))) .and. (size(outbnd) > 2)) then 
-                    ! Do not remove, nothing to do here
-                else
-                    ! Check if we simply had a very short boundary
-                    if (size(outbnd) <= 2) then 
-                        print *, 'TrimTopologicalMesh: face detected ' // & 
-                            'with at most four points, may not be ' // & 
-                            'properly diagnosed for removal. Try ' // & 
-                            'increasing number of points by increasing ' //& 
-                            'contour mesh resolution'
-                    else
-                        ! Points detected inside and outside - throw warning
-                        print *, 'TrimTopologicalMesh: face detected ' // & 
-                            'that has multiple points inside and outside ' // & 
-                            'of domain. May result in unexpected outcome. Check input'
-
-                        if (count(.not. outbnd) < count(outbnd)) then 
-                            rmface(i) = .true.
-                        end if 
-                    end if 
-                end if 
-            end if 
-        end do
-
-        ! Remove
-        call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
-
-        ! Housekeeping
-        !=============
-        end associate
-
-    end subroutine
-
-    ! Topomesh simplification
-    subroutine SimplifyTopologicalMeshFaces(topomesh)
-
-        ! Description
-        !============
-        ! This routine attempts to simplify the topological mesh by 
-        ! merging faces (and hence deleting vertices) if they would
-        ! form a single, unique face again. To achieve this, we loop 
-        ! over all vertices and check the following conditions:
-        ! - does the vertex only appear in two separate boundaries?
-        ! - are those two boundaries of the same type?
-        ! - is the vertex a regular or boundary vertex?
-        ! If all these conditions are met, the neighbouring faces may
-        ! be safely merged into a single face. Normally, this merging 
-        ! shouldn't be necessary, unless e.g. separatrix parts are 
-        ! removed during topological mesh trimming. This routine should
-        ! therefore be called after adding all boundaries to the 
-        ! topological mesh, but before adding cells and other data. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(TopomeshUDT)                      :: topomesh 
-
-        ! Auxiliary
-        integer(I8)                             :: nforig, tf(1:2)
-        integer(I8), allocatable, dimension(:)  :: rmvID, rmf1, rmf2, &
-            fvert 
-        logical, allocatable, dimension(:)      :: markv, markf, &
-            appearstwice
-        real(R8)                                :: fsfval
-        real(R8), allocatable, dimension(:)     :: tempx, tempy 
-        type(RealDynamicArrayUDT)               :: xda, yda 
-
-        ! Loop 
-        integer(I8)                             :: i, k 
-
-        ! Initialize
-        !===========
-        ! Keep looping until exit condition reached
-        do while (.true.) 
-
-            ! Store original sizes
-            nforig = topomesh%face%ntot
-
-            ! Mark vertices and faces for removal
-            allocate(markv(topomesh%vert%ntot), markf(topomesh%face%ntot), &
-                rmvID(0), rmf1(0), rmf2(0))
-            markv = .false. 
-            markf = .false.
-            do i = 1, topomesh%vert%ntot
-                ! Is it a regular or boundary vertex?
-                if ((.not. topomesh%vert%type(i) == TMvertexbndID) .and. &
-                    (.not. topomesh%vert%type(i) == 0)) then 
-                    cycle 
-                end if 
-
-                ! If it is, does it only appear twice in face%vert?
-                appearstwice = ((topomesh%face%vert(:, 1) == i) .or. (topomesh%face%vert(:, 2) == i))
-                if (.not. (count(appearstwice) == 2)) then 
-                    cycle 
-                end if 
-                tf = pack([(k, k = 1, topomesh%face%ntot)], appearstwice)
-
-                ! Are both faces not yet marked for deletion?
-                if (any(markf(tf))) then 
-                    cycle ! do in a next iteration
-                end if 
-
-                ! Do both boundaries have the same type and flux surface
-                ! ID? 
-                if (.not. (topomesh%face%type(tf(1)) == topomesh%face%type(tf(2)))) then 
-                    cycle
-                end if 
-                if (.not. (topomesh%face%fsID(tf(1)) == topomesh%face%fsID(tf(2)))) then 
-                    cycle
-                end if 
-
-                ! If we got here, we passed all checks. Mark for merging
-                ! and deletion
-                markv(i) = .true.
-                markf(tf) = .true. 
-                rmvID = [rmvID, i]
-                rmf1 = [rmf1, tf(1)]
-                rmf2 = [rmf2, tf(2)]
-
-            end do 
-
-            ! Check exit condition
-            if (count(markv) == 0) then 
-                exit 
-            end if 
-
-            ! Merge faces
-            !============
-            do i = 1, size(rmf1)
-                ! Check vertices
-                if (topomesh%face%vert(rmf1(i), 2) == rmvID(i)) then 
-                    ! First face is in good position 
-                    xda = topomesh%face%x(rmf1(i))
-                    yda = topomesh%face%y(rmf1(i))
-                    if (topomesh%face%vert(rmf2(i), 1) == rmvID(i)) then 
-                        ! Simply append 
-                        fvert = [topomesh%face%vert(rmf1(i), 1), &
-                            topomesh%face%vert(rmf2(i), 2)]
-                        call xda%Append(topomesh%face%x(rmf2(i))%Get())
-                        call yda%Append(topomesh%face%y(rmf2(i))%Get())
-
-                    elseif (topomesh%face%vert(rmf2(i), 2) == rmvID(i)) then 
-                        ! Need to flip second face
-                        fvert = [topomesh%face%vert(rmf1(i), 1), &
-                            topomesh%face%vert(rmf2(i), 1)]
-                        tempx = topomesh%face%x(rmf2(i))%Get()
-                        tempy = topomesh%face%y(rmf2(i))%Get()
-                        call xda%Append(tempx(size(tempx):1:-1))
-                        call yda%Append(tempy(size(tempy):1:-1))
-
-                    else 
-                        ! This is a bug
-                        call gdErrorHandler('SimplifyTopologicalMesh: ' // &
-                            'bug detected')
-                    end if 
-                elseif (topomesh%face%vert(rmf1(i), 1) == rmvID(i)) then 
-                    ! Need to flip first face
-                    tempx = topomesh%face%x(rmf1(i))%Get()
-                    tempy = topomesh%face%y(rmf1(i))%Get()
-                    tempx = tempx(size(tempx):1:-1)
-                    tempy = tempy(size(tempy):1:-1)
-                    xda = ConstructRealDynamicArray(tempx)
-                    yda = ConstructRealDynamicArray(tempy)
-                    if (topomesh%face%vert(rmf2(i), 1) == rmvID(i)) then 
-                        ! Simply append 
-                        fvert = [topomesh%face%vert(rmf1(i), 2), &
-                            topomesh%face%vert(rmf2(i), 2)]
-                        call xda%Append(topomesh%face%x(rmf2(i))%Get())
-                        call yda%Append(topomesh%face%y(rmf2(i))%Get())
-
-                    elseif (topomesh%face%vert(rmf2(i), 2) == rmvID(i)) then 
-                        ! Need to flip second face
-                        fvert = [topomesh%face%vert(rmf1(i), 2), &
-                            topomesh%face%vert(rmf2(i), 1)]
-                        tempx = topomesh%face%x(rmf2(i))%Get()
-                        tempy = topomesh%face%y(rmf2(i))%Get()
-                        call xda%Append(tempx(size(tempx):1:-1))
-                        call yda%Append(tempy(size(tempy):1:-1))
-                        
-                    else 
-                        ! This is a bug
-                        call gdErrorHandler('SimplifyTopologicalMesh: ' // &
-                            'bug detected')
-                    end if 
-                else 
-                    ! This is a bug
-                    call gdErrorHandler('SimplifyTopologicalMesh: ' // &
-                        'bug detected')
-                end if 
-
-                ! Add the new face
-                if (topomesh%face%fsID(rmf1(i)) /= 0) then 
-                    fsfval = topomesh%fsfval%Get(topomesh%face%fsID(rmf1(i)))
-                else
-                    fsfval = 0.0_R8
-                end if 
-                call AddTopologicalMeshFace(topomesh, fvert, &
-                    xda, yda, topomesh%face%type(rmf1(i)), &
-                    topomesh%face%fsID(rmf1(i)), fsfval)
-
-            end do 
-
-            ! Extend the face deletion vertices
-            markf = [markf, spread(.false., 1, topomesh%face%ntot - nforig)]
-
-            ! Delete the faces
-            call RemoveTopologicalMeshFaceLogical(topomesh, markf)
-
-            ! Delete the vertices
-            call RemoveTopologicalMeshVertexLogical(topomesh, markv)
-
-            ! Housekeeping
-            deallocate(markv, markf, rmvID, rmf1, rmf2)
-
-        end do 
-
-    end subroutine 
-
     ! Getters
     function GetTMVertFace(vert, i) result(res)
         integer(I8)                 :: i 
@@ -6894,6 +8378,42 @@ module ggmod_topology2D
         class(TopomeshTubeUDT)      :: tube 
         integer(I8), allocatable    :: res(:)
         res = tube%face(tube%faceP(i, 1):(tube%faceP(i, 1) + tube%faceP(i, 2) - 1))
+    end function
+
+    function GetTMTubeBndFace(tube, i, j) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i, j
+        integer(I8), allocatable    :: res(:)
+        
+        if (j == 1) then 
+            res = tube%bndf1(tube%bndf1P(i, 1):(tube%bndf1P(i, 1) + tube%bndf1P(i, 2) - 1))
+        else 
+            res = tube%bndf2(tube%bndf2P(i, 1):(tube%bndf2P(i, 1) + tube%bndf2P(i, 2) - 1))
+        end if 
+    end function
+
+    function GetTMTubeBndVert(tube, i, j) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i, j
+        integer(I8), allocatable    :: res(:)
+
+        if (j == 1) then 
+            res = tube%bndv1(tube%bndv1P(i, 1):(tube%bndv1P(i, 1) + tube%bndv1P(i, 2) - 1))
+        else 
+            res = tube%bndv2(tube%bndv2P(i, 1):(tube%bndv2P(i, 1) + tube%bndv2P(i, 2) - 1))
+        end if 
+    end function
+
+    function GetTMTubeNeig(tube, i, j) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i, j
+        integer(I8), allocatable    :: res(:)
+
+        if (j == 1) then 
+            res = tube%ftneig1(tube%ftneig1P(i, 1):(tube%ftneig1P(i, 1) + tube%ftneig1P(i, 2) - 1))
+        else 
+            res = tube%ftneig2(tube%ftneig2P(i, 1):(tube%ftneig2P(i, 1) + tube%ftneig2P(i, 2) - 1))
+        end if 
     end function
 
     function GetTMVertFaceNeig(vert, i, tf) result(res)
@@ -7230,7 +8750,225 @@ module ggmod_topology2D
         call Unique(fsIDs, fsID)
 
     end function
+
+    function GetStrikePointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns the vertex indices that are strike 
+        ! points. Strike points are defined as boundary points of which
+        ! at least one face is a separatrix segment.
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tempID, tv
+        logical, allocatable, dimension(:)      :: temp
+
+        ! Loop
+        integer(I8)                 :: i, j
+
+        ! Get
+        !====
+        ! Find separatrix faces
+        tempID = topomesh%GetSeparatrixFaceIDs()
+
+        ! Check which separatrix faces have a boundary vertex
+        allocate(temp(topomesh%vert%ntot))
+        temp = .false. 
+        do i = 1, size(tempID)
+            ! Get face vertices
+            tv = topomesh%face%vert(tempID(i), :)
+
+            ! Check
+            do j = 1, size(tv)
+                if (topomesh%vert%type(tv(j)) == TMvertexbndID) then 
+                    temp(tv(j)) = .true.
+                end if 
+            end do 
+        end do 
+
+        ! Get indices
+        allocate(ID(count(temp)))
+        ID = pack([(j, j = 1, topomesh%vert%ntot)], temp)
+
+    end function
+
+    function GetXPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns all the X-point (saddle point) IDs
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        integer(I8), allocatable, dimension(:)  :: ID
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)      :: isXP
+
+        ! Loop
+        integer(I8)                             :: k
+
+        ! Find X-points
+        !==============
+        isXP = topomesh%vert%type == TMvertexsaddleID
+        allocate(ID(count(isXP)))
+        ID = pack([(k, k = 1, size(isXP))], isXP)
+
+    end function
+
+    function GetOPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns all the O-points (extrema) point) IDs
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        integer(I8), allocatable, dimension(:)  :: ID
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)      :: isOP
+
+        ! Loop
+        integer(I8)                             :: k
+
+        ! Find X-points
+        !==============
+        isOP = (topomesh%vert%type == TMvertexminID) .or. &
+            (topomesh%vert%type == TMvertexmaxID)
+        allocate(ID(count(isOP)))
+        ID = pack([(k, k = 1, size(isOP))], isOP)
+
+    end function
  
+    ! Topological mesh identification 
+    function IdentifyTopologicalMeshType(topomesh) result(TMlabel)
+
+        ! Description
+        !============
+        ! This function attempts to identify the topological mesh type
+        ! and returns the topological mesh identification number 
+        ! (see mod_definitions of the definition thereof). This is not 
+        ! really required by goat itself, but is rather a convenience
+        ! tool for later simulation etc and face label mapping. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)              :: topomesh
+        integer(I8)                     :: TMlabel
+
+        ! Auxiliary
+        logical                                 :: issinglenull, &
+            isdoublenull
+        integer(I8)                             :: nxp, nop, nwgc, nsp, &
+            ncc
+        integer(I8), allocatable, dimension(:)  :: xp, op, wgc, sp, cc
+
+        ! Initialize
+        !===========
+        ! Set initial label to default label
+        TMlabel = TMTopGeneral
+
+        ! Get all X-points
+        xp = topomesh%GetXPointIDs()
+        nxp = size(xp)
+
+        ! Get all O-points
+        op = topomesh%GetOPointIDs()
+        nop = size(op)
+
+        ! Strike points
+        sp = topomesh%GetStrikePointIDs()
+        nsp = size(sp)
+
+        ! Get all wide grid cells
+        wgc = topomesh%GetWideGridCellIDs()        
+        nwgc = size(wgc)
+
+        ! Core cells
+        cc = topomesh%GetCoreCellIDs()
+        ncc = size(cc)
+
+        ! Initialize
+        issinglenull = .true.
+        isdoublenull = .true.
+
+        ! Single null
+        !============        
+        ! X-point and O-point checks
+        if (nxp /= 1 .or. nop /= 0) then 
+            issinglenull = .false.
+        end if 
+
+        ! Strike point checks
+        if (nsp /= 2) then 
+            issinglenull = .false. 
+        end if 
+
+        ! Number of wide and narrow grid cells
+        if (nwgc > 0) then 
+            issinglenull = .false.
+        elseif (topomesh%cell%ntot /= 3) then
+            issinglenull = .false.
+        end if 
+
+        ! Core cells
+        if (ncc /= 1) then 
+            issinglenull = .false.
+        end if 
+
+        ! Double null
+        !============
+        ! X-point and O-point checks
+        if (nxp /= 2 .or. nop /= 0) then 
+            isdoublenull = .false.
+        end if 
+
+        ! Strike point checks
+        if (nsp /= 4) then 
+            isdoublenull = .false. 
+        end if 
+
+        ! Number of wide and narrow grid cells
+        if (nwgc > 0) then 
+            isdoublenull = .false.
+        elseif (topomesh%cell%ntot /= 3) then
+            isdoublenull = .false.
+        end if 
+
+        ! Core cells
+        if (ncc /= 2) then 
+            isdoublenull = .false.
+        end if 
+
+        ! Determine flag
+        !===============
+        ! Sanity checks
+        if (count([issinglenull, isdoublenull]) > 1) then 
+            ! Probably we missed something in the definition then
+            print *, 'IdentifyTopologicalMeshType: multiple topologies ' // & 
+                'appear valid, this is likely a bug. Setting flag to ' // & 
+                'general flag...'
+
+        elseif (issinglenull) then 
+            TMlabel = TMTopSN
+        elseif (isdoublenull) then 
+            TMlabel = TMTopDN
+        end if 
+
+    end function
+
     !------------------------------------------------------------------!
     !                 TOPOLOGICAL MESH CELL OPERATORS                  !
     !------------------------------------------------------------------!
@@ -7665,6 +9403,74 @@ module ggmod_topology2D
 
     end subroutine
 
+    ! Tracer updater
+    subroutine UpdateTracersFromTopomesh(topomesh, tracer, &
+        magneticField, vessel, options)
+
+        ! Description
+        !============
+        ! This routine updates the field/vessel tracers by adding the 
+        ! topological mesh points as saddle points 
+
+        ! Modules
+        !========
+        use mod_structured2Dgridding
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(in)          :: topomesh
+        class(ContourTracerUDT), allocatable, intent(inout)  :: tracer
+        type(TopomeshOptionsUDT), intent(in)    :: options
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        type(VesselUDT), intent(in)             :: vessel
+
+        ! Auxiliary
+        real(R8)                                :: dxfracmin, dyfracmin
+        real(R8), allocatable, dimension(:)     :: xb, yb, &
+            xg, yg, Vf, xgv, ygv, xps, yps
+        real(R8), parameter                     :: emptyR8(0)= 0
+        real(R8), allocatable, dimension(:)     :: xtp, ytp, Ftp
+        integer(I8)                             :: ntp 
+        integer(I8), allocatable, dimension(:)  :: IDs
+        integer(I8), parameter                  :: emptyI8(0) = 0
+        logical, allocatable, dimension(:)      :: includevert
+
+        ! Grid
+        !=====
+        ! Initialize
+        dxfracmin = 1e-4_R8 
+        dyfracmin = 1e-4_R8
+
+        ! Determine domain bounds based on vessel and magnetic field extent
+        call vessel%plfvessel%ps%GetVertices(xps, yps)
+        xb = [minval([xps, magneticField%interp%xgv]), maxval([xps, magneticField%interp%xgv])]
+        yb = [minval([yps, magneticField%interp%ygv]), maxval([yps, magneticField%interp%ygv])]
+
+        ! Construct refined grid based on tangency points and extrema
+        includevert = (topomesh%vert%type == TMvertextp1ID) .or. &
+            (topomesh%vert%type == TMvertextp2ID) .or. (topomesh%vert%type == TMvertexsaddleID)
+        ! includevert = topomesh%vert%type == TMvertexsaddleID
+        ntp = count(includevert)
+        allocate(xtp(ntp), ytp(ntp), Ftp(ntp), IDs(ntp))
+        xtp = pack(topomesh%vert%x, includevert)
+        ytp = pack(topomesh%vert%y, includevert)
+        Ftp = pack(topomesh%vert%fval, includevert)
+        IDs = pack(topomesh%vert%ID, includevert)
+        call ConstructRefined2DStructuredGrid(xg, yg, xgv, ygv, xb, yb, &
+            options%vresx, options%vresy, xtp, ytp, 5, 5, dxfracmin, dyfracmin)  
+
+        ! Evaluate magnetic field and vessel
+        allocate(Vf(size(xg)))
+        call magneticField%interp%Evaluate(xg, yg, 0, 0, Vf)
+        call magneticField%interp%Evaluate(xtp, ytp, 0, 0, Ftp)
+
+        ! Update the tracer 
+        tracer = ConstructStructuredTracer(&
+            reshape(Vf, [size(xgv), size(ygv)]), xgv, ygv, &
+            xtp, ytp, Ftp, IDs, tracer%npmin, tracer%npmax, tracer%dl)
+
+    end subroutine
     !------------------------------------------------------------------!
     !                               I/O                                !
     !------------------------------------------------------------------!
@@ -7734,6 +9540,7 @@ module ggmod_topology2D
         integer(I8), allocatable, dimension(:)  :: tID
         real(R8), allocatable, dimension(:)     :: xf, yf, tfval
         character(:), allocatable               :: dir
+        logical                                 :: isuptodate
         logical, allocatable, dimension(:)      :: BV, BF
         type(RealDynamicArrayUDT), allocatable  :: xcda(:), ycda(:)
 
@@ -7749,6 +9556,11 @@ module ggmod_topology2D
             c       => topomesh%cell,   &
             t       => topomesh%tube    &
         )
+
+        ! Switch to check if full topomesh is up to date. If not, 
+        ! certain (many) things will not be written out (cells, 
+        ! some connectivity data, ...)
+        isuptodate = .true.
 
         ! Construct writing directory
         dir = plotdir // filesepchar // filename // '.dat'
@@ -7802,15 +9614,21 @@ module ggmod_topology2D
 
         ! Vertex face data
         if (allocated(v%faceP) .and. allocated(v%face)) then 
-            write (fu, *) 'vertex face pointer'
-            do i = 1, v%ntot
-                write (fu, *) v%faceP(i, 1), v%faceP(i, 2)
-            end do 
+            if (size(v%faceP, 1) == v%ntot) then ! may not be up to date
+                write (fu, *) 'vertex face pointer'
+                do i = 1, v%ntot
+                    write (fu, *) v%faceP(i, 1), v%faceP(i, 2)
+                end do 
 
-            write (fu, *) 'vertex facelist'
-            do i = 1, size(v%face)
-                write (fu, *) v%face(i)
-            end do 
+                write (fu, *) 'vertex facelist'
+                do i = 1, size(v%face)
+                    write (fu, *) v%face(i)
+                end do 
+            else
+                isuptodate = .false.
+            end if 
+        else
+            isuptodate = .false.
         end if 
 
         ! Write face data
@@ -7848,104 +9666,127 @@ module ggmod_topology2D
         ! Write cell data
         !================
         ! Number of cells, number of cell vertices, number of cell faces
-        if (allocated(c%vert)) then 
-            cvsize = size(c%vert)
+        if (allocated(c%vert) .and. isuptodate) then 
+            if ((size(c%vert) == c%ntotv) .and. .not. (any(c%vert == 0))) then 
+                cvsize = size(c%vert)
+            else
+                cvsize = 0
+                isuptodate = .false.
+            end if 
         else
             cvsize = 0
+            isuptodate = .false.
         end if 
-        if (allocated(c%face)) then 
-            cfsize = size(c%face)
+        if (allocated(c%face) .and. isuptodate) then 
+            if (size(c%face) == c%ntotf) then 
+                cfsize = size(c%face)
+            else
+                cfsize = 0
+                isuptodate = .false.
+            end if 
         else
             cfsize = 0
+            isuptodate = .false.
         end if 
         write (fu, *) 'cells'
-        write (fu, *) c%ntot, cvsize, cfsize
+        if (isuptodate) then 
+            write (fu, *) c%ntot, cvsize, cfsize
+        else
+            write (fu, *) 0_I8, cvsize, cfsize
+        end if 
 
-        ! Compute cell polygon data
-        allocate(xcda(c%ntot), ycda(c%ntot))
-        do i = 1, c%ntot
-            call ConstructTopologicalMeshCellPolygon(topomesh, i, xcda(i), ycda(i))
-        end do 
-
-        ! Cell data
-        write (fu, *) 'ID, nc'
-        do i = 1, c%ntot 
-            write (fu, *) i, xcda(i)%Size()
-        end do 
-
-        ! Cell vertices
-        write (fu, *) 'cell vertexlist'
-        do i = 1, cvsize
-            write (fu, *) c%vert(i)
-        end do 
-        write (fu, *) 'cell vertex pointer'
-        do i = 1, c%ntot 
-            write (fu, *) c%vertP(i, 1), c%vertP(i, 2)
-        end do 
-
-        ! Cell faces
-        write (fu, *) 'cell facelist'
-        do i = 1, cfsize
-            write (fu, *) c%face(i)
-        end do 
-        write (fu, *) 'cell face pointer'
-        do i = 1, c%ntot 
-            write (fu, *) c%faceP(i, 1), c%faceP(i, 2)
-        end do 
-
-        ! Cell polygons
-        write (fu, *) 'cell polygons'
-        do i = 1, c%ntot 
-            ! Write header
-            write (fu, *) 'cell ', i 
-
-            ! Write coordinates
-            xf = xcda(i)%Get()
-            yf = ycda(i)%Get()
-            do j = 1, size(xf)
-                write(fu, *) xf(j), yf(j)
+        ! Print additional data
+        if (isuptodate) then 
+            ! Compute cell polygon data
+            allocate(xcda(c%ntot), ycda(c%ntot))
+            do i = 1, c%ntot
+                call ConstructTopologicalMeshCellPolygon(topomesh, i, xcda(i), ycda(i))
             end do 
-        end do 
+
+            ! Cell data
+            write (fu, *) 'ID, nc'
+            do i = 1, c%ntot 
+                write (fu, *) i, xcda(i)%Size()
+            end do 
+
+            ! Cell vertices
+            write (fu, *) 'cell vertexlist'
+            do i = 1, cvsize
+                write (fu, *) c%vert(i)
+            end do 
+            write (fu, *) 'cell vertex pointer'
+            do i = 1, c%ntot 
+                write (fu, *) c%vertP(i, 1), c%vertP(i, 2)
+            end do 
+
+            ! Cell faces
+            write (fu, *) 'cell facelist'
+            do i = 1, cfsize
+                write (fu, *) c%face(i)
+            end do 
+            write (fu, *) 'cell face pointer'
+            do i = 1, c%ntot 
+                write (fu, *) c%faceP(i, 1), c%faceP(i, 2)
+            end do 
+
+            ! Cell polygons
+            write (fu, *) 'cell polygons'
+            do i = 1, c%ntot 
+                ! Write header
+                write (fu, *) 'cell ', i 
+
+                ! Write coordinates
+                xf = xcda(i)%Get()
+                yf = ycda(i)%Get()
+                do j = 1, size(xf)
+                    write(fu, *) xf(j), yf(j)
+                end do 
+            end do 
+        end if 
 
         ! Write flux surface data
         !========================
-        ! Header and sizes
-        write (fu, *) 'flux surfaces'
-        write (fu, *) topomesh%nfs 
-        
-        ! Data
-        write (fu, *) 'ID, fval'
-        tID = topomesh%fsID%Get()
-        tfval = topomesh%fsfval%Get()
-        do i = 1, size(tID)
-            write (fu, *) tID(i), tfval(i)
-        end do 
+        if (isuptodate) then 
+            ! Header and sizes
+            write (fu, *) 'flux surfaces'
+            write (fu, *) topomesh%nfs 
+            
+            ! Data
+            write (fu, *) 'ID, fval'
+            tID = topomesh%fsID%Get()
+            tfval = topomesh%fsfval%Get()
+            do i = 1, size(tID)
+                write (fu, *) tID(i), tfval(i)
+            end do 
+        end if 
 
         ! Write tube data
         !================
-        ! Header and sizes
-        write (fu, *) 'tubes'
-        write (fu, *) t%ntot, t%nface, t%ncell 
+        if (isuptodate) then 
+            ! Header and sizes
+            write (fu, *) 'tubes'
+            write (fu, *) t%ntot, t%nface, t%ncell 
 
-        ! Tube faces
-        write (fu, *) 'tube facelist'
-        do i = 1, t%nface
-            write (fu, *) t%face(i)
-        end do 
-        write (fu, *) 'tube face pointer'
-        do i = 1, t%ntot 
-            write (fu, *) t%faceP(i, 1), t%faceP(i, 2)
-        end do 
+            ! Tube faces
+            write (fu, *) 'tube facelist'
+            do i = 1, t%nface
+                write (fu, *) t%face(i)
+            end do 
+            write (fu, *) 'tube face pointer'
+            do i = 1, t%ntot 
+                write (fu, *) t%faceP(i, 1), t%faceP(i, 2)
+            end do 
 
-        ! Tube cells
-        write (fu, *) 'tube cells'
-        do i = 1, t%ncell
-            write (fu, *) t%cell(i)
-        end do 
-        write (fu, *) 'tube cell pointer'
-        do i = 1, t%ntot 
-            write (fu, *) t%cellP(i, 1), t%cellP(i, 2)
-        end do 
+            ! Tube cells
+            write (fu, *) 'tube cells'
+            do i = 1, t%ncell
+                write (fu, *) t%cell(i)
+            end do 
+            write (fu, *) 'tube cell pointer'
+            do i = 1, t%ntot 
+                write (fu, *) t%cellP(i, 1), t%cellP(i, 2)
+            end do 
+        end if 
 
         ! Housekeeping
         !=============

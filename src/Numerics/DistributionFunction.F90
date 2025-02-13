@@ -1240,6 +1240,7 @@ module DistributionFunction
                 end if 
             end do 
         end do
+        where (A <= 1e-10) A = 0
 
         ! Call solver
         allocate(sol(size(b)))

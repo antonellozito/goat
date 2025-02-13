@@ -340,8 +340,14 @@ module goatmod_types
         ! - IMPcell, IMPface    : same, but inner mid plane
         ! - OMPr, OMPz          : points defining line segment of OMP
         ! - IMPr, IMPz          : same but for inner mid plane
+        ! - topoflag            : flag indicating the topological mesh 
+        !                       type (see also mod_definitions)
         ! - xpointID            : array containing all X-point vertex IDs
         ! - nxp                 : number of x-points
+        ! - spointID            : array containing all strike point vertex IDs
+        ! - nsp                 : number of strike points
+        ! - opointID            : O point IDs (in the grid)
+        ! - nop                 : number of o points
 
         ! Flux data
         type(FluxDataUDT)           :: fluxdata
@@ -349,6 +355,9 @@ module goatmod_types
         ! Legacy data of structured grid
         type(StructuredGridDataUDT) :: sglegacy
 
+        ! Topological mesh type
+        integer(I8)                             :: topoflag
+        
         ! OMP & IMP
         integer(I8), allocatable, dimension(:)  :: OMPcell, OMPface, &
             IMPcell, IMPface
@@ -357,9 +366,10 @@ module goatmod_types
         real(R8), dimension(1:2)                :: OMPr, OMPz, IMPr, &
             IMPz
 
-        ! X-point(s)
-        integer(I8), allocatable                :: xpointID(:)
-        integer(I8)                             :: nxp
+        ! X-point(s), strike points, o points
+        integer(I8), allocatable, dimension(:)  :: xpointID, &
+            spointID, opointID
+        integer(I8)                             :: nxp, nsp, nop
 
     end type
 
@@ -507,6 +517,7 @@ module goatmod_types
         class(PolygonShapeFunctionUDT), allocatable     :: psf
         class(PolygonLevelsetFunction2DUDT), allocatable   :: plfvessel, &
             plftarget
+        type(PolygonLevelsetFunction2DClosedExactUDT)   :: exactplfvessel
 
     contains 
 
@@ -1011,7 +1022,7 @@ module goatmod_types
         ! Data structures 
         v = grid%vert
         f = grid%face
-        c = grid%cell 
+        c = grid%cell  
     
         ! Checks
         if (size(f%vert,2) /= 2) then
@@ -1181,6 +1192,7 @@ module goatmod_types
                         if (fcount(tf) > 2) then
                             print *, 'face ID: ', tf
                             print *, 'neighbours: ', tempfcell(tf,:), i
+                            print *, 'vert: ', f%vert(tf, 1), f%vert(tf, 2)
                             call gdErrorHandler(& 
                             'ComputeGridInterconnections: too many ' &
                                 // 'neighbours for this face')
@@ -1840,9 +1852,8 @@ module goatmod_types
         !========
         ! Magnetic field at vertices
         call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 0, grid%vert%psi)
-        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 1, grid%vert%bx)
-        call mf%Evaluate(grid%vert%x, grid%vert%y, 1, 0, grid%vert%by)
-        grid%vert%bx = -grid%vert%bx
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 1, 0, grid%vert%bx) 
+        call mf%Evaluate(grid%vert%x, grid%vert%y, 0, 1, grid%vert%by) 
 
         ! Cell centers
         do i = 1, nc 
@@ -1850,6 +1861,9 @@ module goatmod_types
             grid%cell%x(i) = sum(grid%vert%x(tv))/size(tv)
             grid%cell%y(i) = sum(grid%vert%y(tv))/size(tv)
         end do 
+
+        ! Amount of guard cells (not present here, simply amount of boundary faces)
+        grid%cell%ngc = count(grid%face%BF)
 
         ! Magnetic field at cell centers
         call mf%Evaluate(grid%cell%x, grid%cell%y, 0, 0, grid%cell%psi)
