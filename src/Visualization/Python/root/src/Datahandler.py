@@ -1114,6 +1114,7 @@ def ReadTraduitOutB2us(filepath):
             i = i + 1
 
     # Start reading
+    i = i + 1
     for j in np.arange(0, nf):
         values = alllines[i+j].split()
         ID = np.fromstring(values[0], dtype=int, count=1, sep =' '); ID = ID[0]

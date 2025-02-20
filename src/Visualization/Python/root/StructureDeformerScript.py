@@ -12,7 +12,7 @@ import os
 
 # Load structure
 structuredir = './goatf/Examples/JT60SA/Baseline/structure.dat'
-writedir  = './goatf/Examples/JT60SA/10degrees6cm'
+writedir  = './goatf/Examples/JT60SA/5degreesRP'
 topomeshdir = './goatf/Examples/JT60SA/Baseline/output/topomesh.dat'
 structure = dh.ReadStructureFile(structuredir)
 newstructure = copy.deepcopy(structure)
@@ -27,8 +27,9 @@ pl.PlotStructure(structure, 0)
 # 4: translate entire vessel
 
 # Operations to apply translations and rotations
-ApplyDeformations = True
-if ApplyDeformations:
+ApplyDeformations = 2
+if ApplyDeformations == 1:
+    # 6cm shift of entire vessel, then rotation
     operations = [4, 1, 1]
     structIDs = [0, 2, 2]
     points = [0, 3, 4]
@@ -36,6 +37,22 @@ if ApplyDeformations:
     xdata = [-0.5, structure[1].x[4], structure[1].x[4]]
     ydata = [-0.3, structure[1].y[4], structure[1].y[4]]
     zdata = [0.06, 10, 10]
+
+elif ApplyDeformations == 2:
+    # Extension along limiter direction
+    operations = [2, 1, 1]
+    structIDs = [2, 2, 2]
+    points = [2, 3, 4]
+
+    dx = structure[1].x[1] - structure[1].x[0]
+    dy = structure[1].y[1] - structure[1].y[0]
+    dn = np.sqrt(dx**2 + dy**2)
+    dx = dx/dn
+    dy = dy/dn 
+    xdata = [dx, structure[1].x[4], structure[1].x[4]]
+    ydata = [dy, structure[1].y[4], structure[1].y[4]]
+    #zdata = [0.12, 10, 10]
+    zdata = [0.05, 5, 5]
 
 # Operations to adjust original structure
 else:

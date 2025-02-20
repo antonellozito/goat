@@ -1,6 +1,7 @@
 from src import Plotter as plotter
 from src import Datahandler as dh
 import os
+import numpy as np
 
 # Description
 #------------
@@ -28,7 +29,10 @@ try:
     [R, Z, Psi] = dh.ReadRZPsiFile('./rzpsi.dat')
 
     # Visualize
-    plotter.PlotStructured2DContourf(R, Z, Psi, 1)
+    resc = 50
+    mylevels = np.arange(0, resc, 1)*(np.max(Psi) - np.min(Psi))/resc + np.min(Psi)
+    mylevels = [-6., -5, -4., -3., -2., -1., -0.5, -0.1, 0.0, 0.1, 0.5, 1., 2., 3., 4., 5., 6.]
+    plotter.PlotStructured2DContourf(R, Z, Psi, 1, levels=mylevels)
 
 except:
     print("Could not load the magnetic field")
