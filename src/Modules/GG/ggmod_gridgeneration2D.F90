@@ -251,7 +251,8 @@ module ggmod_gridgeneration2D
 
         ! Getters
         procedure :: GetSegmentFaceIndices  => GetGGTMFieldLineSegmentFaceIndices
-        procedure :: GetSegmentVertIndices  => GetGGTMFieldLineSegmentVertINdices
+        procedure :: GetSegmentVertIndices  => GetGGTMFieldLineSegmentVertIndices
+        procedure :: GetAllSegmentVertIndices   => GetGGTMFieldLineAllSegmentVertIndices
 
     end type
 
@@ -289,7 +290,8 @@ module ggmod_gridgeneration2D
         ! that this data transfer can be done smoothly
 
         ! Data for length-based refinement
-        logical                                 :: doBLstart, doBLend 
+        logical                                 :: doBLstart, doBLend, &
+            dlBLlengthbased 
         integer(I8)                             :: ncBLstart, ncBLend 
         real(R8), allocatable, dimension(:)     :: dlBLstart, dlBLend
 
@@ -519,6 +521,10 @@ module ggmod_gridgeneration2D
         procedure(RefineGGTMLineSingleINT), deferred :: RefineLineSingle
         generic :: Refine   => RefineLineSingle
 
+        ! Apply vertex distribution of a line to another 
+        procedure(ProjectLineVertexDistributionINT), deferred   :: &
+            ProjectLineVertexDistribution 
+
         ! Update refinement options
         procedure(UpdateRefinementOptionsINT), deferred :: UpdateRefinementOptions
 
@@ -541,6 +547,10 @@ module ggmod_gridgeneration2D
         ! Update refinement options
         procedure :: UpdateRefinementOptions    => UpdateRefinementOptionsNoRef
 
+        ! Project distribution
+        procedure :: ProjectLineVertexDistribution  => &
+            ProjectLineVertexDistributionNoRef
+
     end type
 
     ! Length based refiner 
@@ -560,6 +570,9 @@ module ggmod_gridgeneration2D
         !                   face (boundary layers are not included)
         ! - doBLstart       do starting (or ending if doBLend) boundary
         !                   layer
+        ! - dlBLlengthbased switch to determine if it is based on 
+        !                   classical (euler) length (true) or on the 
+        !                   lengthtype (false)
         ! - ncBLstart       number of boundary layer cells 
         ! - dlBLstart       size of boundary layer cells (in length units 
         !                   specified by lengthtype!)
@@ -573,7 +586,7 @@ module ggmod_gridgeneration2D
         !                   lengthtype
         character(:), allocatable           :: meth, lengthtype 
         logical                             :: doBLstart, &
-            doBLend
+            doBLend, dlBLlengthbased
         integer(I8)                         :: ncBLstart, ncBLend 
         real(R8), allocatable, dimension(:) :: dlBLstart, dlBLend, &
             linedllc 
@@ -587,6 +600,10 @@ module ggmod_gridgeneration2D
 
         ! Update refinement options
         procedure :: UpdateRefinementOptions        => UpdateRefinementOptionsLB
+
+        ! Project distribution
+        procedure :: ProjectLineVertexDistribution  => &
+            ProjectLineVertexDistributionLB
 
         ! Auxiliary
         procedure :: GetLineEdgeLength              => GetLineEdgeLengthLB
@@ -628,6 +645,18 @@ module ggmod_gridgeneration2D
             type(TopomeshUDT), intent(in)                       :: topomesh
 
         end subroutine
+
+        ! Project vertex distribution
+        subroutine ProjectLineVertexDistributionINT(refiner, linein, &
+            lineout, vertID, ggtmdata)
+            import :: GGTMFieldlineDataUDT, I8, GGTMLineRefiner2DUDT, &
+                GGTMDataUDT
+            class(GGTMLineRefiner2DUDT)                 :: refiner 
+            type(GGTMFieldlineDataUDT), intent(in)      :: linein 
+            type(GGTMFieldlineDataUDT), intent(inout)   :: lineout
+            integer(I8), intent(inout)                  :: vertID
+            type(GGTMDataUDT), intent(inout)            :: ggtmdata 
+        end subroutine 
 
     end interface
 
@@ -2043,6 +2072,7 @@ module ggmod_gridgeneration2D
                         end if 
 
                         if (nct > 1) then 
+                            ! Check for intersections with last lfline
                             if (keepind(k)) then 
                                 ! Use dedicated routine to hedge for end point
                                 ! intersections
@@ -2054,9 +2084,24 @@ module ggmod_gridgeneration2D
                                     keepind(k) = .false.
                                 end if 
                             end if 
+
+                            ! Check for intersections with next lfline
+                            if (keepind(k)) then 
+                                ! Use dedicated routine to hedge for end point
+                                ! intersections
+                                call GGTMLineIntersections(ggtmdata, lflinek, ct(k+1)%lfline, &
+                                    xint, yint, s1, s2, vertbased=.true.)
+
+                                ! Check
+                                if (size(xint) > 0) then
+                                    keepind(k) = .false.
+                                end if 
+                            end if 
                         end if 
                     elseif (k == nct .and. nct > 1) then 
                         ! Only need to check the hfline
+
+                        ! First hfline
                         if (keepind(k)) then 
                             ! Use dedicated routine to hedge for end point
                             ! intersections
@@ -2069,6 +2114,7 @@ module ggmod_gridgeneration2D
                             end if 
                         end if 
 
+                        ! Last lfline
                         if (keepind(k)) then 
                             ! Use dedicated routine to hedge for end point
                             ! intersections
@@ -2080,8 +2126,24 @@ module ggmod_gridgeneration2D
                                 keepind(k) = .false.
                             end if 
                         end if 
+
+                        ! Previous hfline
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, hflinek, ct(k-1)%hfline, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
+                            end if 
+                        end if 
+
                     else
                         ! Standard case, check both lines
+
+                        ! First hfline, this lfline
                         if (keepind(k)) then 
                             ! Use dedicated routine to hedge for end point
                             ! intersections
@@ -2094,6 +2156,7 @@ module ggmod_gridgeneration2D
                             end if 
                         end if 
 
+                        ! Last lfline, this lfline
                         if (keepind(k)) then 
                             ! Use dedicated routine to hedge for end point
                             ! intersections
@@ -2106,18 +2169,7 @@ module ggmod_gridgeneration2D
                             end if 
                         end if 
 
-                        if (keepind(k)) then 
-                            ! Use dedicated routine to hedge for end point
-                            ! intersections
-                            call GGTMLineIntersections(ggtmdata, hflinek, hfline1, &
-                                xint, yint, s1, s2, vertbased=.true.)
-
-                            ! Check
-                            if (size(xint) > 0) then
-                                keepind(k) = .false.
-                            end if 
-                        end if 
-
+                        ! Last lfline, this hfline
                         if (keepind(k)) then 
                             ! Use dedicated routine to hedge for end point
                             ! intersections
@@ -2129,7 +2181,48 @@ module ggmod_gridgeneration2D
                                 keepind(k) = .false.
                             end if 
                         end if 
+
+                        ! First hfline, this hfline
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, hflinek, hfline1, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
+                            end if 
+                        end if
+                        
+                        ! Previous lfline with this lfline
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, lflinek, ct(k-1)%lfline, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
+                            end if 
+                        end if 
+
+                        ! Next hfline with this hfline
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, hflinek, ct(k-1)%hfline, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
+                            end if 
+                        end if
                     end if 
+
+                     
                     
                     ! Housekeeping
                     end associate
@@ -2752,7 +2845,7 @@ module ggmod_gridgeneration2D
                         ! Update counter
                         k2 = k2 + 1
                         
-                        if (k2 == n2) then 
+                        if (k2 == n2 .and. .not. dolasttriangle) then 
                             tff(1) = eff
                         end if 
                     elseif ((k1 < n1) .and. (k2 == n2)) then 
@@ -2764,7 +2857,7 @@ module ggmod_gridgeneration2D
                         ! Update counter
                         k1 = k1 + 1
                         
-                        if (k1 == n1) then  
+                        if (k1 == n1 .and. .not. dolasttriangle) then  
                             tff(2) = eff
                         end if 
                         
@@ -2772,6 +2865,7 @@ module ggmod_gridgeneration2D
                         ! This shouldn't happen
                         call gdErrorHandler('Something wrong in quad gridder')
                     end if 
+                    
                         
                     ! Add grid faces and cells
                     !-------------------------
@@ -4040,7 +4134,9 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: nv, nfl, nflmax, &
             tfmax
-        integer(I8), allocatable, dimension(:)  :: tf, tvID
+        integer(I8), allocatable, dimension(:)  :: tf, tvID, bndv1, &  
+            bndv2
+        logical                                 :: doflip
         logical, allocatable, dimension(:)      :: keepvert
         real(R8), allocatable, dimension(:)     :: xc, yc, dlcv
 
@@ -4063,12 +4159,15 @@ module ggmod_gridgeneration2D
         ! Determine tube distribution
         !============================
         do i = 1, tube%ntot 
-            ! Get tube faces
+            ! Get tube faces and boundary vertices (to check later if we
+            ! need to project distributions etc)
             tf = tube%GetFace(i)
+            bndv1 = tube%GetBndVert(i, 1)
+            bndv2 = tube%GetBndVert(i, 2)
 
             ! Initialize
             nfl = 0
-            nflmax = 0
+            nflmax = 0 
 
             ! Loop for the first time to construct initial distribution
             do k = 1, size(tf)
@@ -4108,31 +4207,74 @@ module ggmod_gridgeneration2D
 
 
             ! Loop
+            nflmax = size(facedata(tf(1))%line%xv)
+            tfmax = tf(1)
             do j = 1, size(tf)
                 ! Determine number of field lines
                 nfl = size(facedata(tf(j))%line%xv)
-                if (nfl > nflmax) then 
+                if (nfl < nflmax) then 
                     nflmax = nfl 
                     tfmax = tf(j)
                 end if 
             end do 
 
             ! Project the distribution to the first face of the tube
-            j = tf(1)
-            associate(tdlcv         => facedata(tfmax)%line%dlcv)
-            dlcv = tdlcv/tdlcv(size(tdlcv))*facedata(j)%line%dlcv(size(facedata(j)%line%dlcv))
-            dlcv(1) = 0
-            dlcv(size(dlcv)) = facedata(j)%line%dllc(size(facedata(j)%line%dllc))
-            end associate
+            ! Not the length distribution, but the length used by 
+            ! the refiner! Will lead to weird results otherwise
+            call GGTMlinerefiner%ProjectLineVertexDistribution(facedata(tfmax)%line, &
+                facedata(tf(1))%line, grid%vert%ntot, ggtmdata)
+
+            ! Check orientation based on tube boundary vertices
+            doflip = .false.
+            if (any(bndv1 == face%vert(tfmax, 1))) then 
+                if (any(bndv1 == face%vert(tf(1), 1))) then 
+                    ! correctly oriented
+                elseif (any(bndv2 == face%vert(tf(1), 1))) then 
+                    ! Need to flip 
+                    doflip = .true.
+                else
+                    ! Call error
+                    call gdErrorHandler('DistributeVerticesTopologicalMeshTubes: ' // & 
+                        'face of tube does not have its vertices in the ' // &
+                        'tube boundary vertices, unexpected')
+                end if 
+            elseif (any(bndv2 == face%vert(tfmax, 1))) then 
+                if (any(bndv2 == face%vert(tf(1), 1))) then 
+                    ! correctly oriented
+                elseif (any(bndv1 == face%vert(tf(1), 1))) then 
+                    ! Need to flip 
+                    doflip = .true.
+                else
+                    ! Call error
+                    call gdErrorHandler('DistributeVerticesTopologicalMeshTubes: ' // & 
+                        'face of tube does not have its vertices in the ' // &
+                        'tube boundary vertices, unexpected')
+                end if 
+            else
+                ! Call error
+                call gdErrorHandler('DistributeVerticesTopologicalMeshTubes: ' // & 
+                    'face of tube does not have its vertices in the ' // &
+                    'tube boundary vertices, unexpected')
+            end if 
+
+            ! Flip if necessary
+            dlcv = facedata(tf(1))%line%dlcv
+            if (doflip) then 
+                dlcv = dlcv(size(dlcv)) - dlcv(size(dlcv):1:-1) 
+                dlcv(1) = 0
+                dlcv(size(dlcv)) = facedata(tf(1))%line%dllc(size(facedata(tf(1))%line%dllc))
+            end if 
 
             ! Add data
-            call facedata(j)%line%AddVertexCoordinates(dlcv)
+            call facedata(tf(1))%line%AddVertexCoordinates(dlcv)
 
             ! Add vertex IDs
-            tvID = [face%vert(j, 1), (k, k = grid%vert%ntot+1, grid%vert%ntot + size(dlcv) - 2), face%vert(j, 2)]
-            call facedata(j)%line%AddVertexIDs(tvID, &
+            tvID = [face%vert(tf(1), 1), (k, k = grid%vert%ntot+1, grid%vert%ntot + size(dlcv) - 2), face%vert(tf(1), 2)]
+            call facedata(tf(1))%line%AddVertexIDs(tvID, &
                 [.true., spread(.false., 1, size(dlcv)-2), .true.])
             
+            ! Update segment data
+            call facedata(tf(1))%line%UpdateSegmentData(ggtmdata)
 
             ! Add maximal distribution to tube
             tubedata(i)%distributionface = tf(1)
@@ -5824,7 +5966,7 @@ module ggmod_gridgeneration2D
 
                         ! Extend the tube
                         call ExtendTubeWithSegment(i, tubes(j), tsegID, &
-                            ggtmdata, .true., vertID)
+                            ggtmdata, .true., vertID, magneticField)
                     end if 
                     if (doend(j)) then 
                         ! Get segment ID for extension
@@ -5839,7 +5981,7 @@ module ggmod_gridgeneration2D
 
                         ! Extend the tube
                         call ExtendTubeWithSegment(i, tubes(j), tsegID, &
-                            ggtmdata, .false., vertID)
+                            ggtmdata, .false., vertID, magneticField)
                     end if 
                 end do
 
@@ -5935,6 +6077,10 @@ module ggmod_gridgeneration2D
 
             ! Check for each cell
             do i = 1, size(celldata)
+
+                ! Add global data
+                celldata(i)%linerefoptions%dlBLlengthbased = options%refdlBLlengthbased
+
                 ! Check starting radial face
                 if (any(celldata(i)%srf == vesselfaceIDs)) then 
                     ! Overwrite defaults
@@ -5965,6 +6111,10 @@ module ggmod_gridgeneration2D
 
             ! Check for each cell
             do i = 1, size(celldata)
+
+                ! Add global data
+                celldata(i)%linerefoptions%dlBLlengthbased = options%refdlBLlengthbased
+
                 ! Check starting radial face
                 if (any(celldata(i)%srf == targetfaceIDs)) then 
                     ! Overwrite defaults
@@ -6020,6 +6170,7 @@ module ggmod_gridgeneration2D
                 end do 
 
                 ! Add data anyway
+                tubedata(i)%linerefoptions%dlBLlengthbased  = options%radrefdlBLlengthbased
                 tubedata(i)%linerefoptions%ncBLstart = options%radrefBLncsp
                 tubedata(i)%linerefoptions%dlBLstart = options%radrefBLdlsp
                 tubedata(i)%linerefoptions%ncBLend = options%radrefBLncsp
@@ -6107,6 +6258,10 @@ module ggmod_gridgeneration2D
             if (refoptions%doBLstart) then 
                 ! Check hf face
                 if (nhf > 0) then 
+                    ! Add general data
+                    facedata(hf(1))%linerefoptions%dlBLlengthbased = refoptions%dlBLlengthbased 
+
+                    ! Check if we need to do specific things
                     if (any(face%vert(hf(1), 1) == face%vert(srf, :))) then 
                         ! Set start
                         facedata(hf(1))%linerefoptions%doBLstart = refoptions%doBLstart
@@ -6123,6 +6278,9 @@ module ggmod_gridgeneration2D
 
                 ! Check lf face
                 if (nlf > 0) then 
+                    ! Add general data
+                    facedata(lf(1))%linerefoptions%dlBLlengthbased = refoptions%dlBLlengthbased 
+
                     if (any(face%vert(lf(1), 1) == face%vert(srf, :))) then 
                         ! Set start
                         facedata(lf(1))%linerefoptions%doBLstart = refoptions%doBLstart
@@ -6141,7 +6299,10 @@ module ggmod_gridgeneration2D
             ! Check boundary layer at cell end
             if (refoptions%doBLend) then 
                 ! Check hf face
-                if (nhf > 0) then 
+                if (nhf > 0) then
+                    ! Add general data
+                    facedata(hf(nhf))%linerefoptions%dlBLlengthbased = refoptions%dlBLlengthbased 
+
                     if (any(face%vert(hf(nhf), 1) == face%vert(erf, :))) then 
                         ! Set start
                         facedata(hf(nhf))%linerefoptions%doBLstart = refoptions%doBLend
@@ -6157,7 +6318,10 @@ module ggmod_gridgeneration2D
                 end if
 
                 ! Check lf face
-                if (nlf > 0) then 
+                if (nlf > 0) then
+                    ! Add general data
+                    facedata(lf(nlf))%linerefoptions%dlBLlengthbased = refoptions%dlBLlengthbased 
+
                     if (any(face%vert(lf(nlf), 1) == face%vert(erf, :))) then 
                         ! Set start
                         facedata(lf(nlf))%linerefoptions%doBLstart = refoptions%doBLend
@@ -6196,6 +6360,9 @@ module ggmod_gridgeneration2D
             ! For each face, check if BL should be applied
             if (refoptions%doBLstart) then 
                 do j = 1, size(tf)
+                    ! Set general data
+                    facedata(tf(j))%linerefoptions%dlBLlengthbased = refoptions%dlBLlengthbased
+
                     ! Check face vertices
                     if (any(face%vert(tf(j), 1) == tv1)) then 
                         facedata(tf(j))%linerefoptions%doBLstart = .true. 
@@ -6217,6 +6384,9 @@ module ggmod_gridgeneration2D
             ! For each face, check if BL should be applied
             if (refoptions%doBLend) then 
                 do j = 1, size(tf)
+                    ! Set general data
+                    facedata(tf(j))%linerefoptions%dlBLlengthbased = refoptions%dlBLlengthbased
+
                     ! Check face vertices
                     if (any(face%vert(tf(j), 1) == tv2)) then 
                         facedata(tf(j))%linerefoptions%doBLstart = .true. 
@@ -6365,6 +6535,7 @@ module ggmod_gridgeneration2D
         ! Set defaults
         !=============
         ! Boundary layer options
+        options%dlBLlengthbased = .false.
         options%doBLstart = .false.
         options%ncBLstart = 0
         options%doBLend = .false. 
@@ -8063,6 +8234,41 @@ module ggmod_gridgeneration2D
 
     end function 
 
+    ! GGTM field line all segment vertex indices getter
+    function GetGGTMFieldLineAllSegmentVertIndices(line) result(vertind)
+
+        ! Description
+        !============
+        ! Same as for one segment, but now all (unique and sorted) 
+        ! vertex IDs are returned. 
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMFieldlineDataUDT), intent(in)     :: line 
+        integer(I8), allocatable, dimension(:)      :: vertind(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:, :)   :: tempvertind(:, :)
+
+        ! Loop
+        integer(I8)                                 :: i 
+
+        ! Compute
+        !========
+        ! Initialize
+        allocate(tempvertind(line%ns, 2))
+
+        ! Determine all vertex indices
+        do i = 1, line%ns
+            tempvertind(i, :) = line%GetSegmentVertIndices(i)
+        end do 
+
+        ! Get unique set
+        call Unique(reshape(tempvertind, [size(tempvertind)]), vertind)
+
+    end function 
+
     ! GGTM field line segment face indices getter
     function GetGGTMFieldLineSegmentFaceIndices(line, i) result(faceind)
 
@@ -8245,7 +8451,6 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)         :: s1raux, s2raux, &
             tempx, tempy, temps1r, temps2r
         integer(I8), allocatable, dimension(:)      :: temps1, temps2
-        logical, allocatable, dimension(:)          :: keepx
 
         ! Loop
         integer(I8)                                 :: i, j 
@@ -8291,7 +8496,8 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! GGTM tube extension
-    subroutine ExtendTubeWithSegment(cellID, tube, segID, ggtmdata, start, vertID)
+    subroutine ExtendTubeWithSegment(cellID, tube, segID, ggtmdata, start, &
+        vertID, magneticField)
 
         ! Description
         !============
@@ -8323,8 +8529,10 @@ module ggmod_gridgeneration2D
         ! Splitting is based on geometry considerations. Currently, the 
         ! splitting point is determined as the location where the sign 
         ! of the scalar product between segment edge tangent vectors and 
-        ! the last line edge tangent vector becomes negative. This might 
-        ! lead to bad vertex distributions locally and to cell overlap. 
+        ! magnetic field vector becomes negative. This might 
+        ! lead to bad vertex distributions locally and to cell overlap.
+        ! Note that we adjust the sign of the magnetic field to point 
+        ! along the hfline in the segment direction. 
 
         ! Note: currently, we don't properly keep track of all the 
         ! segments that may be generated. Normally, this is also not 
@@ -8341,14 +8549,15 @@ module ggmod_gridgeneration2D
         integer(I8), intent(inout)                      :: vertID
         type(GGTMDataUDT), intent(inout)                :: ggtmdata 
         logical, intent(in)                             :: start 
+        type(MagneticFieldUDT), intent(in)              :: magneticField
 
         ! Auxiliary
         integer(I8)                             :: newsegID, ind, indhf, &
             indlf, newhfvert, newlfvert
         integer(I8), allocatable, dimension(:)  :: newvertID
-        real(R8)                                :: hftx, hfty, lftx, lfty
-        real(R8), allocatable, dimension(:)     :: segtx, segty, hfdp, &
-            lfdp
+        real(R8)                                :: hftx, hfty
+        real(R8), allocatable, dimension(:)     :: segtx, segty, &
+            By, Bx, Bhfx, Bhfy, Byf, Bxf, segdp
         logical                                 :: doflip
 
         ! Checks
@@ -8373,6 +8582,7 @@ module ggmod_gridgeneration2D
         !=============
         ! Get segment
         associate(&
+            interp      => magneticField%interp,    &
             srfline     => ggtmdata%face(ggtmdata%cell(cellID)%srf)%line,    &
             erfline     => ggtmdata%face(ggtmdata%cell(cellID)%erf)%line,    & 
             tseg        => ggtmdata%seg(segID),     &
@@ -8380,10 +8590,19 @@ module ggmod_gridgeneration2D
             lfline      => tube%lfline          &
             )
 
+        ! Evaluate magnetic field at segment nodes
+        allocate(By(tseg%nl), Bx(tseg%nl))
+        call interp%Evaluate(tseg%xl, tseg%yl, 0, 1, Bx)
+        call interp%Evaluate(tseg%xl, tseg%yl, 1, 0, By)
+        Bx = -Bx
+        Bxf = 0.5*(Bx(2:tseg%nl) + Bx(1:tseg%nl-1))
+        Byf = 0.5*(By(2:tseg%nl) + By(1:tseg%nl-1))
+
         ! Compute dot products and other data - we orient the segment data
         ! from hfline to lfline
         doflip = .false.
         if (start) then 
+            ! Evaluate magnetic field at seg
             ! Get segment tangents in hfline starting point
             if (tseg%sv == hfline%vert(1)) then 
                 segtx = tseg%xl(2:tseg%nl) - tseg%xl(1:tseg%nl-1)
@@ -8392,20 +8611,30 @@ module ggmod_gridgeneration2D
                 doflip = .true.
                 segtx = -tseg%xl(tseg%nl:2:-1) + tseg%xl(tseg%nl-1:1:-1)
                 segty = -tseg%yl(tseg%nl:2:-1) + tseg%yl(tseg%nl-1:1:-1)
+                Bx = Bx(size(Bx):1:-1)
+                By = By(size(By):1:-1)
+                Bxf = Bxf(size(Bxf):1:-1)
+                Byf = Byf(size(Byf):1:-1)
             else
                 call gdErrorHandler('ExtendTubeWithSegment: segment ' // & 
                     'does not have starting vertex of hfline, unexpected')
             end if 
 
             ! Compute line tangents
-            hftx = hfline%xl(2) - hfline%xl(1)
-            hfty = hfline%yl(2) - hfline%yl(1)
-            lftx = lfline%xl(2) - lfline%xl(1)
-            lfty = lfline%yl(2) - lfline%yl(1)
+            hftx = hfline%xl(1) - hfline%xl(2)
+            hfty = hfline%yl(1) - hfline%yl(2)
+
+            ! Compute magnetic field
+            allocate(Bhfx(1), Bhfy(1))
+            call interp%Evaluate(hfline%xl(1:1), hfline%yl(1:1), 0, 1, Bhfx)
+            call interp%Evaluate(hfline%xl(1:1), hfline%yl(1:1), 1, 0, Bhfy)
+            Bhfx = -Bhfx
 
             ! Compute dot products
-            hfdp = -(hftx*segtx + hfty*segty)
-            lfdp = lftx*segtx + lfty*segty 
+            segdp = Bxf*segtx + Byf*segty 
+            if ((Bhfx(1)*hftx + Bhfy(1)*hfty) < 0) then 
+                segdp = -segdp 
+            end if 
         else
             if (tseg%sv == hfline%vert(hfline%nv)) then 
                 segtx = tseg%xl(2:tseg%nl) - tseg%xl(1:tseg%nl-1)
@@ -8414,6 +8643,10 @@ module ggmod_gridgeneration2D
                 doflip = .true.
                 segtx = -tseg%xl(tseg%nl:2:-1) + tseg%xl(tseg%nl-1:1:-1)
                 segty = -tseg%yl(tseg%nl:2:-1) + tseg%yl(tseg%nl-1:1:-1)
+                Bx = Bx(size(Bx):1:-1)
+                By = By(size(By):1:-1)
+                Bxf = Bxf(size(Bxf):1:-1)
+                Byf = Byf(size(Byf):1:-1)
             else
                 call gdErrorHandler('ExtendTubeWithSegment: segment ' // & 
                     'does not have ending vertex of hfline, unexpected')
@@ -8422,31 +8655,36 @@ module ggmod_gridgeneration2D
             ! Compute line tangents
             hftx = hfline%xl(hfline%nl) - hfline%xl(hfline%nl-1)
             hfty = hfline%yl(hfline%nl) - hfline%yl(hfline%nl-1)
-            lftx = lfline%xl(lfline%nl) - lfline%xl(lfline%nl-1)
-            lfty = lfline%yl(lfline%nl) - lfline%yl(lfline%nl-1)
+
+            ! Compute magnetic field
+            allocate(Bhfx(1), Bhfy(1))
+            call interp%Evaluate([hfline%xl(hfline%nl)], [hfline%yl(hfline%nl)], 0, 1, Bhfx)
+            call interp%Evaluate([hfline%xl(hfline%nl)], [hfline%yl(hfline%nl)], 1, 0, Bhfy)
+            Bhfx = -Bhfx
 
             ! Compute dot products
-            hfdp = hftx*segtx + hfty*segty
-            lfdp = -(lftx*segtx + lfty*segty)
+            segdp = Bxf*segtx + Byf*segty 
+            if ((Bhfx(1)*hftx + Bhfy(1)*hfty) < 0) then 
+                segdp = -segdp 
+            end if 
         end if 
 
         ! Extend
         !=======
         if (start) then 
-            if (hfdp(1) >= 0 .and. lfdp(size(lfdp)) <= 0) then ! Extend the hfline
+            if (segdp(1) >= 0 .and. segdp(size(segdp)) >= 0) then ! Extend the hfline
 
-                ! Print warning that this code was not yet verified
-                print *, 'ExtendTubeWithSegment: code part not yet verified'
-
+                ! No extension of lfline possible since edge goes against mf
+                ! (segdp remains positive at end)
                 
                 ! Check if we can take the segment as a whole
-                if (all(hfdp > 0)) then 
+                if (all(segdp > 0)) then 
                     ! Just append the segment
                     call hfline%AppendSegment(segID, ggtmdata, .false.)
                 else
                     ! Construct a new segment by finding the first location 
                     ! where the sign switches
-                    ind = findloc(hfdp <= 0, .true., 1, back=.false.)
+                    ind = findloc(segdp <= 0, .true., 1, back=.false.)
 
                     ! Split the line at this node
                     call srfline%SplitAtNodes(segID, [ind], &
@@ -8461,20 +8699,22 @@ module ggmod_gridgeneration2D
                     call hfline%AppendSegment(newsegID, ggtmdata, .false.)
                 end if 
             
-            elseif (lfdp(size(lfdp)) >= 0 .and. hfdp(1) <= 0) then ! Extend the lfline
+            elseif (segdp(size(segdp)) <= 0 .and. segdp(1) <= 0) then ! Extend the lfline
+
+                ! The hfline cannot be extended (dot product is negative)
+                ! but the lfline can (dot product at end is negative) 
 
                 ! Print warning that this code was not yet verified
-                print *, 'ExtendTubeWithSegment: code part not yet verified'
+                !print *, 'ExtendTubeWithSegment: code part not yet verified'
 
-                
                 ! Check if we can take the segment as a whole
-                if (all(lfdp > 0)) then 
+                if (all(segdp <= 0)) then 
                     ! Just append the segment
                     call lfline%AppendSegment(segID, ggtmdata, .false.)
                 else
                     ! Construct a new segment by finding the first location 
                     ! where the sign switches
-                    ind = findloc(lfdp <= 0, .true., 1, back=.true.)
+                    ind = findloc(segdp >= 0, .true., 1, back=.true.)
 
                     ! Split the line at this node
                     call srfline%SplitAtNodes(segID, [ind], &
@@ -8489,7 +8729,10 @@ module ggmod_gridgeneration2D
                     call lfline%AppendSegment(newsegID, ggtmdata, .false.)
                 end if 
             
-            elseif (hfdp(1) <= 0 .and. lfdp(size(lfdp)) <= 0) then ! Recompute
+            elseif (segdp(1) <= 0 .and. segdp(size(segdp)) >= 0) then ! Recompute
+
+                ! Both segments go against the magnetic field - need to make
+                ! straight segment between lines
 
                 ! Print warning that this code was not yet verified
                 print *, 'ExtendTubeWithSegment: code part not yet verified'
@@ -8499,6 +8742,10 @@ module ggmod_gridgeneration2D
                     tseg%yl([1, tseg%nl]), tseg%fsID, tseg%TMfaceID, &
                     tseg%sv, tseg%ev)
                 call srfline%UpdateLineData(ggtmdata)
+
+                ! Recompute the magnetic field
+                Bxf = 0.5*(Bx(1:1) + [Bx(size(Bx))])
+                Byf = 0.5*(By(1:1) + [By(size(By))])
 
                 ! Recompute the dot product
                 ! Get segment tangents in hfline starting point
@@ -8514,18 +8761,14 @@ module ggmod_gridgeneration2D
                         'does not have starting vertex of hfline, unexpected')
                 end if 
 
-                ! Compute line tangents
-                hftx = hfline%xl(2) - hfline%xl(1)
-                hfty = hfline%yl(2) - hfline%yl(1)
-                lftx = lfline%xl(2) - lfline%xl(1)
-                lfty = lfline%yl(2) - lfline%yl(1)
-
                 ! Compute dot products
-                hfdp = -(hftx*segtx + hfty*segty)
-                lfdp = lftx*segtx + lfty*segty
-                    
+                segdp = Bxf*segtx + Byf*segty 
+                if ((Bhfx(1)*hftx + Bhfy(1)*hfty) < 0) then 
+                    segdp = -segdp
+                end if 
+
                 ! Extend
-                if (hfdp(1) >= 0) then 
+                if (segdp(1) >= 0) then 
                     call hfline%AppendSegment(segID, ggtmdata, .false.)
                 else
                     call lfline%AppendSegment(segID, ggtmdata, .false.)
@@ -8538,11 +8781,40 @@ module ggmod_gridgeneration2D
 
                 ! Construct a new segment by finding the first location 
                 ! where the sign switches
-                indhf = findloc(hfdp <= 0, .true., 1, back=.false.)
-                indlf = findloc(lfdp <= 0, .true., 1, back=.true.)
+                indhf = findloc(segdp <= 0, .true., 1, back=.false.)
+                indlf = findloc(segdp >= 0, .true., 1, back=.true.)
+
+                ! Update from edge index to vertex index
+                if (indhf /= 0) then  
+                    if (indhf == size(segdp)) then  ! since we trace from the start
+                        indhf = indhf + 1
+                    end if 
+                end if 
+                if (indlf /= 0) then
+                    if (indlf /= 1) then  ! since we trace from the back,
+                        indlf = indlf + 1
+                    end if
+                end if 
 
                 ! Check how many segments we get
-                if (indhf == indlf) then 
+                if (indhf == 0 .and. indlf == 0) then 
+                    ! This shouldn't be happening here, case already 
+                    ! hedged for upstream
+                    call gdErrorHandler('ExtendTubeWithSegment: could not ' // &
+                        'find any split vertices, unexpected')
+                elseif (indhf == 0) then 
+                    ! Only extension of lfline, only one segment
+                    call srfline%SplitAtNodes(segID, [indlf], &
+                        ggtmdata, vertID, newvertID)
+                    newhfvert = newvertID(1)
+                    newlfvert = newvertID(1)
+                elseif (indlf == 0) then 
+                    ! Only extension of hfline, only one segment
+                    call srfline%SplitAtNodes(segID, [indhf], &
+                        ggtmdata, vertID, newvertID)
+                    newhfvert = newvertID(1)
+                    newlfvert = newvertID(1)
+                elseif (indhf == indlf) then 
                     ! Just one segment
                     call srfline%SplitAtNodes(segID, [indhf], &
                         ggtmdata, vertID, newvertID)
@@ -8556,37 +8828,41 @@ module ggmod_gridgeneration2D
                     newlfvert = newvertID(2)
                 end if
 
-                ! Get the segment that has the split vertex and the new
-                ! vertex for the hfline
-                newsegID = GetSegmentIDFromVertices(srfline, ggtmdata, newhfvert, &
-                    hfline%vert(1))
-                
-                ! Append this segment
-                call hfline%AppendSegment(newsegID, ggtmdata, .false.)
+                ! Check which lines to extend
+                if (indhf /= 0) then 
+                    ! Get the segment that has the split vertex and the new
+                    ! vertex for the hfline
+                    newsegID = GetSegmentIDFromVertices(srfline, ggtmdata, newhfvert, &
+                        hfline%vert(1))
+                    
+                    ! Append this segment
+                    call hfline%AppendSegment(newsegID, ggtmdata, .false.)
+                end if 
 
-                ! Get the segment that has the split vertex and the new
-                ! vertex for the lfline
-                newsegID = GetSegmentIDFromVertices(srfline, ggtmdata, newlfvert, &
-                    lfline%vert(1))
-                
-                ! Append this segment
-                call lfline%AppendSegment(newsegID, ggtmdata, .false.)
-
+                if (indlf /= 0) then 
+                    ! Get the segment that has the split vertex and the new
+                    ! vertex for the lfline
+                    newsegID = GetSegmentIDFromVertices(srfline, ggtmdata, newlfvert, &
+                        lfline%vert(1))
+                    
+                    ! Append this segment
+                    call lfline%AppendSegment(newsegID, ggtmdata, .false.)
+                end if 
             end if   
         else
-            if (hfdp(1) >= 0 .and. lfdp(size(lfdp)) <= 0) then ! Extend the hfline
+            if (segdp(1) >= 0 .and. segdp(size(segdp)) >= 0) then ! Extend the hfline
 
                 ! Print warning that this code was not yet verified
-                print *, 'ExtendTubeWithSegment: code part not yet verified'
+                !print *, 'ExtendTubeWithSegment: code part not yet verified'
                 
                 ! Check if we can take the segment as a whole
-                if (all(hfdp > 0)) then 
+                if (all(segdp > 0)) then 
                     ! Just append the segment
                     call hfline%AppendSegment(segID, ggtmdata, .true.)
                 else
                     ! Construct a new segment by finding the first location 
                     ! where the sign switches
-                    ind = findloc(hfdp <= 0, .true., 1, back=.false.)
+                    ind = findloc(segdp <= 0, .true., 1, back=.false.)
 
                     ! Split the line at this node
                     call erfline%SplitAtNodes(segID, [ind], &
@@ -8601,19 +8877,19 @@ module ggmod_gridgeneration2D
                     call hfline%AppendSegment(newsegID, ggtmdata, .true.)
                 end if 
             
-            elseif (lfdp(size(lfdp)) >= 0 .and. hfdp(1) <= 0) then ! Extend the lfline
+            elseif (segdp(size(segdp)) <= 0 .and. segdp(1) <= 0) then ! Extend the lfline
 
                 ! Print warning that this code was not yet verified
                 print *, 'ExtendTubeWithSegment: code part not yet verified'
                 
                 ! Check if we can take the segment as a whole
-                if (all(lfdp > 0)) then 
+                if (all(segdp <= 0)) then 
                     ! Just append the segment
                     call lfline%AppendSegment(segID, ggtmdata, .true.)
                 else
                     ! Construct a new segment by finding the first location 
                     ! where the sign switches
-                    ind = findloc(lfdp <= 0, .true., 1, back=.true.)
+                    ind = findloc(segdp >= 0, .true., 1, back=.true.)
 
                     ! Split the line at this node
                     call erfline%SplitAtNodes(segID, [ind], &
@@ -8628,7 +8904,7 @@ module ggmod_gridgeneration2D
                     call lfline%AppendSegment(newsegID, ggtmdata, .true.)
                 end if 
             
-            elseif (hfdp(1) <= 0 .and. lfdp(size(lfdp)) <= 0) then ! Recompute
+            elseif (segdp(1) <= 0 .and. segdp(size(segdp)) >= 0) then ! Recompute
 
                 ! Print warning that this code was not yet verified
                 print *, 'ExtendTubeWithSegment: code part not yet verified'
@@ -8653,18 +8929,18 @@ module ggmod_gridgeneration2D
                         'does not have ending vertex of hfline, unexpected')
                 end if 
 
-                ! Compute line tangents
-                hftx = hfline%xl(2) - hfline%xl(1)
-                hfty = hfline%yl(2) - hfline%yl(1)
-                lftx = lfline%xl(2) - lfline%xl(1)
-                lfty = lfline%yl(2) - lfline%yl(1)
+                ! Recompute the magnetic field
+                Bxf = 0.5*(Bx(1:1) + [Bx(size(Bx))])
+                Byf = 0.5*(By(1:1) + [By(size(By))])
 
                 ! Compute dot products
-                hfdp = hftx*segtx + hfty*segty
-                lfdp = -(lftx*segtx + lfty*segty)
+                segdp = Bxf*segtx + Byf*segty 
+                if ((Bhfx(1)*hftx + Bhfy(1)*hfty) < 0) then 
+                    segdp = -segdp
+                end if 
                     
                 ! Extend
-                if (hfdp(1) >= 0) then 
+                if (segdp(1) >= 0) then 
                     call hfline%AppendSegment(segID, ggtmdata, .true.)
                 else
                     call lfline%AppendSegment(segID, ggtmdata, .true.)
@@ -8674,13 +8950,40 @@ module ggmod_gridgeneration2D
 
                 ! Construct a new segment by finding the first location 
                 ! where the sign switches
-                indhf = findloc(hfdp <= 0, .true., 1, back=.false.)
-                indlf = findloc(lfdp <= 0, .true., 1, back=.true.)
-                indlf = indlf + 1
-                indhf = indhf - 1
+                indhf = findloc(segdp <= 0, .true., 1, back=.false.)
+                indlf = findloc(segdp >= 0, .true., 1, back=.true.)
+
+                ! Update from edge index to vertex index
+                if (indhf /= 0) then  
+                    if (indhf == size(segdp)) then  ! since we trace from the start
+                        indhf = indhf + 1
+                    end if 
+                end if 
+                if (indlf /= 0) then
+                    if (indlf /= 1) then  ! since we trace from the back,
+                        indlf = indlf + 1
+                    end if
+                end if 
 
                 ! Check how many segments we get
-                if (indhf == indlf) then 
+                if (indhf == 0 .and. indlf == 0) then 
+                    ! This shouldn't be happening here, case already 
+                    ! hedged for upstream
+                    call gdErrorHandler('ExtendTubeWithSegment: could not ' // &
+                        'find any split vertices, unexpected')
+                elseif (indhf == 0) then 
+                    ! Only extension of lfline, only one segment
+                    call erfline%SplitAtNodes(segID, [indlf], &
+                        ggtmdata, vertID, newvertID)
+                    newhfvert = newvertID(1)
+                    newlfvert = newvertID(1)
+                elseif (indlf == 0) then 
+                    ! Only extension of hfline, only one segment
+                    call erfline%SplitAtNodes(segID, [indhf], &
+                        ggtmdata, vertID, newvertID)
+                    newhfvert = newvertID(1)
+                    newlfvert = newvertID(1)
+                elseif (indhf == indlf) then 
                     ! Just one segment
                     call erfline%SplitAtNodes(segID, [indhf], &
                         ggtmdata, vertID, newvertID)
@@ -8694,21 +8997,26 @@ module ggmod_gridgeneration2D
                     newlfvert = newvertID(2)
                 end if
 
-                ! Get the segment that has the split vertex and the new
-                ! vertex for the hfline
-                newsegID = GetSegmentIDFromVertices(erfline, ggtmdata, newhfvert, &
-                    hfline%vert(hfline%nv))
-                
-                ! Append this segment
-                call hfline%AppendSegment(newsegID, ggtmdata, .true.)
+                ! Check which lines to extend
+                if (indhf /= 0) then 
+                    ! Get the segment that has the split vertex and the new
+                    ! vertex for the hfline
+                    newsegID = GetSegmentIDFromVertices(erfline, ggtmdata, newhfvert, &
+                        hfline%vert(hfline%nv))
+                    
+                    ! Append this segment
+                    call hfline%AppendSegment(newsegID, ggtmdata, .true.)
+                end if 
 
-                ! Get the segment that has the split vertex and the new
-                ! vertex for the lfline
-                newsegID = GetSegmentIDFromVertices(erfline, ggtmdata, newlfvert, &
-                    lfline%vert(lfline%nv))
-                
-                ! Append this segment
-                call lfline%AppendSegment(newsegID, ggtmdata, .true.)
+                if (indlf /= 0) then 
+                    ! Get the segment that has the split vertex and the new
+                    ! vertex for the lfline
+                    newsegID = GetSegmentIDFromVertices(erfline, ggtmdata, newlfvert, &
+                        lfline%vert(lfline%nv))
+                    
+                    ! Append this segment
+                    call lfline%AppendSegment(newsegID, ggtmdata, .true.)
+                end if 
 
             end if   
         end if 
@@ -8921,10 +9229,10 @@ module ggmod_gridgeneration2D
                 ! Check which points to include
                 allocate(xp(0), yp(0), valpLmin(0), valpLmax(0), decaylength(0))
 
-                ! Include x-point regions?
+                ! Include x-point/strike point regions?
                 if (options%radrefLBdosp) then 
-                    ! Add all strike points
-                    tv = topomesh%GetStrikePointIDs()
+                    ! Add all strike and x-points
+                    tv = [topomesh%GetStrikePointIDs(), topomesh%GetXPointIDs()]
                     xp = [xp, topomesh%vert%x(tv)]
                     yp = [yp, topomesh%vert%y(tv)]
                     valpLmin = [valpLmin, spread(options%radrefLBLminsp, 1, size(tv))]
@@ -8938,6 +9246,14 @@ module ggmod_gridgeneration2D
                     decaylength)
                 call Lmax%Initialize(xp, yp, valpLmax, options%radrefLBLmaxinf, &
                     decaylength)
+
+                ! Visualize
+                call Lmin%Visualize([minval(topomesh%vert%x), maxval(topomesh%vert%x)], &
+                    [minval(topomesh%vert%y), maxval(topomesh%vert%y)], &
+                    100, 100, 'Lminradref')
+                call Lmax%Visualize([minval(topomesh%vert%x), maxval(topomesh%vert%x)], &
+                    [minval(topomesh%vert%y), maxval(topomesh%vert%y)], &
+                    100, 100, 'Lmaxradref')
 
                 ! Construct refiner
                 GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic', &
@@ -8970,6 +9286,113 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Projection, dummy
+    subroutine ProjectLineVertexDistributionNoRef(refiner, linein, &
+        lineout, vertID, ggtmdata)
+
+        ! Description
+        !============
+        ! Project the current length distribution in the incoming line
+        ! onto the length distribution of the outgoing line. For this 
+        ! refiner, this simply means interpolating the length 
+        ! distribution of the vertices of the incoming line (except for
+        ! the nodes to be kept). The original vertex distribution there 
+        ! is lost of course. Small faces (smaller than distttol) are 
+        ! removed. 
+
+        ! Note: it is assumed that dlcv goes from 0 to the length of the
+        ! line. Further, we assume that the vertex distribution of the
+        ! incoming line has no very small faces (i.e. they are removed
+        ! before this routine) and therefore small faces can only 
+        ! originate from/near vertices to be kept in the outgoing line. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerNoRefUDT)              :: refiner 
+        type(GGTMFieldlineDataUDT), intent(in)      :: linein
+        type(GGTMFieldlineDataUDT), intent(inout)   :: lineout
+        integer(I8), intent(inout)                  :: vertID 
+        type(GGTMDataUDT), intent(inout)            :: ggtmdata
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)         :: tdlcv, dlv
+        integer(I8), allocatable, dimension(:)      :: tvertID, &
+            sortind
+        logical, allocatable, dimension(:)          :: keepind, &
+            tisnodevert
+
+        ! Loop
+        integer(I8)                                 :: i, k 
+
+        ! Unpack
+        !=======
+        associate(&
+            dllcin      => linein%dllc,     &
+            dlcvin      => linein%dlcv,     &
+            dlcvout     => lineout%dlcv,    &
+            dllcout     => lineout%dllc     &
+            )
+
+        ! Project
+        !========
+        ! Just project actual length coordinate
+        tdlcv = dlcvin/dlcvin(size(dlcvin))*dllcout(size(dllcout))
+        tvertID = [(k, k = vertID+1, vertID+size(tdlcv))]
+        tisnodevert = [spread(.false., 1, size(tdlcv))]
+        
+        ! Update vertex index
+        vertID = vertID + size(tdlcv)
+
+        ! Insert vertices to be kept
+        tdlcv       = [tdlcv, pack(linein%dlcv, linein%isnodevert)]
+        tvertID     = [tvertID, pack(linein%vert, linein%isnodevert)]
+        tisnodevert = [tisnodevert, spread(.true., 1, count(linein%isnodevert))]
+        allocate(sortind(size(tdlcv)))
+        call Sort(tdlcv, ind=sortind, ascend=.true.)
+        tvertID     = tvertID(sortind)
+        tisnodevert = tisnodevert(sortind)
+        deallocate(sortind)
+
+        ! Check for very small distances
+        allocate(keepind(size(tdlcv)))
+        dlv = abs(tdlcv(2:) - tdlcv(1:size(tdlcv)-1))
+        do i = 1, size(dlv)
+            if (dlv(i) < disttol) then 
+                if (tisnodevert(i) .and. .not. tisnodevert(i+1)) then
+                    keepind(i+1) = .false.
+                elseif (.not. tisnodevert(i) .and. tisnodevert(i+1)) then 
+                    keepind(i) = .false.
+                else
+                    ! Can't delete nodes, small faces will be present...
+                end if  
+            end if 
+        end do 
+
+        ! Delete vertices to remove small distances
+        tdlcv = pack(tdlcv, keepind)
+        tvertID = pack(tvertID, keepind)
+        tisnodevert = pack(tisnodevert, keepind)
+
+        ! Reconstruct line
+        !=================
+        ! Add coordinates
+        tdlcv(1) = 0 ! ensure start and end on line
+        tdlcv(size(tdlcv)) = lineout%dllc(lineout%nl)
+        call lineout%AddVertexCoordinates(tdlcv)
+
+        ! Add line vertices
+        call lineout%AddVertexIDs(tvertID, tisnodevert)
+
+        ! Update segment data
+        call lineout%UpdateSegmentData(ggtmdata)
+
+        ! Housekeeping
+        !=============
+        end associate
+        
+    end subroutine
+
     ! Refiner option updating, length-based
     subroutine UpdateRefinementOptionsLB(refiner, refoptions, topomesh)
 
@@ -8990,6 +9413,7 @@ module ggmod_gridgeneration2D
 
         ! Update boundary layer
         !======================
+        refiner%dlBLlengthbased     = refoptions%dlBLlengthbased
         refiner%doBLstart   = refoptions%doBLstart 
         refiner%doBLend     = refoptions%doBLend 
         refiner%ncBLstart   = refoptions%ncBLstart 
@@ -9026,6 +9450,7 @@ module ggmod_gridgeneration2D
         refiner%field       = magneticField
 
         ! Boundary layer (simply set to zero currently)
+        refiner%dlBLlengthbased = .false.
         refiner%doBLstart = .false. 
         refiner%doBLend = .false. 
         if (allocated(refiner%dlBLstart)) then 
@@ -9122,7 +9547,8 @@ module ggmod_gridgeneration2D
             lBLstart, lBLend
         real(R8), allocatable, dimension(:)         :: dll, &
             Lmaxvert, Lminvert, newdll, newdllc, dlcBLstart, &
-            dlcBLend, tempdlcBLstart, tempdlcBLend
+            dlcBLend, tempdlcBLstart, tempdlcBLend, dlBLstart, &
+            dlBLend, tdlcBLstart, tdlcBLend, dlcBLstarti, dlcBLendi
         integer(I8)                                 :: minind, &
             ncBLstart, ncBLend
         integer(I8), allocatable, dimension(:)      :: thisvertID, &
@@ -9135,11 +9561,47 @@ module ggmod_gridgeneration2D
         !===========
         ! Associate
         associate(&
+            lengthbased     => refiner%dlBLlengthbased,    &
             doBLstart       => refiner%doBLstart,   &
             doBLend         => refiner%doBLend,     &
-            dlBLstart       => refiner%dlBLstart,   &
-            dlBLend         => refiner%dlBLend      &
+            dlBLstarti      => refiner%dlBLstart,   &
+            dlBLendi        => refiner%dlBLend      &
             )
+
+        ! Initialize the refiner
+        call refiner%InitializeLineData(line)
+
+        ! Check if distance is (euler) length based or not (if not, 
+        ! assumed given in current units).
+        if (lengthbased) then 
+            ! Need to interpolate
+            
+            if (doBLstart) then 
+                allocate(dlcBLstarti(size(dlBLstarti)+1))
+                dlcBLstarti = 0
+                do i = 2, size(dlcBLstarti)
+                    dlcBLstarti(i) = dlcBLstarti(i-1) + dlBLstarti(i-1)
+                end do
+                call Interpolate1D(dlcBLstarti, tdlcBLstart, line%dllc, refiner%linedllc)
+                dlBLstart = tdlcBLstart(2:size(tdlcBLstart)) - tdlcBLstart(1:size(tdlcBLstart)-1)
+                deallocate(dlcBLstarti)
+            end if 
+            if (doBLend) then 
+                allocate(dlcBLendi(size(dlBLendi)+1))
+                dlcBLendi = 0
+                do i = 2, size(dlcBLendi)
+                    dlcBLendi(i) = dlcBLendi(i-1) + dlBLendi(i-1)
+                end do
+                dlcBLendi = line%dllc(line%nl) - dlcBLendi
+                call Interpolate1D(dlcBLendi, tdlcBLend, line%dllc, refiner%linedllc)
+                dlBLend = -tdlcBLend(2:size(tdlcBLend)) + tdlcBLend(1:size(tdlcBLend)-1)
+                deallocate(dlcBLendi)
+            end if 
+        else
+            ! Just take as is
+            dlBLstart = dlBLstarti
+            dlBLend = dlBLendi
+        end if
 
         ! Ensure proper dimensions
         if (size(keepvert) /= size(line%vert)) then 
@@ -9148,7 +9610,6 @@ module ggmod_gridgeneration2D
         end if 
 
         ! Initialize
-        call refiner%InitializeLineData(line)
         ncBLstart = refiner%ncBLstart
         ncBLend = refiner%ncBLend
 
@@ -9651,7 +10112,7 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         real(R8), allocatable, dimension(:)     :: dx, dy, xf, yf, bx, &
-            by, bn, dll, dllc
+            by, bn, dll, dllc, psi, dpsi
 
         ! Loop 
         integer(I8)                             :: i 
@@ -9680,7 +10141,13 @@ module ggmod_gridgeneration2D
             by = by/bn 
 
             ! Project and take absolute value
-            dll = abs(dx*bx + dy*by) 
+            dll = dx*bx + dy*by
+            if (sum(dll)/size(dll) < 0) then 
+                where(dll > 0) dll = 0
+            else
+                where(dll < 0) dll = 0
+            end if 
+            dll = abs(dll) 
             
             ! Compute accumulative length
             allocate(dllc(line%nl))
@@ -9688,6 +10155,37 @@ module ggmod_gridgeneration2D
             do i = 2, line%nl
                 dllc(i) = dllc(i-1) + dll(i-1)
             end do 
+            refiner%linedllc = dllc
+
+        case ('psi')
+
+            ! Evaluate psi values on line
+            allocate(psi(line%nl))
+            call refiner%field%interp%Evaluate(line%xl, line%yl, 0, 0, psi)
+
+            ! Take differences along the line
+            dpsi = (psi(2:line%nl) - psi(1:line%nl-1))
+
+            ! Check general difference between first and last, remove
+            ! parts that are  not ascending/descending
+            if (psi(1) > psi(size(psi))) then 
+                ! Descending
+                where (dpsi > 0) dpsi = 0
+                where((psi(2:) > psi(1)) .or. (psi(2:) < psi(size(psi)))) dpsi = 0
+            else 
+                ! Ascending
+                where(dpsi < 0) dpsi = 0
+                where((psi(2:) < psi(1)) .or. (psi(2:) > psi(size(psi)))) dpsi = 0
+            end if 
+            dpsi = abs(dpsi)
+                
+
+            ! Compute accumulative length
+            allocate(dllc(line%nl))
+            dllc = 0_R8
+            do i = 2, line%nl 
+                dllc(i) = dllc(i-1) + dpsi(i-1)
+            end do
             refiner%linedllc = dllc
 
         case default 
@@ -9726,11 +10224,11 @@ module ggmod_gridgeneration2D
             ! Simply return line%dlcv
             dlcv = line%dlcv
 
-        case ('radial')
+        case ('radial', 'psi')
 
             ! Need to interpolate 
             call Interpolate1D(line%dlcv, dlcv, line%dllc, refiner%linedllc)
-            
+
         case default 
             
             call gdErrorHandler('RefineLineSingleLB: length ' // & 
@@ -9769,7 +10267,7 @@ module ggmod_gridgeneration2D
             ! Simply call line method
             call line%AddVertexCoordinates(dlcv)
 
-        case ('radial')
+        case ('radial', 'psi')
 
             ! Need to interpolate first
             call Interpolate1D(dlcv, newdlcv, refiner%linedllc, line%dllc)
@@ -9787,6 +10285,128 @@ module ggmod_gridgeneration2D
         end select
 
 
+    end subroutine
+    
+    ! Projection, length-based
+    subroutine ProjectLineVertexDistributionLB(refiner, linein, &
+        lineout, vertID, ggtmdata)
+
+        ! Description
+        !============
+        ! Project the current length distribution in the incoming line
+        ! onto the length distribution of the outgoing line. For this 
+        ! refiner, this simply means interpolating the length 
+        ! distribution of the vertices of the incoming line (except for
+        ! the nodes to be kept). The original vertex distribution there 
+        ! is lost of course. Small faces (smaller than distttol) are 
+        ! removed. 
+
+        ! Note: it is assumed that dlcv goes from 0 to the length of the
+        ! line. Further, we assume that the vertex distribution of the
+        ! incoming line has no very small faces (i.e. they are removed
+        ! before this routine) and therefore small faces can only 
+        ! originate from/near vertices to be kept in the outgoing line. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)               :: refiner 
+        type(GGTMFieldlineDataUDT), intent(in)      :: linein
+        type(GGTMFieldlineDataUDT), intent(inout)   :: lineout
+        integer(I8), intent(inout)                  :: vertID 
+        type(GGTMDataUDT), intent(inout)            :: ggtmdata
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)         :: tdlcv, dlv, &
+            refinerdllcin, refinerdllcout, refinerdlcvin, refinerdlcvout, &
+            refinerdlcvoutinit
+        integer(I8), allocatable, dimension(:)      :: tvertID, &
+            sortind, segvertind
+        logical, allocatable, dimension(:)          :: keepind, &
+            tisnodevert
+
+        ! Loop
+        integer(I8)                                 :: i, k 
+
+        ! Project
+        !========
+        ! Determine line lengths in correct length measure
+        call refiner%InitializeLineData(linein)
+        refinerdllcin = refiner%linedllc 
+        call refiner%InitializeLineData(lineout)
+        refinerdllcout = refiner%linedllc
+
+        ! Initialize vertices etc
+        tvertID = [(k, k = vertID+1, vertID+size(linein%dlcv))]
+        tisnodevert = [spread(.false., 1, size(linein%dlcv))]
+
+        ! Update vertex index
+        vertID = vertID + size(linein%dlcv)
+
+        ! Interpolate the incoming line length distribution
+        call Interpolate1D(linein%dlcv, refinerdlcvin, linein%dllc, refinerdllcin)
+
+        ! Project onto the outgoing line length distribution
+        refinerdlcvout = refinerdlcvin/refinerdllcin(size(refinerdllcin))*refinerdllcout(size(refinerdllcout))
+
+        ! Append vertices to be kept
+        refinerdlcvoutinit = refiner%GetLineEdgeLength(lineout)
+        segvertind = lineout%GetAllSegmentVertIndices()
+        refinerdlcvout = [refinerdlcvout, refinerdlcvoutinit(segvertind)]
+        tvertID = [tvertID, lineout%vert(segvertind)]
+        tisnodevert = [tisnodevert, lineout%isnodevert(segvertind)]
+        
+        ! Interpolate the outgoing actual line length
+        call Interpolate1D(refinerdlcvout, tdlcv, refinerdllcout, lineout%dllc)
+        !tdlcv = refinerdlcvout/refinerdlcvout(size(refinerdlcvout))*&
+        !    refinerdllcout(size(refinerdllcout))
+
+        ! Insert vertices to be kept
+        allocate(sortind(size(tdlcv)))
+        call Sort(tdlcv, ind=sortind, ascend=.true.)
+        tvertID     = tvertID(sortind)
+        tisnodevert = tisnodevert(sortind)
+        deallocate(sortind)
+
+        ! Check for very small distances
+        allocate(keepind(size(tdlcv)))
+        keepind = .true.
+        dlv = abs(tdlcv(2:) - tdlcv(1:size(tdlcv)-1))
+        do i = 1, size(dlv)
+            if (dlv(i) < disttol) then 
+                if (tisnodevert(i) .and. .not. tisnodevert(i+1)) then
+                    keepind(i+1) = .false.
+                elseif (.not. tisnodevert(i) .and. tisnodevert(i+1)) then 
+                    keepind(i) = .false.
+                elseif (tvertID(i) == tvertID(i+1)) then 
+                    ! Same vertices, can delete one 
+                    keepind(i) = .false.
+                else
+                    ! Can't delete nodes, small faces will be present...
+                end if  
+            end if 
+        end do 
+
+        ! Delete vertices to remove small distances
+        tdlcv = pack(tdlcv, keepind)
+        tvertID = pack(tvertID, keepind)
+        tisnodevert = pack(tisnodevert, keepind)
+        tdlcv(1) = 0 ! ensure start and end on line
+        tdlcv(size(tdlcv)) = lineout%dllc(lineout%nl)
+        tisnodevert(1) = .true.
+        tisnodevert(size(tdlcv)) = .true.
+
+        ! Reconstruct line
+        !=================
+        ! Add coordinates
+        call lineout%AddVertexCoordinates(tdlcv)
+
+        ! Add line vertices
+        call lineout%AddVertexIDs(tvertID, tisnodevert)
+
+        ! Update segment data
+        call lineout%UpdateSegmentData(ggtmdata)
+        
     end subroutine
 
     !------------------------------------------------------------------!
@@ -10583,7 +11203,7 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                                 :: ne, &
-            TPlabel, fcregID
+            TPlabel, fcregID, mySOLPScoreregIDincr
         integer(I8), allocatable, dimension(:)      :: IFlabels, &
             TPlabels, bndlabels, fl_orig, fl_new, Clabels, &
             facelabelmapping, allfID, tfID, &
@@ -10865,6 +11485,7 @@ module ggmod_gridgeneration2D
         !-------------
         ! Get core IDs
         coreIDs = topomesh%GetCoreCellIDs()
+        mySOLPScoreregIDincr = SOLPScoreregIDincr
 
         ! Compute mapping
         allocate(cellregionmapping(0:maxval(simgrid%cell%reg)))
@@ -10878,10 +11499,13 @@ module ggmod_gridgeneration2D
                 coreIDc = coreIDc + SOLPScoreregIDincr
             else
                 ! Check if we should update the region ID
-                if ((regIDc == coreIDc) .or. &
-                    (mod(regIDc, SOLPScoreregIDincr)-solpscoreregID) == 0) then 
-                    ! Assumed solpscoreregIDincr larger than one
-                    regIDc = regIDc + 1
+                if (regIDc == coreIDc) then 
+                    if (mySOLPScoreregIDincr /= 0) then 
+                        if ((mod(regIDc, mySOLPScoreregIDincr)-solpscoreregID) == 0) then 
+                        ! Assumed solpscoreregIDincr larger than one
+                        regIDc = regIDc + 1
+                        end if 
+                    end if
                 end if 
                 cellregionmapping(i) = regIDc 
                 regIDc = regIDc + 1
@@ -11607,7 +12231,7 @@ module ggmod_gridgeneration2D
         ! <header> 
         ! 'celldata'
         ! <cell%ntot>
-        ! 'ID, doBLstart, doBLend, ncBLstart, ncBLend'
+        ! 'ID, doBLstart, doBLend, ncBLstart, ncBLend, dlBLlengthbased'
         ! <the above for each cell per line>
         ! 'dlBLstart' (in order of celldata, one row per cell)
         ! <dlBLstart>
@@ -11633,7 +12257,7 @@ module ggmod_gridgeneration2D
         character(*), intent(in)                :: filename 
 
         ! Auxiliary
-        integer                                 :: fu
+        integer                                 :: fu, lengthbased 
         character(:), allocatable               :: dir
 
         ! Loop
@@ -11666,10 +12290,15 @@ module ggmod_gridgeneration2D
         write(fu, *) size(c)
 
         ! Write scalar data
-        write(fu, *) 'ID, doBLstart, doBLend, ncBLstart, ncBLend'
+        write(fu, *) 'ID, doBLstart, doBLend, ncBLstart, ncBLend, dlBLlengthbased'
         do i = 1, size(c)
             associate(r     => c(i)%linerefoptions)
-            write(fu, *) i, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend 
+            if (r%dlBLlengthbased) then 
+                lengthbased = 1
+            else
+                lengthbased = 0
+            end if 
+            write(fu, *) i, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend, lengthbased
             end associate
         end do
 
@@ -11700,10 +12329,15 @@ module ggmod_gridgeneration2D
         write(fu, *) size(t)
 
         ! Write scalar data
-        write(fu, *) 'ID, doBLstart, doBLend, ncBLstart, ncBLend'
+        write(fu, *) 'ID, doBLstart, doBLend, ncBLstart, ncBLend, lengthbased'
         do i = 1, size(t)
             associate(r     => t(i)%linerefoptions)
-            write(fu, *) i, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend 
+            if (r%dlBLlengthbased) then 
+                lengthbased = 1
+            else
+                lengthbased = 0
+            end if 
+            write(fu, *) i, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend, lengthbased
             end associate
         end do
 
@@ -11766,7 +12400,7 @@ module ggmod_gridgeneration2D
         character(*), intent(in)                :: filename 
 
         ! Auxiliary
-        integer                                 :: fu
+        integer                                 :: fu, lengthbased
         integer(I8)                             :: nc, cID, nt
         real(R8), allocatable, dimension(:)     :: temp
         character(:), allocatable               :: thisline
@@ -11818,7 +12452,12 @@ module ggmod_gridgeneration2D
         ! Read scalar data
         do i = 1, size(c)
             associate(r     => c(i)%linerefoptions)
-            read(fu, *) cID, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend 
+            read(fu, *) cID, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend, lengthbased 
+            if (lengthbased > 0) then 
+                c(i)%linerefoptions%dlBLlengthbased = .true.
+            else
+                c(i)%linerefoptions%dlBLlengthbased = .false.
+            end if 
             end associate
         end do
 
@@ -11871,7 +12510,12 @@ module ggmod_gridgeneration2D
         ! Read scalar data
         do i = 1, size(t)
             associate(r     => t(i)%linerefoptions)
-            read(fu, *) cID, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend 
+            read(fu, *) cID, r%doBLstart, r%doBLend, r%ncBLstart, r%ncBLend, lengthbased
+            if (lengthbased > 0) then 
+                r%dlBLlengthbased = .true.
+            else
+                r%dlBLlengthbased = .false.
+            end if 
             end associate
         end do
 

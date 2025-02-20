@@ -89,7 +89,17 @@ module Interpolant1D
             else
                 dx = xv(ind+1) - xv(ind)
                 dy = yv(ind+1) - yv(ind)
-                yq(i) = dy/dx*(xq(i) - xv(ind)) + yv(ind)
+                if (dy == 0_R8) then 
+                    yq(i) = yv(ind)
+                elseif (dx == 0_r8) then
+                    ! This actually means there's a discontinuity, so we
+                    ! just take the half of dy... (discontinuity only if 
+                    ! dy /= 0)
+                    yq(i) =  0.5*dy + yv(ind)
+                else
+                    ! Standard interpolation
+                    yq(i) = dy/dx*(xq(i) - xv(ind)) + yv(ind)
+                end if
             end if 
         end do 
 
