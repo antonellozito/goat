@@ -461,10 +461,11 @@ module goatmod_userinput
         ! largely the same as poloidal one (but then vdr instead of vdp)
         ! but some differences
         ! - vdrtype:        (same as vdptype)
+        ! - vdrdoxp:            include x-point and separatrix points?
         ! - vdrdfieldwidth: desired field with for uniform distribution
         ! - vdrddecaylength:    decay length parameter 
-        ! - vdrddensityatseparatrix:    desired density at separatrix
-        ! - vdrddensityatinf:           density far from separatrix
+        ! - vdrddensityatxp:    desired density at separatrix
+        ! - vdrddensityatinf:   density far from separatrix
  
         ! Options for extending flux tubes with vessel parts (so-called 
         ! 'cut cells')
@@ -558,7 +559,7 @@ module goatmod_userinput
             refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
-            radrefdlBLlengthbased
+            radrefdlBLlengthbased, vdrdoxp
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp
@@ -567,7 +568,7 @@ module goatmod_userinput
         real(R8)                    :: vdpdfacelength, vdpddecaylengthplf, &
             vdpddecaylengthxp, vdpddensityatvessel, vdpddensityatxp, &
             vdpddensityatinf, vdrdfieldwidth, &
-            vdrddecaylength, vdrddensityatseparatrix, vdrddensityatinf, &
+            vdrddecaylengthxp, vdrddensityatxp, vdrddensityatinf, &
             remfspsitol, remfspsirattol, rembndtriaminangle, &
             remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
             refLBLmaxxp, refLBdecaylengthxp, orthtracerstep, &
@@ -950,11 +951,12 @@ module goatmod_userinput
         options%orthtracernsteps = 2000
 
         ! Options for radial vertex distribution
-        options%vdrtype             = 'densitybased'
+        options%vdrtype             = 'uniform'
         options%vdrdfieldwidth      = 4e-3
-        options%vdrddecaylength     = 0.005
-        options%vdrddensityatseparatrix     = 2500.0_R8
-        options%vdrddensityatinf            = 250.0_R8
+        options%vdrddecaylengthxp   = 0.005
+        options%vdrddensityatxp     = 2500.0_R8
+        options%vdrddensityatinf    = 250.0_R8
+        options%vdrdoxp             = .true.
 
         ! Options for flux tube extensions
         options%extendtptubes       = .true. 
@@ -1765,12 +1767,14 @@ module goatmod_userinput
         ! Options for radial vertex distribution
         field = 'gg.vd.rd.type'
         call ExtractOptionValueCharacter(fid, field, options%vdrtype)
+        field = 'gg.vd.rd.distribution.doxp'
+        call ExtractOptionValueLogical0D(fid, field, options%vdrdoxp)
         field = 'gg.vd.rd.distribution.fieldwidth'
         call ExtractOptionValueReal0D(fid, field, options%vdrdfieldwidth)
-        field = 'gg.vd.rd.distribution.decaylength'
-        call ExtractOptionValueReal0D(fid, field, options%vdrddecaylength)
-        field = 'gg.vd.rd.distribution.densityatseparatrix'
-        call ExtractOptionValueReal0D(fid, field, options%vdrddensityatseparatrix)
+        field = 'gg.vd.rd.distribution.decaylengthxp'
+        call ExtractOptionValueReal0D(fid, field, options%vdrddecaylengthxp)
+        field = 'gg.vd.rd.distribution.densityatxp'
+        call ExtractOptionValueReal0D(fid, field, options%vdrddensityatxp)
         field = 'gg.vd.rd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatinf)
 
