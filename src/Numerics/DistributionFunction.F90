@@ -54,6 +54,10 @@ module DistributionFunction
         ! Evaluation
         procedure(EvaluateDistributionFunctionINT), deferred :: Evaluate   
 
+        ! Derivative evaluation
+        procedure(EvaluateDerivativeDistributionFunctionINT), deferred :: &
+            EvaluateDerivative
+
         ! Visualization 
         procedure   :: Visualize    => VisualizeDistributionFunction
 
@@ -74,6 +78,9 @@ module DistributionFunction
 
         ! Evaluation
         procedure :: Evaluate       => EvaluateStructured2DDF
+
+        ! Derivative evaluation
+        procedure :: EvaluateDerivative  => EvaluateDerivativeStructured2DDF
 
     end type
 
@@ -106,6 +113,9 @@ module DistributionFunction
 
         ! Evaluation
         procedure :: Evaluate       => EvaluateStructured2DDistanceDF
+
+        ! Derivative evaluation
+        procedure :: EvaluateDerivative     => EvaluateDerivativeStructured2DDistanceDF
 
     end type
 
@@ -140,6 +150,9 @@ module DistributionFunction
 
         ! Evaluation
         procedure :: Evaluate       => EvaluateStructuredPLF2DDistanceDF
+
+        ! Derivative evaluation
+        procedure :: EvaluateDerivative     => EvaluateDerivativeStructuredPLF2DDistanceDF
 
     end type
 
@@ -177,6 +190,9 @@ module DistributionFunction
 
         ! Evaluation
         procedure :: Evaluate       => EvaluatePolygonset2DFieldDistanceDF
+
+        ! Derivative evaluation
+        procedure :: EvaluateDerivative     => EvaluateDerivativePolygonset2DFieldDistanceDF
 
     end type
 
@@ -217,6 +233,9 @@ module DistributionFunction
         ! Evaluation
         procedure :: Evaluate       => EvaluatePolygonset1DFieldDistanceDF
 
+        ! Derivative evaluation
+        procedure :: EvaluateDerivative     => EvaluateDerivativePolygonset1DFieldDistanceDF
+
     end type
 
     ! Coordinates, 1D
@@ -255,6 +274,9 @@ module DistributionFunction
         ! Evaluation
         procedure :: Evaluate       => EvaluateCoordinates1DFieldDistanceDF
 
+        ! Derivative evaluation
+        procedure :: EvaluateDerivative     => EvaluateDerivativeCoordinates1DFieldDistanceDF
+
     end type
 
     ! Coordinates, 2D
@@ -283,6 +305,9 @@ module DistributionFunction
 
         ! Evaluation
         procedure :: Evaluate       => EvaluateCoordinates2DDistanceDF
+
+        ! Derivative evaluation
+        procedure :: EvaluateDerivative     => EvaluateDerivativeCoordinates2DDistanceDF
 
     end type
 
@@ -322,6 +347,9 @@ module DistributionFunction
         ! Evaluation
         procedure :: Evaluate       => EvaluateCoordinatesPLF2DDistanceDF
 
+        ! Derivative evaluation
+        procedure :: EvaluateDerivative  => EvaluateDerivativeCoordinatesPLF2DDistanceDF
+
     end type
 
     !==================================================================!
@@ -339,6 +367,15 @@ module DistributionFunction
             import :: DistributionFunctionUDT, R8
             class(DistributionFunctionUDT) :: distribution
             real(R8), intent(in)        :: x(:), y(:)
+            real(R8), intent(out)       :: v(size(x))
+        end subroutine
+
+        ! Derivative evaluation routine
+        subroutine EvaluateDerivativeDistributionFunctionINT(distribution, x, y, derivx, derivy, v)
+            import :: DistributionFunctionUDT, R8, I8
+            class(DistributionFunctionUDT) :: distribution
+            real(R8), intent(in)        :: x(:), y(:)
+            integer(I8), intent(in)     :: derivx, derivy
             real(R8), intent(out)       :: v(size(x))
         end subroutine
 
@@ -457,6 +494,29 @@ module DistributionFunction
 
     end subroutine 
 
+    ! Derivative evaluation
+    subroutine EvaluateDerivativeStructured2DDF(distribution, x, y, &
+        derivx, derivy, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function derivative
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Structured2DDFUDT)            :: distribution 
+        real(R8), intent(in)                :: x(:), y(:)
+        real(R8), intent(out)               :: v(size(x))
+        integer(I8), intent(in)             :: derivx, derivy 
+
+        ! Evaluate
+        !=========
+        ! Just call interpolant evaluator
+        call distribution%F%Evaluate(x, y, derivx, derivy, v)
+
+    end subroutine 
+
     !------------------------------------------------------------------!
     !                         DISTANCE FUNCTION                        !
     !------------------------------------------------------------------!
@@ -538,6 +598,27 @@ module DistributionFunction
         end associate
 
 
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateDerivativeStructured2DDistanceDF(distribution, x, y, &
+        derivx, derivy, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Structured2DDistanceDFUDT)    :: distribution 
+        real(R8), intent(in)                :: x(:), y(:)
+        real(R8), intent(out)               :: v(size(x))
+        integer(I8), intent(in)             :: derivx, derivy
+
+        call gdErrorHandler('EvaluateDerivativeStructured2DDistanceDF: ' // & 
+            'derivatives not yet implemented for this distribution type')
+    
     end subroutine
 
     !------------------------------------------------------------------!
@@ -664,6 +745,27 @@ module DistributionFunction
         !=============
         end associate
 
+
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateDerivativeStructuredPLF2DDistanceDF(distribution, &
+        x, y, derivx, derivy, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredPLF2DDistanceDFUDT) :: distribution 
+        real(R8), intent(in)                :: x(:), y(:)
+        real(R8), intent(out)               :: v(size(x))
+        integer(I8), intent(in)             :: derivx, derivy
+
+        call gdErrorHandler('EvaluateDerivativeStructuredPLF2DDistanceDF: ' // & 
+            'derivatives not yet implemented for this distribution type')
 
     end subroutine
 
@@ -929,6 +1031,28 @@ module DistributionFunction
         end associate
 
 
+    end subroutine
+    
+    ! Derivative evaluation
+    subroutine EvaluateDerivativePolygonset2DFieldDistanceDF(distribution, &
+        x, y, derivx, derivy, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Polygonset2DFieldDistanceDFUDT)   :: distribution 
+        real(R8), intent(in)                    :: x(:), y(:)
+        real(R8), intent(out)                   :: v(size(x))
+        integer(I8), intent(in)                 :: derivx, derivy
+
+        call gdErrorHandler('EvaluateDerivativePolygonset2DFieldDistanceDF: ' // & 
+            'derivatives not yet implemented for this distribution type')
+
+
     end subroutine 
 
     !------------------------------------------------------------------!
@@ -1146,6 +1270,28 @@ module DistributionFunction
 
 
     end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateDerivativePolygonset1DFieldDistanceDF(distribution, &
+        x, y, derivx, derivy, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Polygonset1DFieldDistanceDFUDT)   :: distribution 
+        real(R8), intent(in)                    :: x(:), y(:)
+        real(R8), intent(out)                   :: v(size(x))
+        integer(I8), intent(in)                 :: derivx, derivy
+
+        call gdErrorHandler('EvaluateDerivativePolygonset1DFieldDistanceDF: ' // & 
+            'derivatives not yet implemented for this distribution type')
+
+
+    end subroutine 
     
     !------------------------------------------------------------------!
     !                      COORDINATES & FIELD, 1D                     !
@@ -1347,9 +1493,62 @@ module DistributionFunction
 
     end subroutine
 
+    ! Derivative evaluation
+    subroutine EvaluateDerivativeCoordinates1DFieldDistanceDF(distribution, &
+        x, y, derivx, derivy, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Coordinates1DFieldDistanceDFUDT)  :: distribution 
+        real(R8), intent(in)                    :: x(:), y(:)
+        real(R8), intent(out)                   :: v(size(x))
+        integer(I8), intent(in)                 :: derivx, derivy
+
+        call gdErrorHandler('EvaluateDerivativeCoordinates1DFieldDistanceDF: ' // & 
+            'derivatives not yet implemented for this distribution type')
+
+
+    end subroutine 
+
     !------------------------------------------------------------------!
     !                          COORDINATES, 2D                         !
     !------------------------------------------------------------------!
+
+    ! Constructor
+    function ConstructCoordinates2DDistanceDF(xp, yp, val0, valinf, &
+        decaylengthp) result(distribution)
+
+        ! Description
+        !============
+        ! Construct the distributor - simply a wrapper for the 
+        ! initialization function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DistributionFunctionUDT), allocatable     :: distribution 
+        real(R8), intent(in)                            :: val0(:), valinf, &
+            xp(:), yp(:), decaylengthp(:)
+
+        ! Initialize
+        !===========
+        allocate(Coordinates2DDistanceDFUDT::distribution)
+
+        select type(distribution)
+
+        type is (Coordinates2DDistanceDFUDT)
+
+            ! Call initializer
+            call distribution%Initialize(xp, yp, val0, valinf, decaylengthp)
+
+        end select
+
+    end function 
 
     ! Initialization
     subroutine InitializeCoordinates2DDistanceDF(distribution, &
@@ -1379,6 +1578,8 @@ module DistributionFunction
         real(R8), allocatable                           :: d(:), b(:), &
             A(:, :), sol(:)
 
+        logical, allocatable, dimension(:)              :: isduplicate
+
         ! Loop
         integer(I8)                                     :: i, j
 
@@ -1403,22 +1604,36 @@ module DistributionFunction
         na = size(xp, 1)
 
         ! Allocate
-        allocate(d(na), b(na), A(na, na))
+        allocate(d(na), b(na), A(na, na), isduplicate(na))
 
         ! Construct rhs to compute attractor coefficients
         b = a0 - b0
 
         ! Compute lhs to compute attractor coefficients
+        isduplicate = .false. 
         A = 0
         do j = 1, na
             do i = 1, na
                 if (i /= j) then 
                     tempd = sqrt( (xp(i) - xp(j))**2 + (yp(i) - yp(j))**2)
+                    if (tempd == 0) then 
+                        isduplicate(j) = .true.
+                    end if  
                     A(i, j) = exp(-tempd/d0(j))
                 else 
                     A(i, j) = 1.0_R8
                 end if 
             end do 
+        end do
+
+        ! Adjust
+        do j = 1, na
+            if (isduplicate(j)) then 
+                A(j, :) = 0
+                A(:, j) = 0
+                A(j, j) = 1
+                b(j) = 1
+            end if 
         end do
 
         ! Call solver
@@ -1438,6 +1653,13 @@ module DistributionFunction
         ! Housekeeping
         !=============
         end associate
+
+        ! Reset distribution quantities to exclude duplicate points
+        distribution%coef = pack(distribution%coef, .not. isduplicate)
+        distribution%xa = pack(distribution%xa, .not. isduplicate) 
+        distribution%ya = pack(distribution%ya, .not. isduplicate)
+        distribution%a0 = pack(distribution%a0, .not. isduplicate)
+        distribution%d0 = pack(distribution%d0, .not. isduplicate)
 
     end subroutine
 
@@ -1495,6 +1717,130 @@ module DistributionFunction
 
         ! Add constant component
         v = v + b0
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateDerivativeCoordinates2DDistanceDF(distribution, &
+        x, y, derivx, derivy, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Coordinates2DDistanceDFUDT)       :: distribution 
+        real(R8), intent(in)                    :: x(:), y(:)
+        real(R8), intent(out)                   :: v(size(x))
+        integer(I8), intent(in)                 :: derivx, derivy 
+
+        ! Auxiliary
+        real(R8), parameter                     :: myone = 1
+        real(R8)                                :: d(size(x))
+        real(R8), allocatable, dimension(:)     :: dddx, dddy 
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Check sizes
+        if ( (size(v) /= size(x)) .or. (size(x) /= size(y))) then 
+            ! Throw error
+            call gdErrorHandler('EvaluateDerivativeCoordinates2DDistanceDF: ' // & 
+                'incompatible sizes in input')
+        end if 
+
+        ! Associate
+        associate(&
+            a0      => distribution%a0,     & 
+            c       => distribution%coef,   & 
+            b0      => distribution%b0,     & 
+            d0      => distribution%d0,     &
+            xa      => distribution%xa,     &
+            ya      => distribution%ya      &
+        )
+
+        ! Evaluate
+        !=========
+        ! Evaluate field values in coordinates
+        v = 0
+
+        select case (derivx)
+
+        case (0)
+
+            select case (derivy)
+
+            case (0)
+
+                ! Field value
+                do i = 1, size(xa)
+                    ! Distance 
+                    d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
+
+                    ! Value
+                    v = v + c(i)*exp(-d/d0(i))
+                end do
+
+                ! Add constant component
+                v = v + b0
+
+            case (1)
+
+                ! dfdy 
+                do i = 1, size(xa)
+                    ! Distance 
+                    d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
+                    dddy = (y - ya(i))/d
+
+                    ! Value
+                    v = v - c(i)/d0(i)*exp(-d/d0(i))*dddy
+                end do
+
+            case default
+
+                call gdErrorHandler('EvaluateDerivativeCoordinates2DDistanceDF: ' // & 
+                    'derivative not implemented')
+
+            end select
+
+        case (1)
+
+            select case (derivy)
+
+            case (0)
+
+                ! dfdx
+                do i = 1, size(xa)
+                    ! Distance 
+                    d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
+                    dddx = (x - xa(i))/d
+
+                    ! Value
+                    v = v - c(i)/d0(i)*exp(-d/d0(i))*dddx
+                end do
+
+            case default
+
+                call gdErrorHandler('EvaluateDerivativeCoordinates2DDistanceDF: ' // & 
+                    'derivative not implemented')
+
+            end select
+
+        case default 
+
+            call gdErrorHandler('EvaluateDerivativeCoordinates2DDistanceDF: ' // & 
+                    'derivative not implemented')
+
+        end select
 
         ! Housekeeping
         !=============
@@ -1704,6 +2050,28 @@ module DistributionFunction
         !=============
         end associate
 
+
+    end subroutine
+
+    ! Derivative evaluation
+    subroutine EvaluateDerivativeCoordinatesPLF2DDistanceDF(distribution, &
+        x, y, derivx, derivy, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CoordinatesPLF2DDistanceDFUDT)    :: distribution 
+        real(R8), intent(in)                    :: x(:), y(:)
+        real(R8), intent(out)                   :: v(size(x))
+        integer(I8), intent(in)                 :: derivx, derivy 
+
+        call gdErrorHandler('EvaluateDerivativeCoordinatesPLF2DDistanceDF: ' // & 
+            'derivatives not yet implemented for this distribution type')
+        
 
     end subroutine
 
