@@ -28,7 +28,7 @@ subroutine ConstructMagneticField(magneticField, mfoptions)
 
     ! Auxiliary 
     real(R8)                                :: dR, dZ 
-    real(R8), allocatable, dimension(:)     :: dx, dy, x, y, temp
+    real(R8), allocatable, dimension(:)     :: x, y, temp
     real(R8), allocatable, dimension(: ,:)  :: val, tempval  
     type(StructuredInterpolant2DUDT)    :: interp
 
