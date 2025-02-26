@@ -158,7 +158,7 @@ module ggmod_vertexdistribution2D
         procedure :: DistributeOverCurve    => DistributeVerticesDensityBasedOverCurve
 
         ! Distribution over given field
-        procedure :: DistributeOverField    => DistributeVerticesDensityBasedOverField
+        procedure :: DistributeOverField    => DistributeVerticesDensityBasedOverField2
 
     end type
 
@@ -744,7 +744,7 @@ module ggmod_vertexdistribution2D
         allocate(fc(size(xc)))
         call field%Evaluate(xc, yc, fc) 
         df = abs(fc(2:) - fc(1:size(fc)-1))
-        dl = sqrt(dx**2 + dy**1)
+        dl = sqrt(dx**2 + dy**2)
         l = sum(dl)
 
         ! Check
@@ -776,7 +776,7 @@ module ggmod_vertexdistribution2D
         ! Compute mass of each segment
         allocate(Mi(size(dx)))
         do i = 1, size(dx)
-            Mi(i) = sum(rhoi(i, :)*reshape(coef, [size(coef)])*dl(i))
+            Mi(i) = sum(rhoi(i, :)*reshape(coef, [size(coef)])*df(i))/sum(df)
         end do
 
         ! Correct for sign
@@ -819,7 +819,188 @@ module ggmod_vertexdistribution2D
                 dlc(k+1) = dlc(k) + dl(k)
             end do 
             ldistr = distr 
-            call Interpolate1D(distr, ldistr, dlc, dllc)
+            call Interpolate1D(distr, ldistr, Mdistr, dllc)
+        end if 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    subroutine DistributeVerticesDensityBasedOverField2(vd, xc, yc, field, nv, &
+        xv, yv, ldistr)
+
+        ! Description
+        !============
+        ! Distribute the vertices over the given curve xc, yc based on 
+        ! uniform distance in terms of the field values fc that are defined
+        ! on the curve coordinates. fc is made monotonic by building the
+        ! interpolation coordinate as the sum of the absolute value of
+        ! the difference in fc (which is therefore always monotonic). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DensityBasedVertexDistributor2DUDT)   :: vd 
+        class(DistributionFunctionUDT), intent(in)  :: field 
+        real(R8), intent(in)                :: xc(:), yc(:)
+        integer(I8), intent(out)            :: nv 
+        real(R8), allocatable, intent(out), optional    :: ldistr(:), xv(:), yv(:)
+
+        ! Auxiliary
+        integer(I8)                         :: nc 
+        real(R8)                            :: l, Mtot 
+        real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, fc, &
+            dllc, dlc, dll, temp, df, Mi, Mdistr, dfdx, dfdy, fx, fy, fn, &
+            xf, yf
+        real(R8), allocatable, dimension(:, :)  :: xi, yi, rhoi 
+        integer(I8), allocatable, dimension(:)  :: pxi 
+        character(:), allocatable               :: lengthtype
+
+        ! Loop
+        integer(I8)                         :: i, k 
+
+        ! Initialize
+        !===========
+        nc = size(xc)
+
+        ! Checks
+        if (size(xc) /= size(yc)) then 
+            call gdErrorHandler('DistributeUniformOverCurve: curve ' // & 
+                'coordinates have incompatible dimensions')
+        end if 
+        if (present(xv)) then 
+            if (allocated(xv)) then 
+                deallocate(xv)
+            end if 
+        end if 
+        if (present(yv)) then 
+            if (allocated(yv)) then 
+                deallocate(yv)
+            end if 
+        end if
+
+        ! Associate
+        associate(&
+            xb          => vd%xi, &
+            rho         => vd%densityfunction, &
+            coef        => vd%lagcoef,  &
+            intcoef     => vd%intlagcoef) 
+
+        ! Precompute
+        !===========
+        ! Compute curve quantities
+        dx = xc(2:) - xc(1:nc-1)
+        dy = yc(2:) - yc(1:nc-1) 
+        dl = sqrt(dx**2 + dy**2)
+        l = sum(dl)
+
+        ! Compute field quantities
+        allocate(fc(nc), dfdx(nc), dfdy(nc), fx(nc), fy(nc))
+        call field%Evaluate(xc, yc, fc)
+        call field%EvaluateDerivative(xc, yc, 1, 0, dfdx)
+        call field%EvaluateDerivative(xc, yc, 0, 1, dfdy)
+        df = abs(fc(2:) - fc(1:size(fc)-1))
+        fn = sqrt(dfdx**2 + dfdy**2) 
+        fx = 0
+        fy = 0
+        where( fn > disttol) 
+            fx = dfdx/fn
+            fy = dfdy/fn 
+        end where 
+
+        ! Recompute the length coordinate
+        fc = 0
+        lengthtype = 'radial'
+        select case (lengthtype)
+
+        case ('psi')
+
+            do i = 2, nc
+                fc(i) = fc(i-1) + df(i-1)
+            end do
+            
+        case ('euler')
+
+            do i = 2, nc
+                fc(i) = fc(i-1) + dl(i-1)
+            end do
+            df = dl 
+
+        case ('radial')
+
+            do i = 2, nc
+                df(i-1) = abs(dx(i-1)*fx(i-1) + dy(i-1)*fy(i-1))
+                fc(i) = fc(i-1) + df(i-1)
+            end do
+            
+
+        case default 
+
+            call gdErrorHandler('DistributeVerticesDensityBasedOverField:' // & 
+                'unknown length type')
+
+        end select
+
+        ! Compute density at face centers
+        xf = 0.5*(xc(1:nc-1) + xc(2:nc))
+        yf = 0.5*(yc(1:nc-1) + yc(2:nc))
+        xi = spread(xb, 1, size(dx))
+        yi = spread(xb, 1, size(dy))
+        do i = 1, size(dx)
+            xi(i, :) = xi(i, :)*dx(i) + xc(i)
+            yi(i, :) = yi(i, :)*dy(i) + yc(i)
+        end do 
+        allocate(temp(nc-1))
+        call rho%Evaluate(xf, yf, temp)
+
+        ! Compute number of vertices
+        !===========================
+        ! Compute mass of each segment
+        allocate(Mi(nc-1))
+        do i = 1, nc-1
+            Mi(i) = temp(i)*df(i)
+        end do
+
+        ! Compute total mass
+        Mtot = sum(Mi)
+
+        ! Determine total number of vertices (at least two)
+        nv = max(ceiling(abs(Mtot)), 2)
+
+        ! Determine vertex distribution
+        !==============================
+        ! Determine mass distribution 
+        allocate(Mdistr(nc))
+        Mdistr = 0
+        do i = 1, nc-1
+            Mdistr(i+1) = Mdistr(i) + Mi(i)
+        end do 
+
+        ! Compute distribution
+        distr = real([(k, k = 0, nv-1)], kind=R8)*(Mtot/(nv-1))
+        distr(size(distr)) = Mtot ! just to make sure
+
+        ! Distribute - simply interpolate linearly for now
+        if (present(xv) .and. present(yv)) then 
+            call DistributeVerticesLine(xc, yc, Mdistr, distr, xv, yv)
+        end if 
+
+        ! Return length distribution
+        if (present(ldistr)) then 
+            ! This has to be the length distribution!
+            dll = sqrt(dx**2 + dy**2)
+            dllc = spread(0, 1, nc)
+            dlc = spread(0, 1, nc)
+            do k = 1, nc-1
+                dllc(k+1) = dllc(k) + dll(k)
+            end do 
+            do k = 1, nc-1
+                dlc(k+1) = dlc(k) + dl(k)
+            end do 
+            ldistr = distr 
+            call Interpolate1D(distr, ldistr, Mdistr, dllc)
         end if 
 
         ! Housekeeping
