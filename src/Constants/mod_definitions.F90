@@ -51,7 +51,7 @@ module mod_definitions
     character(*), parameter :: SOLPSversion = '03.002.000'
 
     ! Solver-related
-    integer(I8), parameter :: SOLPScoreregID = 1, SOLPScoreregIDincr = 0, &
+    integer(I8), parameter :: SOLPScoreregID = 1, SOLPScoreregIDincr = -4, &
         SOLPSbndcellID = 3, SOLPSinternalcellID = 1, SOLPScorefclblID = -21
    
     ! Topological mesh identification number
