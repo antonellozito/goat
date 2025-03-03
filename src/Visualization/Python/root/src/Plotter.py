@@ -1273,7 +1273,7 @@ def PlotGeneral2DPatch(verts, val, fignum):
     fig = plt.figure(fignum)
 
     # Create the polygon collection
-    poly = mpl.collections.PolyCollection(verts, closed=True, array=val, edgecolor='k', linewidth=0.25, cmap='viridis')
+    poly = mpl.collections.PolyCollection(verts, closed=True, array=val, edgecolor='k', linewidth=0.0, cmap='viridis')
     
     # Get the current axes
     ax = fig.axes 

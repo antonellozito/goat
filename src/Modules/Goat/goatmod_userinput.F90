@@ -252,14 +252,18 @@ module goatmod_userinput
         !               non-uniform grids. 
         ! - RBtor       product of torodial magnetic field and major 
         !               radius (assumed constants here)
+        ! - reinterpolate   switch to reinterpolate the magnetic field 
+        !                   for a different resolution defined by resx, 
+        !                   rexy
 
         
         character(:), allocatable   :: readmeth
         character(:), allocatable   :: filepath
         character(:), allocatable   :: interpmeth 
 
-        integer(I8)                 :: interpC, interpM
+        integer(I8)                 :: interpC, interpM, resx, resy
         real(R8)                    :: RBtor
+        logical                     :: reinterpolate 
 
     contains
     
@@ -457,10 +461,11 @@ module goatmod_userinput
         ! largely the same as poloidal one (but then vdr instead of vdp)
         ! but some differences
         ! - vdrtype:        (same as vdptype)
+        ! - vdrdoxp:            include x-point and separatrix points?
         ! - vdrdfieldwidth: desired field with for uniform distribution
         ! - vdrddecaylength:    decay length parameter 
-        ! - vdrddensityatseparatrix:    desired density at separatrix
-        ! - vdrddensityatinf:           density far from separatrix
+        ! - vdrddensityatxp:    desired density at separatrix
+        ! - vdrddensityatinf:   density far from separatrix
  
         ! Options for extending flux tubes with vessel parts (so-called 
         ! 'cut cells')
@@ -529,6 +534,9 @@ module goatmod_userinput
         ! - refBLnctarget   number of desired boundary layer cells at 
         !                   the target (similar for vessel)
         ! - refBLdltarget   desired lengths for these cells 
+        ! - refdlBLlengthbased  desired length is specified in classic 
+        !                       euler length or not (if not, lengthtype 
+        !                       is taken)
 
         ! (Radial) refinement options for lengthbased refiner:
         !   mostly the same refinement options as the poloidal direction,
@@ -550,7 +558,8 @@ module goatmod_userinput
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
             refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
-            extendtptubes, extendvesseltubes 
+            extendtptubes, extendvesseltubes, refdlBLlengthbased, &
+            radrefdlBLlengthbased, vdrdoxp
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp
@@ -559,7 +568,7 @@ module goatmod_userinput
         real(R8)                    :: vdpdfacelength, vdpddecaylengthplf, &
             vdpddecaylengthxp, vdpddensityatvessel, vdpddensityatxp, &
             vdpddensityatinf, vdrdfieldwidth, &
-            vdrddecaylength, vdrddensityatseparatrix, vdrddensityatinf, &
+            vdrddecaylengthxp, vdrddensityatxp, vdrddensityatinf, &
             remfspsitol, remfspsirattol, rembndtriaminangle, &
             remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
             refLBLmaxxp, refLBdecaylengthxp, orthtracerstep, &
@@ -735,6 +744,9 @@ module goatmod_userinput
         options%interpmeth              = 'uniformgrid' 
         options%interpC                 = 3
         options%interpM                 = 6
+        options%reinterpolate           = .false. 
+        options%resx                    = 100 
+        options%resy                    = 100
 
         options%RBtor                   = 0
 
@@ -939,11 +951,12 @@ module goatmod_userinput
         options%orthtracernsteps = 2000
 
         ! Options for radial vertex distribution
-        options%vdrtype             = 'densitybased'
+        options%vdrtype             = 'uniform'
         options%vdrdfieldwidth      = 4e-3
-        options%vdrddecaylength     = 0.005
-        options%vdrddensityatseparatrix     = 2500.0_R8
-        options%vdrddensityatinf            = 250.0_R8
+        options%vdrddecaylengthxp   = 0.005
+        options%vdrddensityatxp     = 2500.0_R8
+        options%vdrddensityatinf    = 250.0_R8
+        options%vdrdoxp             = .true.
 
         ! Options for flux tube extensions
         options%extendtptubes       = .true. 
@@ -1320,6 +1333,12 @@ module goatmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%interpM)
         field = 'goat.mf.interpmeth'
         call ExtractOptionValueCharacter(fid, field, options%interpmeth)
+        field = 'goat.mf.reinterpolate'
+        call ExtractOptionValueLogical0D(fid, field, options%reinterpolate)
+        field = 'goat.mf.resx'
+        call ExtractOptionValueInteger0D(fid, field, options%resx)
+        field = 'goat.mf.resy'
+        call ExtractOptionValueInteger0D(fid, field, options%resy)
 
         ! RBtor
         field  = 'goat.mf.RBtor'
@@ -1625,8 +1644,6 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%refmeth) 
         field = 'gg.ref.LB.lengthtype'
         call ExtractOptionValueCharacter(fid, field, options%reflengthtype)
-        field = 'gg.radref.meth'
-        call ExtractOptionValueCharacter(fid, field, options%radrefmeth) 
         field = 'gg.ref.readexistingrefdata'
         call ExtractOptionValueLogical0D(fid, field, options%readexistingrefdata) 
         field = 'gg.ref.refdatafile'
@@ -1661,6 +1678,8 @@ module goatmod_userinput
         call ExtractOptionValueInteger1D(fid, field, options%refLBvertIDs)
 
         ! Refinement options (radial)
+        field = 'gg.radref.meth'
+        call ExtractOptionValueCharacter(fid, field, options%radrefmeth) 
         field  = 'gg.radref.LB.lengthtype'
         call ExtractOptionValueCharacter(fid, field, options%radreflengthtype)
         field  = 'gg.radref.LB.dosp'
@@ -1690,6 +1709,8 @@ module goatmod_userinput
         call ExtractOptionValueReal1D(fid, field, options%refBLdltarget)
         field = 'gg.ref.BL.dlvessel'
         call ExtractOptionValueReal1D(fid, field, options%refBLdlvessel)
+        field = 'gg.ref.BL.dllengthbased'
+        call ExtractOptionValueLogical0D(fid, field, options%refdlBLlengthbased)
 
         ! Boundary layer options (only for length-based ref, radial)
         field = 'gg.radref.BL.dosp'
@@ -1698,6 +1719,8 @@ module goatmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%radrefBLncsp)
         field = 'gg.radref.BL.dlsp'
         call ExtractOptionValueReal1D(fid, field, options%radrefBLdlsp)
+        field = 'gg.radref.BL.dllengthbased'
+        call ExtractOptionValueLogical0D(fid, field, options%radrefdlBLlengthbased)
 
         ! Contouring options in grid generator
         field = 'gg.vd.contouring.resx'
@@ -1744,12 +1767,14 @@ module goatmod_userinput
         ! Options for radial vertex distribution
         field = 'gg.vd.rd.type'
         call ExtractOptionValueCharacter(fid, field, options%vdrtype)
+        field = 'gg.vd.rd.distribution.doxp'
+        call ExtractOptionValueLogical0D(fid, field, options%vdrdoxp)
         field = 'gg.vd.rd.distribution.fieldwidth'
         call ExtractOptionValueReal0D(fid, field, options%vdrdfieldwidth)
-        field = 'gg.vd.rd.distribution.decaylength'
-        call ExtractOptionValueReal0D(fid, field, options%vdrddecaylength)
-        field = 'gg.vd.rd.distribution.densityatseparatrix'
-        call ExtractOptionValueReal0D(fid, field, options%vdrddensityatseparatrix)
+        field = 'gg.vd.rd.distribution.decaylengthxp'
+        call ExtractOptionValueReal0D(fid, field, options%vdrddecaylengthxp)
+        field = 'gg.vd.rd.distribution.densityatxp'
+        call ExtractOptionValueReal0D(fid, field, options%vdrddensityatxp)
         field = 'gg.vd.rd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatinf)
 

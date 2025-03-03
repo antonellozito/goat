@@ -2341,6 +2341,7 @@ module ggmod_topology2D
         deallocate(bndpol)
 
         ! Trim the topological mesh
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
@@ -3524,12 +3525,13 @@ module ggmod_topology2D
         logical                                 :: marked, &
             passedcheck
         logical, allocatable, dimension(:)      :: delf, delv
-        integer(I8)                             :: thisind
+        integer(I8)                             :: thisind, maxind
         integer(I8), allocatable, dimension(:)  :: tf, tfv, tnb, &
             tfmerge, tnbmerge, tfvu, tfradmerge, tvfvID, tvfvIDu, &
-            tvf
-        real(R8)                                :: dpsi, dpsinb1, dpsinb2
-        real(R8), allocatable, dimension(:)     :: fval
+            tvf, thisv
+        real(R8)                                :: dpsi, dpsinb1, dpsinb2, &
+            thisdeletedfval
+        real(R8), allocatable, dimension(:)     :: fval, thisvfval
 
         ! Loop
         integer(I8)                             :: i, j
@@ -3789,8 +3791,22 @@ module ggmod_topology2D
                     ! If so, delete one of both (perhaps)
                     call Unique([face%vert(tfradmerge, 1), face%vert(tfradmerge, 2)], tfvu)
                     do while (count(vert%type(tfvu) == TMvertextp1ID) > 1)
-                        thisind = findloc(vert%type(tfvu), TMvertextp1ID, 1)
-                        vert%type(tfvu(thisind)) = TMvertexbndID
+                        ! Get all type 1 vertices
+                        allocate(thisv(count(vert%type(tfvu) == TMvertextp1ID)))
+                        thisv = pack(tfvu, vert%type(tfvu) == TMvertextp1ID)
+
+                        ! Get field values
+                        thisvfval = topomesh%fsfval%Get(vert%fsID(thisv))
+                        thisdeletedfval = topomesh%fsfval%Get(face%fsID(tfmerge(1)))
+
+                        ! Check which vertex is the furthest away in terms
+                        ! of psi values - keep that one, delete the rest
+                        maxind = maxloc(abs(thisvfval - thisdeletedfval), 1)
+                        vert%type(thisv) = TMvertexbndID
+                        vert%type(thisv(maxind)) = TMvertextp1ID
+
+                        ! Housekeeping
+                        deallocate(thisv)
                     end do 
 
                     ! Remove faces

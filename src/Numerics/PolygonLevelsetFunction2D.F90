@@ -1739,13 +1739,11 @@ module PolygonLevelsetFunction2D
         integer(I8), allocatable, intent(out)       :: vq(:, :) 
 
         ! Auxiliary
-        character(:), allocatable               :: deriv, derivxc, &
-            derivyc
 
         integer(I8)                             :: nq, np, npe, &
-            indmine, indminv, indmin, nval, ne, npsc, nl
+            indmine, indminv, indmin, nl
         integer(I8), allocatable                :: eind(:), vind(:), &
-            minind(:), psvert(:), psedges(:, :)
+            minind(:)
 
         real(R8)                                :: inf, signe, signv, &
             fv, fe, xqr, yqr, totsign(1:2)
@@ -1753,16 +1751,13 @@ module PolygonLevelsetFunction2D
         real(R8), allocatable                   :: myones(:), dvn(:), &
             tdistvert(:), tcrossprod(:), vx(:), vy(:), tvn(:), &
             dx(:), dy(:), theta(:), distedge(:), distvert(:), &
-            val(:), tvx(:), tvy(:), ttxp(:), ttyp(:), tnxp(:), &
-            tnyp(:), dfdxp1(:), dfdxp2(:), dfdyp1(:), dfdyp2(:), &
-            dfdxp(:), dfdyp(:)
-        
+            val(:)
 
         logical, allocatable                    :: isinvert(:), &
-            onedge(:), te(:), tv(:)
+            onedge(:)
 
         ! Loop
-        integer(I8)                             :: i, iq, ccv, cce, cnv
+        integer(I8)                             :: iq
 
         ! Data
         inf = ieee_value(inf, ieee_positive_inf)        

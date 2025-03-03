@@ -1114,6 +1114,7 @@ def ReadTraduitOutB2us(filepath):
             i = i + 1
 
     # Start reading
+    i = i + 1
     for j in np.arange(0, nf):
         values = alllines[i+j].split()
         ID = np.fromstring(values[0], dtype=int, count=1, sep =' '); ID = ID[0]
@@ -1584,7 +1585,6 @@ def ReadRZPsiFromEqdskFile(filepath):
     # Return
     return R, Z, Psi
 
-
 def SplitEqdskFileLine(line):
     # Description
     #------------
@@ -1600,7 +1600,88 @@ def SplitEqdskFileLine(line):
 
     return values
 
+def ReadRZPsiFromCSV(Rfilepath, Zfilepath, Psifilepath, separator):
+    # Description
+    #------------
+    # Read the rzpsi values from three different csv files where R, Z 
+    # and psi are given all as nZ-by-nR matrices (so nZ rows, nR columns) 
+    # These are returned, however, as vectors and as a nR-by-nZ array
+    import csv 
+
+    # Open psi file
+    thisfile = open(Psifilepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Determine dimensions
+    nZ = len(alllines)
+    nR = len(alllines[0].split(separator))
+
+    # Initialize
+    psi = np.zeros((nR, nZ), dtype=float)
+    R = np.zeros(nR, dtype=float)
+    Z = np.zeros(nZ, dtype=float)
+
+    # Read psi
+    for j in np.arange(0, nZ):
+        temp = alllines[j].split(separator)
+        for i in np.arange(0, nR):
+            psi[i, j] = np.fromstring(temp[i], dtype=float, count=1, sep =' ')
+
+    # Close file
+    thisfile.close()
+
+    # Open R file
+    thisfile = open(Rfilepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Determine dimensions
+    tempnZ = len(alllines)
+    tempnR = len(alllines[0].split(separator))
+    if (tempnZ == nR and tempnR == 1):
+        for i in np.arange(0, nR):
+            R[i] = np.fromstring(alllines[i], dtype=float, count=1, sep=' ')
+    elif ((tempnZ == nZ and tempnR == nR) or (tempnZ == nZ and tempnR == 1)):
+        temp = alllines[1].split(separator)
+        for i in np.arange(0, nR):
+            R[i] = np.fromstring(temp[i], dtype=float, count=1, sep=' ')
+    else: 
+        # Shouldn't be happening
+        raise ValueError('Inconsistent dimensions of R coordinates')
+    
+    # close file
+    thisfile.close()
+
+    # Open Z file
+    thisfile = open(Zfilepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Determine dimensions
+    tempnZ = len(alllines)
+    tempnR = len(alllines[0].split(separator))
+    if ((tempnZ == nZ and tempnR == nR) or (tempnZ == nZ and tempnR == 1)):
+        for i in np.arange(0, nZ):
+            Z[i] = np.fromstring(alllines[i], dtype=float, count=1, sep=' ')
+    elif (tempnZ == 1 and tempnR == nZ):
+        temp = alllines[1].split(separator)
+        for i in np.arange(0, nZ):
+            Z[i] = np.fromstring(temp[i], dtype=float, count=1, sep=' ')
+    else: 
+        # Shouldn't be happening
+        raise ValueError('Inconsistent dimensions of Z coordinates')
+    
+    # close file
+    thisfile.close()
+    
 
 
+    return [R, Z, psi, nZ, nR]
+
+    
     
 
