@@ -147,7 +147,7 @@ module Interpolant2D
     ! Auxiliary
     integer(I8)                         :: nx, ny
     real(R8), allocatable               :: xgv(:), ygv(:), xg(:), &
-        yg(:), vg(:), xe(:, :), ye(:, :)
+        yg(:), vg(:)
     real(R8)                            :: xmin, ymin, xmax, ymax, &
         offsetx, offsety, dx, dy, dxgv, dygv
 

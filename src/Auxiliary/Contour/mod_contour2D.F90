@@ -1954,9 +1954,9 @@ module mod_contour2D
                                 where ((superquadflags == superquadflags(iic, jjc)) &
                                     .and. (quadc > 0)) startquads = .true.  
                             else
-                                ! Ensure we don't start again at this quad
-                                where ((superquadflags == superquadflags(iic, jjc)) &
-                                    .and. (quadc > 0)) startquads = .false.  
+                                !! Ensure we don't start again at this quad
+                                !where ((superquadflags == superquadflags(iic, jjc)) &
+                                !    .and. (quadc > 0)) startquads = .false.  
                             end if 
                         end if 
                         exit 
