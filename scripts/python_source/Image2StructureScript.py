@@ -10,8 +10,8 @@
 # Load modules
 import numpy as  np 
 import cv2
-from src import Datahandler as dh
-from src import goat_types as gt
+from . import Datahandler as dh
+from . import goat_types as gt
 
 # Define inputs
 impath = '/mnt/c/Users/u0110555/Desktop/code_werk/goatf/goatf/src/Visualization/PET.JPG' # image path

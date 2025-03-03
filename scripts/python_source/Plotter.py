@@ -3,9 +3,9 @@ import matplotlib as mpl
 mpl.use('TkAgg') # set the gui backend for the cluster...
 from matplotlib import pyplot as plt
 import numpy as np
-from src import Datahandler as dh
+from . import Datahandler as dh
 import time
-from src import goat_types as gt
+from . import goat_types as gt
 
 #==========================================================================#
 #                                                                          #
