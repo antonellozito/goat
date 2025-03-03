@@ -4289,6 +4289,7 @@ module ggmod_gridgeneration2D
                 end if 
             end do 
 
+#ifdef debug
             ! Project the distribution to the first face of the tube
             ! Not the length distribution, but the length used by 
             ! the refiner! Will lead to weird results otherwise
@@ -4346,9 +4347,9 @@ module ggmod_gridgeneration2D
             
             ! Update segment data
             call facedata(tf(1))%line%UpdateSegmentData(ggtmdata)
-
+#endif
             ! Add maximal distribution to tube
-            tubedata(i)%distributionface = tf(1)
+            tubedata(i)%distributionface = tfmax
 
         end do 
 
@@ -4753,56 +4754,21 @@ module ggmod_gridgeneration2D
 
             ! Get cell belonging to this face
             tfloc = findloc(tubef, tf, 1, back=.false.)
-
-            ! Rearrange to ensure start from distribution face
-            if (tfloc /= 1) then 
-                tubec = [tubec(tfloc:size(tubec)), tubec(1:tfloc-1)]
-            end if 
-
-            ! Check & rearrange to ensure start from distribution face
             if (tfloc == 0) then 
                 ! This should not happen
                 print *, 'tube: ', i, 'face: ', tf 
                 call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // &
                     'could not find distribution face in tube, this is a bug' )
             elseif (tfloc == size(tubec)+1) then
-                ! Need to flip 
-                ! Faces
-                tubef = tubef(size(tubef):1:-1)
-
-                ! Cells
-                tubec = tubec(size(tubec):1:-1)
-            elseif (tfloc /= 1) then 
-                ! Can simply shift IF not closed! otherwise, we need to 
-                ! adjust the last face
-                print *, 'AddTopologicalMeshCellGriddingData: code part ' // & 
-                    'not yet verified'
-                print *, tubef(tfloc), tf
-                print *, 'faces before shift: ', tubef
-                print *, 'cells before shift: ', tubec
-                ! Faces
-                if (tubef(1) /= tubef(size(tubef))) then 
-                    tubef = [tubef(tfloc:size(tubef)), tubef(1:tfloc-1)]
-                    tubec = [tubec(tfloc:size(tubec)), tubec(1:tfloc-1)]
-                else
-                    tubef = [tubef(tfloc:size(tubef)), tubef(1:tfloc-1)]
-                    tubef(size(tubef)) = tubef(1)
-                    tubec = [tubec(tfloc:size(tubec)), tubec(1:tfloc-1)]
-                end if 
-                print *, 'faces after shift: ', tubef
-                print *, 'cells after shift: ', tubec
-
-                ! Cells
-                
-
+                ! Cell is last cell
+                tfc = tubec(size(tubec))
             else 
-                ! Nothing to do, move along
-
+                ! Default case
+                tfc = tubec(tfloc)
             end if 
-            tfc = tubec(1)
 
-            ! Trace contours
-            !---------------
+            ! Determine contour starting points
+            !----------------------------------
             ! Get initial vertex distribution 
             tx = facedata(tf)%line%xv
             ty = facedata(tf)%line%yv
@@ -4866,7 +4832,8 @@ module ggmod_gridgeneration2D
             ! Housekeeping
             deallocate(newdlcv, newtfval, keepind, isdescending)
 
-            
+            ! Trace contours
+            !---------------
             ! Trace
             tempc = fieldtracer%TraceContours(tx(2:size(tx)-1), ty(2:size(ty)-1))
 
@@ -4878,6 +4845,8 @@ module ggmod_gridgeneration2D
                 call fieldtracer%CoarsenContours(tempc)
             end if 
 
+            ! Concatenate & orient contours
+            !------------------------------
             ! Precompute face normals for each flux surface for 
             ! determining orientation
             nxf = -(facedata(tf)%line%yl(2:) - facedata(tf)%line%yl(1:size(facedata(tf)%line%yl)-1))
@@ -4887,12 +4856,6 @@ module ggmod_gridgeneration2D
             nnf = sqrt(nxf**2 + nyf**2)
             nxf = nxf/nnf
             nyf = nyf/nnf
-
-            ! Make sure it goes from high field to low field
-            !if (tfval(1) < tfval(size(tfval))) then 
-            !    nxf = -nxf(size(nxf):1:-1) 
-            !    nyf = -nyf(size(nyf):1:-1) 
-            !end if
 
             ! Find high field/low field face that has the same vertex
             thf = celldata(tfc)%hffaces
@@ -5085,19 +5048,6 @@ module ggmod_gridgeneration2D
             end if 
 
             ! Recompute face normals, now with (coarser) vertex values
-            !nxf = -(facedata(tf)%line%yl(2:) - facedata(tf)%line%yl(1:size(facedata(tf)%line%yl)-1))
-            !nyf = (facedata(tf)%line%xl(2:) - facedata(tf)%line%xl(1:size(facedata(tf)%line%xl)-1))
-            !nxf = [nxf, nxf(size(nxf))]
-            !nyf = [nyf, nyf(size(nyf))]
-            !nnf = sqrt(nxf**2 + nyf**2)
-            !nxf = nxf/nnf
-            !nyf = nyf/nnf
-            !nxf2 = nxf()
-            !call Interpolate1D(facedata(tf)%line%dlcv, nxf2, facedata(tf)%line%dllc, nxf)
-            !call Interpolate1D(facedata(tf)%line%dlcv, nyf2, facedata(tf)%line%dllc, nyf)
-            !nnf2 = sqrt(nxf2**2 + nyf2**2)
-            !nxf2 = nxf2/nnf2
-            !nyf2 = nyf2/nnf2
             if (facedata(tf)%line%dlcv(1) < facedata(tf)%line%dlcv(facedata(tf)%line%nv)) then 
                 nxf = -(facedata(tf)%line%yv(2:) - facedata(tf)%line%yv(1:size(facedata(tf)%line%yv)-1))
                 nyf = (facedata(tf)%line%xv(2:) - facedata(tf)%line%xv(1:size(facedata(tf)%line%xv)-1))
@@ -5313,6 +5263,7 @@ module ggmod_gridgeneration2D
 
             ! Compute intersections 
             !----------------------
+            ! Initialize
             nc = size(tempc)
             ntf = size(tubef)
             allocate(xintda(nc, ntf), yintda(nc, ntf), nint(nc, ntf), &
@@ -5382,13 +5333,13 @@ module ggmod_gridgeneration2D
                     end if 
                 else
                     if (tempc(j)%isclosed) then 
-                        ! Two intersections are expected in the first
+                        ! Two intersections are expected in the tracing
                         ! face only
-                        if (any(nint(j, 2:ntf) > 1)) then 
+                        if (any(nint(j, [(k, k = 1, tfloc-1), (k, k = tfloc+1, ntf)]) > 1)) then 
                             ! Simply set warning message
                             isintersectremoved = .true. 
                         end if 
-                        if (nint(j, 1) > 2) then 
+                        if (nint(j, tfloc) > 2) then 
                             isintersectremoved = .true. 
                         end if 
                     elseif (any(nint(j, :) > 1)) then 
@@ -5433,10 +5384,10 @@ module ggmod_gridgeneration2D
                     ! Update counter
                     cc = cc + 1 
 
-                    ! First intersection: should always be the one
+                    ! Intersection in tracing face: should always be the one
                     ! that is at the start of the contour IF it is a 
                     ! closed polygon! Otherwise, we just take the first one...
-                    k = 1
+                    k = tfloc
                     if (tempc(cc)%isclosed) then 
                         tsegrc = segrcda(j, k)%Get()
                         startind = findloc(tsegrc, 0.0_R8, 1)
@@ -5481,7 +5432,12 @@ module ggmod_gridgeneration2D
                     nfs = nfs + 1
 
                     ! Loop
-                    do k = 2, ntf-1 
+                    do k = 1, ntf-1 
+                        ! Skip the tracing radial face
+                        if (k == tfloc) then 
+                            cycle 
+                        end if 
+
                         ! Get first intersection
                         xint(cc, k) = xintda(j, k)%Get(1)
                         yint(cc, k) = yintda(j, k)%Get(1)
@@ -5536,22 +5492,22 @@ module ggmod_gridgeneration2D
             deallocate(keepind)
 
             ! Do sanity checks for closed tube
-            if (tube%isclosed(i)) then 
-                ! First and last intersection should be at 0 
-                ! and ne coordinate by construction
-                do j = 1, nc
-                    if (segrc(j, 1) /= 0_R8) then 
-                        call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
-                            'first intersection of closed contour is not at start of ' // & 
-                            'contour for closed flux tube, unexpected')
-                    end if
-                    if (segrc(j, size(segrc, 2)) /= size(tempc(j)%x)-1) then 
-                        call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
-                            'last intersection of closed contour is not at end of ' // & 
-                            'contour for closed flux tube, unexpected')
-                    end if 
-                end do 
-            end if 
+            !if (tube%isclosed(i)) then 
+            !    ! First and last intersection should be at 0 
+            !    ! and ne coordinate by construction
+            !    do j = 1, nc
+            !        if (segrc(j, 1) /= 0_R8) then 
+            !            call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
+            !                'first intersection of closed contour is not at start of ' // & 
+            !                'contour for closed flux tube, unexpected')
+            !        end if
+            !        if (segrc(j, size(segrc, 2)) /= size(tempc(j)%x)-1) then 
+            !            call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
+            !                'last intersection of closed contour is not at end of ' // & 
+            !                'contour for closed flux tube, unexpected')
+            !        end if 
+            !    end do 
+            !end if 
 
             ! Add lines for each cell
             do k = 1, ntf-1
@@ -5572,7 +5528,6 @@ module ggmod_gridgeneration2D
 
                     ! Note: we ensure no duplicate points by skipping the
                     ! first vertex of the face segment
-                    !polv = [(cc, cc = 1, size(tempc(j)%x))]
                     if (incr > 0) then 
                         polv = [(cc, cc = segc(j, k)+2, segc(j, k+1)-1, incr)]
                     else 
@@ -5580,12 +5535,6 @@ module ggmod_gridgeneration2D
                     end if 
                     xl = [xint(j, k), tempc(j)%x(polv), xint(j, k+1)]
                     yl = [yint(j, k), tempc(j)%y(polv), yint(j, k+1)]
-                    if (.not. issrf) then 
-                        ! we've traced from end to start, need to flip
-                        xl = [xl(size(xl):1:-1)]
-                        yl = [yl(size(yl):1:-1)]
-                    end if 
-                    !polv = polc(j)%vert(segc(j, k)+2:segc(j, k+1)-1:incr)
                     
                     ! Add segment
                     nseg = nseg + 1
@@ -9759,12 +9708,13 @@ module ggmod_gridgeneration2D
 
         ! Adjust boundary layer distribution if necessary
         dostart = .true. 
-        do while (lBLstart + lBLend > lline)  
-            if (dostart .and. lBLstart > 0.0_R8) then
+        do while ((lBLstart + lBLend > lline) .or. isnan(lBLstart) .or. &
+            isnan(lBLend)) ! account for out of bounds interpolation
+            if (dostart .and. (lBLstart > 0.0_R8 .or. isnan(lBLstart))) then
                 dlcBLstart = dlcBLstart(1:size(dlcBLstart)-1)
                 lBLstart = dlcBLstart(size(dlcBLstart))
                 dostart = .false.
-            elseif (.not. dostart .and. lBLend > 0.0_R8) then 
+            elseif (.not. dostart .and. (lBLend > 0.0_R8 .or. isnan(lBLend))) then 
                 dlcBLend = dlcBLend(2:size(dlcBLend))
                 lBLend = lline - dlcBLend(1)
                 dostart = .true. 
