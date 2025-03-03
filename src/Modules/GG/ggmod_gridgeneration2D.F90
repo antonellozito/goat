@@ -872,6 +872,12 @@ module ggmod_gridgeneration2D
                 )
 
             allocate(xp(0), yp(0), valp(0), dp(0))
+
+            ! Add user-defined points
+            xp = [xp, options%vdrdx]
+            yp = [yp, options%vdrdy]
+            dp = [dp, options%vdrdd]
+            valp = [valp, options%vdrdval]
             
 
             ! Check which points to use
@@ -954,7 +960,7 @@ module ggmod_gridgeneration2D
         ! Relevant radial faces of tubes
         call DistributeVerticesTopologicalMeshTubes(grid, ggtmdata, &
             topomesh, radialvertexdistributor, GGTMlinerefinerrad, &
-            magneticFieldDF, TMfacenonalignedID)
+            magneticFieldDF)
 
         ! Generate initial grid
         !======================
@@ -4173,16 +4179,16 @@ module ggmod_gridgeneration2D
 
     ! Vertex distribution over tubes
     subroutine DistributeVerticesTopologicalMeshTubes(grid, ggtmdata, topomesh, &
-        vd, GGTMlinerefiner, field, facetypes)
+        vd, GGTMlinerefiner, field)
 
         ! Description
         !============
-        ! Distribute field values over topological mesh faces of the types
-        ! defined in 'facetypes'. The field values are computed per tube,
-        ! first based on an initial distribution on the faces in 
-        ! 'facetypes'. This chosen distribution is simply 
+        ! Distribute field values over topological mesh tubes. 
+        ! The field values are computed per tube,
+        ! first based on an initial distribution on the tube faces.
+        ! This chosen distribution is simply 
         ! taken as the distribution that gives the maximal amount 
-        ! of faces, as this is likely the desired one. We store the 
+        ! of vertices, as this is likely the desired one. We store the 
         ! chosen topological face ID for each flux tube (we don't 
         ! propagate the distribution to other faces yet, since we have 
         ! to compute intersections anyway)
@@ -4196,14 +4202,12 @@ module ggmod_gridgeneration2D
         class(VertexDistributor2DUDT), intent(in)    :: vd 
         class(DistributionFunctionUDT), intent(in)  :: field 
         class(GGTMLineRefiner2DUDT), intent(in) :: GGTMlinerefiner
-        integer(I8), intent(in)                 :: facetypes(:)
 
         ! Auxiliary
         integer(I8)                             :: nv, nfl, nflmax, &
             tfmax
         integer(I8), allocatable, dimension(:)  :: tf, tvID, bndv1, &  
             bndv2
-        logical                                 :: doflip
         logical, allocatable, dimension(:)      :: keepvert
         real(R8), allocatable, dimension(:)     :: xc, yc, dlcv
 
@@ -4289,65 +4293,7 @@ module ggmod_gridgeneration2D
                 end if 
             end do 
 
-#ifdef debug
-            ! Project the distribution to the first face of the tube
-            ! Not the length distribution, but the length used by 
-            ! the refiner! Will lead to weird results otherwise
-            call GGTMlinerefiner%ProjectLineVertexDistribution(facedata(tfmax)%line, &
-                facedata(tf(1))%line, grid%vert%ntot, ggtmdata)
 
-            ! Check orientation based on tube boundary vertices
-            doflip = .false.
-            if (any(bndv1 == face%vert(tfmax, 1))) then 
-                if (any(bndv1 == face%vert(tf(1), 1))) then 
-                    ! correctly oriented
-                elseif (any(bndv2 == face%vert(tf(1), 1))) then 
-                    ! Need to flip 
-                    doflip = .true.
-                else
-                    ! Call error
-                    call gdErrorHandler('DistributeVerticesTopologicalMeshTubes: ' // & 
-                        'face of tube does not have its vertices in the ' // &
-                        'tube boundary vertices, unexpected')
-                end if 
-            elseif (any(bndv2 == face%vert(tfmax, 1))) then 
-                if (any(bndv2 == face%vert(tf(1), 1))) then 
-                    ! correctly oriented
-                elseif (any(bndv1 == face%vert(tf(1), 1))) then 
-                    ! Need to flip 
-                    doflip = .true.
-                else
-                    ! Call error
-                    call gdErrorHandler('DistributeVerticesTopologicalMeshTubes: ' // & 
-                        'face of tube does not have its vertices in the ' // &
-                        'tube boundary vertices, unexpected')
-                end if 
-            else
-                ! Call error
-                call gdErrorHandler('DistributeVerticesTopologicalMeshTubes: ' // & 
-                    'face of tube does not have its vertices in the ' // &
-                    'tube boundary vertices, unexpected')
-            end if 
-
-            ! Flip if necessary
-            dlcv = facedata(tf(1))%line%dlcv
-            if (doflip) then 
-                dlcv = dlcv(size(dlcv)) - dlcv(size(dlcv):1:-1) 
-                dlcv(1) = 0
-                dlcv(size(dlcv)) = facedata(tf(1))%line%dllc(size(facedata(tf(1))%line%dllc))
-            end if 
-
-            ! Add data
-            call facedata(tf(1))%line%AddVertexCoordinates(dlcv)
-
-            ! Add vertex IDs
-            tvID = [face%vert(tf(1), 1), (k, k = grid%vert%ntot+1, grid%vert%ntot + size(dlcv) - 2), face%vert(tf(1), 2)]
-            call facedata(tf(1))%line%AddVertexIDs(tvID, &
-                [.true., spread(.false., 1, size(dlcv)-2), .true.])
-            
-            ! Update segment data
-            call facedata(tf(1))%line%UpdateSegmentData(ggtmdata)
-#endif
             ! Add maximal distribution to tube
             tubedata(i)%distributionface = tfmax
 

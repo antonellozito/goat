@@ -3525,7 +3525,7 @@ module ggmod_topology2D
         logical                                 :: marked, &
             passedcheck
         logical, allocatable, dimension(:)      :: delf, delv
-        integer(I8)                             :: thisind, maxind
+        integer(I8)                             :: maxind
         integer(I8), allocatable, dimension(:)  :: tf, tfv, tnb, &
             tfmerge, tnbmerge, tfvu, tfradmerge, tvfvID, tvfvIDu, &
             tvf, thisv

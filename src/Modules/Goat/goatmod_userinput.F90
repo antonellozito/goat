@@ -577,7 +577,8 @@ module goatmod_userinput
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
             vdpdval, refLBLminstructure, refLBLminvert, refLBLmaxstructure, &
             refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert, &
-            refBLdltarget, refBLdlvessel, radrefBLdlsp
+            refBLdltarget, refBLdlvessel, radrefBLdlsp, vdrdx, vdrdy, &
+            vdrdd, vdrdval
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
             cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
@@ -929,6 +930,8 @@ module goatmod_userinput
         options%radrefLBLminsp     = 0.0_R8
         options%radrefLBLmaxsp     = 100_R8 ! some absurd big number  
         options%radrefLBdecaylengthsp = 0.1_R8 
+        allocate(options%vdrdx(0), options%vdrdy(0), options%vdrdd(0), &
+            options%vdrdval(0))
 
         ! Poloidal boundary layer options
         options%refBLdotarget   = .false. 
@@ -1777,6 +1780,14 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatxp)
         field = 'gg.vd.rd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatinf)
+        field = 'gg.vd.rd.distribution.points.x'
+        call ExtractOptionValueReal1D(fid, field, options%vdrdx)
+        field = 'gg.vd.rd.distribution.points.y'
+        call ExtractOptionValueReal1D(fid, field, options%vdrdy)
+        field = 'gg.vd.rd.distribution.points.d'
+        call ExtractOptionValueReal1D(fid, field, options%vdrdd)
+        field = 'gg.vd.rd.distribution.points.val'
+        call ExtractOptionValueReal1D(fid, field, options%vdrdval)
 
         ! Options for extending flux tubes
         field = 'gg.adap.extendtptubes'

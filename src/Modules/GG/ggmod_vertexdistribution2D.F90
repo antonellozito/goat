@@ -854,8 +854,7 @@ module ggmod_vertexdistribution2D
         real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, fc, &
             dllc, dlc, dll, temp, df, Mi, Mdistr, dfdx, dfdy, fx, fy, fn, &
             xf, yf
-        real(R8), allocatable, dimension(:, :)  :: xi, yi, rhoi 
-        integer(I8), allocatable, dimension(:)  :: pxi 
+        real(R8), allocatable, dimension(:, :)  :: xi, yi 
         character(:), allocatable               :: lengthtype
 
         ! Loop
@@ -962,6 +961,9 @@ module ggmod_vertexdistribution2D
         do i = 1, nc-1
             Mi(i) = temp(i)*df(i)
         end do
+
+        ! Make sure the mass is positive
+        where (Mi < 0) Mi = 0.0_R8
 
         ! Compute total mass
         Mtot = sum(Mi)
