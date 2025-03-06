@@ -995,8 +995,12 @@ module ggmod_gridgeneration2D
 
         end select
 
+        ! Write data
+        call WriteGGTMData(ggtmdata, 'ggtmdata_before_pp')
+
         ! Post-process the distribution
-        call PostProcessVertexDistribution(ggtmdata, topomesh, grid)
+        call PostProcessVertexDistribution(ggtmdata, topomesh, grid, &
+            streamlinetracer)
 
         ! Write data
         call WriteGGTMData(ggtmdata, 'ggtmdata_after_vertexdistribution')
@@ -2025,7 +2029,8 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Vertex distribution post-processing
-    subroutine PostProcessVertexDistribution(ggtmdata, topomesh, grid)
+    subroutine PostProcessVertexDistribution(ggtmdata, topomesh, grid, &
+        streamlinetracer)
 
         ! Description
         !============
@@ -2037,10 +2042,22 @@ module ggmod_gridgeneration2D
 
         ! Currently, we apply the following checks/add the following 
         ! information:
-        ! - tube intersections:     we check whether the lines of a 
+        ! - tube intersections (1)  we check whether lines of a tube 
+        !                           after vertex construction intersect
+        !                           with any other tube. We assume that 
+        !                           the contour lines themselves do not
+        !                           intersect (should be checked in 
+        !                           tracing routine upstream), but that 
+        !                           intersections arise from the discrete
+        !                           vertex distribution and the field 
+        !                           curvature. Then, we insert vertices 
+        !                           near these intersections to capture 
+        !                           the curvature better and hopefully 
+        !                           remove the interesections. 
+        ! - tube intersections (2)  we check whether the lines of a 
         !                           tube, *after* vertex construction, 
         !                           intersect. These tubes are removed
-        !                           to prevent overlapping cells
+        !                           to prevent overlapping cells.
         ! - line-of-sight data:     data on LOS is added for vertices 
         !                           to facilitate cell construction in 
         !                           ConstructCellsQuadTria
@@ -2051,18 +2068,26 @@ module ggmod_gridgeneration2D
         type(GGTMDataUDT), intent(inout)            :: ggtmdata 
         class(TopomeshUDT), intent(in)              :: topomesh
         type(GGGridUDT), intent(inout)              :: grid
+        class(StreamlineTracerUDT), intent(in)      :: streamlinetracer
         
         ! Auxiliary
         integer(I8)                             :: nft, nct, t1, t2
         integer(I8), allocatable, dimension(:)  :: tc, s1, s2, allIDs, &
-            vertmap
-        real(R8), allocatable, dimension(:)     :: xint, yint
-        logical                                 :: vertexwasdeleted
+            vertmap, sortind, tracevert, hftracevert, ts1, ts2, &
+            newvert
+        real(R8)                                :: xb(1:2), yb(1:2), &
+            tempr
+        real(R8), allocatable, dimension(:)     :: xint, yint, s1r, s2r, &
+            txint, tyint, ts1r, ts2r, tempdlcv, newdlcv
+        logical                                 :: vertexwasdeleted, &
+            foundIntersection
         logical, allocatable, dimension(:)      :: keepind, &
-            isvertexdeleted
+            isvertexdeleted, newisnodevert
+        type(StreamlineUDT), allocatable        :: orthlines(:)
 
         ! Loop
-        integer(I8)                             :: i, j, k, cc
+        integer(I8)                             :: i, j, k, cc, ic, is, &
+            ie
 
         ! Initialize
         !===========
@@ -2093,10 +2118,296 @@ module ggmod_gridgeneration2D
         ! Initialize
         vertexwasdeleted = .false. 
 
-        ! Check intersections 
-        !====================
+        ! Check intersections (1)
+        !========================
+        ! At this stage, we attempt to remove intersections by adding
+        ! grid vertices. The idea is that the contour lines themselves
+        ! do not intersect, but that due to the discrete vertex 
+        ! distribution and magnetic field curvature, the 'coarsened' 
+        ! contours do intersect. By tracing orthogonal lines at vertices
+        ! between intersection points, we can find additional vertices 
+        ! to be inserted into the other field line to capture this 
+        ! curvature. We keep looping over all tubes until no more 
+        ! intersections are found. 
+        
+        ! Initialize
+        allocate(xint(0), yint(0), s1(0), s2(0), s1r(0), s2r(0))
+
+        ! Loop over all cells 
+        do i = 1, cell%ntot
+            ! Unpack for ease
+            associate(tubes     => celldata(i)%tubes)
+
+            ! Loop over all tubes
+            k = 1
+            do while (k <= size(tubes))
+                ! Unpack
+                associate(&
+                    hfline      => tubes(k)%hfline,     &
+                    lfline      => tubes(k)%lfline      &
+                    )
+
+                ! Update lines
+                call hfline%UpdateLineData(ggtmdata)
+                call lfline%UpdateLineData(ggtmdata)
+
+                ! Initialize
+                foundIntersection = .false.
+
+                ! Determine trace boxes
+                xb = [minval([hfline%xl, lfline%xl]), maxval([hfline%xl, lfline%xl])]
+                yb = [minval([hfline%yl, lfline%yl]), maxval([hfline%yl, lfline%yl])]
+
+                ! Sanity check: if the tube line contours intersect, 
+                ! skip tube (will likely be deleted downstream)
+                call GGTMLineIntersections(ggtmdata, hfline, lfline, xint, yint, &
+                    s1, s2, vertbased=.false.)
+                if (size(xint) > 0) then 
+                    ! Update counter
+                    k = k + 1 
+
+                    ! Skip remainder of loop
+                    cycle
+                end if 
+                    
+                ! Compute all vertex intersections
+                call GGTMLineIntersections(ggtmdata, hfline, lfline, xint, yint, &
+                    s1, s2, s1r=s1r, s2r=s2r, vertbased=.true.)
+
+                ! Check if any intersections are present - if not, go 
+                ! to the next tube
+                if (size(xint) == 0) then
+                    ! Update counter 
+                    k = k + 1
+
+                    ! Skip remainder of loop
+                    cycle
+                end if 
+
+                call Write2DPolygonData(hfline%xv, hfline%yv, 'l1')
+                call Write2DPolygonData(lfline%xv, lfline%yv, 'l2')
+
+                ! Determine lfline tracing vertices
+                allocate(tracevert(0))
+                ic = 1 ! initialize intersection counter
+                allocate(sortind(size(s1r)))
+                call Sort(s1r, ind=sortind, ascend=.true.)
+                s2r = s2r(sortind)
+                s1 = s1(sortind)
+                s2 = s2(sortind)
+                deallocate(sortind)
+                do while (.true.)
+                    ! Check exit conditions
+                    if (ic >= size(s1)) then 
+                        exit 
+                    end if 
+
+                    ! Check if this intersection is in the same face 
+                    ! as the next one
+                    if (s1(ic) == s1(ic+1)) then 
+                        ! Set ic as start index, find end
+                        is = ic 
+                        ie = findloc(s1, s1(ic), 1, back=.true.)
+
+                        ! Add node for later tracing
+                        tracevert = [tracevert, (cc, cc = ceiling(s2r(is))+1, ceiling(s2r(ie)))]
+
+                        ! Update the counter
+                        ic = ie + 1
+                    else 
+                        ic  = ic + 1
+                    end if 
+                end do
+
+                ! Trace the streamlines from the lfline
+                orthlines = streamlinetracer%TraceStreamlines(&
+                    lfline%xv(tracevert), lfline%yv(tracevert), &
+                    xb, yb, spread(1_I8, 1, size(tracevert)))
+
+                ! Compute intersections with the hfline & build vertices
+                newdlcv = hfline%dlcv
+                newvert = hfline%vert
+                newisnodevert = hfline%isnodevert
+                do j = 1, size(orthlines)
+                    ! Intersections
+                    call SimplePolygonIntersections(orthlines(j)%x, &
+                        orthlines(j)%y, hfline%xl, hfline%yl, &
+                        txint, tyint, ts1, ts2, ts1r, ts2r)
+                    call Write2DPolygonData(orthlines(j)%x, orthlines(j)%y, 'l3')
+
+                    ! Check
+                    if (size(txint) > 0) then 
+                        ! Take the intersection closest to the start
+                        ! of the orthogonal line
+                        allocate(sortind(size(ts1r)))
+                        call Sort(ts1r, ind=sortind, ascend=.true.)
+                        ts2r = ts2r(sortind)
+                        tempr = ts2r(1)
+                        deallocate(sortind)
+
+                        ! Interpolate to get actual length 
+                        call Interpolate1D([tempr], tempdlcv, &
+                            real([(cc, cc = 0, hfline%nl-1)], kind=R8), hfline%dllc)
+
+                        ! Update grid vertex counter
+                        grid%vert%ntot = grid%vert%ntot + 1
+
+                        ! Add
+                        newdlcv = [newdlcv, tempdlcv]
+                        newvert = [newvert, grid%vert%ntot]
+                        newisnodevert = [newisnodevert, .false.]                        
+
+                        ! Update logicals
+                        foundIntersection = .true.
+
+                    else
+                        ! A bit weird, but nothing tremendously wrong -
+                        ! intersection will be caught downstream and 
+                        ! tube will be removed
+                    end if 
+                end do
+
+
+                ! Add vertices on the hfline
+                allocate(sortind(size(newdlcv)))
+                call Sort(newdlcv, ind=sortind, ascend=.true.)
+                newvert = newvert(sortind)
+                newisnodevert = newisnodevert(sortind)
+                deallocate(sortind)
+                call hfline%AddVertexCoordinates(newdlcv)
+                call hfline%AddVertexIDs(newvert, newisnodevert)
+
+                ! Update hfline segment data
+                call hfline%UpdateSegmentData(ggtmdata)
+
+                ! Housekeeping
+                deallocate(tracevert)
+
+                ! Determine hfline tracing vertices
+                allocate(tracevert(0))
+                ic = 1 ! initialize intersection counter
+                allocate(sortind(size(s1r)))
+                call Sort(s2r, ind=sortind, ascend=.true.)
+                s1r = s1r(sortind)
+                s1 = s1(sortind)
+                s2 = s2(sortind)
+                deallocate(sortind)
+                do while (.true.)
+                    ! Check exit conditions
+                    if (ic >= size(s1)) then 
+                        exit 
+                    end if 
+
+                    ! Check if this intersection is in the same face 
+                    ! as the next one
+                    if (s2(ic) == s2(ic+1)) then 
+                        ! Set ic as start index, find end
+                        is = ic 
+                        ie = findloc(s2, s2(ic), 1, back=.true.)
+
+                        ! Add node for later tracing
+                        tracevert = [tracevert, (cc, cc = ceiling(s2r(is))+1, ceiling(s2r(ie)))]
+
+                        ! Update the counter
+                        ic = ie + 1
+                    else 
+                        ic = ic + 1
+                    end if 
+                end do
+
+                ! Trace the streamlines from the hfline
+                orthlines = streamlinetracer%TraceStreamlines(&
+                    hfline%xv(tracevert), hfline%yv(tracevert), &
+                    xb, yb, spread(-1_I8, 1, size(tracevert)))
+
+                ! Compute intersections with the hfline & build vertices
+                newdlcv = lfline%dlcv
+                newvert = lfline%vert
+                newisnodevert = lfline%isnodevert
+                do j = 1, size(orthlines)
+                    ! Intersections
+                    call SimplePolygonIntersections(orthlines(j)%x, &
+                        orthlines(j)%y, lfline%xl, lfline%yl, &
+                        txint, tyint, ts1, ts2, ts1r, ts2r)
+
+                    ! Check
+                    if (size(txint) > 0) then 
+                        ! Take the intersection closest to the start
+                        ! of the orthogonal line
+                        allocate(sortind(size(ts2r)))
+                        call Sort(ts2r, ind=sortind, ascend=.true.)
+                        ts1r = ts1r(sortind)
+                        tempr = ts1r(1)
+                        deallocate(sortind)
+
+                        ! Interpolate to get actual length 
+                        call Interpolate1D([tempr], tempdlcv, &
+                            real([(cc, cc = 0, lfline%nl-1)], kind=R8), lfline%dllc)
+
+                        ! Update grid vertex counter
+                        grid%vert%ntot = grid%vert%ntot + 1
+
+                        ! Add
+                        newdlcv = [newdlcv, tempdlcv]
+                        newvert = [newvert, grid%vert%ntot]
+                        newisnodevert = [newisnodevert, .false.]
+
+                        ! Update logicals
+                        foundIntersection = .true.
+
+                    else
+                        ! A bit weird, but nothing tremendously wrong -
+                        ! intersection will be caught downstream and 
+                        ! tube will be removed
+                    end if 
+                end do
+
+
+                ! Add vertices on the lfline
+                allocate(sortind(size(newdlcv)))
+                call Sort(newdlcv, ind=sortind, ascend=.true.)
+                newvert = newvert(sortind)
+                newisnodevert = newisnodevert(sortind)
+                deallocate(sortind)
+                call lfline%AddVertexCoordinates(newdlcv)
+                call lfline%AddVertexIDs(newvert, newisnodevert)
+
+                ! Update lfline segment data
+                call lfline%UpdateSegmentData(ggtmdata)
+
+                ! Housekeeping
+                deallocate(tracevert)
+
+                ! Update the tube index
+                if (foundIntersection) then 
+                    ! Check if we can decrease the counter to recheck
+                    ! the previous tube
+                    if (k > 1) then 
+                        k = k - 1
+                    else
+                        ! Keep k at one and recheck the tube
+                        k = 1
+                    end if 
+                else
+                    ! Increase the counter
+                    k = k + 1
+                end if 
+
+                ! Housekeeping
+                end associate
+            end do 
+
+            ! Housekeeping
+            end associate
+        end do 
+
+        ! Housekeeping
+        deallocate(xint, yint, s1, s2, s1r, s2r)
+
+        ! Check intersections (2) 
+        !========================
         ! Lines of tube may intersect with the starting or ending
-        ! field line - to be removed in entire tube
+        ! field line or neighbouring tubes
         allocate(xint(0), yint(0), s1(0), s2(0))
         do i = 1, tube%ntot
             ! Initialize
@@ -2415,43 +2726,41 @@ module ggmod_gridgeneration2D
 
         ! Update vertex numbering
         !========================
-        if (vertexwasdeleted) then 
-            ! Initialize
-            allocate(isvertexdeleted(grid%vert%ntot))
-            isvertexdeleted = .true. 
-            do i = 1, cell%ntot 
-                ! Check if vertices are present & ensure properly updated lines
-                do j = 1, size(celldata(i)%tubes)
-                    call celldata(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
-                    call celldata(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
-                    isvertexdeleted(celldata(i)%tubes(j)%hfline%vert) = .false.
-                    isvertexdeleted(celldata(i)%tubes(j)%lfline%vert) = .false.
-                end do
-            end do 
+        ! Initialize
+        allocate(isvertexdeleted(grid%vert%ntot))
+        isvertexdeleted = .true. 
+        do i = 1, cell%ntot 
+            ! Check if vertices are present & ensure properly updated lines
+            do j = 1, size(celldata(i)%tubes)
+                call celldata(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
+                call celldata(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
+                isvertexdeleted(celldata(i)%tubes(j)%hfline%vert) = .false.
+                isvertexdeleted(celldata(i)%tubes(j)%lfline%vert) = .false.
+            end do
+        end do 
 
-            ! Get all IDs and construct mapping
-            allIDs = pack([(k, k = 1, grid%vert%ntot)], .not. isvertexdeleted)
-            allocate(vertmap(grid%vert%ntot))
-            vertmap = 0_I8
-            vertmap(allIDs) = [(k, k = 1, count(.not. isvertexdeleted))]
+        ! Get all IDs and construct mapping
+        allIDs = pack([(k, k = 1, grid%vert%ntot)], .not. isvertexdeleted)
+        allocate(vertmap(grid%vert%ntot))
+        vertmap = 0_I8
+        vertmap(allIDs) = [(k, k = 1, count(.not. isvertexdeleted))]
 
-            ! Loop and adjust IDs - first segments, then tubes
-            do i = 1, ggtmdata%nseg 
-                ggtmdata%seg(i)%vert = vertmap(ggtmdata%seg(i)%vert)
-                ggtmdata%seg(i)%sv = vertmap(ggtmdata%seg(i)%sv)
-                ggtmdata%seg(i)%ev = vertmap(ggtmdata%seg(i)%ev)
+        ! Loop and adjust IDs - first segments, then tubes
+        do i = 1, ggtmdata%nseg 
+            ggtmdata%seg(i)%vert = vertmap(ggtmdata%seg(i)%vert)
+            ggtmdata%seg(i)%sv = vertmap(ggtmdata%seg(i)%sv)
+            ggtmdata%seg(i)%ev = vertmap(ggtmdata%seg(i)%ev)
+        end do 
+        do i = 1, cell%ntot 
+            ! Update
+            do j = 1, size(celldata(i)%tubes)
+                call celldata(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
+                call celldata(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
             end do 
-            do i = 1, cell%ntot 
-                ! Update
-                do j = 1, size(celldata(i)%tubes)
-                    call celldata(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
-                    call celldata(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
-                end do 
-            end do 
+        end do 
 
-            ! Update number of grid vertices
-            grid%vert%ntot = count(.not. isvertexdeleted)
-        end if  
+        ! Update number of grid vertices
+        grid%vert%ntot = count(.not. isvertexdeleted)
 
         ! Add LOS
         !========
@@ -8414,6 +8723,8 @@ module ggmod_gridgeneration2D
         logical, intent(in), optional                       :: vertbased
 
         ! Auxiliary
+        real(R8)                                    :: Li, Lj
+        integer(I8)                                 :: ni, nj
         real(R8), allocatable, dimension(:)         :: s1raux, s2raux, &
             tempx, tempy, temps1r, temps2r
         integer(I8), allocatable, dimension(:)      :: temps1, temps2
@@ -8429,10 +8740,17 @@ module ggmod_gridgeneration2D
         ! Compute 
         !========
         ! Intersections
+        Li = 0 ! Keep track of accumulated segment 'length'
+        ni = 0
         do i = 1, l1%ns 
+            ! Keep track of accumulated 'length' 
+            Lj = 0
+            nj = 0
+
             ! Unpack
             associate(seg1      => ggtmdata%seg(l1%segID(i)))
-            do j = 1, l2%ns 
+            do j = 1, l2%ns
+                ! Unpack
                 associate(seg2      => ggtmdata%seg(l2%segID(j)))
                 
                 ! Compute intersections
@@ -8440,16 +8758,34 @@ module ggmod_gridgeneration2D
                     temps1, temps2, temps1r, temps2r, vertbased)
 
                 ! Append
-                xint = [xint, tempx]
-                yint = [yint, tempy]
-                s1 = [s1, temps1]
-                s2 = [s2, temps2]
-                s1raux = [s1raux, temps1r]
-                s2raux = [s2raux, temps2r]
+                if (size(tempx) > 0) then 
+                    xint = [xint, tempx]
+                    yint = [yint, tempy]
+                    if (l1%flipseg(i)) then 
+                        s1 = [s1, seg1%nv - temps1 - 1 + ni]
+                        s1raux = [s1raux, seg1%nv - 1 - temps1r + Li]
+                    else
+                        s1 = [s1, temps1 + ni]
+                        s1raux = [s1raux, temps1r + Li]
+                    end if 
+                    if (l2%flipseg(j)) then 
+                        s2 = [s2, seg2%nv - temps2 - 1 + nj]
+                        s2raux = [s2raux, seg2%nv - 1 - temps2r + Lj]
+                    else
+                        s2 = [s2, temps2 + nj]
+                        s2raux = [s2raux, temps2r + Lj]
+                    end if 
+                end if
 
                 ! Housekeeping
+                Lj = Lj + seg2%nv-1
+                nj = nj + seg2%nv-1
                 end associate
             end do 
+
+            ! Update length
+            Li = Li + seg1%nv-1
+            ni = ni + seg1%nv-1
             end associate
         end do 
         
