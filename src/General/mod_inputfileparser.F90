@@ -776,37 +776,54 @@ module mod_inputfileparser
         logical                                 :: haspair 
 
         ! Auxiliary
-        integer(I8)                             :: ndelim
+        integer(I8)                             :: ndelim, commentcharloc
 
         integer(I8), allocatable                :: delimloc(:)
 
-        logical, allocatable                    :: isdelim(:)
+        logical, allocatable                    :: isdelim(:), &
+            iscommentchar(:)
 
         ! Loop
         integer(I8)                             :: k
 
         ! Initialize
         !===========
+        ! Check length
+        if (len(curline) < 1) then 
+            ! Empty, return
+            return 
+        end if 
+
         ! Set logicals
         haspair = .false. 
 
         ! Check where the delimiters occur
         allocate(isdelim(len(curline))) 
 
+        ! Check where the comment characters occur
+        allocate(iscommentchar(len(curline)))
+
         ! Count the number of quotation marks
         do k = 1, len(curline)
             isdelim(k) = curline(k:k) == delimiter
+            iscommentchar(k) = curline(k:k) == commentchar
         end do
+
+        ! Find the location of the first comment character
+        commentcharloc = findloc(iscommentchar, .true., 1, back=.false.)
+        
+        ! Hedge for comment character
+        if (commentcharloc /= 0) then 
+            ! Set delimiter to false after comment char
+            isdelim(commentcharloc:) = .false.
+        end if 
+
+        ! Count number of delimiters
         ndelim = count(isdelim)
 
         ! Check string
-        !=============
-        if (len(curline) < 1) then 
-            ! Empty, return
-            return 
-        end if 
-        
-        if ( ((curline(1:1) == commentchar)) .or. (ndelim < 4) ) then ! Comment or bogus line
+        !=============        
+        if (ndelim < 4) then ! Comment or bogus line
             ! No key-value pair present
         else
 
