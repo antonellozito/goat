@@ -553,13 +553,16 @@ module goatmod_userinput
         !                   the strike point 
         ! - radrefBLdlsp   desired lengths for these cells
 
+        ! Label translation options:
+        !   - structurebasedlabels:     base labels on structure IDs 
+
         
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
             refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
-            radrefdlBLlengthbased, vdrdoxp
+            radrefdlBLlengthbased, vdrdoxp, structurebasedlabels
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp
@@ -884,6 +887,7 @@ module goatmod_userinput
         options%gcresx = 100 
         options%gcresy = 100
         options%coarsencontours = .false.
+        options%structurebasedlabels = .false.
 
         ! Options for poloidal vertex distribution
         options%vdptype             = 'densitybased'
@@ -1641,6 +1645,10 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)
         field = 'gg.TMcellgriddingorder'
         call ExtractOptionValueCharacter(fid, field, options%TMcellgriddingorder)
+
+        ! Label translation
+        field = 'gg.labels.structurebased'
+        call ExtractOptionValueLogical0D(fid, field, options%structurebasedlabels)
 
         ! Refinement options (general)
         field = 'gg.ref.meth'

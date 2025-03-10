@@ -269,6 +269,8 @@ module ggmod_gridgeneration2D
         integer(I8), allocatable, dimension(:)  :: l1minLOS, l1maxLOS, &
             l2minLOS, l2maxLOS
         logical                     :: isextendedstart, isextendedend
+        type(IntegerDynamicArrayUDT)    :: hfface, lfface, tubeface, &
+            cell 
 
     contains 
 
@@ -1025,6 +1027,13 @@ module ggmod_gridgeneration2D
 
         ! Write intermediate file
         call grid%WriteData('grid_after_cellconstruction')
+
+        ! Apply grid adaptations
+        !=======================
+        ! Remove non-convex cells
+        call SplitNonConvexCells(ggtmdata, grid) 
+
+        ! 
 
         ! Extract the necessary gridding data
         !====================================
@@ -2945,7 +2954,8 @@ module ggmod_gridgeneration2D
         integer(I8), allocatable, dimension(:, :)   :: tempfacevert, &
             tempcellvertP
         logical                                 :: &
-            doquad, islegaltria1, islegaltria2, islegalquad, dolasttriangle
+            doquad, islegaltria1, islegaltria2, islegalquad, &
+            dolasttriangle, isv2onl1
         type(GGTMFieldlineDataUDT)              :: thisline
 
         ! Loop
@@ -3058,17 +3068,21 @@ module ggmod_gridgeneration2D
 
                     ! Set faces
                     nf = nf + 1
+                    call tubes(j)%hfface%Append(grid%face%ntot + nf)
                     tempfacevert(nf, :) = [v1, v2]
                     tempfacelabels(nf) = l1%facelabels(k1)
                     nf = nf + 1
+                    call tubes(j)%lfface%Append(grid%face%ntot + nf)
                     tempfacevert(nf, :) = [v1, v3]
                     tempfacelabels(nf) = l2%facelabels(k2)
                     nf = nf + 1
+                    call tubes(j)%tubeface%Append(grid%face%ntot + nf)
                     tempfacevert(nf, :) = [v2, v3]
                     tempfacelabels(nf) = 0
 
                     ! Set cell
                     nc = nc + 1
+                    call tubes(j)%cell%Append(grid%cell%ntot + nc)
                     tempcellvert(ncv+1:ncv+3) = [v1, v2, v3]
                     tempcellvertP(nc, :) = [ncv+1, 3]
                     ncv = ncv + 3
@@ -3095,6 +3109,7 @@ module ggmod_gridgeneration2D
                 else
                     ! Add the first face 
                     nf = nf + 1
+                    call tubes(j)%tubeface%Append(grid%face%ntot + nf)
                     tempfacevert(nf, :) = [l1%vert(k1), l2%vert(k2)]
                     tempfacelabels(nf) = sff
                 end if 
@@ -3141,6 +3156,7 @@ module ggmod_gridgeneration2D
                     ! First two vertices are always the same
                     v1 = l1%vert(k1)
                     v3 = l2%vert(k2)
+                    isv2onl1 = .false.
                     
                     ! Here, purely based on length of added aligned face
                     doquad = .false.
@@ -3191,6 +3207,7 @@ module ggmod_gridgeneration2D
                         if (indmin == 3) then 
                             ! Add third face, quad
                             doquad = .true.
+                            isv2onl1 = .false.
                             v2 = l2%vert(k2+1)
                             v4 = l1%vert(k1+1)
                             
@@ -3200,6 +3217,7 @@ module ggmod_gridgeneration2D
                         elseif (indmin == 1) then 
                             ! Add first face, triangle
                             v2 = l2%vert(k2+1)
+                            isv2onl1 = .false.
                             tff = [0, l2%facelabels(k2)]
                             
                             ! Update counter
@@ -3207,6 +3225,7 @@ module ggmod_gridgeneration2D
                         elseif (indmin == 2 ) then 
                             ! Add second face, triangle
                             v2 = l1%vert(k1+1)
+                            isv2onl1 = .true.
                             tff = [l1%facelabels(k1), 0]
                             
                             ! Update counter
@@ -3222,6 +3241,7 @@ module ggmod_gridgeneration2D
                         ! line
                         ! Add first face pair
                         v2 = l2%vert(k2+1)
+                        isv2onl1 = .false.
                         tff = [0, l2%facelabels(k2)]
                         
                         ! Update counter
@@ -3234,6 +3254,7 @@ module ggmod_gridgeneration2D
                         ! We have to take the second option
                         ! Add second face pair
                         v2 = l1%vert(k1+1)
+                        isv2onl1 = .true.
                         tff = [l1%facelabels(k1), 0]
                         
                         ! Update counter
@@ -3254,12 +3275,15 @@ module ggmod_gridgeneration2D
                     ! Add face pair
                     if (doquad) then 
                         nf = nf + 1
+                        call tubes(j)%hfface%Append(grid%face%ntot + nf) 
                         tempfacevert(nf, :) = [v1, v4]
                         tempfacelabels(nf) = l1%facelabels(k1-1)
                         nf = nf + 1
+                        call tubes(j)%lfface%Append(grid%face%ntot + nf) 
                         tempfacevert(nf, :) = [v3, v2]
                         tempfacelabels(nf) = l2%facelabels(k2-1)
                         nf = nf + 1
+                        call tubes(j)%tubeface%Append(grid%face%ntot + nf) 
                         tempfacevert(nf, :) = [v4, v2]
                         if ((k1 /= n1) .or. (k2 /= n2) .or. dolasttriangle) then 
                             tempfacelabels(nf) = 0
@@ -3268,15 +3292,26 @@ module ggmod_gridgeneration2D
                         end if 
                     else
                         nf = nf + 1
+                        if (isv2onl1) then 
+                            call tubes(j)%hfface%Append(grid%face%ntot + nf) 
+                        else
+                            call tubes(j)%tubeface%Append(grid%face%ntot + nf) 
+                        end if 
                         tempfacevert(nf, :) = [v1, v2]
                         tempfacelabels(nf) = tff(1)
                         nf = nf + 1
+                        if (isv2onl1) then 
+                            call tubes(j)%tubeface%Append(grid%face%ntot + nf) 
+                        else
+                            call tubes(j)%lfface%Append(grid%face%ntot + nf) 
+                        end if
                         tempfacevert(nf, :) = [v3, v2]
                         tempfacelabels(nf) = tff(2)
                     end if 
 
                     ! Add cell
                     nc = nc + 1
+                    call tubes(j)%cell%Append(grid%cell%ntot + nc)
                     if (doquad .and. v1 /= v3) then 
                         tempcellvert(ncv+1:ncv+4) = [v1, v3, v2, v4]
                         tempcellvertP(nc, :) = [ncv+1, 4]
@@ -3323,19 +3358,21 @@ module ggmod_gridgeneration2D
 
                     ! Set faces
                     nf = nf + 1
+                    call tubes(j)%hfface%Append(grid%face%ntot + nf)
                     tempfacevert(nf, :) = [v1, v2]
                     tempfacelabels(nf) = l1%facelabels(k1)
                     nf = nf + 1
+                    call tubes(j)%lfface%Append(grid%face%ntot + nf)
                     tempfacevert(nf, :) = [v1, v3]
                     tempfacelabels(nf) = l2%facelabels(k2)
 
                     ! Set cell
                     nc = nc + 1
+                    call tubes(j)%cell%Append(grid%cell%ntot + nc)
                     tempcellvert(ncv+1:ncv+3) = [v1, v2, v3]
                     tempcellvertP(nc, :) = [ncv+1, 3]
                     ncv = ncv + 3
                 end if 
-
 
                 ! Add to grid
                 allocate(tempcellregion(nc), tempfaceregion(nf))
@@ -3357,7 +3394,7 @@ module ggmod_gridgeneration2D
 
         ! Cleanup
         !========
-        call RemoveDuplicateGridFaces(grid)
+        call RemoveDuplicateGridFaces(ggtmdata, grid)
 
         ! Housekeeping
         !=============
@@ -4187,7 +4224,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Removal of duplicate faces in grid
-    subroutine RemoveDuplicateGridFaces(grid)
+    subroutine RemoveDuplicateGridFaces(ggtmdata, grid)
 
         ! Description
         !============
@@ -4204,16 +4241,17 @@ module ggmod_gridgeneration2D
         !==================
         ! Arguments
         type(GGGridUDT), intent(inout)          :: grid 
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata
 
         ! Auxiliary
-        integer(I8)                             :: vtemp
+        integer(I8)                             :: vtemp, thisfID
         integer(I8), allocatable, dimension(:)  :: v1, v2, fID, &
-            sortind, dv1, dv2, tsortind, tv2, tfID
+            sortind, dv1, dv2, tsortind, tv2, tfID, fIDnew
         integer(I8), allocatable                :: fvert(:, :)
         logical, allocatable, dimension(:)      :: delind 
         
         ! Loop
-        integer(I8)                             :: i, k, kold
+        integer(I8)                             :: i, j, k, kold
 
         ! Initialize
         !===========
@@ -4280,9 +4318,30 @@ module ggmod_gridgeneration2D
         ! If both are zero, set delind to true
         delind = [.false., (dv1 == 0) .and. (dv2 == 0)]
 
-        ! Remove faces
+        ! Construct mapping
+        fIDnew = fID
+        thisfID = fID(1)
+        do i = 1, size(fID)
+            if (.not. delind(i)) then 
+                thisfID = fID(i)
+            end if 
+            fIDnew(i) = thisfID
+        end do
+
+        ! Remove faces from grid
         fID = pack(fID, delind)
         call RemoveGGFace(grid, fID)
+
+        ! Remap faces in cell tube data 
+        do i = 1, size(ggtmdata%cell)
+            do j = 1, size(ggtmdata%cell(i)%tubes)
+                associate(tube  => ggtmdata%cell(i)%tubes(j))
+                call tube%hfface%Set(fIDnew(tube%hfface%Get()))
+                call tube%lfface%Set(fIDnew(tube%lfface%Get()))
+                call tube%tubeface%Set(fIDnew(tube%tubeface%Get()))
+                end associate
+            end do 
+        end do
 
         ! Housekeeping
         !=============
@@ -4293,45 +4352,252 @@ module ggmod_gridgeneration2D
     !------------------------------------------------------------------!
     !                         GRID ADAPTATION                          !
     !------------------------------------------------------------------!
-#ifdef debug
-    ! Removal of flux surfaces within a topomesh tube
-    subroutine RemoveSmallFluxTubes(options)
+
+    ! Non-convex cell splitting
+    subroutine SplitNonConvexCells(ggtmdata, grid)
 
         ! Description
         !============
-        ! This routine can be used to remove flux tubes that are 
-        ! 'too small' (in whatever measure available) by removing a 
-        ! flux surface. The only limitation is that we cannot remove 
-        ! flux surfaces that are part of the topological mesh (i.e. 
-        ! we can only remove flux surfaces within a topological flux 
-        ! tube). Currently, the following cases are dealt with:
-        ! - flux surfaces with a delta Psi smaller than a predefined 
-        !   value
-        ! - intersecting flux surfaces (e.g. due to coarse approximation
-        !   or numerics)
+        ! This routine removes non-convex cells by splitting the cell
+        ! at non-convex parts into triangles. Only 'radial' faces can 
+        ! be introduced at this stage, and no additional vertices are
+        ! added (faces are added, cells are deleted and added). Tube 
+        ! data of the ggtmdata structure is adequately adjusted to 
+        ! keep a correct representation of the grid. 
 
-        ! For this adaptation, it is assumed that the initial vertex
-        ! distribution was already done (so we can check on actual 
-        ! intersections between faces). When deleting vertices/surfaces,
-        ! we don't recompute all vertex IDs etc again - this should be 
-        ! done afterwards (typically after all adaptations have been 
-        ! done)
+        ! Note: currently, we only support splitting quads, since at 
+        ! this stage, no cells with more than 4 vertices are generated.
+        ! This is checked for in the beginning. 
+
+        ! Note: though ggtmdata is updated, the cells and faces will very likely
+        ! not be in the correct order anymore. To this end, one should
+        ! call sorting routines that reconstruct these. 
 
         ! Declare variables
         !==================
         ! Arguments
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata 
+        type(GGGridUDT), intent(inout)          :: grid 
 
         ! Auxiliary
+        integer(I8)                             :: ntv, npos, nneg, &
+            tvind, nnewc, faceloc
+        integer(I8), allocatable, dimension(:)  :: tv, vertind, &
+            splitvertind, vp1, vp2, newcellvert, cellvert, othercellvert, &
+            newfacelabel, splitcellind, newcells, tc, cellfacemapping, &
+            newcellregion, newfaceregion
+        integer(I8), allocatable, dimension(:, :)   :: newfacevert, &
+            newcellvertP, cellmapping
+        real(R8), allocatable, dimension(:)     :: dx, dy, sintheta, &
+            x, y
+        logical, allocatable, dimension(:)      :: splitcell, issplitcell
 
         ! Loop
-        integer(I8)                         :: i 
+        integer(I8)                             :: i, j, k, cc
 
         ! Initialize
         !===========
-        ! 
+        ! Associate
+        associate(&
+            celldata        => ggtmdata%cell,   &
+            cell            => grid%cell,       &
+            face            => grid%face,       &
+            vert            => grid%vert        &
+            )
+
+        ! Initialize
+        allocate(cellmapping(grid%cell%ntot, 2), cellfacemapping(grid%cell%ntot))
+        cellmapping = 0 ! mapping from splitted cell to two new cells
+        cellfacemapping = 0
+        vp1 = cell%vp1%Get()
+        vp2 = cell%vp2%Get()
+        cellvert = cell%vert%Get()
+        vertind = [2, 3, 4, 1]
+        x = vert%x%Get()
+        y = vert%y%Get()
+
+        ! Check
+        if (any(cell%vp2%Get() > 4)) then 
+            call gdErrorHandler('SplitNonConvexCells: cells with more than ' // & 
+                '4 vertices detected, not yet supported')
+        end if 
+
+        ! Mark cells
+        !===========
+        ! Initialize
+        allocate(splitcell(cell%ntot), splitvertind(cell%ntot))
+        splitcell = .false. 
+        splitvertind = 0
+
+        ! Determine which cells to split
+        do i = 1, cell%ntot
+            ! Check amount
+            if (vp2(i) < 4) then 
+                cycle
+            end if 
+
+            ! Get vertices
+            tv = GetArrayFromPointer(vp1, vp2, cellvert, i)
+            ntv = size(tv)
+
+            ! Sanity check
+            if (ntv /= 4) then 
+                call gdErrorHandler('SplitNonConvexCells: this is a bug')
+            end if 
+
+            ! Close for ease
+            tv = [tv, tv(1:2)]
+
+            ! Compute angles 
+            dx = x(tv(2:ntv+2)) - x(tv(1:ntv+1))
+            dy = y(tv(2:ntv+2)) - y(tv(1:ntv+1))
+            sintheta = dx(1:ntv)*dy(2:ntv+1) - dx(2:ntv+1)*dy(1:ntv)
+
+            ! Check sign
+            npos = count(sintheta >= 0.0_R8)
+            nneg = count(sintheta < 0.0_R8)
+            if ((npos == ntv) .or. (nneg == ntv)) then 
+                ! All good, skip
+                cycle
+            elseif ((npos == 1) .or. (nneg == 1)) then 
+                ! Mark for splitting
+                splitcell(i) = .true. 
+                if (npos == 1) then 
+                    splitvertind(i) = vertind(findloc(sintheta >= 0.0_R8, .true., 1))
+                else
+                    splitvertind(i) = vertind(findloc(sintheta < 0.0_R8, .true., 1))
+                end if 
+            else
+                ! Cell is self-intersecting, cannot split. Issue message
+                print *, 'SplitNonConvexCells: cell ', i, ' is self-intersecting, ' // & 
+                    'can not split. Continuing...'
+            end if
+        end do
+
+        ! Check if there are any cells to remove. If not, return
+        nnewc = count(splitcell)
+        if (nnewc == 0) then 
+            return 
+        end if 
+
+        ! Split cells
+        !============
+        ! Print message
+        print *, 'SplitNonConvexCells: non-convex quads detected, splitting...'
+
+        ! Initialize
+        allocate(newfacevert(nnewc, 2), newfacelabel(nnewc)) ! one face per splitted quad
+        allocate(newcellvertP(2*nnewc, 2), newcellvert(nnewc*6)) ! two triangles per splitted quad
+        allocate(newcellregion(2*nnewc), newfaceregion(nnewc))
+        newfacevert = 0
+        newcellvert = 0
+        newfacelabel = 0
+        newcellregion = 0
+        newfaceregion = 0
+        newcellvertP(:, 1) = [(k, k = 1, 2*nnewc*3-2, 3)]
+        newcellvertP(:, 2) = 3
+
+        ! Loop
+        cc = 0
+        do i = 1, cell%ntot
+            if (splitcell(i)) then 
+                ! Update counter
+                cc = cc + 1
+
+                ! Get vertices
+                tv = GetArrayFromPointer(vp1, vp2, cellvert, i)
+
+                ! Check which vertices form the new face 
+                tvind = mod(splitvertind(i) + 2, 4) ! because we know only 4 vertices exist...
+                if (tvind == 0) then 
+                    tvind = 4
+                end if 
+
+                ! Add the new face vertices & region
+                newfacevert(cc, :) = [tv(splitvertind(i)), tv(tvind)]
+                newfaceregion(cc) = cell%region%Get(i)
+
+
+                ! Add the new cell vertices & region
+                call SetDiff(tv, newfacevert(cc, :), othercellvert)
+                newcellvert(6*cc-5:6*cc-3) = [newfacevert(cc, :), othercellvert(1)]
+                newcellvert(6*cc-2:6*cc) = [newfacevert(cc, :), othercellvert(2)]
+                newcellregion(2*cc-1:2*cc) = cell%region%Get(i)
+
+                ! Construct the cell mapping
+                cellmapping(i, :) = [2*cc-1, 2*cc]
+                cellfacemapping(i) = face%ntot + cc
+
+            end if 
+        end do 
+
+        ! Add constant to cellmapping
+        cellmapping = cellmapping + cell%ntot
+
+        ! Remap ggmdata
+        !==============
+        ! If we need to sort afterwards anyway, no need to put in effort
+        ! to sort here. Just append/replace... (though nearly sortedness
+        ! may likely lead to speed-up, so we do a bit of effort)
+        do i = 1, size(celldata)
+            do j = 1, size(celldata(i)%tubes)
+                ! Associate for ease
+                associate(tube  => celldata(i)%tubes(j))
+
+                ! Check tube cells
+                issplitcell = splitcell(tube%cell%Get())
+
+                ! Replace if present
+                if (any(issplitcell)) then 
+                    ! Get indices
+                    allocate(splitcellind(count(issplitcell)))
+                    splitcellind = pack([(k, k = 1, size(issplitcell))], &
+                        issplitcell)
+
+                    ! Loop
+                    do k = 1, size(splitcellind)
+                        ! Get current tube cells
+                        tc = tube%cell%Get()
+                        
+                        ! Delete the old cell
+                        newcells = cellmapping(tc(splitcellind(k)), :)
+                        call tube%cell%Set(newcells(1), splitcellind(k))
+                        call tube%cell%Insert(newcells(2), splitcellind(k))
+
+                        ! Insert the face at an approximate location
+                        call tube%tubeface%Insert(cellfacemapping(tc(splitcellind(k))), &
+                            splitcellind(k))
+
+                        ! Update splitcellind to be consistent with extra
+                        ! vertex
+                        splitcellind = splitcellind + 1
+
+                    end do
+
+                    ! Housekeeping
+                    deallocate(splitcellind)
+                end if 
+
+                ! Housekeeping
+                end associate
+            end do 
+        end do
+
+        ! Add and delete cells & faces
+        !=============================
+        ! Faces
+        call AddGGFace(grid, newfacevert, newfacelabel, newfaceregion)
+
+        ! Cells
+        call AddGGCell(grid, newcellvert, newcellvertP, newcellregion)
+        call RemoveGGCell(grid, pack([(k, k = 1, size(splitcell))], splitcell))
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
-#endif
+
     !------------------------------------------------------------------!
     !                  TOPOMESH GRID DATA ROUTINES                     !
     !------------------------------------------------------------------!
@@ -4943,7 +5209,7 @@ module ggmod_gridgeneration2D
             startind, endind, nfs, tfloc, tfc, nthf, ntlf
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, &
             allIDs, s1, s2, polv, fsID, sortind, thf, tlf, tvertexID, &
-            tf1, tf2, allnbtf
+            tf1, tf2, allnbtf, contourind
         integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
             segc, vertexID, temp2
         real(R8)                                :: &
@@ -5577,14 +5843,27 @@ module ggmod_gridgeneration2D
 
                 ! Check if multiple intersections with radial lines
                 if (tube%isclosed(i)) then 
-                    ! Two intersections are expected in first and 
-                    ! last face, since they are the same face
-                    if (any(nint(j, 2:ntf-1) > 1)) then 
-                        ! Simply set warning message
-                        isintersectremoved = .true. 
-                    end if 
-                    if ((nint(j, 1) > 2) .or. (nint(j, ntf) > 2)) then 
-                        isintersectremoved = .true. 
+                    
+                    if (tfloc == 1 .or. tfloc == size(tubef)) then 
+                        ! Two intersections are expected in first and 
+                        ! last face, since they are the same face (normally)
+                        ! Also last face
+                        if (any(nint(j, 2:ntf-1) > 1)) then 
+                            ! Simply set warning message
+                            isintersectremoved = .true. 
+                        end if 
+                        if ((nint(j, 1) > 2) .or. (nint(j, ntf) > 2)) then 
+                            isintersectremoved = .true. 
+                        end if 
+                    else
+                        ! Only one face, but should have two intersections
+                        if (any(nint(j, [(k, k = 1, tfloc-1), (k, k = tfloc+1, ntf)]) > 1)) then 
+                            ! Simply set warning message
+                            isintersectremoved = .true. 
+                        end if 
+                        if (nint(j, tfloc) > 2) then 
+                            isintersectremoved = .true. 
+                        end if 
                     end if 
                 else
                     if (tempc(j)%isclosed) then 
@@ -5627,7 +5906,8 @@ module ggmod_gridgeneration2D
             ! Unpack intersections
             allocate(xint(nc, ntf), yint(nc, ntf), segc(nc, ntf), &
                 segrf(nc, ntf), segrc(nc, ntf), segrrf(nc, ntf), &
-                vertexID(nc, ntf), fsID(nc), temp2(nc, ntf))
+                vertexID(nc, ntf), fsID(nc), temp2(nc, ntf), &
+                contourind(nc))
             !do j = 1, size(nint, 2)
             !    temp2(:, j) = pack(nint(:, j), keepind)
             !end do 
@@ -5638,6 +5918,7 @@ module ggmod_gridgeneration2D
                 if (keepind(j)) then 
                     ! Update counter
                     cc = cc + 1 
+                    contourind(cc) = j
 
                     ! Intersection in tracing face: should always be the one
                     ! that is at the start of the contour IF it is a 
@@ -5712,22 +5993,31 @@ module ggmod_gridgeneration2D
                     
                     ! Hedge for closed flux surfaces
                     if (tube%isclosed(i)) then 
-                        ! Intersection with first and last radial line
-                        ! should be exactly the same! Only intersection
-                        ! coordinate should differ
-                        tsegrc = segrcda(cc, ntf)%Get()
-                        endind = findloc(tsegrc, real(size(tempc(cc)%x)-1, kind=R8), 1)
-                        if (endind == 0) then 
-                            print *, 'AddToplogicalMeshCellGriddingData: ' // & 
-                                'closed contour does not intersect at ending point. ' // & 
-                                'contour: ', cc, 'tube: ', i 
-                            print *, 'taking first intersection...'
+                        if (tfloc == 1 .or. tfloc == size(tubef)) then 
+                            ! Intersection with first and last radial line
+                            ! should be exactly the same! Only intersection
+                            ! coordinate should differ
+                            tsegrc = segrcda(cc, ntf)%Get()
+                            endind = findloc(tsegrc, real(size(tempc(cc)%x)-1, kind=R8), 1)
+                            if (endind == 0) then 
+                                print *, 'AddToplogicalMeshCellGriddingData: ' // & 
+                                    'closed contour does not intersect at ending point. ' // & 
+                                    'contour: ', cc, 'tube: ', i 
+                                print *, 'taking first intersection...'
+                                endind = 1
+                                call Write2DPolygonData(tempc(cc)%x, tempc(cc)%y, 'l1')
+                            end if 
+
+                        else
+
+                            ! Just a regular end for last face
                             endind = 1
-                            call Write2DPolygonData(tempc(cc)%x, tempc(cc)%y, 'l1')
+
                         end if 
 
-                        ! Set vertex ID - should be the same as before
-                        nv = nv + 1
+                        ! First and last face are always the same 
+                        ! normally speaking, so vertex should be 
+                        ! the same
                         vertexID(cc, ntf) = vertexID(cc, 1)
                     else
 
@@ -5772,8 +6062,61 @@ module ggmod_gridgeneration2D
                 end if 
                 allocate(celldata(tubec(k))%lines(nc))
 
+                
                 ! Loop over lines
                 do j = 1, nc
+                    ! Hedge for closed tubes of which the starting radial 
+                    ! face is not the first or last one (need to adjust 
+                    ! segrc on the fly there... First segrc is 0, second is
+                    ! size of the line)
+                    if (k+1 == tfloc) then 
+                        if (tube%isclosed(i) .and. (tfloc /= 1 .or. tfloc /= size(tubef))) then 
+                            ! Need to adjust starting position
+                            cc = contourind(j)
+                            tsegrc = segrcda(cc, k+1)%Get()
+                            endind = findloc(tsegrc, real(size(tempc(cc)%x)-1, kind=R8), 1)
+                            if (endind == 0) then 
+                                print *, 'AddToplogicalMeshCellGriddingData: ' // & 
+                                    'closed contour does not intersect at ending point. ' // & 
+                                    'contour: ', cc, 'tube: ', i 
+                                print *, 'taking first intersection...'
+                                endind = 1
+                                call Write2DPolygonData(tempc(cc)%x, tempc(cc)%y, 'l1')
+                            end if 
+
+                            xint(j, k+1) = xintda(cc, k+1)%Get(endind)
+                            yint(j, k+1) = yintda(cc, k+1)%Get(endind)
+                            segc(j, k+1) = segcda(cc, k+1)%Get(endind)
+                            segrf(j, k+1) = segrfda(cc, k+1)%Get(endind)
+                            segrc(j, k+1) = segrcda(cc, k+1)%Get(endind)
+                            segrrf(j, k+1) = segrrfda(cc, k+1)%Get(endind)
+
+                        end if 
+                    elseif (k == tfloc) then 
+                        if (tube%isclosed(i) .and. (tfloc /= 1 .or. tfloc /= size(tubef))) then 
+                            ! Need to adjust starting position
+                            cc = contourind(j)
+                            tsegrc = segrcda(cc, k)%Get()
+                            startind = findloc(tsegrc, 0.0_R8, 1)
+                            if (startind == 0) then 
+                                print *, 'AddToplogicalMeshCellGriddingData: ' // & 
+                                    'closed contour does not intersect at starting point. ' // & 
+                                    'contour: ', cc, 'tube: ', i 
+                                print *, 'taking first intersection...'
+                                startind = 1
+                                call Write2DPolygonData(tempc(cc)%x, tempc(cc)%y, 'l1')
+                            end if 
+
+                            xint(j, k) = xintda(cc, k)%Get(startind)
+                            yint(j, k) = yintda(cc, k)%Get(startind)
+                            segc(j, k) = segcda(cc, k)%Get(startind)
+                            segrf(j, k) = segrfda(cc, k)%Get(startind)
+                            segrc(j, k) = segrcda(cc, k)%Get(startind)
+                            segrrf(j, k) = segrrfda(cc, k)%Get(startind)
+
+                        end if 
+                    end if
+
                     ! Check line order
                     if (segrc(j, k) < segrc(j, k+1)) then 
                         incr = 1
@@ -5854,7 +6197,7 @@ module ggmod_gridgeneration2D
             ! Housekeeping
             deallocate(xint, yint, segc, segrf, segrc, segrrf, nint, &
                 vertexID, polc, xintda, yintda, segcda, segrfda, &
-                segrcda, segrrfda, fsID, temp2)
+                segrcda, segrrfda, fsID, temp2, contourind)
         end do 
 
         ! Housekeeping
@@ -6995,23 +7338,32 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                 :: lb, ub 
-        integer(I8), allocatable    :: vertdel(:)
+        integer(I8), allocatable    :: vertdel(:), vp1(:), vp2(:)
 
         ! Loop
         integer(I8)                 :: i, k
 
         ! Remove
         !=======
+        allocate(vertdel(0))
         do i = 1, size(delind)
             lb = grid%cell%vp1%Get(delind(i))
             ub = lb  + grid%cell%vp2%Get(delind(i))-1
-            vertdel = [(k, k = ub, lb)]
-            call grid%cell%vert%Remove(vertdel)
+            vertdel = [vertdel, [(k, k = lb, ub)]]
         end do 
-        call grid%cell%vp1%Remove(delind)
+        call grid%cell%vert%Remove(vertdel)
         call grid%cell%vp2%Remove(delind)
         call grid%cell%region%Remove(delind)
-        grid%cell%ntot = grid%cell%vp1%Size()
+        grid%cell%ntot = grid%cell%vp2%Size()
+
+        ! Rebuild the pointer
+        allocate(vp1(grid%cell%ntot))
+        vp1(1) = 1
+        vp2 = grid%cell%vp2%Get()
+        do i = 2, grid%cell%ntot
+            vp1(i) = vp1(i-1) + vp2(i-1)
+        end do
+        call grid%cell%vp1%Set(vp1)
 
     end subroutine
 
@@ -8613,6 +8965,10 @@ module ggmod_gridgeneration2D
         linepair%erflabel = 0_I8
         linepair%isextendedstart = .false. 
         linepair%isextendedend = .false.
+        linepair%hfface     = ConstructIntegerDynamicArray()
+        linepair%lfface     = ConstructIntegerDynamicArray()
+        linepair%tubeface   = ConstructIntegerDynamicArray()
+        linepair%cell       = ConstructIntegerDynamicArray()
 
     end subroutine
 
@@ -9530,6 +9886,14 @@ module ggmod_gridgeneration2D
                     decaylength)
                 call Lmax%Initialize(xp, yp, valpLmax, options%refLBLmaxinf, &
                     decaylength)
+
+                ! Visualize
+                call Lmin%Visualize([minval(topomesh%vert%x), maxval(topomesh%vert%x)], &
+                    [minval(topomesh%vert%y), maxval(topomesh%vert%y)], &
+                    100, 100, 'Lminpolref')
+                call Lmax%Visualize([minval(topomesh%vert%x), maxval(topomesh%vert%x)], &
+                    [minval(topomesh%vert%y), maxval(topomesh%vert%y)], &
+                    100, 100, 'Lmaxpolref')
 
                 ! Construct refiner
                 GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic', &
@@ -10792,6 +11156,9 @@ module ggmod_gridgeneration2D
 
         ! Basic data
         !===========
+        ! General
+        simgrid%data%sglegacy%isClassicalGrid = 0
+
         ! Sizes
         simgrid%vert%ntot = nv 
         simgrid%face%ntot = nf 
@@ -11464,7 +11831,8 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Label translation
-    subroutine TranslateGridLabels(simgrid, topomesh, vessel, formattype)
+    subroutine TranslateGridLabels(simgrid, topomesh, vessel, options, &
+        formattype)
 
         ! Description
         !============
@@ -11482,6 +11850,7 @@ module ggmod_gridgeneration2D
         type(GridUDT), intent(inout)    :: simgrid 
         type(VesselUDT), intent(in)     :: vessel
         type(TopomeshUDT), intent(in)   :: topomesh 
+        type(GGOptionsUDT), intent(in)  :: options
         character(*), intent(in)        :: formattype ! destination format
 
 
@@ -11492,7 +11861,7 @@ module ggmod_gridgeneration2D
         case ('solps')
 
             ! Call translator
-            call TranslateGridLabelsSOLPS(simgrid, topomesh, vessel)
+            call TranslateGridLabelsSOLPS(simgrid, topomesh, vessel, options)
 
         case ('no')
 
@@ -11507,7 +11876,7 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
-    subroutine TranslateGridLabelsSOLPS(simgrid, topomesh, vessel)
+    subroutine TranslateGridLabelsSOLPS(simgrid, topomesh, vessel, options)
 
         ! Description
         !============
@@ -11538,6 +11907,7 @@ module ggmod_gridgeneration2D
         type(VesselUDT), intent(in)                 :: vessel
         type(GridUDT), intent(inout)                :: simgrid 
         type(TopomeshUDT), intent(in)               :: topomesh
+        type(GGOptionsUDT), intent(in)              :: options
 
         ! Auxiliary
         integer(I8)                                 :: ne, &
@@ -11797,29 +12167,29 @@ module ggmod_gridgeneration2D
             deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
         end do 
 
-#ifdef SOLPSnewlabels
         ! Overwrite vessel region labels
         !-------------------------------
-        ! Unpack for ease
-        associate(&
-            xv      => simgrid%vert%x,    &
-            yv      => simgrid%vert%y,    &
-            fv      => simgrid%face%vert  &
-            )
-        
-        ! Compute face coordinates
-        xf = 0.5*(xv(fv(:, 1)) + xv(fv(:, 2)))
-        yf = 0.5*(yv(fv(:, 1)) + yv(fv(:, 2)))
+        if (options%structurebasedlabels) then 
+            ! Unpack for ease
+            associate(&
+                xv      => simgrid%vert%x,    &
+                yv      => simgrid%vert%y,    &
+                fv      => simgrid%face%vert  &
+                )
+            
+            ! Compute face coordinates
+            xf = 0.5*(xv(fv(:, 1)) + xv(fv(:, 2)))
+            yf = 0.5*(yv(fv(:, 1)) + yv(fv(:, 2)))
 
-        ! Interpolate
-        call vessel%exactplfvessel%EvaluateLabel(xf, yf, flabels)
+            ! Interpolate
+            call vessel%exactplfvessel%EvaluateLabel(xf, yf, flabels)
 
-        ! Extract
-        where (isvesselface) simgrid%face%label = abs(flabels(:, 1))
-        
-        ! Housekeeping
-        end associate
-#endif
+            ! Extract
+            where (isvesselface) simgrid%face%label = abs(flabels(:, 1))
+            
+            ! Housekeeping
+            end associate
+        end if 
 
         ! Cell regions
         !-------------

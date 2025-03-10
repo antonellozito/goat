@@ -876,6 +876,23 @@ module goatmod_types
 
     ! Basic operations
     !=================
+    ! Basic pointer getter
+    function GetArrayFromPointer(p1, p2, list, i) result(array)
+        !  Description
+        !=============
+        ! General array getter from pointer input (only for integers)
+
+        ! Declare variables
+        !==================
+        integer(I8), intent(in)                 :: p1(:), p2(:), list(:)
+        integer(I8), intent(in)                 :: i 
+        integer(I8), allocatable                :: array(:) 
+
+        ! Get array
+        array = list(p1(i):(p1(i) + p2(i) - 1))
+
+    end function
+
     ! Get cells of a vertex
     function GetVertCell(vert, i) result(res)
         integer(I8)                 :: i 
