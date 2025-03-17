@@ -955,6 +955,17 @@ def ReadTraduitOutB2us(filepath):
     # Read lines
     alllines = thisfile.readlines()
 
+    # Read version to determine what data to read in 
+    temp = alllines[0].split(); temp = temp[0]
+    version = temp[7:17]
+    topodataversion = '03.002.001'
+
+    if version >= topodataversion:
+        hasTopologicalData = True
+    else: 
+        hasTopologicalData = False 
+    
+
     # Read dimensions
     #----------------
     # Start at top of file
@@ -1000,6 +1011,106 @@ def ReadTraduitOutB2us(filepath):
 
     # Initialize vertex structure
     grid.vert.Initialize(nv)
+
+    # Read topological data
+    #----------------------
+    if hasTopologicalData:
+        while i < len(alllines):
+            if "topoflag" in alllines[i]:
+                break 
+            else: 
+                i = i + 1
+
+        # Read in topoflag
+        i = i + 1
+        values = alllines[i].split()
+        topoflag = np.fromstring(values[0], dtype=int, count=1, sep =' '); topoflag = topoflag[0]
+        i = i + 1
+
+        # Read in numbers
+        i = i + 1
+        values = alllines[i].split()
+        nX = np.fromstring(values[0], dtype=int, count=1, sep =' '); nX = nX[0]
+        nO = np.fromstring(values[1], dtype=int, count=1, sep =' '); nO = nO[0]
+        nS = np.fromstring(values[2], dtype=int, count=1, sep =' '); nS = nS[0]
+        nT = np.fromstring(values[3], dtype=int, count=1, sep =' '); nT = nT[0]
+        nDiv = np.fromstring(values[4], dtype=int, count=1, sep =' '); nDiv = nDiv[0]
+        nDivFc = np.fromstring(values[5], dtype=int, count=1, sep =' '); nDivFc = nDivFc[0]
+        i = i + 1
+
+        # Initialize
+        grid.topodata.Initialize(nX, nO, nS, nT, nDiv, nDivFc, topoflag)
+
+        # Read x-point data
+        i = i + 1
+        for j in np.arange(0, nX, 1):
+            values = alllines[i+j].split()
+            xind = np.fromstring(values[0], dtype=int, count=1, sep =' '); xind = xind[0]
+            isprimaryxp = np.fromstring(values[1], dtype=int, count=1, sep =' '); isprimaryxp = isprimaryxp[0]
+
+            grid.topodata.XpointID[j] = xind 
+            grid.topodata.isprimaryxp[j] = isprimaryxp 
+        i = i + nX 
+
+        # Read O-point data
+        i = i + 1
+        for j in np.arange(0, nO, 1):
+            values = alllines[i+j].split()
+            xind = np.fromstring(values[0], dtype=int, count=1, sep =' '); xind = xind[0]
+
+            grid.topodata.OpointID[j] = xind 
+        i = i + nO
+
+        # Read S-point data
+        i = i + 1
+        for j in np.arange(0, nS, 1):
+            values = alllines[i+j].split()
+            xind = np.fromstring(values[0], dtype=int, count=1, sep =' '); xind = xind[0]
+            spointxpID = np.fromstring(values[1], dtype=int, count=1, sep =' '); spointxpID = spointxpID[0]
+            spointdivID = np.fromstring(values[2], dtype=int, count=1, sep =' '); spointdivID = spointdivID[0]
+
+            grid.topodata.SpointID[j] = xind 
+            grid.topodata.spointdivID[j] = spointdivID 
+            grid.topodata.spointxpID[j] = spointxpID 
+        i = i + nS
+
+        # Read T-point data
+        i = i + 1
+        for j in np.arange(0, nT, 1):
+            values = alllines[i+j].split()
+            xind = np.fromstring(values[0], dtype=int, count=1, sep =' '); xind = xind[0]
+            tpointdivID = np.fromstring(values[1], dtype=int, count=1, sep =' '); tpointdivID = tpointdivID[0]
+
+            grid.topodata.TpointID[j] = xind 
+            grid.topodata.tpointdivID[j] = tpointdivID 
+            grid.topodata.spointxpID[j] = spointxpID 
+        i = i + nT
+
+        # Read divertor face pointer
+        i = i + 1
+        for j in np.arange(0, nDiv, 1):
+            values = alllines[i+j].split()
+            divFcP1 = np.fromstring(values[1], dtype=int, count=1, sep =' '); divFcP1 = divFcP1[0]
+            divFcP2 = np.fromstring(values[2], dtype=int, count=1, sep =' '); divFcP2 = divFcP2[0]
+
+            grid.topodata.divFcP1[j] = divFcP1-1 # account for zero-based indexing 
+            grid.topodata.divFcP2[j] = divFcP2 
+        i = i + nDiv 
+
+        # Read divertor face list
+        i = i + 1
+        k = 0
+        while k < nDivFc:
+            values = alllines[i].split()
+            for j in np.arange(0, len(values)):
+                ID = np.fromstring(values[j], dtype=int, count=1, sep =' '); ID = ID[0]
+                grid.topodata.divFc[k] = ID
+                k = k + 1
+            i = i + 1
+    else:
+        # Simply initialize to zero
+        grid.topodata.Initialize(0, 0, 0, 0, 0, 0, 0)
+        
 
     # Read vertex data
     #-----------------
@@ -1252,8 +1363,9 @@ def ReadTraduitOutB2us(filepath):
         for k in tv2:
             grid.vert.fieldlineID[k-1] = j+1
 
-
-
+    # Compute grid interconnections
+    grid.ComputeInterconnections()
+    
     # Return
     return grid
 

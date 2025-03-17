@@ -24,7 +24,7 @@ subroutine ReadTraduitUS(grid, filepath)
     integer(I8)                 :: nc, nf, nv, nfsFc, nftCv, nftFc
     character(*)               :: filepath
 
-    logical                     :: reachedeof
+    logical                     :: reachedeof, readTopologicalData 
 
     character(:), allocatable   :: chardummy   ! dummy array
     integer(I8), allocatable    :: cdummy(:,:) ! dummy array
@@ -59,10 +59,17 @@ subroutine ReadTraduitUS(grid, filepath)
     open(unit = filespec, file = filepath)
     rewind(filespec)
 
-    ! First, read the header with the versionv - just ignore that alltogether
+    ! First, read the header with the version
     call ReadSingleLine(filespec, chardummy, reachedeof)
     if (reachedeof) then 
         call gdErrorHandler('ReadTraduitUS: reached EOF prematurely')
+    end if 
+
+    ! Check the version to determine what to read in 
+    readTopologicalData = .false. 
+    if (chardummy(8:17) >= '03.002.001') then 
+        ! Topological data should be present
+        readTopologicalData = .true.
     end if 
     ! call cfverr(filespec,b2fgmtryversion)
 
@@ -87,6 +94,97 @@ subroutine ReadTraduitUS(grid, filepath)
     grid%cell%nface = idum(1)
     grid%vert%ncell  = idum(3)
     grid%vert%nface  = idum(4)
+
+    ! Initialize topological data
+    if (allocated(grid%data%isprimaryxp)) deallocate(grid%data%isprimaryxp)
+    if (allocated(grid%data%xpointID)) deallocate(grid%data%xpointID)
+    if (allocated(grid%data%opointID)) deallocate(grid%data%opointID)
+    if (allocated(grid%data%spointID)) deallocate(grid%data%spointID)
+    if (allocated(grid%data%divFcP)) deallocate(grid%data%divFcP)
+    if (allocated(grid%data%divFc)) deallocate(grid%data%divFc)
+    if (allocated(grid%data%spointdivID)) deallocate(grid%data%spointdivID)
+    if (allocated(grid%data%tpointdivID)) deallocate(grid%data%tpointdivID)
+    
+    ! Read topological data
+    if (readTopologicalData) then 
+        ! Read topological mesh flag
+        call cfruin(filespec, 1, idum, 'topoflag')
+        grid%data%topoflag = idum(0)
+
+        ! Read number of topological points
+        call cfruin(filespec, 6, idum, 'nX,nO,nS,nT,Div,nDivFc')
+        grid%data%nxp = idum(0)
+        grid%data%nop = idum(1)
+        grid%data%nsp = idum(2)
+        grid%data%ntp = idum(3)
+        grid%data%ndiv = idum(4)
+        grid%data%ndivFc = idum(5)
+
+        ! Allocate
+        allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
+            grid%data%spointID(idum(2)), grid%data%isprimaryxp(idum(0)), &
+            grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
+            grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp))
+
+        ! Read X-point data
+        call ReadSingleLine(filespec, chardummy, reachedeof) ! header
+        do i = 1, grid%data%nxp  
+            ! Read 
+            read(filespec, *) grid%data%xpointID(i), grid%data%isprimaryxp, &
+                idum(0)
+        end do
+
+        ! Read O-point data
+        call ReadSingleLine(filespec, chardummy, reachedeof) ! header
+        do i = 1, grid%data%nop  
+            ! Read 
+            read(filespec, *) grid%data%opointID(i)
+        end do
+
+        ! Read strike point data
+        call ReadSingleLine(filespec, chardummy, reachedeof) ! header
+        do i = 1, grid%data%nsp  
+            ! Read 
+            read(filespec, *) grid%data%spointID(i), grid%data%spointxpID(i), &
+                grid%data%spointdivID(i), idum(0)
+        end do
+
+        ! Read tangency point data
+        call ReadSingleLine(filespec, chardummy, reachedeof) ! header
+        do i = 1, grid%data%ntp  
+            ! Read 
+            read(filespec, *) grid%data%tpointID(i), grid%data%tpointdivID(i), &
+                idum(0)
+        end do
+
+        ! Read divertor data
+        call ReadSingleLine(filespec, chardummy, reachedeof) ! header
+        do i = 1, grid%data%ndiv  
+            ! Read 
+            read(filespec, *) idum(0), grid%data%divFcP(i, 1), &
+                grid%data%divFcP(i, 2)
+        end do
+
+        ! Read divertor face data
+        call cfruin(filespec, grid%data%ndivFc, grid%data%divFc, 'divFc')
+
+    else 
+        ! Initialize to zero
+        grid%data%topoflag = 0
+        grid%data%nxp = 0
+        grid%data%nop = 0
+        grid%data%nsp = 0
+        grid%data%ntp = 0
+        grid%data%ndiv = 0
+        grid%data%ndivFc = 0
+
+        ! Allocate
+        allocate(grid%data%xpointID(0), grid%data%opointID(0), &
+            grid%data%spointID(0), grid%data%isprimaryxp(0), &
+            grid%data%divFcP(0, 2), grid%data%divFc(0), &
+            grid%data%spointdivID(0), grid%data%tpointdivID(0))
+
+    end if 
 
     ! Allocate grid
     call AllocateGrid(grid)
@@ -115,22 +213,8 @@ subroutine ReadTraduitUS(grid, filepath)
         grid%data%sglegacy%ny = idum(1)
     end if
 
-    ! Attempt to read in x-point and OMP/IMP data etc - may not be present
-    !---------------------------------------------------------------------
-    ! nX
-    call ReadUntilFound(filespec, 'nX', reachedeof)
-    if (reachedeof) then 
-        ! Not found, issue warning and rewind
-        print *, 'ReadTraduitUS: could not find field "nX", setting to zero...'
-        grid%data%nxp = 0
-        rewind(filespec)
-    else 
-        ! Found, go one back and read in
-        backspace(filespec) ! go one back to read in amount of nX
-        call cfruin(filespec, 1, idum, 'nX')
-        grid%data%nxp = idum(0)
-    end if 
-
+    ! Attempt to read in OMP/IMP data 
+    !--------------------------------
     ! OMP
     call ReadUntilFound(filespec, 'OMPr', reachedeof)
     if (reachedeof) then 
@@ -173,21 +257,6 @@ subroutine ReadTraduitUS(grid, filepath)
         ! Found, read in coordinates (assumed two)
         backspace(filespec)
         call cfrure(filespec, 2, grid%data%IMPz, 'IMPz')
-    end if 
-
-    ! Xpoint(s)
-    allocate(grid%data%xpointID(grid%data%nxp))
-    call ReadUntilFound(filespec, 'Xpoint(s)', reachedeof)
-    if (reachedeof) then 
-        ! Not found, issue warning and rewind
-        print *, 'ReadTraduitUS: could not find field "Xpoint(s)", setting to zero...'
-        grid%data%xpointID = 0
-        rewind(filespec)
-    else 
-        ! Found, go one back and read in
-        backspace(filespec) 
-        call cfruin(filespec, grid%data%nxp, idum, 'Xpoint(s)')
-        grid%data%xpointID = idum(0:grid%data%nxp-1)
     end if 
 
     ! Rewind and reset to expected location

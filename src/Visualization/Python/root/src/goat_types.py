@@ -560,6 +560,10 @@ class Face:
         self.v1 = np.zeros(0, dtype=int)
         self.v2 = np.zeros(0, dtype=int)
 
+        # Cell neighbours
+        self.nb1 = np.zeros(0, dtype=int)
+        self.nb2 = np.zeros(0, dtype=int)
+
         # Labels
         self.label = np.zeros(0, dtype=int)
         self.region = np.zeros(0, dtype=int)
@@ -578,6 +582,10 @@ class Face:
         # Vertices
         self.v1 = np.zeros(nf, dtype=int)
         self.v2 = np.zeros(nf, dtype=int)
+
+        # Cells
+        self.nb1 = np.zeros(nf, dtype=int)
+        self.nb2 = np.zeros(nf, dtype=int)
 
         # Labels
         self.label = np.zeros(nf, dtype=int)
@@ -605,12 +613,19 @@ class Cell:
         # Face pointer
         self.fp1 = np.zeros(0, dtype=int)
         self.fp2 = np.zeros(0, dtype=int)
+
+        # Neighbour pointer
+        self.nbp1 = np.zeros(0, dtype=int)
+        self.nbp2 = np.zeros(0, dtype=int)
         
         # Vertices
         self.vert = np.zeros(0, dtype=int)
 
         # Faces
         self.face = np.zeros(0, dtype=int)
+
+        # Neighbours
+        self.nb = np.zeros(0, dtype=int)
 
         # Coordinates
         self.x  = np.zeros(0, dtype=float)
@@ -643,12 +658,19 @@ class Cell:
         # Face pointer
         self.fp1 = np.zeros(nc, dtype=int)
         self.fp2 = np.zeros(nc, dtype=int)
+
+        # Neighbour pointer 
+        self.nbp1 = np.zeros(nc, dtype=int)
+        self.nbp2 = np.zeros(nc, dtype=int)
         
         # Vertices
         self.vert = np.zeros(ncv, dtype=int)
 
         # Faces
         self.face = np.zeros(ncf, dtype=int)
+
+        # Neighbours
+        self.nb = np.zeros(ncf, dtype=int)
 
         # Coordinates
         self.x  = np.zeros(nc, dtype=float)
@@ -674,6 +696,11 @@ class Cell:
     # Face getter
     def GetFace(self, i):
         return self.face[self.fp1[i]:self.fp1[i]+self.fp2[i]]
+
+    # Cell neighbour getter
+    def GetNeig(self, i):
+        return self.nb[self.nbp1[i]:self.nbp1[i]+self.nbp2[i]]
+    
 
 # Grid flux surfaces
 class FluxSurf:
@@ -775,6 +802,68 @@ class FluxTube:
     def GetFace(self, i):
         return self.cell[self.cp1[i]:self.cp1[i]+self.cp2[i]]
 
+# Grid topological data
+class TopoData: 
+    # Definition
+    def __init__(self):
+        # Number
+        self.nxp = 0
+        self.nop = 0
+        self.nsp = 0
+        self.ntp = 0
+        self.ndiv = 0
+        self.ndivFc = 0
+        self.topoID = 0
+
+        # Points
+        self.XpointID = np.zeros(0, dtype=int)
+        self.OpointID = np.zeros(0, dtype=int)
+        self.SpointID = np.zeros(0, dtype=int)
+        self.TpointID = np.zeros(0, dtype=int)
+
+        # Point data
+        self.isprimaryxp = np.zeros(0, dtype=int)
+        self.spointxpID = np.zeros(0, dtype=int)
+        self.spointdivID = np.zeros(0, dtype=int)
+        self.tpointdivID = np.zeros(0, dtype=int)
+
+        # Divertor face data
+        self.divFcP1 = np.zeros(0, dtype=int)
+        self.divFcP2 = np.zeros(0, dtype=int)
+        self.divFc = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nX, nO, nS, nT, nDiv, nDivFc, topoID):
+        # Number
+        self.nxp = nX
+        self.nop = nO
+        self.nsp = nS
+        self.ntp = nT
+        self.ndiv = nDiv
+        self.ndivFc = nDivFc
+        self.topoID = topoID
+
+        # Points
+        self.XpointID = np.zeros(nX, dtype=int)
+        self.OpointID = np.zeros(nO, dtype=int)
+        self.SpointID = np.zeros(nS, dtype=int)
+        self.TpointID = np.zeros(nT, dtype=int)
+
+        # Point data
+        self.isprimaryxp = np.zeros(nX, dtype=int)
+        self.spointxpID = np.zeros(nS, dtype=int)
+        self.spointdivID = np.zeros(nS, dtype=int)
+        self.tpointdivID = np.zeros(nT, dtype=int)
+
+        # Divertor face data
+        self.divFcP1 = np.zeros(nDiv, dtype=int)
+        self.divFcP2 = np.zeros(nDiv, dtype=int)
+        self.divFc = np.zeros(nDivFc, dtype=int)
+
+    # Divertor face getter
+    def GetDivFace(self, i):
+        return self.divFc[self.divFcP1[i]:self.divFcP1[i]+self.divFcP2[i]]
+
 # Grid
 class Grid:
     # Init
@@ -785,3 +874,241 @@ class Grid:
         self.cell = Cell()
         self.fs = FluxSurf()
         self.ft = FluxTube()
+        self.topodata = TopoData()
+
+    # Interconnection computation
+    def ComputeInterconnections(self):
+        # Computes additional grid interconnection data, assuming
+        # all other necessary fields were read in
+
+        # Face cells
+        for i in np.arange(0, self.cell.ntot, 1):
+            # Get cell faces
+            tf = self.cell.GetFace(i)
+
+            # Loop over each face
+            for j in np.arange(0, len(tf), 1):
+                if self.face.nb1[tf[j]-1] == 0:
+                    self.face.nb1[tf[j]-1] = i+1 
+                elif self.face.nb2[tf[j]-1] == 0:
+                    self.face.nb2[tf[j]-1] = i+1 
+                else:
+                    raise('ComputeInterconnections: face has more than two cell neighbours')
+
+        # Cell neighbours
+        self.cell.nbp1 = self.cell.fp1 # should be the same
+        self.cell.nbp2 = self.cell.fp2 
+        cc = 0 
+        for i in np.arange(0, self.cell.ntot, 1):
+            # Get cell faces
+            tf = self.cell.GetFace(i)
+
+            # Loop over each face
+            for j in np.arange(0, len(tf), 1):
+                if (self.face.nb1[tf[j]-1] == i+1):
+                    self.cell.nb[cc] = self.face.nb2[tf[j]-1]
+                elif (self.face.nb2[tf[j]-1] == i+1):
+                    self.cell.nb[cc] = self.face.nb1[tf[j]-1]
+                else:
+                    raise('ComputeInterconnections: something wrong in grid interconnection')
+                cc = cc + 1
+
+
+#----------------------------------------------------------------------#
+#                        GENERAL 2D INTERPOLANT                        #
+#----------------------------------------------------------------------#
+
+# General 2D unstructured interpolant based on grid
+class GridInterpolant2D:
+    def __init__(self):
+        # Grid description
+        self.grid = Grid()
+
+        # Points
+        self.x = np.zeros(0, dtype=float)
+        self.y = np.zeros(0, dtype=float)
+
+        # (normalized) field for curvilinear method evaluated at cell centers
+        self.bx = np.zeros(0, dtype=float)
+        self.by = np.zeros(0, dtype=float)
+
+        # Values at points
+        self.f = np.zeros(0, dtype=float)
+
+        # Gradient at points (doesn't have to be in x, y direction)
+        self.dfdx = np.zeros(0, dtype=float)
+        self.dfdy = np.zeros(0, dtype=float)
+
+        # Length method
+        self.method = ''
+
+    def Initialize(self, grid):
+        self.grid = grid 
+        self.x = np.zeros(grid.cell.ntot, dtype=float)
+        self.y = np.zeros(grid.cell.ntot, dtype=float)
+        self.bx = np.zeros(grid.cell.ntot, dtype=float)
+        self.by = np.zeros(grid.cell.ntot, dtype=float)
+        self.f = np.zeros(grid.cell.ntot, dtype=float) 
+        self.dfdx = np.zeros(grid.cell.ntot, dtype=float)
+        self.dfdy = np.zeros(grid.cell.ntot, dtype=float)
+        self.method = ''
+
+    def Construct(self, grid, cellvalues, method):
+        # Construct the interpolant based on the values defined 
+        # in the cell centers. 
+
+        # Initialize
+        self.Initialize(grid)
+
+        # checks
+        if (not (len(cellvalues) == grid.cell.ntot)):
+            raise('Construction of GridInterpolant2D: cell values do '
+                  + 'not have the same dimension as grid cells')
+        
+        # Add basic values
+        self.f = cellvalues 
+        self.method = method 
+        self.grid = grid 
+
+        # Compute cell center coordinates and add
+        for i in np.arange(0, grid.cell.ntot, 1):
+            tv = grid.cell.GetVert(i)
+            self.x[i] = np.mean(grid.vert.x[tv-1])
+            self.y[i] = np.mean(grid.vert.y[tv-1])
+
+            tbx = -grid.vert.by[tv-1] # actually bx is dpsidx etc 
+            tby = grid.vert.bx[tv-1] 
+
+            self.bx[i] = np.mean(tbx) # May need a better way to determine this...
+            self.by[i] = np.mean(tby)
+
+        # Normalize
+        bn = np.sqrt(self.bx**2 + self.by**2)
+        self.bx = self.bx/bn 
+        self.by = self.by/bn
+
+        # Compute derived quantities
+        match self.method: 
+            case 'cartesian':
+                # Reconstruct gradient based on cartesian coordinates
+                for i in np.arange(0, grid.cell.ntot, 1):
+                    # Get cell neighbours
+                    tc = grid.cell.GetNeig(i)
+
+                    # Compute distances
+                    tdx = self.x[tc-1] - self.x[i]
+                    tdy = self.y[tc-1] - self.y[i]
+
+                    # Compute rhs
+                    b = self.f[i] - self.f[tc-1]
+                    b = np.append(float(i), b)
+
+                    # Compute lhs 
+                    a = np.zeros((len(tc)+1, 3)) # not square per se
+                    a[0, :] = [1.0, 0.0, 0.0]
+                    for j in np.arange(0, len(tc)):
+                        a[j+1, :] = [1.0, tdx[j], tdy[j]]
+
+                    A = np.matmul(np.transpose(a), a)
+
+                    # Solve
+                    x = np.linalg.solve(A, np.matmul(np.transpose(a), b))
+
+                    # Add
+                    self.dfdx[j] = x[1]
+                    self.dfdy[j] = x[2]
+
+
+                    # Compute coefficients by unweighted least squares
+            case 'curvilinear':
+                # Reconstruct gradient based on curvilinear coordinates
+                for i in np.arange(0, grid.cell.ntot, 1):
+                    # Get cell neighbours
+                    tc = grid.cell.GetNeig(i)
+
+                    # Compute distances
+                    tdx = self.x[tc-1] - self.x[i]
+                    tdy = self.y[tc-1] - self.y[i]
+                    tdtheta = tdx*self.bx[tc-1] + tdy*self.by[tc-1]
+                    tdr = -tdx*self.by[tc-1] + tdy*self.bx[tc-1]
+
+                    # Compute rhs
+                    b = self.f[i] - self.f[tc-1]
+
+                    # Compute lhs 
+                    a = np.zeros((3, len(tc)+1)) # not square per se
+                    a[0, :] = [1.0, 0.0, 0.0]
+                    for j in np.arange(0, len(tc)):
+                        a[j+1, :] = [1.0, tdtheta[j], tdr[j]]
+
+                    A = np.matmul(np.transpose(a), a)
+
+                    # Solve
+                    x = np.linalg.solve(A, np.transpose(a)*b)
+
+                    # Add
+                    self.dfdx[j] = x[1]
+                    self.dfdy[j] = x[2]
+            case _: 
+                raise('ConstructGridInterpolant2D: unknown method')
+
+    def Evaluate(self, xq, yq):
+        # Description
+        #------------
+        # Evaluate the interpolant at xq, yq coordinates and return the
+        # values in vq
+
+        # Checks
+        if (not (len(xq) == len(yq) )):
+            raise('EvaluateGridInterpolant2D: incompatible sizes of query point coordinates')
+        
+        # Initialize
+        vq = np.zeros(len(xq), dtype=float)
+
+        # Check which distance metric to take
+        match self.method:
+
+            case 'cartesian': # based on regular x, y coordinates
+
+                # Check for each query point which cell lies closest
+                for i in np.arange(0, len(xq), 1):
+                    # Unpack
+                    txq = xq[i]
+                    tyq = yq[i]
+
+                    # Compute distance
+                    dist = np.sqrt((self.x - txq)**2 + (self.y - tyq)**2) 
+                    mindistind = np.argmin(dist)
+                    dx = txq - self.x[mindistind]
+                    dy = tyq - self.y[mindistind] 
+
+                    # Compute value
+                    vq[i] = self.f[mindistind] + self.dfdx[mindistind]*dx + self.dfdy[mindistind]*dy
+
+            case 'curvilinear': # based on radial/poloidal distance
+
+                # Check for each query point which cell lies closest
+                for i in np.arange(0, len(xq), 1):
+                    # Unpack
+                    txq = xq[i]
+                    tyq = yq[i]
+
+                    # Compute distance
+                    dist = np.sqrt((self.x - txq)**2 + (self.y - tyq)**2) 
+                    mindistind = np.argmin(dist)
+                    dx = txq - self.x[mindistind]
+                    dy = tyq - self.y[mindistind] 
+
+                    # Compute poloidal (parallel) and radial (perpendicular) distance
+                    dtheta = dx*self.bx[mindistind] + dy*self.by[mindistind]
+                    dr = -dx*self.by[mindistind] + dy*self.bx[mindistind]
+
+                    # Compute value
+                    vq[i] = self.f[mindistind] + self.dfdx[mindistind]*dtheta + self.dfdy[mindistind]*dr
+                    
+            case _: 
+                raise('EvaluateGridInterpolant2D: unknown method')
+
+        # Return 
+        return vq
+    

@@ -118,7 +118,8 @@ module ggmod_gridgeneration2D
     use omp_lib
     implicit none
     private 
-    public :: GenerateUnstructuredAlignedGrid, TranslateGridLabels
+    public :: GenerateUnstructuredAlignedGrid, TranslateGridLabels, &
+        ComputeTopologicalData
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -11813,20 +11814,141 @@ module ggmod_gridgeneration2D
         type(TopomeshUDT), intent(in)           :: topomesh
 
         ! Auxiliary
+        integer(I8)                             :: tp, tploc, &
+            ndivface, ndiv, ps, pe
+        integer(I8), allocatable, dimension(:)  :: primaryxp, &
+            allpoints, divind, tpbf, tpf, tflabels, divface, sortind, &
+            vertdivID
+        integer(I8), allocatable, dimension(:, :)   :: divfacevert
 
-        ! Compute
-        !========
+        logical, allocatable, dimension(:)      :: isdivface, &
+            isbranchingpolygon, ispolygonstart
+
+        ! Loop
+        integer(I8)                             :: i, j, k
+
+        ! Compute basic data
+        !===================
         ! Determine topological mesh type
         simgrid%data%topoflag = IdentifyTopologicalMeshType(topomesh)
 
-        ! X-points, strike points, O-points
+        ! Basic X-, O-, S-, T-point data
         simgrid%data%xpointID = topomesh%GetXPointIDs()
-        simgrid%data%spointID = topomesh%GetStrikePointIDs()
         simgrid%data%opointID = topomesh%GetOPointIDs()
+        simgrid%data%spointID = topomesh%GetStrikePointIDs()
+        simgrid%data%tpointID = topomesh%GetClosedContourTangencyPointIDs()
+        simgrid%data%spointxpID = topomesh%GetStrikePointXPointIDs()
         simgrid%data%nxp = size(simgrid%data%xpointID)
-        simgrid%data%nsp = size(simgrid%data%spointID)
         simgrid%data%nop = size(simgrid%data%opointID)
+        simgrid%data%nsp = size(simgrid%data%spointID)
+        simgrid%data%ntp = size(simgrid%data%tpointID)        
 
+        ! Compute divertor data
+        !======================
+        ! A divertor target part is defined as all the (sorted) faces 
+        ! with a label near one (or multiple) strike or tangency 
+        ! points. Algorithm is simple: first, mark all face labels that
+        ! are labels of a divertor plate. Then, extract the faces and
+        ! sort them. Each polygon then forms a divertor target. In post-
+        ! process, the mapping between strike/tangency points and 
+        ! divertor targets can be made. 
+
+        ! Initialize
+        allocate(divind(topomesh%vert%ntot))
+        divind = 0
+        
+        ! Concatenate for ease
+        allpoints = [simgrid%data%spointID, simgrid%data%tpointID]
+
+        ! Loop
+        allocate(isdivface(simgrid%face%ntot))
+        isdivface = .false.
+        do i = 1, size(allpoints)
+            ! Determine the next point
+            tp = allpoints(i)
+
+            ! Get the boundary faces of this point
+            tpf = GetvertFace(simgrid%vert, tp)
+            allocate(tpbf(count(simgrid%face%BF(tpf))))
+            tpbf = pack(tpf, simgrid%face%BF(tpf))
+
+            ! Take face labels
+            tflabels = simgrid%face%label(tpbf)
+
+            ! Mark faces with these labels
+            do j = 1, size(tflabels)
+                where (simgrid%face%label == tflabels(j)) isdivface = .true.
+            end do 
+
+            ! Housekeeping
+            deallocate(tpbf)
+        end do
+
+        ! Get all divertor face vertices and sort
+        ndivface = count(isdivface)
+        allocate(divface(ndivface))
+        divface = pack([(k, k = 1, simgrid%face%ntot)], isdivface)
+        divfacevert = simgrid%face%vert(divface, :)
+        allocate(sortind(ndivface), ispolygonstart(ndivface), &
+            isbranchingpolygon(ndivface))
+        call SortPolygonEdges(divfacevert, ndivface, sortind, ispolygonstart, &
+            isbranchingpolygon)
+        divfacevert = divfacevert(sortind, :)
+        divface = divface(sortind)
+
+        ! Sanity checks
+        if (count(isbranchingpolygon) /= 0) then 
+            call gdErrorHandler('ComputeTopologicalData: some divertor ' // & 
+                'plates form branching polygons, unexpected')
+        end if 
+
+        ! Build list and pointer
+        if (allocated(simgrid%data%divFcP)) deallocate(simgrid%data%divFcP)
+        simgrid%data%divFc = divface
+        simgrid%data%ndivFc = size(divface)
+        ndiv = count(ispolygonstart)
+        simgrid%data%ndiv = ndiv
+        allocate(simgrid%data%divFcP(ndiv, 2))
+        allocate(vertdivID(simgrid%vert%ntot))
+        vertdivID = 0
+        ps = 0
+        pe = 0
+        do i = 1, ndiv 
+            ! Get polygon bounds
+            ps = findloc(ispolygonstart(pe+1:), .true., 1, back=.false.)
+            ps = ps + pe 
+            if (i < ndiv) then 
+                pe = findloc(ispolygonstart(ps+1:), .true., 1, back=.false.)
+                pe = pe + ps - 1
+            else
+                pe = size(ispolygonstart)
+            end if 
+
+            ! Set pointer
+            simgrid%data%divFcP(i, 1) = ps
+            simgrid%data%divFcP(i, 2) = pe - ps + 1
+
+            ! Set divertor plate ID for vertices
+            vertdivID([divfacevert(ps:pe, 1), divfacevert(ps:pe, 2)]) = i
+        end do
+
+        ! Compute additional point data
+        !==============================
+        ! Additional x-point data
+        primaryxp = topomesh%GetPrimaryXPointIDs()
+        if (allocated(simgrid%data%isprimaryxp)) deallocate(simgrid%data%isprimaryxp)
+        allocate(simgrid%data%isprimaryxp(simgrid%data%nxp))
+        do i = 1, simgrid%data%nxp
+            if (any(simgrid%data%xpointID(i) == primaryxp)) then 
+                simgrid%data%isprimaryxp(i) = 1
+            else
+                simgrid%data%isprimaryxp(i) = 0 
+            end if 
+        end do 
+
+        ! Additional s-, t-point data
+        simgrid%data%spointdivID = vertdivID(simgrid%data%spointID)
+        simgrid%data%tpointdivID = vertdivID(simgrid%data%tpointID) 
 
     end subroutine
 
@@ -11942,7 +12064,7 @@ module ggmod_gridgeneration2D
         ! Face label counter and face label increment
         flc = 0 
         flcinc = -1 ! we set negative face labels
-        flccoreinc = -4 ! we set different core labels
+        flccoreinc = SOLPScorefclblIDincr ! we set different core labels
         flccore = SOLPScorefclblID
 
         ! Set solps temporary labels
@@ -12209,14 +12331,14 @@ module ggmod_gridgeneration2D
                 coreIDc = coreIDc + SOLPScoreregIDincr
             else
                 ! Check if we should update the region ID
-                if (regIDc == coreIDc) then 
+                !if (regIDc == coreIDc) then 
                     if (mySOLPScoreregIDincr /= 0) then 
                         if ((mod(regIDc, mySOLPScoreregIDincr)-solpscoreregID) == 0) then 
                         ! Assumed solpscoreregIDincr larger than one
                         regIDc = regIDc + 1
                         end if 
                     end if
-                end if 
+                !end if 
                 cellregionmapping(i) = regIDc 
                 regIDc = regIDc + 1
             end if 

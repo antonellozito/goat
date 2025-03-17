@@ -187,7 +187,8 @@ module ggmod_topology2D
             GetTargetFaceIDs, GetSeparatrixFaceIDs, GetVesselFaceIDs, &
             GetCoreFaceIDs, GetCoreCellIDs, GetWideGridCellIDs, &
             GetSeparatrixFluxSurfaceIDs, GetStrikePointIDs, GetXPOintIDs, &
-            GetOPointIDs
+            GetOPointIDs, GetPrimaryXPointIDs, GetStrikePointXPointIDs, &
+            GetClosedContourTangencyPointIDs
     end type 
 
     contains 
@@ -605,7 +606,7 @@ module ggmod_topology2D
         !==================
         ! Arguments
         class(TopomeshUDT), intent(inout)       :: topomesh
-        class(ContourTracerUDT), intent(inout)  :: fieldtracer 
+        class(ContourTracerUDT), intent(in)     :: fieldtracer 
         type(MagneticFieldUDT), intent(in)      :: magneticField 
         type(TopomeshOptionsUDT), intent(in)    :: options 
 
@@ -8864,6 +8865,232 @@ module ggmod_topology2D
             (topomesh%vert%type == TMvertexmaxID)
         allocate(ID(count(isOP)))
         ID = pack([(k, k = 1, size(isOP))], isOP)
+
+    end function
+
+    function GetPrimaryXPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns the vertex IDs of all x-points that 
+        ! lie close to a core (close in the sense that there is no other
+        ! x-point between this x-point and the next o-point). This can 
+        ! only occur if the x-point is present in a core region's 
+        ! vertices. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        integer(I8), allocatable, dimension(:)  :: ID
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: corecells, tv
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(ID(0))
+
+        ! Unpack
+        associate(&
+            cell        => topomesh%cell,   &
+            vert        => topomesh%vert    &
+            )
+
+        ! Determine primary x-points
+        !===========================
+        ! Determine core cells
+        corecells = topomesh%GetCoreCellIDs()
+        do i = 1, size(corecells)
+            ! Get vertices
+            tv = cell%GetVert(corecells(i))
+
+            ! Check which ones are x-points (if any) and add
+            ID = [ID, pack(tv, vert%type(tv) == TMvertexsaddleID)]
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end function
+
+    function GetStrikePointXPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns the x-point ID for each strike point 
+        ! as returned by GetStrikePointIDs (a strike point can only 
+        ! have one X-point normally speaking). To determine this, we 
+        ! start from each strike point and keep tracing the aligned 
+        ! field line it belongs to until an x-point is reached (normally, 
+        ! this is already reached in the first face but ok)
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        integer(I8)                             :: nsp, tspfloc, &
+            nextv, tsp
+        integer(I8), allocatable, dimension(:)  ::sp, tspf, tfvert
+
+        ! Loop
+        integer(I8)                 :: i
+
+        ! Initialize
+        !===========
+        ! Get strike points
+        sp = topomesh%GetStrikePointIDs()
+        nsp = size(sp)
+        
+        ! Initialize array
+        allocate(ID(nsp))
+        ID = 0
+
+        ! Associate
+        associate(&
+            vert    => topomesh%vert,   &
+            face    => topomesh%face    &
+            )
+
+        ! Loop
+        !=====
+        do i = 1, nsp
+            ! Unpack 
+            tsp = sp(i)
+
+            ! Get faces of this strike point
+            tspf = vert%GetFace(tsp)
+
+            ! Get separatrix face
+            tspfloc = findloc(face%type(tspf), TMfacesepID, 1)
+
+            ! Sanity check
+            if (tspfloc == 0) then 
+                call gdErrorHandler('GetStrikePointXPointIDs: could not ' // & 
+                    'find separatrix face, unexpected')
+            end if 
+
+            ! Get the next vertex
+            tfvert = face%vert(tspf(tspfloc), :)
+            if (tfvert(1) == tsp) then 
+                nextv = tfvert(2)
+            elseif (tfvert(2) == tsp) then 
+                nextv = tfvert(1)
+            else
+                call gdErrorHandler('GetStrikePointXPointIDs: something ' // & 
+                    'wrong with topomesh interconnections, could not ' // & 
+                    'find current vertex in face vertices')
+            end if 
+
+            ! Check the point type
+            if (vert%type(nextv) == TMvertexsaddleID) then 
+                ! Found, add and cycle
+                ID(i) = nextv 
+                cycle
+            elseif (vert%type(nextv) == TMvertexbndID) then 
+                ! Shouldn't happen, error
+                call gdErrorHandler('GetStrikePointXPointIDs: could not ' // & 
+                    'find X-point of strike point')
+            end if 
+
+            ! If we got here, we need to keep on walking along the 
+            ! separatrix - this is not yet implemented
+            call gdErrorHandler('GetStrikePointXPointIDs: strike points ' // & 
+                'that do not directly connect to an x-point are not yet ' // & 
+                'supported')
+
+        end do
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end function
+
+    function GetClosedContourTangencyPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns the tangency point IDs (type 2) that 
+        ! have a contour which closes upon itself. 
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tv, &
+            sortind, tf
+        integer(I8), allocatable, dimension(:, :)   :: tfvert
+        logical, allocatable, dimension(:)      :: isbranchingpolygon, &
+            ispolygonstart
+
+        ! Loop
+        integer(I8)                 :: i, k
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(ID(0))
+
+        ! Associate
+        associate(&
+            face        => topomesh%face,   &
+            vert        => topomesh%vert    &
+            )
+
+        ! Loop
+        !=====
+        do i = 1, vert%ntot
+            if (vert%type(i) == TMvertextp2ID) then 
+                ! Get all topomesh faces with this flux surface ID
+                allocate(tf(count(face%fsID == vert%fsID(i))))
+                tf = pack([(k, k = 1, face%ntot)], face%fsID == vert%fsID(i))
+
+                ! Check by sorting vertices 
+                tfvert = face%vert(tf, :)
+                allocate(sortind(size(tf)), ispolygonstart(size(tf)), &
+                    isbranchingpolygon(size(tf)))
+                call SortPolygonEdges(tfvert, size(tf), sortind, ispolygonstart, &
+                    isbranchingpolygon)
+                tfvert = tfvert(sortind, :)
+
+                ! Sanity checks
+                if (count(ispolygonstart) /= 1) then 
+                    call gdErrorHandler('GetClosedContourTangencyPointIDs: ' // & 
+                        'found no or multiple polygons, unexpected')
+                end if 
+                if (count(isbranchingpolygon) /= 0) then 
+                    call gdErrorHandler('GetClosedContourTangencyPointIDs: ' // &
+                        'found branching polygons, unexpected')
+                end if 
+
+                ! Check first and last edge
+                call SetDiff(tfvert(1, :), tfvert(size(tf), :), tv)
+                if (size(tv) == 0) then 
+                    ! Found, add
+                    ID = [ID, i]
+                end if 
+
+                ! Housekeeping
+                deallocate(tf, sortind, ispolygonstart, isbranchingpolygon)
+
+            end if 
+        end do
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end function
  

@@ -800,7 +800,42 @@ def PlotGridCells(grid, fignum):
      # Set axes
     SetAxesLimits2D(plt.gca(), xb, yb)
     
+# Grid topological data
+def PlotGridTopologicalData(grid, fignum):
+    # Description
+    #------------
+    # Plot a grid and highlight the topological data 
+    
+    # Plot the grid
+    PlotGridFaces(grid, fignum)
 
+    # Plot x-points
+    if (grid.topodata.nxp > 0):
+        xpID = grid.topodata.XpointID-1
+        PlotPoints2D(grid.vert.x[xpID], grid.vert.y[xpID], fignum, marker='x', color='r', label='x-points')
+
+    # Plot o-points
+    if (grid.topodata.nop > 0):
+        xpID = grid.topodata.OpointID-1
+        PlotPoints2D(grid.vert.x[xpID], grid.vert.y[xpID], fignum, marker='o', color='r', label='o-points')
+
+    # Plot strike points
+    if (grid.topodata.nsp > 0):
+        xpID = grid.topodata.SpointID-1
+        PlotPoints2D(grid.vert.x[xpID], grid.vert.y[xpID], fignum, marker='^', color='r', label='strike points')
+
+    # Plot tangency points
+    if (grid.topodata.ntp > 0):
+        xpID = grid.topodata.TpointID-1
+        PlotPoints2D(grid.vert.x[xpID], grid.vert.y[xpID], fignum, marker='s', color='r', label='tangency points')
+
+    # Plot divertor targets
+    if (grid.topodata.ndiv > 0):
+        xf = 0.5*(grid.vert.x[grid.face.v1-1] + grid.vert.x[grid.face.v2-1])
+        yf = 0.5*(grid.vert.y[grid.face.v1-1] + grid.vert.y[grid.face.v2-1])
+        for i in np.arange(0, grid.topodata.ndiv, 1):
+            tdivfaces = grid.topodata.GetDivFace(i)
+            PlotPolygons2D(xf[tdivfaces-1], yf[tdivfaces-1], fignum, label='divertor target ' + str(i))
 #--------------------------------------------------------------------------#
 #                             Shape Optimization                           #
 #--------------------------------------------------------------------------#
@@ -1143,6 +1178,31 @@ def Plot2DSurfaceDataContour(filepath, fignum, **plotargs):
     PlotGeneral2DContour(data[:, 0], data[:, 1], data[:, 2], fignum, **plotargs)
 
     # Add colorbar
+
+#--------------------------------------------------------------------------#
+#                                 Interpolant                              #
+#--------------------------------------------------------------------------#
+
+def VisualizeGridInterpolant2D(interp, fignum):
+    # Description
+    #------------
+    # Simple routine to visualize the grid interpolant evaluated on 
+    # some predefined raster
+
+    # Construct grid vectors
+    xb = np.array([np.min(interp.grid.vert.x), np.max(interp.grid.vert.x)])
+    yb = np.array([np.min(interp.grid.vert.y), np.max(interp.grid.vert.y)]) 
+    resx = 100
+    resy = 100
+    x = np.linspace(xb[0], xb[1], resx)
+    y = np.linspace(yb[0], yb[1], resy)
+    val = np.zeros((len(x), len(y)), dtype=float)
+    for i in np.arange(0, len(x), 1): 
+        for j in np.arange(0, len(y), 1):
+            val[i, j] = interp.Evaluate(x[i], y[j])
+
+    # Visualize
+    PlotStructured2DSurface(x, y, val, fignum)
 
 
 #==========================================================================#

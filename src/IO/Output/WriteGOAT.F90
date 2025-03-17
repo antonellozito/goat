@@ -34,7 +34,8 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
     type(EnvironmentUDT), intent(in)        :: environment
 
     ! Auxiliary
-    character(:), allocatable               :: version, tempstring, fmt
+    character(:), allocatable               :: version, tempstring, fmt, &
+        gridversion
     integer                                 :: fu 
 
     ! Loop
@@ -69,13 +70,24 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
         ffbzv           => grid%vert%ffbz,      &
         nvertcell       => grid%vert%ncell,     &
         nvertface       => grid%vert%nface,     &
+        fieldlineID     => grid%vert%fieldlineID,   &
+        isprimaryxp     => grid%data%isprimaryxp,   &
+        SpointxpID      => grid%data%spointxpID,    &
+        SpointdivID     => grid%data%spointdivID,   &
         Xpoint          => grid%data%xpointID,  &
         Opoint          => grid%data%opointID,  &
         Spoint          => grid%data%spointID,  &
+        Tpoint          => grid%data%tpointID,  &
+        TpointdivID     => grid%data%tpointdivID,   &
         topoflag        => grid%data%topoflag,  &
         nX              => grid%data%nxp,       &
         nO              => grid%data%nop,       &
         nS              => grid%data%nsp,       &
+        nT              => grid%data%ntp,       &
+        nDiv            => grid%data%ndiv,      &
+        ndivFc          => grid%data%ndivFc,    &
+        divFc           => grid%data%divFc,     &
+        divFcP          => grid%data%divFcP,    &
         nf              => grid%face%ntot,      &
         facevert        => grid%face%vert,      &
         labelf          => grid%face%label,     &
@@ -121,8 +133,15 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
         isClassicalGrid => grid%data%sglegacy%isclassicalgrid       &
         )
 
+    ! Write
+    !======
     ! Version
-    version = 'VERSION' // SOLPSversion // ' traduit.out.b2us'
+    if (goatoptions%write_topologicaldata) then 
+        gridversion = '03.002.001'
+    else
+        gridversion = '03.002.000'
+    end if 
+    version = 'VERSION' // gridversion // ' traduit.out.b2us'
     write(fu, '(a)') version 
 
     ! General grid information
@@ -148,49 +167,67 @@ subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
         fmt = '(3'//Ifm//')'
         write(fu, fmt) sgnx, sgny, sgncut
     end if 
+    
+    if (goatoptions%write_topologicaldata) then 
+        ! Topological flag
+        tempstring = '*cf:    int                1    topoflag'
+        write(fu, '(a)' ) tempstring
+        fmt = '(1'//Ifm//')'
+        write(fu, fmt) topoflag
 
-#ifdef debug 
-    ! Topological flag
-    tempstring = '*cf:    int                1    topoflag'
-    write(fu, '(a)' ) tempstring
-    fmt = '(1'//Ifm//')'
-    write(fu, fmt) topoflag
+        ! Topological points information
+        tempstring = '*cf:    int                6    nX,nO,nS,nT,nDiv,nDivFc'
+        write(fu, '(a)' ) tempstring
+        fmt = '(6'//Ifm//')'
+        write(fu, fmt) nX, nO, nS, nT, nDiv, nDivFc
 
-    ! Topological points information
-    tempstring = '*cf:    int                3    nX,nO,nS'
-    write(fu, '(a)' ) tempstring
-    fmt = '(3'//Ifm//')'
-    write(fu, fmt) nX, nO, nS
+        ! X-point data
+        tempstring = '*cf: Vx isprimary fsID'
+        write(fu, '(a)' ) tempstring 
+        fmt = '(3'//Ifm//')'
+        do i = 1, nX 
+            write(fu, fmt) Xpoint(i), isprimaryxp(i), fieldlineID(Xpoint(i))
+        end do
 
-    ! OMP and IMP lengths
-    !if (goatoptions%write_OMPdata) then 
-    !    tempstring = '*cf:    int                4    ncvOMP,ncvIMP,nfcOMP,nfcIMP'
-    !    write(fu, '(a)' ) tempstring
-    !    fmt = '(4'//Ifm//')'
-    !    write(fu, fmt) ncvOMP, ncvIMP, nfcOMP, nfcIMP 
-    !end if 
+        ! O-point data
+        tempstring = '*cf: Vx'
+        write(fu, '(a)' ) tempstring 
+        do i = 1, nO 
+            fmt = '('//Ifm//')' 
+            write (fu, fmt) Opoint(i)
+        end do 
 
-    ! X-point data
-    write(fu, '(2a8,i12,4x,a8)') '*cf:    ','int     ', nX, 'Xpoints '
-    do i = 1, nX 
-        fmt = '('//Ifm//')' 
-        write (fu, fmt) Xpoint(i)
-    end do 
+        ! S-point data
+        tempstring = '*cf: Vx xpID divID fsID'
+        write(fu, '(a)' ) tempstring 
+        do i = 1, nS 
+            fmt = '(4'//Ifm//')' 
+            write (fu, fmt) Spoint(i), SpointxpID(i), SpointdivID(i), fieldlineID(Spoint(i))
+        end do
 
-    ! O-point data
-    write(fu, '(2a8,i12,4x,a8)') '*cf:    ','int     ', nO, 'Opoints '
-    do i = 1, nO 
-        fmt = '('//Ifm//')' 
-        write (fu, fmt) Opoint(i)
-    end do 
+        ! T-point data
+        tempstring = '*cf: Vx divID fsID'
+        write(fu, '(a)' ) tempstring 
+        do i = 1, nT 
+            fmt = '(3'//Ifm//')' 
+            write (fu, fmt) Tpoint(i), TpointdivID(i), fieldlineID(Tpoint(i))
+        end do
 
-    ! S-point data
-    write(fu, '(2a8,i12,4x,a8)') '*cf:    ','int     ', nS, 'Spoints '
-    do i = 1, nS 
-        fmt = '('//Ifm//')' 
-        write (fu, fmt) Spoint(i)
-    end do
-#endif 
+        ! Divertor target data
+        tempstring  = '*cf: div divFcP(:,1) divFcP(:,2)'
+        write(fu, '(a)' ) tempstring 
+        do i = 1, nDiv
+            fmt = '(3'//Ifm//')' 
+            write (fu, fmt) i, divFcP(i, 1), divFcP(i, 2)
+        end do
+
+        ! Divertor face list
+        tempstring = repeat(' ', 1000)
+        write(fu, '(2a8,i12,4x,a5)') '*cf:    ','int     ', ndivFc, 'divFc'
+        fmt = repeat(' ', 1000)
+        write(fmt, *) '(', 12, '(', Ifm, '))'
+        write(fu, fmt) divFc
+    end if 
 
     ! Vertex information
     tempstring = '*cf: Vx vxX vxY vxPsi vxBx vxBy vxFfbz'

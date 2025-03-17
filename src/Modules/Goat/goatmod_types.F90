@@ -343,11 +343,28 @@ module goatmod_types
         ! - topoflag            : flag indicating the topological mesh 
         !                       type (see also mod_definitions)
         ! - xpointID            : array containing all X-point vertex IDs
+        ! - isprimaryxp         : integer array which is 1 if the 
+        !                       x-point is a primary x-point (i.e. it 
+        !                       lies on a separatrix that is connected
+        !                       directly to a core region), otherwise 0
         ! - nxp                 : number of x-points
         ! - spointID            : array containing all strike point vertex IDs
         ! - nsp                 : number of strike points
         ! - opointID            : O point IDs (in the grid)
         ! - nop                 : number of o points
+        ! - tpointID            : Tangency point IDs (but here tangency 
+        !                       points are only those tangency points 
+        !                       that have a closed contour in the grid!)
+        ! - ntp                 : number of t points
+        ! - spointxpID          : x-point vertex number of the x-point 
+        !                       the strike point belongs to
+        ! - ndiv                : number of divertor targets/plates
+        ! - spointdivID         : list of targets that belong to strike 
+        !                       points (one target each)
+        ! - tpointdivID         : same as above but for tangency points
+        ! - ndivFc              : total number of divertor faces
+        ! - divFc               : list of divertor faces
+        ! - divFcP              : pointer for the list of divertor faces
 
         ! Flux data
         type(FluxDataUDT)           :: fluxdata
@@ -366,10 +383,13 @@ module goatmod_types
         real(R8), dimension(1:2)                :: OMPr, OMPz, IMPr, &
             IMPz
 
-        ! X-point(s), strike points, o points
+        ! X-point(s), strike points, o points, ...
         integer(I8), allocatable, dimension(:)  :: xpointID, &
-            spointID, opointID
-        integer(I8)                             :: nxp, nsp, nop
+            spointID, opointID, tpointID, isprimaryxp, spointxpID, &
+            divFc, spointdivID, tpointdivID
+        integer(I8), allocatable, dimension(:, :)   :: divFcP
+        integer(I8)                             :: nxp, nsp, nop, ntp, &
+            ndiv, ndivFc
 
     end type
 
