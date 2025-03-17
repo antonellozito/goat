@@ -19,6 +19,7 @@ module Interpolant2D
     use mod_precision
     use mod_sparseinterface
     use mod_plotter
+    use mod_structured2Dgridding
 
     !==================================================================!
     !                                                                  !

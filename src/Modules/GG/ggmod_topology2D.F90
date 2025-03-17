@@ -26,7 +26,8 @@ module ggmod_topology2D
     use mod_sort
     use mod_definitions
     use mod_linearsolverinterface, only: SolveDenseLinearSystemDI
-    use goatmod_types, only : magneticFieldUDT, VesselUDT
+    use goatmod_types, only : magneticFieldUDT, VesselUDT, &
+        ConstructVesselPolygonSet
     use goatmod_userinput, only : TopomeshOptionsUDT
     use Interpolant1D
     use mod_streamlinetracing2D
