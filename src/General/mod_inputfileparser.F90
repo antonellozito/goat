@@ -85,6 +85,7 @@ module mod_inputfileparser
     !============
     use mod_precision
     use mod_specialchars 
+    use mod_std_formatspecs, only: Rfm
     use mod_readwrite 
     use mod_errorhandler
 
@@ -1722,7 +1723,155 @@ module mod_inputfileparser
 
     end subroutine
 
-    ! Auxiliary routines
+    ! String splitting, returns list of strings
+    function SplitString(stringval, sep) result(strlist)
+
+        ! Description
+        !============
+        ! This routine splits a string based on the separator values
+        ! given in 'sep' (these may be multiple values). The result is 
+        ! stored in a list of strings. If the input string is empty, 
+        ! then the strlist will be empty and of size 0. If the input 
+        ! list is not empty but all characters equal a separator, then 
+        ! also the input 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(*), intent(in)        :: stringval, sep 
+        type(StringUDT), allocatable    :: strlist(:)
+
+        ! Auxiliary
+        character(:), allocatable           :: tempstring, auxstring
+        logical, allocatable, dimension(:)  :: issep, temp 
+        integer(I8)                         :: nstrings
+
+        ! Loop
+        integer(I8)                     :: i, cc
+
+        ! Checks
+        !=======
+        ! Check for trivial case
+        if (len(stringval) == 0) then 
+            allocate(strlist(0))
+            return 
+        end if 
+
+        ! Check for faulty input
+        if (len(sep) == 0) then 
+            call gdErrorHandler('SplitString: at least one separator ' // & 
+                'value expected')
+        end if 
+
+        ! Split
+        !======
+        ! Replace all separators by the first one
+        tempstring = stringval 
+        allocate(issep(len(tempstring)))
+        issep = .false. 
+        do i = 1, len(sep)
+            call CompareStringWithCharacter(tempstring, sep(i:i), temp)
+            issep = issep .or. temp 
+        end do 
+
+        ! Count number of strings
+        nstrings = 0
+        if (.not. issep(1)) then 
+            ! Hedge for start effect
+            nstrings = nstrings + 1
+        end if 
+        do i = 2, len(tempstring)
+            ! Simply do count + 1 if we go from separator to non-separator
+            if (issep(i-1) .and. .not. issep(i)) then 
+                nstrings = nstrings + 1
+            end if 
+        end do 
+
+        ! Allocate
+        allocate(strlist(nstrings))
+
+        ! Extract
+        auxstring = ''
+        cc = 0
+        if (.not. issep(1)) then 
+            auxstring = auxstring // tempstring(1:1)
+        end if 
+        do i = 2, len(tempstring)
+            ! Simply append
+            if (.not. issep(i)) then 
+                auxstring = auxstring // tempstring(i:i)
+            elseif (issep(i) .and. .not. (issep(i-1))) then 
+                cc = cc + 1
+                strlist(cc)%val = auxstring 
+                auxstring = ''
+            else
+                ! Do nothing
+            end if 
+        end do 
+
+        ! Hedge for end effect
+        if (.not. issep(len(tempstring))) then
+            cc = cc + 1
+            strlist(cc)%val = auxstring  
+        end if
+
+    end function
+
+    ! Read until exact substring is found in line (position is next line)
+    subroutine ReadUntilMatchFound(fid, substring, sep, reachedeof)
+
+        ! Description
+        !============
+        ! This routine keeps reading next lines until either the 
+        ! a line contains the desired substring exactly between 
+        ! specified separators.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer, intent(in)             :: fid 
+        character(*), intent(in)        :: substring, sep
+        logical, intent(out)            :: reachedeof
+
+        ! Auxiliary
+        character(:), allocatable       :: thisline
+        type(StringUDT), allocatable    :: strlist(:)
+        
+        ! Loop
+        logical                         :: isnotfound 
+        integer(I8)                     :: i 
+
+        ! Initialize
+        !===========
+        isnotfound = .true. 
+        reachedeof = .false. 
+
+        ! Loop
+        !=====
+        do while (isnotfound .and. (.not. reachedeof))
+
+            ! Read next line
+            call ReadSingleLine(fid, thisline, reachedeof)            
+
+            ! Check 
+            if (reachedeof) then 
+                ! Will exit, do nothing
+            end if 
+
+            ! Split string 
+            strlist = SplitString(thisline, sep)
+            do i = 1, size(strlist)
+                if (strlist(i)%val == substring) then 
+                    ! Substring found, exit
+                    isnotfound = .false. 
+                    exit 
+                end if 
+            end do
+
+        end do
+
+
+    end subroutine
     
 
     !------------------------------------------------------------------!
@@ -1753,8 +1902,9 @@ module mod_inputfileparser
         ! Allocate
         if (allocated(l)) then  
             deallocate(l) 
-            allocate(l(len(s)))
         end if
+        allocate(l(len(s)))
+        
 
         ! Initialize
         l(:) = .false.

@@ -22,6 +22,8 @@ module goatmod_types
     use goatmod_userinput
     use mod_precision
     use mod_polygon
+    use mod_inputfileparser
+    use mod_plotter
     use Interpolant
     use PolygonShapeFunction
     use PolygonLevelsetFunction2D
@@ -470,6 +472,55 @@ module goatmod_types
     end type
 
     !------------------------------------------------------------------!
+    !                          DivGeo coupling                         !
+    !------------------------------------------------------------------!
+    type DivGeoDataUDT
+
+        ! Description
+        !============
+        ! DivGeo data structure to manipulate output obtained from .dgo
+        ! file. This typically includes elements that form structure or
+        ! vessel polygons etc. From this file, inputs may be retrieved
+        ! if it is available. Note that this object does not read in 
+        ! magnetic field data, as this is defined in the .equ and should
+        ! be read in through the magnetic field routines.
+
+        ! Currently, the following data is read in :
+        ! - Element point coordinates pairs P1, P2 (x, y, z, assumed in 
+        !   csv-like format - but we don't store z)
+        ! - Element face labels (fcLbl)
+        ! - Vessel elements (elvessel)
+
+        ! We indicate whether data is available using logicals
+        
+        integer(I8)                             :: nel, nv
+        integer(I8), allocatable, dimension(:)  :: elID, elfcLbl, elv1, &
+            elv2, elvessel
+        real(R8), allocatable, dimension(:)     :: elvx, elvy
+
+        logical     :: hasEl, hasElFcLbl, hasElVessel
+
+    contains 
+
+        ! Allocation
+        procedure :: Allocate   => AllocateDGData
+        procedure :: Deallocate => DeallocateDGData
+
+        ! Initialization
+        procedure :: Initialize => InitializeDGData
+
+        ! Reader
+        procedure :: Read       => ReadDGFile 
+
+        ! Structure extraction 
+        procedure :: ExtractStructures  => ExtractDGStructures
+
+        ! Vessel structure extraction
+        procedure :: ExtractVesselStructures => ExtractDGVesselStructures
+
+    end type
+
+    !------------------------------------------------------------------!
     !                            Environment                           !
     !------------------------------------------------------------------!
     ! Vessel structures
@@ -488,6 +539,8 @@ module goatmod_types
         ! - isclosed:   logical to indicate if the polygon should close
         !               upon itself
         ! - id:         identifier (integer number)
+        ! - label:      (optional) additional label. Zero by default, 
+        !               unless otherwise specified. 
 
         ! Coordinates
         integer(I8)                         :: np = 0
@@ -497,7 +550,7 @@ module goatmod_types
         logical                             :: isclosed
 
         ! ID
-        integer(I4)                         :: ID
+        integer(I4)                         :: ID, label
 
     end type
 
@@ -3708,7 +3761,6 @@ module goatmod_types
     
     end subroutine
     
-    
     ! Main reader
     subroutine ReadMagneticField(magneticField, mfoptions, filepath)
 
@@ -3757,11 +3809,16 @@ module goatmod_types
     
             ! Read in a classic rzpsi file 
             call Readrzpsi(filespecifier, magneticField)
+
+            ! Add additional data - needs to be specified separately
+            magneticField%RBtor = mfoptions%RBtor
     
         case ('equ')
     
             ! Read the equ file using CARRE subroutines - wrapper here
             call Readequ(filespecifier, magneticField)
+
+            ! RBtor computed from equilibrium file
     
         case default
     
@@ -3769,9 +3826,11 @@ module goatmod_types
             call gdErrorHandler('ReadMagneticField: unknown reading method')
     
         end select
+
+        ! Print RBtor value
+        print *, 'ReadMagneticField: RBtor [m T] = ', magneticField%RBtor
     
-        ! Add additional data
-        magneticField%RBtor = mfoptions%RBtor
+        
     
         ! Housekeeping
         !=============
@@ -4110,7 +4169,8 @@ module goatmod_types
         ! Add data
         magneticField%R = R(1:nr)
         magneticField%Z = Z(1:nz)
-        magneticField%Psi = pfm(1:nr, 1:nz)
+        magneticField%Psi = pfm(1:nr, 1:nz)*2*pi_R8 ! convert from Wb/rad to Wb
+        magneticField%RBtor = btf*rtf
     
     end subroutine
 
@@ -4148,7 +4208,6 @@ module goatmod_types
     
         ! Auxiliary variables 
         integer                             :: filespecifier
-        logical                             :: debugplots
     
         ! Additional environment structures
         type(VesselOptionsUDT)              :: vesseloptions
@@ -4254,7 +4313,8 @@ module goatmod_types
         ! Read the amount of structures
         read(filespecifier, *) nstruct
         print *, 'there are ', nstruct, ' structures present'
-        print *, 'vessel structure ID | number of points | is closed'
+        print *, 'vessel structure ID |vessel structure label | ' // &
+            'number of points | is closed'
 
         ! Allocate
         vessel%nstructures = nstruct
@@ -4265,8 +4325,9 @@ module goatmod_types
 
         ! Read in structures
         do i = 1, nstruct
-            ! Read the header (structure <structureID>)
-            read(filespecifier, *) dummy, vessel%structures(i)%ID
+            ! Read the header (structure <structurelabel>)
+            vessel%structures(i)%ID = int(i, kind=I4) 
+            read(filespecifier, *) dummy, vessel%structures(i)%label
 
             ! Read the number of points
             read(filespecifier, *) npoints
@@ -4277,7 +4338,8 @@ module goatmod_types
             call AllocateVesselStructure(vessel%structures(i))
 
             ! Print
-            print *, vessel%structures(i)%ID,  vessel%structures(i)%np, vessel%structures(i)%isclosed
+            print *, vessel%structures(i)%ID,  vessel%structures(i)%label, &
+                vessel%structures(i)%np, vessel%structures(i)%isclosed
 
             ! Read coordinates
             do j = 1, vessel%structures(i)%np
@@ -4292,7 +4354,6 @@ module goatmod_types
         
 
     end subroutine
-    
 
     ! Vessel
     !=======
@@ -4363,10 +4424,13 @@ module goatmod_types
         integer                         :: filespecifier
         type(VesselOptionsUDT)          :: vesseloptions 
         type(VesselUDT)                 :: vessel
+        type(DivGeoDataUDT)             :: dgdata
     
         ! Loop variables
     
         ! Auxiliary variables 
+        type(VesselStructureUDT), allocatable   :: structures(:)
+        integer(I8)                             :: flag
     
         ! Main program
         !=============
@@ -4381,6 +4445,23 @@ module goatmod_types
             ! Reformat the structures of the vessel into a single vessel
             ! polygon
             ! call FormatVesselStructures(vessel)
+
+        case ('read_dg')
+
+            ! Read from DivGeo file
+            call dgdata%Initialize()
+            call dgdata%Read(vesseloptions%filepath)
+            call dgdata%ExtractVesselStructures(structures, flag)
+
+            ! Check
+            if (flag > 0) then 
+                call gdErrorHandler('ReadVessel: could not read in ' // & 
+                    'vessel structure data from DivGeo file')
+            end if 
+
+            ! Initialize
+            vessel%nstructures = int(size(structures), kind=I4)
+            vessel%structures = structures
     
         case default
     
@@ -4499,7 +4580,7 @@ module goatmod_types
             if (.not. any(vesseloptions%exclude == i)) then 
                 ! Mapping 
                 pc = pc + 1
-                vesselIDmap(pc) = vs(i)%ID
+                vesselIDmap(pc) = vs(i)%label ! now propagating label instead of ID
     
                 ! Coordinates
                 tempx(cc+1:cc+vs(i)%np) = vs(i)%x
@@ -5724,6 +5805,732 @@ module goatmod_types
         ! Adjust vessel description
         !==========================
         call vessel%plfvessel%Initialize(vessel%polygonset)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                         DivGeo coupling                          !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeDGData(dgdata)
+
+        ! Description
+        !============
+        ! Initialize and allocate all data to default values
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DivGeoDataUDT)        :: dgdata 
+
+        ! Initialize
+        !===========
+        ! Logicals
+        dgdata%hasEl            = .false. 
+        dgdata%hasElFcLbl       = .false.
+        dgdata%hasElVessel      = .false. 
+
+        ! Elements & points
+        dgdata%nel      = 0
+        dgdata%nv       = 0 
+
+        ! Allocate
+        !=========
+        call dgdata%Allocate()
+        
+        
+    end subroutine
+
+    ! Allocation
+    subroutine AllocateDGData(dgdata)
+
+        ! Description
+        !============
+        ! Allocate the divgeo data object, assuming that all relevant 
+        ! sizes have been initialized.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DivGeoDataUDT)        :: dgdata 
+
+        ! First deallocate
+        !=================
+        ! Soft deallocation
+        call dgdata%Deallocate()
+        
+        ! Then allocate
+        !==============
+        ! Element & points
+        allocate(dgdata%elID(dgdata%nel), dgdata%elfcLbl(dgdata%nel), &
+            dgdata%elvx(dgdata%nv), dgdata%elvy(dgdata%nv), &
+            dgdata%elv1(dgdata%nel), dgdata%elv2(dgdata%nel))
+        
+        ! Vessel elements
+        allocate(dgdata%elvessel(dgdata%nel)) 
+
+    end subroutine
+
+    ! Deallocation
+    subroutine DeallocateDGData(dgdata)
+
+        ! Description
+        !============
+        ! Deallocate the divgeo data object (soft)
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DivGeoDataUDT)        :: dgdata 
+
+        ! Soft deallocation
+        !==================
+        ! Element & points
+        if (allocated(dgdata%elID)) deallocate(dgdata%elID)
+        if (allocated(dgdata%elfcLbl)) deallocate(dgdata%elfcLbl)
+        if (allocated(dgdata%elv1)) deallocate(dgdata%elv1)
+        if (allocated(dgdata%elv2)) deallocate(dgdata%elv2)
+        if (allocated(dgdata%elvx)) deallocate(dgdata%elvx)
+        if (allocated(dgdata%elvy)) deallocate(dgdata%elvy)
+
+        ! Vessel elements
+        if (allocated(dgdata%elvessel)) deallocate(dgdata%elvessel)
+
+    end subroutine
+
+    ! DivGeo .dgo reader
+    subroutine ReadDGFile(dgdata, filepath)
+
+        ! Description
+        !============
+        ! This routine allocates and reads in data from a .dgo file. The
+        ! following fields are read in:
+        ! - p1: list of first vertices of elements (x, y, z coordinates)
+        ! - p2: list of second vertices of elements (x, y, z coordinates)
+        ! - fcLbl: list of element labels
+        ! - vess_elm: list of vessel element indices
+
+        ! From this data, different other base quantities are derived, 
+        ! such as the element vertices (as a ne-by-2 array) and the 
+        ! vertices themselves. If data is not present, then the 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DivGeoDataUDT)            :: dgdata
+        character(*), intent(in)        :: filepath 
+
+        ! Auxiliary
+        integer(I8)                             :: np1, np2, nfcLbl, &
+            nwork
+        integer(I8), allocatable, dimension(:)  :: tempi, fcLbl, v1, v2, &
+            worki 
+        logical                                 :: reachedeof, hasp1, &
+            hasp2, islegal 
+        real(R8), allocatable, dimension(:)     :: tempr, x1, x2, &
+            y1, y2, z1, z2, x, y
+        character(:), allocatable       :: thisline
+
+        ! Loop
+
+        ! Data
+        integer         :: fid
+        data fid /70/
+        
+        ! Initialize
+        !===========
+        ! Initialize structure to defaults
+        call dgdata%Initialize()
+
+        ! Open file
+        !==========
+        ! Print from where we're reading
+        print *, 'reading divgeo output from file: ', filepath
+
+        ! Open the file
+        open(unit = fid, file = filepath)
+
+        ! Read file
+        !==========
+        ! Read elements & points
+        !-----------------------
+        ! Initialize
+        hasp1 = .true. 
+        hasp2 = .true. 
+        np1 = 0
+        np2 = 0
+
+        ! Read until we find 'p1'
+        call ReadUntilMatchFound(fid, 'p1', ' ', reachedeof)
+        if (reachedeof) then 
+            ! Set to false
+            hasp1 = .false. 
+        else
+            ! Initialize
+            allocate(x1(0), y1(0), z1(0))
+
+            ! Read in data
+            do while (.true.)
+                ! Read in the next triplet
+                call ReadSingleLine(fid, thisline, reachedeof)
+
+                ! Check for EOF
+                if (reachedeof) then 
+                    exit 
+                end if 
+
+                ! Check if we can extract coordinates
+                call ExtractRealFromString1D(thisline, tempr, islegal)
+
+                ! Check if the read was legal
+                if (.not. islegal) then 
+                    exit
+                end if 
+                if (size(tempr) /= 3) then 
+                    exit
+                end if 
+
+                ! Add the coordinates
+                x1 = [x1, tempr(1)]
+                y1 = [y1, tempr(2)]
+                z1 = [z1, tempr(3)]
+
+            end do 
+
+            ! Determine size
+            np1 = size(x1)
+        end if 
+
+        ! Rewind the file
+        rewind(fid)
+
+        ! Read until we find 'p2'
+        call ReadUntilMatchFound(fid, 'p2', ' ', reachedeof)
+        if (reachedeof) then 
+            ! Set to false
+            hasp2 = .false. 
+        else
+            ! Initialize
+            allocate(x2(0), y2(0), z2(0))
+
+            ! Read in data
+            do while (.true.)
+                ! Read in the next triplet
+                call ReadSingleLine(fid, thisline, reachedeof)
+
+                ! Check for EOF
+                if (reachedeof) then 
+                    exit 
+                end if 
+
+                ! Check if we can extract coordinates
+                call ExtractRealFromString1D(thisline, tempr, islegal)
+
+                ! Check if the read was legal
+                if (.not. islegal) then 
+                    exit
+                end if 
+                if (size(tempr) /= 3) then 
+                    exit
+                end if 
+
+                ! Add the coordinates
+                x2 = [x2, tempr(1)]
+                y2 = [y2, tempr(2)]
+                z2 = [z2, tempr(3)]
+
+            end do 
+
+            ! Determine size
+            np2 = size(x2)
+        end if 
+
+        ! Sanity checks
+        if (.not. hasp1 .and. .not. hasp2) then 
+            ! Print
+            print *, 'ReadDGData: element data not available'
+
+            ! Set logicals
+            dgdata%hasEl = .false.
+
+        elseif (hasp1 .and. hasp2) then 
+            ! Check if dimensions are consistent
+            if (np1 /= np2) then 
+                call gdErrorHandler('ReadDGData: inconsistent number of ' // & 
+                    'p1 and p2, check input file')
+            else
+                ! Set logicals
+                dgdata%hasEl = .true. 
+
+                ! Set number of elements
+                dgdata%nel = np1 
+                print *, 'ReadDGData: number of elements = ', dgdata%nel
+            end if 
+        else
+            ! Inconsistent 
+            call gdErrorHandler('ReadDGData: only one set of point ' // & 
+                'coordinates found, not supported. Check input file')
+        end if 
+
+        ! Read fcLbl
+        !-----------
+        ! Only if elements are present
+        dgdata%haselfcLbl = .false.
+        if (dgdata%hasEl) then 
+            ! Rewind the file
+            rewind(fid)
+
+            ! Read until we find 'fclbl'
+            dgdata%haselfcLbl = .true.
+            call ReadUntilMatchFound(fid, 'fclbl', ' ', reachedeof)
+            if (reachedeof) then 
+                ! Set to false
+                dgdata%haselfcLbl = .false. 
+            else
+                ! Initialize
+                allocate(fcLbl(0))
+
+                ! Read in data
+                do while (.true.)
+                    ! Read in the next triplet
+                    call ReadSingleLine(fid, thisline, reachedeof)
+
+                    ! Check for EOF
+                    if (reachedeof) then 
+                        exit 
+                    end if 
+
+                    ! Check if we can extract 
+                    call ExtractIntegerFromString1D(thisline, tempi, islegal)
+
+                    ! Check if the read was legal
+                    if (.not. islegal) then 
+                        exit
+                    end if 
+                    if (size(tempi) /= 1) then ! Expected size 1
+                        exit
+                    end if 
+
+                    ! Add the coordinates
+                    fcLbl = [fcLbl, tempi]
+
+                end do 
+
+                ! Determine size
+                nfcLbl = size(fcLbl)
+
+                ! Sanity checks
+                if (nfcLbl /= dgdata%nel) then 
+                    call gdErrorHandler('ReadDGData: number of fcLbl does ' // & 
+                        'not equal number of elements, unexpected')
+                end if 
+
+                ! Add
+                dgdata%elfcLbl = fcLbl
+
+            end if 
+        end if 
+
+        ! Read vessel elements
+        if (dgdata%hasEl) then 
+            ! Rewind the file
+            rewind(fid)
+
+            ! Read until we find 'vess_elm'
+            dgdata%haselvessel = .true.
+            call ReadUntilMatchFound(fid, 'vess_elm', ' ', reachedeof)
+            if (reachedeof) then 
+                ! Set to false
+                dgdata%haselvessel = .false. 
+            else
+                ! Initialize
+                allocate(worki(0))
+
+                ! Read in data
+                do while (.true.)
+                    ! Read in the next triplet
+                    call ReadSingleLine(fid, thisline, reachedeof)
+
+                    ! Check for EOF
+                    if (reachedeof) then 
+                        exit 
+                    end if 
+
+                    ! Check if we can extract 
+                    call ExtractIntegerFromString1D(thisline, tempi, islegal)
+
+                    ! Check if the read was legal
+                    if (.not. islegal) then 
+                        exit
+                    end if 
+                    if (size(tempi) /= 1) then ! Expected size 1
+                        exit
+                    end if 
+
+                    ! Add the coordinates
+                    worki = [worki, tempi]
+
+                end do 
+
+                ! Add
+                dgdata%elvessel = worki
+
+                ! Housekeeping
+                deallocate(worki)
+
+            end if 
+        end if 
+
+        ! Print 
+        if (dgdata%haselvessel) then 
+            print *, 'ReadDGData: vessel elements read in'
+        end if 
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(fid)
+
+        ! Add additional data
+        !====================
+        ! If elements are present, we extract the element vertices
+        ! and the local vertex numbering. These are stored in x, y and 
+        ! v1, v2 arrays
+        if (dgdata%hasEl) then 
+            ! Extract
+            call ExtractEdgesFromCoordinates(x1, y1, x2, y2, &
+                v1, v2, x, y)
+
+            ! Add
+            dgdata%elvx = x 
+            dgdata%elvy = y 
+            dgdata%elv1 = v1 
+            dgdata%elv2 = v2
+
+            ! rescale x, y (originally in mm)
+            dgdata%elvx = dgdata%elvx/1e3_R8
+            dgdata%elvy = dgdata%elvy/1e3_R8
+        end if 
+
+
+
+    end subroutine
+
+    ! Structure extraction
+    subroutine ExtractDGStructures(dgdata, structures, elementIDs, flag)
+
+        ! Description
+        !============
+        ! This routine extracts structure data from the dgdata
+        ! structure, assuming that all required fields have been 
+        ! properly initialized. This is only possible if elements are
+        ! present. If in addition labels are present, then the
+        ! structures are further subdivided based on these labels. The 
+        ! flag is zero if the structures were succesfully extracted, 
+        ! otherwise it has a positive value. Structure IDs are set 
+        ! equal to the face label found in DivGeo if present, otherwise
+        ! it simply goes from 1 to the number of structures.
+
+        ! Note: since in general an arbitrary number of elements may 
+        ! coincide, we leave it up to the user to specify which subset 
+        ! of elements (defined as the array 'elementIDs') that should 
+        ! be taken to form structures. It is then assumed that all these
+        ! elements form simple (open or closed) non-branching polygons. 
+
+        ! Note: under the hood this routine uses the polygon edge 
+        ! sorter to determine all structures etc. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DivGeoDataUDT)            :: dgdata 
+        type(VesselStructureUDT), allocatable, intent(out)  :: &
+            structures(:)
+        integer(I8), dimension(:), intent(in)               :: elementIDs
+        integer(I8), intent(out)        :: flag 
+
+        ! Auxiliary
+        integer(I8)                             :: si, ei, nel
+        integer(I8), allocatable, dimension(:)  :: fcLbl, &
+            sortindex, pv 
+        integer(I8), allocatable                :: pein(:, :), &
+            sortededges(:, :)
+        logical, allocatable, dimension(:)      :: ispolygonstart, &
+            isbranchingpolygon
+        
+        ! Loop
+        integer(I8)                             :: k 
+
+        ! Initialize
+        !===========
+        ! Set flag to success
+        flag = 0
+
+        ! Unpack
+        nel = size(elementIDs)
+
+        ! Hedge for trivial case
+        if (size(elementIDs) == 0) then 
+            allocate(structures(0))
+            return 
+        end if
+
+        ! Check if elements are present
+        if (.not. dgdata%hasEl) then 
+            print *, 'ExtractDGStructures: no elements present, ' // & 
+                'cannot extract structures. Returning...'
+            flag = 1
+            return 
+        end if
+
+        ! Check if labels are present
+        if (.not. dgdata%hasElFcLbl) then 
+            print *, 'ExtractDGStructures: no element fcLbl present, ' // & 
+                'extracting based on element data only and setting label ' // & 
+                'equal to structure ID' 
+            allocate(fcLbl(dgdata%nel))
+            fcLbl = 0
+        else
+            ! Get labels
+            fcLbl = dgdata%elfcLbl
+        end if
+        
+        ! Extract structures
+        !===================
+        ! Sort polygon edges
+        allocate(pein(nel, 2))
+        pein(:, 1) = dgdata%elv1(elementIDs)
+        pein(:, 2) = dgdata%elv2(elementIDs)
+        allocate(sortindex(nel), ispolygonstart(nel), &
+            isbranchingpolygon(nel))
+        call SortPolygonEdges(pein, nel, sortindex, &
+            ispolygonstart, isbranchingpolygon)
+        sortededges = pein(sortindex, :)
+
+        ! Sanity checks
+        if (any(isbranchingpolygon)) then 
+            ! This is not supported
+            flag = 2
+            print *, 'ExtractDGStructures: branching polygons present, ' // & 
+                'cannot proceed. Returning...'
+            return 
+        end if 
+
+        ! Extract polygons
+        allocate(structures(count(ispolygonstart)))
+        k = 0
+        si = 0
+        ei = 0
+        do while (k < count(ispolygonstart)) 
+            ! Update counter
+            k = k + 1
+
+            ! Find the next polygon indices
+            si = findloc(ispolygonstart(ei+1:), .true., 1, back=.false.) + ei 
+            ei = findloc(ispolygonstart(si+1:), .true., 1, back=.false.) + si
+            if (ei == si) then ! no further start found, so we reached the end
+                ei = size(ispolygonstart)
+            else
+                ei = ei - 1
+            end if   
+
+            ! Get the vertices
+            call ExtractPolygonVertices(sortededges(si:ei, :), ei-si+1, pv)
+
+            ! Add to the structure
+            structures(k)%x = dgdata%elvx(pv)
+            structures(k)%y = dgdata%elvy(pv)
+            structures(k)%np = size(structures(k)%x)
+            if (pv(1) == pv(size(pv))) then 
+                structures(k)%isclosed = .true.
+            else
+                structures(k)%isclosed = .false. 
+            end if 
+            structures(k)%ID = int(k, kind=I4) 
+            
+            ! Check label
+            if (dgdata%hasElFcLbl) then 
+                structures(k)%label = int(fcLbl(elementIDs(sortindex(si))), kind=I4)
+                if (.not. all(fcLbl(elementIDs(sortindex(si:ei))) == &
+                    fcLbl(elementIDs(sortindex(si))))) then 
+                    print *, 'ExtractDGStructures: found multiple labels for ' // & 
+                        'structure ', k, ' taking first label: ', structures(k)%label 
+                end if 
+            else
+                structures(k)%label = structures(k)%ID 
+            end if 
+        end do 
+
+    end subroutine
+
+    ! Vessel structure extraction
+    subroutine ExtractDGVesselStructures(dgdata, structures, flag)
+
+        ! Description
+        !============
+        ! This routine extracts structures that are part of the vessel
+        ! structure. These structures are defined as structures with a 
+        ! non-zero label. The routine extracts the vessel structures by
+        ! checking for each unique vessel label (propagated to 
+        ! structure.label) which elements belong to it, and how many
+        ! polygons (vessel structures) that can be constructed from it.
+        ! Normally, only one, non-brancching, non-selfintersecting 
+        ! polygon should emerge, otherwise we throw an error.
+         
+        ! Note: vessel elements are assumed to hold a non-zero label
+        ! (it can be negative). Furthermore, vessel polygons are 
+        ! assumed to be non-branching, simple polygons, and should have
+        ! the same label on all elements
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DivGeoDataUDT)            :: dgdata
+        type(VesselStructureUDT), allocatable, intent(out)  :: structures(:) 
+        integer(I8), intent(out)        :: flag
+
+        ! Auxiliary
+        integer(I8)                 :: nvs, tfcLbl 
+        integer(I8), allocatable, dimension(:)  :: fcLblu, vessfcLbl, &
+            tel
+        type(VesselStructureUDT), allocatable, dimension(:)     :: &
+            tempstructures
+
+        ! Loop
+        integer(I8)                 :: i
+
+        ! Extract structures
+        !===================
+        ! Set to success
+        flag = 0
+
+        ! Check if vessel elements are present
+        if (.not. dgdata%hasElVessel) then 
+            print *, 'ExtractDGVesselStructures: no vessel element data ' // &
+                'present, cannot proceed. Returning...'
+            flag = 1
+            return 
+        end if 
+        if (.not. dgdata%hasElFcLbl) then 
+            print *, 'ExtractDGVesselStructures: fcLbl not present, ' // &
+                'which is required for vessel data. Returning...'
+            flag  = 2
+            return 
+        end if 
+        
+        ! Check if all vessel labels are non-zero
+        if (any(dgdata%elfcLbl(dgdata%elvessel) == 0)) then 
+            print *, 'ExtractDGVesselStructures: vessel segments with ' // &
+                'zero label detected, not supported. Check dg setup. ' // & 
+                'Returning...'
+            flag = 3
+            return 
+        end if
+
+        ! Compute unique number of face labels
+        vessfcLbl = dgdata%elfcLbl(dgdata%elvessel)
+        call Unique(vessfcLbl, fcLblu)
+        nvs = size(fcLblu)
+
+        ! Allocate
+        allocate(structures(nvs))
+
+        ! Determine structures
+        do i = 1, nvs 
+            ! Get labels for this unique label
+            tfcLbl = fcLblu(i)
+
+            ! Check which elements have this label
+            allocate(tel(count(vessfcLbl == tfcLbl)))
+            tel = pack(dgdata%elvessel, vessfcLbl == tfcLbl)
+
+            ! Extract the structures
+            call dgdata%ExtractStructures(tempstructures, tel, flag)
+
+            ! Checks
+            if (flag /= 0) then 
+                print *, 'ExtractDGVesselStructures: could not extract ' // & 
+                    'structures for label', fcLblu(i), ', returning...'
+                return
+            end if 
+            if (size(tempstructures) /= 1) then 
+                print *, 'ExtractDGVesselStructures: did not find exactly ' // &
+                    'one structure for label', fcLblu(i), ', returning...'
+                flag = 4
+                return 
+            end if
+            
+            ! Add
+            structures(i) = tempstructures(1)
+            structures(i)%ID = int(i, kind=I4) 
+            structures(i)%label = int(fcLblu(i), kind=I4)
+
+            ! Housekeeping
+            deallocate(tel)
+        end do 
+
+        ! Write
+        call WriteStructureFile('vessel_dgo', structures)
+
+    end subroutine
+
+    ! Structure file writing
+    subroutine WriteStructureFile(filename, structures)
+
+        ! Description
+        !============
+        ! This routine writes out a structure file (filename specified
+        ! through filename variable) containing the structures given 
+        ! in 'structures' in a structure.dat file format.
+
+        ! Declare modules
+        !================
+        use mod_std_formatspecs
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(*), intent(in)        :: filename 
+        type(VesselStructureUDT), intent(in)    :: structures(:)
+        
+        ! Auxiliary
+        integer(I8)                     :: ns, fu 
+        character(:), allocatable       :: fmt 
+
+        ! Loop
+        integer(I8)                     :: i, j
+
+        ! Initialize
+        !===========
+        ! Open file 
+        open (action='write', file=trim(filename // '.dat'), newunit=fu, &
+            status='unknown')
+
+        ! Compute size
+        ns = size(structures)
+
+        ! Write number of structures
+        write(fu, *) ns 
+        write(fu, *) '$structures'
+
+        ! Set writing format
+        fmt = '(' // Rfm // ',' // spacefm // ','// Rfm // ')'
+
+        ! Write structure data
+        !=====================
+        do i = 1, ns
+            ! Write structure header
+            write (fu, *) 'Structure ', structures(i)%ID
+
+            ! Write structure polygon
+            write (fu, *) structures(i)%np 
+            do j = 1, structures(i)%np 
+                write (fu, fmt) structures(i)%x(j), structures(i)%y(j)
+            end do  
+        end do
+
+        ! Housekeeping
+        close(fu)
 
     end subroutine
 
