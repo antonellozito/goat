@@ -6,9 +6,8 @@ sys.path.append(script_dir)  # Add Visualization/ to sys.path
 
 import GOATpy as gp
 
-thisdir = gp.dh.GetFolder()
+thisdir = os.getcwd()
 
-print(thisdir)
 Rpath = thisdir + '/R.csv'
 Zpath = thisdir + '/Z.csv'
 Psipath = thisdir + '/psi.csv'

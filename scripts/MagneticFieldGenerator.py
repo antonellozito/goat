@@ -3,10 +3,9 @@
 # Simple script to generate our own magnetic fields based on analytic
 # descriptions. Writes out an rzpsi file using the datahandler 
 # module
-from . import Datahandler as dh 
-from . import Plotter as pl
 import numpy as np
-from . import goat_types as gt
+import os
+import GOATpy as gp
 
 # Define magnetic field
 def MagneticField(x, y):
@@ -14,12 +13,12 @@ def MagneticField(x, y):
     #return psi
     Btor = 0.08666
     # psi = np.sqrt((x - 0.78)**2 + y**2) 
-    psi = 0.001*Btor*x + 0.0000001*Btor*y
+    psi = 0.000001*Btor*x + 0.0000001*Btor*y
     return psi
 
     
 
-writedir = './goatf/src/Visualization'
+writedir = os.getcwd()
 
 
 # Construct R, Z coordinates
@@ -42,11 +41,11 @@ xv = Rmaj + Rmin*np.cos(theta)
 yv = Rmin*np.sin(theta)
 
 # Construct structures
-structures = [gt.Structure() for i in np.arange(0, 1, 1)]
+structures = [gp.gt.Structure() for i in np.arange(0, 1, 1)]
 structures[0].Initialize(len(xv), xv, yv)
 
 # Write output
-dh.WriteStructureFile(writedir, structures)
+gp.dh.WriteStructureFile(writedir, structures)
 
 # Compute
 for j in np.arange(0, nZ, 1):
@@ -54,13 +53,8 @@ for j in np.arange(0, nZ, 1):
         Psi[i, j] = MagneticField(R[i], Z[j])
 
 # Visualize
-pl.PlotStructured2DContourf(R, Z, Psi, 1)
-pl.ShowFigures()
+gp.pl.PlotStructured2DContourf(R, Z, Psi, 1)
+gp.pl.ShowFigures()
 
 # Write
-dh.WriteRZPsiFile(writedir, R, Z, Psi)
-
-
-
-
-
+gp.dh.WriteRZPsiFile(writedir, R, Z, Psi)

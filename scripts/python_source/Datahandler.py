@@ -74,8 +74,8 @@ def GetFolder():
 	# Print and store the selected folder name
 	print(f"You selected: {s_dir}")
 
-	datadir = './'+sd+s_dir
-	print('Final dir: {datadir}')
+	datadir = './' + sd + '/' + s_dir
+	print(f'Final dir: {datadir}')
 	return datadir
 
 def GetDataDirectory():
