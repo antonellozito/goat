@@ -121,7 +121,7 @@ VERSION 1.00.00
 'goat.data.IMPz'                '[0 0]'
 
 # Data
-'goat.mf.RBtor'                '0.067548'
+'goat.mf.RBtor'                '0.067548' # MAGNETIC FIELD @ R0 TIMES R0 (B field)
 
 #=========================================================================#
 #                                                                         #
@@ -451,23 +451,23 @@ VERSION 1.00.00
 #'gg.ref.meth'                           'no'
 'gg.ref.LB.doxp'                        '1'
 'gg.ref.LB.dovessel'                    '0'
-'gg.ref.LB.Lmininf'                     '0.004'
-'gg.ref.LB.Lmaxinf'                     '0.01'
+'gg.ref.LB.Lmininf'                     '0.004' # change those to coarsen poloidally
+'gg.ref.LB.Lmaxinf'                     '0.01' # change those to coarsen poloidally
 'gg.ref.LB.structureIDs'                '[1, 2]'
 'gg.ref.LB.Lminstructure'               '[0.007, 0.007]'
 'gg.ref.LB.Lmaxstructure'               '[0.0125, 0.0125]'
 'gg.ref.LB.decaylengthstructure'        '[0.25, 0.25]'
 'gg.ref.LB.Lminxp'                      '0.01'
 'gg.ref.LB.Lmaxxp'                      '0.05'
-'gg.ref.LB.decaylengthxp'               '0.5'
+'gg.ref.LB.decaylengthxp'               '0.5' # change those to coarsen poloidally
 
 # Refinement options
-'gg.radref.meth'                           'lengthbased'
+#'gg.radref.meth'                           'lengthbased'
 'gg.radref.LB.lengthtype'                  'radial' # or Euler
-#'gg.radref.meth'                          'no'
-'gg.radref.LB.dosp'                        '1'
-'gg.radref.LB.Lmininf'                     '0.001'
-'gg.radref.LB.Lmaxinf'                     '0.005'
+'gg.radref.meth'                          'no'
+'gg.radref.LB.dosp'                        '0'
+'gg.radref.LB.Lmininf'                     '0.00001'
+'gg.radref.LB.Lmaxinf'                     '0.5'
 'gg.radref.LB.Lminsp'                      '0.05'
 'gg.radref.LB.Lmaxsp'                      '0.02'
 'gg.radref.LB.decaylengthsp'               '0.5'
@@ -507,10 +507,20 @@ VERSION 1.00.00
 
 
 # Distribution of flux surfaces (radial)
-'gg.vd.rd.type'                         'uniform'
+'gg.vd.rd.type'                         'densitybased' # this has to be densitybased in order to use what is below
+# Options for density based distribution, radial
+'gg.vd.rd.distribution.doxp'            '1'
+'gg.vd.rd.distribution.decaylengthxp'   '0.25';
+'gg.vd.rd.distribution.densityatxp'     '200';
+'gg.vd.rd.distribution.densityatinf'    '20';
+'gg.vd.rd.distribution.points.x'        '[0.79, 0.79, 0.52, 1.04]'
+'gg.vd.rd.distribution.points.y'        '[-0.3, 0.3, 0.0, 0.0]'
+'gg.vd.rd.distribution.points.val'      '[1000, 1000, 500, 500]'
+'gg.vd.rd.distribution.points.d'        '[0.05, 0.05, 0.05, 0.05]'
 
 # Distribution of vertices on flux surfaces (poloidal)
 'gg.vd.pd.type'                         'densitybased'
+
 
 # Options for uniform distribution
 'gg.vd.pd.distribution.facelength'      '4e-2';
@@ -523,11 +533,6 @@ VERSION 1.00.00
 'gg.vd.pd.distribution.densityatvessel' '250';
 'gg.vd.pd.distribution.densityatinf'    '10';
 
-'gg.vd.rd.distribution.type'            'magneticfield_separatrix_psi_weight';
-'gg.vd.rd.distribution.lengthparam'     '0.005';
-'gg.vd.rd.distribution.densityatseparatrix' '2500';
-'gg.vd.rd.distribution.densityatinf'    '250';
-
 # Options for remove flux surfaces
 'gg.vd.rfs.mark.psitol'                 '0'
 'gg.vd.rfs.mark.psirattol'              '1e-1'
@@ -536,6 +541,3 @@ VERSION 1.00.00
 # Options for remove narrow boundary triangles
 'gg.vd.rnbt.mark.criterion'             'angle'
 'gg.vd.rnbt.mark.minangle'              '15'
-
-
-
