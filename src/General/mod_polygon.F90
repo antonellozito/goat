@@ -3076,7 +3076,7 @@ module mod_polygon
         integer                         :: ne
         
         ! Output
-        integer(I8), dimension(:), intent(inout)    :: pv
+        integer(I8), allocatable, dimension(:), intent(out)    :: pv
     
         ! Mixed
     
@@ -3097,9 +3097,11 @@ module mod_polygon
             call gdErrorHandler('ExtractPolygonVertices: input argument pe should be a ne-by-2 integer array')
     
         end if
-        if (size(pv) /= ne+1) then 
-            call gdErrorHandler('ExtractPolygonVertices: pv should have dimension ne+1')
-        end if
+        allocate(pv(ne+1))
+        pv = 0
+        !if (size(pv) /= ne+1) then 
+        !    call gdErrorHandler('ExtractPolygonVertices: pv should have dimension ne+1')
+        !end if
     
         ! Initialize
         check(:) = .false. 
@@ -3173,6 +3175,141 @@ module mod_polygon
             pv(k+1) = pe(ne,1)
         end if
     
+    end subroutine
+
+    ! Vertex and face extractor from unsorted point data
+    subroutine ExtractEdgesFromCoordinates(x1, y1, x2, y2, &
+        v1, v2, x, y)
+
+        ! Description
+        !============
+        ! This routine extracts vertex IDs (from 1 to number of vertices
+        ! ) for a given set of edge coordinates. Duplicate vertices 
+        ! are recognized if the coordinates are the same up to 
+        ! their precision (i.e. we use the equals sign to check if 
+        ! coordinates are equal). We return v1 and v2 that are the 
+        ! vertex indices into x, y coordinates
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), dimension(:), intent(in)      :: x1, x2, y1, y2
+        integer(I8), dimension(:), allocatable, intent(out) :: v1, v2
+        real(R8), allocatable, dimension(:), intent(out)    :: x, y 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: tx, ty, txnew, tynew, &
+            thisy, dx
+        integer(I8)                             :: si, ei
+        integer(I8), allocatable, dimension(:)  :: tv, tvnew, sortind, &
+            sortind2, thisind
+        
+        ! Loop
+        integer(I8)                             :: i, j, k, cc  
+        
+        ! Initialize
+        !===========
+        ! Sanity checks on dimensions
+        if ((size(x1) /= size(y1)) .or. (size(x2) /= size(y2)) .or. &
+            (size(x1) /= size(x2)) .or. (size(y1) /= size(y2))) then 
+            call gdErrorHandler('ExtractEdgseFromCoordinates: ' // & 
+                'incompatible input sizes')
+        end if 
+
+        ! Allocate  
+        allocate(v1(size(x1)), v2(size(x1)), x(2*size(x1)), y(2*size(x1)))
+
+        ! Initialize
+        v1 = 0
+        v2 = 0
+        x = 0.0_R8
+        y = 0.0_R8 
+
+        ! Sort
+        !=====
+        ! X-coordinates only
+        tx = [x1, x2]
+        ty = [y1, y2]
+        tv = [(k, k = 1, size(tx))]
+        allocate(sortind(size(tv)))
+        call Sort(tx, ind=sortind, ascend=.true.)
+        ty = ty(sortind)
+        tv = tv(sortind)
+
+        ! Check which parts contain multiple x-coordinates that are
+        ! the same - sort these based on y-value (and adjust sortind)
+        dx = tx(2:) - tx(1:size(tx)-1)
+        si = 0
+        ei = 0
+        k = 0
+        do while (k < size(dx))
+            ! Update counter
+            k = k + 1
+
+            ! Check if we need to sort
+            if (dx(k) /= 0) then 
+                cycle
+            end if
+
+            ! Set start
+            si = k 
+
+            ! Find end
+            ei = findloc(dx(si+1:) /= 0, .true., 1, back=.false.)
+            if (ei == 0) then 
+                ! End of polygon reached
+                ei = size(tx)
+            else
+                ! Account for starting at si+1
+                ei = ei + si
+            end if 
+
+            ! Build the index
+            thisind = [(j, j = si, ei)]
+
+            ! Sort these coordinates according to y
+            allocate(sortind2(size(thisind)))
+            thisy = ty(thisind)
+            call Sort(thisy, ind=sortind2, ascend=.true.)
+            tx(thisind) = tx(thisind(sortind2))
+            ty(thisind) = ty(thisind(sortind2))
+            sortind(thisind) = sortind(thisind(sortind2))
+            deallocate(sortind2)
+
+            ! Update k 
+            k = ei - 1
+        end do
+
+        ! Check for exactly the same coordinates
+        txnew = tx 
+        tynew = ty 
+        tvnew = tv 
+        cc = 1 ! First vertex is always kept
+        tvnew(1) = cc 
+        do i = 2, size(tx)
+            if ((txnew(i) == txnew(i-1)) .and. (tynew(i) == tynew(i-1))) then 
+                ! Vertex is the same
+                tvnew(i) = tvnew(i-1)
+            else
+                ! Vertex is different
+                cc = cc + 1
+                tvnew(i) = cc 
+                txnew(cc) = tx(i)
+                tynew(cc) = ty(i)
+            end if 
+        end do 
+
+        ! Construct output
+        x = txnew(1:cc)
+        y = tynew(1:cc)
+        do i = 1, size(tvnew)
+            if (sortind(i) > size(x1)) then 
+                v2(sortind(i) - size(x1)) = tvnew(i)
+            else
+                v1(sortind(i)) = tvnew(i)
+            end if 
+        end do 
+
     end subroutine
 
     !------------------------------------------------------------------!

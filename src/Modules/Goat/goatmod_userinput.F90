@@ -66,6 +66,8 @@ module goatmod_userinput
         ! - write_b2agdat:  write final b2ag.dat file for use in b2ag
         ! - write_Xpointdata: write out X-point data in traduit file
         ! - write_OMPdata: write OMP data in traduit file
+        ! - write_topologicaldata:   write out X-, O-, and strike point
+        ! information, and other topological data. 
 
         ! Case identification options
         ! - vesselmode: set to true if the case is a vessel mode grid
@@ -98,6 +100,9 @@ module goatmod_userinput
         ! - IMP_r, IMP_z: R, Z coordinates that define the inner mid 
         ! plane line segment
 
+        ! Topological data
+        
+
         ! General
         logical                     :: debug     
         character(:), allocatable   :: meth 
@@ -117,6 +122,7 @@ module goatmod_userinput
         logical                     :: write_b2agdat
         logical                     :: write_Xpointdata 
         logical                     :: write_OMPdata
+        logical                     :: write_topologicaldata
 
         ! Case identification options
         logical                     :: vesselmode 
@@ -141,7 +147,7 @@ module goatmod_userinput
 
         ! OMP and IMP
         real(R8), allocatable       :: OMP_r(:), OMP_z(:), IMP_r(:), &
-            IMP_z(:)
+            IMP_z(:)        
 
     contains
 
@@ -553,13 +559,16 @@ module goatmod_userinput
         !                   the strike point 
         ! - radrefBLdlsp   desired lengths for these cells
 
+        ! Label translation options:
+        !   - structurebasedlabels:     base labels on structure IDs 
+
         
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
             refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
-            radrefdlBLlengthbased, vdrdoxp
+            radrefdlBLlengthbased, vdrdoxp, structurebasedlabels
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp
@@ -648,6 +657,7 @@ module goatmod_userinput
         options%write_b2agdat       = .true. 
         options%write_Xpointdata    = .false. 
         options%write_OMPdata       = .false. 
+        options%write_topologicaldata = .false.
 
         ! Case identification options
         options%vesselmode          = .false. 
@@ -884,6 +894,7 @@ module goatmod_userinput
         options%gcresx = 100 
         options%gcresy = 100
         options%coarsencontours = .false.
+        options%structurebasedlabels = .false.
 
         ! Options for poloidal vertex distribution
         options%vdptype             = 'densitybased'
@@ -1062,6 +1073,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%write_Xpointdata)
         field = 'goat.write_OMPdata'
         call ExtractOptionValueLogical0D(fid, field, options%write_OMPdata)
+        field = 'goat.write_topologicaldata'
+        call ExtractOptionValueLogical0D(fid, field, options%write_topologicaldata)
 
         ! Case identification options
         field = 'goat.vesselmode'
@@ -1111,7 +1124,7 @@ module goatmod_userinput
         field = 'goat.IMPz'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_z)
-
+        
         ! Checks
         !=======
         ! Check for name clashes when using solps
@@ -1641,6 +1654,10 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)
         field = 'gg.TMcellgriddingorder'
         call ExtractOptionValueCharacter(fid, field, options%TMcellgriddingorder)
+
+        ! Label translation
+        field = 'gg.labels.structurebased'
+        call ExtractOptionValueLogical0D(fid, field, options%structurebasedlabels)
 
         ! Refinement options (general)
         field = 'gg.ref.meth'
