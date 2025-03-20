@@ -3,22 +3,51 @@
 # Simple plot script that uses the other python functionality
 from src import Plotter as pl 
 from src import Datahandler as dh 
+from src import goat_types as gt
 import numpy as np
 from matplotlib import pyplot as plt
 
 # Set paths
 #----------
 # Simulation directory
-#[R, Z, PsiWb] = dh.ReadRZPsiFromEqdskFile('./goatf/Runs/DEMO_P2/Equil_DEMO_PROCESS_SOB_COCOS11.eqdsk')
-#Psi = PsiWb/(2*np.pi)
-#pl.PlotStructured2DContourf(R,Z, Psi, 10)
-#dh.WriteRZPsiFile('./goatf/Runs/DEMO_P2', R, Z, Psi)
-#simdir = dh.GetDataDirectory()
-#simdir = './goatf/Examples/JT60SA/10degrees6cm'
-simdir = './goatf/Runs/DEMO_P2'
+#thisdir = './goatf/Runs/TCV_Anthony'
+#Rpath = thisdir + '/R.csv'
+#Zpath = thisdir + '/Z.csv'
+#Psipath = thisdir + '/psi.csv'
+#separator = ';'
+#[R, Z, PsimWb, nZ, nR] = dh.ReadRZPsiFromCSV(Rpath, Zpath, Psipath, separator)
+# [R, Z, PsiWb] = dh.ReadRZPsiFromEqdskFile('./goatf/Runs/DEMO_P2/Equil_DEMO_PROCESS_SOB_COCOS11.eqdsk')
+#Psi = PsiWb
+#Psi = PsimWb/1000.0 # rescale
+#pl.PlotStructured2DContourf(R,Z, Psi, 10, levels=20)
+#dh.WriteRZPsiFile('./goatf/Runs/TCV_Anthony', R, Z, Psi)
+
+simdir = dh.GetDataDirectory()
+#simdir = './goatf/Examples/JT60SA/5degreesRP'
+simdir = './goatf/Runs/JT60SA/Giulio'
+#simdir = './goatf/Runs/DEMO_P2'
 outputdir = simdir + '/output'
 structuredir = './goatf/src/Visualization'
 writedir = './goatf/src/Visualization'
+griddir = 'traduit.out.b2us'
+structurefile = 'structure.dat.dat'
+simgrid = dh.ReadTraduitOutB2us(simdir + '/' + griddir)
+
+#mylevels = [0.001, 0.005, 0.01, 0.02, 0.05, 0.1]
+#mylevels = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
+#mylevelsmf = [-10, -8, -6, -4, -2, -1, 0, 1, 2, 4, 8, 10]
+mylevelsdf = 20
+#mylevelsdf = 2*mylevelsdf
+#pl.Plot2DSurfaceDataContourf(outputdir + '/Lmaxradref.dat', 0, levels=mylevels)
+#pl.Plot2DSurfaceDataContourf(outputdir + '/magneticfield_visualization.dat', 11, levels=mylevelsmf)
+#simgrid = dh.ReadTraduitOutB2us(simdir + '/' + griddir)
+#pl.PlotGridTopologicalData(simgrid, 17)
+
+#thisinterp = gt.GridInterpolant2D()
+#thisinterp.Construct(simgrid, simgrid.cell.region, 'cartesian')
+
+#pl.VisualizeGridInterpolant2D(thisinterp, -5)
+
 try: 
     l1 = dh.GetPolygonCoordinates(outputdir + '/l1.dat')
     l2 = dh.GetPolygonCoordinates(outputdir + '/l2.dat')
@@ -69,16 +98,21 @@ except:
 # Plot stuff
 #-----------
 #[R, Z, Psi] = dh.ReadRZPsiFile(simdir + '/rzpsi.dat')
-structure = dh.ReadStructureFile(simdir + '/structure.dat')
+structure = dh.ReadStructureFile(simdir + '/' + structurefile)
 #dh.WriteRZPsiFile(writedir, R, Z, Psi)
 #pl.PlotStructured2DContourf(R, Z, Psi, 3)
-pl.PlotStructure(structure, 3)
+pl.PlotStructure(structure, 5)
+pl.PlotStructure(structure, 12)
+pl.PlotStructure(structure, 10)
+pl.PlotStructure(structure, 16)
+pl.PlotStructure(structure, 18)
+
 #pl.PlotPolygonData(outputdir + '/temppol.dat', 5, color = 'r')
-#structure = dh.ReadStructureFile(structuredir + '/structure.dat')
+#structure = dh.ReadStructureFile(structuredir + '/' + structurefile)
 #pl.PlotStructure(structure, 2)
 
 try: 
-    simgrid = dh.ReadTraduitOutB2us(simdir + '/traduit.out.b2us')
+    simgrid = dh.ReadTraduitOutB2us(simdir + '/' + griddir)
     #tf = 31
     #tfind = tf - 1
     #pl.PlotPoints2D(simgrid.vert.x[[simgrid.face.v1[tfind]-1, simgrid.face.v2[tfind]-1]], 
@@ -87,15 +121,19 @@ try:
     
     pl.PlotGridCells(simgrid, 0)
     pl.PlotGridFaceLabels(simgrid, 0)
-    # pl.PlotGridVertFieldlineID(simgrid, 0)
+    pl.PlotGridFaceLabels(simgrid, 18)
+    #pl.PlotGridVertFieldlineID(simgrid, 0)
     
     #pl.PlotGridCells(simgrid, 1)
     pl.PlotGridCells(simgrid, 3)
     pl.PlotGridCells(simgrid, -1)
-    pl.PlotGridFaceRegions(simgrid, -1)
+    pl.SetAxesLimits2D(plt.gca(), np.array([1.8, 3.0]), np.array([-3.0, -1.8]))
+    #pl.PlotGridFaceRegions(simgrid, -1)
     #pl.PlotCellBasedQuantity2D(simgrid, simgrid.cell.ft, 2)
     #pl.PlotCellBasedQuantity2D(simgrid, simgrid.cell.cflags, 3)
-    #pl.PlotCellBasedQuantity2D(simgrid, simgrid.cell.bt, 8)
+    pl.PlotCellBasedQuantity2D(simgrid, simgrid.cell.bt, 14)
+    pl.PlotCellBasedQuantity2D(simgrid, simgrid.cell.bp, 13)
+    pl.PlotGridTopologicalData(simgrid, 17)
     #pl.PlotCellBasedQuantity2D(simgrid, simgrid.cell.region, 4)
 except: 
     print("could not plot simulation grid")
@@ -118,14 +156,21 @@ try:
 except:
     print("could not plot base topological mesh")
 try:
+    ggtmdata2 = dh.ReadGGTMDataFile(outputdir + '/ggtmdata_before_pp.dat')
     ggtmdata = dh.ReadGGTMDataFile(outputdir + '/ggtmdata_after_vertexdistribution.dat')
     grid = dh.ReadGGGridDataFile(outputdir + '/grid_after_cellconstruction.dat')
 
     pl.PlotGGTMDataFaceVertexDistribution(ggtmdata, topomesh, -2)
     pl.PlotGGTMDataCellVertexDistribution(ggtmdata, topomesh, -2)
+    pl.PlotGGTMDataFaceVertexDistribution(ggtmdata2, topomesh, -4)
+    pl.PlotGGTMDataCellVertexDistribution(ggtmdata2, topomesh, -4)
     pl.PlotGridVertices(grid, 9)
     pl.PlotGridFaces(grid, 9)
     pl.PlotTopologicalMesh(topomesh, 9)
+    pl.Plot2DSurfaceDataContourf(outputdir + '/gg_vd_radialdensityfunction.dat', 12, levels=mylevelsdf)
+    pl.Plot2DSurfaceDataContourf(outputdir + '/gg_vd_poloidaldensityfunction.dat', 11, levels=mylevelsdf)
+    pl.Plot2DSurfaceDataContourf(outputdir + '/Lmaxpolref.dat', 16, levels=mylevelsdf)
+
 except:
     print("could not plot intermediate data")
 
