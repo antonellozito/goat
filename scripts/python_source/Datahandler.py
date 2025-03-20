@@ -2,11 +2,82 @@
 # in proper structures.
 import numpy as np
 import os 
-from src import goat_types as gt
+from . import goat_types as gt
 
 #--------------------------------------------------------------------------#
 #                                   goat                                   #
 #--------------------------------------------------------------------------#
+def GetFolder():
+	# Description
+	#------------
+
+	# Check
+	# Set base_dir, should not be changed
+	bd = './'
+
+	# Get all subdirectories in base_dir
+	subfolders = [f for f in os.listdir(bd) if os.path.isdir(os.path.join(bd, f))]
+
+	# Check if there are any subfolders
+	if not subfolders:
+		print("No subfolders found in Runs/. Exiting.")
+		exit()
+
+	# Print the subfolders with numbers
+	print("Select a folder:")
+	for idx, folder in enumerate(subfolders, start=1):
+		print(f"{idx}) {folder}")
+
+	# User input selection
+	while True:
+		try:
+			choice = int(input("Enter the number of the folder: "))
+			if 1 <= choice <= len(subfolders):
+				sd = subfolders[choice - 1]
+				break
+			else:
+				print("Invalid number. Please enter a valid option.")
+		except ValueError:
+			print("Invalid input. Please enter a number.")
+
+	# Print and store the selected folder name
+	print(f"You selected: {sd}")
+
+	# Set base_dir, should not be changed
+	base_dir = sd
+
+	# Get all subdirectories in base_dir
+	subfolders = [f for f in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, f))]
+
+	# Check if there are any subfolders
+	if not subfolders:
+		print("No subfolders found in Runs/. Exiting.")
+		exit()
+
+	# Print the subfolders with numbers
+	print("Select a folder:")
+	for idx, folder in enumerate(subfolders, start=1):
+		print(f"{idx}) {folder}")
+
+	# User input selection
+	while True:
+		try:
+			choice = int(input("Enter the number of the folder: "))
+			if 1 <= choice <= len(subfolders):
+				s_dir = subfolders[choice - 1]
+				break
+			else:
+				print("Invalid number. Please enter a valid option.")
+		except ValueError:
+			print("Invalid input. Please enter a number.")
+
+	# Print and store the selected folder name
+	print(f"You selected: {s_dir}")
+
+	datadir = './' + sd + '/' + s_dir
+	print(f'Final dir: {datadir}')
+	return datadir
+
 def GetDataDirectory():
     # Description
     #------------

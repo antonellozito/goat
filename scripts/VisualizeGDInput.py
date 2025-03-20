@@ -10,7 +10,7 @@ from src import Datahandler as dh
 # Data directory
 #---------------
 # Check if solps is present
-datadir = dh.GetDataDirectory()
+datadir = os.getcwd()
 
 # Print
 print('VisualizeGDInput: reading from directory: ' + datadir)
