@@ -1832,8 +1832,21 @@ def ReadRZPsiFromCSV(Rfilepath, Zfilepath, Psifilepath, separator):
         for i in np.arange(0, nR):
             R[i] = np.fromstring(temp[i], dtype=float, count=1, sep=' ')
     else: 
-        # Shouldn't be happening
-        raise ValueError('Inconsistent dimensions of R coordinates')
+        print('Trying transposing R coordinates')
+        alllines = [' '.join(row) for row in zip(*[line.split(separator) for line in alllines])]
+        tempnZ = len(alllines)
+        tempnR = len(alllines[0].split(separator))
+        if (tempnZ == nR and tempnR == 1):
+            for i in np.arange(0, nR):
+                R[i] = np.fromstring(alllines[i], dtype=float, count=1, sep=' ')
+        elif ((tempnZ == nZ and tempnR == nR) or (tempnZ == nZ and tempnR == 1)):
+            temp = alllines[1].split(separator)
+            for i in np.arange(0, nR):
+                R[i] = np.fromstring(temp[i], dtype=float, count=1, sep=' ')
+        else:
+            # Shouldn't be happening
+            raise ValueError('Inconsistent dimensions of R coordinates') 
+
     
     # close file
     thisfile.close()
@@ -1855,8 +1868,21 @@ def ReadRZPsiFromCSV(Rfilepath, Zfilepath, Psifilepath, separator):
         for i in np.arange(0, nZ):
             Z[i] = np.fromstring(temp[i], dtype=float, count=1, sep=' ')
     else: 
-        # Shouldn't be happening
-        raise ValueError('Inconsistent dimensions of Z coordinates')
+        print('Trying transposing Z coordinates')
+        alllines = [' '.join(row) for row in zip(*[line.split(separator) for line in alllines])]
+        tempnZ = len(alllines)
+        tempnR = len(alllines[0].split(separator))
+        if ((tempnZ == nZ and tempnR == nR) or (tempnZ == nZ and tempnR == 1)):
+            for i in np.arange(0, nZ):
+                Z[i] = np.fromstring(alllines[i], dtype=float, count=1, sep=' ')
+        elif (tempnZ == 1 and tempnR == nZ):
+            temp = alllines[1].split(separator)
+            for i in np.arange(0, nZ):
+                Z[i] = np.fromstring(temp[i], dtype=float, count=1, sep=' ')
+        else: 
+            # Shouldn't be happening
+            raise ValueError('Inconsistent dimensions of Z coordinates')
+
     
     # close file
     thisfile.close()
