@@ -116,6 +116,7 @@ module ggmod_gridgeneration2D
     use mod_plotter
     use mod_utility, only: wall_time
     use omp_lib
+    use mod_graph
     implicit none
     private 
     public :: GenerateUnstructuredAlignedGrid, TranslateGridLabels, &
@@ -269,16 +270,19 @@ module ggmod_gridgeneration2D
         integer(I8)                 :: srflabel, erflabel
         integer(I8), allocatable, dimension(:)  :: l1minLOS, l1maxLOS, &
             l2minLOS, l2maxLOS
-        logical                     :: isextendedstart, isextendedend
+        logical                     :: isextendedstart, isextendedend, &
+            dograph
         type(IntegerDynamicArrayUDT)    :: hfface, lfface, tubeface, &
             cell 
+        type(UGraphUDT)             :: graph
 
     contains 
 
         ! Initialization
         procedure :: Initialize     => InitializeGGTMFieldlinePairData
 
-        ! 
+        ! Graph initialization
+        procedure :: InitializeGraph  => InitializeGGTMFieldlinePairDataGraph  
 
     end type
 
@@ -2083,7 +2087,7 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: nft, nct, t1, t2
         integer(I8), allocatable, dimension(:)  :: tc, s1, s2, allIDs, &
-            vertmap, sortind, tracevert, hftracevert, ts1, ts2, &
+            vertmap, sortind, tracevert, ts1, ts2, &
             newvert
         real(R8)                                :: xb(1:2), yb(1:2), &
             tempr
@@ -2094,6 +2098,7 @@ module ggmod_gridgeneration2D
         logical, allocatable, dimension(:)      :: keepind, &
             isvertexdeleted, newisnodevert
         type(StreamlineUDT), allocatable        :: orthlines(:)
+        character(6)                            :: tstring
 
         ! Loop
         integer(I8)                             :: i, j, k, cc, ic, is, &
@@ -2452,6 +2457,14 @@ module ggmod_gridgeneration2D
                         lflinek     => ct(k)%lfline     &
                         )
 
+                    ! Update just to be sure
+                    call hfline1%UpdateLineData(ggtmdata)
+                    call hflinen%UpdateLineData(ggtmdata)
+                    call hflinek%UpdateLineData(ggtmdata)
+                    call lfline1%UpdateLineData(ggtmdata)
+                    call lflinen%UpdateLineData(ggtmdata)
+                    call lflinek%UpdateLineData(ggtmdata)
+
                     if (k == 1) then 
                         ! Only need to check the lfline
                         if (keepind(k)) then 
@@ -2600,13 +2613,39 @@ module ggmod_gridgeneration2D
                             if (size(xint) > 0) then
                                 keepind(k) = .false.
                             end if 
-                        end if 
+                        end if
+                        
+                        ! Next lfline with this lfline
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, lflinek, ct(k+1)%lfline, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
+                            end if 
+                        end if
+
+                        ! Previous hfline with this hfline
+                        if (keepind(k)) then 
+                            ! Use dedicated routine to hedge for end point
+                            ! intersections
+                            call GGTMLineIntersections(ggtmdata, hflinek, ct(k-1)%hfline, &
+                                xint, yint, s1, s2, vertbased=.true.)
+
+                            ! Check
+                            if (size(xint) > 0) then
+                                keepind(k) = .false.
+                            end if 
+                        end if
 
                         ! Next hfline with this hfline
                         if (keepind(k)) then 
                             ! Use dedicated routine to hedge for end point
                             ! intersections
-                            call GGTMLineIntersections(ggtmdata, hflinek, ct(k-1)%hfline, &
+                            call GGTMLineIntersections(ggtmdata, hflinek, ct(k+1)%hfline, &
                                 xint, yint, s1, s2, vertbased=.true.)
 
                             ! Check
@@ -2641,7 +2680,7 @@ module ggmod_gridgeneration2D
                 if (size(keepind) == 1 .and. .not. keepind(1)) then 
                     ! Only one tube that should be deleted -> cell 
                     ! boundaries intersect
-                    print *, 'Cell ', tc(j), 'has only one tube of ' // & 
+                    print *, 'Cells ', tc, 'have only one tube of ' // & 
                         'which the boundaries intersect, cannot delete. ' // & 
                         'Grid will have intersecting cells...'
                     
@@ -2675,6 +2714,34 @@ module ggmod_gridgeneration2D
                     do while (k < nft)
                         if (.not. keepind(k)) then 
                             if (keepind(k-1) .and. keepind(k+1)) then 
+                                ! Write out the tubes
+                                do j = 1, size(tc)
+                                    associate(ct        => celldata(tc(j))%tubes)
+                                        associate(&
+                                        hfline1     => ct(k-1)%hfline,    &
+                                        lfline1     => ct(k-1)%lfline,    &
+                                        hflinen     => ct(k+1)%hfline,  &
+                                        lflinen     => ct(k+1)%lfline,  &
+                                        hflinek     => ct(k)%hfline,    &
+                                        lflinek     => ct(k)%lfline     &
+                                        )
+                                    write (tstring, '(a2, i4)') 'l1', tc(j)
+                                    call Write2DPolygonData(hfline1%xv, hfline1%yv, tstring)
+                                    write (tstring, '(a2, i4)') 'l2', tc(j)
+                                    call Write2DPolygonData(lfline1%xv, lfline1%yv, tstring)
+                                    write (tstring, '(a2, i4)') 'l3', tc(j)
+                                    call Write2DPolygonData(hflinek%xv, hflinek%yv, tstring)
+                                    write (tstring, '(a2, i4)') 'l4', tc(j)
+                                    call Write2DPolygonData(lflinek%xv, lflinek%yv, tstring)
+                                    write (tstring, '(a2, i4)') 'l5', tc(j)
+                                    call Write2DPolygonData(hflinen%xv, hflinen%yv, tstring)
+                                    write (tstring, '(a2, i4)') 'l6', tc(j)
+                                    call Write2DPolygonData(lflinen%xv, lflinen%yv, tstring)
+                                    end associate
+                                    end associate
+                                end do
+
+                                ! Print error
                                 call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
                                 'only one tube marked for deletion, unexpected')
                             end if 
@@ -2775,6 +2842,13 @@ module ggmod_gridgeneration2D
         ! Add LOS
         !========
         call DetermineLOSlimits(ggtmdata)
+
+        ! Construct graph
+        do i = 1, cell%ntot 
+           do j = 1, size(celldata(i)%tubes)
+                call celldata(i)%tubes(j)%InitializeGraph()
+            end do 
+        end do 
         
         ! Housekeeping
         !=============
@@ -4382,7 +4456,7 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: ntv, npos, nneg, &
-            tvind, nnewc, faceloc
+            tvind, nnewc
         integer(I8), allocatable, dimension(:)  :: tv, vertind, &
             splitvertind, vp1, vp2, newcellvert, cellvert, othercellvert, &
             newfacelabel, splitcellind, newcells, tc, cellfacemapping, &
@@ -6520,7 +6594,8 @@ module ggmod_gridgeneration2D
                     !------
                     ! Check if we can extend start  
                     if (.not. tubes(j)%isextendedstart .and. &
-                        topomesh%face%type(tc%srf) == TMfacebndID) then 
+                        topomesh%face%type(tc%srf) == TMfacebndID) then
+
                         ! Get length of segment
                         vind1 = findloc(srfline%vert, thfline%vert(1), 1)
                         vind2 = findloc(srfline%vert, tlfline%vert(1), 1)
@@ -6536,12 +6611,12 @@ module ggmod_gridgeneration2D
                             srfvert(2*j-1) = thfline%vert(1)
                             srfvert(2*j) = tlfline%vert(1) 
                         end if 
-
                     end if 
 
                     ! Check if we can extend end  
                     if (.not. tubes(j)%isextendedend .and. &
-                        topomesh%face%type(tc%erf) == TMfacebndID) then 
+                        topomesh%face%type(tc%erf) == TMfacebndID) then
+
                         ! Get length of segment
                         vind1 = findloc(erfline%vert, thfline%vert(thfline%nv), 1)
                         vind2 = findloc(erfline%vert, tlfline%vert(tlfline%nv), 1)
@@ -6586,6 +6661,7 @@ module ggmod_gridgeneration2D
                         ! Extend the tube
                         call ExtendTubeWithSegment(i, tubes(j), tsegID, &
                             ggtmdata, .true., vertID, magneticField)
+
                     end if 
                     if (doend(j)) then 
                         ! Get segment ID for extension
@@ -8970,6 +9046,159 @@ module ggmod_gridgeneration2D
         linepair%lfface     = ConstructIntegerDynamicArray()
         linepair%tubeface   = ConstructIntegerDynamicArray()
         linepair%cell       = ConstructIntegerDynamicArray()
+
+    end subroutine
+
+    ! GGTM line pair graph initialization 
+    subroutine InitializeGGTMFieldlinePairDataGraph(linepair)
+
+        ! Description
+        !============
+        ! This routine initializes the graph of the field line pair 
+        ! data. This is a separate routine, since this initialization 
+        ! is non-trivial and involves some rather costly operations.
+        ! It is likely also not necessary in most cases to have this
+        ! graph if the grid is 'nicely' behaved (i.e. we get away 
+        ! with just relying on the magnetic field and other subroutines
+        ! to give a non-overlapping grid). However, in several cases it
+        ! may be that cell overlap will occur, and that one may need to 
+        ! properly check which vertex can be connected where. This is 
+        ! where the graph comes in - it can determine which connections
+        ! are possible etc. This is, however, a rather expensive 
+        ! operation (not only to construct, but also to evaluate).
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMFieldlinePairDataUDT)         :: linepair 
+
+        ! Auxiliary
+        logical                                 :: isintube
+        integer(I8), allocatable, dimension(:)  :: ev1, ev2, &
+            gvert, hfv, lfv
+        real(R8), allocatable, dimension(:)     :: xp, yp 
+
+        ! Loop
+        integer(I8)                             :: i, j, k, svhf, svlf, &
+            evhf, evlf
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            graph       => linepair%graph,  &
+            hfline      => linepair%hfline, &
+            lfline      => linepair%lfline  &
+            )        
+
+        ! Construct closed polygon coordinates and mapping from hfline
+        ! and lfline indices
+        xp = hfline%xv
+        yp = hfline%yv 
+        hfv = [(k, k = 1, hfline%nv)]
+        lfv = [(k, k = lfline%nv, 1, -1)] + hfline%nv
+        if (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)) then 
+            xp = [xp, lfline%xv(lfline%nv:1:-1)]
+            yp = [yp, lfline%yv(lfline%nv:1:-1)]
+        else
+            xp = [xp, lfline%xv(lfline%nv-1:1:-1)]
+            yp = [yp, lfline%yv(lfline%nv-1:1:-1)]
+            lfv = lfv - 1
+        end if 
+        if (hfline%vert(1) /= lfline%vert(1)) then 
+            xp = [xp, hfline%xv(1)]
+            yp = [yp, hfline%yv(1)]
+        end if 
+
+        ! Compute vertices
+        !=================
+        ! Easy - just take vertices of hfline and lfline 
+        gvert = [hfline%vert, lfline%vert]
+
+        ! Compute edges
+        !==============
+        ! Hard(er) - need to check:
+        ! - which edges cross 
+        ! - which edges (that don't cross) go out of bounds
+        ! Using the dedicated routine from mod_polygon
+
+        ! Initialize
+        allocate(ev1(0), ev2(0))
+
+        ! Hedge for the same start/end vertex
+        svhf = 1
+        svlf = 1
+        evhf = hfline%nv
+        evlf = lfline%nv
+        if (hfline%vert(1) == lfline%vert(1)) then 
+            svhf = 2
+            svlf = 2
+        end if 
+        if (hfline%vert(hfline%nv) == lfline%vert(lfline%nv)) then 
+            evhf = evhf - 1
+            evlf = evlf - 1
+        end if 
+
+        ! Loop over hfline vertices
+        do i = svhf, evhf
+            ! Unpack
+            associate(&
+                v1 => hfline%vert(i),    &
+                x1 => hfline%xv(i),      &
+                y1 => hfline%yv(i)       &
+                )
+
+            ! Loop over lfline vertices
+            do j = svlf, evlf 
+                ! Unpack 
+                associate(&
+                    v2 => lfline%vert(j),    &
+                    x2 => lfline%xv(j),      &
+                    y2 => lfline%yv(j)       &
+                    )
+
+                ! Skip check
+                !===========
+                ! Add if first or last radial face (if it exists) - 
+                ! should always be present 
+                if ((i == 1 .and. j == 1) .or. &
+                    (i == hfline%nv .and. j == lfline%nv)) then 
+                    ev1 = [ev1, v1]
+                    ev2 = [ev2, v2]
+                    cycle 
+                end if 
+
+                ! Edge in polygon check
+                !======================
+                ! Check if edge starts and ends in the interior 
+                isintube = IsEdgeInClosedSimplePolygon(xp, yp, hfv(i), &
+                    lfv(j))
+                if (.not. isintube) then 
+                    cycle
+                end if 
+
+                ! If we got here, add the vertices
+                ev1 = [ev1, v1]
+                ev2 = [ev2, v2]
+
+                ! Housekeeping
+                end associate
+            end do 
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Construct graph
+        !================
+        ! Construct
+        call graph%Construct(ev1, ev2, gvert)
+
+        ! Checks? Probably not needed here as this should trigger when 
+        ! forming cells/faces etc
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
@@ -11396,7 +11625,7 @@ module ggmod_gridgeneration2D
                 call Unique([v%fieldlineID(f%vert(tcf, 1)), &
                     v%fieldlineID(f%vert(tcf, 2))], IDs)
                 IDs = pack(IDs, IDs /= 0)
-                if (size(IDs) == 2) then 
+                if (size(IDs) <= 2) then 
                     tc(i) = .true.
                 end if
             end if
@@ -11648,7 +11877,11 @@ module ggmod_gridgeneration2D
                 call Unique([v%fieldlineID(f%vert(tcf, 1)), &
                     v%fieldlineID(f%vert(tcf, 2))], IDs)
                 IDs = pack(IDs, IDs /= 0)  
-                fd%fluxtubefsIDS(cc, :) = IDs 
+                if (size(IDs) /= 2) then 
+                    fd%fluxtubefsIDs(cc, :) = 0
+                else 
+                    fd%fluxtubefsIDS(cc, :) = IDs 
+                end if 
 
                 ! Set cell ft region
                 c%ft(i) = cc
@@ -11666,6 +11899,12 @@ module ggmod_gridgeneration2D
         ! Trim
         fd%fluxtubefaces = fd%fluxtubefaces(1:nface)
         fd%fluxtubecells = fd%fluxtubecells(1:ncell)
+
+        ! Sanity check: all cells should be in a flux tube
+        if (ncell /= simgrid%cell%ntot) then 
+            print *, 'ComputeGridData: not all cells ' // & 
+                'have been attributed to a flux tube'
+        end if 
 
         ! Additional data
         !================
