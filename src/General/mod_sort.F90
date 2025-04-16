@@ -32,7 +32,7 @@ module mod_sort
     ! The usual
     implicit none 
     private 
-    public :: Sort, Unique, Setdiff, CountOccurrence
+    public :: Sort, Unique, Setdiff, CountOccurrence, SearchSortedArray
 
     !==================================================================!
     !                                                                  !
@@ -66,6 +66,11 @@ module mod_sort
     ! General element occurrence counter
     interface CountOccurrence
         module procedure CountOccurrence_I8
+    end interface
+
+    ! General binary search of a sorted array
+    interface SearchSortedArray
+        module procedure BinarySearch_I8
     end interface
 
     contains 
@@ -797,5 +802,112 @@ module mod_sort
         end if 
         
     end subroutine
+
+    ! Binary search for sorted integer arrays
+    function BinarySearch_I8(in, el) result(ind)
+
+        ! Description
+        !============
+        ! Find the index of the element with value 'el' in the input 
+        ! array 'in', where 'in' is assumed to be sorted. We do this in 
+        ! a binary search way to achieve O(log(N)) behavior instead of 
+        ! regular O(N) for unsorted arrays. If the element is not 
+        ! present, then 0 is returned as index. 
+
+        ! Declare arguments
+        !==================
+        ! Arguments
+        integer(I8), dimension(:), intent(in)       :: in 
+        integer(I8), intent(in)                     :: el 
+        integer(I8)                                 :: ind 
+
+        ! Auxiliary
+        logical                     :: ascend 
+        integer(I8)                 :: nin, low, mid, high, midel
+
+        ! Initialize
+        !===========
+        ! Set default value
+        ind = 0
+        nin = size(in)
+
+        ! Hedge for trivial cases
+        if (nin == 0) then 
+            return 
+        end if 
+        if (nin == 1) then 
+            if (in(1) == el) then 
+                ind = 1
+            end if 
+            return 
+        end if 
+
+        ! Check sorting direction
+        ascend = .true. 
+        if (in(1) > in(nin)) then 
+            ascend = .false. 
+        end if 
+
+        ! Search
+        !=======
+        ! Initialize
+        low = 1
+        high = nin 
+        mid = (low + high)/2 ! intended integer division
+
+        ! Loop
+        if (ascend) then 
+            do while (.true.)
+                ! Checks if mid equals el
+                midel = in(mid)
+                if (in(mid) == el) then
+                    ind = mid  
+                    exit 
+                end if 
+
+                ! If not, check 
+                if (el < midel) then 
+                    high = mid - 1
+                else
+                    low = mid + 1
+                end if 
+                mid = (high + low)/2
+
+                ! Some checks for now
+                if (mid < low .or. mid > high) then 
+                    call gdErrorHandler('something wrong in binary search')
+                end if 
+
+            end do 
+        else 
+            do while (.true.)
+                ! Checks if mid equals el
+                midel = in(mid)
+                if (in(mid) == el) then
+                    ind = mid  
+                    exit 
+                end if 
+
+                ! If not, check 
+                if (el > midel) then 
+                    low = mid - 1
+                else
+                    high = mid + 1
+                end if 
+                mid = (high + low)/2
+
+                ! Some checks for now
+                if (mid < low .or. mid > high) then 
+                    call gdErrorHandler('something wrong in binary search')
+                end if 
+
+            end do 
+        end if 
+
+
+
+    end function 
+
+
 
 end module
