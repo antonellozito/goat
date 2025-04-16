@@ -1,6 +1,8 @@
 # This module defines some convenient types for post-processing that
 # mimick the types of goat 
 import numpy as np 
+import shapely
+from shapely import geometry
 
 #======================================================================#
 #                                                                      #
@@ -549,6 +551,14 @@ class Vert:
         # Fieldline ID
         self.fieldlineID = np.zeros(nv, dtype=int)
 
+        # Cells (unsorted)
+        self.cp1 = np.zeros(nv, dtype=int)
+        self.cp2 = np.zeros(nv, dtype=int)
+        self.cell = np.zeros(0, dtype=int) # To be determined in grid interconnections
+
+    def GetCell(self, i):
+        return self.cell[self.cp1[i]:self.cp1[i]+self.cp2[i]]
+
 # Grid faces
 class Face:
     # Definition
@@ -700,7 +710,7 @@ class Cell:
     # Cell neighbour getter
     def GetNeig(self, i):
         return self.nb[self.nbp1[i]:self.nbp1[i]+self.nbp2[i]]
-    
+        
 
 # Grid flux surfaces
 class FluxSurf:
@@ -799,7 +809,7 @@ class FluxTube:
         return self.face[self.fp1[i]:self.fp1[i]+self.fp2[i]]
     
     # Cell getter
-    def GetFace(self, i):
+    def GetCell(self, i):
         return self.cell[self.cp1[i]:self.cp1[i]+self.cp2[i]]
 
 # Grid topological data
@@ -896,8 +906,6 @@ class Grid:
                     raise('ComputeInterconnections: face has more than two cell neighbours')
 
         # Cell neighbours
-        self.cell.nbp1 = self.cell.fp1 # should be the same
-        self.cell.nbp2 = self.cell.fp2 
         cc = 0 
         for i in np.arange(0, self.cell.ntot, 1):
             # Get cell faces
@@ -905,13 +913,74 @@ class Grid:
 
             # Loop over each face
             for j in np.arange(0, len(tf), 1):
-                if (self.face.nb1[tf[j]-1] == i+1):
+                if (self.face.nb1[tf[j]-1] == i+1 and self.face.nb2[tf[j]-1] != 0):
                     self.cell.nb[cc] = self.face.nb2[tf[j]-1]
-                elif (self.face.nb2[tf[j]-1] == i+1):
+                    self.cell.nbp2[i] = self.cell.nbp2[i] + 1
+                    cc = cc + 1
+                elif (self.face.nb2[tf[j]-1] == i+1 and self.face.nb1[tf[j]-1] != 0):
                     self.cell.nb[cc] = self.face.nb1[tf[j]-1]
-                else:
-                    raise('ComputeInterconnections: something wrong in grid interconnection')
-                cc = cc + 1
+                    cc = cc + 1
+                    self.cell.nbp2[i] = self.cell.nbp2[i] + 1
+
+        # Construct pointer
+        self.cell.nbp1[0] = 0 # Account for zero-based indexing
+        for i in np.arange(1, self.cell.ntot, 1):
+            self.cell.nbp1[i] = self.cell.nbp1[i-1] + self.cell.nbp2[i-1]
+
+        # Vertex pointer setup (assumed initialized)
+        for i in np.arange(0, self.cell.ntot, 1):
+            # Get vertices of this cell
+            tv = self.cell.GetVert(i)
+
+            # Update counter
+            self.vert.cp2[tv-1] = self.vert.cp2[tv-1] + 1
+
+        for i in np.arange(1, self.vert.ntot, 1):
+            self.vert.cp1[i] = self.vert.cp1[i-1] + self.vert.cp2[i-1]
+
+        # Vertex cell list construction
+        vcounter = np.zeros(self.vert.ntot, dtype=int)
+        self.vert.cell = np.zeros(np.sum(self.vert.cp2), dtype=int)
+        for i in np.arange(0, self.cell.ntot, 1):
+            #  Get the cell vertices
+            tv = self.cell.GetVert(i)
+
+            # Set the vertex cells
+            for j in np.arange(0, len(tv), 1):
+                ind = self.vert.cp1[tv[j]-1] + vcounter[tv[j]-1]
+                self.vert.cell[ind] = i+1 
+                vcounter[tv[j]-1] = vcounter[tv[j]-1] + 1
+
+    # Check if point lies in cell domain
+    def InCell(self, i, xq, yq):
+        # Get cell vertices
+        tv = self.cell.GetVert(i)
+
+        # Get coordinates
+        vx = self.vert.x[tv-1]
+        vy = self.vert.y[tv-1]
+
+        # Build points
+        pts = np.zeros((len(vx), 2), dtype=float)
+        for j in np.arange(0, len(tv), 1):
+            pts[j, 0] = vx[j]
+            pts[j, 1] = vy[j]
+
+        # Create a polygon
+        pol = geometry.Polygon(pts)
+        pt = geometry.Point(xq, yq)
+        
+        # Check if point in polygon
+        inpolyg = pol.contains(pt)
+
+        # Check if point on boundary
+        bnd = shapely.boundary(pol)
+        onboundary = bnd.contains(pt)
+        isincell = inpolyg or onboundary
+
+        return isincell
+
+                
 
 
 #----------------------------------------------------------------------#
@@ -992,8 +1061,12 @@ class GridInterpolant2D:
             case 'cartesian':
                 # Reconstruct gradient based on cartesian coordinates
                 for i in np.arange(0, grid.cell.ntot, 1):
-                    # Get cell neighbours
-                    tc = grid.cell.GetNeig(i)
+                    # Get cell neighbours (9point)
+                    tv = grid.cell.GetVert(i)
+                    tc = np.zeros(0, dtype=int)
+                    for j in tv:
+                        tc = np.append(tc, grid.vert.GetCell(j-1))
+                    tc = np.unique(tc)
 
                     # Compute distances
                     tdx = self.x[tc-1] - self.x[i]
@@ -1001,13 +1074,11 @@ class GridInterpolant2D:
 
                     # Compute rhs
                     b = self.f[i] - self.f[tc-1]
-                    b = np.append(float(i), b)
 
                     # Compute lhs 
-                    a = np.zeros((len(tc)+1, 3)) # not square per se
-                    a[0, :] = [1.0, 0.0, 0.0]
+                    a = np.zeros((len(tc), 2)) # not square per se
                     for j in np.arange(0, len(tc)):
-                        a[j+1, :] = [1.0, tdx[j], tdy[j]]
+                        a[j, :] = [tdx[j], tdy[j]]
 
                     A = np.matmul(np.transpose(a), a)
 
@@ -1015,16 +1086,20 @@ class GridInterpolant2D:
                     x = np.linalg.solve(A, np.matmul(np.transpose(a), b))
 
                     # Add
-                    self.dfdx[j] = x[1]
-                    self.dfdy[j] = x[2]
+                    self.dfdx[i] = x[0]
+                    self.dfdy[i] = x[1]
 
 
                     # Compute coefficients by unweighted least squares
             case 'curvilinear':
                 # Reconstruct gradient based on curvilinear coordinates
                 for i in np.arange(0, grid.cell.ntot, 1):
-                    # Get cell neighbours
-                    tc = grid.cell.GetNeig(i)
+                    # Get cell neighbours (9point)
+                    tv = grid.cell.GetVert(i)
+                    tc = np.zeros(0, dtype=int)
+                    for j in tv:
+                        tc = np.append(tc, grid.vert.GetCell(j-1))
+                    tc = np.unique(tc)
 
                     # Compute distances
                     tdx = self.x[tc-1] - self.x[i]
@@ -1036,19 +1111,18 @@ class GridInterpolant2D:
                     b = self.f[i] - self.f[tc-1]
 
                     # Compute lhs 
-                    a = np.zeros((3, len(tc)+1)) # not square per se
-                    a[0, :] = [1.0, 0.0, 0.0]
+                    a = np.zeros((len(tc), 2)) # not square per se
                     for j in np.arange(0, len(tc)):
-                        a[j+1, :] = [1.0, tdtheta[j], tdr[j]]
+                        a[j, :] = [tdtheta[j], tdr[j]]
 
                     A = np.matmul(np.transpose(a), a)
 
                     # Solve
-                    x = np.linalg.solve(A, np.transpose(a)*b)
+                    x = np.linalg.solve(A, np.matmul(np.transpose(a), b))
 
                     # Add
-                    self.dfdx[j] = x[1]
-                    self.dfdy[j] = x[2]
+                    self.dfdx[i] = x[0]
+                    self.dfdy[i] = x[1]
             case _: 
                 raise('ConstructGridInterpolant2D: unknown method')
 
@@ -1079,11 +1153,25 @@ class GridInterpolant2D:
                     # Compute distance
                     dist = np.sqrt((self.x - txq)**2 + (self.y - tyq)**2) 
                     mindistind = np.argmin(dist)
-                    dx = txq - self.x[mindistind]
-                    dy = tyq - self.y[mindistind] 
 
-                    # Compute value
-                    vq[i] = self.f[mindistind] + self.dfdx[mindistind]*dx + self.dfdy[mindistind]*dy
+                    # Check if point in polygon, if not: set dist to nan and
+                    # keep looking
+                    isincell = self.grid.InCell(mindistind, txq, tyq)
+                    dist[mindistind] = np.inf 
+                    while ((not isincell) and (not all(dist == np.inf))):
+                        mindistind = np.argmin(dist)
+                        isincell = self.grid.InCell(mindistind, txq, tyq)
+                        dist[mindistind] = np.inf 
+                    
+                    if (all(dist == np.inf) and (not isincell)):
+                        vq[i] = np.NaN # set to nan and return 
+                    else:
+
+                        dx = txq - self.x[mindistind]
+                        dy = tyq - self.y[mindistind] 
+
+                        # Compute value
+                        vq[i] = self.f[mindistind] + self.dfdx[mindistind]*dx + self.dfdy[mindistind]*dy
 
             case 'curvilinear': # based on radial/poloidal distance
 
@@ -1099,12 +1187,24 @@ class GridInterpolant2D:
                     dx = txq - self.x[mindistind]
                     dy = tyq - self.y[mindistind] 
 
-                    # Compute poloidal (parallel) and radial (perpendicular) distance
-                    dtheta = dx*self.bx[mindistind] + dy*self.by[mindistind]
-                    dr = -dx*self.by[mindistind] + dy*self.bx[mindistind]
+                    # Check if point in polygon, if not: set dist to nan and
+                    # keep looking
+                    isincell = self.grid.InCell(mindistind, txq, tyq)
+                    dist[mindistind] = np.inf 
+                    while ((not isincell) and (not all(dist == np.inf))):
+                        mindistind = np.argmin(dist)
+                        isincell = self.grid.InCell(mindistind, txq, tyq)
+                        dist[mindistind] = np.inf 
 
-                    # Compute value
-                    vq[i] = self.f[mindistind] + self.dfdx[mindistind]*dtheta + self.dfdy[mindistind]*dr
+                    if (all(dist == np.inf) and (not isincell)):
+                        vq[i] = np.NaN # set to nan and return 
+                    else:
+                        # Compute poloidal (parallel) and radial (perpendicular) distance
+                        dtheta = dx*self.bx[mindistind] + dy*self.by[mindistind]
+                        dr = -dx*self.by[mindistind] + dy*self.bx[mindistind]
+
+                        # Compute value
+                        vq[i] = self.f[mindistind] + self.dfdx[mindistind]*dtheta + self.dfdy[mindistind]*dr
                     
             case _: 
                 raise('EvaluateGridInterpolant2D: unknown method')
