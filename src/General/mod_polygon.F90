@@ -90,6 +90,7 @@ module mod_polygon
     use, intrinsic :: ieee_arithmetic
     use mod_plotter
     use mod_sort
+    use mod_constants, only : pi_R8
 
     ! The usual
     implicit none
@@ -3326,7 +3327,8 @@ module mod_polygon
         ! Declare variables
         !==================
         ! Arguments
-        real(R8)            :: d, x1, x2, y1, y2 
+        real(R8), intent(in)            :: x1, x2, y1, y2 
+        real(R8), intent(out)           :: d
 
         ! Compute
         !========
@@ -5141,6 +5143,201 @@ module mod_polygon
 
     end subroutine
 
+    ! Edge inbetween edges checker
+    function IsEdgeInClosedSimplePolygon(xp, yp, v1, v2) result(isinbetween)
+
+        ! Description
+        !============
+        ! This function computes whether the vertex pair, defined by
+        ! indices [v1, v2], lies in the interior of the simple 
+        ! (closed) polygon. It is assumed that start and end point
+        ! are the same vertex. Note that if the vertex pair consists of 
+        ! consecutive indices, the edge lies automatically in the 
+        ! polygon. If this is not the case, then we need to check 
+        ! the following:
+        !
+        ! - does the edge start and end in the interior of the polygon?
+        !   if no -> edge lies outside, if yes -> continue
+        ! - does the edge intersect with any non-neighbouring edge? 
+        !   if no -> edge lies in interior, if yes -> edge lies outside
+        !
+        ! Note that this routine naturally only supports edges formed
+        ! by polygon vertices. 
+
+        ! Note: it is assumed that the polygon is not self-intersecting.
+        ! Otherwise, surface area computations may be off and the result
+        ! will be wrong.
+
+        ! Note: the first check on starting/ending in the interior of 
+        ! the domain is done based on dot products between the 
+        ! inward pointing normals of the adjacent edges at both sides. 
+        ! These should both be >= 0. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in), dimension(:)          :: xp, yp
+        integer(I8), intent(in)                     :: v1, v2
+        logical                                     :: isinbetween 
+
+        ! Auxiliary
+        integer(I8)                                 :: nv, v1s, v1e, &
+            v2s, v2e
+        real(R8)                                    :: dx, dy, surfA, &
+            dxs1, dys1, dxe1, dye1, dxs2, dys2, dxe2, dye2, dp(1:4), & 
+            d0, xint, yint
+
+        ! Loop
+        integer(I8)                                 :: i 
+
+        ! Initialize
+        !===========
+        ! Output
+        isinbetween = .false. 
+
+        ! Check dimensions
+        if (size(xp) /= size(yp)) then 
+            call gdErrorHandler('IsEdgeInClosedSimplePolygon: inputs ' // & 
+                'have inconsistent dimensions')
+        end if 
+        nv = size(xp)
+
+        ! Check last point
+        call Distance(d0, xp(1), yp(1), xp(nv), yp(nv))
+        if (d0 > disttol) then 
+            call gdErrorHandler('IsEdgeInClosedSimplePolygon: first and ' // &
+                'last vertex should be the same, but have non-zero distance')
+        end if 
+
+        ! Compute
+        !========
+        ! Check for trivial case
+        if ((v1 == v2) .or. (abs(v1 - v2) == 1) .or. &
+            (v1 == 1 .and. v2 == nv-1) .or. (v1 == nv-1 .and. v2 == 1)) then 
+            ! All cases where the edge lies on the polygon
+            isinbetween = .true.
+            return 
+        end if 
+
+        ! Get vertices of previous and next vertex
+        if (v1 /= 1) then 
+            v1s = v1 - 1
+        else
+            v1s = nv-1
+        end if 
+        if (v1 /= nv) then 
+            v1e = v1 + 1
+        else
+            v1e = 2
+        end if 
+        if (v2 /= 1) then 
+            v2s = v2 - 1
+        else
+            v2s = nv-1
+        end if 
+        if (v2 /= nv) then 
+            v2e = v2 + 1
+        else
+            v2e = 2
+        end if 
+
+        ! Unpack
+        associate(&
+            x1      => xp(v1),  &
+            y1      => yp(v1),  &
+            x1s     => xp(v1s), &
+            y1s     => yp(v1s), &
+            x1e     => xp(v1e), &
+            y1e     => yp(v1e), &
+            x2s     => xp(v2s), &
+            y2s     => yp(v2s), &
+            x2e     => xp(v2e), &
+            y2e     => yp(v2e), &
+            x2      => xp(v2),  &
+            y2      => yp(v2)   &
+            )
+
+        ! Compute polygon surface area to check orientation
+        surfA = ComputeSimplePolygonSurfaceArea(xp, yp)
+
+        ! Compute distances along the polygon direction (so from vert 1
+        ! to vert N)
+        dx = x2 - x1 
+        dy = y2 - y1
+        dxs1 = -(x1s - x1 )
+        dys1 = -(y1s - y1)
+        dxe1 = x1e - x1 
+        dye1 = y1e - y1
+        dxs2 = -(x2s - x2) 
+        dys2 = -(y2s - y2)
+        dxe2 = x2e - x2 
+        dye2 = y2e - y2
+
+        if (surfA > 0) then 
+            ! Clockwise polygon orientation: inward pointing normal 
+            ! should be (dy, -dx), 
+            dp(1) = dx*dys1 - dy*dxs1
+            dp(2) = dx*dye1 - dy*dxe1
+            dp(3) = -dx*dys2 + dy*dxs2 
+            dp(4) = -dx*dye2 + dy*dxe2
+
+            ! Check
+            if (all(dp > 0.0_R8)) then 
+                ! It's Saul Goodman
+                isinbetween = .true. 
+            else
+                ! Set to false
+                isinbetween = .false.
+            end if 
+        else
+            ! Counter-clockwise polygon orientation: inward pointing normal 
+            ! should be (-dy, dx), 
+            dp(1) = -dx*dys1 + dy*dxs1
+            dp(2) = -dx*dye1 + dy*dxe1
+            dp(3) = dx*dys2 - dy*dxs2 
+            dp(4) = dx*dye2 - dy*dxe2
+
+            ! Check
+            if (all(dp > 0.0_R8)) then 
+                ! It's Saul Goodman
+                isinbetween = .true. 
+            else
+                ! Set to false
+                isinbetween = .false.
+            end if 
+        end if 
+
+        ! First check
+        if (.not. isinbetween) then 
+            return 
+        end if 
+
+        ! Check intersections with non-neighbouring edges
+        do i = 1, nv-1 
+            ! Next edge is [i, i+1]
+            ! Check if we should skip
+            if ((i == v1) .or. (i+1 == v1) .or. &
+                (i == v2) .or. (i+1 == v2))  then 
+                cycle 
+            end if 
+
+            ! Compute intersections
+            call SegmentIntersections(xint, yint, xp(i), yp(i), &
+                xp(i+1), yp(i+1), x1, y1, x2, y2)
+
+            ! Check
+            if (.not. isnan(xint)) then
+                isinbetween = .false. 
+                exit 
+            end if 
+
+        end do
+
+        ! Housekeeping
+        end associate
+
+    end function
+
     ! Polygon surface area
     function ComputePolygonSurfaceArea(polygon) result(out)
 
@@ -5150,6 +5347,10 @@ module mod_polygon
         ! enclosed by the polygon. For this, we employ the simple
         ! trapezoidal rule for integration, which is exact for 
         ! piecewise-linear polygons. 
+
+        ! Note: this is the closed polygon surface area. If the polygon
+        ! is open, the last vertex will be connected to the first one
+        ! for the area computation.
 
         ! Declare variables
         !==================
