@@ -1865,6 +1865,83 @@ def ReadRZPsiFromCSV(Rfilepath, Zfilepath, Psifilepath, separator):
 
     return [R, Z, psi, nZ, nR]
 
+#--------------------------------------------------------------------------#
+#                                SOLPS                                     #
+#--------------------------------------------------------------------------#   
+
+# Read field 
+def ReadSOLPSField(fieldname, lines, startindex, nval, fieldtype, dims):
+
+    # Description
+    #------------
+    # Read in a field with the name 'fieldname' that has an amount of 
+    # values 'nval'. 'startindex' is the starting line index in the 
+    # lines. At exit, 'startindex' will be the last line read in. 
+
+    # Initialize (always skip header)
+    if startindex >= len(lines):
+        startindex = 1
+    elif startindex < 0:
+        startindex = 1
+    i = startindex 
+    if fieldtype == 'float':
+        vals = np.zeros(nval, dtype=float)
+    elif fieldtype == 'int':
+        vals = np.zeros(nval, dtype=int)
+    else: 
+        raise("ReadField: unknown fieldtype option")
+
+    # Look for the field name
+    isfound = False 
+    while i < len(lines):
+        if '*cf' in lines[i]:
+            values = lines[i].split()
+            for j in values: 
+                if fieldname == j:
+                    isfound = True 
+            if isfound:
+                break 
+            else:
+                i = i + 1
+        else: 
+            i = i + 1
+    if not isfound:
+        i = 1 
+        while i < startindex: 
+            if '*cf' in lines[i]:
+                values = lines[i].split()
+                for j in values: 
+                    if fieldname == j:
+                        isfound = True 
+                if isfound:
+                    break 
+                else: 
+                    i = i + 1
+            else: 
+                i = i + 1
     
-    
+    # Check if the field was found
+    if not isfound:
+        print("ReadField: could not find field: '" + fieldname + "' in "
+            "in file. Returning zeros...")
+    else: 
+        # Read in the field
+        i = i + 1 # Skip header
+        k = 0
+        while k < nval:
+            # Read line
+            values = lines[i].split()
+            for j in values:
+                vals[k] = j 
+                k = k + 1
+
+            # Go to next line
+            i = i + 1
+
+    # Reshape the field to the desired dimensions
+    out = np.reshape(vals, dims, order='F')
+
+    # Return 
+    startindex = i
+    return out, startindex # need to return startindex, since it is immutable and therefore isn't returned...
 
