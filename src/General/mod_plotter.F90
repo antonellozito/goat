@@ -506,7 +506,7 @@ module mod_plotter
         ! Arguments
         real(R8), intent(in)                        :: x(:), y(:) 
         integer                                     :: i, fu
-        character(:), allocatable, intent(in)       :: filepath 
+        character(*), intent(in)                    :: filepath 
 
         ! Initialize
         !===========
