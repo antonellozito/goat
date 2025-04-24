@@ -5144,7 +5144,8 @@ module mod_polygon
     end subroutine
 
     ! Edge inbetween edges checker
-    function IsEdgeInClosedSimplePolygon(xp, yp, v1, v2) result(isinbetween)
+    function IsEdgeInClosedSimplePolygon(xp, yp, vp, v1, v2) &
+        result(isinbetween)
 
         ! Description
         !============
@@ -5162,30 +5163,47 @@ module mod_polygon
         !   if no -> edge lies in interior, if yes -> edge lies outside
         !
         ! Note that this routine naturally only supports edges formed
-        ! by polygon vertices. 
+        ! by polygon vertices. The inputs should be the coordinates of 
+        ! the (subsequent) edges, and vp the vertex ID. The latter 
+        ! should be used to check if vertices are the same in order to 
+        ! allow polygons that have 'touching' boundaries. 
 
         ! Note: it is assumed that the polygon is not self-intersecting.
         ! Otherwise, surface area computations may be off and the result
         ! will be wrong.
 
         ! Note: the first check on starting/ending in the interior of 
-        ! the domain is done based on dot products between the 
-        ! inward pointing normals of the adjacent edges at both sides. 
-        ! These should both be >= 0. 
+        ! the domain is done based on:
+        ! - the angle between neighbouring edges of the first edge vertex, 
+        !   measured in the interior of the polygon (alpha)
+        ! - the angle between the first neighbouring edge (in vertex 
+        !   order of the polygon) and the edge vector, pointing away
+        !   from the first vertex (beta)
+        ! - similar angles, but for the second vertex and its 
+        !   neighbouring edges
+        ! These angles should always be in the interval [0, 2*pi]. The
+        ! edge then lies within the polygon if for both vertices it 
+        ! holds that:
+        !
+        !       0 <= beta <= alpha
+
+        ! Note: v1 and v2 are indices in xp, yp, vp
 
         ! Declare variables
         !==================
         ! Arguments
         real(R8), intent(in), dimension(:)          :: xp, yp
-        integer(I8), intent(in)                     :: v1, v2
+        integer(I8), intent(in)                     :: v1, v2, vp(:)
         logical                                     :: isinbetween 
 
         ! Auxiliary
         integer(I8)                                 :: nv, v1s, v1e, &
             v2s, v2e
-        real(R8)                                    :: dx, dy, surfA, &
-            dxs1, dys1, dxe1, dye1, dxs2, dys2, dxe2, dye2, dp(1:4), & 
-            d0, xint, yint
+        real(R8)                                    :: dx, dy, &
+            dxs1, dys1, dxe1, dye1, dxs2, dys2, dxe2, dye2, & 
+            d0, xint, yint, alpha(1:2), beta(1:2), &
+            dpalpha(1:2), cpalpha(1:2), dpbeta(1:2), cpbeta(1:2), &
+            surfA
 
         ! Loop
         integer(I8)                                 :: i 
@@ -5196,7 +5214,7 @@ module mod_polygon
         isinbetween = .false. 
 
         ! Check dimensions
-        if (size(xp) /= size(yp)) then 
+        if ((size(xp) /= size(yp)) .or. (size(xp) /= size(vp))) then 
             call gdErrorHandler('IsEdgeInClosedSimplePolygon: inputs ' // & 
                 'have inconsistent dimensions')
         end if 
@@ -5204,7 +5222,7 @@ module mod_polygon
 
         ! Check last point
         call Distance(d0, xp(1), yp(1), xp(nv), yp(nv))
-        if (d0 > disttol) then 
+        if ((d0 > disttol) .and. (vp(1) /= vp(nv))) then 
             call gdErrorHandler('IsEdgeInClosedSimplePolygon: first and ' // &
                 'last vertex should be the same, but have non-zero distance')
         end if 
@@ -5257,52 +5275,55 @@ module mod_polygon
             y2      => yp(v2)   &
             )
 
-        ! Compute polygon surface area to check orientation
-        surfA = ComputeSimplePolygonSurfaceArea(xp, yp)
-
         ! Compute distances along the polygon direction (so from vert 1
         ! to vert N)
         dx = x2 - x1 
         dy = y2 - y1
-        dxs1 = -(x1s - x1 )
-        dys1 = -(y1s - y1)
+        dxs1 = (x1s - x1 )
+        dys1 = (y1s - y1)
         dxe1 = x1e - x1 
         dye1 = y1e - y1
-        dxs2 = -(x2s - x2) 
-        dys2 = -(y2s - y2)
+        dxs2 = (x2s - x2) 
+        dys2 = (y2s - y2)
         dxe2 = x2e - x2 
         dye2 = y2e - y2
 
-        if (surfA > 0) then 
-            ! Clockwise polygon orientation: inward pointing normal 
-            ! should be (dy, -dx), 
-            dp(1) = dx*dys1 - dy*dxs1
-            dp(2) = dx*dye1 - dy*dxe1
-            dp(3) = -dx*dys2 + dy*dxs2 
-            dp(4) = -dx*dye2 + dy*dxe2
+        ! Compute dot and cross products
+        dpalpha(1) = (dxs1*dxe1 + dys1*dye1)
+        dpalpha(2) = (dxs2*dxe2 + dys2*dye2)
+        cpalpha(1) = dxs1*dye1 - dys1*dxe1
+        cpalpha(2) = dxs2*dye2 - dys2*dxe2
+        dpbeta(1) = (dxs1*dx + dys1*dy)
+        dpbeta(2) = -(dxs2*dx + dys2*dy)
+        cpbeta(1) = (dxs1*dy - dys1*dx)
+        cpbeta(2) = -(dxs2*dy - dys2*dx)
 
-            ! Check
-            if (all(dp > 0.0_R8)) then 
-                ! It's Saul Goodman
-                isinbetween = .true. 
+        ! Compute angles
+        alpha = atan2(cpalpha, dpalpha)
+        beta = atan2(cpbeta, dpbeta)
+        !where (alpha < 0.0_R8) alpha = alpha + 2*pi_R8
+        !where (beta < 0.0_R8) beta = beta + 2*pi_R8
+
+        ! Compute surface area
+        surfA = ComputeSimplePolygonSurfaceArea(xp, yp)
+
+        ! Adjust angles
+        if (surfA >= 0.0_R8) then 
+            ! If angle is negative, then concave angle
+            where (alpha < 0.0_R8) alpha = alpha + 2*pi_R8 
+            where (beta < 0.0_R8)  beta = beta + 2*pi_R8
+            if (all(beta <= alpha)) then 
+                isinbetween = .true.
             else
-                ! Set to false
                 isinbetween = .false.
             end if 
         else
-            ! Counter-clockwise polygon orientation: inward pointing normal 
-            ! should be (-dy, dx), 
-            dp(1) = -dx*dys1 + dy*dxs1
-            dp(2) = -dx*dye1 + dy*dxe1
-            dp(3) = dx*dys2 - dy*dxs2 
-            dp(4) = dx*dye2 - dy*dxe2
-
-            ! Check
-            if (all(dp > 0.0_R8)) then 
-                ! It's Saul Goodman
-                isinbetween = .true. 
+            ! If angle is negative, then convex angle
+            where (alpha < 0.0_R8) alpha = alpha + 2*pi_R8 
+            where (beta < 0.0_R8)  beta = beta + 2*pi_R8
+            if (all(beta >= alpha)) then 
+                isinbetween = .true.
             else
-                ! Set to false
                 isinbetween = .false.
             end if 
         end if 
@@ -5316,8 +5337,11 @@ module mod_polygon
         do i = 1, nv-1 
             ! Next edge is [i, i+1]
             ! Check if we should skip
-            if ((i == v1) .or. (i+1 == v1) .or. &
-                (i == v2) .or. (i+1 == v2))  then 
+            if ((vp(i) == vp(v1)) .or. (vp(i+1) == vp(v1)) .or. &
+                (vp(i) == vp(v2)) .or. (vp(i+1) == vp(v2)) .or. &
+                ((v1 == 1) .and. (i == nv .or. i+1 == nv)) .or. & 
+                ((v2 == 1) .and. (i == nv .or. i+1 == nv)) &
+                ) then 
                 cycle 
             end if 
 
