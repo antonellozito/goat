@@ -114,8 +114,6 @@ module mod_graph
         ! Condensation
         procedure :: Condense   => CondenseGraph
 
-        ! Cycle checking
-
     end type
 
     type, extends(GraphUDT), public :: UGraphUDT 
@@ -535,7 +533,7 @@ contains
     end function
 
     ! Flood
-    function FloodGraph(graph, startvertind) result(vertind)
+    function FloodGraph(graph, startvertind, skipvertopt) result(vertind)
 
         ! Description
         !============
@@ -548,12 +546,21 @@ contains
         ! non-connected parts, called 'subgraphs', which each can be 
         ! found by flooding from a non-flooded vertex. 
 
+        ! Note: if certain vertices and their connections should not
+        ! be considered, then set the corresponding local index in 
+        ! skipvert to true. If the start vertex happens to be a 
+        ! skipped vertex, then the flood doesn't take place and 
+        ! vertind will be false everywhere. Note that vertices where 
+        ! skipvertopt is true will always be false in vertind
+
         ! Declare variables
         !==================
         ! Arguments
         class(GraphUDT)                     :: graph 
         integer(I8), intent(in)             :: startvertind
         logical, allocatable, dimension(:)  :: vertind 
+        logical, dimension(:), intent(in), optional     :: skipvertopt
+        logical, allocatable, dimension(:)  :: skipvert
 
         ! Auxiliary
         integer(I8)                             :: nextv
@@ -567,18 +574,36 @@ contains
             call gdErrorHandler('FloodGraph: start vertex index is out ' // & 
                 'of bounds')
         end if 
+        if (present(skipvertopt)) then
+            if (size(skipvertopt) /= graph%nv) then 
+                call gdErrorHandler('FloodGraph: incompatible dimension ' // & 
+                    'of optional argument skipvertopt')
+            end if 
+            skipvert = skipvertopt 
+        else
+            allocate(skipvert(graph%nv))
+            skipvert = .false. 
+        end if 
 
         ! Initialize
         allocate(vertind(graph%nv),  istraceable(graph%nv))
         vertind = .false. 
         istraceable = .false. 
 
+        ! Hedge for trivial case
+        if (skipvert(startvertind)) then 
+            return
+        end if 
+
+
         ! Flood
         !======
         ! Better call Master Chief
         nextv = startvertind
-        vertind(nextv) = .true. 
         do while (nextv /= 0)
+            ! Set as found
+            vertind(nextv) = .true. 
+
             ! Get the vertex outgoing edges
             ve = graph%GetVertexEdgesDirectional(nextv, .true.)
 
@@ -587,6 +612,9 @@ contains
 
             ! Set vertices that were already found as non-traceable
             where (vertind) istraceable = .false.  
+
+            ! Set vertices that are to be skipped to false
+            where (skipvert) istraceable = .false. 
 
             ! Get the next vertex index 
             nextv = findloc(istraceable, .true., 1, back=.false.)
@@ -742,7 +770,7 @@ contains
     end subroutine
 
     ! Flood
-    function FloodUGraph(graph, startvertind) result(vertind)
+    function FloodUGraph(graph, startvertind, skipvertopt) result(vertind)
 
         ! Description
         !============
@@ -755,12 +783,21 @@ contains
         ! non-connected parts, called 'subgraphs', which each can be 
         ! found by flooding from a non-flooded vertex. 
 
+        ! Note: if certain vertices and their connections should not
+        ! be considered, then set the corresponding local index in 
+        ! skipvert to true. If the start vertex happens to be a 
+        ! skipped vertex, then the flood doesn't take place and 
+        ! vertind will be false everywhere. Note that vertices where 
+        ! skipvertopt is true will always be false in vertind
+
         ! Declare variables
         !==================
         ! Arguments
         class(UGraphUDT)                    :: graph 
         integer(I8), intent(in)             :: startvertind
         logical, allocatable, dimension(:)  :: vertind 
+        logical, dimension(:), intent(in), optional     :: skipvertopt
+        logical, allocatable, dimension(:)  :: skipvert
 
         ! Auxiliary
         integer(I8)                             :: nextv
@@ -775,17 +812,36 @@ contains
                 'of bounds')
         end if 
 
+        if (present(skipvertopt)) then
+            if (size(skipvertopt) /= graph%nv) then 
+                call gdErrorHandler('FloodGraph: incompatible dimension ' // & 
+                    'of optional argument skipvertopt')
+            end if 
+            skipvert = skipvertopt 
+        else
+            allocate(skipvert(graph%nv))
+            skipvert = .false. 
+        end if 
+
         ! Initialize
         allocate(vertind(graph%nv),  istraceable(graph%nv))
         vertind = .false. 
         istraceable = .false. 
 
+        ! Hedge for trivial case
+        if (skipvert(startvertind)) then 
+            return
+        end if 
+
         ! Flood
         !======
         ! Better call Master Chief
         nextv = startvertind
-        vertind(nextv) = .true. 
+        
         do while (nextv /= 0)
+            ! Set as found
+            vertind(nextv) = .true. 
+
             ! Get the vertex edges
             ve = graph%GetVertexEdges(nextv)
 
@@ -795,9 +851,12 @@ contains
             ! Set vertices that were already found as non-traceable
             where (vertind) istraceable = .false.  
 
+            ! Set vertices that are to be skipped to false
+            where (skipvert) istraceable = .false. 
+
             ! Get the next vertex index 
             nextv = findloc(istraceable, .true., 1, back=.false.)
-
+            
         end do 
 
     end function 
@@ -901,36 +960,57 @@ contains
     end subroutine
 
     ! Graph connectedness check
-    function IsUGraphConnected(graph) result(isconnected)
+    function IsUGraphConnected(graph, skipvertopt) result(isconnected)
 
         ! Description
         !============
         ! This function checks whether the graph is connected by 
         ! doing a flood operation and checking if each vertex was 
-        ! found.
+        ! found. Optionally, a boolean list can be passed that 
+        ! represent vertices in the graph that will not be considered
+        ! when doing the flood operation. If all non-skip vertices 
+        ! are found, the graph is considered to be connected. 
 
         ! Declare variables
         !==================
         ! Arguments
         class(UGraphUDT)                    :: graph 
         logical                             :: isconnected 
+        logical, intent(in), optional       :: skipvertopt(:)
 
         ! Auxiliary
-        logical, allocatable, dimension(:)  :: vertind 
+        integer(I8)                         :: startvertind
+        logical, allocatable, dimension(:)  :: vertind, skipvert
 
         ! Compute
         !========
         ! Initialize
         isconnected = .false. 
+        if (present(skipvertopt)) then 
+            skipvert = skipvertopt
+            if (size(skipvert) /= graph%nv) then 
+                call gdErrorHandler('IsUGraphConnected: incompatible ' // & 
+                    'dimension of input skipvertopt')
+            end if 
+        else
+            allocate(skipvert(graph%nv))
+            skipvert = .false.
+        end if
 
         ! Hedge for trivial case
         if (graph%nv == 0) then 
             isconnected = .true.
             return  
         end if 
+        if (all(skipvert)) then 
+            isconnected = .true. 
+            return 
+        end if 
 
         ! Compute
-        vertind = graph%Flood(1)
+        startvertind = findloc(.not. skipvert, .true., 1)
+        vertind = graph%Flood(startvertind, skipvert)
+        vertind = vertind .or. skipvert
         if (all(vertind)) then 
             isconnected = .true. 
         end if 
