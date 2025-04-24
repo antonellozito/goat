@@ -318,12 +318,15 @@ module gdmod_userinput
 
         ! Fields
         ! - checkperp:          check if edges are perpendicular?
+        ! - includecutcellvert: include cut cell vertices (zero ID, on 
+        !                       boundary) for orthogonality constraints?
         ! - epsperp:            tolerance on dot product
         ! - includebox(x, y)    boxes for edge inclusion
         ! - excludebox(x, y)    boxes for edge exclusion (applied after 
         !                       inclusion) 
 
         integer(I8)                 :: checkperp 
+        logical                     :: includecutcellvert
         real(R8)                    :: epsperp 
         real(R8), allocatable       :: includeboxx(:, :), &
             includeboxy(:, :), excludeboxx(:, :), excludeboxy(:, :)
@@ -420,6 +423,7 @@ module gdmod_userinput
 
         ! Fields for inequality constraints
         integer(I8)         :: linefolding ! prevent flux line folding
+        integer(I8)         :: invessel ! prevent vertices from moving out of the vessel structure
 
         ! Number of (continuous) constraints
         integer(I8)         :: neq ! number of equality constraints
@@ -690,6 +694,7 @@ module gdmod_userinput
         options%fixedfluxvalues     = 1
 
         options%linefolding         = 0
+        options%invessel            = 0 
 
         options%neq                 = 5
         options%nineq               = 0
@@ -791,6 +796,7 @@ module gdmod_userinput
 
         ! Default options
         !================
+        options%includecutcellvert = .false.
         options%checkperp = 0 
         options%epsperp = 0.2
         if (allocated(options%includeboxx)) then 
@@ -1482,6 +1488,8 @@ module gdmod_userinput
         ! Inequality constraints
         field = 'gd.design.inec.linefolding'
         call ExtractOptionValueInteger0D(fid, field, options%linefolding)
+        field = 'gd.design.inec.invessel'
+        call ExtractOptionValueInteger0D(fid, field, options%invessel)
 
         ! Data writing
         field = 'gd.design.ec.writedata'
@@ -1717,6 +1725,8 @@ module gdmod_userinput
         
         ! Read options
         !=============
+        field = 'gd.design.ec.par.orthogonality.includecutcellvert'
+        call ExtractOptionValueLogical0D(fid, field, options%includecutcellvert)
         field = 'gd.design.ec.par.orthogonality.checkperp'
         call ExtractOptionValueInteger0D(fid, field, options%checkperp)
         field = 'gd.design.ec.par.orthogonality.epsperp'

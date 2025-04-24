@@ -129,7 +129,11 @@ subroutine GGDriver(goatoptions)
     ! Write data
     !===========
     ! Translate labels etc
-    call TranslateGridLabels(grid, topomesh, 'solps')
+    call TranslateGridLabels(grid, topomesh, environment%vessel, ggoptions, &
+        'solps')
+
+    ! Recompute topological data from grid for new face labels
+    call ComputeTopologicalData(grid, topomesh)
 
     ! Grid data
     call WriteGOAT(goatoptions, grid, magneticField, environment)

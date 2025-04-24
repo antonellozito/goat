@@ -1953,7 +1953,7 @@ module mod_contour2D
                             if (superquadflags(iic, jjc) /= superquadflags(iisq, jjsq)) then 
                                 where ((superquadflags == superquadflags(iic, jjc)) &
                                     .and. (quadc > 0)) startquads = .true.  
-                            else
+                            elseif (.not. issaddlepoint) then 
                                 ! Ensure we don't start again at this quad
                                 where ((superquadflags == superquadflags(iic, jjc)) &
                                     .and. (quadc > 0)) startquads = .false.  
@@ -3060,13 +3060,15 @@ module mod_contour2D
             tnp = ceiling(l/tdl)+1
 
             ! Compute
-            distr = real([(k, k = 0, tnp-1)], kind=R8)*l/(tnp-1)
-            distr(1) = 0.0_R8
-            distr(tnp) = l
-            call Interpolate1D(distr, tx, dlc, contours(i)%x)
-            call Interpolate1D(distr, ty, dlc, contours(i)%y)
-            contours(i)%x = tx 
-            contours(i)%y = ty
+            if (tnp < ncp) then 
+                distr = real([(k, k = 0, tnp-1)], kind=R8)*l/(tnp-1)
+                distr(1) = 0.0_R8
+                distr(tnp) = l
+                call Interpolate1D(distr, tx, dlc, contours(i)%x)
+                call Interpolate1D(distr, ty, dlc, contours(i)%y)
+                contours(i)%x = tx 
+                contours(i)%y = ty
+            end if 
 
             ! Housekeeping
             deallocate(dlc)

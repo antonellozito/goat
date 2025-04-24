@@ -57,6 +57,7 @@ ifdef USE_OPENMP
 EXT_OPENMP = .openmp
 endif
 ifdef SOLPS_DEBUG
+GOAT_DEBUG = yes
 EXT_DEBUG = .debug
 IMAS_AMNS_DEBUG = yes
 else
@@ -184,7 +185,8 @@ DRIVER_FILES = $(wildcard src/Drivers/Goat/*.F90)
 SODRIVER_FILES = $(wildcard src/Drivers/ShapeOpt/*.F90)
 
 ## MODULE_FILES			: Module filenames (.F90, .F) - sequence matters
-MODULE_FILES_GOAT =  $(wildcard src/Modules/Goat/*.F90)
+MODULE_FILES_GOAT =  src/Modules/Goat/goatmod_userinput.F90 src/Modules/Goat/goatmod_types.F90\
+    $(wildcard src/Modules/Goat/*.F90)
 MODULE_FILES_GD = src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
     $(wildcard src/Modules/GD/*.F90)
@@ -211,6 +213,7 @@ AUXILIARY_FILES =  src/Auxiliary/mod_structured2Dgridding.F90 \
     $(wildcard src/Auxiliary/Interpolation/*.F90) \
     $(wildcard src/Auxiliary/Contour/*.F90) \
     src/Auxiliary/mod_streamlinetracing2D.F90 \
+    src/Auxiliary/Graphs/mod_graph.F90
 
 ## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
 B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)
@@ -260,7 +263,7 @@ SHAPEOPTSOLPS_FILES  =  src/Modules/ShapeOpt/somod_userinput.F90 \
 ## %========
 ## GDRUN_TARGETS			: Targets to be run for the grid deformation
 GDRUN_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
-    IO_carre IO_output IO_input Setup Drivers 
+    IO_carre Drivers 
 
 ## GOAT_TARGETS             : Targets to be run for the full goat
 GOAT_TARGETS = $(GDRUN_TARGETS) 
@@ -277,8 +280,8 @@ CTEST_TARGETS = Clayer
 ## SHAPEOPT_TARGETS         : Targets to be run for shape optimization program
 ifdef DOSOLPS
 SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
-    IO_carre IO_output IO_input  Setup  ShapeOptimizationSolps Drivers SODrivers
+    IO_carre ShapeOptimizationSolps Drivers SODrivers
 else
 SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
-    IO_carre IO_output IO_input  Setup  ShapeOptimization Drivers SODrivers
+    IO_carre ShapeOptimization Drivers SODrivers
 endif

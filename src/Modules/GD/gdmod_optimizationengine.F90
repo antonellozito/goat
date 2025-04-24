@@ -97,6 +97,9 @@ module gdmod_optimizationengine
         ! KKT relaxation
         procedure :: RelaxProblemKKTSystem => RelaxProblemKKTSystemGD
 
+        ! Optimization iteration data writing
+        procedure :: WriteIterationData => WriteIterationDataGD
+
         ! Additional routines
         !====================
         ! Initialization finalizer to account for cross-design/cfv/con
@@ -200,6 +203,72 @@ module gdmod_optimizationengine
 
     end subroutine
 
+    ! Constructor
+    subroutine ConstructGridDesignProblem(optimizationdriver, &
+        designoptions, grid, magneticField, environment)
+    
+        ! Description
+        !============
+        ! Construct the initial grid design problem by initializing the 
+        ! following quantities:
+        ! 
+        ! - Cost function: type, parameters
+        ! - design variables: type, values
+        ! - constraints: 
+    
+        ! Notes
+        !======
+    
+        ! The usual
+        implicit none 
+    
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(OptimizationEngineGDUDT)       :: optimizationdriver
+        type(DesignOptionsUDT), intent(in)  :: designoptions
+        type(GridUDT), intent(in)           :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        type(EnvironmentUDT), intent(in)    :: environment
+    
+        ! Loop variables
+    
+        ! Auxiliary variables 
+    
+        ! Data
+    
+        ! State
+        !======
+        optimizationdriver%inputfilepath = designoptions%inputfilepath
+        optimizationdriver%inputfileprefix = 'gd.'
+        call optimizationdriver%SetupOptimizationDriver()
+        
+        ! Associate in order to execute select type...
+        associate(thisproblem => optimizationdriver%problem) 
+    
+            select type(thisproblem)
+    
+            type is (OptimizationProblemGDUDT)
+        
+                ! This should be the only possible type 
+                thisproblem%grid            = grid 
+                thisproblem%magneticField   = magneticField 
+                thisproblem%environment     = environment
+                thisproblem%designoptions   = designoptions
+    
+            class default
+    
+                ! Unknown, throw error
+                stop 'Unknown optimization problem type'
+    
+            end select
+    
+        end associate
+    
+    end subroutine
+    
+
+
     !------------------------------------------------------------------!
     !                       OPTIMIZATION PROBLEM                       !
     !------------------------------------------------------------------!
@@ -300,6 +369,15 @@ module gdmod_optimizationengine
 
         ! Design variables
         !=================
+        ! Check if already allocated
+        if (allocated(problem%designvariables)) then 
+            ! Print and deallocate
+            print *, 'InitializeOptimizationProblemGD: design variables ' // & 
+                'already allocated, reinitializing...'
+
+            deallocate(problem%designvariables)
+        end if 
+
         ! Allocate the design variables, depending on the type.
         select case (trim(problem%designoptions%variables%type))
 
@@ -332,6 +410,14 @@ module gdmod_optimizationengine
         
         ! Cost function
         !==============
+        if (allocated(problem%costfunction)) then 
+            ! Print and deallocate
+            print *, 'InitializeOptimizationProblemGD: cost function ' // & 
+                'already allocated, reinitializing...'
+
+            deallocate(problem%costfunction)
+        end if
+        
         ! Allocate the cost function, depending on the type
         select case (trim(problem%designoptions%costfunction%type))
 
@@ -413,6 +499,13 @@ module gdmod_optimizationengine
             problem%designvariables, problem%designoptions%constraints)
 
         ! Set Lagrange multipliers
+        if (allocated(problem%lambda)) then 
+            deallocate(problem%lambda)
+        end if 
+        if (allocated(problem%mu)) then 
+            deallocate(problem%mu)
+        end if 
+
         allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
             problem%mu(problem%constraints%ineqcon%nineqcon))
         problem%lambda = 0
@@ -734,7 +827,8 @@ module gdmod_optimizationengine
         character(*), intent(in)            :: updatemeth 
 
         ! Auxiliary
-        logical                             :: upconbnd, upconlf
+        logical                             :: upconbnd, upconlf, &
+            upconiv
 
         integer(I8)                         :: np
 
@@ -755,6 +849,7 @@ module gdmod_optimizationengine
         ! Set initial switches to update cost function and constraints
         upconbnd    = .false. 
         upconlf     = .false.
+        upconiv     = .false.
 
         ! Update parameters
         !==================
@@ -774,6 +869,7 @@ module gdmod_optimizationengine
             ! update
             upconbnd    = .true. 
             upconlf     = .true.
+            upconiv     = .true.
 
         case default
 
@@ -799,6 +895,12 @@ module gdmod_optimizationengine
             call problem%constraints%ineqcon%linefolding%Update(grid, &
                 magneticField, environment)
         end if
+
+        ! In vessel constraints
+        if (upconiv .and. problem%constraints%ineqcon%doinvessel) then 
+            call problem%constraints%ineqcon%invessel%Update(grid, &
+                magneticField, environment)
+        end if 
 
         ! Housekeeping
         !=============
@@ -960,6 +1062,79 @@ module gdmod_optimizationengine
 
     end subroutine
 
+    ! Optimization iteration data writing
+    subroutine WriteIterationDataGD(problem, itopt)
+
+        ! Description
+        !============
+        ! Write out any data of the optimization problem per iteration
+        ! to a specific file. Uses the plotter module in the backend.
+        ! Here, we don't use the itopt variable, which gives the 
+        ! iteration number, so we overwrite each file.
+        ! The following data is written out:
+        ! - temp_gridcellsiterate.dat: grid cell coordinates with vertices for plotting (overwritten each time)
+        ! - history.dat (created at iteration one, appended each iteration)
+
+        ! Modules
+        !========
+        use mod_plotter, only: plotdir 
+        use mod_specialchars, only: filesepchar
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)         :: problem 
+        integer(I8)                             :: itopt 
+
+        ! Auxiliary 
+        integer, parameter                      :: fid = 70
+        integer                                 :: iostat
+        logical                                 :: isfile 
+        character(:), allocatable               :: filepath 
+
+        ! Initialize
+        !===========
+        ! Associate some fields for easier reading/writing
+        associate(grid      => problem%grid)
+
+        ! Set filepath
+        filepath = plotdir // filesepchar // 'goat_optimization_history.dat'
+
+        ! Write data
+        !===========
+        ! Cell vertex data
+        call WriteGridCells(grid, 'temp_gridcellsiterate')
+
+        ! Iteration data
+        if (itopt == 1) then 
+            ! Check if the file exists
+            inquire(file=filepath, exist=isfile)
+            if (isfile) then 
+                ! Replace old file
+                open(unit=fid, status='old', iostat=iostat, file=filepath)
+                rewind(fid)
+            else
+                ! Create new file
+                open(unit=fid, status='new', iostat=iostat, file=filepath)
+            end if
+
+            ! Write header
+            call problem%monitor%WriteFileHeader(fid)
+        else
+            ! File should already by opened, append
+            open(unit=fid, status='old', iostat=iostat, file=filepath, access='sequential', position='append')
+        end if
+
+        ! Write
+        call problem%monitor%WriteFileIterate(fid)
+
+        ! Housekeeping
+        !=============
+        close(unit=fid)
+        end associate
+
+    end subroutine
+
     ! Constraint group construction
     subroutine ConstructInequalityConstraintGroups(problem)
 
@@ -1109,6 +1284,12 @@ module gdmod_optimizationengine
         end if 
 
         ! Allocate
+        if (allocated(problem%congroups)) then 
+            deallocate(problem%congroups)
+        end if 
+        if (allocated(problem%dofgroups)) then 
+            deallocate(problem%dofgroups)
+        end if 
         allocate(hasrl(nv), hasfs(nv), nvertrl(nv), vertfs(nv))
         allocate(vertrl(nv, maxval(grid%vert%neigP(:, 2)))) ! vertex can belong to multiple radial lines if x-point... initialized too big here
         allocate(dofs(nv + nfs + nrl), problem%dofgroups(nv + nfs + nrl))
@@ -1347,6 +1528,48 @@ module gdmod_optimizationengine
 
         ! Constraint counter
         cc = 0
+
+        ! Invessel
+        if (ineqcon%doinvessel) then 
+            
+            ! Associate
+            associate( &
+                vert          => ineqcon%invessel%vert,         &
+                nvert         => ineqcon%invessel%nvert         &
+                )
+
+            ! Set rules
+            fslegal = .true. 
+            rllegal = .true.
+            vertlegal = .true. 
+
+            ! Loop over all vertices
+            do i = 1, nvert
+                ! Update counter
+                cc = cc + 1
+
+                ! Attribute
+                call DetermineConstraintDofgroups([vert(i)], dofs, fslegal, rllegal, &
+                    vertlegal, hasfs, hasrl, groupindrl, groupindfs, vertrl, vertfs, nvertrl, &
+                    attributed, groupID)
+                
+                ! Add
+                congroups(cc)%dofgroups = groupID
+                isineqconattributed(cc) = attributed
+
+            end do 
+
+            if (any(.not. isineqconattributed(cc-nvert+1:cc))) then 
+                ! Throw warning, some constraints will not be set
+                print *, 'ConstructInequalityConstraintGroups: some ' // & 
+                    'invessel inequalities will never be active as ' // &
+                    'they could not be attributed'
+            end if
+           
+            ! Housekeeping
+            end associate
+        end if 
+
 
         ! Linefolding
         if (ineqcon%dolinefolding) then 

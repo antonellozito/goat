@@ -61,6 +61,8 @@ module PolygonShapeFunction
     ! Load modules
     use mod_precision
     use mod_plotter
+    use mod_errorhandler
+    use mod_structured2Dgridding
 
     ! The usual
     implicit none

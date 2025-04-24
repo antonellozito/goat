@@ -23,6 +23,7 @@ module somod_costfunction
     use somod_designvariables
     use PolygonLevelsetFunction2D
     use mod_linearsolverinterface
+    use optmod_hessianapproximation
 
     ! The usual
     implicit none
@@ -46,6 +47,7 @@ module somod_costfunction
         ! optimization. The following general fields are added: 
         ! - J:          The cost function value (scalar)
         ! - type:       the cost function type (string)
+        ! - B:          hessian estimator
 
         ! The following routines should be implemented for these cost
         ! functions (see also the interface below for a description of
@@ -53,11 +55,17 @@ module somod_costfunction
         ! - Initialize
         ! - Evaluate
 
+        ! Note that it is up to the developer to use/update the hessian
+        ! estimator if required/desired! 
+
         ! Cost function value
         real(R8)                        :: J 
 
         ! Cost function type
         character(:), allocatable       :: type
+
+        ! Hessian estimator
+        class(HessianApproximationUDT), allocatable     :: B
 
     contains
 
@@ -138,6 +146,11 @@ module somod_costfunction
 
         ! Note: one should *not* impose the goat constraints in 
         ! addition to the optimization problem 
+
+        ! Note: since the hessian of the reduced problem is typically
+        ! hard to compute, we use a hessian estimator for the reduced 
+        ! cost function  (except for those contributions that can be 
+        ! computed directly). This hessian estimator 
 
         ! Fields
         class(CostFunctionSOUDT), allocatable       :: costfunction 

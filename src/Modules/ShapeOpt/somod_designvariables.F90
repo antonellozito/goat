@@ -196,6 +196,9 @@ module somod_designvariables
         designvariables%xind = (/(i, i = 1, nv)/)
         designvariables%yind = designvariables%xind + nv
 
+        ! Write out data
+        call goat%environment%vessel%polygonset%WriteData('vesselpolyg_orig')
+
     end subroutine
 
     ! Design update

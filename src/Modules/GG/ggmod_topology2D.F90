@@ -24,12 +24,10 @@ module ggmod_topology2D
     use mod_contour2D
     use mod_polygon
     use mod_sort
-    use mod_definitions, only: TMvertexbndID, TMvertexmaxID, &
-        TMvertexminID, TMvertexsaddleID, TMvertextp1ID, &
-        TMvertextp2ID, TMfacepolID, TMfaceradID, TMfacebndID, &
-        TMvertexsplitID, TMfacesepID, TMfacecoreID, TMfacePFID
+    use mod_definitions
     use mod_linearsolverinterface, only: SolveDenseLinearSystemDI
-    use goatmod_types, only : magneticFieldUDT, VesselUDT
+    use goatmod_types, only : magneticFieldUDT, VesselUDT, &
+        ConstructVesselPolygonSet
     use goatmod_userinput, only : TopomeshOptionsUDT
     use Interpolant1D
     use mod_streamlinetracing2D
@@ -37,7 +35,8 @@ module ggmod_topology2D
     implicit none
     private 
     public :: TopomeshUDT, ConstructTopologicalMesh, TraceExtrema2D, &
-        TraceTangencyPoints2D, ReadTopologicalMesh, WriteTopologicalMesh
+        TraceTangencyPoints2D, ReadTopologicalMesh, WriteTopologicalMesh, &
+        IdentifyTopologicalMeshType
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -188,7 +187,9 @@ module ggmod_topology2D
         procedure :: GetInternalFaceIDs, GetBoundaryFaceIDs, &
             GetTargetFaceIDs, GetSeparatrixFaceIDs, GetVesselFaceIDs, &
             GetCoreFaceIDs, GetCoreCellIDs, GetWideGridCellIDs, &
-            GetSeparatrixFluxSurfaceIDs, GetStrikePointIDs
+            GetSeparatrixFluxSurfaceIDs, GetStrikePointIDs, GetXPOintIDs, &
+            GetOPointIDs, GetPrimaryXPointIDs, GetStrikePointXPointIDs, &
+            GetClosedContourTangencyPointIDs
     end type 
 
     contains 
@@ -606,7 +607,7 @@ module ggmod_topology2D
         !==================
         ! Arguments
         class(TopomeshUDT), intent(inout)       :: topomesh
-        class(ContourTracerUDT), intent(inout)  :: fieldtracer 
+        class(ContourTracerUDT), intent(in)     :: fieldtracer 
         type(MagneticFieldUDT), intent(in)      :: magneticField 
         type(TopomeshOptionsUDT), intent(in)    :: options 
 
@@ -2342,6 +2343,7 @@ module ggmod_topology2D
         deallocate(bndpol)
 
         ! Trim the topological mesh
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Split boundaries
@@ -3525,12 +3527,13 @@ module ggmod_topology2D
         logical                                 :: marked, &
             passedcheck
         logical, allocatable, dimension(:)      :: delf, delv
-        integer(I8)                             :: thisind
+        integer(I8)                             :: maxind
         integer(I8), allocatable, dimension(:)  :: tf, tfv, tnb, &
             tfmerge, tnbmerge, tfvu, tfradmerge, tvfvID, tvfvIDu, &
-            tvf
-        real(R8)                                :: dpsi, dpsinb1, dpsinb2
-        real(R8), allocatable, dimension(:)     :: fval
+            tvf, thisv
+        real(R8)                                :: dpsi, dpsinb1, dpsinb2, &
+            thisdeletedfval
+        real(R8), allocatable, dimension(:)     :: fval, thisvfval
 
         ! Loop
         integer(I8)                             :: i, j
@@ -3609,7 +3612,7 @@ module ggmod_topology2D
                             tfmerge = tube%GetBndFace(i, 1_I8)
                             tnbmerge = tnb
                             tfradmerge = [tube%GetFace(tnb(1)), &
-                                tube%GetFace(tnb(2))]
+                                tube%GetFace(tnb(2)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
                             if (any(face%type(tfmerge) == TMfacesepID)) then 
@@ -3649,7 +3652,7 @@ module ggmod_topology2D
                             ! Get merge data
                             tfmerge = tube%GetBndFace(i, 1_I8)
                             tnbmerge = tnb
-                            tfradmerge = tube%GetFace(tnb(1))
+                            tfradmerge = [tube%GetFace(tnb(1)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
                             if (any(face%type(tfmerge) == TMfacesepID)) then 
@@ -3703,7 +3706,7 @@ module ggmod_topology2D
                             tfmerge = tube%GetBndFace(i, 2_I8)
                             tnbmerge = tnb
                             tfradmerge = [tube%GetFace(tnb(1)), &
-                                tube%GetFace(tnb(2))]
+                                tube%GetFace(tnb(2)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
                             if (any(face%type(tfmerge) == TMfacesepID)) then 
@@ -3743,7 +3746,7 @@ module ggmod_topology2D
                             ! Get merge data
                             tfmerge = tube%GetBndFace(i, 2_I8)
                             tnbmerge = tnb
-                            tfradmerge = tube%GetFace(tnb(1))
+                            tfradmerge = [tube%GetFace(tnb(1)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
                             if (any(face%type(tfmerge) == TMfacesepID)) then 
@@ -3790,8 +3793,22 @@ module ggmod_topology2D
                     ! If so, delete one of both (perhaps)
                     call Unique([face%vert(tfradmerge, 1), face%vert(tfradmerge, 2)], tfvu)
                     do while (count(vert%type(tfvu) == TMvertextp1ID) > 1)
-                        thisind = findloc(vert%type(tfvu), TMvertextp1ID, 1)
-                        vert%type(tfvu(thisind)) = TMvertexbndID
+                        ! Get all type 1 vertices
+                        allocate(thisv(count(vert%type(tfvu) == TMvertextp1ID)))
+                        thisv = pack(tfvu, vert%type(tfvu) == TMvertextp1ID)
+
+                        ! Get field values
+                        thisvfval = topomesh%fsfval%Get(vert%fsID(thisv))
+                        thisdeletedfval = topomesh%fsfval%Get(face%fsID(tfmerge(1)))
+
+                        ! Check which vertex is the furthest away in terms
+                        ! of psi values - keep that one, delete the rest
+                        maxind = maxloc(abs(thisvfval - thisdeletedfval), 1)
+                        vert%type(thisv) = TMvertexbndID
+                        vert%type(thisv(maxind)) = TMvertextp1ID
+
+                        ! Housekeeping
+                        deallocate(thisv)
                     end do 
 
                     ! Remove faces
@@ -8798,7 +8815,404 @@ module ggmod_topology2D
         ID = pack([(j, j = 1, topomesh%vert%ntot)], temp)
 
     end function
+
+    function GetXPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns all the X-point (saddle point) IDs
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        integer(I8), allocatable, dimension(:)  :: ID
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)      :: isXP
+
+        ! Loop
+        integer(I8)                             :: k
+
+        ! Find X-points
+        !==============
+        isXP = topomesh%vert%type == TMvertexsaddleID
+        allocate(ID(count(isXP)))
+        ID = pack([(k, k = 1, size(isXP))], isXP)
+
+    end function
+
+    function GetOPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns all the O-points (extrema) point) IDs
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        integer(I8), allocatable, dimension(:)  :: ID
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)      :: isOP
+
+        ! Loop
+        integer(I8)                             :: k
+
+        ! Find X-points
+        !==============
+        isOP = (topomesh%vert%type == TMvertexminID) .or. &
+            (topomesh%vert%type == TMvertexmaxID)
+        allocate(ID(count(isOP)))
+        ID = pack([(k, k = 1, size(isOP))], isOP)
+
+    end function
+
+    function GetPrimaryXPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns the vertex IDs of all x-points that 
+        ! lie close to a core (close in the sense that there is no other
+        ! x-point between this x-point and the next o-point). This can 
+        ! only occur if the x-point is present in a core region's 
+        ! vertices. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        integer(I8), allocatable, dimension(:)  :: ID
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: corecells, tv
+
+        ! Loop
+        integer(I8)                             :: i
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(ID(0))
+
+        ! Unpack
+        associate(&
+            cell        => topomesh%cell,   &
+            vert        => topomesh%vert    &
+            )
+
+        ! Determine primary x-points
+        !===========================
+        ! Determine core cells
+        corecells = topomesh%GetCoreCellIDs()
+        do i = 1, size(corecells)
+            ! Get vertices
+            tv = cell%GetVert(corecells(i))
+
+            ! Check which ones are x-points (if any) and add
+            ID = [ID, pack(tv, vert%type(tv) == TMvertexsaddleID)]
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end function
+
+    function GetStrikePointXPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns the x-point ID for each strike point 
+        ! as returned by GetStrikePointIDs (a strike point can only 
+        ! have one X-point normally speaking). To determine this, we 
+        ! start from each strike point and keep tracing the aligned 
+        ! field line it belongs to until an x-point is reached (normally, 
+        ! this is already reached in the first face but ok)
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        integer(I8)                             :: nsp, tspfloc, &
+            nextv, tsp
+        integer(I8), allocatable, dimension(:)  ::sp, tspf, tfvert
+
+        ! Loop
+        integer(I8)                 :: i
+
+        ! Initialize
+        !===========
+        ! Get strike points
+        sp = topomesh%GetStrikePointIDs()
+        nsp = size(sp)
+        
+        ! Initialize array
+        allocate(ID(nsp))
+        ID = 0
+
+        ! Associate
+        associate(&
+            vert    => topomesh%vert,   &
+            face    => topomesh%face    &
+            )
+
+        ! Loop
+        !=====
+        do i = 1, nsp
+            ! Unpack 
+            tsp = sp(i)
+
+            ! Get faces of this strike point
+            tspf = vert%GetFace(tsp)
+
+            ! Get separatrix face
+            tspfloc = findloc(face%type(tspf), TMfacesepID, 1)
+
+            ! Sanity check
+            if (tspfloc == 0) then 
+                call gdErrorHandler('GetStrikePointXPointIDs: could not ' // & 
+                    'find separatrix face, unexpected')
+            end if 
+
+            ! Get the next vertex
+            tfvert = face%vert(tspf(tspfloc), :)
+            if (tfvert(1) == tsp) then 
+                nextv = tfvert(2)
+            elseif (tfvert(2) == tsp) then 
+                nextv = tfvert(1)
+            else
+                call gdErrorHandler('GetStrikePointXPointIDs: something ' // & 
+                    'wrong with topomesh interconnections, could not ' // & 
+                    'find current vertex in face vertices')
+            end if 
+
+            ! Check the point type
+            if (vert%type(nextv) == TMvertexsaddleID) then 
+                ! Found, add and cycle
+                ID(i) = nextv 
+                cycle
+            elseif (vert%type(nextv) == TMvertexbndID) then 
+                ! Shouldn't happen, error
+                call gdErrorHandler('GetStrikePointXPointIDs: could not ' // & 
+                    'find X-point of strike point')
+            end if 
+
+            ! If we got here, we need to keep on walking along the 
+            ! separatrix - this is not yet implemented
+            call gdErrorHandler('GetStrikePointXPointIDs: strike points ' // & 
+                'that do not directly connect to an x-point are not yet ' // & 
+                'supported')
+
+        end do
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end function
+
+    function GetClosedContourTangencyPointIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! This function returns the tangency point IDs (type 2) that 
+        ! have a contour which closes upon itself. 
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tv, &
+            sortind, tf
+        integer(I8), allocatable, dimension(:, :)   :: tfvert
+        logical, allocatable, dimension(:)      :: isbranchingpolygon, &
+            ispolygonstart
+
+        ! Loop
+        integer(I8)                 :: i, k
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(ID(0))
+
+        ! Associate
+        associate(&
+            face        => topomesh%face,   &
+            vert        => topomesh%vert    &
+            )
+
+        ! Loop
+        !=====
+        do i = 1, vert%ntot
+            if (vert%type(i) == TMvertextp2ID) then 
+                ! Get all topomesh faces with this flux surface ID
+                allocate(tf(count(face%fsID == vert%fsID(i))))
+                tf = pack([(k, k = 1, face%ntot)], face%fsID == vert%fsID(i))
+
+                ! Check by sorting vertices 
+                tfvert = face%vert(tf, :)
+                allocate(sortind(size(tf)), ispolygonstart(size(tf)), &
+                    isbranchingpolygon(size(tf)))
+                call SortPolygonEdges(tfvert, size(tf), sortind, ispolygonstart, &
+                    isbranchingpolygon)
+                tfvert = tfvert(sortind, :)
+
+                ! Sanity checks
+                if (count(ispolygonstart) /= 1) then 
+                    call gdErrorHandler('GetClosedContourTangencyPointIDs: ' // & 
+                        'found no or multiple polygons, unexpected')
+                end if 
+                if (count(isbranchingpolygon) /= 0) then 
+                    call gdErrorHandler('GetClosedContourTangencyPointIDs: ' // &
+                        'found branching polygons, unexpected')
+                end if 
+
+                ! Check first and last edge
+                call SetDiff(tfvert(1, :), tfvert(size(tf), :), tv)
+                if (size(tv) == 0) then 
+                    ! Found, add
+                    ID = [ID, i]
+                end if 
+
+                ! Housekeeping
+                deallocate(tf, sortind, ispolygonstart, isbranchingpolygon)
+
+            end if 
+        end do
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end function
  
+    ! Topological mesh identification 
+    function IdentifyTopologicalMeshType(topomesh) result(TMlabel)
+
+        ! Description
+        !============
+        ! This function attempts to identify the topological mesh type
+        ! and returns the topological mesh identification number 
+        ! (see mod_definitions of the definition thereof). This is not 
+        ! really required by goat itself, but is rather a convenience
+        ! tool for later simulation etc and face label mapping. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)              :: topomesh
+        integer(I8)                     :: TMlabel
+
+        ! Auxiliary
+        logical                                 :: issinglenull, &
+            isdoublenull
+        integer(I8)                             :: nxp, nop, nwgc, nsp, &
+            ncc
+        integer(I8), allocatable, dimension(:)  :: xp, op, wgc, sp, cc
+
+        ! Initialize
+        !===========
+        ! Set initial label to default label
+        TMlabel = TMTopGeneral
+
+        ! Get all X-points
+        xp = topomesh%GetXPointIDs()
+        nxp = size(xp)
+
+        ! Get all O-points
+        op = topomesh%GetOPointIDs()
+        nop = size(op)
+
+        ! Strike points
+        sp = topomesh%GetStrikePointIDs()
+        nsp = size(sp)
+
+        ! Get all wide grid cells
+        wgc = topomesh%GetWideGridCellIDs()        
+        nwgc = size(wgc)
+
+        ! Core cells
+        cc = topomesh%GetCoreCellIDs()
+        ncc = size(cc)
+
+        ! Initialize
+        issinglenull = .true.
+        isdoublenull = .true.
+
+        ! Single null
+        !============        
+        ! X-point and O-point checks
+        if (nxp /= 1 .or. nop /= 0) then 
+            issinglenull = .false.
+        end if 
+
+        ! Strike point checks
+        if (nsp /= 2) then 
+            issinglenull = .false. 
+        end if 
+
+        ! Number of wide and narrow grid cells
+        if (nwgc > 0) then 
+            issinglenull = .false.
+        elseif (topomesh%cell%ntot /= 3) then
+            issinglenull = .false.
+        end if 
+
+        ! Core cells
+        if (ncc /= 1) then 
+            issinglenull = .false.
+        end if 
+
+        ! Double null
+        !============
+        ! X-point and O-point checks
+        if (nxp /= 2 .or. nop /= 0) then 
+            isdoublenull = .false.
+        end if 
+
+        ! Strike point checks
+        if (nsp /= 4) then 
+            isdoublenull = .false. 
+        end if 
+
+        ! Number of wide and narrow grid cells
+        if (nwgc > 0) then 
+            isdoublenull = .false.
+        elseif (topomesh%cell%ntot /= 3) then
+            isdoublenull = .false.
+        end if 
+
+        ! Core cells
+        if (ncc /= 2) then 
+            isdoublenull = .false.
+        end if 
+
+        ! Determine flag
+        !===============
+        ! Sanity checks
+        if (count([issinglenull, isdoublenull]) > 1) then 
+            ! Probably we missed something in the definition then
+            print *, 'IdentifyTopologicalMeshType: multiple topologies ' // & 
+                'appear valid, this is likely a bug. Setting flag to ' // & 
+                'general flag...'
+
+        elseif (issinglenull) then 
+            TMlabel = TMTopSN
+        elseif (isdoublenull) then 
+            TMlabel = TMTopDN
+        end if 
+
+    end function
+
     !------------------------------------------------------------------!
     !                 TOPOLOGICAL MESH CELL OPERATORS                  !
     !------------------------------------------------------------------!
