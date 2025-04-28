@@ -39,11 +39,7 @@ module mod_plotter
     public 
 
     ! Define the (relative) file directory where the plot are located
-#ifdef SOLPS
-    character(*), parameter     :: plotdir = '../output'
-#else 
     character(*), parameter     :: plotdir = './output'
-#endif
 
     ! Define the (general) plot filename and data filename
     character(:), allocatable                 :: plotfile
@@ -395,7 +391,7 @@ module mod_plotter
         integer(I8),  intent(in)                    :: ID(:)
         real(R8),              intent(in)           :: x(:), y(:) 
         integer                                     :: i, fu
-        character(:), allocatable, intent(in)       :: filepath 
+        character(*), intent(in)                    :: filepath 
 
         ! Initialize
         !===========
@@ -469,7 +465,7 @@ module mod_plotter
         ! Declare variables
         !==================
         ! Arguments
-        real(R8), allocatable, intent(in)           :: x(:), y(:) 
+        real(R8), intent(in)           :: x(:), y(:) 
         integer                                     :: i, fu
         character(*),  intent(in)       :: filepath 
 
@@ -510,7 +506,7 @@ module mod_plotter
         ! Arguments
         real(R8), intent(in)                        :: x(:), y(:) 
         integer                                     :: i, fu
-        character(:), allocatable, intent(in)       :: filepath 
+        character(*), intent(in)                    :: filepath 
 
         ! Initialize
         !===========

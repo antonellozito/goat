@@ -1,0 +1,7 @@
+# General
+
+module load GCC/11.3.0
+module load SuiteSparse/5.13.0-foss-2022a-METIS-5.1.0
+module load OpenBLAS/0.3.20-GCC-11.3.0
+module load matplotlib/3.5.2-foss-2022a
+module load ArmForge/22.1.2

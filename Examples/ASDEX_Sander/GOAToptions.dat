@@ -9,7 +9,7 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # General options
 'goat.debug'                        '0'
-'goat.meth'                         'GD'
+'goat.meth'                         'GG'
 
 # Input file locations 
 #'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
@@ -20,7 +20,7 @@ VERSION 1.00.00
 'goat.GDinputfilepath'              'GOAToptions.dat'
 
 # Output file locations 
-'goat.writefilepath'                'traduit.out.b2us_demo'  
+'goat.writefilepath'                'traduit.out.b2us'  
 
 # Output options 
 'goat.write_final'                  '1'
@@ -408,6 +408,11 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 #                         TOPOLOGICAL MESH OPTIONS                        #
 #-------------------------------------------------------------------------#
+# Read exising file? 
+'gg.tm.readexistingTM'          '1'
+'gg.tm.TMfilepath'              './output/topomesh_base.dat'
+'gg.tm.doadaptations'           '1'
+
 # Magnetic field: tracing & resolution (description is determined by GD options)
 'gg.tm.field.resx'              '300'
 'gg.tm.field.resy'              '1200'
@@ -419,14 +424,49 @@ VERSION 1.00.00
 'gg.tm.vessel.resy'             '1200'
 'gg.tm.vessel.donewton'         '0'
 
-# Core boundary and region treatment
+'gg.tm.contour.npmin'           '10'
+'gg.tm.contour.npmax'           '10000'
+'gg.tm.contour.dl'              '0.01'
+
+# Topological mesh adaptations
 'gg.tm.addcoreboundaries'       '1'
+'gg.tm.addPFboundaries'         '1'
 'gg.tm.cbnd.frac'               '0.1'
+'gg.tm.PFbnd.frac'              '0.1'
 'gg.tm.removecoreregions'       '1'
+'gg.tm.removewidegridregions'   '0'
+'gg.tm.mergetangencypointtubes' '1'
+'gg.tm.dpsimintangencypointtubes'   '1e-2'
 
 #-------------------------------------------------------------------------#
 #                         VERTEX DISTRIBUTION OPTIONS                     #
 #-------------------------------------------------------------------------#
+# General options
+'gg.verbosity'                          '1'
+'gg.vertexconstructionmethod'           'orthogonal'
+'gg.cellconstructionmethod'             'quads_triangles'
+'gg.TMcellgriddingorder'                'sequential'
+
+# Refinement options
+'gg.ref.meth'                           'lengthbased'
+#'gg.ref.meth'                           'no'
+'gg.ref.LB.doxp'                        '1'
+'gg.ref.LB.dovessel'                    '1'
+'gg.ref.LB.Lmininf'                     '0.001'
+'gg.ref.LB.Lmaxinf'                     '0.05'
+'gg.ref.LB.structureIDs'                '[1, 2]'
+'gg.ref.LB.Lminstructure'               '[0.0001, 0.0001]'
+'gg.ref.LB.Lmaxstructure'               '[0.005, 0.005]'
+'gg.ref.LB.decaylengthstructure'        '[0.01, 0.01]'
+'gg.ref.LB.Lminxp'                      '0.0001'
+'gg.ref.LB.Lmaxxp'                      '0.025'
+'gg.ref.LB.decaylengthxp'               '0.05'
+
+# Boundary layer options (only for length based refinement for now)
+'gg.ref.BL.dotarget'                    '1'
+'gg.ref.BL.nctarget'                  '2'
+'gg.ref.BL.dltarget'                  '[0.001, 0.001]'
+
 # Post-processing options
 'gg.vd.removefluxsurfaces'              '1' # Remove too narrow flux surfaces
 'gg.vd.removenarrowboundarytriangles'   '1' # Remove too narrow triangles at boundary and replace by cut cells
@@ -434,9 +474,15 @@ VERSION 1.00.00
 # Contour resolution 
 'gg.vd.contouring.resx'         '100'
 'gg.vd.contouring.resy'         '200'
+'gg.vd.contouring.coarsen'      '1'
+
+# Orthogonal line tracer options (only if orthogonal based GG is used)
+'gg.vd.orthlinetracing.step'    '5' # relative step size (larger = less accurate but faster)
+'gg.vd.orthlinetracing.nsteps'  '500' # maximal number of steps to take 
+
 
 # Distribution of flux surfaces (radial)
-'gg.vd.rd.type'                         'densitybased'
+'gg.vd.rd.type'                         'uniform'
 
 # Distribution of vertices on flux surfaces (poloidal)
 'gg.vd.pd.type'                         'densitybased'
@@ -444,11 +490,11 @@ VERSION 1.00.00
 # Options for uniform distribution
 'gg.vd.pd.distribution.facelength'      '4e-2';
 
-'gg.vd.rd.distribution.fieldwidth'      '4e-3';
+'gg.vd.rd.distribution.fieldwidth'      '2e-2';
 
 # Options for density based distribution
-'gg.vd.pd.distribution.type'            'vessel_bnd_weight';
-'gg.vd.pd.distribution.lengthparam'     '0.05';
+'gg.vd.pd.distribution.plftype'            'target';
+'gg.vd.pd.distribution.decaylengthplf'     '0.25';
 'gg.vd.pd.distribution.densityatvessel' '250';
 'gg.vd.pd.distribution.densityatinf'    '10';
 

@@ -318,12 +318,14 @@ module gdmod_userinput
 
         ! Fields
         ! - checkperp:          check if edges are perpendicular?
+        ! - includecutcellvert: include cut cell vertices (zero ID, on 
+        !                       boundary) for orthogonality constraints?
         ! - epsperp:            tolerance on dot product
         ! - includebox(x, y)    boxes for edge inclusion
         ! - excludebox(x, y)    boxes for edge exclusion (applied after 
         !                       inclusion) 
 
-        integer(I8)                 :: checkperp
+        integer(I8)                 :: checkperp 
         logical                     :: includecutcellvert
         real(R8)                    :: epsperp 
         real(R8), allocatable       :: includeboxx(:, :), &
@@ -794,6 +796,7 @@ module gdmod_userinput
 
         ! Default options
         !================
+        options%includecutcellvert = .false.
         options%checkperp = 0 
         options%includecutcellvert = .false. 
         options%epsperp = 0.2
@@ -1723,6 +1726,8 @@ module gdmod_userinput
         
         ! Read options
         !=============
+        field = 'gd.design.ec.par.orthogonality.includecutcellvert'
+        call ExtractOptionValueLogical0D(fid, field, options%includecutcellvert)
         field = 'gd.design.ec.par.orthogonality.checkperp'
         call ExtractOptionValueInteger0D(fid, field, options%checkperp)
         field = 'gd.design.ec.par.orthogonality.epsperp'

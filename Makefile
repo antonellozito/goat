@@ -3,6 +3,13 @@
 # up the compilation and linking steps etc by moving all .o and .mod
 # files into a build directory that is constructed during compilation
 
+ifeq ($(MAKECMDGOALS), goat_debug)
+    GOAT_DEBUG = TRUE
+    EXEC_NAME = goat_debug.exe
+else
+    EXEC_NAME = goat.exe
+endif
+
 # Include the config file
 include config.mk
 
@@ -57,16 +64,15 @@ BUILDDIR :=./builds/$(BUILDDIR)
 ## goattranslator: Create executable for GOAToptions file translator
 ## shapeopt 	: Create executable for shape optimization with goat
 
-# Add these flags for memory debugging with DDT:
-# -Wl,--wrap=dlopen,--wrap=dlclose,--allow-multiple-definition,--undefined=malloc,--undefined=_ZdaPv -lpthread -lstdc++ /apps/leuven/rocky8/skylake/2018a/software/ArmForge/22.1.2/lib/64/libdmallocthcxx.a
-
 goat: $(addprefix $(BUILDDIR)/, $(GOAT_TARGETS)) $(BUILDDIR)/goat.o
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
-	$(FC)  $(LFLAGS) -o $(BUILDDIR)/goat.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/$(EXEC_NAME) $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include; 
 	rm $(BUILDDIR)/Goat.o; 
-	cp $(BUILDDIR)/goat.exe ./executables/.
+	cp $(BUILDDIR)/$(EXEC_NAME) ./executables/.
+
+goat_debug: goat
 
 goattranslator: $(addprefix $(BUILDDIR)/,$(GOATTRANSLATOR_TARGETS) ) $(BUILDDIR)/goattranslator.o 
 	-mv -f *.o $(BUILDDIR);  
@@ -166,10 +172,21 @@ $(BUILDDIR)/General: $(GENERAL_FILES)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
 	touch $(BUILDDIR)/General
 	
-## Modules			: compile modules 
-$(BUILDDIR)/Modules: $(MODULE_FILES)
+## Modules			: compile modules
+$(BUILDDIR)/Modules_goat: $(MODULE_FILES_GOAT)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
-	touch $(BUILDDIR)/Modules
+	touch $(BUILDDIR)/Modules_goat
+$(BUILDDIR)/Modules_GD: $(MODULE_FILES_GD)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Modules_GD
+$(BUILDDIR)/Modules_GG: $(MODULE_FILES_GG)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Modules_GG
+$(BUILDDIR)/Modules_B25: $(MODULE_FILES_B25)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/Modules_B25
+$(BUILDDIR)/Modules: $(BUILDDIR)/Modules_goat $(BUILDDIR)/Modules_GD \
+	$(BUILDDIR)/Modules_GG $(BUILDDIR)/Modules_B25
 
 ## Auxiliary			: compile auxiliary routines
 $(BUILDDIR)/Auxiliary: $(AUXILIARY_FILES)

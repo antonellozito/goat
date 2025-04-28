@@ -4659,7 +4659,7 @@ module gdmod_costfunction
             where (fieldlineID == fieldlineID(xpind(i))) issepvert = .true.
         end do 
         allocate(tvID(count(issepvert)))
-        tvID = pack([(k, k = 1, grid%vert%ntot)], issepvert)
+        tvID = xpind ! pack([(k, k = 1, grid%vert%ntot)], issepvert)
 
         ! Initialize distributions
         call dfbias%Initialize(magneticField%interp, x(tvID), y(tvID), &

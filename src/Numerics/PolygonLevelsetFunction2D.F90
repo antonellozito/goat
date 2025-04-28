@@ -38,6 +38,8 @@ module PolygonLevelsetFunction2D
     use Interpolant
     use mod_polygon
     use mod_sparseinterface
+    use mod_structured2Dgridding
+    use omp_lib
 
     ! The usual
     implicit none
@@ -52,8 +54,8 @@ module PolygonLevelsetFunction2D
         PLF2DClosedExactOptionsUDT, PLF2DClosedApproximationOptionsUDT
 
     ! Routines
-    public InitializePolygonLevelsetFunction2D
-    public assignment(=)
+    public InitializePolygonLevelsetFunction2D, InitializePLF2DGeneral, &
+        InitializePLF2DClosedExact, InitializePLF2DClosedApproximation
 
     !==================================================================!
     !                                                                  !
@@ -218,12 +220,23 @@ module PolygonLevelsetFunction2D
         ! vertex, or the normal distance to the line formed by a 
         ! certain polygon edge). 
 
+        ! Note: an extra method is provided specifically for this 
+        ! routine to determine from which edge and which polygon 
+        ! the value was interpolated. Useful for some reconstruction
+        ! purposes (e.g. determining face labels based on vessel 
+        ! structures). It should be noted that at polygon transitions, 
+        ! there will be a discontinuity in value (on the vertex itself, 
+        ! two values are actually present), and we simply take one 
+        ! value in the vertex itself. 
+
         ! Fields
         type(PLF2DClosedExactOptionsUDT)    :: options
         real(R8), allocatable               :: xp(:), yp(:), xf(:), &
             yf(:), nxp(:), nyp(:), tnp(:), nxpv(:, :), &
             nypv(:, :), crossprod(:), thetav(:), xp1(:), xp2(:), &
             yp1(:), yp2(:)
+        integer(I8), allocatable, dimension(:, :)   :: edgelabel, &
+            vertlabel
 
     contains 
 
@@ -232,6 +245,7 @@ module PolygonLevelsetFunction2D
 
         ! Evaluate
         procedure :: Evaluate       => EvaluatePLF2DClosedExact
+        procedure :: EvaluateLabel  => EvaluatePLF2DClosedExactLabel
 
     end type
 
@@ -324,6 +338,9 @@ module PolygonLevelsetFunction2D
 
         ! Initialize
         !===========
+        if (allocated(plf)) then 
+            deallocate(plf)
+        end if 
         select type (options)
 
         type is (PLF2DGeneralOptionsUDT)
@@ -376,7 +393,8 @@ module PolygonLevelsetFunction2D
     end subroutine
 
     ! Visualization
-    subroutine VisualizePolygonLevelsetFunction2D(plf, savefilepath)
+    subroutine VisualizePolygonLevelsetFunction2D(plf, savefilepath, &
+            nxin, nyin)
 
         ! Description
         !============
@@ -391,6 +409,7 @@ module PolygonLevelsetFunction2D
         ! Arguments
         class(PolygonLevelsetFunction2DUDT)      :: plf 
         character(*), intent(in)                 :: savefilepath
+        integer(I8), intent(in), optional        :: nxin, nyin
         
         ! Auxiliary
         integer(I8)                         :: nx, ny
@@ -405,8 +424,16 @@ module PolygonLevelsetFunction2D
         ! Construct a 2D grid
         !====================
         ! Set mesh size
-        nx = 200
-        ny = 400
+        if (present(nxin)) then 
+            nx = nxin 
+        else 
+            nx = 200
+        end if 
+        if (present(nyin)) then 
+            ny = nyin 
+        else
+            ny = 200
+        end if 
 
         ! Allocate
         allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny), &
@@ -992,7 +1019,9 @@ module PolygonLevelsetFunction2D
         type(PolygonSetUDT), intent(in)             :: ps 
 
         ! Auxiliary
-        integer(I8)                                 :: np, flag, ne
+        integer(I8)                                 :: np, flag, ne, nl
+        integer(I8), allocatable                    :: tempvertlabel(:, :), &
+            tempedgelabel(:, :), vertlabelp(:, :), edgelabelp(:, :)
 
         real(R8), allocatable                       :: xe(:, :), &
             ye(:, :), nx(:), ny(:), nn(:), tx(:), ty(:), tn(:), xp(:), &
@@ -1008,7 +1037,7 @@ module PolygonLevelsetFunction2D
         !===========
         ! Check polygonset 
         call ps%OrientNestedClosedPolygons(flag)
-        if (flag > 0) then 
+        if (flag > 1) then 
             ! Polygon set does not comply, throw error
             call gdErrorHandler('InitializePLF2DClosedExact: polygon set should be closed and non-intersecting')
         end if 
@@ -1023,6 +1052,9 @@ module PolygonLevelsetFunction2D
 
         ! Compute additional data
         !========================
+        ! Compute number of labels
+        nl = size(pol(1)%labels, 2)
+
         ! Get edge data
         call ps%GetEdges(xe, ye) ! may still change
         call ps%GetNormals(nx, ny, nn) ! may still change
@@ -1033,7 +1065,8 @@ module PolygonLevelsetFunction2D
         np = (size(xe, 1))+ps%np
         allocate(nxpv(np, 2), nypv(np, 2), xp(np), yp(np), &
             xf(size(xe, 1)), yf(size(xe, 1)), xp1(size(xe, 1)),  &
-            yp1(size(xe, 1)), xp2(size(xe, 1)), yp2(size(xe, 1)))
+            yp1(size(xe, 1)), xp2(size(xe, 1)), yp2(size(xe, 1)), &
+            vertlabelp(np, nl), edgelabelp(size(xe, 1), nl))
 
         ! Compute vertex regions
         ce = 0
@@ -1049,11 +1082,13 @@ module PolygonLevelsetFunction2D
             ! Coordinates
             tempx = pol(i)%x(pol(i)%vert)
             tempy = pol(i)%y(pol(i)%vert)
+            tempvertlabel = pol(i)%labels(pol(i)%vert, :)
 
             txp1 = tempx(1:ne)
             txp2 = tempx(2:ne+1)
             typ1 = tempy(1:ne)
             typ2 = tempy(2:ne+1)
+            tempedgelabel = tempvertlabel(1:ne, :) ! somewhat extrapolation
 
             ! Normals
             allocate(tempnx(ne+1, 2), tempny(ne+1, 2))
@@ -1085,6 +1120,8 @@ module PolygonLevelsetFunction2D
             ! Add
             xp(ce+1:ce+ne+1) = tempx 
             yp(ce+1:ce+ne+1) = tempy 
+            vertlabelp(ce+1:ce+ne+1, :) = tempvertlabel
+            edgelabelp(ce2+1:ce2+ne, :) = tempedgelabel
             nxpv(ce+1:ce+ne+1, :) = tempnx ! normals should be oriented outwards already
             nypv(ce+1:ce+ne+1, :) = tempny 
             nx(ce2+1:ce2+ne) = tnxp !pol(i)%nx/pol(i)%nn 
@@ -1096,6 +1133,7 @@ module PolygonLevelsetFunction2D
             xp2(ce2+1:ce2+ne) = txp2
             yp1(ce2+1:ce2+ne) = typ1
             yp2(ce2+1:ce2+ne) = typ2
+
 
             ! Update counter
             ce = ce + ne + 1
@@ -1132,6 +1170,8 @@ module PolygonLevelsetFunction2D
         plf%nypv    = nypv
         plf%thetav  = theta0 
         plf%crossprod   = crossprod
+        plf%edgelabel = edgelabelp 
+        plf%vertlabel = vertlabelp
 
         ! Housekeeping
         !=============
@@ -1307,10 +1347,13 @@ module PolygonLevelsetFunction2D
 
         ! Loop 
         !=====
-        allocate(vx(np), vy(np), dvn(np), tvn(np), dx(np), dy(np), &
-            theta(np), isinvert(np), onedge(np), distedge(np), &
-            distvert(np), myones(np))
+        allocate(myones(np))
         myones = 1
+        !$omp parallel do default(none) shared(xq, yq, plf, &
+        !$omp val, minind, vind, eind, tdistvert, tcrossprod, nq, myones, inf) &
+        !$omp private(xqr, yqr, vx, vy, dvn, tvn, dx, dy, theta, isinvert, &
+        !$omp onedge, distedge, distvert, indmine, fe, signe, indminv, &
+        !$omp fv, signv, totsign, indmin)
         do iq = 1, nq
             
             ! Unpack
@@ -1329,7 +1372,7 @@ module PolygonLevelsetFunction2D
             dy = yqr - yp
             theta = atan2(dx*nypv(:, 1) - dy*nxpv(:, 1), dx*nxpv(:, 1) + dy*nypv(:, 1))
             where (theta < 0) theta = theta + 2*pi_R8
-            isinvert = theta < theta0
+            isinvert = theta <= theta0
 
             ! Hedge for vertices lying exactly on polygonset vertex
             where ((dx == 0) .and. (dy == 0)) isinvert = .true. 
@@ -1363,6 +1406,7 @@ module PolygonLevelsetFunction2D
             val(iq) = val(iq)*totsign(indmin)
             
         end do 
+        !$omp end parallel do
 
         ! Construct function handle depending on type
         select case (trim(deriv))
@@ -1457,7 +1501,7 @@ module PolygonLevelsetFunction2D
                     vq(iq) = nxp(eind(iq))
                 else
                     if (tdistvert(iq) == 0.0) then 
-                        vq(iq) = 0
+                        vq(iq) = 1
                     else
                         vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(xp(vind(iq)) - xq(iq))
                     end if 
@@ -1541,7 +1585,7 @@ module PolygonLevelsetFunction2D
                     vq(iq) = nyp(eind(iq))
                 else
                     if (tdistvert(iq) == 0.0) then 
-                        vq(iq) = 0
+                        vq(iq) = 1
                     else
                         vq(iq) = -sign(myone, tdistvert(iq))*sign(myone, tcrossprod(iq))/tdistvert(iq)*(yp(vind(iq)) - yq(iq))
                     end if
@@ -1718,6 +1762,169 @@ module PolygonLevelsetFunction2D
         end if
 
     end subroutine
+
+    ! Label evaluation
+    subroutine EvaluatePLF2DClosedExactLabel(plf, xq, yq, vq)
+
+        ! Description
+        !============
+        ! Evaluate the polygon levelset labels in the query points xq, yq
+        ! (value returned is in vq). The label is of the same size as 
+        ! the source polygon labels and evaluation is done by simply 
+        ! taking the corresponding polygon edge's label (or vertex) 
+        ! as originally given during the construction phase. No 
+        ! derivatives etc are returned. 
+
+        use iso_fortran_env
+        use, intrinsic :: ieee_arithmetic
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonLevelsetFunction2DClosedExactUDT)  :: plf 
+        real(R8), intent(in)                        :: xq(:), yq(:)
+        integer(I8), allocatable, intent(out)       :: vq(:, :) 
+
+        ! Auxiliary
+
+        integer(I8)                             :: nq, np, npe, &
+            indmine, indminv, indmin, nl
+        integer(I8), allocatable                :: eind(:), vind(:), &
+            minind(:)
+
+        real(R8)                                :: inf, signe, signv, &
+            fv, fe, xqr, yqr, totsign(1:2)
+        real(R8), parameter                     :: myone = 1
+        real(R8), allocatable                   :: myones(:), dvn(:), &
+            tdistvert(:), tcrossprod(:), vx(:), vy(:), tvn(:), &
+            dx(:), dy(:), theta(:), distedge(:), distvert(:), &
+            val(:)
+
+        logical, allocatable                    :: isinvert(:), &
+            onedge(:)
+
+        ! Loop
+        integer(I8)                             :: iq
+
+        ! Data
+        inf = ieee_value(inf, ieee_positive_inf)        
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vl      => plf%vertlabel,   &
+            el      => plf%edgelabel,   &
+            xp      => plf%xp,      &
+            yp      => plf%yp,      &
+            xp1     => plf%xp1,     &
+            xp2     => plf%xp2,     &
+            yp1     => plf%yp1,     &
+            yp2     => plf%yp2,     &
+            nxp     => plf%nxp,     &
+            nyp     => plf%nyp,     &
+            nxpv    => plf%nxpv,    &
+            nypv    => plf%nypv,    &
+            tnp     => plf%tnp,     &
+            theta0  => plf%thetav,  &
+            crossprod => plf%crossprod, &
+            xf      => plf%xf,      &
+            yf      => plf%yf       &
+            )
+
+        ! Get sizes
+        npe = size(xp1, 1)
+        np = size(xp, 1)
+        nq = size(xq, 1)
+        nl = size(vl, 2)
+
+        ! Initialize
+        allocate(vq(nq, nl))
+
+        ! Check for the trivial case
+        if (nl == 0) then 
+            return 
+        end if 
+        
+        ! Allocate and initialize
+        allocate(eind(nq), vind(nq), minind(nq), tdistvert(nq), &
+            tcrossprod(nq), val(nq))
+
+        ! Loop 
+        !=====
+        allocate(myones(np))
+        myones = 1
+        !$omp parallel do default(none) shared(xq, yq, plf, &
+        !$omp val, minind, vind, eind, tdistvert, tcrossprod, nq, myones, inf, vq) &
+        !$omp private(xqr, yqr, vx, vy, dvn, tvn, dx, dy, theta, isinvert, &
+        !$omp onedge, distedge, distvert, indmine, fe, signe, indminv, &
+        !$omp fv, signv, totsign, indmin)
+        do iq = 1, nq
+            
+            ! Unpack
+            xqr = xq(iq)
+            yqr = yq(iq)
+
+            ! Construct vector between edge centers and points
+            vx = (xqr - xf)
+            vy = (yqr - yf)
+            dvn = (vx*nxp + vy*nyp)
+            tvn = vx*nyp - vy*nxp ! distance in tangential direction
+            
+            ! Check in which regions the query points lie
+            ! Vertex regions
+            dx = xqr - xp
+            dy = yqr - yp
+            theta = atan2(dx*nypv(:, 1) - dy*nxpv(:, 1), dx*nxpv(:, 1) + dy*nypv(:, 1))
+            where (theta < 0) theta = theta + 2*pi_R8
+            isinvert = theta <= theta0
+
+            ! Hedge for vertices lying exactly on polygonset vertex
+            where ((dx == 0) .and. (dy == 0)) isinvert = .true. 
+            
+            ! Edge regions
+            onedge = (abs(tvn) <= 0.5*tnp)
+            
+            ! Compute distances
+            distedge = dvn
+            distvert = sign(myones, crossprod)*sqrt((xp - xqr)**2 + (yp - yqr)**2)
+            where (.not. onedge) distedge = inf 
+            where (.not. isinvert) distvert = inf 
+            
+            ! Compute minimal distance
+            indmine = minloc(abs(distedge), 1)
+            fe = minval(abs(distedge))
+            signe = sign(myone, distedge(indmine))
+            eind(iq) = indmine
+
+            indminv = minloc(abs(distvert), 1)
+            fv = minval(abs(distvert))
+            tdistvert(iq) = abs(distvert(indminv))
+            tcrossprod(iq) = crossprod(indminv)
+
+            signv = sign(myone, distvert(indminv))
+            vind(iq) = indminv
+            totsign = [signe, signv]
+            val(iq) = minval([fe, fv])
+            indmin = minloc([fe, fv], 1)
+            minind(iq) = indmin 
+            val(iq) = val(iq)*totsign(indmin)
+            if (indmin == 1) then 
+                vq(iq, :) = el(indmine, :)
+            else
+                vq(iq, :) = vl(indminv, :)
+            end if 
+            
+        end do 
+        !$omp end parallel do
+
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
 
     !------------------------------------------------------------------!
     !                     PLF CLOSED APPROXIMATION                     !
