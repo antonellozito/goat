@@ -1,5 +1,5 @@
-from src import Plotter as plotter
-from src import Datahandler as dh
+from GOATpy import pl as plotter
+from GOATpy import dh as dh
 
 # Description
 #------------

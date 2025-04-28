@@ -32,7 +32,7 @@ echo '  / / / /_/ / /_/ / / /_/ / /_/ />  <                                     
 echo ' /_/  \____/\____/_/_.___/\____/_/|_|                                     '
 echo ' '
 echo 'Documentation: currently none!'
-echo 'Current implementation: only grid optimization'
+echo 'Current implementation: grid optimization and grid generation'
 
 # Set goat top directory
 setenv LAST_COMMAND `echo $_`
@@ -50,7 +50,7 @@ echo 'Running at goat top directory: '  ${GOATTOP}
 # Add scripts to the path variable
 setenv GOAT_SCRIPTPATHS ${GOATTOP}/scripts
 setenv GOAT_EXECUTABLES ${GOATTOP}/executables
-setenv GOAT_VISUALIZATION ${GOATTOP}/src/Visualization/Python/root
+setenv GOAT_VISUALIZATION ${GOATTOP}/scripts
 setenv PATH "${GOAT_SCRIPTPATHS}:${GOAT_EXECUTABLES}:${PATH}"
 
 # Set HOST_NAME and COMPILER, which will determine setup files to be used
