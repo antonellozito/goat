@@ -3,12 +3,24 @@
 # up the compilation and linking steps etc by moving all .o and .mod
 # files into a build directory that is constructed during compilation
 
-ifeq ($(MAKECMDGOALS), goat_debug)
-    GOAT_DEBUG = TRUE
-    EXEC_NAME = goat_debug.exe
+# Preamble
+#=========
+# Set the executable name
+EXEC_NAME = $(MAKECMDGOALS).exe
+
+# Check if we are debugging
+$(info % ===========================)
+$(info % Makefile preamble execution)
+$(info % ===========================)
+$(info % Makefile command: $(MAKECMDGOALS)) 
+
+# Check debug mode
+ifeq ($(findstring _debug, $(MAKECMDGOALS)), _debug)
+    GOAT_DEBUG = yes 
 else
-    EXEC_NAME = goat.exe
+	GOAT_DEBUG = no 
 endif
+$(info % Goat debug mode: $(GOAT_DEBUG))
 
 # Include the config file
 include config.mk
@@ -108,15 +120,17 @@ shapeopt: $(addprefix $(BUILDDIR)/, $(SHAPEOPT_TARGETS) ) $(BUILDDIR)/shapeopt.o
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
 ifdef DOSOLPS
-	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt.exe $(BUILDDIR)/*.o $(B25LIBPATH)/adStack.o \
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/$(EXEC_NAME) $(BUILDDIR)/*.o $(B25LIBPATH)/adStack.o \
 	 $(B25LIBPATH)/b2mod_cdf.o $(B25LIBPATH)/smax.o $(B25LIBPATH)/smin.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) \
 	 -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
 else
-	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/$(EXEC_NAME) $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
 	-I $(SUITESPARSEPATH) -I src/Clayer/Include
 endif
 	rm $(BUILDDIR)/ShapeOptimization.o; 
-	cp $(BUILDDIR)/shapeopt.exe ./executables/.
+	cp $(BUILDDIR)/$(EXEC_NAME) ./executables/.
+
+shapeopt_debug: shapeopt
 
 #shapeopt_solps: $(addprefix $(BUILDDIR)/,$(SHAPEOPTSOLPS_TARGETS) ) $(BUILDDIR)/shapeopt_solps.o 
 #	-mv -f *.o $(BUILDDIR);  

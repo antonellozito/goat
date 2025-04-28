@@ -88,7 +88,7 @@ EXT_DIFF = .adj_shape
 DIFF = yes
 DIFFDIR = src/differentiation/adjoint_shape
 endif
-ifdef GOAT_DEBUG
+ifeq ($(strip $(GOAT_DEBUG)),yes)
 EXT_DEBUG = .debug
 endif
 ##
@@ -149,7 +149,7 @@ LFLAGS_OMP_DEBUG = -pg -g -fopenmp
 #==========
 # Set the CFLAGS
 CFLAGS = $(CFLAGS_DEF) $(COMPDIRVARS)
-ifdef GOAT_DEBUG
+ifeq ($(strip $(GOAT_DEBUG)),yes)
 CFLAGS += -g -O0 -Wall -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized
 else
 CFLAGS += -O3
@@ -160,7 +160,7 @@ LFLAGS = $(LFLAGS_DEF)
 
 # Set CFLAGS for C compiler
 CCFLAGS = $(CCFLAGS_DEF) $(COMPDIRVARS)
-ifdef GOAT_DEBUG
+ifeq ($(strip $(GOAT_DEBUG)),yes)
 CCFLAGS += -g -Wall -O0 
 else
 CCFLAGS += -O3
