@@ -56,6 +56,7 @@ module PolygonLevelsetFunction2D
     ! Routines
     public InitializePolygonLevelsetFunction2D, InitializePLF2DGeneral, &
         InitializePLF2DClosedExact, InitializePLF2DClosedApproximation
+    public assignment(=)
 
     !==================================================================!
     !                                                                  !

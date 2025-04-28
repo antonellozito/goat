@@ -461,6 +461,14 @@ module DistributionFunction
 
             call gdErrorHandler('Unknown type')
 
+        type is (Structured2DDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Structured2DDFUDT)
+                a = b 
+            end select
+
         type is (Structured2DDistanceDFUDT)
 
             allocate(a, source=b)
@@ -498,6 +506,22 @@ module DistributionFunction
             allocate(a, source=b)
             select type (a)
             type is (Coordinates1DFieldDistanceDFUDT)
+                a = b
+            end select
+
+        type is (Coordinates2DDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Coordinates2DDistanceDFUDT)
+                a = b
+            end select
+
+        type is (CoordinatesPLF2DDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (CoordinatesPLF2DDistanceDFUDT)
                 a = b
             end select
 
