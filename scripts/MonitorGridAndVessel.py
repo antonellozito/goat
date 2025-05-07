@@ -1,5 +1,5 @@
-from . import Plotter as plotter
-from . import Datahandler as dh
+from python_source import Plotter as plotter
+from python_source import Datahandler as dh
 
 pausetime = 1
 maxtime = 1000

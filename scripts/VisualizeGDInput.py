@@ -11,7 +11,7 @@ import os
 # Data directory
 #---------------
 # Check if solps is present
-datadir = os.getcwd()
+datadir = dh.GetDataDirectory()
 
 # Print
 print('VisualizeGDInput: reading from directory: ' + datadir)
@@ -19,9 +19,9 @@ print('VisualizeGDInput: reading from directory: ' + datadir)
 # Design
 #-------
 # Plot the grid
-plotter.PlotGridCellsFromFile(datadir, 1)
-plotter.PlotGridCellsIterate(datadir, 0)
-plotter.PlotVesselPolygon(datadir, -1)
+#plotter.PlotGridCellsFromFile(datadir, 1)
+#plotter.PlotGridCellsIterate(datadir, 0)
+#plotter.PlotVesselPolygon(datadir, -1)
 
 # Constraints
 #------------
