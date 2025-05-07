@@ -22,6 +22,8 @@ module gdmod_utility_optimization
     !use mod_plotter
     use gdmod_types
     use gdmod_userinput 
+    use mod_definitions, only: targetID, vesselID, outerboundaryID, &
+        coreID, interiorID
     !use, intrinsic :: ieee_arithmetic, only: IEEE_Value, IEEE_QUIET_NAN
 
     ! The usual
@@ -475,8 +477,7 @@ module gdmod_utility_optimization
         integer(I8)                         :: i, j
 
         ! Auxiliary variables 
-        integer(I8)                         :: TPind(1:2), WGind(1:1), &
-            ntv, ntvn, ne
+        integer(I8)                         :: ntv, ntvn, ne
 
         integer(I8), allocatable            :: tv(:), tvn(:), &
             tempvesseledges(:, :)
@@ -484,7 +485,7 @@ module gdmod_utility_optimization
         logical                             :: condition
 
         logical, allocatable                :: mask(:), &
-            isBndVertex(:), isEqualID(:)
+            isBndVertex(:), isEqualID(:), isVertIncluded(:)
 
         ! Data
 
@@ -498,23 +499,18 @@ module gdmod_utility_optimization
 
         ! Allocate (too big, trim later)
         allocate(tempvesseledges(faces%ntot, 2))
-        allocate(isBndVertex(vert%ntot))
+        allocate(isBndVertex(vert%ntot), isVertIncluded(vert%ntot))
             
         ! Initialize
         nvesseledges = 0
-
-        ! Set target plate indices
-        TPind(1:2) = [1, 2]
-
-        ! Set other vessel boundary indices
-        WGind(1:1) = [5]
+        isVertIncluded = .false. 
 
         ! Loop over all boundaries
         !=========================
         do i = 1, size(bnd) 
             ! Check if this boundary is a target plate or wide grid bnd
-            condition = any(bnd(i)%ID == TPind) .and. doTP
-            condition = condition .or. ( any(bnd(i)%ID == WGind) .and. doWG)
+            condition = (bnd(i)%ID == targetID) .and. doTP
+            condition = condition .or. ( (bnd(i)%ID == vesselID) .and. doWG)
             if (condition) then 
                 ! Get the vertices of this boundary
                 ntv = bnd(i)%nvert
@@ -528,6 +524,12 @@ module gdmod_utility_optimization
 
                 ! For each vertex, get the neighbours
                 do j = 1, ntv
+                    ! Skip if vertex was already included
+                    if (isVertIncluded(tv(j))) then 
+                        print *, 'vertex already included, skipping...'
+                        cycle
+                    end if 
+
                     ! Extract neighbours of this vertex
                     ntvn = vert%neigP(tv(j), 2)
                     allocate(tvn(ntvn))
@@ -546,7 +548,7 @@ module gdmod_utility_optimization
                     allocate(isEqualID(ntvn))
                     isEqualID = (vert%fieldlineID(tv(j)) == &
                         vert%fieldlineID(tvn))
-                    where (.not. isEqualID) mask = .false. 
+                    where (.not. isEqualID) mask = .false.
 
                     ! Add to temporary edges
                     ne = count(mask)
@@ -557,6 +559,9 @@ module gdmod_utility_optimization
 
                     ! Update counter
                     nvesseledges = nvesseledges + ne
+
+                    ! Update logical
+                    isVertIncluded(tv(j)) = .true.
 
                     ! Housekeeping
                     deallocate(tvn, mask, isEqualID)                    
@@ -641,7 +646,7 @@ module gdmod_utility_optimization
             ! Check if boundary belongs to vessel boundaries
             select case (bnd(ib)%ID) 
                 
-            case (1, 5)
+            case (targetID, vesselID)
 
                 isvesselvertex(bnd(ib)%vert) = .true.
 

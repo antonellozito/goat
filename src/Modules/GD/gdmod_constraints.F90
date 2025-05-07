@@ -4698,6 +4698,9 @@ module gdmod_constraints
                 (vcc(tempvesseledges(:, 2)) >= maxvcc(tempvesseledges(:, 2)))) &
                 dovesseledgecon = .false.
 
+            ! Skip edges that have two boundary vertices
+            where (vert%BV(tempvesseledges(:, 1)) .and. vert%BV(tempvesseledges(:, 2))) dovesseledgecon = .false. 
+
             ! Recompute edges
             nvesseledges = count(dovesseledgecon)
             allocate(vesseledges(nvesseledges, 2))
