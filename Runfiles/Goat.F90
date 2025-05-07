@@ -84,9 +84,13 @@ program Goat
 
     case ('GG')
 
-        ! Grid generation only (experimental!)
-        print *, 'warning: GG option is still experimental! use at own risk'
+        ! Grid generation only 
         call GGDriver(goatoptions)
+
+    case ('GGGD')
+
+        ! Grid generation with subsequent grid deformation
+        call GGGDDriver(goatoptions)
 
     case ('GDtest')
 

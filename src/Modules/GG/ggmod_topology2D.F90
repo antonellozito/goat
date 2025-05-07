@@ -189,7 +189,7 @@ module ggmod_topology2D
             GetCoreFaceIDs, GetCoreCellIDs, GetWideGridCellIDs, &
             GetSeparatrixFluxSurfaceIDs, GetStrikePointIDs, GetXPOintIDs, &
             GetOPointIDs, GetPrimaryXPointIDs, GetStrikePointXPointIDs, &
-            GetClosedContourTangencyPointIDs
+            GetClosedContourTangencyPointIDs, GetLastFluxSurfaceFaceIDs
     end type 
 
     contains 
@@ -8634,6 +8634,35 @@ module ggmod_topology2D
         allocate(ID(count(temp)))
         ID = pack(tempID, temp)
 
+    end function
+
+    function GetLastFluxSurfaceFaceIDs(topomesh) result(ID)
+
+        ! Description
+        !============
+        ! Get faces that form last flux surfaces (e.g. PF or SOL
+        ! boundary) - these are boundary faces that are not 
+        ! vessel faces
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)          :: topomesh 
+        integer(I8), allocatable    :: ID(:)
+
+        ! Auxiliary
+        logical, allocatable        :: temp(:)
+
+        ! Loop
+        integer(I8)                 :: k 
+
+        ! Get
+        !====
+        temp = (topomesh%face%type /= TMfacebndID) .and. &
+            topomesh%face%BF 
+        allocate(ID(count(temp)))
+        ID = pack([(k, k = 1, topomesh%face%ntot)], temp)
+        
     end function
 
     function GetCoreCellIDs(topomesh) result(ID)

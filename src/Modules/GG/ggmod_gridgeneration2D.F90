@@ -120,7 +120,7 @@ module ggmod_gridgeneration2D
     implicit none
     private 
     public :: GenerateUnstructuredAlignedGrid, TranslateGridLabels, &
-        ComputeTopologicalData
+        ComputeTopologicalData, GetGridFaceLabelMappingGD
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -12510,6 +12510,11 @@ module ggmod_gridgeneration2D
             ! Call translator
             call TranslateGridLabelsSOLPS(simgrid, topomesh, vessel, options)
 
+        case ('GD')
+
+            ! Call translator
+            call TranslateGridLabelsGD(simgrid, topomesh)
+
         case ('no')
 
             ! Don't do anything
@@ -12909,6 +12914,103 @@ module ggmod_gridgeneration2D
 
         
 
+
+    end subroutine
+
+    subroutine TranslateGridLabelsGD(simgrid, topomesh)
+
+        ! Description
+        !============
+        ! Translate the face labels from the initial grid to be 
+        ! compatible with the grid deformation implementation. This 
+        ! means that targets, core boundaries, outer boundaries, and 
+        ! vessel boundaries have to be identified. It is assumed that 
+        ! the input grid has the default labels attributed by the 
+        ! grid generator, which point to the topological faces. 
+
+        ! Modules
+        !========
+        use mod_definitions, only: targetID, coreID, vesselID, &
+            outerboundaryID, interiorID
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)        :: simgrid 
+        type(TopomeshUDT), intent(in)       :: topomesh 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: coreIDs, targetIDs, &
+            vesselIDs, lastfsIDs, interiorIDs
+
+        ! Loop
+        integer(I8)                             :: k 
+
+        ! Initialize
+        !===========
+        ! Get necessary boundary IDs from topomesh
+        coreIDs = topomesh%GetCoreFaceIDs()
+        targetIDs = topomesh%GetTargetFaceIDs()
+        vesselIDs = topomesh%GetVesselFaceIDs()
+        lastfsIDs = topomesh%GetLastFluxSurfaceFaceIDs()
+        call SetDiff([(k, k = 1, maxval(simgrid%face%label))], &
+            [coreIDs, targetIDs, vesselIDs, lastfsIDs], interiorIDs)
+
+        ! Adjust labels
+        !==============
+        where (simgrid%face%label == targetIDs)     simgrid%face%label = targetID
+        where (simgrid%face%label == coreIDs)       simgrid%face%label = coreID
+        where (simgrid%face%label == vesselIDs)     simgrid%face%label = vesselID
+        where (simgrid%face%label == lastfsIDs)     simgrid%face%label = outerboundaryID
+        where (simgrid%face%label == interiorIDs)   simgrid%face%label = interiorID
+
+    end subroutine
+
+    ! Label mapping getter
+    subroutine GetGridFaceLabelMappingGD(simgrid, topomesh, facelabelGG, &
+        facelabelGD)
+
+        ! Description
+        !============
+        ! Routine to get only the mapping without actually changing the
+        ! face labels
+
+        ! Modules
+        !========
+        use mod_definitions, only: targetID, coreID, vesselID, &
+            outerboundaryID, interiorID
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(in)               :: simgrid 
+        type(TopomeshUDT), intent(in)           :: topomesh 
+        integer(I8), allocatable, dimension(:), intent(out)     :: &
+            facelabelGG, facelabelGD 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: coreIDs, targetIDs, &
+            vesselIDs, lastfsIDs, interiorIDs
+
+        ! Loop
+        integer(I8)                             :: k 
+
+        ! Initialize
+        !===========
+        ! Get necessary boundary IDs from topomesh
+        coreIDs = topomesh%GetCoreFaceIDs()
+        targetIDs = topomesh%GetTargetFaceIDs()
+        vesselIDs = topomesh%GetVesselFaceIDs()
+        lastfsIDs = topomesh%GetLastFluxSurfaceFaceIDs()
+        call SetDiff([(k, k = 1, maxval(simgrid%face%label))], &
+            [coreIDs, targetIDs, vesselIDs, lastfsIDs], interiorIDs)
+
+        ! Construct mapping
+        facelabelGG = [coreIDs, targetIDs, vesselIDs, lastfsIDs]
+        facelabelGD = [spread(coreID, 1, size(coreIDs)), spread(targetID, 1, size(targetIDs)), &
+            spread(vesselID, 1, size(vesselIDs)), spread(outerboundaryID, 1, size(lastfsIDs)), &
+            spread(interiorID, 1, size(interiorIDs))]
+        
 
     end subroutine
 
