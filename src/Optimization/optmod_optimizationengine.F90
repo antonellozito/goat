@@ -2576,8 +2576,8 @@ module optmod_optimizationengine
             ! Set the problem
             fun%problem = problem
             fun%solver  = solver
-            allocate(fun%lambda(size(lambda)))
-            allocate(fun%mu(size(mu)))
+            !allocate(fun%lambda(size(lambda)))
+            !allocate(fun%mu(size(mu)))
             fun%lambda = lambda 
             fun%mu = mu
 
@@ -2858,7 +2858,7 @@ module optmod_optimizationengine
 
             ! Set the problem
             fun%problem = problem
-            allocate(fun%lambda(neq))
+            !allocate(fun%lambda(neq))
             fun%lambda = lambda
 
             ! Compute errors
