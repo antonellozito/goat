@@ -1963,7 +1963,7 @@ module gdmod_constraints
 
                     ! Get the vertices
                     tv = grid%Bnd(i)%vert
-                    mask(tv) = .true.
+                    where (vert%fieldlineID(tv) == 0) mask(tv) = .true.
                     deallocate(tv)
                     
                     ! Delete vertices that can't be constrained or are
@@ -2178,7 +2178,8 @@ module gdmod_constraints
             dpsidy(:), d2psidx2(:), d2psidxdy(:), d2psidy2(:), &
             dVdx(:), dVdy(:), d2Vdx2(:), d2Vdxdy(:), d2Vdy2(:), &
             d3Vdx3(:), d3Vdx2dy(:), d3Vdxdy2(:), d3Vdy3(:), &
-            d3psidx3(:), d3psidx2dy(:), d3psidxdy2(:), d3psidy3(:)
+            d3psidx3(:), d3psidx2dy(:), d3psidxdy2(:), d3psidy3(:), &
+            Gv(:)
         integer(I8)                         :: spID, nc
         integer(I8), allocatable            :: tvID(:)
 
@@ -2277,6 +2278,8 @@ module gdmod_constraints
         allocate(d2psidx2(nv), d2psidxdy(nv), d2psidy2(nv))
         allocate(dpsidx(nv), dpsidy(nv))
         allocate(dVdx(nv), dVdy(nv))
+        allocate(Gv(nv))
+        Gv = 0.0_R8
 
         call magneticField%interp%Evaluate(x, y, 0, 0, psival)
 
@@ -2331,11 +2334,11 @@ module gdmod_constraints
             call magneticField%interp%Evaluate(x, y, 0, 2, d2psidy2)
         end if 
 
-        if (ntp > 0) then 
-            ! Compute vessel boundary derivatives etc as well
-            ! For now, call error
-            call gdErrorHandler('Tangency points not yet implemented')
-        end if 
+        !if (ntp > 0) then 
+        !    ! Compute vessel boundary derivatives etc as well
+        !    ! For now, call error
+        !    call gdErrorHandler('Tangency points not yet implemented')
+        !end if 
 
         ! Evaluate
         !=========
@@ -2349,6 +2352,7 @@ module gdmod_constraints
 
             ! Evaluate
             G(ic+1:ic+nc) = psival(tvID) - psival(spID)
+            Gv(tvID) = G(ic+1:ic+nc)
 
             ! Update
             ic = ic + nc
@@ -2362,6 +2366,7 @@ module gdmod_constraints
 
             ! Evaluate
             G(ic+1:ic+nc) = -dpsidx(tvID)*dVdy(tvID) + dpsidy(tvID)*dVdx(tvID)
+            Gv(tvID) = G(ic+1:ic+nc)
 
             ! Update
             ic = ic + nc
@@ -2375,6 +2380,7 @@ module gdmod_constraints
 
             ! Evaluate
             G(ic+1:ic+nc) = psival(tvID) - fixedpoints(i)%PsiD
+            Gv(tvID) = G(ic+1:ic+nc)
 
             ! Update
             ic = ic + nc
@@ -2388,10 +2394,14 @@ module gdmod_constraints
 
             ! Evaluate
             G(ic+1:ic+nc) = psival(tvID) - fluxsurfaces(i)%PsiD 
+            Gv(tvID) = G(ic+1:ic+nc)
 
             ! Update
             ic = ic + nc
         end do
+
+        ! write to file
+        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_ff_val_vertices')
 
         ! Derivatives
         !============
@@ -3408,9 +3418,14 @@ module gdmod_constraints
         integer(I8)                         :: ic, ivg, ivh
 
         ! Auxiliary variables
+        real(R8), allocatable, dimension(:) :: Gv
         
         ! Initialize
         !===========
+        ! Initialize vertex values
+        allocate(Gv(grid%vert%ntot))
+        Gv = 0.0_R8
+
         ! Check inputs
         if (present(varin)) then 
             var = varin 
@@ -3507,6 +3522,10 @@ module gdmod_constraints
                 'polygonsetcoordinates', values, dGdvar)
 
         end select
+        !Gv(tv) = G
+
+        ! Write data
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_bnd_val_vertices')
 
         ! Derivatives
         !============
@@ -4908,10 +4927,14 @@ module gdmod_constraints
 
         ! Auxiliary variables
         real(R8), allocatable               :: valxx(:), valxy(:), &
-            valyy(:), xv1(:), xv2(:), yv1(:), yv2(:), dist(:)
+            valyy(:), xv1(:), xv2(:), yv1(:), yv2(:), dist(:), Gv(:)
         
         ! Initialize
         !===========
+        ! Initialize
+        allocate(Gv(grid%vert%ntot))
+        Gv = 0.0_R8
+
         ! Check inputs
         if (present(varin)) then 
             var = varin 
@@ -5009,6 +5032,13 @@ module gdmod_constraints
         ! Evaluate
         dist = (xv1 - xv2)**2 + (yv1 - yv2)**2
         G = 0.5*(dist - d0**2)
+        !do ic = 1, nc
+        !    Gv(ev(ic, 1)) = Gv(ev(ic, 1)) + abs(G(ic))
+        !    Gv(ev(ic, 2)) = Gv(ev(ic, 2)) + abs(G(ic))
+        !end do 
+
+        ! Write
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_el_val_vertices')
 
         ! Constraint gradient
         !====================
@@ -5327,10 +5357,11 @@ module gdmod_constraints
         real(R8)                    :: tx, ty, tn, bx, by, bn, dotprod, &
             epsperp, maxx, minx, maxy, miny
         logical                     :: checkperp, isfaceperp, &
-            debugplots 
+            debugplots, delv(1:2)
         
         integer(I8), allocatable    :: cvertlist(:), temp(:), &
-            northcon(:), maxnorthcon(:), tvn(:), vpairs(:, :)
+            northcon(:), maxnorthcon(:), tvn(:), vpairs(:, :), &
+            tvn1(:), tvn2(:), tvn_old(:), closuretype(:)
 
         real(R8), allocatable       :: Btx(:), Bty(:), xf(:), yf(:)
 
@@ -5384,10 +5415,6 @@ module gdmod_constraints
         allocate(Btx(vert%ntot), Bty(vert%ntot))
         call interp%Evaluate(x, y, 0, 1, Btx)
         call interp%Evaluate(x, y, 1, 0, Bty)
-        !call EvaluateBicubicSplineInterpolant(vert%x, vert%y, Btx, interp, &
-        !    '0', '1')
-        !call EvaluateBicubicSplineInterpolant(vert%x, vert%y, Bty, interp, &
-        !    '1', '0')
         Btx = -Btx ! adjust sign 
 
         ! Determine which nodes to consider
@@ -5423,6 +5450,18 @@ module gdmod_constraints
         ! Include boundary vertices with zero ID?
         if (opt%includecutcellvert) then 
             where (isvesselvertex) cvert = .true.
+        end if 
+
+        ! Include core vertices? 
+        if (opt%includecorevert) then 
+            ! Check which flux surfaces are closed
+            closuretype = DetermineFluxSurfaceClosure(grid)
+            do i = 1, size(closuretype)
+                if (closuretype(i) == 1) then 
+                    ! Closed flux surface
+                    where (vert%fieldlineID == i) cvert = .true. 
+                end if 
+            end do 
         end if 
 
         ! Prioritize inner vertices (typically yields better results, 
@@ -5566,6 +5605,31 @@ module gdmod_constraints
                     if (nbID(1) == nbID(2)) then 
                         deallocate(tvn)
                         allocate(tvn(0))
+                    else
+                        ! Check if the neighbouring vertices only have 
+                        ! one vertex with ID equal to the ID of the first
+                        ! vertex
+                        tvn1 = GetVertNeig(vert, tvn(1))
+                        tvn2 = GetVertNeig(vert, tvn(2))
+                        delv = .false. 
+                        if (count(vert%fieldlineID(tvn1) == tID) /= 1) then 
+                            ! Don't include
+                            delv(1) = .true. 
+                        end if 
+                        if (isvesselvertex(tvn(1))) then 
+                            delv(1) = .true.
+                        end if 
+                        if (count(vert%fieldlineID(tvn2) == tID) /= 1) then 
+                            ! Don't include
+                            delv(2) = .true. 
+                        end if 
+                        if (isvesselvertex(tvn(2))) then 
+                            delv(2) = .true.
+                        end if 
+                        tvn_old = tvn 
+                        deallocate(tvn)
+                        allocate(tvn(count(.not. delv)))
+                        tvn = pack(tvn_old, .not. delv)
                     end if 
                 else
                     ! Check if the current vertex is a vessel vertex
@@ -5592,6 +5656,14 @@ module gdmod_constraints
                 deallocate(cID)
             end if
 
+            ! Don't put orthogonality constraints for boundary vertices
+            ! with non-zero flux surface - may lead to more unstable
+            ! problem and is typically not required/necessary for grid quality
+            if (isvesselvertex(tv) .and. (tID /= 0)) then 
+               deallocate(tvn)
+                allocate(tvn(0))
+            end if 
+ 
             ! Constrain each pair 
             do j = 1, size(tvn, 1)
                 ! Get the face 
@@ -5765,7 +5837,7 @@ module gdmod_constraints
         type(MySparseUDT)                   :: dGdvar, dgradGdvar
 
         ! Loop variables
-        integer(I8)                         :: ic, ivg, ivh, k
+        integer(I8)                         :: i, ic, ivg, ivh, k
         integer(I8), allocatable            :: valindex(:), conindex(:), &
             row(:), col(:)
 
@@ -5774,10 +5846,14 @@ module gdmod_constraints
             valyy(:), xv(:, :), yv(:, :), xf(:), yf(:), gxf(:), gyf(:), &
             dx(:), dy(:), gxxf(:), gxyf(:), gyxf(:), gyyf(:), gxxxf(:), &
             gxyxf(:), gyxxf(:), gyyxf(:), gxxyf(:), gxyyf(:), gyxyf(:), &
-            gyyyf(:)
+            gyyyf(:), Gv(:)
         
         ! Initialize
         !===========
+        ! Initialize
+        allocate(Gv(grid%vert%ntot))
+        Gv = 0.0_R8
+
         ! Check inputs
         if (present(varin)) then 
             var = varin 
@@ -5878,6 +5954,13 @@ module gdmod_constraints
 
         ! Evaluate
         G = gxf*dx + gyf*dy
+        do i = 1, nc 
+            Gv(ev(i, 1)) = Gv(ev(i, 1)) + abs(G(i))
+            Gv(ev(i, 2)) = Gv(ev(i, 2)) + abs(G(i))
+        end do
+
+        ! Write
+        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_orth_val_vertices')
 
         ! Constraint gradient
         !====================
@@ -6181,13 +6264,17 @@ module gdmod_constraints
         class(DesignVariablesGDUDT)                 :: designvariables
 
         ! Auxiliary
-        integer(I8)                     :: nfs, ntfsIDs, nfsv, ncfs
+        integer(I8)                     :: nfs, ntfsIDs, nfsv, ncfs, &
+            ntpind, vID
         integer(I8), allocatable        :: allIDs(:), fsind(:), &
-            tvID(:), tfsIDs(:)
+            tvID(:), tfsIDs(:), allvertIDs(:), tvn(:), tv(:), tpind(:), &
+            tptype(:), tvnID(:), uniqueID(:)
 
-        logical                         :: dowarning
+        logical                         :: dowarning, dolonelyfluxsurfaces, &
+            islonely
         logical, allocatable            :: doesIDoccur(:), &
-            hasbeenfound(:), isvesselvertex(:), isvesselface(:)
+            hasbeenfound(:), isvesselvertex(:), isvesselface(:), &
+            istangencypoint(:)
 
         real(R8), allocatable           :: psid(:), psi(:)
 
@@ -6196,6 +6283,7 @@ module gdmod_constraints
 
         ! Checks
         !=======
+        dolonelyfluxsurfaces = .false.
         ! Allocation status
         if (allocated(constraints%psiind)) then 
             deallocate(constraints%psiind)
@@ -6231,6 +6319,7 @@ module gdmod_constraints
         ! Allocate
         nfs = maxval(fieldlineID) ! should provide upper bound
         allIDs = [(k, k = 1, nfs)]
+        allvertIDs = [(k, k = 1, grid%vert%ntot)]
         fscc = 0 ! flux surface counter 
         allocate(fsind(nfs), doesIDoccur(nfs), psid(nfs), &
             hasbeenfound(nfs), psi(grid%vert%ntot))
@@ -6240,6 +6329,10 @@ module gdmod_constraints
         fsind = 0
         psid = 0
 
+        ! Get tangency points
+        call DetermineTangencyPoints(tpind, ntpind, tptype, grid)
+        allocate(istangencypoint(grid%vert%ntot))
+        istangencypoint(tpind) = .true.
 
         ! Core flux 
         !==========
@@ -6429,6 +6522,125 @@ module gdmod_constraints
 
         end if 
 
+        ! Update
+        ncfs = fscc 
+
+        ! Lonely flux surfaces
+        !=====================
+        ! Basically flux surfaces with only one non-zero neighbour
+        if (dolonelyfluxsurfaces) then 
+            ! Loop over all flux surfaces
+            do i = 1, nfs
+                ! Initialize
+                islonely = .true. 
+
+                ! Skip if already constrained
+                if (hasbeenfound(i)) then 
+                    islonely = .false. 
+                    cycle
+                end if 
+
+                ! Get all vertices of this flux surface
+                allocate(tv(count(fieldlineID == i)))
+                tv = pack(allvertIDs, fieldlineID == i) 
+
+                ! Hedge for no vertices
+                if (size(tv) == 0) then
+                    deallocate(tv) 
+                    islonely = .false. 
+                    cycle
+                end if 
+
+                ! Loop over all vertices
+                do j = 1, size(tv) 
+                    ! Get neighbours & fieldline IDs of this vertex
+                    tvn = GetVertNeig(grid%vert, tv(j))
+
+                    ! If all IDs are either equal to the current flux surface ID
+                    ! or equal to zero, or equal to a tangency point ID, 
+                    ! or equal to the unique flux surface ID that is not 
+                    ! zero and not the current ID, then continue. 
+                    ! Otherwise, this flux surface is not lonely
+                    tvnID = fieldlineID(tvn)
+                    vID = fieldlineID(tv(j))
+                    call Unique(pack(tvnID, tvnID /= 0 .and. tvnID /= vID), uniqueID)
+                    if (size(uniqueID) == 1) then 
+                        if (any( (tvnID /= vID) .and. (tvnID /= 0) .and. &
+                            (tvnID /= uniqueID(1)) .and. (.not. istangencypoint(tvn)))) then 
+                            islonely = .false. 
+                            exit
+                        end if 
+                    else 
+                        islonely = .false.
+                        exit
+                    end if 
+                end do 
+
+                ! Add if not lonely
+                if (islonely .and. (size(tv) > 2) .and. (.not. any(istangencypoint(tv)))) then 
+                    ! Add
+                    fsind(fscc+1) = i 
+                    hasbeenfound(i) = .true. 
+
+                    ! Update counter
+                    fscc = fscc + 1 
+                end if
+                
+                ! Housekeeping
+                deallocate(tv)
+            end do 
+
+            ! Determine flux value
+            select case (options%ffvoptions%fixouterfluxmeth)
+
+            case ('auto')
+
+                ! Precompute flux values
+                call magneticField%interp%Evaluate(x, y, 0, 0, psi)
+
+                ! Precompute vessel vertices
+                call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
+
+                ! Determine flux value as mean of current flux values
+                do i = ncfs+1, fscc 
+                    nfsv = 0
+                    do j = 1, grid%vert%ntot
+                        if ( (fieldlineID(j) == fsind(i)) .and. (isvesselvertex(j))) then 
+
+                            ! Compute
+                            psid(i) = psid(i) + psi(j)
+                            nfsv = nfsv + 1
+
+                        end if 
+                    end do
+
+                    if (nfsv == 0) then 
+                        ! No vertices found, throw error
+                        print *, 'outer flux surface ID: ', fsind(i)
+                        call gdErrorHandler('InitializeFixedFluxvaluesConstraints: ' // &
+                            'no boundary vertices found for outer flux surface ID')
+                    end if 
+
+                    ! Average
+                    psid(i) = psid(i)/nfsv 
+
+                end do
+
+            case ('manual')
+
+                call gdErrorHandler('InitializeFixedFluxValuesConstraints: ' // & 
+                    'manual option not available for lonely flux surfaces')
+
+            case default 
+
+                ! Throw error
+                call gdErrorHandler('InitializeFixedFluxvaluesConstraints: ' // &
+                    'unknown method to determine flux values for outer flux')
+
+            end select
+
+        end if 
+
         ! Update constraint counter and issue warning if necessary
         dowarning  = .false.
         do i = 1, grid%vert%ntot
@@ -6451,6 +6663,18 @@ module gdmod_constraints
         constraints%ncon = fscc
         allocate(constraints%psiind(fscc))
         constraints%psiind = 0
+
+        ! Write data
+        !===========
+        if (options%writedata == 1) then 
+            ! Loop over all constrained flux surfaces and get vertices
+            if (allocated(tv)) deallocate(tv)
+            allocate(tv(0))
+            do i = 1, constraints%ncon
+                tv = [tv, pack(allvertIDs, fieldlineID == constraints%fsind(i))]
+            end do 
+            call WriteVertexData(tv, grid%vert%x(tv), grid%vert%y(tv), 'con_ffv_vertices')
+        end if 
 
         ! Housekeeping
         !=============
@@ -7075,7 +7299,8 @@ module gdmod_constraints
         type(MySparseUDT)                   :: dGdvar, dgradGdvar
 
         ! Auxiliary
-        integer(I8)                             :: nvpairs
+        integer(I8)                             :: nvpairs, ntvp 
+        integer(I8), allocatable, dimension(:)  :: tvp 
 
         real(R8), allocatable, dimension(:, :)  :: xvp, yvp, xvr, yvr, &
             xvv, yvv 
@@ -7213,6 +7438,15 @@ module gdmod_constraints
 
         ! Evaluate
         G(ic+1:ic+nvpairspol) = -signvecpol*(gxp*dxp + gyp*dyp) + tol
+        if (any(G(ic+1:ic+nvpairspol) > 0)) then 
+            !print *, 'EvaluateLineFoldingConstraints: poloidal folding active'
+        end if 
+        ntvp = count(G(ic+1:ic+nvpairspol) > 0)
+        allocate(tvp(ntvp))
+        tvp = pack([(k, k = 1, nvpairspol)], G(ic+1:ic+nvpairspol) > 0)
+        call WriteVertexPairData(vpairspol(tvp, :), xvp(tvp, :), yvp(tvp, :), &
+            'con_lf_vpairspol_iterate')
+        deallocate(tvp)
 
         ! Update counter
         ic = ic + nvpairspol 
@@ -7233,6 +7467,15 @@ module gdmod_constraints
 
         ! Evaluate
         G(ic+1:ic+nvpairsrad) = -signvecrad*(gxr*dxr + gyr*dyr) + tol
+        if (any(G(ic+1:ic+nvpairsrad) > 0)) then 
+            !print *, 'EvaluateLineFoldingConstraints: radial folding active'
+        end if 
+        ntvp = count(G(ic+1:ic+nvpairsrad) > 0)
+        allocate(tvp(ntvp))
+        tvp = pack([(k, k = 1, nvpairsrad)], G(ic+1:ic+nvpairsrad) > 0)
+        call WriteVertexPairData(vpairsrad(tvp, :), xvr(tvp, :), yvr(tvp, :), &
+            'con_lf_vpairsrad_iterate')
+        deallocate(tvp)
 
         ! Update counter
         ic = ic + nvpairsrad 
@@ -7254,6 +7497,16 @@ module gdmod_constraints
 
         ! Evaluate
         G(ic+1:ic+nvpairsves) = -signvecves*(gxv*dxv + gyv*dyv) + tol
+        if (any(G(ic+1:ic+nvpairsves) > 0)) then 
+            !print *, 'EvaluateLineFoldingConstraints: vessel folding active'
+        end if 
+        ntvp = count(G(ic+1:ic+nvpairsves) > 0)
+        allocate(tvp(ntvp))
+        tvp = pack([(k, k = 1, nvpairsves)], G(ic+1:ic+nvpairsves) > 0)
+        call WriteVertexPairData(vpairsves(tvp, :), xvv(tvp, :), yvv(tvp, :), &
+            'con_lf_vpairsves_iterate')
+        deallocate(tvp)
+        
 
         ! Update counter
         ic = ic + nvpairsves 

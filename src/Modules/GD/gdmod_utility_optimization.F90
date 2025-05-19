@@ -413,6 +413,8 @@ module gdmod_utility_optimization
         ! Set tpind
         !==========
         ntpind = count(istpID)
+        allocate(tpind(ntpind))
+        tpind = 0
         tpind = pack([(i, i = 1, vert%ntot)], istpID)
         tptype = pack(tptype, istpID)
     
@@ -674,6 +676,72 @@ module gdmod_utility_optimization
         end associate
 
     end subroutine
+
+    ! Determine which flux surfaces are closed/open
+    function DetermineFluxSurfaceClosure(grid) result(closuretype)
+
+        ! Description
+        !============
+        ! This function returns all the flux surface IDs of flux 
+        ! surfaces that are closed (1)/open(0)/undetermined(-1). 
+        ! This is determined by checking if 
+        ! all vertices occur exactly twice in the flux surface ID. 
+        ! It is assumed that flux surface IDs go from 1 to 
+        ! max(vert%fieldlineID) (flux surface IDs with no vertices 
+        ! are not considered closed or open)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(in)               :: grid 
+        integer(I8), allocatable, dimension(:)  :: closuretype 
+
+        ! Auxiliary
+        integer(I8)                             :: maxfsID
+        integer(I8), allocatable, dimension(:)  :: vertcount, &
+            fsfaces
+
+        ! Loop 
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Determine max amount of flux surfaces
+        maxfsID = maxval(grid%vert%fieldlineID)
+
+        ! Initialize output 
+        allocate(closuretype(maxfsID))
+        closuretype = 0_I8 
+
+        ! Determine closure
+        !==================
+        ! Loop
+        allocate(vertcount(grid%vert%ntot))
+        do i = 1, maxfsID 
+            ! Get the flux surface faces, if none -> undefined
+            fsfaces = GetFSFace(grid%data%fluxdata, i)
+            if (size(fsfaces) == 0) then 
+                closuretype(i) = -1_I8 
+                cycle 
+            end if 
+
+            ! Count vertex occurrences
+            vertcount = 0_I8
+            do j = 1, size(fsfaces)
+                vertcount(grid%face%vert(fsfaces(j), :)) = &
+                    vertcount(grid%face%vert(fsfaces(j), :)) + 1
+            end do 
+
+            ! Check
+            if (any(vertcount == 1)) then 
+                closuretype(i) = 0_I8
+            else
+                closuretype(i) = 1_I8 
+            end if 
+        end do 
+
+
+    end function
 
     !------------------------------------------------------------------!
     !                          Auxiliary functions                     !
