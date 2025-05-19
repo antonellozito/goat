@@ -1,6 +1,7 @@
 from GOATpy import pl as plotter
 from GOATpy import dh as dh
 import os
+import sys 
 
 # Description
 #------------
@@ -20,12 +21,31 @@ datadir = dh.GetDataDirectory()
 print('VisualizeGGOutput: reading output from directory: ' + datadir)
 print('VisualizeGGOutput: reading grid from directory: ' + os.getcwd())
 
+# Set default names
+topomeshname = 'topomesh.dat'
+gridname = 'traduit.out.b2us'
+
+# Check if names were given as input (first argument is python script name, 
+# second is assumed to be gridname, third is topomesh name)
+narg = len(sys.argv)
+print("total number of arguments passed: ", narg)
+for i in range(1, narg):
+    # Check
+    if (i == 1):
+        gridname = sys.argv[i]
+    elif (i == 2): 
+        topomeshname = sys.argv[i]
+
+print('VisualizeGGOutput: reading grid from file: ' + gridname)
+print('VisualizeGGOutput: reading topomesh from file: ' + topomeshname)
+
+
 # Outputs
 #-------
 # Topological mesh
 try:
     # Load
-    topomesh = dh.ReadTopomeshFile(datadir + '/topomesh.dat')
+    topomesh = dh.ReadTopomeshFile(datadir + '/' + topomeshname)
 
     # Visualize
     plotter.PlotTopologicalMesh(topomesh, 1)
@@ -36,7 +56,7 @@ except:
 # Grid (no labels)
 try:
     # Load (normally in folder above)
-    simgrid = dh.ReadTraduitOutB2us('traduit.out.b2us')
+    simgrid = dh.ReadTraduitOutB2us(gridname)
 
     # Visualize
     plotter.PlotGridCells(simgrid, 2)

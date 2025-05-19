@@ -24,13 +24,49 @@ filesep = '/' # file separator
 #--------------
 # file where grid vertices are stored in [ID, x, y] format
 gridverticesfile = 'vertices_init.dat' # all grid vertices (initial coordinates)
+
+# Grid deformation cost function
+cfvLRvertexpairsfile = 'costfunction_vertexpairs_LR.dat'
+cfvLRdesiredbiasfile = 'costfunctionLR_desiredbias.dat'
+cfvLRbiasfile = 'costfunctionLR_desiredbias.dat'
+cfvLRradvertexpairsfile = 'costfunction_vertexpairs_LRrad.dat'
+cfvFADvertexpairsfile = 'costfunction_vertexpairs_FAD.dat'
+cfvFADweightsfile = 'costfunctionFAD_weights.dat'
+cfvFAvertexpairsfile = 'costfunction_vertexpairs_FA.dat'
+cfvFAweightsfile = 'costfunctionFA_weights.dat'
+cfvPRPBbiasfile = 'costfunctionPRPB_desiredbias.dat'
+cfvPRPBweightfile = 'costfunctionPRPB_weight.dat'
+
+cfvPRPBfspairsfile = 'costfunctionPRPB_fspairs.dat'
+cfvPRPBvertfile = 'costfunction_vertexpairs_PRPB.dat'
+
+cfvLRvalverticesfileit = 'cfv_lr_val_vertices.dat'
+cfvFADvalverticesfileit = 'cfv_fad_val_vertices.dat'
+cfvLRradvalverticesfileit = 'cfv_lrrad_val_vertices.dat'
+cfvFAvalverticesfileit = 'cfv_fa_val_vertices.dat'
+cfvPRPBvalverticesfileit = 'cfv_prpb_val_vertices.dat'
+
+
+# Grid deformation equality constraints
 bndconverticesfile = 'con_bnd_vertices.dat' # vertices constrained by boundary constraints
+bndconverticesvalfile = 'con_bnd_val_vertices.dat'
 ffconverticesfile = 'con_ff_vertices.dat' # vertices constrained by flux function constraints
+ffconverticesvalfile = 'con_ff_val_vertices.dat'
 ffconverticesfilestem = 'con_ff_vertices_'
 xpconverticesfile = 'con_xp_vertices.dat' # vertices constrained as x-points
 elconvertexpairsfile = 'con_el_vertices.dat' # vertex pairs constrained for edge lengths
 orthconvertexpairsfile = 'con_orth_vertices.dat' # vertex pairs constrained for orthogonality
-vesselpolygonfile = 'vesselpolygon.dat'
+orthconverticesvalfile = 'con_orth_val_vertices.dat'
+ffvconverticesfile = 'con_ffv_vertices.dat' # vertices constrained by constant flux value for flux surface 
+
+# Grid deformation inequality constraints
+convertpairsLFpol = 'con_lf_vpairspol.dat'
+convertpairsLFrad = 'con_lf_vpairsrad.dat'
+convertpairsLFves = 'con_lf_vpairsves.dat'
+convertpairsLFpolit = 'con_lf_vpairspol_iterate.dat'
+convertpairsLFradit = 'con_lf_vpairsrad_iterate.dat'
+convertpairsLFvesit = 'con_lf_vpairsves_iterate.dat'
+
 
 # file where grid cells are stored in polygon format ([x, y] with blank
 # lines between polygons)
@@ -42,6 +78,7 @@ goathistoryfile = 'goat_optimization_history.dat'
 shapeopthistoryfile = 'so_optimization_history.dat'
 
 # Shape optimization paths
+vesselpolygonfile = 'vesselpolygon.dat'
 fvpfile = 'so_con_fvp_vertices.dat' # fixed vessel points file
 fvffile = 'so_con_fvf_vertices.dat' # fixed vessel flux file
 origvesselpolygonfile = 'vesselpolygon_orig_so.dat' # original/initial vessel file
@@ -78,9 +115,9 @@ def PlotGridCellsFromFile(dirpath, fignum):
 
     # Plot
     PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='',
-        label='Grid cells')
+        linewidth=0.1, label='Grid cells')
     PlotPolygons2D(vesselvals[:, 0], vesselvals[:, 1], fignum, color='b', marker='',
-        label='Vessel')
+        linewidth=0.1, label='Vessel')
 
     # Set axes
     SetAxesLimits2D(plt.gca(), vesselvals[:, 0], vesselvals[:, 1])
@@ -139,6 +176,9 @@ def MonitorGrid(datadir, num, pausetime, maxruntime):
             # Plot the data
             PlotGridCellsIterate(datadir, 1)
 
+            # Plot constraints
+            PlotActiveLinefoldingConstraintsIterate(datadir, 1)
+
             # Draw
             thisfig.canvas.draw()
             thisfig.canvas.flush_events()
@@ -191,6 +231,256 @@ def PlotGridVertFieldlineID(grid, fignum):
 #--------------------------------------------------------------------------#
 #                              Grid Optimization                           #
 #--------------------------------------------------------------------------#
+def PlotLRCostfunctionVertexPairs(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertex pairs in a quiver-like plot that are considered 
+    # in the length ratio costfunction (or any derivate of that costfunction)
+
+    # Set filepaths
+    # Set the filepaths
+    vertfilepath = dirpath + filesep + cfvLRvertexpairsfile
+
+    # Get the vertex pairs
+    vals = dh.GetVertexPairsPairCoordinates(vertfilepath)
+
+    # Plot in a quiver style
+    PlotPoints2D(0.5*(vals[:, 0] + vals[:, 2]), 0.5*(vals[:, 1] + vals[:, 3]), fignum, color='b', marker='o',
+        facecolors='none', label='Vertices')
+    PlotPoints2D(0.5*(vals[:, 4] + vals[:, 6]), 0.5*(vals[:, 5] + vals[:, 7]), fignum, color='b', marker='o',
+        facecolors='none', label='Vertices')
+    PlotVertexPairs2DQuiver(0.5*(vals[:, 0] + vals[:, 2]), 0.5*(vals[:, 1] + vals[:, 3]), 
+        0.5*(vals[:, 4] + vals[:, 6]), 0.5*(vals[:, 5] + vals[:, 7]), 
+        fignum, color='b')
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Length ratio costfunction pairs of vertex pairs')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotLRCostfunctionDesiredBias(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the desired bias for the length ratio cost function
+    # Set filepaths
+    # Set the filepaths
+    datafilepath = dirpath + filesep + cfvLRdesiredbiasfile
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum)
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Length ratio costfunction desired bias')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotLRCostfunctionValueAtVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Visualize the cost function value per vertex
+    # Set filepaths
+    # Set the filepaths
+    datafilepath = dirpath + filesep + cfvLRvalverticesfileit
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum)
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Length ratio costfunction value per vertex')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+    
+def PlotLRradCostfunctionVertexPairs(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertex pairs in a quiver-like plot that are considered 
+    # in the length ratio costfunction (or any derivate of that costfunction)
+
+    # Set filepaths
+    # Set the filepaths
+    vertfilepath = dirpath + filesep + cfvLRradvertexpairsfile
+
+    # Get the vertex pairs
+    vals = dh.GetVertexPairsPairCoordinates(vertfilepath)
+
+    # Plot in a quiver style
+    PlotPoints2D(0.5*(vals[:, 0] + vals[:, 2]), 0.5*(vals[:, 1] + vals[:, 3]), fignum, color='b', marker='o',
+        facecolors='none', label='Vertices')
+    PlotPoints2D(0.5*(vals[:, 4] + vals[:, 6]), 0.5*(vals[:, 5] + vals[:, 7]), fignum, color='b', marker='o',
+        facecolors='none', label='Vertices')
+    PlotVertexPairs2DQuiver(0.5*(vals[:, 0] + vals[:, 2]), 0.5*(vals[:, 1] + vals[:, 3]), 
+        0.5*(vals[:, 4] + vals[:, 6]), 0.5*(vals[:, 5] + vals[:, 7]), 
+        fignum, color='b')
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Radial length ratio costfunction pairs of vertex pairs')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotLRradCostfunctionValueAtVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Visualize the cost function value per vertex
+    # Set filepaths
+    # Set the filepaths
+    datafilepath = dirpath + filesep + cfvLRradvalverticesfileit
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum)
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Radial length ratio costfunction value per vertex')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotFACostfunctionVertexPairs(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertex pairs in a quiver-like plot that are considered 
+    # in the face angle costfunction (or any derivate of that costfunction)
+
+    # Set filepaths
+    # Set the filepaths
+    vertfilepath = dirpath + filesep + cfvFAvertexpairsfile
+    fffilepath = dirpath + filesep + ffconverticesfilestem
+
+    # Get the vertex pairs
+    vals = dh.GetVertexPairCoordinates(vertfilepath)
+
+    # Plot in a quiver style
+    PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='b', marker='o',
+        facecolors='none', label='Vertices')
+    PlotPoints2D(vals[:, 2], vals[:, 3], fignum, color='b', marker='o',
+        facecolors='none', label='Vertices')
+    PlotVertexPairs2DQuiver(vals[:, 0], vals[:, 1], vals[:, 2], vals[:, 3], 
+        fignum, color='b')
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Face angle costfunction vertex pairs')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotFACostfunctionValueAtVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Visualize the cost function value per vertex
+    # Set filepaths
+    # Set the filepaths
+    datafilepath = dirpath + filesep + cfvFAvalverticesfileit
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum)
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Face angle costfunction value per vertex')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotFADCostfunctionVertexPairs(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertex pairs in a quiver-like plot that are considered 
+    # in the face angle difference costfunction (or any derivate of that costfunction)
+
+    # Set filepaths
+    # Set the filepaths
+    vertfilepath = dirpath + filesep + cfvFADvertexpairsfile
+
+    # Get the vertex pairs
+    vals = dh.GetVertexPairsPairCoordinates(vertfilepath)
+
+    # Plot in a quiver style
+    PlotPoints2D(0.5*(vals[:, 0] + vals[:, 2]), 0.5*(vals[:, 1] + vals[:, 3]), fignum, color='b', marker='o',
+        facecolors='none', label='Vertices')
+    PlotPoints2D(0.5*(vals[:, 4] + vals[:, 6]), 0.5*(vals[:, 5] + vals[:, 7]), fignum, color='b', marker='o',
+        facecolors='none', label='Vertices')
+    PlotVertexPairs2DQuiver(0.5*(vals[:, 0] + vals[:, 2]), 0.5*(vals[:, 1] + vals[:, 3]), 
+        0.5*(vals[:, 4] + vals[:, 6]), 0.5*(vals[:, 5] + vals[:, 7]), 
+        fignum, color='b')
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Face angle difference costfunction pairs of vertex pairs')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotFADCostfunctionValueAtVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Visualize the cost function value per vertex
+    # Set filepaths
+    # Set the filepaths
+    datafilepath = dirpath + filesep + cfvFADvalverticesfileit
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum)
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Face angle difference costfunction value per vertex')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotPRPBCostfunctionVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the PRPB vertices
+
+    # Set the filepaths
+    vertfilepath = dirpath + filesep + gridverticesfile
+    prpbvertfilepath = dirpath + filesep + cfvPRPBvertfile
+
+    # Get the data
+    vals = dh.GetVertexCoordinates(vertfilepath)
+    valscon = dh.GetVertexCoordinates(prpbvertfilepath)
+
+    # Plot the data
+    PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='b',
+        marker='+', label='Flux surface vertices')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Vertices of flux surfaces considered in PRPB cost function')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotPRPBCostfunctionValueAtVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Visualize the cost function value per vertex
+    # Set filepaths
+    # Set the filepaths
+    datafilepath = dirpath + filesep + cfvPRPBvalverticesfileit
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum)
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Psi ratio costfunction value per vertex')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
 
 def PlotFluxfunctionConstraintVertices(dirpath, fignum):
     # Description
@@ -205,8 +495,6 @@ def PlotFluxfunctionConstraintVertices(dirpath, fignum):
 
     # Get the grid data
     vals = dh.GetVertexCoordinates(vertfilepath)
-    PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
-        facecolors='none', label='Vertices')
 
     # Special points
     try: 
@@ -254,6 +542,42 @@ def PlotFluxfunctionConstraintVertices(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+def PlotFluxFunctionConstraintValueAtVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Visualize the cost function value per vertex
+    # Set filepaths
+    # Set the filepaths
+    datafilepath = dirpath + filesep + ffconverticesvalfile
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum)
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Flux function constraint value per vertex')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotBoundaryConstraintValueAtVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Visualize the cost function value per vertex
+    # Set filepaths
+    # Set the filepaths
+    datafilepath = dirpath + filesep + bndconverticesvalfile
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum)
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Boundary constraint value per vertex')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
 def PlotBoundaryConstraintVertices(dirpath, fignum):
     # Description
     #------------
@@ -272,8 +596,6 @@ def PlotBoundaryConstraintVertices(dirpath, fignum):
     valscon = dh.GetVertexCoordinates(bndfilepath)
 
     # Plot the data
-    PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
-        facecolors='none', label='Vertices')
     PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='b',
         marker='+', label='Constrained vertices')
 
@@ -302,8 +624,6 @@ def PlotXPointConstraintVertices(dirpath, fignum):
     valscon = dh.GetVertexCoordinates(confilepath)
 
     # Plot the data
-    PlotPoints2D(vals[:, 0], vals[:, 1], fignum, color='r', marker='o',
-                 facecolors='none', label='Vertices')
     PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='b',
                  marker='+', label='Constrained vertices')
 
@@ -332,8 +652,6 @@ def PlotEdgelengthsConstraintEdges(dirpath, fignum):
     valscon = dh.GetVertexPairCoordinates(confilepath)
 
     # Plot the data
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r',
-        label='Grid faces')
     PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
         0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='b',
         marker='+', label='Constrained edges')
@@ -344,6 +662,35 @@ def PlotEdgelengthsConstraintEdges(dirpath, fignum):
     # Set title and other descriptors
     thisaxes = plt.gca()
     thisaxes.set_title('Edge length constrained edges')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotFixedFluxFunctionConstraintVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertices that belong to flux surfaces of which the 
+    # flux value is being constrained. 
+
+    # Set filepaths
+    # Set the filepaths
+    vertfilepath = dirpath + filesep + gridverticesfile
+    confilepath = dirpath + filesep + ffvconverticesfile
+
+    # Get the data
+    vals = dh.GetVertexCoordinates(vertfilepath)
+    valscon = dh.GetVertexCoordinates(confilepath)
+
+    # Plot the data
+    PlotPoints2D(valscon[:, 0], valscon[:, 1], fignum, color='b',
+                 marker='+', label='Constrained vertices')
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Fixed flux value for flux surfaces constraint vertices')
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
@@ -363,8 +710,6 @@ def PlotOrthogonalityConstraintEdges(dirpath, fignum):
     valscon = dh.GetVertexPairCoordinates(confilepath)
 
     # Plot the data
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r',
-        label='Grid faces')
     PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
         0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='b',
         marker='o', label='Constrained edges')
@@ -375,6 +720,24 @@ def PlotOrthogonalityConstraintEdges(dirpath, fignum):
     # Set title and other descriptors
     thisaxes = plt.gca()
     thisaxes.set_title('Orthogonality constrained edges')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotOrthogonalityConstraintValueAtVertices(dirpath, fignum):
+    # Description
+    #------------
+    # Visualize the cost function value per vertex
+    # Set filepaths
+    # Set the filepaths
+    datafilepath = dirpath + filesep + orthconverticesvalfile
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum)
+    
+    # Set title and other descriptors
+    thisaxes = plt.gca()
+    thisaxes.set_title('Orthogonality constraint value per vertex')
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
@@ -391,13 +754,11 @@ def PlotLinefoldingConstraintEdges(dirpath, fignum):
     # Underlying grid
     cellfilepath = dirpath + filesep + gridcellsfile
     vals = dh.GetPolygonCoordinates(cellfilepath)
-    PlotPolygons2D(vals[:, 0], vals[:, 1], fignum, color='r',
-        label='Grid faces')
 
     # Poloidal
     #---------
     # Set filepaths
-    confilepath = dirpath + filesep + 'con_lf_vpairspol.dat'
+    confilepath = dirpath + filesep + convertpairsLFpol
 
     # Get the data
     valscon = dh.GetVertexPairCoordinates(confilepath)
@@ -409,7 +770,7 @@ def PlotLinefoldingConstraintEdges(dirpath, fignum):
     
     # Radial
     #-------
-    confilepath = dirpath + filesep + 'con_lf_vpairsrad.dat'
+    confilepath = dirpath + filesep + convertpairsLFrad
 
     # Get the data
     valscon = dh.GetVertexPairCoordinates(confilepath)
@@ -421,7 +782,7 @@ def PlotLinefoldingConstraintEdges(dirpath, fignum):
     
     # Vessel
     #-------
-    confilepath = dirpath + filesep + 'con_lf_vpairsves.dat'
+    confilepath = dirpath + filesep + convertpairsLFves
 
     # Get the data
     valscon = dh.GetVertexPairCoordinates(confilepath)
@@ -439,6 +800,60 @@ def PlotLinefoldingConstraintEdges(dirpath, fignum):
     thisaxes.set_title('Linefolding constrained edges')
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
+    thisaxes.legend(loc='upper right')
+
+def PlotActiveLinefoldingConstraintsIterate(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the vertex pairs that belong to the linefolding constraints.
+    # This includes poloidal, radial, and vessel line folding 
+    # constraints. 
+
+    # Poloidal
+    #---------
+    # Set filepaths
+    confilepath = dirpath + filesep + convertpairsLFpolit
+
+    # Get the data
+    valscon = dh.GetVertexPairCoordinates(confilepath)
+
+    # Plot the data
+    if len(valscon) > 0: 
+        PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
+            0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='b',
+            marker='o', label='Constrained edges')
+    
+    # Radial
+    #-------
+    confilepath = dirpath + filesep + convertpairsLFradit
+
+    # Get the data
+    valscon = dh.GetVertexPairCoordinates(confilepath)
+
+    # Plot the data
+    if len(valscon) > 0: 
+        PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
+            0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='g',
+            marker='x', label='Constrained edges')
+    
+    # Vessel
+    #-------
+    confilepath = dirpath + filesep + convertpairsLFvesit
+
+    # Get the data
+    valscon = dh.GetVertexPairCoordinates(confilepath)
+
+    # Plot the data -  if available
+    if len(valscon) > 0: 
+        PlotPoints2D(0.5*valscon[:, 0] + 0.5*valscon[:, 2],
+            0.5*valscon[:, 1] + 0.5*valscon[:, 3], fignum, color='k',
+            marker='+', label='Constrained edges')
+
+    # Set axes
+    #SetAxesLimits2D(plt.gca(), vals[:, 0], vals[:, 1])
+
+    # Set title and other descriptors
+    thisaxes = plt.gca()
     thisaxes.legend(loc='upper right')
 
 def PlotGoatOptimizationHistory(dirpath, fignum):
@@ -1128,14 +1543,44 @@ def PlotStructure(structure, fignum, **plotargs):
     thisaxes = plt.gca()
     thisaxes.legend()
 
-
-
 def PlotStructureFromFile(dirpath, fignum):
     # Read the structure
     structure = dh.ReadStructureFile(dirpath)
 
     # Plot
     PlotStructure(structure, fignum, color='k', linewidth='2')
+
+#--------------------------------------------------------------------------#
+#                             Magnetic field                               #
+#--------------------------------------------------------------------------#
+def PlotMagneticFieldFromRZPsi(dirpath, fignum, plottype, **plotargs):
+    # Description
+    #------------
+    # Plot magnetic field that is stored in an rzpsi.dat file format. 
+    # Use 'plottype' to determine what kind of plot to make (with
+    # arguments defined in plotargs):
+    # 'contour'     classic contour plot
+    # 'contourf'    filled contours
+    # 'quiver'      quiver plot of Bx, By (approximated using FD). Note
+    #               that these arrows are normalized
+    
+    # Load values
+    [R, Z, Psi] = dh.ReadRZPsiFile(dirpath)
+
+    if plottype == 'contour':
+        PlotStructured2DContour(R, Z, Psi, fignum, **plotargs)
+    elif plottype == 'contourf':
+        PlotStructured2DContourf(R, Z, Psi, fignum, **plotargs)
+    elif plottype == 'quiver':
+        bx = np.gradient(Psi.transpose(), Z, axis=0)
+        by = np.gradient(Psi.transpose(), R, axis=1)
+        bx = -bx
+        bn = np.sqrt(bx**2 + by**2)
+        bx = np.divide(bx, bn) 
+        by = np.divide(by, bn)
+        PlotStructured2DQuiver(R, Z, bx, by, fignum, **plotargs)
+    else:
+        raise('PlotMagneticfieldFromRZPsi: unknown method')
 
 #--------------------------------------------------------------------------#
 #                               2D surface plots                           #
@@ -1259,6 +1704,18 @@ def PlotPolygons2DQuiver(x, y, fignum, **plotargs):
     dx = -(x[0:len(x)-1] - x[1:len(x)])
     dy = -(y[0:len(y)-1] - y[1:len(y)])
     plt.quiver(x[0:len(x)-1], y[0:len(y)-1], dx, dy, 
+        **plotargs, angles='xy', scale_units='xy', scale=1)
+
+def PlotVertexPairs2DQuiver(x1, y1, x2, y2, fignum, **plotargs):
+    # Plot an arrow between vertex pairs defined by (x1, y1), (x2, y2)
+
+    # Set the current figure
+    plt.figure(fignum)
+
+    # Plot displacement vector
+    dx = (x2 - x1)
+    dy = (y2 - y1)
+    plt.quiver(x1, y1, dx, dy, 
         **plotargs, angles='xy', scale_units='xy', scale=1)
 
 def PlotPolygonData(filepath, fignum, **plotargs):
@@ -1418,7 +1875,19 @@ def PlotStructured2DContourf(x, y, val, fignum, **plotargs):
     # Plot
     PlotGeneral2DContourf(xp, yp, vp, fignum, **plotargs)
 
+def PlotStructured2DQuiver(x, y, vx, vy, fignum, **plotargs):
+    # Description
+    #------------
+    # Make a quiver plot from structured data. X, y should give the 
+    # axis spacing, vx, vy should be nx-by-ny arrays containing the 
+    # x and y vector components. 
 
+    # Set the current figure
+    plt.figure(fignum)
+
+    # Plot
+    plt.quiver(x, y, vx, vy, 
+        **plotargs, angles='xy', scale_units='xy') # , angles='xy', scale_units='xy', scale=1
 
 #==========================================================================#
 #                                                                          #
@@ -1495,7 +1964,6 @@ def GetColorsFromValue(val, minval, maxval):
 
     return col
 
-
 def PlotCellBasedQuantity2D(grid, val, fignum):
     # Description
     #------------
@@ -1505,6 +1973,35 @@ def PlotCellBasedQuantity2D(grid, val, fignum):
     if (len(val) != grid.cell.ntot):
         raise ValueError('PlotCellBasedQuantity2D: ' \
             'value length is not equal to number of grid cells')
+        
+    
+    # Construct cell polygon collection
+    verts = []
+
+    counter = 0
+    for i in np.arange(0, grid.cell.ntot): 
+        nvc = grid.cell.vp2[i]
+        tv = grid.cell.GetVert(i)-1
+        
+        verts.append(list(zip(grid.vert.x[tv], grid.vert.y[tv])))
+        counter = counter + nvc + 2
+
+    # Make patchplot
+    PlotGeneral2DPatch(verts, val, fignum)
+
+    # Set axes
+    SetAxesLimits2D(plt.gca(), grid.cell.x, grid.cell.y)
+
+def PlotVertBasedQuantity2D(grid, val, fignum):
+
+# Description
+    #------------
+    # Make a patchplot of a cell based quantity
+
+    # Check
+    if (len(val) != grid.vert.ntot):
+        raise ValueError('PlotVertBasedQuantity2D: ' \
+            'value length is not equal to number of grid vertices')
         
     
     # Construct cell polygon collection

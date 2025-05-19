@@ -2,6 +2,7 @@ from GOATpy import pl as plotter
 from GOATpy import dh as dh
 import os
 import numpy as np
+import sys
 
 # Description
 #------------
@@ -20,6 +21,20 @@ import numpy as np
 
 # Print
 print('VisualizeGGInput: reading from directory: ' + os.getcwd())
+
+# Set default names
+structurename = 'structure.dat'
+
+# Check if names were given as input (first argument is python script name, 
+# second is assumed to be gridname, third is topomesh name)
+narg = len(sys.argv)
+print("total number of arguments passed: ", narg)
+for i in range(1, narg):
+    # Check
+    if (i == 1):
+        structurename = sys.argv[i]
+
+print('VisualizeGGInput: reading structure from file: ' + structurename)
 
 # Inputs
 #-------
@@ -40,10 +55,10 @@ except:
 # Structure
 try:
     # Load 
-    structure = dh.ReadStructureFile('structure.dat')
+    structure = dh.ReadStructureFile(structurename)
 
     # Visualize
-    plotter.PlotStructure(structure, 1, color='k', linewidth=2)
+    plotter.PlotStructure(structure, 1, linewidth=2)
 except: 
     print("Could not load the structure")
 

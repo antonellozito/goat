@@ -584,6 +584,10 @@ class Face:
         # ID
         self.ID =  np.zeros(0, dtype=int)
 
+        # Coordinates
+        self.x = np.zeros(0, dtype=float)
+        self.y = np.zeros(0, dtype=float)
+
     # Initializer
     def Initialize(self, nf):
         # Number
@@ -607,14 +611,20 @@ class Face:
         # ID
         self.ID =  np.zeros(nf, dtype=int)
 
+        # Coordinates
+        self.x = np.zeros(nf, dtype=float)
+        self.y = np.zeros(nf, dtype=float)
+
 # Grid cells
 class Cell:
     # Definition
     def __init__(self):
         # Number
-        self.ntot = 0
         self.nvert = 0
         self.nface = 0
+        self.ncg = 0 # number of guard cells 
+        self.nci = 0 # number of internal (non-guard) cells
+        self.ntot = self.ncg + self.nci 
 
         # Vertex pointer
         self.vp1 = np.zeros(0, dtype=int)
@@ -655,11 +665,14 @@ class Cell:
         self.ft     = np.zeros(0, dtype=int)
 
     # Initializer
-    def Initialize(self, nc, ncv, ncf):
+    def Initialize(self, nci, ncg, ncv, ncf):
         # Number
-        self.ntot = nc
+        self.nci = nci 
+        self.ncg = ncg 
         self.nvert = ncv
         self.nface = ncf
+        nc = self.nci + self.ncg 
+        self.ntot = nc
 
         # Vertex pointer
         self.vp1 = np.zeros(nc, dtype=int)
@@ -892,6 +905,8 @@ class Grid:
         # all other necessary fields were read in
 
         # Face cells
+        self.face.nb1[:] = 0 
+        self.face.nb2[:] = 0
         for i in np.arange(0, self.cell.ntot, 1):
             # Get cell faces
             tf = self.cell.GetFace(i)
@@ -980,8 +995,23 @@ class Grid:
 
         return isincell
 
-                
+    # Compute grid metrics
+    def ComputeFaceCoordinates(self):
+        # Compute face center coordinates
+        for i in np.arange(0, self.face.ntot, 1):
+            tv = np.array([self.face.v1[i], self.face.v2[i]])
+            self.face.x[i] = np.mean(self.vert.x[tv-1])
+            self.face.y[i] = np.mean(self.vert.y[tv-1])
 
+    def ComputeCellCoordinates(self):
+        # Compute cell center coordinates - only for internal cells, 
+        # guard cells should be given or will be zero
+        for i in np.arange(0, self.cell.nci, 1): 
+            tv = self.cell.GetVert(i)
+            self.cell.x[i] = np.mean(self.vert.x[tv-1])
+            self.cell.y[i] = np.mean(self.vert.y[tv-1])
+
+        
 
 #----------------------------------------------------------------------#
 #                        GENERAL 2D INTERPOLANT                        #
