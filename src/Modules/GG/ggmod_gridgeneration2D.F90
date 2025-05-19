@@ -2858,7 +2858,7 @@ module ggmod_gridgeneration2D
 
         ! Add LOS
         !========
-        call DetermineLOSlimits(ggtmdata)
+        ! call DetermineLOSlimits(ggtmdata)
 
         ! Construct graph
         do i = 1, cell%ntot 
@@ -6799,7 +6799,9 @@ module ggmod_gridgeneration2D
                     !------
                     ! Check if we can extend start  
                     if (.not. tubes(j)%isextendedstart .and. &
-                        topomesh%face%type(tc%srf) == TMfacebndID) then
+                        topomesh%face%type(tc%srf) == TMfacebndID &
+                        .and. .not. (ggtmdata%seg(tubes(j)%hfline%segID(1))%isvertex) & 
+                        .and. .not. (ggtmdata%seg(tubes(j)%lfline%segID(1))%isvertex)) then
 
                         ! Get length of segment
                         vind1 = findloc(srfline%vert, thfline%vert(1), 1)
@@ -6820,7 +6822,9 @@ module ggmod_gridgeneration2D
 
                     ! Check if we can extend end  
                     if (.not. tubes(j)%isextendedend .and. &
-                        topomesh%face%type(tc%erf) == TMfacebndID) then
+                        topomesh%face%type(tc%erf) == TMfacebndID &
+                        .and. .not. (ggtmdata%seg(tubes(j)%hfline%segID(1))%isvertex) & 
+                        .and. .not. (ggtmdata%seg(tubes(j)%lfline%segID(1))%isvertex)) then
 
                         ! Get length of segment
                         vind1 = findloc(erfline%vert, thfline%vert(thfline%nv), 1)
@@ -13006,7 +13010,7 @@ module ggmod_gridgeneration2D
             [coreIDs, targetIDs, vesselIDs, lastfsIDs], interiorIDs)
 
         ! Construct mapping
-        facelabelGG = [coreIDs, targetIDs, vesselIDs, lastfsIDs]
+        facelabelGG = [coreIDs, targetIDs, vesselIDs, lastfsIDs, interiorIDs]
         facelabelGD = [spread(coreID, 1, size(coreIDs)), spread(targetID, 1, size(targetIDs)), &
             spread(vesselID, 1, size(vesselIDs)), spread(outerboundaryID, 1, size(lastfsIDs)), &
             spread(interiorID, 1, size(interiorIDs))]
