@@ -149,6 +149,14 @@ subroutine GGGDDriver(goatoptions)
     gridoptions%facelabelmappingGD = facelabelsGD 
     gridoptions%facelabelsubfrom   = emptyI8 
     gridoptions%facelabelsubto     = emptyI8 
+    print *, 'GGGDDriver: facelabelsGG: ', facelabelsGG 
+    print *, 'GGGDDriver: facelabelsGG: ', facelabelsGD
+
+    ! Recompute topological data from grid for new face labels
+    call ComputeTopologicalData(grid, topomesh)
+
+    ! Grid data
+    call WriteGOAT(goatoptions, grid, magneticField, environment)
 
     ! Extract the required grid data for grid deformation
     call ExtractGridData(grid, 'traduitb2us', gridoptions)
