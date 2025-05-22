@@ -4,7 +4,15 @@ subroutine ShapeOptDriver(inputfilepath)
     !============
     ! This driver runs a shape optimization driver that solves a shape
     ! optimization problem (see somod_optimizationengine.F90 for more
-    ! details).
+    ! details). Remeshing is supported using the goat grid generator.
+    ! Note that a remeshing step means a full reinitialization of the 
+    ! optimization problem, and is therefore a costly step. This is 
+    ! necessary, since remeshing will change the number of state 
+    ! and grid deformation equations. This means, however, that 
+    ! remeshing in any subroutine of the optimization problem is 
+    ! strictly speaking not allowed (or that it should be followed 
+    ! by an optimization problem update, which can only be done at 
+    ! the upper level right now)
 
     ! Initialize
     !===========
@@ -12,6 +20,7 @@ subroutine ShapeOptDriver(inputfilepath)
     use somod_userinput
     use somod_optimizationengine
     use goatmod_types
+    use ggmod_gridgenerator
 
     ! The usual
     implicit none 
@@ -23,9 +32,15 @@ subroutine ShapeOptDriver(inputfilepath)
 
     ! Auxiliary
     type(OptimizationEngineSOUDT)   :: ShapeOptEngine
-    type(GridUDT)                   :: grid
+    type(GridUDT)                   :: grid, newgrid 
     type(GOAToptionsUDT)            :: goatoptions
     type(ShapeOptimizationOptionsUDT)   :: SOoptions
+    type(GoatGridGenerator2DUDT)    :: gridgenerator 
+    type(MagneticFieldUDT)          :: magneticField 
+    type(EnvironmentUDT)            :: environment 
+
+    ! Loop
+    integer(I8)                     :: itremesh 
 
     ! Initialize
     !===========
@@ -48,20 +63,64 @@ subroutine ShapeOptDriver(inputfilepath)
     goatoptions%inputfilepath = SOoptions%goatfilepath
     call goatoptions%Set()
 
+    ! Read in grid generation data
+    call ReadGGData(magneticField, environment, goatoptions)
+
+    ! Initialize the grid generator
+    call gridgenerator%Initialize(magneticField, environment, &
+        SOoptions%goatfilepath)
+
     ! Solve
     !======
-    ! Solve the problem
-    !call ShapeOptEngine%solver%SolveOptimizationProblem(ShapeOptEngine%problem)
+    ! Call driver for the first time
     call ShapeOptEngine%Driver()
 
-    ! Write data
-    !===========
-    ! Extract
+    ! Check if we need to remesh and resolve
     associate(problem        => ShapeOptEngine%problem)
 
     select type (problem)
 
     type is (OptimizationProblemSOUDT)
+
+        ! Initialize
+        problem%doremesh = .false. 
+        itremesh = 1
+
+        ! Keep looping until exit conditions are met
+        do while (SOoptions%doremesh .and. (itremesh <= SOoptions%itmaxremesh))
+
+            ! Check if we need to remesh
+            if (problem%doremesh) then 
+                ! Reset remeshing
+                problem%doremesh = .false. 
+
+                ! Update remeshing iteration
+                itremesh = itremesh + 1 
+                
+            else
+                ! Converged or exited - stop
+                exit 
+            end if 
+
+            ! Update the environment (mf not necessary)
+            call gridgenerator%UpdateEnvironment(problem%goat%environment)
+
+            ! Reconstruct the topomesh
+            call gridgenerator%ConstructTopomesh()
+
+            ! Reconstruct the grid
+            call gridgenerator%ConstructGrid()
+
+            ! Translate
+            call TranslateGridLabels(gridgenerator%grid, &
+                gridgenerator%topomesh, gridgenerator%environment%vessel, &
+                ggoptions, 'GD')
+            problem%goat%grid = gridgenerator%grid 
+
+            ! Re-solve the optimization problem 
+            call ShapeOptEngine%Driver()
+
+        end do 
 
         ! Extract grid
         grid = problem%goat%grid 

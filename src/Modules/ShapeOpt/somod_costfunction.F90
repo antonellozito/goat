@@ -48,6 +48,9 @@ module somod_costfunction
         ! - J:          The cost function value (scalar)
         ! - type:       the cost function type (string)
         ! - B:          hessian estimator
+        ! - doremesh:   logical flag to indicate if remeshing is 
+        !               requested. Cost function and gradient value 
+        !               may be garbage in that case. 
 
         ! The following routines should be implemented for these cost
         ! functions (see also the interface below for a description of
@@ -66,6 +69,9 @@ module somod_costfunction
 
         ! Hessian estimator
         class(HessianApproximationUDT), allocatable     :: B
+
+        ! Remeshing 
+        logical                         :: doremesh 
 
     contains
 
@@ -325,6 +331,7 @@ module somod_costfunction
         type(CostFunctionOptionsSOUDT)      :: options
 
         ! Nothing to do here
+        costfunction%doremesh = .false.
         
     end subroutine
 
@@ -437,6 +444,9 @@ module somod_costfunction
         
         ! Initialize
         !===========
+        ! Set remeshing
+        costfunction%doremesh = .false.
+
         ! Set the scaling constant
         costfunction%lambda = options%plf%lambda
 
@@ -694,6 +704,9 @@ module somod_costfunction
         
         ! Initialize
         !===========
+        ! Set remeshing
+        costfunction%doremesh = .false.
+
         ! Associate
         associate(&
             opt       => options%fa,                        &   
@@ -1445,6 +1458,9 @@ module somod_costfunction
         
         ! Initialize
         !===========
+        ! Set remesh
+        costfunction%doremesh = .false.
+
         ! Set evaluation switches
         costfunction%doPLF      = .false.
         costfunction%doFA       = .false.
@@ -1652,6 +1668,9 @@ module somod_costfunction
 
         ! Initialize costfunction
         !========================
+        ! Set remesh
+        costfunction%doremesh = .false.
+
         ! Check which cost function it is
         select case (options%type)
 
@@ -1792,6 +1811,9 @@ module somod_costfunction
                 ! No need to recall error, but need to check how to adjust output
                 goatcfv = goatproblem%monitor%convnorm(goatproblem%monitor%itopt)
                 call costfunction%goatengine%solver%Initialize()
+
+                ! Raise the remesh flag
+                costfunction%doremesh = .true. 
             else
                 ! Update goat
                 goat = goatproblem 

@@ -379,6 +379,13 @@ module somod_userinput
         !               are read in 
         ! - optionprefix:   prefix preceding any option key in the 
         !                   options key-value pairs
+
+        ! Remeshing options
+        ! - doremesh    switch to turn remeshing off or on. If off, then 
+        !               the program will simply exit on a remeshing 
+        !               request. Hence, by default, this is turned on. 
+        ! - itmaxremesh maximal number of remeshing steps that are 
+        !               allowed. 
         
         ! Paths and options for I/O
         ! - goatfilepath:   input filepath to read goat options
@@ -388,6 +395,10 @@ module somod_userinput
         ! General
         character(:), allocatable   :: optionprefix, &
             goatfilepath, writefilepath  
+
+        ! Remeshing
+        logical                     :: doremesh 
+        integer(I8)                 :: itmaxremesh
     
     contains
 
@@ -444,6 +455,10 @@ module somod_userinput
         options%writefilepath   = 'so'
         options%optionprefix    = 'so'
         options%goatfilepath    = 'GOAToptions.dat'
+
+        ! Remeshing options
+        options%doremesh        = .true. 
+        options%itmaxremesh     = 10 
 
     end subroutine
 
@@ -844,6 +859,13 @@ module somod_userinput
         call ExtractOptionValueCharacter(fid, field, options%goatfilepath)
         field = 'so.main.writefilepath'
         call ExtractOptionValueCharacter(fid, field, options%writefilepath)
+
+        ! Remeshing options
+        field = 'so.remesh.doremesh'
+        call ExtractOptionValueLogical0D(fid, field, options%doremesh)
+        field = 'so.remesh.itmax'
+        call ExtractOptionValueInteger0D(fid, field, options%itmaxremesh)
+        
         ! Housekeeping
         !=============
         ! Close the file
