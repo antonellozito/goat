@@ -21,6 +21,7 @@ import os
 statefile = 'b2fstate' # state
 gridfile = 'traduit.out.b2us' # grid
 plasmafile = 'b2fplasmf'
+gmtryfile = 'b2fgmtry'
 
 # Read command line arguments
 narg = len(sys.argv)
@@ -32,26 +33,28 @@ for i in range(1, narg):
         gridfile = sys.argv[i]
     elif (i == 3):
         plasmafile = sys.argv[i]
-        
-simdir = os.cwd()
-statedir = simdir + statefile
-plasmadir = simdir + plasmafile
-griddir = simdir + gridfile
+    elif (i == 4):
+        gmtryfile = sys.argv[i]
 
+simdir = os.getcwd()
+statedir = simdir + '/' + statefile
+plasmadir = simdir + '/' + plasmafile
+griddir = simdir + '/' + gridfile
+gmtrydir = simdir + '/' + gmtryfile
 
 # Print out paths 
 print('SolpsPostProcess: reading state file from: ' + statedir)
 print('SolpsPostProcess: reading grid file from: ' + griddir)
 print('SolpsPostProcess: reading b2fplasmf file from: ' + plasmadir)
+print('SolpsPostProcess: reading b2fgmtry file from: ' + gmtrydir)
 
 
 # Initialize objects
 state = st.PlasmaState()
 const = st.PhysicalConstants()
 
-# Load state and geometry
+# Load state 
 state.ReadB2fstatefile(statedir)
-grid = dh.ReadTraduitOutB2us(griddir)
 
 # Try loading the residuals
 plotresiduals = True 
@@ -60,6 +63,17 @@ try:
 except:
     plotresiduals = False
     print("SolpsPostProcess: could not read b2fplasmf, not plotting residuals")
+
+# Try loading b2fgmtry to be able to plot guard cell quantities
+try:
+    grid = dh.ReadGridFromB2fgmtryus(gmtrydir)
+except:
+    try: 
+        # Try loading through traduit file
+        grid = dh.ReadTraduitOutB2us(griddir)
+        print("SolpsPostProcess: could not read b2fgmtry, reading from traduit file")
+    except:
+        raise ValueError(("SolpsPostProcess: could not read b2fgmtry nor traduit file"))     
 
 # Figure counter
 fignum = 0
@@ -79,6 +93,8 @@ fignum = fignum + 1
 
 # Visualize plasma state
 #-----------------------
+# Determine plotting range
+
 # Density
 for i in range(0, state.ns):
     pl.PlotCellBasedQuantity2D(grid, np.log10(state.na[0:grid.cell.ntot, i]), fignum)
