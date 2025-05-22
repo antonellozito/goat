@@ -1837,6 +1837,20 @@ module gdmod_costfunction
         ! aligned. If it is not the same and both are non-zero, it is 
         ! a potential face to consider. 
 
+        ! Note: to address fully unstructured grids with potentially
+        ! many triangles, the original quadrilateral grid based 
+        ! approach where only vertex pairs in the two adjacent flux 
+        ! tubes are considered is insufficient for grid topologies where
+        ! multiple triangles are present in a tube. Therefore, the 
+        ! approach has been extended (May 2025) to include vertex pairs
+        ! that lie in the same flux tube - this should promote a 
+        ! 'symmetric' distribution of the vertices along the field 
+        ! line.
+
+        ! Note: if any adjustments are made here, make sure that vertex
+        ! pairs are correctly oriented! This is not explicitly checked, 
+        ! if not oriented properly results may be surprising. 
+
         ! Modules
         !========
 
@@ -1855,23 +1869,18 @@ module gdmod_costfunction
         ! Auxiliary variables
         type(StructuredPLF2DDistanceDFUDT)  :: dfwt
 
-        integer(I8)                         :: tID, vp1(1:2), &
-            vp2(1:2), ntvn, ntemptvn, nvp
+        integer(I8)                         :: tID, &
+            ntvn, ntemptvn, nvp, nxpind, nalignedv, &
+            nvID1, nvID2
 
-        real(R8)                            :: dxf, dyf, txf, tyf, tnf,&
-            bxf, byf, bnf, dpf
-
-        logical                             :: thischeck
-
-        integer(I8), allocatable            :: tvn(:), temptvn(:), &
-            vpairs(:,:), nvpairs(:), reverse(:), tempvpairs(:,:)
+        integer(I8), allocatable            :: temptvn(:), &
+            vpairs(:,:), nvpairs(:), &
+            xpind(:), order(:), alignedvloc(:), vID1(:), vID2(:)
 
         real(R8), allocatable               :: bx(:), by(:), xv(:,:), &
-            yv(:,:), xf(:,:), yf(:,:), gxf(:,:), gyf(:,:), dx(:,:), &
-            dy(:,:), dotprod(:,:), wt(:)
+            yv(:,:),  wt(:)
 
-        logical, allocatable                :: cID(:), mask(:), &
-            isaligned(:)
+        logical, allocatable                :: cID(:), isxp(:)
 
         ! Data
         real(R8)                            :: epsalignment 
@@ -1884,7 +1893,8 @@ module gdmod_costfunction
 
         ! Allocate (initialize too big)
         nvp = grid%vert%ntot*maxval(grid%vert%neigP(:,2)) ! maximal number of pairs
-        allocate(vpairs(nvp,4), nvpairs(grid%vert%ntot))
+        allocate(vpairs(nvp,4), nvpairs(grid%vert%ntot), isxp(grid%vert%ntot))
+        isxp = .false. 
         ! call costfunction%Allocate(grid%vert%ntot, 4)
 
         ! Compute magnetic field in grid points
@@ -1906,11 +1916,13 @@ module gdmod_costfunction
         vpairs(:, :) = 0
         nvpairs(:) = 0
         vpc = 1 ! vertex pair index & counter
+        call DetermineXPoints(xpind, nxpind, order, grid)
+        isxp(xpind) = .true. 
 
         ! Loop over all vertices
         do i = 1, vert%ntot
             ! Skip if the current vertex is a boundary vertex 
-            if (vert%BV(i)) then 
+            if (vert%BV(i) .or. isxp(i)) then 
                 cycle ! skip the remainder of the do-loop for this iteration
             end if
 
@@ -1921,171 +1933,81 @@ module gdmod_costfunction
             allocate(temptvn(ntemptvn))
             allocate(cID(ntemptvn))
 
-            ! Get the vertex neighbours of this vertex
+            ! Get the vertex neighbours of this vertex - normally, these 
+            ! should be sorted clockwise or counterclockwise
             temptvn = vert%neig(& 
                 vert%neigP(i, 1):vert%neigP(i, 1)+vert%neigP(i, 2)-1)
             
             ! Get the ID of the coordinate line
             tID = vert%fieldlineID(i)
 
+            ! Find vertices with the same IDs - should be exactly two if
+            ! no boundary vertex and no x-point (we skip x-points here)
+            nalignedv = count(vert%fieldlineID(temptvn) == tID)
+            if (nalignedv /= 2) then 
+                print *, 'vertex ID: ', i
+                print *, 'InitializeCostFunctionFAD: non-boundary, non-xpoint ' // & 
+                'vertex detected with not exactly two aligned faces. ' // & 
+                'Unexpected, skipping this vertex and continuing...'
+                deallocate(temptvn, cID)
+                cycle 
+            end if 
+            allocate(alignedvloc(nalignedv))
+            alignedvloc = pack([(k, k = 1, size(temptvn))], vert%fieldlineID(temptvn) == tID)
+
+            ! Get vertex sequences
+            vID1 = [temptvn(1:alignedvloc(1)-1), temptvn(alignedvloc(2)+1:size(temptvn))]
+            vID2 = temptvn(alignedvloc(1)+1:alignedvloc(2)-1)
+            nvID1 = size(vID1)
+            nvID2 = size(vID2)
+
             ! Check if there is an ID
             ntvn = 0
-            if (tID == 0) then ! no vertex ID - check all vertex neighbours
-                ! Check which faces are aligned to know which vertex 
-                ! pairs to (not) include. Each vertex pair consists of 
-                ! the current node and one of its neighbours in temptvn. 
-                ! Alignment checking is based on the dot product between 
-                ! the normalized face and magnetic field vectors. The 
-                ! magnetic field vector is interpolated from the 
-                ! precomputed magnetic field on the vertices. 
-
-                ! Allocate & initialize aligned indicator
-                allocate(isaligned(ntemptvn))
-                isaligned(:) = .false. 
-
-                ! Loop
-                do j = 1, ntemptvn
-                    ! Get normalized face vector
-                    dxf = x(temptvn(j)) - x(i)
-                    dyf = y(temptvn(j)) - y(i)
-                    tnf = sqrt(dxf**2 + dyf**2)
-                    txf = dxf/tnf 
-                    tyf = dyf/tnf 
-
-                    ! Get normalized magnetic field vector, approximated
-                    ! by simple arithmetic average
-                    bxf = (bx(temptvn(j)) + bx(i))*0.5
-                    byf = (by(temptvn(j)) + by(i))*0.5
-                    bnf = sqrt(bxf**2 + byf**2)
-                    bxf = bxf/bnf 
-                    byf = byf/bnf
-
-                    ! Compute dot product
-                    dpf = bxf*txf + byf*tyf 
-
-                    ! Check
-                    if (abs( abs(dpf) - 1 ) < epsalignment) then 
-                        ! Consider as aligned 
-                        isaligned(j) = .true.
-                    end if
-                end do
-
-                ! Extract the non-aligned nodes if two non-aligned faces
-                ! remain. Otherwise, set to zero. 
-                ntvn = count(.not. isaligned)
-                if (ntvn .ne. 2) then 
-                    ntvn = 0
-                    ! Allocate - to prevent deallocation errors downstream
-                    allocate(tvn(ntvn))
-                else
-                    ! Allocate
-                    allocate(tvn(ntvn))
-
-                    ! Extract the vertices
-                    tvn = pack(temptvn, .not. isaligned)
-                end if
-    
-                ! Deallocate
-                deallocate(isaligned)
+            if (tID == 0) then 
+                ! We don't support vertices with zero ID that are not 
+                ! boundary vertices anymore - print warning and skip 
+                ! remainder of loop after housekeeping
+                print *, 'vertex ID: ', i 
+                print *, 'InitializeCostFunctionFAD: non-boundary, ' // & 
+                    'non-xpoint vertex detected with zero ID. Skipping...'
+                deallocate(alignedvloc, temptvn, cID)
+                cycle
 
             else
-                ! Check which vertices have the same ID
-                cID = tID == vert%fieldlineID(temptvn)
+                ! Check which vertex pairs to construct based on the 
+                ! number of vertices in both sequences
 
-                ! Check which faces are aligned
-                allocate(isaligned(ntemptvn))
+                ! If we have an uneven amount of vertices at both sides,
+                ! the pairs formed by the middle vertices and the current
+                ! vertex can be added
+                if ((mod(nvID1, 2) /= 0) .and. (mod(nvID2, 2) /= 0)) then 
+                    ! Add this vertex pair
+                    vpairs(vpc, :) = [vID1(nvID1/2+1), i, i, vID2(nvID2/2+1)]
+                    vpc = vpc + 1
+                end if 
 
-                ! Loop
-                do j = 1, ntemptvn
-                    ! Get normalized face vector
-                    dxf = x(temptvn(j)) - x(i)
-                    dyf = y(temptvn(j)) - y(i)
-                    tnf = sqrt(dxf**2 + dyf**2)
-                    txf = dxf/tnf 
-                    tyf = dyf/tnf 
-
-                    ! Get normalized magnetic field vector, approximated
-                    ! by simple arithmetic average
-                    bxf = (bx(temptvn(j)) + bx(i))*0.5
-                    byf = (by(temptvn(j)) + by(i))*0.5
-                    bnf = sqrt(bxf**2 + byf**2)
-                    bxf = bxf/bnf 
-                    byf = byf/bnf
-
-                    ! Compute dot product
-                    dpf = bxf*txf + byf*tyf 
-
-                    ! Check
-                    if (abs( abs(dpf) - 1 ) < epsalignment) then 
-                        ! Consider as aligned 
-                        isaligned(j) = .true.
-                    end if
-                end do
-            
-                ! Extract vertices that have NOT the same ID and are not
-                ! aligned. 
-                allocate(mask(ntemptvn))
-                mask = (.not. cID) ! .and. (.not. isaligned)
-                allocate(tvn(count(mask)))
-                tvn = pack(temptvn, mask)
-
-                ! Only keep if there are two vertices 
-                if  (size(tvn) .ne. 2) then
-                    ntvn = 0
-                else
-                    ntvn = 2
-                end if
-
-
-                ! Deallocate
-                deallocate(mask, isaligned)
+                ! Add pairs in flux tubes 1 and 2
+                do j = 1, nvID1/2
+                    vpairs(vpc, :) = [vID1(j), i, i, vID1(nvID1-j+1)]
+                    vpc = vpc + 1
+                end do 
+                do j = 1, nvID2/2
+                    vpairs(vpc, :) = [vID2(j), i, i, vID2(nvID2-j+1)]
+                    vpc = vpc + 1
+                end do 
             end if
             
-            ! Constrain each pair (more generally written in case 
-            ! multiple pairs are allowed in the future)
-            nvpairs(i) = (ntvn/2) ! this automatically floors
-            do j = 1, nvpairs(i)
-
-                ! Get the vertex pairs
-                vp1 = [i, tvn(2*j-1)]
-                vp2 = [i, tvn(2*j)]
-                
-                ! Check if these pairs should be added. For now, we 
-                ! don't consider vertices where there are more than two
-                ! pairs, as here the cost function does not make much
-                ! sense. 
-                thischeck = .true.
-                thischeck = thischeck .and. (.not. (nvpairs(i) > 1)) 
-                
-                ! Add the pair if allowed
-                if (thischeck) then 
-                    ! Add the pairs
-                    vpairs(vpc,:) = [vp1, vp2]
-                    
-                    ! Update counter
-                    vpc = vpc+1
-
-                end if
-            end do
-
             ! Deallocate
-            deallocate(tvn, temptvn, cID)
+            deallocate(temptvn, cID, alignedvloc)
         end do
 
-        ! Check order
-        !============
-        ! Check the vertex pair order by computing the dot product with 
-        ! the local magnetic field (now evaluated with the actual face
-        ! coordinates)
-
+        ! Determine weigths
+        !==================
         ! Update counter (-1 to get actual number of edges)
         vpc = vpc-1
 
         ! Allocate
-        allocate(xv(vpc, 4), yv(vpc, 4), xf(vpc, 2), &
-            yf(vpc, 2), gxf(vpc, 2), gyf(vpc, 2), &
-            dx(vpc, 2), dy(vpc, 2), dotprod(vpc, 2), &
-            tempvpairs(size(vpairs,1), size(vpairs, 2)))
+        allocate(xv(vpc, 4), yv(vpc, 4))
         call costfunction%Allocate(vpc, 4, grid%vert%ntot)
 
         ! Compute vectors
@@ -2094,43 +2016,6 @@ module gdmod_costfunction
             yv(:, i) = y(vpairs(1:vpc, i)) !reshape(y(vpairs),[vert%ntot,4])
         end do
 
-        ! Compute edge faces
-        xf(:, 1) = xv(:, 1) + xv(:, 2)
-        xf(:, 2) = xv(:, 3) + xv(:, 4)
-        xf = 0.5*xf
-        yf(:, 1) = yv(:, 1) + yv(:, 2)
-        yf(:, 2) = yv(:, 3) + yv(:, 4)
-        yf = 0.5*yf
-
-        ! Compute the vector perpendicular on the magnetic field vector
-        do i = 1, 2
-            call magneticField%interp%Evaluate(xf(:, i), yf(:, i ), 1, 0, gxf(:, i))
-            call magneticField%interp%Evaluate(xf(:, i), yf(:, i ), 0, 1, gyf(:, i))
-        end do
-
-        ! Compute distances
-        dx(:, 1) = xv(:, 2) - xv(:, 1)
-        dx(:, 2) = xv(:, 4) - xv(:, 3)
-        dy(:, 1) = yv(:, 2) - yv(:, 1)
-        dy(:, 2) = yv(:, 4) - yv(:, 3)
-
-        ! Compute dot product
-        dotprod = dx*gxf + dy*gyf
-
-        ! Compute faces to reverse 
-        tempvpairs = vpairs
-        allocate(mask(vpc))
-        do i = 1, 2
-            mask = (dotprod(:,i) < 0)
-            allocate(reverse(count(mask)))
-            reverse = pack([(k, k = 1, vpc)], mask)
-            vpairs(reverse, 2*i-1)  = tempvpairs(reverse, 2*i)
-            vpairs(reverse, 2*i)    = tempvpairs(reverse, 2*i-1)
-            deallocate(reverse)
-        end do
-
-        ! Determine weigths
-        !==================
         ! Initialize (magnetic field as dummy since unsigned anyway)
         call dfwt%Initialize(magneticField%interp, &
             environment%vessel%plfvessel, environment%vessel%plfvessel, &
@@ -2167,13 +2052,6 @@ module gdmod_costfunction
         if (options%writedata == 1) then 
             call costfunction%WriteData(grid) 
         end if 
-
-        ! Deallocate
-        deallocate(tempvpairs, dx, dy, gxf, gyf, xv, yv, xf, &
-            yf, dotprod, bx, by, vpairs, nvpairs, mask)
-        
-
-        
 
     end subroutine
 
@@ -2225,7 +2103,7 @@ module gdmod_costfunction
         type(MySparseUDT)                   :: dgradJdvar
 
         ! Loop variables
-        integer(I8)                     :: i, cc
+        integer(I8)                     :: i, k, cc
 
         ! Auxiliary
         real(R8)                        :: gxf1, gxf2, gyf1, gyf2, dx1, &
@@ -2244,7 +2122,7 @@ module gdmod_costfunction
             gyyfv1(:), gyyfv2(:), gxxxfv1(:), gxxxfv2(:), gxxyfv1(:), &
             gxxyfv2(:), gxyxfv1(:), gxyxfv2(:), gxyyfv1(:), gxyyfv2(:), &
             gyxxfv1(:), gyxxfv2(:), gyxyfv1(:), gyxyfv2(:), gyyyfv1(:), &
-            gyyyfv2(:), valxx(:), valxy(:), valyx(:), valyy(:) 
+            gyyyfv2(:), valxx(:), valxy(:), valyx(:), valyy(:), dJ(:) 
 
         ! Initialize
         !===========
@@ -2320,8 +2198,13 @@ module gdmod_costfunction
         ! Compute cost function
         !======================
         ! Sum contributions
-        Jv(vpairs(:, 1)) = 0.5*( wtv*(atan(ratv1) - atan(ratv2) )**2 ) 
-        J = sum( 0.5*( wtv*(atan(ratv1) - atan(ratv2) )**2 ) )
+        dJ = 0.5*( wtv*(atan(ratv1) - atan(ratv2) )**2 )
+        do k = 1, 4
+            do i = 1, np
+                Jv(vpairs(i, k)) = Jv(vpairs(i, k)) + 0.25*(dJ(i))
+            end do 
+        end do 
+        J = sum(dJ)
 
         ! Scale
         J = lambda*J
@@ -6114,11 +5997,11 @@ module gdmod_costfunction
 
         ! Destroy
         !========
-        call costfunction%cfv_lr%Deallocate()
-        call costfunction%cfv_fad%Deallocate()
-        call costfunction%cfv_fa%Deallocate()
-        call costfunction%cfv_prpb%Deallocate()
-        call costfunction%cfv_lrrad%Deallocate()
+        if (costfunction%doLR) call costfunction%cfv_lr%Deallocate()
+        if (costfunction%doFAD) call costfunction%cfv_fad%Deallocate()
+        if (costfunction%doFA) call costfunction%cfv_fa%Deallocate()
+        if (costfunction%doPRPB) call costfunction%cfv_prpb%Deallocate()
+        if (costfunction%doLRrad) call costfunction%cfv_lrrad%Deallocate()
 
     end subroutine
     
