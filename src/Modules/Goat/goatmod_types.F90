@@ -846,6 +846,15 @@ module goatmod_types
         if (allocated(grid%data%divFc)) deallocate(grid%data%divFc)
         if (allocated(grid%data%spointdivID)) deallocate(grid%data%spointdivID)
         if (allocated(grid%data%tpointdivID)) deallocate(grid%data%tpointdivID)
+
+        ! Read data for structured grid remapping (to be deleted in future)
+        call cfruin (filespec,1,idum2,'isClassicalGrid') 
+        grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4) ! cast to I4 type
+        if (grid%data%sglegacy%isClassicalGrid == 1) then 
+            call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
+            grid%data%sglegacy%nx = idum(0)
+            grid%data%sglegacy%ny = idum(1)
+        end if
         
         ! Read topological data
         if (readTopologicalData) then 
@@ -854,7 +863,7 @@ module goatmod_types
             grid%data%topoflag = idum(0)
     
             ! Read number of topological points
-            call cfruin(filespec, 6, idum, 'nX,nO,nS,nT,Div,nDivFc')
+            call cfruin(filespec, 6, idum, 'nX,nO,nS,nT,nDiv,nDivFc')
             grid%data%nxp = idum(0)
             grid%data%nop = idum(1)
             grid%data%nsp = idum(2)
@@ -866,7 +875,8 @@ module goatmod_types
             allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
                 grid%data%spointID(idum(2)), grid%data%isprimaryxp(idum(0)), &
                 grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
-                grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp))
+                grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
+                grid%data%spointxpID(i))
     
             ! Read X-point data
             call ReadSingleLine(filespec, chardummy, reachedeof) ! header
@@ -945,16 +955,7 @@ module goatmod_types
         allocate(fsdummyr(grid%data%fluxdata%nFs))
         allocate(facelistdummy(grid%cell%nface))
         allocate(ftdummy(grid%data%fluxdata%nFt))
-    
-        ! Read data for structured grid remapping (to be deleted in future)
-        call cfruin (filespec,1,idum2,'isClassicalGrid') 
-        grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4) ! cast to I4 type
-        if (grid%data%sglegacy%isClassicalGrid == 1) then 
-            call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
-            grid%data%sglegacy%nx = idum(0)
-            grid%data%sglegacy%ny = idum(1)
-        end if
-    
+        
         ! Attempt to read in OMP/IMP data 
         !--------------------------------
         ! OMP
