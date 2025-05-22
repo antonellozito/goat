@@ -13,14 +13,14 @@ from matplotlib import pyplot as plt
 import numpy as np 
 import sys 
 import copy
+import os 
 
 # Initialize
 #-----------
 # Set initial paths
-statefile = 'b2fstati' # state
-gridfile = 'traduit.out.b2us_gg' # grid
+statefile = 'b2fstate' # state
+gridfile = 'traduit.out.b2us' # grid
 plasmafile = 'b2fplasmf'
-#gridfile = 'traduit.out.b2us_norefxp2_gd2_correctedb'
 
 # Read command line arguments
 narg = len(sys.argv)
@@ -32,21 +32,17 @@ for i in range(1, narg):
         gridfile = sys.argv[i]
     elif (i == 3):
         plasmafile = sys.argv[i]
-
-simdir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/fully_extended_DEMO_Donly/afn_adjustedvessel/'
-griddir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/fully_extended_DEMO_Donly/afn_adjustedvessel/'
-#simdir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/extended2_DEMO_Donly/afn/'
-#griddir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/extended2_DEMO_Donly/baserun/'
-simdir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/fully_extended_DEMO_Donly/afn/'
-griddir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/fully_extended_DEMO_Donly/baserun/'
+        
+simdir = os.cwd()
 statedir = simdir + statefile
 plasmadir = simdir + plasmafile
-griddir = griddir + gridfile
+griddir = simdir + gridfile
 
 
 # Print out paths 
 print('SolpsPostProcess: reading state file from: ' + statedir)
 print('SolpsPostProcess: reading grid file from: ' + griddir)
+print('SolpsPostProcess: reading b2fplasmf file from: ' + plasmadir)
 
 
 # Initialize objects
@@ -64,8 +60,6 @@ try:
 except:
     plotresiduals = False
     print("SolpsPostProcess: could not read b2fplasmf, not plotting residuals")
-
-#state.WriteB2fstatefile(simdir + 'teststate')
 
 # Figure counter
 fignum = 0
@@ -173,6 +167,7 @@ if plotresiduals:
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
     fignum = fignum + 1
+
 
         
     
