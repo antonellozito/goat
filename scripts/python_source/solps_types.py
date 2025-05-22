@@ -988,8 +988,8 @@ class PlasmaState:
         fpointsin = np.array((gridin.face.x, gridin.face.y)).transpose()
 
         # Initialize interpolators (nearest neighbour)
-        cinterp = interpolate.NearestNDInterpolator(cpoints, np.zeros((grid.cell.ntot), dtype=float), rescale=True)
-        finterp = interpolate.NearestNDInterpolator(fpoints, np.zeros((grid.face.ntot), dtype=float), rescale=True)
+        cinterp = interpolate.NearestNDInterpolator(cpointsin, np.zeros((gridin.cell.ntot), dtype=float), rescale=True)
+        finterp = interpolate.NearestNDInterpolator(fpointsin, np.zeros((gridin.face.ntot), dtype=float), rescale=True)
 
         # Interpolate
         #------------
