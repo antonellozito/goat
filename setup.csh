@@ -95,6 +95,9 @@ else
     env|sed -ne "/^[ }]\|=(/b; s/\([^=]*\)=\(.*\)/setenv \1 '\2'/p" >! $setup_pre
 endif
 
+# Load default openmp settings
+source ${GOATTOP}/SETUP/openmp
+
 # Setup files for combination of HOST_NAME and COMPILER, + local modifications if present
 if (-s ${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}) then
   echo Loading SETUP/setup.csh.${HOST_NAME}.${COMPILER}.
