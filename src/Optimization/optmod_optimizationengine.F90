@@ -169,6 +169,7 @@ module optmod_optimizationengine
         type(NumKKTUDT)         :: numKKT
         type(numLSUDT)          :: numLS 
         type(NumNCPUDT)         :: numNCP
+        type(DLinearSolverOptionsUDT)   :: numLinearSolver
 
     contains 
 
@@ -857,6 +858,13 @@ module optmod_optimizationengine
         call solver%numKKT%InitializeNumParams() 
         call solver%numLS%InitializeNumParams()
         call solver%numNCP%InitializeNumParams()
+        
+
+        ! Linear solver options
+        solver%numLinearSolver%inputfilepath = solver%inputfilepath
+        solver%numLinearSolver%fieldprefix   = solver%inputfileprefix // 'opt.'
+        call solver%numLinearSolver%Set()
+
 
     end subroutine
 
@@ -914,6 +922,8 @@ module optmod_optimizationengine
         integer(I8), allocatable    :: phiind(:), eqconind(:), &
             ineqconind(:), activeineqconind(:), inactiveineqconind(:)
         type(MySparseUDT)           :: hessLJ, lhs, hessLC
+        class(DLinearSolverUDT), allocatable    :: linearsolverKKT, &
+            linearsolverLS, linearsolverLM ! different solvers for each type of system to simplify reuse/optimization
 
         ! FD checkers
         type(FDcheckerUDT)          :: FDcfv, FDeqcon, FDineqcon
@@ -1001,6 +1011,11 @@ module optmod_optimizationengine
         phiind = [(k, k = 1, nphi)]
         eqconind = [(k, k = nphi+1, nphi+neq)]
         ineqconind = [(k, k = nphi+neq+1, nphi+neq+nineq)]
+        linearsolverKKT = ConstructDLinearSolver(solver%numLinearSolver)
+        linearsolverLS = ConstructDLinearSolver(solver%numLinearSolver) 
+        linearsolverLM = ConstructDLinearSolver(solver%numLinearSolver) 
+        ! call linearsolver%Initialize()
+        
 
         ! Diagnostics
         !checkgradients  = .false. ! check gradients in each iteration?
@@ -1144,7 +1159,9 @@ module optmod_optimizationengine
                 
                 ! Call the sparse solver
                 call wall_time(t_linsolve_s)
-                call SolveSparseLinearSystemDI(lhs, rhs, dx, flag)
+                call linearsolverKKT%SolveSparseLinearSystem(lhs, rhs, dx, flag)
+                ! call SolveSparseLinearSystemDI(lhs, rhs, dx, flag)
+                ! call SolveSparseLinearSystemDIDMUMPS(lhs, rhs, dx, flag)
                 call wall_time(t_linsolve_e)
 
             else
@@ -1161,7 +1178,8 @@ module optmod_optimizationengine
                     ! Lagrange multipliers may change!
                     if (flag == 0) then 
 
-                        call ComputeStepLengthLS(problem, solver%numLS, dx, lambda, mu, alphals, flagls) ! dx is changed during linesearch
+                        call ComputeStepLengthLS(problem, solver%numLS, &
+                            dx, lambda, mu, alphals, flagls, linearsolverLS) ! dx is changed during linesearch
                     else 
                         ! Something wrong during linear solver, try with relaxation
                         flagls = 1
@@ -1217,7 +1235,7 @@ module optmod_optimizationengine
                         !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
                         !    dxl2, flag)
                         !dxl2 = -dxl2
-                        call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
+                        call linearsolverLM%SolveSparseLinearSystem((hessLC%Transpose()*hessLC), &
                             MatrixVectorProduct(hessLC%Transpose(), &
                             (rhs(phiind) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
                             dxl, flag)
@@ -1736,7 +1754,8 @@ module optmod_optimizationengine
     end subroutine
 
     ! Step length computation
-    recursive subroutine ComputeStepLengthLS(problem, numLS, dx, lambda, mu, alpha, flag)
+    recursive subroutine ComputeStepLengthLS(problem, numLS, dx, &
+        lambda, mu, alpha, flag, linearsolver)
 
         ! Description
         !============
@@ -1753,6 +1772,13 @@ module optmod_optimizationengine
         ! search routine! Use an appropriate merit function for this
         ! (see also the EvaluateMeritFunction subroutine)
 
+        ! Note: optionally, a linear solver may be passed as an argument.
+        ! If it is not present, the default double precision sparse solver
+        ! will be used to solve any linear systems in case they arise. 
+        ! If the solver is passed, then it is probably best to construct
+        ! a dedicated solver for this routine in order to reuse (and 
+        ! possibly speed up) initializations/factorizations, etc. 
+
         ! Modules
         !========
         use ieee_arithmetic
@@ -1765,6 +1791,7 @@ module optmod_optimizationengine
         real(R8), allocatable               :: dx(:), lambda(:), mu(:), dphi(:)
         real(R8)                            :: alpha
         integer(I8)                         :: flag 
+        class(DLinearSolverUDT), optional    :: linearsolver
         
         ! Auxiliary
         logical                             :: conv, doderiv 
@@ -2070,7 +2097,11 @@ module optmod_optimizationengine
                     ! Check if constraints are bounded, otherwise skip
                     if (all(ieee_is_finite(ck))) then
                         ! Compute correction step
-                        call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
+                        if (present(linearsolver)) then 
+                            call linearsolver%SolveSparseLinearSystem(LSA, ck, wkt, flag2)
+                        else
+                            call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
+                        end if 
 
                         ! Check if it converged, otherwise skip update
                         if (flag2 /= 0) then 
