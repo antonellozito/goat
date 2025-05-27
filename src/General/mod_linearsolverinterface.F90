@@ -38,6 +38,7 @@ module mod_linearsolverinterface
     use mod_precision
     use mod_sparseinterface
     use mod_errorhandler
+    use mod_inputfileparser
 
     ! Binding with C
     use, intrinsic :: iso_c_binding 
@@ -81,6 +82,43 @@ module mod_linearsolverinterface
     !                               TYPES                              !
     !                                                                  !
     !==================================================================!
+
+    ! Solver options
+    type, extends(OptionsUDT), public :: DLinearSolverOptionsUDT 
+        
+        ! Description
+        !============
+        ! Option structure to be parsed to the linear solver constructor.
+        ! Will read in options from the file specified in 'inputfilepath'
+        ! in the parent object. To allow different solvers with different
+        ! settings to be constructed, we also include the 'fieldprefix' 
+        ! character array that is prepended to each to be read in field
+        ! when reading the options. By default, this is simply empty.
+        ! See the default set method for which fields are read in. 
+        ! Note that the fieldprefix should be set by the developer prior
+        ! to initializing/setting/reading the options! The 
+        ! following options are available (but may not be implemented 
+        ! by each solver!):
+        ! - solvername:     name of the solver to be used (lowercase), 
+        !       e.g. 'mumps', 'umfpack', 'lapack'
+        ! - fieldprefix:    prefix to be prepended when reading in
+        !       options, e.g. for grid deformation 'gd.' 
+        ! - verbosity:      level of output printing. Default is 1 
+        !       (errors), higher than one prints out additional debugging
+        !       and performance information, if available. Zero suppresses
+        !       nearly all output and should not be used. 
+
+        ! Fields
+        character(:), allocatable       :: solvername, fieldprefix
+        integer(I8)                     :: verbosity 
+
+    contains 
+
+        ! Default options 
+        procedure :: SetDefaults        => SetDefaultsDLinearSolverOptions 
+        procedure :: Read               => ReadDLinearSolverOptions
+
+    end type 
 
     ! Abstract solver type
     type, abstract, public :: DLinearSolverUDT 
@@ -454,8 +492,76 @@ module mod_linearsolverinterface
 
     ! General solver
     !===============
+    ! Default options setter
+    subroutine SetDefaultsDLinearSolverOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(DLinearSolverOptionsUDT)       :: options 
+
+        ! Set defaults
+        !=============
+        ! Check for prefix
+        if (.not. allocated(options%fieldprefix)) options%fieldprefix = '' ! default: no prefix
+
+        ! Set defaults
+        options%solvername  = 'umfpack' ! default solver 
+        options%verbosity   = 1  
+
+    end subroutine
+
+    ! Option reader
+    subroutine ReadDLinearSolverOptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(DLinearSolverOptionsUDT)       :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadDLinearSolverOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadDLinearSolverOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Structure & vertex IDs
+        field = options%fieldprefix // 'ls.solvername'
+        call ExtractOptionValueCharacter(fid, field, options%solvername)
+        field = options%fieldprefix // 'ls.verbosity'
+        call ExtractOptionValueInteger0D(fid, field, options%verbosity)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
     ! Constructor
-    function ConstructDLinearSolver(solvername) result(ls)
+    function ConstructDLinearSolver(options) result(ls)
 
         ! Description
         !============
@@ -469,8 +575,8 @@ module mod_linearsolverinterface
         ! Declare variables
         !==================
         ! Arguments
-        character(*), intent(in)                :: solvername 
-        class(DLinearSolverUDT), allocatable    :: ls 
+        class(DLinearSolverOptionsUDT), intent(in)   :: options
+        class(DLinearSolverUDT), allocatable        :: ls 
 
         ! Initialize
         !===========
@@ -480,7 +586,7 @@ module mod_linearsolverinterface
         end if 
 
         ! Initialize 
-        select case(solvername)
+        select case(options%solvername)
 
         case ('UMFPACK', 'umfpack', 'Umfpack')
 
@@ -500,13 +606,13 @@ module mod_linearsolverinterface
         case default 
 
             call gdErrorHandler('ConstructDLinearSolver: unknown option: ' // & 
-                solvername)
+                options%solvername)
 
         end select
 
         ! Set default options and solver type
-        ls%solvername   = solvername 
-        ls%verbosity    = 1_I8 
+        ls%solvername   = options%solvername 
+        ls%verbosity    = options%verbosity 
 
         ! Call initializer
         call ls%Initialize()
@@ -1084,9 +1190,7 @@ module mod_linearsolverinterface
         call dmumps(mumps_par)
 
         ! Adjust some default parameters
-        mumps_par%icntl(14) = 50
         mumps_par%icntl(4) = 1 ! only error message output
-        mumps_par%icntl(16) = 4
 
         ! Print a message
         if (verbosity > 0) then 
@@ -1097,8 +1201,7 @@ module mod_linearsolverinterface
         !===============
         ! Define problem on the host (process 0)
         if (mumps_par%myid == 0) then 
-            ! Initialize
-            mumps_par%icntl(14) = 50
+
             ! Set dimensions
             mumps_par%n = A%nrow  
             mumps_par%nnz = A%nval  
@@ -1121,7 +1224,7 @@ module mod_linearsolverinterface
         mumps_par%job = 1 ! Analyze
         call dmumps(mumps_par)
         mumps_par%job = 2 ! solve
-        mumps_par%ICNTL(14) = 1000 
+        mumps_par%ICNTL(14) = 1000 ! typically higher memory required
         call dmumps(mumps_par)
 
         mumps_par%job = 3 ! solve
@@ -1131,6 +1234,9 @@ module mod_linearsolverinterface
         if (mumps_par%infog(1) < 0) then 
             print *, 'SolveSparseLinearSystemDMUMPS: linear solver returned ' // & 
                 'with error flags: ', mumps_par%infog(1), mumps_par%infog(2) 
+            flag = mumps_par%infog(1)
+        else
+            flag = 0
         end if 
 
         ! Solution has been assembled on the host
@@ -1179,7 +1285,6 @@ module mod_linearsolverinterface
         ! To be done for all processes
         ! Define the communicator
         ls%mumps_par%comm = mpi_comm_world 
-        print *, mpi_comm_world
 
         ! Initialize the instance
         ls%mumps_par%job = -1 ! flag for initialization
@@ -1187,11 +1292,20 @@ module mod_linearsolverinterface
         ls%mumps_par%par = 1 ! let the main process also do work
         call dmumps(ls%mumps_par)
 
-        ! Adjust some default parameters
-        ls%mumps_par%icntl(14) = 35
+        ! Set verbosity level
+        if (ls%verbosity > 1) then 
+            ls%mumps_par%icntl(4) = 2 
+        elseif (ls%verbosity < 0) then 
+            ls%mumps_par%icntl(4) = 0 
+        else
+            ls%mumps_par%icntl(4) = ls%verbosity 
+        end if 
+
+        ! Adjust memory consumption
+        ls%mumps_par%icntl(14) = 1000 ! typically we need quite a lot of additional memory than estimated
 
         ! Print a message
-        if (ls%verbosity > 0) then 
+        if (ls%verbosity > 1) then 
             print *, 'InitializeDMUMPSSolver: solver initialized'
         end if 
 
@@ -1233,6 +1347,11 @@ module mod_linearsolverinterface
             call gdErrorHandler('FinalizeDMUMPSSolver: could not finalize, exiting...')
         end if 
 
+        ! Print a message
+        if (ls%verbosity > 1) then 
+            print *, 'FinalizeDMUMPSSolver: solver finalized'
+        end if 
+
     end subroutine
 
     ! Destruction
@@ -1253,7 +1372,7 @@ module mod_linearsolverinterface
 
         ! Print
         if (ls%verbosity > 1) then 
-            print *, 'Destroyed mumps solver'
+            print *, 'Destroyed mumps solver with finalization routine'
         end if 
 
     end subroutine
@@ -1328,8 +1447,7 @@ module mod_linearsolverinterface
         ! Call package for solution
         ls%mumps_par%job = 1 ! Analyze
         call dmumps(ls%mumps_par)
-        ! Set memory larger
-        ls%mumps_par%ICNTL(14) = 1000 ! systems are often tough to solve 
+        
         ls%mumps_par%job = 2 ! factorize
         call dmumps(ls%mumps_par)
 
@@ -1340,6 +1458,9 @@ module mod_linearsolverinterface
         if (ls%mumps_par%infog(1) < 0) then 
             print *, 'SolveSparseLinearSystemDMUMPS: linear solver returned ' // & 
                 'with error flags: ', ls%mumps_par%infog(1), ls%mumps_par%infog(2) 
+            flag = ls%mumps_par%infog(1)
+        else
+            flag = 0
         end if 
 
         ! Solution has been assembled on the host
