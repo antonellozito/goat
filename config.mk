@@ -239,10 +239,8 @@ endif
 MAIN_RUNFILE = MainRunFileGridDeformation.F90
 
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
-GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_plotter.F90 \
-    src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 src/General/mod_sort.F90 $(wildcard src/General/*.F90)  
-    
-    
+GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_readwrite.F90 src/General/mod_inputfileparser.F90 src/General/mod_plotter.F90 \
+    src/General/mod_sparseinterface.F90  src/General/mod_sort.F90 $(wildcard src/General/*.F90)      
 
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
 DRIVER_FILES = $(wildcard src/Drivers/Goat/*.F90)
