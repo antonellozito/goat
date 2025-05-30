@@ -1797,7 +1797,7 @@ module ggmod_gridgeneration2D
             ! Find intersections with all other boundaries
             !$omp parallel default(private) shared(orthlines, vertID, ggtmdata, &
             !$omp newtx, nnew, newty, news2r, newID, i) 
-            !$omp do 
+            !$omp do schedule(dynamic)
             do j = 1, size(orthlines)
                 ! Initialize
                 addpoint = .true. 
@@ -2150,11 +2150,16 @@ module ggmod_gridgeneration2D
         ! curvature. We keep looping over all tubes until no more 
         ! intersections are found. 
         
-        ! Initialize
-        allocate(xint(0), yint(0), s1(0), s2(0), s1r(0), s2r(0))
-
         ! Loop over all cells 
+        !$omp parallel do default(none) private(i, k, xb, yb, xint, yint, &
+        !$omp s1, s2, s1r, s2r, ic, tracevert, sortind, is, ie, orthlines, &
+        !$omp newdlcv, newvert, newisnodevert, txint, tyint, ts1, ts2, &
+        !$omp ts1r, ts2r, tempr, tempdlcv, foundIntersection, cc) &
+        !$omp shared(ggtmdata, topomesh, grid, streamlinetracer) schedule(dynamic)
         do i = 1, cell%ntot
+            ! Initialize
+            allocate(xint(0), yint(0), s1(0), s2(0), s1r(0), s2r(0))
+
             ! Unpack for ease
             associate(tubes     => celldata(i)%tubes)
 
@@ -2168,8 +2173,10 @@ module ggmod_gridgeneration2D
                     )
 
                 ! Update lines
+                !$omp critical
                 call hfline%UpdateLineData(ggtmdata)
                 call lfline%UpdateLineData(ggtmdata)
+                !$omp end critical
 
                 ! Initialize
                 foundIntersection = .false.
@@ -2306,11 +2313,14 @@ module ggmod_gridgeneration2D
                 newvert = newvert(sortind)
                 newisnodevert = newisnodevert(sortind)
                 deallocate(sortind)
+
+                !$omp critical
                 call hfline%AddVertexCoordinates(newdlcv)
                 call hfline%AddVertexIDs(newvert, newisnodevert)
 
                 ! Update hfline segment data
                 call hfline%UpdateSegmentData(ggtmdata)
+                !$omp end critical 
 
                 ! Housekeeping
                 deallocate(tracevert)
@@ -2401,11 +2411,14 @@ module ggmod_gridgeneration2D
                 newvert = newvert(sortind)
                 newisnodevert = newisnodevert(sortind)
                 deallocate(sortind)
+
+                !$omp critical
                 call lfline%AddVertexCoordinates(newdlcv)
                 call lfline%AddVertexIDs(newvert, newisnodevert)
 
                 ! Update lfline segment data
                 call lfline%UpdateSegmentData(ggtmdata)
+                !$omp end critical
 
                 ! Housekeeping
                 deallocate(tracevert)
@@ -2430,12 +2443,11 @@ module ggmod_gridgeneration2D
             end do 
 
             ! Housekeeping
+            deallocate(xint, yint, s1, s2, s1r, s2r)
             end associate
         end do 
-
-        ! Housekeeping
-        deallocate(xint, yint, s1, s2, s1r, s2r)
-
+        !$omp end parallel do
+        
         ! Check intersections (2) 
         !========================
         ! Lines of tube may intersect with the starting or ending
@@ -13086,7 +13098,7 @@ module ggmod_gridgeneration2D
 
         ! Compute
         !========
-        !$omp parallel do default(private) shared(simgrid, allxint, allyint, faceIDs)
+        !$omp parallel do default(private) shared(simgrid, allxint, allyint, faceIDs) schedule(dynamic)
         do i = 1, nf 
             do j = i+1, nf 
                 if (any(fv(i, 1) == fv(j, :)) .or. any(fv(i, 2) == fv(j, :))) then 
