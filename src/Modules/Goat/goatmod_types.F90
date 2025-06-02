@@ -2916,6 +2916,9 @@ module goatmod_types
         vcount = 1
         allocate(tempfcell(f%ntot, 2))
         tempfcell = 0
+        !$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
+        !$omp private(i, j, k, tv, ntv, tf, ind) &
+        !$omp shared(v, f, c, nv, nf, nc, fcount, tempfcell, vcount) 
         do i = 1, nc ! loop over all cells
             ! Get vertices of this cell
             tv = GetCellVert(c, i)
@@ -2954,12 +2957,13 @@ module goatmod_types
                             'ComputeGridInterconnections: too many ' &
                                 // 'neighbours for this face')
                         end if
-    
                     
+                        !$omp critical
                         tempfcell(tf,fcount(tf)) = i
     
                         ! Update fcount
                         fcount(tf) = fcount(tf)+1
+                        !$omp end critical
                     end if
     
                     ! Add the current cell to the j'th vertex
@@ -2967,11 +2971,12 @@ module goatmod_types
                     if (ind > v%ncell) then
                         call gdErrorHandler('unknown error')
                     end if
+                    !$omp critical
                     v%cell(ind) = i
     
                     ! Update vcount
                     vcount(tv(j)) = vcount(tv(j))+1
-    
+                    
                     ! Add cell face
                     if (.not. ((j > 1) .and. c%GC(i))) then ! hedge for guard cells
                         ind = c%faceP(i,1) + j - 1
@@ -2980,6 +2985,7 @@ module goatmod_types
                         end if
                         c%face(ind) = tf
                     end if
+                    !$omp end critical
                 end if
     
             end do
@@ -2988,6 +2994,7 @@ module goatmod_types
             deallocate(tv)
     
         end do
+        !$omp end parallel do
     
         ! Construct cell arrays for faces and vertices
         fcount = fcount-1
@@ -3145,6 +3152,12 @@ module goatmod_types
         !========================================
         
         ! Loop over all vertices
+        !$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
+        !$omp private (i, j, tcs, nvc, cellfound, localID, allvertcells, &
+        !$omp sp, ep, tcf, startcellnotfound, thiscell, m, tc, fc, ncf, &
+        !$omp k, tcn, fn, q, vc, allnotfound, nextcell, allfv, allfvind, &
+        !$omp tcf2, ntcf2, tfv) &
+        !$omp shared (v, f, c, accountforGC)
         do i = 1, v%ntot ! v%ntot
     
             ! Check how many distinct cell sequences there are by checking 
@@ -3551,14 +3564,7 @@ module goatmod_types
             deallocate(allvertcells)
     
         end do
-    
-        !do i = 1, v%ntot 
-        !    print *, i, v%BV(i), v%neig(v%neigP(i,1):v%neigP(i,1)+v%neigP(i,2)-1)
-        !end do
-        !    do i = 1, v%ntot 
-        !    print *, i, v%BV(i), v%cell(v%cellP(i,1):v%cellP(i,1)+v%cellP(i,2)-1)
-        !end do
-        
+        !$omp end parallel do 
     
         ! Add to grid
         !============

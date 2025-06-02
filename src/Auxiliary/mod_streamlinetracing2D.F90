@@ -318,6 +318,7 @@ module mod_streamlinetracing2D
         integer(I8)                             :: nx, ny, nv
         real(R8), allocatable, dimension(:)     :: xfw, yfw, xbw, ybw
         real(R8)                                :: emptyarray(0), step
+        logical                                 :: do_parallel
 
         ! Loop
         integer(I8)                             :: i 
@@ -366,7 +367,9 @@ module mod_streamlinetracing2D
         
         ! Loop and trace
         !---------------
-        !$omp parallel do default(shared) private(xfw, yfw, xbw, ybw)
+        do_parallel = .not. omp_in_parallel()
+        !$omp parallel do default(shared) private(xfw, yfw, xbw, ybw) schedule(dynamic) &
+        !$omp if (do_parallel)
         do i = 1, nv
             ! Check if we should trace
             if (isoutofbounds(i)) then 

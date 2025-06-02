@@ -1712,7 +1712,7 @@ module ggmod_gridgeneration2D
 
         ! Determine cell vertices
         !========================
-        ! Compute intersections
+        ! Compute intersections;
         do i = 1, size(tubes)
             ! Initialize
             !-----------
@@ -2475,6 +2475,9 @@ module ggmod_gridgeneration2D
 
                 ! Check intersections of lfline (except if final tube)
                 nct = size(ct)
+                !$omp parallel do default(none) schedule(dynamic) &
+                !$omp private(k, xint, yint, s1, s2) & 
+                !$omp shared(nct, ggtmdata, j, keepind)
                 do k = 1, nct
                     ! Associate for ease
                     associate(&
@@ -2487,12 +2490,14 @@ module ggmod_gridgeneration2D
                         )
 
                     ! Update just to be sure
+                    !$omp critical
                     call hfline1%UpdateLineData(ggtmdata)
                     call hflinen%UpdateLineData(ggtmdata)
                     call hflinek%UpdateLineData(ggtmdata)
                     call lfline1%UpdateLineData(ggtmdata)
                     call lflinen%UpdateLineData(ggtmdata)
                     call lflinek%UpdateLineData(ggtmdata)
+                    !$omp end critical
 
                     if (k == 1) then 
                         ! Only need to check the lfline
@@ -2503,7 +2508,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if 
 
@@ -2517,7 +2524,9 @@ module ggmod_gridgeneration2D
 
                                 ! Check
                                 if (size(xint) > 0) then
+                                    !$omp critical
                                     keepind(k) = .false.
+                                    !$omp end critical
                                 end if 
                             end if 
 
@@ -2530,7 +2539,9 @@ module ggmod_gridgeneration2D
 
                                 ! Check
                                 if (size(xint) > 0) then
+                                    !$omp critical
                                     keepind(k) = .false.
+                                    !$omp end critical
                                 end if 
                             end if 
                         end if 
@@ -2546,7 +2557,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if 
 
@@ -2559,7 +2572,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if 
 
@@ -2572,7 +2587,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if 
 
@@ -2588,7 +2605,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if 
 
@@ -2601,7 +2620,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if 
 
@@ -2614,7 +2635,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if 
 
@@ -2627,7 +2650,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if
                         
@@ -2640,7 +2665,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if
                         
@@ -2653,7 +2680,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if
 
@@ -2666,7 +2695,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if
 
@@ -2679,7 +2710,9 @@ module ggmod_gridgeneration2D
 
                             ! Check
                             if (size(xint) > 0) then
+                                !$omp critical
                                 keepind(k) = .false.
+                                !$omp end critical
                             end if 
                         end if
                     end if 
@@ -2689,6 +2722,7 @@ module ggmod_gridgeneration2D
                     ! Housekeeping
                     end associate
                 end do
+                !$omp end parallel do
 
                 ! Housekeeping
                 end associate
@@ -2873,11 +2907,18 @@ module ggmod_gridgeneration2D
         ! call DetermineLOSlimits(ggtmdata)
 
         ! Construct graph
+        !$omp parallel default(none) & 
+        !$omp private(i, j) shared(ggtmdata)
+        !$omp single 
         do i = 1, cell%ntot 
            do j = 1, size(celldata(i)%tubes)
+                !$omp task
                 call celldata(i)%tubes(j)%InitializeGraph()
+                !$omp end task
             end do 
         end do 
+        !$omp end single
+        !$omp end parallel 
         
         ! Housekeeping
         !=============
@@ -3069,10 +3110,11 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)     :: dx, dy, &
             dp, bx, by
         integer(I8)                             :: nf, nc, ncv, &
-            v1, v3, v2, v4, tff(1:2), indmin, tracingdir, n1, n2, &
-            vind
+            v1, v3, v2, v4, tff(1:2), indmin, n1, n2, &
+            vind, nk
         integer(I8), allocatable, dimension(:)  :: tempfacelabels, &
-            tempcellvert, tempfaceregion, tempcellregion
+            tempcellvert, tempfaceregion, tempcellregion, tracingdir, &
+            ii, jj
         integer(I8), allocatable, dimension(:, :)   :: tempfacevert, &
             tempcellvertP
         logical                                 :: &
@@ -3082,7 +3124,7 @@ module ggmod_gridgeneration2D
         type(GGTMFieldlineDataUDT)              :: thisline
 
         ! Loop
-        integer(I8)                             :: i, j, k1, k2
+        integer(I8)                             :: i, j, k, k1, k2
 
         ! Initialize
         !===========
@@ -3091,8 +3133,9 @@ module ggmod_gridgeneration2D
             seg         => ggtmdata%seg     &
             )
 
-        ! Loop
-        !=====
+        ! Precompute
+        allocate(tracingdir(size(celldata)))
+        tracingdir = 0_I8
         do i = 1, size(celldata)
             ! Associate for ease
             associate(&
@@ -3121,272 +3164,283 @@ module ggmod_gridgeneration2D
             dp = dx*bx + dy*by
 
             if (sum(dp) >= 0.0_R8) then 
-                tracingdir = 1_I8 
+                tracingdir(i) = 1_I8 
             else
-                tracingdir = -1_I8 
+                tracingdir(i) = -1_I8 
             end if 
             deallocate(bx, by)
+            end associate
+        end do 
 
-            ! Loop over all tubes
-            do j = 1, size(tubes)
-                ! Unpack
-                associate(&
-                    graph   => tubes(j)%graph,      &
-                    l1      => tubes(j)%hfline,     &
-                    l2      => tubes(j)%lfline,     &
-                    sff     => tubes(j)%srflabel,   &
-                    eff     => tubes(j)%erflabel    &
-                    )
+        ! Pre-collapse double loop over celldata and tubes for 
+        ! easier parallellization
+        nk = 0
+        do i = 1, size(celldata)
+            nk = nk + size(celldata(i)%tubes)
+        end do 
+        allocate(ii(nk), jj(nk))
+        k = 0
+        do i = 1, size(celldata)
+            do j = 1, size(celldata(i)%tubes)
+                k = k + 1
+                ii(k) = i
+                jj(k) = j
+            end do 
+        end do 
 
-                ! Initialize
-                k1 = 1
-                k2 = 1
-                nf = 0
-                nc = 0
-                ncv = 0
-                n1 = tubes(j)%hfline%nv 
-                n2 = tubes(j)%lfline%nv
-                allocate(tempfacevert(4*(n1+n2), 2), tempfacelabels(4*(n1+n2)), &
-                    tempcellvert(3*(n1+n2)), tempcellvertP(4*(n1+n2), 2)) ! overestimations
-                allocate(skipvert(graph%nv))
-                skipvert = .false.
+        ! Loop
+        !=====
+        !$omp parallel default(none) &
+        !$omp private(i, j, k, k1, k2, nf, &
+        !$omp nc, ncv, n1, n2, tempfacevert, tempfacelabels, skipvert, &
+        !$omp dolasttriangle, vind, v1, v2, v3, tempcellvert, tempcellvertP, &
+        !$omp islegaltria1, islegaltria2, islegalquad, isv2onl1, doquad, &
+        !$omp dx1, dx2, dx3, dy1, dy2, dy3, bxf, byf, alpha1, alpha2, &
+        !$omp alpha3, indmin, v4, tff, tempcellregion, tempfaceregion) &
+        !$omp shared(ggtmdata, grid, magneticField, tracingdir, ii, jj, nk)
+        !$omp do schedule(dynamic)
+        
+        do k = 1, nk 
+            ! Unpack iterates
+            i = ii(k)
+            j = jj(k)
 
-                ! Compute face labels
-                call l1%UpdateLineGriddingData(ggtmdata)
-                call l2%UpdateLineGriddingData(ggtmdata)
+            ! Associate for ease
+            associate(&
+                tubes     => celldata(i)%tubes,     &
+                doBLstart     => celldata(i)%linerefoptions%doBLstart,     &
+                doBLend       => celldata(i)%linerefoptions%doBLend  ,     &
+                ncBLstart     => celldata(i)%linerefoptions%ncBLstart,     &
+                ncBLend       => celldata(i)%linerefoptions%ncBLend        &
+                )
 
-                ! Hedge for vertex lines
-                if (seg(tubes(j)%hfline%segID(1))%isvertex) then
-                    n1 = 1
+            ! Unpack
+            associate(&
+                graph   => tubes(j)%graph,      &
+                l1      => tubes(j)%hfline,     &
+                l2      => tubes(j)%lfline,     &
+                sff     => tubes(j)%srflabel,   &
+                eff     => tubes(j)%erflabel    &
+                )
+            ! Initialize
+            k1 = 1
+            k2 = 1
+            nf = 0
+            nc = 0
+            ncv = 0
+            n1 = tubes(j)%hfline%nv 
+            n2 = tubes(j)%lfline%nv
+            allocate(tempfacevert(4*(n1+n2), 2), tempfacelabels(4*(n1+n2)), &
+                tempcellvert(3*(n1+n2)), tempcellvertP(4*(n1+n2), 2)) ! overestimations
+            allocate(skipvert(graph%nv))
+            skipvert = .false.
+
+            ! Compute face labels
+            !$omp critical
+            call l1%UpdateLineGriddingData(ggtmdata)
+            call l2%UpdateLineGriddingData(ggtmdata)
+            !$omp end critical
+
+            ! Hedge for vertex lines
+            if (seg(tubes(j)%hfline%segID(1))%isvertex) then
+                n1 = 1
+            end if 
+            if (seg(tubes(j)%lfline%segID(1))%isvertex) then
+                n2 = 1
+            end if 
+
+            ! Hedge for last vertices being the same
+            dolasttriangle = .false. 
+            if (l1%vert(n1) == l2%vert(n2)) then 
+                ! Last cell should be treated as triangle IF we don't
+                ! have a single triangle
+                dolasttriangle = .true.
+
+                ! Last vertex does not have to be connected in the 
+                ! graph, so set to false
+                vind = graph%GetVertexIndex(l1%vert(n1))
+                skipvert(vind) = .true. 
+
+                ! Make sure to skip in main loop
+                n1 = n1 - 1
+                n2 = n2 - 1
+
+                ! Sanity check
+                if (n1 == 0 .or. n2 == 0) then 
+                    call gdErrorHandler('ConstructCellsQuadsTria: ' // & 
+                        'first vertex is the same, yet appears to be ' // & 
+                        'tangency point, unexpected')
                 end if 
-                if (seg(tubes(j)%lfline%segID(1))%isvertex) then
-                    n2 = 1
+            end if 
+
+            ! Hedge for first vertices being the same (insert triangle)
+            if (l1%vert(k1) == l2%vert(k2)) then 
+                ! Add the triangle by adding the first two faces (third
+                ! face will be added later automatically)
+
+                ! Set vertices
+                v1 = l1%vert(k1) ! common vertex
+                v2 = l1%vert(k1+1)
+                v3 = l2%vert(k2+1)
+
+                ! Set faces
+                nf = nf + 1
+                call tubes(j)%hfface%Append(nf) ! local index, updated later
+                tempfacevert(nf, :) = [v1, v2]
+                tempfacelabels(nf) = l1%facelabels(k1)
+                nf = nf + 1
+                call tubes(j)%lfface%Append(nf)
+                tempfacevert(nf, :) = [v1, v3]
+                tempfacelabels(nf) = l2%facelabels(k2)
+                nf = nf + 1
+                call tubes(j)%tubeface%Append(nf)
+                tempfacevert(nf, :) = [v2, v3]
+                tempfacelabels(nf) = 0
+
+                ! Set cell
+                nc = nc + 1
+                call tubes(j)%cell%Append(nc) ! local index, updated later
+                tempcellvert(ncv+1:ncv+3) = [v1, v2, v3]
+                tempcellvertP(nc, :) = [ncv+1, 3]
+                ncv = ncv + 3
+
+                ! First vertex can be disconnected from the graph
+                vind = graph%GetVertexIndex(l1%vert(k1)) 
+                skipvert(vind) = .true. 
+
+                ! Update k1, k2
+                k1 = k1 + 1
+                k2 = k2 + 1
+
+                if (k1 > n1) then 
+                    k1 = n1 
+                end if 
+                if (k2 > n2) then 
+                    k2 = n2
                 end if 
 
-                ! Hedge for last vertices being the same
-                dolasttriangle = .false. 
-                if (l1%vert(n1) == l2%vert(n2)) then 
-                    ! Last cell should be treated as triangle IF we don't
-                    ! have a single triangle
-                    dolasttriangle = .true.
-
-                    ! Last vertex does not have to be connected in the 
-                    ! graph, so set to false
-                    vind = graph%GetVertexIndex(l1%vert(n1))
-                    skipvert(vind) = .true. 
-
-                    ! Make sure to skip in main loop
-                    n1 = n1 - 1
-                    n2 = n2 - 1
-
-                    ! Sanity check
-                    if (n1 == 0 .or. n2 == 0) then 
-                        call gdErrorHandler('ConstructCellsQuadsTria: ' // & 
-                            'first vertex is the same, yet appears to be ' // & 
-                            'tangency point, unexpected')
-                    end if 
+                ! Check if we should really add the last triangle
+                if (dolasttriangle .and. (l1%nv == 2 .and. l2%nv == 3) &
+                    .or. (l1%nv == 3 .and. l2%nv == 2)) then 
+                    ! Start and end triangle are the same...
+                    dolasttriangle = .false.
                 end if 
+                    
+            
+            else
+                ! Add the first face 
+                nf = nf + 1
+                call tubes(j)%tubeface%Append(nf)
+                tempfacevert(nf, :) = [l1%vert(k1), l2%vert(k2)]
+                tempfacelabels(nf) = sff
+            end if 
 
-                ! Hedge for first vertices being the same (insert triangle)
-                if (l1%vert(k1) == l2%vert(k2)) then 
-                    ! Add the triangle by adding the first two faces (third
-                    ! face will be added later automatically)
+            ! Loop
+            do while (k1 < n1 .or. k2 < n2)
 
-                    ! Set vertices
-                    v1 = l1%vert(k1) ! common vertex
-                    v2 = l1%vert(k1+1)
-                    v3 = l2%vert(k2+1)
-
-                    ! Set faces
-                    nf = nf + 1
-                    call tubes(j)%hfface%Append(grid%face%ntot + nf)
-                    tempfacevert(nf, :) = [v1, v2]
-                    tempfacelabels(nf) = l1%facelabels(k1)
-                    nf = nf + 1
-                    call tubes(j)%lfface%Append(grid%face%ntot + nf)
-                    tempfacevert(nf, :) = [v1, v3]
-                    tempfacelabels(nf) = l2%facelabels(k2)
-                    nf = nf + 1
-                    call tubes(j)%tubeface%Append(grid%face%ntot + nf)
-                    tempfacevert(nf, :) = [v2, v3]
-                    tempfacelabels(nf) = 0
-
-                    ! Set cell
-                    nc = nc + 1
-                    call tubes(j)%cell%Append(grid%cell%ntot + nc)
-                    tempcellvert(ncv+1:ncv+3) = [v1, v2, v3]
-                    tempcellvertP(nc, :) = [ncv+1, 3]
-                    ncv = ncv + 3
-
-                    ! First vertex can be disconnected from the graph
-                    vind = graph%GetVertexIndex(l1%vert(k1)) 
-                    skipvert(vind) = .true. 
-
-                    ! Update k1, k2
-                    k1 = k1 + 1
-                    k2 = k2 + 1
-
-                    if (k1 > n1) then 
-                        k1 = n1 
-                    end if 
-                    if (k2 > n2) then 
-                        k2 = n2
-                    end if 
-
-                    ! Check if we should really add the last triangle
-                    if (dolasttriangle .and. (l1%nv == 2 .and. l2%nv == 3) &
-                        .or. (l1%nv == 3 .and. l2%nv == 2)) then 
-                        ! Start and end triangle are the same...
-                        dolasttriangle = .false.
-                    end if 
-                        
+                ! Make candidate faces
+                !---------------------
+                ! Face pair 1: vertex k1 and vertex k2+1, vertex k2, k2+1
+                ! (triangle)
                 
-                else
-                    ! Add the first face 
-                    nf = nf + 1
-                    call tubes(j)%tubeface%Append(grid%face%ntot + nf)
-                    tempfacevert(nf, :) = [l1%vert(k1), l2%vert(k2)]
-                    tempfacelabels(nf) = sff
+                ! Face pair 2: vertex k1+1 and vertex k2, vertex k1, k1+1
+                ! (triangle)
+                
+                ! Face pair 3: k1+1, k2+1 (quad)
+
+                ! Determine which face to take
+                !-----------------------------
+                ! Check which faces are legal
+                call DetermineLegalCellsQuadTria(islegaltria1, &
+                    islegaltria2, islegalquad, l1, l2, k1, k2, n1, n2, &
+                    tracingdir(i), magneticField, celldata(i)%linerefoptions, &
+                    celldata(i)%legalcellstyle, graph, skipvert)
+
+                ! If none are legal, then throw warning for 
+                ! overlapping cells and reset
+                if (.not. any([islegaltria1, islegaltria2, islegalquad])) then 
+                    ! We don't have a fix for this yet...
+                    print *, 'ConstructCellsQuadTria: could not ' // & 
+                        'find non-overlapping cell. Overlapping ' // &
+                        'cells will be present in the grid...'
+                    print *, 'cell: ', i, 'line: ', j, 'near vertex ID: ', &
+                        l1%vert(k1), 'coordinates: ', l1%xv(k1), l1%yv(k1)
+                    call tubes(j)%VisualizeGraph('lpgraph')
+
+                    ! Reset to continue...
+                    islegaltria1 = .true. 
+                    islegaltria2 = .true. 
+                    islegalquad = .true. 
+
                 end if 
 
-                ! Loop
-                do while (k1 < n1 .or. k2 < n2)
+                ! First two vertices are always the same
+                v1 = l1%vert(k1)
+                v3 = l2%vert(k2)
+                isv2onl1 = .false.
+                
+                ! Here, purely based on length of added aligned face
+                doquad = .false.
+                if ((k1 < n1) .and. (k2 < n2)) then 
 
-                    ! Make candidate faces
-                    !---------------------
-                    ! Face pair 1: vertex k1 and vertex k2+1, vertex k2, k2+1
-                    ! (triangle)
-                    
-                    ! Face pair 2: vertex k1+1 and vertex k2, vertex k1, k1+1
-                    ! (triangle)
-                    
-                    ! Face pair 3: k1+1, k2+1 (quad)
+                            
+                    ! Compute angle of face normal with magnetic field
+                    dx1 = l2%xv(k2+1) - l1%xv(k1)
+                    dy1 = l2%yv(k2+1) - l1%yv(k1)
+                    dx2 = l1%xv(k1+1) - l2%xv(k2)
+                    dy2 = l1%yv(k1+1) - l2%yv(k2)
+                    dx3 = l2%xv(k2+1) - l1%xv(k1+1)
+                    dy3 = l2%yv(k2+1) - l1%yv(k1+1)
 
-                    ! Determine which face to take
-                    !-----------------------------
-                    ! Check which faces are legal
-                    call DetermineLegalCellsQuadTria(islegaltria1, &
-                        islegaltria2, islegalquad, l1, l2, k1, k2, n1, n2, &
-                        tracingdir, magneticField, celldata(i)%linerefoptions, &
-                        celldata(i)%legalcellstyle, graph, skipvert)
+                    call magneticField%interp%Evaluate(&
+                        [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
+                        [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
+                        0, 1, bxf)
+                    call magneticField%interp%Evaluate(&
+                        [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
+                        [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
+                        1, 0, byf)
+                    bxf = -bxf ! adjust sign
 
-                    ! If none are legal, then throw warning for 
-                    ! overlapping cells and reset
-                    if (.not. any([islegaltria1, islegaltria2, islegalquad])) then 
-                        ! We don't have a fix for this yet...
-                        print *, 'ConstructCellsQuadTria: could not ' // & 
-                            'find non-overlapping cell. Overlapping ' // &
-                            'cells will be present in the grid...'
-                        print *, 'cell: ', i, 'line: ', j, 'near vertex ID: ', &
-                            l1%vert(k1), 'coordinates: ', l1%xv(k1), l1%yv(k1)
-                        call tubes(j)%VisualizeGraph('lpgraph')
+                    alpha1 = abs(atan( (-dy1*byf(1) -dx1*bxf(1))/(-dy1*bxf(1) + dx1*byf(1))))
+                    alpha2 = abs(atan( (-dy2*byf(2) -dx2*bxf(2))/(-dy2*bxf(2) + dx2*byf(2))))
+                    alpha3 = abs(atan( (-dy3*byf(3) -dx3*bxf(3))/(-dy3*bxf(3) + dx3*byf(3))))
+                
 
-                        ! Reset to continue...
-                        islegaltria1 = .true. 
-                        islegaltria2 = .true. 
-                        islegalquad = .true. 
 
+                    ! Check which triangles are allowed
+                    if (.not. islegaltria1) then 
+                        alpha1 = posinfval_R8()
                     end if 
-
-                    ! First two vertices are always the same
-                    v1 = l1%vert(k1)
-                    v3 = l2%vert(k2)
-                    isv2onl1 = .false.
+                    if (.not. islegaltria2) then 
+                        alpha2 = posinfval_R8()
+                    end if 
+                    if (.not. islegalquad) then 
+                        alpha3 = posinfval_R8()
+                    end if 
                     
-                    ! Here, purely based on length of added aligned face
-                    doquad = .false.
-                    if ((k1 < n1) .and. (k2 < n2)) then 
+                    ! Find face that makes the smallest angle
+                    indmin = minloc([alpha1, alpha2, alpha3], 1)
 
-                                
-                        ! Compute angle of face normal with magnetic field
-                        dx1 = l2%xv(k2+1) - l1%xv(k1)
-                        dy1 = l2%yv(k2+1) - l1%yv(k1)
-                        dx2 = l1%xv(k1+1) - l2%xv(k2)
-                        dy2 = l1%yv(k1+1) - l2%yv(k2)
-                        dx3 = l2%xv(k2+1) - l1%xv(k1+1)
-                        dy3 = l2%yv(k2+1) - l1%yv(k1+1)
-
-                        call magneticField%interp%Evaluate(&
-                            [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
-                            [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
-                            0, 1, bxf)
-                        call magneticField%interp%Evaluate(&
-                            [l1%xv(k1)+0.5*dx1, l2%xv(k2)+0.5*dx2, l1%xv(k1+1)+0.5*dx3], &
-                            [l1%yv(k1)+0.5*dy1, l2%yv(k2)+0.5*dy2, l1%yv(k1+1)+0.5*dy3], &
-                            1, 0, byf)
-                        bxf = -bxf ! adjust sign
-
-                        alpha1 = abs(atan( (-dy1*byf(1) -dx1*bxf(1))/(-dy1*bxf(1) + dx1*byf(1))))
-                        alpha2 = abs(atan( (-dy2*byf(2) -dx2*bxf(2))/(-dy2*bxf(2) + dx2*byf(2))))
-                        alpha3 = abs(atan( (-dy3*byf(3) -dx3*bxf(3))/(-dy3*bxf(3) + dx3*byf(3))))
-                    
-
-
-                        ! Check which triangles are allowed
-                        if (.not. islegaltria1) then 
-                            alpha1 = posinfval_R8()
-                        end if 
-                        if (.not. islegaltria2) then 
-                            alpha2 = posinfval_R8()
-                        end if 
-                        if (.not. islegalquad) then 
-                            alpha3 = posinfval_R8()
-                        end if 
+                    ! Add the face
+                    if (indmin == 3) then 
+                        ! Add third face, quad
+                        doquad = .true.
+                        isv2onl1 = .false.
+                        v2 = l2%vert(k2+1)
+                        v4 = l1%vert(k1+1)
                         
-                        ! Find face that makes the smallest angle
-                        indmin = minloc([alpha1, alpha2, alpha3], 1)
+                        ! Disconnect previous vertices from graph
+                        vind = graph%GetVertexIndex(l1%vert(k1))
+                        skipvert(vind) = .true.
+                        vind = graph%GetVertexIndex(l2%vert(k2))
+                        skipvert(vind) = .true.
 
-                        ! Add the face
-                        if (indmin == 3) then 
-                            ! Add third face, quad
-                            doquad = .true.
-                            isv2onl1 = .false.
-                            v2 = l2%vert(k2+1)
-                            v4 = l1%vert(k1+1)
-                            
-                            ! Disconnect previous vertices from graph
-                            vind = graph%GetVertexIndex(l1%vert(k1))
-                            skipvert(vind) = .true.
-                            vind = graph%GetVertexIndex(l2%vert(k2))
-                            skipvert(vind) = .true.
-
-                            ! Update counter
-                            k2 = k2+1
-                            k1 = k1+1
-                        elseif (indmin == 1) then 
-                            ! Add first face, triangle
-                            v2 = l2%vert(k2+1)
-                            isv2onl1 = .false.
-                            tff = [0, l2%facelabels(k2)]
-
-                            ! Disconnect previous vertex from graph
-                            vind = graph%GetVertexIndex(l2%vert(k2))
-                            skipvert(vind) = .true.
-                            
-                            ! Update counter
-                            k2 = k2 + 1
-                        elseif (indmin == 2 ) then 
-                            ! Add second face, triangle
-                            v2 = l1%vert(k1+1)
-                            isv2onl1 = .true.
-                            tff = [l1%facelabels(k1), 0]
-
-                            ! Disconnect previous vertex from graph
-                            vind = graph%GetVertexIndex(l1%vert(k1))
-                            skipvert(vind) = .true.
-
-                            ! Update counter
-                            k1 = k1 + 1
-                        else
-                            ! Should never happen
-                            call gdErrorHandler('Something wrong')
-                        end if 
-                                
-                        
-                    elseif ((k1 == n1) .and. (k2 < n2)) then 
-                        ! We have to take the first option, no vertices left in first
-                        ! line
-                        ! Add first face pair
+                        ! Update counter
+                        k2 = k2+1
+                        k1 = k1+1
+                    elseif (indmin == 1) then 
+                        ! Add first face, triangle
                         v2 = l2%vert(k2+1)
                         isv2onl1 = .false.
                         tff = [0, l2%facelabels(k2)]
@@ -3397,13 +3451,8 @@ module ggmod_gridgeneration2D
                         
                         ! Update counter
                         k2 = k2 + 1
-                        
-                        if (k2 == n2 .and. .not. dolasttriangle) then 
-                            tff(1) = eff
-                        end if 
-                    elseif ((k1 < n1) .and. (k2 == n2)) then 
-                        ! We have to take the second option
-                        ! Add second face pair
+                    elseif (indmin == 2 ) then 
+                        ! Add second face, triangle
                         v2 = l1%vert(k1+1)
                         isv2onl1 = .true.
                         tff = [l1%facelabels(k1), 0]
@@ -3411,142 +3460,185 @@ module ggmod_gridgeneration2D
                         ! Disconnect previous vertex from graph
                         vind = graph%GetVertexIndex(l1%vert(k1))
                         skipvert(vind) = .true.
-                        
+
                         ! Update counter
                         k1 = k1 + 1
-                        
-                        if (k1 == n1 .and. .not. dolasttriangle) then  
-                            tff(2) = eff
-                        end if 
-                        
                     else
-                        ! This shouldn't happen
-                        call gdErrorHandler('Something wrong in quad gridder')
+                        ! Should never happen
+                        call gdErrorHandler('Something wrong')
+                    end if 
+                            
+                    
+                elseif ((k1 == n1) .and. (k2 < n2)) then 
+                    ! We have to take the first option, no vertices left in first
+                    ! line
+                    ! Add first face pair
+                    v2 = l2%vert(k2+1)
+                    isv2onl1 = .false.
+                    tff = [0, l2%facelabels(k2)]
+
+                    ! Disconnect previous vertex from graph
+                    vind = graph%GetVertexIndex(l2%vert(k2))
+                    skipvert(vind) = .true.
+                    
+                    ! Update counter
+                    k2 = k2 + 1
+                    
+                    if (k2 == n2 .and. .not. dolasttriangle) then 
+                        tff(1) = eff
+                    end if 
+                elseif ((k1 < n1) .and. (k2 == n2)) then 
+                    ! We have to take the second option
+                    ! Add second face pair
+                    v2 = l1%vert(k1+1)
+                    isv2onl1 = .true.
+                    tff = [l1%facelabels(k1), 0]
+
+                    ! Disconnect previous vertex from graph
+                    vind = graph%GetVertexIndex(l1%vert(k1))
+                    skipvert(vind) = .true.
+                    
+                    ! Update counter
+                    k1 = k1 + 1
+                    
+                    if (k1 == n1 .and. .not. dolasttriangle) then  
+                        tff(2) = eff
                     end if 
                     
-                        
-                    ! Add grid faces and cells
-                    !-------------------------
-                    ! Add face pair
-                    if (doquad) then 
-                        nf = nf + 1
-                        call tubes(j)%hfface%Append(grid%face%ntot + nf) 
-                        tempfacevert(nf, :) = [v1, v4]
-                        tempfacelabels(nf) = l1%facelabels(k1-1)
-                        nf = nf + 1
-                        call tubes(j)%lfface%Append(grid%face%ntot + nf) 
-                        tempfacevert(nf, :) = [v3, v2]
-                        tempfacelabels(nf) = l2%facelabels(k2-1)
-                        nf = nf + 1
-                        call tubes(j)%tubeface%Append(grid%face%ntot + nf) 
-                        tempfacevert(nf, :) = [v4, v2]
-                        if ((k1 /= n1) .or. (k2 /= n2) .or. dolasttriangle) then 
-                            tempfacelabels(nf) = 0
-                        else
-                            tempfacelabels(nf) = eff
-                        end if 
-                    else
-                        nf = nf + 1
-                        if (isv2onl1) then 
-                            call tubes(j)%hfface%Append(grid%face%ntot + nf) 
-                        else
-                            call tubes(j)%tubeface%Append(grid%face%ntot + nf) 
-                        end if 
-                        tempfacevert(nf, :) = [v1, v2]
-                        tempfacelabels(nf) = tff(1)
-                        nf = nf + 1
-                        if (isv2onl1) then 
-                            call tubes(j)%tubeface%Append(grid%face%ntot + nf) 
-                        else
-                            call tubes(j)%lfface%Append(grid%face%ntot + nf) 
-                        end if
-                        tempfacevert(nf, :) = [v3, v2]
-                        tempfacelabels(nf) = tff(2)
-                    end if 
-
-                    ! Add cell
-                    nc = nc + 1
-                    call tubes(j)%cell%Append(grid%cell%ntot + nc)
-                    if (doquad .and. v1 /= v3) then 
-                        tempcellvert(ncv+1:ncv+4) = [v1, v3, v2, v4]
-                        tempcellvertP(nc, :) = [ncv+1, 4]
-                        ncv = ncv + 4
-                    elseif (doquad) then 
-                        tempcellvert(ncv+1:ncv+3) = [v1, v2, v4]
-                        tempcellvertP(nc, :) = [ncv+1, 3]
-                        ncv = ncv + 2
-                    else
-                        tempcellvert(ncv+1:ncv+3) = [v1, v2, v3]
-                        tempcellvertP(nc, :) = [ncv+1, 3]
-                        ncv = ncv + 3
-                    end if 
+                else
+                    ! This shouldn't happen
+                    call gdErrorHandler('Something wrong in quad gridder')
+                end if 
+                
                     
-                    ! Check stop criterium
-                    if ((k1 >= n1) .and. (k2 >= n2)) then 
-                        !! Check if the last non-aligned face was equal to the first one
-                        !issameface = (tempfacevert(nf-1, 1) == tempfacevert(1, 1) ) .and. &
-                        !    (tempfacevert(nf-1, 2) == tempfacevert(1, 2))
-                        !issameface = issameface .or. (tempfacevert(nf-1, 2) == tempfacevert(1, 1) ) .and. &
-                        !    (tempfacevert(nf-1, 1) == tempfacevert(1, 2))
-                        !if (issameface) then 
-                        !    ! Don't add the last face
-                        !    nf = nf-1
-                        !end if 
-                        exit
-                    end if 
-
-                    
-
-                end do
-
-                ! Check for last cell
-                if (dolasttriangle) then 
-                    ! Add the triangle by adding the last two faces (third
-                    ! face already added normally speaking)
-
-                    ! Set vertices
-                    k1 = n1 ! reset to be sure
-                    k2 = n2
-                    v1 = l1%vert(k1+1) ! common vertex
-                    v2 = l1%vert(k1) ! previous vertices
-                    v3 = l2%vert(k2)
-
-                    ! Set faces
+                ! Add grid faces and cells
+                !-------------------------
+                ! Add face pair
+                if (doquad) then 
                     nf = nf + 1
-                    call tubes(j)%hfface%Append(grid%face%ntot + nf)
+                    call tubes(j)%hfface%Append(nf) 
+                    tempfacevert(nf, :) = [v1, v4]
+                    tempfacelabels(nf) = l1%facelabels(k1-1)
+                    nf = nf + 1
+                    call tubes(j)%lfface%Append(nf) 
+                    tempfacevert(nf, :) = [v3, v2]
+                    tempfacelabels(nf) = l2%facelabels(k2-1)
+                    nf = nf + 1
+                    call tubes(j)%tubeface%Append(nf) 
+                    tempfacevert(nf, :) = [v4, v2]
+                    if ((k1 /= n1) .or. (k2 /= n2) .or. dolasttriangle) then 
+                        tempfacelabels(nf) = 0
+                    else
+                        tempfacelabels(nf) = eff
+                    end if 
+                else
+                    nf = nf + 1
+                    if (isv2onl1) then 
+                        call tubes(j)%hfface%Append(nf) 
+                    else
+                        call tubes(j)%tubeface%Append(nf) 
+                    end if 
                     tempfacevert(nf, :) = [v1, v2]
-                    tempfacelabels(nf) = l1%facelabels(k1)
+                    tempfacelabels(nf) = tff(1)
                     nf = nf + 1
-                    call tubes(j)%lfface%Append(grid%face%ntot + nf)
-                    tempfacevert(nf, :) = [v1, v3]
-                    tempfacelabels(nf) = l2%facelabels(k2)
+                    if (isv2onl1) then 
+                        call tubes(j)%tubeface%Append(nf) 
+                    else
+                        call tubes(j)%lfface%Append(nf) 
+                    end if
+                    tempfacevert(nf, :) = [v3, v2]
+                    tempfacelabels(nf) = tff(2)
+                end if 
 
-                    ! Set cell
-                    nc = nc + 1
-                    call tubes(j)%cell%Append(grid%cell%ntot + nc)
+                ! Add cell
+                nc = nc + 1
+                call tubes(j)%cell%Append(nc)
+                if (doquad .and. v1 /= v3) then 
+                    tempcellvert(ncv+1:ncv+4) = [v1, v3, v2, v4]
+                    tempcellvertP(nc, :) = [ncv+1, 4]
+                    ncv = ncv + 4
+                elseif (doquad) then 
+                    tempcellvert(ncv+1:ncv+3) = [v1, v2, v4]
+                    tempcellvertP(nc, :) = [ncv+1, 3]
+                    ncv = ncv + 2
+                else
                     tempcellvert(ncv+1:ncv+3) = [v1, v2, v3]
                     tempcellvertP(nc, :) = [ncv+1, 3]
                     ncv = ncv + 3
                 end if 
+                
+                ! Check stop criterium
+                if ((k1 >= n1) .and. (k2 >= n2)) then 
+                    !! Check if the last non-aligned face was equal to the first one
+                    !issameface = (tempfacevert(nf-1, 1) == tempfacevert(1, 1) ) .and. &
+                    !    (tempfacevert(nf-1, 2) == tempfacevert(1, 2))
+                    !issameface = issameface .or. (tempfacevert(nf-1, 2) == tempfacevert(1, 1) ) .and. &
+                    !    (tempfacevert(nf-1, 1) == tempfacevert(1, 2))
+                    !if (issameface) then 
+                    !    ! Don't add the last face
+                    !    nf = nf-1
+                    !end if 
+                    exit
+                end if 
 
-                ! Add to grid
-                allocate(tempcellregion(nc), tempfaceregion(nf))
-                tempcellregion = celldata(i)%region
-                tempfaceregion = celldata(i)%region
-                call grid%AddFace(tempfacevert(1:nf, :), tempfacelabels(1:nf), tempfaceregion(1:nf))
-                call grid%AddCell(tempcellvert(1:ncv), tempcellvertP(1:nc, 1:2), tempcellregion(1:nc))
+                
 
-                ! Housekeeping
-                deallocate(tempfacevert, tempfacelabels, tempcellvert, &
-                    tempcellvertP, tempcellregion, tempfaceregion, &
-                    skipvert)
-                end associate
-            end do 
+            end do
+
+            ! Check for last cell
+            if (dolasttriangle) then 
+                ! Add the triangle by adding the last two faces (third
+                ! face already added normally speaking)
+
+                ! Set vertices
+                k1 = n1 ! reset to be sure
+                k2 = n2
+                v1 = l1%vert(k1+1) ! common vertex
+                v2 = l1%vert(k1) ! previous vertices
+                v3 = l2%vert(k2)
+
+                ! Set faces
+                nf = nf + 1
+                call tubes(j)%hfface%Append(nf)
+                tempfacevert(nf, :) = [v1, v2]
+                tempfacelabels(nf) = l1%facelabels(k1)
+                nf = nf + 1
+                call tubes(j)%lfface%Append(nf)
+                tempfacevert(nf, :) = [v1, v3]
+                tempfacelabels(nf) = l2%facelabels(k2)
+
+                ! Set cell
+                nc = nc + 1
+                call tubes(j)%cell%Append(nc)
+                tempcellvert(ncv+1:ncv+3) = [v1, v2, v3]
+                tempcellvertP(nc, :) = [ncv+1, 3]
+                ncv = ncv + 3
+            end if 
+
+            ! Add to grid
+            allocate(tempcellregion(nc), tempfaceregion(nf))
+            tempcellregion = celldata(i)%region
+            tempfaceregion = celldata(i)%region
+            !$omp critical
+            tubes(j)%cell       = tubes(j)%cell + grid%cell%ntot 
+            tubes(j)%tubeface   = tubes(j)%tubeface + grid%face%ntot 
+            tubes(j)%lfface     = tubes(j)%lfface + grid%face%ntot 
+            tubes(j)%hfface     = tubes(j)%hfface + grid%face%ntot
+            call grid%AddFace(tempfacevert(1:nf, :), tempfacelabels(1:nf), tempfaceregion(1:nf))
+            call grid%AddCell(tempcellvert(1:ncv), tempcellvertP(1:nc, 1:2), tempcellregion(1:nc))
+            !$omp end critical
+
+            ! Housekeeping
+            deallocate(tempfacevert, tempfacelabels, tempcellvert, &
+                tempcellvertP, tempcellregion, tempfaceregion, &
+                skipvert)
+            end associate
 
             ! Housekeeping
             end associate
-
-        end do 
+        end do
+        !$omp end do
+        !$omp end parallel
 
         ! Cleanup
         !========
@@ -5992,19 +6084,26 @@ module ggmod_gridgeneration2D
 
             ! Check if contour lines intersect with the tube boundary 
             ! faces
+            !$omp parallel do default(none) schedule(dynamic) collapse(2) &
+            !$omp private(j, k, txint, tyint, s1, s2, sr1, sr2) &
+            !$omp shared(tempc, allnbtf, grid, topomesh, keepind)
             do j = 1, size(tempc)
                 ! Check for intersections with aligned faces
                 do k = 1, size(allnbtf)
-                    txint = spread(0, 1, 0)
-                    call SimplePolygonIntersections(tempc(j)%x, tempc(j)%y, &
-                        face%x(allnbtf(k))%Get(), face%y(allnbtf(k))%Get(), &
-                        txint, tyint, s1, s2, sr1, sr2)
-                    if (size(txint) > 0) then 
-                        keepind(j) = .false. 
-                        exit ! no need to check further
+                    if (keepind(j)) then  ! no need to check if already found intersection
+                        txint = spread(0, 1, 0)
+                        call SimplePolygonIntersections(tempc(j)%x, tempc(j)%y, &
+                            face%x(allnbtf(k))%Get(), face%y(allnbtf(k))%Get(), &
+                            txint, tyint, s1, s2, sr1, sr2)
+                        if (size(txint) > 0) then 
+                            !$omp critical
+                            keepind(j) = .false. 
+                            !$omp end critical
+                        end if 
                     end if 
                 end do 
             end do
+            !$omp end parallel do
 
             ! Remove contours
             if (any(.not. keepind)) then 
@@ -6034,7 +6133,10 @@ module ggmod_gridgeneration2D
 
             ! Loop over all contours
             call wall_time(tstart)
-            !omp parallel do private(i, j, txint, tyint, s1, s2, sr1, sr2)
+            !$omp parallel do default(none) schedule(dynamic) collapse(2) &
+            !$omp private(i, j, txint, tyint, s1, s2, sr1, sr2) &
+            !$omp shared(tempc, tubef, xintda, yintda, segrfda, segcda, &
+            !$omp segrrfda, segrcda, nint)
             do j = 1, size(tempc)
                 ! Compute intersections with each radial face's polygon
                 do k = 1, size(tubef)
@@ -6055,7 +6157,7 @@ module ggmod_gridgeneration2D
                     nint(j, k) = size(txint)
                 end do 
             end do 
-            !omp end parallel do
+            !$omp end parallel do
             call wall_time(tend)
             !print *, 'time spent in intersections:', tend-tstart
             ! Print
@@ -13101,15 +13203,15 @@ module ggmod_gridgeneration2D
         !$omp parallel do default(private) shared(simgrid, allxint, allyint, faceIDs) schedule(dynamic)
         do i = 1, nf 
             do j = i+1, nf 
-                if (any(fv(i, 1) == fv(j, :)) .or. any(fv(i, 2) == fv(j, :))) then 
-                    ! Don't do anything - neighbouring face
-                else 
-                    ! Compmute segment-segment intersection
-                    call SegmentIntersections(xint, yint, xv(fv(i, 1)), &
-                        yv(fv(i, 1)), xv(fv(i, 2)), yv(fv(i, 2)), xv(fv(j, 1)), &
-                        yv(fv(j, 1)), xv(fv(j, 2)), yv(fv(j, 2)))
+                ! Compmute segment-segment intersection
+                call SegmentIntersections(xint, yint, xv(fv(i, 1)), &
+                    yv(fv(i, 1)), xv(fv(i, 2)), yv(fv(i, 2)), xv(fv(j, 1)), &
+                    yv(fv(j, 1)), xv(fv(j, 2)), yv(fv(j, 2)))
 
-                    if (.not. isnan(xint)) then 
+                if (.not. isnan(xint)) then 
+                    if (any(fv(i, 1) == fv(j, :)) .or. any(fv(i, 2) == fv(j, :))) then 
+                        ! Don't do anything - neighbouring face
+                    else 
                         !$omp critical 
                         allxint = [allxint, xint, xint]
                         allyint = [allyint, yint, yint]

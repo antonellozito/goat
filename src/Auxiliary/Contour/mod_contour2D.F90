@@ -510,8 +510,8 @@ module mod_contour2D
         !==========
         !$omp parallel default(private) shared(tracevalues, V, X, Y, &
         !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
-        !$omp contours) firstprivate(spstruct) if(size(tracevalues) > 4)
-        !$omp do 
+        !$omp contours) firstprivate(spstruct) if(.not. omp_in_parallel())
+        !$omp do schedule(dynamic) 
         do i = 1, size(tracevalues)
             ! Get current trace value
             tv = tracevalues(i)
@@ -701,7 +701,7 @@ module mod_contour2D
         !==========
         !$omp parallel do default(private) shared(xt, yt, nt, V, X, Y, &
         !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
-        !$omp contours) firstprivate(spstruct) if(nt > 4)
+        !$omp contours) firstprivate(spstruct) if(.not. omp_in_parallel()) schedule(dynamic)
         do i = 1, nt
             ! Get current trace value
             txt = xt(i)
@@ -2967,14 +2967,16 @@ module mod_contour2D
         ! Auxiliary
         logical, allocatable                    :: delind(:)
         real(R8), allocatable                   :: dx(:), dy(:)
+        logical                                 :: do_parallel
 
         ! Loop
         integer(I8)                             :: i 
         
         ! Clean
         !======
+        do_parallel = omp_in_parallel()
         !$omp parallel do default(none) private(dx, dy, delind) &
-        !$omp shared(contours)
+        !$omp shared(contours) schedule(static) if(do_parallel)
         do  i = 1, size(contours)
             dx = contours(i)%x(2:size(contours(i)%x)) - &
                 contours(i)%x(1:size(contours(i)%x)-1)
@@ -3109,6 +3111,7 @@ module mod_contour2D
         real(R8)                        :: x1, y1, dx1, dy1, dx1p, dy1p, &
             x2, y2, dx2, dy2, dx2p, dy2p, x3, y3, dx3, dy3, dx3p, dy3p, & 
             cp(1:3)
+        logical                         :: do_parallel
 
         ! Loop
         integer(I8)                         :: i 
@@ -3137,7 +3140,9 @@ module mod_contour2D
         ! Compute
         !========
         ! Loop
-        !$omp parallel do default(private) shared(v1, v2, v3, x, y, in, on, xp, yp)
+        do_parallel = .not. omp_in_parallel()
+        !$omp parallel do default(private) shared(v1, v2, v3, x, y, in, on, xp, yp) &
+        !$omp schedule(static) if (do_parallel)
         do i = 1, size(v1)
             ! Get coordinates
             x1 = x(v1(i))
