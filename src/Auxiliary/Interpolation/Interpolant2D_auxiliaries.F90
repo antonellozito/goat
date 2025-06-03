@@ -96,7 +96,9 @@ module Interpolant2D_auxiliaries
         ny = size(y, 1)
 
         ! Loop over all query points
-        !$omp parallel do default(shared) private(indx, indy)
+        !$omp parallel do default(none) private(indx, indy, k) &
+        !$omp if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp shared(nq, xq, x, nx, yq, y, ny, ind)
         do k = 1, nq
             ! Get the bin index for x
             call GetBinIndex(xq(k), x, nx, indx)
@@ -157,7 +159,9 @@ module Interpolant2D_auxiliaries
         ny = size(y, 1)
 
         ! Loop over all query points
-        !$omp parallel do default(shared) private(indx, indy)
+        !$omp parallel do default(none) private(indx, indy, k) &
+        !$omp if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp shared(nq, xq, x, nx, yq, y, ny, ix, iy)
         do k = 1, nq
             ! Get the bin index for x
             call GetBinIndex(xq(k), x, nx, indx)

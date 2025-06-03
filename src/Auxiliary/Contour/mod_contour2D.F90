@@ -508,9 +508,12 @@ module mod_contour2D
  
         ! Main loop
         !==========
-        !$omp parallel default(private) shared(tracevalues, V, X, Y, &
-        !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
-        !$omp contours) firstprivate(spstruct) if(.not. omp_in_parallel())
+        !$omp parallel default(none) if(.not. omp_in_parallel()) &
+        !$omp shared(tracevalues, V, X, Y, superquadflags, &
+        !$omp superquadfacexflags, superquadfaceyflags, nx, ny, &
+        !$omp contours) &
+        !$omp private(i, tv, tempcontours, j) & 
+        !$omp firstprivate(spstruct) 
         !$omp do schedule(dynamic) 
         do i = 1, size(tracevalues)
             ! Get current trace value
@@ -699,9 +702,11 @@ module mod_contour2D
 
         ! Main loop
         !==========
-        !$omp parallel do default(private) shared(xt, yt, nt, V, X, Y, &
-        !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
-        !$omp contours) firstprivate(spstruct) if(.not. omp_in_parallel()) schedule(dynamic)
+        !$omp parallel do default(none) if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp shared(xt, yt, nt, V, X, Y, superquadflags, &
+        !$omp superquadfacexflags, superquadfaceyflags, nx, ny, contours) &
+        !$omp private(txt, tyt, i, j, tempcontours) & 
+        !$omp firstprivate(spstruct) 
         do i = 1, nt
             ! Get current trace value
             txt = xt(i)
@@ -2874,7 +2879,7 @@ module mod_contour2D
 
         ! Initial values
         quadflags = 0 ! default: no value
-        !$omp parallel workshare
+        !$omp parallel workshare if(.not. omp_in_parallel())
         c1 = hasvv(1:nv1-1, 1:nv2-1)
         c2 = hasvv(2:nv1, 1:nv2-1)
         c3 = hasvv(2:nv1, 2:nv2) 
@@ -3141,8 +3146,10 @@ module mod_contour2D
         !========
         ! Loop
         do_parallel = .not. omp_in_parallel()
-        !$omp parallel do default(private) shared(v1, v2, v3, x, y, in, on, xp, yp) &
-        !$omp schedule(static) if (do_parallel)
+        !$omp parallel do default(none) schedule(static) if (do_parallel) &
+        !$omp shared(v1, v2, v3, x, y, in, on, xp, yp) &
+        !$omp private(i, x1, x2, x3, y1, y2, y3, dx1, dx2, dx3, dy1, dy2, dy3, &
+        !$omp dx1p, dx2p, dx3p, dy1p, dy2p, dy3p, cp)
         do i = 1, size(v1)
             ! Get coordinates
             x1 = x(v1(i))

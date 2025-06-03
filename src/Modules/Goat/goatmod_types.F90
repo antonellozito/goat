@@ -3431,7 +3431,9 @@ module goatmod_types
                             ! if the current cell is not a guard cell
                             
                             sp = v%cellP(i,1)
+                            !$omp critical
                             v%cell(sp) = thiscell 
+                            !$omp end critical
                             if (.not. c%GC(thiscell)) then
                                 sp = v%neigP(i,1)
                                 tfv = f%vert(tcf2(1),:)
@@ -3454,7 +3456,9 @@ module goatmod_types
     
                         ! Add the cell and vertex neighbour
                         sp = v%cellP(i,1) + vc
+                        !$omp critical
                         v%cell(sp) = nextcell
+                        !$omp end critical
                         sp = v%neigP(i,1) + vc
                         tfv = f%vert(tcf,:)
                         if (tfv(1) == i) then 
@@ -3537,11 +3541,13 @@ module goatmod_types
                     ! Add cell and vertex neighbour
                     sp = v%neigP(i,1) + vc
                     tfv = f%vert(tcf2(1),:)
+                    !$omp critical
                     if (tfv(1) == i) then
                         v%neig(sp) = tfv(2)
                     else
                         v%neig(sp) = tfv(1)
                     end if
+                    !$omp end critical
     
                     ! Housekeeping
                     deallocate(allfvind)

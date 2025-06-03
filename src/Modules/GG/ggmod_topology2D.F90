@@ -733,8 +733,11 @@ module ggmod_topology2D
         end do 
 
         ! Compute intersections
-        !$omp parallel do default(private) shared(fxp, fyp, magneticField, &
-        !$omp fxpeid, fxpsid, fxpsrid, fypeid, fypsid, fypsrid, xc, yc, fc, tc, ec, nfxc, nfyc)
+        !$omp parallel do default(none) schedule(dynamic) collapse(2) &
+        !$omp shared(fxp, fyp, magneticField, fxpeid, fxpsid, fxpsrid, &
+        !$omp fypeid, fypsid, fypsrid, xc, yc, fc, tc, ec, nfxc, nfyc) & 
+        !$omp private(i, j, tx, ty, ts1, ts2, tsr1, tsr2, nx, tt, k, &
+        !$omp tempx, tempy, conv, tf, tfxx, tfxy, tfyy, thiseig)
         do i = 1, nfxc
             ! Only compute intersections with other polygons
             do j = 1, nfyc
@@ -1582,9 +1585,6 @@ module ggmod_topology2D
                 end do 
 
                 ! Check intersections with radial core boundaries
-                !$omp parallel do default(shared) private(xout, yout, vindI, &
-                !$omp vindJ, iout, jout, cc, intfacestart, intcstart, &
-                !$omp dointersect, nstc, vindIfh, vindIsh, sortind)
                 do j = 1, topomesh%face%ntot
                     ! Check where exactly it (should) intersect
                     if ((topomesh%face%type(j) == TMfaceradID)) then 
@@ -1611,7 +1611,6 @@ module ggmod_topology2D
                             end if 
 
                             if (dointersect) then 
-                                !$omp critical 
                                 call SimplePolygonIntersections(tc(k)%x, tc(k)%y, &
                                     topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get(), &
                                     xout, yout, vindI, vindJ, iout, jout)
@@ -1778,12 +1777,10 @@ module ggmod_topology2D
                                     tc(k)%x = tc(k)%x(notdelind)
                                     tc(k)%y = tc(k)%y(notdelind)
                                 end if 
-                                !$omp end critical
                             end if 
                         end do 
                     end if 
                 end do
-                !$omp end parallel do
 
                 ! Add
                 allc = [allc, tc]
@@ -1799,7 +1796,10 @@ module ggmod_topology2D
         !----------------------------
         ! First, trace all contours
         allocate(alltpc(0))
-        !$omp parallel do default(shared) private(tc, keepind, dist)
+        !$omp parallel do default(none) private(i, k, tc, keepind, dist) & 
+        !$omp shared(fieldtracer, pspx, pspy, psptype, npsp, tracepoints, &
+        !$omp alltpc, curvetypes, fsIDs, pspid) & 
+        !$omp schedule(dynamic)
         do i = 1, npsp
             if ((psptype(i) == TMvertextp2ID) .and. tracepoints(i)) then 
                 ! Trace contour
@@ -1870,8 +1870,10 @@ module ggmod_topology2D
         end do 
 
         ! Loop
-        !$omp parallel do default(shared) private(xout, yout, vindI, vindJ, &
-        !$omp iout, jout)
+        !$omp parallel do default(none) &
+        !$omp schedule(dynamic) collapse(2) & 
+        !$omp private(xout, yout, vindI, vindJ, iout, jout) & 
+        !$omp shared(ntpc, topomesh, alltpc, sc, scr, faceind, sf, sfr, contourind)
         do i = 1, ntpc
             do j = 1, topomesh%face%ntot
                 if (topomesh%face%type(j) == TMfacebndID) then 
@@ -2410,7 +2412,10 @@ module ggmod_topology2D
 
         ! First, trace all contours
         allocate(allbsvc(0))
-        !$omp parallel do default(shared) private(tc, keepind, dist)
+        !$omp parallel do default(none) schedule(dynamic) &
+        !$omp private(i, k, tc, keepind, dist) & 
+        !$omp shared(topomesh, fieldtracer, allbsvc, curvetypes, &
+        !$omp fsIDs) 
         do i = 1, topomesh%vert%ntot
             if ((topomesh%vert%type(i) == TMvertexsplitID) .and. &
                 topomesh%vert%fsID(i) == 0) then 
@@ -4028,8 +4033,9 @@ module ggmod_topology2D
         ! Compute intersections 
         !======================
         ! Loop over all faces
-        !$omp parallel do default(private) shared(topomesh, fda, xda, &
-        !$omp yda, s1da, s2da, s1rda, s2rda, cp)
+        !$omp parallel do default(none) schedule(dynamic) &
+        !$omp shared(topomesh, fda, xda, yda, s1da, s2da, s1rda, s2rda, cp) & 
+        !$omp private(i, xint, yint, s1, s2, s1r, s2r)
         do i  = 1, topomesh%face%ntot 
             ! Associate current face polygon 
             associate(&
@@ -5412,8 +5418,10 @@ module ggmod_topology2D
         !end do 
 
         ! Compute intersections
-        !$omp parallel do default(private), shared(nfxc, nfyc, fxc, fyc, &
-        !$omp magneticField, xc, yc, fc, tc)
+        !$omp parallel do default(none) schedule(dynamic) collapse(2) &
+        !$omp shared(nfxc, nfyc, fxc, fyc, magneticField, xc, yc, fc, tc) &
+        !$omp private(i, j, tx, ty, ts1, ts2, nx, tt, k, tempx, tempy, &
+        !$omp conv, tf, tfxx, tfxy, tfyy, thiseig)
         do i = 1, nfxc
             ! Only compute intersections with other polygons
             do j = 1, nfyc

@@ -91,6 +91,7 @@ module mod_polygon
     use mod_plotter
     use mod_sort
     use mod_constants, only : pi_R8
+    use omp_lib
 
     ! The usual
     implicit none
@@ -4707,6 +4708,11 @@ module mod_polygon
         ! Compute intersections
         !======================
         ! Loop over p2
+        !$omp parallel do default(none) schedule(dynamic) if(.not. omp_in_parallel()) &
+        !$omp shared(x1, y1, x2, y2, counter, sz, tempx, tempy, temps1, &
+        !$omp temps2, temps1r, temps2r, szmult) &
+        !$omp private(i, xe1, ye1, xe2, ye2, xi, yi, si, ni, szold, &
+        !$omp mgmti, mgmtr)
         do i = 1, size(x2)-1 
             ! Get coordinates of next polygon edge
             xe1 = x2(i)
@@ -4723,7 +4729,9 @@ module mod_polygon
             ni = size(xi)
             if (ni > 0) then 
                 ! Memory MGMT
+                !$omp critical
                 if (counter + ni > sz) then 
+                    
                     ! Store old size
                     szold = sz
 
@@ -4762,8 +4770,10 @@ module mod_polygon
 
                 ! Update counter
                 counter = counter + ni
+                !$omp end critical
             end if 
         end do  
+        !$omp end parallel do
 
         ! Add to output
         allocate(x(counter), y(counter), s1(counter), s2(counter)) 

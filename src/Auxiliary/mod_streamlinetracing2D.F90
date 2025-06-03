@@ -368,7 +368,9 @@ module mod_streamlinetracing2D
         ! Loop and trace
         !---------------
         do_parallel = .not. omp_in_parallel()
-        !$omp parallel do default(shared) private(xfw, yfw, xbw, ybw) schedule(dynamic) &
+        !$omp parallel do default(none) private(xfw, yfw, xbw, ybw) schedule(dynamic) &
+        !$omp shared(nv, isoutofbounds, streamlines, emptyarray, U, V, X, Y, x0, y0, &
+        !$omp xb, yb, step, tol, nmax, direction) &
         !$omp if (do_parallel)
         do i = 1, nv
             ! Check if we should trace

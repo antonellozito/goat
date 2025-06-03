@@ -1052,9 +1052,11 @@ module ggmod_gridgeneration2D
 
         ! Diagnostics
         !============
-        call RunGridDiagnostics(simgrid)
-
-
+        if (options%dogriddiagnostics) then 
+            call RunGridDiagnostics(simgrid)
+        else
+            print *, 'GenerateUnstructuredAlignedGrid: not running grid diagnostics'
+        end if 
 
         ! Visualize
         !----------
@@ -1795,9 +1797,14 @@ module ggmod_gridgeneration2D
             nnew = 0
 
             ! Find intersections with all other boundaries
-            !$omp parallel default(private) shared(orthlines, vertID, ggtmdata, &
-            !$omp newtx, nnew, newty, news2r, newID, i) 
-            !$omp do schedule(dynamic)
+            !!$omp parallel default(none) 
+            !!$omp shared(orthlines, vertID, ggtmdata, newtx, nnew, &
+            !!$omp tubes, newty, news2r, newID, i) 
+            !!$omp private(j, addpoint, x1, y1, s11, s12, s11r, s12r, &
+            !!$omp x2, y2, s21, s22, s21r, s22r, x3, y3, s31, s32, s31r, s32r, &
+            !!$omp x4, y4, s41, s42, s41r, s42r, stype, s1r, sortind, &
+            !!$omp tempx, tempy, temps2r)
+            !!$omp do schedule(dynamic)
             do j = 1, size(orthlines)
                 ! Initialize
                 addpoint = .true. 
@@ -1911,10 +1918,10 @@ module ggmod_gridgeneration2D
                         addpoint = .false.
                     elseif (size(stype) < 2) then 
                         ! Only one intersection found - don't add
-                        call Write2DPolygonData(orthlines(j)%x, orthlines(j)%y, 'l1')
-                        call Write2DPolygonData(lfline%xl, lfline%yl, 'l2')
-                        call Write2DPolygonData(hfline%xl, hfline%yl, 'l3')
-                        call Write2DPolygonData(hfline%xv, hfline%yv, 'l4')
+                        !call Write2DPolygonData(orthlines(j)%x, orthlines(j)%y, 'l1')
+                        !call Write2DPolygonData(lfline%xl, lfline%yl, 'l2')
+                        !call Write2DPolygonData(hfline%xl, hfline%yl, 'l3')
+                        !call Write2DPolygonData(hfline%xv, hfline%yv, 'l4')
                         addpoint = .false.
                     elseif (stype(1) /= 1 .or. s11r(1) /= 0) then ! .or. s1(1) /= 0
                         ! We expect that the first point is an
@@ -1940,7 +1947,7 @@ module ggmod_gridgeneration2D
                     temps2r = temps2r(sortind)
                     
                     
-                    !$omp critical
+                    !!$omp critical
                     ! Update counter
                     nnew = nnew + 1
 
@@ -1950,15 +1957,15 @@ module ggmod_gridgeneration2D
                     news2r(nnew) = temps2r(2)
                     newID(nnew) = vertID+1
                     vertID = vertID+1
-                    !$omp end critical
+                    !!$omp end critical
                 end if
                 
                 ! Housekeeping
                 deallocate(s11, s12, s11r, s12r, sortind)
                 
             end do 
-            !$omp end do
-            !$omp end parallel
+            !!$omp end do
+            !!$omp end parallel
             
             ! Trim
             newtx = newtx(1:nnew)
@@ -13200,7 +13207,9 @@ module ggmod_gridgeneration2D
 
         ! Compute
         !========
-        !$omp parallel do default(private) shared(simgrid, allxint, allyint, faceIDs) schedule(dynamic)
+        !$omp parallel do default(none) schedule(dynamic) & 
+        !$omp shared(simgrid, allxint, allyint, faceIDs) & 
+        !$omp private(i, j, xint, yint)
         do i = 1, nf 
             do j = i+1, nf 
                 ! Compmute segment-segment intersection
