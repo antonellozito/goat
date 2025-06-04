@@ -2967,11 +2967,11 @@ module goatmod_types
                     end if
     
                     ! Add the current cell to the j'th vertex
+                    !$omp critical
                     ind = v%cellP(tv(j),1) + vcount(tv(j)) - 1
                     if (ind > v%ncell) then
                         call gdErrorHandler('unknown error')
                     end if
-                    !$omp critical
                     v%cell(ind) = i
     
                     ! Update vcount
@@ -3433,7 +3433,6 @@ module goatmod_types
                             sp = v%cellP(i,1)
                             !$omp critical
                             v%cell(sp) = thiscell 
-                            !$omp end critical
                             if (.not. c%GC(thiscell)) then
                                 sp = v%neigP(i,1)
                                 tfv = f%vert(tcf2(1),:)
@@ -3446,6 +3445,7 @@ module goatmod_types
                                 ! Update vc
                                 vc = vc+1
                             end if
+                            !$omp end critical
     
                             ! Housekeeping
                             deallocate(allfvind)
@@ -3458,7 +3458,6 @@ module goatmod_types
                         sp = v%cellP(i,1) + vc
                         !$omp critical
                         v%cell(sp) = nextcell
-                        !$omp end critical
                         sp = v%neigP(i,1) + vc
                         tfv = f%vert(tcf,:)
                         if (tfv(1) == i) then 
@@ -3466,6 +3465,7 @@ module goatmod_types
                         else
                             v%neig(sp) = tfv(1)
                         end if
+                        !$omp end critical
     
                         ! Update counter
                         vc = vc + 1
