@@ -262,15 +262,13 @@ module ggmod_gridgeneration2D
     type :: GGTMFieldlinePairDataUDT
 
         ! Data type that contains data on pairs of field lines, such as 
-        ! line-of-sight etc. Also holds (possibly extended) field line
+        ! the graph etc. Also holds (possibly extended) field line
         ! line data for the high field and low field line of the tube.
         ! These lines of course don't have to be at the high or low 
         ! field.  
         type(GGTMFieldlineDataUDT)              :: hfline, lfline 
         real(R8), allocatable, dimension(:)     :: graphxv, graphyv
         integer(I8)                             :: srflabel, erflabel
-        integer(I8), allocatable, dimension(:)  :: l1minLOS, l1maxLOS, &
-            l2minLOS, l2maxLOS
         logical                                 :: isextendedstart, &
             isextendedend, dograph
         type(IntegerDynamicArrayUDT)    :: hfface, lfface, tubeface, &
@@ -4350,215 +4348,6 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
-    ! Line-of-sight determination for line pairs to determine possible
-    ! cell shapes etc
-    subroutine DetermineLOSlimits(ggtmdata)
-
-        ! Description
-        !============
-        ! This routine determines the line-of-sight for each line pair 
-        ! of each cell, which can be used during cell generation to 
-        ! determine whether a cell can be formed or not, or during 
-        ! grid construction to determine if more local refinement is
-        ! needed. The line-of-sight limits are determined between 
-        ! two lines, l1, l2, as follows:
-        !
-        ! - minLOS for l1, vertex k1: the vertex index k2, starting from 
-        !   the first line, which forms the first face (k1, k2) that does
-        !   not intersect either l1 or l2 (i.e. k1, k2-1 intersects). 
-        ! - maxLOS for l1, vertex k1: similar to minLOS, but now the 
-        !   vertex pair (k1, k2) is the last one, starting from minLOS, 
-        !   that does not intersect with l1 or l2 (i.e. k1, k2+1 interects)
-        ! - similar definitions hold for l2 of course
-        ! - for each of these edges, there's the additional requirement
-        !   that it has to be facing to the interior of the domain 
-        !   determined by the line pairs. 
-        
-        ! Notes
-        !======
-        ! Note 1: it is assumed that all line data is initialized and 
-        ! has proper (initial) dimensions. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(GGTMDataUDT)                      :: ggtmdata 
-
-        ! Auxiliary
-        real(R8), allocatable, dimension(:)     :: xint, yint, xint1, &
-            xint2
-        integer(I8), allocatable, dimension(:)  :: sint
-        type(GGTMFieldlineDataUDT)              :: l1, l2
-
-        ! Loop  
-        integer(I8)                             :: i, j, k1, k2
-
-        ! Initialize
-        !===========
-        allocate(xint(0), xint1(0), xint2(0))
-
-        ! Determine LOS
-        !==============
-        do i = 1, size(ggtmdata%cell)
-            ! Associate
-            associate(tc        => ggtmdata%cell(i))
-
-            ! Loop over all line pairs
-            do j = 1, size(tc%tubes)
-                ! Initialize
-                tc%tubes(j)%l1maxLOS = spread(0_I8, 1, tc%tubes(j)%hfline%nv)
-                tc%tubes(j)%l1minLOS = spread(0_I8, 1, tc%tubes(j)%hfline%nv)
-                tc%tubes(j)%l2maxLOS = spread(0_I8, 1, tc%tubes(j)%lfline%nv)
-                tc%tubes(j)%l2minLOS = spread(0_I8, 1, tc%tubes(j)%lfline%nv)
-
-                ! Unpack
-                l1 = tc%tubes(j)%hfline
-                l2 = tc%tubes(j)%lfline
-
-                ! Determine LOS for l1
-                do k1 = 1, l1%nv 
-                    ! minLOS
-                    k2 = 1
-                    
-                    do while (k2 <= l2%nv)
-                        ! Compute segment intersections, l1
-                        if (k1 > 1) then 
-                            ! Check for intersections in l1(1:k1-1)
-                            call SegmentSimplePolygonIntersections(l1%xv(1:k1-1), &
-                                l1%yv(1:k1-1), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
-                                xint1, yint, sint)
-                        end if 
-                        if (k1 < l1%nv) then 
-                            ! Check for intersections in l1(k1+1:nv)
-                            call SegmentSimplePolygonIntersections(l1%xv(k1+1:l1%nv), &
-                                l1%yv(k1+1:l1%nv), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
-                                xint2, yint, sint)
-                        end if 
-
-                        ! Check
-                        if (size(xint1) == 0 .and. size(xint2) == 0) then 
-                            exit
-                        else 
-                            ! Update k2
-                            k2 = k2 + 1
-                        end if
-                    end do 
-                    
-
-                    ! Set the minimal value
-                    tc%tubes(j)%l1minLOS(k1) = k2
-
-                    ! maxLOS
-                    k2 = tc%tubes(j)%l1minLOS(k1) ! start from minLOS
-                    do while (k2 <= l2%nv)
-                        ! Compute segment intersections 
-                        if (k1 > 1) then 
-                            ! Check for intersections in l1(1:k1-1)
-                            call SegmentSimplePolygonIntersections(l1%xv(1:k1-1), &
-                                l1%yv(1:k1-1), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
-                                xint, yint, sint)
-                            
-                            if (size(xint) > 0) then 
-                                ! Exit the loop
-                                exit
-                            end if  
-                        end if 
-                        if (k1 < l1%nv) then 
-                            ! Check for intersections in l1(k1+1:nv)
-                            call SegmentSimplePolygonIntersections(l1%xv(k1+1:l1%nv), &
-                                l1%yv(k1+1:l1%nv), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
-                                xint, yint, sint)
-                            
-                            if (size(xint) > 0) then 
-                                ! Exit the loop
-                                exit
-                            end if  
-                        end if 
-
-                        ! If we got here, update k2
-                        k2 = k2 + 1
-                    end do 
-
-                    ! Set the maximal value
-                    tc%tubes(j)%l1maxLOS(k1) = k2
-
-                end do 
-
-                ! Determine LOS for l2
-                do k2 = 1, l2%nv 
-                    ! minLOS
-                    k1 = 1
-                    do while (k1 <= l1%nv)
-                        ! Compute segment intersections
-                        if (k2 > 1) then 
-                            ! Check for intersections in l1(1:k1-1)
-                            call SegmentSimplePolygonIntersections(l2%xv(1:k2-1), &
-                                l2%yv(1:k2-1), l2%xv(k2), l2%yv(k2), l1%xv(k1), l1%yv(k1), &
-                                xint1, yint, sint)
-                        end if 
-                        if (k1 < l1%nv) then 
-                            ! Check for intersections in l1(k1+1:nv)
-                            call SegmentSimplePolygonIntersections(l2%xv(k2+1:l2%nv), &
-                                l2%yv(k2+1:l2%nv), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
-                                xint2, yint, sint)
-                        end if 
-
-                        ! Check
-                        if (size(xint1) == 0 .and. size(xint2) == 0) then 
-                            exit
-                        else 
-                            ! Update k1
-                            k1 = k1 + 1
-                        end if
-                    end do 
-
-                    ! Set the minimal value
-                    tc%tubes(j)%l2minLOS(k2) = k1
-
-                    ! maxLOS
-                    k1 = tc%tubes(j)%l2minLOS(k2) ! start from minLOS
-                    do while (k1 <= l1%nv)
-                        ! Compute segment intersections 
-                        if (k2 > 1) then 
-                            ! Check for intersections in l1(1:k1-1)
-                            call SegmentSimplePolygonIntersections(l2%xv(1:k2-1), &
-                                l2%yv(1:k2-1), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
-                                xint, yint, sint)
-                            
-                            if (size(xint) > 0) then 
-                                ! Exit the loop
-                                exit
-                            end if  
-                        end if 
-                        if (k1 < l1%nv) then 
-                            ! Check for intersections in l1(k1+1:nv)
-                            call SegmentSimplePolygonIntersections(l2%xv(k2+1:l2%nv), &
-                                l2%yv(k2+1:l2%nv), l1%xv(k1), l1%yv(k1), l2%xv(k2), l2%yv(k2), &
-                                xint, yint, sint)
-                            
-                            if (size(xint) > 0) then 
-                                ! Exit the loop
-                                exit
-                            end if  
-                        end if 
-
-                        ! If we got here, update k1
-                        k1 = k1 + 1
-                    end do 
-
-                    ! Set the maximal value
-                    tc%tubes(j)%l2maxLOS(k2) = k1
-                end do 
-            end do 
-
-
-            ! Housekeeping
-            end associate
-        end do 
-
-
-    end subroutine
-
     ! Removal of duplicate faces in grid
     subroutine RemoveDuplicateGridFaces(ggtmdata, grid)
 
@@ -7688,29 +7477,7 @@ module ggmod_gridgeneration2D
         grid%cell%ntot = grid%cell%ntot + size(cellregion)
 
     end subroutine
-
-    ! Vertex removal
-    subroutine RemoveGGVert(grid, delind)
-
-        ! Description
-        !============
-        ! Remove vertices of the grid (without updating interconnection)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(GGGridUDT)            :: grid 
-        integer(I8), intent(in)     :: delind(:)
-
-        ! Remove
-        !=======
-        call grid%vert%x%Remove(delind)
-        call grid%vert%y%Remove(delind)
-        call grid%vert%fieldlineID%Remove(delind)
-        grid%vert%ntot = grid%vert%x%Size()
-
-    end subroutine
-
+    
     ! Face removal
     subroutine RemoveGGFace(grid, delind)
 
@@ -9354,27 +9121,8 @@ module ggmod_gridgeneration2D
 
         ! Initialize
         !===========
-        ! Check allocation status
-        if (allocated(linepair%l1minLOS)) then 
-            deallocate(linepair%l1minLOS)
-        end if 
-        if (allocated(linepair%l2minLOS)) then 
-            deallocate(linepair%l2minLOS)
-        end if 
-        if (allocated(linepair%l1maxLOS)) then 
-            deallocate(linepair%l1maxLOS)
-        end if 
-        if (allocated(linepair%l2maxLOS)) then 
-            deallocate(linepair%l2maxLOS)
-        end if 
 
         ! Allocate and initialize
-        allocate(linepair%l1minLOS(0), linepair%l1maxLOS(0), &
-            linepair%l2minLOS(0), linepair%l2maxLOS(0))
-        linepair%l1minLOS = 0_I8
-        linepair%l1maxLOS = 0_I8
-        linepair%l2minLOS = 0_I8
-        linepair%l2maxLOS = 0_I8
         linepair%srflabel = 0_I8
         linepair%erflabel = 0_I8
         linepair%isextendedstart = .false. 
@@ -12464,7 +12212,7 @@ module ggmod_gridgeneration2D
         type(TopomeshUDT), intent(in)           :: topomesh
 
         ! Auxiliary
-        integer(I8)                             :: tp, tploc, &
+        integer(I8)                             :: tp, &
             ndivface, ndiv, ps, pe
         integer(I8), allocatable, dimension(:)  :: primaryxp, &
             allpoints, divind, tpbf, tpf, tflabels, divface, sortind, &
