@@ -64,6 +64,16 @@ try:
 except: 
     print("Could not load the grid")
 
+# Structure
+try: 
+    # Load 
+    structure = dh.ReadStructureFile(structurename)
+
+    # Visualize
+    plotter.PlotStructure(structure, 2, linewidth=2)
+except:
+    print("Could not plot structure.dat")
+
 # Face labels
 try:
     # At this point, the simulation grid has to be loaded or it will not 
@@ -87,6 +97,13 @@ try:
 
 except: 
     print("Could not load the grid")
+
+try: 
+    plotter.PlotGridCells(simgrid, 5)
+    vals = dh.GetGeneral2DSurfaceData(datadir + '/' + 'gg_vd_radialdensityfunction.dat')
+    plotter.PlotGeneral2DContourf(vals[:, 0], vals[:, 1], vals[:, 2], 5)
+except:
+    print("Could not plot radial density distribution function")
 
 
 
