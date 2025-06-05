@@ -1355,7 +1355,7 @@ module PolygonLevelsetFunction2D
         !$omp private(xqr, yqr, vx, vy, dvn, tvn, dx, dy, theta, isinvert, &
         !$omp onedge, distedge, distvert, indmine, fe, signe, indminv, &
         !$omp fv, signv, totsign, indmin) if(.not. omp_in_parallel()) &
-        !$omp schedule(guided)
+        !$omp schedule(static)
         do iq = 1, nq
             
             ! Unpack
@@ -1861,7 +1861,7 @@ module PolygonLevelsetFunction2D
         !$omp private(xqr, yqr, vx, vy, dvn, tvn, dx, dy, theta, isinvert, &
         !$omp onedge, distedge, distvert, indmine, fe, signe, indminv, &
         !$omp fv, signv, totsign, indmin) if (.not. omp_in_parallel()) & 
-        !$omp schedule(guided)
+        !$omp schedule(static)
         do iq = 1, nq
             
             ! Unpack
