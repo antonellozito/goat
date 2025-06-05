@@ -2916,9 +2916,9 @@ module goatmod_types
         vcount = 1
         allocate(tempfcell(f%ntot, 2))
         tempfcell = 0
-        !$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
-        !$omp private(i, j, k, tv, ntv, tf, ind) &
-        !$omp shared(v, f, c, nv, nf, nc, fcount, tempfcell, vcount) 
+        !!$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
+        !!$omp private(i, j, k, tv, ntv, tf, ind) &
+        !!$omp shared(v, f, c, nv, nf, nc, fcount, tempfcell, vcount) 
         do i = 1, nc ! loop over all cells
             ! Get vertices of this cell
             tv = GetCellVert(c, i)
@@ -2994,7 +2994,7 @@ module goatmod_types
             deallocate(tv)
     
         end do
-        !$omp end parallel do
+        !!$omp end parallel do
     
         ! Construct cell arrays for faces and vertices
         fcount = fcount-1
@@ -3152,12 +3152,12 @@ module goatmod_types
         !========================================
         
         ! Loop over all vertices
-        !$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
-        !$omp private (i, j, tcs, nvc, cellfound, localID, allvertcells, &
-        !$omp sp, ep, tcf, startcellnotfound, thiscell, m, tc, fc, ncf, &
-        !$omp k, tcn, fn, q, vc, allnotfound, nextcell, allfv, allfvind, &
-        !$omp tcf2, ntcf2, tfv) &
-        !$omp shared (v, f, c, accountforGC)
+        !!$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
+        !!$omp private (i, j, tcs, nvc, cellfound, localID, allvertcells, &
+        !!$omp sp, ep, tcf, startcellnotfound, thiscell, m, tc, fc, ncf, &
+        !!$omp k, tcn, fn, q, vc, allnotfound, nextcell, allfv, allfvind, &
+        !!$omp tcf2, ntcf2, tfv) &
+        !!$omp shared (v, f, c, accountforGC)
         do i = 1, v%ntot ! v%ntot
     
             ! Check how many distinct cell sequences there are by checking 
@@ -3570,7 +3570,7 @@ module goatmod_types
             deallocate(allvertcells)
     
         end do
-        !$omp end parallel do 
+        !!$omp end parallel do 
     
         ! Add to grid
         !============
