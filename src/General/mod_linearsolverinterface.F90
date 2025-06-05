@@ -71,6 +71,9 @@ module mod_linearsolverinterface
     public SolveSparseLinearSystemDIDMUMPS ! sparse system solver (centralized - MUMPS)
 #endif
 
+    ! Assignment overwriting for constructors
+    public assignment(=)
+
     ! UMFPACK variables - hard coded here...
     integer(c_int) :: umfpack_a = 0
     integer(c_int) :: umfpack_control = 20
@@ -482,6 +485,11 @@ module mod_linearsolverinterface
         module procedure SolveDenseLinearSystemDI2D
     end interface
 
+    ! Interface assignment operator
+    interface assignment(=)
+        module procedure AssignDLinearSolverClass
+    end interface
+
     contains
 
     !==================================================================!
@@ -618,6 +626,51 @@ module mod_linearsolverinterface
         call ls%Initialize()
 
     end function 
+
+    ! Assignment
+    subroutine AssignDLinearSolverClass(a, b) 
+
+        ! Description
+        !============
+        ! Overloading of assignment operator to avoid memory issues
+        class(DLinearSolverUDT), allocatable, intent(inout)    :: a 
+        class(DLinearSolverUDT), intent(in)                    :: b 
+
+        print *, 'assigning solver class'
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+
+        select type (b)
+
+        class default 
+
+            call gdErrorHandler('Unknown type')
+
+        type is (DUMFPACKLinearSolverUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (DUMFPACKLinearSolverUDT)
+                a = b 
+            end select
+#ifdef MUMPS
+        type is (DMUMPSLinearSolverUDT)
+
+            allocate(a, source=b) ! this already does the job actually
+#endif 
+        type is (DLAPACKLinearSolverUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (DLAPACKLinearSolverUDT)
+                a = b
+            end select
+
+        end select
+        print *, 'assigned solver class'
+
+    end subroutine
 
     ! UMFPACK
     !========

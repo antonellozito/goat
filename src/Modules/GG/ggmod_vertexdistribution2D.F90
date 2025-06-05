@@ -283,24 +283,24 @@ module ggmod_vertexdistribution2D
         ! Declare variables
         !==================
         ! Arguments
-        class(VertexDistributor2DUDT), allocatable :: vd 
+        type(UniformVertexDistributor2DUDT) :: vd 
         real(R8), intent(in)                    :: d, fd
 
         ! Initialize
         !===========
         ! Allocate
-        allocate(UniformVertexDistributor2DUDT::vd)
+        !allocate(UniformVertexDistributor2DUDT::vd)
 
         ! Set the fields
-        select type (vd)
+        !select type (vd)
 
-        type is (UniformVertexDistributor2DUDT)
+        !type is (UniformVertexDistributor2DUDT)
 
             ! Set parameters
             vd%d = d ! distance 
             vd%fd = fd ! field distance
 
-        end select 
+        !end select 
 
     end function 
 
@@ -319,7 +319,7 @@ module ggmod_vertexdistribution2D
         ! Declare variables
         !==================
         ! Arguments
-        class(VertexDistributor2DUDT), allocatable  :: vd 
+        type(DensityBasedVertexDistributor2DUDT)  :: vd 
         class(DistributionFunctionUDT), intent(in)  :: distribution
         integer(I8), intent(in)                     :: order
 
@@ -330,12 +330,12 @@ module ggmod_vertexdistribution2D
         ! Initialize
         !===========
         ! Allocate
-        allocate(DensityBasedVertexDistributor2DUDT::vd)
+        !allocate(DensityBasedVertexDistributor2DUDT::vd)
 
         ! Initialize
-        select type(vd)
+        !select type(vd)
 
-        type is (DensityBasedVertexDistributor2DUDT)
+        !type is (DensityBasedVertexDistributor2DUDT)
 
             ! Set some fields
             vd%order = order
@@ -346,7 +346,7 @@ module ggmod_vertexdistribution2D
             call ConstructLagrangianBasisFunctions(vd%order, vd%xi, &
                 vd%lagcoef, vd%intlagcoef)
 
-        end select
+        !end select
 
     end function
 
@@ -365,24 +365,24 @@ module ggmod_vertexdistribution2D
         ! Declare variables
         !==================
         ! Arguments
-        class(FieldDistributor1DUDT), allocatable   :: vd 
+        type(UniformFieldDistributor1DUDT)   :: vd 
         real(R8), intent(in)                        :: d, fd
 
         ! Initialize
         !===========
         ! Allocate
-        allocate(UniformFieldDistributor1DUDT::vd)
+        !allocate(UniformFieldDistributor1DUDT::vd)
 
         ! Set the fields
-        select type (vd)
+        !select type (vd)
 
-        type is (UniformFieldDistributor1DUDT)
+        !type is (UniformFieldDistributor1DUDT)
 
             ! Set parameters
             vd%d = d ! distance 
             vd%fd = fd ! field distance
 
-        end select 
+        !end select 
 
     end function 
 

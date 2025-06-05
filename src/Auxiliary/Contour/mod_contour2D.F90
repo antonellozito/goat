@@ -28,6 +28,7 @@ module mod_contour2D
     private 
     public :: ContourUDT, TraceContoursStructured2D, ContourTracerUDT, &
         StructuredContourTracerUDT, ConstructStructuredTracer, CleanContours
+    public assignment(=)
 
     ! Module parameters
     integer, parameter  :: npq          = 4 ! number of padding quads for 2D tracer to determine saddle points
@@ -253,6 +254,11 @@ module mod_contour2D
         module procedure AddContourScalar
     end interface
 
+    ! Operator overloading
+    interface assignment(=)
+        module procedure AssignContourTracer2DClass
+    end interface
+
     contains 
 
     !==================================================================!
@@ -305,7 +311,7 @@ module mod_contour2D
         ! Declare variables
         !==================
         ! Arguments
-        class(ContourTracerUDT), allocatable    :: tracer 
+        type(StructuredContourTracerUDT)    :: tracer 
         real(R8), intent(in), dimension(:)      :: X, Y, xs, ys, vs 
         real(R8), intent(in)                    :: V(:, :), dl
         integer(I8), intent(in), dimension(:)   :: IDs
@@ -319,14 +325,14 @@ module mod_contour2D
         ! Initialize
         !===========
         ! Allocate
-        allocate(StructuredContourTracerUDT::tracer) 
+        !allocate(StructuredContourTracerUDT::tracer) 
         allocate(order(size(xs)))
 
         ! Set values
         !===========
-        select type (tracer)
+        !select type (tracer)
 
-        type is (StructuredContourTracerUDT)
+        !type is (StructuredContourTracerUDT)
 
             tracer%dl = dl 
             if (npmin <= 2) then 
@@ -353,11 +359,43 @@ module mod_contour2D
             tracer%xg = xg 
             tracer%yg = yg
 
+        !class default 
+
+        !end select
+
+    end function 
+
+    ! Assignment overloading
+    subroutine AssignContourTracer2DClass(a, b)
+
+        class(ContourTracerUDT), allocatable, intent(inout)    :: a 
+        class(ContourTracerUDT), intent(in)                    :: b 
+
+        print *, 'assigning tracer'
+
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+
+        select type (b)
+
         class default 
+
+            call gdErrorHandler('Unknown type')
+
+        type is (StructuredContourTracerUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (StructuredContourTracerUDT)
+                a = b 
+            end select
 
         end select
 
-    end function 
+        print *, 'assigned tracer'
+    
+    end subroutine
 
     !------------------------------------------------------------------!
     !                              TRACERS                             !
@@ -3232,6 +3270,12 @@ module mod_contour2D
         lambda3 = 1 - lambda1 - lambda2
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                            OVERLOADING                           !
+    !------------------------------------------------------------------!
+
+    ! Assignment
 
 
     
