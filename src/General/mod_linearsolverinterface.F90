@@ -39,6 +39,7 @@ module mod_linearsolverinterface
     use mod_sparseinterface
     use mod_errorhandler
     use mod_inputfileparser
+    use omp_lib
 
     ! Binding with C
     use, intrinsic :: iso_c_binding 
@@ -1357,9 +1358,17 @@ module mod_linearsolverinterface
         ! Adjust memory consumption
         ls%mumps_par%icntl(14) = 1000 ! typically we need quite a lot of additional memory than estimated
 
+        ! Set the number of threads to be used for openmp
+        ls%mumps_par%icntl(16) = omp_get_max_threads()
+
+        ! Set tree multithreading
+        ls%mumps_par%icntl(48) = 0
+
         ! Print a message
         if (ls%verbosity > 1) then 
             print *, 'InitializeDMUMPSSolver: solver initialized'
+            print *, 'number of threads: ', ls%mumps_par%icntl(16)
+            print *, 'tree multithreading: ', ls%mumps_par%icntl(48)
         end if 
 
     end subroutine
@@ -1452,6 +1461,7 @@ module mod_linearsolverinterface
         integer(I8), intent(out)            :: flag 
 
         ! Auxiliary
+        logical                             :: doana, doalloc, dodealloc 
 
         ! Check
         !======
@@ -1477,6 +1487,25 @@ module mod_linearsolverinterface
 
         ! Initialize
         !===========
+        ! Check if a matrix was already allocated
+        doana = .true. 
+        doalloc = .true. 
+        dodealloc = .true. 
+        if (associated(ls%mumps_par%irn)) then 
+            ! Check if we can skip the analysis phase 
+            if (ls%mumps_par%nnz == A%nval .and. ls%mumps_par%n == A%nrow) then 
+                doalloc = .false. 
+                if (all((ls%mumps_par%irn - A%row) == 0) .and. &
+                    all((ls%mumps_par%jcn - A%col) == 0)) then 
+                    doana = .false.
+                    dodealloc = .false. 
+                end if 
+            end if 
+        else
+            ! Not yet allocated - don't deallocate
+            dodealloc = .false. 
+        end if
+
         ! Define problem on the host (process 0)
         if (ls%mumps_par%myid == 0) then 
             ! Initialize
@@ -1486,8 +1515,14 @@ module mod_linearsolverinterface
 
 
             ! Allocate
-            allocate(ls%mumps_par%irn(ls%mumps_par%nnz), ls%mumps_par%jcn(ls%mumps_par%nnz), &
-                ls%mumps_par%A(ls%mumps_par%nnz), ls%mumps_par%rhs(ls%mumps_par%n))
+            if (dodealloc) then 
+                deallocate(ls%mumps_par%irn, ls%mumps_par%jcn, &
+                    ls%mumps_par%A, ls%mumps_par%rhs)
+            end if 
+            if (doalloc) then 
+                allocate(ls%mumps_par%irn(ls%mumps_par%nnz), ls%mumps_par%jcn(ls%mumps_par%nnz), &
+                    ls%mumps_par%A(ls%mumps_par%nnz), ls%mumps_par%rhs(ls%mumps_par%n))
+            end if 
             
             ! Assign
             ls%mumps_par%irn    = A%row 
@@ -1498,8 +1533,10 @@ module mod_linearsolverinterface
         end if 
 
         ! Call package for solution
-        ls%mumps_par%job = 1 ! Analyze
-        call dmumps(ls%mumps_par)
+        if (doana) then 
+            ls%mumps_par%job = 1 ! Analyze
+            call dmumps(ls%mumps_par)
+        end if 
         
         ls%mumps_par%job = 2 ! factorize
         call dmumps(ls%mumps_par)
@@ -1522,10 +1559,10 @@ module mod_linearsolverinterface
         end if 
 
         ! Deallocate data
-        if (ls%mumps_par%myid == 0) then 
-            deallocate(ls%mumps_par%irn, ls%mumps_par%jcn, &
-                ls%mumps_par%A, ls%mumps_par%rhs)
-        end if 
+        !if (ls%mumps_par%myid == 0) then 
+        !    deallocate(ls%mumps_par%irn, ls%mumps_par%jcn, &
+        !        ls%mumps_par%A, ls%mumps_par%rhs)
+        !end if 
 
     end subroutine
 
