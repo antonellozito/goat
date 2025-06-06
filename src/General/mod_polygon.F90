@@ -91,6 +91,7 @@ module mod_polygon
     use mod_plotter
     use mod_sort
     use mod_constants, only : pi_R8
+    use omp_lib
 
     ! The usual
     implicit none
@@ -2672,13 +2673,13 @@ module mod_polygon
         integer(I8)             :: i, j, k, spind
     
         ! Auxiliary
-        integer(I8)                 :: nv, nremedges, nextremedge, &
-                                    tc1, tc2
+        integer(I8)                 :: nv, nremedges, nextremedge
     
         logical                     :: allbranchingfound
         logical, allocatable        :: isedgesorted(:), isremedgesorted(:), &
             mask(:), isbranchingvertex(:, :), remisbranching(:, :), &
-            hasbv(:), sortedisbranchingvertex(:, :), pvb(:)
+            hasbv(:), sortedisbranchingvertex(:, :), pvb(:), &
+            isnonbranchingstartvertex(:, :)
     
         integer(I8)                 :: pID, ind 
         integer(I8), allocatable    :: remedges(:,:), edgeID(:), &
@@ -2717,9 +2718,11 @@ module mod_polygon
         allv = [pein(:, 1), pein(:, 2)]
         call CountOccurrence(allv, oc, el, sortindoc=sortind, sortindel=sortind2)
         alloc = oc(sortind)
-        allocate(isbranchingvertex(ne, 2))
+        allocate(isbranchingvertex(ne, 2), isnonbranchingstartvertex(ne, 2))
         isbranchingvertex(:, 1) = alloc(1:ne) > 2_I8
-        isbranchingvertex(:, 2) = alloc(ne+1:2*ne) > 2_I8
+        isbranchingvertex(:, 2) = alloc(ne+1:2*ne) > 2_I8 
+        isnonbranchingstartvertex(:, 1) = alloc(1:ne) == 1_I8
+        isnonbranchingstartvertex(:, 2) = alloc(ne+1:2*ne) == 1_I8
     
         ! Loop
         allbranchingfound = count(isbranchingvertex) == 0
@@ -2807,13 +2810,13 @@ module mod_polygon
             do while ((startfound .eqv. .false.) .and. (k <= nremedges))
 
                 ! Count how many times the current edge vertices occur
-                tc1 = count(remedges(:,1) == remedges(k,1)) & 
-                    + count(remedges(:,2) == remedges(k,1))
-                tc2 = count(remedges(:,1) == remedges(k,2)) & 
-                    + count(remedges(:,2) == remedges(k,2))
+                !tc1 = count(remedges(:,1) == remedges(k,1)) & 
+                !    + count(remedges(:,2) == remedges(k,1))
+                !tc2 = count(remedges(:,1) == remedges(k,2)) & 
+                !    + count(remedges(:,2) == remedges(k,2))
     
                 ! Check & add
-                if (tc1 == 1) then
+                if (isnonbranchingstartvertex(remedgeID(k), 1)) then
                     ! Found a start vertex
                     startfound = .true.
                     nv = remedges(k,2) ! next vertex
@@ -2827,7 +2830,7 @@ module mod_polygon
                     ! Update indices
                     k = k+1
                     spind = spind+1
-                else if (tc2 == 1) then
+                else if (isnonbranchingstartvertex(remedgeID(k), 2)) then
                     ! Found a start vertex
                     startfound = .true.
                     nv = remedges(k,1) ! next vertex
@@ -2841,7 +2844,7 @@ module mod_polygon
                     ! Update counters
                     k = k+1
                     spind = spind+1
-                else if ((tc1 > 2) .or. (tc2 > 2)) then
+                else if (isbranchingvertex(remedgeID(k), 1) .or. isbranchingvertex(remedgeID(k), 2)) then
                     ! Polygon branches, throw error
                     call gdErrorHandler('SortPolygonEdges: branching polygon detected, not supported')
                 else
@@ -4705,6 +4708,11 @@ module mod_polygon
         ! Compute intersections
         !======================
         ! Loop over p2
+        !$omp parallel do default(none) schedule(dynamic) if(.not. omp_in_parallel()) &
+        !$omp shared(x1, y1, x2, y2, counter, sz, tempx, tempy, temps1, &
+        !$omp temps2, temps1r, temps2r, szmult) &
+        !$omp private(i, xe1, ye1, xe2, ye2, xi, yi, si, ni, szold, &
+        !$omp mgmti, mgmtr)
         do i = 1, size(x2)-1 
             ! Get coordinates of next polygon edge
             xe1 = x2(i)
@@ -4721,7 +4729,9 @@ module mod_polygon
             ni = size(xi)
             if (ni > 0) then 
                 ! Memory MGMT
+                !$omp critical
                 if (counter + ni > sz) then 
+                    
                     ! Store old size
                     szold = sz
 
@@ -4760,8 +4770,10 @@ module mod_polygon
 
                 ! Update counter
                 counter = counter + ni
+                !$omp end critical
             end if 
         end do  
+        !$omp end parallel do
 
         ! Add to output
         allocate(x(counter), y(counter), s1(counter), s2(counter)) 

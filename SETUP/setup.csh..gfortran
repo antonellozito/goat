@@ -1,0 +1,2 @@
+setenv DMUMPS_LPATH "-L../../MUMPS_5.8.0/lib -lsmumps -ldmumps -lmumps_common -L/usr/lib  -lparmetis -lmetis -L../../PORD/lib/ -lpord -L/usr/lib -lptesmumps -lptscotch -lptscotcherr -lscalapack-openmpi  -llapack   -lblas -lpthread"
+setenv DMUMPS_IPATH "-I../../MUMPS_5.8.0/include"

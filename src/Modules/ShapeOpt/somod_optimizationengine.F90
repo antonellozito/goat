@@ -67,6 +67,7 @@ module somod_optimizationengine
         type(DesignOptionsSOUDT)            :: designoptions 
         type(CGStructureUDT), allocatable   :: congroups(:) 
         type(DOFGStructureUDT), allocatable :: dofgroups(:)
+        logical                             :: doremesh 
         
     contains
 
@@ -274,6 +275,11 @@ module somod_optimizationengine
 
         ! Design options
         problem%designoptions%inputfilepath = problem%inputfilepath
+
+        ! Remeshing
+        !==========
+        ! Initialize to false
+        problem%doremesh = .false. 
 
         ! Design options
         !===============

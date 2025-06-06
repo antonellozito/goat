@@ -390,16 +390,17 @@ class GGVert:
     def __init__(self):
         # Number
         self.ntot = 0
+        nv = self.ntot
 
         # coordinates
-        self.x = np.zeros(0, dtype=float)
-        self.y = np.zeros(0, dtype=float)
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
 
         # ID
-        self.ID =  np.zeros(0, dtype=int)
+        self.ID =  np.zeros(nv, dtype=int)
 
         # Fieldline ID
-        self.fieldlineID = np.zeros(0, dtype=int)
+        self.fieldlineID = np.zeros(nv, dtype=int)
 
     # Initializer
     def Initialize(self, nv):
@@ -457,19 +458,20 @@ class GGCell:
         # Number
         self.ntot = 0
         self.nvert = 0
+        nc = self.ntot 
 
         # Vertex pointer
-        self.vp1 = np.zeros(0, dtype=int)
-        self.vp2 = np.zeros(0, dtype=int)
+        self.vp1 = np.zeros(nc, dtype=int)
+        self.vp2 = np.zeros(nc, dtype=int)
         
         # Vertices
-        self.vert = np.zeros(0, dtype=int)
+        self.vert = np.zeros(nc, dtype=int)
 
         # ID
-        self.ID =  np.zeros(0, dtype=int)
+        self.ID =  np.zeros(nc, dtype=int)
 
         # Region
-        self.region = np.zeros(0, dtype=int)
+        self.region = np.zeros(nc, dtype=int)
 
     # Initializer
     def Initialize(self, nc, ncv):
@@ -513,6 +515,7 @@ class Vert:
     def __init__(self):
         # Number
         self.ntot = 0
+        nv = self.ntot
 
         # Coordinates
         self.x = np.zeros(0, dtype=float)
@@ -529,6 +532,11 @@ class Vert:
 
         # Fieldline ID
         self.fieldlineID = np.zeros(0, dtype=int)
+
+        # Metrics
+        self.bb = np.zeros((nv, 4), dtype=float)
+        self.ffbz = np.zeros(nv, dtype=float)
+        self.fspsi = np.zeros(nv, dtype=float)
 
     # Initializer
     def Initialize(self, nv):
@@ -556,6 +564,11 @@ class Vert:
         self.cp2 = np.zeros(nv, dtype=int)
         self.cell = np.zeros(0, dtype=int) # To be determined in grid interconnections
 
+        # Metrics
+        self.bb = np.zeros((nv, 4), dtype=float)
+        self.ffbz = np.zeros(nv, dtype=float)
+        self.fspsi = np.zeros(nv, dtype=float)
+
     def GetCell(self, i):
         return self.cell[self.cp1[i]:self.cp1[i]+self.cp2[i]]
 
@@ -565,6 +578,7 @@ class Face:
     def __init__(self):
         # Number
         self.ntot = 0 
+        nf = self.ntot
 
         # Vertices
         self.v1 = np.zeros(0, dtype=int)
@@ -587,6 +601,16 @@ class Face:
         # Coordinates
         self.x = np.zeros(0, dtype=float)
         self.y = np.zeros(0, dtype=float)
+
+        # Metrics
+        self.bb = np.zeros((nf, 4), dtype=float)
+        self.s = np.zeros(nf, dtype=float)
+        self.hc = np.zeros((nf, 4), dtype=float)
+        self.ht = np.zeros(nf, dtype=float)
+        self.qgam = np.zeros((nf, 2), dtype=float)
+        self.qalf = np.zeros((nf, 2), dtype=float)
+        self.qbet = np.zeros((nf, 2), dtype=float)
+        self.pbs = np.zeros(nf, dtype=float)
 
     # Initializer
     def Initialize(self, nf):
@@ -615,6 +639,16 @@ class Face:
         self.x = np.zeros(nf, dtype=float)
         self.y = np.zeros(nf, dtype=float)
 
+        # Metrics
+        self.bb = np.zeros((nf, 4), dtype=float)
+        self.s = np.zeros(nf, dtype=float)
+        self.hc = np.zeros((nf, 4), dtype=float)
+        self.ht = np.zeros(nf, dtype=float)
+        self.qgam = np.zeros((nf, 2), dtype=float)
+        self.qalf = np.zeros((nf, 2), dtype=float)
+        self.qbet = np.zeros((nf, 2), dtype=float)
+        self.pbs = np.zeros(nf, dtype=float)
+
 # Grid cells
 class Cell:
     # Definition
@@ -625,6 +659,7 @@ class Cell:
         self.ncg = 0 # number of guard cells 
         self.nci = 0 # number of internal (non-guard) cells
         self.ntot = self.ncg + self.nci 
+        nc = self.ntot
 
         # Vertex pointer
         self.vp1 = np.zeros(0, dtype=int)
@@ -663,6 +698,15 @@ class Cell:
         self.cflags = np.zeros(0, dtype=int)
         self.region = np.zeros(0, dtype=int)
         self.ft     = np.zeros(0, dtype=int)
+
+        # Metrics
+        self.bb = np.zeros((nc, 4), dtype=float)
+        self.zb = np.zeros((nc, 3), dtype=float)
+        self.sz = np.zeros(nc, dtype=int)
+        self.hz = np.zeros(nc, dtype=int)
+        self.hx = np.zeros(nc, dtype=int)
+        self.qgam = np.zeros((nc, 2), dtype=int)
+        self.vol = np.zeros(nc, dtype=int)
 
     # Initializer
     def Initialize(self, nci, ncg, ncv, ncf):
@@ -711,6 +755,15 @@ class Cell:
         self.cflags = np.zeros(nc, dtype=int)
         self.region = np.zeros(nc, dtype=int)
         self.ft     = np.zeros(nc, dtype=int)
+
+        # Metrics
+        self.bb = np.zeros((nc, 4), dtype=float)
+        self.zb = np.zeros((nc, 3), dtype=float)
+        self.sz = np.zeros(nc, dtype=int)
+        self.hz = np.zeros(nc, dtype=int)
+        self.hx = np.zeros(nc, dtype=int)
+        self.qgam = np.zeros((nc, 2), dtype=int)
+        self.vol = np.zeros(nc, dtype=int)
 
     # Vertex getter
     def GetVert(self, i):

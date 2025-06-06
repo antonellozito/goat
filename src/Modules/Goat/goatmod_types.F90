@@ -846,6 +846,15 @@ module goatmod_types
         if (allocated(grid%data%divFc)) deallocate(grid%data%divFc)
         if (allocated(grid%data%spointdivID)) deallocate(grid%data%spointdivID)
         if (allocated(grid%data%tpointdivID)) deallocate(grid%data%tpointdivID)
+
+        ! Read data for structured grid remapping (to be deleted in future)
+        call cfruin (filespec,1,idum2,'isClassicalGrid') 
+        grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4) ! cast to I4 type
+        if (grid%data%sglegacy%isClassicalGrid == 1) then 
+            call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
+            grid%data%sglegacy%nx = idum(0)
+            grid%data%sglegacy%ny = idum(1)
+        end if
         
         ! Read topological data
         if (readTopologicalData) then 
@@ -854,7 +863,7 @@ module goatmod_types
             grid%data%topoflag = idum(0)
     
             ! Read number of topological points
-            call cfruin(filespec, 6, idum, 'nX,nO,nS,nT,Div,nDivFc')
+            call cfruin(filespec, 6, idum, 'nX,nO,nS,nT,nDiv,nDivFc')
             grid%data%nxp = idum(0)
             grid%data%nop = idum(1)
             grid%data%nsp = idum(2)
@@ -866,7 +875,8 @@ module goatmod_types
             allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
                 grid%data%spointID(idum(2)), grid%data%isprimaryxp(idum(0)), &
                 grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
-                grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp))
+                grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
+                grid%data%spointxpID(i))
     
             ! Read X-point data
             call ReadSingleLine(filespec, chardummy, reachedeof) ! header
@@ -945,16 +955,7 @@ module goatmod_types
         allocate(fsdummyr(grid%data%fluxdata%nFs))
         allocate(facelistdummy(grid%cell%nface))
         allocate(ftdummy(grid%data%fluxdata%nFt))
-    
-        ! Read data for structured grid remapping (to be deleted in future)
-        call cfruin (filespec,1,idum2,'isClassicalGrid') 
-        grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4) ! cast to I4 type
-        if (grid%data%sglegacy%isClassicalGrid == 1) then 
-            call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
-            grid%data%sglegacy%nx = idum(0)
-            grid%data%sglegacy%ny = idum(1)
-        end if
-    
+        
         ! Attempt to read in OMP/IMP data 
         !--------------------------------
         ! OMP
@@ -2915,6 +2916,9 @@ module goatmod_types
         vcount = 1
         allocate(tempfcell(f%ntot, 2))
         tempfcell = 0
+        !!$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
+        !!$omp private(i, j, k, tv, ntv, tf, ind) &
+        !!$omp shared(v, f, c, nv, nf, nc, fcount, tempfcell, vcount) 
         do i = 1, nc ! loop over all cells
             ! Get vertices of this cell
             tv = GetCellVert(c, i)
@@ -2953,15 +2957,17 @@ module goatmod_types
                             'ComputeGridInterconnections: too many ' &
                                 // 'neighbours for this face')
                         end if
-    
                     
+                        !$omp critical
                         tempfcell(tf,fcount(tf)) = i
     
                         ! Update fcount
                         fcount(tf) = fcount(tf)+1
+                        !$omp end critical
                     end if
     
                     ! Add the current cell to the j'th vertex
+                    !$omp critical
                     ind = v%cellP(tv(j),1) + vcount(tv(j)) - 1
                     if (ind > v%ncell) then
                         call gdErrorHandler('unknown error')
@@ -2970,7 +2976,7 @@ module goatmod_types
     
                     ! Update vcount
                     vcount(tv(j)) = vcount(tv(j))+1
-    
+                    
                     ! Add cell face
                     if (.not. ((j > 1) .and. c%GC(i))) then ! hedge for guard cells
                         ind = c%faceP(i,1) + j - 1
@@ -2979,6 +2985,7 @@ module goatmod_types
                         end if
                         c%face(ind) = tf
                     end if
+                    !$omp end critical
                 end if
     
             end do
@@ -2987,6 +2994,7 @@ module goatmod_types
             deallocate(tv)
     
         end do
+        !!$omp end parallel do
     
         ! Construct cell arrays for faces and vertices
         fcount = fcount-1
@@ -3144,6 +3152,12 @@ module goatmod_types
         !========================================
         
         ! Loop over all vertices
+        !!$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
+        !!$omp private (i, j, tcs, nvc, cellfound, localID, allvertcells, &
+        !!$omp sp, ep, tcf, startcellnotfound, thiscell, m, tc, fc, ncf, &
+        !!$omp k, tcn, fn, q, vc, allnotfound, nextcell, allfv, allfvind, &
+        !!$omp tcf2, ntcf2, tfv) &
+        !!$omp shared (v, f, c, accountforGC)
         do i = 1, v%ntot ! v%ntot
     
             ! Check how many distinct cell sequences there are by checking 
@@ -3417,6 +3431,7 @@ module goatmod_types
                             ! if the current cell is not a guard cell
                             
                             sp = v%cellP(i,1)
+                            !$omp critical
                             v%cell(sp) = thiscell 
                             if (.not. c%GC(thiscell)) then
                                 sp = v%neigP(i,1)
@@ -3430,6 +3445,7 @@ module goatmod_types
                                 ! Update vc
                                 vc = vc+1
                             end if
+                            !$omp end critical
     
                             ! Housekeeping
                             deallocate(allfvind)
@@ -3440,6 +3456,7 @@ module goatmod_types
     
                         ! Add the cell and vertex neighbour
                         sp = v%cellP(i,1) + vc
+                        !$omp critical
                         v%cell(sp) = nextcell
                         sp = v%neigP(i,1) + vc
                         tfv = f%vert(tcf,:)
@@ -3448,6 +3465,7 @@ module goatmod_types
                         else
                             v%neig(sp) = tfv(1)
                         end if
+                        !$omp end critical
     
                         ! Update counter
                         vc = vc + 1
@@ -3523,11 +3541,13 @@ module goatmod_types
                     ! Add cell and vertex neighbour
                     sp = v%neigP(i,1) + vc
                     tfv = f%vert(tcf2(1),:)
+                    !$omp critical
                     if (tfv(1) == i) then
                         v%neig(sp) = tfv(2)
                     else
                         v%neig(sp) = tfv(1)
                     end if
+                    !$omp end critical
     
                     ! Housekeeping
                     deallocate(allfvind)
@@ -3550,14 +3570,7 @@ module goatmod_types
             deallocate(allvertcells)
     
         end do
-    
-        !do i = 1, v%ntot 
-        !    print *, i, v%BV(i), v%neig(v%neigP(i,1):v%neigP(i,1)+v%neigP(i,2)-1)
-        !end do
-        !    do i = 1, v%ntot 
-        !    print *, i, v%BV(i), v%cell(v%cellP(i,1):v%cellP(i,1)+v%cellP(i,2)-1)
-        !end do
-        
+        !!$omp end parallel do 
     
         ! Add to grid
         !============

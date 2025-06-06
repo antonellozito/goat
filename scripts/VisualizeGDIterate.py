@@ -12,13 +12,12 @@ import os
 #-----------
 # figure data
 fignum = 0 # counter
-maxfignum = 8 # total number of figures to be plotted
+maxfignum = 9 # total number of figures to be plotted
 
 # Data directory
 #---------------
 # Check if solps is present
 datadir = dh.GetDataDirectory()
-datadir = '/mnt/c/Users/u0110555/Desktop/code_werk/goatf/goatf/Runs/DEMO_P2/output'
 
 # Print
 print('VisualizeGDInput: reading from directory: ' + datadir)
@@ -32,9 +31,6 @@ try:
 
 except:
     print("could not plot initial grid")
-#plotter.PlotGridCellsFromFile(datadir, 1)
-#plotter.PlotGridCellsIterate(datadir, 0)
-#plotter.PlotVesselPolygon(datadir, -1)
 
 # Cost function
 #--------------
@@ -95,11 +91,19 @@ fignum = fignum + 1
 
 
 
+
 # orthogonality
 try: 
     plotter.PlotOrthogonalityConstraintValueAtVertices(datadir, fignum)
 except: 
     print("could not plot orthogonality constraint value")
+fignum = fignum + 1
+
+try: 
+    # Plot active inequality constraints
+    plotter.PlotActiveLinefoldingConstraintsIterate(datadir, fignum)
+except: 
+    print("could not plot active inequality constraints")
 fignum = fignum + 1
 
 # Show figures

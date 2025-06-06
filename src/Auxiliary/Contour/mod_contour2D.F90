@@ -28,6 +28,7 @@ module mod_contour2D
     private 
     public :: ContourUDT, TraceContoursStructured2D, ContourTracerUDT, &
         StructuredContourTracerUDT, ConstructStructuredTracer, CleanContours
+    public assignment(=)
 
     ! Module parameters
     integer, parameter  :: npq          = 4 ! number of padding quads for 2D tracer to determine saddle points
@@ -253,6 +254,11 @@ module mod_contour2D
         module procedure AddContourScalar
     end interface
 
+    ! Operator overloading
+    interface assignment(=)
+        module procedure AssignContourTracer2DClass
+    end interface
+
     contains 
 
     !==================================================================!
@@ -305,7 +311,7 @@ module mod_contour2D
         ! Declare variables
         !==================
         ! Arguments
-        class(ContourTracerUDT), allocatable    :: tracer 
+        type(StructuredContourTracerUDT)    :: tracer 
         real(R8), intent(in), dimension(:)      :: X, Y, xs, ys, vs 
         real(R8), intent(in)                    :: V(:, :), dl
         integer(I8), intent(in), dimension(:)   :: IDs
@@ -319,14 +325,14 @@ module mod_contour2D
         ! Initialize
         !===========
         ! Allocate
-        allocate(StructuredContourTracerUDT::tracer) 
+        !allocate(StructuredContourTracerUDT::tracer) 
         allocate(order(size(xs)))
 
         ! Set values
         !===========
-        select type (tracer)
+        !select type (tracer)
 
-        type is (StructuredContourTracerUDT)
+        !type is (StructuredContourTracerUDT)
 
             tracer%dl = dl 
             if (npmin <= 2) then 
@@ -353,11 +359,43 @@ module mod_contour2D
             tracer%xg = xg 
             tracer%yg = yg
 
+        !class default 
+
+        !end select
+
+    end function 
+
+    ! Assignment overloading
+    subroutine AssignContourTracer2DClass(a, b)
+
+        class(ContourTracerUDT), allocatable, intent(inout)    :: a 
+        class(ContourTracerUDT), intent(in)                    :: b 
+
+        print *, 'assigning tracer'
+
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+
+        select type (b)
+
         class default 
+
+            call gdErrorHandler('Unknown type')
+
+        type is (StructuredContourTracerUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (StructuredContourTracerUDT)
+                a = b 
+            end select
 
         end select
 
-    end function 
+        print *, 'assigned tracer'
+    
+    end subroutine
 
     !------------------------------------------------------------------!
     !                              TRACERS                             !
@@ -508,10 +546,13 @@ module mod_contour2D
  
         ! Main loop
         !==========
-        !$omp parallel default(private) shared(tracevalues, V, X, Y, &
-        !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
-        !$omp contours) firstprivate(spstruct) if(size(tracevalues) > 4)
-        !$omp do 
+        !$omp parallel default(none) if(.not. omp_in_parallel()) &
+        !$omp shared(tracevalues, V, X, Y, superquadflags, &
+        !$omp superquadfacexflags, superquadfaceyflags, nx, ny, &
+        !$omp contours) &
+        !$omp private(i, tv, tempcontours, j) & 
+        !$omp firstprivate(spstruct) 
+        !$omp do schedule(dynamic) 
         do i = 1, size(tracevalues)
             ! Get current trace value
             tv = tracevalues(i)
@@ -699,9 +740,11 @@ module mod_contour2D
 
         ! Main loop
         !==========
-        !$omp parallel do default(private) shared(xt, yt, nt, V, X, Y, &
-        !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
-        !$omp contours) firstprivate(spstruct) if(nt > 4)
+        !$omp parallel do default(none) if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp shared(xt, yt, nt, V, X, Y, superquadflags, &
+        !$omp superquadfacexflags, superquadfaceyflags, nx, ny, contours) &
+        !$omp private(txt, tyt, i, j, tempcontours) & 
+        !$omp firstprivate(spstruct) 
         do i = 1, nt
             ! Get current trace value
             txt = xt(i)
@@ -2874,7 +2917,7 @@ module mod_contour2D
 
         ! Initial values
         quadflags = 0 ! default: no value
-        !$omp parallel workshare
+        !$omp parallel workshare if(.not. omp_in_parallel())
         c1 = hasvv(1:nv1-1, 1:nv2-1)
         c2 = hasvv(2:nv1, 1:nv2-1)
         c3 = hasvv(2:nv1, 2:nv2) 
@@ -2967,14 +3010,16 @@ module mod_contour2D
         ! Auxiliary
         logical, allocatable                    :: delind(:)
         real(R8), allocatable                   :: dx(:), dy(:)
+        logical                                 :: do_parallel
 
         ! Loop
         integer(I8)                             :: i 
         
         ! Clean
         !======
+        do_parallel = omp_in_parallel()
         !$omp parallel do default(none) private(dx, dy, delind) &
-        !$omp shared(contours)
+        !$omp shared(contours) schedule(static) if(do_parallel)
         do  i = 1, size(contours)
             dx = contours(i)%x(2:size(contours(i)%x)) - &
                 contours(i)%x(1:size(contours(i)%x)-1)
@@ -3109,6 +3154,7 @@ module mod_contour2D
         real(R8)                        :: x1, y1, dx1, dy1, dx1p, dy1p, &
             x2, y2, dx2, dy2, dx2p, dy2p, x3, y3, dx3, dy3, dx3p, dy3p, & 
             cp(1:3)
+        logical                         :: do_parallel
 
         ! Loop
         integer(I8)                         :: i 
@@ -3137,7 +3183,11 @@ module mod_contour2D
         ! Compute
         !========
         ! Loop
-        !$omp parallel do default(private) shared(v1, v2, v3, x, y, in, on, xp, yp)
+        do_parallel = .not. omp_in_parallel()
+        !$omp parallel do default(none) schedule(static) if (do_parallel) &
+        !$omp shared(v1, v2, v3, x, y, in, on, xp, yp) &
+        !$omp private(i, x1, x2, x3, y1, y2, y3, dx1, dx2, dx3, dy1, dy2, dy3, &
+        !$omp dx1p, dx2p, dx3p, dy1p, dy2p, dy3p, cp)
         do i = 1, size(v1)
             ! Get coordinates
             x1 = x(v1(i))
@@ -3220,6 +3270,12 @@ module mod_contour2D
         lambda3 = 1 - lambda1 - lambda2
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                            OVERLOADING                           !
+    !------------------------------------------------------------------!
+
+    ! Assignment
 
 
     

@@ -17,6 +17,10 @@ from . import goat_types as gt
 #-------------------
 filesep = '/' # file separator
 
+# Data
+#-----
+GUARD_CELL_WIDTH = 0.1 # width of guard cell for plotting
+
 # Enable gui events
 #------------------
 
@@ -1967,24 +1971,90 @@ def GetColorsFromValue(val, minval, maxval):
 def PlotCellBasedQuantity2D(grid, val, fignum):
     # Description
     #------------
-    # Make a patchplot of a cell based quantity
+    # Make a patchplot of a cell based quantity. If guard cells are 
+    # present, we need to create additional guard vertices in order to
+    # visualize the values there. These guard cells will not be be drawn
+    # to scale but will have the width defined in GUARD_CELL_WIDTH.
+    # It is assumed in this case that face and cell coordinates are
+    # available. 
 
     # Check
     if (len(val) != grid.cell.ntot):
         raise ValueError('PlotCellBasedQuantity2D: ' \
             'value length is not equal to number of grid cells')
         
-    
     # Construct cell polygon collection
     verts = []
+    if (hasattr(grid.cell, 'nci')):
+        # Interior cells
+        for i in np.arange(0, grid.cell.nci): 
+            nvc = grid.cell.vp2[i]
+            tv = grid.cell.GetVert(i)-1
+            
+            verts.append(list(zip(grid.vert.x[tv], grid.vert.y[tv])))
 
-    counter = 0
-    for i in np.arange(0, grid.cell.ntot): 
-        nvc = grid.cell.vp2[i]
-        tv = grid.cell.GetVert(i)-1
+        # Guard cells
+        for i in np.arange(grid.cell.nci, grid.cell.ntot): 
+            # Get the guard cell face
+            tf = grid.cell.GetFace(i)
+            if len(tf) == 1:
+                pass 
+            else:
+                raise ValueError('PlotCellBasedQuantity2D: guard cell does not ' \
+                'have exactly one face, unexpected.') 
+            tfind = tf[0]-1
+
+            # Construct the cell connector
+            nb1 = grid.face.nb1[tfind]
+            nb2 = grid.face.nb2[tfind]
+            if nb1-1 == i: 
+                nbind = nb2-1
+            elif nb2-1 == i:
+                nbind = nb1-1
+            else:
+                raise ValueError('PlotCellBasedQuantity2D: guard face ' \
+                'does not have the guard cell as neighbour, unexpected.')
+            ccx = grid.face.x[tfind] - grid.cell.x[nbind]
+            ccy = grid.face.y[tfind] - grid.cell.y[nbind]
+            ccn = np.sqrt(ccx**2 + ccy**2)
+            ccx = ccx/ccn 
+            ccy = ccy/ccn 
+
+            # Construct the outward facing face normal
+            tfv1ind = grid.face.v1[tfind]-1
+            tfv2ind = grid.face.v2[tfind]-1
+            nx = -(grid.vert.y[tfv2ind] - grid.vert.y[tfv1ind])
+            ny = grid.vert.x[tfv2ind] - grid.vert.x[tfv1ind]
+            nn = np.sqrt(nx**2 + ny**2)
+            nx = nx/nn 
+            ny = ny/nn
+            if (nx*ccx + ny*ccy) < 0:
+                nx = -nx 
+                ny = -ny
+
+            # Get the boundary vertices from the guard cell
+            nvc = grid.cell.vp2[i]
+            tv = grid.cell.GetVert(i)-1
+
+            # Project the vertices along the connector vector
+            tvx = grid.vert.x[tv]
+            tvy = grid.vert.y[tv]
+            tgvx = tvx + nx*GUARD_CELL_WIDTH 
+            tgvy = tvy + ny*GUARD_CELL_WIDTH
+            tx = np.append(tvx, np.flipud(tgvx))
+            ty = np.append(tvy, np.flipud(tgvy))
+            
+            # Add vertex coordinates
+            verts.append(list(zip(tx, ty)))
+
         
-        verts.append(list(zip(grid.vert.x[tv], grid.vert.y[tv])))
-        counter = counter + nvc + 2
+
+    else:
+        for i in np.arange(0, grid.cell.ntot): 
+            nvc = grid.cell.vp2[i]
+            tv = grid.cell.GetVert(i)-1
+            
+            verts.append(list(zip(grid.vert.x[tv], grid.vert.y[tv])))
 
     # Make patchplot
     PlotGeneral2DPatch(verts, val, fignum)
@@ -2006,6 +2076,7 @@ def PlotVertBasedQuantity2D(grid, val, fignum):
     
     # Construct cell polygon collection
     verts = []
+    cval = np.zeros(grid.cell.ntot, dtype=float)
 
     counter = 0
     for i in np.arange(0, grid.cell.ntot): 
@@ -2013,6 +2084,7 @@ def PlotVertBasedQuantity2D(grid, val, fignum):
         tv = grid.cell.GetVert(i)-1
         
         verts.append(list(zip(grid.vert.x[tv], grid.vert.y[tv])))
+        cval = verts.append
         counter = counter + nvc + 2
 
     # Make patchplot

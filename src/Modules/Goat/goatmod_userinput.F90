@@ -574,13 +574,17 @@ module goatmod_userinput
         ! Label translation options:
         !   - structurebasedlabels:     base labels on structure IDs 
 
+        ! Diagnostics
+        ! - dogriddiagnostics   run grid diagnostics. Will be time consuming!
+
         
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
             refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
-            radrefdlBLlengthbased, vdrdoxp, structurebasedlabels
+            radrefdlBLlengthbased, vdrdoxp, structurebasedlabels, &
+            dogriddiagnostics
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp
@@ -1005,6 +1009,9 @@ module goatmod_userinput
         options%removefaces = .false. 
         options%remfacescriterion = 'facelength_radial_bnd'
         options%remfacesminlength = 2e-3        
+
+        ! Diagnostics
+        options%dogriddiagnostics = .true. ! default true 
 
     end subroutine 
 
@@ -1852,7 +1859,11 @@ module goatmod_userinput
         field = 'gg.vd.rf.criterion'
         call ExtractOptionValueCharacter(fid, field, options%remfacescriterion)
         field = 'gg.vd.rf.minlength'
-        call ExtractOptionValueReal0D(fid, field, options%remfacesminlength)       
+        call ExtractOptionValueReal0D(fid, field, options%remfacesminlength)  
+        
+        ! Diagnostic options
+        field = 'gg.dogriddiagnostics'
+        call ExtractOptionValueLogical0D(fid, field, options%dogriddiagnostics)
 
         ! Housekeeping
         !=============

@@ -1637,9 +1637,9 @@ def ReadGridFromB2fgmtryus(filepath):
 
     # Add data
     grid.cell.fp1 = cvFcP[:, 0]-1
-    grid.cell.fp2 = cvFcP[:, 1]-1
+    grid.cell.fp2 = cvFcP[:, 1]
     grid.cell.vp1 = cvVxP[:, 0]-1
-    grid.cell.vp2 = cvVxP[:, 1]-1
+    grid.cell.vp2 = cvVxP[:, 1]
     grid.cell.face  = cvFc 
     grid.cell.vert  = cvVx
     grid.cell.ft = cvFt 
@@ -1654,15 +1654,15 @@ def ReadGridFromB2fgmtryus(filepath):
     grid.face.label = fcLbl
 
     grid.ft.cp1 = ftCvP[:, 0]-1
-    grid.ft.cp2 = ftCvP[:, 1]-1
+    grid.ft.cp2 = ftCvP[:, 1]
     grid.ft.cell = ftCv 
     grid.ft.fp1 = ftFcP[:, 0]-1
-    grid.ft.fp2 = ftFcP[:, 1]-1
+    grid.ft.fp2 = ftFcP[:, 1]
     grid.ft.face = ftFc 
     grid.ft.region = ftReg 
 
     grid.fs.fp1 = fsFcP[:, 0]-1
-    grid.fs.fp2 = fsFcP[:, 1]-1
+    grid.fs.fp2 = fsFcP[:, 1]
     grid.fs.face = fsFc
 
     
@@ -1744,13 +1744,58 @@ def ReadGridFromB2fgmtryus(filepath):
 
     # Read metrics
     #-------------
-    # cvBb, cvEb: skipped
+    cvBb, i = ReadSOLPSField('cvBb', alllines, i, 4*nc, 'float', np.array([nc, 4]))
+    cvEb, i = ReadSOLPSField('cvEb', alllines, i, 3*nc, 'float', np.array([nc, 3]))
     cvX,  i = ReadSOLPSField('cvX', alllines, i, nc, 'float', np.array([nc]))
     cvY,  i = ReadSOLPSField('cvY', alllines, i, nc, 'float', np.array([nc]))
-    # cvSz, cvHz, cvHx, cvQgam, cvVol, fcBb, fcS, fcHc, fcHt, fcQgam, fcQalf
-    # fcQbet, fcPbs, vxBb, vxX, vxY, vxFfbz, vxFpsi, cvConn, fsPsi: skipped
+    cvSz,  i = ReadSOLPSField('cvSz', alllines, i, nc, 'float', np.array([nc]))
+    cvHz,  i = ReadSOLPSField('cvHz', alllines, i, nc, 'float', np.array([nc]))
+    cvHx,  i = ReadSOLPSField('cvHx', alllines, i, nc, 'float', np.array([nc]))
+    cvQgam,  i = ReadSOLPSField('cvQgam', alllines, i, 2*nc, 'float', np.array([nc, 2]))
+    cvVol,  i = ReadSOLPSField('cvVol', alllines, i, nc, 'float', np.array([nc]))
+
+    fcBb, i = ReadSOLPSField('fcBb', alllines, i, 4*nf, 'float', np.array([nf, 4]))
+    fcS, i = ReadSOLPSField('fcS', alllines, i, nf, 'float', np.array([nf]))
+    fcHc, i = ReadSOLPSField('fcHc', alllines, i, 2*nf, 'float', np.array([nf, 2]))
+    fcHt, i = ReadSOLPSField('fcHt', alllines, i, nf, 'float', np.array([nf]))
+    fcQgam,  i = ReadSOLPSField('fcQgam', alllines, i, 2*nf, 'float', np.array([nf, 2]))
+    fcQalf,  i = ReadSOLPSField('fcQalf', alllines, i, 2*nf, 'float', np.array([nf, 2]))
+    fcQbet,  i = ReadSOLPSField('fcQbet', alllines, i, 2*nf, 'float', np.array([nf, 2]))
+    fcPbs, i = ReadSOLPSField('fcPbs', alllines, i, nf, 'float', np.array([nf]))
+
+    vxBb, i = ReadSOLPSField('vxBb', alllines, i, 4*nv, 'float', np.array([nv, 4]))
+    vxX, i = ReadSOLPSField('vxX', alllines, i, nv, 'float', np.array([nv]))
+    vxY, i = ReadSOLPSField('vxY', alllines, i, nv, 'float', np.array([nv]))
+    vxFfbz, i = ReadSOLPSField('vxFfbz', alllines, i, nv, 'float', np.array([nv]))
+    vxfsPsi, i = ReadSOLPSField('vxfsPsi', alllines, i, nv, 'float', np.array([nv]))
+
+    # cvConn, fsPsi: skipped
+
     grid.cell.x = cvX 
     grid.cell.y = cvY
+    grid.cell.bb = cvBb 
+    grid.cell.eb = cvEb
+    grid.cell.sz = cvSz
+    grid.cell.hz = cvHz
+    grid.cell.hx = cvHx    
+    grid.cell.qgam = cvQgam
+    grid.cell.vol = cvVol 
+
+    grid.face.bb = fcBb
+    grid.face.s = fcS 
+    grid.face.hc = fcHc
+    grid.face.ht = fcHt
+    grid.face.qgam = fcQgam
+    grid.face.qbet = fcQbet
+    grid.face.qalf = fcQalf
+    grid.face.pbs = fcPbs
+
+    grid.vert.bb = vxBb 
+    grid.vert.x = vxX
+    grid.vert.y = vxY 
+    grid.vert.ffbz = vxFfbz
+    grid.vert.fspsi = vxfsPsi 
+
 
     # Compute grid interconnections
     grid.ComputeInterconnections()

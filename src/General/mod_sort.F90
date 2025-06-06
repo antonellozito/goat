@@ -158,15 +158,17 @@ module mod_sort
         ! Post-process
         !=============
         ! Do a sanity check - you never know
-        test = (a(2:size(a)) - a(1:size(a)-1)) < 0
-        if (any(test)) then 
-            call gdErrorHandler('Sort_I8: bug detected: array is not sorted')
-        end if 
+        if (size(a) > 1) then 
+            test = (a(2:size(a)) - a(1:size(a)-1)) < 0
+            if (any(test)) then 
+                call gdErrorHandler('Sort_I8: bug detected: array is not sorted')
+            end if 
 
-        if (flip) then 
-            a = a(size(a):1:-1)
-            if (doindex) then 
-                ind = ind(size(a):1:-1)
+            if (flip) then 
+                a = a(size(a):1:-1)
+                if (doindex) then 
+                    ind = ind(size(a):1:-1)
+                end if 
             end if 
         end if 
 
@@ -375,15 +377,17 @@ module mod_sort
         ! Post-process
         !=============
         ! Do a sanity check - you never know
-        test = (a(2:size(a)) - a(1:size(a)-1)) < 0
-        if (any(test)) then 
-            call gdErrorHandler('Sort_R8: bug detected: array is not sorted')
-        end if 
+        if (size(a) > 1) then 
+            test = (a(2:size(a)) - a(1:size(a)-1)) < 0
+            if (any(test)) then 
+                call gdErrorHandler('Sort_R8: bug detected: array is not sorted')
+            end if 
 
-        if (flip) then 
-            a = a(size(a):1:-1)
-            if (doindex) then 
-                ind = ind(size(a):1:-1)
+            if (flip) then 
+                a = a(size(a):1:-1)
+                if (doindex) then 
+                    ind = ind(size(a):1:-1)
+                end if 
             end if 
         end if 
 

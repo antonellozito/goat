@@ -16,11 +16,16 @@ $(info % Makefile command: $(MAKECMDGOALS))
 
 # Check debug mode
 ifeq ($(findstring _debug, $(MAKECMDGOALS)), _debug)
-    GOAT_DEBUG = yes 
+GOAT_DEBUG = yes 
 else
-	GOAT_DEBUG = no 
+GOAT_DEBUG = no 
 endif
 $(info % Goat debug mode: $(GOAT_DEBUG))
+
+# Check if MUMPS is set
+ifdef MUMPS 
+$(info % Compiling with MUMPS solver)
+endif
 
 # Include the config file
 include config.mk
@@ -34,6 +39,9 @@ $(info % General environment variables)
 $(info % -----------------------------)
 $(info % fortran compiler: $(FC))
 $(info % C compiler: $(CC))
+ifdef USE_MPI 
+$(info % Running with MPI)
+endif
 $(info % Build directory: $(BUILDDIR))
 $(info % )
 $(info % SOLPS specific environment variables)
@@ -79,8 +87,8 @@ BUILDDIR :=./builds/$(BUILDDIR)
 goat: $(addprefix $(BUILDDIR)/, $(GOAT_TARGETS)) $(BUILDDIR)/goat.o
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
-	$(FC) $(LFLAGS) -o $(BUILDDIR)/$(EXEC_NAME) $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
-	-I $(SUITESPARSEPATH) -I src/Clayer/Include; 
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/$(EXEC_NAME) $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) $(DMUMPS_LPATH) -lcxsparse \
+	$(SUITESPARSEPATH) -I src/Clayer/Include $(DMUMPS_IPATH); 
 	rm $(BUILDDIR)/Goat.o; 
 	cp $(BUILDDIR)/$(EXEC_NAME) ./executables/.
 
@@ -90,15 +98,15 @@ goattranslator: $(addprefix $(BUILDDIR)/,$(GOATTRANSLATOR_TARGETS) ) $(BUILDDIR)
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/goattranslator.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
-	-I $(SUITESPARSEPATH) -I src/Clayer/Include
+	$(SUITESPARSEPATH) -I src/Clayer/Include
 	rm $(BUILDDIR)/TranslateGOAToptionsFile.o; 
 	cp $(BUILDDIR)/goattranslator.exe ./executables/.
 
 tests: $(addprefix $(BUILDDIR)/,$(TEST_TARGETS) ) $(BUILDDIR)/tests.o 
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
-	$(FC) $(LFLAGS) -o $(BUILDDIR)/tests.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
-	-I $(SUITESPARSEPATH) -I src/Clayer/Include
+	$(FC) $(LFLAGS) -o $(BUILDDIR)/tests.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) $(DMUMPS_LPATH) -lcxsparse \
+	$(SUITESPARSEPATH) -I src/Clayer/Include
 	rm $(BUILDDIR)/tests.o; 
 	cp $(BUILDDIR)/tests.exe ./executables/.
 
@@ -112,7 +120,7 @@ gdrun: $(addprefix $(BUILDDIR)/,$(GDRUN_TARGETS) ) $(BUILDDIR)/MainRunFileGridDe
 testc: $(addprefix $(BUILDDIR)/,$(CTEST_TARGETS) ) $(BUILDDIR)/testc.o 
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
-	$(CC) $(LFLAGS) -o $(BUILDDIR)/testc.exe $(BUILDDIR)/*.o -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include
+	$(CC) $(LFLAGS) -o $(BUILDDIR)/testc.exe $(BUILDDIR)/*.o -lcxsparse $(SUITESPARSEPATH) -I src/Clayer/Include
 	rm $(BUILDDIR)/Testc.o; 
 	cp $(BUILDDIR)/testc.exe ./executables/.
 
@@ -121,11 +129,11 @@ shapeopt: $(addprefix $(BUILDDIR)/, $(SHAPEOPT_TARGETS) ) $(BUILDDIR)/shapeopt.o
 	-mv -f *.mod $(BUILDDIR); 
 ifdef DOSOLPS
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/$(EXEC_NAME) $(BUILDDIR)/*.o $(B25LIBPATH)/adStack.o \
-	 $(B25LIBPATH)/b2mod_cdf.o $(B25LIBPATH)/smax.o $(B25LIBPATH)/smin.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) \
-	 -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
+	 $(B25LIBPATH)/b2mod_cdf.o $(B25LIBPATH)/smax.o $(B25LIBPATH)/smin.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) $(DMUMPS_LPATH) \
+	 -lcxsparse $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
 else
 	$(FC) $(LFLAGS) -o $(BUILDDIR)/$(EXEC_NAME) $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
-	-I $(SUITESPARSEPATH) -I src/Clayer/Include
+	$(SUITESPARSEPATH) -I src/Clayer/Include
 endif
 	rm $(BUILDDIR)/ShapeOptimization.o; 
 	cp $(BUILDDIR)/$(EXEC_NAME) ./executables/.
@@ -137,7 +145,7 @@ shapeopt_debug: shapeopt
 #	-mv -f *.mod $(BUILDDIR); 
 #	$(FC) $(LFLAGS) -o $(BUILDDIR)/shapeopt_solps $(BUILDDIR)/*.o $(B25LIBBPATH)/adStack.o \
 	 $(B25LIBBPATH)/b2mod_cdf.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) \
-	 -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
+	 -lcxsparse $(SUITESPARSEPATH) -I src/Clayer/Include  -I$(B25LIBPATH) -L$(B25LIBPATH) -l:libb2.a -L$(B25LIBPATH) -l:libb2.a -lnetcdf $(LD_NETCDF)
 #	rm $(BUILDDIR)/ShapeOptimization.o; 
 #	cp $(BUILDDIR)/shapeopt_solps.exe ./executables/.
 
@@ -151,15 +159,15 @@ $(BUILDDIR)/MainRunFileGridDeformation.o: Runfiles/MainRunFileGridDeformation.F9
 
 ## Goat.o 			: main run file goat
 $(BUILDDIR)/goat.o: Runfiles/Goat.F90
-	$(FC) $(CFLAGS) Runfiles/Goat.F90 -I$(BUILDDIR)
+	$(FC) $(CFLAGS) Runfiles/Goat.F90 -I$(BUILDDIR) $(DMUMPS_IPATH) $(DMUMPS_LPATH)
 
 ## Tests.o 			: all tests
 $(BUILDDIR)/tests.o: Runfiles/Tests.F90 
-	$(FC) $(CFLAGS) Runfiles/Tests.F90 -I$(BUILDDIR)
+	$(FC) $(CFLAGS) Runfiles/Tests.F90 -I$(BUILDDIR) $(DMUMPS_IPATH)
 
 ## Testc.o 			: C layer tests
 $(BUILDDIR)/testc.o: Runfiles/Testc.c 
-	$(CC) $(CCFLAGS) Runfiles/Testc.c -lcxsparse -I $(SUITESPARSEPATH) -I src/Clayer/Include -I$(BUILDDIR)
+	$(CC) $(CCFLAGS) Runfiles/Testc.c -lcxsparse $(SUITESPARSEPATH) -I src/Clayer/Include -I$(BUILDDIR) $(DMUMPS_IPATH)
 
 ## goattranslator.o	: translator
 $(BUILDDIR)/goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
@@ -167,94 +175,94 @@ $(BUILDDIR)/goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
 
 ## shapeopt.o		: shape optimization 
 $(BUILDDIR)/shapeopt.o : Runfiles/ShapeOptimization.F90 
-	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR)
+	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR) $(DMUMPS_IPATH)
 
 ## shapeopt_solps.o		: shape optimization with solps
 $(BUILDDIR)/shapeopt_solps.o : Runfiles/ShapeOptimization.F90 
-	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR)
+	$(FC) $(CFLAGS) Runfiles/ShapeOptimization.F90 -I$(BUILDDIR) $(DMUMPS_IPATH)
 
 ##
 ## % Folder compilation targets
 ## %===========================
 ## Constants 		: compile files containing constants
 $(BUILDDIR)/Constants: $(CONSTANTS_FILES) 
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Constants 
 
 ## General 			: compile general files and modules
 $(BUILDDIR)/General: $(GENERAL_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) $(DMUMPS_IPATH)
 	touch $(BUILDDIR)/General
 	
 ## Modules			: compile modules
 $(BUILDDIR)/Modules_goat: $(MODULE_FILES_GOAT)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Modules_goat
 $(BUILDDIR)/Modules_GD: $(MODULE_FILES_GD)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Modules_GD
 $(BUILDDIR)/Modules_GG: $(MODULE_FILES_GG)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Modules_GG
 $(BUILDDIR)/Modules_B25: $(MODULE_FILES_B25)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Modules_B25
 $(BUILDDIR)/Modules: $(BUILDDIR)/Modules_goat $(BUILDDIR)/Modules_GD \
 	$(BUILDDIR)/Modules_GG $(BUILDDIR)/Modules_B25
 
 ## Auxiliary			: compile auxiliary routines
 $(BUILDDIR)/Auxiliary: $(AUXILIARY_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Auxiliary
 
 ## Drivers			: compile all (goat) driver routines
 $(BUILDDIR)/Drivers: $(DRIVER_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Drivers
 
 ## SODrivers			: compile all shape optimization driver routines
 $(BUILDDIR)/SODrivers: $(SODRIVER_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/SODrivers
 
 ## Setup			: compile all setup routines
 $(BUILDDIR)/Setup: $(SETUP_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Setup
 
 ## IO_output 			: compile output routines
 $(BUILDDIR)/IO_output: $(OUTPUT_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/IO_output
 
 ## IO_input			: compile input routines
 $(BUILDDIR)/IO_input: $(INPUT_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/IO_input
 
 ## IO_b25			: compile b25 routines
 $(BUILDDIR)/IO_b25: $(B25_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/IO_b25
 
 ## IO_carre			: compile carre routines
 $(BUILDDIR)/IO_carre: $(CARRE_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/IO_carre
 
 ## Numerics		 	: compile numerics routines
 $(BUILDDIR)/Numerics: $(NUMERICS_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)  
 	touch $(BUILDDIR)/Numerics
 
 ## Optimization		 	: compile optimization routines
 $(BUILDDIR)/Optimization: $(OPTIMIZATION_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Optimization
 
 ## Clayer 				: compile C interlayer routines
 $(BUILDDIR)/Clayer: $(CLAYER_FILES)
-	$(CC) $(CCFLAGS) $^ -I $(SUITESPARSEPATH) -I src/Clayer/Include -I$(BUILDDIR)
+	$(CC) $(CCFLAGS) $^ $(SUITESPARSEPATH) -I src/Clayer/Include -I$(BUILDDIR)
 	touch $(BUILDDIR)/Clayer
 
 ## ClayerF 				: compile fortran modules in Clayer

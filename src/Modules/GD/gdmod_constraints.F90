@@ -5427,6 +5427,23 @@ module gdmod_constraints
         maxnorthcon(:) = 2
         where (vert%BV) maxnorthcon = 1
 
+        ! Include boundary vertices with zero ID?
+        if (opt%includecutcellvert) then 
+            where (isvesselvertex) cvert = .true.
+        end if 
+
+        ! Include core vertices? 
+        if (opt%includecorevert) then 
+            ! Check which flux surfaces are closed
+            closuretype = DetermineFluxSurfaceClosure(grid)
+            do i = 1, size(closuretype)
+                if (closuretype(i) == 1) then 
+                    ! Closed flux surface
+                    where (vert%fieldlineID == i) cvert = .true. 
+                end if 
+            end do 
+        end if 
+
         ! Include?
         do i = 1, nincludebox ! include points in the box
             maxx = maxval(opt%includeboxx(i, :))
@@ -5446,23 +5463,6 @@ module gdmod_constraints
             boxcheck = IsInBox(minx, maxx, miny, maxy, vert%x, vert%y)
             where (boxcheck) cvert = .false.
         end do
-
-        ! Include boundary vertices with zero ID?
-        if (opt%includecutcellvert) then 
-            where (isvesselvertex) cvert = .true.
-        end if 
-
-        ! Include core vertices? 
-        if (opt%includecorevert) then 
-            ! Check which flux surfaces are closed
-            closuretype = DetermineFluxSurfaceClosure(grid)
-            do i = 1, size(closuretype)
-                if (closuretype(i) == 1) then 
-                    ! Closed flux surface
-                    where (vert%fieldlineID == i) cvert = .true. 
-                end if 
-            end do 
-        end if 
 
         ! Prioritize inner vertices (typically yields better results, 
         ! but may not be a general approach)

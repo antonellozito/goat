@@ -348,12 +348,10 @@ module StructuredInterpolant2D
             xgvnew(nx) = xgv(nx)
 
             ! Interpolate values
-            !omp parallel do default(shared) private(vtemp)
             do i = 1, ny 
                 call Interpolate1D(xgvnew, vtemp, xgv, v(:, i))
                 vnew(:, i) = vtemp
             end do 
-            !omp end parallel do 
 
             ! Overwrite
             v = vnew 
@@ -376,12 +374,10 @@ module StructuredInterpolant2D
             ygvnew(ny) = ygv(ny)
 
             ! Interpolate values
-            !omp parallel do default(shared) private(vtemp)
             do i = 1, nx 
                 call Interpolate1D(ygvnew, vtemp, ygv, v(i, :))
                 vnew(i, :) = vtemp
             end do 
-            !omp end parallel do 
 
             ! Overwrite
             v = vnew 
@@ -665,7 +661,10 @@ module StructuredInterpolant2D
             end do 
         end do 
         fvals(:, :, :) = 0
-        !$omp parallel do default(shared)
+        !$omp parallel do default(none) schedule(static) &
+        !$omp if(.not. omp_in_parallel()) & 
+        !$omp shared(nterms, fvals, allprefac, cij, nx, ny) & 
+        !$omp private(k)
         do k = 1, nterms
             fvals(:, :, k) = allprefac(k)*reshape(cij(:, k), (/nx,  ny/))
         end do 
@@ -740,7 +739,11 @@ module StructuredInterpolant2D
         cellindex = reshape([(i, i = 1, (nx-1)*(ny-1))], (/nx-1, ny-1/))
 
         ! Loop over all quads
-        !$omp parallel do default(shared) private(termind, vecind, vec)
+        !$omp parallel do default(none) private(termind, vecind, vec) & 
+        !$omp collapse(2) if(.not. omp_in_parallel()) & 
+        !$omp private(i, j, k, l) & 
+        !$omp shared(nx, ny, interp, fvals, cellindex, rhs, refx, refy, &
+        !$omp refdx, refdy, dxmean, dymean, xg, yg)
         do i = 1, nx-1
             do j = 1, ny-1
                 ! Value vectors at four points
@@ -942,7 +945,12 @@ module StructuredInterpolant2D
 
         ! Extract
         allocate(thisA(size(ind, 1), size(A, 2)))
-        thisA = A(ind, :)
+        !$omp parallel do default(none) schedule(static) if(.not. omp_in_parallel()) &
+        !$omp private(i) shared(thisA, interp, ind)
+        do i = 1, size(ind)
+            thisA(i, :) = A(ind(i), :)
+        end do 
+        !$omp end parallel do
 
         ! Compute normalized query points
         allocate(xqn(nq), yqn(nq))
@@ -953,9 +961,11 @@ module StructuredInterpolant2D
         allocate(term(nq))
         vq(:) = 0
 
-        !$omp parallel default(private) shared(derivx, derivy, &
-        !$omp xqn, yqn, thisA, interp, vq)
-        !$omp do
+        !$omp parallel default(none) shared(derivx, derivy, ind, &
+        !$omp xqn, yqn, thisA, interp) if (.not. omp_in_parallel()) & 
+        !$omp private(i, j, indder, prefac, term)  & 
+        !$omp reduction(+:vq)
+        !$omp do collapse(2) schedule(static)
         do i = derivx, n 
             do j = derivy, n
                 ! Derivative index
@@ -966,16 +976,19 @@ module StructuredInterpolant2D
                     real(precfac(i+1-derivx), kind = R8)*&
                     real(precfac(j+1), kind=R8)/real(precfac(j+1-derivy), kind = R8)
                 term = thisA(:, indder)*prefac*xqn**(i - derivx)*yqn**(j - derivy)
-                !$omp critical
                 vq = vq + term
-                !$omp end critical
             end do 
         end do
         !$omp end do 
         !$omp end parallel
+        
 
         ! Scale
-        vq = vq/( (refdx(ind))**derivx * (refdy(ind))**derivy)
+        !$omp parallel reduction(*:vq)
+        !$omp workshare
+        vq = vq*1/( (refdx(ind))**derivx * (refdy(ind))**derivy)
+        !$omp end workshare
+        !$omp end parallel
 
         ! Set zero indices to NaN
         where (ind_orig == 0) vq = nanval_R8()

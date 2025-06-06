@@ -13,14 +13,15 @@ from matplotlib import pyplot as plt
 import numpy as np 
 import sys 
 import copy
+import os 
 
 # Initialize
 #-----------
 # Set initial paths
-statefile = 'b2fstati' # state
-gridfile = 'traduit.out.b2us_gg' # grid
+statefile = 'b2fstate' # state
+gridfile = 'traduit.out.b2us' # grid
 plasmafile = 'b2fplasmf'
-#gridfile = 'traduit.out.b2us_norefxp2_gd2_correctedb'
+gmtryfile = 'b2fgmtry'
 
 # Read command line arguments
 narg = len(sys.argv)
@@ -32,30 +33,28 @@ for i in range(1, narg):
         gridfile = sys.argv[i]
     elif (i == 3):
         plasmafile = sys.argv[i]
+    elif (i == 4):
+        gmtryfile = sys.argv[i]
 
-simdir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/fully_extended_DEMO_Donly/afn_adjustedvessel/'
-griddir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/fully_extended_DEMO_Donly/afn_adjustedvessel/'
-#simdir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/extended2_DEMO_Donly/afn/'
-#griddir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/extended2_DEMO_Donly/baserun/'
-simdir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/fully_extended_DEMO_Donly/afn/'
-griddir = '/mnt/c/Users/u0110555/Desktop/code_werk/SOLPS/runs/DEMO_2025/fully_extended_DEMO_Donly/baserun/'
-statedir = simdir + statefile
-plasmadir = simdir + plasmafile
-griddir = griddir + gridfile
-
+simdir = os.getcwd()
+statedir = simdir + '/' + statefile
+plasmadir = simdir + '/' + plasmafile
+griddir = simdir + '/' + gridfile
+gmtrydir = simdir + '/' + gmtryfile
 
 # Print out paths 
 print('SolpsPostProcess: reading state file from: ' + statedir)
 print('SolpsPostProcess: reading grid file from: ' + griddir)
+print('SolpsPostProcess: reading b2fplasmf file from: ' + plasmadir)
+print('SolpsPostProcess: reading b2fgmtry file from: ' + gmtrydir)
 
 
 # Initialize objects
 state = st.PlasmaState()
 const = st.PhysicalConstants()
 
-# Load state and geometry
+# Load state 
 state.ReadB2fstatefile(statedir)
-grid = dh.ReadTraduitOutB2us(griddir)
 
 # Try loading the residuals
 plotresiduals = True 
@@ -65,7 +64,16 @@ except:
     plotresiduals = False
     print("SolpsPostProcess: could not read b2fplasmf, not plotting residuals")
 
-#state.WriteB2fstatefile(simdir + 'teststate')
+# Try loading b2fgmtry to be able to plot guard cell quantities
+try:
+    grid = dh.ReadGridFromB2fgmtryus(gmtrydir)
+except:
+    try: 
+        # Try loading through traduit file
+        grid = dh.ReadTraduitOutB2us(griddir)
+        print("SolpsPostProcess: could not read b2fgmtry, reading from traduit file")
+    except:
+        raise ValueError(("SolpsPostProcess: could not read b2fgmtry nor traduit file"))     
 
 # Figure counter
 fignum = 0
@@ -85,6 +93,8 @@ fignum = fignum + 1
 
 # Visualize plasma state
 #-----------------------
+# Determine plotting range
+
 # Density
 for i in range(0, state.ns):
     pl.PlotCellBasedQuantity2D(grid, np.log10(state.na[0:grid.cell.ntot, i]), fignum)
@@ -173,6 +183,7 @@ if plotresiduals:
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
     fignum = fignum + 1
+
 
         
     
