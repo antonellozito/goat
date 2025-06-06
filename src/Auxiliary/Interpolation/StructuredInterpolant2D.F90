@@ -945,7 +945,12 @@ module StructuredInterpolant2D
 
         ! Extract
         allocate(thisA(size(ind, 1), size(A, 2)))
-        thisA = A(ind, :)
+        !$omp parallel do default(none) schedule(static) if(.not. omp_in_parallel()) &
+        !$omp private(i) shared(thisA, interp, ind)
+        do i = 1, size(ind)
+            thisA(i, :) = A(ind(i), :)
+        end do 
+        !$omp end parallel do
 
         ! Compute normalized query points
         allocate(xqn(nq), yqn(nq))
@@ -956,9 +961,9 @@ module StructuredInterpolant2D
         allocate(term(nq))
         vq(:) = 0
 
-        !$omp parallel default(none) shared(derivx, derivy, &
+        !$omp parallel default(none) shared(derivx, derivy, ind, &
         !$omp xqn, yqn, thisA, interp) if (.not. omp_in_parallel()) & 
-        !$omp private(i, j, indder, prefac, term) & 
+        !$omp private(i, j, indder, prefac, term) schedule(static) & 
         !$omp reduction(+:vq)
         !$omp do collapse(2)
         do i = derivx, n 
@@ -976,9 +981,14 @@ module StructuredInterpolant2D
         end do
         !$omp end do 
         !$omp end parallel
+        
 
         ! Scale
-        vq = vq/( (refdx(ind))**derivx * (refdy(ind))**derivy)
+        !$omp parallel reduction(*:vq)
+        !$omp workshare
+        vq = vq*1/( (refdx(ind))**derivx * (refdy(ind))**derivy)
+        !$omp end workshare
+        !$omp end parallel
 
         ! Set zero indices to NaN
         where (ind_orig == 0) vq = nanval_R8()
