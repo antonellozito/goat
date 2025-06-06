@@ -3612,7 +3612,7 @@ module ggmod_topology2D
                             tfmerge = tube%GetBndFace(i, 1_I8)
                             tnbmerge = tnb
                             tfradmerge = [tube%GetFace(tnb(1)), &
-                                tube%GetFace(tnb(2))]
+                                tube%GetFace(tnb(2)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
                             if (any(face%type(tfmerge) == TMfacesepID)) then 
@@ -3652,7 +3652,7 @@ module ggmod_topology2D
                             ! Get merge data
                             tfmerge = tube%GetBndFace(i, 1_I8)
                             tnbmerge = tnb
-                            tfradmerge = tube%GetFace(tnb(1))
+                            tfradmerge = [tube%GetFace(tnb(1)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
                             if (any(face%type(tfmerge) == TMfacesepID)) then 
@@ -3706,7 +3706,7 @@ module ggmod_topology2D
                             tfmerge = tube%GetBndFace(i, 2_I8)
                             tnbmerge = tnb
                             tfradmerge = [tube%GetFace(tnb(1)), &
-                                tube%GetFace(tnb(2))]
+                                tube%GetFace(tnb(2)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
                             if (any(face%type(tfmerge) == TMfacesepID)) then 
@@ -3746,7 +3746,7 @@ module ggmod_topology2D
                             ! Get merge data
                             tfmerge = tube%GetBndFace(i, 2_I8)
                             tnbmerge = tnb
-                            tfradmerge = tube%GetFace(tnb(1))
+                            tfradmerge = [tube%GetFace(tnb(1)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
                             if (any(face%type(tfmerge) == TMfacesepID)) then 

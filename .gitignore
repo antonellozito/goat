@@ -7,9 +7,8 @@
 # ignore .dat files
 *.dat
 
-# ignore builds & executables
+# ignore build
 builds/*
-executables/*
 
 # ignore input
 inputfiles/*
@@ -18,11 +17,12 @@ inputfiles/*
 *.o
 
 # ignore pycache folders
-scripts/__pycache__
-scripts/python_source/__pycache__
+scripts/__pycache__/*
+scripts/python_source/__pycache__/*
 
 # ignore output files
 *.out
+executables/*
 
 # ignore run directory
 Runs/*

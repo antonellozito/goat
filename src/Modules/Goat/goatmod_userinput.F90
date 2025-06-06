@@ -559,6 +559,18 @@ module goatmod_userinput
         !                   the strike point 
         ! - radrefBLdlsp   desired lengths for these cells
 
+        ! Cell distribution options
+        ! - legalcellstyle      option to control how to check if cells
+        !                       are legal. if 'no', then no checks are
+        !                       made. 'old' is an old, deprecated way 
+        !                       that does not always work but catches 
+        !                       most of the issues. If neither of the
+        !                       previous options are taken, it defaults
+        !                       to a graph-based method that is likely
+        !                       more expensive, but does capture all 
+        !                       possible cell overlap cases (normally
+        !                       speaking)
+
         ! Label translation options:
         !   - structurebasedlabels:     base labels on structure IDs 
 
@@ -591,7 +603,8 @@ module goatmod_userinput
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
             cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
-            refdatafile, radrefmeth, reflengthtype, radreflengthtype
+            refdatafile, radrefmeth, reflengthtype, radreflengthtype, &
+            legalcellstyle 
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -913,6 +926,7 @@ module goatmod_userinput
         options%verbosity           = 1
         options%ggmethod            = 'independent'
         options%cellconstructionmethod  = 'quads_triangles'
+        options%legalcellstyle      = 'graph' 
         options%TMcellgriddingorder = 'sequential'
         options%readexistingrefdata = .false. 
         options%refdatafile         = './output/refdataTM.dat'
@@ -1652,6 +1666,8 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%ggmethod)
         field  = 'gg.cellconstructionmethod'
         call ExtractOptionValueCharacter(fid, field, options%cellconstructionmethod)
+        field  = 'gg.legalcellstyle'
+        call ExtractOptionValueCharacter(fid, field, options%legalcellstyle)
         field = 'gg.TMcellgriddingorder'
         call ExtractOptionValueCharacter(fid, field, options%TMcellgriddingorder)
 

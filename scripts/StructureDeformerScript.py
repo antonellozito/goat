@@ -2,11 +2,11 @@
 #------------
 # Simple script to deform structures. Very basic, one has to implement
 # ones own deformations etc manually. 
-from . import Datahandler as dh 
-from . import Plotter as pl
+from GOATpy import dh as dh 
+from GOATpy import pl as pl
 import numpy as np
-from . import goat_types as gt
-from . import StructureDeformer as sd 
+from GOATpy import gt as gt
+from python_source import StructureDeformer as sd 
 import copy
 import os 
 

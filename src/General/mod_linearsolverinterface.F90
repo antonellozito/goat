@@ -244,6 +244,8 @@ module mod_linearsolverinterface
     !                                                                  !
     !==================================================================!
 
+    ! UMFPACK-based sparse solvers
+    !=============================
     ! Simple test routine
     subroutine TestUMFPACK()
 
@@ -453,6 +455,8 @@ module mod_linearsolverinterface
 
     end subroutine
 
+    ! LAPACK based 
+    !=============
     ! The dense solver
     subroutine SolveDenseLinearSystemDI1D(A, b, sol, flag, Ainv)
 

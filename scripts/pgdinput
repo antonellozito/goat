@@ -1,2 +1,2 @@
 #!/bin/bash
-python ${GOATTOP}/scripts/VisualizeGDInput.py
+python3 ${GOATTOP}/scripts/VisualizeGDInput.py

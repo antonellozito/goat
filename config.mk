@@ -213,6 +213,7 @@ AUXILIARY_FILES =  src/Auxiliary/mod_structured2Dgridding.F90 \
     $(wildcard src/Auxiliary/Interpolation/*.F90) \
     $(wildcard src/Auxiliary/Contour/*.F90) \
     src/Auxiliary/mod_streamlinetracing2D.F90 \
+    src/Auxiliary/Graphs/mod_graph.F90
 
 ## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
 B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)

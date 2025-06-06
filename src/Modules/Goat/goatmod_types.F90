@@ -5921,8 +5921,7 @@ module goatmod_types
         character(*), intent(in)        :: filepath 
 
         ! Auxiliary
-        integer(I8)                             :: np1, np2, nfcLbl, &
-            nwork
+        integer(I8)                             :: np1, np2, nfcLbl
         integer(I8), allocatable, dimension(:)  :: tempi, fcLbl, v1, v2, &
             worki 
         logical                                 :: reachedeof, hasp1, &
