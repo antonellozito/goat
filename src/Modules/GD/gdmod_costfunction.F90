@@ -4199,7 +4199,7 @@ module gdmod_costfunction
         ! Deallocate
         !===========
         call costfunction%cfv_lr%Deallocate()
-        deallocate(costfunction%Jv)
+        if (allocated(costfunction%Jv)) deallocate(costfunction%Jv)
 
     end subroutine
 
@@ -4432,7 +4432,7 @@ module gdmod_costfunction
         ! Deallocate
         !===========
         call costfunction%cfv_lrrad%Deallocate()
-        deallocate(costfunction%Jv)
+        if (allocated(costfunction%Jv)) deallocate(costfunction%Jv)
 
     end subroutine
 
