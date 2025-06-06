@@ -32,12 +32,16 @@ subroutine ShapeOptDriver(inputfilepath)
 
     ! Auxiliary
     type(OptimizationEngineSOUDT)   :: ShapeOptEngine
-    type(GridUDT)                   :: grid, newgrid 
+    type(GridUDT)                   :: grid 
     type(GOAToptionsUDT)            :: goatoptions
     type(ShapeOptimizationOptionsUDT)   :: SOoptions
     type(GoatGridGenerator2DUDT)    :: gridgenerator 
     type(MagneticFieldUDT)          :: magneticField 
     type(EnvironmentUDT)            :: environment 
+    type(GridOptionsUDT)            :: gridoptions 
+    integer(I8), allocatable, dimension(:)  :: facelabelsGG, &
+        facelabelsGD
+    integer(I8), parameter                  :: emptyI8(0) = 0
 
     ! Loop
     integer(I8)                     :: itremesh 
@@ -64,7 +68,11 @@ subroutine ShapeOptDriver(inputfilepath)
     call goatoptions%Set()
 
     ! Read in grid generation data
-    call ReadGGData(magneticField, environment, goatoptions)
+    call ExtractGGData(magneticField, environment, goatoptions)
+
+    ! Set grid options
+    gridoptions%inputfilepath = goatoptions%inputfilepath 
+    call gridoptions%Set()
 
     ! Initialize the grid generator
     call gridgenerator%Initialize(magneticField, environment, &
@@ -111,11 +119,22 @@ subroutine ShapeOptDriver(inputfilepath)
             ! Reconstruct the grid
             call gridgenerator%ConstructGrid()
 
-            ! Translate
-            call TranslateGridLabels(gridgenerator%grid, &
-                gridgenerator%topomesh, gridgenerator%environment%vessel, &
-                ggoptions, 'GD')
+            ! Add to goat
             problem%goat%grid = gridgenerator%grid 
+
+            ! Remap the face labels
+            call GetGridFaceLabelMappingGD(gridgenerator%grid, &
+                gridgenerator%topomesh, facelabelsGG, facelabelsGD)
+            gridoptions%facelabelmappingGG = facelabelsGG 
+            gridoptions%facelabelmappingGD = facelabelsGD 
+            gridoptions%facelabelsubfrom   = emptyI8 
+            gridoptions%facelabelsubto     = emptyI8 
+
+            ! Recompute topological data from grid for new face labels
+            call ComputeTopologicalData(problem%goat%grid, gridgenerator%topomesh)
+
+            ! Extract the required grid data for grid deformation
+            call ExtractGridData(problem%goat%grid, 'traduitb2us', gridoptions)
 
             ! Re-solve the optimization problem 
             call ShapeOptEngine%Driver()
