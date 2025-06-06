@@ -963,9 +963,9 @@ module StructuredInterpolant2D
 
         !$omp parallel default(none) shared(derivx, derivy, ind, &
         !$omp xqn, yqn, thisA, interp) if (.not. omp_in_parallel()) & 
-        !$omp private(i, j, indder, prefac, term) schedule(static) & 
+        !$omp private(i, j, indder, prefac, term)  & 
         !$omp reduction(+:vq)
-        !$omp do collapse(2)
+        !$omp do collapse(2) schedule(static)
         do i = derivx, n 
             do j = derivy, n
                 ! Derivative index
