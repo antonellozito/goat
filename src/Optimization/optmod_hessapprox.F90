@@ -39,8 +39,11 @@ module optmod_hessianapproximation
     private 
     
     ! Set public
-    public ConstructHessianApproximation
+    public ConstructHessianApproximation, ConstructDenseDiagonalHessianApproximation, &
+        ConstructSparseDiagonalHessianApproximation, ConstructElementwiseDenseHessianApproximation, &
+        ConstructElementwiseSparseHessianApproximation
     public HessianApproximationUDT
+    public assignment(=)
 
     !==================================================================!
     !                                                                  !
@@ -160,8 +163,11 @@ module optmod_hessianapproximation
     interface ConstructHessianApproximation
         module procedure ConstructSparseHessianApproximation
         module procedure ConstructDenseHessianApproximation
-        module procedure ConstructDiagonalHessianApproximation
-        module procedure ConstructElementwiseHessianApproximation
+    end interface
+
+    ! Assignment interface
+    interface assignment(=)
+        module procedure AssignHessianApproximationClass
     end interface
 
     ! Abstract interface
@@ -211,6 +217,25 @@ module optmod_hessianapproximation
     !                            CONSTRUCTORS                          !
     !------------------------------------------------------------------!
 
+    ! Assignment
+    ! Assignment overloading
+    subroutine AssignHessianApproximationClass(a, b)
+
+        ! Description
+        !============
+        ! Assignment overloading for hessian approximation class to 
+        ! avoid segfaults and memory issues
+        class(HessianApproximationUDT), allocatable, intent(inout)    :: a 
+        class(HessianApproximationUDT), intent(in)                    :: b 
+
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+        allocate(a, source=b)
+
+    
+    end subroutine
+
     ! General dense constructor
     function ConstructDenseHessianApproximation(updatemethod, &
         nphi, inithess) result(hess)
@@ -226,14 +251,9 @@ module optmod_hessianapproximation
         character(*), intent(in)                        :: updatemethod 
         integer(I8), intent(in)                         :: nphi
         real(R8), intent(in)                            :: inithess(1:nphi, 1:nphi)
-        class(HessianApproximationUDT), allocatable     :: hess
+        type(DenseHessianApproximationUDT)              :: hess
 
         ! Auxiliary
-
-        ! Initialize
-        !===========
-        ! Allocate
-        allocate(DenseHessianApproximationUDT::hess)
 
         ! Set parameters
         !===============
@@ -241,20 +261,8 @@ module optmod_hessianapproximation
         hess%updatemethod   = updatemethod
         hess%nphi           = nphi
 
-        ! Type-specific parameters
-        select type (hess)
-
-        type is (DenseHessianApproximationUDT)
-
-            ! Initialize to initial matrix
-            hess%val = inithess
-
-        class default 
-        
-            ! Nothing to do here, shouldn't be possible
-            call gdErrorHandler('ConstructDenseHessianApproximation: implementation bug ')
-
-        end select
+        ! Initialize to initial matrix
+        hess%val = inithess
 
     end function
 
@@ -273,14 +281,9 @@ module optmod_hessianapproximation
         character(*), intent(in)                        :: updatemethod 
         integer(I8), intent(in)                         :: nphi
         type(MySparseUDT), intent(in)                   :: inithess
-        class(HessianApproximationUDT), allocatable     :: hess
+        type(SparseHessianApproximationUDT)             :: hess
 
         ! Auxiliary
-
-        ! Initialize
-        !===========
-        ! Allocate
-        allocate(SparseHessianApproximationUDT::hess)
 
         ! Set parameters
         !===============
@@ -298,26 +301,14 @@ module optmod_hessianapproximation
                 'inconsistent dimensions of initial hessian')
         end if 
 
-        ! Type-specific parameters
-        select type (hess)
-
-        type is (SparseHessianApproximationUDT)
-
-            ! Set initial hessian
-            hess%val = inithess
-
-        class default 
-        
-            ! Nothing to do here, shouldn't be possible
-            call gdErrorHandler('ConstructDenseHessianApproximation: implementation bug ')
-
-        end select
+        ! Set initial hessian
+        hess%val = inithess
 
     end function
 
     ! Diagonal constructor
-    function ConstructDiagonalHessianApproximation(updatemethod, &
-        nphi, diagind, diagvals, hessiantype) result(hess)
+    function ConstructDenseDiagonalHessianApproximation(updatemethod, &
+        nphi, diagind, diagvals) result(hess)
 
         ! Description
         !============
@@ -333,51 +324,29 @@ module optmod_hessianapproximation
         ! Declare variables
         !==================
         ! Arguments
-        character(*), intent(in)            :: updatemethod, hessiantype 
+        character(*), intent(in)            :: updatemethod 
         integer(I8), intent(in)             :: nphi, diagind(:)
         real(R8), intent(in)                :: diagvals(:)
-        class(HessianApproximationUDT), allocatable :: hess
+        type(DenseHessianApproximationUDT)  :: hess
 
         ! Auxiliary
         integer(I8)                         :: nd, nv, nel 
         integer(I8), allocatable            :: row(:), col(:)
         real(R8), allocatable               :: eld(:, :), val(:)
         logical                             :: uniformdiagonals = .false.
-        type(MySparseUDT)                   :: elsp
 
         ! Loop
         integer(I8)                         :: i, k, cc
 
         ! Initialize
         !===========
-        ! Hedge for empty hessian & check input type
-        select case (hessiantype)
-
-        case ('dense')
-
-            ! Check nphi
-            if (nphi <= 0) then 
-                allocate(eld(0, 0))
-                eld = 0
-                hess = ConstructDenseHessianApproximation(updatemethod, nphi, eld)
-                return 
-            end if 
-
-        case ('sparse')
-
-            ! Check nphi
-            if (nphi <= 0) then 
-                elsp = SpZeros(nphi, nphi)
-                hess = ConstructSparseHessianApproximation(updatemethod, nphi, elsp)
-                return 
-            end if 
-
-        case default 
-
-            call gdErrorHandler('ConstructDiagonalHessianApproximation: ' // & 
-                'hessian type: "' // hessiantype // '" not implemented')
-
-        end select
+        ! Hedge for empty hessian 
+        if (nphi <= 0) then 
+            allocate(eld(0, 0))
+            eld = 0
+            hess = ConstructDenseHessianApproximation(updatemethod, nphi, eld)
+            return 
+        end if 
 
         ! Check input format
         nel = 0
@@ -435,14 +404,116 @@ module optmod_hessianapproximation
         
         ! Construct hessian approximation
         !================================
-        hess = ConstructElementwiseHessianApproximation(updatemethod, &
-            nphi, row, col, val, hessiantype)
+        hess = ConstructElementwiseDenseHessianApproximation(updatemethod, &
+            nphi, row, col, val)
+
+    end function
+
+    function ConstructSparseDiagonalHessianApproximation(updatemethod, &
+        nphi, diagind, diagvals) result(hess)
+
+        ! Description
+        !============
+        ! Construct a diagonal hessian approximation based on the given
+        ! diagonal indices (0: main diagonal, offsets go columnwise) and
+        ! values for those diagonals. The values ('diagvals') can be either
+        ! the same size as the diagonal indices, in which case each 
+        ! diagonal has a uniform value, or the same as the number of 
+        ! elements to be attributed (for non-uniform, general diagonal
+        ! matrices). 'hessiantype' should specify which kind of hessian
+        ! (dense, sparse, limited memory, ... ) type should be taken. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(*), intent(in)            :: updatemethod 
+        integer(I8), intent(in)             :: nphi, diagind(:)
+        real(R8), intent(in)                :: diagvals(:)
+        type(SparseHessianApproximationUDT)  :: hess
+
+        ! Auxiliary
+        integer(I8)                         :: nd, nv, nel 
+        integer(I8), allocatable            :: row(:), col(:)
+        real(R8), allocatable               :: val(:)
+        logical                             :: uniformdiagonals = .false.
+        type(MySparseUDT)                   :: elsp
+
+        ! Loop
+        integer(I8)                         :: i, k, cc
+
+        ! Initialize
+        !===========
+        ! Hedge for empty hessian
+        if (nphi <= 0) then 
+            elsp = SpZeros(nphi, nphi)
+            hess = ConstructSparseHessianApproximation(updatemethod, nphi, elsp)
+            return 
+        end if 
+
+        ! Check input format
+        nel = 0
+        nd = size(diagind)
+        nv = size(diagvals)
+        if (nd == nv) then 
+            ! Uniform values for each diagonal
+            uniformdiagonals = .true. 
+        else
+            ! Non-uniform diagonals, values per element
+            uniformdiagonals = .false. 
+        end if 
+
+        ! Compute total number of elements
+        do i = 1, nd 
+            nel = nel + (nphi - abs(diagind(i)))
+        end do
+
+        ! Check dimensions
+        if (.not. uniformdiagonals .and. (nel /= nv)) then 
+            call gdErrorHandler('ConstructDiagonalHessianApproximation: ' // &
+                'mismatch between specified diagonal indices and ' // & 
+                'number of values. Check if given values correspond to ' // &
+                'total number of elements in the hessian or to the ' // &
+                'number of specified diagonals')
+        end if 
+
+        ! Construct initial sparse matrix
+        !================================
+        ! Construct row, col indices
+        allocate(row(nel), col(nel), val(nel))
+        cc = 0
+        do i = 1, nd
+            if (diagind(i) >= 0) then 
+                row(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = 1, nphi-abs(diagind(i)))]
+                col(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = abs(diagind(i))+1, nphi)]
+            else
+                col(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = 1, nphi-abs(diagind(i)))]
+                row(cc+1:cc+(nphi-abs(diagind(i)))) = [(k, k = abs(diagind(i))+1, nphi)]
+            end if 
+            cc = cc + (nphi-abs(diagind(i)))
+        end do
+
+        ! Construct values
+        if (uniformdiagonals) then 
+            ! Assign by looping
+            cc = 0
+            do i = 1, nd 
+                val(cc+1:cc+(nphi-abs(diagind(i)))) = diagvals(i)
+                cc = cc + (nphi-abs(diagind(i)))
+            end do
+        else
+            val = diagvals
+        end if 
+        
+        ! Construct hessian approximation
+        !================================
+        hess = ConstructElementwiseSparseHessianApproximation(updatemethod, &
+            nphi, row, col, val)
 
     end function
 
     ! Elementwise constructor
-    function ConstructElementwiseHessianApproximation(updatemethod, &
-        nphi, row, col, val, hessiantype) result(hess)
+    function ConstructElementwiseDenseHessianApproximation(updatemethod, &
+        nphi, row, col, val) result(hess)
 
         ! Description
         !============
@@ -452,14 +523,13 @@ module optmod_hessianapproximation
         ! Declare variables
         !==================
         ! Arguments
-        character(*), intent(in)        :: updatemethod, hessiantype 
+        character(*), intent(in)        :: updatemethod 
         integer(I8), intent(in)         :: row(:), col(:), nphi
         real(R8), intent(in)            :: val(:)
-        class(HessianApproximationUDT), allocatable     :: hess
+        type(DenseHessianApproximationUDT)  :: hess
 
         ! Auxiliary
         real(R8), allocatable           :: B0d(:, :)
-        type(MysparseUDT)               :: B0sp
 
         ! Loop
         integer(I8)                     :: i 
@@ -478,30 +548,55 @@ module optmod_hessianapproximation
 
         ! Construct
         !==========
-        select case (hessiantype)
+        ! Allocate
+        allocate(B0d(nphi, nphi))
 
-        case ('dense')
+        ! Construct
+        do i = 1, size(row)
+            B0d(row(i), col(i)) = val(i)
+        end do
+        hess = ConstructDenseHessianApproximation(updatemethod, nphi, B0d)
 
-            ! Allocate
-            allocate(B0d(nphi, nphi))
+    end function
 
-            ! Construct
-            do i = 1, size(row)
-                B0d(row(i), col(i)) = val(i)
-            end do
-            hess = ConstructDenseHessianApproximation(updatemethod, nphi, B0d)
+    function ConstructElementwiseSparseHessianApproximation(updatemethod, &
+        nphi, row, col, val) result(hess)
 
-        case ('sparse')
+        ! Description
+        !============
+        ! Construct a hessian approximation based on the element values
+        ! and position defined by the row and col indices.
 
-            ! Construct
-            B0sp = ConstructMySparse(row, col, val, nphi, nphi)
-            hess = ConstructSparseHessianApproximation(updatemethod, nphi, B0sp)
+        ! Declare variables
+        !==================
+        ! Arguments
+        character(*), intent(in)        :: updatemethod 
+        integer(I8), intent(in)         :: row(:), col(:), nphi
+        real(R8), intent(in)            :: val(:)
+        type(SparseHessianApproximationUDT) :: hess
 
-        case default
+        ! Auxiliary
+        type(MysparseUDT)               :: B0sp
 
+        ! Loop
+
+        ! Initialize
+        !===========
+        ! Checks
+        if ( (size(row) /= size(col)) .or. (size(row) /= size(val)) ) then 
+            call gdErrorHandler('ConstructElementwiseHessianApproximation: ' // & 
+                'dimension mismatch in input arguments row, col, val')
+        end if 
+        if (any(row > nphi) .or. any(col > nphi)) then 
             call gdErrorHandler('ConstructElementwiseHessianApproximation: ' // &
-                'hessian type: "' // hessiantype // '" not implemented')
-        end select
+                'some elements are out of matrix range')
+        end if 
+
+        ! Construct
+        !==========
+        ! Construct
+        B0sp = ConstructMySparse(row, col, val, nphi, nphi)
+        hess = ConstructSparseHessianApproximation(updatemethod, nphi, B0sp)
 
     end function
 

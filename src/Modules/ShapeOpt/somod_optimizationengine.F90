@@ -313,6 +313,7 @@ module somod_optimizationengine
         ! Design variables
         !=================
         ! Allocate the design variables, depending on the type.
+        if (allocated(problem%designvariables)) deallocate(problem%designvariables)
         select case (trim(problem%designoptions%variables%type))
 
         case ('vesselcoordinates')
@@ -349,6 +350,7 @@ module somod_optimizationengine
         end if 
 
         ! Allocate the cost function, depending on the type
+        if (allocated(problem%costfunction)) deallocate(problem%costfunction)
         if (problem%designoptions%costfunction%dogoatreduction) then 
 
             ! Check if it's also SOLPS-based and if this is allowed
@@ -425,6 +427,9 @@ module somod_optimizationengine
             problem%designvariables, problem%designoptions%constraints)
 
         ! Set Lagrange multipliers
+        if (allocated(problem%lambda)) deallocate(problem%lambda)
+        if (allocated(problem%mu)) deallocate(problem%mu)
+        if (allocated(problem%A)) deallocate(problem%A)
         allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
             problem%mu(problem%constraints%ineqcon%nineqcon), &
             problem%A(problem%constraints%ineqcon%nineqcon))
@@ -532,8 +537,24 @@ module somod_optimizationengine
 
         case ('diagonal')
 
-            problem%costfunction%B = ConstructHessianApproximation(hopt%updatemethod, &
-                problem%designvariables%nphi, hopt%diagind, hopt%diagval, hopt%storagetype)
+            select case (hopt%storagetype)
+
+            case ('sparse')
+
+                problem%costfunction%B = ConstructSparseDiagonalHessianApproximation(hopt%updatemethod, &
+                    problem%designvariables%nphi, hopt%diagind, hopt%diagval)
+
+            case ('dense')
+
+                problem%costfunction%B = ConstructDenseDiagonalHessianApproximation(hopt%updatemethod, &
+                    problem%designvariables%nphi, hopt%diagind, hopt%diagval)
+
+            case default 
+
+                call gdErrorHandler('FinalizeInitializationSO: ' // & 
+                'unknown hessian storage option: "' // hopt%storagetype // '"')
+
+            end select
 
         case default 
 
@@ -699,6 +720,13 @@ module somod_optimizationengine
         ! Simply call the cost function computation routine
         call problem%costfunction%Evaluate(J, gradJ, hessJ, problem%goat, &
             dogradient, dohessian, problem%designvariables)
+
+        problem%doremesh = .true.
+        if (problem%doremesh) then 
+            ! Pop out by setting to NaN
+            J = nanval_R8() 
+            gradJ = nanval_R8()
+        end if   
 
     end subroutine
 

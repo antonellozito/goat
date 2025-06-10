@@ -962,10 +962,12 @@ module StructuredInterpolant2D
         vq(:) = 0
 
         !$omp parallel default(none) shared(derivx, derivy, ind, &
-        !$omp xqn, yqn, thisA, interp) if (.not. omp_in_parallel()) & 
-        !$omp private(i, j, indder, prefac, term)  & 
-        !$omp reduction(+:vq)
+        !$omp xqn, yqn, thisA, interp, vq) if (.not. omp_in_parallel()) & 
+        !$omp private(i, j, indder, prefac, term) 
         !$omp do collapse(2) schedule(static)
+        ! Note: we chose here not to reduce vq, since this may become very
+        ! memory intensive due to copying of vq for each thread by openmp
+        ! - this of course at the cost of some performance
         do i = derivx, n 
             do j = derivy, n
                 ! Derivative index
@@ -976,7 +978,9 @@ module StructuredInterpolant2D
                     real(precfac(i+1-derivx), kind = R8)*&
                     real(precfac(j+1), kind=R8)/real(precfac(j+1-derivy), kind = R8)
                 term = thisA(:, indder)*prefac*xqn**(i - derivx)*yqn**(j - derivy)
+                !$omp critical
                 vq = vq + term
+                !$omp end critical
             end do 
         end do
         !$omp end do 
@@ -984,7 +988,7 @@ module StructuredInterpolant2D
         
 
         ! Scale
-        !$omp parallel reduction(*:vq)
+        !$omp parallel default(shared)
         !$omp workshare
         vq = vq*1/( (refdx(ind))**derivx * (refdy(ind))**derivy)
         !$omp end workshare
