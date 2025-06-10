@@ -371,8 +371,6 @@ module mod_contour2D
         class(ContourTracerUDT), allocatable, intent(inout)    :: a 
         class(ContourTracerUDT), intent(in)                    :: b 
 
-        print *, 'assigning tracer'
-
         if (allocated(a)) then 
             deallocate(a)
         end if 
@@ -392,8 +390,6 @@ module mod_contour2D
             end select
 
         end select
-
-        print *, 'assigned tracer'
     
     end subroutine
 

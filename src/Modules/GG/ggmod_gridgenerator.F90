@@ -157,6 +157,12 @@ contains
         topomeshoptions%inputfilepath = inputfilepath 
         call topomeshoptions%Set()
 
+        ! Check
+        if (topomeshoptions%readexistingTM) then 
+            print *, 'InitialieGGG2D: setting readexistingTM to false'
+            topomeshoptions%readexistingTM = .false. 
+        end if 
+
         ! Set grid generation options
         ggoptions%inputfilepath = inputfilepath 
         call ggoptions%Set()

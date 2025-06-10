@@ -91,7 +91,6 @@ subroutine ShapeOptDriver(inputfilepath)
     type is (OptimizationProblemSOUDT)
 
         ! Initialize
-        problem%doremesh = .false. 
         itremesh = 1
 
         ! Keep looping until exit conditions are met

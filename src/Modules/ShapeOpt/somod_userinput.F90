@@ -732,6 +732,11 @@ module somod_userinput
         ! Arguments
         class(CostfunctionOptionsSOFAUDT)    :: options 
 
+        ! Check allocation status
+        !========================
+        if (allocated(options%structureIDs)) deallocate(options%structureIDs)
+        if (allocated(options%vertIDs)) deallocate(options%vertIDs)
+        
         ! Set defaults
         !=============
         options%lambda                  = 1
