@@ -5362,7 +5362,9 @@ module ggmod_topology2D
         type(RealDynamicArrayUDT)               :: xc, yc, fc 
         type(IntegerDynamicArrayUDT)            :: tc
         type(ContourUDT), allocatable           :: fxc(:), fyc(:)
-        !type(PolygonUDT), allocatable           :: fxp(:), fyp(:)
+        type(PolygonSetUDT)                     :: tempps
+        type(PolygonUDT), allocatable           :: fxp(:), fyp(:)
+        class(ContourTracerUDT), allocatable    :: fxtracer, fytracer
 
         ! Loop
         integer(I8)                             :: i, j, k
@@ -5393,30 +5395,54 @@ module ggmod_topology2D
         call magneticField%interp%Evaluate(xg, yg, 1, 0, fx)
         call magneticField%interp%Evaluate(xg, yg, 0, 1, fy)
 
+        ! Construct new tracers
+        fxtracer = fieldtracer
+        fytracer = fieldtracer 
+        if (allocated(fxtracer%xs)) then 
+            deallocate(fxtracer%xs, fxtracer%ys, fxtracer%vs, &
+                fxtracer%order, fxtracer%IDs)
+        end if 
+        allocate(fxtracer%xs(0), fxtracer%ys(0), fxtracer%vs(0), &
+            fxtracer%order(0), fxtracer%IDs(0))
+        if (allocated(fytracer%xs)) then 
+            deallocate(fytracer%xs, fytracer%ys, fytracer%vs, &
+            fytracer%order, fytracer%IDs)
+        end if 
+        allocate(fytracer%xs(0), fytracer%ys(0), fytracer%vs(0), &
+            fytracer%order(0), fytracer%IDs(0))
+        call fxtracer%SetValues(fx)
+        call fytracer%SetValues(fy)
+        
+
         ! Trace 
-        f = fieldtracer%GetValues()
-        call fieldtracer%SetValues(fx)
-        fxc = fieldtracer%TraceContours([0.0_R8])
-        call fieldtracer%SetValues(fy)
-        fyc = fieldtracer%TraceContours([0.0_R8])
+        fxc = fxtracer%TraceContours([0.0_R8])
+        fyc = fytracer%TraceContours([0.0_R8])
 
-        ! Reset tracer
-        call fieldtracer%SetValues(f)
+        ! Clean
+        call CleanContours(fxc)
+        call CleanContours(fyc)
 
-        ! Compute all intersections
-        !==========================
         ! Convert all to polygons
         nfxc = size(fxc)
         nfyc = size(fyc)
-        !allocate(fxp(nfxc), fyp(nfyc))
+        allocate(fxp(nfxc), fyp(nfyc))
 
-        !do i = 1, nfxc 
-        !    call fxp(i)%Construct(fxc(i)%x, fxc(i)%y)
-        !end do 
-        !do i = 1, nfyc 
-        !    call fyp(i)%Construct(fyc(i)%x, fyc(i)%y)
-        !end do 
+        do i = 1, nfxc 
+            call fxp(i)%Construct(fxc(i)%x, fxc(i)%y)
+        end do 
+        do i = 1, nfyc 
+            call fyp(i)%Construct(fyc(i)%x, fyc(i)%y)
+        end do 
 
+        ! Write out data
+        call tempps%Construct(fxp)
+        call tempps%WriteData('extrema_fx_lines')
+        call tempps%Construct(fyp)
+        call tempps%WriteData('extrema_fy_lines')
+        
+
+        ! Compute all intersections
+        !==========================
         ! Compute intersections
         !$omp parallel do default(none) schedule(dynamic) collapse(2) &
         !$omp shared(nfxc, nfyc, fxc, fyc, magneticField, xc, yc, fc, tc) &
@@ -5916,6 +5942,14 @@ module ggmod_topology2D
         tptube%ntot = ntot
         tptube%nface = nface
         tptube%ncell = ncell
+        if (allocated(tptube%cell)) then 
+            ! assume all allocated
+            deallocate(tptube%cell, tptube%face, &
+                tptube%cellP, tptube%faceP, tptube%isclosed, tptube%bndf1, tptube%bndf2, &
+                tptube%bndv1, tptube%bndv2, tptube%bndf1P, &
+                tptube%bndf2P, tptube%bndv1P, tptube%bndv2P)
+        end if 
+
         allocate(tptube%cell(ncell), tptube%face(nface), &
             tptube%cellP(ntot, 2), tptube%faceP(ntot, 2), &
             tptube%isclosed(ntot), tptube%bndf1(nf1), tptube%bndf2(nf2), &
