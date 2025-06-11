@@ -66,6 +66,7 @@ module gdmod_optimizationengine
         !==========
         ! Problem initialization
         procedure :: Initialize      => InitializeOptimizationProblemGD
+        procedure :: ReinitializeAfterRemeshing => ReinitializeOptimizationProblemAfterRemeshGD
 
         ! Dimension query
         procedure :: GetProblemDimensions   => GetProblemDimensionsGD 
@@ -267,8 +268,6 @@ module gdmod_optimizationengine
     
     end subroutine
     
-
-
     !------------------------------------------------------------------!
     !                       OPTIMIZATION PROBLEM                       !
     !------------------------------------------------------------------!
@@ -517,6 +516,66 @@ module gdmod_optimizationengine
         ! dependent fields
         call problem%FinalizeInitialization()
 
+
+    end subroutine
+
+    ! Optimization problem reinitialization after remeshing
+    subroutine ReinitializeOptimizationProblemAfterRemeshGD(problem)
+
+        ! Description
+        !============
+        ! Reinitialize the GD optimization problem after a grid update.
+        ! We assume that design variables etc are properly allocated 
+        ! already and that options have been read in. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)      :: problem
+
+        ! Loop variables
+
+        ! Data
+
+        ! Design variables
+        !=================
+        ! Initialize the design variables
+        call problem%designvariables%Initialize(problem%grid, &
+            problem%magneticField, problem%environment)
+        
+        ! Cost function
+        !==============
+        ! Initialize the cost function
+        call problem%costfunction%Initialize(problem%grid, &
+            problem%magneticField, problem%environment, &
+            problem%designoptions%costfunction)
+
+        ! Constraints
+        !============
+        ! Given the (many) possible options for the constraints, the 
+        ! constraints are set in its own initialization. 
+        call problem%constraints%Initialize(problem%grid, &
+            problem%magneticField, problem%environment, & 
+            problem%designvariables, problem%designoptions%constraints)
+
+        ! Set Lagrange multipliers
+        if (allocated(problem%lambda)) then 
+            deallocate(problem%lambda)
+        end if 
+        if (allocated(problem%mu)) then 
+            deallocate(problem%mu)
+        end if 
+
+        allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
+            problem%mu(problem%constraints%ineqcon%nineqcon))
+        problem%lambda = 0
+        problem%mu = 0
+
+        ! Finalize
+        !=========
+        ! Initialize design variables further for constraint/cfv 
+        ! dependent fields
+        call problem%FinalizeInitialization()
 
     end subroutine
 

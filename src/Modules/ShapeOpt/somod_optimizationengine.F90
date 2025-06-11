@@ -501,6 +501,76 @@ module somod_optimizationengine
 
     end subroutine
 
+    ! Re-initialization after remeshing
+    subroutine ReinitializeAfterRemeshing(problem, grid)
+
+        ! Description
+        !============
+        ! This routine reinitializes the optimization problem given a 
+        ! new grid. Since, in general, the grid variables can be present
+        ! anywhere in the design variables, cost function and 
+        ! constraints of the shape optimization problem, we reinitialize
+        ! all of them. For goat, we don't need to reload any of the 
+        ! user input (that doesn't/shouldn't change), but we do need to
+        ! reinitialize the entire optimization problem. 
+
+        ! Note: we could try to extract the previous lagrange 
+        ! multipliers from non-grid related constraints, but this 
+        ! requires additional getter functions of the constraints that
+        ! are design variable agnostic. Given that the computational 
+        ! gain/speed-up is probably low, we chose to simply reinitialize
+        ! the multipliers from scratch for now. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemSOUDT)             :: problem 
+        type(GridUDT), intent(in)                   :: grid 
+
+        ! GOAT
+        !=====
+        ! Set the grid
+        problem%goat%grid = grid 
+
+        ! Reinitialize goat
+        call problem%goat%ReinitializeAfterRemeshing()
+
+        ! Shape optimization
+        !===================
+        ! Design variables
+        call problem%designvariables%Initialize(problem%goat)
+        
+        ! Cost function
+        call problem%costfunction%Initialize(problem%goat, &
+            problem%designoptions%costfunction)
+
+        ! Constraints
+        !============
+        ! Given the (many) possible options for the constraints, the 
+        ! constraints are set in its own initialization. 
+        call problem%constraints%Initialize(problem%goat, & 
+            problem%designvariables, problem%designoptions%constraints)
+
+        ! Set Lagrange multipliers
+        if (allocated(problem%lambda)) deallocate(problem%lambda)
+        if (allocated(problem%mu)) deallocate(problem%mu)
+        if (allocated(problem%A)) deallocate(problem%A)
+        allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
+            problem%mu(problem%constraints%ineqcon%nineqcon), &
+            problem%A(problem%constraints%ineqcon%nineqcon))
+        problem%lambda = 0
+        problem%mu = 0
+        problem%A = .false.
+
+        ! Finalize initialization
+        !========================
+        ! Initialize design variables further for constraint/cfv 
+        ! dependent fields
+        call problem%FinalizeInitialization()
+
+
+    end subroutine
+
     ! Finalize the problem initialization
     subroutine FinalizeInitializationSO(problem)
 
