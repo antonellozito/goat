@@ -791,7 +791,6 @@ module somod_optimizationengine
         call problem%costfunction%Evaluate(J, gradJ, hessJ, problem%goat, &
             dogradient, dohessian, problem%designvariables)
 
-        problem%doremesh = .true.
         if (problem%doremesh) then 
             ! Pop out by setting to NaN
             J = nanval_R8() 
