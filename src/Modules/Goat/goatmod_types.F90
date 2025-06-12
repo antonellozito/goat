@@ -876,13 +876,13 @@ module goatmod_types
                 grid%data%spointID(idum(2)), grid%data%isprimaryxp(idum(0)), &
                 grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
                 grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
-                grid%data%spointxpID(i))
+                grid%data%spointxpID(grid%data%nsp))
     
             ! Read X-point data
             call ReadSingleLine(filespec, chardummy, reachedeof) ! header
             do i = 1, grid%data%nxp  
                 ! Read 
-                read(filespec, *) grid%data%xpointID(i), grid%data%isprimaryxp, &
+                read(filespec, *) grid%data%xpointID(i), grid%data%isprimaryxp(i), &
                     idum(0)
             end do
     
