@@ -941,13 +941,13 @@ module ggmod_gridgeneration2D
         end select
 
         ! Refiner (poloidal)
-        GGTMlinerefinerpol = InitializeGGTMLineRefiner(topomesh, &
+        call InitializeGGTMLineRefiner(GGTmlinerefinerpol, topomesh, &
             magneticField, vessel, fieldtracer, boundarytracer, &
             poloidalvertexdistributor, radialvertexdistributor, options, &
             'poloidal')
 
         ! Refiner (radial)
-        GGTMlinerefinerrad = InitializeGGTMLineRefiner(topomesh, &
+        call InitializeGGTMLineRefiner(GGTMlinerefinerrad, topomesh, &
             magneticField, vessel, fieldtracer, boundarytracer, &
             poloidalvertexdistributor, radialvertexdistributor, options, &
             'radial')
@@ -10088,10 +10088,10 @@ module ggmod_gridgeneration2D
     !------------------------------------------------------------------!
 
     ! Refiner initialization
-    function InitializeGGTMLineRefiner(topomesh, &
+    subroutine InitializeGGTMLineRefiner(GGTMlinerefiner, topomesh, &
         magneticField, vessel, fieldtracer, boundarytracer, &
         poloidalvertexdistributor, radialvertexdistributor, options, &
-        direction) result(GGTMlinerefiner)
+        direction) 
 
         ! Description
         !============
@@ -10111,7 +10111,7 @@ module ggmod_gridgeneration2D
         type(GGoptionsUDT), intent(in)          :: options 
         class(VertexDistributor2DUDT), intent(in)      :: &
             poloidalvertexdistributor, radialvertexdistributor
-        class(GGTMLineRefiner2DUDT), allocatable    :: GGTMlinerefiner
+        class(GGTMLineRefiner2DUDT), allocatable, intent(inout) :: GGTMlinerefiner
         character(*), intent(in)                :: direction
 
         ! Auxiliary
@@ -10125,6 +10125,10 @@ module ggmod_gridgeneration2D
 
         ! Loop
         integer(I8)                                 :: i 
+
+        ! Checks
+        !=======
+        if (allocated(GGTMlinerefiner)) deallocate(GGTMlinerefiner)
 
         ! Select refiner
         !===============
@@ -10338,7 +10342,7 @@ module ggmod_gridgeneration2D
         end select
 
 
-    end function 
+    end subroutine 
 
     ! Refiner option updating, dummy
     subroutine UpdateRefinementOptionsNoRef(refiner, refoptions, topomesh)
