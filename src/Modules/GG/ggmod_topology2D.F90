@@ -235,11 +235,22 @@ module ggmod_topology2D
         !==================
         ! Arguments
         type(TopomeshUDT)                       :: topomesh
-        type(VesselUDT), intent(inout)          :: vessel
+        type(VesselUDT), intent(in)             :: vessel
         type(magneticFieldUDT), intent(in)      :: magneticField 
         type(TopomeshOptionsUDT), intent(in)    :: options
         class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
         class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
+
+        ! Auxiliary
+        type(VesselUDT)                         :: tmvessel
+
+        ! Initialize
+        !===========
+        ! Copy the vessel structure since this may change due to 
+        ! reconstruction of the vessel polygons etc while constructing
+        ! the topological mesh (also small geometrical features might 
+        ! change, but that should be negligible)
+        tmvessel = vessel
 
         ! Construct basic mesh
         !=====================
@@ -250,17 +261,17 @@ module ggmod_topology2D
 
             ! Update the field tracer
             call UpdateTracersFromTopomesh(topomesh, fieldtracer, &
-                magneticField, vessel, options)
+                magneticField, tmvessel, options)
         else
             ! Construct from scratch
-            call ConstructBasicTopologicalMesh(vessel, magneticField, options, &
+            call ConstructBasicTopologicalMesh(tmvessel, magneticField, options, &
                 topomesh, fieldtracer, vesseltracer, streamlinetracer)
         end if
 
         ! Apply adaptations
         !==================
         if (options%doadaptations) then 
-            call ModifyTopologicalMesh(vessel, magneticField, options, &
+            call ModifyTopologicalMesh(tmvessel, magneticField, options, &
                 topomesh, fieldtracer, vesseltracer, streamlinetracer)
         end if 
 
