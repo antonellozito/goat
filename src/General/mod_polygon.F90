@@ -487,18 +487,22 @@ module mod_polygon
     end subroutine
 
     ! Polygon set refiner (uniform)
-    subroutine RefinePolygonSetUniform(polygonset, dlmax)
+    subroutine RefinePolygonSetUniform(polygonset, dlmax, minsplit)
 
         ! Description
         !============
         ! This routine refines each of the polygons in the polygonset 
-        ! in a uniform way. 
+        ! in a uniform way. This routine is just a wrapper for the 
+        ! polygon refinement routine - see that routine for additional
+        ! information. 
+
 
         ! Declare variables
         !==================
         ! Arguments
         class(PolygonSetUDT)                :: polygonset 
         real(R8), intent(in)                :: dlmax 
+        integer(I8), intent(in)             :: minsplit
 
         ! Auxiliary
 
@@ -509,7 +513,7 @@ module mod_polygon
         !=======
         ! Simply call polygon refiner for each polygon...
         do i = 1, polygonset%np
-            call polygonset%polygons(i)%Refine(dlmax)
+            call polygonset%polygons(i)%Refine(dlmax, minsplit)
         end do
 
     end subroutine
@@ -1733,7 +1737,7 @@ module mod_polygon
     end subroutine
 
     ! Polygon refiner
-    subroutine RefinePolygonUniform(polygon, dlmax)
+    subroutine RefinePolygonUniform(polygon, dlmax, minsplit)
 
         ! Description
         !============
@@ -1741,6 +1745,15 @@ module mod_polygon
         ! inserting additional points at edges that are too long. 
         ! The maximal length that an edge should be is determined by 
         ! dlmax. Refinement is done in a uniform way.
+
+        ! Additionally, a minimal refinement level can be set using 
+        ! minsplit, which indicates the minimal amount of splittings 
+        ! per edge that should occur. If set to zero, this has no 
+        ! influence. This setting can help to split very small edges
+        ! without blowing up the polygon size, or to uniformly refine
+        ! the entire polygon but keeping the original resolution 
+        ! distribution (then set dlmax to a very large value to have 
+        ! no effect)
 
         ! Note: the labels of original vertices are retained, but 
         ! the new vertices' labels are simply initialized to zero since
@@ -1751,6 +1764,7 @@ module mod_polygon
         ! Arguments
         class(PolygonUDT)                       :: polygon 
         real(R8), intent(in)                    :: dlmax
+        integer(I8), intent(in)                 :: minsplit
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:,: )   :: newlabels
@@ -1782,6 +1796,7 @@ module mod_polygon
         dye = y(2:ne+1) - y(1:ne)
         le = sqrt( dxe**2 + dye**2 )
         nne = floor(le/dlmax)
+        where (nne < minsplit) nne = minsplit
 
         ! Initialize new edges
         allocate(newx(sum(nne)+ne+1), newy(sum(nne)+ne+1), &

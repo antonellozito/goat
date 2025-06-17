@@ -4630,7 +4630,7 @@ module goatmod_types
         !=========================
         if (vesseloptions%refine) then 
             ! Call refiner 
-            call vessel%polygonset%Refine(vesseloptions%maxdist)
+            call vessel%polygonset%Refine(vesseloptions%maxdist, vesseloptions%minreffac)
     
             ! Update labels - normally, labels are kept the same on original
             ! nodes but zero elsewhere. 

@@ -289,6 +289,9 @@ module goatmod_userinput
         !               more nodes)
         ! - maxdist:    maximum distance between two nodes. If larger,
         !               nodes will be added in between when refine == 1
+        ! - minreffac   minimal refinement factor for each edge. If set 
+        !               to zero, then no effect. Value+1 gives the number 
+        !               of edges that each edge will be split minimally.
         ! - TP:         integer giving the indices of which part of the
         !               structure should be considered as target plates.
         !               This should not account for any structures being
@@ -321,7 +324,8 @@ module goatmod_userinput
 
         ! Vessel representation options
         character(:), allocatable       :: shapemeth 
-        integer(I8)                     :: resx, resy, interpC, interpM 
+        integer(I8)                     :: resx, resy, interpC, interpM, &
+            minreffac 
         real(R8)                        :: offsetfracx, offsetfracy
         real(R8), allocatable           :: xrange(:), yrange(:)
 
@@ -402,6 +406,9 @@ module goatmod_userinput
         ! - dpsimintangencypointtubes   minimal delta psi for tangency 
         !                       point tubes (if below, we attempt to 
         !                       merge)
+        ! - lradmintangencypointtubes   minimal radial length for tangency
+        !                       point tubes (if below, we attempt to 
+        !                       merge)
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax
@@ -410,7 +417,7 @@ module goatmod_userinput
             readexistingTM, removenoncoreregions, mergetangencypointtubes, &
             doadaptations, dotpvesselbased
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
-            PFboundariesfrac, dpsimintangencypointtubes
+            PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes
         character(:), allocatable   :: TMfilepath
     contains 
 
@@ -800,7 +807,8 @@ module goatmod_userinput
         ! Refinement options
         options%refine      = .false.
         options%maxdist     = 0.01
-
+        options%minreffac   = 0_I8
+ 
         ! Target plates
         allocate(options%TP(2))
         allocate(options%TPind(2))
@@ -890,6 +898,7 @@ module goatmod_userinput
         options%removenoncoreregions        = .false.
         options%mergetangencypointtubes     = .false.
         options%dpsimintangencypointtubes   = 100_R8 ! some absurd large value
+        options%lradmintangencypointtubes   = 100_R8 ! some absurd large value
 
     end subroutine 
 
@@ -1440,6 +1449,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%refine)
         field = 'goat.vessel.maxvesseldist'
         call ExtractOptionValueReal0D(fid, field, options%maxdist)
+        field = 'goat.vessel.minreffac'
+        call ExtractOptionValueInteger0D(fid, field, options%minreffac)
         
         ! Target plates
         field = 'goat.vessel.TP'
@@ -1616,6 +1627,8 @@ module goatmod_userinput
         field = 'gg.tm.mergetangencypointtubes'
         call ExtractOptionValueLogical0D(fid, field, options%mergetangencypointtubes)
         field = 'gg.tm.dpsimintangencypointtubes'
+        call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
+        field = 'gg.tm.lradmintangencypointtubes'
         call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
 
         ! Housekeeping
