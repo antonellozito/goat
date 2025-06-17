@@ -758,10 +758,14 @@ module mod_contour2D
 
             ! Check if closed
             do j = 1, size(tempcontours)
-                if (tempcontours(j)%x(1) == tempcontours(j)%x(size(tempcontours(j)%x)) .and. &
-                    tempcontours(j)%y(1) == tempcontours(j)%y(size(tempcontours(j)%y))) then 
-                    if (size(tempcontours(j)%x) > 1) then 
-                        tempcontours(j)%isclosed = .true.
+                if (size(tempcontours(j)%x) > 0) then 
+                    if (tempcontours(j)%x(1) == tempcontours(j)%x(size(tempcontours(j)%x)) .and. &
+                        tempcontours(j)%y(1) == tempcontours(j)%y(size(tempcontours(j)%y))) then 
+                        if (size(tempcontours(j)%x) > 1) then 
+                            tempcontours(j)%isclosed = .true.
+                        else
+                            tempcontours(j)%isclosed = .false.
+                        end if 
                     else
                         tempcontours(j)%isclosed = .false.
                     end if 
@@ -1642,8 +1646,8 @@ module mod_contour2D
         end if 
 
         ! Find the starting quad indices
-        iisq = findloc(x0 > X, .true., 1, back=.true.)
-        jjsq = findloc(y0 > Y, .true., 1, back=.true.)
+        iisq = findloc(x0 >= X, .true., 1, back=.true.)
+        jjsq = findloc(y0 >= Y, .true., 1, back=.true.)
 
         ! Hedge for out of bounds
         if ((iisq == 0) .or. (jjsq == 0) .or. (iisq == nx) .or. (jjsq == ny)) then 
@@ -2164,8 +2168,8 @@ module mod_contour2D
         do i = 1, size(xs)
 
             ! Determine saddle point location
-            ixquad = findloc(xs(i) > X, .true., dim=1, back=.true.)
-            iyquad = findloc(ys(i) > Y, .true., dim=1, back=.true.)
+            ixquad = findloc(xs(i) >= X, .true., dim=1, back=.true.)
+            iyquad = findloc(ys(i) >= Y, .true., dim=1, back=.true.)
 
             ! Check for out-of-bounds
             if ((ixquad == 0) .or. (iyquad == 0)) then 
@@ -3017,22 +3021,24 @@ module mod_contour2D
         !$omp parallel do default(none) private(dx, dy, delind) &
         !$omp shared(contours) schedule(static) if(do_parallel)
         do  i = 1, size(contours)
-            dx = contours(i)%x(2:size(contours(i)%x)) - &
-                contours(i)%x(1:size(contours(i)%x)-1)
-            dy = contours(i)%y(2:size(contours(i)%y)) - &
-                contours(i)%y(1:size(contours(i)%y)-1)
-            allocate(delind(size(dx)))
-            delind = (abs(dx) <= disttol) .and. (abs(dy) <= disttol)
-            ! Don't delete the last point, delete the former instead
-            if (delind(size(dx))) then 
-                delind(size(dx)) = .false.
-                delind(size(dx)-1) = .true.
-            end if 
-            if (any(delind)) then 
-                contours(i)%x = pack(contours(i)%x, [.true., .not. delind])
-                contours(i)%y = pack(contours(i)%y, [.true., .not. delind])
-            end if 
-            deallocate(delind)
+            if (size(contours(i)%x) > 2) then 
+                dx = contours(i)%x(2:size(contours(i)%x)) - &
+                    contours(i)%x(1:size(contours(i)%x)-1)
+                dy = contours(i)%y(2:size(contours(i)%y)) - &
+                    contours(i)%y(1:size(contours(i)%y)-1)
+                allocate(delind(size(dx)))
+                delind = (abs(dx) <= disttol) .and. (abs(dy) <= disttol)
+                ! Don't delete the last point, delete the former instead
+                if (delind(size(dx))) then 
+                    delind(size(dx)) = .false.
+                    delind(size(dx)-1) = .true.
+                end if 
+                if (any(delind)) then 
+                    contours(i)%x = pack(contours(i)%x, [.true., .not. delind])
+                    contours(i)%y = pack(contours(i)%y, [.true., .not. delind])
+                end if 
+                deallocate(delind)
+            end if
         end do 
         !$omp end parallel do
     end subroutine 
