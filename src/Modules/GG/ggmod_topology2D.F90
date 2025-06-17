@@ -39,7 +39,7 @@ module ggmod_topology2D
         IdentifyTopologicalMeshType
 
     ! Module parameters
-    real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
+    real(R8), parameter, private        :: tprelfieldtol = 1e-14 ! relative field tolerance under which extrema are removed
     real(R8), parameter, private        :: disttol = 1e-12 ! distance tolerance
     real(R8), parameter, private        :: distfrac = 1e-3 ! distance fraction when removing edge vertices
 
