@@ -1987,14 +1987,14 @@ def ReadRZPsiFile(filepath):
 def WriteRZPsiFile(dirpath, R, Z, Psi):
     # Description
     #------------
-    # Write out an rzpsi.dat file to the filepath specified as dirpath +
-    # 'rzpsi.dat'
+    # Write out an rzpsi.dat file to the filepath specified as dirpath
+    # (should contain the full name)
 
     # Define number of values per line
     nvpl = 6
 
     # Open file
-    thisfile = open(dirpath + r"/rzpsi.dat", "w")
+    thisfile = open(dirpath, "w")
 
     # Write initial white line
     thisfile.write("\n")
