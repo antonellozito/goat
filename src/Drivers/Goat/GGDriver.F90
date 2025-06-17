@@ -64,10 +64,10 @@ subroutine GGDriver(goatoptions)
     !============================
     ! Determine domain bounds based on vessel and magnetic field extent
     call environment%vessel%plfvessel%ps%GetVertices(xps, yps)
-    xb = [minval([xps, magneticField%interp%xgv(2:size(magneticField%interp%xgv)-1)]), &
-        maxval([xps, magneticField%interp%xgv(2:size(magneticField%interp%xgv)-1)])]
-    yb = [minval([yps, magneticField%interp%ygv(2:size(magneticField%interp%ygv)-1)]), &
-        maxval([yps, magneticField%interp%ygv(2:size(magneticField%interp%ygv)-1)])]
+    xb = [minval([xps, magneticField%interp%xgv(1:size(magneticField%interp%xgv))]), &
+        maxval([xps, magneticField%interp%xgv(1:size(magneticField%interp%xgv))])]
+    yb = [minval([yps, magneticField%interp%ygv(1:size(magneticField%interp%ygv))]), &
+        maxval([yps, magneticField%interp%ygv(1:size(magneticField%interp%ygv))])]
 
     ! Construct a 2D structured grid for tracing (may be extended
     ! in the future for different grid types)
