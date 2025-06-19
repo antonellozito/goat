@@ -633,11 +633,13 @@ module ggmod_gridgeneration2D
     abstract interface 
 
         ! Refine GGTM line
-        subroutine RefineGGTMLineSingleINT(refiner, line, vertID, &
+        subroutine RefineGGTMLineSingleINT(refiner, ggtmdata, line, vertID, &
             keepvert)
 
-            import :: GGTMFieldlineDataUDT, I8, GGTMLineRefiner2DUDT
+            import :: GGTMFieldlineDataUDT, I8, GGTMLineRefiner2DUDT, &
+                GGTMDataUDT
             class(GGTMLineRefiner2DUDT)                 :: refiner 
+            type(GGTMDataUDT), intent(in)            :: ggtmdata
             type(GGTMFieldlineDataUDT), intent(inout)   :: line
             integer(I8), intent(inout)                  :: vertID 
             logical, intent(in)                         :: keepvert(:) 
@@ -1568,7 +1570,7 @@ module ggmod_gridgeneration2D
 
                     ! Refine/coarsen
                     keepvert = hfline%isnodevert ! keep vertices on nodes
-                    call GGTMLinerefiner%Refine(hfline, vertID, keepvert)
+                    call GGTMLinerefiner%Refine(ggtmdata, hfline, vertID, keepvert)
 
                     ! Update hfline segments
                     call hfline%UpdateSegmentData(ggtmdata)
@@ -1601,7 +1603,8 @@ module ggmod_gridgeneration2D
                     ! Refine/coarsen
                     if (.not. seg(lfline%segID(1))%isvertex) then 
                         keepvert = lfline%isnodevert ! keep vertices on nodes
-                        call GGTMLinerefiner%Refine(lfline, vertID, keepvert)
+                        call GGTMLinerefiner%Refine(ggtmdata, lfline, &
+                            vertID, keepvert)
                     end if 
 
                     ! Update hfline segments
@@ -1693,6 +1696,7 @@ module ggmod_gridgeneration2D
             newty, news2r, newdlcv
 
         type(StreamlineUDT), allocatable            :: orthlines(:)
+        type(GGTMFieldlineRefinementOptionsUDT)     :: thislinerefoptions
 
         ! Loop
         integer(I8)                                 :: i, j, k, nnew
@@ -1733,26 +1737,45 @@ module ggmod_gridgeneration2D
                     ! Update the face data to propagate previous distribution
                     call facedata(tf)%line%UpdateLineData(ggtmdata) 
 
+                    ! Update the refinement options
+                    thislinerefoptions = facedata(tf)%linerefoptions
+                    if (tubes(i)%isextendedstart) then 
+                        thislinerefoptions%doBLstart = .false.
+                    end if 
+                    if (tubes(i)%isextendedend) then 
+                        thislinerefoptions%doBLend = .false.
+                    end if 
+ 
                     ! Update the refiner
                     call GGTMLineRefiner%UpdateRefinementOptions(&
-                        facedata(tf)%linerefoptions, topomesh)
+                        thislinerefoptions, topomesh)
 
                     ! Refine
                     keepvert = IsTopomeshVert(facedata(tf)%line%vert, topomesh)
-                    call GGTMlinerefiner%Refine(facedata(tf)%line, vertID, keepvert)
+                    call GGTMlinerefiner%Refine(ggtmdata, facedata(tf)%line,  &
+                        vertID, keepvert)
 
                     ! Update segment data
                     call facedata(tf)%line%UpdateSegmentData(ggtmdata) 
                     
                 end do 
 
+                ! Update the refinement options
+                thislinerefoptions = celldata(tc)%linerefoptions
+                if (tubes(i)%isextendedstart) then 
+                    thislinerefoptions%doBLstart = .false.
+                end if 
+                if (tubes(i)%isextendedend) then 
+                    thislinerefoptions%doBLend = .false.
+                end if 
+
                 ! Update refinement data 
                 call GGTMLineRefiner%UpdateRefinementOptions(&
-                celldata(tc)%linerefoptions, topomesh)
+                    thislinerefoptions, topomesh)
 
                 ! Refine/coarsen non-aligned parts
                 keepvert = hfline%isnodevert
-                call GGTMLinerefiner%Refine(hfline, vertID, keepvert)
+                call GGTMLinerefiner%Refine(ggtmdata, hfline, vertID, keepvert)
 
                 ! Update segments, but only those that are not aligned 
                 ! (i.e. no fsID)
@@ -1765,9 +1788,23 @@ module ggmod_gridgeneration2D
                 ! Update line data
                 call hfline%UpdateLineData(ggtmdata)
 
+                ! Update the refinement options
+                thislinerefoptions = celldata(tc)%linerefoptions
+                if (tubes(i)%isextendedstart) then 
+                    thislinerefoptions%doBLstart = .false.
+                end if 
+                if (tubes(i)%isextendedend) then 
+                    thislinerefoptions%doBLend = .false.
+                end if 
+
+                ! Update refinement data 
+                call GGTMLineRefiner%UpdateRefinementOptions(&
+                    thislinerefoptions, topomesh)
+
+
                 ! Refine/coarsen 
                 keepvert = hfline%isnodevert
-                call GGTMLinerefiner%Refine(hfline, vertID, keepvert)
+                call GGTMLinerefiner%Refine(ggtmdata, hfline, vertID, keepvert)
 
                 ! Update segments
                 call hfline%UpdateSegmentData(ggtmdata)
@@ -1994,7 +2031,7 @@ module ggmod_gridgeneration2D
         
             ! Refine/coarsen
             keepvert = lfline%isnodevert
-            call GGTMLinerefiner%Refine(lfline, vertID, keepvert)
+            call GGTMLinerefiner%Refine(ggtmdata, lfline, vertID, keepvert)
 
             ! Update segments
             call lfline%UpdateSegmentData(ggtmdata)
@@ -2009,13 +2046,26 @@ module ggmod_gridgeneration2D
                     ! Update the face data to propagate previous distribution
                     call facedata(tf)%line%UpdateLineData(ggtmdata) 
 
+                    ! Update the refinement options
+                    thislinerefoptions = facedata(tf)%linerefoptions
+                    if (tubes(i)%isextendedstart) then 
+                        thislinerefoptions%doBLstart = .false.
+                    end if 
+                    if (tubes(i)%isextendedend) then 
+                        thislinerefoptions%doBLend = .false.
+                    end if 
+
+                    ! Update refinement data 
+                    call GGTMLineRefiner%UpdateRefinementOptions(&
+                        thislinerefoptions, topomesh)
+
                     ! Update the refiner
                     call GGTMLineRefiner%UpdateRefinementOptions(&
-                        facedata(tf)%linerefoptions, topomesh)
+                        thislinerefoptions, topomesh)
 
                     ! Refine
                     keepvert = IsTopomeshVert(facedata(tf)%line%vert, topomesh)
-                    call GGTMlinerefiner%Refine(facedata(tf)%line, vertID, keepvert)
+                    call GGTMlinerefiner%Refine(ggtmdata, facedata(tf)%line, vertID, keepvert)
 
                     ! Update segment data
                     call facedata(tf)%line%UpdateSegmentData(ggtmdata) 
@@ -2025,13 +2075,26 @@ module ggmod_gridgeneration2D
                 ! Update line data
                 call lfline%UpdateLineData(ggtmdata)
 
+                ! Update the refinement options
+                thislinerefoptions = celldata(tc)%linerefoptions
+                if (tubes(i)%isextendedstart) then 
+                    thislinerefoptions%doBLstart = .false.
+                end if 
+                if (tubes(i)%isextendedend) then 
+                    thislinerefoptions%doBLend = .false.
+                end if 
+
                 ! Update refinement data 
                 call GGTMLineRefiner%UpdateRefinementOptions(&
-                    celldata(tc)%linerefoptions, topomesh)
+                    thislinerefoptions, topomesh)
+
+                ! Update refinement data 
+                call GGTMLineRefiner%UpdateRefinementOptions(&
+                    thislinerefoptions, topomesh)
 
                 ! Refine/coarsen non-aligned parts
                 keepvert = lfline%isnodevert
-                call GGTMLinerefiner%Refine(lfline, vertID, keepvert)
+                call GGTMLinerefiner%Refine(ggtmdata, lfline, vertID, keepvert)
 
                 ! Update segments, but only those that are not aligned 
                 ! (i.e. no fsID)
@@ -2918,7 +2981,7 @@ module ggmod_gridgeneration2D
         do i = 1, cell%ntot 
            do j = 1, size(celldata(i)%tubes)
                 !$omp task
-                call celldata(i)%tubes(j)%InitializeGraph()
+                call celldata(i)%tubes(j)%InitializeGraph(ggtmdata)
                 !$omp end task
             end do 
         end do 
@@ -3127,6 +3190,7 @@ module ggmod_gridgeneration2D
             dolasttriangle, isv2onl1
         logical, allocatable, dimension(:)      :: skipvert
         type(GGTMFieldlineDataUDT)              :: thisline
+        type(GGTMFieldlineRefinementOptionsUDT) :: thislinerefoptions
 
         ! Loop
         integer(I8)                             :: i, j, k, k1, k2
@@ -3201,7 +3265,8 @@ module ggmod_gridgeneration2D
         !$omp dolasttriangle, vind, v1, v2, v3, tempcellvert, tempcellvertP, &
         !$omp islegaltria1, islegaltria2, islegalquad, isv2onl1, doquad, &
         !$omp dx1, dx2, dx3, dy1, dy2, dy3, bxf, byf, alpha1, alpha2, &
-        !$omp alpha3, indmin, v4, tff, tempcellregion, tempfaceregion) &
+        !$omp alpha3, indmin, v4, tff, tempcellregion, tempfaceregion, &
+        !$omp thislinerefoptions) &
         !$omp shared(ggtmdata, grid, magneticField, tracingdir, ii, jj, nk)
         !$omp do schedule(dynamic)
         
@@ -3209,14 +3274,15 @@ module ggmod_gridgeneration2D
             ! Unpack iterates
             i = ii(k)
             j = jj(k)
+            thislinerefoptions = celldata(i)%linerefoptions
 
             ! Associate for ease
             associate(&
                 tubes     => celldata(i)%tubes,     &
-                doBLstart     => celldata(i)%linerefoptions%doBLstart,     &
-                doBLend       => celldata(i)%linerefoptions%doBLend  ,     &
-                ncBLstart     => celldata(i)%linerefoptions%ncBLstart,     &
-                ncBLend       => celldata(i)%linerefoptions%ncBLend        &
+                doBLstart     => thislinerefoptions%doBLstart,     &
+                doBLend       => thislinerefoptions%doBLend,       &
+                ncBLstart     => thislinerefoptions%ncBLstart,     &
+                ncBLend       => thislinerefoptions%ncBLend        &
                 )
 
             ! Unpack
@@ -3227,7 +3293,8 @@ module ggmod_gridgeneration2D
                 sff     => tubes(j)%srflabel,   &
                 eff     => tubes(j)%erflabel    &
                 )
-            ! Initialize
+
+            ! Initialize            
             k1 = 1
             k2 = 1
             nf = 0
@@ -3239,6 +3306,40 @@ module ggmod_gridgeneration2D
                 tempcellvert(3*(n1+n2)), tempcellvertP(4*(n1+n2), 2)) ! overestimations
             allocate(skipvert(graph%nv))
             skipvert = .false.
+
+            ! Check for tube extensions and adjust imposition of boundary layer if required
+            if (doBLstart .or. doBLend) then
+                ! Don't do boundary layer if the current tube or one of its
+                ! neighbours was extended - will typically lead to badly shaped
+                ! cells
+                if (tubes(j)%isextendedstart) then 
+                    doBLstart = .false. 
+                end if 
+                if (tubes(j)%isextendedend) then 
+                    doBLend = .false. 
+                end if 
+
+                ! Previous neighbour
+                if (j > 1) then 
+                    if (tubes(j-1)%isextendedstart) then 
+                        doBLstart = .false. 
+                    end if 
+                    if (tubes(j-1)%isextendedend) then 
+                        doBLend = .false. 
+                    end if 
+                end if
+
+                ! Next neighbour
+                if (j < size(tubes)) then 
+                    if (tubes(j+1)%isextendedstart) then 
+                        doBLstart = .false. 
+                    end if 
+                    if (tubes(j+1)%isextendedend) then 
+                        doBLend = .false. 
+                    end if 
+                end if
+            end if 
+
 
             ! Compute face labels
             !$omp critical
@@ -3358,7 +3459,7 @@ module ggmod_gridgeneration2D
                 ! Check which faces are legal
                 call DetermineLegalCellsQuadTria(islegaltria1, &
                     islegaltria2, islegalquad, l1, l2, k1, k2, n1, n2, &
-                    tracingdir(i), magneticField, celldata(i)%linerefoptions, &
+                    tracingdir(i), magneticField, thislinerefoptions, &
                     celldata(i)%legalcellstyle, graph, skipvert)
 
                 ! If none are legal, then throw warning for 
@@ -4864,7 +4965,7 @@ module ggmod_gridgeneration2D
 
                 ! Refine
                 keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
-                call GGTMlinerefiner%Refine(facedata(i)%line, grid%vert%ntot, keepvert)
+                call GGTMlinerefiner%Refine(ggtmdata, facedata(i)%line, grid%vert%ntot, keepvert)
 
                 ! Update segment data
                 call facedata(i)%line%UpdateSegmentData(ggtmdata)
@@ -4973,7 +5074,7 @@ module ggmod_gridgeneration2D
 
                 ! Refine 
                 keepvert = IsTopomeshVert(facedata(j)%line%vert, topomesh)
-                call GGTMlinerefiner%Refine(facedata(j)%line, grid%vert%ntot, keepvert)
+                call GGTMlinerefiner%Refine(ggtmdata, facedata(j)%line, grid%vert%ntot, keepvert)
 
                 ! Update
                 call facedata(j)%line%UpdateSegmentData(ggtmdata)
@@ -6435,7 +6536,7 @@ module ggmod_gridgeneration2D
         integer(I8)                             :: nt, startsegID, &
             endsegID, vind1, vind2, tsegID
         integer(I8), allocatable, dimension(:)  :: tc, srfvert, erfvert, &
-            allsegID, uerfvert, usrfvert
+            allsegID, uerfvert, usrfvert, extendseg
         logical, allocatable, dimension(:)      :: dostart, doend
         real(R8)                                :: dl 
 
@@ -6540,150 +6641,294 @@ module ggmod_gridgeneration2D
             ! Tangency point tubes
             !---------------------
             if (options%extendtptubes) then 
+                
+
                 ! Check first tube
                 if (ggtmdata%seg(tubes(1)%hfline%segID(1))%isvertex) then 
-                    ! Get starting radial line, update its data
-                    call facedata(celldata(i)%srf)%line%UpdateLineData(ggtmdata)
-                    
-                    ! Split the line 
-                    call facedata(celldata(i)%srf)%line%SplitAtVertex(&
-                        tubes(1)%lfline%vert(1), ggtmdata)
-                    
-                    ! Get the correct segment for extension
-                    startsegID = 0
-                    allsegID = facedata(celldata(i)%srf)%line%segID
-                    do k = 1, size(allsegID)
-                        if (ggtmdata%seg(allsegID(k))%sv == tubes(1)%hfline%vert(1) .or. &
-                            ggtmdata%seg(allsegID(k))%ev == tubes(1)%hfline%vert(1)) then 
-                            startsegID = allsegID(k)
-                            exit 
-                        end if 
-                    end do 
 
-                    ! Sanity check
-                    if (startsegID == 0) then 
-                        print *, 'cell: ', i, 'tube: ', 1
+                    ! Initialize
+                    allocate(dostart(1), doend(1), extendseg(0)) 
+                    dostart = .false. 
+                    doend  = .false. 
+
+                    ! Is start line segment too long?
+                    vind1 = findloc(srfline%vert, tubes(1)%hfline%vert(1), 1)
+                    vind2 = findloc(srfline%vert, tubes(1)%lfline%vert(1), 1)
+                    if (vind1 == 0 .or. vind2 == 0) then 
                         call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                            'could not find start segment for extension')
+                            'could not find vertices in start radial face, unexpected')
+                    end if 
+                    dl = abs(srfline%dlcv(vind1) - srfline%dlcv(vind2))
+                    if (dl > options%evtmaxvessellength) then 
+                        dostart(1) = .true.
                     end if 
 
-                    ! Get the ending radial line, update its data
-                    call facedata(celldata(i)%erf)%line%UpdateLineData(ggtmdata)
-
-                    ! Split the line
-                    call facedata(celldata(i)%erf)%line%SplitAtVertex(&
-                        tubes(1)%lfline%vert(tubes(1)%lfline%nv), ggtmdata)
-
-                    ! Get the correct segment for extension
-                    endsegID = 0
-                    allsegID = facedata(celldata(i)%erf)%line%segID
-                    do k = 1, size(allsegID)
-                        if (ggtmdata%seg(allsegID(k))%sv == tubes(1)%hfline%vert(1) .or. &
-                            ggtmdata%seg(allsegID(k))%ev == tubes(1)%hfline%vert(1)) then 
-                            endsegID = allsegID(k)
-                            exit 
-                        end if 
-                    end do 
-
-                    ! Sanity check
-                    if (endsegID == 0) then 
-                        print *, 'cell: ', i, 'tube: ', 1
+                    ! Is end segment too long?
+                    vind1 = findloc(erfline%vert, tubes(1)%hfline%vert(tubes(1)%hfline%nv), 1)
+                    vind2 = findloc(erfline%vert, tubes(1)%lfline%vert(tubes(1)%lfline%nv), 1)
+                    if (vind1 == 0 .or. vind2 == 0) then 
                         call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                            'could not find end segment for extension')
+                            'could not find vertices in end radial face, unexpected')
+                    end if 
+                    dl = abs(erfline%dlcv(vind1) - erfline%dlcv(vind2))
+                    if (dl > options%evtmaxvessellength) then 
+                        doend(1) = .true.
                     end if 
 
-                    ! Construct line
-                    call tubes(1)%hfline%Initialize(ggtmdata, [startsegID, endsegID])
+                    ! Find segments
+                    if (dostart(1)) then 
+                        ! Get starting radial line, update its data
+                        call srfline%UpdateLineData(ggtmdata)
+                        
+                        ! Split the line 
+                        call srfline%SplitAtVertex(&
+                            tubes(1)%lfline%vert(1), ggtmdata)
+                        
+                        ! Get the correct segment for extension
+                        startsegID = 0
+                        allsegID = srfline%segID
+                        do k = 1, size(allsegID)
+                            if (ggtmdata%seg(allsegID(k))%sv == tubes(1)%hfline%vert(1) .or. &
+                                ggtmdata%seg(allsegID(k))%ev == tubes(1)%hfline%vert(1)) then 
+                                startsegID = allsegID(k)
+                                exit 
+                            end if 
+                        end do 
 
-                    ! Check if we need to flip
-                    if (ggtmdata%seg(tubes(1)%hfline%segID(1))%TMfaceID == celldata(i)%erf) then 
-                        ! Need to flip
-                        call tubes(1)%hfline%Flip()
-                    elseif (ggtmdata%seg(tubes(1)%hfline%segID(1))%TMfaceID == celldata(i)%srf) then 
-                        ! All good
-                    else
-                        ! All bad
-                        call gdErrorHandler('ConstrutTopologicalMeshCellFluxTubes: ' // & 
-                            'first segment does not come from starting or ' // & 
-                            'ending radial face of cell')
+                        ! Sanity check
+                        if (startsegID == 0) then 
+                            print *, 'cell: ', i, 'tube: ', 1
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'could not find start segment for extension')
+                        end if 
+
+                        ! Add
+                        extendseg = [extendseg, startsegID]
+                    end if 
+                    if (doend(1)) then 
+                        ! Get the ending radial line, update its data
+                        call erfline%UpdateLineData(ggtmdata)
+
+                        ! Split the line
+                        call erfline%SplitAtVertex(&
+                            tubes(1)%lfline%vert(tubes(1)%lfline%nv), ggtmdata)
+
+                        ! Get the correct segment for extension
+                        endsegID = 0
+                        allsegID = erfline%segID
+                        do k = 1, size(allsegID)
+                            if (ggtmdata%seg(allsegID(k))%sv == tubes(1)%hfline%vert(1) .or. &
+                                ggtmdata%seg(allsegID(k))%ev == tubes(1)%hfline%vert(1)) then 
+                                endsegID = allsegID(k)
+                                exit 
+                            end if 
+                        end do 
+
+                        ! Sanity check
+                        if (endsegID == 0) then 
+                            print *, 'cell: ', i, 'tube: ', 1
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'could not find end segment for extension')
+                        end if 
+
+                        ! Add
+                        extendseg = [extendseg, endsegID]
                     end if 
 
-                    ! Set as extended
-                    tubes(1)%isextendedstart = .true.
-                    tubes(1)%isextendedend = .true.
+                    ! Extend if necessary
+                    if (size(extendseg) > 0) then 
+
+                        ! Construct line
+                        call tubes(1)%hfline%Initialize(ggtmdata, extendseg)
+
+                        ! Check if we need to flip - probably not necessary if only one segment
+                        if (ggtmdata%seg(tubes(1)%hfline%segID(1))%TMfaceID == celldata(i)%erf) then 
+                            print *, 'code part not verified'
+                            vind1 = findloc(tubes(1)%lfline%vert, tubes(1)%hfline%vert(1), 1)
+                            vind2 = findloc(tubes(1)%lfline%vert, tubes(1)%hfline%vert(tubes(1)%hfline%nv), 1)
+                            if (vind1 /= 0 .and. vind2 == 0) then 
+                                ! Need to flip - line starts and erf instead of srf
+                                call tubes(1)%hfline%Flip()
+                            elseif (vind1 == 0 .and. vind2 /= 0) then 
+                                ! All good: line ends on erf and does not start in erf
+                            else
+                                ! Something wrong: either both start and end are on erf, or none are
+                                call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                    'something wrong when extending tangency point tubes')
+                            end if 
+                        elseif (ggtmdata%seg(tubes(1)%hfline%segID(1))%TMfaceID == celldata(i)%srf) then 
+                            print *, 'code part not verified'
+                            vind1 = findloc(tubes(1)%lfline%vert, tubes(1)%hfline%vert(1), 1)
+                            vind2 = findloc(tubes(1)%lfline%vert, tubes(1)%hfline%vert(tubes(1)%hfline%nv), 1)
+                            if (vind1 == 0 .and. vind2 /= 0) then 
+                                ! Need to flip - line starts and erf instead of srf
+                                call tubes(1)%hfline%Flip()
+                            elseif (vind1 /= 0 .and. vind2 == 0) then 
+                                ! All good: line ends on erf and does not start in erf
+                            else
+                                ! Something wrong: either both start and end are on erf, or none are
+                                call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                    'something wrong when extending tangency point tubes')
+                            end if 
+                        else
+                            ! All bad
+                            call gdErrorHandler('ConstrutTopologicalMeshCellFluxTubes: ' // & 
+                                'first segment does not come from starting or ' // & 
+                                'ending radial face of cell')
+                        end if 
+
+                        ! Set as extended
+                        tubes(1)%isextendedstart = dostart(1)
+                        tubes(1)%isextendedend = doend(1)
+                    end if 
+
+                    ! Housekeeping
+                    deallocate(dostart, doend, extendseg)
+
                 end if 
 
                 ! Check last tube
                 if (ggtmdata%seg(tubes(nt)%lfline%segID(1))%isvertex) then 
-                    ! Get starting radial line, update its data
-                    call facedata(celldata(i)%srf)%line%UpdateLineData(ggtmdata)
-                    
-                    ! Split the line 
-                    call facedata(celldata(i)%srf)%line%SplitAtVertex(&
-                        tubes(nt)%hfline%vert(1), ggtmdata)
-                    
-                    ! Get the correct segment for extension
-                    startsegID = 0
-                    allsegID = facedata(celldata(i)%srf)%line%segID
-                    do k = 1, size(allsegID)
-                        if (ggtmdata%seg(allsegID(k))%sv == tubes(nt)%lfline%vert(1) .or. &
-                            ggtmdata%seg(allsegID(k))%ev == tubes(nt)%lfline%vert(1)) then 
-                            startsegID = allsegID(k)
-                            exit 
-                        end if 
-                    end do 
 
-                    ! Sanity check
-                    if (startsegID == 0) then 
-                        print *, 'cell: ', i, 'tube: ', 1
+                    ! Initialize
+                    allocate(dostart(1), doend(1), extendseg(0)) 
+                    dostart = .false. 
+                    doend  = .false. 
+
+                    ! Is start line segment too long?
+                    vind1 = findloc(srfline%vert, tubes(nt)%hfline%vert(1), 1)
+                    vind2 = findloc(srfline%vert, tubes(nt)%lfline%vert(1), 1)
+                    if (vind1 == 0 .or. vind2 == 0) then 
                         call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                            'could not find start segment for extension')
+                            'could not find vertices in start radial face, unexpected')
+                    end if 
+                    dl = abs(srfline%dlcv(vind1) - srfline%dlcv(vind2))
+                    if (dl > options%evtmaxvessellength) then 
+                        dostart(1) = .true.
                     end if 
 
-                    ! Get the ending radial line, update its data
-                    call facedata(celldata(i)%erf)%line%UpdateLineData(ggtmdata)
-
-                    ! Split the line
-                    call facedata(celldata(i)%erf)%line%SplitAtVertex(&
-                        tubes(nt)%hfline%vert(tubes(nt)%hfline%nv), ggtmdata)
-
-                    ! Get the correct segment for extension
-                    endsegID = 0
-                    allsegID = facedata(celldata(i)%erf)%line%segID
-                    do k = 1, size(allsegID)
-                        if (ggtmdata%seg(allsegID(k))%sv == tubes(nt)%lfline%vert(1) .or. &
-                            ggtmdata%seg(allsegID(k))%ev == tubes(nt)%lfline%vert(1)) then 
-                            endsegID = allsegID(k)
-                            exit 
-                        end if 
-                    end do 
-
-                    ! Sanity check
-                    if (endsegID == 0) then 
-                        print *, 'cell: ', i, 'tube: ', 1
+                    ! Is end segment too long?
+                    vind1 = findloc(erfline%vert, tubes(nt)%hfline%vert(tubes(nt)%hfline%nv), 1)
+                    vind2 = findloc(erfline%vert, tubes(nt)%lfline%vert(tubes(nt)%lfline%nv), 1)
+                    if (vind1 == 0 .or. vind2 == 0) then 
                         call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                            'could not find end segment for extension')
+                            'could not find vertices in end radial face, unexpected')
+                    end if 
+                    dl = abs(erfline%dlcv(vind1) - erfline%dlcv(vind2))
+                    if (dl > options%evtmaxvessellength) then 
+                        doend(1) = .true.
                     end if 
 
-                    ! Construct line
-                    call tubes(nt)%lfline%Initialize(ggtmdata, [startsegID, endsegID])
+                    ! Find segments
+                    if (dostart(1)) then 
+                        ! Get starting radial line, update its data
+                        call srfline%UpdateLineData(ggtmdata)
+                        
+                        ! Split the line 
+                        call srfline%SplitAtVertex(&
+                            tubes(nt)%hfline%vert(1), ggtmdata)
+                        
+                        ! Get the correct segment for extension
+                        startsegID = 0
+                        allsegID = srfline%segID
+                        do k = 1, size(allsegID)
+                            if (ggtmdata%seg(allsegID(k))%sv == tubes(nt)%lfline%vert(1) .or. &
+                                ggtmdata%seg(allsegID(k))%ev == tubes(nt)%lfline%vert(1)) then 
+                                startsegID = allsegID(k)
+                                exit 
+                            end if 
+                        end do 
 
-                    ! Check if we need to flip
-                    if (ggtmdata%seg(tubes(nt)%lfline%segID(1))%TMfaceID == celldata(i)%erf) then 
-                        ! Need to flip
-                        call tubes(nt)%lfline%Flip()
-                    elseif (ggtmdata%seg(tubes(nt)%lfline%segID(1))%TMfaceID == celldata(i)%srf) then 
-                        ! All good
-                    else
-                        ! All bad
-                        call gdErrorHandler('ConstrutTopologicalMeshCellFluxTubes: ' // & 
-                            'first segment does not come from starting or ' // & 
-                            'ending radial face of cell')
+                        ! Sanity check
+                        if (startsegID == 0) then 
+                            print *, 'cell: ', i, 'tube: ', 1
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'could not find start segment for extension')
+                        end if 
+
+                        ! Add
+                        extendseg = [extendseg, startsegID]
+                    end if 
+                    if (doend(1)) then 
+                        ! Get the ending radial line, update its data
+                        call erfline%UpdateLineData(ggtmdata)
+
+                        ! Split the line
+                        call erfline%SplitAtVertex(&
+                            tubes(nt)%hfline%vert(tubes(nt)%hfline%nv), ggtmdata)
+
+                        ! Get the correct segment for extension
+                        endsegID = 0
+                        allsegID = erfline%segID
+                        do k = 1, size(allsegID)
+                            if (ggtmdata%seg(allsegID(k))%sv == tubes(nt)%lfline%vert(1) .or. &
+                                ggtmdata%seg(allsegID(k))%ev == tubes(nt)%lfline%vert(1)) then 
+                                endsegID = allsegID(k)
+                                exit 
+                            end if 
+                        end do 
+
+                        ! Sanity check
+                        if (endsegID == 0) then 
+                            print *, 'cell: ', i, 'tube: ', 1
+                            call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                'could not find end segment for extension')
+                        end if 
+
+                        ! Add
+                        extendseg = [extendseg, endsegID]
                     end if 
 
-                    ! Set as extended
-                    tubes(nt)%isextendedstart = .true.
-                    tubes(nt)%isextendedend = .true.
+                    ! Extend if necessary
+                    if (size(extendseg) > 0) then 
+
+                        ! Construct line
+                        call tubes(nt)%lfline%Initialize(ggtmdata, extendseg)
+
+                        ! Check if we need to flip - probably not necessary if only one segment
+                        if (ggtmdata%seg(tubes(nt)%lfline%segID(1))%TMfaceID == celldata(i)%erf) then 
+                            print *, 'code part not verified'
+                            vind1 = findloc(tubes(nt)%hfline%vert, tubes(nt)%lfline%vert(1), 1)
+                            vind2 = findloc(tubes(nt)%hfline%vert, tubes(nt)%lfline%vert(tubes(nt)%lfline%nv), 1)
+                            if (vind1 /= 0 .and. vind2 == 0) then 
+                                ! Need to flip - line starts at erf instead of srf
+                                call tubes(nt)%lfline%Flip()
+                            elseif (vind1 == 0 .and. vind2 /= 0) then 
+                                ! All good: line ends on erf and ends in srf
+                            else
+                                ! Something wrong: either both start and end are on erf, or none are
+                                call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                    'something wrong when extending tangency point tubes')
+                            end if 
+                        elseif (ggtmdata%seg(tubes(nt)%lfline%segID(1))%TMfaceID == celldata(i)%srf) then 
+                            print *, 'code part not verified'
+                            vind1 = findloc(tubes(nt)%hfline%vert, tubes(nt)%lfline%vert(1), 1)
+                            vind2 = findloc(tubes(nt)%hfline%vert, tubes(nt)%lfline%vert(tubes(nt)%lfline%nv), 1)
+                            if (vind1 == 0 .and. vind2 /= 0) then 
+                                ! Need to flip - line starts at erf instead of srf
+                                call tubes(nt)%lfline%Flip()
+                            elseif (vind1 /= 0 .and. vind2 == 0) then 
+                                ! All good: line ends on erf and does not start in erf
+                            else
+                                ! Something wrong: either both start and end are on erf, or none are
+                                call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
+                                    'something wrong when extending tangency point tubes')
+                            end if 
+                        else
+                            ! All bad
+                            call gdErrorHandler('ConstrutTopologicalMeshCellFluxTubes: ' // & 
+                                'first segment does not come from starting or ' // & 
+                                'ending radial face of cell')
+                        end if 
+
+                        ! Set as extended
+                        tubes(nt)%isextendedstart = dostart(1)
+                        tubes(nt)%isextendedend = doend(1)
+                    end if 
+
+                    ! Housekeeping
+                    deallocate(dostart, doend, extendseg)
+
                 end if 
             end if 
                 
@@ -6728,6 +6973,9 @@ module ggmod_gridgeneration2D
                             srfvert(2*j-1) = thfline%vert(1)
                             srfvert(2*j) = tlfline%vert(1) 
                         end if 
+
+                        ! Check if the inclination w.r.t. the magnetic 
+                        ! field is too small 
                     end if 
 
                     ! Check if we can extend end  
@@ -9135,7 +9383,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! GGTM line pair graph initialization 
-    subroutine InitializeGGTMFieldlinePairDataGraph(linepair)
+    subroutine InitializeGGTMFieldlinePairDataGraph(linepair, ggtmdata)
 
         ! Description
         !============
@@ -9152,16 +9400,19 @@ module ggmod_gridgeneration2D
         ! are possible etc. This is, however, a rather expensive 
         ! operation (not only to construct, but also to evaluate).
 
+        ! Note: we need to hedge for vertex segments
+
         ! Declare variables
         !==================
         ! Arguments
         class(GGTMFieldlinePairDataUDT)         :: linepair 
+        type(GGTMDataUDT), intent(in)           :: ggtmdata
 
         ! Auxiliary
         logical                                 :: isintube
         integer(I8)                             :: tvind
         integer(I8), allocatable, dimension(:)  :: ev1, ev2, &
-            gvert, hfv, lfv, vp
+            gvert, hfv, lfv, vp, hflinevert, lflinevert
         real(R8), allocatable, dimension(:)     :: xp, yp, xv, yv, &
             xvert, yvert
 
@@ -9173,34 +9424,110 @@ module ggmod_gridgeneration2D
         !===========
         ! Unpack
         associate(&
+            seg         => ggtmdata%seg,    &
             graph       => linepair%graph,  &
             hfline      => linepair%hfline, &
             lfline      => linepair%lfline  &
             )        
 
-        ! Construct closed polygon coordinates and mapping from hfline
-        ! and lfline indices
-        xp = hfline%xv
-        yp = hfline%yv 
-        vp = hfline%vert
-        hfv = [(k, k = 1, hfline%nv)]
-        lfv = [(k, k = lfline%nv, 1, -1)] + hfline%nv
-        if (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)) then 
-            xp = [xp, lfline%xv(lfline%nv:1:-1)]
-            yp = [yp, lfline%yv(lfline%nv:1:-1)]
-            vp = [vp, lfline%vert(lfline%nv:1:-1)]
-        else
-            xp = [xp, lfline%xv(lfline%nv-1:1:-1)]
-            yp = [yp, lfline%yv(lfline%nv-1:1:-1)]
-            vp = [vp, lfline%vert(lfline%nv-1:1:-1)]
-            lfv = lfv - 1
-        end if 
-        if (hfline%vert(1) /= lfline%vert(1)) then 
-            xp = [xp, hfline%xv(1)]
-            yp = [yp, hfline%yv(1)]
-            vp = [vp, hfline%vert(1)]
+        ! Checks
+        if ((seg(hfline%segID(1))%isvertex) .and. (seg(lfline%segID(1))%isvertex)) then 
+            call gdErrorHandler('InitializeGGTMFieldlinePairDataGraph: ' // & 
+                'both hfline and lfline are vertices, not supported.')
         end if 
 
+        ! Construct closed polygon coordinates and mapping from hfline
+        ! and lfline indices, and extract vertices that should form 
+        ! the hfline and lfline (but hedging for vertex segments)
+        if ((seg(hfline%segID(1))%isvertex)) then 
+            ! hfline is vertex
+            xp = hfline%xv(1:1)
+            yp = hfline%yv(1:1)
+            vp = hfline%vert(1:1)
+            hflinevert = hfline%vert(1:1)
+            hfv = [1]
+            if (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)) then 
+                xp = [xp, lfline%xv(lfline%nv:1:-1)]
+                yp = [yp, lfline%yv(lfline%nv:1:-1)]
+                vp = [vp, lfline%vert(lfline%nv:1:-1)]
+                lflinevert = lfline%vert ! don't flip!
+                lfv = [(k, k = lfline%nv, 1, -1)] + 1
+            else
+                xp = [xp, lfline%xv(lfline%nv-1:1:-1)]
+                yp = [yp, lfline%yv(lfline%nv-1:1:-1)]
+                vp = [vp, lfline%vert(lfline%nv-1:1:-1)]
+                lflinevert = lfline%vert(1:lfline%nv-1) ! don't flip!
+                lfv = [(k, k = lfline%nv-1, 1, -1)] + 1
+            end if 
+            if (hfline%vert(1) /= lfline%vert(1)) then 
+                xp = [xp, hfline%xv(1)]
+                yp = [yp, hfline%yv(1)]
+                vp = [vp, hfline%vert(1)]
+            else
+                lflinevert = lflinevert(2:)
+            end if 
+        elseif ((seg(lfline%segID(1))%isvertex)) then 
+            ! lfline is vertex
+            
+            if (hfline%vert(hfline%nv) /= lfline%vert(1)) then 
+                xp = hfline%xv
+                yp = hfline%yv
+                vp = hfline%vert
+                hflinevert = hfline%vert
+                hfv = [(k, k = 1, hfline%nv)]
+                xp = [xp, lfline%xv(1)]
+                yp = [yp, lfline%yv(1)]
+                vp = [vp, lfline%vert(1)]
+                lflinevert = lfline%vert(1:1)
+                lfv = [1] + hfline%nv
+            else
+                xp = hfline%xv(1:hfline%nv-1)
+                yp = hfline%yv(1:hfline%nv-1)
+                vp = hfline%vert(1:hfline%nv-1)
+                hflinevert = hfline%vert(1:hfline%nv-1)
+                hfv = [(k, k = 1, hfline%nv-1)]
+                xp = [xp, lfline%xv(1)]
+                yp = [yp, lfline%yv(1)]
+                vp = [vp, lfline%vert(1)]
+                lflinevert = lfline%vert(1:1)
+                lfv = [1] + hfline%nv-1
+            end if 
+            if (hfline%vert(1) /= lfline%vert(1)) then 
+                xp = [xp, hfline%xv(1)]
+                yp = [yp, hfline%yv(1)]
+                vp = [vp, hfline%vert(1)]
+            else
+                hflinevert = hflinevert(2:)
+            end if 
+        else
+            ! No vertex segments, checked before
+            xp = hfline%xv
+            yp = hfline%yv 
+            vp = hfline%vert
+            hfv = [(k, k = 1, hfline%nv)]
+            lfv = [(k, k = lfline%nv, 1, -1)] + hfline%nv
+            hflinevert = hfline%vert
+            if (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)) then 
+                xp = [xp, lfline%xv(lfline%nv:1:-1)]
+                yp = [yp, lfline%yv(lfline%nv:1:-1)]
+                vp = [vp, lfline%vert(lfline%nv:1:-1)]
+                lflinevert = lfline%vert
+            else
+                xp = [xp, lfline%xv(lfline%nv-1:1:-1)]
+                yp = [yp, lfline%yv(lfline%nv-1:1:-1)]
+                vp = [vp, lfline%vert(lfline%nv-1:1:-1)]
+                lfv = lfv - 1
+                lflinevert = lfline%vert(1:lfline%nv-1)
+            end if 
+            if (hfline%vert(1) /= lfline%vert(1)) then 
+                xp = [xp, hfline%xv(1)]
+                yp = [yp, hfline%yv(1)]
+                vp = [vp, hfline%vert(1)]
+            else
+                lflinevert = lflinevert(2:)
+            end if 
+        end if 
+        
         ! Compute vertices
         !=================
         ! Easy - just take vertices of hfline and lfline 
@@ -9221,41 +9548,42 @@ module ggmod_gridgeneration2D
         ! Hedge for the same start/end vertex
         svhf = 1
         svlf = 1
-        evhf = hfline%nv
-        evlf = lfline%nv
-        if (hfline%vert(1) == lfline%vert(1)) then 
-            svhf = 2
-            svlf = 2
-        end if 
-        if (hfline%vert(hfline%nv) == lfline%vert(lfline%nv)) then 
-            evhf = evhf - 1
-            evlf = evlf - 1
-        end if 
+        evhf = size(hflinevert)
+        evlf = size(lflinevert)
+        !if (hfline%vert(1) == lfline%vert(1)) then 
+        !    svhf = 2
+        !    svlf = 2
+        !end if 
+        !if (hfline%vert(hfline%nv) == lfline%vert(lfline%nv)) then 
+        !    evhf = evhf - 1
+        !    evlf = evlf - 1
+        !end if 
+        !if (seg(hfline%segID(1))%isvertex) then 
+        !    evhf = 1
+        !end if 
+
 
         ! Loop over hfline vertices
         do i = svhf, evhf
             ! Unpack
             associate(&
-                v1 => hfline%vert(i),    &
-                x1 => hfline%xv(i),      &
-                y1 => hfline%yv(i)       &
+                v1 => hflinevert(i)     &
                 )
 
             ! Loop over lfline vertices
             do j = svlf, evlf 
                 ! Unpack 
                 associate(&
-                    v2 => lfline%vert(j),    &
-                    x2 => lfline%xv(j),      &
-                    y2 => lfline%yv(j)       &
+                    v2 => lflinevert(j)     &
                     )
 
                 ! Skip check
                 !===========
                 ! Add if first or last radial face (if it exists) - 
                 ! should always be present 
-                if ((i == 1 .and. j == 1) .or. &
-                    (i == hfline%nv .and. j == lfline%nv)) then 
+                if (((i == 1 .and. j == 1) .and. (hfline%vert(1) /= lfline%vert(1))) .or. &
+                    ((i == size(hflinevert) .and. j == size(hflinevert)) .and. &
+                     (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)))) then 
                     ev1 = [ev1, v1]
                     ev2 = [ev2, v2]
                     cycle 
@@ -9481,6 +9809,18 @@ module ggmod_gridgeneration2D
         !=========
         allocate(s1(0), s2(0), xint(0), yint(0), s1raux(0), &
             s2raux(0))
+
+        ! Hedge for vertex segments - no intersections possible
+        if (ggtmdata%seg(l1%segID(1))%isvertex .or. ggtmdata%seg(l2%segID(1))%isvertex) then 
+            ! Check optional arguments
+            if (present(s1r) .and. present(s2r)) then 
+                s1r = s1raux 
+                s2r = s2raux 
+            end if 
+
+            ! Return
+            return 
+        end if 
 
         ! Compute 
         !========
@@ -10560,7 +10900,7 @@ module ggmod_gridgeneration2D
     end function
 
     ! Single line refinement, dummy
-    subroutine RefineLineSingleNoRef(refiner, line, vertID, keepvert)
+    subroutine RefineLineSingleNoRef(refiner, ggtmdata, line, vertID, keepvert)
 
         ! Description
         !============
@@ -10570,6 +10910,7 @@ module ggmod_gridgeneration2D
         !==================
         ! Arguments
         class(GGTMLineRefinerNoRefUDT)              :: refiner 
+        type(GGTMDataUDT), intent(in)               :: ggtmdata
         type(GGTMFieldlineDataUDT), intent(inout)   :: line 
         integer(I8), intent(inout)                  :: vertID 
         logical, intent(in)                         :: keepvert(:)
@@ -10588,7 +10929,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Single line refinement, length based
-    subroutine RefineLineSingleLB(refiner, line, vertID, keepvert)
+    subroutine RefineLineSingleLB(refiner, ggtmdata, line, vertID, keepvert)
 
         ! Description
         !============
@@ -10624,6 +10965,7 @@ module ggmod_gridgeneration2D
         !==================
         ! Arguments
         class(GGTMLineRefinerLB2DUDT)               :: refiner 
+        type(GGTMDataUDT), intent(in)               :: ggtmdata
         type(GGTMFieldlineDataUDT), intent(inout)   :: line 
         integer(I8), intent(inout)                  :: vertID 
         logical, intent(in)                         :: keepvert(:)
@@ -10655,12 +10997,18 @@ module ggmod_gridgeneration2D
         !===========
         ! Associate
         associate(&
+            seg             => ggtmdata%seg,        &
             lengthbased     => refiner%dlBLlengthbased,    &
             doBLstart       => refiner%doBLstart,   &
             doBLend         => refiner%doBLend,     &
             dlBLstarti      => refiner%dlBLstart,   &
             dlBLendi        => refiner%dlBLend      &
             )
+
+        ! Hedge for vertex segment lines
+        if (seg(line%segID(1))%isvertex) then 
+            return 
+        end if 
 
         ! Initialize the refiner
         call refiner%InitializeLineData(line)
