@@ -206,7 +206,6 @@ module Interpolant2D_auxiliaries
         
         ! Auxiliary
         integer(I8)                     :: nx
-        logical                         :: notfound
 
         ! Compute the bin
         !================
