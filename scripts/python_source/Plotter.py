@@ -1028,18 +1028,59 @@ def PlotTopologicalMesh(topomesh, fignum):
     # thisaxes.legend(loc='upper right')
 
 # Topological cell plotting
-def PlotTopologicalMeshCells(topomesh, fignum):
+def PlotTopologicalMeshCells(topomesh, fignum, **plotargs):
     # Description
     #------------
     # Separate routine to plot topological mesh cells in order not to
     # overburden the standard plot
     maxcellvert = 1000
     thisrange = np.arange(0, topomesh.cell.ntot, 1)
-    thisrange = [36]
     for i in thisrange:
         index = np.arange(0, len(topomesh.cell.data[i].x), len(topomesh.cell.data[i].x)/maxcellvert, dtype=int)
         #PlotPolygons2D(topomesh.cell.data[i].x[index], topomesh.cell.data[i].y[index], fignum)
-        PlotPolygons2D(topomesh.cell.data[i].x, topomesh.cell.data[i].y, fignum)
+        PlotPolygons2D(topomesh.cell.data[i].x, topomesh.cell.data[i].y, fignum, **plotargs)
+
+# Single topological cell, filled 
+def PlotSingleTopologicalMeshCellFilled(topomesh, fignum, cellID, **plotargs):
+    # Description
+    #------------
+    # Plot a single cell of which the surface will be filled according
+    # to the arguments given in **plotargs
+
+    ind = cellID-1 # zero-based indexing
+    PlotFilledPolygons2D(topomesh.cell.data[ind].x, topomesh.cell.data[ind].y, fignum, **plotargs)
+
+
+# Topological mesh tube plotting
+def PlotTopologicalMeshTubes(topomesh, fignum):
+    # Description
+    #------------
+    # This routine plots the topological mesh tubes by plotting their 
+    # cells and plotting the tube number on each radial face (as these
+    # should be unique for each tube)
+    
+    # Plot cells
+    PlotTopologicalMeshCells(topomesh, fignum, color='k')
+
+    # Loop over all tubes and plot the numbers at approx. the middle of 
+    # the face
+    for i in np.arange(0, topomesh.ft.ntot, 1):
+        # Get the tube faces
+        tf = topomesh.ft.GetFace(i)
+
+        # Plot tube ID for each face
+        xf = np.zeros(len(tf), dtype=float)
+        yf = np.zeros(len(tf), dtype=float)
+        ftID = np.zeros(len(tf), dtype=int)
+        cc = 0 
+        for j in tf:
+            txf, tyf = topomesh.face.data[j-1].InterpolateCoordinates(0.5)
+            xf[cc] = txf 
+            yf[cc] = tyf
+            ftID[cc] = topomesh.ft.ID[i]
+            cc = cc + 1
+        PlotPoints2DWithID(xf, yf, ftID, fignum, color='r')
+
 
 # Grid generation data plotting: face vertex distributions
 def PlotGGTMDataFaceVertexDistribution(ggtmdata, topomesh, fignum):
