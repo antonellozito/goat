@@ -471,6 +471,9 @@ def ReadTopomeshFile(filepath):
                 topomesh.face.data[fID].x[k] = np.fromstring(values[0], dtype=float, count=1, sep=' ')
                 topomesh.face.data[fID].y[k] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
 
+            # Compute metrics
+            topomesh.face.data[fID].ComputeMetrics()
+
             # Update position
             i = i + topomesh.face.nc[fID]
         else: 
@@ -548,7 +551,8 @@ def ReadTopomeshFile(filepath):
 
         # Add the values
         tv = np.fromstring(values[0], dtype=int, count=2, sep=' ')
-        topomesh.cell.vertP[j, 0:2] = tv
+        topomesh.cell.vertP[j, 0] = tv[0] - 1 # zero-based indexing!
+        topomesh.cell.vertP[j, 1] = tv[1]
 
     # Read cell coordinates
     #----------------------
@@ -594,6 +598,116 @@ def ReadTopomeshFile(filepath):
             i = i + topomesh.cell.nc[fID]
         else: 
             i = i + 1 
+
+    # Read flux surfaces
+    #-------------------
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "flux surfaces" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+    
+    # Read total amount of flux surfaces
+    i = i + 1
+    ntot = np.fromstring(alllines[i], dtype=int, count=1, sep=' ')
+    topomesh.fs.ntot = ntot[0]
+    
+    # Initialize fields
+    topomesh.fs.Initialize(topomesh.fs.ntot)
+
+    # Read data if available
+    if topomesh.fs.ntot > 0:
+        # Skip header
+        i = i + 2
+
+        # Read data
+        for j in np.arange(0, topomesh.fs.ntot, 1):
+            # Split the string
+            values = alllines[i+j].split()
+
+            # Add the values
+            topomesh.fs.ID[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+            topomesh.fs.psi[j] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+
+    # Read flux tubes
+    #----------------
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "tubes" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+    
+    # Read total amount of flux tubes and the size of face and cell
+    i = i + 1
+    ntot = np.fromstring(alllines[i], dtype=int, count=3, sep=' ')
+    topomesh.ft.ntot = ntot[0]
+    topomesh.ft.nface = ntot[1]
+    topomesh.ft.ncell = ntot[2]
+    
+    # Initialize fields
+    topomesh.ft.Initialize(topomesh.ft.ntot, topomesh.ft.nface, topomesh.ft.ncell)
+
+    # Read data if available
+    if topomesh.ft.ntot > 0:
+
+        # Set ID 
+        topomesh.ft.ID = np.arange(1, topomesh.ft.ntot+1, 1)
+
+        # Skip header
+        i = i + 2
+
+        # Read facelist
+        for j in np.arange(0, topomesh.ft.nface, 1):
+            # Split the string
+            values = alllines[i].split()
+
+            # Add the values
+            topomesh.ft.face[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+
+            # Update counter
+            i = i + 1
+
+        # Read face pointer 
+        i = i + 1
+        for j in np.arange(0, topomesh.ft.ntot, 1):
+            # Split the string
+            values = alllines[i].split()
+
+            # Add the values
+            topomesh.ft.faceP[j, 0] = np.fromstring(values[0], dtype=int, count=1, sep=' ')-1
+            topomesh.ft.faceP[j, 1] = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+
+            # Update counter
+            i = i + 1
+
+        # Read cell list
+        i = i + 1
+        for j in np.arange(0, topomesh.ft.ncell, 1):
+            # Split the string
+            values = alllines[i].split()
+
+            # Add the values
+            topomesh.ft.cell[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+
+            # Update counter
+            i = i + 1
+
+        # Read cell pointer 
+        i = i + 1
+        for j in np.arange(0, topomesh.ft.ntot, 1):
+            # Split the string
+            values = alllines[i].split()
+
+            # Add the values
+            topomesh.ft.cellP[j, 0] = np.fromstring(values[0], dtype=int, count=1, sep=' ')-1
+            topomesh.ft.cellP[j, 1] = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+
+            # Update counter
+            i = i + 1
 
     # Return 
     return topomesh 

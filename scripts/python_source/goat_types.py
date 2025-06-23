@@ -120,12 +120,38 @@ class TopomeshFacedata:
         # coordinates
         self.x = np.zeros(0, dtype=float)
         self.y = np.zeros(0, dtype=float)
+        self.dx = np.zeros(0, dtype=float)
+        self.dy = np.zeros(0, dtype=float)
+        self.dl = np.zeros(0, dtype=float)
+        self.dlsum = np.zeros(0, dtype=float)
+        self.L = 0
 
     # Initializer
     def Initialize(self, nc):
         # Initialize coordinates
         self.x = np.zeros(nc, dtype=float)
         self.y = np.zeros(nc, dtype=float)
+        self.ComputeMetrics()
+
+    def ComputeMetrics(self):
+        self.dx = np.diff(self.x)
+        self.dy = np.diff(self.y)
+        self.dl = np.sqrt(self.dx**2 + self.dy**2)
+        self.dlsum = np.cumsum(np.append(np.array([0]), (self.dl)))
+        self.L = np.sum(self.dl)
+        
+    # Coordinate interpolator
+    def InterpolateCoordinates(self, frac):
+        # Checks
+        if (frac < 0.0) or (frac > 1.0):
+            raise ValueError("InterpolateCoordinates: frac should be between 0.0" \
+                "(start of line) and 1.0 (end of line)")
+        
+        # Interpolate
+        lcoord = frac*self.L 
+        xc = np.interp(lcoord, self.dlsum, self.x)
+        yc = np.interp(lcoord, self.dlsum, self.y)
+        return xc, yc
 
 # Topological mesh faces
 class TopomeshFace:
@@ -243,14 +269,79 @@ class TopomeshCell:
         # Add face coordinates
         self.data[cellindex].x = xc 
         self.data[cellindex].y = yc
+
+# Topological mesh flux surface
+class TopomeshFluxSurface:
+    def __init__(self):
+        # Dimensions
+        self.ntot = 0
         
+        # IDs etc
+        self.ID = np.zeros(self.ntot, dtype=int)
+        self.psi = np.zeros(self.ntot, dtype=float)
+
+    def Initialize(self, ntot):
+        # Dimensions
+        self.ntot = ntot
+        
+        # IDs etc
+        self.ID = np.zeros(self.ntot, dtype=int)
+        self.psi = np.zeros(self.ntot, dtype=float)
+
+# Topological mesh tubes
+class TopomeshFluxTube:
+    def __init__(self):
+        # Dimensions
+        self.ntot   = 0
+        self.nface  = 0
+        self.ncell  = 0
+
+        # ID
+        self.ID     = np.zeros(self.ntot, dtype=int)
+
+        # Faces
+        self.face   = np.zeros(self.nface, dtype=int)
+        self.faceP = np.zeros((self.ntot, 2), dtype=int)
+
+        # Cells
+        self.cell   = np.zeros(self.ncell, dtype=int)
+        self.cellP  = np.zeros((self.ntot, 2), dtype=int)
+
+    def Initialize(self, ntot, nface, ncell):
+        # Dimensions
+        self.ntot   = ntot 
+        self.nface  = nface 
+        self.ncell  = ncell 
+
+        # ID
+        self.ID     = np.zeros(self.ntot, dtype=int)
+
+        # Faces
+        self.face   = np.zeros(self.nface, dtype=int)
+        self.faceP = np.zeros((self.ntot, 2), dtype=int)
+
+        # Cells
+        self.cell   = np.zeros(self.ncell, dtype=int)
+        self.cellP  = np.zeros((self.ntot, 2), dtype=int)
+
+    # Face getter
+    def GetFace(self, i):
+        return self.face[self.faceP[i, 0]:self.faceP[i, 0]+self.faceP[i, 1]]
+    
+    # Cell getter
+    def GetCell(self, i):
+        return self.cell[self.cellP[i, 0]:self.cellP[i, 0]+self.cellP[i, 1]]
+        
+
 # Topological mesh
 class Topomesh:
     def __init__(self):
         # Fields
-        self.vert = TopomeshVert()
-        self.face = TopomeshFace() 
-        self.cell = TopomeshCell()
+        self.vert   = TopomeshVert()
+        self.face   = TopomeshFace() 
+        self.cell   = TopomeshCell()
+        self.fs     = TopomeshFluxSurface()
+        self.ft     = TopomeshFluxTube()
         
 #----------------------------------------------------------------------#
 #                         GRID GENERATOR                               #
