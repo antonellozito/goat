@@ -1,3 +1,4 @@
+#! /bin/tcsh -f
 # Script to initialize openmp variables. 
 # Note: OMP_NUM_THREADS (number of threads per process) should be 
 # set by the calling script
@@ -5,6 +6,7 @@ setenv OMP_DISPLAY_AFFINITY true
 setenv OMP_DISPLAY_ENV verbose
 setenv OMP_PLACES cores
 setenv OMP_PROC_BIND true
+setenv OMP_STACKSIZE 512M
 
 # We don't yet allow multilevel parallellism
 setenv OMP_MAX_ACTIVE_LEVELS 1
