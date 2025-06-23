@@ -24,6 +24,7 @@ print('VisualizeGGOutput: reading grid from directory: ' + os.getcwd())
 # Set default names
 topomeshname = 'topomesh.dat'
 gridname = 'traduit.out.b2us'
+structurename = 'structure.dat'
 
 # Check if names were given as input (first argument is python script name, 
 # second is assumed to be gridname, third is topomesh name)
@@ -35,9 +36,12 @@ for i in range(1, narg):
         gridname = sys.argv[i]
     elif (i == 2): 
         topomeshname = sys.argv[i]
+    elif (i == 3): 
+        structurename = sys.argv[i]
 
 print('VisualizeGGOutput: reading grid from file: ' + gridname)
 print('VisualizeGGOutput: reading topomesh from file: ' + topomeshname)
+print('VisualizeGGOutput: reading structure from file: ' + structurename)
 
 
 # Outputs
@@ -93,7 +97,7 @@ try:
 
     # Visualize
     plotter.PlotGridCells(simgrid, 4)
-    plotter.PlotCellBasedQuantity2D(simgrid, simgrid.cell.region, 4)
+    plotter.PlotCellBasedQuantity2D(simgrid, simgrid.cell.ft, 4)
 
 except: 
     print("Could not load the grid")
