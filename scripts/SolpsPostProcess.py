@@ -94,9 +94,13 @@ fignum = fignum + 1
 # Visualize plasma state
 #-----------------------
 # Determine plotting range
+nsmax = 2
+plotns = state.ns 
+if plotns > nsmax:
+    plotns = nsmax 
 
 # Density
-for i in range(0, state.ns):
+for i in range(0, plotns):
     pl.PlotCellBasedQuantity2D(grid, np.log10(state.na[0:grid.cell.ntot, i]), fignum)
     thisaxes = plt.gca()
     thisaxes.set_title('log10(density) [# m^-3], species: ' + str(i))
@@ -106,7 +110,7 @@ for i in range(0, state.ns):
     fignum = fignum + 1 
 
 # Velocity
-for i in range(0, state.ns):
+for i in range(0, plotns):
     pl.PlotCellBasedQuantity2D(grid, state.ua[0:grid.cell.ntot, i], fignum)
     thisaxes = plt.gca()
     thisaxes.set_title('Parallel velocity [m s^-1], species: ' + str(i))
@@ -142,7 +146,7 @@ fignum = fignum + 1
 #----------
 if plotresiduals:
     # Density
-    for i in range(0, state.ns):
+    for i in range(0, plotns):
         pl.PlotCellBasedQuantity2D(grid, (state.resco[0:grid.cell.ntot, i]), fignum)
         thisaxes = plt.gca()
         thisaxes.set_title('Density residual [s^-1], species: ' + str(i))
@@ -152,7 +156,7 @@ if plotresiduals:
         fignum = fignum + 1 
     
     # Momentum
-    for i in range(0, state.ns):
+    for i in range(0, plotns):
         pl.PlotCellBasedQuantity2D(grid, (state.resmo[0:grid.cell.ntot, i]), fignum)
         thisaxes = plt.gca()
         thisaxes.set_title('Momentum residual [s^-1], species: ' + str(i))
