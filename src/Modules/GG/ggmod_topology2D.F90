@@ -3548,7 +3548,7 @@ module ggmod_topology2D
             tfmerge, tnbmerge, tfvu, tfradmerge, tvfvID, tvfvIDu, &
             tvf, thisv
         real(R8)                                :: dpsi, dpsinb1, dpsinb2, &
-            thisdeletedfval
+            thisdeletedfval, lrad, lradnb1, lradnb2
         real(R8), allocatable, dimension(:)     :: fval, thisvfval
 
         ! Loop
@@ -3602,23 +3602,20 @@ module ggmod_topology2D
                             passedcheck = .false.  
                         end if
 
-                        ! Check tube dpsi
+                        ! Check tube dpsi and radial length
                         tf = tube%GetFace(i)
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsi = maxval(fval) - minval(fval)
-
+                        dpsi = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lrad = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
                         tf = tube%GetFace(tnb(1))
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsinb1 = maxval(fval) - minval(fval)
-
+                        dpsinb1 = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lradnb1 = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
                         tf = tube%GetFace(tnb(2))
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsinb2 = maxval(fval) - minval(fval)
+                        dpsinb2 = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lradnb2 = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
 
-                        if (all([dpsi, dpsinb1, dpsinb2] >= options%dpsimintangencypointtubes)) then 
+                        ! Check if we should merge
+                        if (all([dpsi, dpsinb1, dpsinb2] >= options%dpsimintangencypointtubes) .and. &
+                            all([lrad, lradnb1, lradnb2] >= options%lradmintangencypointtubes)) then 
                             passedcheck = .false.
                         end if 
 
@@ -3647,18 +3644,16 @@ module ggmod_topology2D
                             passedcheck = .false.  
                         end if
 
-                        ! Check tube dpsi
+                        ! Check tube dpsi and radial length
                         tf = tube%GetFace(i)
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsi = maxval(fval) - minval(fval)
-
+                        dpsi = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lrad = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
                         tf = tube%GetFace(tnb(1))
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsinb1 = maxval(fval) - minval(fval)
+                        dpsinb1 = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lradnb1 = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
 
-                        if (all([dpsi, dpsinb1] >= options%dpsimintangencypointtubes)) then 
+                        if (all([dpsi, dpsinb1] >= options%dpsimintangencypointtubes) .and. &
+                            all([lrad, lradnb1] >= options%lradmintangencypointtubes)) then 
                             passedcheck = .false.
                         end if 
 
@@ -3696,23 +3691,20 @@ module ggmod_topology2D
                             passedcheck = .false.  
                         end if
 
-                        ! Check tube dpsi
+                        ! Check tube dpsi and radial length
                         tf = tube%GetFace(i)
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsi = maxval(fval) - minval(fval)
-
+                        dpsi = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lrad = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
                         tf = tube%GetFace(tnb(1))
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsinb1 = maxval(fval) - minval(fval)
-
+                        dpsinb1 = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lradnb1 = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
                         tf = tube%GetFace(tnb(2))
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsinb2 = maxval(fval) - minval(fval)
+                        dpsinb2 = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lradnb2 = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
 
-                        if (all([dpsi, dpsinb1, dpsinb2] >= options%dpsimintangencypointtubes)) then 
+                        ! Check if we should merge
+                        if (all([dpsi, dpsinb1, dpsinb2] >= options%dpsimintangencypointtubes) .and. &
+                            all([lrad, lradnb1, lradnb2] >= options%lradmintangencypointtubes)) then 
                             passedcheck = .false.
                         end if 
 
@@ -3741,18 +3733,16 @@ module ggmod_topology2D
                             passedcheck = .false.  
                         end if
 
-                        ! Check tube dpsi
+                        ! Check tube dpsi and radial length
                         tf = tube%GetFace(i)
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsi = maxval(fval) - minval(fval)
-
+                        dpsi = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lrad = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
                         tf = tube%GetFace(tnb(1))
-                        tfv = [face%vert(tf, 1), face%vert(tf, 2)]
-                        fval = topomesh%fsfval%Get(vert%fsID(tfv))
-                        dpsinb1 = maxval(fval) - minval(fval)
+                        dpsinb1 = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                        lradnb1 = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
 
-                        if (all([dpsi, dpsinb1] >= options%dpsimintangencypointtubes)) then 
+                        if (all([dpsi, dpsinb1] >= options%dpsimintangencypointtubes) .and. &
+                            all([lrad, lradnb1] >= options%lradmintangencypointtubes)) then 
                             passedcheck = .false.
                         end if 
 
@@ -9295,6 +9285,95 @@ module ggmod_topology2D
 
     end function
 
+    ! Topological metric computations
+    function GetTMFaceDeltaPsi(topomesh, faceID) result(dpsi)
+
+        ! Description
+        !============
+        ! This function computes the (absolute) difference in psi value
+        ! for the faces given in the array faceID. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(in)      :: topomesh 
+        integer(I8), intent(in)             :: faceID(:) 
+        real(R8), allocatable, dimension(:) :: dpsi 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tfv1, tfv2 
+        real(R8), allocatable, dimension(:)     :: fval1, fval2
+
+        ! Compute
+        !========
+        ! Get vertices of faces
+        tfv1 = topomesh%face%vert(faceID, 1)
+        tfv2 = topomesh%face%vert(faceID, 2)
+        fval1 = topomesh%fsfval%Get(topomesh%vert%fsID(tfv1))
+        fval2 = topomesh%fsfval%Get(topomesh%vert%fsID(tfv2))
+        dpsi = abs(fval1 - fval2)
+
+    end function
+
+    function GetTMFaceRadialLength(topomesh, magneticField,faceID) &
+        result(lrad)
+
+        ! Description
+        !============
+        ! This function computes the (absolute) length of a face along
+        ! the radial direction. This is determined as the sum of the 
+        ! radial lengths of the face's edges. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(in)      :: topomesh 
+        integer(I8), intent(in)             :: faceID(:) 
+        type(MagneticFieldUDT), intent(in)  :: magneticField 
+        real(R8), allocatable, dimension(:) :: lrad 
+
+        ! Auxiliary
+        integer(I8)                         :: nf    
+        real(R8), allocatable, dimension(:) :: x, y, dx, dy, bx, by, &
+            xf, yf, bn
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        nf = size(faceID)
+        allocate(lrad(nf))
+        lrad = 0.0_R8
+
+        ! Compute
+        !========
+        do i = 1, nf
+            ! Get face coordinates
+            x = topomesh%face%x(faceID(i))%Get()
+            y = topomesh%face%y(faceID(i))%Get()
+
+            ! Compute edge center coordinates and lengths, and psi gradient
+            dx = x(2:) - x(1:size(x)-1)
+            dy = y(2:) - y(1:size(y)-1)
+            xf = 0.5*(x(2:) + x(1:size(x)-1))
+            yf = 0.5*(y(2:) + y(1:size(y)-1))
+            allocate(bx(size(xf)), by(size(xf)))
+            call magneticField%interp%Evaluate(xf, yf, 1, 0, bx)
+            call magneticField%interp%Evaluate(xf, yf, 0, 1, by)
+            bn = sqrt(bx**2 + by**2)
+            bx = bx/bn
+            by = by/bn
+
+            ! Compute length
+            lrad(i) = sum(abs(bx*dx + by*dy))
+
+            ! Housekeeping
+            deallocate(bx, by)
+        end do 
+
+    end function
+
     !------------------------------------------------------------------!
     !                 TOPOLOGICAL MESH CELL OPERATORS                  !
     !------------------------------------------------------------------!
@@ -10084,6 +10163,10 @@ module ggmod_topology2D
             do i = 1, size(tID)
                 write (fu, *) tID(i), tfval(i)
             end do 
+        else
+            ! Header and sizes
+            write (fu, *) 'flux surfaces'
+            write (fu, *) 0_I8 
         end if 
 
         ! Write tube data
@@ -10112,6 +10195,10 @@ module ggmod_topology2D
             do i = 1, t%ntot 
                 write (fu, *) t%cellP(i, 1), t%cellP(i, 2)
             end do 
+        else
+            ! Header and sizes
+            write (fu, *) 'tubes'
+            write (fu, *) 0_I8, 0_I8, 0_I8
         end if 
 
         ! Housekeeping

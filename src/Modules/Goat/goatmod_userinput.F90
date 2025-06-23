@@ -897,8 +897,8 @@ module goatmod_userinput
         options%removewidegridregions       = .true. 
         options%removenoncoreregions        = .false.
         options%mergetangencypointtubes     = .false.
-        options%dpsimintangencypointtubes   = 100_R8 ! some absurd large value
-        options%lradmintangencypointtubes   = 100_R8 ! some absurd large value
+        options%dpsimintangencypointtubes   = 0.0_R8 ! zero to ignore
+        options%lradmintangencypointtubes   = 0.0_R8 ! zero to ignore
 
     end subroutine 
 
@@ -1629,7 +1629,7 @@ module goatmod_userinput
         field = 'gg.tm.dpsimintangencypointtubes'
         call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
         field = 'gg.tm.lradmintangencypointtubes'
-        call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
+        call ExtractOptionValueReal0D(fid, field, options%lradmintangencypointtubes)
 
         ! Housekeeping
         !=============
