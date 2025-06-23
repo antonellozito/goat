@@ -3471,7 +3471,7 @@ module ggmod_gridgeneration2D
                         'cells will be present in the grid...'
                     print *, 'cell: ', i, 'line: ', j, 'near vertex ID: ', &
                         l1%vert(k1), 'coordinates: ', l1%xv(k1), l1%yv(k1)
-                    call tubes(j)%VisualizeGraph('lpgraph')
+                    !call tubes(j)%VisualizeGraph('lpgraph')
 
                     ! Reset to continue...
                     islegaltria1 = .true. 
@@ -6751,10 +6751,18 @@ module ggmod_gridgeneration2D
                                 call tubes(1)%hfline%Flip()
                             elseif (vind1 == 0 .and. vind2 /= 0) then 
                                 ! All good: line ends on erf and does not start in erf
+                            elseif (vind1 /= 0 .and. vind2 /= 0) then 
+                                ! line starts and stops on erf/srf, but need to check orientation
+                                if (vind1 > vind2) then 
+                                    ! Need to flip
+                                    call tubes(1)%hfline%Flip()
+                                else
+                                    ! All good
+                                end if 
                             else
-                                ! Something wrong: either both start and end are on erf, or none are
+                                ! Something wrong, vertices not found
                                 call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                                    'something wrong when extending tangency point tubes')
+                                    'no hfline vertices found on lfline, unexpected')
                             end if 
                         elseif (ggtmdata%seg(tubes(1)%hfline%segID(1))%TMfaceID == celldata(i)%srf) then 
                             print *, 'code part not verified'
@@ -6765,10 +6773,18 @@ module ggmod_gridgeneration2D
                                 call tubes(1)%hfline%Flip()
                             elseif (vind1 /= 0 .and. vind2 == 0) then 
                                 ! All good: line ends on erf and does not start in erf
+                            elseif (vind1 /= 0 .and. vind2 /= 0) then 
+                                ! line starts and stops on erf/srf, but need to check orientation
+                                if (vind1 > vind2) then 
+                                    ! Need to flip
+                                    call tubes(1)%hfline%Flip()
+                                else
+                                    ! All good
+                                end if 
                             else
-                                ! Something wrong: either both start and end are on erf, or none are
+                                ! Something wrong, vertices not found
                                 call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                                    'something wrong when extending tangency point tubes')
+                                    'no hfline vertices found on lfline, unexpected')
                             end if 
                         else
                             ! All bad
@@ -6895,10 +6911,18 @@ module ggmod_gridgeneration2D
                                 call tubes(nt)%lfline%Flip()
                             elseif (vind1 == 0 .and. vind2 /= 0) then 
                                 ! All good: line ends on erf and ends in srf
+                            elseif (vind1 /= 0 .and. vind2 /= 0) then 
+                                ! line starts and stops on erf/srf, but need to check orientation
+                                if (vind1 > vind2) then 
+                                    ! Need to flip
+                                    call tubes(nt)%lfline%Flip()
+                                else
+                                    ! All good
+                                end if 
                             else
-                                ! Something wrong: either both start and end are on erf, or none are
+                                ! Something wrong, vertices not found
                                 call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                                    'something wrong when extending tangency point tubes')
+                                    'no lfline vertices found on hfline, unexpected')
                             end if 
                         elseif (ggtmdata%seg(tubes(nt)%lfline%segID(1))%TMfaceID == celldata(i)%srf) then 
                             print *, 'code part not verified'
@@ -6908,11 +6932,19 @@ module ggmod_gridgeneration2D
                                 ! Need to flip - line starts at erf instead of srf
                                 call tubes(nt)%lfline%Flip()
                             elseif (vind1 /= 0 .and. vind2 == 0) then 
-                                ! All good: line ends on erf and does not start in erf
+                            ! All good: line ends on erf and does not start in erf
+                            elseif (vind1 /= 0 .and. vind2 /= 0) then 
+                                ! line starts and stops on erf/srf, but need to check orientation
+                                if (vind1 > vind2) then 
+                                    ! Need to flip
+                                    call tubes(nt)%lfline%Flip()
+                                else
+                                    ! All good
+                                end if 
                             else
-                                ! Something wrong: either both start and end are on erf, or none are
+                                ! Something wrong, vertices not found
                                 call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                                    'something wrong when extending tangency point tubes')
+                                    'no lfline vertices found on hfline, unexpected')
                             end if 
                         else
                             ! All bad
@@ -12119,6 +12151,9 @@ module ggmod_gridgeneration2D
 
         ! Flux tubes
         !===========
+        ! Initialize
+        c%ft = -10000_I8 
+
         ! Get all non-aligned, non-boundary faces
         tf = (.not. f%BF) .and. (f%cellP(:, 2) == 2) .and. (.not. (f%aligned == 1))
 
