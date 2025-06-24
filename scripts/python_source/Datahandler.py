@@ -1311,7 +1311,6 @@ def ReadTraduitOutB2us(filepath):
 
             grid.topodata.TpointID[j] = xind 
             grid.topodata.tpointdivID[j] = tpointdivID 
-            grid.topodata.spointxpID[j] = spointxpID 
         i = i + nT
 
         # Read divertor face pointer
