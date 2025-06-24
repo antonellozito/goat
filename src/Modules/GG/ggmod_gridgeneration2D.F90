@@ -2059,10 +2059,6 @@ module ggmod_gridgeneration2D
                     call GGTMLineRefiner%UpdateRefinementOptions(&
                         thislinerefoptions, topomesh)
 
-                    ! Update the refiner
-                    call GGTMLineRefiner%UpdateRefinementOptions(&
-                        thislinerefoptions, topomesh)
-
                     ! Refine
                     keepvert = IsTopomeshVert(facedata(tf)%line%vert, topomesh)
                     call GGTMlinerefiner%Refine(ggtmdata, facedata(tf)%line, vertID, keepvert)
@@ -2083,10 +2079,6 @@ module ggmod_gridgeneration2D
                 if (tubes(i)%isextendedend) then 
                     thislinerefoptions%doBLend = .false.
                 end if 
-
-                ! Update refinement data 
-                call GGTMLineRefiner%UpdateRefinementOptions(&
-                    thislinerefoptions, topomesh)
 
                 ! Update refinement data 
                 call GGTMLineRefiner%UpdateRefinementOptions(&
@@ -12158,7 +12150,7 @@ module ggmod_gridgeneration2D
         tf = (.not. f%BF) .and. (f%cellP(:, 2) == 2) .and. (.not. (f%aligned == 1))
 
         ! Get all single cells with two boundary faces that have the 
-        ! same non-zero flux surface ID 
+        ! same non-zero flux surface ID (may still be part of flux tube!)
         allocate(tc(c%ntot))
         tc = .false. 
         do i = 1, c%ntot
@@ -12215,7 +12207,7 @@ module ggmod_gridgeneration2D
         ! Extract tubes
         nftftot = 2*count(tf)  + 2*count(tc) ! overestimation
         np = count(ispolygonstart)
-        fd%nFt = np + count(tc)
+        fd%nFt = np + count(tc) ! to be updated later!
         if (allocated(fd%fluxtubefacesP)) then 
             deallocate(fd%fluxtubefacesP)
         end if 
@@ -12276,6 +12268,9 @@ module ggmod_gridgeneration2D
                     fd%fluxtubecellsP(i+1, 1) = fd%fluxtubecellsP(i, 1) + nftc 
                 end if 
                 c%ft(ftc) = i 
+
+                ! Set tc to false to avoid some fringe cases
+                tc(ftc) = .false. 
 
                 ! Update counters
                 ncell = ncell + nftc
@@ -12341,6 +12336,9 @@ module ggmod_gridgeneration2D
                     fd%fluxtubecellsP(i+1, 1) = fd%fluxtubecellsP(i, 1) + nftc-1 
                 end if 
                 c%ft(ftc(1:nftc-1)) = i
+
+                ! Set tc to false to avoid some fringe cases
+                tc(ftc(1:nftc-1)) = .false. 
 
                 ! Update counters
                 ncell = ncell + nftc - 1
@@ -12443,8 +12441,15 @@ module ggmod_gridgeneration2D
         end do 
 
         ! Trim
+        fd%nFt = cc
         fd%fluxtubefaces = fd%fluxtubefaces(1:nface)
         fd%fluxtubecells = fd%fluxtubecells(1:ncell)
+        fd%fluxtubefacesP = fd%fluxtubefacesP(1:cc, :)
+        fd%fluxtubefsIDs = fd%fluxtubefsIDs(1:cc, :)
+        fd%fluxtubecellsP = fd%fluxtubecellsP(1:cc, :)
+        fd%isclosedft = fd%isclosedft(1:cc)
+        hasbndf1 = hasbndf1(1:cc)
+        hasbndf2 = hasbndf2(1:cc)
 
         ! Sanity check: all cells should be in a flux tube
         if (ncell /= simgrid%cell%ntot) then 
