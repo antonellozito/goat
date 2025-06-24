@@ -108,6 +108,8 @@ module mod_graph
 
         ! Operators
         !==========
+        ! Reverse direction (edge flip - only meaningful for directed graphs)
+        procedure :: ReverseDirection   => ReverseGraphDirection
         ! Flood
         procedure :: Flood      => FloodGraph 
 
@@ -532,6 +534,30 @@ contains
         
     end function
 
+    ! Reverse direction
+    subroutine ReverseGraphDirection(graph)
+
+        ! Description
+        !============
+        ! Reverse the graph direction. This simply flips the starting and
+        ! ending vertices of the edges. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GraphUDT)             :: graph 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tempev 
+
+        ! Flip
+        !=====
+        tempev = graph%ev1 
+        graph%ev1 = graph%ev2 
+        graph%ev2 = tempev 
+
+    end subroutine
+
     ! Flood
     function FloodGraph(graph, startvertind, skipvertopt) result(vertind)
 
@@ -648,8 +674,14 @@ contains
 
         ! Initialize
         !===========
+        ! Hedge for trivial cases
+        if (size(graph%ev1) < 2) then 
+            ! Nothing to be done
+            return 
+        end if 
+
         ! Allocate
-        allocate(delvec(size(ev1)))
+        allocate(delvec(size(graph%ev1)))
         delvec = .false. 
 
         ! Copy
@@ -699,14 +731,19 @@ contains
 
             ! Sort this segment according to ev2
             call Sort(ev2(si:ei))
+
+            ! Check
+            if (ei == size(ev1)) then 
+                exit 
+            end if 
             
         end do 
 
         ! Remove duplicate edges and loops
         !=======================
         ! Compute differences
-        dev1 = ev1(2:) - ev1(1:size(ev1))
-        dev2 = ev2(2:) - ev2(1:size(ev2))
+        dev1 = ev1(2:) - ev1(1:size(ev1)-1)
+        dev2 = ev2(2:) - ev2(1:size(ev2)-1)
 
         ! Update deletion vector
         delvec = delvec .or. ([.false., dev1 == 0 .and. dev2 == 0])
@@ -887,8 +924,14 @@ contains
 
         ! Initialize
         !===========
+        ! Hedge for trivial cases
+        if (size(graph%ev1) < 2) then 
+            ! Nothing to be done
+            return 
+        end if
+        
         ! Allocate
-        allocate(delvec(size(ev1)))
+        allocate(delvec(size(graph%ev1)))
         delvec = .false. 
 
         ! Copy
@@ -934,14 +977,19 @@ contains
 
             ! Sort this segment according to ev2
             call Sort(ev2(si:ei))
+
+            ! Check
+            if (ei == size(ev1)) then 
+                exit 
+            end if 
             
         end do 
 
         ! Remove duplicate edges and loops
         !=======================
         ! Compute differences
-        dev1 = ev1(2:) - ev1(1:size(ev1))
-        dev2 = ev2(2:) - ev2(1:size(ev2))
+        dev1 = ev1(2:) - ev1(1:size(ev1)-1)
+        dev2 = ev2(2:) - ev2(1:size(ev2)-1)
 
         ! Update deletion vector
         delvec = delvec .or. ([.false., dev1 == 0 .and. dev2 == 0])
