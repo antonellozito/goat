@@ -23,6 +23,7 @@ module ggmod_topology2D
     use mod_dynamicarrays
     use mod_contour2D
     use mod_polygon
+    use mod_graph, only: GraphUDT
     use mod_sort
     use mod_definitions
     use mod_linearsolverinterface, only: SolveDenseLinearSystemDI
@@ -143,12 +144,20 @@ module ggmod_topology2D
         ! vertices are not sorted in any particular direction (this is 
         ! non-trivial, since tube boundaries may be branching polygons)
 
+        ! Note: a directional graph is now available after tube 
+        ! construction that points in downward psi direction. This graph
+        ! is used when determining which tubes to delete for example. 
+        ! Other uses may be added in the future. Note that this graph is 
+        ! only up to date after calling the topomesh interconnection    
+        ! routine! 
+
         integer(I8)                                 :: ncell, nface, ntot 
         integer(I8), allocatable, dimension(:)      :: cell, face,  &
             bndf1, bndf2, bndv1, bndv2, ftneig1, ftneig2
         integer(I8), allocatable, dimension(:, :)   :: cellP, faceP, &
             bndf1P, bndf2P, bndv1P, bndv2P, ftneig1P, ftneig2P
         logical, allocatable, dimension(:)          :: isclosed 
+        type(GraphUDT)                              :: graph 
 
     contains
     
@@ -553,21 +562,12 @@ module ggmod_topology2D
                 vessel, fieldtracer, options)
         end if
 
+        ! Remove regions
+        !===============
         ! Remove parts if desired
-        if (options%removecoreregions) then 
-            call RemoveTopologicalMeshCoreRegions(topomesh)
-        end if 
-        if (options%removewidegridregions) then 
-            call RemoveTopologicalMeshWideGridRegions(topomesh)
-        end if 
-        if (options%removenoncoreregions) then 
-            call RemoveTopologicalMeshNonCoreRegions(topomesh)
-        end if
+        call RemoveTopologicalMeshRegions(topomesh, vessel, options)
 
         
-
-        ! Recompute interconnection data
-        call AddTopologicalMeshInterconnectionData(topomesh)
 
     end subroutine
 
@@ -3006,6 +3006,49 @@ module ggmod_topology2D
     end subroutine
 #endif 
 
+    ! General region removal
+    subroutine RemoveTopologicalMeshRegions(topomesh, vessel, options)
+
+        ! Description
+        !============
+        ! Wrapper for all topological mesh region removal operations.
+        ! Includes removal operations based on topology (e.g. core, 
+        ! wide grid), vessel structure (based on vessel structure IDs), 
+        ! and user input (simply indicated by user). See dedicated 
+        ! subroutines for details on algorithms and implementation.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(inout)       :: topomesh 
+        type(TopomeshOptionsUDT), intent(in)    :: options 
+        type(VesselUDT), intent(in)             :: vessel
+
+        ! Topology-based operations
+        !==========================
+        ! Core rggions
+        if (options%removecoreregions) then 
+            call RemoveTopologicalMeshCoreRegions(topomesh)
+        end if 
+
+        ! Wide grid regions
+        if (options%removewidegridregions) then 
+            call RemoveTopologicalMeshWideGridRegions(topomesh)
+        end if 
+
+        ! Non-core regions
+        if (options%removenoncoreregions) then 
+            call RemoveTopologicalMeshNonCoreRegions(topomesh)
+        end if
+
+        ! Structure based operations
+        !===========================
+        if (options%removevesselregions) then 
+            call RemoveTopologicalMeshVesselRegions(topomesh, vessel, options)
+        end if 
+
+    end subroutine
+
     ! Limiter region removal
     subroutine RemoveTopologicalMeshLimiterRegions(topomesh, &
         magneticField, fieldtracer, streamlinetracer, options)
@@ -3339,6 +3382,9 @@ module ggmod_topology2D
         ! Data
         call AddTopologicalMeshData(topomesh)
 
+        ! Recompute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
+
     end subroutine
 
     ! Wide grid region removal
@@ -3404,6 +3450,9 @@ module ggmod_topology2D
 
         ! Data
         call AddTopologicalMeshData(topomesh)
+
+        ! Recompute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
 
     end subroutine
 
@@ -3473,6 +3522,252 @@ module ggmod_topology2D
 
         ! Data
         call AddTopologicalMeshData(topomesh)
+
+        ! Recompute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
+
+    end subroutine
+
+    ! Remove regions that connect to some vessel structure(s)
+    subroutine RemoveTopologicalMeshVesselRegions(topomesh, vessel, options)
+
+        ! Description
+        !============
+        ! This routine removes (or retains, see later) any regions (
+        ! topological mesh tubes) that has a radial boundary that 
+        ! contains part of a vessel structure defined by the user. 
+        ! The user can choose whether a radial line should be partly or 
+        ! fully. The first one leads to most tubes deleted, the second 
+        ! is more conservative. The user can also do the complementary 
+        ! operations by instead keeping only these tubes that have this
+        ! structure (partly) as a radial bound. Furthermore, if desired, 
+        ! the user can request to cascade the deletion of tubes in the 
+        ! radial direction either to increasing or decreasing psi values.
+        ! This can be handy in cases with many different structures to 
+        ! enumerate and where only a narrow grid is desired. 
+
+        ! Algorithm
+        !==========
+        ! We use the vessel structure number interpolant to compute 
+        ! the structure number(s) that each vessel topological face has.
+        ! Then we check for each tube the radial faces. If they belong 
+        ! (completely) to one or more specified structures, then they 
+        ! are either marked for deletion or retainal. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(inout)       :: topomesh 
+        type(VesselUDT), intent(in)             :: vessel 
+        type(TopomeshOptionsUDT), intent(in)    :: options 
+
+        ! Auxiliary
+        logical                                 :: hasIDs
+        logical, allocatable, dimension(:)      :: mark, &
+            tempmark, newmark, delc, delf, delv
+        integer(I8)                             :: vind
+        integer(I8), allocatable, dimension(:)  :: tfvesselIDs, tf, &
+            tc, tcf, tcv
+        integer(I8), allocatable, dimension(:, :)   :: temp
+        real(R8), allocatable, dimension(:)     :: xfv, yfv, xfe, yfe
+        type(IntegerDynamicArrayUDT), allocatable   :: fvesselIDs(:)
+
+        ! Loop
+        integer(I8)                             :: i, j, k 
+
+        ! Initialize
+        !===========
+        ! Unpack and associate
+        associate(&
+            tube        => topomesh%tube,   &
+            face        => topomesh%face,   &
+            vesselIDs   => options%rvrvesselIDs,    &
+            docascade   => options%rvrdocascade,    &
+            cascadedir  => options%rvrcascadedir,   &
+            onlyfullycovered    => options%rvrfullycovered,     &
+            doretain    => options%rvrretain        &
+            )
+
+        ! Hedge for edge cases
+        if (size(vesselIDs) == 0) then 
+            ! Nothing to do here, move along
+            return 
+        end if 
+        
+        ! Mark vector
+        allocate(mark(tube%ntot), fvesselIDs(face%ntot))
+        mark = .false. 
+
+        ! Determine face structure IDs
+        !=============================
+        do i = 1, face%ntot 
+            ! Check if it is a structure
+            if (face%type(i) == TMfacebndID) then 
+                ! Get coordinates of face edge centers
+                xfv = face%x(i)%Get()
+                yfv = face%y(i)%Get()
+                xfe = 0.5*(xfv(1:size(xfv)-1) + xfv(2:))
+                yfe = 0.5*(yfv(1:size(yfv)-1) + yfv(2:))
+
+                ! Compute vessel IDs
+                call vessel%exactplfvessel%EvaluateLabel(xfe, yfe, temp)
+                call Unique(temp(:, 1), tfvesselIDs)
+
+                ! Assign
+                fvesselIDs(i) = ConstructIntegerDynamicArray(tfvesselIDs)
+            else
+                fvesselIDs(i) = ConstructIntegerDynamicArray()
+            end if 
+        end do 
+
+        ! Mark tubes
+        !===========
+        ! Mark tubes based on structure IDs
+        do i = 1, tube%ntot
+            ! Get tube radial faces
+            tf = GetTMTubeFace(tube, i)
+
+            ! Compare IDs with user-defined IDs
+            do j = 1, size(tf)
+                ! Get structure IDs
+                tfvesselIDs = fvesselIDs(tf(j))%Get()
+
+                ! Compare
+                if (onlyfullycovered) then 
+                    hasIDs = .true. 
+                    do k = 1, size(tfvesselIDs)
+                        hasIDs = hasIDs .and. any(tfvesselIDs(k) == vesselIDs)
+                    end do 
+                    if (hasIDs) then 
+                        mark(i) = .true. 
+                    end if 
+                else
+                    hasIDs = .false.
+                    do k = 1, size(tfvesselIDs)
+                        hasIDs = hasIDs .or. any(tfvesselIDs(k) == vesselIDs)
+                    end do 
+                    if (hasIDs) then 
+                        mark(i) = .true. 
+                    end if 
+                end if 
+
+                ! If marked -> exit
+                if (mark(i)) then 
+                    exit 
+                end if
+            end do 
+        end do 
+
+        ! Mark additional tubes by cascade if desired
+        if (docascade) then 
+
+            ! Initialize
+            newmark = mark 
+            newmark = .false. 
+            
+            select case (cascadedir)
+
+            case ('none', 'no')
+
+                ! Do nothing
+
+            case ('upstream', 'up')
+
+                ! Need to flood from high to low -> need to reverse direction
+                ! of graph
+                call tube%graph%ReverseDirection()
+
+            case ('downstream', 'down')
+
+                ! Need to flood from low to high -> can just flood as is
+
+
+            case default
+
+                call gdErrorHandler('RemoveTopologicalMeshVesselRegions: ' // & 
+                    'unknown cascade direction: ' // cascadedir)
+
+            end select
+
+            ! Mark tubes
+            do i = 1, tube%ntot 
+                if (mark(i)) then 
+                    vind = tube%graph%GetVertexIndex(i)
+                    tempmark = tube%graph%Flood(vind)
+                    newmark = newmark .or. tempmark
+                end if 
+            end do 
+            mark = mark .or. newmark
+
+            ! Check if we need to re-reverse
+            select case (cascadedir)
+
+            case ('upstream')
+
+                ! Re-reverse to get original direction again
+                call tube%graph%ReverseDirection()
+
+            end select ! exception handling done before
+
+        end if 
+
+        ! Check if we need to retain instead of delete
+        if (doretain) then 
+            mark = .not. mark 
+        end if 
+
+        ! Housekeeping
+        end associate
+
+        ! Delete
+        !=======
+        ! Initialize
+        !-----------
+        ! Mark cells, vertices, faces for deletion - note: we actually
+        ! work the other way around, i.e. we only keep tubes that are 
+        ! not to be deleted. This yields immediately also the correct 
+        ! faces, cells, and vertices to keep. 
+        allocate(delc(topomesh%cell%ntot), delv(topomesh%vert%ntot), &
+            delf(topomesh%face%ntot))
+        delc = .true. ! default true
+        delv = .true.
+        delf = .true.
+
+        do i = 1, topomesh%tube%ntot 
+            if (.not. mark(i)) then ! This tube should be retained
+                ! Get cells, faces, vertices and mark for retainal
+                tc = GetTMTubeCell(topomesh%tube, i)
+                delc(tc) = .false. 
+                do j = 1, size(tc)
+                    tcf = GetTMCellFace(topomesh%cell, i)
+                    tcv = GetTMCellVert(topomesh%cell, i)
+                    delf(tcf) = .false. 
+                    delv(tcv) = .false. 
+                end do 
+            end if 
+        end do
+
+        ! Delete
+        !=======
+        ! Vertices
+        call RemoveTopologicalMeshVertexLogical(topomesh, delv)
+
+        ! Faces
+        call RemoveTopologicalMeshFaceLogical(topomesh, delf)
+
+        ! Cells
+        call RemoveTopologicalMeshCellLogical(topomesh, delc)
+
+        ! Update again
+        !=============
+        ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Data
+        call AddTopologicalMeshData(topomesh)
+
+        ! Recompute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
 
     end subroutine
 
@@ -3549,7 +3844,7 @@ module ggmod_topology2D
             tvf, thisv
         real(R8)                                :: dpsi, dpsinb1, dpsinb2, &
             thisdeletedfval, lrad, lradnb1, lradnb2
-        real(R8), allocatable, dimension(:)     :: fval, thisvfval
+        real(R8), allocatable, dimension(:)     :: thisvfval
 
         ! Loop
         integer(I8)                             :: i, j
@@ -7573,7 +7868,9 @@ module ggmod_topology2D
         !============
         ! This routine adds additional data to the topological mesh 
         ! tubes, such as which cells are in a tube (cell%tube) and which
-        ! neighbours a tube has
+        ! neighbours a tube has. Also, a directional graph
+        ! representation is built, where sequence is from high psi 
+        ! values to low psi values. 
 
         ! Declare variables
         !==================
@@ -7582,7 +7879,8 @@ module ggmod_topology2D
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:)  :: ttc, tf1, tf2, tc, &
-            tf1u, tf2u
+            tf1u, tf2u, ev1, ev2, v, tnb1, tnb2
+        real(R8), allocatable, dimension(:)     :: tpsi1, tpsi2
 
         type(IntegerDynamicArrayUDT)            :: ftneig1, ftneig2
 
@@ -7727,6 +8025,61 @@ module ggmod_topology2D
             tube%ftneig1P(i, 1) = tube%ftneig1P(i-1, 1) + tube%ftneig1P(i-1, 2)
             tube%ftneig2P(i, 1) = tube%ftneig2P(i-1, 1) + tube%ftneig2P(i-1, 2)
         end do 
+
+        ! Graph
+        !======
+        ! Vertices 
+        v = [(k, k = 1, tube%ntot)] ! simple 
+
+        ! Edges
+        allocate(ev1(0), ev2(0))
+        do i = 1, tube%ntot 
+            ! Get all neighbours of this tube
+            tnb1 = GetTMTubeNeig(tube, i, 1_I8)
+            tnb2 = GetTMTubeNeig(tube, i, 2_I8)
+
+            ! Get all faces
+            tf1 = GetTMTubeBndFace(tube, i, 1_I8)
+            tf2 = GetTMTubeBndFace(tube, i, 2_I8)
+
+            ! Get all flux values
+            tpsi1 = topomesh%fsfval%Get(face%fsID(tf1))
+            tpsi2 = topomesh%fsfval%Get(face%fsID(tf2))
+
+            ! Sanity checks
+            if (all(minval(tpsi1) > tpsi2)) then 
+                ! First boundary is high field boundary -> first neighbours
+                ! should be high field neighbours, so edges go from these 
+                ! neighbours to the current tube. Second neighbours are
+                ! low field, so edges go from this tube to nb2 tubes
+                ev1 = [ev1, tnb1]
+                ev2 = [ev2, spread(i, 1, size(tnb1))]
+                
+                ev1 = [ev1, spread(i, 1, size(tnb2))]
+                ev2 = [ev2, tnb2]
+
+            elseif (all(minval(tpsi2) > tpsi1)) then 
+                ! Second boundary is high field boundary 
+                ev1 = [ev1, tnb2]
+                ev2 = [ev2, spread(i, 1, size(tnb2))]
+                
+                ev1 = [ev1, spread(i, 1, size(tnb1))]
+                ev2 = [ev2, tnb1]
+            else
+                ! Something wrong, shouldn't be happening
+                print *, 'tube: ', i
+                call gdErrorHandler('AddTopologicalMeshTubeData: ' // & 
+                    'boundaries of tube have different psi values and ' // & 
+                    'overlap - could not distinguish between low and high field side')
+            end if 
+
+        end do 
+
+        ! Construct
+        call tube%graph%Construct(ev1, ev2, v)
+
+        ! Condense to remove duplicated edges
+        call tube%graph%Condense()
 
         ! Housekeeping
         !=============

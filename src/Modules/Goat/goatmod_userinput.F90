@@ -392,6 +392,22 @@ module goatmod_userinput
         !                       PF boundary and tangency point
         ! - removewidegridregions: remove all regions that are not next    
         !                           to a separatrix 
+        ! - removevesselregions : remove regions that are adjacent to 
+        !                       some user specified vessel region
+        ! - rvrvesselIDs        : IDs, as specified in the structure.dat
+        !                       or vessel.dat file, to consider
+        ! - rvrretain:          : retain tubes instead of deleting them, 
+        !                       and delete all others
+        ! - rvrfullycovered     : if true, a face is only considered if 
+        !                       it is fully covered by one (or multiple) 
+        !                       defined vessel IDs
+        ! - rvrdocascade        : delete not only marked tubes, but also
+        !                       tubes that connect (so cascade the deletion)
+        !                       in either increasing or decreasing psi 
+        !                       direction (next option)
+        ! - rvrcascadedir       : 'upwards' for tubes with higher psi 
+        !                       value, 'downwards' for lower, 'none' for 
+        !                       no cascade. 
         ! - npmin, npmax, dl    : minimal and maximal number of points
         !                       of contours (when doing coarsening) and
         !                       desired uniform edge length
@@ -412,13 +428,15 @@ module goatmod_userinput
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax
+        integer(I8), allocatable, dimension(:)  :: rvrvesselIDs
         logical                 :: addcoreboundaries, removecoreregions, &
             fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
             readexistingTM, removenoncoreregions, mergetangencypointtubes, &
-            doadaptations, dotpvesselbased
+            doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
+            rvrdocascade, rvrfullycovered
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes
-        character(:), allocatable   :: TMfilepath
+        character(:), allocatable   :: TMfilepath, rvrcascadedir
     contains 
 
         procedure :: Read           => ReadTopomeshOptions
@@ -888,6 +906,8 @@ module goatmod_userinput
 
         ! Additional options
         options%dotpvesselbased             = .false.
+
+        ! Adaptations
         options%doadaptations               = .true.
         options%addcoreboundaries           = .true. 
         options%coreboundariesfrac          = 0.2
@@ -899,6 +919,14 @@ module goatmod_userinput
         options%mergetangencypointtubes     = .false.
         options%dpsimintangencypointtubes   = 0.0_R8 ! zero to ignore
         options%lradmintangencypointtubes   = 0.0_R8 ! zero to ignore
+
+        options%removevesselregions         = .false. 
+        if (allocated(options%rvrvesselIDs)) deallocate(options%rvrvesselIDs)
+        allocate(options%rvrvesselIDs(0))
+        options%rvrfullycovered             = .false. 
+        options%rvrretain                   = .false. 
+        options%rvrdocascade                = .false. 
+        options%rvrcascadedir               = 'none'
 
     end subroutine 
 
@@ -1608,8 +1636,11 @@ module goatmod_userinput
         ! Additional options
         field = 'gg.tm.dotpvesselbased'
         call ExtractOptionValueLogical0D(fid, field, options%dotpvesselbased)
+
+        ! Adaptations
         field = 'gg.tm.doadaptations'
         call ExtractOptionValueLogical0D(fid, field, options%doadaptations)
+
         field = 'gg.tm.addcoreboundaries'
         call ExtractOptionValueLogical0D(fid, field, options%addcoreboundaries)
         field = 'gg.tm.addPFboundaries'
@@ -1622,6 +1653,7 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%coreboundariesfrac)
         field = 'gg.tm.PFbnd.frac'
         call ExtractOptionValueReal0D(fid, field, options%PFboundariesfrac)
+
         field = 'gg.tm.removenoncoreregions'
         call ExtractOptionValueLogical0D(fid, field, options%removenoncoreregions)
         field = 'gg.tm.mergetangencypointtubes'
@@ -1630,6 +1662,19 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
         field = 'gg.tm.lradmintangencypointtubes'
         call ExtractOptionValueReal0D(fid, field, options%lradmintangencypointtubes)
+
+        field = 'gg.tm.removevesselregions'
+        call ExtractOptionValueLogical0D(fid, field, options%removevesselregions)
+        field = 'gg.tm.rvrvesselIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%rvrvesselIDs)
+        field = 'gg.tm.rvrfullycovered'
+        call ExtractOptionValueLogical0D(fid, field, options%rvrfullycovered)
+        field = 'gg.tm.rvrretain'
+        call ExtractOptionValueLogical0D(fid, field, options%rvrretain)
+        field = 'gg.tm.rvrdocascade'
+        call ExtractOptionValueLogical0D(fid, field, options%rvrdocascade)
+        field = 'gg.tm.rvrcascadedir'
+        call ExtractOptionValueCharacter(fid, field, options%rvrcascadedir)
 
         ! Housekeeping
         !=============
