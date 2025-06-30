@@ -425,6 +425,20 @@ module goatmod_userinput
         ! - lradmintangencypointtubes   minimal radial length for tangency
         !                       point tubes (if below, we attempt to 
         !                       merge)
+        ! - alignvesselparts    define certain vessel parts as aligned 
+        !                       faces with a certain flux surface value 
+        !                       and flux surface ID. Only certain boundary
+        !                       faces will be considered for alignment 
+        !                       (typically those near type 2 tangency 
+        !                       points). This will only be done after
+        !                       initial topological mesh construction 
+        !                       as this triggers profound adaptation of     
+        !                       of the topomesh.
+        ! - avpminangle         minimum angle w.r.t. the magnetic field 
+        !                       of boundary edges. If below, it will be
+        !                       considered as potential aligned part 
+        !                       (avp: aligned vessel parts). This angle
+        !                       should be given in degrees!
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax
@@ -433,9 +447,10 @@ module goatmod_userinput
             fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
             readexistingTM, removenoncoreregions, mergetangencypointtubes, &
             doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
-            rvrdocascade, rvrfullycovered
+            rvrdocascade, rvrfullycovered, alignvesselparts
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
-            PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes
+            PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes, &
+            avpminangle
         character(:), allocatable   :: TMfilepath, rvrcascadedir
     contains 
 
@@ -927,6 +942,9 @@ module goatmod_userinput
         options%rvrretain                   = .false. 
         options%rvrdocascade                = .false. 
         options%rvrcascadedir               = 'none'
+
+        options%alignvesselparts            = .false. 
+        options%avpminangle                 = 0.0_R8
 
     end subroutine 
 
@@ -1675,6 +1693,11 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%rvrdocascade)
         field = 'gg.tm.rvrcascadedir'
         call ExtractOptionValueCharacter(fid, field, options%rvrcascadedir)
+
+        field = 'gg.tm.alignvesselparts'
+        call ExtractOptionValueLogical0D(fid, field, options%alignvesselparts)
+        field = 'gg.tm.avpminangle'
+        call ExtractOptionValueReal0D(fid, field, options%avpminangle)
 
         ! Housekeeping
         !=============

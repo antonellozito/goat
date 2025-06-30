@@ -11980,21 +11980,7 @@ module ggmod_gridgeneration2D
             0, 1, simgrid%vert%by)
         call magneticField%interp%Evaluate(simgrid%vert%x, simgrid%vert%y, &
             1, 0, simgrid%vert%bx)
-        simgrid%vert%ffbz = magneticField%RBtor*2.0_R8*pi_R8
-
-        ! Faces
-        associate(&
-            fv      => simgrid%face%vert, &
-            vfID    => simgrid%vert%fieldlineID)
-        simgrid%face%aligned = 0_I8 
-        do i = 1, simgrid%face%ntot 
-            if ((vfID(fv(i, 1)) /= 0) .and. (vfID(fv(i, 2)) /= 0)) then
-                if (vfID(fv(i, 1)) == vfID(fv(i, 2))) then  
-                    simgrid%face%aligned(i) = 1_I8
-                end if 
-            end if 
-        end do 
-        end associate 
+        simgrid%vert%ffbz = magneticField%RBtor*2.0_R8*pi_R8        
 
         ! Cells
         associate(&
@@ -12016,6 +12002,25 @@ module ggmod_gridgeneration2D
         !=====================
         ! Classic grid interconnection data
         call ComputeGridInterconnections(simgrid)
+
+        ! Face alignment
+        associate(&
+            fv      => simgrid%face%vert, &
+            bf      => simgrid%face%BF,   &
+            vfID    => simgrid%vert%fieldlineID)
+        simgrid%face%aligned = 0_I8 
+        do i = 1, simgrid%face%ntot 
+            if ((vfID(fv(i, 1)) /= 0) .and. (vfID(fv(i, 2)) /= 0)) then
+                if (vfID(fv(i, 1)) == vfID(fv(i, 2))) then  
+                    simgrid%face%aligned(i) = 1_I8
+                elseif (simgrid%face%label(i) /= 0) then 
+                    if (topomesh%face%fsID(simgrid%face%label(i)) /= 0) then ! a bit of a hack to get aligned vessel parts working
+                        simgrid%face%aligned(i) = 1_I8
+                    end if 
+                end if 
+            end if 
+        end do 
+        end associate 
 
         ! Additional grid data
         call ComputeGridData(simgrid, magneticField)
@@ -12144,7 +12149,7 @@ module ggmod_gridgeneration2D
         ! Flux tubes
         !===========
         ! Initialize
-        c%ft = -10000_I8 
+        c%ft = 0 
 
         ! Get all non-aligned, non-boundary faces
         tf = (.not. f%BF) .and. (f%cellP(:, 2) == 2) .and. (.not. (f%aligned == 1))
@@ -12267,6 +12272,9 @@ module ggmod_gridgeneration2D
                 if (i < fd%nFt) then 
                     fd%fluxtubecellsP(i+1, 1) = fd%fluxtubecellsP(i, 1) + nftc 
                 end if 
+                if (any(c%ft(ftc) /= 0)) then 
+                    print *, 'ComputeGridInterconnections: cell already had flux tube assigned'
+                end if 
                 c%ft(ftc) = i 
 
                 ! Set tc to false to avoid some fringe cases
@@ -12334,6 +12342,9 @@ module ggmod_gridgeneration2D
                 fd%fluxtubecellsP(i, 2) = nftc-1
                 if (i < fd%nFt) then 
                     fd%fluxtubecellsP(i+1, 1) = fd%fluxtubecellsP(i, 1) + nftc-1 
+                end if 
+                if (any(c%ft(ftc(1:nftc-1)) /= 0)) then 
+                    print *, 'ComputeGridInterconnections: cell already had flux tube assigned'
                 end if 
                 c%ft(ftc(1:nftc-1)) = i
 
@@ -12428,6 +12439,9 @@ module ggmod_gridgeneration2D
                 end if 
 
                 ! Set cell ft region
+                if (c%ft(i) /= 0) then 
+                    print *, 'ComputeGridInterconnections: cell already had flux tube assigned'
+                end if 
                 c%ft(i) = cc
 
                 ! Set fluxtube region ID

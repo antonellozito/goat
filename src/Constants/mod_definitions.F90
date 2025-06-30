@@ -30,19 +30,20 @@ module mod_definitions
     ! field & boundary tangency point types 1 and 2: 4, 5, boundary vertex
     ! that is no tangency point or whatever: 6, vertex constructed by 
     ! splitting face: -1)
+    ! Note: type 1 TP contour line goes out of domain, type 2 goes inwards
     integer(I8), parameter  :: TMvertexminID = 1, TMvertexsaddleID = 2, &
         TMvertexmaxID = 3, TMvertextp1ID = 4, TMvertextp2ID = 5, TMvertexbndID = 6, &
         TMvertexsplitID = -1
 
     ! Topological mesh boundary IDs (1: radial face, 2: poloidal face, &
-    ! 3: boundary face, 4: separatrix/saddle point, 5: inserted core boundary, &
-    ! 6: inserted PF boundary)
+    ! 3: non-aligned boundary face, 4: separatrix/saddle point, 5: inserted core boundary, &
+    ! 6: inserted PF boundary), 7: aligned boundary face 
     integer(I8), parameter :: TMfaceradID = 1, TMfacepolID = 2, TMfacebndID = 3, &
-        TMfacesepID = 4, TMfacecoreID = 5, TMfacePFID = 6
+        TMfacesepID = 4, TMfacecoreID = 5, TMfacePFID = 6, TMfacealbndID = 7
 
     ! Joint IDs
     integer(I8), parameter, dimension(*) :: &
-        TMfacealignedID = [TMfacepolID, TMfacesepID, TMfacecoreID, TMfacePFID], &
+        TMfacealignedID = [TMfacepolID, TMfacesepID, TMfacecoreID, TMfacePFID, TMfacealbndID], &
         TMfacenonalignedID = [TMfaceradID, TMfacebndID]
 
     ! Definitions for SOLPS
