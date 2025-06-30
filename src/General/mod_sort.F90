@@ -883,9 +883,10 @@ module mod_sort
                 end if 
                 mid = (high + low)/2
 
-                ! Some checks for now
+                ! Check if value could not be found
                 if (mid < low .or. mid > high) then 
-                    call gdErrorHandler('something wrong in binary search')
+                    ! Value not found, return zero
+                    ind = 0
                 end if 
 
             end do 
@@ -906,9 +907,10 @@ module mod_sort
                 end if 
                 mid = (high + low)/2
 
-                ! Some checks for now
+                ! Check if value could not be found
                 if (mid < low .or. mid > high) then 
-                    call gdErrorHandler('something wrong in binary search')
+                    ! Value not found, return zero
+                    ind = 0
                 end if 
 
             end do 
