@@ -6,6 +6,7 @@ import numpy as np
 from . import Datahandler as dh
 import time
 from . import goat_types as gt
+import copy
 
 #==========================================================================#
 #                                                                          #
@@ -990,6 +991,7 @@ def PlotTopologicalMesh(topomesh, fignum):
     sepf = np.where(topomesh.face.type == gt.TMfacesepID)
     coref = np.where(topomesh.face.type == gt.TMfacecoreID)
     PFf = np.where(topomesh.face.type ==  gt.TMfacePFID)
+    albndf = np.where(topomesh.face.type ==  gt.TMfacealbndID)
 
     for i in pf[0]:
         PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
@@ -1007,6 +1009,9 @@ def PlotTopologicalMesh(topomesh, fignum):
         PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
             fignum, color='r')
     for i in PFf[0]:
+        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
+            fignum, color='r')
+    for i in albndf[0]:
         PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
             fignum, color='g')
         
@@ -2009,7 +2014,7 @@ def GetColorsFromValue(val, minval, maxval):
 
     return col
 
-def PlotCellBasedQuantity2D(grid, val, fignum):
+def PlotCellBasedQuantity2D(grid, val, fignum, bounds=[-np.Inf, np.Inf]):
     # Description
     #------------
     # Make a patchplot of a cell based quantity. If guard cells are 
@@ -2098,7 +2103,10 @@ def PlotCellBasedQuantity2D(grid, val, fignum):
             verts.append(list(zip(grid.vert.x[tv], grid.vert.y[tv])))
 
     # Make patchplot
-    PlotGeneral2DPatch(verts, val, fignum)
+    thisval = copy.deepcopy(val)
+    thisval = np.where(thisval > bounds[1], np.repeat(bounds[1], len(val), 0), thisval)
+    thisval = np.where(thisval < bounds[0], np.repeat(bounds[0], len(val), 0), thisval)
+    PlotGeneral2DPatch(verts, thisval, fignum)
 
     # Set axes
     SetAxesLimits2D(plt.gca(), grid.cell.x, grid.cell.y)
