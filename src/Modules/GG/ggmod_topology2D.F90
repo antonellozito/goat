@@ -268,9 +268,15 @@ module ggmod_topology2D
             ! Read
             call ReadTopologicalMesh(topomesh, options%TMfilepath)
 
-            ! Update the field tracer
-            call UpdateTracersFromTopomesh(topomesh, fieldtracer, &
-                magneticField, tmvessel, options)
+            if (options%readexistingtracers) then 
+                ! Read from file
+                call fieldtracer%Read(options%TMfieldtracerfilepath)
+                call vesseltracer%Read(options%TMvesseltracerfilepath)
+            else
+                ! Update the field tracer based on topomesh data
+                call UpdateTracersFromTopomesh(topomesh, fieldtracer, &
+                    magneticField, tmvessel, options)
+            end if 
         else
             ! Construct from scratch
             call ConstructBasicTopologicalMesh(tmvessel, magneticField, options, &
@@ -494,6 +500,10 @@ module ggmod_topology2D
 
         ! Write topological mesh
         call WriteTopologicalMesh(topomesh, 'topomesh_base')
+
+        ! Write tracers
+        call fieldtracer%Write('TMfieldtracer')
+        call vesseltracer%Write('TMvesseltracer')
 
     end subroutine
 
@@ -5321,6 +5331,16 @@ module ggmod_topology2D
         curvetypes  = ConstructIntegerDynamicArray()
         cface       = ConstructIntegerDynamicArray()
 
+        ! Refine boundary faces if desired
+        if (options%avprefinevessel) then 
+            do i = 1, face%ntot 
+                if (any(face%type(i) == [TMfacebndID, TMfacealbndID])) then 
+                    call face%pol(i)%Refine(options%avpmaxvesseldist, &
+                        options%avpminreffac)
+                end if 
+            end do 
+        end if 
+
         ! Determine faces
         !================
         ! Tangency point type 1 faces
@@ -5490,21 +5510,6 @@ module ggmod_topology2D
                     tubecase = 3
                 end if 
             end if 
-
-            ! Delete faces that have the same flux surface ID as the
-            ! tangency point 
-            !do k = 1, size(tfmark)
-            !    do j = 1, size(tfnb1)
-            !        if (face%fsID(tfnb1(j)) == vert%fsID(facevert(tfmark(k)))) then 
-            !            remf(tfnb1(j)) = .true. 
-            !        end if 
-            !    end do 
-            !    do j = 1, size(tfnb2)
-            !        if (face%fsID(tfnb2(j)) == vert%fsID(facevert(tfmark(k)))) then 
-            !            remf(tfnb2(j)) = .true. 
-            !        end if 
-            !    end do 
-            !end do 
 
             ! Trace and insert contours where necessary
             select case (tubecase)
@@ -12222,7 +12227,8 @@ module ggmod_topology2D
         !==================
         ! Modules 
         use mod_plotter 
-        use mod_specialchars, only : filesepchar
+        use mod_specialchars, only  : filesepchar
+        use mod_definitions, only   : goatversion
 
         ! Arguments
         class(TopomeshUDT)                      :: topomesh
@@ -12269,7 +12275,7 @@ module ggmod_topology2D
              status='unknown')
 
         ! Write header
-        write(fu, *) 'VERSION3.00.00'
+        write(fu, *) 'VERSION' // goatversion
 
         ! Check data
         !===========

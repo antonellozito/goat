@@ -414,6 +414,12 @@ module goatmod_userinput
         ! - readexistingTM:     read in an existing topomesh file, 
         !                       for which the full path is defined in  
         !                       TMfilepath
+        ! - readexistingtracers     read in existing field and vessel
+        !                       tracers instead of constructing
+        !                       new ones - only when restarting the 
+        !                       topomesh from a previous one. field and
+        !                       vessel filepaths should be fully specified
+        !                       in TMfieldtracerfilepath and TMvesseltracerfilepath
         ! - mergetangencypointtubes     merge tubes that are too small 
         !                       and that have tangency point tubes 
         !                       as neighbours. 'too small' is based on 
@@ -439,19 +445,25 @@ module goatmod_userinput
         !                       considered as potential aligned part 
         !                       (avp: aligned vessel parts). This angle
         !                       should be given in degrees!
+        ! - avprefinevessel     switch to refine vessel boundaries, similar
+        !                       to full vessel refinement (see vessel options)
+        ! - avpmaxvesseldist    maximal vessel edge length
+        ! - avpminreffac        minimal refinement factor for vessel edge refinement                    
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
-            npmax
+            npmax, avpminreffac
         integer(I8), allocatable, dimension(:)  :: rvrvesselIDs
         logical                 :: addcoreboundaries, removecoreregions, &
             fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
             readexistingTM, removenoncoreregions, mergetangencypointtubes, &
             doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
-            rvrdocascade, rvrfullycovered, alignvesselparts
+            rvrdocascade, rvrfullycovered, alignvesselparts, avprefinevessel, &
+            readexistingtracers
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes, &
-            avpminangle
-        character(:), allocatable   :: TMfilepath, rvrcascadedir
+            avpminangle, avpmaxvesseldist
+        character(:), allocatable   :: TMfilepath, rvrcascadedir, &
+            TMfieldtracerfilepath, TMvesseltracerfilepath
     contains 
 
         procedure :: Read           => ReadTopomeshOptions
@@ -897,7 +909,10 @@ module goatmod_userinput
         !=============
         ! I/O
         options%readexistingTM = .false. 
+        options%readexistingtracers = .false. 
         options%TMfilepath = 'topomesh.dat'
+        options%TMfieldtracerfilepath = 'TMfieldtracer.dat'
+        options%TMvesseltracerfilepath = 'TMvesseltracer.dat'
         
         ! Contouring (field)
         options%fresx = 100
@@ -943,8 +958,11 @@ module goatmod_userinput
         options%rvrdocascade                = .false. 
         options%rvrcascadedir               = 'none'
 
-        options%alignvesselparts            = .false. 
+        options%alignvesselparts            = .false.
+        options%avprefinevessel             = .false.  
         options%avpminangle                 = 0.0_R8
+        options%avpmaxvesseldist            = 1e-2 ! [m]
+        options%avpminreffac                = 0
 
     end subroutine 
 
@@ -1624,8 +1642,14 @@ module goatmod_userinput
         ! I/O
         field = 'gg.tm.readexistingTM'
         call ExtractOptionValueLogical0D(fid, field, options%readexistingTM)
+        field = 'gg.tm.readexistingtracers'
+        call ExtractOptionValueLogical0D(fid, field, options%readexistingtracers)
         field = 'gg.tm.TMfilepath'
         call ExtractOptionValueCharacter(fid, field, options%TMfilepath)
+        field = 'gg.tm.TMfieldtracerfilepath'
+        call ExtractOptionValueCharacter(fid, field, options%TMfieldtracerfilepath)
+        field = 'gg.tm.TMvesseltracerfilepath'
+        call ExtractOptionValueCharacter(fid, field, options%TMvesseltracerfilepath)
 
         ! Resolution 
         field = 'gg.tm.field.resx'
@@ -1696,8 +1720,15 @@ module goatmod_userinput
 
         field = 'gg.tm.alignvesselparts'
         call ExtractOptionValueLogical0D(fid, field, options%alignvesselparts)
+        field = 'gg.tm.avprefinevessel'
+        call ExtractOptionValueLogical0D(fid, field, options%avprefinevessel)
         field = 'gg.tm.avpminangle'
         call ExtractOptionValueReal0D(fid, field, options%avpminangle)
+        field = 'gg.tm.avpmaxvesseldist'
+        call ExtractOptionValueReal0D(fid, field, options%avpmaxvesseldist)
+        field = 'gg.tm.avpminreffac'
+        call ExtractOptionValueInteger0D(fid, field, options%avpminreffac)
+
 
         ! Housekeeping
         !=============

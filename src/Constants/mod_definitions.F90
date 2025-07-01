@@ -18,6 +18,11 @@ module mod_definitions
     implicit none
     public 
 
+    ! Goat
+    !=====
+    ! Version
+    character(*), parameter :: goatversion = '01.000.000s'
+
     ! Definitions for grid deformation
     !=================================
     ! Vessel parts definitions

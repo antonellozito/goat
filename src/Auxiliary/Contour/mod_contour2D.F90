@@ -20,6 +20,7 @@ module mod_contour2D
     use mod_errorhandler
     use mod_dynamicarrays
     use mod_structured2Dgridding
+    use mod_plotter, only: plotdir
     use mod_sort
     use mod_constants, only: nanval_R8
     use omp_lib
@@ -123,6 +124,10 @@ module mod_contour2D
         ! Field value getter
         procedure(GetTracerValuesINT), deferred     :: GetValues
 
+        ! I/O
+        procedure(WriteTracerINT), deferred         :: Write 
+        procedure(ReadTracerINT), deferred          :: Read
+
         ! Coarsening of contours
         procedure :: CoarsenContours
 
@@ -156,6 +161,10 @@ module mod_contour2D
 
         ! Field value getter
         procedure :: GetValues      => GetValuesStructured2D
+
+        ! I/O
+        procedure :: Write          => WriteTracerStructured2D 
+        procedure :: Read           => ReadTracerStructured2D
 
     end type 
 
@@ -243,6 +252,19 @@ module mod_contour2D
             class(ContourTracerUDT)         :: tracer 
             real(R8), allocatable           :: v(:)
         end function
+
+        ! I/O
+        subroutine WriteTracerINT(tracer, filename)
+            import :: ContourTracerUDT 
+            class(ContourTracerUDT)         :: tracer 
+            character(*), intent(in)        :: filename
+        end subroutine
+
+        subroutine ReadTracerINT(tracer, filename)
+            import :: ContourTracerUDT 
+            class(ContourTracerUDT)         :: tracer 
+            character(*), intent(in)        :: filename
+        end subroutine
 
     end interface
 
@@ -3270,6 +3292,236 @@ module mod_contour2D
         lambda1 = cp1/cp3
         lambda2 = cp2/cp3
         lambda3 = 1 - lambda1 - lambda2
+
+    end subroutine
+    !------------------------------------------------------------------!
+    !                                I/O                               !
+    !------------------------------------------------------------------!
+
+    ! Write structured tracer
+    subroutine WriteTracerStructured2D(tracer, filename)
+
+        ! Description
+        !============
+        ! Write all tracer data that is required to set up a structured
+        ! tracer. Format:
+        ! 
+        ! Header
+
+        ! Modules
+        !========
+        use mod_specialchars, only  : filesepchar
+        use mod_definitions, only   : goatversion
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)   :: tracer 
+        character(*), intent(in)            :: filename 
+
+        ! Auxiliary
+        integer                             :: fu 
+        character(:), allocatable           :: dir 
+
+        ! Loop
+        integer(I8)                         :: i, j
+
+        ! Initialize
+        !===========
+        ! Construct filepath
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Unpack
+        associate(&
+            xs      => tracer%xs,   &
+            ys      => tracer%ys,   &
+            vs      => tracer%vs,   &
+            dl      => tracer%dl,   &
+            npmin   => tracer%npmin,    &
+            npmax   => tracer%npmax,    &
+            order   => tracer%order,    &
+            IDs     => tracer%IDs,      &
+            X       => tracer%X,        &
+            Y       => tracer%Y,        &
+            V       => tracer%V         &
+            )
+
+        ! Write data
+        !===========
+        ! Common tracer data
+        !-------------------
+        ! Header
+        write(fu, *) 'VERSION' // goatversion
+
+        ! Dimensions
+        write(fu, *) 'ns, nx, ny'
+        write(fu, *) size(xs), size(X), size(Y)
+
+        ! dl
+        write(fu, *) 'dl, npmin, npmax'
+        write(fu, *) dl, npmin, npmax 
+
+        ! xs, ys, vs, order, ID
+        write(fu, *) 'xs, ys, vs, order, ID'
+        do i = 1, size(xs)
+            write(fu, *) xs(i), ys(i), vs(i), order(i), IDs(i)
+        end do 
+
+        ! Specific tracer data
+        !---------------------
+        ! X
+        write(fu, *) 'X'
+        do i = 1, size(X)
+            write(fu, *) X(i)
+        end do
+        
+        ! Y
+        write(fu, *) 'Y'
+        do i = 1, size(Y)
+            write(fu, *) Y(i)
+        end do
+
+        ! V 
+        write (fu, *) 'V'
+        do i = 1, size(V, 1)
+            do j = 1, size(V, 2)
+                write (fu, *) V(i, j)
+            end do 
+        end do 
+
+        ! Housekeeping
+        close(fu)
+        end associate
+
+    end subroutine
+
+    ! Read structured tracer
+    subroutine ReadTracerStructured2D(tracer, filename)
+
+        ! Description
+        !============
+        ! Read all tracer data that is required to set up a structured
+        ! tracer. We also construct the rest of the tracer here. 
+
+        ! Modules
+        !========
+        use mod_specialchars, only  : filesepchar
+        use mod_definitions, only   : goatversion
+        use mod_inputfileparser
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)   :: tracer 
+        character(*), intent(in)            :: filename 
+
+        ! Auxiliary
+        integer                             :: fu 
+        integer(I8)                         :: ns, nx, ny
+        logical                             :: reachedeof
+        character(:), allocatable           :: thisline
+        real(R8), allocatable, dimension(:) :: xg, yg
+
+        ! Loop
+        integer(I8)                         :: i, j
+
+        ! Initialize
+        !===========
+        ! Open file
+        open (action='read', file=trim(filename), newunit=fu, &
+             status='unknown')
+
+        ! Check allocation status
+        if (allocated(tracer%xs)) deallocate(tracer%xs)
+        if (allocated(tracer%ys)) deallocate(tracer%ys)
+        if (allocated(tracer%vs)) deallocate(tracer%vs)
+        if (allocated(tracer%order)) deallocate(tracer%order)
+        if (allocated(tracer%IDs)) deallocate(tracer%IDs)
+        if (allocated(tracer%X)) deallocate(tracer%X)
+        if (allocated(tracer%Y)) deallocate(tracer%Y)
+        if (allocated(tracer%V)) deallocate(tracer%V)
+
+        ! Write data
+        !===========
+        ! Common tracer data
+        !-------------------
+        ! Header
+        call ReadSingleLine(fu, thisline, reachedeof)
+
+        ! Dimensions
+        call ReadUntilFound(fu, 'ns, nx, ny', reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadTracerSTructured2D: could not find dimensions')
+        end if 
+        read(fu, *) ns, nx, ny
+
+        ! Allocate
+        allocate(tracer%xs(ns), tracer%ys(ns), tracer%vs(ns), &
+            tracer%order(ns), tracer%IDs(ns), tracer%X(nx), &
+            tracer%Y(ny), tracer%V(nx, ny))
+
+        ! Unpack
+        associate(&
+            xs      => tracer%xs,   &
+            ys      => tracer%ys,   &
+            vs      => tracer%vs,   &
+            dl      => tracer%dl,   &
+            npmin   => tracer%npmin,    &
+            npmax   => tracer%npmax,    &
+            order   => tracer%order,    &
+            IDs     => tracer%IDs,      &
+            X       => tracer%X,        &
+            Y       => tracer%Y,        &
+            V       => tracer%V         &
+            )
+        
+        ! dl
+        call ReadSingleLine(fu, thisline, reachedeof)
+        read(fu, *) dl, npmin, npmax 
+
+        ! xs, ys, vs, order, ID
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, size(xs)
+            read(fu, *) xs(i), ys(i), vs(i), order(i), IDs(i)
+        end do 
+
+        ! Specific tracer data
+        !---------------------
+        ! X
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, nx
+            read(fu, *) X(i)
+        end do 
+
+        ! Y 
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, ny
+            read(fu, *) Y(i)
+        end do 
+
+
+        ! V 
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, size(V, 1)
+            do j = 1, size(V, 2)
+                read (fu, *) V(i, j)
+            end do 
+        end do 
+
+        ! Construct derived data
+        !-----------------------
+        allocate(xg(nx*ny), yg(nx*ny))
+        call Construct2DStructuredGrid(X, Y, nx, ny, xg, yg)
+        tracer%xg = xg 
+        tracer%yg = yg
+    
+        ! Housekeeping
+        end associate
+        close(fu)
 
     end subroutine
 
