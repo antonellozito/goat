@@ -10104,7 +10104,7 @@ module ggmod_topology2D
 
         ! Description
         !=============
-        ! Get all face IDs that are vessel parts (i.e. type TMfacebndID)
+        ! Get all face IDs that are vessel parts (i.e. type TMfacebndID or TMfacealbndID)
 
         ! Declare variables
         !==================
@@ -10120,7 +10120,8 @@ module ggmod_topology2D
 
         ! Get
         !====
-        temp = topomesh%face%type == TMfacebndID
+        temp = (topomesh%face%type == TMfacebndID) .or.  & 
+            (topomesh%face%type == TMfacealbndID)
         allocate(ID(count(temp)))
         ID = pack([(k, k = 1, topomesh%face%ntot)], temp)
 
