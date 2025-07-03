@@ -42,14 +42,18 @@ module mod_definitions
 
     ! Topological mesh boundary IDs (1: radial face, 2: poloidal face, &
     ! 3: non-aligned boundary face, 4: separatrix/saddle point, 5: inserted core boundary, &
-    ! 6: inserted PF boundary), 7: aligned boundary face 
+    ! 6: inserted PF boundary), 7: aligned boundary face, 8: scrape-off layer 
+    ! flux surface (aligned boundary) ID
     integer(I8), parameter :: TMfaceradID = 1, TMfacepolID = 2, TMfacebndID = 3, &
-        TMfacesepID = 4, TMfacecoreID = 5, TMfacePFID = 6, TMfacealbndID = 7
+        TMfacesepID = 4, TMfacecoreID = 5, TMfacePFID = 6, TMfacealbndID = 7, &
+        TMfaceSOLID = 8
 
-    ! Joint IDs
+    ! Joint IDs: aligned faces (TMfacealignedID), non-aligned faces, 
+    ! domain boundary faces (a bit of a sad choice of names has led to this)
     integer(I8), parameter, dimension(*) :: &
-        TMfacealignedID = [TMfacepolID, TMfacesepID, TMfacecoreID, TMfacePFID, TMfacealbndID], &
-        TMfacenonalignedID = [TMfaceradID, TMfacebndID]
+        TMfacealignedID = [TMfacepolID, TMfacesepID, TMfacecoreID, TMfacePFID, TMfacealbndID, TMfaceSOLID], &
+        TMfacenonalignedID = [TMfaceradID, TMfacebndID], &
+        TMfaceBFID = [TMfacebndID, TMfacealbndID, TMfacecoreID, TMfacePFID, TMfaceSOLID]
 
     ! Definitions for SOLPS
     !======================
