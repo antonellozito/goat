@@ -20,7 +20,7 @@ module goatmod_userinput
     use mod_inputfileparser
     use mod_global_environment, only: solps, solps_inputfilepath, &
         solps_writefilepath, solps_gridfilepath, solps_magneticfieldfilepath, &
-        solps_structurefilepath
+        solps_structurefilepath, solps_outputfilepath
 
     ! The usual
     implicit none
@@ -911,8 +911,8 @@ module goatmod_userinput
         options%readexistingTM = .false. 
         options%readexistingtracers = .false. 
         options%TMfilepath = 'topomesh.dat'
-        options%TMfieldtracerfilepath = 'TMfieldtracer.dat'
-        options%TMvesseltracerfilepath = 'TMvesseltracer.dat'
+        options%TMfieldtracerfilepath = './output/TMfieldtracer.dat'
+        options%TMvesseltracerfilepath = './output/TMvesseltracer.dat'
         
         ! Contouring (field)
         options%fresx = 100
