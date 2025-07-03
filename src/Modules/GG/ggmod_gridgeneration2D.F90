@@ -5154,11 +5154,11 @@ module ggmod_gridgeneration2D
             indsrf, minind, maxind, minindloc
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
-            tf1, tf2
-        real(R8)                                :: hfval, lfval, &
-            dhf1, dhf2, dlf1, dlf2
+            tf1, tf2, tubebndf1, tubebndf2, tubebndv1, tubebndv2, &
+            tubehfvert, tubelfvert
+        real(R8)                                :: hfval, lfval
         real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
-            tcfv2val
+            tcfv2val, tubelfval, tubehfval, tubebndval1, tubebndval2
         logical, allocatable, dimension(:)      :: ishfface, islfface, &
             ishfvert
 
@@ -5188,6 +5188,31 @@ module ggmod_gridgeneration2D
             ! Get the tube cells & faces
             tubec = tube%GetCell(i)
             tubef = tube%GetFace(i)
+
+            ! Get the tube boundary vertices and faces
+            tubebndf1 = tube%GetBndFace(i, 1)
+            tubebndf2 = tube%GetBndFace(i, 2)
+            tubebndv1 = tube%GetBndVert(i, 1)
+            tubebndv2 = tube%GetBndVert(i, 2)
+
+            ! Determine psi values at both sides
+            tubebndval1 = topomesh%fsfval%Get([face%fsID(tubebndf1), vert%fsID(tubebndv1)])
+            tubebndval2 = topomesh%fsfval%Get([face%fsID(tubebndf2), vert%fsID(tubebndv2)])
+            if (minval(tubebndval1) > maxval(tubebndval2)) then 
+                tubehfval = tubebndval1
+                tubelfval = tubebndval2
+                tubehfvert = tubebndv1 
+                tubelfvert = tubebndv2
+            elseif (minval(tubebndval2) > maxval(tubebndval1)) then 
+                tubehfval = tubebndval2
+                tubelfval = tubebndval1
+                tubehfvert = tubebndv2 
+                tubelfvert = tubebndv1
+            else
+                call gdErrorHandler('AddTopologicalMeshGriddingData: ' // & 
+                    'tube psi values seem to overlap, could not determine ' // &
+                    'high and low field value. ')
+            end if 
 
             ! Loop over all tube cells
             do j = 1, size(tubec)
@@ -5255,23 +5280,37 @@ module ggmod_gridgeneration2D
                 do k = 1, size(tcf)
                     ! Check if the face is of poloidal/sep type
                     if (any(face%type(tcf(k)) == TMfacealignedID)) then 
-                        dhf1 = abs(tcfv1val(k) - hfval)
-                        dhf2 = abs(tcfv2val(k) - hfval)
-                        dlf1 = abs(tcfv1val(k) - lfval)
-                        dlf2 = abs(tcfv2val(k) - lfval)
-                        if ((dhf1 < dlf1) .and. (dhf2 < dlf2)) then 
-                            ! High field face
+                        if (any(face%vert(tcf(k), 1) == tubehfvert) .and. &
+                            any(face%vert(tcf(k), 2) == tubehfvert)) then 
                             ishfface(k) = .true. 
-                        elseif ((dhf1 > dlf1) .and. (dhf1 > dlf1)) then 
-                            ! Low field face
+                        elseif (any(face%vert(tcf(k), 1) == tubelfvert) .and. &
+                                any(face%vert(tcf(k), 2) == tubelfvert)) then 
                             islfface(k) = .true. 
                         else 
                             ! Undetermined - throw error (should actually
                             ! not happen)
                             call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
-                                'could not determine based on field value ' // & 
-                                'if poloidal face is high or low field.')
+                                'aligned face vertices do not appear only in  ' // & 
+                                'high or low field vertices of tube. Unexpected')
                         end if 
+
+                        !dhf1 = abs(tcfv1val(k) - hfval)
+                        !dhf2 = abs(tcfv2val(k) - hfval)
+                        !dlf1 = abs(tcfv1val(k) - lfval)
+                        !dlf2 = abs(tcfv2val(k) - lfval)
+                        !if ((dhf1 < dlf1) .and. (dhf2 < dlf2)) then 
+                        !    ! High field face
+                        !    ishfface(k) = .true. 
+                        !elseif ((dhf1 > dlf1) .and. (dhf1 > dlf1)) then 
+                        !    ! Low field face
+                        !    islfface(k) = .true. 
+                        !else 
+                        !    ! Undetermined - throw error (should actually
+                        !    ! not happen)
+                        !    call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
+                        !        'could not determine based on field value ' // & 
+                        !        'if poloidal face is high or low field.')
+                        !end if 
                     end if 
                 end do 
 
@@ -5411,6 +5450,11 @@ module ggmod_gridgeneration2D
         ! anything in. Then, the topomesh resolution should be 
         ! consistent between topomesh and grid generation stage. 
 
+        ! Note 4: since the tube flux surfaces may, in general, contain
+        ! different psi values, we need to bound the psi values being
+        ! traced to the minimal flux at high flux side and maximal flux
+        ! at low flux side. 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -5427,14 +5471,15 @@ module ggmod_gridgeneration2D
             startind, endind, nfs, tfloc, tfc, nthf, ntlf
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, &
             allIDs, s1, s2, polv, fsID, sortind, thf, tlf, tvertexID, &
-            tf1, tf2, allnbtf, contourind
+            tf1, tf2, allnbtf, contourind, tv1, tv2
         integer(I8), allocatable, dimension(:, :)   :: nint, segrf, &
             segc, vertexID, temp2
         real(R8)                                :: &
             nxc, nyc, nxfv, nyfv, txf, tyf, ntxf, tmaxval
         real(R8), allocatable, dimension(:)     :: &
             tx, ty, xl, yl, tfval, sr1, sr2, txint, tyint, &
-            nxf, nyf, nnf, tsegrc, tsegrrf, dlcv, newdlcv, newtfval
+            nxf, nyf, nnf, tsegrc, tsegrrf, dlcv, newdlcv, newtfval, &
+            tubehfval, tubelfval, tempfval
         real(R8), allocatable, dimension(:, :)  :: segrrf, segrc, &
             xint, yint
         logical                                 :: isflremoved_nointersect, &
@@ -5491,7 +5536,25 @@ module ggmod_gridgeneration2D
             tf = tubedata(i)%distributionface
             tf1 = tube%GetBndFace(i, 1)
             tf2 = tube%GetBndFace(i, 2)
+            tv1 = tube%GetBndVert(i, 1)
+            tv2 = tube%GetBndVert(i, 2)
             allnbtf = [tf1, tf2]
+
+            ! Get tube flux value bounds
+            tubehfval = topomesh%fsfval%Get([face%fsID(tf1), vert%fsID(tv1)])
+            tubelfval = topomesh%fsfval%Get([face%fsID(tf2), vert%fsID(tv2)])
+            if (all(maxval(tubehfval) < tubelfval) .and. all(minval(tubelfval) > tubehfval)) then 
+                ! Need to switch
+                tempfval = tubehfval 
+                tubehfval = tubelfval 
+                tubelfval = tempfval 
+            elseif (all(maxval(tubelfval) < tubehfval) .and. all(minval(tubehfval) > tubelfval)) then 
+                ! All good
+            else
+                call gdErrorHandler('TraceTopologicalMeshTubeContours: ' // & 
+                    'could not determine high and low flux value of tube, ' // &
+                    'values between hf and lf side seem to overlap')
+            end if 
 
             ! Get cell belonging to this face
             tfloc = findloc(tubef, tf, 1, back=.false.)
@@ -5531,9 +5594,15 @@ module ggmod_gridgeneration2D
             ! Eliminate values outside of bounds
             allocate(keepind(size(tfval)))
             keepind = .true.
-            where ((tfval > tfval(1) ).or. (tfval < tfval(size(tfval))))
+            where ((tfval > minval(tubehfval) ).or. (tfval < maxval(tubelfval)))
                 keepind = .false. 
             end where
+
+            ! Always keep end points - may be deleted if tube values are 
+            ! more stringent than face values which can occur if aligned
+            ! vessel parts are present (these won't be traced anyway)
+            keepind(1) = .true.
+            keepind(size(keepind)) = .true.
             allocate(newtfval(count(keepind)),newdlcv(count(keepind)))
             newtfval = pack(tfval, keepind)
             newdlcv = pack(dlcv, keepind)
@@ -11903,7 +11972,9 @@ module ggmod_gridgeneration2D
         class(TopomeshUDT), intent(in)          :: topomesh
 
         ! Auxiliary
-        integer(I8), allocatable, dimension(:)  :: tv
+        logical, allocatable, dimension(:)      :: hasfaceID
+        integer(I8), allocatable, dimension(:)  :: tv, fsIDalbnd, &
+            thisv1, thisv2
         real(R8), allocatable, dimension(:)     :: bpvx
 
         ! Loop
@@ -11942,6 +12013,7 @@ module ggmod_gridgeneration2D
         simgrid%vert%fieldlineID    = grid%vert%fieldlineID%Get()
         simgrid%vert%ntot           = nv 
 
+        
         ! Faces
         simgrid%face%vert(:, 1) = grid%face%v1%Get()
         simgrid%face%vert(:, 2) = grid%face%v2%Get()
@@ -11973,6 +12045,43 @@ module ggmod_gridgeneration2D
 
         ! Magnetic field data
         !====================
+        ! Modify the field line IDs for topomesh flux surfaces:
+        ! - aligned boundaries should get zero ID IF they're internal 
+        ! vertices of the boundary
+        ! - others should just get the flux surface ID of the topomesh
+        ! boundary. 
+
+        ! First, set vert ID to false if face vertices have label of 
+        ! aligned faces 
+        allocate(hasfaceID(simgrid%face%ntot))
+        hasfaceID = .false. 
+        do i = 1, topomesh%face%ntot
+            if (topomesh%face%type(i) == TMfacealbndID) then 
+                ! Get vertices
+                hasfaceID = hasfaceID .or. (simgrid%face%label == i)
+            end if 
+        end do 
+        allocate(thisv1(count(hasfaceID)), thisv2(count(hasfaceID)))
+        thisv1 = pack(simgrid%face%vert(:, 1), hasfaceID)
+        thisv2 = pack(simgrid%face%vert(:, 2), hasfaceID)
+        simgrid%vert%fieldlineID([thisv1, thisv2]) = 0
+        deallocate(thisv1, thisv2)
+
+        ! Then, set vert ID to flux surface ID of topomesh flux surface
+        ! if vertex has the label
+        do i = 1, topomesh%face%ntot
+            if (.not. any(topomesh%face%type(i) == [TMfacealbndID, TMfacebndID]) .and.  &
+                any(topomesh%face%type(i) == TMfacealignedID)) then 
+                ! Get vertices
+                hasfaceID = simgrid%face%label == i
+                allocate(thisv1(count(hasfaceID)), thisv2(count(hasfaceID)))
+                thisv1 = pack(simgrid%face%vert(:, 1), hasfaceID)
+                thisv2 = pack(simgrid%face%vert(:, 2), hasfaceID)
+                simgrid%vert%fieldlineID([thisv1, thisv2]) = topomesh%face%fsID(i)
+                deallocate(thisv1, thisv2)
+            end if 
+        end do 
+
         ! Vertices
         call magneticField%interp%Evaluate(simgrid%vert%x, simgrid%vert%y, &
             0, 0, simgrid%vert%psi)
@@ -12009,14 +12118,12 @@ module ggmod_gridgeneration2D
             bf      => simgrid%face%BF,   &
             vfID    => simgrid%vert%fieldlineID)
         simgrid%face%aligned = 0_I8 
+        allocate(fsIDalbnd(count(topomesh%face%type == TMfacealbndID)))
+        fsIDalbnd = pack(topomesh%face%fsID, topomesh%face%type == TMfacealbndID)
         do i = 1, simgrid%face%ntot 
             if ((vfID(fv(i, 1)) /= 0) .and. (vfID(fv(i, 2)) /= 0)) then
-                if (vfID(fv(i, 1)) == vfID(fv(i, 2))) then  
-                    simgrid%face%aligned(i) = 1_I8
-                elseif (simgrid%face%label(i) /= 0) then 
-                    if (topomesh%face%fsID(simgrid%face%label(i)) /= 0) then ! a bit of a hack to get aligned vessel parts working
+                if (vfID(fv(i, 1)) == vfID(fv(i, 2))) then 
                         simgrid%face%aligned(i) = 1_I8
-                    end if 
                 end if 
             end if 
         end do 
