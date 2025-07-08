@@ -535,6 +535,10 @@ module goatmod_userinput
         !                           that complies to the marking criterion
         ! - evtmaxvessellength:     maximum L2-based vessel segment 
         !                           length before tube is extended
+        ! - evtnoBL                 if true, don't apply any boundary 
+        !                           layer at extended tubes (typically 
+        !                           not desired. Only has effect if 
+        !                           boundary layers are applied of course)
 
         ! Options for flux surface removal
         ! - removefluxsurfaces:     switch to remove or not
@@ -636,7 +640,7 @@ module goatmod_userinput
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
             radrefdlBLlengthbased, vdrdoxp, structurebasedlabels, &
-            dogriddiagnostics
+            dogriddiagnostics, evtnoBL
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp
@@ -1067,6 +1071,7 @@ module goatmod_userinput
         options%extendtptubes       = .true. 
         options%extendvesseltubes   = .false. 
         options%evtmaxvessellength  = 0.2
+        options%evtnoBL             = .true.
 
         ! Options for flux surface removal 
         options%removefluxsurfaces = .true.
@@ -1948,6 +1953,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%extendvesseltubes)
         field = 'gg.adap.evt.maxvessellength'
         call ExtractOptionValueReal0D(fid, field, options%evtmaxvessellength)
+        field = 'gg.adap.evt.noBL'
+        call ExtractOptionValuelogical0D(fid, field, options%evtnoBL)
 
         ! Options for flux surface removal 
         field = 'gg.vd.removefluxsurfaces'

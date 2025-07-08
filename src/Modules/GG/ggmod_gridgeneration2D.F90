@@ -136,6 +136,30 @@ module ggmod_gridgeneration2D
     ! Grid data related to topological mesh
     !======================================
 
+    
+    ! Field line refinement options
+    type :: GGTMFieldlineRefinementOptionsUDT 
+
+        ! Description
+        !============
+        ! This structure contains all refinement options for refining
+        ! a GGTM line with any GGTM line refiner. These options should
+        ! be added as a structure to the GGTMCellData structure, such 
+        ! that this data transfer can be done smoothly
+
+        ! Data for length-based refinement
+        logical                                 :: doBLstart, doBLend, &
+            dlBLlengthbased 
+        integer(I8)                             :: ncBLstart, ncBLend 
+        real(R8), allocatable, dimension(:)     :: dlBLstart, dlBLend
+
+    contains 
+
+        ! Initializer to avoid issues
+        procedure :: Initialize         => InitializeGGTMLineRefinementOptions
+
+    end type
+
     ! Field line segment data
     type :: GGTMSegmentUDT
 
@@ -223,6 +247,7 @@ module ggmod_gridgeneration2D
             fsID, nodes, TMfaceID, nodevert, segID
         logical, allocatable, dimension(:)          :: flipseg, isnodevert
         integer(I8)                                 :: nv, nl, ns 
+        type(GGTMFieldlineRefinementOptionsUDT)     :: refoptions
 
     contains 
 
@@ -255,6 +280,7 @@ module ggmod_gridgeneration2D
         procedure :: GetSegmentFaceIndices  => GetGGTMFieldLineSegmentFaceIndices
         procedure :: GetSegmentVertIndices  => GetGGTMFieldLineSegmentVertIndices
         procedure :: GetAllSegmentVertIndices   => GetGGTMFieldLineAllSegmentVertIndices
+        procedure :: IsExtended     => IsGGTMFieldLineExtended
 
     end type
 
@@ -270,7 +296,7 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)     :: graphxv, graphyv
         integer(I8)                             :: srflabel, erflabel
         logical                                 :: isextendedstart, &
-            isextendedend, dograph
+            isextendedend, dograph 
         type(IntegerDynamicArrayUDT)    :: hfface, lfface, tubeface, &
             cell 
         type(UGraphUDT)             :: graph
@@ -288,28 +314,6 @@ module ggmod_gridgeneration2D
 
     end type
 
-    ! Field line refinement options
-    type :: GGTMFieldlineRefinementOptionsUDT 
-
-        ! Description
-        !============
-        ! This structure contains all refinement options for refining
-        ! a GGTM line with any GGTM line refiner. These options should
-        ! be added as a structure to the GGTMCellData structure, such 
-        ! that this data transfer can be done smoothly
-
-        ! Data for length-based refinement
-        logical                                 :: doBLstart, doBLend, &
-            dlBLlengthbased 
-        integer(I8)                             :: ncBLstart, ncBLend 
-        real(R8), allocatable, dimension(:)     :: dlBLstart, dlBLend
-
-    contains 
-
-        ! Initializer to avoid issues
-        procedure :: Initialize         => InitializeGGTMLineRefinementOptions
-
-    end type
 
     ! Vertex data
     type :: GGTMVertexDataUDT
@@ -647,14 +651,12 @@ module ggmod_gridgeneration2D
         end subroutine
 
         ! Update refinement options
-        subroutine UpdateRefinementOptionsINT(refiner, refoptions, &
-            topomesh)
+        subroutine UpdateRefinementOptionsINT(refiner, refoptions)
 
             import :: GGTMLineRefiner2DUDT, GGTMFieldlineRefinementOptionsUDT, &
                 TopomeshUDT
             class(GGTMLineRefiner2DUDT)                         :: refiner 
             type(GGTMFieldlineRefinementOptionsUDT), intent(in) :: refoptions 
-            type(TopomeshUDT), intent(in)                       :: topomesh
 
         end subroutine
 
@@ -980,6 +982,10 @@ module ggmod_gridgeneration2D
         call TraceTopologicalMeshTubeContours(grid, ggtmdata, topomesh, &
             fieldtracer, magneticField, options)
 
+        ! Add refinement data to contour lines
+        call AddTopologicalMeshTubeContoursLineRefinementData(ggtmdata, &
+            topomesh, vessel, options)
+
         ! Generate elemental flux tubes for gridding
         call ConstructTopologicalMeshCellFluxTubes(grid, ggtmdata, topomesh, &
             fieldtracer, magneticField, options)
@@ -1124,10 +1130,6 @@ module ggmod_gridgeneration2D
         ! Add cell vertices
         !==================
         do i = 1, cell%ntot
-
-            ! Update the refiner
-            call GGTMLineRefiner%UpdateRefinementOptions(celldata(i)%linerefoptions, &
-                topomesh)
 
             ! Check which method to use
             select case (options%ggmethod)
@@ -1398,10 +1400,6 @@ module ggmod_gridgeneration2D
 
             ! Add cell vertices
             !------------------
-            ! Update the refiner
-            call GGTMLineRefiner%UpdateRefinementOptions(&
-                celldata(tc)%linerefoptions, topomesh)
-
             ! Check which method to use
             select case (options%ggmethod)
 
@@ -1729,50 +1727,6 @@ module ggmod_gridgeneration2D
             ! Check if we need to update the original hfline
             if (i == 1) then 
                 
-                ! Update the aligned parts of the hf line
-                do j = 1, size(celldata(tc)%hffaces)
-                    ! Unpack
-                    tf = celldata(tc)%hffaces(j)
-
-                    ! Update the face data to propagate previous distribution
-                    call facedata(tf)%line%UpdateLineData(ggtmdata) 
-
-                    ! Update the refinement options
-                    thislinerefoptions = facedata(tf)%linerefoptions
-                    if (tubes(i)%isextendedstart) then 
-                        thislinerefoptions%doBLstart = .false.
-                    end if 
-                    if (tubes(i)%isextendedend) then 
-                        thislinerefoptions%doBLend = .false.
-                    end if 
- 
-                    ! Update the refiner
-                    call GGTMLineRefiner%UpdateRefinementOptions(&
-                        thislinerefoptions, topomesh)
-
-                    ! Refine
-                    keepvert = IsTopomeshVert(facedata(tf)%line%vert, topomesh)
-                    call GGTMlinerefiner%Refine(ggtmdata, facedata(tf)%line,  &
-                        vertID, keepvert)
-
-                    ! Update segment data
-                    call facedata(tf)%line%UpdateSegmentData(ggtmdata) 
-                    
-                end do 
-
-                ! Update the refinement options
-                thislinerefoptions = celldata(tc)%linerefoptions
-                if (tubes(i)%isextendedstart) then 
-                    thislinerefoptions%doBLstart = .false.
-                end if 
-                if (tubes(i)%isextendedend) then 
-                    thislinerefoptions%doBLend = .false.
-                end if 
-
-                ! Update refinement data 
-                call GGTMLineRefiner%UpdateRefinementOptions(&
-                    thislinerefoptions, topomesh)
-
                 ! Refine/coarsen non-aligned parts
                 keepvert = hfline%isnodevert
                 call GGTMLinerefiner%Refine(ggtmdata, hfline, vertID, keepvert)
@@ -1787,20 +1741,6 @@ module ggmod_gridgeneration2D
 
                 ! Update line data
                 call hfline%UpdateLineData(ggtmdata)
-
-                ! Update the refinement options
-                thislinerefoptions = celldata(tc)%linerefoptions
-                if (tubes(i)%isextendedstart) then 
-                    thislinerefoptions%doBLstart = .false.
-                end if 
-                if (tubes(i)%isextendedend) then 
-                    thislinerefoptions%doBLend = .false.
-                end if 
-
-                ! Update refinement data 
-                call GGTMLineRefiner%UpdateRefinementOptions(&
-                    thislinerefoptions, topomesh)
-
 
                 ! Refine/coarsen 
                 keepvert = hfline%isnodevert
@@ -2046,53 +1986,27 @@ module ggmod_gridgeneration2D
                     ! Update the face data to propagate previous distribution
                     call facedata(tf)%line%UpdateLineData(ggtmdata) 
 
-                    ! Update the refinement options
-                    thislinerefoptions = facedata(tf)%linerefoptions
-                    if (tubes(i)%isextendedstart) then 
-                        thislinerefoptions%doBLstart = .false.
-                    end if 
-                    if (tubes(i)%isextendedend) then 
-                        thislinerefoptions%doBLend = .false.
-                    end if 
-
-                    ! Update refinement data 
-                    call GGTMLineRefiner%UpdateRefinementOptions(&
-                        thislinerefoptions, topomesh)
-
-                    ! Refine
-                    keepvert = IsTopomeshVert(facedata(tf)%line%vert, topomesh)
-                    call GGTMlinerefiner%Refine(ggtmdata, facedata(tf)%line, vertID, keepvert)
+                    !! Refine
+                    !keepvert = IsTopomeshVert(facedata(tf)%line%vert, topomesh)
+                    !call GGTMlinerefiner%Refine(ggtmdata, facedata(tf)%line, vertID, keepvert)
 
                     ! Update segment data
-                    call facedata(tf)%line%UpdateSegmentData(ggtmdata) 
+                    !call facedata(tf)%line%UpdateSegmentData(ggtmdata) 
                     
                 end do 
 
                 ! Update line data
-                call lfline%UpdateLineData(ggtmdata)
-
-                ! Update the refinement options
-                thislinerefoptions = celldata(tc)%linerefoptions
-                if (tubes(i)%isextendedstart) then 
-                    thislinerefoptions%doBLstart = .false.
-                end if 
-                if (tubes(i)%isextendedend) then 
-                    thislinerefoptions%doBLend = .false.
-                end if 
-
-                ! Update refinement data 
-                call GGTMLineRefiner%UpdateRefinementOptions(&
-                    thislinerefoptions, topomesh)
+                !call lfline%UpdateLineData(ggtmdata)
 
                 ! Refine/coarsen non-aligned parts
-                keepvert = lfline%isnodevert
-                call GGTMLinerefiner%Refine(ggtmdata, lfline, vertID, keepvert)
+                !keepvert = lfline%isnodevert
+                !call GGTMLinerefiner%Refine(ggtmdata, lfline, vertID, keepvert)
 
                 ! Update segments, but only those that are not aligned 
                 ! (i.e. no fsID)
-                updateseg = lfline%fsID == 0
-                call lfline%UpdateSegmentData(ggtmdata, updateseg)
-                call lfline%UpdateLineData(ggtmdata)
+                !updateseg = lfline%fsID == 0
+                !call lfline%UpdateSegmentData(ggtmdata, updateseg)
+                !call lfline%UpdateLineData(ggtmdata)
 
             end if 
 
@@ -4951,10 +4865,6 @@ module ggmod_gridgeneration2D
                 ! Update vertex counter
                 grid%vert%ntot = grid%vert%ntot + size(dlcv) - 2
 
-                ! Update the refiner
-                call GGTMLineRefiner%UpdateRefinementOptions(&
-                    facedata(i)%linerefoptions, topomesh)
-
                 ! Refine
                 keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
                 call GGTMlinerefiner%Refine(ggtmdata, facedata(i)%line, grid%vert%ntot, keepvert)
@@ -5039,10 +4949,6 @@ module ggmod_gridgeneration2D
                 j = tf(k)
                 xc = face%x(j)%Get()
                 yc = face%y(j)%Get()
-
-                ! Update the refiner
-                call GGTMLineRefiner%UpdateRefinementOptions(&
-                    facedata(j)%linerefoptions, topomesh)
 
                 ! Distribute
                 !call vd%DistributeOverCurve(xc, yc, nv, ldistr=dlcv)
@@ -6587,7 +6493,7 @@ module ggmod_gridgeneration2D
         !==================
         ! Arguments
         type(GGGridUDT), intent(inout)          :: grid
-        type(GGTMDataUDT), intent(inout)       :: ggtmdata
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata
         class(TopomeshUDT), intent(in)          :: topomesh 
         class(ContourTracerUDT), intent(in)     :: fieldtracer 
         type(MagneticFieldUDT), intent(in)      :: magneticField 
@@ -6626,22 +6532,9 @@ module ggmod_gridgeneration2D
             ! Associate for ease
             associate(tc        => celldata(i))
 
-            ! Sanity checks
-            if (.not. allocated(tc%lines)) then 
-                print *, 'cell: ', i 
-                call gdErrorHandler('ConstructTopologicalMeshCellFluxTubes: ' // & 
-                    'cell lines for this cell are not yet allocated')
-            end if 
-
             ! Initialize
             nt = size(tc%lines)+1
             allocate(tc%tubes(nt))
-
-            ! Extract the high/low field line data 
-            call ExtractTMCellAlignedBoundary(tc, 'high', ggtmdata, &
-                topomesh, tc%hfline)
-            call ExtractTMCellAlignedBoundary(tc, 'low', ggtmdata, &
-                topomesh, tc%lfline)
 
             ! Construct tubes
             !----------------
@@ -7149,6 +7042,11 @@ module ggmod_gridgeneration2D
             end associate
         end do 
         
+        ! Update refinement data 
+        !=======================
+        call UpdateCellFluxTubeRefinementData(ggtmdata, topomesh, &
+            options)
+
         ! Housekeeping
         !=============
         end associate
@@ -7575,9 +7473,995 @@ module ggmod_gridgeneration2D
         
         ! Housekeeping
         !=============
+        do i = 1, size(facedata)
+            facedata(i)%line%refoptions = facedata(i)%linerefoptions
+        end do
+
         end associate
 
     end subroutine
+
+    ! Contour line refinement data
+    subroutine AddTopologicalMeshTubeContoursLineRefinementData(ggtmdata, &
+        topomesh, vessel, options)
+
+        ! Description
+        !============
+        ! Add refinement data to contour lines (as stored in cell%lines)
+        ! based on the refinement data already available in the ggtmdata
+        ! structure and additional options given in the options 
+        ! structure. It is assumed here that tubes of cells have not
+        ! yet been constructed. Line refinement data based on the cell 
+        ! lines here should be propagated to the tube lines in the 
+        ! tube constructor. 
+
+        ! Note 1: we still need to construct the hf and lf lines for 
+        ! each cell here. Based on topomesh interconnections, we can
+        ! also check what to do with these lines based on neighbouring
+        ! cell data. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata 
+        type(TopomeshUDT), intent(in)           :: topomesh 
+        type(VesselUDT), intent(in)             :: vessel 
+        type(GGoptionsUDT), intent(in)          :: options
+        
+        ! Auxiliary
+        integer(I8)                             :: nbcellID
+        integer(I8), allocatable, dimension(:)  :: tempc
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Unpack 
+        associate(&
+            celldata    => ggtmdata%cell,   &
+            tube        => topomesh%tube,   &
+            cell        => topomesh%cell,   &
+            face        => topomesh%face    &
+            )
+
+        ! Initialize hf and lf line for each cell
+        do i = 1, cell%ntot 
+            ! Unpack
+            associate(tc    => celldata(i))
+
+            ! Sanity check
+            if (.not. allocated(tc%lines)) then 
+                call gdErrorHandler('AddTopologicalMeshGriddingData: ' // & 
+                    'lines not allocated for cell, this is a bug')
+            end if 
+
+            ! Extract the high/low field line data 
+            call ExtractTMCellAlignedBoundary(tc, 'high', ggtmdata, &
+                topomesh, tc%hfline)
+            call ExtractTMCellAlignedBoundary(tc, 'low', ggtmdata, &
+                topomesh, tc%lfline)
+
+            ! Housekeeping
+            end associate
+        end do 
+        
+
+        ! Boundary layer
+        !===============
+        do i = 1, cell%ntot 
+            ! Unpack
+            associate(thiscell      => celldata(i), &
+                tcrefopt            => celldata(i)%linerefoptions)
+            
+            ! Hf line
+            !--------
+            ! Initialize
+            call thiscell%hfline%refoptions%Initialize()
+
+            ! Check for high field faces
+            if (size(thiscell%hffaces) > 0) then 
+                ! Determine high field start cell ID if present
+                if (.not. face%BF(thiscell%hffaces(1))) then 
+                    ! Need to check refinement options of the neighbouring
+                    ! cells at start and end
+
+                    ! Get neighbour cell at start 
+                    tempc = face%GetCell(thiscell%hffaces(1))
+                    if (count(tempc /= i) /= 1) then 
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'could not find neighbouring cell, this is a bug' )
+                    end if 
+                    if (size(tempc) /= 2) then 
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'Topological mesh face that is ' // & 
+                            'not a boundary faces does not have two cells as ' // & 
+                            'neighbours')
+                    end if 
+                    if (tempc(1) == i) then 
+                        nbcellID = tempc(2)
+                    elseif (tempc(2) == i) then 
+                        nbcellID = tempc(1)
+                    else
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'Topological mesh face has ' // &
+                            'two cells, but none of them are equal to ' // & 
+                            'the current cell. Unexpected')
+                    end if 
+
+                    ! Check refinement options and compare
+                    associate(nbrefopt    => ggtmdata%cell(nbcellID)%linerefoptions)
+                    if (nbrefopt%doBLstart) then 
+                        ! Copy over options
+                        thiscell%hfline%refoptions%doBLstart = nbrefopt%doBLstart
+                        thiscell%hfline%refoptions%dlBLstart = nbrefopt%dlBLstart
+                        thiscell%hfline%refoptions%ncBLstart = nbrefopt%ncBLstart
+                        thiscell%hfline%refoptions%dlBLlengthbased = nbrefopt%dlBLlengthbased
+                    end if 
+                    if (tcrefopt%doBLstart) then 
+                        ! Copy over options - will overwrtie if nbrefopt was also true
+                        ! (may do something more intelligent in the future)
+                        thiscell%hfline%refoptions%doBLstart = tcrefopt%doBLstart
+                        thiscell%hfline%refoptions%dlBLstart = tcrefopt%dlBLstart
+                        thiscell%hfline%refoptions%ncBLstart = tcrefopt%ncBLstart
+                        thiscell%hfline%refoptions%dlBLlengthbased = tcrefopt%dlBLlengthbased
+                    end if 
+
+                    end associate
+                else
+                    ! Simply propagate cell refinement options
+                    thiscell%hfline%refoptions = thiscell%linerefoptions
+                end if 
+
+                ! Determine high field end cell ID if present
+                if (.not. face%BF(thiscell%hffaces(1))) then 
+                    ! Need to check refinement options of the neighbouring
+                    ! cells at start and end
+
+                    ! Get neighbour cell at start 
+                    tempc = face%GetCell(thiscell%hffaces(size(thiscell%hffaces)))
+                    if (count(tempc /= i) /= 1) then 
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'could not find neighbouring cell, this is a bug' )
+                    end if 
+                    if (size(tempc) /= 2) then 
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'Topological mesh face that is ' // & 
+                            'not a boundary faces does not have two cells as ' // & 
+                            'neighbours')
+                    end if 
+                    if (tempc(1) == i) then 
+                        nbcellID = tempc(2)
+                    elseif (tempc(2) == i) then 
+                        nbcellID = tempc(1)
+                    else
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'Topological mesh face has ' // &
+                            'two cells, but none of them are equal to ' // & 
+                            'the current cell. Unexpected')
+                    end if 
+
+                    ! Check refinement options and compare
+                    associate(nbrefopt    => ggtmdata%cell(nbcellID)%linerefoptions)
+                    if (nbrefopt%doBLend) then 
+                        ! Copy over options
+                        thiscell%hfline%refoptions%doBLend = nbrefopt%doBLend
+                        thiscell%hfline%refoptions%dlBLend = nbrefopt%dlBLend
+                        thiscell%hfline%refoptions%ncBLend = nbrefopt%ncBLend
+                        thiscell%hfline%refoptions%dlBLlengthbased = nbrefopt%dlBLlengthbased
+                    end if 
+                    if (tcrefopt%doBLend) then 
+                        ! Copy over options - will overwrtie if nbrefopt was also true
+                        ! (may do something more intelligent in the future)
+                        thiscell%hfline%refoptions%doBLend = tcrefopt%doBLend
+                        thiscell%hfline%refoptions%dlBLend = tcrefopt%dlBLend
+                        thiscell%hfline%refoptions%ncBLend = tcrefopt%ncBLend
+                        thiscell%hfline%refoptions%dlBLlengthbased = tcrefopt%dlBLlengthbased
+                    end if 
+
+                    end associate
+                else
+                    ! Simply propagate cell refinement options
+                    thiscell%hfline%refoptions = thiscell%linerefoptions
+                end if 
+            else
+                ! Simply propagate cell options (in case of tube extension later)
+                thiscell%hfline%refoptions = thiscell%linerefoptions
+                
+            end if 
+
+            ! Lf line
+            !--------
+            ! Initialize
+            call thiscell%lfline%refoptions%Initialize()
+
+            ! Check for low field faces
+            if (size(thiscell%lffaces) > 0) then 
+                ! Determine high field start cell ID if present
+                if (.not. face%BF(thiscell%lffaces(1))) then 
+                    ! Need to check refinement options of the neighbouring
+                    ! cells at start and end
+
+                    ! Get neighbour cell at start 
+                    tempc = face%GetCell(thiscell%lffaces(1))
+                    if (count(tempc /= i) /= 1) then 
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'could not find neighbouring cell, this is a bug' )
+                    end if 
+                    if (size(tempc) /= 2) then 
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'Topological mesh face that is ' // & 
+                            'not a boundary faces does not have two cells as ' // & 
+                            'neighbours')
+                    end if 
+                    if (tempc(1) == i) then 
+                        nbcellID = tempc(2)
+                    elseif (tempc(2) == i) then 
+                        nbcellID = tempc(1)
+                    else
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'Topological mesh face has ' // &
+                            'two cells, but none of them are equal to ' // & 
+                            'the current cell. Unexpected')
+                    end if 
+
+                    ! Check refinement options and compare
+                    associate(nbrefopt    => ggtmdata%cell(nbcellID)%linerefoptions)
+                    if (nbrefopt%doBLstart) then 
+                        ! Copy over options
+                        thiscell%lfline%refoptions%doBLstart = nbrefopt%doBLstart
+                        thiscell%lfline%refoptions%dlBLstart = nbrefopt%dlBLstart
+                        thiscell%lfline%refoptions%ncBLstart = nbrefopt%ncBLstart
+                        thiscell%lfline%refoptions%dlBLlengthbased = nbrefopt%dlBLlengthbased
+                    end if 
+                    if (tcrefopt%doBLstart) then 
+                        ! Copy over options - will overwrtie if nbrefopt was also true
+                        ! (may do something more intelligent in the future)
+                        thiscell%lfline%refoptions%doBLstart = tcrefopt%doBLstart
+                        thiscell%lfline%refoptions%dlBLstart = tcrefopt%dlBLstart
+                        thiscell%lfline%refoptions%ncBLstart = tcrefopt%ncBLstart
+                        thiscell%lfline%refoptions%dlBLlengthbased = tcrefopt%dlBLlengthbased
+                    end if 
+
+                    end associate
+                else
+                    ! Simply propagate cell refinement options
+                    thiscell%lfline%refoptions = thiscell%linerefoptions
+                end if 
+
+                ! Determine high field end cell ID if present
+                if (.not. face%BF(thiscell%lffaces(1))) then 
+                    ! Need to check refinement options of the neighbouring
+                    ! cells at start and end
+
+                    ! Get neighbour cell at start 
+                    tempc = face%GetCell(thiscell%lffaces(size(thiscell%lffaces)))
+                    if (count(tempc /= i) /= 1) then 
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'could not find neighbouring cell, this is a bug' )
+                    end if 
+                    if (size(tempc) /= 2) then 
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'Topological mesh face that is ' // & 
+                            'not a boundary faces does not have two cells as ' // & 
+                            'neighbours')
+                    end if 
+                    if (tempc(1) == i) then 
+                        nbcellID = tempc(2)
+                    elseif (tempc(2) == i) then 
+                        nbcellID = tempc(1)
+                    else
+                        call gdErrorHandler('AddTopologicalMeshTubeContoursLineRefinementData: ' // & 
+                            'Topological mesh face has ' // &
+                            'two cells, but none of them are equal to ' // & 
+                            'the current cell. Unexpected')
+                    end if 
+
+                    ! Check refinement options and compare
+                    associate(nbrefopt    => ggtmdata%cell(nbcellID)%linerefoptions)
+                    if (nbrefopt%doBLend) then 
+                        ! Copy over options
+                        thiscell%lfline%refoptions%doBLend = nbrefopt%doBLend
+                        thiscell%lfline%refoptions%dlBLend = nbrefopt%dlBLend
+                        thiscell%lfline%refoptions%ncBLend = nbrefopt%ncBLend
+                        thiscell%lfline%refoptions%dlBLlengthbased = nbrefopt%dlBLlengthbased
+                    end if 
+                    if (tcrefopt%doBLend) then 
+                        ! Copy over options - will overwrtie if nbrefopt was also true
+                        ! (may do something more intelligent in the future)
+                        thiscell%lfline%refoptions%doBLend = tcrefopt%doBLend
+                        thiscell%lfline%refoptions%dlBLend = tcrefopt%dlBLend
+                        thiscell%lfline%refoptions%ncBLend = tcrefopt%ncBLend
+                        thiscell%lfline%refoptions%dlBLlengthbased = tcrefopt%dlBLlengthbased
+                    end if 
+
+                    end associate
+                else
+                    ! Simply propagate cell refinement options
+                    thiscell%lfline%refoptions = thiscell%linerefoptions
+                end if 
+            else
+                ! Simply propagate cell options (in case of tube extension later)
+                thiscell%lfline%refoptions = thiscell%linerefoptions
+                
+            end if 
+
+            ! Other lines
+            !------------
+            ! Simply apply cell options for now
+            do j = 1, size(thiscell%lines)
+                thiscell%lines(j)%refoptions = thiscell%linerefoptions
+            end do 
+
+            ! Housekeeping
+            end associate
+        end do 
+        
+
+        ! Housekeeping
+        end associate
+
+    end subroutine
+
+    ! Update of refinement data to cell tubes after possible extension
+    subroutine UpdateCellFluxTubeRefinementData(ggtmdata, &
+        topomesh, options)
+
+        ! Description
+        !============
+        ! This routine updates the topological mesh refinement data 
+        ! of the cell flux tubes. Here, we also account for 
+        ! specific user options, e.g. to prevent boundary layer 
+        ! imposition near cut-cell approaches that typically lead to 
+        ! bad cells. Other refinement data may be added in the future. 
+
+        ! Algorithm
+        !==========
+        ! Since boundary layers are desired to be imposed only on vessel
+        ! boundaries, we simply loop over the topological mesh tubes, and
+        ! then their cells, in order to relatively easily check which 
+        ! boundary layers to impose and where. Currently, we only check
+        ! whether boundary layers should not be imposed anymore due to
+        ! presence of cut cell extensions or due to non-vessel 
+        ! boundaries. The current set of rules only prevents boundary 
+        ! layers to be applied but will never reapply a boundary layer 
+        ! again, so the order in which we adjust and check should not 
+        ! influence the final result. If options%evtnoBL is true, then 
+        ! the rules are (distinction between start and end extension
+        ! is always made): 
+        ! - non-boundary field lines: if extended, then no boundary 
+        !   layer applied on this line in any tubes where it appears
+        ! - extended tangency point tubes: no boundary layer on both 
+        !   hfline and lfline if there's a tangency point of type 1 in 
+        !   either hfline or lfline and if the tangency point was 
+        !   extended
+        ! - other boundary field lines: no boundary layer if extension
+        !   is applied OR if the last vertex is a type 2 tangency point
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata
+        type(TopomeshUDT), intent(in)           :: topomesh 
+        type(GGoptionsUDT), intent(in)          :: options
+
+        ! Auxiliary
+        integer(I8)                             :: tc
+        integer(I8), allocatable, dimension(:)  :: tubec, tubef, &
+            hforientation, hfnbtubeID, hfnbcellID, tubecnb, hfvert, lfvert, &
+            lforientation, lfnbtubeID, lfnbcellID, tv1, tv2
+
+        ! Loop
+        integer(I8)                             :: i, j, k, q
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            tube        => topomesh%tube,   &
+            cell        => topomesh%cell,   &
+            face        => topomesh%face,   &
+            celldata    => ggtmdata%cell    &
+            )
+
+        ! Apply general rules
+        !====================
+        ! only BL at true vessel boundaries (no BL near
+        ! type 2 tangency points)
+        do i = 1, tube%ntot
+            ! Get tube cells and faces
+            tubec = tube%GetCell(i)
+            tubef = tube%GetFace(i)
+
+            ! First cell
+            !-----------
+            ! Unpack 
+            associate(tcdata    => celldata(tubec(1)))
+
+            ! Check if start radial face corresponds to tube start face
+            if (tcdata%srf == tubef(1)) then 
+                ! No end BL for this cell if also erf does not equal last flux surface
+                if (tcdata%erf /= tubef(size(tubef))) then 
+                    tcdata%linerefoptions%doBLend = .false. ! should already be the case but OK
+                    do k = 1, size(tcdata%tubes)
+                        tcdata%tubes(k)%hfline%refoptions%doBLend = .false.
+                        tcdata%tubes(k)%lfline%refoptions%doBLend = .false. 
+                    end do 
+                else
+                    ! No end BL if it has a type 2 tangency point at end radial face
+                    if (size(tcdata%hffaces) > 0) then 
+                        tv1 = face%vert(tcdata%erf, :)
+                        tv2 = [face%vert(tcdata%hffaces, 1), face%vert(tcdata%hffaces, 2)]
+                        call SetDiff(tv1, tv2, hfvert)
+                        if (size(hfvert) /= 1) then 
+                            call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                                'not a single vertex found between cell end face ' // & 
+                                'and hfline - this is a bug')
+                        end if 
+                        if (topomesh%vert%type(hfvert(1)) == TMvertextp2ID) then 
+                            tcdata%tubes(1)%hfline%refoptions%doBLend = .false.
+                        end if 
+                    end if 
+                    if (size(tcdata%lffaces) > 0) then 
+                        call SetDiff(face%vert(tcdata%erf, :), [face%vert(tcdata%lffaces, 1), face%vert(tcdata%lffaces, 2)], lfvert)
+                        if (size(lfvert) /= 1) then 
+                            call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                                'not a single vertex found between cell end face ' // & 
+                                'and lfline - this is a bug')
+                        end if 
+                        if (topomesh%vert%type(lfvert(1)) == TMvertextp2ID) then 
+                            tcdata%tubes(size(tcdata%tubes))%lfline%refoptions%doBLstart = .false.
+                        end if 
+                    end if 
+                end if 
+
+                ! No start BL for hf/lf line if it has a type 2 tangency point
+                if (size(tcdata%hffaces) > 0) then 
+                    tv1 = face%vert(tcdata%srf, :)
+                    tv2 = [face%vert(tcdata%hffaces, 1), face%vert(tcdata%hffaces, 2)]
+                    call SetDiff(tv1, tv2, hfvert)
+                    if (size(hfvert) /= 1) then 
+                        call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                            'not a single vertex found between cell start face ' // & 
+                            'and hfline - this is a bug')
+                    end if 
+                    if (topomesh%vert%type(hfvert(1)) == TMvertextp2ID) then 
+                        tcdata%tubes(1)%hfline%refoptions%doBLstart = .false.
+                    end if 
+                end if 
+                if (size(tcdata%lffaces) > 0) then 
+                    call SetDiff(face%vert(tcdata%srf, :), [face%vert(tcdata%lffaces, 1), face%vert(tcdata%lffaces, 2)], lfvert)
+                    if (size(lfvert) /= 1) then 
+                        call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                            'not a single vertex found between cell start face ' // & 
+                            'and lfline - this is a bug')
+                    end if 
+                    if (topomesh%vert%type(lfvert(1)) == TMvertextp2ID) then 
+                        tcdata%tubes(size(tcdata%tubes))%lfline%refoptions%doBLstart = .false.
+                    end if 
+                end if 
+            elseif (tcdata%erf == tubef(1)) then 
+                ! No start BL for this cell if also srf does not equal last flux surface
+                if (tcdata%srf /= tubef(size(tubef))) then 
+                    tcdata%linerefoptions%doBLstart = .false. ! should already be the case but OK
+                    do k = 1, size(tcdata%tubes)
+                        tcdata%tubes(k)%hfline%refoptions%doBLstart = .false.
+                        tcdata%tubes(k)%lfline%refoptions%doBLstart = .false. 
+                    end do 
+                else
+                    ! No start BL for hf/lf line if it has a type 2 tangency point
+                    if (size(tcdata%hffaces) > 0) then 
+                        call SetDiff(face%vert(tcdata%srf, :), [face%vert(tcdata%hffaces, 1), face%vert(tcdata%hffaces, 2)], hfvert)
+                        if (size(hfvert) /= 1) then 
+                            call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                                'not a single vertex found between cell start face ' // & 
+                                'and hfline - this is a bug')
+                        end if 
+                        if (topomesh%vert%type(hfvert(1)) == TMvertextp2ID) then 
+                            tcdata%tubes(1)%hfline%refoptions%doBLstart = .false.
+                        end if 
+                    end if 
+                    if (size(tcdata%lffaces) > 0) then 
+                        call SetDiff(face%vert(tcdata%srf, :), [face%vert(tcdata%lffaces, 1), face%vert(tcdata%lffaces, 2)], lfvert)
+                        if (size(lfvert) /= 1) then 
+                            call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                                'not a single vertex found between cell start face ' // & 
+                                'and lfline - this is a bug')
+                        end if 
+                        if (topomesh%vert%type(lfvert(1)) == TMvertextp2ID) then 
+                            tcdata%tubes(size(tcdata%tubes))%lfline%refoptions%doBLstart = .false.
+                        end if 
+                    end if 
+                end if 
+
+                ! No end BL for hf/lf line if it has a type 2 tangency point
+                if (size(tcdata%hffaces) > 0) then 
+                    call SetDiff(face%vert(tcdata%erf, :), [face%vert(tcdata%hffaces, 1), face%vert(tcdata%hffaces, 2)], hfvert)
+                    if (size(hfvert) /= 1) then 
+                        call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                            'not a single vertex found between cell end face ' // & 
+                            'and hfline - this is a bug')
+                    end if 
+                    if (topomesh%vert%type(hfvert(1)) == TMvertextp2ID) then 
+                        tcdata%tubes(1)%hfline%refoptions%doBLend = .false.
+                    end if 
+                end if 
+                if (size(tcdata%lffaces) > 0) then 
+                    call SetDiff(face%vert(tcdata%erf, :), [face%vert(tcdata%lffaces, 1), face%vert(tcdata%lffaces, 2)], lfvert)
+                    if (size(lfvert) /= 1) then 
+                        call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                            'not a single vertex found between cell end face ' // & 
+                            'and lfline - this is a bug')
+                    end if 
+                    if (topomesh%vert%type(lfvert(1)) == TMvertextp2ID) then 
+                        tcdata%tubes(size(tcdata%tubes))%lfline%refoptions%doBLend = .false.
+                    end if 
+                end if 
+            else
+                ! This should't happen
+                print *, 'cell: ', tubec(1), 'tube: ', i
+                call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                    'starting cell of flux tube does not have starting face ' // & 
+                    'of flux tube as start or end radial face, unexpected')
+            end if 
+
+            ! Housekeeping
+            end associate
+
+            ! Last cell
+            !----------
+            ! Unpack 
+            associate(tcdata    => celldata(tubec(size(tubec))))
+
+            ! Check if end radial face corresponds to tube end face
+            if (tcdata%erf == tubef(size(tubef))) then 
+                ! No start BL for this cell
+                if (tcdata%srf /= tubef(1)) then 
+                    tcdata%linerefoptions%doBLstart = .false. ! should already be the case but OK
+                    do k = 1, size(tcdata%tubes)
+                        tcdata%tubes(k)%hfline%refoptions%doBLstart = .false.
+                        tcdata%tubes(k)%lfline%refoptions%doBLstart = .false. 
+                    end do 
+                else
+                    ! No start BL for hf/lf line if it has a type 2 tangency point
+                    if (size(tcdata%hffaces) > 0) then 
+                        call SetDiff(face%vert(tcdata%srf, :), [face%vert(tcdata%hffaces, 1), face%vert(tcdata%hffaces, 2)], hfvert)
+                        if (size(hfvert) /= 1) then 
+                            call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                                'not a single vertex found between cell start face ' // & 
+                                'and hfline - this is a bug')
+                        end if 
+                        if (topomesh%vert%type(hfvert(1)) == TMvertextp2ID) then 
+                            tcdata%tubes(1)%hfline%refoptions%doBLstart = .false.
+                        end if 
+                    end if 
+                    if (size(tcdata%lffaces) > 0) then 
+                        call SetDiff(face%vert(tcdata%srf, :), [face%vert(tcdata%lffaces, 1), face%vert(tcdata%lffaces, 2)], lfvert)
+                        if (size(lfvert) /= 1) then 
+                            call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                                'not a single vertex found between cell start face ' // & 
+                                'and lfline - this is a bug')
+                        end if 
+                        if (topomesh%vert%type(lfvert(1)) == TMvertextp2ID) then 
+                            tcdata%tubes(size(tcdata%tubes))%lfline%refoptions%doBLstart = .false.
+                        end if 
+                    end if 
+                end if
+
+
+                ! No end BL for hf/lf line if it has a type 2 tangency point
+                if (size(tcdata%hffaces) > 0) then 
+                    call SetDiff(face%vert(tcdata%erf, :), [face%vert(tcdata%hffaces, 1), face%vert(tcdata%hffaces, 2)], hfvert)
+                    if (size(hfvert) /= 1) then 
+                        call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                            'not a single vertex found between cell end face ' // & 
+                            'and hfline - this is a bug')
+                    end if 
+                    if (topomesh%vert%type(hfvert(1)) == TMvertextp2ID) then 
+                        tcdata%tubes(1)%hfline%refoptions%doBLend = .false.
+                    end if 
+                end if 
+                if (size(tcdata%lffaces) > 0) then 
+                    call SetDiff(face%vert(tcdata%erf, :), [face%vert(tcdata%lffaces, 1), face%vert(tcdata%lffaces, 2)], lfvert)
+                    if (size(lfvert) /= 1) then 
+                        call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                            'not a single vertex found between cell start face ' // & 
+                            'and lfline - this is a bug')
+                    end if 
+                    if (topomesh%vert%type(lfvert(1)) == TMvertextp2ID) then 
+                        tcdata%tubes(size(tcdata%tubes))%lfline%refoptions%doBLend = .false.
+                    end if 
+                end if 
+            elseif (tcdata%srf == tubef(size(tubef))) then 
+                ! No end BL for this cell
+                if (tcdata%erf /= tubef(1)) then 
+                    tcdata%linerefoptions%doBLend = .false. ! should already be the case but OK
+                    do k = 1, size(tcdata%tubes)
+                        tcdata%tubes(k)%hfline%refoptions%doBLend = .false.
+                        tcdata%tubes(k)%lfline%refoptions%doBLend = .false. 
+                    end do 
+                else
+                    ! No end BL for hf/lf line if it has a type 2 tangency point
+                    if (size(tcdata%hffaces) > 0) then 
+                        call SetDiff(face%vert(tcdata%erf, :), [face%vert(tcdata%hffaces, 1), face%vert(tcdata%hffaces, 2)], hfvert)
+                        if (size(hfvert) /= 1) then 
+                            call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                                'not a single vertex found between cell end face ' // & 
+                                'and hfline - this is a bug')
+                        end if 
+                        if (topomesh%vert%type(hfvert(1)) == TMvertextp2ID) then 
+                            tcdata%tubes(1)%hfline%refoptions%doBLend = .false.
+                        end if 
+                    end if 
+                    if (size(tcdata%lffaces) > 0) then 
+                        call SetDiff(face%vert(tcdata%erf, :), [face%vert(tcdata%lffaces, 1), face%vert(tcdata%lffaces, 2)], lfvert)
+                        if (size(lfvert) /= 1) then 
+                            call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                                'not a single vertex found between cell end face ' // & 
+                                'and lfline - this is a bug')
+                        end if 
+                        if (topomesh%vert%type(lfvert(1)) == TMvertextp2ID) then 
+                            tcdata%tubes(size(tcdata%tubes))%lfline%refoptions%doBLend = .false.
+                        end if 
+                    end if 
+                end if 
+
+                ! No start BL for hf/lf line if it has a type 2 tangency point
+                if (size(tcdata%hffaces) > 0) then 
+                    call SetDiff(face%vert(tcdata%srf, :), [face%vert(tcdata%hffaces, 1), face%vert(tcdata%hffaces, 2)], hfvert)
+                    if (size(hfvert) /= 1) then 
+                        call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                            'not a single vertex found between cell start face ' // & 
+                            'and hfline - this is a bug')
+                    end if 
+                    if (topomesh%vert%type(hfvert(1)) == TMvertextp2ID) then 
+                        tcdata%tubes(1)%hfline%refoptions%doBLstart = .false.
+                    end if 
+                end if 
+                if (size(tcdata%lffaces) > 0) then 
+                    call SetDiff(face%vert(tcdata%srf, :), [face%vert(tcdata%lffaces, 1), face%vert(tcdata%lffaces, 2)], lfvert)
+                    if (size(lfvert) /= 1) then 
+                        call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                            'not a single vertex found between cell start face ' // & 
+                            'and lfline - this is a bug')
+                    end if 
+                    if (topomesh%vert%type(lfvert(1)) == TMvertextp2ID) then 
+                        tcdata%tubes(size(tcdata%tubes))%lfline%refoptions%doBLstart = .false.
+                    end if 
+                end if 
+            else
+                ! This should't happen
+                print *, 'cell: ', tubec(size(tubec)), 'tube: ', i
+                call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                call gdErrorHandler('UpdateCellFluxTubeRefinementData: ' // & 
+                    'starting cell of flux tube does not have starting face ' // & 
+                    'of flux tube as start or end radial face, unexpected')
+            end if 
+
+            ! Housekeeping
+            end associate
+
+            ! Other cells
+            !------------
+            ! Simply no boundary layer
+            do j = 2, size(tubec)-1
+                associate(tcdata    => celldata(tubec(j)))
+                do k = 1, size(tcdata%tubes)
+                    tcdata%tubes(k)%hfline%refoptions%doBLstart = .false. 
+                    tcdata%tubes(k)%lfline%refoptions%doBLend = .false. 
+                end do 
+                end associate
+            end do 
+        end do 
+
+        ! Apply extended tube rules
+        !==========================
+        ! Extended tube rule: no BL near extended lines
+        ! Note: since the general rule already prevents BLs for inner
+        ! cells, we only need to check the start and end cell of each 
+        ! tube
+        if (options%evtnoBL) then 
+            do i = 1, tube%ntot 
+                ! Get tube cells and faces
+                tubec = tube%GetCell(i)
+                tubef = tube%GetFace(i)
+
+                ! First cell
+                !-----------
+                ! Unpack
+                associate(&
+                    ctubes  => celldata(tubec(1))%tubes,   &
+                    tcdata  => celldata(tubec(1))   &
+                    )
+
+                ! Get all neighbouring cells and tubes of this tube
+                call GetGGTMFieldlinePairNeighbour(ggtmdata, topomesh, &
+                    1, tubec(1), hfnbtubeID, hfnbcellID, 'hf', hforientation)
+                call GetGGTMFieldlinePairNeighbour(ggtmdata, topomesh, &
+                    size(ctubes), tubec(1), lfnbtubeID, lfnbcellID, 'lf', lforientation)
+
+                ! Check hf faces
+                k = 1 ! Set tube index for hf
+                if (size(tcdata%hffaces) == 0) then 
+                    ! Tangency point - check for extensions
+                    if (ctubes(k)%hfline%IsExtended(ggtmdata, topomesh, 'start')) then 
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLstart = .false. 
+                        ctubes(k)%lfline%refoptions%doBLstart = .false.
+                        
+                        ! Neighbouring tube on lf side
+                        if (size(ctubes) > k) then 
+                            ctubes(k+1)%hfline%refoptions%doBLstart = .false. 
+                        end if 
+                    end if 
+                    if (ctubes(k)%hfline%IsExtended(ggtmdata, topomesh, 'end')) then 
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLend = .false. 
+                        ctubes(k)%lfline%refoptions%doBLend = .false.
+                        
+                        ! Neighbouring tube on lf side
+                        if (size(ctubes) > k) then 
+                            ctubes(k+1)%hfline%refoptions%doBLend = .false. 
+                        end if 
+                    end if 
+                elseif (size(hfnbtubeID) > 0) then 
+                    
+                    ! Check if the hfline is extended at start
+                    q = 1 ! set neighbour cell index
+                    associate(nbtubes    => celldata(hfnbcellID(q))%tubes)
+                    if (ctubes(k)%hfline%IsExtended(ggtmdata, topomesh, 'start')) then
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLstart = .false. 
+
+                        ! Now, we need to check the neighbour orientation
+                        if (hforientation(q) == 1) then 
+                            ! Case: lines are in same orientation -> no start BL 
+                            nbtubes(hfnbtubeID(q))%lfline%refoptions%doBLstart = .false. 
+                        elseif (hforientation(q) == -1) then 
+                            ! Case: lines are in opposite orientation -> no end BL 
+                            nbtubes(hfnbtubeID(q))%lfline%refoptions%doBLend = .false. 
+                        end if 
+                    end if 
+                    end associate
+
+                    ! Check if the hfline is extended at end
+                    q = size(hfnbtubeID) ! set neighbour cell index
+                    associate(nbtubes    => celldata(hfnbcellID(q))%tubes)
+                    if (ctubes(k)%hfline%IsExtended(ggtmdata, topomesh, 'end')) then
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLend = .false. 
+
+                        ! Now, we need to check the neighbour orientation
+                        if (hforientation(q) == 1) then 
+                            ! Case: lines are in same orientation -> no end BL 
+                            nbtubes(hfnbtubeID(q))%lfline%refoptions%doBLend = .false. 
+                        elseif (hforientation(q) == -1) then 
+                            ! Case: lines are in opposite orientation -> no start BL 
+                            nbtubes(hfnbtubeID(q))%lfline%refoptions%doBLstart = .false. 
+                        end if 
+                    end if 
+                    end associate
+                end if 
+
+                ! Check lf faces
+                k = size(ctubes) ! Set tube index for lf
+                if (size(tcdata%lffaces) == 0) then 
+                    ! Tangency point - check for extensions
+                    if (ctubes(k)%lfline%IsExtended(ggtmdata, topomesh, 'start')) then 
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLstart = .false. 
+                        ctubes(k)%lfline%refoptions%doBLstart = .false.
+                        
+                        ! Neighbouring tube on hf side
+                        if (size(ctubes) > 1) then 
+                            ctubes(k-1)%lfline%refoptions%doBLstart = .false. 
+                        end if 
+                    end if 
+                    if (ctubes(k)%lfline%IsExtended(ggtmdata, topomesh, 'end')) then 
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLend = .false. 
+                        ctubes(k)%lfline%refoptions%doBLend = .false.
+                        
+                        ! Neighbouring tube on hf side
+                        if (size(ctubes) > 1) then 
+                            ctubes(k-1)%lfline%refoptions%doBLend = .false. 
+                        end if 
+                    end if 
+                elseif (size(lfnbtubeID) > 0) then 
+                    
+                    ! Check if the lfline is extended at start
+                    q = 1 ! set neighbour cell index
+                    associate(nbtubes    => celldata(lfnbcellID(q))%tubes)
+                    if (ctubes(k)%lfline%IsExtended(ggtmdata, topomesh, 'start')) then
+                        ! Current tube
+                        ctubes(k)%lfline%refoptions%doBLstart = .false. 
+
+                        ! Now, we need to check the neighbour orientation
+                        if (hforientation(q) == 1) then 
+                            ! Case: lines are in same orientation -> no start BL 
+                            nbtubes(hfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
+                        elseif (hforientation(q) == -1) then 
+                            ! Case: lines are in opposite orientation -> no end BL 
+                            nbtubes(hfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
+                        end if 
+                    end if 
+                    end associate
+
+                    ! Check if the lfline is extended at end
+                    q = size(lfnbtubeID) ! set neighbour cell index
+                    associate(nbtubes    => celldata(lfnbcellID(q))%tubes)
+                    if (ctubes(k)%lfline%IsExtended(ggtmdata, topomesh, 'end')) then
+                        ! Current tube
+                        ctubes(k)%lfline%refoptions%doBLend = .false. 
+
+                        ! Now, we need to check the neighbour orientation
+                        if (hforientation(q) == 1) then 
+                            ! Case: lines are in same orientation -> no end BL 
+                            nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
+                        elseif (hforientation(q) == -1) then 
+                            ! Case: lines are in opposite orientation -> no start BL 
+                            nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
+                        end if 
+                    end if 
+                    end associate
+                end if 
+                    
+                end associate
+
+                ! Last cell
+                !----------
+                ! Unpack
+                associate(&
+                    ctubes  => celldata(tubec(size(tubec)))%tubes,   &
+                    tcdata  => celldata(tubec(size(tubec)))   &
+                    )
+
+                ! Get all neighbouring cells and tubes of this tube
+                call GetGGTMFieldlinePairNeighbour(ggtmdata, topomesh, &
+                    1, tubec(size(tubec)), hfnbtubeID, hfnbcellID, 'hf', hforientation)
+                call GetGGTMFieldlinePairNeighbour(ggtmdata, topomesh, &
+                    size(ctubes), tubec(size(tubec)), lfnbtubeID, lfnbcellID, 'lf', lforientation)
+
+                ! Check hf faces
+                k = 1 ! Set tube index for hf
+                if (size(tcdata%hffaces) == 0) then ! Actually already happened since first and last cell should be the same
+                    ! Tangency point - check for extensions
+                    if (ctubes(k)%hfline%IsExtended(ggtmdata, topomesh, 'start')) then 
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLstart = .false. 
+                        ctubes(k)%lfline%refoptions%doBLstart = .false.
+                        
+                        ! Neighbouring tube on lf side
+                        if (size(ctubes) > k) then 
+                            ctubes(k+1)%hfline%refoptions%doBLstart = .false. 
+                        end if 
+                    end if 
+                    if (ctubes(k)%hfline%IsExtended(ggtmdata, topomesh, 'end')) then 
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLend = .false. 
+                        ctubes(k)%lfline%refoptions%doBLend = .false.
+                        
+                        ! Neighbouring tube on lf side
+                        if (size(ctubes) > k) then 
+                            ctubes(k+1)%hfline%refoptions%doBLend = .false. 
+                        end if 
+                    end if 
+                elseif (size(hfnbtubeID) > 0) then 
+                    
+                    ! Check if the hfline is extended at start
+                    q = 1 ! set neighbour cell index
+                    associate(nbtubes    => celldata(hfnbcellID(q))%tubes)
+                    if (ctubes(k)%hfline%IsExtended(ggtmdata, topomesh, 'start')) then
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLstart = .false. 
+
+                        ! Now, we need to check the neighbour orientation
+                        if (hforientation(q) == 1) then 
+                            ! Case: lines are in same orientation -> no start BL 
+                            nbtubes(hfnbtubeID(q))%lfline%refoptions%doBLstart = .false. 
+                        elseif (hforientation(q) == -1) then 
+                            ! Case: lines are in opposite orientation -> no end BL 
+                            nbtubes(hfnbtubeID(q))%lfline%refoptions%doBLend = .false. 
+                        end if 
+                    end if 
+                    end associate
+
+                    ! Check if the hfline is extended at end
+                    q = size(hfnbtubeID) ! set neighbour cell index
+                    associate(nbtubes    => celldata(hfnbcellID(q))%tubes)
+                    if (ctubes(k)%hfline%IsExtended(ggtmdata, topomesh, 'end')) then
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLend = .false. 
+
+                        ! Now, we need to check the neighbour orientation
+                        if (hforientation(q) == 1) then 
+                            ! Case: lines are in same orientation -> no end BL 
+                            nbtubes(hfnbtubeID(q))%lfline%refoptions%doBLend = .false. 
+                        elseif (hforientation(q) == -1) then 
+                            ! Case: lines are in opposite orientation -> no start BL 
+                            nbtubes(hfnbtubeID(q))%lfline%refoptions%doBLstart = .false. 
+                        end if 
+                    end if 
+                    end associate
+                end if 
+
+                ! Check lf faces
+                k = size(ctubes) ! Set tube index for lf
+                if (size(tcdata%lffaces) == 0) then 
+                    ! Tangency point - check for extensions
+                    if (ctubes(k)%lfline%IsExtended(ggtmdata, topomesh, 'start')) then 
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLstart = .false. 
+                        ctubes(k)%lfline%refoptions%doBLstart = .false.
+                        
+                        ! Neighbouring tube on hf side
+                        if (size(ctubes) > 1) then 
+                            ctubes(k-1)%lfline%refoptions%doBLstart = .false. 
+                        end if 
+                    end if 
+                    if (ctubes(k)%lfline%IsExtended(ggtmdata, topomesh, 'end')) then 
+                        ! Current tube
+                        ctubes(k)%hfline%refoptions%doBLend = .false. 
+                        ctubes(k)%lfline%refoptions%doBLend = .false.
+                        
+                        ! Neighbouring tube on hf side
+                        if (size(ctubes) > 1) then 
+                            ctubes(k-1)%lfline%refoptions%doBLend = .false. 
+                        end if 
+                    end if 
+                elseif (size(lfnbtubeID) > 0) then 
+                    
+                    ! Check if the lfline is extended at start
+                    q = 1 ! set neighbour cell index
+                    associate(nbtubes    => celldata(lfnbcellID(q))%tubes)
+                    if (ctubes(k)%lfline%IsExtended(ggtmdata, topomesh, 'start')) then
+                        ! Current tube
+                        ctubes(k)%lfline%refoptions%doBLstart = .false. 
+
+                        ! Now, we need to check the neighbour orientation
+                        if (hforientation(q) == 1) then 
+                            ! Case: lines are in same orientation -> no start BL 
+                            nbtubes(hfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
+                        elseif (hforientation(q) == -1) then 
+                            ! Case: lines are in opposite orientation -> no end BL 
+                            nbtubes(hfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
+                        end if 
+                    end if 
+                    end associate
+
+                    ! Check if the lfline is extended at end
+                    q = size(lfnbtubeID) ! set neighbour cell index
+                    associate(nbtubes    => celldata(lfnbcellID(q))%tubes)
+                    if (ctubes(k)%lfline%IsExtended(ggtmdata, topomesh, 'end')) then
+                        ! Current tube
+                        ctubes(k)%lfline%refoptions%doBLend = .false. 
+
+                        ! Now, we need to check the neighbour orientation
+                        if (hforientation(q) == 1) then 
+                            ! Case: lines are in same orientation -> no end BL 
+                            nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
+                        elseif (hforientation(q) == -1) then 
+                            ! Case: lines are in opposite orientation -> no start BL 
+                            nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
+                        end if 
+                    end if 
+                    end associate
+                end if 
+                    
+                end associate
+            end do 
+        end if 
+
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+
+    end subroutine
+
 
     !------------------------------------------------------------------!
     !                       GRID DATA ROUTINES                         !
@@ -8219,6 +9103,86 @@ module ggmod_gridgeneration2D
 
     end function
 
+    ! GGTM segment intersections
+    subroutine GGTMSegmentIntersections(l1, l2, xint, yint, s1, s2, s1r, s2r, &
+        vertbased)
+
+        ! Description
+        !============
+        ! More or less a wrapper for intersections between GGTM segments.
+        ! However, intersections at end points are ignored if the vertex
+        ! IDs are the same there. Intersections are computed based on xl
+        ! and yl, not on the vertex coordinates (reason why we can check
+        ! vertices, is because by definition the first and last vertex
+        ! have to lie on the first and last point of the line). 
+
+        ! Note: this routine is particularly useful when checking
+        ! intersections between field lines to determine to remove a tube
+        ! or field line. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMSegmentUDT), intent(in)      :: l1, l2 
+        real(R8), allocatable, dimension(:), intent(out)    :: xint, yint
+        integer(I8), allocatable, dimension(:), intent(out) :: s1, s2 
+        real(R8), allocatable, dimension(:), intent(out), optional  :: s1r, s2r 
+        logical, intent(in), optional                       :: vertbased
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)         :: s1raux, s2raux
+        logical, allocatable, dimension(:)          :: keepx
+
+        ! Compute 
+        !========
+        ! Intersections
+        if (present(vertbased)) then 
+            if (vertbased) then
+                call SimplePolygonIntersections(l1%xv, l1%yv, l2%xv, l2%yv, &
+                    xint, yint, s1, s2, s1raux, s2raux) 
+            else
+                call SimplePolygonIntersections(l1%xl, l1%yl, l2%xl, l2%yl, &
+                    xint, yint, s1, s2, s1raux, s2raux)
+            end if
+        else
+            call SimplePolygonIntersections(l1%xl, l1%yl, l2%xl, l2%yl, &
+                xint, yint, s1, s2, s1raux, s2raux)
+        end if
+        
+
+        ! Process
+        if (size(xint) > 0) then
+            ! First, hedge for intersections exactly 
+            ! in end point ->  simply cut cell tube
+            allocate(keepx(size(xint)))
+            keepx = .true. 
+            if (any(l1%vert(1) == [l2%vert(1), l2%vert(l2%nv)])) then 
+                where (xint == l1%xl(1) .and. &
+                    yint == l1%yl(1)) keepx = .false. 
+            end if 
+            if (any(l1%vert(l1%nv) == [l2%vert(1), l2%vert(l2%nv)])) then 
+                where (xint == l1%xl(l1%nl) .and. &
+                    yint == l1%yl(l1%nl)) keepx = .false. 
+            end if 
+
+            ! Remove intersections
+            xint = pack(xint, keepx)
+            yint = pack(yint, keepx)
+            s1 = pack(s1, keepx)
+            s2 = pack(s2, keepx)
+            s1raux = pack(s1raux, keepx)
+            s2raux = pack(s2raux, keepx)
+        end if 
+
+        ! Check optional arguments
+        if (present(s1r) .and. present(s2r)) then 
+            s1r = s1raux 
+            s2r = s2raux 
+        end if 
+
+    end subroutine
+
+
     !------------------------------------------------------------------!
     !                      GGTM LINE HANDLING                          !
     !------------------------------------------------------------------!
@@ -8232,6 +9196,9 @@ module ggmod_gridgeneration2D
         ! segments that the field line consists of (these should be 
         ! given in the correct order in segID and should map to the
         ! correct segments in ggtmdata).
+        
+        ! Note: any previously specified refinement options will 
+        ! not be overwritten by this routine
 
         ! Declare variables
         !==================
@@ -9448,6 +10415,202 @@ module ggmod_gridgeneration2D
 
     end function
 
+    ! GGTM field line extension checker
+    function IsGGTMFieldLineExtended(line, ggtmdata, topomesh, loc) &
+        result(isextended)
+
+        ! Description
+        !============
+        ! This function checks if the GGTM field line has been extended
+        ! at the start or end (specified by 'loc') by checking if the 
+        ! first or last segment has a zero flux surface ID and if the
+        ! first or last vertex (resp.) isn't a type 1 tangency point 
+        ! (in that case, the start was not extended but the end, and 
+        ! vice versa, respectively)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMFieldLineDataUDT)             :: line
+        type(GGTMDataUDT), intent(in)           :: ggtmdata 
+        type(TopomeshUDT), intent(in)           :: topomesh
+        character(*), intent(in)                :: loc 
+        logical                                 :: isextended 
+
+        ! Initialize
+        !===========
+        ! Initialize
+        isextended = .false. 
+
+        ! Associate
+        associate(seg       => ggtmdata%seg)
+
+        ! Checks
+        if (seg(line%segID(1))%isvertex) then 
+            isextended = .false. 
+            return 
+        end if 
+
+        ! Determine if extended at location loc
+        select case (loc)
+
+        case ('start')
+
+            if (seg(line%segID(1))%fsID == 0) then 
+                if (line%vert(1) <= topomesh%vert%ntot) then 
+                    if (topomesh%vert%type(line%vert(1)) /= TMvertextp1ID) then 
+                        isextended = .true.
+                    end if 
+                else
+                    ! Vertex is not a topomesh vertex
+                    isextended = .true.
+                end if
+            end if 
+
+        case ('end')
+
+            if (seg(line%segID(size(line%segID)))%fsID == 0) then 
+                if (line%vert(line%nv) <= topomesh%vert%ntot) then 
+                    if (topomesh%vert%type(line%vert(line%nv)) /= TMvertextp1ID) then 
+                        isextended = .true.
+                    end if 
+                else
+                    ! Vertex is not a topomesh vertex
+                    isextended = .true.
+                end if
+            end if 
+
+        case default
+
+            call gdErrorHandler('IsGGTMFieldLineExtended: unknown location')
+
+        end select
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end function
+
+    ! GGTM line intersections
+    subroutine GGTMLineIntersections(ggtmdata, l1, l2, xint, yint, s1, s2, s1r, s2r, &
+        vertbased)
+
+        ! Description
+        !============
+        ! More or less a wrapper for intersections between GGTM lines.
+        ! However, intersections at segment end points are ignored if the vertex
+        ! IDs are the same there. Intersections are computed based on xl
+        ! and yl, not on the vertex coordinates (reason why we can check
+        ! vertices, is because by definition the first and last vertex
+        ! have to lie on the first and last point of the line). 
+
+        ! Note: this routine is particularly useful when checking
+        ! intersections between field lines to determine to remove a tube
+        ! or field line. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMDataUDT), intent(in)               :: ggtmdata
+        type(GGTMFieldLineDataUDT), intent(in)      :: l1, l2 
+        real(R8), allocatable, dimension(:), intent(out)    :: xint, yint
+        integer(I8), allocatable, dimension(:), intent(out) :: s1, s2 
+        real(R8), allocatable, dimension(:), intent(out), optional  :: s1r, s2r 
+        logical, intent(in), optional                       :: vertbased
+
+        ! Auxiliary
+        real(R8)                                    :: Li, Lj
+        integer(I8)                                 :: ni, nj
+        real(R8), allocatable, dimension(:)         :: s1raux, s2raux, &
+            tempx, tempy, temps1r, temps2r
+        integer(I8), allocatable, dimension(:)      :: temps1, temps2
+
+        ! Loop
+        integer(I8)                                 :: i, j 
+
+        ! Initialize
+        !=========
+        allocate(s1(0), s2(0), xint(0), yint(0), s1raux(0), &
+            s2raux(0))
+
+        ! Hedge for vertex segments - no intersections possible
+        if (ggtmdata%seg(l1%segID(1))%isvertex .or. ggtmdata%seg(l2%segID(1))%isvertex) then 
+            ! Check optional arguments
+            if (present(s1r) .and. present(s2r)) then 
+                s1r = s1raux 
+                s2r = s2raux 
+            end if 
+
+            ! Return
+            return 
+        end if 
+
+        ! Compute 
+        !========
+        ! Intersections
+        Li = 0 ! Keep track of accumulated segment 'length'
+        ni = 0
+        do i = 1, l1%ns 
+            ! Keep track of accumulated 'length' 
+            Lj = 0
+            nj = 0
+
+            ! Unpack
+            associate(seg1      => ggtmdata%seg(l1%segID(i)))
+            do j = 1, l2%ns
+                ! Unpack
+                associate(seg2      => ggtmdata%seg(l2%segID(j)))
+                
+                ! Compute intersections
+                call GGTMSegmentIntersections(seg1, seg2, tempx, tempy, &
+                    temps1, temps2, temps1r, temps2r, vertbased)
+
+                ! Append
+                if (size(tempx) > 0) then 
+                    xint = [xint, tempx]
+                    yint = [yint, tempy]
+                    if (l1%flipseg(i)) then 
+                        s1 = [s1, seg1%nv - temps1 - 1 + ni]
+                        s1raux = [s1raux, seg1%nv - 1 - temps1r + Li]
+                    else
+                        s1 = [s1, temps1 + ni]
+                        s1raux = [s1raux, temps1r + Li]
+                    end if 
+                    if (l2%flipseg(j)) then 
+                        s2 = [s2, seg2%nv - temps2 - 1 + nj]
+                        s2raux = [s2raux, seg2%nv - 1 - temps2r + Lj]
+                    else
+                        s2 = [s2, temps2 + nj]
+                        s2raux = [s2raux, temps2r + Lj]
+                    end if 
+                end if
+
+                ! Housekeeping
+                Lj = Lj + seg2%nv-1
+                nj = nj + seg2%nv-1
+                end associate
+            end do 
+
+            ! Update length
+            Li = Li + seg1%nv-1
+            ni = ni + seg1%nv-1
+            end associate
+        end do 
+        
+        ! Check optional arguments
+        if (present(s1r) .and. present(s2r)) then 
+            s1r = s1raux 
+            s2r = s2raux 
+        end if 
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                GGTM LINE PAIR (TUBE) HANDLING                    !
+    !------------------------------------------------------------------!
+
     ! GGTM line pair initialization
     subroutine InitializeGGTMFieldlinePairData(linepair)
 
@@ -9782,202 +10945,315 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
-    ! GGTM segment intersections
-    subroutine GGTMSegmentIntersections(l1, l2, xint, yint, s1, s2, s1r, s2r, &
-        vertbased)
+    ! Tube neighbour getter
+    subroutine GetGGTMFieldlinePairNeighbour(ggtmdata, topomesh, &
+            tubeID, cellID, nbtubeID, nbcellID, loc, orientation)
 
-        ! Description
-        !============
-        ! More or less a wrapper for intersections between GGTM segments.
-        ! However, intersections at end points are ignored if the vertex
-        ! IDs are the same there. Intersections are computed based on xl
-        ! and yl, not on the vertex coordinates (reason why we can check
-        ! vertices, is because by definition the first and last vertex
-        ! have to lie on the first and last point of the line). 
+            ! Description
+            !============
+            ! This routine determines the GGTM tube neighbour(s) for a 
+            ! given tube and cell ID. Specifically, the neighbouring 
+            ! tube and corresponding cell indices are returned. 
+            ! Also the orientation of the tube is returned, 
+            ! which indicates if the tube is oriented along the given
+            ! tube (orientation = 1) or in the opposite direction (-1).
+            ! The location (either hf or lf) should be specified in 'loc'
+            ! to check on which side the neighbours should be given. 
+            ! The neighbours are returned in the order of the hf or lf
+            ! faces of the original cell.
 
-        ! Note: this routine is particularly useful when checking
-        ! intersections between field lines to determine to remove a tube
-        ! or field line. 
+            ! Note 1: this only returns the neighbours along the non-
+            ! aligned coordinate axis (i.e. the 'poloidal' neighbours)
+            ! currently, but extensions to 'loc' may be made to return
+            ! other neighbours as well. 
 
-        ! Declare variables
-        !==================
-        ! Arguments
-        type(GGTMSegmentUDT), intent(in)      :: l1, l2 
-        real(R8), allocatable, dimension(:), intent(out)    :: xint, yint
-        integer(I8), allocatable, dimension(:), intent(out) :: s1, s2 
-        real(R8), allocatable, dimension(:), intent(out), optional  :: s1r, s2r 
-        logical, intent(in), optional                       :: vertbased
+            ! Note 2: if the tube and it's neighbour(s) lie within the 
+            ! same cell, the case is trivial. However, this routine was
+            ! primarily written to get neighbours of tubes at cell 
+            ! boundaries. In these cases, we first need to compute all 
+            ! cell neighbours (in the order of the tube's faces) and 
+            ! then determine the corresponding tubes and their orientation
 
-        ! Auxiliary
-        real(R8), allocatable, dimension(:)         :: s1raux, s2raux
-        logical, allocatable, dimension(:)          :: keepx
+            ! Note 3: for the non-trivial cases, the orientation is 
+            ! checked based on node vertices. This is only possible (or
+            ! relevant) if the neighbouring face is not a tangency 
+            ! point, which should never happen in normal circumstances, 
+            ! as we loop over faces. This also means that tubes that 
+            ! only have a point in common cannot be neighbouring tubes. 
 
-        ! Compute 
-        !========
-        ! Intersections
-        if (present(vertbased)) then 
-            if (vertbased) then
-                call SimplePolygonIntersections(l1%xv, l1%yv, l2%xv, l2%yv, &
-                    xint, yint, s1, s2, s1raux, s2raux) 
-            else
-                call SimplePolygonIntersections(l1%xl, l1%yl, l2%xl, l2%yl, &
-                    xint, yint, s1, s2, s1raux, s2raux)
-            end if
-        else
-            call SimplePolygonIntersections(l1%xl, l1%yl, l2%xl, l2%yl, &
-                xint, yint, s1, s2, s1raux, s2raux)
-        end if
-        
+            ! Modules
+            !========
+            use mod_search
 
-        ! Process
-        if (size(xint) > 0) then
-            ! First, hedge for intersections exactly 
-            ! in end point ->  simply cut cell tube
-            allocate(keepx(size(xint)))
-            keepx = .true. 
-            if (any(l1%vert(1) == [l2%vert(1), l2%vert(l2%nv)])) then 
-                where (xint == l1%xl(1) .and. &
-                    yint == l1%yl(1)) keepx = .false. 
-            end if 
-            if (any(l1%vert(l1%nv) == [l2%vert(1), l2%vert(l2%nv)])) then 
-                where (xint == l1%xl(l1%nl) .and. &
-                    yint == l1%yl(l1%nl)) keepx = .false. 
-            end if 
+            ! Declare variables
+            !==================
+            ! Arguments
+            type(GGTMDataUDT), intent(in)           :: ggtmdata
+            type(TopomeshUDT), intent(in)           :: topomesh
+            integer(I8), intent(in)                 :: tubeID, cellID
+            integer(I8), dimension(:), allocatable, intent(out) :: &
+                nbtubeID, nbcellID, orientation
+            character(*), intent(in)                :: loc                
 
-            ! Remove intersections
-            xint = pack(xint, keepx)
-            yint = pack(yint, keepx)
-            s1 = pack(s1, keepx)
-            s2 = pack(s2, keepx)
-            s1raux = pack(s1raux, keepx)
-            s2raux = pack(s2raux, keepx)
-        end if 
+            ! Auxiliary
+            integer(I8)                             :: fwind, bwind
+            integer(I8), allocatable, dimension(:)  :: tempc, tv1, tv2, &
+                tempt, tempc2, tempo
+            logical, allocatable, dimension(:)      :: keepind
 
-        ! Check optional arguments
-        if (present(s1r) .and. present(s2r)) then 
-            s1r = s1raux 
-            s2r = s2raux 
-        end if 
+            ! Loop
+            integer(I8)                             :: i 
 
-    end subroutine
-
-    ! GGTM line intersections
-    subroutine GGTMLineIntersections(ggtmdata, l1, l2, xint, yint, s1, s2, s1r, s2r, &
-        vertbased)
-
-        ! Description
-        !============
-        ! More or less a wrapper for intersections between GGTM lines.
-        ! However, intersections at segment end points are ignored if the vertex
-        ! IDs are the same there. Intersections are computed based on xl
-        ! and yl, not on the vertex coordinates (reason why we can check
-        ! vertices, is because by definition the first and last vertex
-        ! have to lie on the first and last point of the line). 
-
-        ! Note: this routine is particularly useful when checking
-        ! intersections between field lines to determine to remove a tube
-        ! or field line. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        type(GGTMDataUDT), intent(in)               :: ggtmdata
-        type(GGTMFieldLineDataUDT), intent(in)      :: l1, l2 
-        real(R8), allocatable, dimension(:), intent(out)    :: xint, yint
-        integer(I8), allocatable, dimension(:), intent(out) :: s1, s2 
-        real(R8), allocatable, dimension(:), intent(out), optional  :: s1r, s2r 
-        logical, intent(in), optional                       :: vertbased
-
-        ! Auxiliary
-        real(R8)                                    :: Li, Lj
-        integer(I8)                                 :: ni, nj
-        real(R8), allocatable, dimension(:)         :: s1raux, s2raux, &
-            tempx, tempy, temps1r, temps2r
-        integer(I8), allocatable, dimension(:)      :: temps1, temps2
-
-        ! Loop
-        integer(I8)                                 :: i, j 
-
-        ! Initialize
-        !=========
-        allocate(s1(0), s2(0), xint(0), yint(0), s1raux(0), &
-            s2raux(0))
-
-        ! Hedge for vertex segments - no intersections possible
-        if (ggtmdata%seg(l1%segID(1))%isvertex .or. ggtmdata%seg(l2%segID(1))%isvertex) then 
-            ! Check optional arguments
-            if (present(s1r) .and. present(s2r)) then 
-                s1r = s1raux 
-                s2r = s2raux 
-            end if 
-
-            ! Return
-            return 
-        end if 
-
-        ! Compute 
-        !========
-        ! Intersections
-        Li = 0 ! Keep track of accumulated segment 'length'
-        ni = 0
-        do i = 1, l1%ns 
-            ! Keep track of accumulated 'length' 
-            Lj = 0
-            nj = 0
-
+            ! Initialize
+            !===========
             ! Unpack
-            associate(seg1      => ggtmdata%seg(l1%segID(i)))
-            do j = 1, l2%ns
-                ! Unpack
-                associate(seg2      => ggtmdata%seg(l2%segID(j)))
-                
-                ! Compute intersections
-                call GGTMSegmentIntersections(seg1, seg2, tempx, tempy, &
-                    temps1, temps2, temps1r, temps2r, vertbased)
+            associate(&
+                celldata        => ggtmdata%cell,   &
+                thiscelldata    => ggtmdata%cell(cellID),   &
+                nt              => size(ggtmdata%cell(cellID)%tubes),   &
+                cell            => topomesh%cell,   &
+                face            => topomesh%face    &
+                )
 
-                ! Append
-                if (size(tempx) > 0) then 
-                    xint = [xint, tempx]
-                    yint = [yint, tempy]
-                    if (l1%flipseg(i)) then 
-                        s1 = [s1, seg1%nv - temps1 - 1 + ni]
-                        s1raux = [s1raux, seg1%nv - 1 - temps1r + Li]
-                    else
-                        s1 = [s1, temps1 + ni]
-                        s1raux = [s1raux, temps1r + Li]
+            ! Initialize
+            if (allocated(nbtubeID)) deallocate(nbtubeID)
+            if (allocated(nbcellID)) deallocate(nbcellID)
+            if (allocated(orientation)) deallocate(orientation)
+
+            ! Determine neighbours
+            !=====================
+            ! Check which neighbours to find
+            select case (loc)
+
+            case ('hf')
+
+                ! Internal tube?
+                if (tubeID > 1) then 
+                    ! Only one possible neighbour and cell
+                    nbtubeID = [tubeID-1]
+                    nbcellID = [cellID]
+                    orientation = [1] ! tubes should always be oriented in the same way in a cell
+                else
+                    ! Need to check all hffaces of the current cell and
+                    ! determine cell neighbours.
+                    
+                    ! Are there any faces?
+                    if (size(thiscelldata%hffaces) == 0) then 
+                        ! Trivial case: no neighbour
+                        allocate(nbtubeID(0), nbcellID(0), orientation(0))
+                        return 
                     end if 
-                    if (l2%flipseg(j)) then 
-                        s2 = [s2, seg2%nv - temps2 - 1 + nj]
-                        s2raux = [s2raux, seg2%nv - 1 - temps2r + Lj]
-                    else
-                        s2 = [s2, temps2 + nj]
-                        s2raux = [s2raux, temps2r + Lj]
+
+                    ! Are there any non-boundary faces?
+                    if (all(face%BF(thiscelldata%hffaces))) then 
+                        ! Trivial case: no neighbour
+                        allocate(nbtubeID(0), nbcellID(0), orientation(0))
+                        return 
                     end if 
-                end if
 
-                ! Housekeeping
-                Lj = Lj + seg2%nv-1
-                nj = nj + seg2%nv-1
-                end associate
-            end do 
+                    ! Loop over all hffaces
+                    allocate(nbcellID(size(thiscelldata%hffaces)), &
+                        keepind(size(thiscelldata%hffaces)))
+                    nbcellID = 0
+                    nbtubeID = nbcellID
+                    orientation = nbcellID
+                    keepind = .true. 
+                   
+                    ! Get vertices of hfline for later
+                    tv1 = thiscelldata%hfline%vert(&
+                        thiscelldata%hfline%GetAllSegmentVertIndices())
+                    if (thiscelldata%hfline%IsExtended(ggtmdata, topomesh, 'start')) then 
+                        tv1 = tv1(2:)
+                    end if 
+                    if (thiscelldata%hfline%IsExtended(ggtmdata, topomesh, 'end')) then
+                        tv1 = tv1(1:size(tv1)-1)
+                    end if  
+                    do i = 1, size(thiscelldata%hffaces)
+                        ! Get cells
+                        tempc = face%GetCell(thiscelldata%hffaces(i))
 
-            ! Update length
-            Li = Li + seg1%nv-1
-            ni = ni + seg1%nv-1
+                        ! Hedge for boundary faces
+                        if (face%BF(thiscelldata%hffaces(i))) then 
+                            keepind(i) = .false. 
+                            cycle
+                        end if 
+
+                        ! Sanity check for non-boundary faces
+                        if ((size(tempc) /= 2) .or. (.not. any(tempc == cellID))) then 
+                            call gdErrorHandler('GetGGTMFieldlinePairNeighbour: ' // & 
+                                'something wrong with topomesh interconnections')
+                        end if 
+
+                        ! Determine neighbouring cell
+                        if (tempc(1) == cellID) then 
+                            nbcellID(i) = tempc(2)
+                        else
+                            nbcellID(i) = tempc(1)
+                        end if 
+
+                        ! Neighbouring tube has to be last one, since 
+                        ! we are at the lf side of the neighbouring cell
+                        nbtubeID(i) = size(celldata(nbcellID(i))%tubes)
+
+                        ! Get vertices of hf line of this cell and lf 
+                        ! line of neighbouring cell - sequence should 
+                        ! determine if order should be reversed or not
+                        tv2 = celldata(nbcellID(i))%lfline%vert(&
+                            celldata(nbcellID(i))%lfline%GetAllSegmentVertIndices())
+                        fwind = Findloc1D(tv2, tv1(i:i+1))
+                        bwind = Findloc1D(tv2(size(tv2):1:-1), tv1(i:i+1))
+                        if ((fwind /= 0) .and. (bwind /= 0)) then 
+                            ! Something strange going on
+                            call gdErrorHandler('GetGGTMFieldlinePairNeighbour: ' // &
+                                'vertex sequence appears both in forward ' // & 
+                                'and backward mode - unexpected, this is a bug')
+                        elseif ((fwind == 0) .and. (bwind == 0)) then 
+                            ! This shouldn't happen
+                            call gdErrorHandler('GetGGTMFieldlinePairNeighbour: ' // &
+                            'vertex sequence does not appear in the ' // & 
+                            'neighbour, unexpected')
+                        elseif (fwind /= 0) then 
+                            orientation(i) = 1 
+                        else
+                            orientation(i) = -1 
+                        end if 
+                    end do 
+
+                    ! Extract only those to be kept
+                    tempt = nbtubeID
+                    tempc2 = nbcellID
+                    tempo = orientation
+                    deallocate(nbtubeID, nbcellID, orientation)
+                    allocate(nbtubeID(count(keepind)), nbcellID(count(keepind)), &
+                        orientation(count(keepind)))
+                    nbtubeID = pack(tempt, keepind)
+                    nbcellID = pack(tempc2, keepind)
+                    orientation = pack(tempo, keepind)
+
+                end if 
+
+            case ('lf')
+
+                ! Internal tube?
+                if (tubeID < nt) then 
+                    ! Only one possible neighbour and cell
+                    nbtubeID = [tubeID+1]
+                    nbcellID = [cellID]
+                    orientation = [1] ! tubes should always be oriented in the same way in a cell
+                else
+                    ! Need to check all lffaces of the current cell and
+                    ! determine cell neighbours.
+                    
+                    ! Are there any faces?
+                    if (size(thiscelldata%lffaces) == 0) then 
+                        ! Trivial case: no neighbour
+                        allocate(nbtubeID(0), nbcellID(0), orientation(0))
+                        return 
+                    end if 
+
+                    ! Are there any non-boundary faces?
+                    if (all(face%BF(thiscelldata%lffaces))) then 
+                        ! Trivial case: no neighbour
+                        allocate(nbtubeID(0), nbcellID(0), orientation(0))
+                        return 
+                    end if 
+
+                    ! Loop over all lffaces
+                    allocate(nbcellID(size(thiscelldata%lffaces)), &
+                        keepind(size(thiscelldata%lffaces)))
+                    nbcellID = 0
+                    nbtubeID = nbcellID
+                    orientation = nbcellID
+                    keepind = .true. 
+
+                    ! Get vertices of lfline for later
+                    tv1 = thiscelldata%lfline%vert(&
+                        thiscelldata%lfline%GetAllSegmentVertIndices())
+                    if (thiscelldata%lfline%IsExtended(ggtmdata, topomesh, 'start')) then 
+                        tv1 = tv1(2:)
+                    end if 
+                    if (thiscelldata%lfline%IsExtended(ggtmdata, topomesh, 'end')) then
+                        tv1 = tv1(1:size(tv1)-1)
+                    end if  
+                    do i = 1, size(thiscelldata%lffaces)
+                        ! Get cells
+                        tempc = face%GetCell(thiscelldata%lffaces(i))
+
+                        ! Hedge for boundary faces
+                        if (face%BF(thiscelldata%lffaces(i))) then 
+                            keepind(i) = .false. 
+                            cycle
+                        end if 
+
+                        ! Sanity check
+                        if ((size(tempc) /= 2) .or. (.not. any(tempc == cellID))) then 
+                            call gdErrorHandler('GetGGTMFieldlinePairNeighbour: ' // & 
+                                'something wrong with topomesh interconnections')
+                        end if 
+
+                        ! Determine neighbouring cell
+                        if (tempc(1) == cellID) then 
+                            nbcellID(i) = tempc(2)
+                        else
+                            nbcellID(i) = tempc(1)
+                        end if 
+
+                        ! Neighbouring tube has to be first one, since 
+                        ! we are at the hf side of the neighbouring cell
+                        nbtubeID(i) = 1
+
+                        ! Get vertices of lf line of this cell and hf 
+                        ! line of neighbouring cell - sequence should 
+                        ! determine if order should be reversed or not
+                        tv2 = celldata(nbcellID(i))%hfline%vert(&
+                            celldata(nbcellID(i))%hfline%GetAllSegmentVertIndices())
+                        fwind = Findloc1D(tv2, tv1(i:i+1))
+                        bwind = Findloc1D(tv2(size(tv2):1:-1), tv1(i:i+1))
+                        if ((fwind /= 0) .and. (bwind /= 0)) then 
+                            ! Something strange going on
+                            call gdErrorHandler('GetGGTMFieldlinePairNeighbour: ' // &
+                                'vertex sequence appears both in forward ' // & 
+                                'and backward mode - unexpected, this is a bug')
+                        elseif ((fwind == 0) .and. (bwind == 0)) then 
+                            ! This shouldn't happen
+                            call gdErrorHandler('GetGGTMFieldlinePairNeighbour: ' // &
+                            'vertex sequence does not appear in the ' // & 
+                            'neighbour, unexpected')
+                        elseif (fwind /= 0) then 
+                            orientation(i) = 1 
+                        else
+                            orientation(i) = -1 
+                        end if 
+                    end do 
+
+                    ! Extract only those to be kept
+                    tempt = nbtubeID
+                    tempc2 = nbcellID
+                    tempo = orientation
+                    deallocate(nbtubeID, nbcellID, orientation)
+                    allocate(nbtubeID(count(keepind)), nbcellID(count(keepind)), &
+                        orientation(count(keepind)))
+                    nbtubeID = pack(tempt, keepind)
+                    nbcellID = pack(tempc2, keepind)
+                    orientation = pack(tempo, keepind)
+                end if 
+
+            case default
+
+                call gdErrorHandler('GetGGTMFieldlinePairNeighbour: ' // & 
+                    'unknown neighbour loc option: ' // loc)
+
+            end select
+
+            ! Housekeeping
+            !=============
             end associate
-        end do 
-        
-        ! Check optional arguments
-        if (present(s1r) .and. present(s2r)) then 
-            s1r = s1raux 
-            s2r = s2raux 
-        end if 
 
     end subroutine
 
     ! GGTM tube extension
     subroutine ExtendTubeWithSegment(cellID, tube, segID, ggtmdata, start, &
-        vertID, magneticField)
+        vertID, magneticField, ishfextended, islfextended)
 
         ! Description
         !============
@@ -10030,6 +11306,8 @@ module ggmod_gridgeneration2D
         type(GGTMDataUDT), intent(inout)                :: ggtmdata 
         logical, intent(in)                             :: start 
         type(MagneticFieldUDT), intent(in)              :: magneticField
+        logical, optional, intent(out)                  :: ishfextended, &
+            islfextended
 
         ! Auxiliary
         integer(I8)                             :: newsegID, ind, indhf, &
@@ -10160,6 +11438,12 @@ module ggmod_gridgeneration2D
 
         ! Extend
         !=======
+        if (present(ishfextended)) then 
+            ishfextended = .false.
+        end if 
+        if (present(islfextended)) then 
+            islfextended = .false.
+        end if 
         if (start) then 
             if (segdp(1) >= 0 .and. segdp(size(segdp)) >= 0) then ! Extend the hfline
 
@@ -10186,6 +11470,11 @@ module ggmod_gridgeneration2D
                     
                     ! Append this segment
                     call hfline%AppendSegment(newsegID, ggtmdata, .false.)
+                end if 
+
+                ! Output
+                if (present(ishfextended)) then 
+                    ishfextended = .true.
                 end if 
             
             elseif (segdp(size(segdp)) <= 0 .and. segdp(1) <= 0) then ! Extend the lfline
@@ -10216,6 +11505,11 @@ module ggmod_gridgeneration2D
                     
                     ! Append this segment
                     call lfline%AppendSegment(newsegID, ggtmdata, .false.)
+                end if 
+
+                ! Output
+                if (present(islfextended)) then 
+                    islfextended = .true.
                 end if 
             
             elseif (segdp(1) <= 0 .and. segdp(size(segdp)) >= 0) then ! Recompute
@@ -10259,8 +11553,14 @@ module ggmod_gridgeneration2D
                 ! Extend
                 if (segdp(1) >= 0) then 
                     call hfline%AppendSegment(segID, ggtmdata, .false.)
+                    if (present(ishfextended)) then 
+                        ishfextended = .true.
+                    end if 
                 else
                     call lfline%AppendSegment(segID, ggtmdata, .false.)
+                    if (present(islfextended)) then 
+                        islfextended = .true.
+                    end if 
                 end if
 
             else ! Need to split the line at different points
@@ -10326,6 +11626,11 @@ module ggmod_gridgeneration2D
                     
                     ! Append this segment
                     call hfline%AppendSegment(newsegID, ggtmdata, .false.)
+
+                    ! Output
+                    if (present(ishfextended)) then 
+                        ishfextended = .true.
+                    end if 
                 end if 
 
                 if (indlf /= 0) then 
@@ -10336,6 +11641,11 @@ module ggmod_gridgeneration2D
                     
                     ! Append this segment
                     call lfline%AppendSegment(newsegID, ggtmdata, .false.)
+
+                    ! Output
+                    if (present(islfextended)) then 
+                        islfextended = .true.
+                    end if 
                 end if 
             end if   
         else
@@ -10365,6 +11675,11 @@ module ggmod_gridgeneration2D
                     ! Append this segment
                     call hfline%AppendSegment(newsegID, ggtmdata, .true.)
                 end if 
+
+                ! Output
+                if (present(ishfextended)) then 
+                    ishfextended = .true.
+                end if 
             
             elseif (segdp(size(segdp)) <= 0 .and. segdp(1) <= 0) then ! Extend the lfline
 
@@ -10391,6 +11706,11 @@ module ggmod_gridgeneration2D
                     
                     ! Append this segment
                     call lfline%AppendSegment(newsegID, ggtmdata, .true.)
+                end if 
+
+                ! Output
+                if (present(islfextended)) then 
+                    islfextended = .true.
                 end if 
             
             elseif (segdp(1) <= 0 .and. segdp(size(segdp)) >= 0) then ! Recompute
@@ -10431,8 +11751,18 @@ module ggmod_gridgeneration2D
                 ! Extend
                 if (segdp(1) >= 0) then 
                     call hfline%AppendSegment(segID, ggtmdata, .true.)
+
+                    ! Output
+                    if (present(ishfextended)) then 
+                        ishfextended = .true.
+                    end if 
                 else
                     call lfline%AppendSegment(segID, ggtmdata, .true.)
+
+                    ! Output
+                    if (present(islfextended)) then 
+                        islfextended = .true.
+                    end if 
                 end if
 
             else ! Need to split the line at different points
@@ -10495,6 +11825,11 @@ module ggmod_gridgeneration2D
                     
                     ! Append this segment
                     call hfline%AppendSegment(newsegID, ggtmdata, .true.)
+
+                    ! Output
+                    if (present(ishfextended)) then 
+                        ishfextended = .true.
+                    end if 
                 end if 
 
                 if (indlf /= 0) then 
@@ -10505,6 +11840,11 @@ module ggmod_gridgeneration2D
                     
                     ! Append this segment
                     call lfline%AppendSegment(newsegID, ggtmdata, .true.)
+
+                    ! Output
+                    if (present(islfextended)) then 
+                        islfextended = .true.
+                    end if 
                 end if 
 
             end if   
@@ -10778,12 +12118,11 @@ module ggmod_gridgeneration2D
     end subroutine 
 
     ! Refiner option updating, dummy
-    subroutine UpdateRefinementOptionsNoRef(refiner, refoptions, topomesh)
+    subroutine UpdateRefinementOptionsNoRef(refiner, refoptions)
 
         ! Nothing to do here, move along
         class(GGTMLineRefinerNoRefUDT)                      :: refiner 
         type(GGTMFieldlineRefinementOptionsUDT), intent(in) :: refoptions 
-        type(TopomeshUDT), intent(in)                       :: topomesh
 
     end subroutine
 
@@ -10921,7 +12260,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Refiner option updating, length-based
-    subroutine UpdateRefinementOptionsLB(refiner, refoptions, topomesh)
+    subroutine UpdateRefinementOptionsLB(refiner, refoptions)
 
         ! Description
         !============
@@ -10936,7 +12275,6 @@ module ggmod_gridgeneration2D
         ! Arguments
         class(GGTMLineRefinerLB2DUDT)                       :: refiner 
         type(GGTMFieldlineRefinementOptionsUDT), intent(in) :: refoptions 
-        type(TopomeshUDT), intent(in)                       :: topomesh
 
         ! Update boundary layer
         !======================
@@ -11088,6 +12426,9 @@ module ggmod_gridgeneration2D
 
         ! Initialize
         !===========
+        ! Initialize the refiner
+        call refiner%InitializeLineData(line)
+
         ! Associate
         associate(&
             seg             => ggtmdata%seg,        &
@@ -11102,9 +12443,6 @@ module ggmod_gridgeneration2D
         if (seg(line%segID(1))%isvertex) then 
             return 
         end if 
-
-        ! Initialize the refiner
-        call refiner%InitializeLineData(line)
 
         ! Check if distance is (euler) length based or not (if not, 
         ! assumed given in current units).
@@ -11652,6 +12990,9 @@ module ggmod_gridgeneration2D
 
         ! Loop 
         integer(I8)                             :: i 
+
+        ! Update refinement options
+        call refiner%UpdateRefinementOptions(line%refoptions)
 
         ! Compute
         !========
