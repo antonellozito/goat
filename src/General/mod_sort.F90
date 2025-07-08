@@ -726,6 +726,9 @@ module mod_sort
             i = i + 1
         end do 
 
+        ! Keep only elements from a
+        keepind = keepind .and. ina
+
         ! Set output
         allocate(out(count(keepind)))
         out = pack(c, keepind)
