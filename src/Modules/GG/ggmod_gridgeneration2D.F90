@@ -175,7 +175,9 @@ module ggmod_gridgeneration2D
         ! sv and ev are the start and end vertices of the grid of the 
         ! line (these should never be removed!) and go from start to 
         ! end of the segment. Segments should be stored in the general
-        ! GGTMData structure
+        ! GGTMData structure. A segment should never contain any 
+        ! topological mesh nodes, except potentially at start and end
+        ! of the segment (these can also be regular grid nodes). 
 
         ! Note: a segment can also represent a single vertex (in this 
         ! case 'isvertex' will be true), for which xl, yl still have 
@@ -185,12 +187,17 @@ module ggmod_gridgeneration2D
         ! Note: segments can be closed, but they have very limited 
         ! support. Errors will be thrown.
 
+        ! Note: segments have refinement data now, and though this is 
+        ! typed as '... *line* ...optionsUDT', this also applies to 
+        ! segments. 
+
         real(R8), allocatable, dimension(:)         :: xv, yv, xl, yl, &
             dll, dllc, dlcv
         integer(I8), allocatable, dimension(:)      :: vert
         integer(I8)                                 :: nv, nl, sv, ev, &
             fsID, TMfaceID
         logical                                     :: isvertex, isclosed
+        type(GGTMFieldlineRefinementOptionsUDT)     :: refoptions
 
     contains 
 
@@ -198,6 +205,8 @@ module ggmod_gridgeneration2D
         procedure :: Initialize     => InitializeGGTMSegment
 
         ! Vertex coordinates addition
+        procedure :: AddVertexCoordinates   => AddVertexCoordinatesGGTMSegment
+        procedure :: AddVertexIDs   => AddVertexIDsGGTMSegment
         procedure :: AddVertices    => AddVerticesGGTMSegment
 
         ! Cleaning (removal of small edges)
@@ -385,7 +394,6 @@ module ggmod_gridgeneration2D
 
     end type 
 
-
     ! Topological mesh grid generator data
     type :: GGTMDataUDT
 
@@ -406,6 +414,9 @@ module ggmod_gridgeneration2D
 
         ! Initializer
         procedure :: Initialize         => InitializeGGTMData
+
+        ! Clean up
+        procedure :: Clean              => CleanGGTMData
 
     end type 
 
@@ -522,7 +533,7 @@ module ggmod_gridgeneration2D
         ! type is deferred to a dedicated function. Options for line 
         ! refinement that are specific to a certain refiner can be 
         ! set by calling the 'UpdateRefinementOptions' routine (which is
-        ! deferred) that takes as input a GGTMCellData structure and the
+        ! deferred) that takes as input a refinement options structure and the
         ! topological mesh (see also abstract interface of the 
         ! routine). This should be enough information to update the 
         ! desired refinement (otherwise to be extended in the future). 
@@ -532,8 +543,11 @@ module ggmod_gridgeneration2D
     contains 
 
         ! Refine line (single line based)
-        procedure(RefineGGTMLineSingleINT), deferred :: RefineLineSingle
-        generic :: Refine   => RefineLineSingle
+        procedure(RefineGGTMLineSingleINT), deferred    :: RefineLineSingle
+        procedure(RefineGGTMLineSegmentsINT), deferred  :: RefineLineSegments
+        procedure(RefineGGTMSegmentINT), deferred       :: RefineSegment
+        generic :: Refine   => RefineLineSingle, RefineSegment, &
+            RefineLineSegments
 
         ! Apply vertex distribution of a line to another 
         procedure(ProjectLineVertexDistributionINT), deferred   :: &
@@ -555,8 +569,14 @@ module ggmod_gridgeneration2D
 
     contains 
 
+        ! Refine segment
+        procedure :: RefineSegment      => RefineSegmentNoRef
+
         ! Refine line
         procedure :: RefineLineSingle   => RefineLineSingleNoRef
+
+        ! Refine line, segment based 
+        procedure :: RefineLineSegments             => RefineLineSegmentsNoRef
 
         ! Update refinement options
         procedure :: UpdateRefinementOptions    => UpdateRefinementOptionsNoRef
@@ -609,8 +629,14 @@ module ggmod_gridgeneration2D
 
     contains 
 
+        ! Refine segment
+        procedure :: RefineSegment                  => RefineSegmentLB
+        
         ! Refine line
         procedure :: RefineLineSingle               => RefineLineSingleLB
+
+        ! Refine line, segment based 
+        procedure :: RefineLineSegments             => RefineLineSegmentsLB
 
         ! Update refinement options
         procedure :: UpdateRefinementOptions        => UpdateRefinementOptionsLB
@@ -621,8 +647,11 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         procedure :: GetLineEdgeLength              => GetLineEdgeLengthLB
-        procedure :: AddLineVertexCoordinates       => AddLineVertexCoordinatesLB   
+        procedure :: GetSegmentEdgeLength           => GetSegmentEdgeLengthLB
+        procedure :: AddLineVertexCoordinates       => AddLineVertexCoordinatesLB
+        procedure :: AddSegmentVertexCoordinates    => AddSegmentVertexCoordinatesLB   
         procedure :: InitializeLineData             => InitializeLineDataLB
+        procedure :: InitializeSegmentData          => InitializeSegmentDataLB
 
     end type
 
@@ -636,6 +665,20 @@ module ggmod_gridgeneration2D
     !=========
     abstract interface 
 
+        ! Refine GGTM segment
+        subroutine RefineGGTMSegmentINT(refiner, ggtmdata, segID, vertID, &
+            keepvert)
+
+            import :: I8, GGTMLineRefiner2DUDT, &
+                GGTMDataUDT
+            class(GGTMLineRefiner2DUDT)                 :: refiner 
+            type(GGTMDataUDT), intent(inout)            :: ggtmdata
+            integer(I8), intent(in)                     :: segID
+            integer(I8), intent(inout)                  :: vertID 
+            logical, intent(in)                         :: keepvert(:) 
+
+        end subroutine
+
         ! Refine GGTM line
         subroutine RefineGGTMLineSingleINT(refiner, ggtmdata, line, vertID, &
             keepvert)
@@ -643,10 +686,22 @@ module ggmod_gridgeneration2D
             import :: GGTMFieldlineDataUDT, I8, GGTMLineRefiner2DUDT, &
                 GGTMDataUDT
             class(GGTMLineRefiner2DUDT)                 :: refiner 
-            type(GGTMDataUDT), intent(in)            :: ggtmdata
+            type(GGTMDataUDT), intent(in)               :: ggtmdata
             type(GGTMFieldlineDataUDT), intent(inout)   :: line
             integer(I8), intent(inout)                  :: vertID 
             logical, intent(in)                         :: keepvert(:) 
+
+        end subroutine
+
+        ! Refine GGTM line segments 
+        subroutine RefineGGTMLineSegmentsINT(refiner, ggtmdata, line, vertID)
+
+            import :: GGTMFieldlineDataUDT, I8, GGTMLineRefiner2DUDT, &
+                GGTMDataUDT
+            class(GGTMLineRefiner2DUDT)                 :: refiner 
+            type(GGTMDataUDT), intent(inout)            :: ggtmdata
+            type(GGTMFieldlineDataUDT), intent(inout)   :: line
+            integer(I8), intent(inout)                  :: vertID 
 
         end subroutine
 
@@ -989,6 +1044,13 @@ module ggmod_gridgeneration2D
         ! Generate elemental flux tubes for gridding
         call ConstructTopologicalMeshCellFluxTubes(grid, ggtmdata, topomesh, &
             fieldtracer, magneticField, options)
+
+        ! Clean the GGTM data structure from unused segments
+        call ggtmdata%Clean()
+
+        ! Add refinement options to segments
+        call AddGGTMSegmentRefinementData(ggtmdata, topomesh, &
+            vessel, grid, options)
         
         ! Distribute vertices 
         select case (options%TMcellgriddingorder)
@@ -1724,32 +1786,11 @@ module ggmod_gridgeneration2D
                 lfline      => tubes(i)%lfline      &
                 )
 
-            ! Check if we need to update the original hfline
-            if (i == 1) then 
-                
-                ! Refine/coarsen non-aligned parts
-                keepvert = hfline%isnodevert
-                call GGTMLinerefiner%Refine(ggtmdata, hfline, vertID, keepvert)
+            ! Update the line data
+            call hfline%UpdateLineData(ggtmdata)
 
-                ! Update segments, but only those that are not aligned 
-                ! (i.e. no fsID)
-                updateseg = hfline%fsID == 0
-                call hfline%UpdateSegmentData(ggtmdata, updateseg)
-                call hfline%UpdateLineData(ggtmdata)
-
-            else
-
-                ! Update line data
-                call hfline%UpdateLineData(ggtmdata)
-
-                ! Refine/coarsen 
-                keepvert = hfline%isnodevert
-                call GGTMLinerefiner%Refine(ggtmdata, hfline, vertID, keepvert)
-
-                ! Update segments
-                call hfline%UpdateSegmentData(ggtmdata)
-
-            end if 
+            ! Refine the hfline segments (line is updated in refiner)
+            call GGTMLinerefiner%RefineLineSegments(ggtmdata, hfline, vertID)
             
             ! Skip if the lfline is a vertex
             if (seg(lfline%segID(1))%isvertex) then 
@@ -1968,47 +2009,12 @@ module ggmod_gridgeneration2D
             ! Add points
             call lfline%AddVertexCoordinates(newdlcv, ecbased=.false.)
             call lfline%AddVertexIDs(newID, newisnodevert)
-        
-            ! Refine/coarsen
-            keepvert = lfline%isnodevert
-            call GGTMLinerefiner%Refine(ggtmdata, lfline, vertID, keepvert)
 
             ! Update segments
             call lfline%UpdateSegmentData(ggtmdata)
-
-            ! Check if its the final line
-            if (i == size(tubes)) then 
-                ! Update the aligned parts of the lf line
-                do j = 1, size(celldata(tc)%lffaces)
-                    ! Unpack
-                    tf = celldata(tc)%lffaces(j)
-
-                    ! Update the face data to propagate previous distribution
-                    call facedata(tf)%line%UpdateLineData(ggtmdata) 
-
-                    !! Refine
-                    !keepvert = IsTopomeshVert(facedata(tf)%line%vert, topomesh)
-                    !call GGTMlinerefiner%Refine(ggtmdata, facedata(tf)%line, vertID, keepvert)
-
-                    ! Update segment data
-                    !call facedata(tf)%line%UpdateSegmentData(ggtmdata) 
-                    
-                end do 
-
-                ! Update line data
-                !call lfline%UpdateLineData(ggtmdata)
-
-                ! Refine/coarsen non-aligned parts
-                !keepvert = lfline%isnodevert
-                !call GGTMLinerefiner%Refine(ggtmdata, lfline, vertID, keepvert)
-
-                ! Update segments, but only those that are not aligned 
-                ! (i.e. no fsID)
-                !updateseg = lfline%fsID == 0
-                !call lfline%UpdateSegmentData(ggtmdata, updateseg)
-                !call lfline%UpdateLineData(ggtmdata)
-
-            end if 
+        
+            ! Refine/coarsen
+            call GGTMLinerefiner%RefineLineSegments(ggtmdata, lfline, vertID)
 
             ! Housekeeping
             deallocate(newtx, newty, newID, news2r, sortind, newdlcv)
@@ -3096,7 +3102,8 @@ module ggmod_gridgeneration2D
             dolasttriangle, isv2onl1
         logical, allocatable, dimension(:)      :: skipvert
         type(GGTMFieldlineDataUDT)              :: thisline
-        type(GGTMFieldlineRefinementOptionsUDT) :: thislinerefoptions
+        type(GGTMFieldlineRefinementOptionsUDT) :: thislinerefoptions, &
+            hfrefoptions, lfrefoptions
 
         ! Loop
         integer(I8)                             :: i, j, k, k1, k2
@@ -3172,7 +3179,7 @@ module ggmod_gridgeneration2D
         !$omp islegaltria1, islegaltria2, islegalquad, isv2onl1, doquad, &
         !$omp dx1, dx2, dx3, dy1, dy2, dy3, bxf, byf, alpha1, alpha2, &
         !$omp alpha3, indmin, v4, tff, tempcellregion, tempfaceregion, &
-        !$omp thislinerefoptions) &
+        !$omp thislinerefoptions, hfrefoptions, lfrefoptions) &
         !$omp shared(ggtmdata, grid, magneticField, tracingdir, ii, jj, nk)
         !$omp do schedule(dynamic)
         
@@ -3180,7 +3187,18 @@ module ggmod_gridgeneration2D
             ! Unpack iterates
             i = ii(k)
             j = jj(k)
-            thislinerefoptions = celldata(i)%linerefoptions
+
+            ! Check if boundary layers should be applied based on hf and 
+            ! lf refoptions 
+            hfrefoptions = celldata(i)%tubes(j)%hfline%refoptions
+            lfrefoptions = celldata(i)%tubes(j)%lfline%refoptions
+            thislinerefoptions = hfrefoptions
+            if (.not. (hfrefoptions%doBLstart .and. lfrefoptions%doBLstart)) then 
+                thislinerefoptions%doBLstart = .false. 
+            end if 
+            if (.not. (hfrefoptions%doBLend .and. lfrefoptions%doBLend)) then 
+                thislinerefoptions%doBLend = .false. 
+            end if 
 
             ! Associate for ease
             associate(&
@@ -4800,6 +4818,128 @@ module ggmod_gridgeneration2D
         end associate
 
     end subroutine 
+
+    ! GGTM data cleaning
+    subroutine CleanGGTMData(ggtmdata, mapping)
+
+        ! Description
+        !============
+        ! Clean up the ggtmdata structure by removing all segments that
+        ! are not used in any other data structure of ggtmdata. 
+        ! Optionally, a mapping is returned of which mapping(oldsegID) 
+        ! returns the new segment ID if it exists or zero if it was
+        ! deleted. 
+
+        ! Note: this does not imply any spatial uniqueness, i.e. a 
+        ! segment that has been split into multiple different segments
+        ! may still exist in a line in some structure, while its splitted 
+        ! segments exist in another. So there is no guarantee from this 
+        ! side that segments are 'unique' in that way 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)              :: ggtmdata 
+        integer(I8), allocatable, dimension(:), intent(out), optional :: mapping
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: mpg ! actual mapping
+        logical, allocatable, dimension(:)      :: isused
+        type(GGTMSegmentUDT), allocatable       :: tempseg(:)
+
+        ! Loop
+        integer(I8)                             :: i, j, k 
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            vert    => ggtmdata%vert,   &
+            face    => ggtmdata%face,   &
+            cell    => ggtmdata%cell,   &
+            tube    => ggtmdata%tube    &
+            )
+
+        ! Initialize
+        allocate(isused(ggtmdata%nseg), mpg(ggtmdata%nseg))
+        isused = .false. 
+        mpg = 0
+
+        ! Determine unused segments
+        !==========================
+        ! Vertices
+        do i = 1, size(vert)
+            isused(vert(i)%line%segID) = .true. 
+        end do 
+
+        ! Faces
+        do i = 1, size(face)
+            isused(face(i)%line%segID) = .true. 
+        end do 
+
+        ! Cells
+        do i = 1, size(cell)
+            do j  = 1, size(cell(i)%lines)
+                isused(cell(i)%lines(j)%segID) = .true.
+            end do 
+            do j = 1, size(cell(i)%tubes)
+                isused(cell(i)%tubes(j)%hfline%segID) = .true.
+                isused(cell(i)%tubes(j)%lfline%segID) = .true.
+            end do 
+        end do 
+
+        ! Tubes: nothing to do for now
+
+        ! Determine mapping
+        k = 0
+        do i = 1, ggtmdata%nseg
+            if (isused(i)) then 
+                k = k + 1
+                mpg(i) = k
+            end if 
+        end do 
+
+        ! Map segment IDs
+        !================
+        ! Vertices
+        do i = 1, size(vert)
+            vert(i)%line%segID = mpg(vert(i)%line%segID)
+        end do 
+
+        ! Faces
+        do i = 1, size(face)
+            face(i)%line%segID = mpg(face(i)%line%segID)
+        end do 
+
+        ! Cells
+        do i = 1, size(cell)
+            do j  = 1, size(cell(i)%lines)
+                cell(i)%lines(j)%segID = mpg(cell(i)%lines(j)%segID)
+            end do 
+            do j = 1, size(cell(i)%tubes)
+                cell(i)%tubes(j)%hfline%segID = mpg(cell(i)%tubes(j)%hfline%segID)
+                cell(i)%tubes(j)%lfline%segID = mpg(cell(i)%tubes(j)%lfline%segID)
+            end do 
+        end do 
+
+        ! Delete
+        !=======
+        allocate(tempseg(count(isused)))
+        tempseg = pack(ggtmdata%seg, isused)
+        ggtmdata%seg = tempseg
+        ggtmdata%nseg = size(tempseg)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+        ! Optional output arguments
+        !==========================
+        if (present(mapping)) then 
+            mapping = mpg
+        end if 
+
+    end subroutine
     
     ! Vertex distribution over faces
     subroutine DistributeVerticesTopologicalMeshFaces(grid, ggtmdata, topomesh, &
@@ -4866,8 +5006,8 @@ module ggmod_gridgeneration2D
                 grid%vert%ntot = grid%vert%ntot + size(dlcv) - 2
 
                 ! Refine
-                keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
-                call GGTMlinerefiner%Refine(ggtmdata, facedata(i)%line, grid%vert%ntot, keepvert)
+                !keepvert = IsTopomeshVert(facedata(i)%line%vert, topomesh)
+                !call GGTMlinerefiner%Refine(ggtmdata, facedata(i)%line, grid%vert%ntot, keepvert)
 
                 ! Update segment data
                 call facedata(i)%line%UpdateSegmentData(ggtmdata)
@@ -8462,6 +8602,523 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Add segment refinement data
+    subroutine AddGGTMSegmentRefinementData(ggtmdata, topomesh, vessel, &
+        grid, options)
+
+        ! Description
+        !============
+        ! This routine initializes the refinement data of segments based
+        ! on information of the topomesh and vessel and of options 
+        ! specified in the 'options' structure. For each segment, default
+        ! values are initialized. Based on the options set by the user, 
+        ! boundary layers etc are imposed at the start or end of a 
+        ! segment. Note that due to the segment based approach, contrary 
+        ! to the (hopefully now removed) line based approach, boundary
+        ! layers near any topological mesh vertex may now be imposed. 
+
+        ! Note: this routine should only be called after all possible 
+        ! tube extensions etc have been done. 
+
+        ! Note: refinement may only depend on segment data, but when 
+        ! forming cells and faces, this is done tube based. Therefore,
+        ! we also update tube hf and lf line refinement data here. Also 
+        ! note that therefore boundary layers may not be strictly imposed
+        ! if the boundary layer of a segment lies in the interior of a 
+        ! line (there will be refinement, but the formed cells may not
+        ! be quads)
+        
+        ! Algorithm
+        !==========
+        ! 1) Initialize refinement options for all segments
+        ! 2) Determine refinement options for each segment separately, 
+        !   based on topomesh and vessel structure (and options of course)
+        ! 3) Apply any exclusion rules for refinement options (it is 
+        !   assumed that the order in which segments are treated does not
+        !   matter - otherwise results may vary between different runs 
+        !   with the same input)
+
+        ! Modules
+        !========
+        use mod_search
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata 
+        type(TopomeshUDT), intent(in)           :: topomesh
+        type(VesselUDT), intent(in)             :: vessel 
+        type(GGGridUDT), intent(in)             :: grid
+        type(GGOptionsUDT), intent(in)          :: options 
+
+        ! Auxiliary
+        integer(I8)                             :: segloc, fwind, &
+            bwind
+        integer(I8), allocatable, dimension(:)  :: vesselfaceIDs, &
+            targetfaceIDs, segTMface, segfsID, segsv, segev, tv
+        integer(I8), allocatable, dimension(:, :)   :: segTMvert
+        logical, allocatable, dimension(:)      :: isvesselvert, &
+            istargetvert, doseg, doTMface, dovert, nostart, noend, &
+            isalignedvesselvertex
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Unpack 
+        associate(&
+            seg         => ggtmdata%seg,    &
+            cell        => topomesh%cell,   &
+            celldata    => ggtmdata%cell,   &
+            face        => topomesh%face,   &
+            vert        => topomesh%vert    &
+            )
+
+        ! Initialize options
+        do i = 1, ggtmdata%nseg
+            ! Initialize
+            call seg(i)%refoptions%Initialize()
+
+            ! Propagate general options
+            seg(i)%refoptions%dlBLlengthbased = options%refdlBLlengthbased
+        end do 
+
+        ! Construct auxiliary arrays for ease later on
+        allocate(doseg(ggtmdata%nseg), segTMface(ggtmdata%nseg), &
+            segfsID(ggtmdata%nseg), segTMvert(ggtmdata%nseg, 2), &
+            doTMface(face%ntot), dovert(grid%vert%ntot), segsv(ggtmdata%nseg), &
+            segev(ggtmdata%nseg), nostart(ggtmdata%nseg), noend(ggtmdata%nseg), &
+            isalignedvesselvertex(vert%ntot))
+        doseg       = .false. 
+        doTMface    = .false. 
+        dovert      = .false. 
+        nostart     = .false. 
+        noend       = .false. 
+        isalignedvesselvertex = .false.
+        segTMvert   = 0
+        segTMface   = 0
+        segfsID     = 0
+        segsv       = 0
+        segev       = 0
+        do i = 1, ggtmdata%nseg
+            segfsID(i) = seg(i)%fsID 
+            segTMface(i) = seg(i)%TMfaceID
+            segsv(i) = seg(i)%vert(1)
+            segev(i) = seg(i)%vert(seg(i)%nv)
+        end do
+        where (IsTopomeshVert(segsv, topomesh)) segTMvert(:, 1) = segsv 
+        where (IsTopomeshVert(segev, topomesh)) segTMvert(:, 2) = segev
+
+        ! Boundary layer options
+        !=======================        
+        ! Vessel boundary layer?
+        if (options%refBLdovessel) then
+            ! Initialize
+            allocate(isvesselvert(grid%vert%ntot))
+            isvesselvert = .false. 
+
+            ! Get topological mesh vessel face IDs
+            vesselfaceIDs = topomesh%GetVesselFaceIDs() 
+            doTMface = .false.
+            doTMface(vesselfaceIDs) = .true. 
+
+            ! Determine vertices that are on one of these vessel faces
+            doseg = .false.
+            where (segTMface /= 0) doseg = doTMface(segTMface) ! mark segments that are vessel segments
+            dovert = .false.
+            do i = 1, ggtmdata%nseg
+                if (doseg(i)) then 
+                    dovert(seg(i)%vert) = .true. 
+                end if 
+            end do 
+
+            ! Set refinement options of edges that have a start and/or end vertex as marked vertex
+            doseg = .false. 
+            do i = 1, ggtmdata%nseg
+                if (dovert(segsv(i))) then 
+                    ! Set boundary layer options for start
+                    seg(i)%refoptions%doBLstart = .true. 
+                    seg(i)%refoptions%ncBLstart = options%refBLncvessel 
+                    seg(i)%refoptions%dlBLstart = options%refBLdlvessel
+                end if 
+                if (dovert(segev(i))) then 
+                    ! Set boundary layer options for end
+                    seg(i)%refoptions%doBLend = .true. 
+                    seg(i)%refoptions%ncBLend = options%refBLncvessel 
+                    seg(i)%refoptions%dlBLend = options%refBLdlvessel(options%refBLncvessel:1:-1) ! need to flip
+                end if 
+            end do 
+
+            ! Housekeeping
+            deallocate(isvesselvert)
+        end if 
+
+        ! Target boundary layer? 
+        if (options%refBLdotarget) then 
+            ! Initialize
+            allocate(istargetvert(grid%vert%ntot))
+            istargetvert = .false. 
+
+            ! Get topological mesh target face IDs
+            targetfaceIDs = topomesh%GetTargetFaceIDs() 
+            doTMface = .false.
+            doTMface(targetfaceIDs) = .true. 
+
+            ! Determine vertices that are on one of these vessel faces
+            doseg = .false.
+            where (segTMface /= 0) doseg = doTMface(segTMface) ! mark segments that are vessel segments
+            dovert = .false.
+            do i = 1, ggtmdata%nseg
+                if (doseg(i)) then 
+                    dovert(seg(i)%vert) = .true. 
+                end if 
+            end do 
+
+            ! Set refinement options of edges that have a start and/or end vertex as marked vertex
+            doseg = .false. 
+            do i = 1, ggtmdata%nseg
+                if (dovert(segsv(i))) then 
+                    ! Set boundary layer options for start
+                    seg(i)%refoptions%doBLstart = .true. 
+                    seg(i)%refoptions%ncBLstart = options%refBLnctarget
+                    seg(i)%refoptions%dlBLstart = options%refBLdltarget
+                end if 
+                if (dovert(segev(i))) then 
+                    ! Set boundary layer options for end
+                    seg(i)%refoptions%doBLend = .true. 
+                    seg(i)%refoptions%ncBLend = options%refBLnctarget
+                    seg(i)%refoptions%dlBLend = options%refBLdltarget(options%refBLnctarget:1:-1) ! need to flip)
+                end if
+            end do 
+
+            ! Housekeeping
+            deallocate(istargetvert)
+
+        end if 
+
+        ! Apply exclusion rules
+        !======================
+        ! I've got new rules I count them
+
+        ! Rule: no boundary layers on unaligned segments
+        where(segfsID == 0) 
+            nostart = .true. 
+            noend   = .true.
+        end where
+
+        ! Rule: no boundary layer at start/end based on cell tubes:
+        ! - if high and/or low flux line are extended at start/end
+        ! - if desired by user (one may want to apply them anyway for unknown reasons)
+        if (options%evtnoBL) then 
+            do i = 1, size(celldata)
+                associate(ctubes    => celldata(i)%tubes)
+                do j = 1, size(ctubes)
+                    ! Unpack for ease
+                    associate(&
+                        hfsegID     => ctubes(j)%hfline%segID,  &
+                        lfsegID     => ctubes(j)%lfline%segID   &
+                        )
+
+                    ! Start
+                    !------
+                    if (ctubes(j)%hfline%IsExtended(ggtmdata, topomesh, 'start') .or. &
+                        ctubes(j)%lfline%IsExtended(ggtmdata, topomesh, 'start')) then
+                        ! Treat hfline
+                        !-------------
+                        ! Find the first segment that has non-zero fsID
+                        segloc = findloc(segfsID(hfsegID) /= 0, .true., 1, back=.false.)
+                            
+                        if (segloc == 0) then 
+                            ! If none found -> tangency point tube, take 
+                            ! first segment
+                            segloc = 1
+                        end if 
+
+                        ! Need to check segment orientation
+                        tv = ctubes(j)%hfline%vert(ctubes(j)%hfline%GetAllSegmentVertIndices())
+                        fwind = Findloc1D(tv, [segsv(hfsegID(segloc)), segev(hfsegID(segloc))])
+                        bwind = Findloc1D(tv, [segev(hfsegID(segloc)), segsv(hfsegID(segloc))])
+                        if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                            call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
+                                'segment vertices do not appear or appear ambiguously in ' // & 
+                                'field line - this is a bug')
+                        end if 
+                        if (fwind /= 0) then 
+                            ! Same orientation, don't do start
+                            nostart(hfsegID(segloc)) = .true. 
+                        else
+                            ! Different orientation, don't do end
+                            noend(hfsegID(segloc)) = .true.
+                        end if 
+
+                        ! Treat lfline
+                        !-------------
+                        ! Find the first segment that has non-zero fsID
+                        segloc = findloc(segfsID(lfsegID) /= 0, .true., 1, back=.false.)
+                            
+                        if (segloc == 0) then 
+                            ! If none found -> tangency point tube, take 
+                            ! first segment
+                            segloc = 1
+                        end if 
+
+                        ! Need to check segment orientation
+                        tv = ctubes(j)%lfline%vert(ctubes(j)%lfline%GetAllSegmentVertIndices())
+                        fwind = Findloc1D(tv, [segsv(lfsegID(segloc)), segev(lfsegID(segloc))])
+                        bwind = Findloc1D(tv, [segev(lfsegID(segloc)), segsv(lfsegID(segloc))])
+                        if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                            call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
+                                'segment vertices do not appear or appear ambiguously in ' // & 
+                                'field line - this is a bug')
+                        end if 
+                        if (fwind /= 0) then 
+                            ! Same orientation, don't do start
+                            nostart(lfsegID(segloc)) = .true. 
+                        else
+                            ! Different orientation, don't do end
+                            noend(lfsegID(segloc)) = .true.
+                        end if 
+                    end if 
+
+                    ! End
+                    !----
+                    if (ctubes(j)%hfline%IsExtended(ggtmdata, topomesh, 'end') .or. &
+                        ctubes(j)%lfline%IsExtended(ggtmdata, topomesh, 'end')) then
+                        ! Treat hfline
+                        !-------------
+                        ! Find the first segment that has non-zero fsID
+                        segloc = findloc(segfsID(hfsegID) /= 0, .true., 1, back=.true.)
+                            
+                        if (segloc == 0) then 
+                            ! If none found -> tangency point tube, take 
+                            ! last segment
+                            segloc = ctubes(j)%hfline%ns
+                        end if 
+
+                        ! Need to check segment orientation
+                        tv = ctubes(j)%hfline%vert(ctubes(j)%hfline%GetAllSegmentVertIndices())
+                        fwind = Findloc1D(tv, [segsv(hfsegID(segloc)), segev(hfsegID(segloc))])
+                        bwind = Findloc1D(tv, [segev(hfsegID(segloc)), segsv(hfsegID(segloc))])
+                        if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                            call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
+                                'segment vertices do not appear or appear ambiguously in ' // & 
+                                'field line - this is a bug')
+                        end if 
+                        if (fwind /= 0) then 
+                            ! Same orientation, don't do end
+                            noend(hfsegID(segloc)) = .true. 
+                        else
+                            ! Different orientation, don't do start
+                            nostart(hfsegID(segloc)) = .true.
+                        end if 
+
+                        ! Treat lfline
+                        !-------------
+                        ! Find the first segment that has non-zero fsID
+                        segloc = findloc(segfsID(lfsegID) /= 0, .true., 1, back=.true.)
+                            
+                        if (segloc == 0) then 
+                            ! If none found -> tangency point tube, take 
+                            ! last segment
+                            segloc = ctubes(j)%lfline%ns
+                        end if 
+
+                        ! Need to check segment orientation
+                        tv = ctubes(j)%lfline%vert(ctubes(j)%lfline%GetAllSegmentVertIndices())
+                        fwind = Findloc1D(tv, [segsv(lfsegID(segloc)), segev(lfsegID(segloc))])
+                        bwind = Findloc1D(tv, [segev(lfsegID(segloc)), segsv(lfsegID(segloc))])
+                        if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                            call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
+                                'segment vertices do not appear or appear ambiguously in ' // & 
+                                'field line - this is a bug')
+                        end if 
+                        if (fwind /= 0) then 
+                            ! Same orientation, don't do start
+                            nostart(lfsegID(segloc)) = .true. 
+                        else
+                            ! Different orientation, don't do end
+                            noend(lfsegID(segloc)) = .true.
+                        end if 
+                    end if 
+
+                    ! Housekeeping
+                    end associate
+                end do 
+                end associate
+            end do 
+        end if 
+
+        ! Rule: no boundary layer at type 2 tangency points
+        do i = 1, ggtmdata%nseg
+            if (segTMvert(i, 1) /= 0) then 
+                if (topomesh%vert%type(segTMvert(i, 1)) == TMvertextp2ID) then 
+                    nostart(i) = .true.
+                end if 
+            end if 
+            if (segTMvert(i, 2) /= 0) then 
+                if (topomesh%vert%type(segTMvert(i, 2)) == TMvertextp2ID) then 
+                    noend(i) = .true.
+                end if 
+            end if 
+        end do 
+
+        ! Rule: no boundary layer near aligned vessel parts
+        isalignedvesselvertex = .false.
+        do i = 1, face%ntot
+            if (face%type(i) == TMfacealbndID) then 
+                isalignedvesselvertex(face%vert(i, :)) = .true.
+            end if 
+        end do 
+        do i = 1, ggtmdata%nseg
+            if (segTMvert(i, 1) /= 0) then 
+                if (isalignedvesselvertex(segTMvert(i, 1))) then 
+                    nostart(i) = .true.
+                end if 
+            end if 
+            if (segTMvert(i, 2) /= 0) then 
+                if (isalignedvesselvertex(segTMvert(i, 2))) then 
+                    noend(i) = .true.
+                end if 
+            end if 
+        end do 
+
+        ! Apply rules
+        where (nostart) seg%refoptions%doBLstart = .false.
+        where (noend) seg%refoptions%doBLend = .false.
+
+        ! Update tube data
+        !=================
+        ! Rule: start and end refinement options equal start and end
+        ! refinement options of first/last segment
+        do i = 1, size(celldata)
+            associate(ctubes        => celldata(i)%tubes)
+            do j = 1, size(ctubes)
+                associate(&
+                    hfline      => ctubes(j)%hfline,    &
+                    lfline      => ctubes(j)%lfline,    &
+                    hfsegID     => ctubes(j)%hfline%segID,  &
+                    lfsegID     => ctubes(j)%lfline%segID   &
+                    )
+
+                ! Initialize &  set general options
+                call hfline%refoptions%Initialize()
+                hfline%refoptions%dlBLlengthbased = options%refdlBLlengthbased
+
+                call lfline%refoptions%Initialize()
+                lfline%refoptions%dlBLlengthbased = options%refdlBLlengthbased
+
+                ! hfline
+                !-------  
+                if (.not. seg(hfsegID(1))%isvertex) then 
+                    ! First segment
+                    segloc = 1
+                    tv = hfline%vert(ctubes(j)%hfline%GetAllSegmentVertIndices())
+                    fwind = Findloc1D(tv, [segsv(hfsegID(segloc)), segev(hfsegID(segloc))])
+                    bwind = Findloc1D(tv, [segev(hfsegID(segloc)), segsv(hfsegID(segloc))])
+                    if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                        call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
+                            'segment vertices do not appear or appear ambiguously in ' // & 
+                            'field line - this is a bug')
+                    end if 
+                    if (fwind /= 0) then 
+                        ! Same orientation
+                        hfline%refoptions%doBLstart = seg(hfsegID(segloc))%refoptions%doBLstart
+                        hfline%refoptions%ncBLstart = seg(hfsegID(segloc))%refoptions%ncBLstart
+                        hfline%refoptions%dlBLstart = seg(hfsegID(segloc))%refoptions%dlBLstart
+                    else
+                        ! Different orientation
+                        hfline%refoptions%doBLstart = seg(hfsegID(segloc))%refoptions%doBLend
+                        hfline%refoptions%ncBLstart = seg(hfsegID(segloc))%refoptions%ncBLend
+                        hfline%refoptions%dlBLstart = &
+                            seg(hfsegID(segloc))%refoptions%dlBLend(hfline%refoptions%ncBLstart:1:-1) ! flip
+                    end if 
+
+                    ! Last segment
+                    segloc = hfline%ns
+                    tv = hfline%vert(ctubes(j)%hfline%GetAllSegmentVertIndices())
+                    fwind = Findloc1D(tv, [segsv(hfsegID(segloc)), segev(hfsegID(segloc))])
+                    bwind = Findloc1D(tv, [segev(hfsegID(segloc)), segsv(hfsegID(segloc))])
+                    if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                        call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
+                            'segment vertices do not appear or appear ambiguously in ' // & 
+                            'field line - this is a bug')
+                    end if 
+                    if (fwind /= 0) then 
+                        ! Same orientation
+                        hfline%refoptions%doBLend = seg(hfsegID(segloc))%refoptions%doBLend
+                        hfline%refoptions%ncBLend = seg(hfsegID(segloc))%refoptions%ncBLend
+                        hfline%refoptions%dlBLend = seg(hfsegID(segloc))%refoptions%dlBLend
+                    else
+                        ! Different orientation
+                        hfline%refoptions%doBLend = seg(hfsegID(segloc))%refoptions%doBLstart
+                        hfline%refoptions%ncBLend = seg(hfsegID(segloc))%refoptions%ncBLstart
+                        hfline%refoptions%dlBLend = &
+                            seg(hfsegID(segloc))%refoptions%dlBLstart(hfline%refoptions%ncBLend:1:-1) ! flip
+                    end if 
+                end if 
+                
+                ! lfline
+                !-------  
+                if (.not. seg(lfsegID(1))%isvertex) then 
+                    ! First segment
+                    segloc = 1
+                    tv = lfline%vert(ctubes(j)%lfline%GetAllSegmentVertIndices())
+                    fwind = Findloc1D(tv, [segsv(lfsegID(segloc)), segev(lfsegID(segloc))])
+                    bwind = Findloc1D(tv, [segev(lfsegID(segloc)), segsv(lfsegID(segloc))])
+                    if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                        call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
+                            'segment vertices do not appear or appear ambiguously in ' // & 
+                            'field line - this is a bug')
+                    end if 
+                    if (fwind /= 0) then 
+                        ! Same orientation
+                        lfline%refoptions%doBLstart = seg(lfsegID(segloc))%refoptions%doBLstart
+                        lfline%refoptions%ncBLstart = seg(lfsegID(segloc))%refoptions%ncBLstart
+                        lfline%refoptions%dlBLstart = seg(lfsegID(segloc))%refoptions%dlBLstart
+                    else
+                        ! Different orientation
+                        lfline%refoptions%doBLstart = seg(lfsegID(segloc))%refoptions%doBLend
+                        lfline%refoptions%ncBLstart = seg(lfsegID(segloc))%refoptions%ncBLend
+                        lfline%refoptions%dlBLstart = &
+                            seg(lfsegID(segloc))%refoptions%dlBLend(lfline%refoptions%ncBLstart:1:-1) ! flip
+                    end if 
+
+                    ! Last segment
+                    segloc = lfline%ns
+                    tv = lfline%vert(ctubes(j)%lfline%GetAllSegmentVertIndices())
+                    fwind = Findloc1D(tv, [segsv(lfsegID(segloc)), segev(lfsegID(segloc))])
+                    bwind = Findloc1D(tv, [segev(lfsegID(segloc)), segsv(lfsegID(segloc))])
+                    if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                        call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
+                            'segment vertices do not appear or appear ambiguously in ' // & 
+                            'field line - this is a bug')
+                    end if 
+                    if (fwind /= 0) then 
+                        ! Same orientation
+                        lfline%refoptions%doBLend = seg(lfsegID(segloc))%refoptions%doBLend
+                        lfline%refoptions%ncBLend = seg(lfsegID(segloc))%refoptions%ncBLend
+                        lfline%refoptions%dlBLend = seg(lfsegID(segloc))%refoptions%dlBLend
+                    else
+                        ! Different orientation
+                        lfline%refoptions%doBLend = seg(lfsegID(segloc))%refoptions%doBLstart
+                        lfline%refoptions%ncBLend = seg(lfsegID(segloc))%refoptions%ncBLstart
+                        lfline%refoptions%dlBLend = &
+                            seg(lfsegID(segloc))%refoptions%dlBLstart(lfline%refoptions%ncBLend:1:-1) ! flip
+                    end if 
+                end if 
+
+                end associate
+            end do 
+            end associate
+        end do
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
 
     !------------------------------------------------------------------!
     !                       GRID DATA ROUTINES                         !
@@ -8936,6 +9593,108 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Vertex coordinate addition
+    subroutine AddVertexCoordinatesGGTMSegment(seg, dlcv, ecbased)
+
+        ! Description
+        !============
+        ! This routine adds vertices xv, yv on the segment by interpolating
+        ! the x and y coordinates based on the given length distribution
+        ! dlcv. Note that this routine will overwrite any pre-existing 
+        ! vertex distribution, and that the vertex IDs are not yet 
+        ! added here. 
+
+        ! Note: we hedge for 'lines' that are literally one vertex long.
+        ! In that case, dlcv should equal zero and have size one
+
+        ! Note: if provided, the optional input argument can be used to
+        ! give dlcv in terms of edge coordinate (going from 0 to nl-1) if
+        ! true. Default is that dlcv is in terms of length (going from 0
+        ! to line%dllc(end))
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMSegmentUDT)               :: seg 
+        real(R8), intent(in)                :: dlcv(:)
+        logical, intent(in), optional       :: ecbased 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: tdlcv
+
+        ! Loop
+        integer(I8)                             :: k 
+
+        ! Check
+        !======
+        if (present(ecbased)) then 
+            if (ecbased) then 
+                ! Reformat dlcv to be in terms of length
+                tdlcv = dlcv ! just initialization
+                call Interpolate1D(dlcv, tdlcv, real([(k, k = 0, seg%nl-1)], kind=R8), seg%dllc)
+                
+                ! Check
+                where (dlcv == 0_R8) tdlcv = 0
+                where (dlcv == int((seg%nl-1), kind=R8)) tdlcv = seg%dllc(seg%nl)
+            else
+                tdlcv = dlcv 
+            end if 
+        else
+            tdlcv = dlcv
+        end if 
+
+        ! Add
+        !====
+        if (all(tdlcv == 0.0_R8)) then 
+            seg%dlcv = tdlcv 
+            seg%xv = spread(seg%xl(1), 1, size(tdlcv))
+            seg%yv = spread(seg%yl(1), 1, size(tdlcv))
+            seg%nv = size(tdlcv)
+            return 
+        end if 
+
+        ! Hedge for out of bounds points
+        seg%dlcv = tdlcv 
+        if (count(seg%dlcv >= seg%dllc(seg%nl)) > 1) then 
+            print *, 'weird'
+        end if
+        where (seg%dlcv >= seg%dllc(seg%nl)) seg%dlcv = seg%dllc(seg%nl) 
+        
+        
+        if (allocated(seg%xv)) then 
+            deallocate(seg%xv, seg%yv)
+        end if 
+        allocate(seg%xv(size(tdlcv)), seg%yv(size(tdlcv)))
+        call Interpolate1D(seg%dlcv, seg%xv, seg%dllc, seg%xl)
+        call Interpolate1D(seg%dlcv, seg%yv, seg%dllc, seg%yl)
+        if (any(.not. ieee_is_finite(seg%xv))) then 
+            print *, 'NaNs detected'
+        end if 
+        seg%nv = size(tdlcv)
+
+    end subroutine
+
+    ! Vertex ID addition
+    subroutine AddVertexIDsGGTMSegment(seg, vertIDs)
+
+        ! Description
+        !============
+        ! ID setter (simple wrapper), also sets the logical to check
+        ! if a vertex is a node vertex (we assume this is correctly
+        ! done... )
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMSegmentUDT)           :: seg 
+        integer(I8), intent(in)         :: vertIDs(:)
+
+        ! Set
+        !====
+        seg%vert = vertIDs 
+
+    end subroutine
+
+    ! Vertex addition (coordinates + IDs)
     subroutine AddVerticesGGTMSegment(segment, dlcv, vertID)
 
         ! Description
@@ -12330,6 +13089,27 @@ module ggmod_gridgeneration2D
 
     end function
 
+    ! Single segment refinement, dummy
+    subroutine RefineSegmentNoRef(refiner, ggtmdata, segID, vertID, keepvert)
+
+        ! Description
+        !============
+        ! Simply returns the original distribution
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerNoRefUDT)              :: refiner 
+        type(GGTMDataUDT), intent(inout)            :: ggtmdata
+        integer(I8), intent(in)                     :: segID
+        integer(I8), intent(inout)                  :: vertID 
+        logical, intent(in)                         :: keepvert(:)
+
+        ! Return
+        !=======
+
+    end subroutine
+
     ! Single line refinement, dummy
     subroutine RefineLineSingleNoRef(refiner, ggtmdata, line, vertID, keepvert)
 
@@ -12356,6 +13136,632 @@ module ggmod_gridgeneration2D
 
         ! Return
         !=======
+
+    end subroutine
+
+    ! Single line refinement, segment based, dummy
+    subroutine RefineLineSegmentsNoRef(refiner, ggtmdata, line, vertID)
+
+        ! Description
+        !============
+        ! Simply returns the original distribution
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerNoRefUDT)              :: refiner 
+        type(GGTMDataUDT), intent(inout)            :: ggtmdata
+        type(GGTMFieldlineDataUDT), intent(inout)   :: line 
+        integer(I8), intent(inout)                  :: vertID 
+
+    end subroutine
+
+    ! Single segment refinement, length based
+    subroutine RefineSegmentLB(refiner, ggtmdata, segID, vertID, keepvert)
+
+        ! Description
+        !============
+        ! Refine/coarsen a segment based on a maximal and minimal length
+        ! distribution. The refinement/coarsening factor is hard coded 
+        ! to be two (i.e. either a vertex is added or deleted). In principle
+        ! the minimal length distribution should be at least two times
+        ! smaller than the maximal length distribution in each evaluation
+        ! to avoid infinite refinement. However, here we solve this 
+        ! potential issue by marking faces that have been refinement as 
+        ! impossible to coarsen, and vice versa. 
+
+        ! Since vertices may be added/deleted, the current vertex index
+        ! vertID should be passed. On exit, this will be updated (if 
+        ! vertices were added). The deletedvert logical array will be 
+        ! equal to or larger than vertID. If an element is true, this 
+        ! means that that vertex ID was deleted. On exit, this array will
+        ! be up to date from 1:vertID. It should be used, after all 
+        ! vertices have been constructed, to remove unused vertices. 
+
+        ! Note: instead of throwing an error, we allow the minimal length
+        ! to be larger than the maximal length. Here, we give priority
+        ! to the maximal length (i.e. we will refine rather than coarsen)
+        ! since this is often more important for simulations etc. 
+
+        ! Note: we now also support imposing a boundary layer of cells.
+        ! If the boundary layer would exceed the length of the line, then
+        ! cells are deleted until the length is matched (it is possible
+        ! no boundary layer is then imposed). Also, if nodes should be
+        ! kept that are in the range of the boundary layer, then 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)               :: refiner 
+        type(GGTMDataUDT), intent(inout)            :: ggtmdata
+        integer(I8), intent(in)                     :: segID
+        integer(I8), intent(inout)                  :: vertID 
+        logical, intent(in)                         :: keepvert(:)
+
+        ! Auxiliary
+        logical                                     :: ismerged, &
+            isnextfacelegal, isprevfacelegal, dostart
+        logical, allocatable, dimension(:)          :: isreflegal, &
+            iscoarselegal, thiskeepvert, newkeepvert, refineface, &
+            coarsenface,  newisreflegal, newiscoarselegal, iscoarsenedface, &
+            keepind, keepvertBLstart, iscoarselegalBLstart, &
+            isreflegalBLstart, keepvertBLend, iscoarselegalBLend, &
+            isreflegalBLend
+        real(R8)                                    :: lline, &
+            lBLstart, lBLend
+        real(R8), allocatable, dimension(:)         :: dll, &
+            Lmaxvert, Lminvert, newdll, newdllc, dlcBLstart, &
+            dlcBLend, tempdlcBLstart, tempdlcBLend, dlBLstart, &
+            dlBLend, tdlcBLstart, tdlcBLend, dlcBLstarti, dlcBLendi
+        integer(I8)                                 :: minind, &
+            ncBLstart, ncBLend
+        integer(I8), allocatable, dimension(:)      :: thisvertID, &
+            newvertID, thisvertIDBLstart, sortind, thisvertIDBLend
+
+        ! Loop
+        integer(I8)                                 :: i, k, cc 
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            seg             => ggtmdata%seg(segID),     &
+            lengthbased     => refiner%dlBLlengthbased,    &
+            doBLstart       => refiner%doBLstart,   &
+            doBLend         => refiner%doBLend,     &
+            dlBLstarti      => refiner%dlBLstart,   &
+            dlBLendi        => refiner%dlBLend      &
+            )
+
+        ! Initialize the refiner
+        call refiner%InitializeSegmentData(seg)
+
+
+        ! Hedge for vertex segment lines
+        if (seg%isvertex) then 
+            return 
+        end if 
+
+        ! Check if distance is (euler) length based or not (if not, 
+        ! assumed given in current units).
+        if (lengthbased) then 
+            ! Need to interpolate
+            
+            if (doBLstart) then 
+                allocate(dlcBLstarti(size(dlBLstarti)+1))
+                dlcBLstarti = 0
+                do i = 2, size(dlcBLstarti)
+                    dlcBLstarti(i) = dlcBLstarti(i-1) + dlBLstarti(i-1)
+                end do
+                call Interpolate1D(dlcBLstarti, tdlcBLstart, seg%dllc, refiner%linedllc)
+                dlBLstart = tdlcBLstart(2:size(tdlcBLstart)) - tdlcBLstart(1:size(tdlcBLstart)-1)
+                deallocate(dlcBLstarti)
+            end if 
+            if (doBLend) then 
+                allocate(dlcBLendi(size(dlBLendi)+1))
+                dlcBLendi = 0
+                do i = 2, size(dlcBLendi)
+                    dlcBLendi(i) = dlcBLendi(i-1) + dlBLendi(i-1)
+                end do
+                dlcBLendi = seg%dllc(seg%nl) - dlcBLendi
+                call Interpolate1D(dlcBLendi, tdlcBLend, seg%dllc, refiner%linedllc)
+                dlBLend = -tdlcBLend(2:size(tdlcBLend)) + tdlcBLend(1:size(tdlcBLend)-1)
+                deallocate(dlcBLendi)
+            end if 
+        else
+            ! Just take as is
+            dlBLstart = dlBLstarti
+            dlBLend = dlBLendi
+        end if
+
+        ! Ensure proper dimensions
+        if (size(keepvert) /= size(seg%vert)) then 
+            call gdErrorHandler('RefineSegmentSingleLB: keepvert does not '// & 
+                'have same number of elements as seg%vert, check input')
+        end if 
+
+        ! Initialize
+        ncBLstart = refiner%ncBLstart
+        ncBLend = refiner%ncBLend
+
+        ! Set initial logicals
+        allocate(iscoarselegal(seg%nv-1))
+        iscoarselegal = .true.
+        isreflegal = iscoarselegal
+        thiskeepvert = keepvert
+        thisvertID = seg%vert
+
+        ! Initial distribution
+        newdllc = refiner%GetSegmentEdgeLength(seg)
+        dll = newdllc(2:size(newdllc)) - newdllc(1:size(newdllc)-1)
+        lline = newdllc(size(newdllc))
+
+        ! Initialize boundary layer distributions
+        if (doBLstart) then 
+            ! Check if the length allows it
+            allocate(dlcBLstart(ncBLstart+1))
+            dlcBLstart = 0
+            do i = 2, size(dlcBLstart)
+                dlcBLstart(i) = dlcBLstart(i-1) + dlBLstart(i-1)
+            end do 
+            lBLstart = dlcBLstart(ncBLstart+1)
+        else
+            allocate(dlcBLstart(0))
+            lBLstart = 0
+        end if 
+        if (doBLend) then 
+            ! Check if the length allows it
+            allocate(dlcBLend(ncBLend+1))
+            dlcBLend = lline
+            do i = size(dlcBLend)-1, 1, -1 
+                dlcBLend(i) = dlcBLend(i+1) - dlBLend(i)
+            end do 
+            lBLend = lline - dlcBLend(1)
+        else
+            allocate(dlcBLend(0))
+            lBLend = 0
+        end if 
+
+        ! Adjust boundary layer distribution if necessary
+        dostart = .true. 
+        do while ((lBLstart + lBLend > lline) .or. isnan(lBLstart) .or. &
+            isnan(lBLend)) ! account for out of bounds interpolation
+            if (dostart .and. (lBLstart > 0.0_R8 .or. isnan(lBLstart))) then
+                dlcBLstart = dlcBLstart(1:size(dlcBLstart)-1)
+                lBLstart = dlcBLstart(size(dlcBLstart))
+                dostart = .false.
+            elseif (.not. dostart .and. (lBLend > 0.0_R8 .or. isnan(lBLend))) then 
+                dlcBLend = dlcBLend(2:size(dlcBLend))
+                lBLend = lline - dlcBLend(1)
+                dostart = .true. 
+            elseif (lBLstart == 0.0_R8 .and. lBLend == 0.0_R8) then 
+                exit ! we should in fact not reach this if lline >= 0
+            elseif (dostart) then 
+                dostart = .false. 
+            elseif (.not. dostart) then 
+                dostart = .true. 
+            end if 
+        end do 
+
+        ! Adjust initial distribution, which vertices to keep etc
+        ncBLstart = size(dlcBLstart)-1
+        ncBLend = size(dlcBLend)-1
+        if (size(dlcBLstart) > 0) then 
+            ! Delete nodes that are inside boundary layer (unless they 
+            ! are kept, then they replace)
+            keepind = newdllc > lBLstart
+
+            ! Check if any vertices are kept in the boundary layer part.
+            ! If yes, check how to insert them (they replace a BL vert)
+            k = 1
+            tempdlcBLstart = dlcBLstart
+            allocate(keepvertBLstart(ncBLstart+1), iscoarselegalBLstart(ncBLstart), &
+                isreflegalBLstart(ncBLstart), thisvertIDBLstart(ncBLstart+1))
+            keepvertBLstart         = .true.
+            thisvertIDBLstart       = [(k, k = vertID+1, vertID+ncBLstart+2)]
+            vertID = vertID + ncBLstart + 2
+            iscoarselegalBLstart    = .false.
+            isreflegalBLstart       = .false.
+            do while (.not. keepind(k))
+                if (thiskeepvert(k)) then 
+                    ! Need to keep this vertex
+                    if (all(tempdlcBLstart == Posinfval_R8())) then 
+                        ! Append
+                        print *, 'RefineSegmentLB: code not verified'
+                        dlcBLstart              = [dlcBLstart, newdllc(k)]
+                        keepvertBLstart         = [keepvertBLstart, .true.]
+                        thisvertIDBLstart       = [thisvertIDBLstart, thisvertID(k)]
+                        iscoarselegalBLstart    = [iscoarselegalBLstart, .false.]
+                        isreflegalBLstart       = [isreflegalBLstart, .false.]    
+
+                    else
+                        ! Check which vertex to replace
+                        minind = minloc(abs(tempdlcBLstart - newdllc(k)), 1)
+                        tempdlcBLstart(minind) = Posinfval_R8()
+                        dlcBLstart(minind) = newdllc(k)
+                        thisvertIDBLstart(minind) = thisvertID(k)
+                    end if 
+                    
+                else
+                    ! Overwrite this vertex
+                    ! (nothing to do)
+
+                end if 
+                
+                ! Increment counter
+                k = k + 1
+            end do
+
+            ! Sort
+            allocate(sortind(size(dlcBLstart)))
+            sortind = [(k, k = 1, size(dlcBLstart))]
+            call Sort(dlcBLstart, ind=sortind, ascend=.true.)
+            thisvertIDBLstart = thisvertIDBLstart(sortind)
+            deallocate(sortind)
+
+            ! Rebuild 
+            newdllc = [dlcBLstart, pack(newdllc, keepind)]
+            thiskeepvert = [keepvertBLstart, pack(thiskeepvert, keepind)]
+            thisvertID = [thisvertIDBLstart, pack(thisvertID, keepind)]
+            iscoarselegal = [iscoarselegalBLstart, pack(iscoarselegal, keepind(2:))]
+            isreflegal = [isreflegalBLStart, pack(isreflegal, keepind(2:))]
+        end if 
+        if (size(dlcBLend) > 0) then 
+            ! Delete nodes that are inside boundary layer (unless they 
+            ! are kept, then they replace)
+            keepind = newdllc < (lline - lBLend)
+
+            ! Check if any vertices are kept in the boundary layer part.
+            ! If yes, check how to insert them (they replace a BL vert)
+            k = size(newdllc)
+            tempdlcBLend = dlcBLend
+            allocate(keepvertBLend(ncBLend+1), iscoarselegalBLend(ncBLend), &
+                isreflegalBLend(ncBLend), thisvertIDBLend(ncBLend+1))
+            keepvertBLend         = .true.
+            thisvertIDBLend       = [(k, k = vertID+1, vertID+ncBLend+2)]
+            vertID = vertID + ncBLend + 2
+            iscoarselegalBLend    = .false.
+            isreflegalBLend       = .false.
+            do while (.not. keepind(k))
+                if (thiskeepvert(k)) then 
+                    ! Need to keep this vertex
+                    if (all(tempdlcBLend == Posinfval_R8())) then 
+                        ! Append (will sort later anyway)
+                        print *, 'RefineSegmentLB: code not verified'
+                        dlcBLend              = [dlcBLend, newdllc(k)]
+                        keepvertBLend         = [keepvertBLend, .true.]
+                        thisvertIDBLend       = [thisvertIDBLend, thisvertID(k)]
+                        iscoarselegalBLend    = [iscoarselegalBLend, .false.]
+                        isreflegalBLend       = [isreflegalBLend, .false.]    
+
+                    else
+                        ! Check which vertex to replace
+                        minind = minloc(abs(tempdlcBLend - newdllc(k)), 1)
+                        tempdlcBLend(minind) = Posinfval_R8()
+                        dlcBLend(minind) = newdllc(k)
+                        thisvertIDBLend(minind) = thisvertID(k)
+                    end if 
+                    
+                else
+                    ! Overwrite this vertex
+                    ! (nothing to do)
+
+                end if 
+                
+                ! Decrement counter
+                k = k - 1
+            end do
+
+            ! Sort
+            allocate(sortind(size(dlcBLend)))
+            sortind = [(k, k = 1, size(dlcBLend))]
+            call Sort(dlcBLend, ind=sortind, ascend=.true.)
+            thisvertIDBLend = thisvertIDBLend(sortind)
+            deallocate(sortind)
+
+            ! Rebuild 
+            newdllc         = [pack(newdllc, keepind), dlcBLend]
+            thiskeepvert    = [pack(thiskeepvert, keepind), keepvertBLend]
+            thisvertID      = [pack(thisvertID, keepind), thisvertIDBLend]
+            iscoarselegal   = [pack(iscoarselegal, keepind(1:size(keepind)-1)), iscoarselegalBLend]
+            isreflegal      = [pack(isreflegal, keepind(1:size(keepind)-1)), isreflegalBLend]
+        end if
+
+        ! Rebuild
+        dll = newdllc(2:size(newdllc)) - newdllc(1:size(newdllc)-1)
+        call refiner%AddSegmentVertexCoordinates(seg, newdllc)
+        ! call line%AddVertexCoordinates(newdllc)
+        if (any(thisvertID == 0)) then 
+            print *, thisvertID
+        end if 
+
+        ! Loop
+        !=====
+        do while (.true.)
+
+            ! Precompute
+            !-----------
+            ! Minimal & maximal length @ vertices
+            allocate(Lmaxvert(seg%nv), Lminvert(seg%nv))
+            Lmaxvert = 0.0_R8
+            Lminvert = Lmaxvert 
+            call refiner%Lmax%Evaluate(seg%xv, seg%yv, Lmaxvert)
+            call refiner%Lmin%Evaluate(seg%xv, seg%yv, Lminvert)
+
+            ! Issue warning if Lminvert >= Lmaxvert 
+            if (verbosity > 1) then 
+                if (any(Lminvert >= Lmaxvert)) then 
+                    print *, 'RefineLineSingleLB: minimal length exceeds ' // & 
+                        'maximal length at some vertices'
+                end if 
+            end if 
+
+            ! Initialize
+            allocate(coarsenface(size(dll)), refineface(size(dll)))
+            coarsenface = .false.
+            refineface = .false.
+
+            if (size(isreflegal) /= size(dll)) then 
+                print *, 'size error'
+            end if
+
+            ! Determine which faces to refine/coarsen
+            where (((dll > Lmaxvert(1:seg%nv-1)) .or. (dll > Lmaxvert(2:seg%nv))) &
+                .and. isreflegal) 
+                refineface = .true. 
+                iscoarselegal = .false. 
+            end where
+            where (((dll < Lminvert(1:seg%nv-1)) .or. (dll < Lminvert(2:seg%nv))) &
+                .and. iscoarselegal &
+                .and. .not. (thiskeepvert(1:seg%nv-1) .and. thiskeepvert(2:seg%nv)) &
+                .and. .not. ([.not. iscoarselegal(1:seg%nv-2), .false.] .and. [.false., iscoarselegal(2:seg%nv-1)]))
+                coarsenface = .true.
+                isreflegal = .false.
+            end where
+                
+            ! Check exit conditions
+            if ((.not. any(refineface)) .and. (.not. any(coarsenface))) then
+                if (any(dll < disttol)) then 
+                    print *, minloc(dll)
+                end if  
+                exit
+            end if 
+            if (any(dll < disttol.and. .not. coarsenface)) then 
+                print *, minloc(dll)
+            end if  
+
+            ! Refine/coarsen
+            !---------------
+            select case (refiner%meth)
+
+            case ('classic')
+
+                ! Classic refinement by splitting face, coarsening by
+                ! removing vertex (without any other adaptations)
+
+                ! Initialize new length distribution etc - too long, trimmed later
+                allocate(newdll(size(dll)+count(refineface)))
+                allocate(newkeepvert(size(newdll)+1), newvertID(size(newdll)+1))
+                allocate(newiscoarselegal(size(newdll)), newisreflegal(size(newdll)), &
+                    iscoarsenedface(size(newdll)))
+                newdll = 0.0_R8
+                newkeepvert = .false. 
+                newvertID = 0_I8
+                newiscoarselegal = .true.
+                newisreflegal = .true.
+                iscoarsenedface = .false.
+
+                ! Loop
+                cc = 1 ! from one to size newdll
+                i = 1 ! from one to size dll
+                newkeepvert(1) = keepvert(1)
+                newvertID(cc) = thisvertID(cc) ! always keep first vertex
+                do while (i <= size(dll))
+                    
+                    ! Refine/coarsen face? 
+                    if (refineface(i)) then 
+                        ! Split face
+                        if (cc+1 > size(newdll)) then 
+                            call gdErrorHandler('Something wrong')
+                        end if 
+                        if (iscoarsenedface(cc)) then 
+                            cc = cc + 1
+                        end if 
+                        newdll(cc:cc+1) = dll(i)/2.0_R8 
+
+                        ! Update next vertices
+                        newkeepvert(cc+1) = .false.
+                        newvertID(cc+1) = vertID+1
+                        newkeepvert(cc+2) = thiskeepvert(i+1)
+                        newvertID(cc+2) = thisvertID(i+1)
+
+                        ! Coarsening is illegal
+                        newiscoarselegal(cc:cc+1) = .false.
+
+                        ! Update counters
+                        vertID = vertID + 1
+                        i = i + 1
+                        cc = cc + 2
+                    elseif (coarsenface(i)) then 
+                        ! Preliminary checks
+                        isnextfacelegal = (i < size(dll)) 
+                        if (isnextfacelegal) then 
+                            isnextfacelegal = isnextfacelegal .and. (.not. thiskeepvert(i+1))
+                        end if 
+                        isprevfacelegal = (cc > 1) 
+                        if (isprevfacelegal) then 
+                            isprevfacelegal = isprevfacelegal &
+                                .and. (.not. newkeepvert(cc))
+                        end if  
+                        
+                        ! Check which face to merge with
+                        ismerged = .false. 
+                        if (isnextfacelegal) then 
+                            if (coarsenface(i+1)) then ! both faces mergeable
+                                ! Merge faces
+                                newdll(cc) = dll(i) + dll(i+1)
+
+                                ! Update next vertex
+                                newvertID(cc+1) = thisvertID(i+2)
+                                newkeepvert(cc+1) = thiskeepvert(i+2)
+
+                                ! Refinement is illegal
+                                newisreflegal(cc) = .false. 
+                                iscoarsenedface(cc) = .true. 
+
+                                ! Update counters
+                                cc = cc + 1 
+                                i = i + 2 !skip next face, cause already merged
+                                ismerged = .true.
+                            end if 
+                        end if 
+
+                        ! If not merged, check previous/next face
+                        if (.not. ismerged .and. (isnextfacelegal .and. isprevfacelegal)) then
+                            ! Need to check both previous and next face
+                            ! Next face may be merged
+                            if (newdll(cc-1) < dll(i+1) .or. (refineface(i+1))) then 
+                                ! Merge previous face
+                                newdll(cc-1) = newdll(cc-1)+dll(i)
+
+                                ! Set next vertex 
+                                newvertID(cc) = thisvertID(i+1)
+                                newkeepvert(cc) = thiskeepvert(i+1)
+
+                                ! Refinement is illegal
+                                newisreflegal(cc-1) = .false. 
+
+                                ! Update counter
+                                i = i + 1
+                            else
+                                ! Merge next face
+                                newdll(cc) = dll(i) + dll(i+1)
+
+                                ! Set next vertex
+                                newvertID(cc+1) = thisvertID(i+2)
+                                newkeepvert(cc+1) = thiskeepvert(i+2)
+
+                                ! Refinement is illegal
+                                newisreflegal(cc+1) = .false. 
+
+                                ! Update counters
+                                cc = cc + 1
+                                i = i + 2
+                            end if 
+
+                            ! Anyhow merging should succeed
+                            ismerged = .true.
+                        end if 
+                        if (.not. ismerged .and. (isnextfacelegal)) then 
+                            if (.not. refineface(i+1)) then ! only merge if next face isn't refined
+                                ! Merge next face
+                                newdll(cc) = dll(i) + dll(i+1)
+
+                                ! Set new vertex
+                                newvertID(cc+1) = thisvertID(i+2)
+                                newkeepvert(cc+1) = thiskeepvert(i+2)
+
+                                ! Refinement is illegal
+                                newisreflegal(cc) = .false. 
+
+                                ! Update counters
+                                cc = cc + 1
+                                i = i + 2
+                                ismerged = .true.
+                            end if 
+                        end if 
+                        if (.not. ismerged .and. (isprevfacelegal)) then 
+                            ! Merge previous face
+                            newdll(cc-1) = newdll(cc-1)+dll(i)
+
+                            ! Set next vertex 
+                            newvertID(cc) = thisvertID(i+1)
+                            newkeepvert(cc) = thiskeepvert(i+1)
+
+                            ! Refinement is illegal
+                            newisreflegal(cc-1) = .false. 
+
+                            ! Update counter
+                            i = i + 1
+
+                            ! Update statement
+                            ismerged = .true.
+                        end if 
+                        if (.not. ismerged) then 
+                            ! Skip for next loop
+                            newdll(cc) = dll(i)
+                            newvertID(cc+1) = thisvertID(i+1)
+                            newkeepvert(cc+1) = thiskeepvert(i+1)
+                            newisreflegal(cc) = isreflegal(i)
+                            newiscoarselegal(cc) = iscoarselegal(i)
+                            if (.not. isnextfacelegal .and. .not. isprevfacelegal) then 
+                                newiscoarselegal(cc) = .false. 
+                            end if 
+                            cc = cc + 1
+                            i = i + 1
+                        end if
+                    else
+                        ! Don't do anything, simply copy
+                        newdll(cc) = dll(i)
+                        newvertID(cc+1) = thisvertID(i+1)
+                        newkeepvert(cc+1) = thiskeepvert(i+1)
+                        newisreflegal(cc) = isreflegal(i)
+                        newiscoarselegal(cc) = iscoarselegal(i)
+                        
+                        ! Update counters
+                        cc = cc + 1
+                        i = i + 1
+                    end if 
+                end do 
+
+                ! Update
+                thiskeepvert = newkeepvert(1:cc)
+                thisvertID = newvertID(1:cc)
+                isreflegal = newisreflegal(1:cc-1) 
+                iscoarselegal = newiscoarselegal(1:cc-1)
+                if (any(newdll(1:cc-1) < disttol)) then 
+                    print *, minloc(newdll)
+                end if 
+                dll = newdll(1:cc-1)
+                if (any(dll < disttol)) then 
+                    print *, minloc(dll)
+                end if 
+                deallocate(newdllc)
+                allocate(newdllc(size(dll)+1))
+                newdllc = 0_R8
+                do i = 2, size(newdllc)
+                    newdllc(i) = dll(i-1) + newdllc(i-1)
+                end do 
+                call refiner%AddSegmentVertexCoordinates(seg, newdllc)
+                ! call line%AddVertexCoordinates(newdllc)
+
+                ! Housekeeping
+                deallocate(newvertID, newdll, newkeepvert, newisreflegal, &
+                    newiscoarselegal, iscoarsenedface)
+
+            case default
+
+                call gdErrorHandler('RefineSingleLineLB: unknown ' // & 
+                    'refiner method: ' // refiner%meth)
+
+            end select
+
+            ! Housekeeping
+            deallocate(coarsenface, refineface, Lminvert, Lmaxvert)
+
+        end do
+
+        ! Construct line coordinates
+        !===========================
+        if (any(dll <= disttol)) then 
+            print *, 'weird'
+        end if 
+        call refiner%AddSegmentVertexCoordinates(seg, newdllc)
+        call seg%AddVertexIDs(thisvertID)
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
@@ -12968,6 +14374,177 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Single line refinement, segment based, length based
+    subroutine RefineLineSegmentsLB(refiner, ggtmdata, line, vertID)
+
+        ! Description
+        !============
+        ! This routine refines the line by looping over each segment
+        ! and refining that segment based on its refinement options. 
+        ! Contrary to the other full line refinement, ggtmdata is also 
+        ! updated here and therefore keeps the view on the segments
+        ! consistent. Other lines that may contain the same segments are
+        ! not automatically updated, though. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)               :: refiner 
+        type(GGTMDataUDT), intent(inout)            :: ggtmdata
+        type(GGTMFieldlineDataUDT), intent(inout)   :: line 
+        integer(I8), intent(inout)                  :: vertID
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)          :: keepvert
+
+        ! Loop
+        integer(I8)                                 :: i 
+
+        ! Initialize
+        !===========
+        associate(seg   => ggtmdata%seg)
+
+        ! Checks
+        !=======
+        ! Trivial case: line with single vertex segment
+        if (seg(line%segID(1))%isvertex) then 
+            ! Don't do anything - can't refine point
+            return 
+        end if 
+
+        ! Refine
+        !=======
+        do i = 1, line%ns
+            ! Simply keep vertices at start and end for now
+            allocate(keepvert(seg(line%segID(i))%nv))
+            keepvert = .false. 
+            keepvert(1) = .true. 
+            keepvert(size(keepvert)) = .true.
+
+            ! Refine (options per segment are updated in refiner)
+            call refiner%Refine(ggtmdata, line%segID(i), vertID, &
+                keepvert) 
+
+            ! Housekeeping
+            deallocate(keepvert)
+        end do 
+
+        ! Update line data
+        call line%UpdateLineData(ggtmdata)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Segment initialization
+    subroutine InitializeSegmentDataLB(refiner, seg)
+
+        ! Description
+        !============
+        ! Initialize any line-based data for the refiner. To be called
+        ! only once at the beginning of each refinement loop. In this 
+        ! case, the line length coordinate in terms of the specified 
+        ! length measure is computed and stored.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)           :: refiner
+        type(GGTMSegmentUDT), intent(in)        :: seg 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: dx, dy, xf, yf, bx, &
+            by, bn, dll, dllc, psi, dpsi
+
+        ! Loop 
+        integer(I8)                             :: i 
+
+        ! Update refinement options
+        call refiner%UpdateRefinementOptions(seg%refoptions)
+
+        ! Compute
+        !========
+        select case (refiner%lengthtype)
+
+        case ('euler')
+
+            ! Easy
+            refiner%linedllc = seg%dllc 
+
+        case ('radial')
+
+            ! Initialize
+            dx = seg%xl(2:seg%nl) - seg%xl(1:seg%nl-1)
+            dy = seg%yl(2:seg%nl) - seg%yl(1:seg%nl-1) 
+            xf = 0.5*(seg%xl(2:seg%nl) + seg%xl(1:seg%nl-1))
+            yf = 0.5*(seg%yl(2:seg%nl) + seg%yl(1:seg%nl-1)) 
+            allocate(bx(seg%nl-1), by(seg%nl-1))
+            call refiner%field%interp%Evaluate(xf, yf, 1, 0, bx)
+            call refiner%field%interp%Evaluate(xf, yf, 0, 1, by)
+            bn = sqrt(bx**2 + by**2)
+            bx = bx/bn 
+            by = by/bn 
+
+            ! Project and take absolute value
+            dll = dx*bx + dy*by
+            if (sum(dll)/size(dll) < 0) then 
+                where(dll > 0) dll = 0
+            else
+                where(dll < 0) dll = 0
+            end if 
+            dll = abs(dll) 
+            
+            ! Compute accumulative length
+            allocate(dllc(seg%nl))
+            dllc = 0_R8
+            do i = 2, seg%nl
+                dllc(i) = dllc(i-1) + dll(i-1)
+            end do 
+            refiner%linedllc = dllc
+
+        case ('psi')
+
+            ! Evaluate psi values on seg
+            allocate(psi(seg%nl))
+            call refiner%field%interp%Evaluate(seg%xl, seg%yl, 0, 0, psi)
+
+            ! Take differences along the seg
+            dpsi = (psi(2:seg%nl) - psi(1:seg%nl-1))
+
+            ! Check general difference between first and last, remove
+            ! parts that are  not ascending/descending
+            if (psi(1) > psi(size(psi))) then 
+                ! Descending
+                where (dpsi > 0) dpsi = 0
+                where((psi(2:) > psi(1)) .or. (psi(2:) < psi(size(psi)))) dpsi = 0
+            else 
+                ! Ascending
+                where(dpsi < 0) dpsi = 0
+                where((psi(2:) < psi(1)) .or. (psi(2:) > psi(size(psi)))) dpsi = 0
+            end if 
+            dpsi = abs(dpsi)
+                
+
+            ! Compute accumulative length
+            allocate(dllc(seg%nl))
+            dllc = 0_R8
+            do i = 2, seg%nl 
+                dllc(i) = dllc(i-1) + dpsi(i-1)
+            end do
+            refiner%linedllc = dllc
+
+        case default 
+            
+            call gdErrorHandler('InitializeSegmentDataLB: length ' // & 
+                'method "' // refiner%lengthtype // '" not implemented')
+
+        end select
+
+
+    end subroutine
+
     ! Line initialization
     subroutine InitializeLineDataLB(refiner, line)
 
@@ -13075,7 +14652,47 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
-    ! Line length getter, length based
+    ! Segment length getter
+    function GetSegmentEdgeLengthLB(refiner, seg) result(dlcv)
+
+        ! Description
+        !============
+        ! Wrapper to get line edge lengths. The wrapper here is 
+        ! necessary to allow different length definitions and not only
+        ! the eulerian length given by the line's dll field. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)               :: refiner 
+        type(GGTMSegmentUDT), intent(in)            :: seg 
+        real(R8), allocatable, dimension(:)         :: dlcv
+
+
+        ! Determine length
+        !=================
+        select case (refiner%lengthtype)
+
+        case ('euler')
+
+            ! Simply return line%dlcv
+            dlcv = seg%dlcv
+
+        case ('radial', 'psi')
+
+            ! Need to interpolate 
+            call Interpolate1D(seg%dlcv, dlcv, seg%dllc, refiner%linedllc)
+
+        case default 
+            
+            call gdErrorHandler('RefineSegmentLB: length ' // & 
+                'method "' // refiner%lengthtype // '" not implemented')
+
+        end select
+
+    end function
+
+    ! Line length getter
     function GetLineEdgeLengthLB(refiner, line) result(dlcv)
 
         ! Description
@@ -13114,6 +14731,55 @@ module ggmod_gridgeneration2D
         end select
 
     end function
+
+    ! Segment coordinate setter
+    subroutine AddSegmentVertexCoordinatesLB(refiner, seg, dlcv)
+
+        ! Description
+        !============
+        ! Add the line vertex coordinates based on the new length 
+        ! coordinates given in dlcv which are in terms of the refiner
+        ! length type. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMLineRefinerLB2DUDT)               :: refiner 
+        type(GGTMSegmentUDT), intent(inout)         :: seg 
+        real(R8), dimension(:), intent(in)          :: dlcv
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)         :: newdlcv
+
+
+        ! Determine length
+        !=================
+        select case (refiner%lengthtype)
+
+        case ('euler')
+
+            ! Simply call line method
+            call seg%AddVertexCoordinates(dlcv)
+
+        case ('radial', 'psi')
+
+            ! Need to interpolate first
+            call Interpolate1D(dlcv, newdlcv, refiner%linedllc, seg%dllc)
+            newdlcv(1) = 0_R8
+            newdlcv(size(newdlcv)) = seg%dllc(size(seg%dllc))
+            
+            ! Call line method
+            call seg%AddVertexCoordinates(newdlcv)
+            
+        case default 
+            
+            call gdErrorHandler('RefineLineSingleLB: length ' // & 
+                'method "' // refiner%lengthtype // '" not implemented')
+
+        end select
+
+
+    end subroutine
 
     ! Line coordinate setter
     subroutine AddLineVertexCoordinatesLB(refiner, line, dlcv)
