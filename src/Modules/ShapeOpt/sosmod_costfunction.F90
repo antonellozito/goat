@@ -29,6 +29,8 @@ module sosmod_costfunction
     use somod_costfunction 
     use gdmod_optimizationengine
     use b2mod_costfunction
+    use b2mod_state_constr_diff
+    use b2mod_costfunction_data
 
     ! Rename precision ... 
     use b2mod_types, only: R8_B25 => R8
@@ -82,6 +84,9 @@ module sosmod_costfunction
         type(switches_diff)     :: switchb 
         type(mapping)           :: mpg 
         type(mapping_diff)      :: mpgb
+        type(state_constraint)  :: stc
+        type(state_constraint_diff)     :: stcb 
+        type(costfunction_data)     :: cf_data
 
     contains 
 
@@ -152,7 +157,8 @@ module sosmod_costfunction
             costfunction%switchb, costfunction%g, costfunction%gb, &
             costfunction%mpg, costfunction%mpgb, costfunction%st, &
             costfunction%stb, costfunction%state_ext, costfunction%state_extb, &
-            costfunction%state_avg, costfunction%state_avgb)
+            costfunction%state_avg, costfunction%state_avgb, &
+            costfunction%stc, costfunction%stcb, costfunction%cf_data)
     
     end subroutine 
 
@@ -199,7 +205,10 @@ module sosmod_costfunction
             state_extb      => costfunction%state_extb,     &
             state_avg       => costfunction%state_avg,      &
             state_avgb      => costfunction%state_avgb,     &
-            stb             => costfunction%stb             &
+            stb             => costfunction%stb,            &
+            stc             => costfunction%stc,            &
+            stcb            => costfunction%stcb,           &
+            cf_data         => costfunction%cf_data         &
             )
 
         ! Evaluate
@@ -209,7 +218,7 @@ module sosmod_costfunction
             ! Evaluate the gradient as well 
             call EvaluateCostFunctionGradient(switch, switchb, g, gb, &
                 mpg, mpgb, st, stb, state_ext, state_extb, state_avg, &
-                state_avgb, J1, J1b)
+                state_avgb, J1, J1b, stc, stcb, cf_data)
 
             ! Extract and cast into our precision format
             J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
@@ -218,7 +227,7 @@ module sosmod_costfunction
         else
             ! Evaluate only the cost function
             call EvaluateCostfunction(switch, g, mpg, st, &
-                state_ext, state_avg, J1)
+                state_ext, state_avg, J1, stc, cf_data)
 
             ! Extract and cast into our precision format
             J = real(J1(1), kind=R8_G) ! assumed first entry is total cost function
@@ -276,10 +285,29 @@ module sosmod_costfunction
             ! Allocate
             allocate(CostfunctionPLFUDT::costfunction%costfunction)
 
+            ! Set type
+            costfunction%costfunction%type = 'PLF'
+
+        case ('SOFA')
+
+            ! Allocate
+            allocate(CostFunctionSOFAUDT::costfunction%costfunction)
+
+            ! Set type
+            costfunction%costfunction%type = 'SOFA'
+
+        case ('general')
+                
+            ! General cost function
+            allocate(CostFunctionGeneralSOUDT::costfunction%costfunction)
+
+            ! Set type
+            costfunction%costfunction%type = 'general'
+
         case default 
 
             ! Throw error
-            call gdErrorHandler('InitializeCostFunctionGR: unknown cost' // & 
+            call gdErrorHandler('InitializeCostFunctionGRS: unknown cost' // & 
                 'function type: ' // options%type)
 
         end select

@@ -95,6 +95,9 @@ else
     env|sed -ne "/^[ }]\|=(/b; s/\([^=]*\)=\(.*\)/setenv \1 '\2'/p" >! $setup_pre
 endif
 
+# Load default openmp settings
+source ${GOATTOP}/SETUP/openmp
+
 # Setup files for combination of HOST_NAME and COMPILER, + local modifications if present
 if (-s ${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}) then
   echo Loading SETUP/setup.csh.${HOST_NAME}.${COMPILER}.
@@ -117,6 +120,7 @@ alias psooutput "python3 ${GOAT_VISUALIZATION}/VisualizeShapeOptOutput.py"
 alias mgv "python3 ${GOAT_VISUALIZATION}/MonitorGridAndVessel.py"
 alias pgginput "python3 ${GOAT_VISUALIZATION}/VisualizeGGInput.py"
 alias pggoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGGOutput.py"
+alias pspp "python3 ${GOAT_VISUALIZATION}/SolpsPostProcess.py"
 
 # Create environment cache for faster loading (setenv, unsetenv, and aliases)
 set setup_post = `mktemp`

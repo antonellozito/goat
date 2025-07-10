@@ -56,6 +56,7 @@ module PolygonLevelsetFunction2D
     ! Routines
     public InitializePolygonLevelsetFunction2D, InitializePLF2DGeneral, &
         InitializePLF2DClosedExact, InitializePLF2DClosedApproximation
+    public assignment(=)
 
     !==================================================================!
     !                                                                  !
@@ -308,6 +309,11 @@ module PolygonLevelsetFunction2D
         end subroutine
 
     end interface
+
+    ! Operator overloading
+    interface assignment(=)
+        module procedure AssignPLF2DClass
+    end interface
     
     contains
 
@@ -327,7 +333,7 @@ module PolygonLevelsetFunction2D
         ! Declare variables
         !==================
         ! Arguments
-        class(PolygonLevelsetFunction2DUDT), allocatable        :: plf 
+        class(PolygonLevelsetFunction2DUDT), allocatable, intent(out)  :: plf 
         type(PolygonSetUDT), intent(in)                         :: ps
         class(PLF2DOptionsUDT), intent(in)                      :: options
 
@@ -382,8 +388,6 @@ module PolygonLevelsetFunction2D
                 call plf%Initialize(ps)
 
             end select
-
-        class default
 
         end select 
 
@@ -472,6 +476,50 @@ module PolygonLevelsetFunction2D
         ! Deallocate
         deallocate(xgv, ygv, xg, yg, vg)
 
+    end subroutine
+
+    ! Assignment
+    subroutine AssignPLF2DClass(a, b)
+
+        class(PolygonLevelsetFunction2DUDT), allocatable, intent(inout)    :: a 
+        class(PolygonLevelsetFunction2DUDT), intent(in)                    :: b 
+
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+
+        select type (b)
+
+        class default 
+
+            call gdErrorHandler('Unknown type')
+
+        type is (PolygonLevelsetFunction2DClosedApproximationUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (PolygonLevelsetFunction2DClosedApproximationUDT)
+                a = b 
+            end select
+
+        type is (PolygonLevelsetFunction2DGeneralUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (PolygonLevelsetFunction2DGeneralUDT)
+                a = b 
+            end select
+
+        type is (PolygonLevelsetFunction2DClosedExactUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (PolygonLevelsetFunction2DClosedExactUDT)
+                a = b
+            end select
+
+        end select
+    
     end subroutine
 
     !------------------------------------------------------------------!
@@ -1306,7 +1354,8 @@ module PolygonLevelsetFunction2D
         !$omp val, minind, vind, eind, tdistvert, tcrossprod, nq, myones, inf) &
         !$omp private(xqr, yqr, vx, vy, dvn, tvn, dx, dy, theta, isinvert, &
         !$omp onedge, distedge, distvert, indmine, fe, signe, indminv, &
-        !$omp fv, signv, totsign, indmin)
+        !$omp fv, signv, totsign, indmin) if(.not. omp_in_parallel()) &
+        !$omp schedule(static)
         do iq = 1, nq
             
             ! Unpack
@@ -1811,7 +1860,8 @@ module PolygonLevelsetFunction2D
         !$omp val, minind, vind, eind, tdistvert, tcrossprod, nq, myones, inf, vq) &
         !$omp private(xqr, yqr, vx, vy, dvn, tvn, dx, dy, theta, isinvert, &
         !$omp onedge, distedge, distvert, indmine, fe, signe, indminv, &
-        !$omp fv, signv, totsign, indmin)
+        !$omp fv, signv, totsign, indmin) if (.not. omp_in_parallel()) & 
+        !$omp schedule(static)
         do iq = 1, nq
             
             ! Unpack

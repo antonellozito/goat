@@ -601,6 +601,9 @@ module goatmod_types
         ! Vessel coordinate getter
         procedure :: GetVesselCoordinates
 
+        ! Vessel vertex pairs getter
+        procedure :: GetVesselVertexPairs
+
     end type
 
     ! Environment
@@ -843,6 +846,15 @@ module goatmod_types
         if (allocated(grid%data%divFc)) deallocate(grid%data%divFc)
         if (allocated(grid%data%spointdivID)) deallocate(grid%data%spointdivID)
         if (allocated(grid%data%tpointdivID)) deallocate(grid%data%tpointdivID)
+
+        ! Read data for structured grid remapping (to be deleted in future)
+        call cfruin (filespec,1,idum2,'isClassicalGrid') 
+        grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4) ! cast to I4 type
+        if (grid%data%sglegacy%isClassicalGrid == 1) then 
+            call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
+            grid%data%sglegacy%nx = idum(0)
+            grid%data%sglegacy%ny = idum(1)
+        end if
         
         ! Read topological data
         if (readTopologicalData) then 
@@ -851,7 +863,7 @@ module goatmod_types
             grid%data%topoflag = idum(0)
     
             ! Read number of topological points
-            call cfruin(filespec, 6, idum, 'nX,nO,nS,nT,Div,nDivFc')
+            call cfruin(filespec, 6, idum, 'nX,nO,nS,nT,nDiv,nDivFc')
             grid%data%nxp = idum(0)
             grid%data%nop = idum(1)
             grid%data%nsp = idum(2)
@@ -863,13 +875,14 @@ module goatmod_types
             allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
                 grid%data%spointID(idum(2)), grid%data%isprimaryxp(idum(0)), &
                 grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
-                grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp))
+                grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
+                grid%data%spointxpID(grid%data%nsp))
     
             ! Read X-point data
             call ReadSingleLine(filespec, chardummy, reachedeof) ! header
             do i = 1, grid%data%nxp  
                 ! Read 
-                read(filespec, *) grid%data%xpointID(i), grid%data%isprimaryxp, &
+                read(filespec, *) grid%data%xpointID(i), grid%data%isprimaryxp(i), &
                     idum(0)
             end do
     
@@ -942,16 +955,7 @@ module goatmod_types
         allocate(fsdummyr(grid%data%fluxdata%nFs))
         allocate(facelistdummy(grid%cell%nface))
         allocate(ftdummy(grid%data%fluxdata%nFt))
-    
-        ! Read data for structured grid remapping (to be deleted in future)
-        call cfruin (filespec,1,idum2,'isClassicalGrid') 
-        grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4) ! cast to I4 type
-        if (grid%data%sglegacy%isClassicalGrid == 1) then 
-            call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
-            grid%data%sglegacy%nx = idum(0)
-            grid%data%sglegacy%ny = idum(1)
-        end if
-    
+        
         ! Attempt to read in OMP/IMP data 
         !--------------------------------
         ! OMP
@@ -2912,6 +2916,9 @@ module goatmod_types
         vcount = 1
         allocate(tempfcell(f%ntot, 2))
         tempfcell = 0
+        !!$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
+        !!$omp private(i, j, k, tv, ntv, tf, ind) &
+        !!$omp shared(v, f, c, nv, nf, nc, fcount, tempfcell, vcount) 
         do i = 1, nc ! loop over all cells
             ! Get vertices of this cell
             tv = GetCellVert(c, i)
@@ -2950,15 +2957,17 @@ module goatmod_types
                             'ComputeGridInterconnections: too many ' &
                                 // 'neighbours for this face')
                         end if
-    
                     
+                        !$omp critical
                         tempfcell(tf,fcount(tf)) = i
     
                         ! Update fcount
                         fcount(tf) = fcount(tf)+1
+                        !$omp end critical
                     end if
     
                     ! Add the current cell to the j'th vertex
+                    !$omp critical
                     ind = v%cellP(tv(j),1) + vcount(tv(j)) - 1
                     if (ind > v%ncell) then
                         call gdErrorHandler('unknown error')
@@ -2967,7 +2976,7 @@ module goatmod_types
     
                     ! Update vcount
                     vcount(tv(j)) = vcount(tv(j))+1
-    
+                    
                     ! Add cell face
                     if (.not. ((j > 1) .and. c%GC(i))) then ! hedge for guard cells
                         ind = c%faceP(i,1) + j - 1
@@ -2976,6 +2985,7 @@ module goatmod_types
                         end if
                         c%face(ind) = tf
                     end if
+                    !$omp end critical
                 end if
     
             end do
@@ -2984,6 +2994,7 @@ module goatmod_types
             deallocate(tv)
     
         end do
+        !!$omp end parallel do
     
         ! Construct cell arrays for faces and vertices
         fcount = fcount-1
@@ -3141,6 +3152,12 @@ module goatmod_types
         !========================================
         
         ! Loop over all vertices
+        !!$omp parallel do default(none) schedule(guided) if(.not. omp_in_parallel()) &
+        !!$omp private (i, j, tcs, nvc, cellfound, localID, allvertcells, &
+        !!$omp sp, ep, tcf, startcellnotfound, thiscell, m, tc, fc, ncf, &
+        !!$omp k, tcn, fn, q, vc, allnotfound, nextcell, allfv, allfvind, &
+        !!$omp tcf2, ntcf2, tfv) &
+        !!$omp shared (v, f, c, accountforGC)
         do i = 1, v%ntot ! v%ntot
     
             ! Check how many distinct cell sequences there are by checking 
@@ -3414,6 +3431,7 @@ module goatmod_types
                             ! if the current cell is not a guard cell
                             
                             sp = v%cellP(i,1)
+                            !$omp critical
                             v%cell(sp) = thiscell 
                             if (.not. c%GC(thiscell)) then
                                 sp = v%neigP(i,1)
@@ -3427,6 +3445,7 @@ module goatmod_types
                                 ! Update vc
                                 vc = vc+1
                             end if
+                            !$omp end critical
     
                             ! Housekeeping
                             deallocate(allfvind)
@@ -3437,6 +3456,7 @@ module goatmod_types
     
                         ! Add the cell and vertex neighbour
                         sp = v%cellP(i,1) + vc
+                        !$omp critical
                         v%cell(sp) = nextcell
                         sp = v%neigP(i,1) + vc
                         tfv = f%vert(tcf,:)
@@ -3445,6 +3465,7 @@ module goatmod_types
                         else
                             v%neig(sp) = tfv(1)
                         end if
+                        !$omp end critical
     
                         ! Update counter
                         vc = vc + 1
@@ -3520,11 +3541,13 @@ module goatmod_types
                     ! Add cell and vertex neighbour
                     sp = v%neigP(i,1) + vc
                     tfv = f%vert(tcf2(1),:)
+                    !$omp critical
                     if (tfv(1) == i) then
                         v%neig(sp) = tfv(2)
                     else
                         v%neig(sp) = tfv(1)
                     end if
+                    !$omp end critical
     
                     ! Housekeeping
                     deallocate(allfvind)
@@ -3547,14 +3570,7 @@ module goatmod_types
             deallocate(allvertcells)
     
         end do
-    
-        !do i = 1, v%ntot 
-        !    print *, i, v%BV(i), v%neig(v%neigP(i,1):v%neigP(i,1)+v%neigP(i,2)-1)
-        !end do
-        !    do i = 1, v%ntot 
-        !    print *, i, v%BV(i), v%cell(v%cellP(i,1):v%cellP(i,1)+v%cellP(i,2)-1)
-        !end do
-        
+        !!$omp end parallel do 
     
         ! Add to grid
         !============
@@ -4614,7 +4630,7 @@ module goatmod_types
         !=========================
         if (vesseloptions%refine) then 
             ! Call refiner 
-            call vessel%polygonset%Refine(vesseloptions%maxdist)
+            call vessel%polygonset%Refine(vesseloptions%maxdist, vesseloptions%minreffac)
     
             ! Update labels - normally, labels are kept the same on original
             ! nodes but zero elsewhere. 
@@ -5772,11 +5788,15 @@ module goatmod_types
             xvp = xv(k+1:k+npv)
             yvp = yv(k+1:k+npv)
 
-            ! Assign
-            call vessel%polygonset%polygons(i)%Construct(&
-                xv(vessel%polygonset%polygons(i)%vert), &
-                yv(vessel%polygonset%polygons(i)%vert), &
-                vessel%polygonset%polygons(i)%labels(vessel%polygonset%polygons(i)%vert,:))
+            ! Assign - don't reconstruct, may alter vertex oder!
+            vessel%polygonset%polygons(i)%x = xvp 
+            vessel%polygonset%polygons(i)%y = yvp
+
+            ! H
+            !call vessel%polygonset%polygons(i)%Construct(&
+            !   xv(vessel%polygonset%polygons(i)%vert), &
+            !    yv(vessel%polygonset%polygons(i)%vert), &
+            !    vessel%polygonset%polygons(i)%labels(vessel%polygonset%polygons(i)%vert,:))
             
             ! Update counter
             k = k + npv 
@@ -6674,5 +6694,137 @@ module goatmod_types
     
     end subroutine
     
+
+    ! Vessel vertex pairs
+    subroutine GetVesselVertexPairs(vessel, vpairs, structureIDs, vertIDs)
+
+        ! Description
+        !============
+        ! This routine returns the vessel vertex pairs (i.e. the 
+        ! subsequent edge pairs) in a nvpairs-by-3 structure. The 
+        ! edges are formed by v1v2 and v2v3 (in that specific order). 
+        ! This routine is useful for many shape optimization related 
+        ! cost functions and constraints. Only vertex pairs of the 
+        ! specified structure IDs or vertices are taken (for the latter,
+        ! the vertex pair of v2, i.e. v1v2 v2v3 is stored). Note that 
+        ! the first and last pair may not be part of the specified 
+        ! structure. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselUDT)                        :: vessel 
+        integer(I8), allocatable, intent(out)   :: vpairs(:, :)
+        integer(I8), intent(in)                 :: structureIDs(:), &
+            vertIDs(:)
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)      :: includevert, &
+            ispolygonstart, ispolygonend
+        integer(I8)                             :: nv, nvpairs, psind, &
+            prevv, ind
+        integer(I8), allocatable                :: labels(:, :)
+        integer(I8), allocatable, dimension(:)  :: pID, vID
+        real(R8), allocatable, dimension(:)     :: xv, yv
+
+        ! Loop
+        integer(I8)                             :: i, cc
+ 
+        ! Initialize
+        !===========
+        ! Associate
+        associate(ps        => vessel%polygonset)
+
+        ! Determine vertex pairs
+        !=======================
+        ! Get all vertices and vertex labels
+        call ps%GetLabels(labels)
+        call ps%GetVertices(xv, yv, pID)
+        call ps%GetVertices(vID)
+        nv = size(labels, 1)
+
+        ! Check if contributions should be included
+        allocate(includevert(nv))
+        includevert = .false. 
+
+        ! Constrain per vessel structure (label 1 and 2)
+        do i = 1, size(structureIDs)
+            ! Unpack ID
+            associate(tID       => structureIDs(i))
+
+            ! Check vertices
+            where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) &
+                includevert = .true. 
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Constrain per vertex ID
+        do i = 1, size(vertIDs)
+            ! Unpack ID
+            associate(tID       => vertIDs(i))
+
+            ! Check vertices
+            where( (labels(:, 3) == tID)) includevert = .true. 
+
+            ! Housekeeping
+            end associate
+        end do
+
+        ! Check starting points of polygon
+        ispolygonstart = [.true., pID(2:) - pID(:nv-1) /= 0]
+        ispolygonend = [ispolygonstart(2:), .true.]
+
+        ! Initialize vertex pairs 
+        nvpairs = count(includevert .and. (.not. ispolygonend))
+        allocate(vpairs(nvpairs, 3))
+
+        ! Loop
+        cc = 0
+        psind = 1
+        do i = 1, size(vID)
+            if (includevert(vID(i))) then 
+
+                ! Check if we should include the pair (need to account
+                ! for starting vertex appearing twice in vID)
+                if (ispolygonend(i)) then 
+                    ! Update psind
+                    psind = psind + ps%polygons(pID(i))%ne + 1
+                    cycle 
+                end if 
+
+                ! Update counter
+                cc = cc + 1
+
+                ! Set current vertex
+                vpairs(cc, 2) = vID(i) 
+
+                ! Check
+                if (ispolygonstart(i)) then
+                    ! Previous vertex ID should be current polygon start 
+                    ! plus number of edges minus 1
+                    ind = psind + ps%polygons(pID(i))%ne - 1
+                    prevv = vID(ind) 
+                else 
+                    prevv = vID(i-1)
+                end if 
+
+                ! Add
+                vpairs(cc, 1) = prevv 
+                vpairs(cc, 3) = vID(i+1)
+            end if 
+        end do
+
+        ! Sanity check
+        if (cc /= nvpairs) then 
+            ! Should be a bug
+            call gdErrorHandler('GetVesselVertexPairs: this is a bug')
+        end if 
+
+        ! Housekeeping
+        end associate
+
+    end subroutine
 
 end module

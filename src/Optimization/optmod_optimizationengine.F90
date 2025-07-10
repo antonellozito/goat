@@ -169,6 +169,7 @@ module optmod_optimizationengine
         type(NumKKTUDT)         :: numKKT
         type(numLSUDT)          :: numLS 
         type(NumNCPUDT)         :: numNCP
+        type(DLinearSolverOptionsUDT)   :: numLinearSolver
 
     contains 
 
@@ -783,6 +784,18 @@ module optmod_optimizationengine
         !=======================
         ! Compute penalty factor
         penfac = max(maxvallambda, maxvalmu) + delta
+
+        ! Check if we should update the penalty factor (rule of nocedal
+        ! and wright, eq. 18.40 p545, first edition) - note that penfac
+        ! here is mu^-1 in nocedal
+        !if (num%mfpenfac >= penfac) then 
+            ! Penalty factor would decrease - keep it high
+        !    penfac = num%mfpenfac 
+        !else
+            ! Penalty factor increases, allow and update (note: we don't
+            ! account for the factor 2 before delta as in N&W)
+        !    num%mfpenfac = penfac
+        !end if 
         
         ! Compute L1 norm of constraints
         gnorm = 0
@@ -804,7 +817,7 @@ module optmod_optimizationengine
                 DJf = sum(gradJ*dx(1:nphi))
             end if 
         end if 
-
+        
         ! Housekeeping
         !=============
 
@@ -845,6 +858,13 @@ module optmod_optimizationengine
         call solver%numKKT%InitializeNumParams() 
         call solver%numLS%InitializeNumParams()
         call solver%numNCP%InitializeNumParams()
+        
+
+        ! Linear solver options
+        solver%numLinearSolver%inputfilepath = solver%inputfilepath
+        solver%numLinearSolver%fieldprefix   = solver%inputfileprefix // 'opt.'
+        call solver%numLinearSolver%Set()
+
 
     end subroutine
 
@@ -902,6 +922,8 @@ module optmod_optimizationengine
         integer(I8), allocatable    :: phiind(:), eqconind(:), &
             ineqconind(:), activeineqconind(:), inactiveineqconind(:)
         type(MySparseUDT)           :: hessLJ, lhs, hessLC
+        class(DLinearSolverUDT), allocatable    :: linearsolverKKT, &
+            linearsolverLS, linearsolverLM ! different solvers for each type of system to simplify reuse/optimization
 
         ! FD checkers
         type(FDcheckerUDT)          :: FDcfv, FDeqcon, FDineqcon
@@ -941,40 +963,42 @@ module optmod_optimizationengine
         allocate(gradJ(nphi))
         J = 0
         gradJ(:) = 0
-        hessJ%nrow = nphi 
-        hessJ%ncol = nphi 
+        hessJ = SpZeros(nphi, nphi)
 
         ! Equality constraint 
         allocate(G(neq), lambda(neq))
         G(:) = 0
-        lambda(:) = 0.0
-        gradG%nrow = nphi 
-        gradG%ncol = neq 
-        hessG%nrow = nphi 
-        hessG%ncol = nphi
+        lambda = 0
+        if (allocated(problem%lambda)) then 
+            if (size(problem%lambda) == neq) then 
+                lambda = problem%lambda
+            end if 
+        end if 
+        gradG = SpZeros(nphi, neq)
+        hessG = SpZeros(nphi, nphi)
 
         ! Inequality constraint 
         allocate(H(nineq), mu(nineq))
         H(:) = 0
         mu(:) = 0
-        gradH%nrow = nphi 
-        gradH%ncol = nineq 
-        hessH%nrow = nphi 
-        hessH%ncol = nphi
+        if (allocated(problem%mu)) then 
+            if (size(problem%mu) == nineq) then 
+                mu = problem%mu
+            end if 
+        end if 
+        gradH = SpZeros(nphi, nineq)
+        hessH = SpZeros(nphi, nphi)
 
         ! NCP function
         allocate(ncp(nineq), A(nineq), I(nineq))
-        gradncpphi%nrow = nphi 
-        gradncpphi%ncol = nineq
-        gradncpmu%nrow = nineq 
-        gradncpmu%ncol = nineq
-        A(:) = .false.
-        I(:) = .not. A
+        gradncpphi = SpZeros(nphi, nineq)
+        gradncpmu = SpZeros(nineq, nineq)
+        A = mu > 0_R8
+        I = .not. A
 
         ! Lagrangian 
         allocate(gradL(nphi + neq + nineq))
-        hessL%nrow = nphi + neq + nineq
-        hessL%ncol = nphi + neq + nineq
+        hessL = SpZeros(nphi + neq + nineq, nphi + neq + nineq)
         L = 0
         gradL(:) = 0
 
@@ -987,6 +1011,11 @@ module optmod_optimizationengine
         phiind = [(k, k = 1, nphi)]
         eqconind = [(k, k = nphi+1, nphi+neq)]
         ineqconind = [(k, k = nphi+neq+1, nphi+neq+nineq)]
+        linearsolverKKT = ConstructDLinearSolver(solver%numLinearSolver)
+        linearsolverLS = ConstructDLinearSolver(solver%numLinearSolver) 
+        linearsolverLM = ConstructDLinearSolver(solver%numLinearSolver) 
+        ! call linearsolver%Initialize()
+        
 
         ! Diagnostics
         !checkgradients  = .false. ! check gradients in each iteration?
@@ -1079,6 +1108,10 @@ module optmod_optimizationengine
                 H, gradH, hessH, mu, A, &
                 dogradient, dohessian)
 
+            ! Check convergence
+            call solver%CheckConvergenceKKT(gradL, converged, convnorm)
+            problem%monitor%convnorm(itopt) = convnorm
+
             ! Check if an error was encountered
             errstat = ErrorStack%ErrorState()
             call ErrorStack%EndTrack()
@@ -1090,15 +1123,14 @@ module optmod_optimizationengine
             end if 
 
             ! Check if NaNs are encountered in residual
-            if (any(isnan(gradL))) then 
+            if (any(isnan(gradL)) .or. isnan(L)) then 
                 ! Call error, exit the loop
                 call gdErrorHandler('SolveOptimizationProblemKKT: NaNs ' // &
                     'detected when evaluating the problem, exiting', severityin=0)
                 exit 
             end if 
 
-            ! Check convergence
-            call solver%CheckConvergenceKKT(gradL, converged, convnorm)
+            
 
             ! Timers
             call wall_time(t_eval_e)
@@ -1127,7 +1159,9 @@ module optmod_optimizationengine
                 
                 ! Call the sparse solver
                 call wall_time(t_linsolve_s)
-                call SolveSparseLinearSystemDI(lhs, rhs, dx, flag)
+                call linearsolverKKT%SolveSparseLinearSystem(lhs, rhs, dx, flag)
+                ! call SolveSparseLinearSystemDI(lhs, rhs, dx, flag)
+                ! call SolveSparseLinearSystemDIDMUMPS(lhs, rhs, dx, flag)
                 call wall_time(t_linsolve_e)
 
             else
@@ -1137,105 +1171,108 @@ module optmod_optimizationengine
 
             ! Do linesearch?
             alphals = 1
-            if (solver%numLS%dolinesearch) then 
-                ! Compute the step length for the line search, don't 
-                ! apply relaxation using rxfdesign. Note: also the 
-                ! Lagrange multipliers may change!
-                if (flag == 0) then 
+            if (.not. converged) then 
+                if (solver%numLS%dolinesearch) then 
+                    ! Compute the step length for the line search, don't 
+                    ! apply relaxation using rxfdesign. Note: also the 
+                    ! Lagrange multipliers may change!
+                    if (flag == 0) then 
 
-                    call ComputeStepLengthLS(problem, solver%numLS, dx, lambda, mu, alphals, flagls) ! dx is changed during linesearch
-                else 
-                    ! Something wrong during linear solver, try with relaxation
-                    flagls = 1
-                end if 
-
-                ! Check the linesearch output
-                if (flagls == 0) then 
-                    ! All good
-
-                elseif (flagls == 1) then 
-                    ! Non-descent direction, print message and skip remainder of iterate
-                    if (flag /= 0) then 
-                        print *, 'step direction computation not succeeded, ' // &
-                            'reattempting with damped Hessian'
-
-                    else
-
-                        print *, 'non-descent direction, skipping update ' // &
-                            'and reattempt with damped Hessian'
-
+                        call ComputeStepLengthLS(problem, solver%numLS, &
+                            dx, lambda, mu, alphals, flagls, linearsolverLS) ! dx is changed during linesearch
+                    else 
+                        ! Something wrong during linear solver, try with relaxation
+                        flagls = 1
                     end if 
 
-                    ! Set step to zero
-                    dx(:) = 0
-                    alphals = 0
+                    ! Check the linesearch output
+                    if (flagls == 0) then 
+                        ! All good
 
-                    ! Add relaxation
-                    if (rxf > 0) then 
-                        rxf = 2*rxf 
-                    else
-                        ! Apparently no relaxation, add
-                        print *, 'No relaxation detected, adding relaxation'
-                        rxf = 1
-                        if (rxfdec > 0) then 
-                        else 
-                            rxfdec = 0.9
+                    elseif (flagls == 1) then 
+                        ! Non-descent direction, print message and skip remainder of iterate
+                        if (flag /= 0) then 
+                            print *, 'step direction computation not succeeded, ' // &
+                                'reattempting with damped Hessian'
+
+                        else
+
+                            print *, 'non-descent direction, skipping update ' // &
+                                'and reattempt with damped Hessian'
+
+                        end if 
+
+                        ! Set step to zero
+                        dx(:) = 0
+                        alphals = 0
+
+                        ! Add relaxation
+                        if (rxf > 0) then 
+                            rxf = 2*rxf 
+                        else
+                            ! Apparently no relaxation, add
+                            print *, 'No relaxation detected, adding relaxation'
+                            rxf = 1
+                            if (rxfdec > 0) then 
+                            else 
+                                rxfdec = 0.9
+                            end if 
                         end if 
                     end if 
-                end if 
 
-                ! Update lagrange multipliers using least-squares approach
-                ! for active constraints
-                if ( (flag == 0) .and. (flagls == 0)) then 
-                    allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
-                    activeineqconind = pack(ineqconind, A)
-                    inactiveineqconind = pack(ineqconind, I)
-                    hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
-                    hessLJ = hessLJ%DeleteRows([eqconind, ineqconind])
-                    hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
-                    hessLC = hessLC%DeleteRows([eqconind, ineqconind])
-                    allocate(dxl(neq + count(A)))
-                    !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
-                    !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
-                    !    dxl2, flag)
-                    !dxl2 = -dxl2
-                    call SolveSparseLinearSystemDI((hessLC%Transpose()*hessLC), &
-                        MatrixVectorProduct(hessLC%Transpose(), &
-                        (rhs(phiind) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
-                        dxl, flag)
+                    ! Update lagrange multipliers using least-squares approach
+                    ! for active constraints
+                    if ( (flag == 0) .and. (flagls == 0)) then 
+                        allocate(activeineqconind(count(A)), inactiveineqconind(count(I)))
+                        activeineqconind = pack(ineqconind, A)
+                        inactiveineqconind = pack(ineqconind, I)
+                        hessLJ = lhs%DeleteColumns([eqconind, ineqconind])
+                        hessLJ = hessLJ%DeleteRows([eqconind, ineqconind])
+                        hessLC = lhs%DeleteColumns([phiind, inactiveineqconind])
+                        hessLC = hessLC%DeleteRows([eqconind, ineqconind])
+                        allocate(dxl(neq + count(A)))
+                        !call SolveSparseLinearSystemDI((gradG%Transpose()*gradG), &
+                        !    MatrixVectorProduct(gradG%Transpose(), (gradL(1:nphi) + MatrixVectorProduct(hessLJ, dx(1:nphi)))), &
+                        !    dxl2, flag)
+                        !dxl2 = -dxl2
+                        call linearsolverLM%SolveSparseLinearSystem((hessLC%Transpose()*hessLC), &
+                            MatrixVectorProduct(hessLC%Transpose(), &
+                            (rhs(phiind) - MatrixVectorProduct(hessLJ, dx(phiind)))), &
+                            dxl, flag)
 
-                    !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
+                        !print *, maxval(abs(dx(nphi+1:nphi+neq+nineq) - dxl))
+                        
+                        dx(nphi+1:nphi+neq) = dxl(1:neq)
+                        dx(activeineqconind) = dxl(neq+1:neq+count(A))
+                        deallocate(dxl, activeineqconind, inactiveineqconind)
+                    end if 
                     
-                    dx(nphi+1:nphi+neq) = dxl(1:neq)
-                    dx(activeineqconind) = dxl(neq+1:neq+count(A))
-                    deallocate(dxl, activeineqconind, inactiveineqconind)
-                end if 
-                
-            else
-                ! Check convergence of solver
-                if (flag == 0) then 
-                    ! Directly update design without linesearch, apply the
-                    ! relaxation using rxfdesign
-                    dx(1:nphi) = rxfdesign*dx(1:nphi)
                 else
-                    ! Set step to zero
-                    dx(:) = 0
-                    alphals = 0
-
-                    ! Add relaxation
-                    if (rxf > 0) then 
-                        rxf = 2*rxf 
+                    ! Check convergence of solver
+                    if (flag == 0) then 
+                        ! Directly update design without linesearch, apply the
+                        ! relaxation using rxfdesign
+                        dx(1:nphi) = rxfdesign*dx(1:nphi)
                     else
-                        ! Apparently no relaxation, add
-                        print *, 'No relaxation detected, adding relaxation'
-                        rxf = 1
-                        if (rxfdec > 0) then 
-                        else 
-                            rxfdec = 0.9
+                        ! Set step to zero
+                        dx(:) = 0
+                        alphals = 0
+
+                        ! Add relaxation
+                        if (rxf > 0) then 
+                            rxf = 2*rxf 
+                        else
+                            ! Apparently no relaxation, add
+                            print *, 'No relaxation detected, adding relaxation'
+                            rxf = 1
+                            if (rxfdec > 0) then 
+                            else 
+                                rxfdec = 0.9
+                            end if 
                         end if 
                     end if 
-                end if 
-            end if
+                end if
+            end if 
 
             ! Update the design
             call problem%UpdateDesign(dx(1:nphi))
@@ -1261,7 +1298,7 @@ module optmod_optimizationengine
             problem%monitor%G(itopt)        = maxval(abs(G))
             problem%monitor%H(itopt)        = maxval(H)
             problem%monitor%alpha(itopt)    = alphals
-            problem%monitor%convnorm(itopt) = convnorm
+            
             problem%monitor%evaltime        = t_eval_e - t_eval_s
             problem%monitor%ittime          = t_it_e - t_it_s 
             problem%monitor%linsolvetime    = t_linsolve_e - t_linsolve_s
@@ -1717,7 +1754,8 @@ module optmod_optimizationengine
     end subroutine
 
     ! Step length computation
-    recursive subroutine ComputeStepLengthLS(problem, numLS, dx, lambda, mu, alpha, flag)
+    recursive subroutine ComputeStepLengthLS(problem, numLS, dx, &
+        lambda, mu, alpha, flag, linearsolver)
 
         ! Description
         !============
@@ -1734,6 +1772,13 @@ module optmod_optimizationengine
         ! search routine! Use an appropriate merit function for this
         ! (see also the EvaluateMeritFunction subroutine)
 
+        ! Note: optionally, a linear solver may be passed as an argument.
+        ! If it is not present, the default double precision sparse solver
+        ! will be used to solve any linear systems in case they arise. 
+        ! If the solver is passed, then it is probably best to construct
+        ! a dedicated solver for this routine in order to reuse (and 
+        ! possibly speed up) initializations/factorizations, etc. 
+
         ! Modules
         !========
         use ieee_arithmetic
@@ -1746,6 +1791,7 @@ module optmod_optimizationengine
         real(R8), allocatable               :: dx(:), lambda(:), mu(:), dphi(:)
         real(R8)                            :: alpha
         integer(I8)                         :: flag 
+        class(DLinearSolverUDT), optional    :: linearsolver
         
         ! Auxiliary
         logical                             :: conv, doderiv 
@@ -2051,7 +2097,11 @@ module optmod_optimizationengine
                     ! Check if constraints are bounded, otherwise skip
                     if (all(ieee_is_finite(ck))) then
                         ! Compute correction step
-                        call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
+                        if (present(linearsolver)) then 
+                            call linearsolver%SolveSparseLinearSystem(LSA, ck, wkt, flag2)
+                        else
+                            call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
+                        end if 
 
                         ! Check if it converged, otherwise skip update
                         if (flag2 /= 0) then 
@@ -2440,6 +2490,7 @@ module optmod_optimizationengine
 
         ! Allocate
         allocate(xref(nx))
+        d2f = SpZeros(nx, nx)
 
         ! Get current design variables
         call fun%problem%GetProblemDesignVariables(xref)
@@ -2556,8 +2607,8 @@ module optmod_optimizationengine
             ! Set the problem
             fun%problem = problem
             fun%solver  = solver
-            allocate(fun%lambda(size(lambda)))
-            allocate(fun%mu(size(mu)))
+            !allocate(fun%lambda(size(lambda)))
+            !allocate(fun%mu(size(mu)))
             fun%lambda = lambda 
             fun%mu = mu
 
@@ -2838,7 +2889,7 @@ module optmod_optimizationengine
 
             ! Set the problem
             fun%problem = problem
-            allocate(fun%lambda(neq))
+            !allocate(fun%lambda(neq))
             fun%lambda = lambda
 
             ! Compute errors

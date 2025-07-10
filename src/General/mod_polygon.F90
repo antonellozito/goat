@@ -91,6 +91,7 @@ module mod_polygon
     use mod_plotter
     use mod_sort
     use mod_constants, only : pi_R8
+    use omp_lib
 
     ! The usual
     implicit none
@@ -486,18 +487,22 @@ module mod_polygon
     end subroutine
 
     ! Polygon set refiner (uniform)
-    subroutine RefinePolygonSetUniform(polygonset, dlmax)
+    subroutine RefinePolygonSetUniform(polygonset, dlmax, minsplit)
 
         ! Description
         !============
         ! This routine refines each of the polygons in the polygonset 
-        ! in a uniform way. 
+        ! in a uniform way. This routine is just a wrapper for the 
+        ! polygon refinement routine - see that routine for additional
+        ! information. 
+
 
         ! Declare variables
         !==================
         ! Arguments
         class(PolygonSetUDT)                :: polygonset 
         real(R8), intent(in)                :: dlmax 
+        integer(I8), intent(in)             :: minsplit
 
         ! Auxiliary
 
@@ -508,7 +513,7 @@ module mod_polygon
         !=======
         ! Simply call polygon refiner for each polygon...
         do i = 1, polygonset%np
-            call polygonset%polygons(i)%Refine(dlmax)
+            call polygonset%polygons(i)%Refine(dlmax, minsplit)
         end do
 
     end subroutine
@@ -1132,7 +1137,7 @@ module mod_polygon
 
     end subroutine
 
-    subroutine GetPolygonSetEdgesIDs(polygonset, edges)
+    subroutine GetPolygonSetEdgesIDs(polygonset, edges, polygonID)
 
         ! Description
         !============
@@ -1144,9 +1149,11 @@ module mod_polygon
         ! Arguments
         class(PolygonSetUDT)                    :: polygonset 
         integer(I8), allocatable, intent(out)   :: edges(:, :)
+        integer(I8), allocatable, intent(out), optional :: polygonID(:)
 
         ! Auxiliary
         integer(I8)                             :: netot 
+        integer(I8), allocatable, dimension(:)  :: pID 
 
         ! Loop
         integer(I8)                             :: i, vc, ec
@@ -1167,12 +1174,13 @@ module mod_polygon
         end do
 
         ! Compute edges
-        allocate(edges(netot, 2))
+        allocate(edges(netot, 2), pID(netot))
         vc = 0 ! keep track of vertices to update local polygon vertex IDs
         ec = 0
         do i = 1, np 
             ! Add
             edges(ec+1:ec+pol(i)%ne, :) = pol(i)%edges + vc 
+            pID(ec+1:ec+pol(i)%ne)  = i 
 
             ! Update counters
             vc = vc + pol(i)%nv 
@@ -1181,7 +1189,11 @@ module mod_polygon
 
         ! Housekeeping
         !=============
+        if (present(polygonID)) then 
+            polygonID = pID 
+        end if 
         end associate
+        
 
     end subroutine
 
@@ -1324,7 +1336,7 @@ module mod_polygon
     end subroutine
 
     ! Get polygonset Vertices 
-    subroutine GetPolygonSetVerticesCoordinates(polygonset, xp, yp)
+    subroutine GetPolygonSetVerticesCoordinates(polygonset, xp, yp, polygonID)
 
         ! Description
         !============
@@ -1338,9 +1350,11 @@ module mod_polygon
         ! Arguments
         class(PolygonSetUDT)                :: polygonset 
         real(R8), allocatable, intent(out)  :: xp(:), yp(:)
+        integer(I8), allocatable, intent(out), optional     :: polygonID(:)
 
         ! Auxiliary
         integer(I8)                         :: nv
+        integer(I8), allocatable, dimension(:)  :: pID
 
         ! Loop
         integer(I8)                         :: i, ce
@@ -1368,7 +1382,7 @@ module mod_polygon
         end do 
 
         ! Allocate
-        allocate(xp(nv), yp(nv))
+        allocate(xp(nv), yp(nv), pID(nv))
 
         ! Loop and add
         ce = 0 ! edge counter
@@ -1376,6 +1390,7 @@ module mod_polygon
             ! Add coordinates
             xp(ce+1:ce+pol(i)%nv)   = pol(i)%x 
             yp(ce+1:ce+pol(i)%nv)   = pol(i)%y 
+            pID(ce+1:ce+pol(i)%nv)  = i
 
             ! Update counter
             ce = ce + pol(i)%nv 
@@ -1383,27 +1398,31 @@ module mod_polygon
 
         ! Housekeeping
         !=============
+        if (present(polygonID)) then 
+            polygonID = pID 
+        end if 
         end associate
 
     end subroutine
 
-    subroutine GetPolygonSetVerticesID(polygonset, ID)
+    subroutine GetPolygonSetVerticesID(polygonset, ID, polygonID)
 
         ! Description
         !============
         ! Return the ID vector of all points in the polygon set (IDs). 
-        ! Actually, this is simply the 1:nv vector, but just in case 
-        ! this changes at some point we compute it here. 
+        ! Additionally, the polygon index may be returned as optional
+        ! output argument. 
 
         ! Declare variables
         !==================
         ! Arguments
         class(PolygonSetUDT)                    :: polygonset 
         integer(I8), allocatable, intent(out)   :: ID(:)
+        integer(I8), allocatable, intent(out), optional     :: polygonID(:) 
 
         ! Auxiliary
         integer(I8)                         :: nv  
-        integer(I8), allocatable            :: tID(:)
+        integer(I8), allocatable            :: tID(:), pID(:)
 
         ! Loop
         integer(I8)                         :: i, vc
@@ -1428,7 +1447,7 @@ module mod_polygon
         end do 
 
         ! Allocate
-        allocate(ID(nv))
+        allocate(ID(nv), pID(nv))
 
         ! Loop and add
         vc = 0 ! vertex counter
@@ -1436,6 +1455,7 @@ module mod_polygon
             ! Add coordinates
             call pol(i)%GetVert(tID)
             ID(vc+1:vc+pol(i)%nv)   = tID + vc ! update
+            pID(vc+1:vc+pol(i)%nv)  =  i 
 
             ! Update counter
             vc = vc + pol(i)%nv 
@@ -1443,6 +1463,9 @@ module mod_polygon
 
         ! Housekeeping
         !=============
+        if (present(polygonID)) then 
+            polygonID = pID 
+        end if 
         end associate
 
     end subroutine
@@ -1714,7 +1737,7 @@ module mod_polygon
     end subroutine
 
     ! Polygon refiner
-    subroutine RefinePolygonUniform(polygon, dlmax)
+    subroutine RefinePolygonUniform(polygon, dlmax, minsplit)
 
         ! Description
         !============
@@ -1722,6 +1745,15 @@ module mod_polygon
         ! inserting additional points at edges that are too long. 
         ! The maximal length that an edge should be is determined by 
         ! dlmax. Refinement is done in a uniform way.
+
+        ! Additionally, a minimal refinement level can be set using 
+        ! minsplit, which indicates the minimal amount of splittings 
+        ! per edge that should occur. If set to zero, this has no 
+        ! influence. This setting can help to split very small edges
+        ! without blowing up the polygon size, or to uniformly refine
+        ! the entire polygon but keeping the original resolution 
+        ! distribution (then set dlmax to a very large value to have 
+        ! no effect)
 
         ! Note: the labels of original vertices are retained, but 
         ! the new vertices' labels are simply initialized to zero since
@@ -1732,6 +1764,7 @@ module mod_polygon
         ! Arguments
         class(PolygonUDT)                       :: polygon 
         real(R8), intent(in)                    :: dlmax
+        integer(I8), intent(in)                 :: minsplit
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:,: )   :: newlabels
@@ -1763,6 +1796,7 @@ module mod_polygon
         dye = y(2:ne+1) - y(1:ne)
         le = sqrt( dxe**2 + dye**2 )
         nne = floor(le/dlmax)
+        where (nne < minsplit) nne = minsplit
 
         ! Initialize new edges
         allocate(newx(sum(nne)+ne+1), newy(sum(nne)+ne+1), &
@@ -2654,13 +2688,13 @@ module mod_polygon
         integer(I8)             :: i, j, k, spind
     
         ! Auxiliary
-        integer(I8)                 :: nv, nremedges, nextremedge, &
-                                    tc1, tc2
+        integer(I8)                 :: nv, nremedges, nextremedge
     
         logical                     :: allbranchingfound
         logical, allocatable        :: isedgesorted(:), isremedgesorted(:), &
             mask(:), isbranchingvertex(:, :), remisbranching(:, :), &
-            hasbv(:), sortedisbranchingvertex(:, :), pvb(:)
+            hasbv(:), sortedisbranchingvertex(:, :), pvb(:), &
+            isnonbranchingstartvertex(:, :)
     
         integer(I8)                 :: pID, ind 
         integer(I8), allocatable    :: remedges(:,:), edgeID(:), &
@@ -2699,9 +2733,11 @@ module mod_polygon
         allv = [pein(:, 1), pein(:, 2)]
         call CountOccurrence(allv, oc, el, sortindoc=sortind, sortindel=sortind2)
         alloc = oc(sortind)
-        allocate(isbranchingvertex(ne, 2))
+        allocate(isbranchingvertex(ne, 2), isnonbranchingstartvertex(ne, 2))
         isbranchingvertex(:, 1) = alloc(1:ne) > 2_I8
-        isbranchingvertex(:, 2) = alloc(ne+1:2*ne) > 2_I8
+        isbranchingvertex(:, 2) = alloc(ne+1:2*ne) > 2_I8 
+        isnonbranchingstartvertex(:, 1) = alloc(1:ne) == 1_I8
+        isnonbranchingstartvertex(:, 2) = alloc(ne+1:2*ne) == 1_I8
     
         ! Loop
         allbranchingfound = count(isbranchingvertex) == 0
@@ -2789,13 +2825,13 @@ module mod_polygon
             do while ((startfound .eqv. .false.) .and. (k <= nremedges))
 
                 ! Count how many times the current edge vertices occur
-                tc1 = count(remedges(:,1) == remedges(k,1)) & 
-                    + count(remedges(:,2) == remedges(k,1))
-                tc2 = count(remedges(:,1) == remedges(k,2)) & 
-                    + count(remedges(:,2) == remedges(k,2))
+                !tc1 = count(remedges(:,1) == remedges(k,1)) & 
+                !    + count(remedges(:,2) == remedges(k,1))
+                !tc2 = count(remedges(:,1) == remedges(k,2)) & 
+                !    + count(remedges(:,2) == remedges(k,2))
     
                 ! Check & add
-                if (tc1 == 1) then
+                if (isnonbranchingstartvertex(remedgeID(k), 1)) then
                     ! Found a start vertex
                     startfound = .true.
                     nv = remedges(k,2) ! next vertex
@@ -2809,7 +2845,7 @@ module mod_polygon
                     ! Update indices
                     k = k+1
                     spind = spind+1
-                else if (tc2 == 1) then
+                else if (isnonbranchingstartvertex(remedgeID(k), 2)) then
                     ! Found a start vertex
                     startfound = .true.
                     nv = remedges(k,1) ! next vertex
@@ -2823,7 +2859,7 @@ module mod_polygon
                     ! Update counters
                     k = k+1
                     spind = spind+1
-                else if ((tc1 > 2) .or. (tc2 > 2)) then
+                else if (isbranchingvertex(remedgeID(k), 1) .or. isbranchingvertex(remedgeID(k), 2)) then
                     ! Polygon branches, throw error
                     call gdErrorHandler('SortPolygonEdges: branching polygon detected, not supported')
                 else
@@ -4687,6 +4723,11 @@ module mod_polygon
         ! Compute intersections
         !======================
         ! Loop over p2
+        !$omp parallel do default(none) schedule(dynamic) if(.not. omp_in_parallel()) &
+        !$omp shared(x1, y1, x2, y2, counter, sz, tempx, tempy, temps1, &
+        !$omp temps2, temps1r, temps2r, szmult) &
+        !$omp private(i, xe1, ye1, xe2, ye2, xi, yi, si, ni, szold, &
+        !$omp mgmti, mgmtr)
         do i = 1, size(x2)-1 
             ! Get coordinates of next polygon edge
             xe1 = x2(i)
@@ -4703,7 +4744,9 @@ module mod_polygon
             ni = size(xi)
             if (ni > 0) then 
                 ! Memory MGMT
+                !$omp critical
                 if (counter + ni > sz) then 
+                    
                     ! Store old size
                     szold = sz
 
@@ -4742,8 +4785,10 @@ module mod_polygon
 
                 ! Update counter
                 counter = counter + ni
+                !$omp end critical
             end if 
         end do  
+        !$omp end parallel do
 
         ! Add to output
         allocate(x(counter), y(counter), s1(counter), s2(counter)) 

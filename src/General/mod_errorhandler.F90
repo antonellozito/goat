@@ -13,6 +13,9 @@ module mod_errorhandler
     ! Initialize
     !===========
     use mod_precision
+#if (defined(USE_MPI)  || (defined(MUMPS))) 
+    use mpi
+#endif
 
     ! The usual
     implicit none
@@ -109,6 +112,10 @@ module mod_errorhandler
         integer, intent(in), optional       :: IDin, severityin
 
         integer                             :: ID, severity
+#if (defined(USE_MPI)  || (defined(MUMPS))) 
+        integer                             :: ierror 
+#endif
+    
 
         ! Check inputs
         !=============
@@ -133,6 +140,9 @@ module mod_errorhandler
 
         ! Check for stop
         if (severity > 0) then 
+#if (defined(USE_MPI)  || (defined(MUMPS))) 
+            call mpi_abort(MPI_COMM_WORLD, 1, ierror)
+#endif 
             stop 
         end if 
     

@@ -29,6 +29,7 @@ module mod_sparseinterface
     use mod_precision
     use mod_errorhandler
     use Clayer
+    use omp_lib
 
     ! The usual
     implicit none
@@ -614,9 +615,12 @@ module mod_sparseinterface
 
         ! Loop
         !=====
+        !$omp parallel do default(none) if(.not. omp_in_parallel()) &
+        !$omp private(i) shared(a, b, c)
         do i = 1, a%nval 
             c%val(i) = a%val(i)*b(a%row(i))
         end do
+        !$omp end parallel do 
 
     end function
 
@@ -649,9 +653,12 @@ module mod_sparseinterface
 
         ! Loop
         !=====
+        !$omp parallel do default(none) if(.not. omp_in_parallel()) &
+        !$omp private(i) shared(a, b, c)
         do i = 1, b%nval 
             c%val(i) = b%val(i)*a(b%row(i))
         end do
+        !$omp end parallel do
 
     end function
 
@@ -737,6 +744,9 @@ module mod_sparseinterface
         
         ! Reconvert
         call ConvertToMySparse(cscf, c)
+
+        ! Free memory
+        call FreeCSparse(cscf)
         
     end function 
 
@@ -1239,9 +1249,12 @@ module mod_sparseinterface
         col(:) = 0
 
         ! Loop over all values, sum
+        !$omp parallel do default(none) if(.not. omp_in_parallel()) &
+        !$omp private(i) shared(mysparse) reduction(+:col)
         do i = 1, nval 
             col(row(i)) = col(row(i)) + val(i)
         end do
+        !$omp end parallel do
 
         ! End associate
         end associate
@@ -1293,9 +1306,12 @@ module mod_sparseinterface
         row(:) = 0
 
         ! Loop over all values, sum
+        !$omp parallel do default(none) if(.not. omp_in_parallel()) &
+        !$omp private(i) shared(mysparse) reduction(+:row)
         do i = 1, nval 
             row(col(i)) = row(col(i)) + val(i)
         end do
+        !$omp end parallel do
 
         ! End associate
         end associate
@@ -1360,11 +1376,14 @@ module mod_sparseinterface
 
         ! Compute
         !========
+        !$omp parallel do default(none) if(.not. omp_in_parallel()) &
+        !$omp private(i, tc, tr) shared(a, b) reduction(+:c) 
         do i = 1, a%nval 
             tc = a%col(i)
             tr = a%row(i)
             c(tr) = c(tr) + b(tc)*a%val(i)
         end do 
+        !$omp end parallel do
 
     end function
 
