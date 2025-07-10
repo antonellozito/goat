@@ -1703,13 +1703,11 @@ module ggmod_topology2D
                                 sortind = [(k, k = 1, size(xout))]
                                 call Sort(iout, ind=sortind, ascend=.true.)
                                 vindI = vindI(sortind)
-                                iout = iout(sortind)
                                 
                                 ! Sort the intersections according to face
                                 sortind = [(k, k = 1, size(xout))]
                                 call Sort(jout, ind=sortind, ascend=.true.)
                                 vindJ = vindJ(sortind)
-                                jout = jout(sortind)
 
                                 ! If there are other intersections, adjust the face and the contour
                                 if (size(xout) > 1) then 
@@ -1780,13 +1778,13 @@ module ggmod_topology2D
                                         ! Check which part to keep
                                         if ((size(vindIfh) > 0) .and. (size(vindIsh) > 0)) then 
                                             ! Intersections at both sides, take 'middle' piece
-                                            notdelind = [1, (cc, cc = maxval(vindIfh)+1, minval(vindIsh)-1), nstc]
+                                            notdelind = [1, (cc, cc = maxval(vindIfh)+1, minval(vindIsh)-1), nstc+1]
                                         elseif (size(vindIfh) > 0) then 
                                             ! Intersection only at first half
-                                            notdelind = [1, (cc, cc = maxval(vindIfh)+1, nstc)]
+                                            notdelind = [1, (cc, cc = maxval(vindIfh)+1, nstc+1)]
                                         elseif (size(vindIsh) > 0) then 
                                             ! Intersection only at second half
-                                            notdelind = [(cc, cc = 1, minval(vindIsh)-1), nstc]
+                                            notdelind = [(cc, cc = 1, minval(vindIsh)-1), nstc+1]
                                         else
                                             ! Only two intersections in 
                                             ! start and end, move along
