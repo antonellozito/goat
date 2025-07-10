@@ -2,6 +2,7 @@ from GOATpy import pl as plotter
 from GOATpy import dh as dh
 import os
 import sys 
+import numpy as np
 
 # Description
 #------------
@@ -108,6 +109,12 @@ try:
     plotter.PlotGeneral2DContourf(vals[:, 0], vals[:, 1], vals[:, 2], 5)
 except:
     print("Could not plot radial density distribution function")
+    
+
+try: 
+    plotter.PlotGridFaces(simgrid, 6)
+except:
+    print("Could not plot grid faces")
 
 
 
