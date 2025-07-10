@@ -19,7 +19,6 @@ ifdef SOLPSTOP
 COMPDIRVARS += -DSOLPS
 endif
 
-
 ## % Library paths
 ## %==============
 ## LAPACKPATH 			: LAPACK library path (user defined)

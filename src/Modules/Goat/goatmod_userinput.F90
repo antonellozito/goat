@@ -1700,7 +1700,6 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%coreboundariesfrac)
         field = 'gg.tm.PFbnd.frac'
         call ExtractOptionValueReal0D(fid, field, options%PFboundariesfrac)
-
         field = 'gg.tm.removenoncoreregions'
         call ExtractOptionValueLogical0D(fid, field, options%removenoncoreregions)
         field = 'gg.tm.mergetangencypointtubes'

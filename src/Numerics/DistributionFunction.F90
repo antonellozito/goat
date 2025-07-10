@@ -608,6 +608,82 @@ module DistributionFunction
     end subroutine 
 
     !------------------------------------------------------------------!
+    !                     2D STRUCTURED INTERPOLANT                    !
+    !------------------------------------------------------------------!
+
+    ! Constructor
+    function ConstructStructured2DDF(interp) result(distribution)
+
+        ! Description
+        !============
+        ! Construct the distributor based on the given interpolant
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredInterpolant2DUDT), intent(in)   :: interp 
+        class(DistributionFunctionUDT), allocatable     :: distribution 
+
+        ! Initialize
+        !===========
+        allocate(Structured2DDFUDT::distribution)
+
+        select type(distribution)
+
+        type is (Structured2DDFUDT)
+
+            ! Add interpolant
+            distribution%F = interp
+
+        end select
+
+    end function 
+
+    ! Evaluation
+    subroutine EvaluateStructured2DDF(distribution, x, y, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Structured2DDFUDT)            :: distribution 
+        real(R8), intent(in)                :: x(:), y(:)
+        real(R8), intent(out)               :: v(size(x))
+
+        ! Evaluate
+        !=========
+        ! Just call interpolant evaluator
+        call distribution%F%Evaluate(x, y, 0, 0, v)
+
+    end subroutine 
+
+    ! Derivative evaluation
+    subroutine EvaluateDerivativeStructured2DDF(distribution, x, y, &
+        derivx, derivy, v)
+
+        ! Description
+        !============
+        ! Evaluate the distribution function derivative
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(Structured2DDFUDT)            :: distribution 
+        real(R8), intent(in)                :: x(:), y(:)
+        real(R8), intent(out)               :: v(size(x))
+        integer(I8), intent(in)             :: derivx, derivy 
+
+        ! Evaluate
+        !=========
+        ! Just call interpolant evaluator
+        call distribution%F%Evaluate(x, y, derivx, derivy, v)
+
+    end subroutine 
+
+    !------------------------------------------------------------------!
     !                         DISTANCE FUNCTION                        !
     !------------------------------------------------------------------!
 
