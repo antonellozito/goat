@@ -1798,8 +1798,13 @@ module ggmod_gridgeneration2D
             end if 
 
             ! Trace streamlines starting from the hfline
-            xt = hfline%xv
-            yt = hfline%yv 
+            if (seg(hfline%segID(1))%isvertex) then 
+                xt = hfline%xv(1:1)
+                yt = hfline%yv(1:1)
+            else
+                xt = hfline%xv
+                yt = hfline%yv
+            end if  
             xb = [minval([lfline%xl, hfline%xl]), &
                 maxval([lfline%xl, hfline%xl])]
             yb = [minval([lfline%yl, hfline%yl]), &
@@ -3232,37 +3237,35 @@ module ggmod_gridgeneration2D
             skipvert = .false.
 
             ! Check for tube extensions and adjust imposition of boundary layer if required
-            if (doBLstart .or. doBLend) then
-                ! Don't do boundary layer if the current tube or one of its
-                ! neighbours was extended - will typically lead to badly shaped
-                ! cells
-                if (tubes(j)%isextendedstart) then 
+            ! Don't do boundary layer if the current tube or one of its
+            ! neighbours was extended - will typically lead to badly shaped
+            ! cells
+            if (tubes(j)%isextendedstart) then 
+                doBLstart = .false. 
+            end if 
+            if (tubes(j)%isextendedend) then 
+                doBLend = .false. 
+            end if 
+
+            ! Previous neighbour
+            if (j > 1) then 
+                if (tubes(j-1)%isextendedstart) then 
                     doBLstart = .false. 
                 end if 
-                if (tubes(j)%isextendedend) then 
+                if (tubes(j-1)%isextendedend) then 
                     doBLend = .false. 
                 end if 
+            end if
 
-                ! Previous neighbour
-                if (j > 1) then 
-                    if (tubes(j-1)%isextendedstart) then 
-                        doBLstart = .false. 
-                    end if 
-                    if (tubes(j-1)%isextendedend) then 
-                        doBLend = .false. 
-                    end if 
-                end if
-
-                ! Next neighbour
-                if (j < size(tubes)) then 
-                    if (tubes(j+1)%isextendedstart) then 
-                        doBLstart = .false. 
-                    end if 
-                    if (tubes(j+1)%isextendedend) then 
-                        doBLend = .false. 
-                    end if 
-                end if
-            end if 
+            ! Next neighbour
+            if (j < size(tubes)) then 
+                if (tubes(j+1)%isextendedstart) then 
+                    doBLstart = .false. 
+                end if 
+                if (tubes(j+1)%isextendedend) then 
+                    doBLend = .false. 
+                end if 
+            end if
 
 
             ! Compute face labels
@@ -8950,18 +8953,20 @@ module ggmod_gridgeneration2D
         end if 
 
         ! Rule: no boundary layer at type 2 tangency points
-        do i = 1, ggtmdata%nseg
-            if (segTMvert(i, 1) /= 0) then 
-                if (topomesh%vert%type(segTMvert(i, 1)) == TMvertextp2ID) then 
-                    nostart(i) = .true.
+        if (.false.) then 
+            do i = 1, ggtmdata%nseg
+                if (segTMvert(i, 1) /= 0) then 
+                    if (topomesh%vert%type(segTMvert(i, 1)) == TMvertextp2ID) then 
+                        nostart(i) = .true.
+                    end if 
                 end if 
-            end if 
-            if (segTMvert(i, 2) /= 0) then 
-                if (topomesh%vert%type(segTMvert(i, 2)) == TMvertextp2ID) then 
-                    noend(i) = .true.
+                if (segTMvert(i, 2) /= 0) then 
+                    if (topomesh%vert%type(segTMvert(i, 2)) == TMvertextp2ID) then 
+                        noend(i) = .true.
+                    end if 
                 end if 
-            end if 
-        end do 
+            end do 
+        end if 
 
         ! Rule: no boundary layer near aligned vessel parts
         isalignedvesselvertex = .false.
@@ -13223,6 +13228,9 @@ module ggmod_gridgeneration2D
 
         ! Initialize
         !===========
+        ! Initialize the refiner
+        call refiner%InitializeSegmentData(ggtmdata%seg(segID))
+
         ! Associate
         associate(&
             seg             => ggtmdata%seg(segID),     &
@@ -13232,10 +13240,6 @@ module ggmod_gridgeneration2D
             dlBLstarti      => refiner%dlBLstart,   &
             dlBLendi        => refiner%dlBLend      &
             )
-
-        ! Initialize the refiner
-        call refiner%InitializeSegmentData(seg)
-
 
         ! Hedge for vertex segment lines
         if (seg%isvertex) then 
