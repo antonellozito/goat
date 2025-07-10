@@ -1742,12 +1742,11 @@ module ggmod_gridgeneration2D
         class(GGTMLineRefiner2DUDT), intent(in)     :: GGTMlinerefiner
 
         ! Auxiliary
-        integer(I8)                                 :: tf
         integer(I8), allocatable, dimension(:)      :: &
             s11, s12, s21, s22, s31, s32, s41, s42, &
             stype, sortind, newID
         logical                                     :: addpoint
-        logical, allocatable, dimension(:)          ::  keepvert, newisnodevert, &
+        logical, allocatable, dimension(:)          :: newisnodevert, &
             updateseg
         real(R8)                                    :: xb(1:2), yb(1:2)
         real(R8), allocatable, dimension(:)         :: xt, yt, &
@@ -1756,7 +1755,6 @@ module ggmod_gridgeneration2D
             newty, news2r, newdlcv
 
         type(StreamlineUDT), allocatable            :: orthlines(:)
-        type(GGTMFieldlineRefinementOptionsUDT)     :: thislinerefoptions
 
         ! Loop
         integer(I8)                                 :: i, j, k, nnew
@@ -4968,7 +4966,6 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: nv 
         integer(I8), allocatable, dimension(:)  :: tvID
-        logical, allocatable, dimension(:)      :: keepvert
         real(R8), allocatable, dimension(:)     :: dlcv 
 
         ! Loop
@@ -7989,9 +7986,8 @@ module ggmod_gridgeneration2D
         type(GGoptionsUDT), intent(in)          :: options
 
         ! Auxiliary
-        integer(I8)                             :: tc
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, &
-            hforientation, hfnbtubeID, hfnbcellID, tubecnb, hfvert, lfvert, &
+            hforientation, hfnbtubeID, hfnbcellID, hfvert, lfvert, &
             lforientation, lfnbtubeID, lfnbcellID, tv1, tv2
 
         ! Loop
@@ -8728,7 +8724,7 @@ module ggmod_gridgeneration2D
 
             ! Determine vertices that are on one of these vessel faces
             doseg = .false.
-            where (segTMface /= 0) doseg = doTMface(segTMface) ! mark segments that are vessel segments
+            where (segTMface /= 0 .and. (.not. seg%isvertex)) doseg = doTMface(segTMface) ! mark segments that are vessel segments
             dovert = .false.
             do i = 1, ggtmdata%nseg
                 if (doseg(i)) then 
@@ -8770,7 +8766,7 @@ module ggmod_gridgeneration2D
 
             ! Determine vertices that are on one of these vessel faces
             doseg = .false.
-            where (segTMface /= 0) doseg = doTMface(segTMface) ! mark segments that are vessel segments
+            where (segTMface /= 0 .and. (.not. seg%isvertex)) doseg = doTMface(segTMface) ! mark segments that are vessel segments
             dovert = .false.
             do i = 1, ggtmdata%nseg
                 if (doseg(i)) then 
@@ -8813,6 +8809,7 @@ module ggmod_gridgeneration2D
         ! Rule: no boundary layer at start/end based on cell tubes:
         ! - if high and/or low flux line are extended at start/end
         ! - if desired by user (one may want to apply them anyway for unknown reasons)
+        ! - if segment is closed ()
         if (options%evtnoBL) then 
             do i = 1, size(celldata)
                 associate(ctubes    => celldata(i)%tubes)
@@ -8842,12 +8839,18 @@ module ggmod_gridgeneration2D
                         tv = ctubes(j)%hfline%vert(ctubes(j)%hfline%GetAllSegmentVertIndices())
                         fwind = Findloc1D(tv, [segsv(hfsegID(segloc)), segev(hfsegID(segloc))])
                         bwind = Findloc1D(tv, [segev(hfsegID(segloc)), segsv(hfsegID(segloc))])
-                        if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                        if ((fwind == 0 .and. bwind == 0)) then
                             call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
-                                'segment vertices do not appear or appear ambiguously in ' // & 
+                                'segment vertices do not appear in ' // & 
                                 'field line - this is a bug')
                         end if 
-                        if (fwind /= 0) then 
+                        if (fwind /= 0 .and. bwind /= 0) then 
+                            ! Don't do anything if closed segment
+                            if (.not. seg(hfsegID(segloc))%isclosed) then 
+                                call gdErrorHandler('AddGGTMSegmentRefinemenData: ' // & 
+                                    'segment is not closed, but vertex order is ambiguous in field line')
+                            end if 
+                        elseif (fwind /= 0) then 
                             ! Same orientation, don't do start
                             nostart(hfsegID(segloc)) = .true. 
                         else
@@ -8870,12 +8873,18 @@ module ggmod_gridgeneration2D
                         tv = ctubes(j)%lfline%vert(ctubes(j)%lfline%GetAllSegmentVertIndices())
                         fwind = Findloc1D(tv, [segsv(lfsegID(segloc)), segev(lfsegID(segloc))])
                         bwind = Findloc1D(tv, [segev(lfsegID(segloc)), segsv(lfsegID(segloc))])
-                        if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                        if ((fwind == 0 .and. bwind == 0)) then
                             call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
-                                'segment vertices do not appear or appear ambiguously in ' // & 
+                                'segment vertices do not appear in ' // & 
                                 'field line - this is a bug')
                         end if 
-                        if (fwind /= 0) then 
+                        if (fwind /= 0 .and. bwind /= 0) then 
+                            ! Don't do anything if closed segment
+                            if (.not. seg(lfsegID(segloc))%isclosed) then 
+                                call gdErrorHandler('AddGGTMSegmentRefinemenData: ' // & 
+                                    'segment is not closed, but vertex order is ambiguous in field line')
+                            end if 
+                        elseif (fwind /= 0) then 
                             ! Same orientation, don't do start
                             nostart(lfsegID(segloc)) = .true. 
                         else
@@ -8903,12 +8912,18 @@ module ggmod_gridgeneration2D
                         tv = ctubes(j)%hfline%vert(ctubes(j)%hfline%GetAllSegmentVertIndices())
                         fwind = Findloc1D(tv, [segsv(hfsegID(segloc)), segev(hfsegID(segloc))])
                         bwind = Findloc1D(tv, [segev(hfsegID(segloc)), segsv(hfsegID(segloc))])
-                        if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                        if ((fwind == 0 .and. bwind == 0)) then
                             call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
-                                'segment vertices do not appear or appear ambiguously in ' // & 
+                                'segment vertices do not appear in ' // & 
                                 'field line - this is a bug')
                         end if 
-                        if (fwind /= 0) then 
+                        if (fwind /= 0 .and. bwind /= 0) then 
+                            ! Don't do anything if closed segment
+                            if (.not. seg(hfsegID(segloc))%isclosed) then 
+                                call gdErrorHandler('AddGGTMSegmentRefinemenData: ' // & 
+                                    'segment is not closed, but vertex order is ambiguous in field line')
+                            end if 
+                        elseif (fwind /= 0) then 
                             ! Same orientation, don't do end
                             noend(hfsegID(segloc)) = .true. 
                         else
@@ -8931,12 +8946,18 @@ module ggmod_gridgeneration2D
                         tv = ctubes(j)%lfline%vert(ctubes(j)%lfline%GetAllSegmentVertIndices())
                         fwind = Findloc1D(tv, [segsv(lfsegID(segloc)), segev(lfsegID(segloc))])
                         bwind = Findloc1D(tv, [segev(lfsegID(segloc)), segsv(lfsegID(segloc))])
-                        if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                        if ((fwind == 0 .and. bwind == 0)) then
                             call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
-                                'segment vertices do not appear or appear ambiguously in ' // & 
+                                'segment vertices do not appear in ' // & 
                                 'field line - this is a bug')
                         end if 
-                        if (fwind /= 0) then 
+                        if (fwind /= 0 .and. bwind /= 0) then 
+                            ! Don't do anything if closed segment
+                            if (.not. seg(lfsegID(segloc))%isclosed) then 
+                                call gdErrorHandler('AddGGTMSegmentRefinemenData: ' // & 
+                                    'segment is not closed, but vertex order is ambiguous in field line')
+                            end if 
+                        elseif (fwind /= 0) then 
                             ! Same orientation, don't do start
                             nostart(lfsegID(segloc)) = .true. 
                         else
@@ -9021,12 +9042,18 @@ module ggmod_gridgeneration2D
                     tv = hfline%vert(ctubes(j)%hfline%GetAllSegmentVertIndices())
                     fwind = Findloc1D(tv, [segsv(hfsegID(segloc)), segev(hfsegID(segloc))])
                     bwind = Findloc1D(tv, [segev(hfsegID(segloc)), segsv(hfsegID(segloc))])
-                    if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                    if ((fwind == 0 .and. bwind == 0)) then
                         call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
-                            'segment vertices do not appear or appear ambiguously in ' // & 
+                            'segment vertices do not appear in ' // & 
                             'field line - this is a bug')
                     end if 
-                    if (fwind /= 0) then 
+                    if (fwind /= 0 .and. bwind /= 0) then 
+                        ! Don't do anything if closed segment
+                        if (.not. seg(hfsegID(segloc))%isclosed) then 
+                            call gdErrorHandler('AddGGTMSegmentRefinemenData: ' // & 
+                                'segment is not closed, but vertex order is ambiguous in field line')
+                        end if 
+                    elseif (fwind /= 0) then 
                         ! Same orientation
                         hfline%refoptions%doBLstart = seg(hfsegID(segloc))%refoptions%doBLstart
                         hfline%refoptions%ncBLstart = seg(hfsegID(segloc))%refoptions%ncBLstart
@@ -9044,12 +9071,18 @@ module ggmod_gridgeneration2D
                     tv = hfline%vert(ctubes(j)%hfline%GetAllSegmentVertIndices())
                     fwind = Findloc1D(tv, [segsv(hfsegID(segloc)), segev(hfsegID(segloc))])
                     bwind = Findloc1D(tv, [segev(hfsegID(segloc)), segsv(hfsegID(segloc))])
-                    if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                    if ((fwind == 0 .and. bwind == 0)) then
                         call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
-                            'segment vertices do not appear or appear ambiguously in ' // & 
+                            'segment vertices do not appear in ' // & 
                             'field line - this is a bug')
                     end if 
-                    if (fwind /= 0) then 
+                    if (fwind /= 0 .and. bwind /= 0) then 
+                        ! Don't do anything if closed segment
+                        if (.not. seg(hfsegID(segloc))%isclosed) then 
+                            call gdErrorHandler('AddGGTMSegmentRefinemenData: ' // & 
+                                'segment is not closed, but vertex order is ambiguous in field line')
+                        end if 
+                    elseif (fwind /= 0) then 
                         ! Same orientation
                         hfline%refoptions%doBLend = seg(hfsegID(segloc))%refoptions%doBLend
                         hfline%refoptions%ncBLend = seg(hfsegID(segloc))%refoptions%ncBLend
@@ -9071,12 +9104,18 @@ module ggmod_gridgeneration2D
                     tv = lfline%vert(ctubes(j)%lfline%GetAllSegmentVertIndices())
                     fwind = Findloc1D(tv, [segsv(lfsegID(segloc)), segev(lfsegID(segloc))])
                     bwind = Findloc1D(tv, [segev(lfsegID(segloc)), segsv(lfsegID(segloc))])
-                    if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                    if ((fwind == 0 .and. bwind == 0)) then
                         call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
-                            'segment vertices do not appear or appear ambiguously in ' // & 
+                            'segment vertices do not appear in ' // & 
                             'field line - this is a bug')
                     end if 
-                    if (fwind /= 0) then 
+                    if (fwind /= 0 .and. bwind /= 0) then 
+                        ! Don't do anything if closed segment
+                        if (.not. seg(lfsegID(segloc))%isclosed) then 
+                            call gdErrorHandler('AddGGTMSegmentRefinemenData: ' // & 
+                                'segment is not closed, but vertex order is ambiguous in field line')
+                        end if 
+                    elseif (fwind /= 0) then 
                         ! Same orientation
                         lfline%refoptions%doBLstart = seg(lfsegID(segloc))%refoptions%doBLstart
                         lfline%refoptions%ncBLstart = seg(lfsegID(segloc))%refoptions%ncBLstart
@@ -9094,12 +9133,18 @@ module ggmod_gridgeneration2D
                     tv = lfline%vert(ctubes(j)%lfline%GetAllSegmentVertIndices())
                     fwind = Findloc1D(tv, [segsv(lfsegID(segloc)), segev(lfsegID(segloc))])
                     bwind = Findloc1D(tv, [segev(lfsegID(segloc)), segsv(lfsegID(segloc))])
-                    if ((fwind == 0 .and. bwind == 0) .or. (fwind /= 0 .and. bwind /= 0)) then
+                    if ((fwind == 0 .and. bwind == 0)) then
                         call gdErrorHandler('AddGGTMSegmentRefinementData: ' // & 
-                            'segment vertices do not appear or appear ambiguously in ' // & 
+                            'segment vertices do not appear in ' // & 
                             'field line - this is a bug')
                     end if 
-                    if (fwind /= 0) then 
+                    if (fwind /= 0 .and. bwind /= 0) then 
+                        ! Don't do anything if closed segment
+                        if (.not. seg(lfsegID(segloc))%isclosed) then 
+                            call gdErrorHandler('AddGGTMSegmentRefinemenData: ' // & 
+                                'segment is not closed, but vertex order is ambiguous in field line')
+                        end if 
+                    elseif (fwind /= 0) then 
                         ! Same orientation
                         lfline%refoptions%doBLend = seg(lfsegID(segloc))%refoptions%doBLend
                         lfline%refoptions%ncBLend = seg(lfsegID(segloc))%refoptions%ncBLend
