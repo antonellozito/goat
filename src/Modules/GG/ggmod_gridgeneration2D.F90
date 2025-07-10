@@ -1746,8 +1746,7 @@ module ggmod_gridgeneration2D
             s11, s12, s21, s22, s31, s32, s41, s42, &
             stype, sortind, newID
         logical                                     :: addpoint
-        logical, allocatable, dimension(:)          :: newisnodevert, &
-            updateseg
+        logical, allocatable, dimension(:)          :: newisnodevert
         real(R8)                                    :: xb(1:2), yb(1:2)
         real(R8), allocatable, dimension(:)         :: xt, yt, &
             x1, x2, x3, x4, y1, y2, y3, y4, s11r, s12r, s21r, s22r, &
