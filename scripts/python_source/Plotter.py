@@ -226,13 +226,27 @@ def PlotGridFaceRegions(grid, fignum):
     # Plot
     PlotPoints2DWithID(xf[ind], yf[ind], grid.face.region[ind], fignum) 
 
-def PlotGridVertFieldlineID(grid, fignum):
+def PlotGridVertFieldlineID(grid, fignum, vID=None):
     # Description
     #------------
     # plot vertex fieldline IDs (may be heavy)
 
+    if vID == None:
+        tvID = grid.vert.fieldlineID
+        tx = grid.vert.x
+        ty = grid.vert.y
+    else:
+        hasID = np.zeros(grid.vert.ntot)
+        for i in vID:
+            hasID = np.where(grid.vert.fieldlineID == i, 1, hasID)
+        this = np.array(hasID > 0)
+        tx = grid.vert.x[this]
+        ty = grid.vert.y[this]
+        tvID = grid.vert.fieldlineID[this]
+        
+
     # Plot
-    PlotPoints2DWithID(grid.vert.x, grid.vert.y, grid.vert.fieldlineID, fignum) 
+    PlotPoints2DWithID(tx, ty, tvID, fignum) 
 #--------------------------------------------------------------------------#
 #                              Grid Optimization                           #
 #--------------------------------------------------------------------------#
