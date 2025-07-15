@@ -3,6 +3,7 @@ from GOATpy import dh as dh
 import os
 import sys 
 import numpy as np
+from matplotlib import pyplot as plt
 
 # Description
 #------------
@@ -54,6 +55,10 @@ try:
 
     # Visualize
     plotter.PlotTopologicalMesh(topomesh, 1)
+    thisaxes = plt.gca()
+    thisaxes.set_title('Topological mesh')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
 
 except:
     print("Could not load the topological mesh")
@@ -65,6 +70,10 @@ try:
 
     # Visualize
     plotter.PlotGridCells(simgrid, 2)
+    thisaxes = plt.gca()
+    thisaxes.set_title('Grid cells')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
 
 except: 
     print("Could not load the grid")
@@ -76,6 +85,10 @@ try:
 
     # Visualize
     plotter.PlotStructure(structure, 2, linewidth=2)
+    thisaxes = plt.gca()
+    thisaxes.set_title('Vessel structures')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
 except:
     print("Could not plot structure.dat")
 
@@ -87,6 +100,10 @@ try:
     # Visualize
     plotter.PlotGridCells(simgrid, 3)
     plotter.PlotGridFaceLabels(simgrid, 3)
+    thisaxes = plt.gca()
+    thisaxes.set_title('Face labels')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
 
 except: 
     print("Could not load the grid")
@@ -99,6 +116,10 @@ try:
     # Visualize
     plotter.PlotGridCells(simgrid, 4)
     plotter.PlotCellBasedQuantity2D(simgrid, simgrid.cell.ft, 4)
+    thisaxes = plt.gca()
+    thisaxes.set_title('Cell flux tube numbers')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
 
 except: 
     print("Could not load the grid")
@@ -107,16 +128,37 @@ try:
     plotter.PlotGridCells(simgrid, 5)
     vals = dh.GetGeneral2DSurfaceData(datadir + '/' + 'gg_vd_radialdensityfunction.dat')
     plotter.PlotGeneral2DContourf(vals[:, 0], vals[:, 1], vals[:, 2], 5)
+    thisaxes = plt.gca()
+    thisaxes.set_title('GG radial density function [# m^-1]')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
 except:
     print("Could not plot radial density distribution function")
-    
 
 try: 
-    plotter.PlotGridFaces(simgrid, 6)
+    plotter.PlotGridCells(simgrid, 6)
+    vals = dh.GetGeneral2DSurfaceData(datadir + '/' + 'Lmaxpolref.dat')
+    plotter.PlotGeneral2DContourf(vals[:, 0], vals[:, 1], vals[:, 2], 6)
+    thisaxes = plt.gca()
+    thisaxes.set_title('GG maximal poloidal length [m]')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+except:
+    print("Could not maximal poloidal length distribution function")
+
+    
+# Faces
+try: 
+    plotter.PlotGridFaces(simgrid, 7)
 except:
     print("Could not plot grid faces")
 
-
+# Surface area
+try: 
+    plotter.PlotGridCellArea(simgrid, 7, doinverse=True)
+    plotter.PlotGridCells(simgrid, 8)
+except:
+    print("Could not plot grid cell area")
 
 # Show figures
 #-------------
