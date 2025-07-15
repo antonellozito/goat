@@ -68,10 +68,10 @@ else
     set iamat=`${GOATTOP}/whereami|tail -1`
     echo Running at $iamat.
   else
-    set iamat="UNKNOWN"
+    set iamat="LOCAL"
   endif
   switch ($iamat)
-  case "*UNKNOWN":
+  case "*LOCAL":
     setenv HOST_NAME UNKNOWN
     breaksw
   default:
