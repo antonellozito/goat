@@ -43,6 +43,7 @@ TMfacesepID = 4
 TMfacecoreID = 5
 TMfacePFID = 6
 TMfacealbndID = 7
+TMfaceSOLID = 8
 
 #----------------------------------------------------------------------#
 #                               I/O                                    #
@@ -1156,7 +1157,36 @@ class Grid:
             self.cell.x[i] = np.mean(self.vert.x[tv-1])
             self.cell.y[i] = np.mean(self.vert.y[tv-1])
 
-        
+    def ComputeCellSurfaceArea(self):
+        surfA = np.zeros(self.cell.ntot, dtype=float)
+        for i in np.arange(0, self.cell.ntot):
+             tv = self.cell.GetVert(i)
+             xv = self.vert.x[tv-1]
+             yv = self.vert.y[tv-1]
+             surfA[i] = Compute2DSurfaceArea(xv, yv)
+        return surfA
+
+
+#----------------------------------------------------------------------#
+#                                METRICS                               #
+#----------------------------------------------------------------------#
+
+def Compute2DSurfaceArea(x, y):
+    # Description
+    #------------
+    # Compute the (signed) 2D surface area underneath a polygon defined by the 
+    # x, y coordinate sequence. We do trapezoidal 
+
+    if (x[0] == x[len(x)-1]) and  (y[0] == y[len(y)-1]):
+        pass
+    else:
+        x = np.append(x, x[0])
+        y = np.append(y, y[0])
+
+    dx = x[1:len(x)] - x[0:len(x)-1]
+    yf = 0.5*(y[0:len(y)-1] + y[1:len(y)])
+    surfA = np.sum(dx*yf)
+    return surfA
 
 #----------------------------------------------------------------------#
 #                        GENERAL 2D INTERPOLANT                        #

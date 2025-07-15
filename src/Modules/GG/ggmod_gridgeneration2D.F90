@@ -8654,10 +8654,12 @@ module ggmod_gridgeneration2D
             bwind
         integer(I8), allocatable, dimension(:)  :: vesselfaceIDs, &
             targetfaceIDs, segTMface, segfsID, segsv, segev, tv
-        integer(I8), allocatable, dimension(:, :)   :: segTMvert
-        logical, allocatable, dimension(:)      :: isvesselvert, &
-            istargetvert, doseg, doTMface, dovert, nostart, noend, &
+        integer(I8), allocatable, dimension(:, :)   :: segTMvert, &
+            vertlabel
+        logical, allocatable, dimension(:)      :: &
+            doseg, doTMface, dovert, nostart, noend, &
             isalignedvesselvertex
+        real(R8), allocatable, dimension(:)     :: xv, yv
 
         ! Loop
         integer(I8)                             :: i, j
@@ -8687,7 +8689,7 @@ module ggmod_gridgeneration2D
             segfsID(ggtmdata%nseg), segTMvert(ggtmdata%nseg, 2), &
             doTMface(face%ntot), dovert(grid%vert%ntot), segsv(ggtmdata%nseg), &
             segev(ggtmdata%nseg), nostart(ggtmdata%nseg), noend(ggtmdata%nseg), &
-            isalignedvesselvertex(vert%ntot))
+            isalignedvesselvertex(vert%ntot), xv(grid%vert%ntot), yv(grid%vert%ntot))
         doseg       = .false. 
         doTMface    = .false. 
         dovert      = .false. 
@@ -8708,13 +8710,18 @@ module ggmod_gridgeneration2D
         where (IsTopomeshVert(segsv, topomesh)) segTMvert(:, 1) = segsv 
         where (IsTopomeshVert(segev, topomesh)) segTMvert(:, 2) = segev
 
+        ! Initialize coordinates (not yet defined in grid%vert)
+        xv = 0
+        yv = 0
+        do i = 1, ggtmdata%nseg
+            xv(seg(i)%vert) = seg(i)%xv
+            yv(seg(i)%vert) = seg(i)%yv
+        end do 
+
         ! Boundary layer options
-        !=======================        
+        !======================= 
         ! Vessel boundary layer?
         if (options%refBLdovessel) then
-            ! Initialize
-            allocate(isvesselvert(grid%vert%ntot))
-            isvesselvert = .false. 
 
             ! Get topological mesh vessel face IDs
             vesselfaceIDs = topomesh%GetVesselFaceIDs() 
@@ -8747,17 +8754,11 @@ module ggmod_gridgeneration2D
                     seg(i)%refoptions%dlBLend = options%refBLdlvessel(options%refBLncvessel:1:-1) ! need to flip
                 end if 
             end do 
-
-            ! Housekeeping
-            deallocate(isvesselvert)
         end if 
 
         ! Target boundary layer? 
         if (options%refBLdotarget) then 
-            ! Initialize
-            allocate(istargetvert(grid%vert%ntot))
-            istargetvert = .false. 
-
+            
             ! Get topological mesh target face IDs
             targetfaceIDs = topomesh%GetTargetFaceIDs() 
             doTMface = .false.
@@ -8789,10 +8790,51 @@ module ggmod_gridgeneration2D
                     seg(i)%refoptions%dlBLend = options%refBLdltarget(options%refBLnctarget:1:-1) ! need to flip)
                 end if
             end do 
+        end if 
 
-            ! Housekeeping
-            deallocate(istargetvert)
+        ! Structure boundary layer?
+        if (options%refBLdostructure) then 
 
+            ! Get topological mesh vessel face IDs
+            vesselfaceIDs = topomesh%GetVesselFaceIDs() 
+            doTMface = .false.
+            doTMface(vesselfaceIDs) = .true. 
+            where (face%type == TMfacealbndID) doTMface = .false. ! exclude aligned vessel parts
+
+            ! Determine vertices that are on one of these vessel faces
+            doseg = .false.
+            where (segTMface /= 0 .and. (.not. seg%isvertex)) doseg = doTMface(segTMface) ! mark segments that are vessel segments
+            dovert = .false.
+            do i = 1, ggtmdata%nseg
+                if (doseg(i)) then 
+                    dovert(seg(i)%vert) = .true. 
+                end if 
+            end do 
+
+            ! Evaluate the structure labels 
+            call vessel%exactplfvessel%EvaluateLabel(xv, yv, vertlabel)
+
+            ! Exclude vertices that don't have a specified structure label
+            do i = 1, grid%vert%ntot
+                dovert(i) = dovert(i) .and. any(vertlabel(i, 1) == options%refBLstructureID)
+            end do 
+
+            ! Set refinement options of edges that have a start and/or end vertex as marked vertex
+            doseg = .false. 
+            do i = 1, ggtmdata%nseg
+                if (dovert(segsv(i))) then 
+                    ! Set boundary layer options for start
+                    seg(i)%refoptions%doBLstart = .true. 
+                    seg(i)%refoptions%ncBLstart = options%refBLncstructure
+                    seg(i)%refoptions%dlBLstart = options%refBLdlstructure
+                end if 
+                if (dovert(segev(i))) then 
+                    ! Set boundary layer options for end
+                    seg(i)%refoptions%doBLend = .true. 
+                    seg(i)%refoptions%ncBLend = options%refBLncstructure
+                    seg(i)%refoptions%dlBLend = options%refBLdlstructure(options%refBLncstructure:1:-1) ! need to flip)
+                end if
+            end do  
         end if 
 
         ! Apply exclusion rules

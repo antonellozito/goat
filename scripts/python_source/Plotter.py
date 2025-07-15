@@ -247,6 +247,32 @@ def PlotGridVertFieldlineID(grid, fignum, vID=None):
 
     # Plot
     PlotPoints2DWithID(tx, ty, tvID, fignum) 
+
+def PlotGridCellArea(grid, fignum, doinverse=False):
+    # Description
+    #------------
+    # Make a plot of the cell area of the grid, just to detect small
+    # cells. 
+
+    # Calculate surface area
+    surfA = grid.ComputeCellSurfaceArea()
+
+    # Plot
+    
+    
+    if doinverse:
+        PlotCellBasedQuantity2D(grid, np.log10(1/np.abs(surfA)), fignum)
+        thisaxes = plt.gca()
+        thisaxes.set_title('Log10 of grid cell surface area (inverse) [m^-2]')
+        thisaxes.set_xlabel('x [m]')
+        thisaxes.set_ylabel('y [m]')
+    else:
+        PlotCellBasedQuantity2D(grid, np.log10(np.abs(surfA)), fignum)
+        thisaxes = plt.gca()
+        thisaxes.set_title('Log10 of grid cell surface area [m^2]')
+        thisaxes.set_xlabel('x [m]')
+        thisaxes.set_ylabel('y [m]')
+
 #--------------------------------------------------------------------------#
 #                              Grid Optimization                           #
 #--------------------------------------------------------------------------#
@@ -1005,6 +1031,7 @@ def PlotTopologicalMesh(topomesh, fignum):
     sepf = np.where(topomesh.face.type == gt.TMfacesepID)
     coref = np.where(topomesh.face.type == gt.TMfacecoreID)
     PFf = np.where(topomesh.face.type ==  gt.TMfacePFID)
+    SOLf = np.where(topomesh.face.type ==  gt.TMfaceSOLID)
     albndf = np.where(topomesh.face.type ==  gt.TMfacealbndID)
 
     for i in pf[0]:
@@ -1023,6 +1050,9 @@ def PlotTopologicalMesh(topomesh, fignum):
         PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
             fignum, color='r')
     for i in PFf[0]:
+        PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
+            fignum, color='r')
+    for i in SOLf[0]:
         PlotPolygons2D(topomesh.face.data[i].x, topomesh.face.data[i].y, 
             fignum, color='r')
     for i in albndf[0]:
