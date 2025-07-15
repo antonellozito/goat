@@ -20,6 +20,7 @@ module mod_contour2D
     use mod_errorhandler
     use mod_dynamicarrays
     use mod_structured2Dgridding
+    use mod_plotter, only: plotdir
     use mod_sort
     use mod_constants, only: nanval_R8
     use omp_lib
@@ -28,6 +29,7 @@ module mod_contour2D
     private 
     public :: ContourUDT, TraceContoursStructured2D, ContourTracerUDT, &
         StructuredContourTracerUDT, ConstructStructuredTracer, CleanContours
+    public assignment(=)
 
     ! Module parameters
     integer, parameter  :: npq          = 4 ! number of padding quads for 2D tracer to determine saddle points
@@ -122,6 +124,10 @@ module mod_contour2D
         ! Field value getter
         procedure(GetTracerValuesINT), deferred     :: GetValues
 
+        ! I/O
+        procedure(WriteTracerINT), deferred         :: Write 
+        procedure(ReadTracerINT), deferred          :: Read
+
         ! Coarsening of contours
         procedure :: CoarsenContours
 
@@ -155,6 +161,10 @@ module mod_contour2D
 
         ! Field value getter
         procedure :: GetValues      => GetValuesStructured2D
+
+        ! I/O
+        procedure :: Write          => WriteTracerStructured2D 
+        procedure :: Read           => ReadTracerStructured2D
 
     end type 
 
@@ -243,6 +253,19 @@ module mod_contour2D
             real(R8), allocatable           :: v(:)
         end function
 
+        ! I/O
+        subroutine WriteTracerINT(tracer, filename)
+            import :: ContourTracerUDT 
+            class(ContourTracerUDT)         :: tracer 
+            character(*), intent(in)        :: filename
+        end subroutine
+
+        subroutine ReadTracerINT(tracer, filename)
+            import :: ContourTracerUDT 
+            class(ContourTracerUDT)         :: tracer 
+            character(*), intent(in)        :: filename
+        end subroutine
+
     end interface
 
     ! Normal interfaces
@@ -251,6 +274,11 @@ module mod_contour2D
     interface AddContours 
         module procedure AddContourArray
         module procedure AddContourScalar
+    end interface
+
+    ! Operator overloading
+    interface assignment(=)
+        module procedure AssignContourTracer2DClass
     end interface
 
     contains 
@@ -305,7 +333,7 @@ module mod_contour2D
         ! Declare variables
         !==================
         ! Arguments
-        class(ContourTracerUDT), allocatable    :: tracer 
+        type(StructuredContourTracerUDT)    :: tracer 
         real(R8), intent(in), dimension(:)      :: X, Y, xs, ys, vs 
         real(R8), intent(in)                    :: V(:, :), dl
         integer(I8), intent(in), dimension(:)   :: IDs
@@ -319,14 +347,14 @@ module mod_contour2D
         ! Initialize
         !===========
         ! Allocate
-        allocate(StructuredContourTracerUDT::tracer) 
+        !allocate(StructuredContourTracerUDT::tracer) 
         allocate(order(size(xs)))
 
         ! Set values
         !===========
-        select type (tracer)
+        !select type (tracer)
 
-        type is (StructuredContourTracerUDT)
+        !type is (StructuredContourTracerUDT)
 
             tracer%dl = dl 
             if (npmin <= 2) then 
@@ -353,11 +381,39 @@ module mod_contour2D
             tracer%xg = xg 
             tracer%yg = yg
 
-        class default 
+        !class default 
 
-        end select
+        !end select
 
     end function 
+
+    ! Assignment overloading
+    subroutine AssignContourTracer2DClass(a, b)
+
+        class(ContourTracerUDT), allocatable, intent(inout)    :: a 
+        class(ContourTracerUDT), intent(in)                    :: b 
+
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+
+        select type (b)
+
+        class default 
+
+            call gdErrorHandler('Unknown type')
+
+        type is (StructuredContourTracerUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (StructuredContourTracerUDT)
+                a = b 
+            end select
+
+        end select
+    
+    end subroutine
 
     !------------------------------------------------------------------!
     !                              TRACERS                             !
@@ -508,10 +564,13 @@ module mod_contour2D
  
         ! Main loop
         !==========
-        !$omp parallel default(private) shared(tracevalues, V, X, Y, &
-        !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
-        !$omp contours) firstprivate(spstruct) if(size(tracevalues) > 4)
-        !$omp do 
+        !$omp parallel default(none) if(.not. omp_in_parallel()) &
+        !$omp shared(tracevalues, V, X, Y, superquadflags, &
+        !$omp superquadfacexflags, superquadfaceyflags, nx, ny, &
+        !$omp contours) &
+        !$omp private(i, tv, tempcontours, j) & 
+        !$omp firstprivate(spstruct) 
+        !$omp do schedule(dynamic) 
         do i = 1, size(tracevalues)
             ! Get current trace value
             tv = tracevalues(i)
@@ -699,9 +758,11 @@ module mod_contour2D
 
         ! Main loop
         !==========
-        !$omp parallel do default(private) shared(xt, yt, nt, V, X, Y, &
-        !$omp superquadflags, superquadfacexflags, superquadfaceyflags, nx, ny, &
-        !$omp contours) firstprivate(spstruct) if(nt > 4)
+        !$omp parallel do default(none) if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp shared(xt, yt, nt, V, X, Y, superquadflags, &
+        !$omp superquadfacexflags, superquadfaceyflags, nx, ny, contours) &
+        !$omp private(txt, tyt, i, j, tempcontours) & 
+        !$omp firstprivate(spstruct) 
         do i = 1, nt
             ! Get current trace value
             txt = xt(i)
@@ -719,10 +780,14 @@ module mod_contour2D
 
             ! Check if closed
             do j = 1, size(tempcontours)
-                if (tempcontours(j)%x(1) == tempcontours(j)%x(size(tempcontours(j)%x)) .and. &
-                    tempcontours(j)%y(1) == tempcontours(j)%y(size(tempcontours(j)%y))) then 
-                    if (size(tempcontours(j)%x) > 1) then 
-                        tempcontours(j)%isclosed = .true.
+                if (size(tempcontours(j)%x) > 0) then 
+                    if (tempcontours(j)%x(1) == tempcontours(j)%x(size(tempcontours(j)%x)) .and. &
+                        tempcontours(j)%y(1) == tempcontours(j)%y(size(tempcontours(j)%y))) then 
+                        if (size(tempcontours(j)%x) > 1) then 
+                            tempcontours(j)%isclosed = .true.
+                        else
+                            tempcontours(j)%isclosed = .false.
+                        end if 
                     else
                         tempcontours(j)%isclosed = .false.
                     end if 
@@ -1603,8 +1668,8 @@ module mod_contour2D
         end if 
 
         ! Find the starting quad indices
-        iisq = findloc(x0 > X, .true., 1, back=.true.)
-        jjsq = findloc(y0 > Y, .true., 1, back=.true.)
+        iisq = findloc(x0 >= X, .true., 1, back=.true.)
+        jjsq = findloc(y0 >= Y, .true., 1, back=.true.)
 
         ! Hedge for out of bounds
         if ((iisq == 0) .or. (jjsq == 0) .or. (iisq == nx) .or. (jjsq == ny)) then 
@@ -2125,8 +2190,8 @@ module mod_contour2D
         do i = 1, size(xs)
 
             ! Determine saddle point location
-            ixquad = findloc(xs(i) > X, .true., dim=1, back=.true.)
-            iyquad = findloc(ys(i) > Y, .true., dim=1, back=.true.)
+            ixquad = findloc(xs(i) >= X, .true., dim=1, back=.true.)
+            iyquad = findloc(ys(i) >= Y, .true., dim=1, back=.true.)
 
             ! Check for out-of-bounds
             if ((ixquad == 0) .or. (iyquad == 0)) then 
@@ -2874,7 +2939,7 @@ module mod_contour2D
 
         ! Initial values
         quadflags = 0 ! default: no value
-        !$omp parallel workshare
+        !$omp parallel workshare if(.not. omp_in_parallel())
         c1 = hasvv(1:nv1-1, 1:nv2-1)
         c2 = hasvv(2:nv1, 1:nv2-1)
         c3 = hasvv(2:nv1, 2:nv2) 
@@ -2967,31 +3032,35 @@ module mod_contour2D
         ! Auxiliary
         logical, allocatable                    :: delind(:)
         real(R8), allocatable                   :: dx(:), dy(:)
+        logical                                 :: do_parallel
 
         ! Loop
         integer(I8)                             :: i 
         
         ! Clean
         !======
+        do_parallel = omp_in_parallel()
         !$omp parallel do default(none) private(dx, dy, delind) &
-        !$omp shared(contours)
+        !$omp shared(contours) schedule(static) if(do_parallel)
         do  i = 1, size(contours)
-            dx = contours(i)%x(2:size(contours(i)%x)) - &
-                contours(i)%x(1:size(contours(i)%x)-1)
-            dy = contours(i)%y(2:size(contours(i)%y)) - &
-                contours(i)%y(1:size(contours(i)%y)-1)
-            allocate(delind(size(dx)))
-            delind = (abs(dx) <= disttol) .and. (abs(dy) <= disttol)
-            ! Don't delete the last point, delete the former instead
-            if (delind(size(dx))) then 
-                delind(size(dx)) = .false.
-                delind(size(dx)-1) = .true.
-            end if 
-            if (any(delind)) then 
-                contours(i)%x = pack(contours(i)%x, [.true., .not. delind])
-                contours(i)%y = pack(contours(i)%y, [.true., .not. delind])
-            end if 
-            deallocate(delind)
+            if (size(contours(i)%x) > 2) then 
+                dx = contours(i)%x(2:size(contours(i)%x)) - &
+                    contours(i)%x(1:size(contours(i)%x)-1)
+                dy = contours(i)%y(2:size(contours(i)%y)) - &
+                    contours(i)%y(1:size(contours(i)%y)-1)
+                allocate(delind(size(dx)))
+                delind = (abs(dx) <= disttol) .and. (abs(dy) <= disttol)
+                ! Don't delete the last point, delete the former instead
+                if (delind(size(dx))) then 
+                    delind(size(dx)) = .false.
+                    delind(size(dx)-1) = .true.
+                end if 
+                if (any(delind)) then 
+                    contours(i)%x = pack(contours(i)%x, [.true., .not. delind])
+                    contours(i)%y = pack(contours(i)%y, [.true., .not. delind])
+                end if 
+                deallocate(delind)
+            end if
         end do 
         !$omp end parallel do
     end subroutine 
@@ -3109,6 +3178,7 @@ module mod_contour2D
         real(R8)                        :: x1, y1, dx1, dy1, dx1p, dy1p, &
             x2, y2, dx2, dy2, dx2p, dy2p, x3, y3, dx3, dy3, dx3p, dy3p, & 
             cp(1:3)
+        logical                         :: do_parallel
 
         ! Loop
         integer(I8)                         :: i 
@@ -3137,7 +3207,11 @@ module mod_contour2D
         ! Compute
         !========
         ! Loop
-        !$omp parallel do default(private) shared(v1, v2, v3, x, y, in, on, xp, yp)
+        do_parallel = .not. omp_in_parallel()
+        !$omp parallel do default(none) schedule(static) if (do_parallel) &
+        !$omp shared(v1, v2, v3, x, y, in, on, xp, yp) &
+        !$omp private(i, x1, x2, x3, y1, y2, y3, dx1, dx2, dx3, dy1, dy2, dy3, &
+        !$omp dx1p, dx2p, dx3p, dy1p, dy2p, dy3p, cp)
         do i = 1, size(v1)
             ! Get coordinates
             x1 = x(v1(i))
@@ -3220,6 +3294,242 @@ module mod_contour2D
         lambda3 = 1 - lambda1 - lambda2
 
     end subroutine
+    !------------------------------------------------------------------!
+    !                                I/O                               !
+    !------------------------------------------------------------------!
+
+    ! Write structured tracer
+    subroutine WriteTracerStructured2D(tracer, filename)
+
+        ! Description
+        !============
+        ! Write all tracer data that is required to set up a structured
+        ! tracer. Format:
+        ! 
+        ! Header
+
+        ! Modules
+        !========
+        use mod_specialchars, only  : filesepchar
+        use mod_definitions, only   : goatversion
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)   :: tracer 
+        character(*), intent(in)            :: filename 
+
+        ! Auxiliary
+        integer                             :: fu 
+        character(:), allocatable           :: dir 
+
+        ! Loop
+        integer(I8)                         :: i, j
+
+        ! Initialize
+        !===========
+        ! Construct filepath
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Unpack
+        associate(&
+            xs      => tracer%xs,   &
+            ys      => tracer%ys,   &
+            vs      => tracer%vs,   &
+            dl      => tracer%dl,   &
+            npmin   => tracer%npmin,    &
+            npmax   => tracer%npmax,    &
+            order   => tracer%order,    &
+            IDs     => tracer%IDs,      &
+            X       => tracer%X,        &
+            Y       => tracer%Y,        &
+            V       => tracer%V         &
+            )
+
+        ! Write data
+        !===========
+        ! Common tracer data
+        !-------------------
+        ! Header
+        write(fu, *) 'VERSION' // goatversion
+
+        ! Dimensions
+        write(fu, *) 'ns, nx, ny'
+        write(fu, *) size(xs), size(X), size(Y)
+
+        ! dl
+        write(fu, *) 'dl, npmin, npmax'
+        write(fu, *) dl, npmin, npmax 
+
+        ! xs, ys, vs, order, ID
+        write(fu, *) 'xs, ys, vs, order, ID'
+        do i = 1, size(xs)
+            write(fu, *) xs(i), ys(i), vs(i), order(i), IDs(i)
+        end do 
+
+        ! Specific tracer data
+        !---------------------
+        ! X
+        write(fu, *) 'X'
+        do i = 1, size(X)
+            write(fu, *) X(i)
+        end do
+        
+        ! Y
+        write(fu, *) 'Y'
+        do i = 1, size(Y)
+            write(fu, *) Y(i)
+        end do
+
+        ! V 
+        write (fu, *) 'V'
+        do i = 1, size(V, 1)
+            do j = 1, size(V, 2)
+                write (fu, *) V(i, j)
+            end do 
+        end do 
+
+        ! Housekeeping
+        close(fu)
+        end associate
+
+    end subroutine
+
+    ! Read structured tracer
+    subroutine ReadTracerStructured2D(tracer, filename)
+
+        ! Description
+        !============
+        ! Read all tracer data that is required to set up a structured
+        ! tracer. We also construct the rest of the tracer here. 
+
+        ! Modules
+        !========
+        use mod_specialchars, only  : filesepchar
+        use mod_definitions, only   : goatversion
+        use mod_inputfileparser
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(StructuredContourTracerUDT)   :: tracer 
+        character(*), intent(in)            :: filename 
+
+        ! Auxiliary
+        integer                             :: fu 
+        integer(I8)                         :: ns, nx, ny
+        logical                             :: reachedeof
+        character(:), allocatable           :: thisline
+        real(R8), allocatable, dimension(:) :: xg, yg
+
+        ! Loop
+        integer(I8)                         :: i, j
+
+        ! Initialize
+        !===========
+        ! Open file
+        open (action='read', file=trim(filename), newunit=fu, &
+             status='unknown')
+
+        ! Check allocation status
+        if (allocated(tracer%xs)) deallocate(tracer%xs)
+        if (allocated(tracer%ys)) deallocate(tracer%ys)
+        if (allocated(tracer%vs)) deallocate(tracer%vs)
+        if (allocated(tracer%order)) deallocate(tracer%order)
+        if (allocated(tracer%IDs)) deallocate(tracer%IDs)
+        if (allocated(tracer%X)) deallocate(tracer%X)
+        if (allocated(tracer%Y)) deallocate(tracer%Y)
+        if (allocated(tracer%V)) deallocate(tracer%V)
+
+        ! Write data
+        !===========
+        ! Common tracer data
+        !-------------------
+        ! Header
+        call ReadSingleLine(fu, thisline, reachedeof)
+
+        ! Dimensions
+        call ReadUntilFound(fu, 'ns, nx, ny', reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadTracerSTructured2D: could not find dimensions')
+        end if 
+        read(fu, *) ns, nx, ny
+
+        ! Allocate
+        allocate(tracer%xs(ns), tracer%ys(ns), tracer%vs(ns), &
+            tracer%order(ns), tracer%IDs(ns), tracer%X(nx), &
+            tracer%Y(ny), tracer%V(nx, ny))
+
+        ! Unpack
+        associate(&
+            xs      => tracer%xs,   &
+            ys      => tracer%ys,   &
+            vs      => tracer%vs,   &
+            dl      => tracer%dl,   &
+            npmin   => tracer%npmin,    &
+            npmax   => tracer%npmax,    &
+            order   => tracer%order,    &
+            IDs     => tracer%IDs,      &
+            X       => tracer%X,        &
+            Y       => tracer%Y,        &
+            V       => tracer%V         &
+            )
+        
+        ! dl
+        call ReadSingleLine(fu, thisline, reachedeof)
+        read(fu, *) dl, npmin, npmax 
+
+        ! xs, ys, vs, order, ID
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, size(xs)
+            read(fu, *) xs(i), ys(i), vs(i), order(i), IDs(i)
+        end do 
+
+        ! Specific tracer data
+        !---------------------
+        ! X
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, nx
+            read(fu, *) X(i)
+        end do 
+
+        ! Y 
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, ny
+            read(fu, *) Y(i)
+        end do 
+
+
+        ! V 
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, size(V, 1)
+            do j = 1, size(V, 2)
+                read (fu, *) V(i, j)
+            end do 
+        end do 
+
+        ! Construct derived data
+        !-----------------------
+        allocate(xg(nx*ny), yg(nx*ny))
+        call Construct2DStructuredGrid(X, Y, nx, ny, xg, yg)
+        tracer%xg = xg 
+        tracer%yg = yg
+    
+        ! Housekeeping
+        end associate
+        close(fu)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                            OVERLOADING                           !
+    !------------------------------------------------------------------!
+
+    ! Assignment
 
 
     

@@ -42,6 +42,7 @@ TMfacebndID = 3
 TMfacesepID = 4
 TMfacecoreID = 5
 TMfacePFID = 6
+TMfacealbndID = 7
 
 #----------------------------------------------------------------------#
 #                               I/O                                    #
@@ -120,12 +121,38 @@ class TopomeshFacedata:
         # coordinates
         self.x = np.zeros(0, dtype=float)
         self.y = np.zeros(0, dtype=float)
+        self.dx = np.zeros(0, dtype=float)
+        self.dy = np.zeros(0, dtype=float)
+        self.dl = np.zeros(0, dtype=float)
+        self.dlsum = np.zeros(0, dtype=float)
+        self.L = 0
 
     # Initializer
     def Initialize(self, nc):
         # Initialize coordinates
         self.x = np.zeros(nc, dtype=float)
         self.y = np.zeros(nc, dtype=float)
+        self.ComputeMetrics()
+
+    def ComputeMetrics(self):
+        self.dx = np.diff(self.x)
+        self.dy = np.diff(self.y)
+        self.dl = np.sqrt(self.dx**2 + self.dy**2)
+        self.dlsum = np.cumsum(np.append(np.array([0]), (self.dl)))
+        self.L = np.sum(self.dl)
+        
+    # Coordinate interpolator
+    def InterpolateCoordinates(self, frac):
+        # Checks
+        if (frac < 0.0) or (frac > 1.0):
+            raise ValueError("InterpolateCoordinates: frac should be between 0.0" \
+                "(start of line) and 1.0 (end of line)")
+        
+        # Interpolate
+        lcoord = frac*self.L 
+        xc = np.interp(lcoord, self.dlsum, self.x)
+        yc = np.interp(lcoord, self.dlsum, self.y)
+        return xc, yc
 
 # Topological mesh faces
 class TopomeshFace:
@@ -243,14 +270,79 @@ class TopomeshCell:
         # Add face coordinates
         self.data[cellindex].x = xc 
         self.data[cellindex].y = yc
+
+# Topological mesh flux surface
+class TopomeshFluxSurface:
+    def __init__(self):
+        # Dimensions
+        self.ntot = 0
         
+        # IDs etc
+        self.ID = np.zeros(self.ntot, dtype=int)
+        self.psi = np.zeros(self.ntot, dtype=float)
+
+    def Initialize(self, ntot):
+        # Dimensions
+        self.ntot = ntot
+        
+        # IDs etc
+        self.ID = np.zeros(self.ntot, dtype=int)
+        self.psi = np.zeros(self.ntot, dtype=float)
+
+# Topological mesh tubes
+class TopomeshFluxTube:
+    def __init__(self):
+        # Dimensions
+        self.ntot   = 0
+        self.nface  = 0
+        self.ncell  = 0
+
+        # ID
+        self.ID     = np.zeros(self.ntot, dtype=int)
+
+        # Faces
+        self.face   = np.zeros(self.nface, dtype=int)
+        self.faceP = np.zeros((self.ntot, 2), dtype=int)
+
+        # Cells
+        self.cell   = np.zeros(self.ncell, dtype=int)
+        self.cellP  = np.zeros((self.ntot, 2), dtype=int)
+
+    def Initialize(self, ntot, nface, ncell):
+        # Dimensions
+        self.ntot   = ntot 
+        self.nface  = nface 
+        self.ncell  = ncell 
+
+        # ID
+        self.ID     = np.zeros(self.ntot, dtype=int)
+
+        # Faces
+        self.face   = np.zeros(self.nface, dtype=int)
+        self.faceP = np.zeros((self.ntot, 2), dtype=int)
+
+        # Cells
+        self.cell   = np.zeros(self.ncell, dtype=int)
+        self.cellP  = np.zeros((self.ntot, 2), dtype=int)
+
+    # Face getter
+    def GetFace(self, i):
+        return self.face[self.faceP[i, 0]:self.faceP[i, 0]+self.faceP[i, 1]]
+    
+    # Cell getter
+    def GetCell(self, i):
+        return self.cell[self.cellP[i, 0]:self.cellP[i, 0]+self.cellP[i, 1]]
+        
+
 # Topological mesh
 class Topomesh:
     def __init__(self):
         # Fields
-        self.vert = TopomeshVert()
-        self.face = TopomeshFace() 
-        self.cell = TopomeshCell()
+        self.vert   = TopomeshVert()
+        self.face   = TopomeshFace() 
+        self.cell   = TopomeshCell()
+        self.fs     = TopomeshFluxSurface()
+        self.ft     = TopomeshFluxTube()
         
 #----------------------------------------------------------------------#
 #                         GRID GENERATOR                               #
@@ -390,16 +482,17 @@ class GGVert:
     def __init__(self):
         # Number
         self.ntot = 0
+        nv = self.ntot
 
         # coordinates
-        self.x = np.zeros(0, dtype=float)
-        self.y = np.zeros(0, dtype=float)
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
 
         # ID
-        self.ID =  np.zeros(0, dtype=int)
+        self.ID =  np.zeros(nv, dtype=int)
 
         # Fieldline ID
-        self.fieldlineID = np.zeros(0, dtype=int)
+        self.fieldlineID = np.zeros(nv, dtype=int)
 
     # Initializer
     def Initialize(self, nv):
@@ -457,19 +550,20 @@ class GGCell:
         # Number
         self.ntot = 0
         self.nvert = 0
+        nc = self.ntot 
 
         # Vertex pointer
-        self.vp1 = np.zeros(0, dtype=int)
-        self.vp2 = np.zeros(0, dtype=int)
+        self.vp1 = np.zeros(nc, dtype=int)
+        self.vp2 = np.zeros(nc, dtype=int)
         
         # Vertices
-        self.vert = np.zeros(0, dtype=int)
+        self.vert = np.zeros(nc, dtype=int)
 
         # ID
-        self.ID =  np.zeros(0, dtype=int)
+        self.ID =  np.zeros(nc, dtype=int)
 
         # Region
-        self.region = np.zeros(0, dtype=int)
+        self.region = np.zeros(nc, dtype=int)
 
     # Initializer
     def Initialize(self, nc, ncv):
@@ -513,6 +607,7 @@ class Vert:
     def __init__(self):
         # Number
         self.ntot = 0
+        nv = self.ntot
 
         # Coordinates
         self.x = np.zeros(0, dtype=float)
@@ -529,6 +624,11 @@ class Vert:
 
         # Fieldline ID
         self.fieldlineID = np.zeros(0, dtype=int)
+
+        # Metrics
+        self.bb = np.zeros((nv, 4), dtype=float)
+        self.ffbz = np.zeros(nv, dtype=float)
+        self.fspsi = np.zeros(nv, dtype=float)
 
     # Initializer
     def Initialize(self, nv):
@@ -556,6 +656,11 @@ class Vert:
         self.cp2 = np.zeros(nv, dtype=int)
         self.cell = np.zeros(0, dtype=int) # To be determined in grid interconnections
 
+        # Metrics
+        self.bb = np.zeros((nv, 4), dtype=float)
+        self.ffbz = np.zeros(nv, dtype=float)
+        self.fspsi = np.zeros(nv, dtype=float)
+
     def GetCell(self, i):
         return self.cell[self.cp1[i]:self.cp1[i]+self.cp2[i]]
 
@@ -565,6 +670,7 @@ class Face:
     def __init__(self):
         # Number
         self.ntot = 0 
+        nf = self.ntot
 
         # Vertices
         self.v1 = np.zeros(0, dtype=int)
@@ -583,6 +689,20 @@ class Face:
 
         # ID
         self.ID =  np.zeros(0, dtype=int)
+
+        # Coordinates
+        self.x = np.zeros(0, dtype=float)
+        self.y = np.zeros(0, dtype=float)
+
+        # Metrics
+        self.bb = np.zeros((nf, 4), dtype=float)
+        self.s = np.zeros(nf, dtype=float)
+        self.hc = np.zeros((nf, 4), dtype=float)
+        self.ht = np.zeros(nf, dtype=float)
+        self.qgam = np.zeros((nf, 2), dtype=float)
+        self.qalf = np.zeros((nf, 2), dtype=float)
+        self.qbet = np.zeros((nf, 2), dtype=float)
+        self.pbs = np.zeros(nf, dtype=float)
 
     # Initializer
     def Initialize(self, nf):
@@ -607,14 +727,31 @@ class Face:
         # ID
         self.ID =  np.zeros(nf, dtype=int)
 
+        # Coordinates
+        self.x = np.zeros(nf, dtype=float)
+        self.y = np.zeros(nf, dtype=float)
+
+        # Metrics
+        self.bb = np.zeros((nf, 4), dtype=float)
+        self.s = np.zeros(nf, dtype=float)
+        self.hc = np.zeros((nf, 4), dtype=float)
+        self.ht = np.zeros(nf, dtype=float)
+        self.qgam = np.zeros((nf, 2), dtype=float)
+        self.qalf = np.zeros((nf, 2), dtype=float)
+        self.qbet = np.zeros((nf, 2), dtype=float)
+        self.pbs = np.zeros(nf, dtype=float)
+
 # Grid cells
 class Cell:
     # Definition
     def __init__(self):
         # Number
-        self.ntot = 0
         self.nvert = 0
         self.nface = 0
+        self.ncg = 0 # number of guard cells 
+        self.nci = 0 # number of internal (non-guard) cells
+        self.ntot = self.ncg + self.nci 
+        nc = self.ntot
 
         # Vertex pointer
         self.vp1 = np.zeros(0, dtype=int)
@@ -654,12 +791,24 @@ class Cell:
         self.region = np.zeros(0, dtype=int)
         self.ft     = np.zeros(0, dtype=int)
 
+        # Metrics
+        self.bb = np.zeros((nc, 4), dtype=float)
+        self.zb = np.zeros((nc, 3), dtype=float)
+        self.sz = np.zeros(nc, dtype=int)
+        self.hz = np.zeros(nc, dtype=int)
+        self.hx = np.zeros(nc, dtype=int)
+        self.qgam = np.zeros((nc, 2), dtype=int)
+        self.vol = np.zeros(nc, dtype=int)
+
     # Initializer
-    def Initialize(self, nc, ncv, ncf):
+    def Initialize(self, nci, ncg, ncv, ncf):
         # Number
-        self.ntot = nc
+        self.nci = nci 
+        self.ncg = ncg 
         self.nvert = ncv
         self.nface = ncf
+        nc = self.nci + self.ncg 
+        self.ntot = nc
 
         # Vertex pointer
         self.vp1 = np.zeros(nc, dtype=int)
@@ -698,6 +847,15 @@ class Cell:
         self.cflags = np.zeros(nc, dtype=int)
         self.region = np.zeros(nc, dtype=int)
         self.ft     = np.zeros(nc, dtype=int)
+
+        # Metrics
+        self.bb = np.zeros((nc, 4), dtype=float)
+        self.zb = np.zeros((nc, 3), dtype=float)
+        self.sz = np.zeros(nc, dtype=int)
+        self.hz = np.zeros(nc, dtype=int)
+        self.hx = np.zeros(nc, dtype=int)
+        self.qgam = np.zeros((nc, 2), dtype=int)
+        self.vol = np.zeros(nc, dtype=int)
 
     # Vertex getter
     def GetVert(self, i):
@@ -892,6 +1050,8 @@ class Grid:
         # all other necessary fields were read in
 
         # Face cells
+        self.face.nb1[:] = 0 
+        self.face.nb2[:] = 0
         for i in np.arange(0, self.cell.ntot, 1):
             # Get cell faces
             tf = self.cell.GetFace(i)
@@ -980,8 +1140,23 @@ class Grid:
 
         return isincell
 
-                
+    # Compute grid metrics
+    def ComputeFaceCoordinates(self):
+        # Compute face center coordinates
+        for i in np.arange(0, self.face.ntot, 1):
+            tv = np.array([self.face.v1[i], self.face.v2[i]])
+            self.face.x[i] = np.mean(self.vert.x[tv-1])
+            self.face.y[i] = np.mean(self.vert.y[tv-1])
 
+    def ComputeCellCoordinates(self):
+        # Compute cell center coordinates - only for internal cells, 
+        # guard cells should be given or will be zero
+        for i in np.arange(0, self.cell.nci, 1): 
+            tv = self.cell.GetVert(i)
+            self.cell.x[i] = np.mean(self.vert.x[tv-1])
+            self.cell.y[i] = np.mean(self.vert.y[tv-1])
+
+        
 
 #----------------------------------------------------------------------#
 #                        GENERAL 2D INTERPOLANT                        #

@@ -67,6 +67,7 @@ module somod_optimizationengine
         type(DesignOptionsSOUDT)            :: designoptions 
         type(CGStructureUDT), allocatable   :: congroups(:) 
         type(DOFGStructureUDT), allocatable :: dofgroups(:)
+        logical                             :: doremesh 
         
     contains
 
@@ -275,6 +276,11 @@ module somod_optimizationengine
         ! Design options
         problem%designoptions%inputfilepath = problem%inputfilepath
 
+        ! Remeshing
+        !==========
+        ! Initialize to false
+        problem%doremesh = .false. 
+
         ! Design options
         !===============
         ! Set shape optimization options
@@ -307,6 +313,7 @@ module somod_optimizationengine
         ! Design variables
         !=================
         ! Allocate the design variables, depending on the type.
+        if (allocated(problem%designvariables)) deallocate(problem%designvariables)
         select case (trim(problem%designoptions%variables%type))
 
         case ('vesselcoordinates')
@@ -343,6 +350,7 @@ module somod_optimizationengine
         end if 
 
         ! Allocate the cost function, depending on the type
+        if (allocated(problem%costfunction)) deallocate(problem%costfunction)
         if (problem%designoptions%costfunction%dogoatreduction) then 
 
             ! Check if it's also SOLPS-based and if this is allowed
@@ -372,10 +380,32 @@ module somod_optimizationengine
                 ! Allocate 
                 allocate(CostFunctionPLFUDT::problem%costfunction)
 
+                ! Set type
+                problem%costfunction%type = 'PLF'
+
+            case ('SOFA')
+
+                ! Allocate
+                allocate(CostFunctionSOFAUDT::problem%costfunction)
+
+                ! Set type
+                problem%costfunction%type = 'SOFA'
+
             case ('no')
 
                 ! Zero cost function
                 allocate(CostFunctionDummyUDT::problem%costfunction)
+
+                ! Set type
+                problem%costfunction%type = 'no'
+
+            case ('general')
+                
+                ! General cost function
+                allocate(CostFunctionGeneralSOUDT::problem%costfunction)
+
+                ! Set type
+                problem%costfunction%type = 'general'
                 
             case default
                 
@@ -397,6 +427,9 @@ module somod_optimizationengine
             problem%designvariables, problem%designoptions%constraints)
 
         ! Set Lagrange multipliers
+        if (allocated(problem%lambda)) deallocate(problem%lambda)
+        if (allocated(problem%mu)) deallocate(problem%mu)
+        if (allocated(problem%A)) deallocate(problem%A)
         allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
             problem%mu(problem%constraints%ineqcon%nineqcon), &
             problem%A(problem%constraints%ineqcon%nineqcon))
@@ -439,10 +472,11 @@ module somod_optimizationengine
             ! Check cost function
             select case (problem%costfunction%type)
 
-            case ('PLF')
+            case ('PLF', 'SOFA', 'general')
 
                 ! Requires  vesselcoordinates(_goat)
-                call gdErrorHandler('Cost function "PLF" requires design ' // &
+                call gdErrorHandler('Cost function "' // problem%costfunction%type // &
+                    '" requires design ' // &
                     'variables with vessel coordinates, check input')
 
             case default 
@@ -457,6 +491,76 @@ module somod_optimizationengine
             end if 
 
         end select
+
+        ! Finalize initialization
+        !========================
+        ! Initialize design variables further for constraint/cfv 
+        ! dependent fields
+        call problem%FinalizeInitialization()
+
+
+    end subroutine
+
+    ! Re-initialization after remeshing
+    subroutine ReinitializeAfterRemeshing(problem, grid)
+
+        ! Description
+        !============
+        ! This routine reinitializes the optimization problem given a 
+        ! new grid. Since, in general, the grid variables can be present
+        ! anywhere in the design variables, cost function and 
+        ! constraints of the shape optimization problem, we reinitialize
+        ! all of them. For goat, we don't need to reload any of the 
+        ! user input (that doesn't/shouldn't change), but we do need to
+        ! reinitialize the entire optimization problem. 
+
+        ! Note: we could try to extract the previous lagrange 
+        ! multipliers from non-grid related constraints, but this 
+        ! requires additional getter functions of the constraints that
+        ! are design variable agnostic. Given that the computational 
+        ! gain/speed-up is probably low, we chose to simply reinitialize
+        ! the multipliers from scratch for now. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemSOUDT)             :: problem 
+        type(GridUDT), intent(in)                   :: grid 
+
+        ! GOAT
+        !=====
+        ! Set the grid
+        problem%goat%grid = grid 
+
+        ! Reinitialize goat
+        call problem%goat%ReinitializeAfterRemeshing()
+
+        ! Shape optimization
+        !===================
+        ! Design variables
+        call problem%designvariables%Initialize(problem%goat)
+        
+        ! Cost function
+        call problem%costfunction%Initialize(problem%goat, &
+            problem%designoptions%costfunction)
+
+        ! Constraints
+        !============
+        ! Given the (many) possible options for the constraints, the 
+        ! constraints are set in its own initialization. 
+        call problem%constraints%Initialize(problem%goat, & 
+            problem%designvariables, problem%designoptions%constraints)
+
+        ! Set Lagrange multipliers
+        if (allocated(problem%lambda)) deallocate(problem%lambda)
+        if (allocated(problem%mu)) deallocate(problem%mu)
+        if (allocated(problem%A)) deallocate(problem%A)
+        allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
+            problem%mu(problem%constraints%ineqcon%nineqcon), &
+            problem%A(problem%constraints%ineqcon%nineqcon))
+        problem%lambda = 0
+        problem%mu = 0
+        problem%A = .false.
 
         ! Finalize initialization
         !========================
@@ -503,8 +607,24 @@ module somod_optimizationengine
 
         case ('diagonal')
 
-            problem%costfunction%B = ConstructHessianApproximation(hopt%updatemethod, &
-                problem%designvariables%nphi, hopt%diagind, hopt%diagval, hopt%storagetype)
+            select case (hopt%storagetype)
+
+            case ('sparse')
+
+                problem%costfunction%B = ConstructSparseDiagonalHessianApproximation(hopt%updatemethod, &
+                    problem%designvariables%nphi, hopt%diagind, hopt%diagval)
+
+            case ('dense')
+
+                problem%costfunction%B = ConstructDenseDiagonalHessianApproximation(hopt%updatemethod, &
+                    problem%designvariables%nphi, hopt%diagind, hopt%diagval)
+
+            case default 
+
+                call gdErrorHandler('FinalizeInitializationSO: ' // & 
+                'unknown hessian storage option: "' // hopt%storagetype // '"')
+
+            end select
 
         case default 
 
@@ -526,6 +646,7 @@ module somod_optimizationengine
 
         ! Write original grid cells
         call WriteGridCells(problem%goat%grid, 'cells_init')
+        call WriteGridVertices(problem%goat%grid, 'vertices_init')
 
         ! Housekeeping
         !=============
@@ -669,6 +790,12 @@ module somod_optimizationengine
         ! Simply call the cost function computation routine
         call problem%costfunction%Evaluate(J, gradJ, hessJ, problem%goat, &
             dogradient, dohessian, problem%designvariables)
+
+        if (problem%doremesh) then 
+            ! Pop out by setting to NaN
+            J = nanval_R8() 
+            gradJ = nanval_R8()
+        end if   
 
     end subroutine
 
@@ -892,7 +1019,9 @@ module somod_optimizationengine
         ! Write data
         !===========
         ! Goat
-        call goat%WriteIterationData(itopt)
+        if (problem%designoptions%costfunction%dogoatreduction) then 
+            call goat%WriteIterationData(itopt)
+        end if 
 
         ! Vessel data
         call vessel%polygonset%WriteData('vesselpolygon_iterate_so')
@@ -930,6 +1059,10 @@ module somod_optimizationengine
 
         ! Write
         call problem%monitor%WriteFileIterate(fid)
+
+
+        ! Close file
+        close(fid)
         
 
         ! Housekeeping

@@ -205,6 +205,10 @@ def GetVertexPairCoordinates(filepath):
 
     alllines = thisfile.readlines()
 
+    if len(alllines) < 2:
+        vals = np.zeros([0, 0])
+        return vals 
+
     # Retrieve sizes
     dim = np.fromstring(alllines[1], dtype=float, sep=' ')
     del alllines[0]
@@ -221,6 +225,45 @@ def GetVertexPairCoordinates(filepath):
         else:
             # Read
             vals[cc, 0:6] = np.fromstring(i, dtype=float, count=6, sep=' ')
+
+        # Update counter
+        cc = cc + 1
+
+    # Return values
+    returnvec = np.zeros([2*npoints], dtype=int)
+    for i in np.arange(0, npoints, 1):
+        returnvec[2*i] = npoints + i 
+        returnvec[2*i+1] = 2*npoints + i 
+    return vals[0:cc, returnvec]
+
+def GetVertexPairsPairCoordinates(filepath):
+    # Description
+    #------------
+    # Read in a pair of vertex pairs format file where the vertices are stored in
+    # ID1, ID2, ID3, ID4,, x1, x2, x3, x4, y1, y2, y3, y4 format. The values that are returned are
+    # in [x1, y1, x2, y2, x3, y3, x4, y4] format. Empty lines are skipped
+
+    # Read in vertex coordinates from the vertices.dat file
+    thisfile = open(filepath)
+
+    alllines = thisfile.readlines()
+
+    # Retrieve sizes
+    dim = np.fromstring(alllines[1], dtype=float, sep=' ')
+    del alllines[0]
+    npoints = np.floor(len(dim)/3).astype(int)
+    vals = np.zeros([len(alllines), len(dim)])
+
+    # Read in vertex data
+    cc = 0
+
+    for i in alllines:
+        if i == '\n':  # empty string
+            # don't read
+            pass
+        else:
+            # Read
+            vals[cc, 0:12] = np.fromstring(i, dtype=float, count=12, sep=' ')
 
         # Update counter
         cc = cc + 1
@@ -428,6 +471,9 @@ def ReadTopomeshFile(filepath):
                 topomesh.face.data[fID].x[k] = np.fromstring(values[0], dtype=float, count=1, sep=' ')
                 topomesh.face.data[fID].y[k] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
 
+            # Compute metrics
+            topomesh.face.data[fID].ComputeMetrics()
+
             # Update position
             i = i + topomesh.face.nc[fID]
         else: 
@@ -505,7 +551,8 @@ def ReadTopomeshFile(filepath):
 
         # Add the values
         tv = np.fromstring(values[0], dtype=int, count=2, sep=' ')
-        topomesh.cell.vertP[j, 0:2] = tv
+        topomesh.cell.vertP[j, 0] = tv[0] - 1 # zero-based indexing!
+        topomesh.cell.vertP[j, 1] = tv[1]
 
     # Read cell coordinates
     #----------------------
@@ -551,6 +598,116 @@ def ReadTopomeshFile(filepath):
             i = i + topomesh.cell.nc[fID]
         else: 
             i = i + 1 
+
+    # Read flux surfaces
+    #-------------------
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "flux surfaces" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+    
+    # Read total amount of flux surfaces
+    i = i + 1
+    ntot = np.fromstring(alllines[i], dtype=int, count=1, sep=' ')
+    topomesh.fs.ntot = ntot[0]
+    
+    # Initialize fields
+    topomesh.fs.Initialize(topomesh.fs.ntot)
+
+    # Read data if available
+    if topomesh.fs.ntot > 0:
+        # Skip header
+        i = i + 2
+
+        # Read data
+        for j in np.arange(0, topomesh.fs.ntot, 1):
+            # Split the string
+            values = alllines[i+j].split()
+
+            # Add the values
+            topomesh.fs.ID[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+            topomesh.fs.psi[j] = np.fromstring(values[1], dtype=float, count=1, sep=' ')
+
+    # Read flux tubes
+    #----------------
+    # Get header position
+    i = 0
+    while i < len(alllines): 
+        if "tubes" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+    
+    # Read total amount of flux tubes and the size of face and cell
+    i = i + 1
+    ntot = np.fromstring(alllines[i], dtype=int, count=3, sep=' ')
+    topomesh.ft.ntot = ntot[0]
+    topomesh.ft.nface = ntot[1]
+    topomesh.ft.ncell = ntot[2]
+    
+    # Initialize fields
+    topomesh.ft.Initialize(topomesh.ft.ntot, topomesh.ft.nface, topomesh.ft.ncell)
+
+    # Read data if available
+    if topomesh.ft.ntot > 0:
+
+        # Set ID 
+        topomesh.ft.ID = np.arange(1, topomesh.ft.ntot+1, 1)
+
+        # Skip header
+        i = i + 2
+
+        # Read facelist
+        for j in np.arange(0, topomesh.ft.nface, 1):
+            # Split the string
+            values = alllines[i].split()
+
+            # Add the values
+            topomesh.ft.face[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+
+            # Update counter
+            i = i + 1
+
+        # Read face pointer 
+        i = i + 1
+        for j in np.arange(0, topomesh.ft.ntot, 1):
+            # Split the string
+            values = alllines[i].split()
+
+            # Add the values
+            topomesh.ft.faceP[j, 0] = np.fromstring(values[0], dtype=int, count=1, sep=' ')-1
+            topomesh.ft.faceP[j, 1] = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+
+            # Update counter
+            i = i + 1
+
+        # Read cell list
+        i = i + 1
+        for j in np.arange(0, topomesh.ft.ncell, 1):
+            # Split the string
+            values = alllines[i].split()
+
+            # Add the values
+            topomesh.ft.cell[j] = np.fromstring(values[0], dtype=int, count=1, sep=' ')
+
+            # Update counter
+            i = i + 1
+
+        # Read cell pointer 
+        i = i + 1
+        for j in np.arange(0, topomesh.ft.ntot, 1):
+            # Split the string
+            values = alllines[i].split()
+
+            # Add the values
+            topomesh.ft.cellP[j, 0] = np.fromstring(values[0], dtype=int, count=1, sep=' ')-1
+            topomesh.ft.cellP[j, 1] = np.fromstring(values[1], dtype=int, count=1, sep=' ')
+
+            # Update counter
+            i = i + 1
 
     # Return 
     return topomesh 
@@ -1015,7 +1172,7 @@ def ReadTraduitOutB2us(filepath):
     # Description
     #------------
     # This routine reads in the grid data in unstructured traduit file
-    # into a 'Grid' object. 
+    # into a 'Grid' object. This does not contain any guard cells yet
 
     # Initialize
     grid = gt.Grid()
@@ -1076,7 +1233,7 @@ def ReadTraduitOutB2us(filepath):
     # Initialize the grid (except flux surfaces etc - later on)
     grid.vert.Initialize(nv)
     grid.face.Initialize(nf)
-    grid.cell.Initialize(nc, ncv, ncf)
+    grid.cell.Initialize(nc, 0, ncv, ncf)
     grid.ft.Initialize(nft)
     grid.fs.Initialize(nfs)
 
@@ -1154,7 +1311,6 @@ def ReadTraduitOutB2us(filepath):
 
             grid.topodata.TpointID[j] = xind 
             grid.topodata.tpointdivID[j] = tpointdivID 
-            grid.topodata.spointxpID[j] = spointxpID 
         i = i + nT
 
         # Read divertor face pointer
@@ -1436,6 +1592,329 @@ def ReadTraduitOutB2us(filepath):
 
     # Compute grid interconnections
     grid.ComputeInterconnections()
+
+    # Compute face coordinates
+    grid.ComputeFaceCoordinates()
+
+    # Compute cell coordinates
+    grid.ComputeCellCoordinates()
+    
+    # Return
+    return grid
+
+def ReadGridFromB2fgmtryus(filepath):
+    # Description
+    #------------
+    # This routine reads in the grid data in unstructured b2fgmtry file
+    # format. Besides the usual grid data (without guard cells), also
+    # grid data of guard cells, and coordinate data of faces and cells
+    # are loaded. 
+    # Note: not all data available in b2fgmtry is loaded in, only the 
+    # data required for post-processing purposes
+
+    # Initialize
+    grid = gt.Grid()
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read version to determine what data to read in 
+    temp = alllines[0].split(); temp = temp[0]
+    version = temp[7:17]
+    topodataversion = '03.002.001'
+
+    if version >= topodataversion:
+        hasTopologicalData = True
+    else: 
+        hasTopologicalData = False 
+    
+
+    # Read dimensions
+    #----------------
+    # Start at top of file
+    i = 0
+    while i < len(alllines):
+        if "nCi,nCg,nCv,nFc,nVx,nFs,nFt" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read dimensions
+    values = alllines[i].split()
+    nci = np.fromstring(values[0], dtype=int, count=1, sep =' '); nci = nci[0]
+    ncg = np.fromstring(values[1], dtype=int, count=1, sep =' '); ncg = ncg[0]
+    nc = np.fromstring(values[2], dtype=int, count=1, sep =' '); nc = nc[0]
+    nf = np.fromstring(values[3], dtype=int, count=1, sep =' '); nf = nf[0]
+    nv = np.fromstring(values[4], dtype=int, count=1, sep =' '); nv = nv[0]
+    nfs = np.fromstring(values[5], dtype=int, count=1, sep =' '); nfs = nfs[0]
+    nft = np.fromstring(values[6], dtype=int, count=1, sep =' '); nft = nft[0]
+
+    # Read secondary dimensions (continue from previous line)
+    while i < len(alllines):
+        if "nCmxVx,nCmxFc,nVmxCv,nVmxFc,nCmx" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read dimensions
+    values = alllines[i].split()
+    ncv = np.fromstring(values[0], dtype=int, count=1, sep =' '); ncv = ncv[0]
+    ncf = np.fromstring(values[1], dtype=int, count=1, sep =' '); ncf = ncf[0]
+
+    # Initialize the grid (except flux surfaces etc - later on)
+    grid.vert.Initialize(nv)
+    grid.face.Initialize(nf)
+    grid.cell.Initialize(nci, ncg, ncv, ncf)
+    grid.ft.Initialize(nft)
+    grid.fs.Initialize(nfs)
+
+    # Initialize vertex structure
+    grid.vert.Initialize(nv)
+
+    # Read topological data
+    #----------------------
+    # First only header, other information is further downstream
+    if hasTopologicalData:
+        while i < len(alllines):
+            if "topoflag" in alllines[i]:
+                break 
+            else: 
+                i = i + 1
+
+        # Read in topoflag
+        i = i + 1
+        values = alllines[i].split()
+        topoflag = np.fromstring(values[0], dtype=int, count=1, sep =' '); topoflag = topoflag[0]
+        i = i + 1
+
+        # Read in numbers
+        i = i + 1
+        values = alllines[i].split()
+        nX = np.fromstring(values[0], dtype=int, count=1, sep =' '); nX = nX[0]
+        nO = np.fromstring(values[1], dtype=int, count=1, sep =' '); nO = nO[0]
+        nS = np.fromstring(values[2], dtype=int, count=1, sep =' '); nS = nS[0]
+        nT = np.fromstring(values[3], dtype=int, count=1, sep =' '); nT = nT[0]
+        nDiv = np.fromstring(values[4], dtype=int, count=1, sep =' '); nDiv = nDiv[0]
+        nDivFc = np.fromstring(values[5], dtype=int, count=1, sep =' '); nDivFc = nDivFc[0]
+        i = i + 1   
+        
+    else:
+        # Simply initialize to zero
+        nX = 0 
+        nO = 0
+        nS = 0
+        nT = 0
+        nDiv = 0
+        nDivFc = 0
+        topoflag = 0
+
+    # Initialize
+    grid.topodata.Initialize(nX, nO, nS, nT, nDiv, nDivFc, topoflag)        
+
+    # Read interconnection data
+    #--------------------------
+    # Read
+    cvFcP, i = ReadSOLPSField('cvFcP', alllines, i, nc*2, 'int', np.array([nc, 2]))
+    cvFc,  i = ReadSOLPSField('cvFc', alllines, i, ncf, 'int', np.array([ncf]))
+    fcCv,  i = ReadSOLPSField('fcCv', alllines, i, nf*2, 'int', np.array([nf, 2]))
+    fcVx,  i = ReadSOLPSField('fcVx', alllines, i, nf*2, 'int', np.array([nf, 2]))
+    cvVxP, i = ReadSOLPSField('cvVxP', alllines, i, nc*2, 'int', np.array([nc, 2]))
+    cvVx,  i = ReadSOLPSField('cvVx', alllines, i, ncv, 'int', np.array([ncv]))
+    # vxFcP: not read
+    # vxFc: not read
+    # vxCvP: not read
+    # vxCv: not read
+    ftCvP, i = ReadSOLPSField('ftCvP', alllines, i, nft*2, 'int', np.array([nft, 2]))
+    ftCv,  i = ReadSOLPSField('ftCv', alllines, i, nc, 'int', np.array([nc]))
+    ftFcP, i = ReadSOLPSField('ftFcP', alllines, i, nft*2, 'int', np.array([nft, 2]))
+    ftFc,  i = ReadSOLPSField('ftFc', alllines, i, nf, 'int', np.array([nf])) # in this case equal to amount of faces...
+    cvFt,  i = ReadSOLPSField('cvFt', alllines, i, nc, 'int', np.array([nc]))
+    fsFcP, i = ReadSOLPSField('fsFcP', alllines, i, nfs*2, 'int', np.array([nfs, 2]))
+    fsFc,  i = ReadSOLPSField('fsFc', alllines, i, nf, 'int', np.array([nf]))
+    fcReg, i = ReadSOLPSField('fcReg', alllines, i, nf, 'int', np.array([nf]))
+    cvReg, i = ReadSOLPSField('cvReg', alllines, i, nc, 'int', np.array([nc]))
+    ftReg, i = ReadSOLPSField('ftReg', alllines, i, nft, 'int', np.array([nft]))
+    # intcellP, intcellR, imap*, icorn: not read
+    fcLbl, i = ReadSOLPSField('fcLbl', alllines, i, nf, 'int', np.array([nf]))
+    cvLbl, i = ReadSOLPSField('cvLbl', alllines, i, nc, 'int', np.array([nc]))
+    # ftLbl: not read
+
+    # Add data
+    grid.cell.fp1 = cvFcP[:, 0]-1
+    grid.cell.fp2 = cvFcP[:, 1]
+    grid.cell.vp1 = cvVxP[:, 0]-1
+    grid.cell.vp2 = cvVxP[:, 1]
+    grid.cell.face  = cvFc 
+    grid.cell.vert  = cvVx
+    grid.cell.ft = cvFt 
+    grid.cell.region = cvReg 
+    grid.cell.cflags = cvLbl
+
+    grid.face.nb1 = fcCv[:, 0]
+    grid.face.nb2 = fcCv[:, 1]
+    grid.face.v1 = fcVx[:, 0]
+    grid.face.v2 = fcVx[:, 1]
+    grid.face.region = fcReg
+    grid.face.label = fcLbl
+
+    grid.ft.cp1 = ftCvP[:, 0]-1
+    grid.ft.cp2 = ftCvP[:, 1]
+    grid.ft.cell = ftCv 
+    grid.ft.fp1 = ftFcP[:, 0]-1
+    grid.ft.fp2 = ftFcP[:, 1]
+    grid.ft.face = ftFc 
+    grid.ft.region = ftReg 
+
+    grid.fs.fp1 = fsFcP[:, 0]-1
+    grid.fs.fp2 = fsFcP[:, 1]
+    grid.fs.face = fsFc
+
+    
+    # Read additional topological data
+    #---------------------------------
+    if hasTopologicalData:
+        # Read x-point data
+        while i < len(alllines):
+            if "*cf:    Vx isPrimary fsID" in alllines[i]:
+                break 
+            else: 
+                i = i + 1
+        i = i + 1
+        for j in np.arange(0, nX, 1):
+            values = alllines[i+j].split()
+            xind = np.fromstring(values[0], dtype=int, count=1, sep =' '); xind = xind[0]
+            isprimaryxp = np.fromstring(values[1], dtype=int, count=1, sep =' '); isprimaryxp = isprimaryxp[0]
+
+            grid.topodata.XpointID[j] = xind 
+            grid.topodata.isprimaryxp[j] = isprimaryxp 
+        i = i + nX 
+
+        # Read S-point data
+        i = i + 1
+        for j in np.arange(0, nS, 1):
+            values = alllines[i+j].split()
+            xind = np.fromstring(values[0], dtype=int, count=1, sep =' '); xind = xind[0]
+            spointxpID = np.fromstring(values[1], dtype=int, count=1, sep =' '); spointxpID = spointxpID[0]
+            spointdivID = np.fromstring(values[2], dtype=int, count=1, sep =' '); spointdivID = spointdivID[0]
+
+            grid.topodata.SpointID[j] = xind 
+            grid.topodata.spointdivID[j] = spointdivID 
+            grid.topodata.spointxpID[j] = spointxpID 
+        i = i + nS
+
+        # Read O-point data
+        i = i + 1
+        for j in np.arange(0, nO, 1):
+            values = alllines[i+j].split()
+            xind = np.fromstring(values[0], dtype=int, count=1, sep =' '); xind = xind[0]
+
+            grid.topodata.OpointID[j] = xind 
+        i = i + nO
+
+        
+
+        # Read T-point data - still some things going wrong at b2fgmtry side...
+        #i = i + 1
+        for j in np.arange(0, nT, 1):
+            values = alllines[i+j].split()
+            xind = np.fromstring(values[0], dtype=int, count=1, sep =' '); xind = xind[0]
+            tpointdivID = np.fromstring(values[1], dtype=int, count=1, sep =' '); tpointdivID = tpointdivID[0]
+
+            grid.topodata.TpointID[j] = xind 
+            grid.topodata.tpointdivID[j] = tpointdivID 
+        i = i + nT
+
+        # Read divertor face pointer
+        i = i + 1
+        for j in np.arange(0, nDiv, 1):
+            values = alllines[i+j].split()
+            divFcP1 = np.fromstring(values[0], dtype=int, count=1, sep =' '); divFcP1 = divFcP1[0]
+            divFcP2 = np.fromstring(values[1], dtype=int, count=1, sep =' '); divFcP2 = divFcP2[0]
+
+            grid.topodata.divFcP1[j] = divFcP1-1 # account for zero-based indexing 
+            grid.topodata.divFcP2[j] = divFcP2 
+        i = i + nDiv 
+
+        # Read divertor face list
+        i = i + 1
+        k = 0
+        while k < nDivFc:
+            values = alllines[i].split()
+            for j in np.arange(0, len(values)):
+                ID = np.fromstring(values[j], dtype=int, count=1, sep =' '); ID = ID[0]
+                grid.topodata.divFc[k] = ID
+                k = k + 1
+            i = i + 1
+
+    # Read metrics
+    #-------------
+    cvBb, i = ReadSOLPSField('cvBb', alllines, i, 4*nc, 'float', np.array([nc, 4]))
+    cvEb, i = ReadSOLPSField('cvEb', alllines, i, 3*nc, 'float', np.array([nc, 3]))
+    cvX,  i = ReadSOLPSField('cvX', alllines, i, nc, 'float', np.array([nc]))
+    cvY,  i = ReadSOLPSField('cvY', alllines, i, nc, 'float', np.array([nc]))
+    cvSz,  i = ReadSOLPSField('cvSz', alllines, i, nc, 'float', np.array([nc]))
+    cvHz,  i = ReadSOLPSField('cvHz', alllines, i, nc, 'float', np.array([nc]))
+    cvHx,  i = ReadSOLPSField('cvHx', alllines, i, nc, 'float', np.array([nc]))
+    cvQgam,  i = ReadSOLPSField('cvQgam', alllines, i, 2*nc, 'float', np.array([nc, 2]))
+    cvVol,  i = ReadSOLPSField('cvVol', alllines, i, nc, 'float', np.array([nc]))
+
+    fcBb, i = ReadSOLPSField('fcBb', alllines, i, 4*nf, 'float', np.array([nf, 4]))
+    fcS, i = ReadSOLPSField('fcS', alllines, i, nf, 'float', np.array([nf]))
+    fcHc, i = ReadSOLPSField('fcHc', alllines, i, 2*nf, 'float', np.array([nf, 2]))
+    fcHt, i = ReadSOLPSField('fcHt', alllines, i, nf, 'float', np.array([nf]))
+    fcQgam,  i = ReadSOLPSField('fcQgam', alllines, i, 2*nf, 'float', np.array([nf, 2]))
+    fcQalf,  i = ReadSOLPSField('fcQalf', alllines, i, 2*nf, 'float', np.array([nf, 2]))
+    fcQbet,  i = ReadSOLPSField('fcQbet', alllines, i, 2*nf, 'float', np.array([nf, 2]))
+    fcPbs, i = ReadSOLPSField('fcPbs', alllines, i, nf, 'float', np.array([nf]))
+
+    vxBb, i = ReadSOLPSField('vxBb', alllines, i, 4*nv, 'float', np.array([nv, 4]))
+    vxX, i = ReadSOLPSField('vxX', alllines, i, nv, 'float', np.array([nv]))
+    vxY, i = ReadSOLPSField('vxY', alllines, i, nv, 'float', np.array([nv]))
+    vxFfbz, i = ReadSOLPSField('vxFfbz', alllines, i, nv, 'float', np.array([nv]))
+    vxfsPsi, i = ReadSOLPSField('vxfsPsi', alllines, i, nv, 'float', np.array([nv]))
+
+    # cvConn, fsPsi: skipped
+
+    grid.cell.x = cvX 
+    grid.cell.y = cvY
+    grid.cell.bb = cvBb 
+    grid.cell.eb = cvEb
+    grid.cell.sz = cvSz
+    grid.cell.hz = cvHz
+    grid.cell.hx = cvHx    
+    grid.cell.qgam = cvQgam
+    grid.cell.vol = cvVol 
+
+    grid.face.bb = fcBb
+    grid.face.s = fcS 
+    grid.face.hc = fcHc
+    grid.face.ht = fcHt
+    grid.face.qgam = fcQgam
+    grid.face.qbet = fcQbet
+    grid.face.qalf = fcQalf
+    grid.face.pbs = fcPbs
+
+    grid.vert.bb = vxBb 
+    grid.vert.x = vxX
+    grid.vert.y = vxY 
+    grid.vert.ffbz = vxFfbz
+    grid.vert.fspsi = vxfsPsi 
+
+
+    # Compute grid interconnections
+    grid.ComputeInterconnections()
+
+    # Compute face coordinates
+    grid.ComputeFaceCoordinates()
     
     # Return
     return grid
@@ -1621,14 +2100,14 @@ def ReadRZPsiFile(filepath):
 def WriteRZPsiFile(dirpath, R, Z, Psi):
     # Description
     #------------
-    # Write out an rzpsi.dat file to the filepath specified as dirpath +
-    # 'rzpsi.dat'
+    # Write out an rzpsi.dat file to the filepath specified as dirpath
+    # (should contain the full name)
 
     # Define number of values per line
     nvpl = 6
 
     # Open file
-    thisfile = open(dirpath + r"/rzpsi.dat", "w")
+    thisfile = open(dirpath, "w")
 
     # Write initial white line
     thisfile.write("\n")
@@ -1915,7 +2394,7 @@ def ReadSOLPSField(fieldname, lines, startindex, nval, fieldtype, dims):
     elif fieldtype == 'int':
         vals = np.zeros(nval, dtype=int)
     else: 
-        raise("ReadField: unknown fieldtype option")
+        raise Exception("ReadField: unknown fieldtype option")
 
     # Look for the field name
     isfound = False 
@@ -1970,4 +2449,48 @@ def ReadSOLPSField(fieldname, lines, startindex, nval, fieldtype, dims):
     # Return 
     startindex = i
     return out, startindex # need to return startindex, since it is immutable and therefore isn't returned...
+
+# Write field 
+def WriteSOLPSField(filehandle, vals, fieldname, fieldtype):
+    # Description
+    #------------
+    # Write out a scalar, unstructured field with the name 'fieldname' 
+    # into the file opened by the filehandle. This includes the classical
+    # field name header, followed by the solps format of fields. 
+    # For fields of multiple species, the values are appended columnwise
+    # as expected.
+
+    # Write header
+    nval = vals.size
+    headerstring = ( "*cf:".ljust(8, ' ') + fieldtype.ljust(8, ' ') + 
+        str(nval).ljust(12, ' ') + " ".ljust(4, ' ') + fieldname )
+    filehandle.write(headerstring + '\n')
+    val = np.reshape(vals, nval, order='F')
+    nvalsperline = 6 # max. number of values on each line
+
+    # Write data
+    if fieldtype == 'real':
+        k = 0
+        while k < nval:
+            valind = 0 
+            datastring = ""
+            while (valind < nvalsperline) and (k+valind < nval):
+                datastring = datastring + np.format_float_scientific(val[k+valind], 
+                    unique=False, precision=13, pad_left=3, exp_digits=3, trim='k')
+                valind = valind + 1
+            filehandle.write(datastring + ' \n')
+            k = k + nvalsperline # no problem if k > nval 
+    elif fieldtype == 'int':
+        k = 0
+        while k < nval:
+            valind = 0 
+            datastring = ""
+            while (valind < nvalsperline) and (k+valind < nval):
+                datastring = datastring + str(val[k+valind]).rjust(11, " ")
+                valind = valind + 1
+            filehandle.write(datastring + ' \n')
+            k = k + nvalsperline # no problem if k > nval 
+    else:
+        raise Exception("WriteSOLPSField: unknown data format: " + fieldtype)
+
 

@@ -21,11 +21,11 @@ module DistributionFunction
     use mod_polygon
     use PolygonLevelsetFunction2D
     use mod_structured2Dgridding
+    use omp_lib
 
     ! The usual
     implicit none 
     public 
-    
 
     !==================================================================!
     !                                                                  !
@@ -381,6 +381,11 @@ module DistributionFunction
 
     end interface
 
+    ! Assignment override
+    interface assignment(=)
+        module procedure AssignDFClass
+    end interface
+
     contains 
 
     !==================================================================!
@@ -439,6 +444,91 @@ module DistributionFunction
         ! Write data
         call Write3DCoordinateData(xg, yg, vg, savefilepath)
 
+    end subroutine
+
+    ! Assignment
+    subroutine AssignDFClass(a, b)
+
+        class(DistributionFunctionUDT), allocatable, intent(inout)    :: a 
+        class(DistributionFunctionUDT), intent(in)                    :: b 
+
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+
+        select type (b)
+
+        class default 
+
+            call gdErrorHandler('Unknown type')
+
+        type is (Structured2DDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Structured2DDFUDT)
+                a = b 
+            end select
+
+        type is (Structured2DDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Structured2DDistanceDFUDT)
+                a = b 
+            end select
+
+        type is (StructuredPLF2DDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (StructuredPLF2DDistanceDFUDT)
+                a = b 
+            end select
+
+        type is (Polygonset2DFieldDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Polygonset2DFieldDistanceDFUDT)
+                a = b
+            end select
+
+        type is (Polygonset1DFieldDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Polygonset1DFieldDistanceDFUDT)
+                a = b
+            end select
+
+        type is (Coordinates1DFieldDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Coordinates1DFieldDistanceDFUDT)
+                a = b
+            end select
+
+        type is (Coordinates2DDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (Coordinates2DDistanceDFUDT)
+                a = b
+            end select
+
+        type is (CoordinatesPLF2DDistanceDFUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (CoordinatesPLF2DDistanceDFUDT)
+                a = b
+            end select
+
+        end select 
+
+    
     end subroutine
 
     !------------------------------------------------------------------!
@@ -1000,6 +1090,11 @@ module DistributionFunction
 
         case ('unsigned')
 
+
+            !$omp parallel do default(none) schedule(static) if (.not. omp_in_parallel()) &
+            !$omp shared(distribution, x, y) &
+            !$omp private(i, d) &
+            !$omp reduction(+:v)
             do i = 1, size(xa)
                 ! Distance 
                 d = sqrt( (x - xa(i))**2 + (y - ya(i))**2)
@@ -1007,9 +1102,14 @@ module DistributionFunction
                 ! Value
                 v = v + b0(i)*exp(-d/d0(i))
             end do
+            !$omp end parallel do
 
         case ('signed')
 
+            !$omp parallel do default(none) schedule(static) if (.not. omp_in_parallel()) &
+            !$omp shared(distribution, x, y) &
+            !$omp private(i, d) &
+            !$omp reduction(+:v)
             do i = 1, size(xa)
                 ! Distance 
                 d = sqrt( (x - xa(i))**2 + (y - ya(i))**2)
@@ -1017,6 +1117,7 @@ module DistributionFunction
                 ! Value
                 v = v + b0(i)*(sign(myone, dp(i)))*exp(-d/d0(i))
             end do
+            !$omp end parallel do 
 
         case default
 
@@ -1240,6 +1341,10 @@ module DistributionFunction
 
         case ('unsigned')
 
+            !$omp parallel do default(none) schedule(static) if (.not. omp_in_parallel()) &
+            !$omp shared(distribution, fv) &
+            !$omp private(i, d) &
+            !$omp reduction(+:v)
             do i = 1, size(xa)
                 ! Distance 
                 d = (fv - fval(i))
@@ -1247,9 +1352,14 @@ module DistributionFunction
                 ! Value
                 v = v + b0*exp(-abs(d)/d0)
             end do
+            !$omp end parallel do 
 
         case ('signed')
 
+            !$omp parallel do default(none) schedule(static) if (.not. omp_in_parallel()) &
+            !$omp shared(distribution, fv) &
+            !$omp private(i, d) &
+            !$omp reduction(+:v)
             do i = 1, size(xa)
                 ! Distance 
                 d = (fv - fval(i))
@@ -1257,6 +1367,7 @@ module DistributionFunction
                 ! Value
                 v = v + b0*(sign(myone, d))*exp(-abs(d)/d0)
             end do
+            !$omp end parallel do
 
         case default
 
@@ -1459,6 +1570,10 @@ module DistributionFunction
 
         case ('unsigned')
 
+            !$omp parallel do default(none) schedule(static) if (.not. omp_in_parallel()) &
+            !$omp shared(distribution, fv) &
+            !$omp private(i, d) &
+            !$omp reduction(+:v)
             do i = 1, size(xa)
                 ! Distance 
                 d = (fv - fval(i))
@@ -1466,9 +1581,14 @@ module DistributionFunction
                 ! Value
                 v = v + c(i)*exp(-abs(d)/d0)
             end do
+            !$omp end parallel do 
 
         case ('signed')
 
+            !$omp parallel do default(none) schedule(static) if (.not. omp_in_parallel()) &
+            !$omp shared(distribution, fv) &
+            !$omp private(i, d) &
+            !$omp reduction(+:v)
             do i = 1, size(xa)
                 ! Distance 
                 d = (fv - fval(i))
@@ -1476,6 +1596,7 @@ module DistributionFunction
                 ! Value
                 v = v + c(i)*(sign(myone, d))*exp(-abs(d)/d0)
             end do
+            !$omp end parallel do 
 
         case default
 
@@ -1612,12 +1733,17 @@ module DistributionFunction
         ! Compute lhs to compute attractor coefficients
         isduplicate = .false. 
         A = 0
+        !$omp parallel do default(none) schedule(static) collapse(2) &
+        !$omp shared(na, xp, yp, isduplicate, A, distribution) &
+        !$omp private(tempd) if(.not. omp_in_parallel())
         do j = 1, na
             do i = 1, na
                 if (i /= j) then 
                     tempd = sqrt( (xp(i) - xp(j))**2 + (yp(i) - yp(j))**2)
                     if (tempd == 0) then 
+                        !$omp critical
                         isduplicate(j) = .true.
+                        !$omp end critical
                     end if  
                     A(i, j) = exp(-tempd/d0(j))
                 else 
@@ -1625,6 +1751,7 @@ module DistributionFunction
                 end if 
             end do 
         end do
+        !$omp end parallel do
 
         ! Adjust
         do j = 1, na
@@ -1707,6 +1834,10 @@ module DistributionFunction
         ! Evaluate field values in coordinates
         v = 0
 
+        !$omp parallel do default(none) schedule(static) if (.not. omp_in_parallel()) &
+        !$omp shared(distribution, x, y) &
+        !$omp private(i, d) &
+        !$omp reduction(+:v)
         do i = 1, size(xa)
             ! Distance 
             d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
@@ -1714,6 +1845,7 @@ module DistributionFunction
             ! Value
             v = v + c(i)*exp(-d/d0(i))
         end do
+        !$omp end parallel do 
 
         ! Add constant component
         v = v + b0
@@ -2030,6 +2162,10 @@ module DistributionFunction
         v = 0
 
         ! Point contributions
+        !$omp parallel do default(none) schedule(static) if (.not. omp_in_parallel()) &
+        !$omp shared(distribution, x, y) &
+        !$omp private(i, d) &
+        !$omp reduction(+:v)
         do i = 1, size(xa)
             ! Distance 
             d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
@@ -2037,6 +2173,7 @@ module DistributionFunction
             ! Value
             v = v + c(i)*exp(-d/d0(i))
         end do
+        !$omp end parallel do 
 
         ! PLF contributions
         allocate(vplf(size(x)))

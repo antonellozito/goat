@@ -32,7 +32,8 @@ module mod_sort
     ! The usual
     implicit none 
     private 
-    public :: Sort, Unique, Setdiff, CountOccurrence, SearchSortedArray
+    public :: Sort, Unique, Setdiff, CountOccurrence, SearchSortedArray, &
+        GetBinIndexSortedArray
 
     !==================================================================!
     !                                                                  !
@@ -71,6 +72,11 @@ module mod_sort
     ! General binary search of a sorted array
     interface SearchSortedArray
         module procedure BinarySearch_I8
+    end interface
+
+    ! General bin indexing of a sorted array
+    interface GetBinIndexSortedArray
+        module procedure GetBinIndex_R8 
     end interface
 
     contains 
@@ -158,15 +164,17 @@ module mod_sort
         ! Post-process
         !=============
         ! Do a sanity check - you never know
-        test = (a(2:size(a)) - a(1:size(a)-1)) < 0
-        if (any(test)) then 
-            call gdErrorHandler('Sort_I8: bug detected: array is not sorted')
-        end if 
+        if (size(a) > 1) then 
+            test = (a(2:size(a)) - a(1:size(a)-1)) < 0
+            if (any(test)) then 
+                call gdErrorHandler('Sort_I8: bug detected: array is not sorted')
+            end if 
 
-        if (flip) then 
-            a = a(size(a):1:-1)
-            if (doindex) then 
-                ind = ind(size(a):1:-1)
+            if (flip) then 
+                a = a(size(a):1:-1)
+                if (doindex) then 
+                    ind = ind(size(a):1:-1)
+                end if 
             end if 
         end if 
 
@@ -375,15 +383,17 @@ module mod_sort
         ! Post-process
         !=============
         ! Do a sanity check - you never know
-        test = (a(2:size(a)) - a(1:size(a)-1)) < 0
-        if (any(test)) then 
-            call gdErrorHandler('Sort_R8: bug detected: array is not sorted')
-        end if 
+        if (size(a) > 1) then 
+            test = (a(2:size(a)) - a(1:size(a)-1)) < 0
+            if (any(test)) then 
+                call gdErrorHandler('Sort_R8: bug detected: array is not sorted')
+            end if 
 
-        if (flip) then 
-            a = a(size(a):1:-1)
-            if (doindex) then 
-                ind = ind(size(a):1:-1)
+            if (flip) then 
+                a = a(size(a):1:-1)
+                if (doindex) then 
+                    ind = ind(size(a):1:-1)
+                end if 
             end if 
         end if 
 
@@ -716,6 +726,9 @@ module mod_sort
             i = i + 1
         end do 
 
+        ! Keep only elements from a
+        keepind = keepind .and. ina
+
         ! Set output
         allocate(out(count(keepind)))
         out = pack(c, keepind)
@@ -873,9 +886,10 @@ module mod_sort
                 end if 
                 mid = (high + low)/2
 
-                ! Some checks for now
+                ! Check if value could not be found
                 if (mid < low .or. mid > high) then 
-                    call gdErrorHandler('something wrong in binary search')
+                    ! Value not found, return zero
+                    ind = 0
                 end if 
 
             end do 
@@ -896,12 +910,142 @@ module mod_sort
                 end if 
                 mid = (high + low)/2
 
-                ! Some checks for now
+                ! Check if value could not be found
                 if (mid < low .or. mid > high) then 
-                    call gdErrorHandler('something wrong in binary search')
+                    ! Value not found, return zero
+                    ind = 0
                 end if 
 
             end do 
+        end if 
+
+
+
+    end function 
+
+    ! 1D binner for sorted real arrays
+    function GetBinIndex_R8(in, el) result(ind)
+
+        ! Description
+        !============
+        ! Find the bin index of the element with value 'el' in the input 
+        ! array 'in', where 'in' is assumed to be sorted. We do this in 
+        ! a binary search way to achieve O(log(N)) behavior instead of 
+        ! regular O(N) for unsorted arrays. If the element is out of 
+        ! bounds defined by in(1) and in(size(in)), then zero is 
+        ! returned. If the value is exactly on a bin bound value, the
+        ! result may vary depending on how the algorithm proceeded. 
+        
+        ! Declare arguments
+        !==================
+        ! Arguments
+        real(R8), dimension(:), intent(in)          :: in 
+        real(R8), intent(in)                        :: el 
+        integer(I8)                                 :: ind 
+
+        ! Auxiliary
+        logical                     :: ascend 
+        real(R8)                    :: midel
+        integer(I8)                 :: nin, low, mid, high
+
+        ! Initialize
+        !===========
+        ! Set default value
+        ind = 0
+        nin = size(in)
+
+        ! Hedge for trivial cases
+        if (nin == 0) then 
+            return 
+        end if 
+        if (nin == 1) then 
+            if (in(1) == el) then 
+                ind = 1
+            end if 
+            return 
+        end if 
+
+        ! Check if the value lies inside the range
+        if ((el < (in(1))) .or. (el > in(nin))) then
+            ! Outside of bin
+            ind = 0
+            return 
+        end if
+
+        ! Check if there are NaNs - then return
+        if (isnan(el)) then 
+            ind = 0
+            return 
+        end if
+
+        ! Check sorting direction
+        ascend = .true. 
+        if (in(1) > in(nin)) then 
+            ascend = .false. 
+        end if 
+
+        ! Search
+        !=======
+        ! Initialize
+        low = 1
+        high = nin 
+        mid = (low + high)/2 ! intended integer division
+
+        ! Loop
+        if (ascend) then 
+            do while (.true.)
+
+                ! Check if difference between low and high is 1 -> bin 
+                ! found
+                midel = in(mid)
+                if (high - low == 1) then 
+                    ind = low
+                    exit  
+                end if
+
+                ! If not, check 
+                if (el <= midel) then 
+                    high = mid
+                else
+                    low = mid
+                end if 
+                mid = (high + low)/2
+
+                ! Some checks for now
+                if (mid < low .or. mid > high) then 
+                    call gdErrorHandler('Something wrong in binner')
+                end if 
+
+            end do 
+        else 
+            do while (.true.)
+
+                ! Check if difference between low and high is 1 -> bin 
+                ! found
+                midel = in(mid)
+                if (high - low == 1) then 
+                    ind = low
+                    exit  
+                end if
+
+                ! If not, check 
+                if (el >= midel) then 
+                    high = mid
+                else
+                    low = mid
+                end if 
+                mid = (high + low)/2
+
+                ! Some checks for now
+                if (mid < low .or. mid > high) then 
+                    call gdErrorHandler('Something wrong in binner')
+                end if 
+            end do 
+        end if 
+
+        ! Sanity check for now
+        if (.not. (el <= in(ind+1)) .or. .not. (el >= in(ind))) then 
+            call gdErrorHandler('Something wrong in binner')
         end if 
 
 

@@ -66,6 +66,7 @@ module gdmod_optimizationengine
         !==========
         ! Problem initialization
         procedure :: Initialize      => InitializeOptimizationProblemGD
+        procedure :: ReinitializeAfterRemeshing => ReinitializeOptimizationProblemAfterRemeshGD
 
         ! Dimension query
         procedure :: GetProblemDimensions   => GetProblemDimensionsGD 
@@ -267,8 +268,6 @@ module gdmod_optimizationengine
     
     end subroutine
     
-
-
     !------------------------------------------------------------------!
     !                       OPTIMIZATION PROBLEM                       !
     !------------------------------------------------------------------!
@@ -520,6 +519,66 @@ module gdmod_optimizationengine
 
     end subroutine
 
+    ! Optimization problem reinitialization after remeshing
+    subroutine ReinitializeOptimizationProblemAfterRemeshGD(problem)
+
+        ! Description
+        !============
+        ! Reinitialize the GD optimization problem after a grid update.
+        ! We assume that design variables etc are properly allocated 
+        ! already and that options have been read in. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(OptimizationProblemGDUDT)      :: problem
+
+        ! Loop variables
+
+        ! Data
+
+        ! Design variables
+        !=================
+        ! Initialize the design variables
+        call problem%designvariables%Initialize(problem%grid, &
+            problem%magneticField, problem%environment)
+        
+        ! Cost function
+        !==============
+        ! Initialize the cost function
+        call problem%costfunction%Initialize(problem%grid, &
+            problem%magneticField, problem%environment, &
+            problem%designoptions%costfunction)
+
+        ! Constraints
+        !============
+        ! Given the (many) possible options for the constraints, the 
+        ! constraints are set in its own initialization. 
+        call problem%constraints%Initialize(problem%grid, &
+            problem%magneticField, problem%environment, & 
+            problem%designvariables, problem%designoptions%constraints)
+
+        ! Set Lagrange multipliers
+        if (allocated(problem%lambda)) then 
+            deallocate(problem%lambda)
+        end if 
+        if (allocated(problem%mu)) then 
+            deallocate(problem%mu)
+        end if 
+
+        allocate(problem%lambda(problem%constraints%eqcon%neqcon), &
+            problem%mu(problem%constraints%ineqcon%nineqcon))
+        problem%lambda = 0
+        problem%mu = 0
+
+        ! Finalize
+        !=========
+        ! Initialize design variables further for constraint/cfv 
+        ! dependent fields
+        call problem%FinalizeInitialization()
+
+    end subroutine
+
     ! Finalize the problem initialization
     subroutine FinalizeInitialization(problem)
 
@@ -693,6 +752,7 @@ module gdmod_optimizationengine
         integer(I8)                         :: i
 
         ! Auxiliary variables 
+        character(:), allocatable           :: vertpath, cellpath
 
         ! Data
 
@@ -732,6 +792,17 @@ module gdmod_optimizationengine
             ! Do nothing
 
         end select
+
+        ! Write data
+        if (problem%designoptions%writedata == 1) then 
+            ! Call grid vertex writing routine
+            allocate(character(len('vertices_iterate')) :: vertpath)
+            allocate(character(len('cells_iterate')) :: cellpath)
+            vertpath = 'vertices_iterate'
+            cellpath = 'cells_iterate'
+            call WriteGridVertices(problem%grid, vertpath) 
+            call WriteGridCells(problem%grid, cellpath)
+        end if
 
         ! Housekeeping
         !=============
@@ -1088,9 +1159,9 @@ module gdmod_optimizationengine
 
         ! Auxiliary 
         integer, parameter                      :: fid = 70
-        integer                                 :: iostat
+        integer                                 :: tiostat
         logical                                 :: isfile 
-        character(:), allocatable               :: filepath 
+        character(:), allocatable               :: filepath
 
         ! Initialize
         !===========
@@ -1111,18 +1182,18 @@ module gdmod_optimizationengine
             inquire(file=filepath, exist=isfile)
             if (isfile) then 
                 ! Replace old file
-                open(unit=fid, status='old', iostat=iostat, file=filepath)
+                open(unit=fid, status='old', iostat=tiostat, file=filepath)
                 rewind(fid)
             else
                 ! Create new file
-                open(unit=fid, status='new', iostat=iostat, file=filepath)
+                open(unit=fid, status='new', iostat=tiostat, file=filepath)
             end if
 
             ! Write header
             call problem%monitor%WriteFileHeader(fid)
         else
             ! File should already by opened, append
-            open(unit=fid, status='old', iostat=iostat, file=filepath, access='sequential', position='append')
+            open(unit=fid, status='old', iostat=tiostat, file=filepath, access='sequential', position='append')
         end if
 
         ! Write

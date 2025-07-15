@@ -16,6 +16,7 @@ module Interpolant2D_auxiliaries
     ! Load modules
     use mod_precision
     use mod_errorhandler
+    use mod_sort
     use omp_lib
 
     implicit none
@@ -96,7 +97,9 @@ module Interpolant2D_auxiliaries
         ny = size(y, 1)
 
         ! Loop over all query points
-        !$omp parallel do default(shared) private(indx, indy)
+        !$omp parallel do default(none) private(indx, indy, k) &
+        !$omp if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp shared(nq, xq, x, nx, yq, y, ny, ind)
         do k = 1, nq
             ! Get the bin index for x
             call GetBinIndex(xq(k), x, nx, indx)
@@ -157,7 +160,9 @@ module Interpolant2D_auxiliaries
         ny = size(y, 1)
 
         ! Loop over all query points
-        !$omp parallel do default(shared) private(indx, indy)
+        !$omp parallel do default(none) private(indx, indy, k) &
+        !$omp if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp shared(nq, xq, x, nx, yq, y, ny, ix, iy)
         do k = 1, nq
             ! Get the bin index for x
             call GetBinIndex(xq(k), x, nx, indx)
@@ -175,7 +180,40 @@ module Interpolant2D_auxiliaries
     end subroutine
 
     ! Get index 1D
+
     subroutine GetBinIndex(xq, x, nx, ind)
+
+        ! Description
+        !============
+        ! Get the bin index of a point xq (scalar) in the array x. Not
+        ! optimized. It is assumed that x is monotonously increasing.
+        ! If the value is outside of x, the index value 0 is returned.
+        
+        ! A point lies in the ith bin if:
+        !
+        !    x(i) <= xq < x(i+1) (for i = 1:nx-1)
+        !
+        ! Points that are outside of the domain will get a zero value 
+        ! and are eliminated first 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), intent(in)            :: xq, x(:)
+        integer, intent(out)            :: ind 
+        
+        ! Loop variables
+        
+        ! Auxiliary
+        integer(I8)                     :: nx
+
+        ! Compute the bin
+        !================
+        ind = GetBinIndexSortedArray(x, xq)
+
+    end subroutine
+
+    subroutine GetBinIndex_old(xq, x, nx, ind)
 
         ! Description
         !============

@@ -152,12 +152,14 @@ module optmod_numerics
         !                   factor becomes active for the merit function
         ! - mfpenfacdef:    default penalization factor, used in
         !                   initial iterate
+        ! - mfpenfac:       penalty factor for the merit function (only
+        !                   used if appliceable)
 
 
         character(:), allocatable       :: type, meritfunction 
         logical                         :: dolinesearch
         real(R8)                        :: dec, inc, c1, c2, mfdelta, &
-            mfpenfactol, mfpenfacdef
+            mfpenfactol, mfpenfacdef, mfpenfac
 
 
 
@@ -566,6 +568,7 @@ module optmod_numerics
         num%mfdelta         = 1e-4 
         num%mfpenfactol     = 1e-12
         num%mfpenfacdef     = 1
+        num%mfpenfac        = 1 
 
     end subroutine
 

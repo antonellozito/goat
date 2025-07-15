@@ -1,10 +1,10 @@
-subroutine GGDriver(goatoptions)
+subroutine GGGDDriver(goatoptions)
 
     ! Description
     !============
-    ! This driver runs the grid deformation in standalone mode. The 
-    ! goatoptions should be passed to this routine to identify which
-    ! files to load etc. 
+    ! This driver first runs the grid generator and afterwards the 
+    ! grid deformation module. This is mainly intended as a testing 
+    ! routine for coupling the grid generator to the grid deformation
 
     ! Initialize
     !===========
@@ -32,16 +32,20 @@ subroutine GGDriver(goatoptions)
 
     ! Other options
     type(GGoptionsUDT)          :: ggoptions
+    type(GDoptionsUDT)          :: gdoptions
+    type(GridOptionsUDT)        :: gridoptions 
     type(TopomeshOptionsUDT)    :: topomeshoptions
     
     ! Auxiliary
     type(TopomeshUDT)           :: topomesh
     class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
     class(StreamlineTracerUDT), allocatable :: streamlinetracer
+    type(VesselUDT)             :: tempvessel
 
     real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
         yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy
     real(R8), parameter                     :: emptyR8(0)= 0
+    integer(I8), allocatable, dimension(:)  :: facelabelsGG, facelabelsGD
     integer(I8)                             :: nv
     integer(I8), parameter                  :: emptyI8(0) = 0
 
@@ -60,14 +64,22 @@ subroutine GGDriver(goatoptions)
     ggoptions%inputfilepath = goatoptions%inputfilepath 
     call ggoptions%Set()
 
+    ! Set grid deformation options
+    gdoptions%inputfilepath = goatoptions%inputfilepath
+    call gdoptions%Set()
+
+    ! Set grid options
+    gridoptions%inputfilepath = goatoptions%inputfilepath 
+    call gridoptions%Set()
+
     ! Construct (initial) tracers
     !============================
     ! Determine domain bounds based on vessel and magnetic field extent
     call environment%vessel%plfvessel%ps%GetVertices(xps, yps)
-    xb = [minval([xps, magneticField%interp%xgv(1:size(magneticField%interp%xgv))]), &
-        maxval([xps, magneticField%interp%xgv(1:size(magneticField%interp%xgv))])]
-    yb = [minval([yps, magneticField%interp%ygv(1:size(magneticField%interp%ygv))]), &
-        maxval([yps, magneticField%interp%ygv(1:size(magneticField%interp%ygv))])]
+    xb = [minval([xps, magneticField%interp%xgv(2:size(magneticField%interp%xgv)-1)]), &
+        maxval([xps, magneticField%interp%xgv(2:size(magneticField%interp%xgv)-1)])]
+    yb = [minval([yps, magneticField%interp%ygv(2:size(magneticField%interp%ygv)-1)]), &
+        maxval([yps, magneticField%interp%ygv(2:size(magneticField%interp%ygv)-1)])]
 
     ! Construct a 2D structured grid for tracing (may be extended
     ! in the future for different grid types)
@@ -117,7 +129,8 @@ subroutine GGDriver(goatoptions)
 
     ! Generate the topological mesh
     !==============================
-    call ConstructTopologicalMesh(environment%vessel, magneticField, &
+    tempvessel = environment%vessel
+    call ConstructTopologicalMesh(tempvessel, magneticField, &
         topomeshoptions, topomesh, fieldtracer, vesseltracer, streamlinetracer)
 
     ! Generate the grid
@@ -125,6 +138,32 @@ subroutine GGDriver(goatoptions)
     call GenerateUnstructuredAlignedGrid(grid, topomesh, magneticField, &
         environment%vessel, fieldtracer, vesseltracer, streamlinetracer, &
         ggoptions)
+
+    ! Apply grid deformation
+    !=======================
+    ! Get label mapping
+    call GetGridFaceLabelMappingGD(grid, topomesh, facelabelsGG, facelabelsGD)
+
+    ! Overwrite grid options
+    gridoptions%facelabelmappingGG = facelabelsGG 
+    gridoptions%facelabelmappingGD = facelabelsGD 
+    gridoptions%facelabelsubfrom   = emptyI8 
+    gridoptions%facelabelsubto     = emptyI8 
+    print *, 'GGGDDriver: facelabelsGG: ', facelabelsGG 
+    print *, 'GGGDDriver: facelabelsGG: ', facelabelsGD
+
+    ! Recompute topological data from grid for new face labels
+    call ComputeTopologicalData(grid, topomesh)
+
+    ! Grid data
+    call WriteGOAT(goatoptions, grid, magneticField, environment)
+
+    ! Extract the required grid data for grid deformation
+    call ExtractGridData(grid, 'traduitb2us', gridoptions)
+
+    ! Run deformation
+    call RunGridOptimization(grid, magneticField, environment, &
+        gdoptions)
 
     ! Write data
     !===========

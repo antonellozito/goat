@@ -23,6 +23,7 @@ module mod_streamlinetracing2D
     public :: ConstructStructuredStreamlineTracer, StreamlineTracerUDT, &
         StructuredStreamlineTracerUDT, StreamlineUDT, &
         TraceStreamlinesStructured2D, CleanStreamlines
+    public assignment(=)
 
     ! Module parameters
     real(R8), parameter :: disttol = 1e-12 ! distance tolerance when cleaning streamlines [m]
@@ -148,6 +149,11 @@ module mod_streamlinetracing2D
 
     end interface
 
+    ! Assignment interface
+    interface assignment(=)
+        module procedure AssignStreamlineTracer2DClass
+    end interface
+
     contains 
 
     !==================================================================!
@@ -193,7 +199,7 @@ module mod_streamlinetracing2D
         ! Declare variables
         !==================
         ! Arguments
-        class(StreamlineTracerUDT), allocatable    :: tracer 
+        type(StructuredStreamlineTracerUDT)     :: tracer 
         real(R8), intent(in), dimension(:)      :: X, Y
         real(R8), intent(in)                    :: U(:, :), V(:, :)
         real(R8), intent(in), optional          :: step, tol
@@ -206,7 +212,7 @@ module mod_streamlinetracing2D
         ! Initialize
         !===========
         ! Allocate
-        allocate(StructuredStreamlineTracerUDT::tracer) 
+        !allocate(StructuredStreamlineTracerUDT::tracer) 
 
         ! Initialize general values
         if (present(step)) then 
@@ -227,9 +233,9 @@ module mod_streamlinetracing2D
 
         ! Set values
         !===========
-        select type (tracer)
+        !select type (tracer)
 
-        type is (StructuredStreamlineTracerUDT)
+        !type is (StructuredStreamlineTracerUDT)
 
             tracer%U = U
             tracer%V = V 
@@ -241,11 +247,40 @@ module mod_streamlinetracing2D
             tracer%xg = xg 
             tracer%yg = yg
 
-        class default 
+        !class default 
 
-        end select
+        !end select
 
     end function 
+
+    ! Assignment
+    ! Assignment overloading
+    subroutine AssignStreamlineTracer2DClass(a, b)
+
+        class(StreamlineTracerUDT), allocatable, intent(inout)    :: a 
+        class(StreamlineTracerUDT), intent(in)                    :: b 
+
+        if (allocated(a)) then 
+            deallocate(a)
+        end if 
+
+        select type (b)
+
+        class default 
+
+            call gdErrorHandler('Unknown type')
+
+        type is (StructuredStreamlineTracerUDT)
+
+            allocate(a, source=b)
+            select type (a)
+            type is (StructuredStreamlineTracerUDT)
+                a = b 
+            end select
+
+        end select
+    
+    end subroutine
 
     !------------------------------------------------------------------!
     !                              TRACERS                             !
@@ -318,6 +353,7 @@ module mod_streamlinetracing2D
         integer(I8)                             :: nx, ny, nv
         real(R8), allocatable, dimension(:)     :: xfw, yfw, xbw, ybw
         real(R8)                                :: emptyarray(0), step
+        logical                                 :: do_parallel
 
         ! Loop
         integer(I8)                             :: i 
@@ -366,7 +402,11 @@ module mod_streamlinetracing2D
         
         ! Loop and trace
         !---------------
-        !$omp parallel do default(shared) private(xfw, yfw, xbw, ybw)
+        do_parallel = .not. omp_in_parallel()
+        !$omp parallel do default(none) private(xfw, yfw, xbw, ybw) schedule(dynamic) &
+        !$omp shared(nv, isoutofbounds, streamlines, emptyarray, U, V, X, Y, x0, y0, &
+        !$omp xb, yb, step, tol, nmax, direction) &
+        !$omp if (do_parallel)
         do i = 1, nv
             ! Check if we should trace
             if (isoutofbounds(i)) then 

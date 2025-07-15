@@ -1485,14 +1485,17 @@ module mod_inputfileparser
 
         ! Auxiliary
         integer(I8)                             :: stringlength, &
-            readstatus, nval
+            readstatus, nval, ntempval, tempi
+        integer(I8), allocatable                :: index(:)
         logical                                 :: islegal ! My lord, is that legal?
         character(:), allocatable               :: tempc 
 
-        logical, allocatable                    :: check(:), templ(:)
+        logical, allocatable                    :: check(:), templ(:), &
+            isveccon(:), isarraystart(:), isrepchar(:), isrepstart(:)
+        real(R8), allocatable, dimension(:)     :: temprealval
 
         ! Loop
-        integer(I8)                             :: i
+        integer(I8)                             :: i, k
         
 
         ! Initialize
@@ -1501,29 +1504,23 @@ module mod_inputfileparser
         stringlength = len(stringval) 
 
         ! Allocate
-        allocate(check(stringlength), templ(stringlength))
+        allocate(check(stringlength), templ(stringlength), &
+            isveccon(stringlength), index(stringlength), & 
+            isrepchar(stringlength))
         allocate(character(stringlength) :: tempc)
 
         ! Initialize
         islegal     = .false. 
         check(:)    = .false. 
+        isveccon(:) = .false. 
+        isrepchar(:)    = .false.
+        index(:)        = 0
+        
 
         ! Checks
         !=======
         ! Is there a column separator? 
         call CompareStringWithCharacter(stringval, rowdel, templ) 
-        if (any(templ)) then 
-            return 
-        end if
-
-        ! Is there a vector constructor?
-        call CompareStringWithCharacter(stringval, veccon, templ) 
-        if (any(templ)) then 
-            return 
-        end if
-
-        ! Is there a repeater character?
-        call CompareStringWithCharacter(stringval, repeatchar, templ) 
         if (any(templ)) then 
             return 
         end if
@@ -1541,12 +1538,41 @@ module mod_inputfileparser
         ! Eliminate row delimiters 
         check = check .or. templ
 
+        ! Check for any vector constructor symbols
+        call CompareStringWithCharacter(stringval, veccon, isveccon)
+        if (any(isveccon)) then 
+            ! Not yet supported
+            return 
+        end if
+
+        ! Check for any repeater symbols
+        call CompareStringWithCharacter(stringval, repeatchar, isrepchar)
+        nval = nval + count(isrepchar) ! +1 already accounted for
+
+        ! Eliminate repeater symbols
+        check = check .or. isrepchar
+
         ! Trim the string
         check = .not. check 
+        k = 0
         do i = 1, stringlength 
             if (check(i)) then 
                 ! Add
                 tempc(i:i) = stringval(i:i)
+
+                ! Checks for index
+                if (i > 1) then 
+                    ! Check if previous character was also a number. 
+                    ! Otherwise, increase k
+                    if (.not. check(i-1)) then 
+                        k = k + 1
+                    end if
+                else 
+                    ! First index, don't check previous
+                    k = k + 1
+                end if
+                index(i) = k
+
             else
                 ! Replace by whitespace
                 tempc(i:i) = ' ' 
@@ -1563,19 +1589,116 @@ module mod_inputfileparser
         ! Read
         !=====
         ! Allocate
-        allocate(realval(nval))
+        allocate(temprealval(nval))
 
         ! Read (only if nonempty)
         if (nval == 0) then 
             islegal = .true.
+            allocate(realval(nval))
             return 
         end if
-        read (tempc, *, iostat=readstatus) realval
+        read (tempc, *, iostat=readstatus) temprealval
 
         ! Check if read succeeded
-        if (readstatus == 0) then 
-            islegal = .true. ! I'll make it legal
+        if (readstatus .ne. 0) then 
+            return 
         end if
+
+        ! Check if we need to execute vector constructors or repeaters
+        if (any(isveccon, 1) .or. any(isrepchar, 1)) then 
+            ! First, we extract which number are start/end of array
+            allocate(isarraystart(nval), isrepstart(nval))
+            
+            ! Initialize
+            isarraystart(:) = .false. 
+            isrepstart(:) = .false.
+
+            ! Loop over isveccon to determine which one(s) are start
+            do i = 2, stringlength-1 ! skip first and last entry - would/should be illegal
+                if (isveccon(i)) then 
+                    ! Not yet supported
+                    call gdErrorHandler('We should not end up here')
+                    ! Check previous and next character (no whitespace allowed!)
+                    if ((index(i-1) == 0) .or. (index(i+1) ==0)) then
+                        ! Not allowed, return
+                        return 
+                    end if 
+
+                    ! Set previous to true
+                    isarraystart(index(i-1)) = .true.
+                elseif (isrepchar(i)) then 
+                    ! Check previous and next character (no whitespace allowed!)
+                    if ((index(i-1) == 0) .or. (index(i+1) ==0)) then
+                        ! Not allowed, return
+                        return 
+                    end if 
+
+                    ! Set previous to true
+                    isrepstart(index(i-1)) = .true.
+                end if
+
+            end do
+
+            ! Determine the actual number of values for intval
+            ntempval = nval
+            nval = 0
+            do i = 1, ntempval 
+                if (isarraystart(i)) then 
+                    ! Compute number of elements and add
+                    call gdErrorHandler('We should not end up here')
+                    ! nval = nval + tempintval(i+1)-tempintval(i)+1
+                elseif (isrepstart(i)) then 
+                    ! Compute number of elements and add
+                    nval = nval + nint(temprealval(i+1), kind=I8)
+                elseif (i > 1) then 
+                    if (isrepstart(i-1) .or. isarraystart(i-1)) then 
+                        ! Skip addition, already added before
+                    else 
+                        ! Normal entry, +1
+                        nval = nval + 1
+                    end if 
+                else
+                    ! Normal entry, +1
+                    nval = nval + 1
+                end if
+            end do 
+
+            ! Construct the final value vector
+            k = 0
+            allocate(realval(nval))
+            do i = 1, ntempval 
+                if (isarraystart(i)) then 
+                    ! Compute number of elements and add
+                    call gdErrorHandler('we should not get here')
+                    !tempi = temprealval(i+1)-temprealval(i)+1
+                    !realval(k+1:k+tempi) = [(j, j = temprealval(i), temprealval(i+1))]
+                    !k = k + tempi
+                elseif (isrepstart(i)) then 
+                    ! Compute number of elements and add
+                    tempi = nint(temprealval(i+1), kind=I8)
+                    realval(k+1:k+tempi) = temprealval(i)
+                    k = k + tempi
+                    elseif (i > 1) then 
+                        if (isrepstart(i-1) .or. isarraystart(i-1)) then 
+                            ! Skip addition, already added before
+                        else 
+                            ! Normal entry, +1
+                            realval(k+1) = temprealval(i)
+                            k = k + 1
+                        end if 
+                    else
+                    ! Normal entry
+                    realval(k+1) = temprealval(i)
+                    k = k + 1
+                end if
+            end do 
+        else 
+            ! Set realval equal to temprealval
+            realval = temprealval 
+        end if
+
+        ! If we managed to get here, reading etc was successful
+        islegal = .true.
 
     end subroutine
 

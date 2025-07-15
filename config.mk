@@ -30,6 +30,45 @@ BLASPATH = -lopenblas
 ## UMFPACKPATH 			: UMFPACK library path (user defined)
 UMFPACKPATH = -lumfpack
 
+## DMUMPSPATH            : DMUMPS library path (user defined, optional)
+#DMUMPSPATH = -ldmumps -lmumps_common -L/usr/lib -lmetis  -lesmumps -L../../PORD/lib/ -lpord -L../../lib -L../../libseq -lscotch -lscotcherr -L../../libseq/libmpiseq.a -lpthread
+#DMUMPSPATH = -ldmumps -lmumps_common -L/usr/lib -lmetis  -lesmumps -lpord -lscotch -lscotcherr -lpthread
+#DMUMPSPATH = -L../../MUMPS_5.8.0/lib -lsmumps -ldmumps -lmumps_common -L/usr/lib  -lparmetis -lmetis -L../../PORD/lib/ -lpord -L/usr/lib -lptesmumps -lptscotch -lptscotcherr -lscalapack-openmpi  -llapack   -lblas -lpthread
+
+
+## DMUMPSLIBPATH        : DMUMPS include path (user defined, optional)
+ifdef DMUMPS_LPATH 
+    ifdef DMUMPS_IPATH
+        ifndef NO_USE_MPI
+            # Define mumps 
+            MUMPS = yes 
+            # Mumps has to be compiled with MPI
+            USE_MPI = yes 
+            $(info % MUMPS library and include paths set, MPI available. Compiling with MUMPS) 
+        else 
+            undefine USE_MPI
+            undefine DMUMPS_LPATH 
+            undefine DMUMPS_IPATH 
+            $(info % MUMPS paths available, but no MPI. Not compiling MUMPS.)
+        endif
+    else
+        # Not all paths define, issue message and undefine to ensure proper compilation
+        $(info % MUMPS include path not set, set "DMUMPS_LPATH" and "DMUMPS_IPATH" to enable compilation with MUMPS)  
+        undefine DMUMPS_LPATH 
+        undefine DMUMPS_IPATH 
+    endif
+else
+    # Not all paths define, issue message and undefine to ensure proper compilation
+    $(info % MUMPS library path not set, set "DMUMPS_LPATH" and "DMUMPS_IPATH" to enable compilation with MUMPS) 
+    undefine DMUMPS_LPATH 
+    undefine DMUMPS_IPATH 
+endif
+
+# Define MUMPS for the compiler
+ifdef MUMPS 
+COMPDIRVARS += -DMUMPS 
+endif
+
 ## SOLPSTOP            : path to SOLPS (overridden if SOLPSTOP is define)
 ifdef SOLPSTOP
 DOSOLPS = true
@@ -88,7 +127,7 @@ EXT_DIFF = .adj_shape
 DIFF = yes
 DIFFDIR = src/differentiation/adjoint_shape
 endif
-ifdef GOAT_DEBUG
+ifeq ($(strip $(GOAT_DEBUG)),yes)
 EXT_DEBUG = .debug
 endif
 ##
@@ -96,10 +135,32 @@ endif
 ## %=========
 ## FC			: Compiler to be used for fortran (overridden if COMPILER is defined)
 ifdef COMPILER
-FC = $(COMPILER)
+    ifeq ($(strip $(COMPILER)),gfortran)
+        ifdef USE_MPI
+            FC = mpif90 
+        else
+            FC = gfortran 
+        endif  
+    else ifeq ($(strip $(COMPILER)),ifort64)
+        ifdef USE_MPI
+            FC = mpiifort
+        else 
+            FC = ifort 
+        endif 
+    else
+        ifdef USE_MPI
+            FC = mpif90 
+        else
+            FC = gfortran 
+        endif  
+    endif 
 else 
-COMPILER = gfortran
-FC = gfortran
+    COMPILER = gfortran
+    ifdef (USE_MPI)
+        FC = mpif90 
+    else
+        FC = gfortran 
+    endif  
 endif 
 
 # Directory where objectcode/binaries will be created
@@ -111,45 +172,49 @@ BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_I
 ## % Include paths
 ## %==============
 ## SUITESPARSEPATH      : SuiteSparse header file path
-SUITESPARSEPATH = /usr/include/suitesparse
+SUITESPARSEPATH = -I/usr/include/suitesparse
 
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS_DEF = -c -pg -fopenmp
-CFLAGS_DEF_NO_OMP = -c -pg -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized 
+CFLAGS_DEF = -c -fopenmp
+CFLAGS_DEF_NO_OMP = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized 
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
 CFLAGS_DEBUG = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -fopenmp -Wno-uninitialized
 ## CFLAGS_OMP_DEBUG	: compiler flags for OpenMP and debugging
-CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
+CFLAGS_OMP_DEBUG = -c -g -Wall  -O0 -fopenmp
 CFLAGS_PERF = -c -O2 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fopenmp -Wno-uninitialized
 
 ## CC           : Compiler to be used for C
-CC = gcc 
+ifdef USE_MPI
+    CC = mpicc
+else 
+    CC = gcc 
+endif 
 
-CCFLAGS_DEF = -pg -c
+CCFLAGS_DEF = -c -g
 CCFLAGS_PERF = -c -Wall -O2
 
 ## % Linker
 ## %=======
 ## LFLAGS			: linking flags to be used (apart from libraries)
-LFLAGS_DEF =   -pg -fcheck=all -fopenmp
-LFLAGS_DEF_NO_OMP =   -pg -fcheck=all
+LFLAGS_DEF =   -fcheck=all -fopenmp
+LFLAGS_DEF_NO_OMP =   -fcheck=all
 ## LFLAGS_DEBUG 	: linking flags for debugging
-LFLAGS_DEBUG = -pg -g -fcheck=all
+LFLAGS_DEBUG = -g -fcheck=all
 
 ## LFLAGS			: linking flags to be used for openMP
-LFLAGS_OMP = -pg -g -fopenmp
+LFLAGS_OMP = -g -fopenmp
 LFLAGS_PERF = -fopenmp
 
 ## LFLAGS_DEBUG 	: linking flags for debugging
-LFLAGS_OMP_DEBUG = -pg -g -fopenmp
+LFLAGS_OMP_DEBUG = -g -fopenmp
 
 # Set flags
 #==========
 # Set the CFLAGS
 CFLAGS = $(CFLAGS_DEF) $(COMPDIRVARS)
-ifdef GOAT_DEBUG
+ifeq ($(strip $(GOAT_DEBUG)),yes)
 CFLAGS += -g -O0 -Wall -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized
 else
 CFLAGS += -O3
@@ -160,7 +225,7 @@ LFLAGS = $(LFLAGS_DEF)
 
 # Set CFLAGS for C compiler
 CCFLAGS = $(CCFLAGS_DEF) $(COMPDIRVARS)
-ifdef GOAT_DEBUG
+ifeq ($(strip $(GOAT_DEBUG)),yes)
 CCFLAGS += -g -Wall -O0 
 else
 CCFLAGS += -O3
@@ -173,10 +238,8 @@ endif
 MAIN_RUNFILE = MainRunFileGridDeformation.F90
 
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
-GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_plotter.F90 \
-    src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 src/General/mod_sort.F90 $(wildcard src/General/*.F90)  
-    
-    
+GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_readwrite.F90 src/General/mod_inputfileparser.F90 src/General/mod_plotter.F90 \
+    src/General/mod_sparseinterface.F90  src/General/mod_sort.F90 $(wildcard src/General/*.F90)      
 
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
 DRIVER_FILES = $(wildcard src/Drivers/Goat/*.F90)
@@ -191,7 +254,7 @@ MODULE_FILES_GD = src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
     $(wildcard src/Modules/GD/*.F90)
 MODULE_FILES_GG = src/Modules/GG/ggmod_topology2D.F90 src/Modules/GG/ggmod_vertexdistribution2D.F90 \
-    src/Modules/GG/ggmod_gridgeneration2D.F90
+    src/Modules/GG/ggmod_gridgeneration2D.F90 src/Modules/GG/ggmod_gridgenerator.F90
 MODULE_FILES_B25 = $(wildcard src/Modules/*.F)
 
 MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
@@ -245,7 +308,7 @@ CONSTANTS_FILES = src/Constants/mod_global_environment.F90 src/Constants/mod_pre
 CLAYER_FILES    = $(wildcard src/Clayer/*.c)
 
 ## ClayerF              : fortran files for interfacing with other c code
-CLAYERF_FILES    =  src/Clayer/CSparseF.F90 src/Clayer/Clayer.F90
+CLAYERF_FILES    =   src/Clayer/CUtilities.F90 src/Clayer/CSparseF.F90 src/Clayer/Clayer.F90
 
 ## ShapeOpt             : fortran files for shape optimization
 SHAPEOPT_FILES  = src/Modules/ShapeOpt/somod_userinput.F90 \

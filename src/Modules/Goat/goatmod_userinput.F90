@@ -20,7 +20,7 @@ module goatmod_userinput
     use mod_inputfileparser
     use mod_global_environment, only: solps, solps_inputfilepath, &
         solps_writefilepath, solps_gridfilepath, solps_magneticfieldfilepath, &
-        solps_structurefilepath
+        solps_structurefilepath, solps_outputfilepath
 
     ! The usual
     implicit none
@@ -289,6 +289,9 @@ module goatmod_userinput
         !               more nodes)
         ! - maxdist:    maximum distance between two nodes. If larger,
         !               nodes will be added in between when refine == 1
+        ! - minreffac   minimal refinement factor for each edge. If set 
+        !               to zero, then no effect. Value+1 gives the number 
+        !               of edges that each edge will be split minimally.
         ! - TP:         integer giving the indices of which part of the
         !               structure should be considered as target plates.
         !               This should not account for any structures being
@@ -321,7 +324,8 @@ module goatmod_userinput
 
         ! Vessel representation options
         character(:), allocatable       :: shapemeth 
-        integer(I8)                     :: resx, resy, interpC, interpM 
+        integer(I8)                     :: resx, resy, interpC, interpM, &
+            minreffac 
         real(R8)                        :: offsetfracx, offsetfracy
         real(R8), allocatable           :: xrange(:), yrange(:)
 
@@ -388,12 +392,34 @@ module goatmod_userinput
         !                       PF boundary and tangency point
         ! - removewidegridregions: remove all regions that are not next    
         !                           to a separatrix 
+        ! - removevesselregions : remove regions that are adjacent to 
+        !                       some user specified vessel region
+        ! - rvrvesselIDs        : IDs, as specified in the structure.dat
+        !                       or vessel.dat file, to consider
+        ! - rvrretain:          : retain tubes instead of deleting them, 
+        !                       and delete all others
+        ! - rvrfullycovered     : if true, a face is only considered if 
+        !                       it is fully covered by one (or multiple) 
+        !                       defined vessel IDs
+        ! - rvrdocascade        : delete not only marked tubes, but also
+        !                       tubes that connect (so cascade the deletion)
+        !                       in either increasing or decreasing psi 
+        !                       direction (next option)
+        ! - rvrcascadedir       : 'upwards' for tubes with higher psi 
+        !                       value, 'downwards' for lower, 'none' for 
+        !                       no cascade. 
         ! - npmin, npmax, dl    : minimal and maximal number of points
         !                       of contours (when doing coarsening) and
         !                       desired uniform edge length
         ! - readexistingTM:     read in an existing topomesh file, 
         !                       for which the full path is defined in  
         !                       TMfilepath
+        ! - readexistingtracers     read in existing field and vessel
+        !                       tracers instead of constructing
+        !                       new ones - only when restarting the 
+        !                       topomesh from a previous one. field and
+        !                       vessel filepaths should be fully specified
+        !                       in TMfieldtracerfilepath and TMvesseltracerfilepath
         ! - mergetangencypointtubes     merge tubes that are too small 
         !                       and that have tangency point tubes 
         !                       as neighbours. 'too small' is based on 
@@ -402,16 +428,42 @@ module goatmod_userinput
         ! - dpsimintangencypointtubes   minimal delta psi for tangency 
         !                       point tubes (if below, we attempt to 
         !                       merge)
+        ! - lradmintangencypointtubes   minimal radial length for tangency
+        !                       point tubes (if below, we attempt to 
+        !                       merge)
+        ! - alignvesselparts    define certain vessel parts as aligned 
+        !                       faces with a certain flux surface value 
+        !                       and flux surface ID. Only certain boundary
+        !                       faces will be considered for alignment 
+        !                       (typically those near type 2 tangency 
+        !                       points). This will only be done after
+        !                       initial topological mesh construction 
+        !                       as this triggers profound adaptation of     
+        !                       of the topomesh.
+        ! - avpminangle         minimum angle w.r.t. the magnetic field 
+        !                       of boundary edges. If below, it will be
+        !                       considered as potential aligned part 
+        !                       (avp: aligned vessel parts). This angle
+        !                       should be given in degrees!
+        ! - avprefinevessel     switch to refine vessel boundaries, similar
+        !                       to full vessel refinement (see vessel options)
+        ! - avpmaxvesseldist    maximal vessel edge length
+        ! - avpminreffac        minimal refinement factor for vessel edge refinement                    
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
-            npmax
+            npmax, avpminreffac
+        integer(I8), allocatable, dimension(:)  :: rvrvesselIDs
         logical                 :: addcoreboundaries, removecoreregions, &
             fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
             readexistingTM, removenoncoreregions, mergetangencypointtubes, &
-            doadaptations, dotpvesselbased
+            doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
+            rvrdocascade, rvrfullycovered, alignvesselparts, avprefinevessel, &
+            readexistingtracers
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
-            PFboundariesfrac, dpsimintangencypointtubes
-        character(:), allocatable   :: TMfilepath
+            PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes, &
+            avpminangle, avpmaxvesseldist
+        character(:), allocatable   :: TMfilepath, rvrcascadedir, &
+            TMfieldtracerfilepath, TMvesseltracerfilepath
     contains 
 
         procedure :: Read           => ReadTopomeshOptions
@@ -483,6 +535,10 @@ module goatmod_userinput
         !                           that complies to the marking criterion
         ! - evtmaxvessellength:     maximum L2-based vessel segment 
         !                           length before tube is extended
+        ! - evtnoBL                 if true, don't apply any boundary 
+        !                           layer at extended tubes (typically 
+        !                           not desired. Only has effect if 
+        !                           boundary layers are applied of course)
 
         ! Options for flux surface removal
         ! - removefluxsurfaces:     switch to remove or not
@@ -574,13 +630,17 @@ module goatmod_userinput
         ! Label translation options:
         !   - structurebasedlabels:     base labels on structure IDs 
 
+        ! Diagnostics
+        ! - dogriddiagnostics   run grid diagnostics. Will be time consuming!
+
         
         logical                     :: removefluxsurfaces, &
             removenarrowboundarytriangles, removefaces, refLBdoxp, &
             refLBdovessel, vdpdincludexp, coarsencontours, refBLdotarget, &
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
-            radrefdlBLlengthbased, vdrdoxp, structurebasedlabels
+            radrefdlBLlengthbased, vdrdoxp, structurebasedlabels, &
+            dogriddiagnostics, evtnoBL
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp
@@ -796,7 +856,8 @@ module goatmod_userinput
         ! Refinement options
         options%refine      = .false.
         options%maxdist     = 0.01
-
+        options%minreffac   = 0_I8
+ 
         ! Target plates
         allocate(options%TP(2))
         allocate(options%TPind(2))
@@ -852,7 +913,10 @@ module goatmod_userinput
         !=============
         ! I/O
         options%readexistingTM = .false. 
+        options%readexistingtracers = .false. 
         options%TMfilepath = 'topomesh.dat'
+        options%TMfieldtracerfilepath = './output/TMfieldtracer.dat'
+        options%TMvesseltracerfilepath = './output/TMvesseltracer.dat'
         
         ! Contouring (field)
         options%fresx = 100
@@ -876,6 +940,8 @@ module goatmod_userinput
 
         ! Additional options
         options%dotpvesselbased             = .false.
+
+        ! Adaptations
         options%doadaptations               = .true.
         options%addcoreboundaries           = .true. 
         options%coreboundariesfrac          = 0.2
@@ -885,7 +951,22 @@ module goatmod_userinput
         options%removewidegridregions       = .true. 
         options%removenoncoreregions        = .false.
         options%mergetangencypointtubes     = .false.
-        options%dpsimintangencypointtubes   = 100_R8 ! some absurd large value
+        options%dpsimintangencypointtubes   = 0.0_R8 ! zero to ignore
+        options%lradmintangencypointtubes   = 0.0_R8 ! zero to ignore
+
+        options%removevesselregions         = .false. 
+        if (allocated(options%rvrvesselIDs)) deallocate(options%rvrvesselIDs)
+        allocate(options%rvrvesselIDs(0))
+        options%rvrfullycovered             = .false. 
+        options%rvrretain                   = .false. 
+        options%rvrdocascade                = .false. 
+        options%rvrcascadedir               = 'none'
+
+        options%alignvesselparts            = .false.
+        options%avprefinevessel             = .false.  
+        options%avpminangle                 = 0.0_R8
+        options%avpmaxvesseldist            = 1e-2 ! [m]
+        options%avpminreffac                = 0
 
     end subroutine 
 
@@ -990,6 +1071,7 @@ module goatmod_userinput
         options%extendtptubes       = .true. 
         options%extendvesseltubes   = .false. 
         options%evtmaxvessellength  = 0.2
+        options%evtnoBL             = .true.
 
         ! Options for flux surface removal 
         options%removefluxsurfaces = .true.
@@ -1005,6 +1087,9 @@ module goatmod_userinput
         options%removefaces = .false. 
         options%remfacescriterion = 'facelength_radial_bnd'
         options%remfacesminlength = 2e-3        
+
+        ! Diagnostics
+        options%dogriddiagnostics = .true. ! default true 
 
     end subroutine 
 
@@ -1433,6 +1518,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%refine)
         field = 'goat.vessel.maxvesseldist'
         call ExtractOptionValueReal0D(fid, field, options%maxdist)
+        field = 'goat.vessel.minreffac'
+        call ExtractOptionValueInteger0D(fid, field, options%minreffac)
         
         ! Target plates
         field = 'goat.vessel.TP'
@@ -1560,8 +1647,14 @@ module goatmod_userinput
         ! I/O
         field = 'gg.tm.readexistingTM'
         call ExtractOptionValueLogical0D(fid, field, options%readexistingTM)
+        field = 'gg.tm.readexistingtracers'
+        call ExtractOptionValueLogical0D(fid, field, options%readexistingtracers)
         field = 'gg.tm.TMfilepath'
         call ExtractOptionValueCharacter(fid, field, options%TMfilepath)
+        field = 'gg.tm.TMfieldtracerfilepath'
+        call ExtractOptionValueCharacter(fid, field, options%TMfieldtracerfilepath)
+        field = 'gg.tm.TMvesseltracerfilepath'
+        call ExtractOptionValueCharacter(fid, field, options%TMvesseltracerfilepath)
 
         ! Resolution 
         field = 'gg.tm.field.resx'
@@ -1590,8 +1683,11 @@ module goatmod_userinput
         ! Additional options
         field = 'gg.tm.dotpvesselbased'
         call ExtractOptionValueLogical0D(fid, field, options%dotpvesselbased)
+
+        ! Adaptations
         field = 'gg.tm.doadaptations'
         call ExtractOptionValueLogical0D(fid, field, options%doadaptations)
+
         field = 'gg.tm.addcoreboundaries'
         call ExtractOptionValueLogical0D(fid, field, options%addcoreboundaries)
         field = 'gg.tm.addPFboundaries'
@@ -1610,6 +1706,33 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%mergetangencypointtubes)
         field = 'gg.tm.dpsimintangencypointtubes'
         call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
+        field = 'gg.tm.lradmintangencypointtubes'
+        call ExtractOptionValueReal0D(fid, field, options%lradmintangencypointtubes)
+
+        field = 'gg.tm.removevesselregions'
+        call ExtractOptionValueLogical0D(fid, field, options%removevesselregions)
+        field = 'gg.tm.rvrvesselIDs'
+        call ExtractOptionValueInteger1D(fid, field, options%rvrvesselIDs)
+        field = 'gg.tm.rvrfullycovered'
+        call ExtractOptionValueLogical0D(fid, field, options%rvrfullycovered)
+        field = 'gg.tm.rvrretain'
+        call ExtractOptionValueLogical0D(fid, field, options%rvrretain)
+        field = 'gg.tm.rvrdocascade'
+        call ExtractOptionValueLogical0D(fid, field, options%rvrdocascade)
+        field = 'gg.tm.rvrcascadedir'
+        call ExtractOptionValueCharacter(fid, field, options%rvrcascadedir)
+
+        field = 'gg.tm.alignvesselparts'
+        call ExtractOptionValueLogical0D(fid, field, options%alignvesselparts)
+        field = 'gg.tm.avprefinevessel'
+        call ExtractOptionValueLogical0D(fid, field, options%avprefinevessel)
+        field = 'gg.tm.avpminangle'
+        call ExtractOptionValueReal0D(fid, field, options%avpminangle)
+        field = 'gg.tm.avpmaxvesseldist'
+        call ExtractOptionValueReal0D(fid, field, options%avpmaxvesseldist)
+        field = 'gg.tm.avpminreffac'
+        call ExtractOptionValueInteger0D(fid, field, options%avpminreffac)
+
 
         ! Housekeeping
         !=============
@@ -1829,6 +1952,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%extendvesseltubes)
         field = 'gg.adap.evt.maxvessellength'
         call ExtractOptionValueReal0D(fid, field, options%evtmaxvessellength)
+        field = 'gg.adap.evt.noBL'
+        call ExtractOptionValuelogical0D(fid, field, options%evtnoBL)
 
         ! Options for flux surface removal 
         field = 'gg.vd.removefluxsurfaces'
@@ -1852,7 +1977,11 @@ module goatmod_userinput
         field = 'gg.vd.rf.criterion'
         call ExtractOptionValueCharacter(fid, field, options%remfacescriterion)
         field = 'gg.vd.rf.minlength'
-        call ExtractOptionValueReal0D(fid, field, options%remfacesminlength)       
+        call ExtractOptionValueReal0D(fid, field, options%remfacesminlength)  
+        
+        ! Diagnostic options
+        field = 'gg.dogriddiagnostics'
+        call ExtractOptionValueLogical0D(fid, field, options%dogriddiagnostics)
 
         ! Housekeeping
         !=============

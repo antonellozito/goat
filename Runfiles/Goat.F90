@@ -41,6 +41,11 @@ program Goat
     use mod_global_environment, only: solps, SolpsPreamble
     use mod_plotter, only: plotdir
 
+#if (defined(MUMPS) || defined(USE_MPI))
+    use mpi
+#endif
+
+
     ! Declare variables
     !==================
     ! Arguments
@@ -51,8 +56,27 @@ program Goat
     type(GoatoptionsUDT)        :: goatoptions
     character(:), allocatable   :: filepath
 
+#if (defined(MUMPS) || defined(USE_MPI))
+    ! MPI
+    integer                     :: rank, nrank, ierror
+#endif 
+
     ! Initialize
     !===========
+#if (defined(MUMPS) || defined(USE_MPI))
+    ! MPI call
+    call mpi_init(ierror)
+    call mpi_comm_rank(MPI_COMM_WORLD, rank, ierror)
+    call mpi_comm_size(MPI_COMM_WORLD, nrank, ierror)
+    if (rank == 0) then 
+        print *, 'mpi initialized with: ', nrank, 'processes'
+        print *, MPI_COMM_WORLD
+        if (nrank > 1) then 
+            print *, 'warning: goat not yet capable of using multiple processes, mpi only intended for MUMPS solver'
+        end if 
+    end if 
+#endif 
+
     ! Set the filepath
     allocate(character(len('./GOAToptions.dat')) :: filepath)
     filepath = './GOAToptions.dat'
@@ -63,7 +87,6 @@ program Goat
     else
         call execute_command_line('mkdir ' // plotdir)
     end if
-
 
     ! Read the user input
     !====================
@@ -84,9 +107,13 @@ program Goat
 
     case ('GG')
 
-        ! Grid generation only (experimental!)
-        print *, 'warning: GG option is still experimental! use at own risk'
+        ! Grid generation only 
         call GGDriver(goatoptions)
+
+    case ('GGGD')
+
+        ! Grid generation with subsequent grid deformation
+        call GGGDDriver(goatoptions)
 
     case ('GDtest')
 
@@ -99,7 +126,16 @@ program Goat
 
     end select 
 
+    ! Finalize
+    !=========
+    ! Error handler
     call ErrorStack%Print()
+
+#if (defined(MUMPS) || defined(USE_MPI))
+    ! MPI call
+    call mpi_finalize(ierror)
+#endif 
+
 
 
 end program Goat

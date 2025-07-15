@@ -324,9 +324,12 @@ module gdmod_userinput
         ! - includebox(x, y)    boxes for edge inclusion
         ! - excludebox(x, y)    boxes for edge exclusion (applied after 
         !                       inclusion) 
+        ! - includecorevert:    include core vertices (vertices that 
+        !                       lie on closed flux surfaces)
 
         integer(I8)                 :: checkperp 
-        logical                     :: includecutcellvert
+        logical                     :: includecutcellvert, &
+            includecorevert
         real(R8)                    :: epsperp 
         real(R8), allocatable       :: includeboxx(:, :), &
             includeboxy(:, :), excludeboxx(:, :), excludeboxy(:, :)
@@ -798,7 +801,9 @@ module gdmod_userinput
         !================
         options%includecutcellvert = .false.
         options%checkperp = 0 
+        options%includecutcellvert = .false. 
         options%epsperp = 0.2
+        options%includecorevert = .true.
         if (allocated(options%includeboxx)) then 
             deallocate(options%includeboxx, options%includeboxy, &
                 options%excludeboxx, options%excludeboxy)
@@ -1727,6 +1732,8 @@ module gdmod_userinput
         !=============
         field = 'gd.design.ec.par.orthogonality.includecutcellvert'
         call ExtractOptionValueLogical0D(fid, field, options%includecutcellvert)
+        field = 'gd.design.ec.par.orthogonality.includecorevert'
+        call ExtractOptionValueLogical0D(fid, field, options%includecorevert)
         field = 'gd.design.ec.par.orthogonality.checkperp'
         call ExtractOptionValueInteger0D(fid, field, options%checkperp)
         field = 'gd.design.ec.par.orthogonality.epsperp'
@@ -1739,6 +1746,8 @@ module gdmod_userinput
         call ExtractOptionValueReal2D(fid, field, options%excludeboxx)
         field = 'gd.design.ec.par.orthogonality.excludeboxy'
         call ExtractOptionValueReal2D(fid, field, options%excludeboxy)
+        field = 'gd.design.ec.par.orthogonality.includecutcellvert'
+        call ExtractOptionValueLogical0D(fid, field, options%includecutcellvert)
         
         ! Housekeeping
         !=============
