@@ -1724,11 +1724,22 @@ module mod_contour2D
                     'at these vertices'
             end if 
 
+            ! Additional checks to ensure the starting quad remains a 
+            ! starting quad
+
+            ! Check if on all four corners of the starting quad the
+            ! value is either exact or higher
+            hasvv = Vtrace >= tv 
+            if (all(hasvv([iisq, iisq+1], [jjsq, jjsq+1]))) then 
+                ! subtract perturbation from Vtrace
+                where (isexactv) Vtrace = Vtrace - pert 
+            else
+                ! add perturbation
+                where (isexactv) Vtrace = Vtrace + pert
+            end if
+       
             ! Perturb values & recompute
-            where (isexactv) 
-                Vtrace = Vtrace + pert
-                hasvv = Vtrace > tv
-            end where
+            where (isexactv) hasvv = Vtrace > tv
 
         end if 
 
