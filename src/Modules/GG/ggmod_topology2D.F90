@@ -529,6 +529,12 @@ module ggmod_topology2D
         class(ContourTracerUDT), allocatable, intent(inout)  :: vesseltracer, fieldtracer
         class(StreamlineTracerUDT), intent(in)  :: streamlinetracer
 
+        ! Auxiliary
+        integer(I8)                             :: nTMv
+        integer(I8), allocatable, dimension(:)  :: IDTMv
+        real(R8), allocatable, dimension(:)     :: xTMv, yTMv, FTMv
+        logical, allocatable, dimension(:)      :: keepTMv
+
         ! Compute additional contours
         !============================
         ! Core boundaries? 
@@ -568,8 +574,35 @@ module ggmod_topology2D
 
         ! Remove regions
         !===============
-        ! Remove parts if desired
-        call RemoveTopologicalMeshRegions(topomesh, vessel, options)
+        ! Insert aligned vessel parts?
+        if (options%alignvesselparts) then 
+            ! Update the field tracer for the adjusted topomesh (just 
+            ! add pseudo saddle points, grid shouldn't be updated)
+
+            ! Construct refined grid based on tangency points and extrema
+            keepTMv = (topomesh%vert%type == TMvertextp1ID) &
+                .or. (topomesh%vert%type == TMvertextp2ID)  &
+                .or. (topomesh%vert%type == TMvertexmaxID)  & 
+                .or. (topomesh%vert%type == TMvertexminID)  & 
+                .or. (topomesh%vert%type == TMvertexsaddleID)  
+            nTMv = count(keepTMv)
+            allocate(xTMv(nTMv), yTMv(nTMv), FTMv(nTMv), IDTMv(nTMv))
+            xTMv = pack(topomesh%vert%x, keepTMv)
+            yTMv = pack(topomesh%vert%y, keepTMv)
+            FTMv = pack(topomesh%vert%fval, keepTMv)
+            IDTMv = pack(topomesh%vert%ID, keepTMv)
+
+            ! Update the tracer
+            fieldtracer%xs = xTMv
+            fieldtracer%ys = yTMv 
+            fieldtracer%vs = FTMv 
+            fieldtracer%IDs = IDTMv
+            fieldtracer%order = spread(0_I8, 1, nTMv)
+
+            ! Insert aligned parts
+            call InsertAlignedVesselParts(topomesh, fieldtracer, &
+                magneticField, vessel, options)
+        end if 
 
         ! Merge tubes?
         if (options%mergetangencypointtubes) then 
@@ -577,11 +610,17 @@ module ggmod_topology2D
                 vessel, fieldtracer, options)
         end if
 
-        ! Insert aligned vessel parts?
-        if (options%alignvesselparts) then 
-            call InsertAlignedVesselParts(topomesh, fieldtracer, &
-                magneticField, vessel, options)
-        end if 
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_aftermerge')
+
+        ! Remove regions if desired
+        call RemoveTopologicalMeshRegions(topomesh, vessel, options)
+
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_afterregion')
+
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_afteravp')
 
     end subroutine
 
@@ -3782,8 +3821,8 @@ module ggmod_topology2D
             if (.not. mark(i)) then ! This tube should be retained
                 delc(tc) = .false. 
                 do j = 1, size(tc)
-                    tcf = GetTMCellFace(topomesh%cell, i)
-                    tcv = GetTMCellVert(topomesh%cell, i)
+                    tcf = GetTMCellFace(topomesh%cell, tc(j))
+                    tcv = GetTMCellVert(topomesh%cell, tc(j))
                     delf(tcf) = .false. 
                     delv(tcv) = .false. 
                 end do 
@@ -3794,7 +3833,7 @@ module ggmod_topology2D
                 ! haphazardly some core regions still remain)
                 delc(tc) = .true. 
                 do j = 1, size(tc)
-                    tcf = GetTMCellFace(topomesh%cell, i)
+                    tcf = GetTMCellFace(topomesh%cell, tc(j))
                     do k = 1, size(tcf)
                         if (topomesh%face%type(tcf(k)) == TMfacepolID) then 
                             topomesh%face%type(tcf(k)) = TMfaceSOLID
@@ -3854,6 +3893,9 @@ module ggmod_topology2D
         !   specific, and it is, but it represents one of the most 
         !   common cases that requires coarsening (especially at nearly
         !   aligned walls etc that have many tangency points)
+        ! - tubes that originate from aligned vessel part insertion. 
+        !   These are typically type 1 tangency point tubes with only
+        !   a single tube neighbour. 
 
         ! See dedicated subroutines/documentation below for more information
         
@@ -3878,9 +3920,34 @@ module ggmod_topology2D
         !       one of the tangency points that form the other boundary.
         !       The other one becomes a regular boundary vertex. This
         !       will allow to apply the SimplifyTopologicalMesh operation
-        !       to simplify boundaries. The choice of which vertex to 
-        !       take will 
+        !       to simplify boundaries. 
+        !   6)  Remove any 'garbage' tangency points of type 1
         !   5)  All cell data etc is reconstructed after each tube merge
+
+        ! Type 1 tangency point tube removal
+        !-----------------------------------
+        ! 1)    Take a tube that only has one neighbour on one side
+        !       and a tangency point type 1 on the other side. If no 
+        !       more tubes that meet these criteria are found, go to 5.
+        ! 2)    Determine the radial boundaries of this tube and the 
+        !       radial boundaries of the neighbouring tube. 
+        ! 3)    If both neighbouring boundaries are, for some as of yet
+        !       unknown reason, aligned boundaries, then also the 
+        !       radial boundaries of the current tube become aligned
+        !       boundaries in order to maintain a conforming topomesh. 
+        !       Otherwise, radial boundaries simply keep their type 
+        !       as before. 
+        ! 4)    Determine the aligned boundary face(s) of this tube on
+        !       the non-TP side and mark them for removal. These should
+        !       not contain any aligned boundary faces in principle and 
+        !       should only have a single face (warnings will be thrown
+        !       otherwise). Retype the type 1 tangency point as a 
+        !       regular boundary vertex to have it removed later on 
+        !       during topomesh simplification. Go to 1
+        ! 5)    At this point, all faces etc to be deleted were marked.
+        !       Delete faces, simplify the topological mesh, and 
+        !       reconstruct all data
+
 
         ! Declare variables
         !==================
@@ -3898,7 +3965,8 @@ module ggmod_topology2D
         integer(I8)                             :: maxind
         integer(I8), allocatable, dimension(:)  :: tf, tfv, tnb, &
             tfmerge, tnbmerge, tfvu, tfradmerge, tvfvID, tvfvIDu, &
-            tvf, thisv
+            tvf, thisv, bndt1, bndt2, bndv1, bndv2, bndv, bndvf1, bndvf2, &
+            bndr, bndf
         real(R8)                                :: dpsi, dpsinb1, dpsinb2, &
             thisdeletedfval, lrad, lradnb1, lradnb2
         real(R8), allocatable, dimension(:)     :: thisvfval
@@ -3980,7 +4048,8 @@ module ggmod_topology2D
                                 tube%GetFace(tnb(2)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
-                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                            if (any(face%type(tfmerge) == TMfacesepID) .or. &
+                                (any(face%type(tfmerge) == TMfacealbndID))) then 
                                 marked = .false.
                             else
                                 marked = .true.
@@ -4018,7 +4087,8 @@ module ggmod_topology2D
                             tfradmerge = [tube%GetFace(tnb(1)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
-                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                            if (any(face%type(tfmerge) == TMfacesepID) .or. &
+                                (any(face%type(tfmerge) == TMfacealbndID))) then 
                                 marked = .false.
                             else
                                 marked = .true.
@@ -4069,7 +4139,8 @@ module ggmod_topology2D
                                 tube%GetFace(tnb(2)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
-                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                            if (any(face%type(tfmerge) == TMfacesepID) .or. &
+                                (any(face%type(tfmerge) == TMfacealbndID))) then 
                                 marked = .false.
                             else
                                 marked = .true.
@@ -4107,7 +4178,8 @@ module ggmod_topology2D
                             tfradmerge = [tube%GetFace(tnb(1)), tube%GetFace(i)]
 
                             ! Check for non-mergeable surfaces (separatrix basicall)
-                            if (any(face%type(tfmerge) == TMfacesepID)) then 
+                            if (any(face%type(tfmerge) == TMfacesepID).or. &
+                                (any(face%type(tfmerge) == TMfacealbndID))) then 
                                 marked = .false.
                             else
                                 marked = .true.
@@ -4178,47 +4250,8 @@ module ggmod_topology2D
                     ! Simplify
                     call SimplifyTopologicalMeshFaces(topomesh)
 
-                    !!! To be replaced by garbage point collector?
-
-                    ! Check if the tangency points are currently located
-                    ! in between two flux surfaces with different ID. 
-                    ! In that case, 'delete' one of them
-                    j = 1
-                    do while (j <= vert%ntot)
-                        if (vert%type(j) == TMvertextp1ID) then 
-                            ! Check
-                            tvf = vert%GetFace(j)
-
-                            ! Sanity check
-                            if (size(tvf) /= 2) then 
-                                ! Write out some data for debugging
-                                call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                                print *, 'vertex: ', j
-                                call gdErrorHandler('MergeTopologicalMeshFluxTubes: ' // & 
-                                    'type 1 tangency point does not have ' // & 
-                                    'exactly two faces, unexpected. Check mesh in topomesh_error.dat')
-                            end if 
-
-                            ! Get all unique flux surface IDs of these vertices
-                            tvfvID = vert%fsID([face%vert(tvf, 1), face%vert(tvf, 2)])
-                            call Unique(tvfvID, tvfvIDu)
-                            if (size(tvfvIDu) > 2) then 
-                                ! Set vertex type to simple boundary vertex
-                                ! for deletion later on in simplification 
-                                ! step
-                                vert%type(j) = TMvertexbndID
-
-                                ! Simplify
-                                call SimplifyTopologicalMeshFaces(topomesh)
-
-                                ! Reset counter 
-                                j = 0
-                            end if 
-                        end if 
-
-                        ! Update counter
-                        j = j + 1
-                    end do 
+                    ! Remove garbage tangency points
+                    call RemoveGarbageTangencyPoints(topomesh)
 
                     ! Simplify again
                     call SimplifyTopologicalMeshFaces(topomesh)
@@ -4259,6 +4292,107 @@ module ggmod_topology2D
                 
             end do
         end if 
+
+        ! Aligned vessel part tubes
+        !--------------------------
+        if (options%mergeavptubes) then 
+            ! Initialize
+            if (allocated(delf)) deallocate(delf)
+            allocate(delf(face%ntot))
+            delf = .false. 
+
+            ! Mark
+            do i = 1, tube%ntot
+                ! Find a tube that only has one neighbour and a type 1 
+                ! tangency point as boundaries
+                bndt1 = tube%GetNeig(i, 1)
+                bndt2 = tube%GetNeig(i, 2)
+                bndv1 = tube%GetBndVert(i, 1)
+                bndv2 = tube%GetBndVert(i, 2)
+                if ((size(bndt1) == 1) .and. (size(bndv2) == 1) .and. &
+                    (all(vert%type(bndv2) == TMvertextp1ID))) then  
+                    ! Found a tube, can continue
+                    bndv = bndv1
+                    bndf = tube%GetBndFace(i, 1)
+                elseif ((size(bndt2) == 1) .and. (size(bndv1) == 1) .and. &
+                    (all(vert%type(bndv1) == TMvertextp1ID))) then 
+                    ! Found a tube, can continue
+                    bndv = bndv2
+                    bndf = tube%GetBndFace(i, 2)
+                else
+                    ! Skip
+                    cycle
+                end if 
+
+                ! Checks
+                if (size(bndv) /= 2) then 
+                    ! This implies multiple faces, which is unexpected 
+                    ! and not (yet) supported. Skip
+                    cycle 
+                end if 
+
+                ! Check tube dpsi and radial length
+                tf = tube%GetFace(i)
+                dpsi = maxval(GetTMFaceDeltaPsi(topomesh, tf))
+                lrad = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
+
+                ! Check if we should merge
+                if ((dpsi >= options%dpsimintangencypointtubes) .and. &
+                    (lrad >= options%lradmintangencypointtubes)) then 
+                    ! All criteria fulfilled, skip
+                    cycle 
+                end if 
+
+                ! Check if the (vessel) boundary vertices both have 
+                ! aligned boundary faces as neighbours. In that case,
+                ! reset the type of the radial faces of this tube to 
+                ! aligned boundary faces.
+                bndvf1 = vert%GetFace(bndv(1))
+                bndvf2 = vert%GetFace(bndv(2))
+                if (any(face%type(bndvf1) == TMfacealbndID) .and. &
+                    any(face%type(bndvf2) == TMfacealbndID)) then 
+                    ! Print
+                    print *, 'MergeTopologicalMeshFluxTubes: retyping ' // & 
+                        'radial faces to aligned boundary faces as both ' // & 
+                        'neighbouring radial faces are of this type'
+
+                    ! Retype radial faces
+                    bndr = tube%GetFace(i)
+                    face%type(bndr) = TMfacealbndID
+                end if 
+
+                ! Mark faces for removal
+                delf(bndf) = .true.
+
+                ! Retype points as regular boundary points (should work
+                ! like this since only one aligned face as boundary)
+                vert%type([bndv1, bndv2]) = TMvertexbndID
+            end do 
+
+            
+            ! Remove faces
+            call RemoveTopologicalMeshFaceLogical(topomesh, delf)
+
+            ! Simplify
+            call SimplifyTopologicalMeshFaces(topomesh)
+
+            ! Vertex faces
+            call AddTopologicalMeshVertexFaces(topomesh)
+
+            ! Data
+            call AddTopologicalMeshData(topomesh)
+
+            ! Add cells
+            call AddTopologicalMeshCells(topomesh)
+
+            ! Data (recompute)
+            call AddTopologicalMeshData(topomesh)
+
+            ! Compute interconnection data
+            call AddTopologicalMeshInterconnectionData(topomesh)
+
+        end  if 
+
 
         ! Housekeeping
         !=============
@@ -4312,7 +4446,11 @@ module ggmod_topology2D
         ! by the user), which should guarantee the above statements.
         
         ! Note 1: small flux tubes may exist due to the operations 
-        ! described below. 
+        ! described below. Though merging of these tubes could be 
+        ! deferred to the dedicated merging routine, we choose to tackle
+        ! some cases here already. This is more straightforward 
+        ! implementation-wise, but also allows introducing their vessel
+        ! parts as aligned faces, which may be more desireable than just
         
         ! Algorithms
         !===========
@@ -5064,11 +5202,11 @@ module ggmod_topology2D
                     allc(indtpc)%endsaddle = 0 ! doesn't end anymore in saddle point
                     if (tscr(endind-1) == 0.0_R8) then 
                         call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
-                            [tscr(endind)], 'end', [-distfrac], .true., .false.)
+                            [tscr(endind)], 'end', [-0*distfrac], .true., .false.)
                     else
                         ! Also need to delete a first part
                         call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
-                            [tscr(endind-1:endind)], 'both', [distfrac, -distfrac], .true., .false.)
+                            [tscr(endind-1:endind)], 'both', [0*distfrac, -0*distfrac], .true., .false.)
                     end if 
                     !call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
                     !    [tscr(endind)], 'end', [0.0_R8], .true., .false.)
@@ -5087,11 +5225,11 @@ module ggmod_topology2D
                     allc(i)%startsaddle = 0 ! doesn't start anymore in saddle point
                     if (tscr(startind+1) == real(nstc, kind=R8)) then 
                         call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(startind)], 'start', [-distfrac], .false., .true.)
+                            [tscr(startind)], 'start', [-0*distfrac], .false., .true.)
                     else
                         ! Also need to delete last part
                         call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(startind:startind+1)], 'both', [-distfrac, distfrac], .false., .true.)
+                            [tscr(startind:startind+1)], 'both', [-0*distfrac, 0*distfrac], .false., .true.)
                     end if
                     !allc(i)%x = allc(i)%x([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
                     !allc(i)%y = allc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
@@ -5129,7 +5267,8 @@ module ggmod_topology2D
                     !    'faces - unexpected')
                 else
 
-                    ! Keep only this part of the contour coordinates
+                    ! Keep only this part of the contour coordinates 
+                    ! In this case, we don't keep the starting point
                     call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
                         [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .true., .false.)
                 end if
@@ -6532,65 +6671,140 @@ module ggmod_topology2D
 
         ! Note: no additional interconnection data is updated
 
+        ! Note: when aligned vessel parts are present, we can't check
+        ! on flux surface ID alone but have to chain aligned faces from
+        ! one side of the tangency point to (hopefully) the other. We do 
+        ! this in a similar way as cells are formed (though of course we
+        ! don't store all the data). If we end up from one radial face
+        ! into the other, with only one aligned boundary in between, 
+        ! then the tangency point is valid. Otherwise, if there are 
+        ! multiple distinct aligned parts, the tangency point is removed. 
+
         ! Declare variables
         !==================
         ! Arguments
         class(TopomeshUDT)                      :: topomesh
 
         ! Auxiliary
-        integer(I8)                             :: ntvfal, tv1, tv2
+        integer(I8)                             :: ntvfal, tv1, tv2, &
+            nnonaligned, loc1, loc2
         integer(I8), allocatable, dimension(:)  :: tvf, tvfvID, tvfvIDu, &
-            tvf1, tvf2
+            tvf1, tvf2, tv, tf
         logical, allocatable, dimension(:)      :: delf, delv
 
         ! Loop
-        integer(I8)                             :: j, k
+        integer(I8)                             :: i, j, k
 
         ! Initialize
         !===========
-        ! Associate
-        associate(&
-            vert        => topomesh%vert,   &
-            face        => topomesh%face)
-
         ! Simplify to be sure
         call SimplifyTopologicalMeshFaces(topomesh)
 
         ! Reconstruct vertex faces
         call AddTopologicalMeshVertexFaces(topomesh)
 
+        ! Add data
+        call AddTopologicalMeshData(topomesh)
+
+        ! Recompute cells
+        call AddTopologicalMeshCells(topomesh)
+
+        ! Associate
+        associate(&
+            vert        => topomesh%vert,   &
+            face        => topomesh%face,   &
+            cell        => topomesh%cell    &
+            )
+
         ! Checks
         !=======
         ! Type 1 tangency point garbage
         !------------------------------
+        ! Initialize
+        allocate(delv(vert%ntot))
+        delv = .false.
+
         ! Check which TPs should be removed
-        do j = 1, vert%ntot
-            if (vert%type(j) == TMvertextp1ID) then 
-                ! Check
-                tvf = vert%GetFace(j)
+        do i = 1, cell%ntot
+            ! Get all faces and vertices of this cell
+            tv = cell%GetVert(i)
+            tf = cell%GetFace(i)
 
-                ! Sanity check
-                if (size(tvf) /= 2) then 
-                    ! Write out some data for debugging
-                    call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                    print *, 'vertex: ', j
-                    call gdErrorHandler('RemoveGarbageTangencyPoints: ' // & 
-                        'type 1 tangency point does not have ' // & 
-                        'exactly two faces, unexpected. Check mesh in topomesh_error.dat')
-                end if 
-
-                ! Get all unique flux surface IDs of these vertices
-                tvfvID = vert%fsID([face%vert(tvf, 1), face%vert(tvf, 2)])
-                call Unique(tvfvID, tvfvIDu)
-                if (size(tvfvIDu) > 2 .and. .not. any(tvfvIDu == 0_I8)) then 
-                    ! Set vertex type to simple boundary vertex
-                    ! for deletion later on in simplification 
-                    ! step
-                    vert%type(j) = TMvertexbndID
-                    print *, 'RemoveGarbageTangencyPoints: removing vertex (type 1) ', j
-                end if 
+            ! Is there a tangency point of type 1?
+            if (all(vert%type(tv) /= TMvertextp1ID)) then 
+                cycle
             end if 
+
+            ! Are there more than two non-aligned faces?
+            nnonaligned = 0
+            do j = 1, size(TMfacenonalignedID)
+                nnonaligned = nnonaligned + count(face%type(tf) == TMfacenonalignedID(j))
+            end do 
+            if (nnonaligned == 2) then 
+                cycle
+            end if 
+
+            ! Are there less than two aligned faces?
+            if (nnonaligned < 2) then 
+                ! This is weird, print message but continue
+                print *, 'RemoveGarbageTangencyPoints: cell detected with ' // &
+                    'only one or no non-aligned faces, but with type 1 ' // & 
+                    'tangency point. Unexpected, but continuing without ' // &
+                    'removing tangency point'
+                cycle 
+            end if 
+
+            ! At this point, there should be multiple aligned faces. If
+            ! the tangency point is adjacent to two of them, and only 
+            ! has those two faces as neighbours, remove it by retyping it
+            ! as a regular boundary vertex
+            do j = 1, size(tv)
+                if (vert%type(tv(j)) == TMvertextp1ID) then 
+                    ! Get faces
+                    tvf = vert%GetFace(tv(j))
+
+                    ! Check if it only has two faces
+                    if (size(tvf) /= 2) then 
+                        ! Skip -  we won't be able to remove this one
+                        cycle 
+                    end if 
+
+                    ! Check if the two faces have the same type
+                    if (face%type(tvf(1)) /= face%type(tvf(2))) then 
+                        cycle 
+                    end if 
+                    
+                    ! Check if the two faces are adjacent in the cell 
+                    ! faces (the cell faces should be ordened)
+                    loc1 = findloc(tf, tvf(1), 1, back=.false.)
+                    loc2 = findloc(tf, tvf(2), 1, back=.false.)
+                    if (loc1 == 0 .or. loc2 == 0) then 
+                        ! Skip, something weird
+                        cycle
+                    elseif (loc1 - loc2 == 0) then 
+                        ! Weird - should be same face then
+                        print *, 'RemoveGarbageTangencyPoints: vertex ' // & 
+                            'neighbouring faces appear to be the same. ' // & 
+                            'Unexpected, but moving on...'
+                        cycle
+                    elseif ((abs(loc1 - loc2) == 1) .or. &
+                        ((loc1 == 1) .and. (loc2 == size(tf))) .or. &
+                        ((loc2 == 1) .and. (loc2 == size(tf)))) then 
+
+                        ! Adjacent, remove
+                        delv(tv(j)) = .true. 
+                    else
+                        cycle
+                    end if 
+                end if 
+            end do 
         end do 
+
+        ! 'Remove'
+        where (delv) vert%type = TMvertexbndID
+
+        ! Housekeeping
+        deallocate(delv)
 
         ! Simplify 
         call SimplifyTopologicalMeshFaces(topomesh)
@@ -6619,12 +6833,17 @@ module ggmod_topology2D
                     tvf = pack(tvf, face%type(tvf) == TMfacebndID)
 
                     ! Check
-                    if (size(tvf) /= 2) then 
+                    if (size(tvf) < 2) then 
+                        ! This is possible and will normally not lead to
+                        ! any bad behavior - skip
+                        cycle
+                    elseif (size(tvf) > 2) then 
+                        ! This is not possible - throw error
                         call WriteTopologicalMesh(topomesh, 'topomesh_error')
                         print *, 'vertex: ', j 
                         call gdErrorHandler('RemoveGarbageTangencyPoints: ' // & 
-                            'type 2 tangency points does not have exactly ' // & 
-                            'two boundaries, check topomesh in topomesh_error')
+                            'type 2 tangency point has more than two vessel ' // & 
+                            'faces, unexpected')
                     end if 
 
                     ! Check the flux surface ID of non-tangency point vertices
@@ -6648,7 +6867,7 @@ module ggmod_topology2D
 
                         ! Print
                         print *, 'RemoveGarbageTangencyPoints: removing ', &
-                            'vertex ', tv1
+                            'type 2 tangency point vertex ', tv1
 
                         ! Get other faces of this vertex
                         tvf1 = vert%GetFace(tv1)
@@ -8902,7 +9121,7 @@ module ggmod_topology2D
                         ! vertex (should be one vertex in common with all 
                         ! tube radial faces)
 
-                        ! Add first set
+                        ! Add first set/
                         tf1 = sortedbndfaces
                         call alltubebndf1%Append(tf1)
                         call ntubebndf1%Append(size(tf1))
@@ -8916,16 +9135,15 @@ module ggmod_topology2D
                             size(tf1), tv1)
                         call alltubebndv1%Append(tv1)
                         call ntubebndv1%Append(size(tv1))
-                        deallocate(tv1)
-
+                        
                         ! Extract vertices of second set 
                         call ntubebndv2%Append(1_I8)
                         tf = tubef%Get()
                         tfv = face%vert(tf, :) 
-                        if (all(tfv(1, 1) == tfv(:, 1) .or. tfv(1, 1) == tfv(:, 2))) then 
-                            call alltubebndv2%Append(tfv(1, 1))
-                        elseif (all(tfv(1, 2) == tfv(:, 1) .or. tfv(1, 2) == tfv(:, 2))) then
+                        if (any(tfv(1, 1) == tv1)) then 
                             call alltubebndv2%Append(tfv(1, 2))
+                        elseif (any(tfv(1, 2) == tv1)) then
+                            call alltubebndv2%Append(tfv(1, 1))
                         else
                             ! This shouldn't happen
                             call gdErrorHandler('AddTopologicalMeshTubes: ' // &
@@ -8933,6 +9151,7 @@ module ggmod_topology2D
                                 'find a common point of all tube faces as ' // & 
                                 'other boundary side. Unexpected.')
                         end if 
+                        deallocate(tv1)
                     end if 
                 end if 
 
@@ -10633,9 +10852,14 @@ module ggmod_topology2D
                 tfvert = tfvert(sortind, :)
 
                 ! Sanity checks
-                if (count(ispolygonstart) /= 1) then 
+                if (count(ispolygonstart) == 0) then 
+                    ! Possible if aligned vessel parts were inserted, 
+                    ! skip
+                    deallocate(tf, sortind, ispolygonstart, isbranchingpolygon)
+                    cycle
+                elseif (count(ispolygonstart) > 1) then 
                     call gdErrorHandler('GetClosedContourTangencyPointIDs: ' // & 
-                        'found no or multiple polygons, unexpected')
+                        'found multiple polygons, unexpected')
                 end if 
                 if (count(isbranchingpolygon) /= 0) then 
                     call gdErrorHandler('GetClosedContourTangencyPointIDs: ' // &

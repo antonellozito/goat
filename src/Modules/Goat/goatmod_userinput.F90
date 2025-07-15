@@ -425,6 +425,10 @@ module goatmod_userinput
         !                       as neighbours. 'too small' is based on 
         !                       the (absolute) difference in flux values
         !                       of the tube's radial face vertices
+        ! - mergeavptubes       merge tubes typically originating from 
+        !                       the aligned vessel parts topomesh 
+        !                       modification routine (same criteria as
+        !                       mergetangencypointtubes)
         ! - dpsimintangencypointtubes   minimal delta psi for tangency 
         !                       point tubes (if below, we attempt to 
         !                       merge)
@@ -458,7 +462,7 @@ module goatmod_userinput
             readexistingTM, removenoncoreregions, mergetangencypointtubes, &
             doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
             rvrdocascade, rvrfullycovered, alignvesselparts, avprefinevessel, &
-            readexistingtracers
+            readexistingtracers, mergeavptubes
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes, &
             avpminangle, avpmaxvesseldist
@@ -593,12 +597,20 @@ module goatmod_userinput
 
         ! - refBLdotarget   do BL refinement at targets
         ! - refBLdovessel   do BL refinement at far vessel boundaries
+        ! - refBLdostructure    do BL refinement on user-specified structures
         ! - refBLnctarget   number of desired boundary layer cells at 
-        !                   the target (similar for vessel)
+        !                   the target (similar for vessel and structure)
         ! - refBLdltarget   desired lengths for these cells 
         ! - refdlBLlengthbased  desired length is specified in classic 
         !                       euler length or not (if not, lengthtype 
         !                       is taken)
+        ! - refBLstructureID    specific for structure based BL: the 
+        !                       structure labels (as specified in the   
+        !                       input structure file) at which refinement
+        !                       should be done 
+
+        
+        ! - refBLncstructure    number
 
         ! (Radial) refinement options for lengthbased refiner:
         !   mostly the same refinement options as the poloidal direction,
@@ -640,12 +652,12 @@ module goatmod_userinput
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
             radrefdlBLlengthbased, vdrdoxp, structurebasedlabels, &
-            dogriddiagnostics, evtnoBL
+            dogriddiagnostics, evtnoBL, refBLdostructure
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
-            radrefBLncsp
+            radrefBLncsp, refBLncstructure
         integer(I8), allocatable, dimension(:)  :: refLBstructureIDs, &
-            refLBvertIDs
+            refLBvertIDs, refBLstructureID
         real(R8)                    :: vdpdfacelength, vdpddecaylengthplf, &
             vdpddecaylengthxp, vdpddensityatvessel, vdpddensityatxp, &
             vdpddensityatinf, vdrdfieldwidth, &
@@ -659,7 +671,7 @@ module goatmod_userinput
             vdpdval, refLBLminstructure, refLBLminvert, refLBLmaxstructure, &
             refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert, &
             refBLdltarget, refBLdlvessel, radrefBLdlsp, vdrdx, vdrdy, &
-            vdrdd, vdrdval
+            vdrdd, vdrdval, refBLdlstructure
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
             cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
@@ -951,6 +963,7 @@ module goatmod_userinput
         options%removewidegridregions       = .true. 
         options%removenoncoreregions        = .false.
         options%mergetangencypointtubes     = .false.
+        options%mergeavptubes               = .false.
         options%dpsimintangencypointtubes   = 0.0_R8 ! zero to ignore
         options%lradmintangencypointtubes   = 0.0_R8 ! zero to ignore
 
@@ -1042,12 +1055,17 @@ module goatmod_userinput
         ! Poloidal boundary layer options
         options%refBLdotarget   = .false. 
         options%refBLdovessel   = .false. 
+        options%refBLdostructure    = .false. 
         options%refBLnctarget   = 0
         options%refBLncvessel   = 0
+        options%refBLncstructure    = 0
         allocate(options%refBLdltarget(options%refBLnctarget), &
-            options%refBLdlvessel(options%refBLncvessel))
+            options%refBLdlvessel(options%refBLncvessel), &
+            options%refBLdlstructure(options%refBLncstructure), &
+            options%refBLstructureID(0))
         options%refBLdltarget   = 0.001_R8 ! in m 
-        options%refBLdlvessel   = 0.01_R8 ! in m 
+        options%refBLdlvessel   = 0.01_R8 ! in m
+        options%refBLdlstructure    = 0.001_R8 ! in m
 
         ! Radial boundary layer options
         options%radrefBLdosp    = .false. 
@@ -1704,6 +1722,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%removenoncoreregions)
         field = 'gg.tm.mergetangencypointtubes'
         call ExtractOptionValueLogical0D(fid, field, options%mergetangencypointtubes)
+        field = 'gg.tm.mergeavptubes'
+        call ExtractOptionValueLogical0D(fid, field, options%mergeavptubes)
         field = 'gg.tm.dpsimintangencypointtubes'
         call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
         field = 'gg.tm.lradmintangencypointtubes'
@@ -1860,16 +1880,24 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%refBLdotarget)
         field = 'gg.ref.BL.dovessel'
         call ExtractOptionValueLogical0D(fid, field, options%refBLdovessel)
+        field = 'gg.ref.BL.dostructure'
+        call ExtractOptionValueLogical0D(fid, field, options%refBLdostructure)
         field = 'gg.ref.BL.nctarget'
         call ExtractOptionValueInteger0D(fid, field, options%refBLnctarget)
         field = 'gg.ref.BL.ncvessel'
         call ExtractOptionValueInteger0D(fid, field, options%refBLncvessel)
+        field = 'gg.ref.BL.ncstructure'
+        call ExtractOptionValueInteger0D(fid, field, options%refBLncstructure)
         field = 'gg.ref.BL.dltarget'
         call ExtractOptionValueReal1D(fid, field, options%refBLdltarget)
         field = 'gg.ref.BL.dlvessel'
         call ExtractOptionValueReal1D(fid, field, options%refBLdlvessel)
+        field = 'gg.ref.BL.dlstructure'
+        call ExtractOptionValueReal1D(fid, field, options%refBLdlstructure)
         field = 'gg.ref.BL.dllengthbased'
         call ExtractOptionValueLogical0D(fid, field, options%refdlBLlengthbased)
+        field = 'gg.ref.BL.structureID'
+        call ExtractOptionValueInteger1D(fid, field, options%refBLstructureID)
 
         ! Boundary layer options (only for length-based ref, radial)
         field = 'gg.radref.BL.dosp'
