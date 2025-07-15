@@ -605,10 +605,8 @@ module ggmod_topology2D
         end if 
 
         ! Merge tubes?
-        if (options%mergetangencypointtubes) then 
-            call MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
-                vessel, fieldtracer, options)
-        end if
+        call MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
+            vessel, fieldtracer, options)
 
         ! Do temporary writing
         call WriteTopologicalMesh(topomesh, 'topomesh_aftermerge')
@@ -5257,7 +5255,6 @@ module ggmod_topology2D
                         'are removed'
                 end if 
                 if (intersectind == size(isstartface)) then 
-                    print *, 'InsertAlignedVesselParts: code not yet verified'
                     ! Only intersections in starting face, but no others 
                     ! - no issue actually, since this is likely a contour
                     ! that goes outside of the domain then. 
