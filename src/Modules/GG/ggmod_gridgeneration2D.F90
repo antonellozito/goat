@@ -7753,7 +7753,7 @@ module ggmod_gridgeneration2D
                 end if 
 
                 ! Determine high field end cell ID if present
-                if (.not. face%BF(thiscell%hffaces(1))) then 
+                if (.not. face%BF(thiscell%hffaces(size(thiscell%hffaces)))) then 
                     ! Need to check refinement options of the neighbouring
                     ! cells at start and end
 
@@ -7869,7 +7869,7 @@ module ggmod_gridgeneration2D
                 end if 
 
                 ! Determine high field end cell ID if present
-                if (.not. face%BF(thiscell%lffaces(1))) then 
+                if (.not. face%BF(thiscell%lffaces(size(thiscell%lffaces)))) then 
                     ! Need to check refinement options of the neighbouring
                     ! cells at start and end
 
