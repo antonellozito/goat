@@ -3347,6 +3347,7 @@ module ggmod_topology2D
         if (options%removecoreregions) then 
             call RemoveTopologicalMeshCoreRegions(topomesh)
         end if 
+        call WriteTopologicalMesh(topomesh, 'topomesh_aftercore')
 
         ! Wide grid regions
         if (options%removewidegridregions) then 
@@ -3363,6 +3364,8 @@ module ggmod_topology2D
         if (options%removevesselregions) then 
             call RemoveTopologicalMeshVesselRegions(topomesh, vessel, options)
         end if 
+        call WriteTopologicalMesh(topomesh, 'topomesh_aftervessel')
+
 
     end subroutine
 
@@ -3709,6 +3712,11 @@ module ggmod_topology2D
             do j = 1, size(tf)
                 ! Get structure IDs
                 tfvesselIDs = fvesselIDs(tf(j))%Get()
+
+                ! Skip if no vessel IDs are present
+                if (size(tfvesselIDs) == 0) then 
+                    cycle
+                end if 
 
                 ! Compare
                 if (onlyfullycovered) then 
