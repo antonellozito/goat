@@ -3962,8 +3962,8 @@ module ggmod_topology2D
         logical, allocatable, dimension(:)      :: delf, delv
         integer(I8)                             :: maxind
         integer(I8), allocatable, dimension(:)  :: tf, tfv, tnb, &
-            tfmerge, tnbmerge, tfvu, tfradmerge, tvfvID, tvfvIDu, &
-            tvf, thisv, bndt1, bndt2, bndv1, bndv2, bndv, bndvf1, bndvf2, &
+            tfmerge, tnbmerge, tfvu, tfradmerge, &
+            thisv, bndt1, bndt2, bndv1, bndv2, bndv, bndvf1, bndvf2, &
             bndr, bndf
         real(R8)                                :: dpsi, dpsinb1, dpsinb2, &
             thisdeletedfval, lrad, lradnb1, lradnb2
@@ -6685,7 +6685,7 @@ module ggmod_topology2D
         ! Auxiliary
         integer(I8)                             :: ntvfal, tv1, tv2, &
             nnonaligned, loc1, loc2
-        integer(I8), allocatable, dimension(:)  :: tvf, tvfvID, tvfvIDu, &
+        integer(I8), allocatable, dimension(:)  :: tvf, &
             tvf1, tvf2, tv, tf
         logical, allocatable, dimension(:)      :: delf, delv
 
