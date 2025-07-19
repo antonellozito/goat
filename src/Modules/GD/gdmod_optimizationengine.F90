@@ -444,6 +444,14 @@ module gdmod_optimizationengine
             ! Set type
             problem%costfunction%type = 'FAD'
 
+        case ('CA')
+
+            ! Allocate
+            allocate(CostfunctionCAUDT::problem%costfunction)
+
+            ! Set type
+            problem%costfunction%type = 'CA'
+
         case ('LR_FAD')
 
             ! Allocate
