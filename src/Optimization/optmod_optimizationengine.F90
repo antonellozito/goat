@@ -1320,12 +1320,14 @@ module optmod_optimizationengine
             itopt = itopt+1
 
             ! Update the hessian relaxation factor
-            if (alphals < 1.0_R8) then 
-                ! Increase relaxation factor by 1/alphals
-                rxf = rxf*(1/alphals)
-            else
-                rxf = rxf*rxfdec
-                rxf = max(rxf, rxfmin)
+            if (flagls == 0) then 
+                if (alphals < 1.0_R8) then 
+                    ! Increase relaxation factor by 1/alphals
+                    rxf = rxf*(1/alphals)
+                else
+                    rxf = rxf*rxfdec
+                    rxf = max(rxf, rxfmin)
+                end if 
             end if 
 
         end do
