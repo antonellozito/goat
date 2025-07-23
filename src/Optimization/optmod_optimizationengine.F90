@@ -615,7 +615,7 @@ module optmod_optimizationengine
 
     ! Merit function wrapper
     recursive subroutine EvaluateMeritFunction(problem, f, DJf, dx, lambda, mu, &
-        doderiv, meritfunction, num)
+        doderiv, meritfunction, num, Jout, Gout, Hout)
 
         ! Description
         !============
@@ -635,13 +635,21 @@ module optmod_optimizationengine
         character(*), intent(in)        :: meritfunction 
         type(numLSUDT)                  :: num
 
+        ! Optional output arguments
+        real(R8), optional                            :: Jout
+        real(R8), allocatable, dimension(:), optional :: Gout, Hout
+
+        ! Auxiliary
+        real(R8)                            :: J
+        real(R8), allocatable, dimension(:) :: G, H
+
         ! Check which merit function to evaluate
         select case (meritfunction) 
 
         case ('l1')
 
             call problem%EvaluateMeritFunctionL1(f, DJf, dx, lambda, &
-                mu, doderiv, num)
+                mu, doderiv, num, J, G, H)
 
         case default 
 
@@ -655,11 +663,23 @@ module optmod_optimizationengine
             f = posinfval_R8()
         end if 
 
+        ! Optional output arguments
+        !==========================
+        if (present(Jout)) then 
+            Jout = J 
+        end if 
+        if (present(Gout)) then 
+            Gout = G 
+        end if 
+        if (present(Jout)) then 
+            Hout = H 
+        end if 
+
     end subroutine
 
     ! L1 merit function
     recursive subroutine EvaluateMeritFunctionL1(problem, f, DJf, dx, lambda, mu, &
-        doderiv, num)
+        doderiv, num, Jout, Hout, Gout)
 
         ! Description
         !============
@@ -677,6 +697,10 @@ module optmod_optimizationengine
         real(R8), allocatable           :: lambda(:), mu(:), dl(:), dm(:)
         logical                         :: doderiv 
         type(numLSUDT)                  :: num
+
+        ! Optional output arguments
+        real(R8), optional                            :: Jout 
+        real(R8), allocatable, dimension(:), optional :: Gout, Hout    
 
         ! Auxiliary
         logical                         :: dogradient, dohessian 
@@ -820,6 +844,16 @@ module optmod_optimizationengine
         
         ! Housekeeping
         !=============
+        if (present(Jout)) then 
+            Jout = J 
+        end if 
+        if (present(Gout)) then 
+            Gout = G 
+        end if 
+        if (present(Jout)) then 
+            Hout = H 
+        end if 
+
 
     end subroutine
     
@@ -1824,8 +1858,10 @@ module optmod_optimizationengine
         real(R8)                            :: f0, DJf0, fk, DJfk, &
             alpha_bot, alpha_top
 
-        real(R8), allocatable               :: x0(:), x(:)
-        real                                :: inf 
+        real(R8), allocatable               :: x0(:), x(:), Gref(:), Href(:), &
+            Git(:), Hit(:)
+        real                                :: inf
+        real(R8)                            :: Jref, Jit
 
         ! Loop
         integer(I8)                         :: itls
@@ -1889,7 +1925,7 @@ module optmod_optimizationengine
         ! Evaluate merit function and directional derivative
         doderiv = .true. 
         call problem%EvaluateMeritFunction(f0, DJf0, dx, lambda, mu, &
-            doderiv, meritfunction, numLS)
+            doderiv, meritfunction, numLS, Jout=Jref, Gout=Gref, Hout=Href)
 
         ! If no descent, exit with flag 1
         if (DJf0 >= 0) then 
@@ -2080,7 +2116,7 @@ module optmod_optimizationengine
                 else
                     ! Calculate new cost function value
                     call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
-                        mu, doderiv, meritfunction, numLS)
+                        mu, doderiv, meritfunction, numLS, Jout=Jit, Gout=Git, Hout=Hit)
                 end if
                 
                 ! Check Armijo condition
@@ -2088,6 +2124,11 @@ module optmod_optimizationengine
                     
                     ! Sufficient decrease, terminate
                     conv = .true.
+                    if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
+                        print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                        print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                            maxval(Href), maxval(Hit)
+                    end if
                     
                 elseif (errstat > 0) then 
 
@@ -2145,7 +2186,7 @@ module optmod_optimizationengine
                         call problem%UpdateDesign(wk)
                         call problem%UpdateProblem()
                         call problem%EvaluateMeritFunction(fk, DJfk, dx, &
-                            lambda, mu, doderiv, meritfunction, numLS)
+                            lambda, mu, doderiv, meritfunction, numLS, Jout=Jit, Gout=Git, Hout=Hit)
                     end if 
 
                     ! Housekeeping
@@ -2156,6 +2197,11 @@ module optmod_optimizationengine
 
                         ! Sufficient decrease, terminate
                         conv = .true.
+                        if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
+                            print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                            print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                                maxval(Href), maxval(Hit)
+                        end if
 
                     else
 
