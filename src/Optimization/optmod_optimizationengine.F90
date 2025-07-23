@@ -1325,10 +1325,16 @@ module optmod_optimizationengine
                     ! Increase relaxation factor by 1/alphals
                     rxf = rxf*(1/alphals)
                 else
+                    if (itopt > 1) then 
+                        if (problem%monitor%L(itopt-1) < L) then 
+                            rxf = rxf*2.0_R8/rxfdec  
+                        end if 
+                    end if 
                     rxf = rxf*rxfdec
-                    rxf = max(rxf, rxfmin)
+                    
                 end if 
-            end if 
+            end if
+            rxf = max(rxf, rxfmin)
 
         end do
 
