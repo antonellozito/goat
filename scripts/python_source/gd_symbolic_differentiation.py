@@ -24,16 +24,17 @@
 # Import libraries
 import sympy 
 
-# Define output filepath
-writefilepath = 'derivatives_cell_angles.dat'
-
 # Initialize printer
 sympy.init_printing()
 
 # Define case
-#------------
-casename = 'cell_angles'
+casename = 'length_distribution'
 
+# Define output filepath
+writefilepath = 'derivatives_' + casename + '.dat'
+
+# Setup
+#------
 match casename:
 
     case 'cell_angles':
@@ -44,7 +45,7 @@ match casename:
         # x1, y1, x2, y2, x3, y3, x4, y4. The cost function contribution
         # of two faces is then:
         #
-        #   Ji = 0.5*(theta - theta0)**2
+        #   Ji = 0.5*wti*(theta - theta0)**2
         #   theta = atan(cp/dp)
         #   dp = dx1*dx2 + dy1*dy2
         #   cp = dx1*dy2 - dy1*dx2
@@ -52,7 +53,7 @@ match casename:
         #   dx2 = x4 - x3, dy2 = y4 - y3
 
         # Define symbolic variables
-        x1, x2, x3, x4, y1, y2, y3, y4, theta0 = sympy.symbols('x1, x2, x3, x4, y1, y2, y3, y4, theta0')
+        x1, x2, x3, x4, y1, y2, y3, y4, theta0, wti = sympy.symbols('x1, x2, x3, x4, y1, y2, y3, y4, theta0, wti')
         dx1, dx2, dy1, dy2, cp, dp, theta, Ji = sympy.symbols('dx1, dx2, dy1, dy2, cp, dp, theta, Ji')
 
         # Define symbols to differentiate to
@@ -71,8 +72,85 @@ match casename:
         dp = dx1*dx2 + dy1*dy2
         cp = dx1*dy2 - dy1*dx2
         theta = sympy.atan2(cp, dp)
-        Ji = 0.5*(theta - theta0)**2
+        Ji = 0.5*wti*(theta - theta0)**2
 
+    case 'length_distribution':
+
+        # Length (normalized and weighted) cost function 
+        # contribution for each face (best to be used only for aligned
+        # faces). Cost function contribution is defined as:
+        #
+        # Ji = 0.5*wt(xf, yf)*( (li - l0(xf, yf))/l0(xf, yf) )**2
+        # li = sqrt(dx**2 + dy**2)
+        # dx = x2 - x1 
+        # dy = y2 - y1
+        # xf = 0.5*(x1 + x2)
+        # yf = 0.5*(y1 + y2)
+        # l0(xf, yf): some unknown function for the length distribution,
+        # but for which the first and second order derivatives exist 
+        # and are finite. 
+
+        # Define symbolic variables
+        x1, x2, y1, y2, dx, dy, li, Ji, l0i, wti, rat= sympy.symbols('x1, x2, y1, y2, dx, dy, li, Ji, l0i, wti, rat')
+        dl0dx, dl0dy, d2l0dx2, d2l0dxdy, d2l0dy2 = sympy.symbols('dl0dx, dl0dy, d2l0dx2, d2l0dxdy, d2l0dy2')
+        dwtdx, dwtdy, d2wtdx2, d2wtdxdy, d2wtdy2 = sympy.symbols('dwtdx, dwtdy, d2wtdx2, d2wtdxdy, d2wtdy2')
+
+        # Define undefined functions
+        l0 = sympy.Function('l0')(x1, y1, x2, y2)
+        wt = sympy.Function('wt')(x1, y1, x2, y2)
+
+        # Define symbols to differentiate to
+        diffsym = [x1, x2, y1, y2]
+
+        # Define substition lists (order matters!)
+        subsfrom = [x2 - x1, y2 - y1, sympy.sqrt(dx**2 + dy**2), 
+            sympy.diff(l0, x1, x1), sympy.diff(l0, x2, x1), sympy.diff(l0, y1, x1), sympy.diff(l0, y2, x1), 
+            sympy.diff(l0, x1, x2), sympy.diff(l0, x2, x2), sympy.diff(l0, y1, x2), sympy.diff(l0, y2, x2), 
+            sympy.diff(l0, x1, y1), sympy.diff(l0, x2, y1), sympy.diff(l0, y1, y1), sympy.diff(l0, y2, y1), 
+            sympy.diff(l0, x1, y2), sympy.diff(l0, x2, y2), sympy.diff(l0, y1, y2), sympy.diff(l0, y2, y2), 
+            sympy.diff(l0, x1), sympy.diff(l0, x2), sympy.diff(l0, y1), sympy.diff(l0, y2), 
+            sympy.diff(wt, x1, x1), sympy.diff(wt, x2, x1), sympy.diff(wt, y1, x1), sympy.diff(wt, y2, x1), 
+            sympy.diff(wt, x1, x2), sympy.diff(wt, x2, x2), sympy.diff(wt, y1, x2), sympy.diff(wt, y2, x2), 
+            sympy.diff(wt, x1, y1), sympy.diff(wt, x2, y1), sympy.diff(wt, y1, y1), sympy.diff(wt, y2, y1), 
+            sympy.diff(wt, x1, y2), sympy.diff(wt, x2, y2), sympy.diff(wt, y1, y2), sympy.diff(wt, y2, y2), 
+            sympy.diff(wt, x1), sympy.diff(wt, x2), sympy.diff(wt, y1), sympy.diff(wt, y2), 
+            l0, wt, (li - l0i)/l0i]
+        substo = [dx, dy, li, 
+            0.25*d2l0dx2, 0.25*d2l0dx2, 0.25*d2l0dxdy, 0.25*d2l0dxdy, 
+            0.25*d2l0dx2, 0.25*d2l0dx2, 0.25*d2l0dxdy, 0.25*d2l0dxdy, 
+            0.25*d2l0dxdy, 0.25*d2l0dxdy, 0.25*d2l0dy2, 0.25*d2l0dy2,
+            0.25*d2l0dxdy, 0.25*d2l0dxdy, 0.25*d2l0dy2, 0.25*d2l0dy2,
+            0.5*dl0dx, 0.5*dl0dx, 0.5*dl0dy, 0.5*dl0dy, 
+            0.25*d2wtdx2, 0.25*d2wtdx2, 0.25*d2wtdxdy, 0.25*d2wtdxdy, 
+            0.25*d2wtdx2, 0.25*d2wtdx2, 0.25*d2wtdxdy, 0.25*d2wtdxdy, 
+            0.25*d2wtdxdy, 0.25*d2wtdxdy, 0.25*d2wtdy2, 0.25*d2wtdy2, 
+            0.25*d2wtdxdy, 0.25*d2wtdxdy, 0.25*d2wtdy2, 0.25*d2wtdy2, 
+            0.5*dwtdx, 0.5*dwtdx, 0.5*dwtdy, 0.5*dwtdy, 
+            l0i, wti, rat]
+
+        # Define derived quantities
+        dx = x2 - x1 
+        dy = y2 - y1 
+        li = sympy.sqrt(dx**2 + dy**2)
+        Ji = 0.5*wt*((li - l0)/l0)**2
+
+    case 'exp_distance':
+
+        # Define symbolic variables
+        x, y, xa, ya, c, d, d0 = sympy.symbols('x, y, xa, ya, c, d, d0')
+        dx1, dx2, dy1, dy2, cp, dp, theta, Ji = sympy.symbols('dx1, dx2, dy1, dy2, cp, dp, theta, Ji')
+
+        # Define symbols to differentiate to
+        diffsym = [x, y]
+
+        # Define substition lists (order matters!)
+        subsfrom = [sympy.sqrt((x - xa)**2 + (y - ya)**2)]
+        substo = [d]
+
+        # Define derived quantities
+        d = sympy.sqrt((x - xa)**2 + (y - ya)**2)
+        Ji = c*sympy.exp(-d/d0) 
+        
     case _: 
 
         raise ValueError('Case not implemented')
@@ -126,13 +204,14 @@ with open(writefilepath, 'w') as f:
     # First order derivatives
     for i in range(0, len(diffsym)):
         # Print
-        print("dJid" + str(diffsym[i]) + " = " + str(dJidx[i]), file=f)
+        print("dJid" + str(diffsym[i]) + " = " + str(dJidx[i]) + " !" + str(diffsym[i]), file=f)
 
     # Second order derivatives
     k = 0
     for i in range(0, len(diffsym)):
         for j in range(0, len(diffsym)):
             # Print
-            print("d2Jid" + str(diffsym[i]) + "d" + str(diffsym[j]) + " = " + str(d2Jdidx2[k]), file=f)
+            print("d2Jid" + str(diffsym[i]) + "d" + str(diffsym[j]) + " = " + str(d2Jdidx2[k])
+                + " !" + str(diffsym[i]) + str(diffsym[j]), file=f)
             k = k + 1
 
