@@ -6270,7 +6270,7 @@ module gdmod_constraints
             tvID(:), tfsIDs(:), allvertIDs(:), tvn(:), tv(:), tpind(:), &
             tptype(:), tvnID(:), uniqueID(:)
 
-        logical                         :: dowarning, dolonelyfluxsurfaces, &
+        logical                         :: dowarning, &
             islonely
         logical, allocatable            :: doesIDoccur(:), &
             hasbeenfound(:), isvesselvertex(:), isvesselface(:), &
@@ -6283,7 +6283,6 @@ module gdmod_constraints
 
         ! Checks
         !=======
-        dolonelyfluxsurfaces = .false.
         ! Allocation status
         if (allocated(constraints%psiind)) then 
             deallocate(constraints%psiind)
@@ -6313,6 +6312,7 @@ module gdmod_constraints
             y               => grid%vert%y,             &
             fieldlineID     => grid%vert%fieldlineID,   &
             docoreflux      => options%ffvoptions%fixcoreflux,  &
+            dotpflux        => options%ffvoptions%fixtpflux,    &
             doouterflux     => options%ffvoptions%fixouterflux  & 
             )
 
@@ -6528,7 +6528,7 @@ module gdmod_constraints
         ! Lonely flux surfaces
         !=====================
         ! Basically flux surfaces with only one non-zero neighbour
-        if (dolonelyfluxsurfaces) then 
+        if (dotpflux) then 
             ! Loop over all flux surfaces
             do i = 1, nfs
                 ! Initialize

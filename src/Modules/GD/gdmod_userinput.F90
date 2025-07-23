@@ -429,12 +429,14 @@ module gdmod_userinput
         ! Options for flux value constraints. 
         ! - Fixcoreflux:    fix flux value of core boundary flux surface
         ! - Fixcorefluxmeth: method to fix (either 'auto' or 'manual')
+        ! - fixtpflux:  fix flux values of flux surfaces that are near 
+        ! - a tangency point (or near points that only have a zero flux ID)
         ! - corefluxval     : value(s) at which to fix the core flux 
         !                   value in the case of the 'manual' method
         ! - outer flux: similar to core flux
 
 
-        logical                     :: fixcoreflux, fixouterflux
+        logical                     :: fixcoreflux, fixouterflux, fixtpflux
         character(:), allocatable   :: fixcorefluxmeth, fixouterfluxmeth
         real(R8), allocatable       :: corefluxval(:), outerfluxval(:)
 
@@ -972,6 +974,7 @@ module gdmod_userinput
         !=============
         options%fixcoreflux         = .true. 
         options%fixouterflux        = .true. 
+        options%fixtpflux           = .true.
         options%fixcorefluxmeth     = 'auto'
         options%fixouterfluxmeth    = 'auto'
         if (.not. allocated(options%corefluxval)) then 
@@ -2134,6 +2137,8 @@ module gdmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%fixcoreflux)
         field = 'gd.design.ec.par.fixedfluxvalues.fixouterflux'
         call ExtractOptionValueLogical0D(fid, field, options%fixouterflux)
+        field = 'gd.design.ec.par.fixedfluxvalues.fixtpflux'
+        call ExtractOptionValueLogical0D(fid, field, options%fixtpflux)
         field = 'gd.design.ec.par.fixedfluxvalues.fixcorefluxmeth'
         call ExtractOptionValueCharacter(fid, field, options%fixcorefluxmeth)
         field = 'gd.design.ec.par.fixedfluxvalues.fixouterfluxmeth'
