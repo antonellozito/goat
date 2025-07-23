@@ -1092,6 +1092,7 @@ module goatmod_types
         grid%face%label(flist)              = fdatai(:, 3)
         grid%face%reg(flist)                = fdatai(:, 4)
         grid%face%aligned                   = fdatai(:, 5) 
+        grid%face%TMfacelabel               = grid%face%label
     
         ! Flux tubes
         !-----------
@@ -3741,7 +3742,7 @@ module goatmod_types
     
             y = [(k, k = 0, mfoptions%resy)]*dZ/real(mfoptions%resy, kind=R8) + magneticField%Z(1)
             y(1) = magneticField%Z(1) 
-            y(size(x)) = magneticField%Z(magneticField%nZ)
+            y(size(y)) = magneticField%Z(magneticField%nZ)
     
             ! Interpolate
             val = magneticField%Psi 
