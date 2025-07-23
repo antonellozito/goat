@@ -1218,6 +1218,18 @@ module optmod_optimizationengine
                                 rxfdec = 0.9
                             end if 
                         end if 
+                    elseif (flagls == 2) then 
+                        if (alphals < 1) then 
+                            ! Set step to zero
+                            dx(:) = 0
+
+                            ! Relaxation factor is updated below
+                            print *, 'line search did not converge, skipping update ' // &
+                                    'and reattempt with damped Hessian since step length is small'
+                        else
+                            ! Probably large alpha due to wolfe or something, 
+                            ! just continue as is
+                        end if 
                     end if 
 
                     ! Update lagrange multipliers using least-squares approach
@@ -1320,7 +1332,7 @@ module optmod_optimizationengine
             itopt = itopt+1
 
             ! Update the hessian relaxation factor
-            if (flagls == 0) then 
+            if ((flagls == 0) .or. (flagls == 2)) then 
                 if (alphals < 1.0_R8) then 
                     ! Increase relaxation factor by 1/alphals
                     rxf = rxf*(1/alphals)
@@ -1947,6 +1959,7 @@ module optmod_optimizationengine
             ! Checks
             if (itls-1 == maxit) then 
                 ! Print message, set flag
+                flag = 2
                 if (numLS%verbosity > 0) then 
                     print *, 'linesearch did not converge'
                 end if 
@@ -2030,6 +2043,7 @@ module optmod_optimizationengine
             ! Checks
             if (itls-1 == maxit) then 
                 ! Print message, set flag
+                flag = 2
                 if (numLS%verbosity > 0) then 
                     print *, 'linesearch did not converge'
                 end if 
@@ -2163,6 +2177,7 @@ module optmod_optimizationengine
             ! Checks
             if (itls-1 == maxit) then 
                 ! Print message, set flag
+                flag = 2
                 if (numLS%verbosity > 0) then 
                     print *, 'linesearch did not converge'
                 end if 
