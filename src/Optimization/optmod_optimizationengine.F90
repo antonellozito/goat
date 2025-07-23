@@ -679,7 +679,7 @@ module optmod_optimizationengine
 
     ! L1 merit function
     recursive subroutine EvaluateMeritFunctionL1(problem, f, DJf, dx, lambda, mu, &
-        doderiv, num, Jout, Hout, Gout)
+        doderiv, num, Jout, Gout, Hout)
 
         ! Description
         !============
@@ -2124,11 +2124,11 @@ module optmod_optimizationengine
                     
                     ! Sufficient decrease, terminate
                     conv = .true.
-                    if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
-                        print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
-                        print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
-                            maxval(Href), maxval(Hit)
-                    end if
+                    !if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
+                    !    print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                    !    print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                    !        maxval(Href), maxval(Hit)
+                    !end if
                     
                 elseif (errstat > 0) then 
 
@@ -2197,11 +2197,11 @@ module optmod_optimizationengine
 
                         ! Sufficient decrease, terminate
                         conv = .true.
-                        if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
-                            print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
-                            print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
-                                maxval(Href), maxval(Hit)
-                        end if
+                        !if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
+                        !    print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                        !    print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                        !       maxval(Href), maxval(Hit)
+                        !end if
 
                     else
 
@@ -2238,7 +2238,7 @@ module optmod_optimizationengine
         end select 
 
         ! Apply step length to dphi
-        dx(1:nphi) = dx(1:nphi)*alpha
+        dx(1:nphi) = x - x0 ! dx(1:nphi)*alpha
 
         ! Housekeeping
         !=============
