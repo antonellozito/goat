@@ -48,6 +48,14 @@ print('VisualizeGGOutput: reading structure from file: ' + structurename)
 
 # Outputs
 #-------
+# Magnetic field 
+try:
+    # Load from visualization
+    plotter.Plot2DSurfaceDataContourf(datadir + '/' + 'magneticfield_visualization.dat', 0, levels=50)
+
+except:
+    print("Could not load the magnetic field from output")
+
 # Topological mesh
 try:
     # Load
@@ -155,10 +163,34 @@ except:
 
 # Surface area
 try: 
-    plotter.PlotGridCellArea(simgrid, 7, doinverse=True)
+    plotter.PlotGridCellArea(simgrid, 8, doinverse=True)
     plotter.PlotGridCells(simgrid, 8)
 except:
     print("Could not plot grid cell area")
+
+# Magnetic field strength
+try:
+    # At this point, the simulation grid has to be loaded or it will not 
+    # work anyway
+
+    # Visualize
+    plotter.PlotGridCells(simgrid, 9)
+    plotter.PlotCellBasedQuantity2D(simgrid, simgrid.cell.bp, 9)
+    thisaxes = plt.gca()
+    thisaxes.set_title('Bp in cell centers [T]')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+
+    plotter.PlotGridCells(simgrid, 10)
+    plotter.PlotCellBasedQuantity2D(simgrid, simgrid.cell.bt, 10)
+    thisaxes = plt.gca()
+    thisaxes.set_title('Bt in cell centers [T]')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+
+
+except: 
+    print("Could not plot magnetic field strength")
 
 # Show figures
 #-------------
