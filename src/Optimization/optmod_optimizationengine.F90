@@ -1369,7 +1369,7 @@ module optmod_optimizationengine
             if ((flagls == 0) .or. (flagls == 2)) then 
                 if (alphals < 1.0_R8) then 
                     ! Increase relaxation factor by 1/alphals
-                    rxf = rxf*(1/alphals)
+                    !rxf = rxf*(1/alphals)
                 else
                     if (itopt > 1) then 
                         if (problem%monitor%L(itopt-1) < L) then 
@@ -1864,7 +1864,7 @@ module optmod_optimizationengine
         real(R8)                            :: Jref, Jit
 
         ! Loop
-        integer(I8)                         :: itls
+        integer(I8)                         :: itls, itsoc, maxitsoc
 
         ! Variables for second order correction
         real(R8), allocatable               :: G(:), H(:), ck(:), &
@@ -2228,6 +2228,158 @@ module optmod_optimizationengine
                     print *, 'linesearch did not converge'
                 end if 
             end if 
+
+        case ('backtracking_soc_it')
+
+            ! Don't compute any derivatives
+            doderiv = .false.
+            itsoc = 0
+            maxitsoc = 5 ! To be moved to options
+
+            ! Loop
+            do while ( (.not. conv) .and. (itls <= maxit) )
+            
+                ! Update current iterate
+                x = x0 + alpha*dphi
+
+                ! Start tracking for possible problems
+                call ErrorStack%StartTrack()
+
+                ! Update the design
+                call problem%UpdateDesign(alpha*dphi)
+
+                ! Update the problem
+                call problem%UpdateProblem()
+
+                ! Check error status
+                errstat = ErrorStack%ErrorState()
+                call ErrorStack%EndTrack()
+                if (errstat > 0) then 
+                    ! Error encountered, set value to infinity - don't
+                    ! bother trying to compute the merit function
+                    fk = inf
+                else
+                    ! Calculate new cost function value
+                    call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                        mu, doderiv, meritfunction, numLS, Jout=Jit, Gout=Git, Hout=Hit)
+                end if
+                
+                ! Check Armijo condition
+                if (fk < f0 + c1*alpha*DJf0) then 
+                    
+                    ! Sufficient decrease, terminate
+                    conv = .true.
+                    !if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
+                    !    print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                    !    print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                    !        maxval(Href), maxval(Hit)
+                    !end if
+                    
+                elseif (errstat > 0) then 
+
+                    ! Error when updating problem, don't even bother 
+                    ! trying a second order correction
+
+                    ! Decrease alpha
+                    alpha = dec*alpha
+
+                else
+                    
+                    ! Try if we can get there by applying a second order
+                    ! correction. Here, we keep computing corrections 
+                    ! until either the maximum amount of iterations is 
+                    ! reached, or until the Armijo condition is satisfied
+
+                    ! Note: in Nocedal, this is only done if alpha = 1, but
+                    ! this seems to work better if we do it at each attempt. 
+                    do while ((itsoc < maxitsoc) .and. (.not. conv))
+                        ! Compute constraints & linearization
+                        call problem%EvaluateEqualityConstraints(G, gradG, &
+                            hessG, dogradient, dohessian, lambda)
+                        call problem%EvaluateInequalityConstraints(H, gradH, &
+                            hessH, dogradient, dohessian, mu)
+
+                        ! Compute active set
+                        A = H > 0
+                        na = count(A)
+
+                        ! Construct problem 
+                        allocate(ck(neq + na))
+                        ck = [G, pack(H, A)]
+                        Ak = gradG%Concatenate(gradH%DeleteColumns(.not. A), 2)
+                        LSA = Ak%Transpose()*Ak
+
+                        ! Check if constraints are bounded, otherwise skip
+                        if (all(ieee_is_finite(ck))) then
+                            ! Compute correction step
+                            if (present(linearsolver)) then 
+                                call linearsolver%SolveSparseLinearSystem(LSA, ck, wkt, flag2)
+                            else
+                                call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
+                            end if 
+
+                            ! Check if it converged, otherwise skip update
+                            if (flag2 /= 0) then 
+                                print *, 'linesearch backtracking_soc: could not converge problem, skipping soc update'
+                                wkt(:) = 0
+                            end if 
+
+                            ! Compute correction
+                            wk = MatrixVectorProduct(Ak, -wkt)
+
+                            ! Recompute cost function at step x0 + alpha*d + wk
+                            ! Note: the problem is already updated to x + alpha*d!
+                            x = x + wk ! update x to ensure proper downdate later
+                            call problem%UpdateDesign(wk)
+                            call problem%UpdateProblem()
+                            call problem%EvaluateMeritFunction(fk, DJfk, dx, &
+                                lambda, mu, doderiv, meritfunction, numLS, Jout=Jit, Gout=Git, Hout=Hit)
+                            print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                            print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                                maxval(Href), maxval(Hit)
+                        end if 
+
+                        ! Housekeeping
+                        deallocate(ck)
+
+                        ! Check the Armijo condition again
+                        if (fk < f0 + c1*alpha*DJf0) then 
+
+                            ! Sufficient decrease, terminate
+                            conv = .true.
+
+                        else
+
+                            ! Decrease alpha
+                            alpha = dec*alpha
+
+                        end if 
+                    end do 
+
+                    if (.not. conv) then 
+                        ! Decrease alpha
+                        alpha = dec*alpha
+                    end if 
+                    
+                end if 
+                
+                ! Update counter
+                itls = itls + 1
+
+                ! De-update the design
+                call problem%UpdateDesign(x0-x)
+
+            end do
+            
+            ! Checks
+            if (itls-1 == maxit) then 
+                ! Print message, set flag
+                flag = 2
+                if (numLS%verbosity > 0) then 
+                    print *, 'linesearch did not converge'
+                end if 
+            end if 
+
 
         case default
 
