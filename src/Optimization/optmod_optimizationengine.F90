@@ -2351,7 +2351,7 @@ module optmod_optimizationengine
                         else
 
                             ! Decrease alpha
-                            alpha = dec*alpha
+                            ! alpha = dec*alpha
 
                         end if 
                     end do 
