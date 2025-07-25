@@ -1683,7 +1683,7 @@ module mod_contour2D
         end if 
 
         ! Check if we start in a saddle point
-        if ((superquadflags(iisq, jjsq) /= 0) .and. .not. issaddlepoint) then 
+        if ((superquadflags(iisq, jjsq) /= 0)) then 
             ! Call dedicated evaluator
             tv = EvaluateFromSaddlePoint(x0p, y0p, &
                 spstruct(superquadflags(iisq, jjsq)), X, Y)
@@ -1783,6 +1783,8 @@ module mod_contour2D
         if (issuperquad(iisq, jjsq)) then 
             ! Set all superquad cells to true with this flag
             where ( (quadc > 0) .and. (superquadflags == superquadflags(iisq, jjsq)) ) startquads = .true.
+
+            ! Modify the starting quads to take only those where the contour
         else 
             ! Only current cell is start quad
             startquads(iisq, jjsq) = .true. 
@@ -1843,7 +1845,7 @@ module mod_contour2D
                     ! Start in saddle point
                     call StartFromSaddlePoint(x0p, y0p, iic, jjc, doexit, &
                         quadflags, spstruct, tv, xc, yc, thiscontour, &
-                        V, X, Y, nx, ny)
+                        V, X, Y, nx, ny, startquads)
                     
                     ! Check if we need to exit
                     if (doexit) then 
@@ -2642,7 +2644,7 @@ module mod_contour2D
     ! Start from saddle point
     subroutine StartFromSaddlePoint(xp, yp, iic, jjc, doexit, &
         quadflags, spstruct, tv, xc, yc, contour, V, X, Y, &
-        nx, ny)
+        nx, ny, startquads)
 
         ! Description
         !============
@@ -2654,6 +2656,12 @@ module mod_contour2D
         ! Note: if the saddle point value has been wrongly determined,
         ! it is possible that this routine cannot proceed. 
 
+        ! Note: the startquads logical is now also passed to remove 
+        ! any possible starting quads that are not adjacent to the
+        ! starting triangle. Otherwise, this routine would eventually 
+        ! error because no faces of the starting triangle can be taken
+        ! anymore.
+
         ! Declare variables
         !==================
         ! Arguments
@@ -2661,7 +2669,7 @@ module mod_contour2D
         integer(I8), intent(inout)      :: iic, jjc
         integer(I8), intent(in)         :: quadflags(:, :), &
             nx, ny
-        logical, intent(inout)          :: doexit 
+        logical, intent(inout)          :: doexit, startquads(:, :)
         logical, allocatable            :: hasftri(:, :)
         type(sp2DUDT), intent(inout)    :: spstruct(:)
         type(ContourUDT), intent(inout) :: contour
@@ -2677,6 +2685,7 @@ module mod_contour2D
             y2, frac 
 
         ! Loop 
+        integer(I8)                 :: i 
 
         ! Initialize
         !===========
@@ -2687,6 +2696,8 @@ module mod_contour2D
         thisiic = iic
         thisjjc = jjc
         doexit = .false.
+
+        
         
         ! Unpack
         thissp = spstruct(isp)
@@ -2718,6 +2729,11 @@ module mod_contour2D
             contour%endsaddle = thissp%ID
             return
         end if
+
+        ! Set start quads initially to false in the superquad region
+        do i = 1, size(thissp%tri, 1)
+            startquads(thissp%ixquadtri(i), thissp%iyquadtri(i)) = .false. 
+        end do 
         
         ! Trace
         !======
@@ -2739,6 +2755,59 @@ module mod_contour2D
         ! Add to contour
         call xc%Append(xp)
         call yc%Append(yp)
+
+        ! Check which start quads will never be reached and set to false
+        ! Consistency check
+        if (count(hasftri(ctri, :)) < 1) then 
+            call gdErrorHandler('TraverseSaddlePoint: Not enough values' // & 
+                'found in saddle point region - check if ' // & 
+                'saddle points were correctly determined')
+        end if
+
+        ! Traverse 'backwards'
+        do while (.true.)
+            if (hasftri(ctri, 1)) then 
+                ! Go to previous triangle
+                ctri = ctri - 1
+                if (ctri == 0) then 
+                    ctri = size(thissp%tri, 1)
+                elseif (ctri == thissp%starttri) then 
+                    ! Exit - full cyrcle
+                    exit 
+                end if 
+            elseif (hasftri(ctri, 2)) then 
+                ! Exterior face, exit and set the starting quad here to 
+                ! true
+                startquads(thissp%ixquadtri(ctri), thissp%iyquadtri(ctri)) = .true. 
+                exit 
+            else 
+                exit 
+            end if 
+        end do 
+
+        ! Traverse 'forwards'
+        do while (.true.)
+            if (hasftri(ctri, 3)) then 
+                ! Go to previous triangle
+                ctri = ctri + 1
+                if (ctri == size(thissp%tri, 1)) then 
+                    ctri = 1
+                elseif (ctri == thissp%starttri) then 
+                    ! Exit - full cyrcle
+                    exit 
+                end if 
+            elseif (hasftri(ctri, 2)) then 
+                ! Exterior face, exit and set the starting quad here to 
+                ! true
+                startquads(thissp%ixquadtri(ctri), thissp%iyquadtri(ctri)) = .true. 
+                exit 
+            else 
+                exit 
+            end if 
+        end do 
+
+        ! Reset starting triangle
+        ctri = thissp%starttri
         
         ! Traverse through the saddle point region
         do while (.true.)
@@ -2783,6 +2852,9 @@ module mod_contour2D
                 hasftri(ctri, 2) = .false.
                 spstruct(isp) = thissp
                 spstruct(isp)%hasftri = hasftri
+
+                ! Set starting quad to false
+                startquads(thissp%ixquadtri(ctri), thissp%iyquadtri(ctri)) = .false.  
                 exit
             elseif (hasftri(ctri, 3)) then 
                 ! Compute point at this face
