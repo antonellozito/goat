@@ -12,6 +12,13 @@
 ##
 ## Variables are defined in config.mk
 
+# Target-specific variables
+## COMPDIRVARS:        define variables for compiler directives
+COMPDIRVARS = 
+ifdef SOLPSTOP
+COMPDIRVARS += -DSOLPS
+endif
+
 ## % Library paths
 ## %==============
 ## LAPACKPATH 			: LAPACK library path (user defined)
@@ -23,73 +30,206 @@ BLASPATH = -lopenblas
 ## UMFPACKPATH 			: UMFPACK library path (user defined)
 UMFPACKPATH = -lumfpack
 
-## % Include paths
-## %==============
-## SUITESPARSEPATH      : SuiteSparse header file path
-SUITESPARSEPATH = /usr/include/suitesparse
+## DMUMPSPATH            : DMUMPS library path (user defined, optional)
+#DMUMPSPATH = -ldmumps -lmumps_common -L/usr/lib -lmetis  -lesmumps -L../../PORD/lib/ -lpord -L../../lib -L../../libseq -lscotch -lscotcherr -L../../libseq/libmpiseq.a -lpthread
+#DMUMPSPATH = -ldmumps -lmumps_common -L/usr/lib -lmetis  -lesmumps -lpord -lscotch -lscotcherr -lpthread
+#DMUMPSPATH = -L../../MUMPS_5.8.0/lib -lsmumps -ldmumps -lmumps_common -L/usr/lib  -lparmetis -lmetis -L../../PORD/lib/ -lpord -L/usr/lib -lptesmumps -lptscotch -lptscotcherr -lscalapack-openmpi  -llapack   -lblas -lpthread
 
-##
-## % Targets
-## %========
-## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Clayer ClayerF Constants Auxiliary General Numerics Optimization Modules IO_b25  \
-    IO_carre IO_output IO_input  Setup  Drivers 
 
-## GOAT_TARGETS             : Targets to be run for the full goat
-GOAT_TARGETS = $(GDRUN_TARGETS) 
+## DMUMPSLIBPATH        : DMUMPS include path (user defined, optional)
+ifdef DMUMPS_LPATH 
+    ifdef DMUMPS_IPATH
+        ifndef NO_USE_MPI
+            # Define mumps 
+            MUMPS = yes 
+            # Mumps has to be compiled with MPI
+            USE_MPI = yes 
+            $(info % MUMPS library and include paths set, MPI available. Compiling with MUMPS) 
+        else 
+            undefine USE_MPI
+            undefine DMUMPS_LPATH 
+            undefine DMUMPS_IPATH 
+            $(info % MUMPS paths available, but no MPI. Not compiling MUMPS.)
+        endif
+    else
+        # Not all paths define, issue message and undefine to ensure proper compilation
+        $(info % MUMPS include path not set, set "DMUMPS_LPATH" and "DMUMPS_IPATH" to enable compilation with MUMPS)  
+        undefine DMUMPS_LPATH 
+        undefine DMUMPS_IPATH 
+    endif
+else
+    # Not all paths define, issue message and undefine to ensure proper compilation
+    $(info % MUMPS library path not set, set "DMUMPS_LPATH" and "DMUMPS_IPATH" to enable compilation with MUMPS) 
+    undefine DMUMPS_LPATH 
+    undefine DMUMPS_IPATH 
+endif
 
-## GOATTRANSLATOR_TARGETS   : Targets to be run for the goat input file translator
-GOATTRANSLATOR_TARGETS = Clayer ClayerF Constants Auxiliary General Numerics
+# Define MUMPS for the compiler
+ifdef MUMPS 
+COMPDIRVARS += -DMUMPS 
+endif
 
-## TEST_TARGETS             : Targets to be run for goat tests
-TEST_TARGETS = $(GOAT_TARGETS) 
+## SOLPSTOP            : path to SOLPS (overridden if SOLPSTOP is define)
+ifdef SOLPSTOP
+DOSOLPS = true
+endif
+ifdef HOST_NAME
+else
+HOST_NAME = DEFAULT
+endif 
 
-## CTEST_TARGETS            : Targets to be run to test C layer
-CTEST_TARGETS = Clayer
+# Default prefix for OBJDIR: standalone
+PREF_OBJDIR = standalone
+ifdef USE_EIRENE
+PREF_OBJDIR = couple_SOLPS-ITER
+endif
 
+# Extensions for SOLPS object directories when various options are used
+ifdef USE_IMPGYRO
+EXT_IMPGYRO = .ig
+else
+ifdef USE_MPI
+EXT_MPI = .mpi
+endif
+endif
+ifdef USE_OPENMP
+EXT_OPENMP = .openmp
+endif
+ifdef SOLPS_DEBUG
+GOAT_DEBUG = yes
+EXT_DEBUG = .debug
+IMAS_AMNS_DEBUG = yes
+else
+IMAS_AMNS_DEBUG = no
+endif
+ifdef DIFF_D
+EXT_DIFF = .diff_d
+DIFF = yes
+DIFFDIR = builds/differentiated_files${EXT_DIFF}
+endif
+ifdef DIFF_B
+EXT_DIFF = .diff_b
+DIFF = yes
+DIFFDIR = builds/differentiated_files${EXT_DIFF}
+endif
+ifdef TGT
+EXT_DIFF = .tgt
+DIFF = yes
+DIFFDIR = src/differentiation/tangent
+endif
+ifdef ADJ
+EXT_DIFF = .adj
+DIFF = yes
+DIFFDIR = src/differentiation/adjoint
+endif
+ifdef ADJ_SHAPE
+EXT_DIFF = .adj_shape
+DIFF = yes
+DIFFDIR = src/differentiation/adjoint_shape
+endif
+ifeq ($(strip $(GOAT_DEBUG)),yes)
+EXT_DEBUG = .debug
+endif
 ##
 ## % Compiler
 ## %=========
-## FC			: Compiler to be used for fortran
-FC = gfortran
+## FC			: Compiler to be used for fortran (overridden if COMPILER is defined)
+ifdef COMPILER
+    ifeq ($(strip $(COMPILER)),gfortran)
+        ifdef USE_MPI
+            FC = mpif90 
+        else
+            FC = gfortran 
+        endif  
+    else ifeq ($(strip $(COMPILER)),ifort64)
+        ifdef USE_MPI
+            FC = mpiifort
+        else 
+            FC = ifort 
+        endif 
+    else
+        ifdef USE_MPI
+            FC = mpif90 
+        else
+            FC = gfortran 
+        endif  
+    endif 
+else 
+    COMPILER = gfortran
+    ifdef (USE_MPI)
+        FC = mpif90 
+    else
+        FC = gfortran 
+    endif  
+endif 
+
+# Directory where objectcode/binaries will be created
+B25LIBPATH = ${SOLPSTOP}/modules/B2.5/builds/${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_IMPGYRO}${EXT_DIFF}${EXT_DEBUG}
+
+# Build path
+BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_IMPGYRO}${EXT_DIFF}${EXT_DEBUG}
+
+## % Include paths
+## %==============
+## SUITESPARSEPATH      : SuiteSparse header file path
+SUITESPARSEPATH = -I/usr/include/suitesparse
+
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
-CFLAGS_DEF = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized 
+CFLAGS_DEF = -c -fopenmp
+CFLAGS_DEF_NO_OMP = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized 
 ## CFLAGS_OMP	: compiler flags for OpenMP 
 CFLAGS_OMP = -c -Wall -fopenmp
 ## CFLAGS_DEBUG		: compiler flags for debugging
-CFLAGS_DEBUG = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all
+CFLAGS_DEBUG = -c -g -Wall -O0 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -fopenmp -Wno-uninitialized
 ## CFLAGS_OMP_DEBUG	: compiler flags for OpenMP and debugging
-CFLAGS_OMP_DEBUG = -c -g -Wall -pg  -O0 -fopenmp
+CFLAGS_OMP_DEBUG = -c -g -Wall  -O0 -fopenmp
+CFLAGS_PERF = -c -O2 -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fopenmp -Wno-uninitialized
 
 ## CC           : Compiler to be used for C
-CC = gcc 
+ifdef USE_MPI
+    CC = mpicc
+else 
+    CC = gcc 
+endif 
 
-CCFLAGS_DEF = -c -g -Wall -O0
+CCFLAGS_DEF = -c -g
+CCFLAGS_PERF = -c -Wall -O2
 
 ## % Linker
 ## %=======
 ## LFLAGS			: linking flags to be used (apart from libraries)
-LFLAGS_DEF =   -fcheck=all
-
+LFLAGS_DEF =   -fcheck=all -fopenmp
+LFLAGS_DEF_NO_OMP =   -fcheck=all
 ## LFLAGS_DEBUG 	: linking flags for debugging
-LFLAGS_DEBUG = -pg -g
+LFLAGS_DEBUG = -g -fcheck=all
 
 ## LFLAGS			: linking flags to be used for openMP
-LFLAGS_OMP = -pg -g -fopenmp
+LFLAGS_OMP = -g -fopenmp
+LFLAGS_PERF = -fopenmp
 
 ## LFLAGS_DEBUG 	: linking flags for debugging
-LFLAGS_OMP_DEBUG = -pg -g -fopenmp
+LFLAGS_OMP_DEBUG = -g -fopenmp
 
 # Set flags
 #==========
 # Set the CFLAGS
-CFLAGS = $(CFLAGS_DEF)
+CFLAGS = $(CFLAGS_DEF) $(COMPDIRVARS)
+ifeq ($(strip $(GOAT_DEBUG)),yes)
+CFLAGS += -g -O0 -Wall -Wno-unused-dummy-argument -Wno-maybe-uninitialized -fcheck=all -Wno-uninitialized
+else
+CFLAGS += -O3
+endif
 
 # Set the linking flags
 LFLAGS = $(LFLAGS_DEF)
 
 # Set CFLAGS for C compiler
-CCFLAGS = $(CCFLAGS_DEF) 
+CCFLAGS = $(CCFLAGS_DEF) $(COMPDIRVARS)
+ifeq ($(strip $(GOAT_DEBUG)),yes)
+CCFLAGS += -g -Wall -O0 
+else
+CCFLAGS += -O3
+endif
 
 ##
 ## % Files
@@ -98,29 +238,45 @@ CCFLAGS = $(CCFLAGS_DEF)
 MAIN_RUNFILE = MainRunFileGridDeformation.F90
 
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
-GENERAL_FILES = src/General/mod_sparseinterface.F90 src/General/mod_readwrite.F90 $(wildcard src/General/*.F90)
-    
+GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_readwrite.F90 src/General/mod_inputfileparser.F90 src/General/mod_plotter.F90 \
+    src/General/mod_sparseinterface.F90  src/General/mod_sort.F90 $(wildcard src/General/*.F90)      
 
 ## DRIVER_FILES			: Driver filenames (.F90) - unsequenced
-DRIVER_FILES = $(wildcard src/Drivers/*.F90)
+DRIVER_FILES = $(wildcard src/Drivers/Goat/*.F90)
+
+## SODRIVER_FILES			: Shape optimization driver filenames (.F90) - unsequenced
+SODRIVER_FILES = $(wildcard src/Drivers/ShapeOpt/*.F90)
 
 ## MODULE_FILES			: Module filenames (.F90, .F) - sequence matters
+MODULE_FILES_GOAT =  src/Modules/Goat/goatmod_userinput.F90 src/Modules/Goat/goatmod_types.F90\
+    $(wildcard src/Modules/Goat/*.F90)
+MODULE_FILES_GD = src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
+    src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
+    $(wildcard src/Modules/GD/*.F90)
+MODULE_FILES_GG = src/Modules/GG/ggmod_topology2D.F90 src/Modules/GG/ggmod_vertexdistribution2D.F90 \
+    src/Modules/GG/ggmod_gridgeneration2D.F90 src/Modules/GG/ggmod_gridgenerator.F90
+MODULE_FILES_B25 = $(wildcard src/Modules/*.F)
+
 MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
     src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
     $(wildcard src/Modules/GD/*.F90) \
-    $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F)
-
+    $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F) \
+    src/Modules/GG/ggmod_topology2D.F90 src/Modules/GG/ggmod_vertexdistribution2D.F90 \
+    src/Modules/GG/ggmod_gridgeneration2D.F90
 
 ## AUXILIARY_FILES			: Auxiliary filenames (.F90) - unsequenced
-AUXILIARY_FILES = src/Auxiliary/mod_plotter.F90 \
-    src/Auxiliary/Construct2DStructuredGrid.F90 \
+AUXILIARY_FILES =  src/Auxiliary/mod_structured2Dgridding.F90 \
     $(wildcard src/Auxiliary/*.F90) \
     src/Auxiliary/Interpolation/Interpolant2D_auxiliaries.F90 \
     src/Auxiliary/Interpolation/Interpolant2D.F90 \
+    src/Auxiliary/Interpolation/Interpolant1D.F90 \
     src/Auxiliary/Interpolation/BicubicSplineInterpolant.F90 \
     src/Auxiliary/Interpolation/StructuredInterpolant2D.F90 \
-    $(wildcard src/Auxiliary/Interpolation/*.F90) 
+    $(wildcard src/Auxiliary/Interpolation/*.F90) \
+    $(wildcard src/Auxiliary/Contour/*.F90) \
+    src/Auxiliary/mod_streamlinetracing2D.F90 \
+    src/Auxiliary/Graphs/mod_graph.F90
 
 ## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
 B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)
@@ -146,10 +302,49 @@ OPTIMIZATION_FILES = src/Optimization/optmod_designvariables.F90 src/Optimizatio
     src/Optimization/optmod_numerics.F90 $(wildcard src/Optimization/*.F90)
 
 ## CONSTANTS            : constants such as precision and special characters (.F90) - unsequenced
-CONSTANTS_FILES = src/Constants/mod_precision.F90 $(wildcard src/Constants/*.F90)
+CONSTANTS_FILES = src/Constants/mod_global_environment.F90 src/Constants/mod_precision.F90 $(wildcard src/Constants/*.F90)
 
 ## Clayer               : c files for interfacing with other c code
 CLAYER_FILES    = $(wildcard src/Clayer/*.c)
 
 ## ClayerF              : fortran files for interfacing with other c code
-CLAYERF_FILES    =  src/Clayer/CSparseF.F90 src/Clayer/Clayer.F90
+CLAYERF_FILES    =   src/Clayer/CUtilities.F90 src/Clayer/CSparseF.F90 src/Clayer/Clayer.F90
+
+## ShapeOpt             : fortran files for shape optimization
+SHAPEOPT_FILES  = src/Modules/ShapeOpt/somod_userinput.F90 \
+    src/Modules/ShapeOpt/somod_designvariables.F90 src/Modules/ShapeOpt/somod_costfunction.F90 \
+    src/Modules/ShapeOpt/somod_constraints.F90   src/Modules/ShapeOpt/somod_optimizationengine.F90
+
+## ShapeOptSolps            : fortran files for shape optimization with SOLPS
+SHAPEOPTSOLPS_FILES  =  src/Modules/ShapeOpt/somod_userinput.F90 \
+    src/Modules/ShapeOpt/somod_designvariables.F90 src/Modules/ShapeOpt/somod_costfunction.F90 \
+    src/Modules/ShapeOpt/somod_constraints.F90  src/Modules/ShapeOpt/sosmod_costfunction.F90 \
+    src/Modules/ShapeOpt/somod_optimizationengine.F90 
+    
+
+## % Targets
+## %========
+## GDRUN_TARGETS			: Targets to be run for the grid deformation
+GDRUN_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+    IO_carre Drivers 
+
+## GOAT_TARGETS             : Targets to be run for the full goat
+GOAT_TARGETS = $(GDRUN_TARGETS) 
+
+## GOATTRANSLATOR_TARGETS   : Targets to be run for the goat input file translator
+GOATTRANSLATOR_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics
+
+## TEST_TARGETS             : Targets to be run for goat tests
+TEST_TARGETS = $(GOAT_TARGETS) 
+
+## CTEST_TARGETS            : Targets to be run to test C layer
+CTEST_TARGETS = Clayer
+
+## SHAPEOPT_TARGETS         : Targets to be run for shape optimization program
+ifdef DOSOLPS
+SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
+    IO_carre ShapeOptimizationSolps Drivers SODrivers
+else
+SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+    IO_carre ShapeOptimization Drivers SODrivers
+endif

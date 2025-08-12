@@ -14,7 +14,7 @@ module Interpolant
     ! Initialize
     !============
     ! Load modules
-    use BicubicSplineInterpolant
+    !use BicubicSplineInterpolant
     use StructuredInterpolant2D
 
     contains 

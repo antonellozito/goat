@@ -63,10 +63,10 @@ module gdmod_costfunction
     contains
 
         ! Cost function initialization
-        procedure(InitializeCostfunctionINT), deferred :: Initialize
+        procedure(InitializeCostfunctionINT), deferred      :: Initialize
 
         ! Cost function evaluation
-        procedure(EvaluateCostFunctionINT), deferred :: Evaluate
+        procedure(EvaluateCostFunctionINT), deferred        :: Evaluate
 
     end type
 
@@ -110,6 +110,7 @@ module gdmod_costfunction
         real(R8), allocatable       :: b0(:) ! desired length ratio per vertex
         real(R8), allocatable       :: wt(:) ! weight factor per vertex
         integer(I8), allocatable    :: vpairs(:, :), nvpairs(:) ! vertex pairs
+        real(R8), allocatable       :: Jv(:) ! cost function value per vertex 
 
     contains
 
@@ -180,6 +181,7 @@ module gdmod_costfunction
 
         ! Fields
         type(CostfunctionLRUDT)     :: cfv_lr
+        real(R8), allocatable       :: Jv(:) ! cost function value per vertex 
 
     contains
 
@@ -206,6 +208,7 @@ module gdmod_costfunction
 
         ! Fields
         type(CostfunctionLRradUDT)     :: cfv_lrrad
+        real(R8), allocatable          :: Jv(:)! cost function value per vertex 
 
     contains
 
@@ -268,6 +271,7 @@ module gdmod_costfunction
         integer(I8)                 :: nvpairs ! number of vertex pairs
         real(R8), allocatable       :: wt(:) ! weight factor per vertex
         integer(I8), allocatable    :: vpairs(:, :)! vertex pairs
+        real(R8), allocatable       :: Jv(:) ! cost function value per vertex 
 
     contains
 
@@ -311,11 +315,17 @@ module gdmod_costfunction
         ! FA cost function will not necessarily lead to better FAD, 
         ! though it may help a bit. 
 
+        ! Note 2: the cost function value per vertex is computed by 
+        ! dividing the cost function value per vertex pair equally over    
+        ! the two vertices and summing up all contributions (only for 
+        ! post-processing purposes anyway)
+
         ! Fields
         real(R8)                    :: lambda ! scaling constant
         real(R8), allocatable       :: wt(:) ! weight 
         integer(I8), allocatable    :: vpairs(:, :) ! vertex pairs
         integer(I8)                 :: nvpairs ! total number of vertex pairs
+        real(R8), allocatable       :: Jv(:) ! cost function value per vertex 
 
 
     contains
@@ -356,7 +366,9 @@ module gdmod_costfunction
         real(R8), allocatable           :: wt(:) ! weigths 
         real(R8), allocatable           :: b0(:) ! desired bias
         integer(I8), allocatable        :: psipairs(:, :) ! pairs of psi values
+        integer(I8), allocatable        :: vertID(:)
         integer(I8)                     :: npsipairs ! number of psi value pairs
+        real(R8), allocatable           :: Jv(:) ! cost function value per vertex 
 
 
     contains
@@ -390,6 +402,7 @@ module gdmod_costfunction
 
         ! Fields
         type(CostfunctionPRPBUDT)       :: cfv_prpb
+        real(R8), allocatable           :: Jv(:) ! cost function value per vertex 
 
 
     contains
@@ -452,7 +465,7 @@ module gdmod_costfunction
 
     end type
 
-        ! Cost function with all possible contributions
+    ! Cost function with all possible contributions
     type, extends(CostfunctionGDUDT) :: CostfunctionGeneralUDT
 
         ! Description
@@ -531,7 +544,7 @@ module gdmod_costfunction
         ! Cost function evaluation
         subroutine EvaluateCostFunctionINT(costfunction, J, gradJ, &
             hessJ, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
             ! Description
             !============
@@ -552,6 +565,11 @@ module gdmod_costfunction
             type(EnvironmentUDT)            :: environment 
             logical                         :: dogradient, dohessian
             class(DesignVariablesGDUDT)     :: designvariables
+
+            character(*), intent(in), optional  :: varin 
+            real(R8), intent(in), optional      :: valuesin(:)
+            real(R8), allocatable, optional     :: dJdvarin(:) 
+            type(MySparseUDT), optional         :: dgradJdvarin
 
         end subroutine
 
@@ -597,12 +615,13 @@ module gdmod_costfunction
         type(StructuredPLF2DDistanceDFUDT)  :: dfbias
 
         integer                             :: sgn2, sgn3
-        integer(I8)                         :: sp, ep, tID, v2, v3, tv
+        integer(I8)                         :: sp, ep, tID, v2, v3, tv, &
+            ntpind 
         real(R8)                            :: Btx2, Btx3, Bty2, Bty3, &
             dx2, dy2, dx3, dy3, a0
 
         integer(I8), allocatable            :: tvn(:), temptvn(:), &
-            vesselvert(:), tvf(:), tvfv(:, :)
+            vesselvert(:), tvf(:), tvfv(:, :), tpind(:), tptype(:)
         real(R8), allocatable               :: Btx(:), Bty(:)
         logical, allocatable                :: cID(:), isvesselvertex(:), &
             isvesselface(:)
@@ -644,17 +663,13 @@ module gdmod_costfunction
         call magneticField%interp%Evaluate(x, y, 1, 0, Bty)
         Btx = -Btx ! adjust sign: Btx = - dPsidy
 
+        ! Determine tangency points
+        call DetermineTangencyPoints(tpind, ntpind, tptype, grid)
+
         ! Compute desired length ratio
         !=============================
         ! Desired bias far away from vessel (set to one)
         a0 = 1
-
-        ! Construct polygon set based on target plates only
-        !call targetps%Construct(environment%vessel%targetpolygons)
-
-        ! Construct interpolant
-        !call targetinterp%SetParameters('uniformgrid', 3, 6)
-        !call targetinterp%Construct()
 
         ! Construct
         call dfbias%Initialize(magneticField%interp, &
@@ -667,9 +682,6 @@ module gdmod_costfunction
         ! Visualize
         call environment%vessel%plftarget%Visualize('costfunctionLR_vesselcontours')
         call dfbias%Visualize([minval(x), maxval(x)], [minval(y), maxval(y)], 100, 100, 'costfunctionLR_desiredbias')
-
-        ! Write
-        !call Write3DCoordinateData(x, y, b0, 'costfunctionLR_desiredbias')
 
         ! Compute the vertex pairs
         !=========================
@@ -798,6 +810,13 @@ module gdmod_costfunction
                 ! Unpack
                 tv = vesselvert(i)
 
+                ! Skip if not TP and if lies on flux surface
+                if (grid%vert%fieldlineID(tv) /= 0) then
+                    if (.not. any(tv == tpind)) then 
+                        cycle
+                    end if
+                end if 
+
                 ! Get the faces of this vertex
                 tvf = GetVertFace(vert, tv)
 
@@ -850,7 +869,7 @@ module gdmod_costfunction
     ! Cost function evaluation
     subroutine EvaluateCostFunctionLR(costfunction, J, gradJ, hessJ, &
         grid, magneticField, environment, dogradient, dohessian, &
-        designvariables)
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -887,6 +906,17 @@ module gdmod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
         ! Loop variables
         integer(I8)                     :: i, k, cc 
 
@@ -908,13 +938,27 @@ module gdmod_costfunction
             x       => grid%vert%x, &
             y       => grid%vert%y, &
             lambda  => costfunction%lambda, &
+            Jv      => costfunction%Jv,     &
             wt      => costfunction%wt, &
             eta     => costfunction%eta )
 
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Cost function
         J = 0
+        Jv = 0
 
         ! Gradient
         gradJ(:) = 0
@@ -952,13 +996,15 @@ module gdmod_costfunction
                 d2 = sqrt(dx2**2 + dy2**2)
 
                 ! Compute cost function contribution
-                J = J + 0.5*wt(i)*(d1/(d2 + eta) - b0(i))**2
+                Jv(i) = 0.5_R8*wt(i)*(d1/(d2 + eta) - b0(i))**2
+                J = J + Jv(i)
 
             end do 
         end do
 
         ! Scale
         J = lambda*J
+        Jv = lambda*Jv
 
         ! Compute gradient
         !=================
@@ -1294,6 +1340,23 @@ module gdmod_costfunction
 
         end if
 
+        ! Other derivatives
+        !==================
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
         
 
         ! Deassociate
@@ -1309,6 +1372,7 @@ module gdmod_costfunction
         !============
         ! Write out the cost function data for the LR cost function.
         ! Here, this consists of the vertex pair data in IDn, xn, yn 
+        ! format. We reformat for ease here to [ID1, ID2, ID3, ID4, x1, x2 ...]
         ! format
 
         ! Declare variables
@@ -1325,7 +1389,7 @@ module gdmod_costfunction
         character(:), allocatable       :: filename 
 
         ! Loop
-        integer(I8)                     :: j 
+        integer(I8)                     :: j, k, cc
 
         ! Initialize
         !===========
@@ -1334,8 +1398,8 @@ module gdmod_costfunction
         filename = 'costfunction_vertexpairs_LR'
 
         ! Allocate
-        nrow = size(costfunction%vpairs, 1)
-        ncol = size(costfunction%vpairs, 2)
+        nrow = sum(costfunction%nvpairs)
+        ncol = 4_I8
         allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
 
         ! Unpack
@@ -1348,10 +1412,17 @@ module gdmod_costfunction
         ! Loop
         xn = 0
         yn = 0
-        do j = 1, nrow 
-            IDn(j, :) = vpairs(j, :) 
-            xn(j, 1:2*nvpairs(j)) = x(vpairs(j, 1:2*nvpairs(j)))
-            yn(j, 1:2*nvpairs(j)) = y(vpairs(j, 1:2*nvpairs(j)))
+        cc = 0
+        do j = 1, grid%vert%ntot ! should be the case
+            do k = 1, nvpairs(j) 
+                ! Increment counter
+                cc = cc + 1
+
+                ! Add
+                IDn(cc, :) = [j, vpairs(j, 2*k-1), j, vpairs(j, 2*k)] 
+                xn(cc, :) = x([j, vpairs(j, 2*k-1), j, vpairs(j, 2*k)]) 
+                yn(cc, :) = y([j, vpairs(j, 2*k-1), j, vpairs(j, 2*k)])
+            end do 
         end do
 
         ! Call writer
@@ -1386,6 +1457,7 @@ module gdmod_costfunction
         allocate(costfunction%vpairs(nv,2*nvn))
         allocate(costfunction%b0(nv))
         allocate(costfunction%wt(nv))
+        allocate(costfunction%Jv(nv))
 
     end subroutine
 
@@ -1406,6 +1478,7 @@ module gdmod_costfunction
             deallocate(costfunction%vpairs)
             deallocate(costfunction%b0)
             deallocate(costfunction%wt)
+            deallocate(costfunction%Jv)
         end if
 
     end subroutine
@@ -1457,19 +1530,18 @@ module gdmod_costfunction
 
         ! Auxiliary variables
         integer                             :: sgn2, sgn3
-        integer(I8)                         :: sp, ep, tID, v2, v3, tv, &
+        integer(I8)                         :: sp, ep, tID, v2, v3, &
             tempID(1:2)
         real(R8)                            :: Btx2, Btx3, Bty2, Bty3, &
             dx2, dy2, dx3, dy3
 
         integer(I8), allocatable            :: tvn(:), temptvn(:), &
-            vesselvert(:), tvf(:), tvfv(:, :), tvnID(:)
+            tvnID(:)
         real(R8), allocatable               :: Btx(:), Bty(:)
 
         logical                             :: includecutcellfaces, &
             excludedomainfaces
-        logical, allocatable                :: cID(:), isvesselvertex(:), &
-            isvesselface(:)
+        logical, allocatable                :: cID(:)
 
         ! Data
         
@@ -1496,15 +1568,14 @@ module gdmod_costfunction
         associate(vert => grid%vert, x => grid%vert%x, y => grid%vert%y, &
             b0 => costfunction%b0, wt => costfunction%wt, &
             nvpairs => costfunction%nvpairs, &
-            vpairs => costfunction%vpairs, &
-            dovessel => costfunction%dovessel)
+            vpairs => costfunction%vpairs)
 
         ! Set the initial weighting factors
-        wt(:) = 1
+        wt = 1
 
         ! Initialize
-        vpairs(:, :) = 0
-        nvpairs(:) = 0
+        vpairs = 0
+        nvpairs = 0
 
         ! Compute the magnetic field vectors at the vertex locations
         call magneticField%interp%Evaluate(x, y, 0, 1, Btx)
@@ -1515,7 +1586,7 @@ module gdmod_costfunction
         !=============================
         ! This has to be replaced with an actual computation based on 
         ! the magnetic field... Right now, simply ones
-        b0(:) = 1
+        b0 = 1
 
         ! Compute the vertex pairs
         !=========================
@@ -1662,54 +1733,6 @@ module gdmod_costfunction
 
         end do
 
-        ! Include vessel vertices?
-        if (dovessel) then 
-            ! Get all vessel vertices
-            call DetermineVesselVertices(isvesselvertex, isvesselface, grid)
-            allocate(vesselvert(count(isvesselvertex)))
-            vesselvert = pack([(i, i=1, grid%vert%ntot)], isvesselvertex)
-
-            ! Overwrite potential other vertex pairs (ordering doesn't 
-            ! matter because we set bias to one anyway)
-            do i = 1, size(vesselvert, 1)
-                ! Unpack
-                tv = vesselvert(i)
-
-                ! Get the faces of this vertex
-                tvf = GetVertFace(vert, tv)
-
-                ! Check
-                if (count(isvesselface(tvf)) == 2) then
-                    ! Get the other two vertices
-                    allocate(tvfv(2, 2))
-                    tvfv = grid%face%vert(pack(tvf, isvesselface(tvf)), :)
-                    allocate(tvn(count(tvfv /= tv)))
-                    tvn = pack(tvfv, tvfv /= tv)
-
-                    ! Check
-                    if (size(tvn, 1) /= 2) then 
-                        ! Shouldn't happen, throw error
-                        call gdErrorHandler('InitializeCostFunctionLR: ' // &
-                            'unknown error, something seems wrong in grid interconnection')
-                    end if 
-
-                    ! Add
-                    vpairs(tv, 1:2) = tvn
-                    b0(tv) = 1
-                    nvpairs(tv) = 1 
-
-                    ! Deallocate 
-                    deallocate(tvfv, tvf, tvn)
-                end if 
-
-            end do
-
-            ! Housekeeping
-            deallocate(vesselvert)
-
-
-        end if 
-
         ! Housekeeping
         deallocate(Btx, Bty)
 
@@ -1747,7 +1770,7 @@ module gdmod_costfunction
         character(:), allocatable       :: filename 
 
         ! Loop
-        integer(I8)                     :: j 
+        integer(I8)                     :: j, cc, k 
 
         ! Initialize
         !===========
@@ -1756,8 +1779,8 @@ module gdmod_costfunction
         filename = 'costfunction_vertexpairs_LRrad'
 
         ! Allocate
-        nrow = size(costfunction%vpairs, 1)
-        ncol = size(costfunction%vpairs, 2)
+        nrow = sum(costfunction%nvpairs)
+        ncol = 4_I8
         allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
 
         ! Unpack
@@ -1770,10 +1793,17 @@ module gdmod_costfunction
         ! Loop
         xn = 0
         yn = 0
-        do j = 1, nrow 
-            IDn(j, :) = vpairs(j, :) 
-            xn(j, 1:2*nvpairs(j)) = x(vpairs(j, 1:2*nvpairs(j)))
-            yn(j, 1:2*nvpairs(j)) = y(vpairs(j, 1:2*nvpairs(j)))
+        cc = 0
+        do j = 1, grid%vert%ntot ! should be the case
+            do k = 1, nvpairs(j) 
+                ! Increment counter
+                cc = cc + 1
+
+                ! Add
+                IDn(cc, :) = [j, vpairs(j, 2*k-1), j, vpairs(j, 2*k)] 
+                xn(cc, :) = x([j, vpairs(j, 2*k-1), j, vpairs(j, 2*k)]) 
+                yn(cc, :) = y([j, vpairs(j, 2*k-1), j, vpairs(j, 2*k)])
+            end do 
         end do
 
         ! Call writer
@@ -1807,6 +1837,20 @@ module gdmod_costfunction
         ! aligned. If it is not the same and both are non-zero, it is 
         ! a potential face to consider. 
 
+        ! Note: to address fully unstructured grids with potentially
+        ! many triangles, the original quadrilateral grid based 
+        ! approach where only vertex pairs in the two adjacent flux 
+        ! tubes are considered is insufficient for grid topologies where
+        ! multiple triangles are present in a tube. Therefore, the 
+        ! approach has been extended (May 2025) to include vertex pairs
+        ! that lie in the same flux tube - this should promote a 
+        ! 'symmetric' distribution of the vertices along the field 
+        ! line.
+
+        ! Note: if any adjustments are made here, make sure that vertex
+        ! pairs are correctly oriented! This is not explicitly checked, 
+        ! if not oriented properly results may be surprising. 
+
         ! Modules
         !========
 
@@ -1825,23 +1869,18 @@ module gdmod_costfunction
         ! Auxiliary variables
         type(StructuredPLF2DDistanceDFUDT)  :: dfwt
 
-        integer(I8)                         :: tID, vp1(1:2), &
-            vp2(1:2), ntvn, ntemptvn, nvp
+        integer(I8)                         :: tID, &
+            ntvn, ntemptvn, nvp, nxpind, nalignedv, &
+            nvID1, nvID2
 
-        real(R8)                            :: dxf, dyf, txf, tyf, tnf,&
-            bxf, byf, bnf, dpf
-
-        logical                             :: thischeck
-
-        integer(I8), allocatable            :: tvn(:), temptvn(:), &
-            vpairs(:,:), nvpairs(:), reverse(:), tempvpairs(:,:)
+        integer(I8), allocatable            :: temptvn(:), &
+            vpairs(:,:), nvpairs(:), &
+            xpind(:), order(:), alignedvloc(:), vID1(:), vID2(:)
 
         real(R8), allocatable               :: bx(:), by(:), xv(:,:), &
-            yv(:,:), xf(:,:), yf(:,:), gxf(:,:), gyf(:,:), dx(:,:), &
-            dy(:,:), dotprod(:,:), wt(:)
+            yv(:,:),  wt(:)
 
-        logical, allocatable                :: cID(:), mask(:), &
-            isaligned(:)
+        logical, allocatable                :: cID(:), isxp(:)
 
         ! Data
         real(R8)                            :: epsalignment 
@@ -1854,17 +1893,14 @@ module gdmod_costfunction
 
         ! Allocate (initialize too big)
         nvp = grid%vert%ntot*maxval(grid%vert%neigP(:,2)) ! maximal number of pairs
-        allocate(vpairs(nvp,4), nvpairs(grid%vert%ntot))
+        allocate(vpairs(nvp,4), nvpairs(grid%vert%ntot), isxp(grid%vert%ntot))
+        isxp = .false. 
         ! call costfunction%Allocate(grid%vert%ntot, 4)
 
         ! Compute magnetic field in grid points
         allocate(bx(grid%vert%ntot), by(grid%vert%ntot))
         call magneticField%interp%Evaluate(grid%vert%x, grid%vert%y, 0, 1, bx)
         call magneticField%interp%Evaluate(grid%vert%x, grid%vert%y, 1, 0, by)
-        !call EvaluateBicubicSplineInterpolant( &
-        !    grid%vert%x, grid%vert%y, bx, magneticField%interp, '0', '1')
-        !call EvaluateBicubicSplineInterpolant( &
-        !    grid%vert%x, grid%vert%y, by, magneticField%interp, '1', '0')
         bx = -bx
 
         ! Associate some fields
@@ -1880,11 +1916,13 @@ module gdmod_costfunction
         vpairs(:, :) = 0
         nvpairs(:) = 0
         vpc = 1 ! vertex pair index & counter
+        call DetermineXPoints(xpind, nxpind, order, grid)
+        isxp(xpind) = .true. 
 
         ! Loop over all vertices
         do i = 1, vert%ntot
             ! Skip if the current vertex is a boundary vertex 
-            if (vert%BV(i)) then 
+            if (vert%BV(i) .or. isxp(i)) then 
                 cycle ! skip the remainder of the do-loop for this iteration
             end if
 
@@ -1895,172 +1933,82 @@ module gdmod_costfunction
             allocate(temptvn(ntemptvn))
             allocate(cID(ntemptvn))
 
-            ! Get the vertex neighbours of this vertex
+            ! Get the vertex neighbours of this vertex - normally, these 
+            ! should be sorted clockwise or counterclockwise
             temptvn = vert%neig(& 
                 vert%neigP(i, 1):vert%neigP(i, 1)+vert%neigP(i, 2)-1)
             
             ! Get the ID of the coordinate line
             tID = vert%fieldlineID(i)
 
+            ! Find vertices with the same IDs - should be exactly two if
+            ! no boundary vertex and no x-point (we skip x-points here)
+            nalignedv = count(vert%fieldlineID(temptvn) == tID)
+            if (nalignedv /= 2) then 
+                print *, 'vertex ID: ', i
+                print *, 'InitializeCostFunctionFAD: non-boundary, non-xpoint ' // & 
+                'vertex detected with not exactly two aligned faces. ' // & 
+                'Unexpected, skipping this vertex and continuing...'
+                deallocate(temptvn, cID)
+                cycle 
+            end if 
+            allocate(alignedvloc(nalignedv))
+            alignedvloc = pack([(k, k = 1, size(temptvn))], vert%fieldlineID(temptvn) == tID)
+
+            ! Get vertex sequences
+            vID1 = [temptvn(1:alignedvloc(1)-1), temptvn(alignedvloc(2)+1:size(temptvn))]
+            vID2 = temptvn(alignedvloc(1)+1:alignedvloc(2)-1)
+            nvID1 = size(vID1)
+            nvID2 = size(vID2)
+
             ! Check if there is an ID
             ntvn = 0
-            if (tID == 0) then ! no vertex ID - check all vertex neighbours
-                ! Check which faces are aligned to know which vertex 
-                ! pairs to (not) include. Each vertex pair consists of 
-                ! the current node and one of its neighbours in temptvn. 
-                ! Alignment checking is based on the dot product between 
-                ! the normalized face and magnetic field vectors. The 
-                ! magnetic field vector is interpolated from the 
-                ! precomputed magnetic field on the vertices. 
-
-                ! Allocate & initialize aligned indicator
-                allocate(isaligned(ntemptvn))
-                isaligned(:) = .false. 
-
-                ! Loop
-                do j = 1, ntemptvn
-                    ! Get normalized face vector
-                    dxf = x(temptvn(j)) - x(i)
-                    dyf = y(temptvn(j)) - y(i)
-                    tnf = sqrt(dxf**2 + dyf**2)
-                    txf = dxf/tnf 
-                    tyf = dyf/tnf 
-
-                    ! Get normalized magnetic field vector, approximated
-                    ! by simple arithmetic average
-                    bxf = (bx(temptvn(j)) + bx(i))*0.5
-                    byf = (by(temptvn(j)) + by(i))*0.5
-                    bnf = sqrt(bxf**2 + byf**2)
-                    bxf = bxf/bnf 
-                    byf = byf/bnf
-
-                    ! Compute dot product
-                    dpf = bxf*txf + byf*tyf 
-
-                    ! Check
-                    if (abs( abs(dpf) - 1 ) < epsalignment) then 
-                        ! Consider as aligned 
-                        isaligned(j) = .true.
-                    end if
-                end do
-
-                ! Extract the non-aligned nodes if two non-aligned faces
-                ! remain. Otherwise, set to zero. 
-                ntvn = count(.not. isaligned)
-                if (ntvn .ne. 2) then 
-                    ntvn = 0
-                    ! Allocate - to prevent deallocation errors downstream
-                    allocate(tvn(ntvn))
-                else
-                    ! Allocate
-                    allocate(tvn(ntvn))
-
-                    ! Extract the vertices
-                    tvn = pack(temptvn, .not. isaligned)
-                end if
-    
-                ! Deallocate
-                deallocate(isaligned)
+            if (tID == 0) then 
+                ! We don't support vertices with zero ID that are not 
+                ! boundary vertices anymore - print warning and skip 
+                ! remainder of loop after housekeeping
+                print *, 'vertex ID: ', i 
+                print *, 'InitializeCostFunctionFAD: non-boundary, ' // & 
+                    'non-xpoint vertex detected with zero ID. Skipping...'
+                deallocate(alignedvloc, temptvn, cID)
+                cycle
 
             else
-                ! Check which vertices have the same ID
-                cID = tID == vert%fieldlineID(temptvn)
+                ! Check which vertex pairs to construct based on the 
+                ! number of vertices in both sequences
 
-                ! Check which faces are aligned
-                allocate(isaligned(ntemptvn))
+                ! If we have an uneven amount of vertices at both sides,
+                ! the pairs formed by the middle vertices and the current
+                ! vertex can be added
+                if ((mod(nvID1, 2) /= 0) .and. (mod(nvID2, 2) /= 0)) then 
+                    ! Add this vertex pair
+                    vpairs(vpc, :) = [vID1(nvID1/2+1), i, i, vID2(nvID2/2+1)]
+                    vpc = vpc + 1
+                end if 
 
-                ! Loop
-                do j = 1, ntemptvn
-                    ! Get normalized face vector
-                    dxf = x(temptvn(j)) - x(i)
-                    dyf = y(temptvn(j)) - y(i)
-                    tnf = sqrt(dxf**2 + dyf**2)
-                    txf = dxf/tnf 
-                    tyf = dyf/tnf 
-
-                    ! Get normalized magnetic field vector, approximated
-                    ! by simple arithmetic average
-                    bxf = (bx(temptvn(j)) + bx(i))*0.5
-                    byf = (by(temptvn(j)) + by(i))*0.5
-                    bnf = sqrt(bxf**2 + byf**2)
-                    bxf = bxf/bnf 
-                    byf = byf/bnf
-
-                    ! Compute dot product
-                    dpf = bxf*txf + byf*tyf 
-
-                    ! Check
-                    if (abs( abs(dpf) - 1 ) < epsalignment) then 
-                        ! Consider as aligned 
-                        isaligned(j) = .true.
-                    end if
-                end do
-            
-                ! Extract vertices that have NOT the same ID and are not
-                ! aligned. 
-                allocate(mask(ntemptvn))
-                mask = (.not. cID) ! .and. (.not. isaligned)
-                allocate(tvn(count(mask)))
-                tvn = pack(temptvn, mask)
-
-                ! Only keep if there are two vertices 
-                if  (size(tvn) .ne. 2) then
-                    ntvn = 0
-                else
-                    ntvn = 2
-                end if
-
-
-                ! Deallocate
-                deallocate(mask, isaligned)
+                ! Add pairs in flux tubes 1 and 2
+                do j = 1, nvID1/2
+                    vpairs(vpc, :) = [vID1(j), i, i, vID1(nvID1-j+1)]
+                    vpc = vpc + 1
+                end do 
+                do j = 1, nvID2/2
+                    vpairs(vpc, :) = [vID2(j), i, i, vID2(nvID2-j+1)]
+                    vpc = vpc + 1
+                end do 
             end if
             
-            ! Constrain each pair (more generally written in case 
-            ! multiple pairs are allowed in the future)
-            nvpairs(i) = (ntvn/2) ! this automatically floors
-            do j = 1, nvpairs(i)
-
-                ! Get the vertex pairs
-                vp1 = [i, tvn(2*j-1)]
-                vp2 = [i, tvn(2*j)]
-                
-                ! Check if these pairs should be added. For now, we 
-                ! don't consider vertices where there are more than two
-                ! pairs, as here the cost function does not make much
-                ! sense. 
-                thischeck = .true.
-                thischeck = thischeck .and. (.not. (nvpairs(i) > 1)) 
-                
-                ! Add the pair if allowed
-                if (thischeck) then 
-                    ! Add the pairs
-                    vpairs(vpc,:) = [vp1, vp2]
-                    
-                    ! Update counter
-                    vpc = vpc+1
-
-                end if
-            end do
-
             ! Deallocate
-            deallocate(tvn, temptvn, cID)
+            deallocate(temptvn, cID, alignedvloc)
         end do
 
-        ! Check order
-        !============
-        ! Check the vertex pair order by computing the dot product with 
-        ! the local magnetic field (now evaluated with the actual face
-        ! coordinates)
-
+        ! Determine weigths
+        !==================
         ! Update counter (-1 to get actual number of edges)
         vpc = vpc-1
 
         ! Allocate
-        allocate(xv(vpc, 4), yv(vpc, 4), xf(vpc, 2), &
-            yf(vpc, 2), gxf(vpc, 2), gyf(vpc, 2), &
-            dx(vpc, 2), dy(vpc, 2), dotprod(vpc, 2), &
-            tempvpairs(size(vpairs,1), size(vpairs, 2)))
-        call costfunction%Allocate(vpc, 4)
+        allocate(xv(vpc, 4), yv(vpc, 4))
+        call costfunction%Allocate(vpc, 4, grid%vert%ntot)
 
         ! Compute vectors
         do i = 1, 4
@@ -2068,47 +2016,6 @@ module gdmod_costfunction
             yv(:, i) = y(vpairs(1:vpc, i)) !reshape(y(vpairs),[vert%ntot,4])
         end do
 
-        ! Compute edge faces
-        xf(:, 1) = xv(:, 1) + xv(:, 2)
-        xf(:, 2) = xv(:, 3) + xv(:, 4)
-        xf = 0.5*xf
-        yf(:, 1) = yv(:, 1) + yv(:, 2)
-        yf(:, 2) = yv(:, 3) + yv(:, 4)
-        yf = 0.5*yf
-
-        ! Compute the vector perpendicular on the magnetic field vector
-        do i = 1, 2
-            call magneticField%interp%Evaluate(xf(:, i), yf(:, i ), 1, 0, gxf(:, i))
-            call magneticField%interp%Evaluate(xf(:, i), yf(:, i ), 0, 1, gyf(:, i))
-            !call EvaluateBicubicSplineInterpolant( &
-            !    xf(:,i), yf(:,i), gxf(:,i), magneticField%interp, '1', '0')
-            !call EvaluateBicubicSplineInterpolant( &
-            !    xf(:,i), yf(:,i), gyf(:,i), magneticField%interp, '0', '1')
-        end do
-
-        ! Compute distances
-        dx(:, 1) = xv(:, 2) - xv(:, 1)
-        dx(:, 2) = xv(:, 4) - xv(:, 3)
-        dy(:, 1) = yv(:, 2) - yv(:, 1)
-        dy(:, 2) = yv(:, 4) - yv(:, 3)
-
-        ! Compute dot product
-        dotprod = dx*gxf + dy*gyf
-
-        ! Compute faces to reverse 
-        tempvpairs = vpairs
-        allocate(mask(vpc))
-        do i = 1, 2
-            mask = (dotprod(:,i) < 0)
-            allocate(reverse(count(mask)))
-            reverse = pack([(k, k = 1, vpc)], mask)
-            vpairs(reverse, 2*i-1)  = tempvpairs(reverse, 2*i)
-            vpairs(reverse, 2*i)    = tempvpairs(reverse, 2*i-1)
-            deallocate(reverse)
-        end do
-
-        ! Determine weigths
-        !==================
         ! Initialize (magnetic field as dummy since unsigned anyway)
         call dfwt%Initialize(magneticField%interp, &
             environment%vessel%plfvessel, environment%vessel%plfvessel, &
@@ -2146,19 +2053,12 @@ module gdmod_costfunction
             call costfunction%WriteData(grid) 
         end if 
 
-        ! Deallocate
-        deallocate(tempvpairs, dx, dy, gxf, gyf, xv, yv, xf, &
-            yf, dotprod, bx, by, vpairs, nvpairs, mask)
-        
-
-        
-
     end subroutine
 
     ! Cost function evaluation
     subroutine EvaluateCostFunctionFAD(costfunction, J, gradJ, hessJ, &
         grid, magneticField, environment, dogradient, dohessian, &
-        designvariables)
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -2191,8 +2091,19 @@ module gdmod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
         ! Loop variables
-        integer(I8)                     :: i, cc
+        integer(I8)                     :: i, k, cc
 
         ! Auxiliary
         real(R8)                        :: gxf1, gxf2, gyf1, gyf2, dx1, &
@@ -2211,10 +2122,22 @@ module gdmod_costfunction
             gyyfv1(:), gyyfv2(:), gxxxfv1(:), gxxxfv2(:), gxxyfv1(:), &
             gxxyfv2(:), gxyxfv1(:), gxyxfv2(:), gxyyfv1(:), gxyyfv2(:), &
             gyxxfv1(:), gyxxfv2(:), gyxyfv1(:), gyxyfv2(:), gyyyfv1(:), &
-            gyyyfv2(:), valxx(:), valxy(:), valyx(:), valyy(:) 
+            gyyyfv2(:), valxx(:), valxy(:), valyx(:), valyy(:), dJ(:) 
 
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Cost function
         J = 0
 
@@ -2226,12 +2149,14 @@ module gdmod_costfunction
             np          => costfunction%nvpairs,    &
             vpairs      => costfunction%vpairs,     &
             lambda      => costfunction%lambda,     &
+            Jv          => costfunction%Jv,         &
             wtv         => costfunction%wt,         &
             x           => grid%vert%x,             &
             y           => grid%vert%y,             &
             vert        => grid%vert)
 
         ! Allocate auxiliary arrays
+        Jv = 0
         allocate(xv(np, 4), yv(np, 4), xfv1(np), xfv2(np), yfv1(np), &
             yfv2(np), gxfv1(np), gxfv2(np), gyfv1(np), gyfv2(np), &
             dxv1(np), dxv2(np), dyv1(np), dyv2(np), &
@@ -2273,10 +2198,17 @@ module gdmod_costfunction
         ! Compute cost function
         !======================
         ! Sum contributions
-        J = sum( 0.5*( wtv*(atan(ratv1) - atan(ratv2) )**2 ) )
+        dJ = 0.5*( wtv*(atan(ratv1) - atan(ratv2) )**2 )
+        do k = 1, 4
+            do i = 1, np
+                Jv(vpairs(i, k)) = Jv(vpairs(i, k)) + 0.25*(dJ(i))
+            end do 
+        end do 
+        J = sum(dJ)
 
         ! Scale
         J = lambda*J
+        Jv = lambda*Jv
 
         ! Precompute values
         !==================
@@ -3136,8 +3068,23 @@ module gdmod_costfunction
 
         end if
 
+        ! Other derivatives
+        !==================
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
         ! Housekeeping
         !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
         ! Deallocate auxiliary arrays
         deallocate(xv, yv, xfv1 , xfv2 , yfv1 , &
             yfv2 , gxfv1 , gxfv2 , gyfv1 , gyfv2 , &
@@ -3252,7 +3199,7 @@ module gdmod_costfunction
     end subroutine
 
     ! Housekeeping
-    subroutine AllocateCostFunctionFAD(costfunction, nv, nvn)
+    subroutine AllocateCostFunctionFAD(costfunction, nv, nvn, nvert)
 
         ! Description
         !============
@@ -3262,12 +3209,13 @@ module gdmod_costfunction
         !==================
         ! Arguments
         class(CostfunctionFADUDT)       :: costfunction
-        integer(I8)                     :: nv, nvn
+        integer(I8)                     :: nv, nvn, nvert
 
         ! Allocate
         !=========
         allocate(costfunction%vpairs(nv, nvn))
         allocate(costfunction%wt(nv))
+        allocate(costfunction%Jv(nvert))
 
     end subroutine
 
@@ -3287,6 +3235,7 @@ module gdmod_costfunction
         if (allocated(costfunction%vpairs)) then 
             deallocate(costfunction%vpairs)
             deallocate(costfunction%wt)
+            deallocate(costfunction%Jv)
         end if
 
     end subroutine
@@ -3398,7 +3347,7 @@ module gdmod_costfunction
         end do
 
         ! Allocate and add
-        call costfunction%Allocate(nvpairs)
+        call costfunction%Allocate(nvpairs, grid%vert%ntot)
         costfunction%vpairs = vpairs(1:nvpairs, :)
 
         ! Check orientation
@@ -3459,7 +3408,7 @@ module gdmod_costfunction
     ! Cost function evaluation
     subroutine EvaluateCostFunctionFA(costfunction, J, gradJ, hessJ, &
         grid, magneticField, environment, dogradient, dohessian, &
-        designvariables)
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -3494,6 +3443,17 @@ module gdmod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
         ! Loop variables
         integer(I8)                     :: i, cc 
 
@@ -3520,12 +3480,26 @@ module gdmod_costfunction
             y       => grid%vert%y, &
             nv      => grid%vert%ntot, &
             lambda  => costfunction%lambda, &
+            Jv      => costfunction%Jv,     &
             wt      => costfunction%wt)
 
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Cost function
         J = 0
+        Jv = 0
 
         ! Gradient
         gradJ(:) = 0
@@ -3561,9 +3535,14 @@ module gdmod_costfunction
         !======================
         ! Compute
         J = sum(0.5*wt*thetav**2)
+        do i = 1, nvpairs 
+            Jv(vpairs(i, 1)) = Jv(vpairs(i, 1)) + 0.5_R8*(0.5*wt(i)*thetav(i)**2)
+            Jv(vpairs(i, 2)) = Jv(vpairs(i, 2)) + 0.5_R8*(0.5*wt(i)*thetav(i)**2)
+        end do 
 
         ! Scale
         J = lambda*J
+        Jv = lambda*Jv
 
         ! Compute derivatives
         !====================
@@ -3864,6 +3843,23 @@ module gdmod_costfunction
 
         end select
 
+        ! Other derivatives
+        !==================
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
        
         ! Deassociate
         !============
@@ -3934,7 +3930,7 @@ module gdmod_costfunction
     end subroutine
 
     ! Housekeeping
-    subroutine AllocateCostFunctionFA(costfunction, nvp)
+    subroutine AllocateCostFunctionFA(costfunction, nvp, nv)
 
         ! Description
         !============
@@ -3944,12 +3940,13 @@ module gdmod_costfunction
         !==================
         ! Arguments
         class(CostfunctionFAUDT)        :: costfunction
-        integer(I8)                     :: nvp
+        integer(I8)                     :: nvp, nv
 
         ! Allocate
         !=========
         allocate(costfunction%vpairs(nvp, 2))
         allocate(costfunction%wt(nvp))
+        allocate(costfunction%Jv(nv))
 
     end subroutine
 
@@ -3969,6 +3966,7 @@ module gdmod_costfunction
         if (allocated(costfunction%vpairs)) then 
             deallocate(costfunction%vpairs)
             deallocate(costfunction%wt)
+            deallocate(costfunction%Jv)
         end if
 
     end subroutine
@@ -4028,7 +4026,7 @@ module gdmod_costfunction
     ! Cost function evaluation
     subroutine EvaluateCostFunctionLR2(costfunction, J, gradJ, hessJ, &
         grid, magneticField, environment, dogradient, dohessian, &
-        designvariables)
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -4059,6 +4057,19 @@ module gdmod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:), dJdvar1(:), &
+            dJdvar2(:), Jv1(:), Jv2(:)
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvar1, &
+            dgradJdvar2
+
         ! Loop variables
         integer(I8)                     :: i
 
@@ -4068,6 +4079,18 @@ module gdmod_costfunction
                                         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Store original vertex pairs and bias
         allocate(tempvpairs, source=costfunction%cfv_lr%vpairs)
         allocate(tempb0, source=costfunction%cfv_lr%b0)
@@ -4081,20 +4104,29 @@ module gdmod_costfunction
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)), &
+            dJdvar1(size(values)), dJdvar2(size(values)), &
+            dJdvar(size(values)))
+        dJdvar1 = 0
+        dJdvar2 = 0
+        dJdvar = 0
 
         ! Hessian
         hessJ1%nrow = hessJ%nrow 
         hessJ2%nrow = hessJ%nrow 
         hessJ1%ncol = hessJ%ncol 
         hessJ2%ncol = hessJ%ncol 
+        dgradJdvar  = SpZeros(size(values), size(gradJ))
+        dgradJdvar1 = dgradJdvar
+        dgradJdvar2 = dgradJdvar
 
         ! Compute cost function
         !======================
         ! First contribution
         call costfunction%cfv_lr%Evaluate(J1, gradJ1, &
             hessJ1, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar1, dgradJdvar1)
+        Jv1 = costfunction%cfv_lr%Jv 
         
         ! Adjust vertex pairs and bias
         do i = 1, maxval(costfunction%cfv_lr%nvpairs)
@@ -4106,7 +4138,8 @@ module gdmod_costfunction
         ! Second contribution
         call costfunction%cfv_lr%Evaluate(J2, gradJ2, &
             hessJ2, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar2, dgradJdvar2)
+        Jv2 = costfunction%cfv_lr%Jv 
 
         ! Reset vertex pairs and bias
         costfunction%cfv_lr%b0(:) = tempb0
@@ -4116,10 +4149,19 @@ module gdmod_costfunction
         J = J1 + J2 
         gradJ = gradJ1 + gradJ2
         hessJ = hessJ1 + hessJ2
+        dJdvar = dJdvar1 + dJdvar2
+        dgradJdvar = dgradJdvar1 + dgradJdvar2
+        costfunction%Jv = Jv1 + Jv2
 
         ! Housekeeping
         !=============
-        deallocate(gradJ1, gradJ2)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
 
     end subroutine
 
@@ -4139,6 +4181,7 @@ module gdmod_costfunction
         ! Allocate
         !=========
         call costfunction%cfv_lr%Allocate(nv, nvn)
+        allocate(costfunction%Jv(nv))
 
     end subroutine
 
@@ -4156,6 +4199,7 @@ module gdmod_costfunction
         ! Deallocate
         !===========
         call costfunction%cfv_lr%Deallocate()
+        if (allocated(costfunction%Jv)) deallocate(costfunction%Jv)
 
     end subroutine
 
@@ -4214,7 +4258,7 @@ module gdmod_costfunction
     ! Cost function evaluation
     subroutine EvaluateCostFunctionLRrad2(costfunction, J, gradJ, hessJ, &
         grid, magneticField, environment, dogradient, dohessian, &
-        designvariables)
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -4245,6 +4289,19 @@ module gdmod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:), dJdvar1(:), &
+            dJdvar2(:), Jv1(:), Jv2(:)
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvar1, &
+            dgradJdvar2
+
         ! Loop variables
         integer(I8)                     :: i
 
@@ -4254,6 +4311,18 @@ module gdmod_costfunction
                                         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Store original vertex pairs and bias
         allocate(tempvpairs, source=costfunction%cfv_lrrad%vpairs)
         allocate(tempb0, source=costfunction%cfv_lrrad%b0)
@@ -4267,20 +4336,29 @@ module gdmod_costfunction
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)), &
+            dJdvar1(size(values)), dJdvar2(size(values)), &
+            dJdvar(size(values)))
+        dJdvar1 = 0
+        dJdvar2 = 0
+        dJdvar = 0
 
         ! Hessian
         hessJ1%nrow = hessJ%nrow 
         hessJ2%nrow = hessJ%nrow 
         hessJ1%ncol = hessJ%ncol 
         hessJ2%ncol = hessJ%ncol 
+        dgradJdvar  = SpZeros(size(values), size(gradJ))
+        dgradJdvar1 = dgradJdvar
+        dgradJdvar2 = dgradJdvar
 
         ! Compute cost function
         !======================
         ! First contribution
         call costfunction%cfv_lrrad%Evaluate(J1, gradJ1, &
             hessJ1, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar1, dgradJdvar1)
+        Jv1 = costfunction%cfv_lrrad%Jv
         
         ! Adjust vertex pairs and bias
         do i = 1, maxval(costfunction%cfv_lrrad%nvpairs)
@@ -4292,7 +4370,8 @@ module gdmod_costfunction
         ! Second contribution
         call costfunction%cfv_lrrad%Evaluate(J2, gradJ2, &
             hessJ2, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar2, dgradJdvar2)
+        Jv2 = costfunction%cfv_lrrad%Jv
 
         ! Reset vertex pairs and bias
         costfunction%cfv_lrrad%b0(:) = tempb0
@@ -4302,10 +4381,20 @@ module gdmod_costfunction
         J = J1 + J2 
         gradJ = gradJ1 + gradJ2
         hessJ = hessJ1 + hessJ2
+        dJdvar = dJdvar1 + dJdvar2
+        dgradJdvar = dgradJdvar1 + dgradJdvar2
+        costfunction%Jv = Jv1 + Jv2
 
         ! Housekeeping
         !=============
-        deallocate(gradJ1, gradJ2)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
 
     end subroutine
 
@@ -4325,6 +4414,7 @@ module gdmod_costfunction
         ! Allocate
         !=========
         call costfunction%cfv_lrrad%Allocate(nv, nvn)
+        allocate(costfunction%Jv(nv))
 
     end subroutine
 
@@ -4342,6 +4432,7 @@ module gdmod_costfunction
         ! Deallocate
         !===========
         call costfunction%cfv_lrrad%Deallocate()
+        if (allocated(costfunction%Jv)) deallocate(costfunction%Jv)
 
     end subroutine
 
@@ -4407,6 +4498,8 @@ module gdmod_costfunction
         !===========
         ! Set the scaling constant
         costfunction%lambda = options%PRPB%lambda
+        if (allocated(costfunction%Jv)) deallocate(costfunction%Jv)
+        allocate(costfunction%Jv(grid%vert%ntot))
         
     end subroutine
 
@@ -4435,7 +4528,7 @@ module gdmod_costfunction
         integer(I8)                     :: nfsID, nxpind, tID
         integer(I8), allocatable        :: map2fsind(:), fsID(:), &
             xpind(:), order(:), psipairs(:, :), tvn(:), fsIDcounter(:), &
-            tvnID(:), allfsIDs(:), tvID(:)
+            tvnID(:), allfsIDs(:), tvID(:), vertID(:)
 
         real(R8), allocatable           :: fsPsi(:), b0v(:), wtv(:), &
             wtp(:), b0p(:), thispsival(:, :), sgn1(:), sgn2(:)
@@ -4503,7 +4596,7 @@ module gdmod_costfunction
             where (fieldlineID == fieldlineID(xpind(i))) issepvert = .true.
         end do 
         allocate(tvID(count(issepvert)))
-        tvID = pack([(k, k = 1, grid%vert%ntot)], issepvert)
+        tvID = xpind ! pack([(k, k = 1, grid%vert%ntot)], issepvert)
 
         ! Initialize distributions
         call dfbias%Initialize(magneticField%interp, x(tvID), y(tvID), &
@@ -4530,7 +4623,7 @@ module gdmod_costfunction
         end do
 
         ! Initialize pairs too big
-        allocate(psipairs(nv, 3), wtp(size(wtv)), b0p(size(b0v)))
+        allocate(psipairs(nv, 3), wtp(size(wtv)), b0p(size(b0v)), vertID(nv))
         wtp = wtv 
         b0p = b0v 
 
@@ -4566,6 +4659,7 @@ module gdmod_costfunction
 
                     ! Add
                     psipairs(npp, :) = [tID, pack(allfsIDs, fsIDcounter > 0)]
+                    vertID(npp) = i
                     wtp(npp) = wtv(i)
                     b0p(npp) = b0v(i)
 
@@ -4601,7 +4695,13 @@ module gdmod_costfunction
         costfunction%b0         = b0p(1:npp)
         costfunction%wt         = wtp(1:npp)
         costfunction%psipairs   = psipairs(1:npp, :)
+        costfunction%vertID     = vertID(1:npp)
         costfunction%npsipairs  = npp
+
+        if (options%writedata == 1) then 
+            call costfunction%WriteData(grid)
+        end if
+            
         
         ! Housekeeping
         !=============
@@ -4612,7 +4712,7 @@ module gdmod_costfunction
     ! Cost function evaluation
     subroutine EvaluateCostFunctionPRPB(costfunction, J, gradJ, hessJ, &
         grid, magneticField, environment, dogradient, dohessian, &
-        designvariables)
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -4640,6 +4740,17 @@ module gdmod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
         ! Loop variables
         integer(I8)                     :: i, cc 
 
@@ -4657,17 +4768,32 @@ module gdmod_costfunction
         associate(&
             vert        => grid%vert, &
             psipairs    => costfunction%psipairs, &
+            vertID      => costfunction%vertID, &
             npsipairs   => costfunction%npsipairs, &
             b0          => costfunction%b0, &
             x           => grid%vert%x, &
             y           => grid%vert%y, &
             lambda      => costfunction%lambda, &
+            Jv          => costfunction%Jv,     &
             wt          => costfunction%wt)
 
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Cost function
         J = 0
+        Jv = 0
 
         ! Gradient
         gradJ(:) = 0
@@ -4702,9 +4828,13 @@ module gdmod_costfunction
         d1v = psipairsval(:, 1) - psipairsval(:, 2)
         d2v = psipairsval(:, 3) - psipairsval(:, 1)
         J = J + 0.5*sum(wt*(d1v/d2v - b0)**2)
+        do i = 1, npsipairs 
+            Jv(vertID(i)) = Jv(vertID(i)) + 0.5*(wt(i)*(d1v(i)/d2v(i) - b0(i))**2)
+        end do 
 
         ! Scale
         J = lambda*J
+        Jv = lambda*Jv
 
         ! Compute gradient
         !=================
@@ -4870,8 +5000,23 @@ module gdmod_costfunction
 
         end if
 
+        ! Derivatives
+        !============
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
         ! Deassociate
         !============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if 
+
         end associate
 
     end subroutine
@@ -4892,49 +5037,29 @@ module gdmod_costfunction
         type(GridUDT)                   :: grid
 
         ! Auxiliary
-        integer(I8)                     :: ncol, nrow 
-
-        integer(I8), allocatable        :: IDn(:, :) 
-        real(R8), allocatable           :: xn(:, :), yn(:, :)
         character(:), allocatable       :: filename 
 
         ! Loop
-        integer(I8)                     :: j 
 
         ! Initialize
         !===========
         ! Set filename
-        allocate(character(len('costfunction_psipairs_PRPB')) :: filename)
-        filename = 'costfunction_psipairs_PRPB'
-
-        ! Allocate
-        nrow = size(costfunction%psipairs, 1)
-        ncol = size(costfunction%psipairs, 2)
-        allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
+        filename = 'costfunction_vertexpairs_PRPB'
 
         ! Unpack
         associate(&
-            vpairs      => costfunction%psipairs,         &
+            vertID      => costfunction%vertID,         &
             x           => grid%vert%x,                 &
             y           => grid%vert%y)
 
-        ! Loop
-        do j = 1, ncol 
-            IDn(:, j) = vpairs(:, j) 
-            xn(:, j) = x(vpairs(:, j)) 
-            yn(:, j) = y(vpairs(:, j)) 
-        end do
 
         ! Call writer
         !============
-        call WriteVertexPairData(IDn, xn, yn, filename)
+        call WriteVertexData(vertID, x(vertID), y(vertID), filename)
 
         ! Housekeeping
         !=============
-        end associate
-        deallocate(IDn, xn, yn)
-        
-
+        end associate        
 
     end subroutine
 
@@ -5062,7 +5187,7 @@ module gdmod_costfunction
     ! Cost function evaluation
     subroutine EvaluateCostFunctionPRPB2(costfunction, J, gradJ, hessJ, &
         grid, magneticField, environment, dogradient, dohessian, &
-        designvariables)
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -5093,14 +5218,39 @@ module gdmod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:), dJdvar1(:), &
+            dJdvar2(:)
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvar1, &
+            dgradJdvar2
+
         ! Loop variables
 
         ! Auxiliary
         integer(I8), allocatable        :: tempvpairs(:,:)
-        real(R8), allocatable           :: tempb0(:) 
+        real(R8), allocatable           :: tempb0(:), Jv1(:), Jv2(:)
                                         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Store original vertex pairs and bias
         allocate(tempvpairs, source=costfunction%cfv_prpb%psipairs)
         allocate(tempb0, source=costfunction%cfv_prpb%b0)
@@ -5114,20 +5264,28 @@ module gdmod_costfunction
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)), &
+            dJdvar1(size(values)), dJdvar2(size(values)), &
+            dJdvar(size(values)))
+        dJdvar1 = 0
+        dJdvar2 = 0
 
         ! Hessian
         hessJ1%nrow = hessJ%nrow 
         hessJ2%nrow = hessJ%nrow 
         hessJ1%ncol = hessJ%ncol 
         hessJ2%ncol = hessJ%ncol 
+        dgradJdvar  = SpZeros(size(values), size(gradJ))
+        dgradJdvar1 = dgradJdvar
+        dgradJdvar2 = dgradJdvar
 
         ! Compute cost function
         !======================
         ! First contribution
         call costfunction%cfv_prpb%Evaluate(J1, gradJ1, &
             hessJ1, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar1, dgradJdvar1)
+        Jv1 = costfunction%cfv_prpb%Jv
         
         ! Adjust vertex pairs and bias
         costfunction%cfv_prpb%psipairs(:, :) = tempvpairs(:, [1, 3, 2])
@@ -5136,7 +5294,8 @@ module gdmod_costfunction
         ! Second contribution
         call costfunction%cfv_prpb%Evaluate(J2, gradJ2, &
             hessJ2, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar2, dgradJdvar2)
+        Jv2 = costfunction%cfv_prpb%Jv
 
         ! Reset vertex pairs and bias
         costfunction%cfv_prpb%b0(:) = tempb0
@@ -5146,10 +5305,20 @@ module gdmod_costfunction
         J = J1 + J2 
         gradJ = gradJ1 + gradJ2
         hessJ = hessJ1 + hessJ2
+        dJdvar = dJdvar1 + dJdvar2
+        dgradJdvar = dgradJdvar1 + dgradJdvar2
+        costfunction%Jv = Jv1 + Jv2
 
         ! Housekeeping
         !=============
-        deallocate(gradJ1, gradJ2)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
 
     end subroutine
 
@@ -5266,7 +5435,7 @@ module gdmod_costfunction
     ! Cost function evaluation
     subroutine EvaluateCostFunctionLRFAD(costfunction, J, gradJ, hessJ, &
         grid, magneticField, environment, dogradient, dohessian, &
-        designvariables)
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -5297,12 +5466,37 @@ module gdmod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:), dJdvar1(:), &
+            dJdvar2(:)
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvar1, &
+            dgradJdvar2
+
         ! Loop variables
 
         ! Auxiliary
                                         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Cost function
         J = 0
         J1 = 0
@@ -5310,34 +5504,50 @@ module gdmod_costfunction
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)))
+        allocate(gradJ1(size(gradJ)), gradJ2(size(gradJ)), &
+            dJdvar1(size(values)), dJdvar2(size(values)), dJdvar(size(values)))
+        dJdvar1 = 0
+        dJdvar2 = 0
+        dJdvar = 0
 
         ! Hessian
         hessJ1%nrow = hessJ%nrow 
         hessJ2%nrow = hessJ%nrow 
         hessJ1%ncol = hessJ%ncol 
         hessJ2%ncol = hessJ%ncol 
+        dgradJdvar  = SpZeros(size(values), size(gradJ))
+        dgradJdvar1 = dgradJdvar
+        dgradJdvar2 = dgradJdvar
 
         ! Compute cost function
         !======================
         ! First contribution
         call costfunction%cfv_lr%Evaluate(J1, gradJ1, &
             hessJ1, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar1, dgradJdvar1)
         
         ! Second contribution
         call costfunction%cfv_fad%Evaluate(J2, gradJ2, &
             hessJ2, grid, magneticField, environment, dogradient, &
-            dohessian, designvariables)
+            dohessian, designvariables, var, values, dJdvar2, dgradJdvar2)
 
         ! Add
         J = J1 + J2 
         gradJ = gradJ1 + gradJ2
         hessJ = hessJ1 + hessJ2
+        dJdvar = dJdvar1 + dJdvar2
+        dgradJdvar = dgradJdvar1 + dgradJdvar2
 
         ! Housekeeping
         !=============
-        deallocate(gradJ1, gradJ2)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
 
     end subroutine
 
@@ -5504,7 +5714,7 @@ module gdmod_costfunction
     ! Cost function evaluation
     subroutine EvaluateCostFunctionGeneral(costfunction, J, gradJ, hessJ, &
         grid, magneticField, environment, dogradient, dohessian, &
-        designvariables)
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
 
         ! Description
         !============
@@ -5534,23 +5744,52 @@ module gdmod_costfunction
         logical                         :: dogradient, dohessian 
         class(DesignVariablesGDUDT)     :: designvariables
 
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:), Jv(:)
+        real(R8), allocatable               :: dJdvar(:), dJdvartemp(:) 
+        type(MySparseUDT)                   :: dgradJdvar, dgradJdvartemp
+
         ! Loop variables
 
         ! Auxiliary
                                         
         ! Initialize
         !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
         ! Cost function
         J = 0
         Jtemp = 0
 
         ! Gradient
         gradJ(:) = 0
-        allocate(gradJtemp(size(gradJ)))
+        allocate(gradJtemp(size(gradJ)), dJdvartemp(size(values)), &
+            dJdvar(size(values)))
+        gradJtemp = 0
+        dJdvartemp = 0
+        dJdvar = 0
 
         ! Hessian
         hessJtemp%nrow = hessJ%nrow 
         hessJtemp%ncol = hessJ%ncol 
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+        dgradJdvartemp = dgradJdvar
         
         ! Allocate initially to avoid errors 
         if (.not. allocated(hessJ%row)) then 
@@ -5562,7 +5801,8 @@ module gdmod_costfunction
             hessJ%nval = 0
             call hessJ%Allocate()
         end if 
-            
+        allocate(Jv(grid%vert%ntot))
+        Jv = 0.0_R8
 
         ! Compute cost function
         !======================
@@ -5571,12 +5811,15 @@ module gdmod_costfunction
             ! Compute
             call costfunction%cfv_lr%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+            Jv = costfunction%cfv_lr%Jv 
             
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for LR'
@@ -5584,19 +5827,25 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
+        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lr_val_vertices')
+        Jv = 0.0_R8
         
         ! Face angle difference
         if (costfunction%doFAD) then 
             ! Compute
             call costfunction%cfv_fad%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
-
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+            Jv = costfunction%cfv_fad%Jv 
+            
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for FAD'
@@ -5604,19 +5853,25 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
+        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fad_val_vertices')
+        Jv = 0.0_R8
 
         ! Face angle
         if (costfunction%doFA) then 
             ! Compute
             call costfunction%cfv_fa%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+            Jv = costfunction%cfv_fa%Jv 
 
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for FA'
@@ -5624,19 +5879,26 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
+        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fa_val_vertices')
+        Jv = 0.0_R8
 
         ! Psi ratio, psi based
         if (costfunction%doPRPB) then 
             ! Compute
             call costfunction%cfv_prpb%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+            Jv = costfunction%cfv_prpb%Jv 
 
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
+
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for PRPB'
@@ -5644,19 +5906,25 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
+        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv,'cfv_prpb_val_vertices')
+        Jv = 0.0_R8
 
         ! Length ratio, radial
         if (costfunction%doLRrad) then 
             ! Compute
             call costfunction%cfv_lrrad%Evaluate(Jtemp, gradJtemp, &
                 hessJtemp, grid, magneticField, environment, dogradient, &
-                dohessian, designvariables)
-
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+            Jv = costfunction%cfv_lrrad%Jv 
+            
             ! Add
             J       = J + Jtemp 
             gradJ   = gradJ + gradJtemp
             hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
 
             if (any(.not. ieee_is_finite(gradJtemp))) then 
                 print *, 'Non-finite values in gradJ for LRrad'
@@ -5664,11 +5932,20 @@ module gdmod_costfunction
 
             ! Deallocate
             call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
         end if 
+        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lrrad_val_vertices')
+        Jv = 0.0_R8
 
         ! Housekeeping
         !=============
-        deallocate(gradJtemp)
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
 
     end subroutine
 
@@ -5720,11 +5997,11 @@ module gdmod_costfunction
 
         ! Destroy
         !========
-        call costfunction%cfv_lr%Deallocate()
-        call costfunction%cfv_fad%Deallocate()
-        call costfunction%cfv_fa%Deallocate()
-        call costfunction%cfv_prpb%Deallocate()
-        call costfunction%cfv_lrrad%Deallocate()
+        if (costfunction%doLR) call costfunction%cfv_lr%Deallocate()
+        if (costfunction%doFAD) call costfunction%cfv_fad%Deallocate()
+        if (costfunction%doFA) call costfunction%cfv_fa%Deallocate()
+        if (costfunction%doPRPB) call costfunction%cfv_prpb%Deallocate()
+        if (costfunction%doLRrad) call costfunction%cfv_lrrad%Deallocate()
 
     end subroutine
     

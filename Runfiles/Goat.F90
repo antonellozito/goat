@@ -38,6 +38,13 @@ program Goat
     ! Modules
     !========
     use goatmod_userinput
+    use mod_global_environment, only: solps, SolpsPreamble
+    use mod_plotter, only: plotdir
+
+#if (defined(MUMPS) || defined(USE_MPI))
+    use mpi
+#endif
+
 
     ! Declare variables
     !==================
@@ -46,13 +53,40 @@ program Goat
     ! Loop variables
 
     ! Auxiliary
-    type(GoatoptionsUDT)    :: goatoptions
-    character(:), allocatable    :: filepath
+    type(GoatoptionsUDT)        :: goatoptions
+    character(:), allocatable   :: filepath
+
+#if (defined(MUMPS) || defined(USE_MPI))
+    ! MPI
+    integer                     :: rank, nrank, ierror
+#endif 
 
     ! Initialize
     !===========
+#if (defined(MUMPS) || defined(USE_MPI))
+    ! MPI call
+    call mpi_init(ierror)
+    call mpi_comm_rank(MPI_COMM_WORLD, rank, ierror)
+    call mpi_comm_size(MPI_COMM_WORLD, nrank, ierror)
+    if (rank == 0) then 
+        print *, 'mpi initialized with: ', nrank, 'processes'
+        print *, MPI_COMM_WORLD
+        if (nrank > 1) then 
+            print *, 'warning: goat not yet capable of using multiple processes, mpi only intended for MUMPS solver'
+        end if 
+    end if 
+#endif 
+
+    ! Set the filepath
     allocate(character(len('./GOAToptions.dat')) :: filepath)
     filepath = './GOAToptions.dat'
+
+    ! Call solps preamble
+    if (solps) then 
+        call SolpsPreamble('goat')
+    else
+        call execute_command_line('mkdir ' // plotdir)
+    end if
 
     ! Read the user input
     !====================
@@ -71,12 +105,38 @@ program Goat
         ! Grid deformation only
         call GDDriver(goatoptions)
 
+    case ('GG')
+
+        ! Grid generation only 
+        call GGDriver(goatoptions)
+
+    case ('GGGD')
+
+        ! Grid generation with subsequent grid deformation
+        call GGGDDriver(goatoptions)
+
+    case ('GDtest')
+
+        call GDtestdriver(goatoptions)
+
     case default 
 
         ! Call error handler
         call gdErrorHandler('Goat: unknown driver option')
 
     end select 
+
+    ! Finalize
+    !=========
+    ! Error handler
+    call ErrorStack%Print()
+
+#if (defined(MUMPS) || defined(USE_MPI))
+    ! MPI call
+    call mpi_finalize(ierror)
+#endif 
+
+
 
 end program Goat
                                     

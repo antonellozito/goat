@@ -16,16 +16,21 @@ inputfiles/*
 # ignore compiler files
 *.o
 
-# ignore .dat files in plotter
-src/Visualization/*.dat
-src/Visualization/Plotdata/*.dat
-
-# ignore non-python files in Python directory
-src/Visualization/Python/_*
-src/Visualization/Python/*.pyc
+# ignore pycache folders
+scripts/__pycache__/*
+scripts/python_source/__pycache__/*
 
 # ignore output files
 *.out
+executables/*
 
+# ignore run directory
+Runs/*
+runs/*
 
-
+# any local files, directories,...
+*.local
+*.local.*
+*.local/
+local_4
+local_5
