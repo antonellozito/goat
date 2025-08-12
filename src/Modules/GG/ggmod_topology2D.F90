@@ -5288,8 +5288,8 @@ module ggmod_topology2D
                     !allc(indtpc)%y = allc(i)%y([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
 
                     ! Append flux surface ID etc as well!
-                    call curvetypes%Append(curvetypes%Get(size(allc) + i))
-                    call fsIDs%Append(fsIDs%Get(size(allc) + i))
+                    call curvetypes%Append(curvetypes%Get(i))
+                    call fsIDs%Append(fsIDs%Get(i))
 
                     ! Second segment
                     startind = findloc(isstartface, .false., 1, back=.true.)
@@ -6489,7 +6489,13 @@ module ggmod_topology2D
                 outbnd = Vv(2:size(Vv)-1) >= 0
                 
                 ! Check
-                if (all(outbnd)) then 
+                if (size(outbnd) == 0) then 
+                    ! Face with only two vertices - only keep if both 
+                    ! vertices are non-zero 
+                    if (any(topomesh%face%vert(i, :) == 0)) then 
+                        rmface(i) = .true. 
+                    end if
+                elseif (all(outbnd)) then 
                     ! Remove, no issue
                     rmface(i) = .true.
                 elseif (all(outbnd(2:size(outbnd)-1)) .and. (size(outbnd) > 2)) then 
@@ -10156,7 +10162,7 @@ module ggmod_topology2D
                 else 
                     ! Only add start and end points
                     tx = [sx, ex]
-                    ty = [ex, ey]
+                    ty = [sy, ey]
                 end if 
 
                 ! Add
