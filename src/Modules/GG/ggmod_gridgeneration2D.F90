@@ -10006,13 +10006,24 @@ module ggmod_gridgeneration2D
             ! in end point ->  simply cut cell tube
             allocate(keepx(size(xint)))
             keepx = .true. 
-            if (any(l1%vert(1) == [l2%vert(1), l2%vert(l2%nv)])) then 
-                where (xint == l1%xl(1) .and. &
-                    yint == l1%yl(1)) keepx = .false. 
-            end if 
-            if (any(l1%vert(l1%nv) == [l2%vert(1), l2%vert(l2%nv)])) then 
-                where (xint == l1%xl(l1%nl) .and. &
-                    yint == l1%yl(l1%nl)) keepx = .false. 
+            where (s1raux == 0.0_R8 .or. s2raux == 0.0_R8) keepx = .false.
+            if (present(vertbased)) then 
+                if (vertbased) then 
+                    where (s1raux == 0.0_R8 .and. &
+                        (s2raux == 0.0_R8 .or. s2raux == real(l2%nv-1, kind=R8))) keepx = .false. 
+                    where (s1raux == real(l1%nv-1, kind=R8) .and. &
+                        (s2raux == 0.0_R8 .or. s2raux == real(l2%nv-1, kind=R8))) keepx = .false. 
+                else
+                    where (s1raux == 0.0_R8 .and. &
+                        (s2raux == 0.0_R8 .or. s2raux == real(l2%nl-1, kind=R8))) keepx = .false. 
+                    where (s1raux == real(l1%nl-1, kind=R8) .and. &
+                        (s2raux == 0.0_R8 .or. s2raux == real(l2%nl-1, kind=R8))) keepx = .false. 
+                end if
+            else 
+                where (s1raux == 0.0_R8 .and. &
+                        (s2raux == 0.0_R8 .or. s2raux == real(l2%nl-1, kind=R8))) keepx = .false. 
+                where (s1raux == real(l1%nl-1, kind=R8) .and. &
+                    (s2raux == 0.0_R8 .or. s2raux == real(l2%nl-1, kind=R8))) keepx = .false. 
             end if 
 
             ! Remove intersections
@@ -11688,7 +11699,7 @@ module ggmod_gridgeneration2D
                 ! Add if first or last radial face (if it exists) - 
                 ! should always be present 
                 if (((i == 1 .and. j == 1) .and. (hfline%vert(1) /= lfline%vert(1))) .or. &
-                    ((i == size(hflinevert) .and. j == size(hflinevert)) .and. &
+                    ((i == size(hflinevert) .and. j == size(lflinevert)) .and. &
                      (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)))) then 
                     ev1 = [ev1, v1]
                     ev2 = [ev2, v2]

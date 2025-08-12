@@ -945,7 +945,7 @@ module StructuredInterpolant2D
 
         ! Extract
         allocate(thisA(size(ind, 1), size(A, 2)))
-        !$omp parallel do default(none) schedule(static) if(.not. omp_in_parallel()) &
+        !$omp parallel do default(none) schedule(static) if((.not. omp_in_parallel()) .and. (nq > 100)) &
         !$omp private(i) shared(thisA, interp, ind)
         do i = 1, size(ind)
             thisA(i, :) = A(ind(i), :)
@@ -962,7 +962,7 @@ module StructuredInterpolant2D
         vq(:) = 0
 
         !$omp parallel default(none) shared(derivx, derivy, ind, &
-        !$omp xqn, yqn, thisA, interp, vq) if (.not. omp_in_parallel()) & 
+        !$omp xqn, yqn, thisA, interp, vq) if((.not. omp_in_parallel()) .and. (nq > 100)) & 
         !$omp private(i, j, indder, prefac, term) 
         !$omp do collapse(2) schedule(static)
         ! Note: we chose here not to reduce vq, since this may become very
@@ -988,7 +988,7 @@ module StructuredInterpolant2D
         
 
         ! Scale
-        !$omp parallel default(shared)
+        !$omp parallel default(shared) if((.not. omp_in_parallel()) .and. (nq > 100))
         !$omp workshare
         vq = vq*1/( (refdx(ind))**derivx * (refdy(ind))**derivy)
         !$omp end workshare

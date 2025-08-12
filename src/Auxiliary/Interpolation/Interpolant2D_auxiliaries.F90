@@ -98,7 +98,7 @@ module Interpolant2D_auxiliaries
 
         ! Loop over all query points
         !$omp parallel do default(none) private(indx, indy, k) &
-        !$omp if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp if((.not. omp_in_parallel()) .and. (nq > 100)) schedule(dynamic) & 
         !$omp shared(nq, xq, x, nx, yq, y, ny, ind)
         do k = 1, nq
             ! Get the bin index for x
