@@ -6266,18 +6266,22 @@ module ggmod_topology2D
                 ! instead of boundary faces (these may be contour parts
                 ! etc)
 
-                if (face%type(i) /= TMfacebndID) then 
+                if ((face%type(i) /= TMfacebndID) .and. (face%x(i)%Size() > 2)) then 
                     tf = i
-                elseif (face%type(faceID(i)) /= TMfacebndID) then 
+                elseif ((face%type(faceID(i)) /= TMfacebndID) .and. (face%x(faceID(i))%Size() > 2)) then 
                     tf = faceID(i)
+                elseif (face%x(i)%Size() > 2) then 
+                    tf = i 
                 else
-                    tf = i ! default
+                    tf = faceID(i)
                 end if 
 
                 ! Get number of points of this face
                 np = face%x(tf)%Size()
                 if (np < 3) then  ! end points should be the same and duplicate
                     ! Issue message: we cannot split up this boundary
+                    print *, 'face vertices: ', face%vert(i, 1), face%vert(i, 2)
+                    call WriteTopologicalMesh(topomesh,'topomesh_error')
                     call gdErrorHandler('SplitTopologicalMeshFaces: ' // & 
                         'face with same vertices found with only ' // & 
                         'two coordinates, cannot split up')
@@ -8016,6 +8020,14 @@ module ggmod_topology2D
 
         !  Construct new polygon
         call tp%Construct(x%Get(), y%Get())
+
+        ! Ensure minimal amount of vertices
+        if (tp%nv < 4) then ! 4 should be adequate to represent also closed polygons
+            call tp%Refine(0.0_R8, 4)
+            x = ConstructRealDynamicArray(tp%x(tp%vert))
+            y = ConstructRealDynamicArray(tp%y(tp%vert))
+        end if 
+
 
         ! Concatenate
         !============
