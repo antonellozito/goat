@@ -1795,7 +1795,11 @@ module mod_polygon
         dxe = x(2:ne+1) - x(1:ne)
         dye = y(2:ne+1) - y(1:ne)
         le = sqrt( dxe**2 + dye**2 )
-        nne = floor(le/dlmax)
+        if (dlmax > 0.0_R8) then 
+            nne = floor(le/dlmax)
+        else
+            nne = floor(0.0_R8*le)
+        end if 
         where (nne < minsplit) nne = minsplit
 
         ! Initialize new edges
