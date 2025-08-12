@@ -11699,7 +11699,7 @@ module ggmod_gridgeneration2D
                 ! Add if first or last radial face (if it exists) - 
                 ! should always be present 
                 if (((i == 1 .and. j == 1) .and. (hfline%vert(1) /= lfline%vert(1))) .or. &
-                    ((i == size(hflinevert) .and. j == size(hflinevert)) .and. &
+                    ((i == size(hflinevert) .and. j == size(lflinevert)) .and. &
                      (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)))) then 
                     ev1 = [ev1, v1]
                     ev2 = [ev2, v2]
