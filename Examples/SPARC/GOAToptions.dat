@@ -90,8 +90,8 @@ VERSION 1.00.00
 'goat.vessel.readmeth'          'read_structure'
 
 # Refinement options for vessel
-'goat.vessel.refinevessel'          '0'
-'goat.vessel.maxvesseldist'         '1e-2'
+'goat.vessel.refinevessel'          '1'
+'goat.vessel.maxvesseldist'         '1e-3'
 
 # Target plate definition
 'goat.vessel.TP'                    '[4, 5]'
@@ -443,16 +443,17 @@ VERSION 1.00.00
 'gg.tm.contour.dl'              '0.02'
 
 # Core boundary and region treatment
-'gg.tm.doadaptations'           '0'
+'gg.tm.doadaptations'           '1'
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '0'
 'gg.tm.cbnd.frac'               '0.1'
 'gg.tm.PFbnd.frac'              '0.1'
 'gg.tm.removecoreregions'       '1'
 'gg.tm.removewidegridregions'   '0'
-'gg.tm.mergetangencypointtubes' '0'
+'gg.tm.mergetangencypointtubes' '1'
+'gg.tm.mergeavptubes'           '1'
 'gg.tm.dpsimintangencypointtubes'   '0.0'
-'gg.tm.lradmintangencypointtubes'   '0.5e-3'
+'gg.tm.lradmintangencypointtubes'   '1.0e-2'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'
@@ -461,7 +462,7 @@ VERSION 1.00.00
 'gg.tm.rvrcascadedir'           'up'
 'gg.tm.rvrfullycovered'         '1'
 
-'gg.tm.alignvesselparts'        '0'
+'gg.tm.alignvesselparts'        '1'
 'gg.tm.avpminangle'             '5.0'
 'gg.tm.avprefinevessel'         '0'
 'gg.tm.avpmaxvesseldist'        '2e-3'
@@ -475,7 +476,7 @@ VERSION 1.00.00
 # adaptations
 'gg.adap.extendtptubes'                 '1'
 'gg.adap.extendvesseltubes'             '1'
-'gg.adap.evt.maxvessellength'           '0.2'
+'gg.adap.evt.maxvessellength'           '0.1'
 
 
 # Refinement options
