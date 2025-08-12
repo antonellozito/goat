@@ -3498,9 +3498,12 @@ module mod_polygon
                 // ' coordinates')
         end if 
 
-        ! Check determinant
-        det = -dy1*dx2 + dx1*dy2
-        if ( (abs(det) < macheps) ) then 
+        ! Check determinant/slopes
+        r1 = dx1/dy1
+        r2 = dx2/dy2 
+
+        det = r1 - r2 
+        if ( (abs(det) < macheps) .or. (abs(dy1) < macheps .and. abs(dy2) < macheps)) then 
             ! Parallel or collinear lines - need to check collinearity
             
             ! Compute normal
@@ -3706,12 +3709,13 @@ module mod_polygon
         real(R8)                :: nan, d1, d2, dotprod, d11, d12, &
             d21, d22, dp11, dp12, dp21, dp22, vx1121, vx1122, vx1221, vx1222, &
             vy1121, vy1122, vy1221, vy1222, x2, y2
-        logical                 :: v11on2, v12on2, v21on1, v22on1
+        logical                 :: v11on2, v12on2, v21on1, v22on1, hasoverlap
 
         ! Compute intersection
         !=====================
         ! Check if edges overlap, if so: compute intersections
-        if (CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, x22, y22)) then 
+        hasoverlap = CheckEdgeOverlap(x11, y11, x12, y12, x21, y21, x22, y22)
+        if (hasoverlap) then 
             call LineIntersections(x, y, x11, y11, x12, y12, x21, y21, &
                 x22, y22)
         else 
