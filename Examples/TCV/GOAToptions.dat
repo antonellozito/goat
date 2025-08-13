@@ -447,9 +447,9 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 
 # Read exising file? 
-'gg.tm.readexistingTM'          '1'
-'gg.tm.readexistingtracers'     '1'
-'gg.tm.TMfilepath'              './output/topomesh.dat'
+'gg.tm.readexistingTM'          '0'
+'gg.tm.readexistingtracers'     '0'
+'gg.tm.TMfilepath'              './output/topomesh_base.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
 
@@ -472,7 +472,7 @@ VERSION 1.00.00
 'gg.tm.contour.dl'              '0.02'
 
 # Core boundary and region treatment
-'gg.tm.doadaptations'           '0'
+'gg.tm.doadaptations'           '1'
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '0'
 'gg.tm.cbnd.frac'               '0.1'
@@ -491,7 +491,7 @@ VERSION 1.00.00
 'gg.tm.rvrfullycovered'         '1'
 
 'gg.tm.alignvesselparts'        '1'
-'gg.tm.avpminangle'             '5.0'
+'gg.tm.avpminangle'             '10.0'
 'gg.tm.avprefinevessel'         '0'
 'gg.tm.avpmaxvesseldist'        '2e-3'
 'gg.tm.avpminreffac'            '10'
