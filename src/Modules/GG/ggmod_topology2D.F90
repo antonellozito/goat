@@ -4560,7 +4560,7 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)     :: tx, ty, xf, yf, dx, &
             dy, dn, bxf, byf, bnf, alpha, tpsinb1, tpsinb2, tpsitp, &
             xout, yout, iout, jout, tscr, dl, dlsum, thisx, thisy, &
-            cosalpha, sinalpha, alphasigned
+            cosalpha, sinalpha, alphasigned, fval, dfval
 
         type(ContourUDT), allocatable           :: tempc(:), allc(:)
         type(IntegerDynamicArrayUDT)            :: fsIDs, curvetypes, &
@@ -4667,9 +4667,13 @@ module ggmod_topology2D
                     cosalpha = bxf*dx + byf*dy
                     sinalpha = bxf*dy - byf*dx
                     alphasigned = atan2(sinalpha, cosalpha)
-                    isalphapos = alphasigned > 0.0_R8
+                    fval = fieldtracer%Evaluate(tx, ty)
+                    dfval = fval(2:) - fval(1:size(fval)-1)
+                    isalphapos = dfval > 0.0_R8
                     alpha = abs(alphasigned)
                     isedgealigned = (alpha < avpminangle) .or. ((pi_R8 - alpha) < avpminangle) 
+                    
+                    
 
                     ! Check if we should mark
                     if (any(isedgealigned)) then 
@@ -5288,8 +5292,8 @@ module ggmod_topology2D
                     !allc(indtpc)%y = allc(i)%y([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
 
                     ! Append flux surface ID etc as well!
-                    call curvetypes%Append(curvetypes%Get(size(allc) + i))
-                    call fsIDs%Append(fsIDs%Get(size(allc) + i))
+                    call curvetypes%Append(curvetypes%Get(i))
+                    call fsIDs%Append(fsIDs%Get(i))
 
                     ! Second segment
                     startind = findloc(isstartface, .false., 1, back=.true.)
@@ -6266,18 +6270,22 @@ module ggmod_topology2D
                 ! instead of boundary faces (these may be contour parts
                 ! etc)
 
-                if (face%type(i) /= TMfacebndID) then 
+                if ((face%type(i) /= TMfacebndID) .and. (face%x(i)%Size() > 2)) then 
                     tf = i
-                elseif (face%type(faceID(i)) /= TMfacebndID) then 
+                elseif ((face%type(faceID(i)) /= TMfacebndID) .and. (face%x(faceID(i))%Size() > 2)) then 
                     tf = faceID(i)
+                elseif (face%x(i)%Size() > 2) then 
+                    tf = i 
                 else
-                    tf = i ! default
+                    tf = faceID(i)
                 end if 
 
                 ! Get number of points of this face
                 np = face%x(tf)%Size()
                 if (np < 3) then  ! end points should be the same and duplicate
                     ! Issue message: we cannot split up this boundary
+                    print *, 'face vertices: ', face%vert(i, 1), face%vert(i, 2)
+                    call WriteTopologicalMesh(topomesh,'topomesh_error')
                     call gdErrorHandler('SplitTopologicalMeshFaces: ' // & 
                         'face with same vertices found with only ' // & 
                         'two coordinates, cannot split up')
@@ -6489,7 +6497,13 @@ module ggmod_topology2D
                 outbnd = Vv(2:size(Vv)-1) >= 0
                 
                 ! Check
-                if (all(outbnd)) then 
+                if (size(outbnd) == 0) then 
+                    ! Face with only two vertices - only keep if both 
+                    ! vertices are non-zero 
+                    if (any(topomesh%face%vert(i, :) == 0)) then 
+                        rmface(i) = .true. 
+                    end if
+                elseif (all(outbnd)) then 
                     ! Remove, no issue
                     rmface(i) = .true.
                 elseif (all(outbnd(2:size(outbnd)-1)) .and. (size(outbnd) > 2)) then 
@@ -8010,6 +8024,14 @@ module ggmod_topology2D
 
         !  Construct new polygon
         call tp%Construct(x%Get(), y%Get())
+
+        ! Ensure minimal amount of vertices
+        if (tp%nv < 4) then ! 4 should be adequate to represent also closed polygons
+            call tp%Refine(0.0_R8, 4)
+            x = ConstructRealDynamicArray(tp%x(tp%vert))
+            y = ConstructRealDynamicArray(tp%y(tp%vert))
+        end if 
+
 
         ! Concatenate
         !============
@@ -10156,7 +10178,7 @@ module ggmod_topology2D
                 else 
                     ! Only add start and end points
                     tx = [sx, ex]
-                    ty = [ex, ey]
+                    ty = [sy, ey]
                 end if 
 
                 ! Add
