@@ -4560,7 +4560,7 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)     :: tx, ty, xf, yf, dx, &
             dy, dn, bxf, byf, bnf, alpha, tpsinb1, tpsinb2, tpsitp, &
             xout, yout, iout, jout, tscr, dl, dlsum, thisx, thisy, &
-            cosalpha, sinalpha, alphasigned
+            cosalpha, sinalpha, alphasigned, fval, dfval
 
         type(ContourUDT), allocatable           :: tempc(:), allc(:)
         type(IntegerDynamicArrayUDT)            :: fsIDs, curvetypes, &
@@ -4667,9 +4667,13 @@ module ggmod_topology2D
                     cosalpha = bxf*dx + byf*dy
                     sinalpha = bxf*dy - byf*dx
                     alphasigned = atan2(sinalpha, cosalpha)
-                    isalphapos = alphasigned > 0.0_R8
+                    fval = fieldtracer%Evaluate(tx, ty)
+                    dfval = fval(2:) - fval(1:size(fval)-1)
+                    isalphapos = dfval > 0.0_R8
                     alpha = abs(alphasigned)
                     isedgealigned = (alpha < avpminangle) .or. ((pi_R8 - alpha) < avpminangle) 
+                    
+                    
 
                     ! Check if we should mark
                     if (any(isedgealigned)) then 
