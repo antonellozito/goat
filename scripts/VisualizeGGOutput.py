@@ -160,6 +160,17 @@ try:
 except:
     print("Could not plot grid cell area")
 
+# Face intersections (if present)
+try:
+    coord = dh.GetVertexCoordinates(datadir + '/' + 'gg_faceintersections.dat')
+except:
+    print("Could not load intersection data")
+try: 
+    plotter.PlotGridCells(simgrid, 9)
+    plotter.PlotPoints2D(coord[:, 0], coord[:, 1], 9, color='r', marker='o')
+except:
+    print("Could not plot intersection data")
+
 # Show figures
 #-------------
 plotter.ShowFigures()
