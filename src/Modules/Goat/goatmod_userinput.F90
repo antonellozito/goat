@@ -159,6 +159,37 @@ module goatmod_userinput
     end type
 
     !------------------------------------------------------------------!
+    !                          GRID ADAPTATION                         !
+    !------------------------------------------------------------------! 
+    type, extends(OptionsUDT) :: GAoptionsUDT   
+
+        ! Structure containing the options for the grid adaptation part 
+        ! of GOAT. The following fields are present:
+        ! # TODO 
+
+        ! General adaptation options
+        logical                     :: plt
+        logical                     :: plt_qm
+        logical                     :: timing
+        character(:), allocatable   :: meth
+
+        ! Files to read other options
+        character(:), allocatable   :: operationsoptionsfile 
+        character(:), allocatable   :: splittingoptionsfile 
+        character(:), allocatable   :: mergingoptionsfile 
+        character(:), allocatable   :: pentagonoptionsfile
+        character(:), allocatable   :: distancefunctionoptionsfile
+
+    contains
+
+        ! Routines to manipulate the options
+        procedure   :: Read             => ReadGAOptions 
+        procedure   :: SetDefaults      => SetDefaultGAoptions
+
+
+    end type
+   
+    !------------------------------------------------------------------!
     !                          GRID DEFORMATION                        !
     !------------------------------------------------------------------!
 
@@ -772,6 +803,30 @@ module goatmod_userinput
 
     end subroutine
 
+    ! Grid adaptations options routines
+    subroutine SetDefaultGAoptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAoptionsUDT)       :: options   
+        
+        ! General options
+        options%plt         = .true.
+        options%plt_qm      = .false.
+        options%timing      = .false.
+        options%meth        = 'simple'
+
+        ! Files to read other options
+        options%operationsoptionsfile       = './GOAToptions.dat'
+        options%splittingoptionsfile        = './GOAToptions.dat'
+        options%mergingoptionsfile          = './GOAToptions.dat'
+        options%pentagonoptionsfile         = './GOAToptions.dat'
+        options%distancefunctionoptionsfile = './GOAToptions.dat'       
+
+    end subroutine
+
+
     ! Grid deformation options routines
     subroutine SetDefaultGDOptions(options)
 
@@ -1282,6 +1337,82 @@ module goatmod_userinput
         ! Close the file
         close(unit=fid)
 
+
+    end subroutine
+
+    ! Grid adaptation options reader
+    subroutine ReadGAOptions(options)
+
+        ! Description
+        !============
+        ! This routine reads in the ga options from a file of which 
+        ! the full path should be given in options%inputfilepath. The default
+        ! options should have already been set at this point, as this 
+        ! routine will only overwrite options that are present in the 
+        ! user-specified options file. If no options file is present, 
+        ! nothing is read in and a message will be shown.
+        
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAoptionsUDT)            :: options  
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof, throwerror
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+        throwerror = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadGAOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadGAOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if  
+        
+        ! Read options
+        !=============
+        ! General
+        field = 'ga.plt'
+        call ExtractOptionValueLogical0D(fid, field, options%plt)
+        field = 'ga.plt_qm'
+        call ExtractOptionValueLogical0D(fid, field, options%plt_qm) 
+        field = 'ga.timing'  
+        call ExtractOptionValueLogical0D(fid, field, options%timing)               
+        field = 'ga.meth'
+        call ExtractOptionValueCharacter(fid, field, options%meth)        
+
+        ! Files to read other options
+        field = 'ga.operationsoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%operationsoptionsfile)
+        field = 'ga.splittingoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%splittingoptionsfile)
+        field = 'ga.mergingoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%mergingoptionsfile)
+        field = 'ga.pentagonoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%pentagonoptionsfile)
+        field = 'ga.distancefunctionoptionsfile'
+        call ExtractOptionValueCharacter(fid, field, options%distancefunctionoptionsfile)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
 
     end subroutine
 
