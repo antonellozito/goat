@@ -52,7 +52,7 @@ module gamod_driver
         ! Initialize grid adaptation
         !===========================
         ! TODO call GAinit
-        call gaoptions%Set()    ! Also do other options???
+        call gaoptions%Set()    ! Also do other options, or make then a subtype???
 
         ! Driver Selection
         !=================
