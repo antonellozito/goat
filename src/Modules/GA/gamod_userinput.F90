@@ -23,8 +23,6 @@ module gamod_userinput
     save
     public 
 
-    ! Read namelist from file
-
     ! All functions
 
     !==================================================================!

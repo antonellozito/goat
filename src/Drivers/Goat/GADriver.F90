@@ -22,6 +22,9 @@ subroutine GADriver(goatoptions)
     type(GridUDT)               :: grid 
     type(MagneticFieldUDT)      :: magneticField 
     type(EnvironmentUDT)        :: environment
+
+    ! Other options
+    type(GAoptionsUDT)          :: gaoptions
     
     ! Auxiliary
 
@@ -30,9 +33,18 @@ subroutine GADriver(goatoptions)
     ! Read and extract data
     call ExtractGoatData(grid, magneticField, environment, goatoptions)
 
+    ! Set grid adaptation options
+    gaoptions%inputfilepath = goatoptions%inputfilepath
+    call gaoptions%Set()
+
     ! Run adaptations
     !================
-    ! TODO 
+    call GridAdaptor(grid,environment,magneticField,gaoptions)
+
+
+    ! Post-processing
+    !================
+    ! call PostProcessingGridInformation(grid,magneticField,goatoptions)
 
     ! Write data
     !===========
