@@ -11,6 +11,7 @@ subroutine GADriver(goatoptions)
     ! Modules
     use goatmod_types 
     use goatmod_userinput
+    use gamod_driver
 
     ! The usual
     implicit none 

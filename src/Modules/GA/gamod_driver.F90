@@ -44,24 +44,23 @@ module gamod_driver
         ! Arguments
         type(GridUDT)               :: grid
         type(EnvironmentUDT)        :: environment
-        type(MagneticFieldUDT)      :: magneticField
-        type(GoatoptionsUDT)        :: options        
+        type(MagneticFieldUDT)      :: magneticField     
         
-        type(GAoptionsUDT)          :: gaoptions
+        type(GAoptionsUDT)          :: options
 
         ! Initialize grid adaptation
         !===========================
         ! TODO call GAinit
-        call gaoptions%Set()    ! Also do other options, or make then a subtype???
+        
 
         ! Driver Selection
         !=================
-        select case (gaoptions%meth)
+        select case (options%meth)
 
         case ('simple')
 
             ! Regular grid adaption
-            ! call GAInternalDriver
+            ! call GAInternalDriver(grid,gaoptions,environment,magneticField)
 
         case ('aposteriori')
 
@@ -79,6 +78,67 @@ module gamod_driver
         !===============
         ! call postprocessGA
 
+    end subroutine
+
+    subroutine GAinit(grid,options,environment)
+
+        ! Description
+        !============
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GridUDT)          :: grid 
+        class(GAoptionsUDT)     :: options
+        class(EnvironmentUDT)   :: environment
+
+        ! Variables
+        integer(I8) :: icv, s, nv, vc(1:100)
+        real(R8) :: cvX(grid%cell%ntot), cvY(grid%cell%ntot)
+
+
+        ! Set gaoptions
+        call options%Set()    ! Also do other options, or make then a subtype???
+
+
+        ! Recompute cell centers
+        do icv = 1, grid%cell%ntot
+            s = grid%cell%vertP(icv,1)
+            nv = grid%cell%vertP(icv,2)
+            vc(1:nv) = grid%cell%vert(s:s+nv-1)
+            cvX(icv) = sum(grid%vert%x(vc(1:nv)))/nv
+            cvY(icv) = sum(grid%vert%y(vc(1:nv)))/nv
+        end do
+
+        grid%cell%x = cvX
+        grid%cell%y = cvY
+
+        ! Check order of vertices  (see GetGeo_usCouples.m)
+        ! call CheckVertOrder, 
+
+        ! Get fsVx from fsFc
+
+        ! Determine Xpoints and separatrices
+
+        ! Identify aligned faces
+
+
+        ! Check the connectivity
+
+        ! correct face labels
+
+        ! Remove some connectivity field
+
+        ! Identify farSOL cells
+        
+
+
+    end subroutine
+
+    subroutine GAInternalDriver()
+
+        ! Description
+        !============
     end subroutine
 
 
