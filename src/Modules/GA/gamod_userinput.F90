@@ -78,6 +78,20 @@ module gamod_userinput
 
     ! Options to specify the splitting operations
     type, extends(OptionsUDT) :: SplittingOptionsUDT
+
+        ! TODO explanation on all options
+        logical                     :: no_pents
+        character(:), allocatable   :: QTtype
+        logical                     :: split_out
+        character(:), allocatable   :: splittype
+        integer(I8)                 :: n_split
+        character(:), allocatable   :: typeT
+        character(:), allocatable   :: rad_type
+        character(:), allocatable   :: pol_type
+        real(R8)                    :: dist_function_threshold_split
+        real(R8)                    :: dist_function_threshold_split_Wall
+        
+        
     contains
   
         procedure :: SetDefaults     => SetDefaultSplittingOptions
@@ -184,7 +198,19 @@ module gamod_userinput
         class(SplittingOptionsUDT)    :: options
 
         ! Default options
-        !================        
+        !================   
+        options%no_pents = .true.
+        options%QTtype = 'regular'
+        options%split_out = .false.
+        options%splittype = 'rad'
+        options%n_split = 20
+        options%typeT = 'cutcell'
+        options%rad_type = 'h_rad'
+        options%pol_type = 'trias'
+        options%dist_function_threshold_split = 0.9
+        options%dist_function_threshold_split_wall = 0.6    
+        
+        
     end subroutine
 
     subroutine SetDefaultMergingOptions(options)
@@ -340,7 +366,7 @@ module gamod_userinput
     subroutine ReadSplittingOptions(options)
         ! Description
         !============
-        ! Read in user-specified adaption operation options 
+        ! Read in user-specified splitting options 
         
         ! Declare variables
         !==================
@@ -353,8 +379,52 @@ module gamod_userinput
         integer, parameter              :: fid = 10        
         
         ! Initialize
-        !===========        
+        !===========   
 
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadSplittingOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadSplittingOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if     
+        
+        ! Read options
+        !=============  
+        field = 'ga.no_pents'
+        call ExtractOptionValueLogical0D(fid, field, options%no_pents)         
+        field = 'ga.QTtype'
+        call ExtractOptionValueCharacter(fid, field, options%QTtype) 
+        field = 'ga.split_out'
+        call ExtractOptionValueLogical0D(fid, field, options%split_out)
+        field = 'ga.splittype'
+        call ExtractOptionValueCharacter(fid, field, options%splittype)
+        field = 'ga.n_split'
+        call ExtractOptionValueReal0D(fid, field, options%n_split)
+        field = 'ga.typeT'
+        call ExtractOptionValueCharacter(fid, field, options%typeT)                                   
+        field = 'ga.rad_type'
+        call ExtractOptionValueCharacter(fid, field, options%rad_type)                                   
+        field = 'ga.pol_type'
+        call ExtractOptionValueCharacter(fid, field, options%pol_type)
+        field = 'ga.dist_function_threshold_split'
+        call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_split)                                    
+        field = 'ga.dist_function_threshold_split_wall'
+        call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_split_wall)                                           
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid) 
+
+        
     end subroutine
 
     subroutine ReadMergingOptions(options)
