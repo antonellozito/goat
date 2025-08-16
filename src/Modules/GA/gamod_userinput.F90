@@ -95,7 +95,7 @@ module gamod_userinput
     contains
   
         procedure :: SetDefaults     => SetDefaultSplittingOptions
-        procedure :: Read           => ReadSplittingOptions
+        procedure :: Read            => ReadSplittingOptions
 
     end type    
 
@@ -140,6 +140,16 @@ module gamod_userinput
     
     ! Options to specify the distance function settings
     type, extends(OptionsUDT) :: DistancefunctionOptionsUDT
+
+        ! TODO explain all options
+        logical                     :: dist_function
+        real(R8)                    :: d_rescale
+        real(R8)                    :: d_rescale_wall
+        character(:), allocatable   :: dist_type
+        character(:), allocatable   :: dist_type_wall
+        character(:), allocatable   :: d_char_type
+        logical                     :: plt_dist_func
+
     contains
   
         procedure :: SetDefaults    => SetDefaultDistancefunctionOptions
@@ -290,7 +300,15 @@ module gamod_userinput
         class(DistancefunctionOptionsUDT)    :: options
 
         ! Default options
-        !================        
+        !================
+        options%dist_function = .true.
+        options%d_rescale = 0.5
+        options%d_rescale_wall = 0.5
+        options%dist_type = 'target_single_null'
+        options%dist_type_wall = 'target_to_vessel'
+        options%d_char_type = 'min_Xpoint_dist'
+        options%plt_dist_func = .false.
+
     end subroutine
 
     !------------------------------------------------------------------!
@@ -597,7 +615,45 @@ module gamod_userinput
         integer, parameter              :: fid = 10        
         
         ! Initialize
-        !===========        
+        !=========== 
+        
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadDistancefunctionOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadDistancefunctionOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if     
+        
+        ! Read options
+        !=============
+        field = 'ga.dist_function'
+        call ExtractOptionValueLogical0D(fid, field, options%dist_function)
+        field = 'ga.d_rescale'     
+        call ExtractOptionValueReal0D(fid, field, options%d_rescale)                             
+        field = 'ga.d_rescale_wall'     
+        call ExtractOptionValueReal0D(fid, field, options%d_rescale_wall)
+        field = 'ga.dist_type'
+        call ExtractOptionValueCharacter(fid, field, options%dist_type)
+        field = 'ga.dist_type_wall'
+        call ExtractOptionValueCharacter(fid, field, options%dist_type_wall)
+        field = 'ga.d_char_type'
+        call ExtractOptionValueCharacter(fid, field, options%d_char_type)
+        field = 'ga.plt_dist_function'
+        call ExtractOptionValueLogical0D(fid, field, options%plt_dist_function)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+            
     end subroutine
 
 end module
