@@ -269,14 +269,66 @@ module gamod_userinput
         
         ! Read options
         !=============
+
+        ! Small triangles
+        !================
         field = 'ga.rem_small_trias'
         call ExtractOptionValueLogical0D(fid, field, options%rem_small_trias)        
         field = 'ga.cut_off_pol'
         call ExtractOptionValueReal0D(fid, field, options%cut_off_pol) 
         field = 'ga.cut_off_surf'
         call ExtractOptionValueReal0D(fid, field, options%cut_off_surf)
+
+        ! Stacked triangles
+        !==================
         field = 'ga.stacked_trias'
         call ExtractOptionValueLogical0D(fid, field, options%stacked_trias)          
+        field = 'ga.stacked_trias_checkAR'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_trias_checkAR)     
+        field = 'ga.stacked_trias_maxAR'
+        call ExtractOptionValueReal0D(fid, field, options%stacked_trias_maxAR)
+        field = 'ga.merge_stacked_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%merge_stacked_trias)
+        field = 'ga.merge_stacked_trias_angle_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%merge_stacked_trias_angle_threshold)
+        field = 'ga.merge_trap_into_stacked'
+        call ExtractOptionValueLogical0D(fid, field, options%merge_trap_into_stacked)    
+        
+        ! Stacked to cutcell
+        !===================
+        field = 'ga.stacked_to_cutcell'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_to_cutcell)
+        field = 'ga.stacked_to_cutcell_uniform'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_to_cutcell_uniform)
+
+        ! Splitting and merging
+        !======================
+        field = 'ga.splitting'
+        call ExtractOptionValueLogical0D(fid, field, options%splitting)    
+        field = 'ga.pents_to_tria' 
+        call ExtractOptionValueLogical0D(fid, field, options%pents_to_tria)
+        field = 'ga.merging'
+        call ExtractOptionValueLogical0D(fid, field, options%merging)
+        field = 'ga.h_rad_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%h_rad_threshold)                
+        field = 'ga.h_rad_core_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%h_rad_core_threshold)  
+        
+        ! Special operations
+        !===================
+        field = 'ga.rem_stickout_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_stickout_trias)        
+        field = 'ga.rem_trias_flux'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_trias_flux)        
+        field = 'ga.rem_tube_outershell_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%rem_tube_outershell_threshold)  
+        field = 'ga.outershell_handling'
+        call ExtractOptionValueCharacter(fid, field, options%outershell_handling)
+        field = 'ga.remove_stickoutquad'        
+        call ExtractOptionValueLogical0D(fid, field, options%remove_stickoutquad)
+        field = 'ga.split_noalignedquads'
+        call ExtractOptionValueLogical0D(fid, field, options%split_noalignedquads)        
+        
         
 
         ! Housekeeping
