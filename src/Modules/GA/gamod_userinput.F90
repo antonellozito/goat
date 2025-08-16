@@ -119,9 +119,21 @@ module gamod_userinput
     
     ! Options to specify the pentagon setting
     type, extends(OptionsUDT) :: PentagonOptionsUDT
+
+        ! TODO explain all options
+        logical                     :: no_pents_area_merge
+        logical                     :: no_pents_area_split
+        character(:), allocatable   :: no_pents_area_type
+
+        real(R8)                    :: no_pents_area_maxR
+        real(R8)                    :: no_pents_area_minR
+        real(R8)                    :: no_pents_area_maxZ
+        real(R8)                    :: no_pents_area_minZ
+
+
     contains
   
-        procedure :: SetDefaults     => SetDefaultPentagonOptions
+        procedure :: SetDefaults    => SetDefaultPentagonOptions
         procedure :: Read           => ReadPentagonOptions
 
     end type
@@ -130,7 +142,7 @@ module gamod_userinput
     type, extends(OptionsUDT) :: DistancefunctionOptionsUDT
     contains
   
-        procedure :: SetDefaults     => SetDefaultDistancefunctionOptions
+        procedure :: SetDefaults    => SetDefaultDistancefunctionOptions
         procedure :: Read           => ReadDistancefunctionOptions
 
     end type     
@@ -255,7 +267,16 @@ module gamod_userinput
         class(PentagonOptionsUDT)    :: options
 
         ! Default options
-        !================        
+        !================  
+        options%no_pents_area_merge = .false.
+        options%no_pents_area_split = .true.
+        options%no_pents_area_type  = 'dist_function'
+        
+        options%no_pents_area_maxR  = 2.5
+        options%no_pents_area_minR  = 1
+        options%no_pents_area_maxZ  = -0.9
+        options%no_pents_area_minZ  = -2
+
     end subroutine
 
     subroutine SetDefaultDistancefunctionOptions(options)
@@ -517,7 +538,47 @@ module gamod_userinput
         integer, parameter              :: fid = 10        
         
         ! Initialize
-        !===========        
+        !=========== 
+        
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadPentagonOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadPentagonOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if     
+        
+        ! Read options
+        !============= 
+        field = 'ga.no_pents_area_merge'
+        call ExtractOptionValueLogical0D(fid, field, options%no_pents_area_merge)        
+        field = 'ga.no_pents_area_split'
+        call ExtractOptionValueLogical0D(fid, field, options%no_pents_area_split)        
+        field = 'ga.no_pents_area_type'
+        call ExtractOptionValueCharacter(fid, field, options%no_pents_area_type)     
+           
+        field = 'ga.no_pents_area_maxR'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_maxR)        
+        field = 'ga.no_pents_area_minR'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_minR)        
+        field = 'ga.no_pents_area_maxZ'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_maxZ)        
+        field = 'ga.no_pents_area_minZ'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_minZ)        
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+    
+
     end subroutine
 
     subroutine ReadDistancefunctionOptions(options)
