@@ -330,7 +330,6 @@ module gamod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%split_noalignedquads)        
         
         
-
         ! Housekeeping
         !=============
         ! Close the file
