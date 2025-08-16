@@ -646,8 +646,8 @@ module gamod_userinput
         call ExtractOptionValueCharacter(fid, field, options%dist_type_wall)
         field = 'ga.d_char_type'
         call ExtractOptionValueCharacter(fid, field, options%d_char_type)
-        field = 'ga.plt_dist_function'
-        call ExtractOptionValueLogical0D(fid, field, options%plt_dist_function)
+        field = 'ga.plt_dist_func'
+        call ExtractOptionValueLogical0D(fid, field, options%plt_dist_func)
 
         ! Housekeeping
         !=============
