@@ -373,12 +373,12 @@ VERSION 1.00.00
 
 # Merging options
 'ga.no_hex'           '1'
-'ga.merg_crit'        'h_pol'
+'ga.merge_crit'        'h_pol'
 'ga.merge_h_pol_factor' '1.5'
-'ga.n_merg'           '100'
+'ga.n_merge'           '100'
 'ga.dist_function_threshold_merge' '0.8'
-'ga.merg_crit2'       'h_rad_core'
-'ga.n_merg2'          '20'
+'ga.merge_crit2'       'h_rad_core'
+'ga.n_merge2'          '20'
 
 # Pentagon allowance
 'ga.no_pents_area_merge' '0'

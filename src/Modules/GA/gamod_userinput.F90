@@ -38,35 +38,35 @@ module gamod_userinput
 
 
         ! TODO: explanation on all options!!!!
-        logical         :: rem_small_trias
-        real(R8)        :: cut_off_pol
-        real(R8)         :: cut_off_surf
+        logical                     :: rem_small_trias
+        real(R8)                    :: cut_off_pol
+        real(R8)                    :: cut_off_surf
 
-        logical         :: stacked_trias
-        logical         :: stacked_trias_checkAR
-        real(R8)        :: stacked_trias_maxAR
-        logical         :: merge_stacked_trias
-        real(R8)        :: merge_stacked_trias_angle_threshold
-        logical         :: merge_trap_into_stacked
+        logical                     :: stacked_trias
+        logical                     :: stacked_trias_checkAR
+        real(R8)                    :: stacked_trias_maxAR
+        logical                     :: merge_stacked_trias
+        real(R8)                    :: merge_stacked_trias_angle_threshold
+        logical                     :: merge_trap_into_stacked
 
-        logical         :: stacked_to_cutcell
-        logical         :: stacked_to_cutcell_uniform
+        logical                     :: stacked_to_cutcell
+        logical                     :: stacked_to_cutcell_uniform
 
-        logical         :: split_shaved_off_tube
+        logical                     :: split_shaved_off_tube
 
 
-        logical         :: splitting
-        logical         :: merging
-        logical         :: pents_to_tria
-        real(R8)        :: h_rad_threshold
-        real(R8)        :: h_rad_core_threshold
+        logical                     :: splitting
+        logical                     :: merging
+        logical                     :: pents_to_tria
+        real(R8)                    :: h_rad_threshold
+        real(R8)                    :: h_rad_core_threshold
 
-        logical         :: rem_stickout_trias
-        logical         :: rem_trias_flux
-        real(R8)        :: rem_tube_outershell_threshold
+        logical                     :: rem_stickout_trias
+        logical                     :: rem_trias_flux
+        real(R8)                    :: rem_tube_outershell_threshold
         character(:), allocatable   :: outershell_handling
-        logical         :: remove_stickoutquad
-        logical         :: split_noalignedquads
+        logical                     :: remove_stickoutquad
+        logical                     :: split_noalignedquads
 
 
     contains
@@ -101,6 +101,15 @@ module gamod_userinput
 
     ! Options to specify the merging operations
     type, extends(OptionsUDT) :: MergingOptionsUDT
+
+        ! TODO explain all options
+        logical                     :: no_hex
+        character(:), allocatable   :: merge_crit
+        real(R8)                    :: merge_h_pol_factor 
+        integer(I8)                 :: n_merge
+        real(R8)                    :: merge_bias_limit
+        real(R8)                    :: dist_function_threshold_merge
+
     contains
   
         procedure :: SetDefaults     => SetDefaultMergingOptions
@@ -199,16 +208,16 @@ module gamod_userinput
 
         ! Default options
         !================   
-        options%no_pents = .true.
-        options%QTtype = 'regular'
-        options%split_out = .false.
-        options%splittype = 'rad'
-        options%n_split = 20
-        options%typeT = 'cutcell'
-        options%rad_type = 'h_rad'
-        options%pol_type = 'trias'
-        options%dist_function_threshold_split = 0.9
-        options%dist_function_threshold_split_wall = 0.6    
+        options%no_pents                            = .true.
+        options%QTtype                              = 'regular'
+        options%split_out                           = .false.
+        options%splittype                           = 'rad'
+        options%n_split                             = 20
+        options%typeT                               = 'cutcell'
+        options%rad_type                            = 'h_rad'
+        options%pol_type                            = 'trias'
+        options%dist_function_threshold_split       = 0.9
+        options%dist_function_threshold_split_wall  = 0.6    
         
         
     end subroutine
@@ -224,7 +233,15 @@ module gamod_userinput
         class(MergingOptionsUDT)    :: options
 
         ! Default options
-        !================        
+        !================   
+        options%no_hex                          = .true.
+        options%merge_crit                      = 'h_pol'
+        options%merge_h_pol_factor              = 1
+        options%n_merge                          = 20
+        options%merge_bias_limit                = 5
+        options%dist_function_threshold_merge   = 0.6
+        
+        
     end subroutine
 
     subroutine SetDefaultPentagonOptions(options)
@@ -407,7 +424,7 @@ module gamod_userinput
         field = 'ga.splittype'
         call ExtractOptionValueCharacter(fid, field, options%splittype)
         field = 'ga.n_split'
-        call ExtractOptionValueReal0D(fid, field, options%n_split)
+        call ExtractOptionValueInteger0D(fid, field, options%n_split)
         field = 'ga.typeT'
         call ExtractOptionValueCharacter(fid, field, options%typeT)                                   
         field = 'ga.rad_type'
@@ -424,7 +441,7 @@ module gamod_userinput
         ! Close the file
         close(unit=fid) 
 
-        
+
     end subroutine
 
     subroutine ReadMergingOptions(options)
@@ -443,7 +460,45 @@ module gamod_userinput
         integer, parameter              :: fid = 10        
         
         ! Initialize
-        !===========        
+        !===========    
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadMergingOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadMergingOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if     
+        
+        ! Read options
+        !=============      
+        field = 'ga.no_hex'
+        call ExtractOptionValueLogical0D(fid, field, options%no_hex)
+        field = 'ga.merge_crit'
+        call ExtractOptionValueCharacter(fid, field, options%merge_crit) 
+        field = 'ga.merge_h_pol_factor'
+        call ExtractOptionValueReal0D(fid, field, options%merge_h_pol_factor)
+        field = 'ga.n_merge'
+        call ExtractOptionValueInteger0D(fid, field, options%n_merge)
+        field = 'ga.merge_bias_limit'
+        call ExtractOptionValueReal0D(fid, field, options%merge_bias_limit)        
+        field = 'ga.dist_function_threshold_merge'
+        call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_merge)        
+
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+
     end subroutine
 
     subroutine ReadPentagonOptions(options)
