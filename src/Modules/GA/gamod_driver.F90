@@ -135,10 +135,41 @@ module gamod_driver
 
     end subroutine
 
-    subroutine GAInternalDriver()
+    subroutine GAInternalDriver(options)
 
         ! Description
         !============
+        ! Internal driver for the grid adaptation where all real adaptation take place such as removal of small triangles, stacked triangles
+
+
+        ! Calculate quality metric
+
+        ! Remove Small triangles
+
+        ! Remove flux tubes with only two triangles
+
+        ! Stacked to cutcell
+
+        ! Splitting non-alinged quads
+
+        ! Splitting trapezoids in concave shaved-off flux tube
+
+        ! Splitting  and merging
+
+        ! Stacked triangles
+
+
+        ! Remove sticking out triangles
+
+        ! Remove boundary flux tubes with only two triangles
+
+        ! Remove stickout quad
+
+        ! Boundary layer grid
+
+
+
+
     end subroutine
 
 
