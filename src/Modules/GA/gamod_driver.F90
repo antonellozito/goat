@@ -130,6 +130,7 @@ module gamod_driver
         end if 
 
         ! Get fsVx from fsFc
+        call GetFsVxFromFsFc(grid)
 
         ! Determine Xpoints and separatrices
 
