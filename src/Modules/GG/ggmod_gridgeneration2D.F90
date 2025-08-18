@@ -618,10 +618,18 @@ module ggmod_gridgeneration2D
         !                    which field related lengths are based
         ! - linedllc        line length distribution, but in terms of 
         !                   lengthtype
+        ! - Lmin, Lmax      distributions for minimal and maximal length
+        ! - Lminupperbound  upper bound for Lmin (likewise, Lminlowerbound,
+        !                   Lmaxupperbound, Lmaxlowerbound are defined). 
+        !                   Useful when distribution cannot be 
+        !                   guaranteed to work within specific bounds. 
+        !                   Automatically determined based on other user input
         character(:), allocatable           :: meth, lengthtype 
         logical                             :: doBLstart, &
             doBLend, dlBLlengthbased
         integer(I8)                         :: ncBLstart, ncBLend 
+        real(R8)                            :: Lminlowerbound, Lminupperbound, &
+            Lmaxlowerbound, Lmaxupperbound
         real(R8), allocatable, dimension(:) :: dlBLstart, dlBLend, &
             linedllc 
         class(DistributionFunctionUDT), allocatable     :: Lmin, Lmax 
@@ -12924,7 +12932,7 @@ module ggmod_gridgeneration2D
                     yp = [yp, pack(yv, includevesselvertex)]
                     valpLmin = [valpLmin, pack(tempLmin, includevesselvertex)]
                     valpLmax = [valpLmax, pack(tempLmax, includevesselvertex)]
-                    decaylength = [decaylength, pack(tempdecaylength, includevesselvertex)]
+                    decaylength = [decaylength, pack(tempdecaylength, includevesselvertex)]                    
 
                 end if 
 
@@ -12944,7 +12952,8 @@ module ggmod_gridgeneration2D
 
                 ! Construct refiner
                 GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic', &
-                options%reflengthtype, magneticField)
+                    options%reflengthtype, magneticField, [valpLmin, options%refLBLmininf], &
+                    [valpLmax, options%refLBLmaxinf])
 
             case ('radial') 
 
@@ -12979,7 +12988,8 @@ module ggmod_gridgeneration2D
 
                 ! Construct refiner
                 GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic', &
-                options%radreflengthtype, magneticField)
+                options%radreflengthtype, magneticField, [valpLmin, options%radrefLBLmininf], &
+                    [valpLmax, options%radrefLBLmaxinf])
 
             case default
 
@@ -13171,7 +13181,7 @@ module ggmod_gridgeneration2D
 
     ! Length-based refiner constructor
     function ConstructGGTMLineRefinerLB(Lmin, Lmax, meth, lengthtype, &
-        magneticField) result(refiner)
+        magneticField, Lminbounds, Lmaxbounds) result(refiner)
 
         ! Description
         !============
@@ -13185,6 +13195,8 @@ module ggmod_gridgeneration2D
         class(DistributionFunctionUDT), intent(in)  :: Lmin, Lmax
         character(*), intent(in)                    :: meth, lengthtype 
         type(MagneticFieldUDT), intent(in)          :: magneticField
+        real(R8), intent(in), dimension(:)          :: Lminbounds, &
+            Lmaxbounds(:)
  
         ! Initialize
         !===========
@@ -13194,6 +13206,10 @@ module ggmod_gridgeneration2D
         refiner%meth        = meth
         refiner%lengthtype  = lengthtype 
         refiner%field       = magneticField
+        refiner%Lminlowerbound  = minval(Lminbounds)
+        refiner%Lminupperbound  = maxval(Lminbounds)
+        refiner%Lmaxlowerbound  = minval(Lmaxbounds)
+        refiner%Lmaxupperbound  = maxval(Lmaxbounds)
 
         ! Boundary layer (simply set to zero currently)
         refiner%dlBLlengthbased = .false.
@@ -13608,6 +13624,19 @@ module ggmod_gridgeneration2D
             Lminvert = Lmaxvert 
             call refiner%Lmax%Evaluate(seg%xv, seg%yv, Lmaxvert)
             call refiner%Lmin%Evaluate(seg%xv, seg%yv, Lminvert)
+
+            ! Project on hard bounds
+            associate(&
+                Lmaxlowerbound  => refiner%Lmaxlowerbound,  &
+                Lmaxupperbound  => refiner%Lmaxupperbound,  &
+                Lminlowerbound  => refiner%Lminlowerbound,  &  
+                Lminupperbound  => refiner%Lminupperbound   &
+                )
+            where (Lmaxvert < Lmaxlowerbound) Lmaxvert = Lmaxlowerbound
+            where (Lminvert < Lminlowerbound) Lminvert = Lminlowerbound
+            where (Lmaxvert > Lmaxupperbound) Lmaxvert = Lmaxupperbound
+            where (Lminvert > Lminupperbound) Lminvert = Lminupperbound
+            end associate
 
             ! Issue warning if Lminvert >= Lmaxvert 
             if (verbosity > 1) then 
@@ -14216,6 +14245,19 @@ module ggmod_gridgeneration2D
             Lminvert = Lmaxvert 
             call refiner%Lmax%Evaluate(line%xv, line%yv, Lmaxvert)
             call refiner%Lmin%Evaluate(line%xv, line%yv, Lminvert)
+
+            ! Project on hard bounds
+            associate(&
+                Lmaxlowerbound  => refiner%Lmaxlowerbound,  &
+                Lmaxupperbound  => refiner%Lmaxupperbound,  &
+                Lminlowerbound  => refiner%Lminlowerbound,  &  
+                Lminupperbound  => refiner%Lminupperbound   &
+                )
+            where (Lmaxvert < Lmaxlowerbound) Lmaxvert = Lmaxlowerbound
+            where (Lminvert < Lminlowerbound) Lminvert = Lminlowerbound
+            where (Lmaxvert > Lmaxupperbound) Lmaxvert = Lmaxupperbound
+            where (Lminvert > Lminupperbound) Lminvert = Lminupperbound
+            end associate
 
             ! Issue warning if Lminvert >= Lmaxvert 
             if (verbosity > 1) then 
