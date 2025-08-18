@@ -173,12 +173,76 @@ module goatmod_userinput
         logical                     :: timing
         character(:), allocatable   :: meth
 
-        ! Files to read other options
-        character(:), allocatable   :: operationsoptionsfile 
-        character(:), allocatable   :: splittingoptionsfile 
-        character(:), allocatable   :: mergingoptionsfile 
-        character(:), allocatable   :: pentagonoptionsfile
-        character(:), allocatable   :: distancefunctionoptionsfile
+        ! Operation options
+        logical                     :: rem_small_trias
+        real(R8)                    :: cut_off_pol
+        real(R8)                    :: cut_off_surf
+
+        logical                     :: stacked_trias
+        logical                     :: stacked_trias_checkAR
+        real(R8)                    :: stacked_trias_maxAR
+        logical                     :: merge_stacked_trias
+        real(R8)                    :: merge_stacked_trias_angle_threshold
+        logical                     :: merge_trap_into_stacked
+
+        logical                     :: stacked_to_cutcell
+        logical                     :: stacked_to_cutcell_uniform
+
+        logical                     :: split_shaved_off_tube
+
+
+        logical                     :: splitting
+        logical                     :: merging
+        logical                     :: pents_to_tria
+        real(R8)                    :: h_rad_threshold
+        real(R8)                    :: h_rad_core_threshold
+
+        logical                     :: rem_stickout_trias
+        logical                     :: rem_trias_flux
+        real(R8)                    :: rem_tube_outershell_threshold
+        character(:), allocatable   :: outershell_handling
+        logical                     :: remove_stickoutquad
+        logical                     :: split_noalignedquads 
+        
+        ! Splitting options
+        logical                     :: no_pents
+        character(:), allocatable   :: QTtype
+        logical                     :: split_out
+        character(:), allocatable   :: splittype
+        integer(I8)                 :: n_split
+        character(:), allocatable   :: typeT
+        character(:), allocatable   :: rad_type
+        character(:), allocatable   :: pol_type
+        real(R8)                    :: dist_function_threshold_split
+        real(R8)                    :: dist_function_threshold_split_wall
+        
+        ! Merging options
+        logical                     :: no_hex
+        character(:), allocatable   :: merge_crit
+        real(R8)                    :: merge_h_pol_factor 
+        integer(I8)                 :: n_merge
+        real(R8)                    :: merge_bias_limit
+        real(R8)                    :: dist_function_threshold_merge    
+        
+        ! Pentagon options
+        logical                     :: no_pents_area_merge
+        logical                     :: no_pents_area_split
+        character(:), allocatable   :: no_pents_area_type
+
+        real(R8)                    :: no_pents_area_maxR
+        real(R8)                    :: no_pents_area_minR
+        real(R8)                    :: no_pents_area_maxZ
+        real(R8)                    :: no_pents_area_minZ 
+        
+        ! Distance function options
+        logical                     :: dist_function
+        real(R8)                    :: d_rescale
+        real(R8)                    :: d_rescale_wall
+        character(:), allocatable   :: dist_type
+        character(:), allocatable   :: dist_type_wall
+        character(:), allocatable   :: d_char_type
+        logical                     :: plt_dist_func        
+
 
     contains
 
@@ -817,12 +881,74 @@ module goatmod_userinput
         options%timing      = .false.
         options%meth        = 'simple'
 
-        ! Files to read other options
-        options%operationsoptionsfile       = './GOAToptions.dat'
-        options%splittingoptionsfile        = './GOAToptions.dat'
-        options%mergingoptionsfile          = './GOAToptions.dat'
-        options%pentagonoptionsfile         = './GOAToptions.dat'
-        options%distancefunctionoptionsfile = './GOAToptions.dat'       
+        ! Operation options
+        options%rem_small_trias                     = .false.
+        options%cut_off_pol                         = 0.3
+        options%cut_off_surf                        = 0.05
+    
+        options%stacked_trias                       = .false.
+        options%stacked_trias_checkAR               = .false.
+        options%stacked_trias_maxAR                 = 10
+        options%merge_stacked_trias                 = .false.
+        options%merge_stacked_trias_angle_threshold = 5
+        options%merge_trap_into_stacked             = .true.
+
+        options%stacked_to_cutcell                  = .false.
+        options%stacked_to_cutcell_uniform          = .true.
+
+        options%split_shaved_off_tube               = .false.
+
+        options%splitting                           = .false.
+        options%pents_to_tria                       = .false.
+        options%merging                             = .false.
+        options%h_rad_threshold                     = 0.01
+        options%h_rad_core_threshold                = 0.04
+
+        options%rem_stickout_trias                  = .false.
+        options%rem_trias_flux                      = .false.
+        options%rem_tube_outershell_threshold       = 2
+        options%outershell_handling                 = 'merge' 
+        options%remove_stickoutquad                 = .false.
+        options%split_noalignedquads                = .true. 
+        
+        ! Splitting options
+        options%no_pents                            = .true.
+        options%QTtype                              = 'regular'
+        options%split_out                           = .false.
+        options%splittype                           = 'rad'
+        options%n_split                             = 20
+        options%typeT                               = 'cutcell'
+        options%rad_type                            = 'h_rad'
+        options%pol_type                            = 'trias'
+        options%dist_function_threshold_split       = 0.9
+        options%dist_function_threshold_split_wall  = 0.6  
+        
+        ! Merging options
+        options%no_hex                          = .true.
+        options%merge_crit                      = 'h_pol'
+        options%merge_h_pol_factor              = 1
+        options%n_merge                          = 20
+        options%merge_bias_limit                = 5
+        options%dist_function_threshold_merge   = 0.6   
+        
+        ! Pentagon options
+        options%no_pents_area_merge = .false.
+        options%no_pents_area_split = .true.
+        options%no_pents_area_type  = 'dist_function'
+        
+        options%no_pents_area_maxR  = 2.5
+        options%no_pents_area_minR  = 1
+        options%no_pents_area_maxZ  = -0.9
+        options%no_pents_area_minZ  = -2
+        
+        ! Distance function options
+        options%dist_function = .true.
+        options%d_rescale = 0.5
+        options%d_rescale_wall = 0.5
+        options%dist_type = 'target_single_null'
+        options%dist_type_wall = 'target_to_vessel'
+        options%d_char_type = 'min_Xpoint_dist'
+        options%plt_dist_func = .false.    
 
     end subroutine
 
@@ -1395,19 +1521,137 @@ module goatmod_userinput
         field = 'ga.timing'  
         call ExtractOptionValueLogical0D(fid, field, options%timing)               
         field = 'ga.meth'
-        call ExtractOptionValueCharacter(fid, field, options%meth)        
+        call ExtractOptionValueCharacter(fid, field, options%meth) 
+        
+        ! Operation options
+        !==================
 
-        ! Files to read other options
-        field = 'ga.operationsoptionsfile'
-        call ExtractOptionValueCharacter(fid, field, options%operationsoptionsfile)
-        field = 'ga.splittingoptionsfile'
-        call ExtractOptionValueCharacter(fid, field, options%splittingoptionsfile)
-        field = 'ga.mergingoptionsfile'
-        call ExtractOptionValueCharacter(fid, field, options%mergingoptionsfile)
-        field = 'ga.pentagonoptionsfile'
-        call ExtractOptionValueCharacter(fid, field, options%pentagonoptionsfile)
-        field = 'ga.distancefunctionoptionsfile'
-        call ExtractOptionValueCharacter(fid, field, options%distancefunctionoptionsfile)
+        ! Small triangles
+        field = 'ga.rem_small_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_small_trias)        
+        field = 'ga.cut_off_pol'
+        call ExtractOptionValueReal0D(fid, field, options%cut_off_pol) 
+        field = 'ga.cut_off_surf'
+        call ExtractOptionValueReal0D(fid, field, options%cut_off_surf)
+
+        ! Stacked triangles
+        field = 'ga.stacked_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_trias)          
+        field = 'ga.stacked_trias_checkAR'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_trias_checkAR)     
+        field = 'ga.stacked_trias_maxAR'
+        call ExtractOptionValueReal0D(fid, field, options%stacked_trias_maxAR)
+        field = 'ga.merge_stacked_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%merge_stacked_trias)
+        field = 'ga.merge_stacked_trias_angle_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%merge_stacked_trias_angle_threshold)
+        field = 'ga.merge_trap_into_stacked'
+        call ExtractOptionValueLogical0D(fid, field, options%merge_trap_into_stacked) 
+        
+        ! Stacked to cutcell
+        field = 'ga.stacked_to_cutcell'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_to_cutcell)
+        field = 'ga.stacked_to_cutcell_uniform'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_to_cutcell_uniform) 
+               
+        ! Splitting and merging
+        field = 'ga.splitting'
+        call ExtractOptionValueLogical0D(fid, field, options%splitting)    
+        field = 'ga.pents_to_tria' 
+        call ExtractOptionValueLogical0D(fid, field, options%pents_to_tria)
+        field = 'ga.merging'
+        call ExtractOptionValueLogical0D(fid, field, options%merging)
+        field = 'ga.h_rad_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%h_rad_threshold)                
+        field = 'ga.h_rad_core_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%h_rad_core_threshold)  
+
+        ! Special operations
+        field = 'ga.rem_stickout_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_stickout_trias)        
+        field = 'ga.rem_trias_flux'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_trias_flux)        
+        field = 'ga.rem_tube_outershell_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%rem_tube_outershell_threshold)  
+        field = 'ga.outershell_handling'
+        call ExtractOptionValueCharacter(fid, field, options%outershell_handling)
+        field = 'ga.remove_stickoutquad'        
+        call ExtractOptionValueLogical0D(fid, field, options%remove_stickoutquad)
+        field = 'ga.split_noalignedquads'
+        call ExtractOptionValueLogical0D(fid, field, options%split_noalignedquads) 
+
+        ! Splitting options
+        !==================
+        field = 'ga.no_pents'
+        call ExtractOptionValueLogical0D(fid, field, options%no_pents)         
+        field = 'ga.QTtype'
+        call ExtractOptionValueCharacter(fid, field, options%QTtype) 
+        field = 'ga.split_out'
+        call ExtractOptionValueLogical0D(fid, field, options%split_out)
+        field = 'ga.splittype'
+        call ExtractOptionValueCharacter(fid, field, options%splittype)
+        field = 'ga.n_split'
+        call ExtractOptionValueInteger0D(fid, field, options%n_split)
+        field = 'ga.typeT'
+        call ExtractOptionValueCharacter(fid, field, options%typeT)                                   
+        field = 'ga.rad_type'
+        call ExtractOptionValueCharacter(fid, field, options%rad_type)                                   
+        field = 'ga.pol_type'
+        call ExtractOptionValueCharacter(fid, field, options%pol_type)
+        field = 'ga.dist_function_threshold_split'
+        call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_split)                                    
+        field = 'ga.dist_function_threshold_split_wall'
+        call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_split_wall) 
+        
+        ! Merging options
+        !================
+        field = 'ga.no_hex'
+        call ExtractOptionValueLogical0D(fid, field, options%no_hex)
+        field = 'ga.merge_crit'
+        call ExtractOptionValueCharacter(fid, field, options%merge_crit) 
+        field = 'ga.merge_h_pol_factor'
+        call ExtractOptionValueReal0D(fid, field, options%merge_h_pol_factor)
+        field = 'ga.n_merge'
+        call ExtractOptionValueInteger0D(fid, field, options%n_merge)
+        field = 'ga.merge_bias_limit'
+        call ExtractOptionValueReal0D(fid, field, options%merge_bias_limit)        
+        field = 'ga.dist_function_threshold_merge'
+        call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_merge)  
+        
+        ! Pentagon options
+        !=================
+        field = 'ga.no_pents_area_merge'
+        call ExtractOptionValueLogical0D(fid, field, options%no_pents_area_merge)        
+        field = 'ga.no_pents_area_split'
+        call ExtractOptionValueLogical0D(fid, field, options%no_pents_area_split)        
+        field = 'ga.no_pents_area_type'
+        call ExtractOptionValueCharacter(fid, field, options%no_pents_area_type)     
+           
+        field = 'ga.no_pents_area_maxR'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_maxR)        
+        field = 'ga.no_pents_area_minR'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_minR)        
+        field = 'ga.no_pents_area_maxZ'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_maxZ)        
+        field = 'ga.no_pents_area_minZ'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_minZ)    
+        
+        ! Distance function options
+        !==========================
+        field = 'ga.dist_function'
+        call ExtractOptionValueLogical0D(fid, field, options%dist_function)
+        field = 'ga.d_rescale'     
+        call ExtractOptionValueReal0D(fid, field, options%d_rescale)                             
+        field = 'ga.d_rescale_wall'     
+        call ExtractOptionValueReal0D(fid, field, options%d_rescale_wall)
+        field = 'ga.dist_type'
+        call ExtractOptionValueCharacter(fid, field, options%dist_type)
+        field = 'ga.dist_type_wall'
+        call ExtractOptionValueCharacter(fid, field, options%dist_type_wall)
+        field = 'ga.d_char_type'
+        call ExtractOptionValueCharacter(fid, field, options%d_char_type)
+        field = 'ga.plt_dist_func'
+        call ExtractOptionValueLogical0D(fid, field, options%plt_dist_func)
 
         ! Housekeeping
         !=============
