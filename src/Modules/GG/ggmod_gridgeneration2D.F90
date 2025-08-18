@@ -3395,7 +3395,9 @@ module ggmod_gridgeneration2D
                         'cells will be present in the grid...'
                     print *, 'cell: ', i, 'line: ', j, 'near vertex ID: ', &
                         l1%vert(k1), 'coordinates: ', l1%xv(k1), l1%yv(k1)
-                    !call tubes(j)%VisualizeGraph('lpgraph')
+                    !$omp critical
+                    call tubes(j)%VisualizeGraph('lpgraph')
+                    !$omp end critical
 
                     ! Reset to continue...
                     islegaltria1 = .true. 
@@ -4278,28 +4280,38 @@ module ggmod_gridgeneration2D
         
         case default
 
-            ! New style, graph based
-            ! Initialize
-            vindk1 = graph%GetVertexIndex(l1%vert(k1))
-            vindk2 = graph%GetVertexIndex(l2%vert(k2))
+            ! New style, graph based            
 
             ! Test triangle 1
             !----------------
             if (k2 < n2) then 
-                ! Remove vertex at k2 temporarily
-                skipvert(vindk2) = .true. 
+                ! Get vertex indices for k1, k2+1
+                vindk1 = graph%GetVertexIndex(l1%vert(k1))
+                vindk2 = graph%GetVertexIndex(l2%vert(k2+1))
 
-                ! Check if graph is still connected, if yes, then triangle 
-                ! is legal
-                isconnected = graph%IsConnected(skipvert)
-                if (isconnected) then 
-                    islegaltria1 = .true.
+                ! Check if edge exists in graph
+                if (graph%IsEdgeInGraph(vindk1, vindk2)) then 
+
+                    ! If edge exists, check if we can take it
+
+                    ! Remove vertex at k2 temporarily
+                    vindk2 = graph%GetVertexIndex(l2%vert(k2))
+                    skipvert(vindk2) = .true. 
+
+                    ! Check if graph is still connected, if yes, then triangle 
+                    ! is legal
+                    isconnected = graph%IsConnected(skipvert)
+                    if (isconnected) then 
+                        islegaltria1 = .true.
+                    else
+                        islegaltria1 = .false.
+                    end if 
+
+                    ! Add vertex again
+                    skipvert(vindk2) = .false. 
                 else
-                    islegaltria1 = .false.
+                    islegaltria1 = .false. 
                 end if 
-
-                ! Add vertex again
-                skipvert(vindk2) = .false. 
             else
                 islegaltria1 = .false.
             end if 
@@ -4307,20 +4319,31 @@ module ggmod_gridgeneration2D
             ! Test triangle 2
             !----------------
             if (k1 < n1) then 
-                ! Remove vertex at k1 temporarily
-                skipvert(vindk1) = .true. 
+                ! Get vertex indices for k1, k2+1
+                vindk1 = graph%GetVertexIndex(l1%vert(k1+1))
+                vindk2 = graph%GetVertexIndex(l2%vert(k2))
 
-                ! Check if graph is still connected, if yes, then triangle 
-                ! is legal
-                isconnected = graph%IsConnected(skipvert)
-                if (isconnected) then 
-                    islegaltria2 = .true.
+                ! Check if edge exists in graph
+                if (graph%IsEdgeInGraph(vindk1, vindk2)) then
+
+                    ! Remove vertex at k1 temporarily
+                    vindk1 = graph%GetVertexIndex(l1%vert(k1))
+                    skipvert(vindk1) = .true. 
+
+                    ! Check if graph is still connected, if yes, then triangle 
+                    ! is legal
+                    isconnected = graph%IsConnected(skipvert)
+                    if (isconnected) then 
+                        islegaltria2 = .true.
+                    else
+                        islegaltria2 = .false.
+                    end if 
+
+                    ! Add vertex again
+                    skipvert(vindk1) = .false.
                 else
-                    islegaltria2 = .false.
+                    islegaltria2 = .false. 
                 end if 
-
-                ! Add vertex again
-                skipvert(vindk1) = .false.
             else 
                 islegaltria2 = .false.
             end if 
@@ -4329,23 +4352,34 @@ module ggmod_gridgeneration2D
             !----------
             ! Only if both triangles are legal we need to test
             if (islegaltria1 .and. islegaltria2) then 
-                ! Remove both vertices temporarily
-                skipvert(vindk1) = .true.
-                skipvert(vindk2) = .true.
-                
-                ! Check if graph is still connected, if yes, then quad 
-                ! is legal
-                isconnected = graph%IsConnected(skipvert)
-                if (isconnected) then 
-                    islegalquad = .true.
+                ! Get vertex indices for k1, k2+1
+                vindk1 = graph%GetVertexIndex(l1%vert(k1+1))
+                vindk2 = graph%GetVertexIndex(l2%vert(k2+1))
+
+                ! Check if edge exists in graph
+                if (graph%IsEdgeInGraph(vindk1, vindk2)) then
+
+                    ! Remove both vertices temporarily
+                    vindk1 = graph%GetVertexIndex(l1%vert(k1))
+                    vindk2 = graph%GetVertexIndex(l2%vert(k2))
+                    skipvert(vindk1) = .true.
+                    skipvert(vindk2) = .true.
+                    
+                    ! Check if graph is still connected, if yes, then quad 
+                    ! is legal
+                    isconnected = graph%IsConnected(skipvert)
+                    if (isconnected) then 
+                        islegalquad = .true.
+                    else
+                        islegalquad = .false.
+                    end if 
+
+                    ! Add vertices again
+                    skipvert(vindk1) = .false.
+                    skipvert(vindk2) = .false.
                 else
-                    islegalquad = .false.
-                end if 
-
-                ! Add vertices again
-                skipvert(vindk1) = .false.
-                skipvert(vindk2) = .false.
-
+                    islegalquad = .false. 
+                end if
             else
                 islegalquad = .false.
             end if     
@@ -6737,7 +6771,7 @@ module ggmod_gridgeneration2D
                 
 
                 ! Check first tube
-                if (ggtmdata%seg(tubes(1)%hfline%segID(1))%isvertex) then 
+                if (ggtmdata%seg(tubes(1)%hfline%segID(1))%isvertex ) then 
 
                     ! Initialize
                     allocate(dostart(1), doend(1), extendseg(0)) 
@@ -6752,7 +6786,8 @@ module ggmod_gridgeneration2D
                             'could not find vertices in start radial face, unexpected')
                     end if 
                     dl = abs(srfline%dlcv(vind1) - srfline%dlcv(vind2))
-                    if (dl > options%evtmaxvessellength) then 
+                    if ((dl > options%evtmaxvessellength) .and. &
+                        (topomesh%face%type(tc%srf) == TMfacebndID)) then  
                         dostart(1) = .true.
                     end if 
 
@@ -6764,7 +6799,8 @@ module ggmod_gridgeneration2D
                             'could not find vertices in end radial face, unexpected')
                     end if 
                     dl = abs(erfline%dlcv(vind1) - erfline%dlcv(vind2))
-                    if (dl > options%evtmaxvessellength) then 
+                    if ((dl > options%evtmaxvessellength) .and. &
+                        (topomesh%face%type(tc%erf) == TMfacebndID)) then 
                         doend(1) = .true.
                     end if 
 
@@ -6912,7 +6948,8 @@ module ggmod_gridgeneration2D
                             'could not find vertices in start radial face, unexpected')
                     end if 
                     dl = abs(srfline%dlcv(vind1) - srfline%dlcv(vind2))
-                    if (dl > options%evtmaxvessellength) then 
+                    if ((dl > options%evtmaxvessellength) .and. &
+                        (topomesh%face%type(tc%srf) == TMfacebndID))  then 
                         dostart(1) = .true.
                     end if 
 
@@ -6924,7 +6961,8 @@ module ggmod_gridgeneration2D
                             'could not find vertices in end radial face, unexpected')
                     end if 
                     dl = abs(erfline%dlcv(vind1) - erfline%dlcv(vind2))
-                    if (dl > options%evtmaxvessellength) then 
+                    if ((dl > options%evtmaxvessellength) .and. &
+                        (topomesh%face%type(tc%erf) == TMfacebndID))  then 
                         doend(1) = .true.
                     end if 
 
@@ -8416,12 +8454,12 @@ module ggmod_gridgeneration2D
                         ctubes(k)%lfline%refoptions%doBLstart = .false. 
 
                         ! Now, we need to check the neighbour orientation
-                        if (hforientation(q) == 1) then 
+                        if (lforientation(q) == 1) then 
                             ! Case: lines are in same orientation -> no start BL 
-                            nbtubes(hfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
-                        elseif (hforientation(q) == -1) then 
+                            nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
+                        elseif (lforientation(q) == -1) then 
                             ! Case: lines are in opposite orientation -> no end BL 
-                            nbtubes(hfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
+                            nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
                         end if 
                     end if 
                     end associate
@@ -8434,10 +8472,10 @@ module ggmod_gridgeneration2D
                         ctubes(k)%lfline%refoptions%doBLend = .false. 
 
                         ! Now, we need to check the neighbour orientation
-                        if (hforientation(q) == 1) then 
+                        if (lforientation(q) == 1) then 
                             ! Case: lines are in same orientation -> no end BL 
                             nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
-                        elseif (hforientation(q) == -1) then 
+                        elseif (lforientation(q) == -1) then 
                             ! Case: lines are in opposite orientation -> no start BL 
                             nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
                         end if 
@@ -8558,12 +8596,12 @@ module ggmod_gridgeneration2D
                         ctubes(k)%lfline%refoptions%doBLstart = .false. 
 
                         ! Now, we need to check the neighbour orientation
-                        if (hforientation(q) == 1) then 
+                        if (lforientation(q) == 1) then 
                             ! Case: lines are in same orientation -> no start BL 
-                            nbtubes(hfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
-                        elseif (hforientation(q) == -1) then 
+                            nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
+                        elseif (lforientation(q) == -1) then 
                             ! Case: lines are in opposite orientation -> no end BL 
-                            nbtubes(hfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
+                            nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
                         end if 
                     end if 
                     end associate
@@ -8576,10 +8614,10 @@ module ggmod_gridgeneration2D
                         ctubes(k)%lfline%refoptions%doBLend = .false. 
 
                         ! Now, we need to check the neighbour orientation
-                        if (hforientation(q) == 1) then 
+                        if (lforientation(q) == 1) then 
                             ! Case: lines are in same orientation -> no end BL 
                             nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLend = .false. 
-                        elseif (hforientation(q) == -1) then 
+                        elseif (lforientation(q) == -1) then 
                             ! Case: lines are in opposite orientation -> no start BL 
                             nbtubes(lfnbtubeID(q))%hfline%refoptions%doBLstart = .false. 
                         end if 
@@ -11562,59 +11600,48 @@ module ggmod_gridgeneration2D
             yp = hfline%yv(1:1)
             vp = hfline%vert(1:1)
             hflinevert = hfline%vert(1:1)
+            lflinevert = lfline%vert 
             hfv = [1]
+            lfv = [(k, k = lfline%nv, 1, -1)] + 1
             if (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)) then 
                 xp = [xp, lfline%xv(lfline%nv:1:-1)]
                 yp = [yp, lfline%yv(lfline%nv:1:-1)]
                 vp = [vp, lfline%vert(lfline%nv:1:-1)]
-                lflinevert = lfline%vert ! don't flip!
-                lfv = [(k, k = lfline%nv, 1, -1)] + 1
             else
                 xp = [xp, lfline%xv(lfline%nv-1:1:-1)]
                 yp = [yp, lfline%yv(lfline%nv-1:1:-1)]
                 vp = [vp, lfline%vert(lfline%nv-1:1:-1)]
-                lflinevert = lfline%vert(1:lfline%nv-1) ! don't flip!
-                lfv = [(k, k = lfline%nv-1, 1, -1)] + 1
+                lfv(lfline%nv) = 1
             end if 
             if (hfline%vert(1) /= lfline%vert(1)) then 
                 xp = [xp, hfline%xv(1)]
                 yp = [yp, hfline%yv(1)]
                 vp = [vp, hfline%vert(1)]
             else
-                lflinevert = lflinevert(2:)
+                lfv(lfline%nv) = 1
             end if 
         elseif ((seg(lfline%segID(1))%isvertex)) then 
             ! lfline is vertex
-            
-            if (hfline%vert(hfline%nv) /= lfline%vert(1)) then 
-                xp = hfline%xv
-                yp = hfline%yv
-                vp = hfline%vert
-                hflinevert = hfline%vert
-                hfv = [(k, k = 1, hfline%nv)]
+            xp = hfline%xv
+            yp = hfline%yv
+            vp = hfline%vert
+            hflinevert = hfline%vert
+            hfv = [(k, k = 1, hfline%nv)]
+            lflinevert = lfline%vert(1:1)
+            lfv = [1] + hfline%nv 
+            if (hfline%vert(hfline%nv) /= lfline%vert(1)) then       
                 xp = [xp, lfline%xv(1)]
                 yp = [yp, lfline%yv(1)]
                 vp = [vp, lfline%vert(1)]
-                lflinevert = lfline%vert(1:1)
-                lfv = [1] + hfline%nv
             else
-                xp = hfline%xv(1:hfline%nv-1)
-                yp = hfline%yv(1:hfline%nv-1)
-                vp = hfline%vert(1:hfline%nv-1)
-                hflinevert = hfline%vert(1:hfline%nv-1)
-                hfv = [(k, k = 1, hfline%nv-1)]
-                xp = [xp, lfline%xv(1)]
-                yp = [yp, lfline%yv(1)]
-                vp = [vp, lfline%vert(1)]
-                lflinevert = lfline%vert(1:1)
-                lfv = [1] + hfline%nv-1
+                lfv = [hfline%nv]
             end if 
             if (hfline%vert(1) /= lfline%vert(1)) then 
                 xp = [xp, hfline%xv(1)]
                 yp = [yp, hfline%yv(1)]
                 vp = [vp, hfline%vert(1)]
             else
-                hflinevert = hflinevert(2:)
+                lfv = [1] 
             end if 
         else
             ! No vertex segments, checked before
@@ -11624,24 +11651,24 @@ module ggmod_gridgeneration2D
             hfv = [(k, k = 1, hfline%nv)]
             lfv = [(k, k = lfline%nv, 1, -1)] + hfline%nv
             hflinevert = hfline%vert
+            lflinevert = lfline%vert 
             if (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)) then 
                 xp = [xp, lfline%xv(lfline%nv:1:-1)]
                 yp = [yp, lfline%yv(lfline%nv:1:-1)]
                 vp = [vp, lfline%vert(lfline%nv:1:-1)]
-                lflinevert = lfline%vert
             else
                 xp = [xp, lfline%xv(lfline%nv-1:1:-1)]
                 yp = [yp, lfline%yv(lfline%nv-1:1:-1)]
                 vp = [vp, lfline%vert(lfline%nv-1:1:-1)]
                 lfv = lfv - 1
-                lflinevert = lfline%vert(1:lfline%nv-1)
             end if 
             if (hfline%vert(1) /= lfline%vert(1)) then 
                 xp = [xp, hfline%xv(1)]
                 yp = [yp, hfline%yv(1)]
                 vp = [vp, hfline%vert(1)]
+
             else
-                lflinevert = lflinevert(2:)
+                lfv(1) = hfv(1)
             end if 
         end if 
         
@@ -11667,18 +11694,6 @@ module ggmod_gridgeneration2D
         svlf = 1
         evhf = size(hflinevert)
         evlf = size(lflinevert)
-        !if (hfline%vert(1) == lfline%vert(1)) then 
-        !    svhf = 2
-        !    svlf = 2
-        !end if 
-        !if (hfline%vert(hfline%nv) == lfline%vert(lfline%nv)) then 
-        !    evhf = evhf - 1
-        !    evlf = evlf - 1
-        !end if 
-        !if (seg(hfline%segID(1))%isvertex) then 
-        !    evhf = 1
-        !end if 
-
 
         ! Loop over hfline vertices
         do i = svhf, evhf
@@ -11696,19 +11711,27 @@ module ggmod_gridgeneration2D
 
                 ! Skip check
                 !===========
-                ! Add if first or last radial face (if it exists) - 
-                ! should always be present 
-                if (((i == 1 .and. j == 1) .and. (hfline%vert(1) /= lfline%vert(1))) .or. &
-                    ((i == size(hflinevert) .and. j == size(lflinevert)) .and. &
-                     (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)))) then 
-                    ev1 = [ev1, v1]
-                    ev2 = [ev2, v2]
+                ! Cycle if both vertices have the same ID
+                if (v1 == v2) then 
                     cycle 
                 end if 
+
+                ! Add if first or last radial face (if it exists) - 
+                ! should always be present - is it still necessary to do this check here?
+                !if (((i == 1 .and. j == 1) .and. (hfline%vert(1) /= lfline%vert(1))) .or. &
+                !    ((i == size(hflinevert) .and. j == size(lflinevert)) .and. &
+                !     (hfline%vert(hfline%nv) /= lfline%vert(lfline%nv)))) then 
+                !    ev1 = [ev1, v1]
+                !    ev2 = [ev2, v2]
+                !    cycle 
+                !end if 
 
                 ! Edge in polygon check
                 !======================
                 ! Check if edge starts and ends in the interior 
+                if ((vp(hfv(i)) /= v1 ) .or. (vp(lfv(j)) /= v2 )) then 
+                    print *, 'hmmm'
+                end if 
                 isintube = IsEdgeInClosedSimplePolygon(xp, yp, vp, hfv(i), &
                     lfv(j))
                 if (.not. isintube) then 
@@ -11740,9 +11763,6 @@ module ggmod_gridgeneration2D
         end do 
         linepair%graphxv = xv 
         linepair%graphyv = yv
-        
-        ! Write data (to be removed)
-        ! call linepair%VisualizeGraph('lpgraph')
 
         ! Checks? Probably not needed here as this should trigger when 
         ! forming cells/faces etc
