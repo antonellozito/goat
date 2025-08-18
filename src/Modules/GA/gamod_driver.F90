@@ -14,7 +14,8 @@ module gamod_driver
     !============
     ! Load modules
     use goatmod_types
-    use gamod_userinput
+    use goatmod_userinput
+    use gamod_utility
 
     ! The usual
     implicit none
@@ -42,15 +43,15 @@ module gamod_driver
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT)               :: grid
-        type(EnvironmentUDT)        :: environment
-        type(MagneticFieldUDT)      :: magneticField     
+        type(GridUDT), intent(inout)                :: grid
+        type(EnvironmentUDT), intent(in)            :: environment
+        type(MagneticFieldUDT), intent(in)          :: magneticField     
         
-        type(GAoptionsUDT)          :: options
+        type(GAoptionsUDT), intent(in)              :: options
 
         ! Initialize grid adaptation
         !===========================
-        ! TODO call GAinit
+        call GAinit(grid,options,environment)
         
 
         ! Driver Selection
@@ -60,7 +61,7 @@ module gamod_driver
         case ('simple')
 
             ! Regular grid adaption
-            ! call GAInternalDriver(grid,gaoptions,environment,magneticField)
+            call GAInternalDriver(grid,options,environment,magneticField)
 
         case ('aposteriori')
 
@@ -88,33 +89,45 @@ module gamod_driver
         ! Declare variables
         !==================
         ! Arguments
-        class(GridUDT)          :: grid 
-        class(GAoptionsUDT)     :: options
-        class(EnvironmentUDT)   :: environment
+        type(GridUDT), intent(inout)            :: grid 
+        type(GAoptionsUDT), intent(in)          :: options
+        type(EnvironmentUDT), intent(in)        :: environment
 
         ! Variables
-        integer(I8) :: icv, s, nv, vc(1:100)
-        real(R8) :: cvX(grid%cell%ntot), cvY(grid%cell%ntot)
+        integer(I8) :: i
+        integer(I8), allocatable, dimension(:) :: tv
+        logical :: cells(grid%cell%ntot), is_ordered(grid%cell%ntot)
 
 
+        ! Initialize
+        !===========
+ 
         ! Set gaoptions
         call options%Set()    ! Also do other options, or make then a subtype???
 
-
+        associate(&
+            c  => grid%cell, &
+            v  => grid%vert &
+            )
         ! Recompute cell centers
-        do icv = 1, grid%cell%ntot
-            s = grid%cell%vertP(icv,1)
-            nv = grid%cell%vertP(icv,2)
-            vc(1:nv) = grid%cell%vert(s:s+nv-1)
-            cvX(icv) = sum(grid%vert%x(vc(1:nv)))/nv
-            cvY(icv) = sum(grid%vert%y(vc(1:nv)))/nv
-        end do
+        do i = 1, c%ntot
+            ! Get cell vertices
+            tv = GetCellVert(c, i)
 
-        grid%cell%x = cvX
-        grid%cell%y = cvY
+            ! Compute coordinates
+            c%x(i) = sum(v%x(tv))/real(size(tv), kind=R8)
+            c%y(i) = sum(v%y(tv))/real(size(tv), kind=R8)
+        end do
+        end associate
 
         ! Check order of vertices  (see GetGeo_usCouples.m)
-        ! call CheckVertOrder, 
+        cells = .true.
+        call CheckVertOrder(grid, is_ordered, cells) 
+
+        if (.not. all(is_ordered)) then
+            ! Do ordening
+            call ReorderCellConn(grid, is_ordered)
+        end if 
 
         ! Get fsVx from fsFc
 
@@ -135,12 +148,19 @@ module gamod_driver
 
     end subroutine
 
-    subroutine GAInternalDriver(options)
+    subroutine GAInternalDriver(grid,options,environment,magneticField)
 
         ! Description
         !============
         ! Internal driver for the grid adaptation where all real adaptation take place such as removal of small triangles, stacked triangles
 
+        ! Declare variables
+        !==================
+        ! Argument
+        type(GridUDT), intent(inout)         :: grid
+        type(GAoptionsUDT), intent(in)       :: options
+        type(EnvironmentUDT), intent(in)     :: environment
+        type(MagneticFieldUDT), intent(in)   :: magneticField
 
         ! Calculate quality metric
 
