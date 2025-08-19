@@ -250,11 +250,11 @@ SODRIVER_FILES = $(wildcard src/Drivers/ShapeOpt/*.F90)
 ## MODULE_FILES			: Module filenames (.F90, .F) - sequence matters
 MODULE_FILES_GOAT =  src/Modules/Goat/goatmod_userinput.F90 src/Modules/Goat/goatmod_types.F90\
     $(wildcard src/Modules/Goat/*.F90)
-MODULE_FILES_GA = src/Modules/GA/gamod_utility.F90 src/Modules/GA/gamod_driver.F90  \
-    $(wildcard src/Modules/GA/*.F90)
 MODULE_FILES_GD = src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
     $(wildcard src/Modules/GD/*.F90)
+MODULE_FILES_GA = src/Modules/GA/gamod_utility.F90 src/Modules/GA/gamod_driver.F90  \
+    $(wildcard src/Modules/GA/*.F90)    
 MODULE_FILES_GG = src/Modules/GG/ggmod_topology2D.F90 src/Modules/GG/ggmod_vertexdistribution2D.F90 \
     src/Modules/GG/ggmod_gridgeneration2D.F90 src/Modules/GG/ggmod_gridgenerator.F90
 MODULE_FILES_B25 = $(wildcard src/Modules/*.F)
@@ -262,8 +262,8 @@ MODULE_FILES_B25 = $(wildcard src/Modules/*.F)
 MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
     src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
-    $(wildcard src/Modules/GA/*.F90) \
     $(wildcard src/Modules/GD/*.F90) \
+    $(wildcard src/Modules/GA/*.F90) \
     $(wildcard src/Modules/*.F90) $(wildcard src/Modules/*.F) \
     src/Modules/GG/ggmod_topology2D.F90 src/Modules/GG/ggmod_vertexdistribution2D.F90 \
     src/Modules/GG/ggmod_gridgeneration2D.F90
