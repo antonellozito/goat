@@ -412,9 +412,9 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 
 # Read exising file? 
-'gg.tm.readexistingTM'          '0'
-'gg.tm.readexistingtracers'     '0'
-'gg.tm.TMfilepath'              './output/topomesh_base.dat'
+'gg.tm.readexistingTM'          '1'
+'gg.tm.readexistingtracers'     '1'
+'gg.tm.TMfilepath'              './output/topomesh.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
 
@@ -437,7 +437,7 @@ VERSION 1.00.00
 'gg.tm.contour.dl'              '0.001'
 
 # Topomesh adaptations
-'gg.tm.doadaptations'           '1'
+'gg.tm.doadaptations'           '0'
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '0'
 'gg.tm.cbnd.frac'               '0.2'
@@ -469,6 +469,7 @@ VERSION 1.00.00
 'gg.cellconstructionmethod'             'quads_triangles'
 'gg.ref.readexistingrefdata'            '0'
 'gg.labels.structurebased'              '1'
+'gg.dogriddiagnostics'                  '1'
 
 # adaptations
 'gg.adap.extendtptubes'                 '1'
@@ -479,7 +480,7 @@ VERSION 1.00.00
 'gg.ref.meth'                           'lengthbased' # 'tis but 'a test'of'this
 #'gg.ref.meth'                           'no'
 'gg.ref.LB.lengthtype'                  'euler'
-'gg.ref.LB.doxp'                        '1'
+'gg.ref.LB.doxp'                        '0'
 'gg.ref.LB.dovessel'                    '0'
 'gg.ref.LB.Lmininf'                     '0.02'
 'gg.ref.LB.Lmaxinf'                     '0.08'

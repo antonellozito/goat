@@ -411,15 +411,15 @@ VERSION 1.00.00
 'gg.cellconstructionmethod'             'quads_triangles'
 'gg.ref.readexistingrefdata'            '0'
 'gg.labels.structurebased'              '1'
-'gg.dogriddiagnostics'                  '0'
+'gg.dogriddiagnostics'                  '1'
 
 #-------------------------------------------------------------------------#
 #                         TOPOLOGICAL MESH OPTIONS                        #
 #-------------------------------------------------------------------------#
 
 # Read exising file? 
-'gg.tm.readexistingTM'          '0'
-'gg.tm.readexistingtracers'     '0'
+'gg.tm.readexistingTM'          '1'
+'gg.tm.readexistingtracers'     '1'
 'gg.tm.TMfilepath'              './output/topomesh.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
@@ -443,7 +443,7 @@ VERSION 1.00.00
 'gg.tm.contour.dl'              '0.02'
 
 # Topomesh adaptations
-'gg.tm.doadaptations'           '1'
+'gg.tm.doadaptations'           '0'
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '0'
 'gg.tm.cbnd.frac'               '0.1'

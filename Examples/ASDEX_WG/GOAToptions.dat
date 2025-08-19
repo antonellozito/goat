@@ -85,7 +85,7 @@ VERSION 1.00.00
 
 # Refinement options for vessel
 'goat.vessel.refinevessel'          '1'
-'goat.vessel.maxvesseldist'         '5e-3'
+'goat.vessel.maxvesseldist'         '1e-3'
 'goat.vessel.minreffac'             '2'
 
 # Target plate definition
@@ -401,16 +401,16 @@ VERSION 1.00.00
 'gg.cellconstructionmethod'             'quads_triangles'
 'gg.ref.readexistingrefdata'            '0'
 'gg.labels.structurebased'              '1'
-'gg.dogriddiagnostics'                  '0'
+'gg.dogriddiagnostics'                  '1'
 
 #-------------------------------------------------------------------------#
 #                         TOPOLOGICAL MESH OPTIONS                        #
 #-------------------------------------------------------------------------#
 
 # Read exising file? 
-'gg.tm.readexistingTM'          '0'
-'gg.tm.readexistingtracers'     '0'
-'gg.tm.TMfilepath'              './output/topomesh.dat'
+'gg.tm.readexistingTM'          '1'
+'gg.tm.readexistingtracers'     '1'
+'gg.tm.TMfilepath'              './output/topomesh_base.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
 
@@ -443,7 +443,7 @@ VERSION 1.00.00
 'gg.tm.mergetangencypointtubes' '1'
 'gg.tm.mergeavptubes'           '1'
 'gg.tm.dpsimintangencypointtubes'   '0.0'
-'gg.tm.lradmintangencypointtubes'   '2.0e-3'
+'gg.tm.lradmintangencypointtubes'   '2.0e-2'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'
@@ -452,7 +452,7 @@ VERSION 1.00.00
 'gg.tm.rvrcascadedir'           'up'
 'gg.tm.rvrfullycovered'         '1'
 
-'gg.tm.alignvesselparts'        '0'
+'gg.tm.alignvesselparts'        '1'
 'gg.tm.avpminangle'             '5.0'
 'gg.tm.avprefinevessel'         '0'
 'gg.tm.avpmaxvesseldist'        '2e-3'

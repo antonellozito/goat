@@ -440,7 +440,7 @@ VERSION 1.00.00
 'gg.cellconstructionmethod'             'quads_triangles'
 'gg.ref.readexistingrefdata'            '0'
 'gg.labels.structurebased'              '1'
-'gg.dogriddiagnostics'                  '0'
+'gg.dogriddiagnostics'                  '1'
 
 #-------------------------------------------------------------------------#
 #                         TOPOLOGICAL MESH OPTIONS                        #
