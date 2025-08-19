@@ -48,6 +48,12 @@ print('VisualizeGGOutput: reading structure from file: ' + structurename)
 
 # Outputs
 #-------
+try: 
+    l1 = dh.GetPolygonCoordinates(datadir + '/' + 'lpgraph_edges.dat')
+    plotter.PlotPolygons2D(l1[:, 0], l1[:, 1], 3, color='r')
+except:
+    pass 
+    
 # Topological mesh
 try:
     # Load
@@ -140,23 +146,34 @@ try:
     vals = dh.GetGeneral2DSurfaceData(datadir + '/' + 'Lmaxpolref.dat')
     plotter.PlotGeneral2DContourf(vals[:, 0], vals[:, 1], vals[:, 2], 6)
     thisaxes = plt.gca()
-    thisaxes.set_title('GG maximal poloidal length [m]')
+    thisaxes.set_title('GG maximal poloidal length [m] (without hard bounds)')
     thisaxes.set_xlabel('x [m]')
     thisaxes.set_ylabel('y [m]')
 except:
     print("Could not maximal poloidal length distribution function")
 
+try: 
+    plotter.PlotGridCells(simgrid, 7)
+    vals = dh.GetGeneral2DSurfaceData(datadir + '/' + 'Lminpolref.dat')
+    plotter.PlotGeneral2DContourf(vals[:, 0], vals[:, 1], vals[:, 2], 7)
+    thisaxes = plt.gca()
+    thisaxes.set_title('GG minimal poloidal length [m] (without hard bounds)')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+except:
+    print("Could not minimal poloidal length distribution function")
+
     
 # Faces
 try: 
-    plotter.PlotGridFaces(simgrid, 7)
+    plotter.PlotGridFaces(simgrid, 8)
 except:
     print("Could not plot grid faces")
 
 # Surface area
 try: 
-    plotter.PlotGridCellArea(simgrid, 7, doinverse=True)
-    plotter.PlotGridCells(simgrid, 8)
+    plotter.PlotGridCellArea(simgrid, 9, doinverse=True)
+    plotter.PlotGridCells(simgrid, 9)
 except:
     print("Could not plot grid cell area")
 
@@ -166,8 +183,8 @@ try:
 except:
     print("Could not load intersection data")
 try: 
-    plotter.PlotGridCells(simgrid, 9)
-    plotter.PlotPoints2D(coord[:, 0], coord[:, 1], 9, color='r', marker='o')
+    plotter.PlotGridCells(simgrid, 10)
+    plotter.PlotPoints2D(coord[:, 0], coord[:, 1], 10, color='r', marker='o')
 except:
     print("Could not plot intersection data")
 

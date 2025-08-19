@@ -106,10 +106,14 @@ module mod_graph
         procedure :: GetVertexEdges     => GetGraphVertexEdges
         procedure :: GetVertexEdgesDirectional  => GetGraphVertexEdgesDirectional
 
+        ! Checkers
+        procedure :: IsEdgeInGraph
+
         ! Operators
         !==========
         ! Reverse direction (edge flip - only meaningful for directed graphs)
         procedure :: ReverseDirection   => ReverseGraphDirection
+
         ! Flood
         procedure :: Flood      => FloodGraph 
 
@@ -143,6 +147,9 @@ module mod_graph
         procedure, private :: DeleteEdgeVertexBased     => DeleteUGraphEdgeVertexBased
 
         ! Getters (unchanged)
+
+        ! Checkers
+        procedure :: IsEdgeInGraph  => IsEdgeInUGraph  
 
         ! Operators
         !==========
@@ -225,6 +232,10 @@ contains
             end if 
             graph%ev2(i) = ind 
         end do 
+
+        ! Interconnection data
+        !---------------------
+        call graph%UpdateInterconnectionData()
         
 
     end subroutine
@@ -242,14 +253,57 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(GraphUDT)                     :: graph 
+        class(GraphUDT)                         :: graph 
 
         ! Auxiliary 
+        integer(I8)                             :: ind 
+        integer(I8), allocatable, dimension(:)  :: cc
+
+        ! Loop
+        integer(I8)                             :: i 
 
         ! Compute interconnections
         !=========================
         ! Vertex edges
+        !-------------
+        ! Initialize
+        if (allocated(graph%ve)) deallocate(graph%ve)
+        if (allocated(graph%vep1)) deallocate(graph%vep1)
+        if (allocated(graph%vep2)) deallocate(graph%vep2)
 
+        allocate(graph%vep1(graph%nv))
+        allocate(graph%vep2(graph%nv))
+        allocate(cc(graph%nv))
+        graph%vep1 = 0
+        graph%vep2 = 0
+        cc = 0
+
+        if (graph%nv > 0) then
+            graph%vep1(1) = 1 
+        end if 
+
+        ! Compute pointer
+        do i = 1, graph%ne
+            graph%vep2(graph%ev1(i)) = graph%vep2(graph%ev1(i)) + 1
+            graph%vep2(graph%ev2(i)) = graph%vep2(graph%ev2(i)) + 1
+        end do  
+        do i = 2, graph%nv 
+            graph%vep1(i) = graph%vep1(i-1) + graph%vep2(i-1)
+        end do 
+
+        ! Compute list
+        allocate(graph%ve(graph%vep1(graph%nv) + graph%vep2(graph%nv)-1))
+        do i = 1, graph%ne
+            ! First vertex
+            ind = graph%vep1(graph%ev1(i)) + cc(graph%ev1(i)) 
+            graph%ve(ind) = i
+            cc(graph%ev1(i)) = cc(graph%ev1(i)) + 1
+
+            ! Second vertex
+            ind = graph%vep1(graph%ev2(i)) + cc(graph%ev2(i)) 
+            graph%ve(ind) = i
+            cc(graph%ev2(i)) = cc(graph%ev2(i)) + 1
+        end do 
 
     end subroutine
 
@@ -317,6 +371,11 @@ contains
         graph%ev2 = pack(graph%ev2, .not. delvec)
         graph%ne = size(graph%ev1)
 
+        ! Update interconnections
+        !========================
+        ! Not the most efficient
+        call graph%UpdateInterconnectionData()
+
     end subroutine
 
     ! Vertex deletion (index based)
@@ -368,6 +427,11 @@ contains
         graph%ne = size(graph%ev1)
         where (graph%ev1 > vertind) graph%ev1 = graph%ev1 - 1
         where (graph%ev2 > vertind) graph%ev2 = graph%ev2 - 1
+
+        ! Update interconnections
+        !========================
+        ! Not the most efficient
+        call graph%UpdateInterconnectionData()
 
     end subroutine 
 
@@ -436,6 +500,11 @@ contains
         graph%ev1 = mapv(graph%ev1)
         graph%ev2 = mapv(graph%ev2)
 
+        ! Update interconnections
+        !========================
+        ! Not the most efficient
+        call graph%UpdateInterconnectionData()
+
     end subroutine
 
     ! Vertex index getter
@@ -469,11 +538,6 @@ contains
         ! Description
         !============
         ! Get the edges of a vertex in index format 
-        ! Note: since the basic graph object does not contain any 
-        ! interconnection data, we need to compute this from scratch. 
-        ! This may not be the best implementation and is probably best
-        ! overwritten by inheriting types with better data 
-        ! structures (e.g. that keep a vertex to edge pointer)
 
         ! Note: these are all the vertex's edges, including ingoing
         ! and outgoing! 
@@ -486,16 +550,17 @@ contains
         integer(I8), allocatable, dimension(:)  :: eind
 
         ! Auxiliary
-        logical, allocatable, dimension(:)      :: hasvert
+        !logical, allocatable, dimension(:)      :: hasvert
 
         ! Loop
-        integer(I8)                             :: k 
+        !integer(I8)                             :: k 
 
         ! Find edges
         !===========
-        hasvert = graph%ev1 == ind .or. graph%ev2 == ind 
-        allocate(eind(count(hasvert)))
-        eind = pack([(k, k = 1, graph%ne)], hasvert)
+        eind = graph%ve(graph%vep1(ind):graph%vep1(ind)+graph%vep2(ind)-1)
+        !hasvert = graph%ev1 == ind .or. graph%ev2 == ind 
+        !allocate(eind(count(hasvert)))
+        !eind = pack([(k, k = 1, graph%ne)], hasvert)
 
     end function
 
@@ -532,6 +597,55 @@ contains
         end if  
         eind = pack([(k, k = 1, graph%ne)], hasvert)
         
+    end function
+
+    ! Edge checker
+    function IsEdgeInGraph(graph, v1, v2) result(in)
+
+        ! Description
+        !============
+        ! This function checks if the edge formed by vertices 
+        ! [v1, v2] is an edge in the current graph. If so, the
+        ! result is true, otherwise it is false.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GraphUDT)                 :: graph
+        integer(I8), intent(in)         :: v1, v2 
+        logical                         :: in 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tve
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        in = .false. 
+
+        ! Checks
+        if ((v1 > graph%nv) .or. (v2 > graph%nv) .or. &
+            (v1 < 1) .or. (v2 < 1)) then 
+            ! Out of bounds, return false
+            return 
+        end if
+
+        ! Find edge
+        !==========
+        ! Get vertex edges
+        if (graph%vep2(v1) < graph%vep2(v2)) then 
+            tve = graph%GetVertexEdges(v1)
+        else 
+            tve = graph%GetVertexEdges(v2)
+        end if 
+        do i = 1, size(tve)
+            if ((graph%ev1(tve(i)) == v1) .and. (graph%ev2(tve(i)) == v2)) then 
+                in = .true.
+            end if 
+        end do 
+    
     end function
 
     ! Reverse direction
@@ -758,6 +872,9 @@ contains
         graph%ev1 = pack(ev1, .not. delvec) 
         graph%ev2 = pack(ev2, .not. delvec)
 
+        ! Compute interconnections
+        !=========================
+        call graph%UpdateInterconnectionData()
 
     end subroutine
 
@@ -805,6 +922,57 @@ contains
         call graph%DeleteEdgeLogicalBased(delvec)
         
     end subroutine
+
+    ! Edge checker
+    function IsEdgeInUGraph(graph, v1, v2) result(in)
+
+        ! Description
+        !============
+        ! This function checks if the edge formed by vertices 
+        ! [v1, v2] is an edge in the current graph. If so, the
+        ! result is true, otherwise it is false. Here, we also 
+        ! need to check [v2, v1] since the graph is undirected
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(UGraphUDT)                :: graph
+        integer(I8), intent(in)         :: v1, v2 
+        logical                         :: in 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tve
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        in = .false. 
+
+        ! Checks
+        if ((v1 > graph%nv) .or. (v2 > graph%nv) .or. &
+            (v1 < 1) .or. (v2 < 1)) then 
+            ! Out of bounds, return false
+            return 
+        end if
+
+        ! Find edge
+        !==========
+        ! Get vertex edges
+        if (graph%vep2(v1) < graph%vep2(v2)) then 
+            tve = graph%GetVertexEdges(v1)
+        else
+            tve = graph%GetVertexEdges(v2)
+        end if 
+        do i = 1, size(tve)
+            if (((graph%ev1(tve(i)) == v1) .and. (graph%ev2(tve(i)) == v2)) .or. &
+                ((graph%ev1(tve(i)) == v2) .and. (graph%ev2(tve(i)) == v1))) then 
+                in = .true.
+            end if 
+        end do 
+
+    end function
 
     ! Flood
     function FloodUGraph(graph, startvertind, skipvertopt) result(vertind)
@@ -1003,6 +1171,9 @@ contains
         graph%ne = count(.not. delvec)
         graph%ev1 = pack(ev1, .not. delvec) 
         graph%ev2 = pack(ev2, .not. delvec)
+
+        ! Compute interconnections
+        call graph%UpdateInterconnectionData()
 
 
     end subroutine

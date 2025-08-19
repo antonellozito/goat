@@ -4671,8 +4671,7 @@ module ggmod_topology2D
                     dfval = fval(2:) - fval(1:size(fval)-1)
                     isalphapos = dfval > 0.0_R8
                     alpha = abs(alphasigned)
-                    isedgealigned = (alpha < avpminangle) .or. ((pi_R8 - alpha) < avpminangle) 
-                    
+                    isedgealigned = (alpha < avpminangle) .or. ((pi_R8 - alpha) < avpminangle)                     
                     
 
                     ! Check if we should mark
@@ -4700,9 +4699,15 @@ module ggmod_topology2D
                                     ! Hit a removed tangency point 
                                     afendind(thisf) = findloc(isalphapos, &
                                         .not. isalphapos(1), 1, back=.false.)
+
+                                    
                                     if (.not. all(isedgealigned)) then 
+                                        ! Consider only edges til first non-aligned edge
+                                        isedgealigned(findloc(isedgealigned, .false., 1, back=.false.):) = .false.
                                         if (findloc(isedgealigned, .false., 1, back=.false.) > afendind(thisf)) then 
                                             ! Bounded by alpha -> override to case 2
+                                            afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(1)) .or. &
+                                                (isedgealigned), .true., 1, back=.true.) ! go as far as possible
                                             overridetubecase(thisf)     = .true.
                                             tubecase_override(thisf)    = 2 
                                         else
@@ -4711,6 +4716,8 @@ module ggmod_topology2D
                                         end if 
                                     else
                                         ! Bounded by alpha -> override to case 2
+                                        afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(1)) .or. &
+                                                (isedgealigned), .true., 1, back=.true.) ! go as far as possible
                                         overridetubecase(thisf)     = .true.
                                         tubecase_override(thisf)    = 2
                                     end if 
@@ -4738,8 +4745,12 @@ module ggmod_topology2D
                                     afstartind(thisf) = findloc(isalphapos, &
                                         .not. isalphapos(size(tx)-1), 1, back=.true.) + 1
                                     if (.not. all(isedgealigned)) then 
+                                        ! Consider only edges til first non-aligned edge
+                                        isedgealigned(:findloc(isedgealigned, .false., 1, back=.true.)) = .false.
                                         if (findloc(isedgealigned, .false., 1, back=.true.)+1 < afendind(thisf)) then 
                                             ! Bounded by alpha -> override to case 2
+                                            afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(size(tx)-1)) .or. &
+                                                (isedgealigned), .true., 1, back=.false.) ! go as far as possible
                                             overridetubecase(thisf)     = .true.
                                             tubecase_override(thisf)    = 2 
                                         else
@@ -4748,6 +4759,8 @@ module ggmod_topology2D
                                         end if 
                                     else
                                         ! Bounded by alpha -> override to case 2
+                                        afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(size(tx)-1)) .or. &
+                                                (isedgealigned), .true., 1, back=.false.) ! go as far as possible
                                         overridetubecase(thisf)     = .true.
                                         tubecase_override(thisf)    = 2
                                     end if 
@@ -5282,9 +5295,10 @@ module ggmod_topology2D
                         call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
                             [tscr(endind)], 'end', [-0*distfrac], .true., .false.)
                     else
-                        ! Also need to delete a first part
+                        ! Also need to delete a first part - and delete the first vertex
+                        allc(indtpc)%startsaddle = 0
                         call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
-                            [tscr(endind-1:endind)], 'both', [0*distfrac, -0*distfrac], .true., .false.)
+                            [tscr(endind-1:endind)], 'both', [0*distfrac, -0*distfrac], .false., .false.)
                     end if 
                     !call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
                     !    [tscr(endind)], 'end', [0.0_R8], .true., .false.)
@@ -5305,9 +5319,10 @@ module ggmod_topology2D
                         call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
                             [tscr(startind)], 'start', [-0*distfrac], .false., .true.)
                     else
-                        ! Also need to delete last part
+                        ! Also need to delete last part - and remove end vertex
+                        allc(i)%endsaddle = 0 ! doesn't end anymore in saddle point
                         call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(startind:startind+1)], 'both', [-0*distfrac, 0*distfrac], .false., .true.)
+                            [tscr(startind:startind+1)], 'both', [-0*distfrac, 0*distfrac], .false., .false.)
                     end if
                     !allc(i)%x = allc(i)%x([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
                     !allc(i)%y = allc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
@@ -5346,8 +5361,15 @@ module ggmod_topology2D
 
                     ! Keep only this part of the contour coordinates 
                     ! In this case, we don't keep the starting point
-                    call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                        [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .true., .false.)
+                    allc(i)%startsaddle = 0
+                    if (tscr(intersectind) == 0.0_R8) then 
+                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
+                            [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .true., .false.)
+                    else
+                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
+                            [tscr(intersectind:intersectind+1)], 'both', [-distfrac, -distfrac], .false., .false.)
+                    end if 
+
                 end if
                     !notdelind = [(k, k = 2, tsc(intersectind))]
                 !allc(i)%x = allc(i)%x(notdelind)
