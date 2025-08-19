@@ -408,8 +408,8 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 
 # Read exising file? 
-'gg.tm.readexistingTM'          '1'
-'gg.tm.readexistingtracers'     '1'
+'gg.tm.readexistingTM'          '0'
+'gg.tm.readexistingtracers'     '0'
 'gg.tm.TMfilepath'              './output/topomesh_base.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'

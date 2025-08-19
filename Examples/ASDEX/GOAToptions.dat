@@ -405,8 +405,8 @@ VERSION 1.00.00
 #                         TOPOLOGICAL MESH OPTIONS                        #
 #-------------------------------------------------------------------------#
 # Read exising file? 
-'gg.tm.readexistingTM'          '1'
-'gg.tm.readexistingtracers'     '1'
+'gg.tm.readexistingTM'          '0'
+'gg.tm.readexistingtracers'     '0'
 'gg.tm.TMfilepath'              './output/topomesh.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
@@ -430,7 +430,7 @@ VERSION 1.00.00
 'gg.tm.contour.dl'              '0.01'
 
 # Topomesh adaptations
-'gg.tm.doadaptations'           '0'
+'gg.tm.doadaptations'           '1'
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '0'
 'gg.tm.cbnd.frac'               '0.1'
@@ -551,7 +551,7 @@ VERSION 1.00.00
 #'gg.vd.pd.distribution.points.val'      '[25, 25]'
 
 # Options for density based distribution, radial
-'gg.vd.rd.distribution.doxp'            '0'
+'gg.vd.rd.distribution.doxp'            '1'
 'gg.vd.rd.distribution.decaylengthxp'   '0.1';
 'gg.vd.rd.distribution.densityatxp'     '100';
 'gg.vd.rd.distribution.densityatinf'    '10';
