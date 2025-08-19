@@ -51,7 +51,7 @@ module gamod_driver
 
         ! Initialize grid adaptation
         !===========================
-        call GAinit(grid,options,environment)
+        call GAinit(grid,options,environment,magneticField)
         
 
         ! Driver Selection
@@ -81,7 +81,7 @@ module gamod_driver
 
     end subroutine
 
-    subroutine GAinit(grid,options,environment)
+    subroutine GAinit(grid,options,environment,magneticField)
 
         ! Description
         !============
@@ -92,11 +92,13 @@ module gamod_driver
         type(GridUDT), intent(inout)            :: grid 
         type(GAoptionsUDT), intent(in)          :: options
         type(EnvironmentUDT), intent(in)        :: environment
+        type(MagneticFieldUDT), intent(in)      :: magneticField
 
         ! Variables
         integer(I8) :: i
-        integer(I8), allocatable, dimension(:) :: tv
-        logical :: cells(grid%cell%ntot), is_ordered(grid%cell%ntot)
+        integer(I8), allocatable, dimension(:) :: tv, cvLookUp
+        logical :: cells(grid%cell%ntot), is_ordered(grid%cell%ntot), &
+            use_nsep, use_sepID, start
 
 
         ! Initialize
@@ -118,7 +120,7 @@ module gamod_driver
             c%x(i) = sum(v%x(tv))/real(size(tv), kind=R8)
             c%y(i) = sum(v%y(tv))/real(size(tv), kind=R8)
         end do
-        end associate
+
 
         ! Check order of vertices  (see GetGeo_usCouples.m)
         cells = .true.
@@ -133,9 +135,15 @@ module gamod_driver
         call GetFsVxFromFsFc(grid)
 
         ! Determine Xpoints and separatrices
+        call GiveXpoint(grid,use_nsep)
+        use_nsep = .false.
+        use_sepID = .false.
+        start = .true.
+        cvLookUp = GetCvLookUp(c)
+        call GiveSeparatrices(grid, use_nsep, use_sepID, start, cvLookUp)
 
         ! Identify aligned faces
-
+        call IdentifyAlignedFaces(grid,options,magneticField)
 
         ! Check the connectivity
 
@@ -144,7 +152,8 @@ module gamod_driver
         ! Remove some connectivity field
 
         ! Identify farSOL cells
-        
+
+        end associate        
 
 
     end subroutine

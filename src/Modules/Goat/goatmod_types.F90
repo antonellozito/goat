@@ -428,6 +428,9 @@ module goatmod_types
         integer(I8), allocatable            :: fluxsurfaceneig(:), fluxsurfaceneigP(:, :)
         real(R8), allocatable               :: fluxsurfacepsi(:)
 
+        integer(I8), allocatable            :: fluxsurfacevertsP(:,:)
+        integer(I8), allocatable            :: fluxsurfaceverts(:)
+
 
     end type
 
@@ -565,9 +568,11 @@ module goatmod_types
         ! - ndivFc              : total number of divertor faces
         ! - divFc               : list of divertor faces
         ! - divFcP              : pointer for the list of divertor faces
+        ! - sepID               : provides the fieldlineID of the separatrices
+        ! - nsep                : number of separatrices    
 
         ! Flux data
-        type(GAFluxDataUDT)           :: fluxdata
+        type(FluxDataUDT)           :: fluxdata
 
         ! Legacy data of structured grid
         type(StructuredGridDataUDT) :: sglegacy
@@ -590,6 +595,10 @@ module goatmod_types
         integer(I8), allocatable, dimension(:, :)   :: divFcP
         integer(I8)                             :: nxp, nsp, nop, ntp, &
             ndiv, ndivFc
+
+        ! Separatrices
+        integer(I8), allocatable                :: sepID(:)
+        integer(I8)                             :: nsep
 
     end type
 
@@ -662,6 +671,8 @@ module goatmod_types
         integer(I8), allocatable, dimension(:, :)   :: divFcP
         integer(I8)                             :: nxp, nsp, nop, ntp, &
             ndiv, ndivFc    
+
+        
     end type
 
     ! Main grid structure

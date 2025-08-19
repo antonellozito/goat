@@ -17,6 +17,7 @@ module gamod_utility
     use mod_sort
     use mod_precision
     use goatmod_types
+    use gdmod_utility_optimization
 
 
     ! The usual
@@ -67,9 +68,9 @@ module gamod_utility
         ! Declare variables
         !==================
         ! Arguments
-        class(QualityMetric)    :: qm
-        type(GridUDT)           :: grid
-        type(GAoptionsUDT)      :: options
+        class(QualityMetric), intent(inout)     :: qm
+        type(GridUDT), intent(in)               :: grid
+        type(GAoptionsUDT), intent(in)          :: options
 
         ! Auxiliary
         real(R8) :: vec_n(grid%face%ntot,2), fcH(grid%face%ntot,2), &
@@ -226,7 +227,7 @@ module gamod_utility
         ! Declare variables
         !==================
         type(GridUDT), intent(inout)    :: grid
-        logical, intent(in)          :: is_ordered(grid%cell%ntot)
+        logical, intent(in)             :: is_ordered(grid%cell%ntot)
 
         ! Declare variables
         !==================
@@ -234,7 +235,8 @@ module gamod_utility
         integer(I8), allocatable, dimension(:) :: tv, tf, ntv, ntf
         integer(I8), allocatable, dimension(:,:) :: vf
         real(R8) :: vec_start(1:2), vec_face1(1:2), vec_face2(1:2), &
-            sin1, sin2, fcX(grid%face%ntot), fcY(grid%face%ntot)
+            sin1, sin2
+        real(R8), allocatable :: fcX(:), fcY(:)
 
         ! Associate
         associate(&
@@ -244,6 +246,7 @@ module gamod_utility
             )
         
         ! Compute face centers
+        allocate(fcX(f%ntot), fcY(f%ntot))
         fcX = 0.5_R8 * (v%x(f%vert(:,1)) + v%x(f%vert(:,2)))
         fcY = 0.5_R8 * (v%y(f%vert(:,1)) + v%y(f%vert(:,2)))
 
@@ -329,6 +332,10 @@ module gamod_utility
             end if
 
         end do
+
+        ! Deallocate 
+        deallocate(fcX, fcY)
+
         end associate
 
 
@@ -379,16 +386,615 @@ module gamod_utility
         end do
 
         ! Trim - first implement GAGrid
-        !fd%fluxsurfacevertices = fsVx(1:nv_counter)
-        !fd%fluxsurfaceverticesP = fsVxP(1:fd%nFs,:)
+        fd%fluxsurfaceverts = fsVx(1:nv_counter)
+        fd%fluxsurfacevertsP = fsVxP(1:fd%nFs,:)
 
         end associate
 
 
+    end subroutine
 
+    subroutine GiveXpoint(grid,use_sep)
 
+        ! Description
+        !============
+        ! Gives the Xpoint(s). Depending the grid information different methods are used. If all vertices have a fieldlineID the routine DetermineXPoints is used, otherwise the xpoint is determined by checking whether a vertex is surrounded by more then three regions and more than four cells. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)   :: grid
+        logical, intent(in)            :: use_sep              
+
+        ! Auxiliary
+        integer(I8)                         :: nxpind, i, j, iv, xpoints(1:100), counter, & 
+            n , nc, s
+        integer(I8), allocatable            :: xpind(:), order(:), vxs(:), cells(:), &
+            regions(:), cvLookUp(:)
+        logical :: use_sepID, start, use_fieldlineID, use_nsep
+        
+
+        ! Initialize
+        counter = 0
+        xpoints = 0
+        
+
+        ! Associate
+        associate(&
+            c   => grid%cell, &
+            v   => grid%vert, &
+            fd  => grid%data%fluxdata &
+            )
+
+            ! Find separatrix if not given
+            if (.not.use_sep) then
+                call GiveSeparatrices(grid,use_nsep,use_sepID,start,cvLookUp)
+            end if
+
+            ! Determine whether to use the vert.fieldlineID to determine the Xpoint
+            use_fieldlineID = .false.
+            if (allocated(v%fieldlineID)) then
+                if (size(v%fieldlineID).eq.v%ntot) then
+                    use_fieldlineID = .true.
+                end if
+            end if
+
+            if (use_fieldlineID) then
+
+                call DetermineXPoints(xpind, nxpind, order, grid)
+                grid%data%xpointID  = xpind
+                grid%data%nxp       = nxpind 
+
+            elseif ((allocated(v%fieldlineID)).and.(allocated(v%cellP))) then
+
+                ! Only check the vertices on the separatrices
+                cvLookUp = GetCvLookUp(c)
+                do i = 1, grid%data%nsep
+                    s = fd%fluxsurfacevertsP(grid%data%sepID(i),1)
+                    n = fd%fluxsurfacevertsP(grid%data%sepID(i),2)
+                    vxs = fd%fluxsurfaceverts(s:s+n-1)
+
+                    do j = 1, n
+                        iv = vxs(j)
+                        cells = GetVertCellGA(c, iv, cvLookUp)
+                        call Unique(c%reg(cells), regions)
+                        nc = size(cells)
+
+                        if ((size(regions).ge.3) .and. (nc.gt.4)) then
+                            counter = counter + 1
+                            xpoints(counter) = iv
+                        end if
+
+                    end do 
+
+                end do
+
+                ! Saving 
+                grid%data%xpointID  = xpoints(1:counter)
+                grid%data%nxp       = counter
+
+            else
+                
+                ! Check all vertices
+                cvLookUp = GetCvLookUp(c)
+                do iv = 1, v%ntot
+                    cells = GetVertCellGA(c, iv, cvLookUp)
+                    call Unique(c%reg(cells), regions)
+                    nc = size(cells)
+
+                    if ((size(regions).ge.3) .and. (nc.gt.4)) then
+                        counter = counter + 1
+                        xpoints(counter) = iv
+                    end if
+
+                end do 
+
+                ! Saving 
+                grid%data%xpointID  = xpoints(1:counter)
+                grid%data%nxp       = counter
+
+            end if
+
+            if (grid%data%nxp == 0) then
+                print *, 'GiveXpoints: Warning: no Xpoint found!'
+            endif 
+
+        end associate
+
+    end subroutine 
+
+    subroutine GiveSeparatrices(grid,use_nsep,use_sepID,start,cvLookUp)
+
+        ! Description
+        !============
+        ! Determines the ID of the separatrices depending on the given information.
+        ! The argument start is used when the separatrices need to be determined at the start of the program, so with little rest information.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)         :: grid
+        logical, intent(in)                  :: use_nsep, use_sepID, start
+        integer(I8), allocatable, optional :: cvLookUp(:)
+
+        ! Initialize
+        logical    :: use_xpointID     
+        integer(I8), allocatable :: vxs(:), fcs(:), cvs(:)
+        integer(I8) :: ifs, ix, nv, s, sepIDloc(1:100), &
+            counter, counter_dummy, nf, step, i, ifc
+
+        ! Initialize
+        sepIDloc = 0
+        counter = 0
+        counter_dummy = 0
+        
+
+        ! Associate
+        associate(&
+            c   => grid%cell, &
+            fd  => grid%data%fluxdata &
+            )
+            
+
+            if (.not.present(cvLookUp)) then 
+                cvLookUp = GetCvLookUp(c)
+            end if
+            
+            ! Determine separatrices IDs
+            if (start) then 
+                if (.not.use_nsep) then
+
+                    ! Checking if an Xpoint was already determined
+                    if (allocated(grid%data%xpointID)) then
+                        use_xpointID = .true.
+                    end if
+
+                    if (use_xpointID) then
+                        ! Based on Xpoints
+                        do ifs = 1, fd%nFs
+                            nv = fd%fluxsurfacevertsP(ifs,1)
+                            s = fd%fluxsurfacevertsP(ifs,2)
+                            vxs = fd%fluxsurfaceverts(s:s+nv-1)
+
+                            do ix = 1, grid%data%nxp
+                                if (any(grid%data%xpointID(ix).eq.vxs)) then
+                                    counter = counter + 1
+                                    sepIDloc(counter) = ifs
+                                end if
+                            end do
+                        end do
+
+                    else
+
+                        do ifs = 1, fd%nFs
+                            nf = fd%fluxsurfacefacesP(ifs,1)
+                            s = fd%fluxsurfacefacesP(ifs,2)
+                            fcs = fd%fluxsurfacefaces(s:s+nf-1)
+
+                            step = 1
+                            sepIDloc = DetectSepID(ifs, c, fcs, sepIDloc, nf, step, cvLookUp, counter)
+                            counter_dummy = counter + 1
+                            if (sepIDloc(counter_dummy) /= 0) then
+                                counter = counter + 1
+                            end if 
+
+                        end do 
+
+                    end if
+
+                    ! Save
+                    grid%data%nsep = counter
+                    grid%data%sepID = sepIDloc(1:counter)
+
+                
+                elseif (use_nsep .and. grid%data%nsep.eq.1) then
+                    ! Determin separatrix for SN-case
+                    ! Check whether previous sepID is still separatrix
+                    if (use_sepID) then
+                        nf = fd%fluxsurfacefacesP(grid%data%sepID(1),2)
+                        s = fd%fluxsurfacefacesP(grid%data%sepID(1),1)
+                        fcs = fd%fluxsurfacefaces(s:s+nf-1)
+                        step = 1
+                        do i = 1, step, nf
+                            ifc = fcs(i)
+                            cvs = GetFaceCellGA(c,ifc,cvLookUp)
+                            if (size(cvs).eq.2) then
+                                if (c%reg(cvs(1)) /= c%reg(cvs(2))) then
+                                    ! Noting has changed and should not be possible to created new separatrices with grid adaptations
+                                    return
+                                end if
+                            else
+                                exit
+                            end if
+                        end do
+                    end if 
+
+                    ! Determine new separatrices (line 99)
+                    sepIDloc = 0
+                    do ifs = 1, fd%nFs
+                        nf = fd%fluxsurfacefacesP(ifs,2)
+                        s = fd%fluxsurfacefacesP(ifs,1)
+                        fcs = fd%fluxsurfacefaces(s:s+nf-1)
+                        step = 1
+
+                        do i = 1, step, nf
+                            ifc = fcs(i)
+                            cvs = GetFaceCellGA(c,ifc,cvLookUp)
+                            if (size(cvs).eq.2) then
+                                if (c%reg(cvs(1)) /= c%reg(cvs(2))) then
+                                    sepIDloc(1) = ifs
+                                    exit
+                                end if 
+                            else
+                                exit
+                            end if
+                        end do
+                        if (sepIDloc(1) == ifs) then
+                            grid%data%sepID = sepIDloc(1)
+                            exit
+                        end if
+
+                    end do 
+
+                    if (sepIDloc(1) .eq. 0) then
+                        call gdErrorHandler('GiveSeparatrices: No separatrix found')
+                    end if
+
+                elseif (use_nsep.and.grid%data%nsep.gt.1) then
+                    ! Determine separatrix for general case
+                    sepIDloc = 0
+                    counter = 0
+                    ! Check whether previous is still correct
+                    if (.not.any(grid%data%sepID /= 0)) then
+                        do i = 1, grid%data%nsep
+                            ifs = grid%data%sepID(i)
+                            nf = fd%fluxsurfacefacesP(ifs, 2)
+                            s = fd%fluxsurfacefacesP(ifs, 1)
+                            fcs = fd%fluxsurfacefaces(s:s+nf-1)
+                            step = 1
+                            sepIDloc = DetectSepID(ifs, c, fcs, sepIDloc, nf, step, cvLookUp, counter)
+                            counter_dummy = counter + 1
+                            if (sepIDloc(counter_dummy) /= 0) then
+                                counter = counter + 1
+                            end if 
+                        end do
+                        if (counter.eq.grid%data%nsep) then
+                            grid%data%sepID = sepIDloc(1:counter)
+                            return
+                        end if
+                    end if
+
+                    do ifs = 1, fd%nFs
+                        if (.not.any(ifs == grid%data%sepID)) then
+                            nf = fd%fluxsurfacefacesP(ifs, 2)
+                            s = fd%fluxsurfacefacesP(ifs, 1)
+                            fcs = fd%fluxsurfacefaces(s:s+nf-1)
+                            step = 1
+                            sepIDloc = DetectSepID(ifs, c, fcs, sepIDloc, nf, step, cvLookUp, counter)
+                            counter_dummy = counter + 1
+                            if (sepIDloc(counter_dummy) /= 0) then
+                                counter = counter + 1
+                            end if
+                            if (sepIDloc(grid%data%nsep) /= 0 ) then ! all separatrices are found
+                                exit
+                            else 
+                                call gdErrorHandler("GiveSeparatrices: not all separatrices were found.")
+                                ! If above would not be sufficient, check give_iFs_sep.m line 194
+                            end if
+                        end if
+
+                    end do
+
+                    ! Save
+                    grid%data%sepID = sepIDloc(1:counter)
+                    !(nsep already there)
+
+                end if 
+
+            else ! no start, hopefully more efficient
+                sepIDloc = 0
+                counter = 0
+                if  (.not.use_nsep) then
+                    if (allocated(grid%data%xpointID)) then
+                        do ifs = 1, fd%nFs
+                            nv = fd%fluxsurfacevertsP(ifs,2)
+                            s = fd%fluxsurfacevertsP(ifs,1)
+
+                            vxs = fd%fluxsurfaceverts(s:s+nv-1)
+                            do ix = 1, grid%data%nxp
+                                if (any(grid%data%xpointID(ix)==vxs)) then
+                                    counter = counter + 1
+                                    sepIDloc(counter) = ifs
+                                end if 
+                            end do 
+                        end do
+                    else ! line 252
+                        do ifs = 1, fd%nFs
+                            nf = fd%fluxsurfacefacesP(ifs, 2)
+                            s = fd%fluxsurfacefacesP(ifs, 1)
+                            fcs = fd%fluxsurfacefaces(s:s+nf-1)
+                            step = max(2,nint(nf/5.0_R8))
+                            sepIDloc = DetectSepID(ifs,c, fcs, sepIDloc, nf, step, cvLookUp, counter)
+                            counter_dummy = counter + 1
+                            if (sepIDloc(counter_dummy) /= 0) then
+                                    counter = counter + 1
+                            end if
+
+                        end do
+
+                    end if
+
+                    ! Save
+                    grid%data%nsep = counter
+                    grid%data%sepID = sepIDloc(1:counter)
+                elseif (use_nsep.and.(grid%data%nsep.eq.1)) then
+                    ! Check whether the previous is separatrix
+                    if (grid%data%sepID(1) /= 0) then
+                            nf = fd%fluxsurfacefacesP(ifs, 2)
+                            s = fd%fluxsurfacefacesP(ifs, 1)
+                            fcs = fd%fluxsurfacefaces(s:s+nf-1)
+                            step = max(2,nint(nf/5.0_R8))   
+                            do i = 3, step, nf-2
+                                ifc = fcs(i)
+                                cvs = GetFaceCellGA(c,ifc,cvLookUp)
+                                if (size(cvs).eq.2) then
+                                    if (c%reg(cvs(1))/=c%reg(cvs(2))) then
+                                        return ! Separatrix is the same
+                                    end if
+                                else
+                                    exit ! exit loop because this surface is boundary
+                                end if
+
+                            end do                     
+                    end if
+
+                    ! Determine new separatrix if necessary
+                    sepIDloc = 0
+                    counter = 0
+                    do ifs = 1, fd%nFs
+                        nf = fd%fluxsurfacefacesP(ifs, 2)
+                        s = fd%fluxsurfacefacesP(ifs, 1)
+                        fcs = fd%fluxsurfacefaces(s:s+nf-1)
+                        step = 1   
+                        do i = 3, step, nf-2 
+                            ifc = fcs(i)
+                            cvs = GetFaceCellGA(c, ifc, cvLookUp)
+                            if (size(cvs).eq.2) then 
+                                if (c%reg(cvs(1))/=c%reg(cvs(2))) then
+                                    counter = counter + 1
+                                    sepIDloc(counter) = ifs
+                                    exit
+                                end if
+                            else
+                                exit                               
+                            end if  
+                        end do
+                        if (sepIDloc(counter).eq.ifs) then
+                            exit
+                        end if
+                    end do 
+
+                    ! Save
+                    grid%data%sepID = sepIDloc(1)
+
+                elseif (use_nsep.and.(grid%data%nsep.gt.1)) then
+                    sepIDloc = 0
+                    counter = 0
+                    if (.not.any(grid%data%sepID.eq.0)) then
+                        do i = 1, grid%data%nsep
+                            ifs = grid%data%sepID(i)
+                            nf = fd%fluxsurfacefacesP(ifs, 2)
+                            s = fd%fluxsurfacefacesP(ifs, 1)
+                            fcs = fd%fluxsurfacefaces(s:s+nf-1) 
+                            step = 1
+                            sepIDloc = DetectSepID(ifs,c, fcs, sepIDloc, nf, step, cvLookUp, counter)
+                            counter_dummy = counter + 1
+                            if (sepIDloc(counter_dummy) /= 0) then
+                                    counter = counter + 1
+                            end if                           
+                        end do
+                        if (counter .eq. grid%data%nsep) then
+                            return ! All stays the same
+                        end if
+                    end if
+
+                    ! Determine new separatrices if necessary
+                    do ifs = 1, fd%nFs
+                        if (.not.any(sepIDloc(1:grid%data%nsep).eq.ifs)) then
+                            nf = fd%fluxsurfacefacesP(ifs, 2)
+                            s = fd%fluxsurfacefacesP(ifs, 1)
+                            fcs = fd%fluxsurfacefaces(s:s+nf-1) 
+                            step = 1   
+                            sepIDloc = DetectSepID(ifs,c, fcs, sepIDloc, nf, step, cvLookUp, counter)
+                            counter_dummy = counter + 1
+                            if (sepIDloc(counter_dummy) /= 0) then
+                                    counter = counter + 1
+                            end if  
+                            if (sepIDloc(grid%data%nsep)/= 0) then
+                                exit ! all separatrices are found
+                            end if
+                        end if
+                    end do
+
+                    ! If not all where found - extra check possible see line 390 in give_iFs_sep.m
+                    if (sepIDloc(grid%data%nsep).eq.0) then
+                       call gdErrorHandler("GiveSeparatrices: not all separatrices where found")
+                    end if
+
+                    ! Save
+                    grid%data%sepID = sepIDloc(1:counter)
+
+                end if
+
+            end if 
+
+        end associate
 
     end subroutine
+
+    subroutine IdentifyAlignedFaces(grid,options,magneticField)
+       
+        ! Description
+        !============
+        ! Identify adhoc whether faces are aligned with the magnetic field or
+        ! whether they were supposed to be aligned by the grid generator
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT) :: grid
+        type(GAoptionsUDT) :: options
+        type(MagneticFieldUDT) :: magneticField
+        
+        ! Auxiliary
+        integer(I8) :: ifc, v1, v2
+        integer(I8), allocatable :: facealigned(:)
+        real(R8), allocatable :: fcX(:), fcY(:), &
+            dpsidx(:), dpsidy(:), Bx(:), By(:), abs_cos(:), &
+            t1x(:), t2x(:), t1y(:), t2y(:)
+
+        ! Associate
+        associate( &
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        allocate(facealigned(f%ntot), fcX(f%ntot), fcY(f%ntot), &
+        Bx(f%ntot), By(f%ntot), tx(f%ntot,2), Bnorm(f%ntot), cos(f%ntot))
+        fcX = 0.5_R8*(v%x(f%vert(:,1)) + v%x(f%vert(:,2)))
+        fcY = 0.5_R8*(v%y(f%vert(:,1)) + v%y(f%vert(:,2)))
+
+        ! Sort faces - Already done in GAInit
+
+        ! Get Magneticfield
+        call magneticField%interp%Evaluate(fcX,fcy,1,0,dpsidx)
+        call magneticField%interp%Evaluate(fcX,fcy,0,1,dpsidy)  
+        Bx = -dpsidy
+        By = dpsidx
+        Btot = sqrt(Bx**2 + By**2)
+
+        abs_cos = 0
+        ! Tangential vector
+        t1x = v%x(f%vert(:,1))
+        t2x = v%x(f%vert(:,2))
+        t1y = v%y(f%vert(:,1))
+        t2y = v%y(f%vert(:,2))
+
+        t1x = t2x - t1x
+        t1y = t2y - t1y
+
+        Bnorm = sqrt(t1x**2 + t1y**2)*Btot
+        cos = t1x*Bx + t1y*By
+        
+        ! Loop because of intrinsic abs an
+        do ifc = 1, f%ntot
+            abs_cos(ifc) = abs(max(-1.0_R8,min(1.0_R8,cos(ifc))) / Bnorm(ifc))
+        end do
+
+        ! Locally generalize face labels
+        
+              
+
+
+
+
+        end associate
+
+    end subroutine
+
+    !==================================================================!
+    !                                                                  !
+    !                           FUNCTIONS                              !
+    !                                                                  !
+    !==================================================================!    
+
+    ! Get cells of a vertex without using vert%cell
+    function GetVertCellGA(cell, i, cvLookUp) result(res)
+        integer(I8)                 :: i 
+        type(CellUDT)               :: cell
+        integer(I8), allocatable, optional    :: cvLookUp(:)
+        integer(I8), allocatable    :: res(:)
+        
+        if (.not.present(cvLookUp)) then
+            cvLookUp = GetCvLookUp(cell)
+        end if
+            
+        res = pack(cvLookUp,cell%vert.eq.i)
+    end function
+
+    function GetFaceCellGA(cell, i, cvLookUp) result(res)
+        integer(I8)                 :: i 
+        type(CellUDT)               :: cell
+        integer(I8), allocatable, optional    :: cvLookUp(:)
+        integer(I8), allocatable    :: res(:)  
+        
+        if (.not.present(cvLookUp)) then
+            cvLookUp = GetCvLookUp(cell)
+        end if
+
+        res = pack(cvLookUp,cell%face.eq.i)
+    end function
+
+    function GetFluxSurfaceFcs(fd, i) result(res)
+        integer(I8) :: i, s, nf
+        type(FluxDataUDT) :: fd
+        integer(I8), allocatable :: res(:)
+
+        nf = fd%fluxsurfacefacesP(i,2)
+        s = fd%fluxsurfacefacesP(i,1)
+        res = fd%fluxsurfacefaces(s:s+nf-1)
+
+    end function
+
+    function GetCvLookUp(cell) result(res)
+        type(CellUDT)       :: cell
+        integer(I8)         :: nc, ic, nv, s                
+        integer(I8), allocatable :: res(:)
+
+        nc = cell%ntot
+
+        allocate(res(1:cell%vertP(nc,1)+cell%vertP(nc,2)-1))
+        res = 0
+
+        do ic = 1, nc
+            s = cell%vertP(ic, 1)
+            nv = cell%vertP(ic, 2)
+            res(s:s+nv-1) = ic
+        end do
+    end function
+
+    function DetectSepID(ifs, cell, faces, sepIDloc, nf, step, cvLookUp, counter) result(res)
+        ! Description
+        !============
+        ! Check whethere is a core region on one side of the flux surface
+        integer(I8) :: ifs, nf, counter, i, step, ifc, reg1, reg2, sepIDloc(1:100)
+        type(CellUDT) ::  cell
+        integer(I8), allocatable :: cvLookUp(:), faces(:), cvs(:), res(:)
+
+        ! Initialize
+        res = sepIDloc
+
+        do i = 1, step, nf
+            ifc = faces(i)
+            cvs = GetFaceCellGA(cell,ifc, cvLookUp)
+            if (size(cvs).eq.2) then
+                reg1 = cell%reg(cvs(1))
+                reg2 = cell%reg(cvs(2))
+                if (reg1 /= reg2) then
+                    if ((mod(reg1,4).eq.1) .or. (mod(reg2,4).eq.1)) then 
+                        counter = counter + 1
+                        res(counter) = ifs
+                        exit
+                    end if
+                end if
+            end if
+        end do
+
+
+        
+    end function
 
 
 end module 

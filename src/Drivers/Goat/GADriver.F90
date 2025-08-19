@@ -38,6 +38,9 @@ subroutine GADriver(goatoptions)
     gaoptions%inputfilepath = goatoptions%inputfilepath
     call gaoptions%Set()
 
+    ! Translate Grid to GAGrid with dynamic arrays
+
+
     ! Run adaptations
     !================
     call GridAdaptor(grid,environment,magneticField,gaoptions)
@@ -46,6 +49,9 @@ subroutine GADriver(goatoptions)
     ! Post-processing
     !================
     ! call PostProcessingGridInformation(grid,magneticField,goatoptions)
+
+    ! Translate GAGrid to Grid
+
 
     ! Write data
     !===========
