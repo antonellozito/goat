@@ -28,6 +28,7 @@ subroutine GADriver(goatoptions)
     type(GAoptionsUDT)          :: gaoptions
     
     ! Auxiliary
+    type(GAGridUDT)             :: GAgrid
 
     ! Initialize
     !===========
@@ -35,11 +36,17 @@ subroutine GADriver(goatoptions)
     call ExtractGoatData(grid, magneticField, environment, goatoptions)
 
     ! Set grid adaptation options
-    gaoptions%inputfilepath = goatoptions%inputfilepath
+    gaoptions%inputfilepath         = goatoptions%inputfilepath
+    gaoptions%vesselmode            = goatoptions%vesselmode 
+    gaoptions%slab                  = goatoptions%slab
+    gaoptions%debug                 = goatoptions%debug 
+    gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
+    gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
+
     call gaoptions%Set()
 
     ! Translate Grid to GAGrid with dynamic arrays
-
+    call TranslateGridTOGAGrid(grid,GAgrid)
 
     ! Run adaptations
     !================
@@ -51,7 +58,7 @@ subroutine GADriver(goatoptions)
     ! call PostProcessingGridInformation(grid,magneticField,goatoptions)
 
     ! Translate GAGrid to Grid
-
+    call TranslateGridTOGAGrid(grid,GAgrid)
 
     ! Write data
     !===========
