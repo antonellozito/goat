@@ -1257,9 +1257,12 @@ module optmod_optimizationengine
                             ! Set step to zero
                             dx(:) = 0
 
-                            ! Relaxation factor is updated below
+                            ! Message
                             print *, 'line search did not converge, skipping update ' // &
                                     'and reattempt with damped Hessian since step length is small'
+
+                            ! Increase rxf
+                            rxf = rxf*2.0_R8/rxfdec
                         else
                             ! Probably large alpha due to wolfe or something, 
                             ! just continue as is
