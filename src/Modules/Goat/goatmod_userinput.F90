@@ -84,9 +84,14 @@ module goatmod_userinput
         ! interface
 
         ! - GGtoGDfacelabelmappingGG: idem above but for GG to GD 
-        ! - GGtoGDfacelabelmappingGA
+        ! - GGtoGDfacelabelmappingGD
         ! - GGtoGDfacelabelsubfrom
         ! - GGtoGDfacelabelsubto
+
+        ! - GGtoGAfacelabelmappingGG: idem above but for GG to GA
+        ! - GGtoGAfacelabelmappingGA
+        ! - GGtoGAfacelabelsubfrom
+        ! - GGtoGAfacelabelsubto
 
         ! Structure options
         ! - TP: structure numbers that are target plates
@@ -140,6 +145,11 @@ module goatmod_userinput
         integer(I8), allocatable    :: GGtoGDfacelabelsubfrom(:) 
         integer(I8), allocatable    :: GGtoGDfacelabelsubto(:) 
 
+        integer(I8), allocatable    :: GGtoGAfacelabelmappingGG(:)
+        integer(I8), allocatable    :: GGtoGAfacelabelmappingGA(:) 
+        integer(I8), allocatable    :: GGtoGAfacelabelsubfrom(:) 
+        integer(I8), allocatable    :: GGtoGAfacelabelsubto(:) 
+
         ! Structure options
         integer(I8), allocatable    :: TP(:)
         integer(I8), allocatable    :: TPind(:) 
@@ -172,6 +182,18 @@ module goatmod_userinput
         logical                     :: plt_qm
         logical                     :: timing
         character(:), allocatable   :: meth
+        logical                     :: debug
+
+        ! Case identification
+        logical                     :: vesselmode
+        logical                     :: slab
+
+        ! fcRegmappingGA
+        integer(I8)                 :: fcRegmappingGA(1:7)
+
+        ! Facelabel mapping
+        integer(I8), allocatable    :: facelabelmappingGG(:)
+        integer(I8), allocatable    :: facelabelmappingGA(:)
 
         ! Operation options
         logical                     :: rem_small_trias
@@ -326,7 +348,7 @@ module goatmod_userinput
         ! Mappings
         integer(I8), allocatable    :: facelabelsubfrom(:), &
             facelabelsubto(:), facelabelmappingGG(:), &
-            facelabelmappingGD(:)
+            facelabelmappingGD(:), facelabelmappingGA(:)
         
 
     contains 
@@ -852,7 +874,11 @@ module goatmod_userinput
             options%GGtoGDfacelabelmappingGG(0), &
             options%GGtoGDfacelabelmappingGD(0), &
             options%GGtoGDfacelabelsubfrom(0), &
-            options%GGtoGDfacelabelsubto(0))
+            options%GGtoGDfacelabelsubto(0), &
+            options%GGtoGAfacelabelmappingGG(0), &
+            options%GGtoGAfacelabelmappingGA(0), &
+            options%GGtoGAfacelabelsubfrom(0), &
+            options%GGtoGAfacelabelsubto(0))
         
         ! Structure options
         allocate(options%TP(0), options%TPind(0), options%exclude(0))
@@ -880,6 +906,9 @@ module goatmod_userinput
         options%plt_qm      = .false.
         options%timing      = .false.
         options%meth        = 'simple'
+
+        ! Set fcReg mapping
+        options%fcRegmappingGA = [0, 0, 0, 1, 4, 5, 8]
 
         ! Operation options
         options%rem_small_trias                     = .false.
@@ -997,9 +1026,11 @@ module goatmod_userinput
 
         ! Default mappings
         allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
-        allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8))
+        allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8), &
+        options%facelabelmappingGA(1:8))
         options%facelabelmappingGG = [-13, -34, -23, -24, -21, -42, -43, -44]
         options%facelabelmappingGD = [1, 2, 3,   3,   4,   5,   5,   5]
+        options%facelabelmappingGD = [4, 5, 3,   3,   2,   3,   3,   3]        
 
     
     end subroutine
@@ -1409,6 +1440,19 @@ module goatmod_userinput
         call ExtractOptionValueInteger1D(fid, field, &
             options%GGtoGDfacelabelsubto)
 
+        field = 'goat.GGtoGA.facelabelmappingGG'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelmappingGG)
+        field = 'goat.GGtoGA.facelabelmappingGA'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelmappingGA)
+        field = 'goat.GGtoGA.facelabelsubfrom'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelsubfrom)
+        field = 'goat.GGtoGA.facelabelsubto'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelsubto)    
+
         ! OMP and IMP
         field = 'goat.OMPr'
         call ExtractOptionValueReal1D(fid, field, &
@@ -1456,6 +1500,12 @@ module goatmod_userinput
                     'wrong I/O filenames for SOLPS (see messages above)')
             end if
 
+        end if 
+
+
+        ! Other checks
+        if (size(options%GGtoGAfacelabelmappingGG)/=size(options%GGtoGAfacelabelmappingGA)) then 
+            call gdErrorHandler('ReadGOAToptions: facelabelmapping has inconsistent lengths')
         end if 
 
         ! Housekeeping

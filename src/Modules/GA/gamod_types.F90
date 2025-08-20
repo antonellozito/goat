@@ -82,11 +82,11 @@ module gamod_types
         ! - ffbz            : ???
 
         ! Coordinates
-        type(RealDynamicArrayUDT), allocatable        :: x(:), y(:)
+        class(RealDynamicArrayUDT), allocatable        :: x, y
 
         ! Logicals and indices
-        logical, allocatable                          :: BV(:)
-        type(IntegerDynamicArrayUDT), allocatable        :: fieldlineID(:) 
+        !logical, allocatable                          :: BV(:)
+        class(IntegerDynamicArrayUDT), allocatable        :: fieldlineID 
         integer(I8)                                   :: ntot = 0
 
         !type(IntegerDynamicArrayUDT), allocatable     :: faceP(:,:)
@@ -102,7 +102,7 @@ module gamod_types
         !integer(I8)                                   :: nneig = 0
 
         ! Other data
-        type(RealDynamicArrayUDT), allocatable, dimension(:) :: bx, &
+        class(RealDynamicArrayUDT), allocatable :: bx, &
             by, psi, ffbz 
     contains
 
@@ -131,15 +131,16 @@ module gamod_types
 
 
         ! Logicals and indices
-        type(IntegerDynamicArrayUDT), allocatable         :: vert(:,:)
+        class(IntegerDynamicArrayUDT), allocatable         :: vert1
+        class(IntegerDynamicArrayUDT), allocatable         :: vert2
 
-        type(IntegerDynamicArrayUDT), allocatable         :: &
-            label(:), reg(:), aligned(:)
+        class(IntegerDynamicArrayUDT), allocatable         :: &
+            label, reg, aligned
 
         !logical :: aligned(:)
         !type(IntegerDynamicArrayUDT), allocatable         :: cell(:)    
         !type(IntegerDynamicArrayUDT), allocatable         :: cellP(:,:)
-        integer(I8)                                       :: ncell = 0
+        !integer(I8)                                       :: ncell = 0
 
         integer(I8)                                       :: ntot = 0
         !type(IntegerDynamicArrayUDT), allocatable         :: BF(:)
@@ -175,22 +176,23 @@ module gamod_types
 
 
         ! Logicals and indices
-        type(IntegerDynamicArrayUDT), allocatable        :: vertP(:,:)
-        type(IntegerDynamicArrayUDT), allocatable        :: vert(:)
-        integer(I8)                                      :: nvert = 0
+        class(IntegerDynamicArrayUDT), allocatable        :: vertP1
+        class(IntegerDynamicArrayUDT), allocatable        :: vertP2
+        class(IntegerDynamicArrayUDT), allocatable        :: vert
+        integer(I8)                                       :: nvert = 0
 
-        type(IntegerDynamicArrayUDT), allocatable        :: faceP(:,:)
-        type(IntegerDynamicArrayUDT), allocatable        :: face(:)
-        integer(I8)                                      :: nface = 0
+        class(IntegerDynamicArrayUDT), allocatable        :: faceP1
+        class(IntegerDynamicArrayUDT), allocatable        :: faceP2
+        class(IntegerDynamicArrayUDT), allocatable        :: face
+        integer(I8)                                       :: nface = 0
 
         !logical, allocatable                             :: GC(:)
 
-        integer(I8)                                      :: ntot = 0, ngc
+        integer(I8)                                       :: ntot = 0, ngc
         
-        type(RealDynamicArrayUDT), allocatable, dimension(:) :: psi, &
+        class(RealDynamicArrayUDT), allocatable           :: psi, &
             bp, bt, x, y
-        type(IntegerDynamicArrayUDT), allocatable, dimension(:)  :: &
-            cflags, reg, ft
+        class(IntegerDynamicArrayUDT), allocatable        :: cflags, reg, ft
     contains
 
         ! Initialize
@@ -253,16 +255,17 @@ module gamod_types
         !logical, allocatable                :: isclosedft(:)
 
         ! Arrays, flux surface data
-        type(IntegerDynamicArrayUDT), allocatable :: &
-            fluxsurfacefacesP(:,:)
-        type(IntegerDynamicArrayUDT), allocatable :: &
-            fluxsurfacefaces(:)
-        type(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceID(:)
+        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacefacesP1
+        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacefacesP2
+        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacefaces
+        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceID
         !type(IntegerDynamicArrayUDT), allocatable :: &
         !    fluxsurfaceneig(:), fluxsurfaceneigP(:, :)
-        type(RealDynamicArrayUDT), allocatable    :: fluxsurfacepsi(:)
-        type(IntegerDynamicArrayUDT), allocatable :: fluxsurfacevertsP(:,:)
-        type(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceverts(:)
+        class(RealDynamicArrayUDT), allocatable    :: fluxsurfacepsi
+        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacevertsP1
+        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacevertsP2
+        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceverts
+
     contains
 
         ! Initialize
@@ -320,26 +323,27 @@ module gamod_types
         type(GAFluxDataUDT)           :: fluxdata
 
         ! Legacy data of structured grid
-        type(StructuredGridDataUDT) :: sglegacy
+        !type(StructuredGridDataUDT) :: sglegacy
 
         ! Topological mesh type
-        integer(I8)                             :: topoflag
+        !integer(I8)                             :: topoflag
         
         ! OMP & IMP
-        integer(I8), allocatable, dimension(:)  :: OMPcell, OMPface, &
-            IMPcell, IMPface
-        integer(I8)                             :: nOMPcell, nOMPface, &
-            nIMPcell, nIMPface
-        real(R8), dimension(1:2)                :: OMPr, OMPz, IMPr, &
-            IMPz
+        !integer(I8), allocatable, dimension(:)  :: OMPcell, OMPface, &
+        !    IMPcell, IMPface
+        !integer(I8)                             :: nOMPcell, nOMPface, &
+        !    nIMPcell, nIMPface
+        !real(R8), dimension(1:2)                :: OMPr, OMPz, IMPr, &
+        !    IMPz
 
         ! X-point(s), strike points, o points, ...
-        integer(I8), allocatable, dimension(:)  :: xpointID, &
-            spointID, opointID, tpointID, isprimaryxp, spointxpID, &
-            divFc, spointdivID, tpointdivID
-        integer(I8), allocatable, dimension(:, :)   :: divFcP
-        integer(I8)                             :: nxp, nsp, nop, ntp, &
-            ndiv, ndivFc  
+        integer(I8), allocatable, dimension(:)  :: xpointID
+        !integer(I8), allocatable, dimension(:)  :: spointID, opointID, tpointID, isprimaryxp, spointxpID, &
+        !    divFc, spointdivID, tpointdivID
+        !integer(I8), allocatable, dimension(:, :)   :: divFcP
+        integer(I8)                             :: nxp
+        !integer(I8)                             :: nsp, nop, ntp, &
+        !    ndiv, ndivFc  
             
     contains
 
@@ -447,8 +451,7 @@ module gamod_types
     !                        GAGRID OPERATIONS                         !
     !------------------------------------------------------------------!  
 
-    subroutine InitializeGAGrid(grid, nv, nf, nc, ncv, ncf, &
-        nfs,nft,nsv,nsf)
+    subroutine InitializeGAGrid(grid)
 
         ! Description
         !============
@@ -457,22 +460,18 @@ module gamod_types
         ! Declare variables
         !==================
         class(GAGridUDT) :: grid
-        integer(I8) :: nv, nf, nc, ncv, ncf, nfs, nft, nsv, nsf
-
-        ! Aux
 
         ! Initialize
         !===========
-
         ! Substructures
-        call grid%vert%Initialize(nv)
-        call grid%face%Initialize(nf)
-        call grid%cell%Initialize(nc, ncv, ncf)
-        call grid%data%Initialize(nfs,nft,nv,nsv,nsf)
+        call grid%vert%Initialize()
+        call grid%face%Initialize()
+        call grid%cell%Initialize()
+        call grid%data%Initialize()
 
     end subroutine
 
-    subroutine InitializeGAVertex(GAvert, nv)
+    subroutine InitializeGAVertex(GAvert)
 
         ! Description
         !============
@@ -482,28 +481,23 @@ module gamod_types
         !==================
         ! Arguments
         class(GAVertexUDT) :: GAvert
-        integer(I8), intent(in), optional :: nv
+
         ! Initialize
         !===========
-        if (present(nv)) then 
-            GAvert%ntot = nv 
-        else
-            GAvert%ntot = 0
-        end if 
         if (allocated(GAvert%x)) then 
             ! Assume all allocated
             deallocate(GAvert%x, GAvert%y, GAvert%fieldlineID, &
                 GAvert%bx, GAvert%by, GAvert%ffbz)
         end if 
-        associate(ntot  => GAvert%ntot)
-        allocate(GAvert%x(ntot), GAvert%y(ntot), GAvert%fieldlineID(ntot), &
-                GAvert%bx(ntot), GAvert%by(ntot), GAvert%ffbz(ntot))
+        allocate(RealDynamicArrayUDT::GAvert%x, GAvert%y, &
+            GAvert%bx, GAvert%by, GAvert%ffbz)
+        allocate(IntegerDynamicArrayUDT:: GAvert%fieldlineID)
 
-        end associate
+
 
     end subroutine
 
-    subroutine InitializeGAFace(GAface,nf)
+    subroutine InitializeGAFace(GAface)
 
         ! Description
         !============
@@ -513,30 +507,20 @@ module gamod_types
         !==================
         ! Arguments
         class(GAFaceUDT)      :: GAface
-        integer(I8), intent(in), optional   :: nf
 
         ! Initialize
         !===========
-        if (present(nf)) then 
-            GAface%ntot = nf
-        else
-            GAface%ntot = 0
-        end if
-        associate(ntot  => GAface%ntot)
-        if (allocated(GAface%vert)) then 
+        if (allocated(GAface%vert1)) then 
             ! assume all allocated
-            deallocate(GAface%vert, GAface%label, GAface%reg, &
+            deallocate(GAface%vert1, GAface%vert2, GAface%label, GAface%reg, &
                 GAface%aligned)
         end if 
-        allocate(GAface%vert(ntot,2), GAface%label(ntot), GAface%reg(ntot), &
-                GAface%aligned(ntot))
-
-        ! Housekeeping
-        end associate
+        allocate(IntegerDynamicArrayUDT:: GAface%vert1, GAface%vert2, GAface%label, &
+             GAface%reg, GAface%aligned)
 
     end subroutine
 
-    subroutine InitializeGACell(GAcell,nc,ncv,ncf)
+    subroutine InitializeGACell(GAcell)
 
         ! Description
         !============
@@ -546,46 +530,27 @@ module gamod_types
         !==================
         ! Arguments
         class(GACellUDT)      :: GAcell
-        integer(I8), intent(in), optional   :: nc, ncv, ncf
+
 
         ! Initialize
         !===========
-        if (present(nc)) then 
-            GAcell%ntot = nc
-        else
-            GAcell%ntot = 0
-        end if
-        if (present(ncv)) then 
-            GAcell%nvert = ncv 
-        else 
-            GAcell%nvert = 0
-        end if 
-        if (present(ncf)) then 
-            GAcell%nface = ncf 
-        else
-            GAcell%nface = 0
-        end if 
-        associate(ntot  => GAcell%ntot, ntotf => GAcell%nface, &
-            ntotv => GAcell%nvert &
-            )
-        if (allocated(GAcell%vertP)) then 
+        if (allocated(GAcell%vertP1)) then 
             ! assume all allocated
-            deallocate(GAcell%vertP, GAcell%vert, GAcell%faceP, &
-                GAcell%face, GAcell%psi, GAcell%bp, GAcell%bt, &
+            deallocate(GAcell%vertP1, GAcell%vertP2, GAcell%vert, &
+                GAcell%faceP1, GAcell%faceP2, GAcell%face, GAcell%psi, &
+                GAcell%bp, GAcell%bt, &
                 GAcell%x, GAcell%y, GAcell%cflags, GAcell%reg, &
                 GAcell%ft )
         end if 
-        allocate(GAcell%vertP(ntot,2), GAcell%vert(ntotv), GAcell%faceP(ntot,2), &
-                GAcell%face(ntotf), GAcell%psi(ntot), GAcell%bp(ntot), &
-                 GAcell%bt(ntot), GAcell%x(ntot), GAcell%y(ntot), &
-                 GAcell%cflags(ntot), GAcell%reg(ntot), GAcell%ft(ntot) )
-
-        ! Housekeeping
-        end associate
+        allocate(RealDynamicArrayUDT:: GAcell%psi, GAcell%bp, &
+                 GAcell%bt, GAcell%x, GAcell%y )
+        allocate(IntegerDynamicArrayUDT:: GAcell%vertP1, GAcell%vertP2, &
+                 GAcell%vert, GAcell%faceP1, GAcell%faceP2, GAcell%face, &
+                 GAcell%cflags, GAcell%reg, GAcell%ft )
 
     end subroutine
 
-    subroutine InitializeGAGridData(GAgriddata,nfs,nft,nv,nsv,nsf)
+    subroutine InitializeGAGridData(GAgriddata)
 
         ! Description
         !============
@@ -595,14 +560,13 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridDataUDT)      :: GAgriddata
-        integer(I8)               :: nfs,nft,nv,nsv,nsf
 
         ! Initialize
-        call GAgriddata%fluxdata%Initialize(nfs,nft,nv,nsv,nsf)     
+        call GAgriddata%fluxdata%Initialize()     
 
     end subroutine
 
-    subroutine InitializeGAFluxData(GAfluxdata,nfs,nft,nv,nsv,nsf)
+    subroutine InitializeGAFluxData(GAfluxdata)
 
         ! Description
         !============
@@ -612,51 +576,22 @@ module gamod_types
         !==================
         ! Arguments
         class(GAFluxdataUDT)      :: GAfluxdata
-        integer(I8), intent(in), optional   :: nfs, nft, nv, nsv, nsf 
-
-        ! Auxiliary
-        integer(I8) :: vntot, nsv1, nsf1
 
         ! Initialize
         !===========
-        if (present(nfs)) then 
-            GAfluxdata%nFs = nfs
-        else
-            GAfluxdata%nFs = 0
-        end if
-        if (present(nft)) then
-            GAfluxdata%nFt = nft
-        else
-            GAfluxdata%nft = 0
-        end if
-        if (present(nv)) then
-            vntot = nv
-        else
-            vntot = 0
-        end if
-        if (present(nsv)) then
-            nsv1 = nsv
-        else
-            nsv1 = 0
-        end if 
-        if (present(nsf)) then
-            nsf1 = nsf
-        else
-            nsf1 = 0
-        end if
-        associate(nfs  => GAfluxdata%nfs, nft => GAfluxdata%nft)
         if (allocated(GAfluxdata%fluxsurfacefaces)) then 
             ! assume all allocated
-            deallocate(GAfluxdata%fluxsurfacefacesP, GAfluxdata%fluxsurfacefaces, &
-                GAfluxdata%fluxsurfaceID, GAfluxdata%fluxsurfacevertsP, &
+            deallocate(GAfluxdata%fluxsurfacefacesP1, GAfluxdata%fluxsurfacefacesP2, &
+                GAfluxdata%fluxsurfacefaces, GAfluxdata%fluxsurfaceID, &
+                GAfluxdata%fluxsurfacevertsP1, GAfluxdata%fluxsurfacevertsP2, &
                 GAfluxdata%fluxsurfaceverts, GAfluxdata%fluxsurfacepsi)
         end if 
-        allocate(GAfluxdata%fluxsurfacefacesP(nfs,2), GAfluxdata%fluxsurfacefaces(nsf1), &
-                GAfluxdata%fluxsurfaceID(vntot), GAfluxdata%fluxsurfacevertsP(nfs,2), &
-                GAfluxdata%fluxsurfaceverts(nsv1), GAfluxdata%fluxsurfacepsi(nfs))
+        allocate(RealDynamicArrayUDT:: GAfluxdata%fluxsurfacepsi)
+        allocate(IntegerDynamicArrayUDT:: GAfluxdata%fluxsurfacefacesP1, &
+                GAfluxdata%fluxsurfacefacesP2, GAfluxdata%fluxsurfacefaces, &
+                GAfluxdata%fluxsurfaceID, GAfluxdata%fluxsurfacevertsP1, &
+                GAfluxdata%fluxsurfacevertsP2, GAfluxdata%fluxsurfaceverts)
 
-        ! Housekeeping
-        end associate
 
     end subroutine
 
@@ -668,30 +603,85 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT) :: grid
-        type(GAGridUDT) :: GAgrid
-
-        ! Auxiliary
-        integer(I8) :: nv, nf, nc, ncv, ncf, nfs, nft, nsv, nsf
+        type(GridUDT), intent(in)       :: grid
+        type(GAGridUDT), intent(out)    :: GAgrid
 
         ! Initialize GAGrid
-        nv = grid%vert%ntot
-        nf = grid%face%ntot
-        nc = grid%cell%ntot
-        ncv = grid%cell%vertP(nc,1) + grid%cell%vertP(nc,2) - 1
-        ncf = grid%cell%faceP(nc,1) + grid%cell%faceP(nc,2) - 1
-        nfs = grid%data%fluxdata%nFs
-        nft = grid%data%fluxdata%nFt
-        nsv = grid%data%fluxdata%fluxsurfacevertsP(nfs,1) + grid%data%fluxdata%fluxsurfacevertsP(nfs,2) - 1
-        nsf = grid%data%fluxdata%fluxsurfacefacesP(nfs,1) + grid%data%fluxdata%fluxsurfacefacesP(nfs,2) - 1
-        call GAgrid%Initialize(nv, nf, nc, ncv, ncf, &
-        nfs, nft, nsv, nsf)
+        call GAgrid%Initialize()
+
+        ! Associate
+        associate(&
+            gc => grid%cell, &
+            gf => grid%face, &
+            gv => grid%vert, &
+            gfd => grid%data%fluxdata, &
+            GAc => GAgrid%cell, &
+            GAf => GAgrid%face, &
+            GAv => GAgrid%vert, &
+            GAfd => GAgrid%data%fluxdata &
+            )
 
         ! Give information in grid to GAgrid
-        GAgrid%vert%x = ConstructRealDynamicArray(grid%vert%x)
+        ! Vertex infromation
+        GAv%x           = ConstructRealDynamicArray(gv%x)
+        GAv%y           = ConstructRealDynamicArray(gv%y)
+        GAv%bx          = ConstructRealDynamicArray(gv%bx)
+        GAv%by          = ConstructRealDynamicArray(gv%by)
+        GAv%psi         = ConstructRealDynamicArray(gv%psi)
+        GAv%ffbz        = ConstructRealDynamicArray(gv%ffbz)
+        GAv%fieldlineID = ConstructIntegerDynamicArray(gv%fieldlineID)
+        GAv%ntot        = gv%ntot
 
+        ! Face information
+        GAf%vert1   = ConstructIntegerDynamicArray(gf%vert(:,1))
+        GAf%vert2   = ConstructIntegerDynamicArray(gf%vert(:,2))
+        GAf%label   = ConstructIntegerDynamicArray(gf%label)
+        GAf%reg     = ConstructIntegerDynamicArray(gf%reg)
+        GAf%aligned = ConstructIntegerDynamicArray(gf%aligned)
+        GAf%ntot    = gf%ntot
 
-        ! Deallocate grid
+        ! Cell information
+        GAc%vertP1  = ConstructIntegerDynamicArray(gc%vertP(:,1))
+        GAc%vertP2  = ConstructIntegerDynamicArray(gc%vertP(:,2))
+        GAc%vert    = ConstructIntegerDynamicArray(gc%vert)
+        GAc%faceP1  = ConstructIntegerDynamicArray(gc%faceP(:,1))
+        GAc%faceP2  = ConstructIntegerDynamicArray(gc%faceP(:,2))
+        GAc%face    = ConstructIntegerDynamicArray(gc%face)
+        GAc%cflags  = ConstructIntegerDynamicArray(gc%cflags)
+        GAc%reg     = ConstructIntegerDynamicArray(gc%reg)
+        GAc%ft      = ConstructIntegerDynamicArray(gc%ft)
+        GAc%psi     = ConstructRealDynamicArray(gc%psi)
+        GAc%bp      = ConstructRealDynamicArray(gc%bp)
+        GAc%bt      = ConstructRealDynamicArray(gc%bt)
+        GAc%x       = ConstructRealDynamicArray(gc%x)
+        GAc%y       = ConstructRealDynamicArray(gc%y)
+        GAc%ntot    = gc%ntot
+        GAc%ngc     = gc%ngc
+        GAc%nvert   = gc%nvert
+        GAc%nface   = gc%nface
+        
+
+        ! Grid data - flux surface data
+        GAgrid%data%xpointID    = grid%data%xpointID
+        GAgrid%data%nxp         = grid%data%nxp
+        GAfd%fluxsurfacefacesP1 = ConstructIntegerDynamicArray(gfd%fluxsurfacefacesP(:,1))
+        GAfd%fluxsurfacefacesP2 = ConstructIntegerDynamicArray(gfd%fluxsurfacefacesP(:,2))
+        GAfd%fluxsurfacefaces   = ConstructIntegerDynamicArray(gfd%fluxsurfacefaces)
+        GAfd%fluxsurfacevertsP1 = ConstructIntegerDynamicArray(gfd%fluxsurfacevertsP(:,1))
+        GAfd%fluxsurfacevertsP2 = ConstructIntegerDynamicArray(gfd%fluxsurfacevertsP(:,2))
+        GAfd%fluxsurfaceverts   = ConstructIntegerDynamicArray(gfd%fluxsurfaceverts)
+        GAfd%fluxsurfaceID      = ConstructIntegerDynamicArray(gfd%fluxsurfaceID)
+        GAfd%fluxsurfacepsi     = ConstructRealDynamicArray(gfd%fluxsurfacepsi)
+        GAfd%nFs                = gfd%nFs
+        GAfd%nFt                = gfd%nFt
+
+    
+        end associate
+
+        ! Deallocate grid - maybe no problem
+        !call DeallocateVertices(grid)
+        !call DeallocateFaces(grid)
+
 
 
     end subroutine
@@ -716,6 +706,80 @@ module gamod_types
 
 
 
-    end subroutine    
+    end subroutine 
+
+    !==================================================================!
+    !                                                                  !
+    !                           FUNCTIONS                              !
+    !                                                                  !
+    !==================================================================! 
+    
+    ! Get vertices of a cell and dynamic arrays
+    function GetCellVertGA(cell, i) result(res)
+        integer(I8)         :: i, j 
+        type(GACellUDT)     :: cell
+        integer(I8), allocatable :: res(:), range(:)
+        range = (/ (j, j = cell%vertP1%Get(i), (cell%vertP1%Get(i) + cell%vertP2%Get(i) - 1)) /)
+        res = cell%vert%GetMultipleElements(range)   
+    end function
+
+    ! Get cells of a face with dynamic arrays
+    function GetFaceCellGA(cell, i, cvLookUp) result(res)
+        integer(I8)                 :: i 
+        type(GACellUDT)               :: cell
+        integer(I8), allocatable, optional    :: cvLookUp(:)
+        integer(I8), allocatable    :: res(:)  
+        
+        if (.not.present(cvLookUp)) then
+            cvLookUp = GetCvLookUp(cell)
+        end if
+
+        res = pack(cvLookUp,cell%face%GetAllElements().eq.i)
+    end function
+
+    function GetFluxSurfaceFcs(fd, i) result(res)
+        integer(I8) :: i, s, nf, j
+        type(GAFluxDataUDT) :: fd
+        integer(I8), allocatable :: res(:), range(:)
+
+        nf = fd%fluxsurfacefacesP2%Get(i)
+        s = fd%fluxsurfacefacesP1%Get(i)
+        range = (/(j, j = s, (s+nf-1) )/)
+        res = fd%fluxsurfacefaces%GetMultipleElements(range)
+
+    end function    
+
+    ! Get cells of a vertex without using vert%cell and dynamic arrays
+    function GetVertCellGA(cell, i, cvLookUp) result(res)
+        integer(I8)                 :: i 
+        type(GACellUDT)               :: cell
+        integer(I8), allocatable, optional    :: cvLookUp(:)
+        integer(I8), allocatable    :: res(:)
+        
+        if (.not.present(cvLookUp)) then
+            cvLookUp = GetCvLookUp(cell)
+        end if
+            
+        res = pack(cvLookUp,cell%vert%GetAllElements.eq.i)
+    end function
+
+    function GetCvLookUp(cell) result(res)
+        type(GACellUDT)       :: cell
+        integer(I8)         :: nc, ic, nv, s, i               
+        integer(I8), allocatable :: res(:), range(:), range2(:)
+
+        nc = cell%ntot
+        range = (/ (i, i = 1,(cell%vertP1%Get(nc)+cell%vertP2%Get(nc)-1))/)
+
+        allocate(res(range))
+        res = 0
+
+        do ic = 1, nc
+            s = cell%vertP1%Get(ic)
+            nv = cell%vertP2%Get(ic)
+            range = (/ (i, i = s, (s+nv-1)) /)
+            res(range) = ic
+        end do
+    end function
 
 end module 

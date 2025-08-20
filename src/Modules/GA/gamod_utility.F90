@@ -18,6 +18,7 @@ module gamod_utility
     use mod_precision
     use goatmod_types
     use gdmod_utility_optimization
+    use gamod_types
 
 
     ! The usual
@@ -31,79 +32,7 @@ module gamod_utility
     !                                                                  !
     !==================================================================! 
     
-    type :: QualityMetric
-
-        ! Type that included several metrics
-        real(R8), allocatable :: fcBias(:)
-        real(R8), allocatable :: fcqalfc(:)
-        real(R8), allocatable :: fcS(:)
-        real(R8), allocatable :: cvS(:)
-        real(R8), allocatable :: cvAR(:)
-        real(R8), allocatable :: h_pol(:)
-        real(R8), allocatable :: h_rad(:)
-        real(R8), allocatable :: h_rad_psi(:)
-        integer(I8) :: nCv
-
-    contains
-    
-        procedure :: ComputeQM
-
-    end type
-
-
     contains 
-
-    !==================================================================!
-    !                                                                  !
-    !                               ROUTINES                           !
-    !                                                                  !
-    !==================================================================!
-    subroutine ComputeQM(qm,grid,options)
-
-        ! Description
-        !============
-        ! Compute all quality metrics
-        ! (Mirror of CalculateCvMetric.m)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(QualityMetric), intent(inout)     :: qm
-        type(GridUDT), intent(in)               :: grid
-        type(GAoptionsUDT), intent(in)          :: options
-
-        ! Auxiliary
-        real(R8) :: vec_n(grid%face%ntot,2), fcH(grid%face%ntot,2), &
-         ncpf(grid%face%ntot), fccv(grid%face%ntot,2), &
-         fcxx(grid%face%ntot)
-
-        
-    end subroutine
-
-    subroutine CalculateQualityMetrics(grid,options,qm)
-        ! Description
-        !============
-        ! Compute metric and criteria of cells necessary to execute grid adaptation.
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        type(GridUDT), intent(in)           :: grid
-        type(GAoptionsUDT), intent(in)      :: options
-        type(QualityMetric), intent(inout)  :: qm
-
-        ! Calculate cv metric
-        call qm%ComputeQM(grid,options)
-
-
-        ! Selecting splitting cell
-
-        ! Selecting merging face
-        
-
-
-    end subroutine
-
 
 
     subroutine CheckVertOrder(grid,is_ordered,cells)
@@ -842,16 +771,22 @@ module gamod_utility
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT) :: grid
-        type(GAoptionsUDT) :: options
-        type(MagneticFieldUDT) :: magneticField
+        type(GridUDT), intent(inout)            :: grid
+        type(GAoptionsUDT), intent(in)          :: options
+        type(MagneticFieldUDT), intent(in)   :: magneticField
         
         ! Auxiliary
-        integer(I8) :: ifc, v1, v2
-        integer(I8), allocatable :: facealigned(:)
-        real(R8), allocatable :: fcX(:), fcY(:), &
-            dpsidx(:), dpsidy(:), Bx(:), By(:), abs_cos(:), &
-            t1x(:), t2x(:), t1y(:), t2y(:)
+        integer(I8) :: ifc, v1, v2, lim, i, ic, nf, indmax, indmin, &
+            rface3, pface3(1:2), ind3(1:3), ind4(1:4), f1, f2, n_al, &
+            fcs_al3(1:3), fcs_al2(1:2) , indmax2
+        integer(I8), allocatable :: facealigned(:), fcLbl_loc(:), indFc(:), &
+         tf(:), fcs(:), fb(:)
+        logical, allocatable :: b_flag(:)
+        real(R8) :: abs_cos_loc3(1:3), abs_cos_loc4(1:4), dpsi_f(1:4), &
+            dpsi_r, cos2, dpsi3(1:3), dpsi2(1:2)
+        real(R8), allocatable, dimension(:) :: fcX, fcY, &
+            dpsidx, dpsidy, Bx, By, Btot, abs_cos, &
+            t1x, t2x, t1y, t2y, Bnorm, cosB
 
         ! Associate
         associate( &
@@ -862,9 +797,14 @@ module gamod_utility
 
         ! Initialize
         allocate(facealigned(f%ntot), fcX(f%ntot), fcY(f%ntot), &
-        Bx(f%ntot), By(f%ntot), tx(f%ntot,2), Bnorm(f%ntot), cos(f%ntot))
+        dpsidx(f%ntot), dpsidy(f%ntot), Bx(f%ntot), By(f%ntot), &
+        Btot(f%ntot), Bnorm(f%ntot), cosB(f%ntot), t1x(f%ntot),&
+        t2x(f%ntot), t1y(f%ntot), t2y(f%ntot), &
+        fcLbl_loc(f%ntot), b_flag(f%ntot), indFc(f%ntot), abs_cos(f%ntot))
+
         fcX = 0.5_R8*(v%x(f%vert(:,1)) + v%x(f%vert(:,2)))
         fcY = 0.5_R8*(v%y(f%vert(:,1)) + v%y(f%vert(:,2)))
+        facealigned = 0
 
         ! Sort faces - Already done in GAInit
 
@@ -886,19 +826,188 @@ module gamod_utility
         t1y = t2y - t1y
 
         Bnorm = sqrt(t1x**2 + t1y**2)*Btot
-        cos = t1x*Bx + t1y*By
+        cosB = t1x*Bx + t1y*By
         
         ! Loop because of intrinsic abs an
         do ifc = 1, f%ntot
-            abs_cos(ifc) = abs(max(-1.0_R8,min(1.0_R8,cos(ifc))) / Bnorm(ifc))
+            abs_cos(ifc) = abs(max(-1.0_R8,min(1.0_R8,cosB(ifc))) / Bnorm(ifc))
         end do
 
         ! Locally generalize face labels
+        fcLbl_loc = GetfcLblGA(f,options)
+
+        ! Boundary faces
+        b_flag = fcLbl_loc /= 0
+
+        ! Criteria for trapezoids
+        if (options%vesselmode) then
+            lim = 10
+        else
+            lim = 100
+        end if
+
+        ! Loop over internal cells - these are 
+        !   Quads with two aligned faces
+        !   Triangles with one aligned face
+        ! Initialize
+        ind3 = (/ (i, i=1,3) /)
+        ind4 = (/ (i, i=1,4) /)
+
+        do ic = 1, c%ntot
+            tf = GetCellFace(c, ic)
+            nf = size(tf)
+
+            ! Get the type of cell
+            if (nf.eq.3) then ! Triangle
+                ! Minimal angles with magneticfield
+                abs_cos_loc3 = abs_cos(tf)
+
+                ! Maximal absolute cosine
+                indmax = maxloc(abs_cos_loc3,1)
+     
+                rface3 = tf(indmax)
+                pface3 = tf(pack(ind3, tf/=rface3))
+
+                facealigned(rface3) = 1
+                facealigned(pface3) = 0
+
+            elseif (nf.eq.4) then
+                ! Minimal angles with magneticfield
+                abs_cos_loc4 = abs_cos(tf)
+
+                ! Maximal absolute cosine
+                indmax = maxloc(abs_cos_loc4,1)
+                f1 = tf(indmax)
+
+                ! Get dpsi_f for opposite faces in increasing psi value
+                dpsi_f = abs(v%psi(f%vert(tf,1)) - v%psi(f%vert(tf,2)));
+                indmin = minloc(dpsi_f,1);
+
+                ! Put f1 on aligned
+                facealigned(f1) = 1;
+
+                ! Get opposite face
+                abs_cos_loc4(indmax) = 0.0_R8;
+                indmax2 = maxloc(abs_cos_loc4,1);
+                f2 = tf(indmax2);
+
+                ! Criteria for f2 being aligned with psi => possibility of trapezoidal cell
+                dpsi_r = dpsi_f(indmax2)/dpsi_f(indmin);
+
+                cos2 = abs_cos_loc4(indmax2);
+
+                ! Decide alignment based on case and criteria
+                if (options%vesselmode) then
+
+                    if (b_flag(f2)) then
+                        if ((abs(cos2).gt.0.999_R8) .and. (dpsi_r.lt.lim)) then
+                            facealigned(f2) = 1
+                        end if 
+                    else ! so no boundary face, so should be aligned with fieldlines by GG
+                        facealigned(f2) = 1
+                    end if
+
+                else ! not vesselmode
+
+                    if (b_flag(f2)) then
+                        if (fcLbl_loc(f2).lt.4) then
+                            if (abs(cos2).gt. 0.9 .and. dpsi_r.lt.lim*10) then
+                                facealigned(f2) = 1
+                            end if
+                        else  ! target face (fclabel >= 4)
+                            if (abs(cos2).gt.0.999_R8 .and. dpsi_r.lt.lim) then
+                                facealigned(f2) = 1
+                            end if
+                        end if
+                    end if
+
+                end if
+
+            else 
+                call gdErrorHandler("IdentifyAlignedFace: cell is quad nor triangle, not supported")
+            end if
+
+        end do
+
+
+        ! Put all core boundary faces as aligned
+        facealigned(pack(indFc,fcLbl_loc==2)) = 1
+
+        ! Check for quads with three aligned faces and triangles with two aligned faces
+        do ic = 1, c%ntot
+            tf = GetCellFace(c, ic)
+            n_al = sum(facealigned(tf))
+            nf = size(tf)
+
+            if ((nf.eq.4).and.(n_al.eq.3)) then
+                ! Find quad with more than two aligned faces
+                ! Find triangle with more than one aligned face 
+                ! Kick out the least aligned face via psi values
+                fcs_al3 = tf(pack(ind4,facealigned(tf).eq.1));
+                dpsi3 = abs(v%psi(f%vert(fcs_al3,1))  - v%psi(f%vert(fcs_al3,2)));
+                indmax = maxloc(dpsi3,1);
+                facealigned(fcs_al3(indmax)) = 0;
+
+            elseif ((nf.eq.3) .and. (n_al.eq.2)) then
+                if (c%cflags(ic).eq.3) then
+
+                    ! Make the boundary face non-algined
+                    fb = tf(pack(ind3,b_flag(tf)));
+                    facealigned(fb) = 0;     
+
+                else
+                    ! Kick out the least aligned face via psi values
+                    fcs_al2 = tf(pack(ind3,facealigned(tf).eq.1));;
+                    dpsi2 = abs(v%psi(f%vert(fcs_al2,1))  - v%psi(f%vert(fcs_al2,2)));
+                    indmax = maxloc(dpsi2, 1);
+                    facealigned(fcs_al2(indmax)) = 0;
+
+                end if
+            
+            elseif (((nf.eq.4) .and. (n_al.eq.4)).or.((nf.eq.3).and.(n_al.eq.3))) then
+                call gdErrorHandler("IdentifyAlignedFaces: not yet implemented")
+            elseif (nf.gt.4) then
+                call gdErrorHandler("IdentifyAlignedFaces: higher than quad is not supported")
+            end if
+
+        end do
+
+        ! Save
+        f%aligned = facealigned
+
+        ! Override values for faces that are part of a flux surface (maybe put this upfront, or better not rely on correctness of fluxsurfaces????)
+
+        if (allocated(grid%data%fluxdata%fluxsurfacefaces)) then
+            f%aligned = 0
+            call Unique(grid%data%fluxdata%fluxsurfacefaces, fcs)
+            f%aligned(fcs(2:size(fcs))) = 1
+        end if
+
+        end associate
+
+    end subroutine
+
+    subroutine ComputeDistanceFunction(grid,options,baseFunction)
         
-              
+        ! Description
+        !============
+        ! Construct a distance function to use as criterium for splitting and merging. The base function is normal distribution b = exp(-1/d (dist)) with d the chararcteristic length.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT) :: grid
+        type(GAoptionsUDT) :: options
+        character(:), allocatable :: baseFunction
 
 
-
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+        
 
         end associate
 
@@ -908,62 +1017,7 @@ module gamod_utility
     !                                                                  !
     !                           FUNCTIONS                              !
     !                                                                  !
-    !==================================================================!    
-
-    ! Get cells of a vertex without using vert%cell
-    function GetVertCellGA(cell, i, cvLookUp) result(res)
-        integer(I8)                 :: i 
-        type(CellUDT)               :: cell
-        integer(I8), allocatable, optional    :: cvLookUp(:)
-        integer(I8), allocatable    :: res(:)
-        
-        if (.not.present(cvLookUp)) then
-            cvLookUp = GetCvLookUp(cell)
-        end if
-            
-        res = pack(cvLookUp,cell%vert.eq.i)
-    end function
-
-    function GetFaceCellGA(cell, i, cvLookUp) result(res)
-        integer(I8)                 :: i 
-        type(CellUDT)               :: cell
-        integer(I8), allocatable, optional    :: cvLookUp(:)
-        integer(I8), allocatable    :: res(:)  
-        
-        if (.not.present(cvLookUp)) then
-            cvLookUp = GetCvLookUp(cell)
-        end if
-
-        res = pack(cvLookUp,cell%face.eq.i)
-    end function
-
-    function GetFluxSurfaceFcs(fd, i) result(res)
-        integer(I8) :: i, s, nf
-        type(FluxDataUDT) :: fd
-        integer(I8), allocatable :: res(:)
-
-        nf = fd%fluxsurfacefacesP(i,2)
-        s = fd%fluxsurfacefacesP(i,1)
-        res = fd%fluxsurfacefaces(s:s+nf-1)
-
-    end function
-
-    function GetCvLookUp(cell) result(res)
-        type(CellUDT)       :: cell
-        integer(I8)         :: nc, ic, nv, s                
-        integer(I8), allocatable :: res(:)
-
-        nc = cell%ntot
-
-        allocate(res(1:cell%vertP(nc,1)+cell%vertP(nc,2)-1))
-        res = 0
-
-        do ic = 1, nc
-            s = cell%vertP(ic, 1)
-            nv = cell%vertP(ic, 2)
-            res(s:s+nv-1) = ic
-        end do
-    end function
+    !==================================================================!     
 
     function DetectSepID(ifs, cell, faces, sepIDloc, nf, step, cvLookUp, counter) result(res)
         ! Description
@@ -994,6 +1048,20 @@ module gamod_utility
 
 
         
+    end function
+
+    function GetfcLblGA(f,options) result(res)
+        type(GAFaceUDT) :: f
+        type(GAoptionsUDT) :: options
+        integer(I8) :: res(1:f%ntot), indFc(1:f%ntot), i 
+
+        res = f%label%GetAllElements()
+        indFc = (/ (i, i=1,f%ntot) /)
+        do i = 1, size(options%facelabelmappingGG)
+            res(pack(indFc, f%label%GetAllElements == options%facelabelmappingGG(i))) &
+                = options%facelabelmappingGA(i)
+        end do
+
     end function
 
 

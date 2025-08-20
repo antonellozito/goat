@@ -43,7 +43,7 @@ module gamod_driver
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT), intent(inout)                :: grid
+        type(GAGridUDT), intent(inout)              :: grid
         type(EnvironmentUDT), intent(in)            :: environment
         type(MagneticFieldUDT), intent(in)          :: magneticField     
         
@@ -89,7 +89,7 @@ module gamod_driver
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT), intent(inout)            :: grid 
+        type(GAGridUDT), intent(inout)          :: grid 
         type(GAoptionsUDT), intent(in)          :: options
         type(EnvironmentUDT), intent(in)        :: environment
         type(MagneticFieldUDT), intent(in)      :: magneticField
@@ -105,7 +105,7 @@ module gamod_driver
         !===========
  
         ! Set gaoptions
-        call options%Set()    ! Also do other options, or make then a subtype???
+        call options%Set()
 
         associate(&
             c  => grid%cell, &
@@ -144,6 +144,12 @@ module gamod_driver
 
         ! Identify aligned faces
         call IdentifyAlignedFaces(grid,options,magneticField)
+
+        ! Set up the distance functions
+        if (options%dist_function) then
+
+        end if 
+
 
         ! Check the connectivity
 
