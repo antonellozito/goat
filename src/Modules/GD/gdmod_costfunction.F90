@@ -17,6 +17,7 @@ module gdmod_costfunction
     !============
     ! Load modules
     use mod_precision
+    use mod_utility
     use mod_sparseinterface
     use gdmod_types 
     use gdmod_designvariables
@@ -1011,8 +1012,7 @@ module gdmod_costfunction
         real(R8)                        :: dx1, dx2, dy1, dy2, d1, d2, rat
         integer(I8), allocatable        :: row(:), col(:) 
         real(R8), allocatable           :: valxx(:),  valxy(:), &
-                                        valyx(:), valyy(:)
-                                        
+                                        valyx(:), valyy(:)                                        
         ! Associate
         !==========
         associate(&
@@ -7245,6 +7245,8 @@ module gdmod_costfunction
         real(R8), allocatable               :: dJdvar(:), dJdvartemp(:) 
         type(MySparseUDT)                   :: dgradJdvar, dgradJdvartemp
 
+        real(R8)                            :: tstart, tend
+
         ! Loop variables
 
         ! Auxiliary
@@ -7297,6 +7299,7 @@ module gdmod_costfunction
         ! Compute cost function
         !======================
         ! Length ratio
+        call wall_time(tstart)
         if (costfunction%doLR) then 
             ! Compute
             call costfunction%cfv_lr%Evaluate(Jtemp, gradJtemp, &
@@ -7319,10 +7322,13 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lr_val_vertices')
+        call wall_time(tend)
+        print *, 'LR cfv time: ', tend - tstart
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lr_val_vertices')
         Jv = 0.0_R8
         
         ! Face angle difference
+        call wall_time(tstart)
         if (costfunction%doFAD) then 
             ! Compute
             call costfunction%cfv_fad%Evaluate(Jtemp, gradJtemp, &
@@ -7345,10 +7351,13 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fad_val_vertices')
+        call wall_time(tend)
+        print *, 'FAD cfv time: ', tend - tstart
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fad_val_vertices')
         Jv = 0.0_R8
 
         ! Face angle
+        call wall_time(tstart)
         if (costfunction%doFA) then 
             ! Compute
             call costfunction%cfv_fa%Evaluate(Jtemp, gradJtemp, &
@@ -7371,10 +7380,13 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fa_val_vertices')
+        call wall_time(tend)
+        print *, 'FA cfv time: ', tend - tstart
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fa_val_vertices')
         Jv = 0.0_R8
 
         ! Psi ratio, psi based
+        call wall_time(tstart)
         if (costfunction%doPRPB) then 
             ! Compute
             call costfunction%cfv_prpb%Evaluate(Jtemp, gradJtemp, &
@@ -7398,7 +7410,9 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv,'cfv_prpb_val_vertices')
+        call wall_time(tend)
+        print *, 'PRPB cfv time: ', tend - tstart
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv,'cfv_prpb_val_vertices')
         Jv = 0.0_R8
 
         ! Length ratio, radial
@@ -7424,7 +7438,7 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lrrad_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lrrad_val_vertices')
         Jv = 0.0_R8
 
         ! Cell angle
@@ -7450,7 +7464,7 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_ca_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_ca_val_vertices')
         Jv = 0.0_R8
 
         ! Length distribution
@@ -7476,7 +7490,7 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_ld_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_ld_val_vertices')
         Jv = 0.0_R8
 
         ! Housekeeping

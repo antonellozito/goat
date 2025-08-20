@@ -967,7 +967,7 @@ module optmod_optimizationengine
 
         ! Timing
         real(R8)                    :: t_it_s, t_it_e, &
-            t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e
+            t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e, tstart, tend
 
         ! Data
 
@@ -1120,16 +1120,25 @@ module optmod_optimizationengine
             !end if
 
             ! Evaluate cost function
+            call wall_time(tstart)
             call problem%EvaluateCostFunction(J, gradJ, & 
                 hessJ, dogradient, dohessian)
+            call wall_time(tend)
+            print *, 'cfv eval: ', tend-tstart
 
             ! Evaluate the equality constraints
+            call wall_time(tstart)
             call problem%EvaluateEqualityConstraints(G, gradG, &
                 hessG, dogradient, dohessian, lambda)
+            call wall_time(tend)
+            print *, 'eq eval: ', tend-tstart
 
             ! Evaluate the inequality constraints
+            call wall_time(tstart)
             call problem%EvaluateInequalityConstraints(H, gradH, &
                 hessH, dogradient, dohessian, mu)
+            call wall_time(tend)
+            print *, 'ineq eval: ', tend-tstart
 
             ! Evaluate the nonlinear complementarity function 
             call EvaluateNCPfunction(ncp, A, I, gradncpphi, gradncpmu, &
