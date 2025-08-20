@@ -168,29 +168,16 @@ try:
 except:
     print("Could not plot grid cell area")
 
-# Magnetic field strength
+# Face intersections (if present)
 try:
-    # At this point, the simulation grid has to be loaded or it will not 
-    # work anyway
-
-    # Visualize
+    coord = dh.GetVertexCoordinates(datadir + '/' + 'gg_faceintersections.dat')
+except:
+    print("Could not load intersection data")
+try: 
     plotter.PlotGridCells(simgrid, 9)
-    plotter.PlotCellBasedQuantity2D(simgrid, simgrid.cell.bp, 9)
-    thisaxes = plt.gca()
-    thisaxes.set_title('Bp in cell centers [T]')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-
-    plotter.PlotGridCells(simgrid, 10)
-    plotter.PlotCellBasedQuantity2D(simgrid, simgrid.cell.bt, 10)
-    thisaxes = plt.gca()
-    thisaxes.set_title('Bt in cell centers [T]')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
-
-
-except: 
-    print("Could not plot magnetic field strength")
+    plotter.PlotPoints2D(coord[:, 0], coord[:, 1], 9, color='r', marker='o')
+except:
+    print("Could not plot intersection data")
 
 # Show figures
 #-------------

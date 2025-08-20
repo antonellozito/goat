@@ -574,6 +574,14 @@ module ggmod_topology2D
 
         ! Remove regions
         !===============
+        ! Merge tubes (before aligned vessel parts)?
+        call MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
+            vessel, fieldtracer, options)
+
+        ! Do temporary writing
+        call WriteTopologicalMesh(topomesh, 'topomesh_aftermerge1')
+
+
         ! Insert aligned vessel parts?
         if (options%alignvesselparts) then 
             ! Update the field tracer for the adjusted topomesh (just 
@@ -604,12 +612,12 @@ module ggmod_topology2D
                 magneticField, vessel, options)
         end if 
 
-        ! Merge tubes?
+        ! Merge tubes (after aligned vessel parts)?
         call MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
             vessel, fieldtracer, options)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_aftermerge')
+        call WriteTopologicalMesh(topomesh, 'topomesh_aftermerge2')
 
         ! Remove regions if desired
         call RemoveTopologicalMeshRegions(topomesh, vessel, options)
@@ -3347,6 +3355,7 @@ module ggmod_topology2D
         if (options%removecoreregions) then 
             call RemoveTopologicalMeshCoreRegions(topomesh)
         end if 
+        call WriteTopologicalMesh(topomesh, 'topomesh_aftercore')
 
         ! Wide grid regions
         if (options%removewidegridregions) then 
@@ -3363,6 +3372,8 @@ module ggmod_topology2D
         if (options%removevesselregions) then 
             call RemoveTopologicalMeshVesselRegions(topomesh, vessel, options)
         end if 
+        call WriteTopologicalMesh(topomesh, 'topomesh_aftervessel')
+
 
     end subroutine
 
@@ -3709,6 +3720,11 @@ module ggmod_topology2D
             do j = 1, size(tf)
                 ! Get structure IDs
                 tfvesselIDs = fvesselIDs(tf(j))%Get()
+
+                ! Skip if no vessel IDs are present
+                if (size(tfvesselIDs) == 0) then 
+                    cycle
+                end if 
 
                 ! Compare
                 if (onlyfullycovered) then 
@@ -4443,12 +4459,16 @@ module ggmod_topology2D
         ! that lies on that vessel part (this should be chosen properly 
         ! by the user), which should guarantee the above statements.
         
-        ! Note 1: small flux tubes may exist due to the operations 
-        ! described below. Though merging of these tubes could be 
-        ! deferred to the dedicated merging routine, we choose to tackle
-        ! some cases here already. This is more straightforward 
-        ! implementation-wise, but also allows introducing their vessel
-        ! parts as aligned faces, which may be more desireable than just
+        ! Note 1: we're now hedging for deleted tangency points by checking
+        ! when the sign of the angle between magnetic field and vessel
+        ! changes. This indicates the presence of a (deleted) tangency 
+        ! point, which may complicate contour tracing. In this case, the
+        ! approximate location of the tangency point is taken as initial
+        ! bound for the aligned vessel part. However, introducing a 
+        ! contour there would likely lead to (again) very shallow 
+        ! angles. Therefore, we override the case determination and set 
+        ! it to case two, where the contour is traced in the middle of 
+        ! the initial aligned vessel part. 
         
         ! Algorithms
         !===========
@@ -4526,19 +4546,21 @@ module ggmod_topology2D
         logical                                 :: markface, ishftp(1:2), &
             hasnewfsIDnb1, hasnewfsIDnb2
         logical, allocatable, dimension(:)      :: vertexmark, facemark, &
-            isedgealigned, isentirefacealigned, remf, keepc, isstartface
+            isedgealigned, isentirefacealigned, remf, keepc, isstartface, &
+            isalphapos, overridetubecase
         integer(I8)                             :: thisf, tubecase, nfs, &
             ntpc, nint, nstc, startind, endind, indtpc, intersectind, &
             insertloc
         integer(I8), allocatable, dimension(:)  :: tf, tfbnd, afstartind, &
             afendind, tfmark, facevert, tfnb1, tfnb2, newfsIDs,  &
             markedtpIDs, sortind, vindI, vindJ, tsc, tfaceind, &
-            vertexmarkIDs, tfnbv1, tfnbv2
+            vertexmarkIDs, tfnbv1, tfnbv2, tubecase_override
         real(R8)                                :: avpminangle, highpsi, &
-            lowpsi
+            lowpsi, tdl
         real(R8), allocatable, dimension(:)     :: tx, ty, xf, yf, dx, &
             dy, dn, bxf, byf, bnf, alpha, tpsinb1, tpsinb2, tpsitp, &
-            xout, yout, iout, jout, tscr, dl, dlsum, thisx, thisy
+            xout, yout, iout, jout, tscr, dl, dlsum, thisx, thisy, &
+            cosalpha, sinalpha, alphasigned, fval, dfval
 
         type(ContourUDT), allocatable           :: tempc(:), allc(:)
         type(IntegerDynamicArrayUDT)            :: fsIDs, curvetypes, &
@@ -4563,7 +4585,8 @@ module ggmod_topology2D
         ! Allocate
         allocate(vertexmark(vert%ntot), facemark(face%ntot), &
             afstartind(face%ntot), afendind(face%ntot), &
-            isentirefacealigned(face%ntot), facevert(face%ntot))
+            isentirefacealigned(face%ntot), facevert(face%ntot), &
+            tubecase_override(face%ntot), overridetubecase(face%ntot))
 
         ! Initialize
         nfs = topomesh%nFs
@@ -4573,6 +4596,8 @@ module ggmod_topology2D
         afstartind  = 0
         afendind    = 0
         isentirefacealigned = .false.
+        overridetubecase = .false. 
+        tubecase_override = 0
         avpminangle = options%avpminangle/180.0_R8*pi_R8
         fsIDs       = ConstructIntegerDynamicArray()
         curvetypes  = ConstructIntegerDynamicArray()
@@ -4639,8 +4664,16 @@ module ggmod_topology2D
                     byf = byf/bnf
 
                     ! Compute (absolute) angle 
-                    alpha = abs(acos(bxf*dx + byf*dy))
+                    cosalpha = bxf*dx + byf*dy
+                    sinalpha = bxf*dy - byf*dx
+                    alphasigned = atan2(sinalpha, cosalpha)
+                    fval = fieldtracer%Evaluate(tx, ty)
+                    dfval = fval(2:) - fval(1:size(fval)-1)
+                    isalphapos = dfval > 0.0_R8
+                    alpha = abs(alphasigned)
                     isedgealigned = (alpha < avpminangle) .or. ((pi_R8 - alpha) < avpminangle) 
+                    
+                    
 
                     ! Check if we should mark
                     if (any(isedgealigned)) then 
@@ -4653,14 +4686,34 @@ module ggmod_topology2D
                                 facemark(thisf) = .true.
                                 facevert(thisf) = i
 
-                                ! Compute face coordinate bounds for later
+                                ! Compute face coordinate bound based on signed alpha + edge alignment
                                 afstartind(thisf)   = 1 
-                                if (all(isedgealigned)) then 
+                                if (all(isalphapos .eqv. isalphapos(1)) .and. &
+                                    all(isedgealigned)) then 
                                     afendind(thisf) = size(tx)
                                     isentirefacealigned(thisf) = .true.
-                                else
+                                elseif (all(isalphapos .eqv. isalphapos(1))) then 
+                                    ! Compute face coordinate bound based on aligned edges
                                     afendind(thisf) = findloc(isedgealigned, &
                                         .false., 1, back=.false.)
+                                else
+                                    ! Hit a removed tangency point 
+                                    afendind(thisf) = findloc(isalphapos, &
+                                        .not. isalphapos(1), 1, back=.false.)
+                                    if (.not. all(isedgealigned)) then 
+                                        if (findloc(isedgealigned, .false., 1, back=.false.) > afendind(thisf)) then 
+                                            ! Bounded by alpha -> override to case 2
+                                            overridetubecase(thisf)     = .true.
+                                            tubecase_override(thisf)    = 2 
+                                        else
+                                            ! Not bounded by alpha -> don't override and recompute
+                                            afendind(thisf) = findloc(isedgealigned, .false., 1, back=.false.)
+                                        end if 
+                                    else
+                                        ! Bounded by alpha -> override to case 2
+                                        overridetubecase(thisf)     = .true.
+                                        tubecase_override(thisf)    = 2
+                                    end if 
                                 end if 
                             end if
                         elseif (face%vert(thisf, 2) == i) then 
@@ -4670,14 +4723,34 @@ module ggmod_topology2D
                                 facemark(thisf) = .true.
                                 facevert(thisf) = i
 
-                                ! Compute face coordinate bounds for later
+                                ! Compute face coordinate bound based on signed alpha
                                 afendind(thisf)   = size(tx)
-                                if (all(isedgealigned)) then 
+                                if (all(isalphapos .eqv. isalphapos(1)) .and. &
+                                    all(isedgealigned)) then 
                                     afstartind(thisf) = 1
                                     isentirefacealigned(thisf) = .true.
-                                else
+                                elseif (all(isalphapos .eqv. isalphapos(1))) then 
+                                    ! Compute face coordinate bound based on aligned edges
                                     afstartind(thisf) = findloc(isedgealigned, &
                                         .false., 1, back=.true.) + 1
+                                else
+                                    ! Hit a removed tangency point 
+                                    afstartind(thisf) = findloc(isalphapos, &
+                                        .not. isalphapos(size(tx)-1), 1, back=.true.) + 1
+                                    if (.not. all(isedgealigned)) then 
+                                        if (findloc(isedgealigned, .false., 1, back=.true.)+1 < afendind(thisf)) then 
+                                            ! Bounded by alpha -> override to case 2
+                                            overridetubecase(thisf)     = .true.
+                                            tubecase_override(thisf)    = 2 
+                                        else
+                                            ! Not bounded by alpha -> don't override and recompute
+                                            afstartind(thisf) = findloc(isedgealigned, .false., 1, back=.true.) + 1
+                                        end if 
+                                    else
+                                        ! Bounded by alpha -> override to case 2
+                                        overridetubecase(thisf)     = .true.
+                                        tubecase_override(thisf)    = 2
+                                    end if 
                                 end if 
                             end if 
                         else
@@ -4762,6 +4835,12 @@ module ggmod_topology2D
                 end if 
             end if 
 
+            ! Override 
+            if (any(overridetubecase(tfmark))) then 
+                ! Just take one...
+                tubecase = tubecase_override(tfmark(1))
+            end if 
+
             ! Trace and insert contours where necessary
             select case (tubecase)
 
@@ -4812,18 +4891,19 @@ module ggmod_topology2D
                 dlsum = dlsum/dlsum(size(dlsum))
 
                 ! Compute tracing point
-                call Interpolate1D([0.5_R8], thisx, dlsum, tx)
-                call Interpolate1D([0.5_R8], thisy, dlsum, ty)
+                tdl = dlsum(afstartind(tfmark(1)))+0.5_R8*(dlsum(afendind(tfmark(1))) - dlsum(afstartind(tfmark(1))))
+                call Interpolate1D([tdl], thisx, dlsum, tx)
+                call Interpolate1D([tdl], thisy, dlsum, ty)
 
                 ! Insert tracing point in face and reconstruct polygon
-                insertloc = findloc(abs(dlsum - 0.5_R8)*sum(dl) < 1e-6, .true., 1, back=.false.)
+                insertloc = findloc(abs(dlsum - tdl)*sum(dl) < 1e-6, .true., 1, back=.false.)
                 if ((insertloc /= 0) .and. (insertloc /= 1) .and. (insertloc /= size(tx))) then 
                     ! Relocate existing point
                     call face%x(tfmark(1))%Set([insertloc], thisx)
                     call face%y(tfmark(1))%Set([insertloc], thisy)
                 else 
                     ! Insert in the middle
-                    insertloc = findloc(dlsum > 0.5_R8, .true., 1, back=.false.)
+                    insertloc = findloc(dlsum > tdl, .true., 1, back=.false.)
                     if (insertloc == 0) then 
                         ! This should never happen, unless the original face length 
                         ! is near machine precision and round-off effects 
@@ -5212,8 +5292,8 @@ module ggmod_topology2D
                     !allc(indtpc)%y = allc(i)%y([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
 
                     ! Append flux surface ID etc as well!
-                    call curvetypes%Append(curvetypes%Get(size(allc) + i))
-                    call fsIDs%Append(fsIDs%Get(size(allc) + i))
+                    call curvetypes%Append(curvetypes%Get(i))
+                    call fsIDs%Append(fsIDs%Get(i))
 
                     ! Second segment
                     startind = findloc(isstartface, .false., 1, back=.true.)
@@ -6190,18 +6270,22 @@ module ggmod_topology2D
                 ! instead of boundary faces (these may be contour parts
                 ! etc)
 
-                if (face%type(i) /= TMfacebndID) then 
+                if ((face%type(i) /= TMfacebndID) .and. (face%x(i)%Size() > 2)) then 
                     tf = i
-                elseif (face%type(faceID(i)) /= TMfacebndID) then 
+                elseif ((face%type(faceID(i)) /= TMfacebndID) .and. (face%x(faceID(i))%Size() > 2)) then 
                     tf = faceID(i)
+                elseif (face%x(i)%Size() > 2) then 
+                    tf = i 
                 else
-                    tf = i ! default
+                    tf = faceID(i)
                 end if 
 
                 ! Get number of points of this face
                 np = face%x(tf)%Size()
                 if (np < 3) then  ! end points should be the same and duplicate
                     ! Issue message: we cannot split up this boundary
+                    print *, 'face vertices: ', face%vert(i, 1), face%vert(i, 2)
+                    call WriteTopologicalMesh(topomesh,'topomesh_error')
                     call gdErrorHandler('SplitTopologicalMeshFaces: ' // & 
                         'face with same vertices found with only ' // & 
                         'two coordinates, cannot split up')
@@ -6413,7 +6497,13 @@ module ggmod_topology2D
                 outbnd = Vv(2:size(Vv)-1) >= 0
                 
                 ! Check
-                if (all(outbnd)) then 
+                if (size(outbnd) == 0) then 
+                    ! Face with only two vertices - only keep if both 
+                    ! vertices are non-zero 
+                    if (any(topomesh%face%vert(i, :) == 0)) then 
+                        rmface(i) = .true. 
+                    end if
+                elseif (all(outbnd)) then 
                     ! Remove, no issue
                     rmface(i) = .true.
                 elseif (all(outbnd(2:size(outbnd)-1)) .and. (size(outbnd) > 2)) then 
@@ -7934,6 +8024,14 @@ module ggmod_topology2D
 
         !  Construct new polygon
         call tp%Construct(x%Get(), y%Get())
+
+        ! Ensure minimal amount of vertices
+        if (tp%nv < 4) then ! 4 should be adequate to represent also closed polygons
+            call tp%Refine(0.0_R8, 4)
+            x = ConstructRealDynamicArray(tp%x(tp%vert))
+            y = ConstructRealDynamicArray(tp%y(tp%vert))
+        end if 
+
 
         ! Concatenate
         !============
@@ -10080,7 +10178,7 @@ module ggmod_topology2D
                 else 
                     ! Only add start and end points
                     tx = [sx, ex]
-                    ty = [ex, ey]
+                    ty = [sy, ey]
                 end if 
 
                 ! Add
