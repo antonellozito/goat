@@ -6146,9 +6146,13 @@ module gdmod_costfunction
         ! Check and switch
         sgn1 = thispsival(:, 1) - thispsival(:, 2)
         sgn2 = thispsival(:, 3) - thispsival(:, 1)
+        wtp = wtp(1:npp)
         if (any(sgn1*sgn2 < 0)) then 
-            ! Shouldn't happen, throw error
-            call gdErrorHandler('Something wrong with initial psi values')
+            ! Shouldn't happen, throw warning and set weight to zero
+            print *, 'FinalizeInitializationCostFunctionPRPB: ' // & 
+                'Something wrong with initial psi values, setting weight ' // &
+                'of these pairs to zero. Results may be unexpected...' 
+            where (sgn1*sgn2 < 0) wtp = 0.0_R8
         end if 
         doflip = (sgn1 < 0) .and. (sgn2 < 0)
         do i = 1, npp
