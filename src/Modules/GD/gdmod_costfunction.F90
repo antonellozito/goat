@@ -7299,7 +7299,6 @@ module gdmod_costfunction
         ! Compute cost function
         !======================
         ! Length ratio
-        call wall_time(tstart)
         if (costfunction%doLR) then 
             ! Compute
             call costfunction%cfv_lr%Evaluate(Jtemp, gradJtemp, &
@@ -7322,13 +7321,10 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call wall_time(tend)
-        print *, 'LR cfv time: ', tend - tstart
         !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lr_val_vertices')
         Jv = 0.0_R8
         
         ! Face angle difference
-        call wall_time(tstart)
         if (costfunction%doFAD) then 
             ! Compute
             call costfunction%cfv_fad%Evaluate(Jtemp, gradJtemp, &
@@ -7351,13 +7347,10 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call wall_time(tend)
-        print *, 'FAD cfv time: ', tend - tstart
         !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fad_val_vertices')
         Jv = 0.0_R8
 
         ! Face angle
-        call wall_time(tstart)
         if (costfunction%doFA) then 
             ! Compute
             call costfunction%cfv_fa%Evaluate(Jtemp, gradJtemp, &
@@ -7380,13 +7373,10 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call wall_time(tend)
-        print *, 'FA cfv time: ', tend - tstart
         !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fa_val_vertices')
         Jv = 0.0_R8
 
         ! Psi ratio, psi based
-        call wall_time(tstart)
         if (costfunction%doPRPB) then 
             ! Compute
             call costfunction%cfv_prpb%Evaluate(Jtemp, gradJtemp, &
@@ -7410,8 +7400,6 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call wall_time(tend)
-        print *, 'PRPB cfv time: ', tend - tstart
         !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv,'cfv_prpb_val_vertices')
         Jv = 0.0_R8
 

@@ -1053,7 +1053,6 @@ module gdmod_constraints
 
         ! X-point constraints
         !--------------------
-        call wall_time(tstart)
         if (constraints%doxpoints) then 
             ! Construct the constraint index
             conindex = [(k, k = ic+1, ic+constraints%xpoints%ncon)]
@@ -1083,12 +1082,9 @@ module gdmod_constraints
             ic = ic + constraints%xpoints%ncon
 
         end if
-        call wall_time(tend)
-        print *, 'xcon: ', tend-tstart
 
         ! Boundary function constraints
         !------------------------------
-        
         if (constraints%doboundaryfunction) then 
             ! Construct the constraint index
             conindex = [(k, k = ic+1, ic+constraints%boundaryfunction%ncon)]
@@ -1097,14 +1093,12 @@ module gdmod_constraints
             lambda_bnd = lambda(conindex)
 
             ! Call the evaluation routine
-            call wall_time(tstart)
             call constraints%boundaryfunction%Evaluate(G_bnd, &
                 gradG_bnd, hessG_bnd, &
                 grid, magneticField, environment, dogradient, &
                 dohessian, designvariables, &
                 lambda_bnd, var, values, dG_bnddvar, dgradG_bnddvar)
-            call wall_time(tend)
-            print *, 'bndcon: ', tend-tstart
+
             ! Assign
             G(conindex) = G_bnd
             if (dogradient) then 
@@ -1124,7 +1118,6 @@ module gdmod_constraints
 
         ! Flux function constraints
         !--------------------------
-        call wall_time(tstart)
         if (constraints%dofluxfunction) then 
             ! Construct the constraint index
             conindex = [(k, k = ic+1, ic+constraints%fluxfunction%ncon)]
@@ -1154,12 +1147,9 @@ module gdmod_constraints
             ic = ic + constraints%fluxfunction%ncon
 
         end if
-        call wall_time(tend)
-        print *, 'ffcon: ', tend-tstart
 
         ! Edge lengths constraints
         !-------------------------
-        call wall_time(tstart)
         if (constraints%doedgelengths) then 
             ! Construct the constraint index
             conindex = [(k, k = ic+1, ic+constraints%edgelengths%ncon)]
@@ -1191,12 +1181,9 @@ module gdmod_constraints
             ic = ic + constraints%edgelengths%ncon
 
         end if
-        call wall_time(tend)
-        print *, 'elcon: ', tend-tstart
 
         ! Orthogonality constraints
         !--------------------------
-        call wall_time(tstart)
         if (constraints%doorthogonality) then 
             ! Construct the constraint index
             conindex = [(k, k = ic+1, ic+constraints%orthogonality%ncon)]
@@ -1226,12 +1213,9 @@ module gdmod_constraints
             ic = ic + constraints%orthogonality%ncon
 
         end if
-        call wall_time(tend)
-        print *, 'orthcon: ', tend-tstart
 
         ! Fixed flux values constraints
         !------------------------------
-        call wall_time(tstart)
         if (constraints%dofixedfluxvalues) then 
             ! Construct the constraint index
             conindex = [(k, k = ic+1, ic+constraints%fixedfluxvalues%ncon)]
@@ -1261,8 +1245,6 @@ module gdmod_constraints
             ic = ic + constraints%fixedfluxvalues%ncon
 
         end if
-        call wall_time(tend)
-        print *, 'ffvcon: ', tend-tstart
 
         ! Housekeeping
         !=============

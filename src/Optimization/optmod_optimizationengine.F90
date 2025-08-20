@@ -1120,25 +1120,16 @@ module optmod_optimizationengine
             !end if
 
             ! Evaluate cost function
-            call wall_time(tstart)
             call problem%EvaluateCostFunction(J, gradJ, & 
                 hessJ, dogradient, dohessian)
-            call wall_time(tend)
-            print *, 'cfv eval: ', tend-tstart
 
             ! Evaluate the equality constraints
-            call wall_time(tstart)
             call problem%EvaluateEqualityConstraints(G, gradG, &
                 hessG, dogradient, dohessian, lambda)
-            call wall_time(tend)
-            print *, 'eq eval: ', tend-tstart
 
             ! Evaluate the inequality constraints
-            call wall_time(tstart)
             call problem%EvaluateInequalityConstraints(H, gradH, &
                 hessH, dogradient, dohessian, mu)
-            call wall_time(tend)
-            print *, 'ineq eval: ', tend-tstart
 
             ! Evaluate the nonlinear complementarity function 
             call EvaluateNCPfunction(ncp, A, I, gradncpphi, gradncpmu, &
