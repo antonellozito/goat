@@ -1888,13 +1888,31 @@ module gamod_types
         logical :: check_extra_conn
 
         ! Auxiliary
+        integer(I8), allocatable, dimension(:) :: cvLookUp, v1n, v2n, cf, &
+            cellnumbers, verts_of_cell, cvertP2, cfaceP2, fcs, ccflags, nvxs, &
+            b_cells, indCv
+        integer(I8) :: verts_of_face(1:2), nc, nf, l, ic, nb, i, j, counter, &
+            nface, nvert
 
         ! Associate
         associate(&
             c => grid%cell, &
             f => grid%face, &
-            v => grid%vert &
+            v => grid%vert, &
+            fd => grid%data%fluxdata &
             )
+
+            ! Initialize
+            nface = c%faceP1%Get(c%ntot)+c%faceP2%Get(c%ntot)-1
+            allocate(v1n(v%ntot), v2n(v%ntot), cf(nface), &
+                cvertP2(c%ntot), cfaceP2(c%ntot), ccflags(c%ntot), &
+                indCv(c%ntot))
+            v1n = f%vert1%GetAllElements()
+            v2n = f%vert2%GetAllElements()
+            cf  = c%face%GetAllElements()
+            cvertP2 = c%vertP2%GetAllElements()
+            cfaceP2 = c%faceP2%GetAllElements()
+            ccflags = c%cflags%GetAllElements()
 
             ! Check 1 - Equal lengths of data
             if ((c%vertP1%Size() /= c%ntot) .or. (c%faceP1%Size() /=  c%ntot) &
@@ -1902,8 +1920,156 @@ module gamod_types
                 call gdErrorHandler('CheckUnstructuredGrid: check 1, length of data is not matching')
             end if
 
-            ! Check2
+            ! Check2 -every cells has an equal amount of faces and vertices
+            if (any(cfaceP2 /= cvertP2)) then
+               call gdErrorHandler('CheckUnstructuredGrid: check 2, not every cell has equal amount of face and vertices')
+            end if
 
+            ! Check 3 - faces and vertices connection
+
+            !voor alle faces, minstens 1 cell, 
+            ! de twee vertices van het face moeten voorkomen in de verts van de (beide) cell
+
+            !first make the cv_look_up
+            nvert = c%vertP1%Get(c%ntot)+c%vertP2%Get(c%ntot)-1
+            allocate(cvLookUp(nvert))
+            cvLookUp = GetCvLookUp(c)
+
+            do j = 1,f%ntot
+                verts_of_face(1) = v1n(j)
+                verts_of_face(2) = v2n(j)
+
+                ! find a cell where the face is attached
+                nc = count(cf == j)
+                allocate(cellnumbers(nc))
+                cellnumbers = pack(cvLookUp,cf == j)
+                if (nc .gt. 2) then
+                    call gdErrorHandler('CheckUnstructuredGrid: check 3, more than two // &
+                     & cells connected to a face')
+                end if
+
+                !get vertices of cells
+                do l = 1, nc
+                    ic = cellnumbers(l);
+                    verts_of_cell = GetCellVertGA(c,ic)
+                    !verts_of_face moeten voorkomen in verts_of_cells
+                    do i = 1,2
+                        if (.not.any(verts_of_cell == verts_of_face(i))) then
+                                call gdErrorHandler('CheckUnstructuredGrid: check 3, vertices // &
+                                & of face not in vertices of the cells of that face')
+                        end if
+                    end do
+                end do
+                
+                deallocate(cellnumbers)
+
+            end do
+
+            ! Check 4 - whether all internal cells have faces which are connected to two cells
+            do ic = 1, c%ntot
+                nf = cfaceP2(ic);
+                fcs = GetCellFaceGA(c, ic)
+                if (ccflags(ic) == 1) then
+                    do i = 1, nf
+                        if (.not.( size( pack(cvLookUp,cf == fcs(i)) ) .eq. 2 ) ) then
+                            call gdErrorHandler('CheckUnstructuredGrid: check 4, not all internal faces have two cells')
+                        end if
+
+                    end do
+                end if
+            
+            end do
+
+            ! Check 5 duplicate face
+            ![dup_faces,grid] = DetectOverlappingFaces(grid);
+
+            !if ~isempty(dup_faces)
+            !    fcX = 0.5*sum(vert.x(face.vert),2);
+            !    fcY = 0.5*sum(vert.y(face.vert),2);
+            !    figure,plotgeo_us(grid,'fast'),hold on
+            !    plot(fcX(dup_faces),fcY(dup_faces),'g*')
+            !    error('CheckUnstructuredGrid: Check 5, overlapping faces')
+            !end
+            ! Check 6 every vertex is only once in a flux surface
+            if (allocated(fd%fluxsurfaceverts)) then
+                    call Unique(fd%fluxsurfaceverts%GetAllElements(), nvxs)
+                    if (fd%fluxsurfaceverts%Size() /= size(nvxs)) then
+                        !figure,plotgeo_us(grid,'fast'),hold on
+                        !fs = grid.fs;
+                        !for iFs = 1:fs.ntot
+                        !    s = fs.vertP(iFs,1);
+                        !    verts = fs.vert(s:s+fs.vertP(iFs,2)-1);
+                        !    plot(grid.vert.x(verts),grid.vert.y(verts),'-*'),hold on;
+                        !end
+                        !for i = 1:length(fs.vert)
+                        !    vx = fs.vert(i);
+                        !    if sum(ismember(fs.vert,vx)) > 1
+                        !        plot(grid.vert.x(vx),grid.vert.y(vx),'g*')
+                        !         break
+                        !    end
+                        !end
+                    
+                        call gdErrorHandler('CheckUnstructuredGrid: check 6, vertex multiple times in fs.vert')
+
+                    end if 
+            end if
+
+            ! Check 7 - wether all boundary cells have one faces which is only connected to that cell
+            nb = count(ccflags .eq. 3)
+            allocate(b_cells(nb))
+            indCv = (/ (i, i = 1, c%ntot) /)
+            b_cells = pack(indCv,ccflags .eq. 3) ! boundary cells
+            do ic = 1, nb
+                nf = cfaceP2(ic);
+                fcs = GetCellFaceGA(c, ic)
+
+                counter = 0;
+                do j = 1,nf
+                    if (size(pack(cvLookUp,cf == fcs(j)) ) .eq. 1 )  then
+                        counter = counter + 1;
+                    end if
+                end do
+
+                if ((counter .eq. 0) .or. (counter .eq. nf)) then!only one disconnected face == boundary face
+                    !this statement is not closing as for al regular BC cells,
+                    !count should be one and only for the corner cells it needs to
+                    !be two
+                    !figure, plotgeo_us(grid), hold on
+                    !plot(cell.x(iCv),cell.y(iCv),'r*')
+                    call gdErrorHandler('CheckUnstructuredGrid: check 7, boundary cell has no boundary face')
+                end if
+            end do
+
+            ! Extra check on the extra connectivity fields
+            if (check_extra_conn) then
+
+                ! Not necessary for GAgrid I believe, and these field are not present anyway
+
+                !%% Check 7
+                !if any(face.cellP(:,2)==0)
+                !    flags(7) = 1;
+                !    error('CheckUnstructuredGrid: check 7, face(s) with zero cells')
+                !end
+
+                !%% Check 8
+                !if any(vert.cellP(:,2)==0)
+                !    flags(8) = 1;
+                !    figure,plotgeo_us(grid,'fast'),hold on
+                !    plot(vert.x(vert.cellP(:,2)==0),vert.y(vert.cellP(:,2)==0),'g*')
+                !    error('CheckUnstructuredGrid: check 8, vertex with zero cells')
+                    
+                !end
+
+                !%% Check 9
+                !if any(vert.faceP(:,2)==0)
+                !    flags(9) = 1;
+                !        figure,plotgeo_us(grid,'fast'),hold on
+                !    plot(vert.x(vert.cellP(:,2)==0),vert.y(vert.cellP(:,2)==0),'g*')
+                !    error('CheckUnstructuredGrid: check 9, vertex with zero faces')
+                !end
+
+
+            end if 
 
         end associate
 
