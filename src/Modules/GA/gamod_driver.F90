@@ -16,6 +16,7 @@ module gamod_driver
     use goatmod_types
     use goatmod_userinput
     use gamod_utility
+    use gamod_types
 
     ! The usual
     implicit none
@@ -77,7 +78,7 @@ module gamod_driver
 
         ! Postprocessing
         !===============
-        ! call postprocessGA
+        ! call PostProcessGA
 
     end subroutine
 
@@ -99,6 +100,7 @@ module gamod_driver
         integer(I8), allocatable, dimension(:) :: tv, cvLookUp
         logical :: cells(grid%cell%ntot), is_ordered(grid%cell%ntot), &
             use_nsep, use_sepID, start
+        character(:), allocatable :: base_func
 
 
         ! Initialize
@@ -114,44 +116,71 @@ module gamod_driver
         ! Recompute cell centers
         do i = 1, c%ntot
             ! Get cell vertices
-            tv = GetCellVert(c, i)
+            tv = GetCellVertGA(c, i)
 
             ! Compute coordinates
-            c%x(i) = sum(v%x(tv))/real(size(tv), kind=R8)
-            c%y(i) = sum(v%y(tv))/real(size(tv), kind=R8)
+            call c%x%SetSingleElement(i,sum(v%x%GetMultipleElements(tv))/real(size(tv), kind=R8)) 
+            call c%y%SetSingleElement(i,sum(v%y%GetMultipleElements(tv))/real(size(tv), kind=R8)) 
+
         end do
 
 
         ! Check order of vertices  (see GetGeo_usCouples.m)
         cells = .true.
-        call CheckVertOrder(grid, is_ordered, cells) 
+        call grid%CheckVertOrder(is_ordered, cells) 
 
         if (.not. all(is_ordered)) then
+
             ! Do ordening
-            call ReorderCellConn(grid, is_ordered)
+            call grid%ReorderCellConn(is_ordered)
+
         end if 
 
         ! Get fsVx from fsFc
-        call GetFsVxFromFsFc(grid)
+        call grid%GetFsVxFromFsFc()
 
         ! Determine Xpoints and separatrices
-        call GiveXpoint(grid,use_nsep)
+        cvLookUp = GetCvLookUp(c)
         use_nsep = .false.
+        call grid%GiveXpoints(use_nsep,cvLookUp)
         use_sepID = .false.
         start = .true.
-        cvLookUp = GetCvLookUp(c)
-        call GiveSeparatrices(grid, use_nsep, use_sepID, start, cvLookUp)
+        call grid%GiveSeparatrices(use_nsep, use_sepID, start, cvLookUp)
 
         ! Identify aligned faces
-        call IdentifyAlignedFaces(grid,options,magneticField)
+        call grid%IdentifyAlignedFaces(options,magneticField)
 
         ! Set up the distance functions
         if (options%dist_function) then
+
+            ! Define base function to compute the distance function
+            base_func = options%base_func !'exp(-dist/d)'
+
+            ! Free distance function based on user-defined input
+            grid%fun%d_char_type = options%d_char_type
+            grid%fun%dist_type   = options%dist_type
+            grid%fun%d_rescale   = options%d_rescale
+            call grid%fun%ComputeDistanceFunction(grid,options,base_func)
+
+            ! Distance function for high poloidal flux next to the separatrix
+            grid%fun_r%d_char_type = options%d_char_type
+            grid%fun_r%dist_type   = 'pol_flux_est'
+            grid%fun_r%d_rescale   = options%d_rescale
+            call grid%fun_r%ComputeDistanceFunction(grid,options,base_func)
+
+            ! Distance function for wall proximity
+            grid%fun_wall%d_char_type = options%d_char_type
+            grid%fun_wall%dist_type = options%dist_type_wall
+            grid%fun_wall%d_rescale = options%d_rescale_wall
+            call grid%fun_wall%ComputeDistanceFunction(grid,options,base_func)
 
         end if 
 
 
         ! Check the connectivity
+        if (options%debug) then
+            call grid%CheckUnstructuredGrid(.false.)
+        end if
 
         ! correct face labels
 
@@ -173,7 +202,7 @@ module gamod_driver
         ! Declare variables
         !==================
         ! Argument
-        type(GridUDT), intent(inout)         :: grid
+        type(GAGridUDT), intent(inout)       :: grid
         type(GAoptionsUDT), intent(in)       :: options
         type(EnvironmentUDT), intent(in)     :: environment
         type(MagneticFieldUDT), intent(in)   :: magneticField

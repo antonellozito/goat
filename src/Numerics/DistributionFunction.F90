@@ -1768,7 +1768,7 @@ module DistributionFunction
         call SolveDenseLinearSystemDI(A, b, sol, flag)
         if (flag /= 0) then
             ! Call error
-            call gdErrorHandler('InitializeCoordinates1DDistanceDF: ' // &
+            call gdErrorHandler('InitializeCoordinates2DDistanceDF: ' // &
                 'could not determine attractor function coefficients ' // &
                 'due to non-converging linear solver')
         end if 

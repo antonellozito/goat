@@ -257,6 +257,7 @@ module goatmod_userinput
         real(R8)                    :: no_pents_area_minZ 
         
         ! Distance function options
+        character(:), allocatable   :: base_func
         logical                     :: dist_function
         real(R8)                    :: d_rescale
         real(R8)                    :: d_rescale_wall
@@ -953,31 +954,32 @@ module goatmod_userinput
         options%dist_function_threshold_split_wall  = 0.6  
         
         ! Merging options
-        options%no_hex                          = .true.
-        options%merge_crit                      = 'h_pol'
-        options%merge_h_pol_factor              = 1
-        options%n_merge                          = 20
-        options%merge_bias_limit                = 5
-        options%dist_function_threshold_merge   = 0.6   
+        options%no_hex                              = .true.
+        options%merge_crit                          = 'h_pol'
+        options%merge_h_pol_factor                  = 1
+        options%n_merge                             = 20
+        options%merge_bias_limit                    = 5
+        options%dist_function_threshold_merge       = 0.6   
         
         ! Pentagon options
-        options%no_pents_area_merge = .false.
-        options%no_pents_area_split = .true.
-        options%no_pents_area_type  = 'dist_function'
+        options%no_pents_area_merge                 = .false.
+        options%no_pents_area_split                 = .true.
+        options%no_pents_area_type                  = 'dist_function'
         
-        options%no_pents_area_maxR  = 2.5
-        options%no_pents_area_minR  = 1
-        options%no_pents_area_maxZ  = -0.9
-        options%no_pents_area_minZ  = -2
+        options%no_pents_area_maxR                  = 2.5
+        options%no_pents_area_minR                  = 1
+        options%no_pents_area_maxZ                  = -0.9
+        options%no_pents_area_minZ                  = -2
         
         ! Distance function options
-        options%dist_function = .true.
-        options%d_rescale = 0.5
-        options%d_rescale_wall = 0.5
-        options%dist_type = 'target_single_null'
-        options%dist_type_wall = 'target_to_vessel'
-        options%d_char_type = 'min_Xpoint_dist'
-        options%plt_dist_func = .false.    
+        options%base_func                           = 'exp(-dist/d)'
+        options%dist_function                       = .true.
+        options%d_rescale                           = 0.5
+        options%d_rescale_wall                      = 0.5
+        options%dist_type                           = 'target_single_null'
+        options%dist_type_wall                      = 'target_to_vessel'
+        options%d_char_type                         = 'min_Xpoint_dist'
+        options%plt_dist_func                       = .false.    
 
     end subroutine
 
@@ -1690,6 +1692,8 @@ module goatmod_userinput
         !==========================
         field = 'ga.dist_function'
         call ExtractOptionValueLogical0D(fid, field, options%dist_function)
+        field = 'ga.base_func'
+        call ExtractOptionValueCharacter(fid, field, options%base_func)        
         field = 'ga.d_rescale'     
         call ExtractOptionValueReal0D(fid, field, options%d_rescale)                             
         field = 'ga.d_rescale_wall'     
