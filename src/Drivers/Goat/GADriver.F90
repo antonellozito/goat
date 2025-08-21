@@ -42,7 +42,6 @@ subroutine GADriver(goatoptions)
     gaoptions%debug                 = goatoptions%debug 
     gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
     gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
-
     call gaoptions%Set()
 
     ! Translate Grid to GAGrid with dynamic arrays
@@ -52,13 +51,13 @@ subroutine GADriver(goatoptions)
     !================
     call GridAdaptor(GAgrid,environment,magneticField,gaoptions)
 
-
-    ! Post-processing
-    !================
-    ! call PostProcessingGridInformation(GAgrid,magneticField,goatoptions)
-
     ! Translate GAGrid to Grid
     call TranslateGAGridTOGrid(grid,GAgrid,gaoptions)
+
+    
+    ! Post-processing
+    !================
+    call PostProcessingGridInformation(grid,magneticField,gaoptions)
 
     ! Write data
     !===========

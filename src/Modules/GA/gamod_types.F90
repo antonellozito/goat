@@ -726,10 +726,8 @@ module gamod_types
     
         end associate
 
-        ! Deallocate grid - maybe no problem
-        !call DeallocateVertices(grid)
-        !call DeallocateFaces(grid)
-
+        ! Deallocate grid 
+        call DeallocateGrid(grid)
 
 
     end subroutine
@@ -973,7 +971,7 @@ module gamod_types
         ! Declare variables
         !==================
         class(GAGridUDT), intent(inout)    :: grid
-        logical, intent(in)             :: is_ordered(grid%cell%ntot)
+        logical, intent(in)                :: is_ordered(grid%cell%ntot)
 
         ! Declare variables
         !==================
@@ -2162,6 +2160,7 @@ module gamod_types
 
 
     end subroutine
+
     !------------------------------------------------------------------!
     !                        DISTANCE FUNCTIONS                        !
     !------------------------------------------------------------------! 

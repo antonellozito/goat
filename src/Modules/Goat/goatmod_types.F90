@@ -2524,6 +2524,154 @@ module goatmod_types
 
     end subroutine
 
+    ! Face structure
+    subroutine DeallocateFaces(face)
+
+        ! Description
+        !============
+        ! Deallocate the fields in the face structure
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(FaceUDT)       :: face
+
+        ! Deallocate
+        !===========
+        deallocate(face%vert)
+        deallocate(face%cell)
+        deallocate(face%cellP)
+        deallocate(face%label)
+        deallocate(face%reg)
+        deallocate(face%aligned)
+        deallocate(face%TMfacelabel)
+        deallocate(face%cellP)
+        deallocate(face%BF)
+
+
+    end subroutine
+
+    ! Cell structure
+    subroutine DeallocateCells(cell)
+
+        ! Description
+        !============
+        ! Deallocate the fields in the cell structure
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(CellUDT)       :: cell
+
+        ! Deallocate
+        !===========
+        deallocate(cell%vertP)
+        deallocate(cell%vert)
+        deallocate(cell%faceP)
+        deallocate(cell%face)
+        deallocate(cell%GC)
+        deallocate(cell%psi)
+        deallocate(cell%psi)
+        deallocate(cell%bp)
+        deallocate(cell%bt)
+        deallocate(cell%x)
+        deallocate(cell%y)
+        deallocate(cell%cflags)
+        deallocate(cell%reg)
+        deallocate(cell%ft)
+
+    end subroutine
+
+    ! Grid data structure
+    subroutine DeallocateGridData(data)
+
+        ! Description
+        !============
+        ! Deallocate the fields in the grid data structure
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridDataUDT)       :: data
+
+        ! Deallocate
+        !===========
+        deallocate(data%OMPcell)
+        deallocate(data%OMPface)
+        deallocate(data%IMPcell)
+        deallocate(data%IMPface)
+        deallocate(data%xpointID)
+        deallocate(data%spointID)
+        deallocate(data%opointID)
+        deallocate(data%tpointID)
+        deallocate(data%isprimaryxp)
+        deallocate(data%spointxpID)
+        deallocate(data%divFc)
+        deallocate(data%spointdivID)
+        deallocate(data%tpointdivID)
+        deallocate(data%divFcP)
+        deallocate(data%sepID)
+        
+        call DeallocateFluxData(data%fluxdata)
+
+    end subroutine
+
+    subroutine DeallocateFluxData(fluxdata)
+
+        ! Description
+        !============
+        ! Deallocate the fields in the flux data structure
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(FluxDataUDT)       :: fluxdata
+
+        ! Deallocate
+        !===========        
+        deallocate(fluxdata%fluxtubecellsP)
+        deallocate(fluxdata%fluxtubecells)
+        deallocate(fluxdata%fluxtubefacesP)
+        deallocate(fluxdata%fluxtubefaces)
+        deallocate(fluxdata%fluxtubefsIDs)
+        deallocate(fluxdata%fluxtuberegID)
+        deallocate(fluxdata%isclosedft)
+        deallocate(fluxdata%fluxsurfacefacesP)
+        deallocate(fluxdata%fluxsurfacefaces)
+        deallocate(fluxdata%fluxsurfaceID)
+        deallocate(fluxdata%fluxsurfaceneig)
+        deallocate(fluxdata%fluxsurfaceneigP)
+        deallocate(fluxdata%fluxsurfacepsi)
+        deallocate(fluxdata%fluxsurfacevertsP)
+        deallocate(fluxdata%fluxsurfaceverts)
+
+    end subroutine
+
+    ! Grid structure
+    subroutine DeallocateGrid(grid)
+
+        ! Description
+        !============
+        ! Deallocate the fields in the grid structure
+
+        ! The usual
+        implicit none
+
+        ! Declare variables
+        type(GridUDT)       :: grid 
+        
+        ! Deallocate substructures
+        call DeallocateVertices(grid%vert)
+        call DeallocateFaces(grid%face)
+        call DeallocateCells(grid%cell)
+        call DeallocateGridData(grid%data)
+
+    end subroutine
+
     ! Basic operations
     !=================
     ! Basic pointer getter

@@ -47,7 +47,6 @@ module gamod_driver
         type(GAGridUDT), intent(inout)              :: grid
         type(EnvironmentUDT), intent(in)            :: environment
         type(MagneticFieldUDT), intent(in)          :: magneticField     
-        
         type(GAoptionsUDT), intent(in)              :: options
 
         ! Initialize grid adaptation
@@ -78,7 +77,7 @@ module gamod_driver
 
         ! Postprocessing
         !===============
-        ! call PostProcessGA
+        call PostProcessGA(grid,magneticField,options)
 
     end subroutine
 
@@ -234,6 +233,77 @@ module gamod_driver
 
 
 
+
+    end subroutine
+ 
+    subroutine PostProcessGA(grid,magneticField,options)
+
+        ! Description
+        !============
+        ! Postprocessing specifically after grid adaptations
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GAGridUDT), intent(inout)      :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        type(GAoptionsUDT), intent(in)         :: options
+
+        ! Auxiliary
+        logical :: is_ordered(grid%cell%ntot), cells(grid%cell%ntot), &
+         use_nsep, use_sepID, start
+        integer(I8), allocatable :: cvLookUp(:)
+        integer(I8) ::  i
+        
+
+        ! Check consistency
+        if (options%debug) then
+            call grid%CheckUnstructuredGrid(.false.)
+        end if
+
+        ! Order correctly
+        cells = .true.
+        call grid%CheckVertOrder(is_ordered,cells) 
+        call grid%ReorderCellConn(is_ordered)
+
+        ! Determine number of Xpoints and separatrices
+        cvLookUp = GetCvLookUp(grid%cell)
+        use_nsep = .true.
+        use_sepID = .true. 
+        call grid%GiveSeparatrices(use_nsep, use_sepID, start, cvLookUp)
+        call grid%GiveXpoints(use_sepID,cvLookUp)
+
+        ! Check flux surfaces for possible merging of open surfaces
+
+        ! 
+    end subroutine
+
+
+    subroutine PostProcessingGridInformation(grid,magneticField,options)
+
+        ! Description
+        !============
+        ! Post-process grid information to receive correct fields for
+        ! traduit.out.b2us-file. This includes:
+        ! - psi, bx, by, ffbz at the vertex locations
+        ! - x, y coordinates of cells
+        ! - bp, bt according to b2ag
+
+        ! Notes
+        !======
+        ! Note 1: as implemented now, the grid.psi values may be inconsistent with
+        ! the new grid coordinates, as first grid.psi is computed based on the old
+        ! cell coordinates.  A similar issue is with the t0 term when recalculating 
+        ! bp and bt. Needs revision        
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)        :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        type(GAoptionsUDT), intent(in)         :: options 
+        
+        
 
     end subroutine
 
