@@ -58,7 +58,7 @@ subroutine GADriver(goatoptions)
     ! call PostProcessingGridInformation(GAgrid,magneticField,goatoptions)
 
     ! Translate GAGrid to Grid
-    call TranslateGridTOGAGrid(grid,GAgrid)
+    call TranslateGAGridTOGrid(grid,GAgrid,gaoptions)
 
     ! Write data
     !===========

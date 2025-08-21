@@ -734,7 +734,7 @@ module gamod_types
 
     end subroutine
 
-    subroutine TranslateGAGridTOGrid(grid,GAgrid)
+    subroutine TranslateGAGridTOGrid(grid,GAgrid,options)
         ! Description
         ! ===========
         ! Translating the information in the GridUDT type to a GAGridUDT type with dynamic arrays
@@ -742,14 +742,101 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT) :: grid
-        type(GAGridUDT) :: GAgrid
+        type(GridUDT), intent(out)      :: grid
+        type(GAGridUDT), intent(inout)  :: GAgrid
+        type(GAoptionsUDT), intent(in)  :: options
 
-        ! Initialize grid
+        ! Auxiliary
+        integer(I8) :: i, indFc(GAgrid%face%ntot), fcLbl_loc(GAgrid%face%ntot), nfb
+        integer(I8), allocatable :: fcsbnd(:), vxsbnd(:)
+
 
         ! Give information in GAgrid to grid
+        associate(&
+            gc => grid%cell, &
+            gf => grid%face, &
+            gv => grid%vert, &
+            gfd => grid%data%fluxdata, &
+            GAc => GAgrid%cell, &
+            GAf => GAgrid%face, &
+            GAv => GAgrid%vert, &
+            GAfd => GAgrid%data%fluxdata &
+            )
+        ! Initialize grid
+        ! Correct sizes for allocation
+        gv%ntot     = GAv%ntot    
+        gf%ntot     = GAf%ntot
+        gc%ntot     = GAc%ntot
+        gc%nvert    = GAc%vertP1%Get(GAc%ntot) + Gac%vertP2%Get(GAc%ntot) - 1 
+        gc%nface    = GAc%faceP1%Get(GAc%ntot) + Gac%faceP2%Get(GAc%ntot) - 1 
+        gfd%nFs     = GAfd%nFs
+        gfd%nFt     = GAfd%nFt
 
-        ! Deallocate GAgrid
+        ! Boundary information
+        fcLbl_loc = GetfcLblGA(GAf, options)
+        nfb = count(fcLbL_loc /= 0)
+        grid%bnd%nface = nfb
+        indFc = (/ (i, i = 1, GAf%ntot) /)
+        allocate(fcsbnd(nfb))
+        fcsbnd = pack(indFc, fcLbL_loc /= 0 )
+        vxsbnd = GetVxsFromFcs(GAf, fcsbnd)
+        grid%bnd%nvert = size(vxsbnd)
+
+        call AllocateGrid(grid)
+
+
+        ! Vertex information
+        gv%x            = GAv%x%GetAllElements()
+        gv%y            = GAv%y%GetAllElements()
+        gv%bx           = GAv%bx%GetAllElements()
+        gv%by           = GAv%by%GetAllElements()
+        gv%psi          = GAv%psi%GetAllElements()
+        gv%ffbz         = GAv%ffbz%GetAllElements()
+        gv%fieldlineID  = GAv%fieldlineID%GetAllElements()
+
+        ! Face information
+        gf%vert(:,1)    = GAf%vert1%GetAllElements()
+        gf%vert(:,2)    = GAf%vert2%GetAllElements()
+        gf%label        = GAf%label%GetAllElements()
+        gf%reg          = GAf%reg%GetAllElements()
+        gf%aligned      = GAf%aligned%GetAllElements()
+
+        ! Cell information
+        gc%vertP(:,1)   = GAc%vertP1%GetAllElements() 
+        gc%vertP(:,2)   = GAc%vertP2%GetAllElements() 
+        gc%vert         = GAc%vert%GetAllElements() 
+        gc%faceP(:,1)   = GAc%faceP1%GetAllElements()
+        gc%faceP(:,2)   = GAc%faceP2%GetAllElements()
+        gc%face         = GAc%face%GetAllElements()
+        gc%cflags       = GAc%cflags%GetAllElements()
+        gc%ft           = GAc%ft%GetAllElements()
+        gc%psi          = GAc%psi%GetAllElements()
+        gc%bp           = GAc%bp%GetAllElements()
+        gc%bt           = GAc%bt%GetAllElements()
+        gc%x            = GAc%x%GetAllElements()
+        gc%y            = GAc%y%GetAllElements()
+
+        ! Grid data - flux surface data
+        grid%data%xpointID          = GAgrid%data%xpointID
+        grid%data%nxp               = GAgrid%data%nxp
+        grid%data%sepID             = GAgrid%data%sepID
+        grid%data%nsep              = GAgrid%data%nsep
+        gfd%fluxsurfacefacesP(:,1)  = GAfd%fluxsurfacefacesP1%GetAllElements()
+        gfd%fluxsurfacefacesP(:,2)  = GAfd%fluxsurfacefacesP2%GetAllElements()
+        gfd%fluxsurfacefaces        = GAfd%fluxsurfacefaces%GetAllElements()
+        gfd%fluxsurfacevertsP(:,1)  = GAfd%fluxsurfacevertsP1%GetAllElements()
+        gfd%fluxsurfacevertsP(:,2)  = GAfd%fluxsurfacevertsP2%GetAllElements()
+        gfd%fluxsurfaceverts        = GAfd%fluxsurfaceverts%GetAllElements()
+        gfd%fluxsurfaceID           = GAfd%fluxsurfaceID%GetAllElements()
+        gfd%fluxsurfacepsi          = GAfd%fluxsurfacepsi%GetAllElements()
+
+        ! Problem need to compute some extra fields for grid 
+        ! See what is needed for WriteGOAT: TODO
+
+
+
+        end associate
+        ! Deallocate GAgrid - maybe not problematic
 
 
 
