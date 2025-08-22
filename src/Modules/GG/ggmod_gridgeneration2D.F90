@@ -1124,7 +1124,8 @@ module ggmod_gridgeneration2D
         ! Extract the necessary gridding data
         !====================================
         ! Extract
-        call ExtractSimulationGrid(simgrid, grid, magneticField, topomesh)
+        call ExtractSimulationGrid(simgrid, grid, magneticField, &
+            topomesh, ggtmdata)
 
         ! Diagnostics
         !============
@@ -4436,7 +4437,7 @@ module ggmod_gridgeneration2D
         type(GGTMDataUDT), intent(inout)        :: ggtmdata
 
         ! Auxiliary
-        integer(I8)                             :: vtemp, thisfID
+        integer(I8)                             :: vtemp
         integer(I8), allocatable, dimension(:)  :: v1, v2, fID, &
             sortind, dv1, dv2, tsortind, tv2, tfID, fIDnew
         integer(I8), allocatable                :: fvert(:, :)
@@ -4475,6 +4476,7 @@ module ggmod_gridgeneration2D
         call Sort(v1, ind=sortind)
         v2 = v2(sortind)
         fID = fID(sortind)
+        deallocate(sortind)
 
         ! Sort v2 per segment of equal v1
         k = 0
@@ -4510,14 +4512,20 @@ module ggmod_gridgeneration2D
         ! If both are zero, set delind to true
         delind = [.false., (dv1 == 0) .and. (dv2 == 0)]
 
+        ! Resort according to face ID
+        allocate(sortind(size(fID)))
+        call Sort(fID, ind=sortind)
+        delind = delind(sortind)
+        deallocate(sortind)
+
         ! Construct mapping
         fIDnew = fID
-        thisfID = fID(1)
+        k = 0
         do i = 1, size(fID)
             if (.not. delind(i)) then 
-                thisfID = fID(i)
+                k = k + 1
             end if 
-            fIDnew(i) = thisfID
+            fIDnew(i) = k
         end do
 
         ! Remove faces from grid
@@ -4982,7 +4990,7 @@ module ggmod_gridgeneration2D
         end if 
 
     end subroutine
-    
+
     ! Vertex distribution over faces
     subroutine DistributeVerticesTopologicalMeshFaces(grid, ggtmdata, topomesh, &
         vd, GGTMlinerefiner, facetypes)
@@ -15120,7 +15128,8 @@ module ggmod_gridgeneration2D
     !------------------------------------------------------------------!
 
     ! Simulation grid extraction
-    subroutine ExtractSimulationGrid(simgrid, grid, magneticField, topomesh)
+    subroutine ExtractSimulationGrid(simgrid, grid, magneticField, &
+        topomesh, ggtmdata)
 
         ! Description
         !============
@@ -15140,6 +15149,7 @@ module ggmod_gridgeneration2D
         type(GGGridUDT), intent(in)             :: grid 
         type(MagneticFieldUDT), intent(in)      :: magneticField
         class(TopomeshUDT), intent(in)          :: topomesh
+        type(GGTMDataUDT), intent(in)           :: ggtmdata
 
         ! Auxiliary
         logical, allocatable, dimension(:)      :: hasfaceID
@@ -15302,6 +15312,7 @@ module ggmod_gridgeneration2D
         ! Additional grid data
         call ComputeGridData(simgrid, magneticField)
         call ComputeTopologicalData(simgrid, topomesh)
+        call ComputeGoatGGData(simgrid, topomesh, ggtmdata)
 
         ! Grid boundary
         !call ComputeGridBoundaries(simgrid)
@@ -16030,6 +16041,184 @@ module ggmod_gridgeneration2D
         ! Additional s-, t-point data
         simgrid%data%spointdivID = vertdivID(simgrid%data%spointID)
         simgrid%data%tpointdivID = vertdivID(simgrid%data%tpointID) 
+
+    end subroutine
+
+    ! Goat grid generator data 
+    subroutine ComputeGoatGGData(simgrid, topomesh, ggtmdata)
+
+        ! Description
+        !============
+        ! This routine writes out a .dat file with useful info that is 
+        ! additional to the standard traduit.out.b2us format. Currently, 
+        ! the following data is written:
+        ! - faces: ID, topomesh face type, boundary layer face number
+        ! - vert: ID, topomesh vertex type
+        ! The face boundary layer number is either zero (face is not 
+        ! a boundary layer face) or a positive integer that indicates
+        ! it's position w.r.t. the boundary (i.e. 1 is adjacent to the 
+        ! boundary, 2 is after 1, etc). 
+
+        ! Notes:
+        !=======
+        ! Note 1: when the amount of boundary faces that should have
+        ! been imposed is larger than the actual number of faces in the 
+        ! line, these faces are not considered to be boundary faces.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)            :: simgrid 
+        type(TopomeshUDT), intent(in)           :: topomesh 
+        type(GGTMDataUDT), intent(in)           :: ggtmdata 
+
+        ! Auxiliary
+        integer(I8)                             :: nBLf, nsf
+        integer(I8), allocatable, dimension(:)  :: TMfacetype, BLind, &
+            TMverttype, tf
+
+        ! Loop
+        integer(I8)                             :: i, j, k, tfc, tseg, &
+            cc
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            face        => simgrid%face,    &
+            vert        => simgrid%vert,    &
+            seg         => ggtmdata%seg,    &
+            celldata    => ggtmdata%cell,   &
+            facedata    => ggtmdata%face,   &
+            vertdata    => ggtmdata%vert    &
+            )
+
+        ! Allocate & initialize
+        allocate(TMfacetype(face%ntot), BLind(face%ntot))
+        allocate(TMverttype(vert%ntot))
+        TMfacetype  = 0
+        BLind       = 0
+        TMverttype  = 0
+
+        ! Compute data
+        !=============
+        ! Face data
+        do i = 1, size(celldata)
+            associate(tubes     => celldata(i)%tubes)
+            do j = 1, size(tubes)
+                associate(&
+                    hfline    => tubes(j)%hfline,   &
+                    lfline    => tubes(j)%lfline)
+
+                ! Hfline
+                !-------
+                tf = tubes(j)%hfface%Get()
+                if (size(tf) > 0) then 
+                    where (hfline%TMfaceID /= 0) TMfacetype(tf) = topomesh%face%type(hfline%TMfaceID)
+                    tfc = 0
+                    do k = 1, hfline%ns
+                        ! Unpack
+                        tseg = hfline%segID(k)
+                        
+                        ! Check
+                        nsf = seg(tseg)%nv-1
+                        if (seg(tseg)%refoptions%ncBLstart + seg(tseg)%refoptions%ncBLend >= nsf) then 
+                            cycle 
+                        end if 
+
+                        ! Determine boundary layer IDs
+                        if (seg(tseg)%refoptions%doBLstart) then 
+                            ! Unpack
+                            nBLf = seg(tseg)%refoptions%ncBLstart
+
+                            ! Check if we need to flip
+                            if (hfline%flipseg(k)) then
+                                BLind(tf(tfc+nsf:tfc+nsf-nBLf+1:-1)) = [(cc, cc = 1, nBLf)]
+                            else 
+                                BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
+                            end if 
+                        end if 
+                        if (seg(tseg)%refoptions%doBLend) then 
+                            ! Unpack
+                            nBLf = seg(tseg)%refoptions%ncBLend
+
+                            ! Check if we need to flip
+                            if (hfline%flipseg(k)) then
+                                BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
+                            else 
+                                BLind(tf(tfc+nsf:tfc+nsf-nBLf+1:-1)) = [(cc, cc = 1, nBLf)]
+                            end if 
+                        end if
+
+                        ! Update face counter
+                        tfc = tfc + nsf
+                    end do
+                end if 
+                
+                ! Lfline
+                !-------
+                tf = tubes(j)%lfface%Get()
+                if (size(tf) > 0) then 
+                    where (lfline%TMfaceID /= 0) TMfacetype(tf) = topomesh%face%type(lfline%TMfaceID) 
+                    tfc = 0
+                    do k = 1, lfline%ns
+                        ! Unpack
+                        tseg = lfline%segID(k)
+                        
+                        ! Check
+                        nsf = seg(tseg)%nv-1
+                        if (seg(tseg)%refoptions%ncBLstart + seg(tseg)%refoptions%ncBLend >= nsf) then 
+                            cycle 
+                        end if 
+
+                        ! Determine boundary layer IDs
+                        if (seg(tseg)%refoptions%doBLstart) then 
+                            ! Unpack
+                            nBLf = seg(tseg)%refoptions%ncBLstart
+
+                            ! Check if we need to flip
+                            if (lfline%flipseg(k)) then
+                                BLind(tf(tfc+nsf:tfc+nsf-nBLf+1:-1)) = [(cc, cc = 1, nBLf)]
+                            else 
+                                BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
+                            end if 
+                        end if 
+                        if (seg(tseg)%refoptions%doBLend) then 
+                            ! Unpack
+                            nBLf = seg(tseg)%refoptions%ncBLend
+
+                            ! Check if we need to flip
+                            if (lfline%flipseg(k)) then
+                                BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
+                            else 
+                                BLind(tf(tfc+nsf:tfc+nsf-nBLf+1:-1)) = [(cc, cc = 1, nBLf)]
+                            end if 
+                        end if
+                    
+                        ! Update face counter
+                        tfc = tfc + nsf
+                    end do
+                end if 
+                end associate
+            end do
+            end associate
+        end do 
+
+        ! Vertex data
+        do i = 1, topomesh%vert%ntot
+            TMverttype(i) = topomesh%vert%type(i)
+        end do 
+
+        ! Add
+        !====
+        simgrid%data%goatggdata%TMfacetype = TMfacetype
+        simgrid%data%goatggdata%TMverttype = TMverttype
+        simgrid%data%goatggdata%BLind      = BLind
+        simgrid%data%hasGoatGGData         = .true. 
+
+        ! Housekeeping
+        !=============
+        end associate
 
     end subroutine
 
