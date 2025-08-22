@@ -154,6 +154,8 @@ module gamod_types
 
         ! Initialize
         procedure :: Initialize     => InitializeGAFace
+        procedure :: ChainFaces
+
     end type
 
     ! Cell structure
@@ -433,6 +435,7 @@ module gamod_types
         procedure :: GiveSeparatrices
         procedure :: IdentifyAlignedFaces
         procedure :: CheckUnstructuredGrid
+        procedure :: RecalcMagn
 
     end type  
 
@@ -871,8 +874,8 @@ module gamod_types
             )
 
         ! Initialize
-        allocate(fcX(f%ntot), fcY(f%ntot), v1n(v%ntot), &
-            v2n(v%ntot), cx(c%ntot), cy(c%ntot), vx(v%ntot), &
+        allocate(fcX(f%ntot), fcY(f%ntot), v1n(f%ntot), &
+            v2n(f%ntot), cx(c%ntot), cy(c%ntot), vx(v%ntot), &
             vy(v%ntot)) 
         v1n = f%vert1%GetAllElements()
         v2n = f%vert2%GetAllElements()
@@ -990,8 +993,8 @@ module gamod_types
             )
         
         ! Compute face centers
-        allocate(fcX(f%ntot), fcY(f%ntot), v1n(v%ntot), &
-            v2n(v%ntot), vx(v%ntot), vy(v%ntot))
+        allocate(fcX(f%ntot), fcY(f%ntot), v1n(f%ntot), &
+            v2n(f%ntot), vx(v%ntot), vy(v%ntot))
         v1n = f%vert1%GetAllElements()
         v2n = f%vert2%GetAllElements()        
         vx = v%x%GetAllElements()
@@ -1128,14 +1131,14 @@ module gamod_types
         
         ! Initialize
         allocate(fsVx(v%ntot), fsVxP(fd%nFs,2),verts(v%ntot), &
-            v1n(v%ntot), v2n(v%ntot))
+            v1n(f%ntot), v2n(f%ntot))
         v1n = f%vert1%GetAllElements()
         v2n = f%vert2%GetAllElements()
         
 
         do ifs = 1, fd%nFs
             ! Get vertices from flux surface
-            fcs = GetFluxSurfaceFcs(fd, ifs)
+            fcs = GetFluxSurfaceFcsGA(fd, ifs)
             nf = size(fcs)
             verts(1:nf) = v1n(fcs) 
             verts(nf+1:nf*2) = v2n(fcs)
@@ -1172,9 +1175,9 @@ module gamod_types
         integer(I8), allocatable, optional :: cvLookUp(:)            
 
         ! Auxiliary
-        integer(I8)                         :: nxpind, i, j, iv, xpoints(1:100), counter, & 
-            n , nc, s
-        integer(I8), allocatable            :: xpind(:), order(:), vxs(:), cells(:), &
+        integer(I8)                         :: i, j, iv, xpoints(1:100), counter, & 
+            n , nc
+        integer(I8), allocatable            :: vxs(:), cells(:), &
             regions(:), creg(:)
         logical :: use_sepID, start, use_fieldlineID, use_nsep
         
@@ -1220,7 +1223,7 @@ module gamod_types
                 cvLookUp = GetCvLookUp(c)
                 do i = 1, grid%data%nsep
                     n = fd%fluxsurfacevertsP2%Get(grid%data%sepID(i))
-                    vxs = GetFluxSurfaceVxs(fd, i)
+                    vxs = GetFluxSurfaceVxsGA(fd, i)
 
                     do j = 1, n
                         iv = vxs(j)
@@ -1425,7 +1428,7 @@ module gamod_types
         ! Initialize
         logical    :: use_xpointID     
         integer(I8), allocatable :: vxs(:), fcs(:), cvs(:), creg(:)
-        integer(I8) :: ifs, ix, nv, s, sepIDloc(1:100), &
+        integer(I8) :: ifs, ix, nv, sepIDloc(1:100), &
             counter, counter_dummy, nf, step, i, ifc
 
         ! Initialize
@@ -1462,7 +1465,7 @@ module gamod_types
                         ! Based on Xpoints
                         do ifs = 1, fd%nFs
                             nv = fd%fluxsurfacevertsP2%Get(ifs)
-                            vxs = GetFluxSurfaceVxs(fd, ifs)
+                            vxs = GetFluxSurfaceVxsGA(fd, ifs)
 
                             do ix = 1, grid%data%nxp
                                 if (any(grid%data%xpointID(ix).eq.vxs)) then
@@ -1475,7 +1478,7 @@ module gamod_types
                     else
 
                         do ifs = 1, fd%nFs
-                            fcs = GetFluxSurfaceFcs(fd, ifs)
+                            fcs = GetFluxSurfaceFcsGA(fd, ifs)
                             nf = fd%fluxsurfacefacesP2%Get(ifs)
 
                             step = 1
@@ -1499,7 +1502,7 @@ module gamod_types
                     ! Check whether previous sepID is still separatrix
                     if (use_sepID) then
                         nf = fd%fluxsurfacefacesP2%Get(ifs)
-                        fcs = GetFluxSurfaceFcs(fd, ifs)
+                        fcs = GetFluxSurfaceFcsGA(fd, ifs)
                         step = 1
                         do i = 1, step, nf
                             ifc = fcs(i)
@@ -1519,7 +1522,7 @@ module gamod_types
                     sepIDloc = 0
                     do ifs = 1, fd%nFs
                         nf = fd%fluxsurfacefacesP2%Get(ifs)
-                        fcs = GetFluxSurfaceFcs(fd, ifs)
+                        fcs = GetFluxSurfaceFcsGA(fd, ifs)
                         step = 1
 
                         do i = 1, step, nf
@@ -1554,7 +1557,7 @@ module gamod_types
                         do i = 1, grid%data%nsep
                             ifs = grid%data%sepID(i)
                             nf = fd%fluxsurfacefacesP2%Get(ifs)
-                            fcs = GetFluxSurfaceFcs(fd, ifs)
+                            fcs = GetFluxSurfaceFcsGA(fd, ifs)
                             step = 1
                             sepIDloc = DetectSepID(ifs, c, fcs, sepIDloc, nf, step, cvLookUp, counter)
                             counter_dummy = counter + 1
@@ -1571,7 +1574,7 @@ module gamod_types
                     do ifs = 1, fd%nFs
                         if (.not.any(ifs == grid%data%sepID)) then
                             nf = fd%fluxsurfacefacesP2%Get(ifs)
-                            fcs = GetFluxSurfaceFcs(fd, ifs)
+                            fcs = GetFluxSurfaceFcsGA(fd, ifs)
                             step = 1
                             sepIDloc = DetectSepID(ifs, c, fcs, sepIDloc, nf, step, cvLookUp, counter)
                             counter_dummy = counter + 1
@@ -1601,7 +1604,7 @@ module gamod_types
                     if (allocated(grid%data%xpointID)) then
                         do ifs = 1, fd%nFs
                             nv = fd%fluxsurfacevertsP2%Get(ifs)
-                            vxs = GetFluxSurfaceVxs(fd, ifs)
+                            vxs = GetFluxSurfaceVxsGA(fd, ifs)
                             do ix = 1, grid%data%nxp
                                 if (any(grid%data%xpointID(ix)==vxs)) then
                                     counter = counter + 1
@@ -1612,7 +1615,7 @@ module gamod_types
                     else ! line 252
                         do ifs = 1, fd%nFs
                             nf = fd%fluxsurfacefacesP2%Get(ifs)
-                            fcs = GetFluxSurfaceFcs(fd, ifs)
+                            fcs = GetFluxSurfaceFcsGA(fd, ifs)
                             step = max(2,nint(nf/5.0_R8))
                             sepIDloc = DetectSepID(ifs,c, fcs, sepIDloc, nf, step, cvLookUp, counter)
                             counter_dummy = counter + 1
@@ -1631,7 +1634,7 @@ module gamod_types
                     ! Check whether the previous is separatrix
                     if (grid%data%sepID(1) /= 0) then
                             nf = fd%fluxsurfacefacesP2%Get(ifs)
-                            fcs = GetFluxSurfaceFcs(fd, ifs)
+                            fcs = GetFluxSurfaceFcsGA(fd, ifs)
                             step = max(2,nint(nf/5.0_R8))   
                             do i = 3, step, nf-2
                                 ifc = fcs(i)
@@ -1652,7 +1655,7 @@ module gamod_types
                     counter = 0
                     do ifs = 1, fd%nFs
                         nf = fd%fluxsurfacefacesP2%Get(ifs)
-                        fcs = GetFluxSurfaceFcs(fd, ifs)
+                        fcs = GetFluxSurfaceFcsGA(fd, ifs)
                         step = 1   
                         do i = 3, step, nf-2 
                             ifc = fcs(i)
@@ -1682,7 +1685,7 @@ module gamod_types
                         do i = 1, grid%data%nsep
                             ifs = grid%data%sepID(i)
                             nf = fd%fluxsurfacefacesP2%Get(ifs)
-                            fcs = GetFluxSurfaceFcs(fd, ifs) 
+                            fcs = GetFluxSurfaceFcsGA(fd, ifs) 
                             step = 1
                             sepIDloc = DetectSepID(ifs,c, fcs, sepIDloc, nf, step, cvLookUp, counter)
                             counter_dummy = counter + 1
@@ -1699,7 +1702,7 @@ module gamod_types
                     do ifs = 1, fd%nFs
                         if (.not.any(sepIDloc(1:grid%data%nsep).eq.ifs)) then
                             nf = fd%fluxsurfacefacesP2%Get(ifs)
-                            fcs = GetFluxSurfaceFcs(fd, ifs) 
+                            fcs = GetFluxSurfaceFcsGA(fd, ifs) 
                             step = 1   
                             sepIDloc = DetectSepID(ifs,c, fcs, sepIDloc, nf, step, cvLookUp, counter)
                             counter_dummy = counter + 1
@@ -1743,7 +1746,7 @@ module gamod_types
         type(MagneticFieldUDT), intent(in)   :: magneticField
         
         ! Auxiliary
-        integer(I8) :: ifc, v1, v2, lim, i, ic, nf, indmax, indmin, &
+        integer(I8) :: ifc, lim, i, ic, nf, indmax, indmin, &
             rface3, pface3(1:2), ind3(1:3), ind4(1:4), f1, f2, n_al, &
             fcs_al3(1:3), fcs_al2(1:2) , indmax2
         integer(I8), allocatable :: facealigned(:), fcLbl_loc(:), indFc(:), &
@@ -1768,7 +1771,7 @@ module gamod_types
         Btot(f%ntot), Bnorm(f%ntot), cosB(f%ntot), t1x(f%ntot),&
         t2x(f%ntot), t1y(f%ntot), t2y(f%ntot), &
         fcLbl_loc(f%ntot), b_flag(f%ntot), indFc(f%ntot), abs_cos(f%ntot), &
-        v1n(v%ntot), v2n(v%ntot), vpsi(v%ntot), ccflags(c%ntot))
+        v1n(f%ntot), v2n(f%ntot), vpsi(v%ntot), ccflags(c%ntot))
 
         v1n = f%vert1%GetAllElements()
         v2n = f%vert2%GetAllElements()
@@ -1989,7 +1992,7 @@ module gamod_types
 
             ! Initialize
             nface = c%faceP1%Get(c%ntot)+c%faceP2%Get(c%ntot)-1
-            allocate(v1n(v%ntot), v2n(v%ntot), cf(nface), &
+            allocate(v1n(f%ntot), v2n(f%ntot), cf(nface), &
                 cvertP2(c%ntot), cfaceP2(c%ntot), ccflags(c%ntot), &
                 indCv(c%ntot))
             v1n = f%vert1%GetAllElements()
@@ -2161,6 +2164,167 @@ module gamod_types
 
     end subroutine
 
+    subroutine RecalcMagn(grid, magneticField)
+
+        ! Description
+        !============
+        ! Evaluates the magneticField interpolants
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        type(MagneticFieldUDT)          :: magneticField
+
+        ! Auxiliary
+        real(R8) :: dpsidx(grid%vert%ntot), dpsidy(grid%vert%ntot), &
+            psi_cv(grid%cell%ntot), psi_vx(grid%vert%ntot),  &
+            vx(grid%vert%ntot), vy(grid%vert%ntot), cx(grid%cell%ntot), &
+            cy(grid%cell%ntot)
+
+        ! Initialize
+        vx = grid%vert%x%GetAllElements()
+        vy = grid%vert%y%GetAllElements()
+        cx = grid%cell%x%GetAllElements()
+        cy = grid%cell%y%GetAllElements()
+
+        ! Evaluate magneticField
+        call magneticField%interp%Evaluate(cx,cy,0,0,psi_cv)
+        call magneticField%interp%Evaluate(vx,vy,0,0,psi_vx)
+        call magneticField%interp%Evaluate(vx,vy,1,0,dpsidx)
+        call magneticField%interp%Evaluate(vx,vy,0,1,dpsidy) 
+
+        call grid%cell%psi%SetAllElementsArray(psi_cv) 
+        call grid%vert%psi%SetAllElementsArray(psi_vx) 
+        call grid%vert%bx%SetAllElementsArray(dpsidx) 
+        call grid%vert%by%SetAllElementsArray(dpsidy) 
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                        GAFACE ROUTINES                           !
+    !------------------------------------------------------------------!    
+
+    subroutine ChainFaces(face, f_list, f_ord, nf)
+
+        ! Description
+        !============
+        ! Order a list of faces by chaining then together. The faces need to be an open chain
+        ! - f_list  : input list of faces
+        ! - f_ord   : ordered list of faces
+        ! - nf      : number of faces per detected chains
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAFaceUDT), intent(in)            :: face
+        integer(I8), allocatable, intent(in)    :: f_list(:)
+        integer(I8), allocatable, intent(out)   :: f_ord(:,:), nf(:)
+
+        ! Auxiliary
+        integer(I8), allocatable :: verts_list(:,:), indv(:,:), &
+            a(:)
+        integer(I8) :: i, j, k, l, ends, nfcs, v1n(face%ntot), &
+            v2n(face%ntot), start_fcs, com_vert(1:2), na, f
+
+        ! Initialize
+        nfcs = size(f_list)
+        allocate(verts_list(nfcs,2), indv(nfcs,2))
+        v1n = face%vert1%GetAllElements()
+        v2n = face%vert2%GetAllElements()
+        verts_list(:,1) = v1n(f_list)
+        verts_list(:,2) = v2n(f_list)
+        ends = 0
+        indv(:,1) = (/(i, i = 1, nfcs)/)
+        indv(:,2) = (/(i, i = 1, nfcs)/)
+
+        ! Check the occurence of vertices to determine the starting and endings of a chain, and save one end face for algo efficienvy
+        do i = 1, nfcs
+            do j = 1, 2
+                if (count(verts_list == verts_list(i,j)) .eq. 1) then
+                    start_fcs = f_list(i)
+                    ends = ends + 1 
+                end if
+            end do
+        end do
+
+        ! Get correct sizes for allocatable output arrays
+        if (ends .gt. 2) then
+            allocate(f_ord(nfcs, ends/2))
+            f_ord = 0
+            allocate(nf(ends/2))
+            nf = 0
+        else
+            allocate(nf(1))
+            nf = size(f_list)
+        end if
+
+        ! Construct the chaines
+        do k = 1, ends/2
+
+            ! Determine the first face
+            if (k /= 1) then 
+                do i = 1, nfcs
+                    do j = 1, 2 
+                        if (count(verts_list == verts_list(i,j)) .eq. 1) then
+                            f = f_list(i)
+                            if (.not.any(f_ord == f)) then
+                                f_ord(1, k) = f_list(i)
+                            end if
+                        end if
+                    end do
+                end do
+
+            else 
+                f_ord(1, 1) = start_fcs
+            end if
+
+            ! Get next faces
+            do i = 2, nfcs
+
+                ! Check whether to continue
+                if (f_ord(i-1,k) == 0) then
+                    nf(k) = i-2
+                    exit
+                end if
+
+                com_vert(1) = v1n(f_ord(i-1,k))
+                com_vert(2) = v2n(f_ord(i-1,k))
+                do l = 1, 2 ! Check two vertices
+
+                    na = count(verts_list == com_vert(l))
+                    allocate(a(na))
+                    a = pack(indv,verts_list == com_vert(l))
+                    
+                    ! Check if vertex is end of chain or not
+                    if (na .eq. 2) then
+
+                        ! If one of the faces is not in the list, add it
+                        if (.not.any(f_list(a(1)) == f_ord(:,k))) then
+                            f_ord(i,k) = f_list(a(1))
+                        elseif (.not.any(f_list(a(2)) == f_ord(:,k))) then
+                            f_ord(i,k) = f_list(a(2))
+                        end if
+
+                    elseif (na .eq. 1) then
+
+                        if (.not.any(f_list(a) == f_ord(:,k))) then
+                            f_ord(i,k) = f_list(a(1))
+                        end if
+
+                    else 
+                        call gdErrorHandler('ChainFaces: Something went wont, probably faces can not form a chain')
+                    end if
+
+                    deallocate(a)
+                end do
+
+            end do
+
+        end do
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                        DISTANCE FUNCTIONS                        !
     !------------------------------------------------------------------! 
@@ -2315,7 +2479,7 @@ module gamod_types
                          'Other wise the assumption is made that sepID(1) is the main separatrix.'
                  
                 ! Get faces of separatrix
-                faces_sep = GetFluxSurfaceFcs(data%fluxdata,data%sepID(1))
+                faces_sep = GetFluxSurfaceFcsGA(data%fluxdata,data%sepID(1))
 
                 vxs_sep = GetVxsFromFcs(f, faces_sep)
                 nv = size(vxs_sep)
@@ -2418,7 +2582,7 @@ module gamod_types
         res = pack(cvLookUp,cell%face%GetAllElements().eq.i)
     end function
 
-    function GetFluxSurfaceFcs(fd, i) result(res)
+    function GetFluxSurfaceFcsGA(fd, i) result(res)
         integer(I8) :: i, s, nf, j
         type(GAFluxDataUDT) :: fd
         integer(I8), allocatable :: res(:), range(:)
@@ -2430,7 +2594,7 @@ module gamod_types
 
     end function   
     
-    function GetFluxSurfaceVxs(fd, i) result(res)
+    function GetFluxSurfaceVxsGA(fd, i) result(res)
         integer(I8) :: i, s, nf, j
         type(GAFluxDataUDT) :: fd
         integer(I8), allocatable :: res(:), range(:)
@@ -2458,7 +2622,7 @@ module gamod_types
     function GetCvLookUp(cell) result(res)
         type(GACellUDT)       :: cell
         integer(I8)         :: nc, ic, nv, s, i               
-        integer(I8), allocatable :: res(:), range(:), range2(:)
+        integer(I8), allocatable :: res(:), range(:)
 
         nc = cell%ntot
         range = (/ (i, i = 1,(cell%vertP1%Get(nc)+cell%vertP2%Get(nc)-1))/)

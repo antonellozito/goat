@@ -252,8 +252,11 @@ module gamod_driver
         ! Auxiliary
         logical :: is_ordered(grid%cell%ntot), cells(grid%cell%ntot), &
          use_nsep, use_sepID, start
-        integer(I8), allocatable :: cvLookUp(:)
-        integer(I8) ::  i
+        integer(I8), allocatable :: cvLookUp(:), fcs(:), f_ord(:,:), nf(:), &
+            lbls(:), lbls2(:), fsVx(:)
+        integer(I8) ::  i, iv, nl, nvi, lb, nind, fcReg(grid%face%ntot), &
+            fcLbl_loc(grid%face%ntot), indFc(grid%face%ntot), &
+            ind(grid%face%ntot)
         
 
         ! Check consistency
@@ -273,9 +276,98 @@ module gamod_driver
         call grid%GiveSeparatrices(use_nsep, use_sepID, start, cvLookUp)
         call grid%GiveXpoints(use_sepID,cvLookUp)
 
-        ! Check flux surfaces for possible merging of open surfaces
+        ! Check flux surfaces for possible merging of open surfaces - only very specific cases for vesselmode
+        ! TODO
 
-        ! 
+        ! Recalculate bx, by
+        call grid%RecalcMagn(magneticField)
+
+        ! Check whether every vertices is an flux surface for the correct cases
+        if (options%stacked_trias .and. .not.options%vesselmode) then
+
+            ! Get all vertices belonging to a flux surface
+            fsVx = grid%data%fluxdata%fluxsurfaceverts%GetAllElements()
+
+            do iv = 1, grid%vert%ntot
+
+                nvi = count(fsVx == iv)
+
+                if (nvi /= 1) then
+
+                    ! Visualize TODO
+                    call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
+
+                end if 
+
+            end do
+
+        end if
+
+        ! fcReg
+        !------
+        ! inner main target => fcReg == 1 
+        ! outer main target => fcReg == 4 
+        ! inner secondary target => fcReg == 5
+        ! inner secondary target => fcReg == 8  
+        
+        ! Locally 
+        fcLbL_loc = GetfcLblGA(grid%face,options)
+
+        call Unique(fcLbl_loc, lbls)
+        lbls2 = pack(lbls,lbls /= 0)
+        nl = size(lbls2)
+
+        if (nl .gt. size(options%fcRegmappingGA)) then
+            call gdErrorHandler('PostProcesGA: fcReg mapping not compitable for GA labels,(more than 2 divertors)')
+        end if
+
+        ! Reset fcReg to zero and apply at the right faces
+        fcReg = 0
+        indFc = (/ (i, i=1,grid%face%ntot) /)
+        do i = 1, nl
+            lb = lbls2(i)
+            nind = count(fcLbl_loc == lb)
+            ind(1:nind) = pack(indFc,fcLbl_loc == lb )
+            fcReg(ind(1:nind)) = options%fcRegmappingGA(lb)
+        end do
+
+        ! Self-check if faces with fcReg label can be chained together
+        do i = 1, size(options%fcRegmappingGA)
+
+            if (options%fcRegmappingGA(i) /= 0) then
+
+                allocate(fcs(count(indFc == options%fcRegmappingGA(i))))
+                fcs = pack(indFc,indFc == options%fcRegmappingGA(i))
+
+                if (size(fcs) /= 0) then
+
+                    ! Build chaines of faces
+                    call grid%face%ChainFaces(fcs, f_ord, nf)
+                    
+                    ! One fcReg number should only have one chain
+                    if (size(nf) > 1) then
+
+                        ! Visualize TODO
+                        call gdErrorHandler("PostprocessGA: more than one chain of faces detect with the fcReg value")
+
+                    end if
+
+                end if
+
+                ! House keeping
+                deallocate(fcs)
+
+
+            end if
+        end do
+
+        call grid%face%reg%SetAllElementsArray(fcReg)
+
+        ! Visualize end grid
+        ! TODO
+
+
+
     end subroutine
 
 
@@ -301,9 +393,109 @@ module gamod_driver
         ! Arguments
         type(GridUDT), intent(inout)        :: grid
         type(MagneticFieldUDT), intent(in)  :: magneticField
-        type(GAoptionsUDT), intent(in)         :: options 
+        type(GAoptionsUDT), intent(in)      :: options 
+
+        ! Auxiliary
+        logical :: trias_present, pents_present
+        integer(I8):: vxs(1:100), s, nv, ic, i, ifs
+        real(R8) :: bp(grid%cell%ntot), bt(grid%cell%ntot), &
+            bpvx(grid%vert%ntot), fsPsi(grid%data%fluxdata%nFs), &
+            r
+        character(:), allocatable :: ctype
+
+        ! Initialize
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Calculate additional connectivity
+        call ComputeGridInterconnections(grid)
+
+        ! Recalculate magnetic field
+        call magneticField%interp%Evaluate(v%x,v%y,0,0,v%psi)
+        call magneticField%interp%Evaluate(v%x,v%y,1,0,v%bx)
+        call magneticField%interp%Evaluate(v%x,v%y,0,1,v%by)
+
+        ! Recalculate ffbz (constant)
+        v%ffbz = v%ffbz(1)
+        if (magneticField%RBtor /= 0) then
+            v%ffbz = 2*pi_R8*magneticField%RBtor
+        end if 
+
+        ! Cells
+        !======
+        ! Recalculate cell centers and bp and bt
+        bp = 0
+        bt = 0
+        do ic = 1, c%ntot
+            vxs = GetCellVert(c, ic)
+            nv = c%vertP(ic,2)
+
+            ! Compute cell centers as average of vertex coordinates
+            c%x(ic) = sum(v%x(vxs))/real(nv, kind=R8)
+            c%y(ic) = sum(v%y(vxs))/real(nv, kind=R8)
+
+            ! Recompute bp and bt according to b2agbb (in b2ag (SOLPS-ITER))
+            do i = 1, nv
+                bpvx(i) = sqrt( v%bx(i)**2 + v%by(i)**2 )
+            end do
+            r = nv*2*pi_R8*c%x(ic)    ! For axissymmetry around Z = 0 ! TODO
+            bp(ic) = -sum(bpvx(1:nv))/r
+            bt(ic) = sum(v%ffbz(vxs))/r
+            bpvx = 0
+        end do
+
+        ! Recalculate psi at cell centers
+        call magneticField%interp%Evaluate(c%x,c%y,0,0,c%psi)
+
+        ! Get number of guard cells
+        c%ngc = count(f%label /= 0)
+
+        ! Ordening should be fine - done in PostProcessGA
+
+        ! Build flux tube data
+        !=====================
+        trias_present = any(c%vertP(:,2) == 3)
+        pents_present = any(c%vertP(:,2) == 5)
+
+        if (.not.trias_present .and. .not.pents_present) then
+
+            ! For grids that can be stored as structured grid
+            ctype = 'all'
+            call BuildFluxTubeData(grid,options,magneticField,ctype)
+
+        elseif (trias_present .and. .not. pents_present) then
+
+            ! For grids with triangles (so fully unstructured) but without pentagons
+            ctype = 'all_us'
+            call BuildFluxTubeData(grid,options,magneticField,ctype); 
+
+        elseif (pents_present) then
+
+            ! For unstructured grids it is sufficient to give the closed flux tubes
+            ! in the core and the first tube in the SOL of cells neighbouring the core. 
+            ctype = 'closed'
+            call BuildFluxTubeData(grid,options,magneticField,ctype);             
+
+        end if
+
+        ! Recalculate fsPsi
+        fsPsi = 0
+        vxs = 0
+        do ifs = 1, grid%data%fluxdata%nFs
+            s = grid%data%fluxdata%fluxsurfacevertsP(ifs,1)
+            nv = grid%data%fluxdata%fluxsurfacevertsP(ifs,2)
+            vxs(1:nv) = grid%data%fluxdata%fluxsurfaceverts(s:s+nv-1)
+            fsPsi(ifs) = sum(v%psi(vxs(1:nv))) / real(nv, kind=R8)
+        end do
+
+        ! Determine OMP and IMP - TODO
+        call DetermineMPs(grid, options)
         
-        
+
+        end associate
 
     end subroutine
 
