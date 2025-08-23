@@ -55,7 +55,7 @@ module gamod_utility
         ! Auxiliary
         logical :: ft_open, ft_open_us, ft_closed
         integer(I8), allocatable :: cvs(:), cvs_rev(:), ind(:), fcs(:), fcs_rev(:), &
-           first_core_tube(:)
+           first_core_tube(:), ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
         integer(I8) :: nc, c1, c2, sv, nv, sf, nf, i, ift
         real(R8) :: c1_bx, c1_by, d, c1_bpolx, c1_bpoly, con_x, con_Y, d2, cosin, &
             dpsidx(grid%cell%ntot), dpsidy(grid%cell%ntot)
@@ -97,12 +97,12 @@ module gamod_utility
         if (ft_open) then
 
             ! Build the open tubes connecting the target for structured grids   
-            call BuildOpenTubes(grid, options)
+            call BuildOpenTubes(grid, options, ftCv, ftCvP)
 
         else if (ft_open_us) then
 
             ! Build the open tubes connecting the target for unstructured grids
-            call BuildOpenTubesUS(grid, options)
+            call BuildOpenTubesUS(grid, options, ftCv, ftCvP, ftFc, ftFcP)
 
         end if
 
@@ -205,7 +205,7 @@ module gamod_utility
 
     end subroutine
 
-    subroutine BuildOpenTubes(grid, options)
+    subroutine BuildOpenTubes(grid, options, ftCv, ftCvP)
 
         ! Description
         !============
@@ -215,12 +215,18 @@ module gamod_utility
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT) :: grid
-        type(GAoptionsUDT) :: options
+        type(GridUDT), intent(in)           :: grid
+        type(GAoptionsUDT), intent(in)      :: options
+        integer(I8), allocatable, intent(out)  ::  ftCv(:), ftCvP(:,:)
 
         ! Auxiliary
-        integer(I8), allocatable :: ftCv(:), ftCvP(:,:), tube(:)
-        integer(I8) :: tube_count
+        integer(I8), allocatable :: tube(:), fcLbl_loc(:), indf(:), &
+             indFc(:), tf(:), fcs(:), cvs(:), ft_cells(:), fcs_next(:), &
+             ind_face11(:)
+        integer(I8) :: tube_count, start_cell, indmax, fc1, fc2, counter, &
+            ic_next, ind_face1, ind_opp_face, s, k, i, cvs1(1:2), ic, ift, nf
+        real(R8), allocatable :: dpsi_f(:)
+        logical :: closed
 
 
         ! Associate
@@ -230,22 +236,243 @@ module gamod_utility
             v => grid%vert, &
             fd => grid%data%fluxdata &
             )
-
+        allocate(fcLbl_loc(f%ntot))
+        allocate(indFc(f%ntot))
         allocate(ftCv(c%ntot))
-        allocate(ftCvP(fd%nFt,2))
+        allocate(ftCvP(c%ntot,2)) ! fd%nFt not known !!!!! TODO
         allocate(tube(c%ntot))
         ftCv = 0
         ftCvP = 0
         tube = 0
         tube_count = 0
+        counter = 0
+
+        ! Get GA face labels
+        fcLbl_loc = f%label
+        indFc = (/ (i, i=1,f%ntot) /) 
+        do i = 1, size(options%facelabelmappingGG)
+            fcLbl_loc(pack(indFc, f%label == options%facelabelmappingGG(i))) = options%facelabelmappingGA(i)
+        end do
+
+        ! Loop over all cells
+        do ic = 1, c%ntot
+
+            ! Flux tubes between the target
+            ! Start at the boundary
+            if (c%cflags(ic) == 3) then
+
+                tf = GetCellFace(c, ic)
+                nf = c%faceP(ic,2)
+
+                start_cell = 0
+                do i = 1, nf
+                    if ((fcLbl_loc(tf(i)) .eq. 4) .or. &
+                     (fcLbl_loc(tf(i)) .eq. 2)) then
+                        start_cell = 1
+                    end if
+                end do
+                if (.not.any(ic == ftCv) .and. start_cell.eq.1) then
+
+                    ! Start tube
+                    tube(1) = ic
+
+                    ! Find other cells
+                    fcs = c%face(c%faceP(ic,1):c%faceP(ic,1)+c%faceP(ic,2)-1)
+
+                    dpsi_f = abs(v%psi(f%vert(fcs,1)) - v%psi(f%vert(fcs,2)))
+                    indmax = maxloc(dpsi_f,1)
+                    fc1 = fcs(indmax) ! poloidal face
+
+                    if (c%faceP(ic,2) .eq. 4) then ! quad
+
+                        dpsi_f(indmax) = 0 ! eliminate previous face
+                        indmax = maxloc(dpsi_f,1)
+                        fc2 = fcs(indmax) ! Get second poloidal face
+
+                        if (fcLbl_loc(fc1) /= 0) then ! boundary face?
+                            fc1 = fc2
+                        end if 
+
+                    else if (c%faceP(ic,2) .eq. 3) then
+
+                        if (fcLbl_loc(fc1) /= 0) then
+                            dpsi_f(indmax) = 0
+                            indmax = maxloc(dpsi_f,1)
+                            fc1 = fcs(indmax)
+
+                        end if 
+
+                    end if
+
+                    ! Marching the direction of the max dpsi face
+                    if (fcLbl_loc(fc1) == 0) then
+
+                        cvs = f%cell(f%cellP(fc1,1):f%cellP(fc1,1)+f%cellP(fc1,2)-1)
+                        do k = 1,2
+                            if (.not.any(cvs(k) == tube(1:counter))) then
+                                counter = counter + 1
+                                tube(counter) = cvs(k)
+                                ic_next = cvs(k)
+                                exit                                 
+                            end if 
+                        end do 
+
+                        closed = .false. ! Flag for core flux tubes
+                        do while (fcLbl_loc(fc1) == 0) 
+                            
+                            ! Get opposite face
+                            nf =  c%faceP(ic_next,2)
+                            fcs_next = c%face(c%faceP(ic_next,1):c%faceP(ic_next,1)+nf-1);
+
+                            indf = (/ (i, i=1,nf )/)
+                            ind_face11 = pack(indf, fcs_next == fc1)
+                            ind_face1 = ind_face11(1)
+                            ind_opp_face = ind_face1 + 2
+
+                            if (ind_opp_face .gt. nf) then
+                                ind_opp_face = ind_opp_face - nf
+                            end if
+
+                            fc1 = fcs_next(ind_opp_face)
+                            if (f%cellP(fc1,2) == 2) then
+
+                                cvs = f%cell(f%cellP(fc1,1):f%cellP(fc1,1)+f%cellP(fc1,2)-1)
+                                do k = 1, 2
+                                    if (.not.any(cvs(k) == tube(1:counter))) then
+
+                                        ! Add cell to tube
+                                        counter = counter + 1
+                                        tube(counter) = cvs(k)
+                                        ic_next = cvs(k)
+                                        exit  ! only add one of the cells
+                                         
+                                    end if
+                                end do
+
+                                if (fc1 == fc2) then
+
+                                    closed = .true.
+
+                                end if 
 
 
-        
+                            end if
+
+                        end do 
+
+                        ! Save the tube
+                        tube_count = tube_count + 1
+                        if (tube_count == 1) then
+
+                            ftCvP(tube_count,1) = 1
+
+                        else
+
+                            ftCvP(tube_count,1) = ftCvP(tube_count-1,1) + ftCvP(tube_count-1,2)
+
+                        end if
+
+                        ftCvP(tube_count,2) = counter
+                        s = ftCvP(tube_count,1)
+                        ftCv(s:s+counter-1) = tube(1:counter)
+
+                        ! Reset
+                        tube = 0
+                        counter = 0
+                        closed = .false.
+
+                    end if
+
+
+                end if
+
+
+
+            end if 
+
+        end do
+
+        ! Check for missing cells in the beginning of a flux tube
+        do ift = 1, tube_count
+
+            ! Get first cell of tube
+            ft_cells = ftCv(ftCvP(ift,1):ftCvP(ift,1)+ftCvP(ift,2)-1)
+            ic = ft_cells(1)
+
+            ! Look on both sides in the  poloidal directions
+            fcs = GetCellFace(c, ic)
+
+            dpsi_f = abs(v%psi(f%vert(fcs,1)) - v%psi(f%vert(fcs,2)))
+            indmax = maxloc(dpsi_f,1)
+            fc1 = fcs(indmax) ! poloidal face1
+
+            if ( c%faceP(ic,2).eq. 4) then ! Quad
+                dpsi_f(indmax) = 0
+                indmax = maxloc(dpsi_f,1)
+                fc2 = fcs(indmax) ! poloidal face1
+            end if
+
+            ! Poloidal face 1 direction
+            if (fcLbl_loc(fc1) == 0) then ! not a boundary face
+
+                ! Get cells of face
+                cvs1 = f%cell(f%cellP(fc1,1):f%cellP(fc1,1)+1)
+                do k = 1, 2
+
+                    if ((cvs1(k) /= ic) .and. (.not.any(cvs1(k) == ft_cells))) then
+
+                        ! Add the cell in front of the tube
+                        ! Push every value from ftCv(ift,1) one place futher
+                        ftCv(ftCvP(ift,1)+1:ftCvP(tube_count,1)+ftCvP(tube_count,2)) = &
+                          ftCv(ftCvP(ift,1):ftCvP(tube_count,1)+ftCvP(tube_count,2)-1)
+                        ftCv(ftCvP(ift,1)) = cvs1(k)
+                        ftCvP(ift,2) = ftCvP(ift,2)+1
+                        ftCvP(ift+1:tube_count,1) = ftCvP(ift+1:tube_count,1) + 1
+
+                        exit
+
+                    end if
+
+                end do
+
+            end if
+
+            if (c%faceP(ic,2) .eq. 4) then
+
+                if (fcLbl_loc(fc2) == 0) then  ! not a boundary face
+                    ! Get cells of face
+                    cvs1 = f%cell(f%cellP(fc2,1):f%cellP(fc2,1)+1)
+
+                    do k = 1, 2
+
+                        if ((cvs1(k) /= ic) .and. (.not.any(cvs1(k) == ft_cells))) then
+
+                            ! Add the cell in front of the tube
+                            ! Push every value from ftCv(ift,1) one place futher
+                            ftCv(ftCvP(ift,1)+1:ftCvP(tube_count,1)+ftCvP(tube_count,2)) = &
+                            ftCv(ftCvP(ift,1):ftCvP(tube_count,1)+ftCvP(tube_count,2)-1)
+                            ftCv(ftCvP(ift,1)) = cvs1(k)
+                            ftCvP(ift,2) = ftCvP(ift,2)+1
+                            ftCvP(ift+1:tube_count,1) = ftCvP(ift+1:tube_count,1) + 1
+
+                            exit
+
+                        end if
+                
+                    end do
+
+
+                end if 
+            end if 
+
+
+
+        end do
 
         end associate
     end subroutine
 
-    subroutine BuildOpenTubesUS(grid, options)
+    subroutine BuildOpenTubesUS(grid, options, ftCv, ftCvP, ftFc, ftFcP)
 
         ! Description
         !============
@@ -255,11 +482,12 @@ module gamod_utility
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT) :: grid
-        type(GAoptionsUDT) :: options
+        type(GridUDT), intent(in) :: grid
+        type(GAoptionsUDT), intent(in) :: options
+        integer(I8), allocatable, intent(out) :: ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
 
         ! Auxiliary
-        integer(I8), allocatable :: ftCv(:), ftCvP(:,:), tube(:)
+        integer(I8), allocatable :: tube(:)
         integer(I8) :: tube_count
 
 
