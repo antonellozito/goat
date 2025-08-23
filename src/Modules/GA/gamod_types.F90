@@ -536,10 +536,10 @@ module gamod_types
         if (allocated(GAvert%x)) then 
             ! Assume all allocated
             deallocate(GAvert%x, GAvert%y, GAvert%fieldlineID, &
-                GAvert%bx, GAvert%by, GAvert%ffbz)
+                GAvert%psi, GAvert%bx, GAvert%by, GAvert%ffbz)
         end if 
         allocate(RealDynamicArrayUDT::GAvert%x, GAvert%y, &
-            GAvert%bx, GAvert%by, GAvert%ffbz)
+            GAvert%psi, GAvert%bx, GAvert%by, GAvert%ffbz)
         allocate(IntegerDynamicArrayUDT:: GAvert%fieldlineID)
 
 
@@ -901,7 +901,7 @@ module gamod_types
                     v2 = tv(i+1)
                     f1 = tf(i)
                     v1f = v1n(f1)
-                    v2f = v1n(f1)
+                    v2f = v2n(f1)
 
                     if (((v1 /= v1f).and.(v1 /= v2f)).or. &
                           ((v2 /= v1f).and.(v2 /= v2f)) ) then
@@ -978,10 +978,11 @@ module gamod_types
 
         ! Declare variables
         !==================
-        integer(I8) :: ic, nv, fcs(1:2), vs(1:2), s, n, i, j
-        integer(I8), allocatable, dimension(:) :: tv, tf, ntv, ntf, &
-            v1n, v2n, range
-        integer(I8), allocatable, dimension(:,:) :: vf
+        integer(I8) :: ic, nv, fcs(1:2), vs(1:2), s, n, i, j, ntv(1:20), &
+            ntf(1:20), indf(1:2)
+        integer(I8), allocatable, dimension(:) :: tv, tf,  &
+            v1n, v2n, range, fcs1, fcs2
+        integer(I8), allocatable, dimension(:,:) :: vf, indv
         real(R8) :: vec_start(1:2), vec_face1(1:2), vec_face2(1:2), &
             sin1, sin2
         real(R8), allocatable :: fcX(:), fcY(:), vx(:), vy(:), cx(:), cy(:)
@@ -1027,7 +1028,18 @@ module gamod_types
                 ! Find the two faces connected to that vertex and the other vertex connected to that face
             
                 ! Find the first face
-                fcs(1:2) = pack(vf, vf == ntv(1))
+                allocate(indv(nv,2))
+                indv(:,1) = (/ (i, i = 1, nv)/)
+                indv(:,2) = indv(:,1)
+                if (count(vf == ntv(1)).eq.1) then
+                    call gdErrorHandler('ReorderCellConn: vertex with one occurence')
+                end if 
+                indf(1:2) = pack(indv, vf == ntv(1))
+                fcs(1:2) = tf(indf)
+                !fcs2 = pack(indv, vf == ntv(1))
+                !fcs(1) = fcs1(1)
+                !fcs(2) = fcs2(1)
+
 
                 ! Start right hand turning
                 ! Define vector from cell centers to points
@@ -1063,16 +1075,17 @@ module gamod_types
                     vs(1) = v1n(ntf(i-1)) 
                     vs(2) = v2n(ntf(i-1))
 
-                    if (.not. any(ntv == vs(1))) then
+                    if (.not. any(ntv(1:nv) == vs(1))) then
                         ntv(i) = vs(1)
                     else
                         ntv(i) = vs(2)
                     end if
 
                     ! Find the next face
-                    fcs(1:2) = pack(vf, vf == ntv(i))
+                    indf(1:2) = pack(indv, vf == ntv(i))
+                    fcs(1:2) = tf(indf)
 
-                    if (.not. any(ntf == fcs(1))) then
+                    if (.not. any(ntf(1:nv) == fcs(1))) then
                         ntf(i) = fcs(1)
                     else
                         ntf(i) = fcs(2)
@@ -1082,12 +1095,14 @@ module gamod_types
 
                 ! Plug in the new verts and faces in cell%vert and cell%face
                 s = c%vertP1%GetSingleElement(ic)
-                n = c%vertP1%GetSingleElement(ic)
+                n = c%vertP2%GetSingleElement(ic)
                 allocate(range(n))
                 range = (/ (j, j = s,s+n-1)/)
-                call c%vert%SetMultipleElements(range,ntv)
-                call c%face%SetMultipleElements(range,ntf)
-                deallocate(range)  
+                call c%vert%SetMultipleElements(range,ntv(1:nv))
+                call c%face%SetMultipleElements(range,ntf(1:nv))
+                deallocate(range) 
+                deallocate(vf) 
+                deallocate(indv)
 
             end if
 
@@ -1117,12 +1132,8 @@ module gamod_types
          
 
 
-        ! Initialize
-        fsVx = 0
-        fsVxP = 0
-        nv_counter = 0
-        verts = 0
 
+        ! Associate
         associate(&
             fd => grid%data%fluxdata, &
             f  => grid%face, &
@@ -1134,6 +1145,10 @@ module gamod_types
             v1n(f%ntot), v2n(f%ntot))
         v1n = f%vert1%GetAllElements()
         v2n = f%vert2%GetAllElements()
+        fsVx = 0
+        fsVxP = 0
+        nv_counter = 0
+        verts = 0
         
 
         do ifs = 1, fd%nFs
@@ -1199,6 +1214,9 @@ module gamod_types
 
             ! Find separatrix if not given
             if (.not.use_sep) then
+                use_nsep = .false.
+                use_sepID = .false.
+                start = .true.
                 call GiveSeparatrices(grid,use_nsep,use_sepID,start,cvLookUp)
             end if
 
@@ -1223,7 +1241,7 @@ module gamod_types
                 cvLookUp = GetCvLookUp(c)
                 do i = 1, grid%data%nsep
                     n = fd%fluxsurfacevertsP2%Get(grid%data%sepID(i))
-                    vxs = GetFluxSurfaceVxsGA(fd, i)
+                    vxs = GetFluxSurfaceVxsGA(fd, grid%data%sepID(i))
 
                     do j = 1, n
                         iv = vxs(j)
@@ -1446,6 +1464,7 @@ module gamod_types
 
             ! Initialize
             creg = c%reg%GetAllElements()
+            use_xpointID = .false.
             
 
             if (.not.present(cvLookUp)) then 
@@ -1458,7 +1477,9 @@ module gamod_types
 
                     ! Checking if an Xpoint was already determined
                     if (allocated(grid%data%xpointID)) then
-                        use_xpointID = .true.
+                        if (size(grid%data%xpointID) /= 0) then
+                            use_xpointID = .true.
+                        end if
                     end if
 
                     if (use_xpointID) then
@@ -1501,10 +1522,11 @@ module gamod_types
                     ! Determin separatrix for SN-case
                     ! Check whether previous sepID is still separatrix
                     if (use_sepID) then
+                        ifs = grid%data%sepID(1)
                         nf = fd%fluxsurfacefacesP2%Get(ifs)
                         fcs = GetFluxSurfaceFcsGA(fd, ifs)
                         step = 1
-                        do i = 1, step, nf
+                        do i = 1, nf, step
                             ifc = fcs(i)
                             cvs = GetFaceCellGA(c,ifc,cvLookUp)
                             if (size(cvs).eq.2) then
@@ -1525,7 +1547,7 @@ module gamod_types
                         fcs = GetFluxSurfaceFcsGA(fd, ifs)
                         step = 1
 
-                        do i = 1, step, nf
+                        do i = 1, nf, step
                             ifc = fcs(i)
                             cvs = GetFaceCellGA(c,ifc,cvLookUp)
                             if (size(cvs).eq.2) then
@@ -1636,7 +1658,7 @@ module gamod_types
                             nf = fd%fluxsurfacefacesP2%Get(ifs)
                             fcs = GetFluxSurfaceFcsGA(fd, ifs)
                             step = max(2,nint(nf/5.0_R8))   
-                            do i = 3, step, nf-2
+                            do i = 3, nf-2, step
                                 ifc = fcs(i)
                                 cvs = GetFaceCellGA(c,ifc,cvLookUp)
                                 if (size(cvs).eq.2) then
@@ -1657,7 +1679,7 @@ module gamod_types
                         nf = fd%fluxsurfacefacesP2%Get(ifs)
                         fcs = GetFluxSurfaceFcsGA(fd, ifs)
                         step = 1   
-                        do i = 3, step, nf-2 
+                        do i = 3, nf-2, step 
                             ifc = fcs(i)
                             cvs = GetFaceCellGA(c, ifc, cvLookUp)
                             if (size(cvs).eq.2) then 
@@ -1905,6 +1927,7 @@ module gamod_types
 
 
         ! Put all core boundary faces as aligned
+        indFc = (/ (i, i = 1, f%ntot)/)
         facealigned(pack(indFc,fcLbl_loc==2)) = 1
 
         ! Check for quads with three aligned faces and triangles with two aligned faces
@@ -2465,7 +2488,8 @@ module gamod_types
                           + (vy(v2n(fcs)) - vy(v1n(fcs)))**2 )
                 
                 allocate(dFun(1:nf))
-                dFun = sum(fcS)*2/size(fcS)
+                dFun = sum(fcLength)*2/(real(nf, kind=R8))
+                nv = nf
 
                 print *, 'Warning: ComputeDistanceFunction:  problem with target to vessel option ' // &
                     'that the distance function is lower where boundary faces are larger. Should be' // &
@@ -2499,7 +2523,7 @@ module gamod_types
                 ! But good enough if the core is large and divertor legs are short
                 SOLwidth = 0.25_R8 * ( (maxval(vx)- maxval(vxFun)) + &
                             (minval(vx - minval(vxFun))) + (maxval(vy) - maxval(vyFun)) & 
-                            + (minval(vy) - maxval(vyFun))) 
+                            + (minval(vy) - minval(vyFun))) 
 
                 dFun = SOLwidth
 
@@ -2566,7 +2590,7 @@ module gamod_types
         integer(I8), allocatable :: res(:), range(:)
         s = cell%faceP1%Get(i)        
         range = (/ (j, j = s, (s + cell%faceP2%Get(i) - 1)) /)
-        res = cell%vert%GetMultipleElements(range)   
+        res = cell%face%GetMultipleElements(range)   
     end function
     ! Get cells of a face with dynamic arrays
     function GetFaceCellGA(cell, i, cvLookUp) result(res)
@@ -2678,7 +2702,7 @@ module gamod_types
         res = sepIDloc
         creg = cell%reg%GetAllElements()
 
-        do i = 1, step, nf
+        do i = 1, nf, step
             ifc = faces(i)
             cvs = GetFaceCellGA(cell,ifc, cvLookUp)
             if (size(cvs).eq.2) then

@@ -37,12 +37,14 @@ subroutine GADriver(goatoptions)
 
     ! Set grid adaptation options
     gaoptions%inputfilepath         = goatoptions%inputfilepath
+    call gaoptions%Set()
+
+    ! Override options from goatoptions
     gaoptions%vesselmode            = goatoptions%vesselmode 
     gaoptions%slab                  = goatoptions%slab
     gaoptions%debug                 = goatoptions%debug 
     gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
     gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
-    call gaoptions%Set()
 
     ! Translate Grid to GAGrid with dynamic arrays
     call TranslateGridTOGAGrid(grid,GAgrid)

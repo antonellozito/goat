@@ -882,13 +882,14 @@ module goatmod_types
             grid%data%ntp = idum(3)
             grid%data%ndiv = idum(4)
             grid%data%ndivFc = idum(5)
+            grid%data%nsep = 0
     
             ! Allocate
             allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
                 grid%data%spointID(idum(2)), grid%data%isprimaryxp(idum(0)), &
                 grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
                 grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
-                grid%data%spointxpID(grid%data%nsp))
+                grid%data%spointxpID(grid%data%nsp), grid%data%sepID(grid%data%nsep))
     
             ! Read X-point data
             call ReadSingleLine(filespec, chardummy, reachedeof) ! header
@@ -941,12 +942,14 @@ module goatmod_types
             grid%data%ntp = 0
             grid%data%ndiv = 0
             grid%data%ndivFc = 0
+            grid%data%nsep = 0
     
             ! Allocate
             allocate(grid%data%xpointID(0), grid%data%opointID(0), &
                 grid%data%spointID(0), grid%data%isprimaryxp(0), &
                 grid%data%divFcP(0, 2), grid%data%divFc(0), &
-                grid%data%spointdivID(0), grid%data%tpointdivID(0))
+                grid%data%spointdivID(0), grid%data%tpointdivID(0), &
+                grid%data%sepID(0))
     
         end if 
     
@@ -2546,8 +2549,8 @@ module goatmod_types
         deallocate(face%reg)
         deallocate(face%aligned)
         deallocate(face%TMfacelabel)
-        deallocate(face%cellP)
-        deallocate(face%BF)
+        if (allocated(face%cellP)) deallocate(face%cellP)
+        if (allocated(face%BF)) deallocate(face%BF)
 
 
     end subroutine
@@ -2572,7 +2575,6 @@ module goatmod_types
         deallocate(cell%faceP)
         deallocate(cell%face)
         deallocate(cell%GC)
-        deallocate(cell%psi)
         deallocate(cell%psi)
         deallocate(cell%bp)
         deallocate(cell%bt)
@@ -2599,21 +2601,21 @@ module goatmod_types
 
         ! Deallocate
         !===========
-        deallocate(data%OMPcell)
-        deallocate(data%OMPface)
-        deallocate(data%IMPcell)
-        deallocate(data%IMPface)
-        deallocate(data%xpointID)
-        deallocate(data%spointID)
-        deallocate(data%opointID)
-        deallocate(data%tpointID)
-        deallocate(data%isprimaryxp)
-        deallocate(data%spointxpID)
-        deallocate(data%divFc)
-        deallocate(data%spointdivID)
-        deallocate(data%tpointdivID)
-        deallocate(data%divFcP)
-        deallocate(data%sepID)
+        if (allocated(data%OMPcell))        deallocate(data%OMPcell)
+        if (allocated(data%OMPface))        deallocate(data%OMPface)
+        if (allocated(data%IMPcell))        deallocate(data%IMPcell)
+        if (allocated(data%IMPface))        deallocate(data%IMPface)
+        if (allocated(data%xpointID))       deallocate(data%xpointID)
+        if (allocated(data%spointID))       deallocate(data%spointID)
+        if (allocated(data%opointID))       deallocate(data%opointID)
+        if (allocated(data%tpointID))       deallocate(data%tpointID)
+        if (allocated(data%isprimaryxp))    deallocate(data%isprimaryxp)
+        if (allocated(data%spointxpID))     deallocate(data%spointxpID)
+        if (allocated(data%divFc))          deallocate(data%divFc)
+        if (allocated(data%spointdivID))    deallocate(data%spointdivID)
+        if (allocated(data%tpointdivID))    deallocate(data%tpointdivID)
+        if (allocated(data%divFcP))         deallocate(data%divFcP)
+        if (allocated(data%sepID))          deallocate(data%sepID)
         
         call DeallocateFluxData(data%fluxdata)
 
@@ -2633,21 +2635,21 @@ module goatmod_types
 
         ! Deallocate
         !===========        
-        deallocate(fluxdata%fluxtubecellsP)
-        deallocate(fluxdata%fluxtubecells)
-        deallocate(fluxdata%fluxtubefacesP)
-        deallocate(fluxdata%fluxtubefaces)
-        deallocate(fluxdata%fluxtubefsIDs)
-        deallocate(fluxdata%fluxtuberegID)
-        deallocate(fluxdata%isclosedft)
-        deallocate(fluxdata%fluxsurfacefacesP)
-        deallocate(fluxdata%fluxsurfacefaces)
-        deallocate(fluxdata%fluxsurfaceID)
-        deallocate(fluxdata%fluxsurfaceneig)
-        deallocate(fluxdata%fluxsurfaceneigP)
-        deallocate(fluxdata%fluxsurfacepsi)
-        deallocate(fluxdata%fluxsurfacevertsP)
-        deallocate(fluxdata%fluxsurfaceverts)
+        if (allocated(fluxdata%fluxtubecellsP))     deallocate(fluxdata%fluxtubecellsP)
+        if (allocated(fluxdata%fluxtubecells))      deallocate(fluxdata%fluxtubecells)
+        if (allocated(fluxdata%fluxtubefacesP))     deallocate(fluxdata%fluxtubefacesP)
+        if (allocated(fluxdata%fluxtubefaces))      deallocate(fluxdata%fluxtubefaces)
+        if (allocated(fluxdata%fluxtubefsIDs))      deallocate(fluxdata%fluxtubefsIDs)
+        if (allocated(fluxdata%fluxtuberegID))      deallocate(fluxdata%fluxtuberegID)
+        if (allocated(fluxdata%isclosedft))         deallocate(fluxdata%isclosedft)
+        if (allocated(fluxdata%fluxsurfacefacesP))  deallocate(fluxdata%fluxsurfacefacesP)
+        if (allocated(fluxdata%fluxsurfacefaces))   deallocate(fluxdata%fluxsurfacefaces)
+        if (allocated(fluxdata%fluxsurfaceID))      deallocate(fluxdata%fluxsurfaceID)
+        if (allocated(fluxdata%fluxsurfaceneig))    deallocate(fluxdata%fluxsurfaceneig)
+        if (allocated(fluxdata%fluxsurfaceneigP))   deallocate(fluxdata%fluxsurfaceneigP)
+        if (allocated(fluxdata%fluxsurfacepsi))     deallocate(fluxdata%fluxsurfacepsi)
+        if (allocated(fluxdata%fluxsurfacevertsP))  deallocate(fluxdata%fluxsurfacevertsP)
+        if (allocated(fluxdata%fluxsurfaceverts))   deallocate(fluxdata%fluxsurfaceverts)
 
     end subroutine
 

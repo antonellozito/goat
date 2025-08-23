@@ -105,9 +105,6 @@ module gamod_driver
         ! Initialize
         !===========
  
-        ! Set gaoptions
-        call options%Set()
-
         associate(&
             c  => grid%cell, &
             v  => grid%vert &
