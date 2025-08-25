@@ -1231,8 +1231,46 @@ module gamod_utility
         type(GAoptionsUDT), intent(in)  :: options        
 
         ! Auxiliary
+        integer(I8) :: mode
+        integer(I8), allocatable, dimension(:) :: cvOMP, fcOMP, cvIMP, fcIMP
+
+        ! OMP
+        mode = 1
+        call CvIntersectionsGOAT(options%OMPr,options%OMPz,grid,mode,cvOMP,fcOMP)
+        
+        ! IMP
+        mode = 1
+        call CvIntersectionsGOAT(options%IMPr,options%IMPz,grid,mode,cvIMP,fcIMP)
+
+        ! Save
+        grid%data%OMPcell   = cvOMP
+        grid%data%OMPncell  = size(cvOMP)
+        grid%data%OMPface   = fcOMP
+        grid%data%OMPnface  = size(fcOMP)
+        grid%data%IMPcell   = cvIMP
+        grid%data%IMPncell  = size(cvIMP)
+        grid%data%IMPface   = fcIMP
+        grid%data%IMPnface  = size(fcIMP)
 
     end subroutine
+
+    subroutine CvIntersectionsGOAT(segm_r, segm_z, grid, mode, listcv, listff)
+
+        ! Description
+        !============
+        ! Determine the cells intersected by a segment. 
+        ! The r or x-coordinates of the segment are defined in segm_r
+        ! The z or y-coordinates of the segment are defined in segm_z
+
+        ! Declare variables
+        ! =================
+        ! Arguments
+        real(R8), intent(in) :: segm_r(1:2), segm_z(1:2)
+        type(GridUDT) :: grid
+        integer(I8) :: mode
+        integer(I8), allocatable :: listcv, listff
+
+    end subroutine 
 
 
     !==================================================================!

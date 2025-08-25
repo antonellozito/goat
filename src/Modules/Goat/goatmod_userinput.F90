@@ -182,14 +182,7 @@ module goatmod_userinput
         logical                     :: plt_qm
         logical                     :: timing
         character(:), allocatable   :: meth
-        logical                     :: debug
 
-        ! Case identification
-        logical                     :: vesselmode
-        logical                     :: slab
-
-        ! fcRegmappingGA
-        integer(I8)                 :: fcRegmappingGA(1:7)
 
         ! Facelabel mapping
         integer(I8), allocatable    :: facelabelmappingGG(:)
@@ -264,7 +257,22 @@ module goatmod_userinput
         character(:), allocatable   :: dist_type
         character(:), allocatable   :: dist_type_wall
         character(:), allocatable   :: d_char_type
-        logical                     :: plt_dist_func        
+        logical                     :: plt_dist_func  
+        
+        
+        ! Caried over from goatoptions
+        ! Case identification
+        logical                     :: debug        
+        logical                     :: vesselmode
+        logical                     :: slab
+
+        ! fcRegmappingGA
+        integer(I8)                 :: fcRegmappingGA(1:7)
+
+        real(R8)                    :: OMPr
+        real(R8)                    :: OMPz
+        real(R8)                    :: IMPr
+        real(R8)                    :: IMPz
 
 
     contains

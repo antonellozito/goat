@@ -45,6 +45,10 @@ subroutine GADriver(goatoptions)
     gaoptions%debug                 = goatoptions%debug 
     gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
     gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
+    gaoptions%OMPr                  = goatoptions%OMPr
+    gaoptions%OMPz                  = goatoptions%OMPz
+    gaoptions%IMPr                  = goatoptions%IMPr
+    gaoptions%IMPz                  = goatoptions%IMPz
 
     ! Translate Grid to GAGrid with dynamic arrays
     call TranslateGridTOGAGrid(grid,GAgrid)
