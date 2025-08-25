@@ -339,10 +339,11 @@ module goatmod_types
         ! - TMfacevert:     same, but for vertices
         ! - BLind:          boundary layer number (0 if not a boundary 
         !                   layer face, otherwise 1, 2, ... where 1 is closest to vessel)    
+        ! - facelabelsGG, facelabelsGD:     mapping from GG to GD face labels
 
         ! Fields
         integer(I8), allocatable, dimension(:)  :: TMfacetype, TMverttype, &   
-            BLind
+            BLind, facelabelsGG, facelabelsGD
 
     end type
 
@@ -1686,7 +1687,7 @@ module goatmod_types
         logical                             :: fileExists, reachedeof 
         character(:), allocatable           :: thisline
         integer(I8)                         :: tmptype, tmpBLind, &
-            tfID 
+            tfID, nfacelabelmappingGGtoGD
 
         ! Loop
         integer(I8)                         :: i 
@@ -1747,6 +1748,20 @@ module goatmod_types
         do i = 1, grid%vert%ntot
             read(fu, *) tfID, tmptype
             grid%data%goatggdata%TMverttype(tfID)    = tmptype
+        end do 
+
+        ! Read face label mappings
+        call ReadSingleLine(fu, thisline, reachedeof) ! header
+        read (fu, *) nfacelabelmappingGGtoGD 
+        allocate(grid%data%goatggdata%facelabelsGG(nfacelabelmappingGGtoGD))
+        grid%data%goatggdata%facelabelsGD = grid%data%goatggdata%facelabelsGG
+        call ReadSingleLine(fu, thisline, reachedeof) ! header
+        do i = 1, nfacelabelmappingGGtoGD
+            read(fu, *) grid%data%goatggdata%facelabelsGG(i)
+        end do 
+        call ReadSingleLine(fu, thisline, reachedeof) ! header
+        do i = 1, nfacelabelmappingGGtoGD
+            read(fu, *) grid%data%goatggdata%facelabelsGD(i)
         end do 
 
         ! Close file
@@ -2150,6 +2165,8 @@ module goatmod_types
         associate(&
             face            => grid%face,                   &
             vert            => grid%vert,                   &
+            facelabelsGG    => grid%data%goatggdata%facelabelsGG,   &
+            facelabelsGD    => grid%data%goatggdata%facelabelsGD,   &
             TMfacetype      => grid%data%goatggdata%TMfacetype,  &
             TMverttype      => grid%data%goatggdata%TMverttype,  &
             BLind           => grid%data%goatggdata%BLind        &
@@ -2170,6 +2187,18 @@ module goatmod_types
         write (fu, *) 'vertices: ID, TMverttype'
         do i = 1, vert%ntot
             write (fu, *) i, TMverttype(i)
+        end do 
+
+        ! Write face label mappings
+        write (fu, *) 'nfacelabelmappingGGtoGD'
+        write (fu, *) size(facelabelsGG)
+        write (fu, *) 'facelabelmappingGG'
+        do i = 1, size(facelabelsGG)
+            write(fu, *) facelabelsGG(i)
+        end do 
+        write (fu, *) 'facelabelmappingGD'
+        do i = 1, size(facelabelsGD)
+            write(fu, *) facelabelsGD(i)
         end do 
 
         ! Housekeeping
@@ -2207,9 +2236,9 @@ module goatmod_types
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT), intent(inout)    :: grid
-        type(GridOptionsUDT)            :: gridoptions
-        character(len=*), intent(in)    :: meth
+        type(GridUDT), intent(inout)        :: grid
+        type(GridOptionsUDT), intent(inout) :: gridoptions
+        character(len=*), intent(in)        :: meth
     
         ! Loop variables
         integer(I8)                 :: i, j, k, iFT, ib, il 
@@ -2221,7 +2250,8 @@ module goatmod_types
             nlabels 
         integer(I8), allocatable    :: tf(:), tfv(:,:)
         integer(I8), allocatable    :: &
-            sortindex(:), temparray(:,:), tempfaces(:), segstart(:)
+            sortindex(:), temparray(:,:), tempfaces(:), segstart(:), &
+            gglabels(:), gdlabels(:)
     
         logical, allocatable        :: mask(:), ispolygonstart(:), &
             isbranchingpolygon(:)
@@ -2237,10 +2267,6 @@ module goatmod_types
     
         ! Initialize
         !===========
-        ! Associate
-        associate(gglabels => gridoptions%facelabelmappingGG, &
-            gdlabels => gridoptions%facelabelmappingGD)
-        
         ! Initialize
         grid%vert%fieldlineID = 0
         grid%data%fluxdata%fluxsurfaceID = 0
@@ -2288,7 +2314,21 @@ module goatmod_types
     
             ! Extract boundaries
             !===================
-            ! Get the supported mapping between boundary labels 
+            ! Check if any goat grid generator data is available. If so, 
+            ! determine mapping automatically 
+            if (grid%data%hasGoatGGData) then 
+                ! Print a message that we're overriding the user defined mapping
+                print *, 'ExtractGridData: goat grid generator data found, '  // & 
+                    'overwriting face label mapping'
+                print *, 'facelabelmappingGG: ', grid%data%goatggdata%facelabelsGG
+                print *, 'facelabelmappingGD: ', grid%data%goatggdata%facelabelsGD
+
+                ! Overwrite
+                gridoptions%facelabelmappingGG = grid%data%goatggdata%facelabelsGG
+                gridoptions%facelabelmappingGD = grid%data%goatggdata%facelabelsGD
+            end if 
+
+            ! Get the mapping between boundary labels 
             gglabels = gridoptions%facelabelmappingGG
             gdlabels = gridoptions%facelabelmappingGD 
     
@@ -2430,9 +2470,7 @@ module goatmod_types
             call gdErrorHandler('ExtractGridData: unknown method')
     
         end select 
-    
-        end associate
-    
+        
     end subroutine
 
     ! Vertex substructure
@@ -6874,6 +6912,7 @@ module goatmod_types
     
         ! Read additional data
         !=====================
+        call ReadGoatGGData(grid, 'goatggdata.dat')
         call ConstructGrid(grid, gridoptions)
         call ConstructMagneticField(magneticField, mfoptions) 
         call ConstructEnvironment(environment, environmentoptions) 
@@ -6884,7 +6923,6 @@ module goatmod_types
     
     end subroutine
     
-
     ! Vessel vertex pairs
     subroutine GetVesselVertexPairs(vessel, vpairs, structureIDs, vertIDs)
 

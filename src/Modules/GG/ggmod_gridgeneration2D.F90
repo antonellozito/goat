@@ -16065,6 +16065,10 @@ module ggmod_gridgeneration2D
         ! been imposed is larger than the actual number of faces in the 
         ! line, these faces are not considered to be boundary faces.
 
+        ! Note 2: the face label mappings are computed based on the 
+        ! topological mesh data. Any label translation afterwards will 
+        ! (very likely) invalidate this mapping. 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -16075,7 +16079,7 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: nBLf, nsf
         integer(I8), allocatable, dimension(:)  :: TMfacetype, BLind, &
-            TMverttype, tf
+            TMverttype, tf, facelabelsGG, facelabelsGD
 
         ! Loop
         integer(I8)                             :: i, j, k, tfc, tseg, &
@@ -16209,12 +16213,18 @@ module ggmod_gridgeneration2D
             TMverttype(i) = topomesh%vert%type(i)
         end do 
 
+        ! Get label mapping
+        call GetGridFaceLabelMappingGD(simgrid, topomesh, facelabelsGG, facelabelsGD)
+
         ! Add
         !====
         simgrid%data%goatggdata%TMfacetype = TMfacetype
         simgrid%data%goatggdata%TMverttype = TMverttype
         simgrid%data%goatggdata%BLind      = BLind
+        simgrid%data%goatggdata%facelabelsGG = facelabelsGG
+        simgrid%data%goatggdata%facelabelsGD = facelabelsGD
         simgrid%data%hasGoatGGData         = .true. 
+        
 
         ! Housekeeping
         !=============
@@ -16298,8 +16308,15 @@ module ggmod_gridgeneration2D
         ! Note 1: it is assumed that the initial face labels identify the
         ! topological mesh boundary ID
 
+        ! Note 2: goat grid data mappings are recomputed here to match 
+        ! the new face labels
+
         ! Declare variables
         !==================
+        ! Module variables
+        use mod_definitions, only: targetID, coreID, outerboundaryID, &
+            vesselID
+
         ! Arguments
         type(VesselUDT), intent(in)                 :: vessel
         type(GridUDT), intent(inout)                :: simgrid 
@@ -16312,16 +16329,17 @@ module ggmod_gridgeneration2D
         integer(I8), allocatable, dimension(:)      :: IFlabels, &
             TPlabels, bndlabels, fl_orig, fl_new, Clabels, &
             facelabelmapping, allfID, tfID, &
-            sortindex, ind, solpslabels, psind, coreIDs, &
+            sortindex, ind, solpslabels, gdlabels, psind, coreIDs, &
             cellregionmapping, veslabels, WGlabels, OFlabels, tfc, &
             allsepIDs, tfv, tfsepv, allTPlabels, uvesstructlabels, &
-            reslabels
+            reslabels, facelabelsGG, facelabelsGD, allstructurelabels, &
+            uallstructurelabels
         integer(I8), allocatable                    :: edges(:, :), &
             vesstructlabels(:, :), flabels(:, :)
         real(R8), allocatable, dimension(:)         :: xf, yf
         logical, allocatable, dimension(:)          :: &
             ispolygonstart, isbranchingpolygon, islabelfound, &
-            keepvert, isvesselface
+            keepvert, isvesselface, keepind
         ! type(PolygonSetUDT)                         :: tempps
 
         ! Loop
@@ -16331,7 +16349,7 @@ module ggmod_gridgeneration2D
         ! Initialize
         !===========
         ! Allocate
-        allocate(reslabels(0))
+        allocate(reslabels(0), facelabelsGG(0), facelabelsGD(0))
 
         ! Initialize
         isvesselface = simgrid%face%BF ! adjusted later
@@ -16346,6 +16364,9 @@ module ggmod_gridgeneration2D
         solpslabels = [(k, k = 1, 3)]
         TPlabel = maxval(solpslabels)+1
 
+        ! Set GD temporary labels
+        gdlabels = [coreID, outerboundaryID, vesselID]
+
         ! Get vessel vertex labels (first one, structures)
         call vessel%polygonset%GetLabels(vesstructlabels)
         
@@ -16354,6 +16375,8 @@ module ggmod_gridgeneration2D
 
         ! Add labels already 
         reslabels = [reslabels, uvesstructlabels]
+        facelabelsGG = [facelabelsGG, uvesstructlabels]
+        facelabelsGD = [facelabelsGD, spread(vesselID, 1, size(uvesstructlabels))]
 
         ! Map
         !====
@@ -16437,6 +16460,7 @@ module ggmod_gridgeneration2D
 
                         ! Update
                         solpslabels = [solpslabels, TPlabel]
+                        gdlabels    = [gdlabels, targetID]
                         TPlabel = TPlabel + 1
                         
                     elseif (facelabelmapping(TPlabels(i)) /= 0 .and. facelabelmapping(TPlabels(j)) == 0) then 
@@ -16508,6 +16532,8 @@ module ggmod_gridgeneration2D
 
             ! Add to reserved face labels
             reslabels = [reslabels, flccore]
+            facelabelsGG = [facelabelsGG, flccore]
+            facelabelsGD = [facelabelsGD, gdlabels(j)]
 
             ! Get indices
             ind = [(k, k = psind(i), psind(i+1)-1)]
@@ -16555,6 +16581,8 @@ module ggmod_gridgeneration2D
 
                 ! Set label
                 simgrid%face%label(tfID(sortindex(ind))) = flc 
+                facelabelsGG = [facelabelsGG, flc]
+                facelabelsGD = [facelabelsGD, gdlabels(j)]
 
                 ! Update vessel faces
                 if (j == 2) then 
@@ -16582,10 +16610,39 @@ module ggmod_gridgeneration2D
             call vessel%exactplfvessel%EvaluateLabel(xf, yf, flabels)
 
             ! Extract
+            allocate(allstructurelabels(count(isvesselface)))
             where (isvesselface) simgrid%face%label = abs(flabels(:, 1))
+            allstructurelabels = pack(abs(flabels(:, 1)), isvesselface)
+            call Unique(allstructurelabels, uallstructurelabels)
+
+            ! Remap GG to GD labels
+            do i = 1, size(uallstructurelabels)
+                where (facelabelsGG == uallstructurelabels(i)) facelabelsGD = vesselID
+                if (.not. any(uallstructurelabels(i) == facelabelsGG)) then 
+                    facelabelsGG = [facelabelsGG, uallstructurelabels(i)]
+                    facelabelsGD = [facelabelsGD, vesselID]
+                end if 
+            end do 
             
             ! Housekeeping
             end associate
+        end if 
+
+        ! Clean mapping
+        allocate(keepind(size(facelabelsGG)))
+        keepind = .true.
+        do i = 1, size(facelabelsGG) 
+            if (.not. any(facelabelsGG(i) == simgrid%face%label)) then 
+                keepind(i) = .false.
+            end if 
+        end do 
+        facelabelsGG = pack(facelabelsGG, keepind)
+        facelabelsGD = pack(facelabelsGD, keepind)
+
+        ! Add mapping
+        if (simgrid%data%hasGoatGGData) then 
+            simgrid%data%goatggdata%facelabelsGG = facelabelsGG
+            simgrid%data%goatggdata%facelabelsGD = facelabelsGD
         end if 
 
         ! Cell regions
@@ -16656,9 +16713,6 @@ module ggmod_gridgeneration2D
             fcregID = fcregID + 1
             where (fl_new == allTPlabels(i)) simgrid%face%reg = fcregID 
         end do
-
-        
-
 
     end subroutine
 
