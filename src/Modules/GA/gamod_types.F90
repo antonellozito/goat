@@ -436,6 +436,7 @@ module gamod_types
         procedure :: IdentifyAlignedFaces
         procedure :: CheckUnstructuredGrid
         procedure :: RecalcMagn
+        procedure :: MergeFS
 
     end type  
 
@@ -773,15 +774,15 @@ module gamod_types
         gfd%nFs     = GAfd%nFs
         gfd%nFt     = GAfd%nFt
 
-        ! Boundary information
-        fcLbl_loc = GetfcLblGA(GAf, options)
-        nfb = count(fcLbL_loc /= 0)
-        grid%bnd%nface = nfb
-        indFc = (/ (i, i = 1, GAf%ntot) /)
-        allocate(fcsbnd(nfb))
-        fcsbnd = pack(indFc, fcLbL_loc /= 0 )
-        vxsbnd = GetVxsFromFcs(GAf, fcsbnd)
-        grid%bnd%nvert = size(vxsbnd)
+        ! Boundary information - TODO
+        !fcLbl_loc = GetfcLblGA(GAf, options)
+        !nfb = count(fcLbL_loc /= 0)
+        !grid%bnd%nface = nfb
+        !indFc = (/ (i, i = 1, GAf%ntot) /)
+        !allocate(fcsbnd(nfb))
+        !fcsbnd = pack(indFc, fcLbL_loc /= 0 )
+        !vxsbnd = GetVxsFromFcs(GAf, fcsbnd)
+        !grid%bnd%nvert = size(vxsbnd)
 
         call AllocateGrid(grid)
 
@@ -981,7 +982,7 @@ module gamod_types
         integer(I8) :: ic, nv, fcs(1:2), vs(1:2), s, n, i, j, ntv(1:20), &
             ntf(1:20), indf(1:2)
         integer(I8), allocatable, dimension(:) :: tv, tf,  &
-            v1n, v2n, range, fcs1, fcs2
+            v1n, v2n, range
         integer(I8), allocatable, dimension(:,:) :: vf, indv
         real(R8) :: vec_start(1:2), vec_face1(1:2), vec_face2(1:2), &
             sin1, sin2
@@ -1238,7 +1239,7 @@ module gamod_types
             if ((allocated(v%fieldlineID))) then!.and.(allocated(v%cellP1))) then
 
                 ! Only check the vertices on the separatrices
-                cvLookUp = GetCvLookUp(c)
+                cvLookUp = GetCvLookUpGA(c)
                 do i = 1, grid%data%nsep
                     n = fd%fluxsurfacevertsP2%Get(grid%data%sepID(i))
                     vxs = GetFluxSurfaceVxsGA(fd, grid%data%sepID(i))
@@ -1265,7 +1266,7 @@ module gamod_types
             else
                 
                 ! Check all vertices
-                cvLookUp = GetCvLookUp(c)
+                cvLookUp = GetCvLookUpGA(c)
                 do iv = 1, v%ntot
                     cells = GetVertCellGA(c, iv, cvLookUp)
                     call Unique(creg(cells), regions)
@@ -1468,7 +1469,7 @@ module gamod_types
             
 
             if (.not.present(cvLookUp)) then 
-                cvLookUp = GetCvLookUp(c)
+                cvLookUp = GetCvLookUpGA(c)
             end if
             
             ! Determine separatrices IDs
@@ -1623,7 +1624,7 @@ module gamod_types
                 sepIDloc = 0
                 counter = 0
                 if  (.not.use_nsep) then
-                    if (allocated(grid%data%xpointID)) then
+                    if (allocated(grid%data%xpointID).and. size(grid%data%xpointID) /= 0) then
                         do ifs = 1, fd%nFs
                             nv = fd%fluxsurfacevertsP2%Get(ifs)
                             vxs = GetFluxSurfaceVxsGA(fd, ifs)
@@ -1973,9 +1974,11 @@ module gamod_types
         ! Override values for faces that are part of a flux surface (maybe put this upfront, or better not rely on correctness of fluxsurfaces????)
 
         if (allocated(grid%data%fluxdata%fluxsurfacefaces)) then
-            facealigned = 0
-            call Unique(grid%data%fluxdata%fluxsurfacefaces%GetAllElements(), fcs)
-            facealigned(fcs(2:size(fcs))) = 1  
+            if (grid%data%fluxdata%fluxsurfacefaces%Size() /= 0) then
+                facealigned = 0
+                call Unique(grid%data%fluxdata%fluxsurfacefaces%GetAllElements(), fcs)
+                facealigned(fcs(2:size(fcs))) = 1  
+            end if
         end if
 
         ! Save
@@ -2044,7 +2047,7 @@ module gamod_types
             !first make the cv_look_up
             nvert = c%vertP1%Get(c%ntot)+c%vertP2%Get(c%ntot)-1
             allocate(cvLookUp(nvert))
-            cvLookUp = GetCvLookUp(c)
+            cvLookUp = GetCvLookUpGA(c)
 
             do j = 1,f%ntot
                 verts_of_face(1) = v1n(j)
@@ -2103,6 +2106,7 @@ module gamod_types
             !end
             ! Check 6 every vertex is only once in a flux surface
             if (allocated(fd%fluxsurfaceverts)) then
+                if (fd%fluxsurfaceverts%Size() /= 0) then
                     call Unique(fd%fluxsurfaceverts%GetAllElements(), nvxs)
                     if (fd%fluxsurfaceverts%Size() /= size(nvxs)) then
                         !figure,plotgeo_us(grid,'fast'),hold on
@@ -2123,6 +2127,7 @@ module gamod_types
                         call gdErrorHandler('CheckUnstructuredGrid: check 6, vertex multiple times in fs.vert')
 
                     end if 
+                end if
             end if
 
             ! Check 7 - wether all boundary cells have one faces which is only connected to that cell
@@ -2224,6 +2229,180 @@ module gamod_types
 
     end subroutine
 
+    subroutine MergeFS(grid)
+
+        ! Description
+        !============
+        ! Checks whether flux surfaces should be merged to one and performs the
+!        mergeing.   
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT) :: grid
+
+        ! Auxiliary
+        integer(I8), allocatable ::  mFS(:,:), mFS_update(:,:)
+        integer(I8), allocatable, dimension(:) :: fieldlineID, tfv, ar, tv1, &
+            tf1, tv2, tf2, new_faces, new_verts, rem_ind_v, rem_ind_f, fID, &
+            hasID, range
+        integer(I8) :: i, j, ifs, counter, ifs1, ifs2, nv1, nf1, nv2, &
+            nf2, counterv, counterf
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert, &
+            fd => grid%data%fluxdata &
+            )
+
+        !Initialize
+        allocate(mFS(fd%nFs,2))
+        allocate(hasID(v%ntot))
+        fieldlineID = 0
+        hasID = 0
+        mFS = 0
+        counter = 0
+
+        ! Augment to mergeFS and mergeFSP
+        do ifs = 1, fd%nFs
+
+            ! Get vertices of flux surface
+            tfv = GetFluxSurfaceVxsGA(fd, ifs)
+
+            ! Check if already attributed
+            if (any(hasID(tfv).eq.1)) then
+
+                ! vertices detected that belong to multiple flux surfaces
+                ! Indicate the surfaces to merge
+                fID = fieldlineID(tfv)
+                ar = fID(hasID(tfv))
+                ifs1 = ar(1)
+                if (size(ar) .gt. 1) &
+                    print *, 'Warning: MergeFS: merging of multiple flux surfaces not yet supported'
+
+                counter = counter + 1
+                mFS(counter,1) = ifs1
+                mFS(counter,2) = ifs
+            end if
+
+            ! Set the fieldline ID
+            fieldlineID(tfv) = ifs
+            hasID(tfv) = 1
+
+        end do
+
+        ! Merge indicated flux surfaces - augment to n-fluxsurface - TODO
+        do i = 1, counter
+
+            ! Get flux surface indices
+            ifs1 = mFS(i,1)
+            ifs2 = mFS(i,2)
+
+            ! Get vertices and faces
+            tv1 = GetFluxSurfaceVxsGA(fd, ifs1)
+            nv1 = fd%fluxsurfacevertsP2%Get(ifs1)
+            tf1 = GetFluxSurfaceFcsGA(fd, ifs1)
+            nf1 = fd%fluxsurfacefacesP2%Get(ifs1)
+            tv2 = GetFluxSurfaceVxsGA(fd, ifs2)
+            nv2 = fd%fluxsurfacevertsP2%Get(ifs2)
+            tf2 = GetFluxSurfaceFcsGA(fd, ifs2)
+            nf2 = fd%fluxsurfacefacesP2%Get(ifs2)
+
+            ! Remove both of them and add one at the back
+            ! Get the indices to remove out of fsVx and fsFc
+            allocate(rem_ind_v(v%ntot))
+            allocate(rem_ind_f(f%ntot))
+            rem_ind_v = 0
+            rem_ind_f = 0
+
+            counterv = 0
+            counterf = 0
+
+            ! First ifs
+            rem_ind_v(counterv + 1: counterv+nv1) = (/ (j, j = fd%fluxsurfacevertsP1%Get(ifs1),&
+                fd%fluxsurfacevertsP1%Get(ifs1)+nv1-1) /)
+            counterv = counterv + nv1
+            rem_ind_f(counterf + 1: counterf+nf1) = (/ (j, j = fd%fluxsurfacefacesP1%Get(ifs1),&
+                fd%fluxsurfacefacesP1%Get(ifs1)+nf1-1) /)
+            counterf = counterf + nf1
+
+            ! Second ifs
+            rem_ind_v(counterv + 1: counterv+nv2) = (/ (j, j = fd%fluxsurfacevertsP1%Get(ifs2),&
+                fd%fluxsurfacevertsP1%Get(ifs2)+nv2-1) /)
+            counterv = counterv + nv2
+            rem_ind_f(counterf + 1: counterf+nf2) = (/ (j, j = fd%fluxsurfacefacesP1%Get(ifs2),&
+                fd%fluxsurfacefacesP1%Get(ifs2)+nf2-1) /)
+            counterf = counterf + nf2
+
+            ! Remove in fsVx and fsFc
+            call fd%fluxsurfaceverts%RemoveMultipleElements(rem_ind_v(1:counterv))
+            call fd%fluxsurfacefaces%RemoveMultipleElements(rem_ind_f(1:counterf))
+
+            ! Remove and adjust pointer arrays
+            call fd%fluxsurfacevertsP1%RemoveSingleElement(ifs1)
+            call fd%fluxsurfacevertsP2%RemoveSingleElement(ifs1)
+            call fd%fluxsurfacefacesP1%RemoveSingleElement(ifs1)
+            call fd%fluxsurfacefacesP2%RemoveSingleElement(ifs1)
+            fd%nFs = fd%nFs - 1
+
+            range = (/ (j, j = ifs1, fd%nFs)/)
+            call fd%fluxsurfacevertsP1%SetMultipleElements(range, fd%fluxsurfacevertsP1%GetMultipleElements(range) - nv1)
+            call fd%fluxsurfacefacesP1%SetMultipleElements(range, fd%fluxsurfacefacesP1%GetMultipleElements(range) - nf1)
+
+            ifs2 = ifs2 - 1
+            call fd%fluxsurfacevertsP1%RemoveSingleElement(ifs2)
+            call fd%fluxsurfacevertsP2%RemoveSingleElement(ifs2)
+            call fd%fluxsurfacefacesP1%RemoveSingleElement(ifs2)
+            call fd%fluxsurfacefacesP2%RemoveSingleElement(ifs2)
+            fd%nFs = fd%nFs - 1
+
+            range = (/ (j, j = ifs2, fd%nFs)/)
+            call fd%fluxsurfacevertsP1%SetMultipleElements(range,fd%fluxsurfacevertsP1%GetMultipleElements(range) - nv2)
+            call fd%fluxsurfacefacesP1%SetMultipleElements(range,fd%fluxsurfacefacesP1%GetMultipleElements(range) - nf2)
+
+            ! Add new flux surface
+            fd%nFs = fd%nFs + 1
+            call Unique([tv1, tv2], new_verts)
+            call Unique([tf1, tf2], new_faces)
+
+            call fd%fluxsurfacevertsP1%AppendSingleElement(fd%fluxsurfacevertsP1%Get(fd%nFs-1)+ &
+                fd%fluxsurfacevertsP2%Get(fd%nFs-1))
+            call fd%fluxsurfacevertsP2%AppendSingleElement(size(new_verts))
+            call fd%fluxsurfaceverts%AppendMultipleElements(new_verts)
+            call fd%fluxsurfacefacesP1%AppendSingleElement(fd%fluxsurfacefacesP1%Get(fd%nFs-1)+ &
+                fd%fluxsurfacefacesP2%Get(fd%nFs-1))
+            call fd%fluxsurfacefacesP2%AppendSingleElement(size(new_faces))
+            call fd%fluxsurfacefaces%AppendMultipleElements(new_faces)
+
+            ! Update other flux surface indices in mFS
+            allocate(mFS_update(size(mFS(:,1)),2))
+            mFS_update = 0
+            do j = i+1, counter
+
+                if (mFS(j,1) .gt. ifs1) mFS_update(j,1) = mFS_update(j,1) + 1 
+                if (mFS(j,2) .gt. ifs1) mFS_update(j,2) = mFS_update(j,2) + 1 
+                if (mFS(j,1) .gt. ifs2+1) mFS_update(j,1) = mFS_update(j,1) + 1 
+                if (mFS(j,2) .gt. ifs2+1) mFS_update(j,2) = mFS_update(j,2) + 1 
+
+            end do
+
+            ! Update
+            mFS = mFs - mFS_update
+            deallocate(mFS_update)
+            deallocate(rem_ind_f)
+            deallocate(rem_ind_v)
+
+        end do
+
+        end associate
+
+        
+        
+        
+    end subroutine
+
     !------------------------------------------------------------------!
     !                        GAFACE ROUTINES                           !
     !------------------------------------------------------------------!    
@@ -2278,6 +2457,8 @@ module gamod_types
             allocate(nf(ends/2))
             nf = 0
         else
+            allocate(f_ord(nfcs,1))
+            f_ord = 0
             allocate(nf(1))
             nf = size(f_list)
         end if
@@ -2409,14 +2590,14 @@ module gamod_types
             indFc = (/ (i, i = 1, f%ntot)/)
             fcs_t1 = pack(indFc, fcLbl_loc.ge.4 )
 
-            vxs_t1 = GetVxsFromFcs(f,fcs_t1)
+            vxs_t1 = GetVxsFromFcsGA(f,fcs_t1)
             nv = size(vxs_t1)
 
             ! Get vertex coordinates
             vertsX = vx(vxs_t1)
             vertsY = vy(vxs_t1)
 
-            cvLookUp = GetCvLookUp(c)
+            cvLookUp = GetCvLookUpGA(c)
             use_nsep = .true.
             use_sepID = .true. 
             start = .true.
@@ -2505,7 +2686,7 @@ module gamod_types
                 ! Get faces of separatrix
                 faces_sep = GetFluxSurfaceFcsGA(data%fluxdata,data%sepID(1))
 
-                vxs_sep = GetVxsFromFcs(f, faces_sep)
+                vxs_sep = GetVxsFromFcsGA(f, faces_sep)
                 nv = size(vxs_sep)
 
                 ! Refinement if needed
@@ -2600,7 +2781,7 @@ module gamod_types
         integer(I8), allocatable    :: res(:)  
         
         if (.not.present(cvLookUp)) then
-            cvLookUp = GetCvLookUp(cell)
+            cvLookUp = GetCvLookUpGA(cell)
         end if
 
         res = pack(cvLookUp,cell%face%GetAllElements().eq.i)
@@ -2637,13 +2818,13 @@ module gamod_types
         integer(I8), allocatable    :: res(:)
         
         if (.not.present(cvLookUp)) then
-            cvLookUp = GetCvLookUp(cell)
+            cvLookUp = GetCvLookUpGA(cell)
         end if
             
         res = pack(cvLookUp,cell%vert%GetAllElements().eq.i)
     end function
 
-    function GetCvLookUp(cell) result(res)
+    function GetCvLookUpGA(cell) result(res)
         type(GACellUDT)       :: cell
         integer(I8)         :: nc, ic, nv, s, i               
         integer(I8), allocatable :: res(:), range(:)
@@ -2676,7 +2857,7 @@ module gamod_types
 
     end function
 
-    function GetVxsFromFcs(f,fcs) result(res)
+    function GetVxsFromFcsGA(f,fcs) result(res)
         type(GAFaceUDT) :: f
         integer(I8), allocatable :: fcs(:), verts(:), res(:)
         integer(I8) :: nf

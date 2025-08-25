@@ -136,7 +136,7 @@ module gamod_driver
         call grid%GetFsVxFromFsFc()
 
         ! Determine Xpoints and separatrices
-        cvLookUp = GetCvLookUp(c)
+        cvLookUp = GetCvLookUpGA(c)
         use_nsep = .false.
         call grid%GiveXpoints(use_nsep,cvLookUp)
         use_sepID = .false.
@@ -178,11 +178,11 @@ module gamod_driver
             call grid%CheckUnstructuredGrid(.false.)
         end if
 
-        ! correct face labels
+        ! correct face labels - TODO
 
-        ! Remove some connectivity field
+        ! Remove some connectivity field - TODO
 
-        ! Identify farSOL cells
+        ! Identify farSOL cells - TODO
 
         end associate        
 
@@ -253,7 +253,7 @@ module gamod_driver
             lbls(:), lbls2(:), fsVx(:)
         integer(I8) ::  i, iv, nl, nvi, lb, nind, fcReg(grid%face%ntot), &
             fcLbl_loc(grid%face%ntot), indFc(grid%face%ntot), &
-            ind(grid%face%ntot)
+            ind(grid%face%ntot), nflbl
         
 
         ! Check consistency
@@ -267,7 +267,7 @@ module gamod_driver
         call grid%ReorderCellConn(is_ordered)
 
         ! Determine number of Xpoints and separatrices
-        cvLookUp = GetCvLookUp(grid%cell)
+        cvLookUp = GetCvLookUpGA(grid%cell)
         use_nsep = .true.
         use_sepID = .true. 
         call grid%GiveSeparatrices(use_nsep, use_sepID, start, cvLookUp)
@@ -275,6 +275,7 @@ module gamod_driver
 
         ! Check flux surfaces for possible merging of open surfaces - only very specific cases for vesselmode
         ! TODO
+        call grid%MergeFS()
 
         ! Recalculate bx, by
         call grid%RecalcMagn(magneticField)
@@ -292,6 +293,8 @@ module gamod_driver
                 if (nvi /= 1) then
 
                     ! Visualize TODO
+                    print *, grid%vert%x%Get(iv)
+                    print *, grid%vert%y%Get(iv)
                     call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
 
                 end if 
@@ -332,9 +335,9 @@ module gamod_driver
         do i = 1, size(options%fcRegmappingGA)
 
             if (options%fcRegmappingGA(i) /= 0) then
-
-                allocate(fcs(count(indFc == options%fcRegmappingGA(i))))
-                fcs = pack(indFc,indFc == options%fcRegmappingGA(i))
+                nflbl = count(fcReg == options%fcRegmappingGA(i))
+                allocate(fcs(nflbl))
+                fcs = pack(indFc,fcReg == options%fcRegmappingGA(i))
 
                 if (size(fcs) /= 0) then
 
@@ -360,8 +363,7 @@ module gamod_driver
 
         call grid%face%reg%SetAllElementsArray(fcReg)
 
-        ! Visualize end grid
-        ! TODO
+        ! Visualize end grid - TODO
 
 
 
@@ -431,8 +433,8 @@ module gamod_driver
             nv = c%vertP(ic,2)
 
             ! Compute cell centers as average of vertex coordinates
-            c%x(ic) = sum(v%x(vxs))/real(nv, kind=R8)
-            c%y(ic) = sum(v%y(vxs))/real(nv, kind=R8)
+            c%x(ic) = sum(v%x(vxs(1:nv)))/real(nv, kind=R8)
+            c%y(ic) = sum(v%y(vxs(1:nv)))/real(nv, kind=R8)
 
             ! Recompute bp and bt according to b2agbb (in b2ag (SOLPS-ITER))
             do i = 1, nv
@@ -440,7 +442,7 @@ module gamod_driver
             end do
             r = nv*2*pi_R8*c%x(ic)    ! For axissymmetry around Z = 0 ! TODO
             bp(ic) = -sum(bpvx(1:nv))/r
-            bt(ic) = sum(v%ffbz(vxs))/r
+            bt(ic) = sum(v%ffbz(vxs(1:nv)))/r
             bpvx = 0
         end do
 

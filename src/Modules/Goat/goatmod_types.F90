@@ -2485,6 +2485,8 @@ module goatmod_types
         ! Flux surface data
         allocate(fluxdata%fluxsurfacefacesP(fluxdata%nFs,2))
         allocate(fluxdata%fluxsurfacefaces(grid%face%ntot))
+        allocate(fluxdata%fluxsurfacevertsP(fluxdata%nFs,2))
+        allocate(fluxdata%fluxsurfaceverts(grid%vert%ntot))
         allocate(fluxdata%fluxsurfaceID(grid%vert%ntot))
         allocate(fluxdata%fluxsurfacepsi(fluxdata%nFs))
 

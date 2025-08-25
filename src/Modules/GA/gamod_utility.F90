@@ -55,7 +55,7 @@ module gamod_utility
         ! Auxiliary
         logical :: ft_open, ft_open_us, ft_closed
         integer(I8), allocatable :: cvs(:), cvs_rev(:), ind(:), fcs(:), fcs_rev(:), &
-           first_core_tube(:), ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
+             ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
         integer(I8) :: nc, c1, c2, sv, nv, sf, nf, i, ift
         real(R8) :: c1_bx, c1_by, d, c1_bpolx, c1_bpoly, con_x, con_Y, d2, cosin, &
             dpsidx(grid%cell%ntot), dpsidy(grid%cell%ntot)
@@ -110,17 +110,19 @@ module gamod_utility
         if (ft_open .and. ft_closed) then
 
             ! Build the core flux tubes while open flux tubes were build
-            call BuildClosedTubes(grid, options, ft_open_us)
+            call BuildClosedTubes(grid, options, ft_open_us, ftCv, ftCvP, ftFc, ftFcP)
 
         elseif (ft_open_us .and. ft_closed) then
 
             ! Build the core flux tubes while open flux tubes were build and add ftFc
-            call BuildClosedTubes(grid,options,ft_open_us)
+            call BuildClosedTubes(grid,options,ft_open_us, ftCv, ftCvP, ftFc, ftFcP)
 
         elseif (.not.(ft_open .or. ft_open_us) .and. ft_closed) then 
 
-            call BuildClosedTubes(grid,options,ft_open_us, first_core_tube)
-            call AddSeparatrixTube(grid, first_core_tube)            
+            call gdErrorHandler('BuildFluxTubeData: only building the closed and the separatrix tube is not supported anymore')
+
+            !call BuildClosedTubes(grid,options,ft_open_us, ftCv, ftCvP, ftFc, ftFcP, first_core_tube)
+            !call AddSeparatrixTube(grid, ftCv, ftCvP, ftFc, ftFcP, first_core_tube)            
 
         end if
 
@@ -461,11 +463,9 @@ module gamod_utility
                 
                     end do
 
-
                 end if 
+            
             end if 
-
-
 
         end do
 
@@ -487,8 +487,15 @@ module gamod_utility
         integer(I8), allocatable, intent(out) :: ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
 
         ! Auxiliary
-        integer(I8), allocatable :: tube(:)
-        integer(I8) :: tube_count
+        integer(I8), allocatable, dimension(:) :: tube, tube_fc, fcs, & 
+            pfaces, pfacesB, pfacesI, pfaces_dummy, ipface, cvs, faceB, &
+            ic_dummy
+        integer(I8) :: tube_count, ic, ic1, npfacesB, i, tube_cv, tube_count_fc, &
+            cv_tot_count, fc_tot_count, ifc, ind, next_ic, v1, v2, nipface
+        real(R8), allocatable :: fcX(:), fcY(:), vecX_i, vecY_i, vecX_B, vecY_B, &
+            cosf(:)
+        logical :: start_cell,  build_tube
+        logical, allocatable :: in_ftCv(:)
 
 
         ! Associate
@@ -499,20 +506,256 @@ module gamod_utility
             fd => grid%data%fluxdata &
             )
 
+        ! Initialize
         allocate(ftCv(c%ntot))
-        allocate(ftCvP(fd%nFt,2))
+        allocate(ftCvP(c%ntot,2)) ! NFT not known probably
+        allocate(ftFc(f%ntot))
+        allocate(ftFcP(f%ntot,2))        
         allocate(tube(c%ntot))
+        allocate(tube_fc(f%ntot))
+        allocate(in_ftCv(c%ntot))
+        allocate(fcX(f%ntot))
+        allocate(fcY(f%ntot))
         ftCv = 0
         ftCvP = 0
+        ftFc = 0
+        ftFcP = 0
         tube = 0
         tube_count = 0
+        tube_fc = 0
+        tube_cv = 0
+        in_ftCv = .false.
+        cv_tot_count = 0
+        fc_tot_count = 0
+        fcX = 0.5_R8 * v%x(f%vert(:,1)) + v%x(f%vert(:,2))
+        fcY = 0.5_R8 * v%y(f%vert(:,1)) + v%y(f%vert(:,2))
 
+        ! Loop over all cells
+        do ic = 1, c%ntot
+
+            ! Find a starting cell
+            if (c%cflags(ic) == 3) then
+
+                if (.not.in_ftCv(ic)) then
+
+                    ! Dummy variable to save the cell
+                    ic1 = ic
+
+                    ! Get faces of the cell
+                    fcs = GetCellFace(c, ic)
+
+                    ! Eliminate if cells is trapezoid
+                    start_cell = .true.
+                    pfaces = pack(fcs, f%aligned(fcs) /= 0)
+                    pfacesB = pack(pfaces, f%label(pfaces) /= 0)
+                    npfacesB = size(pfacesB)
+
+                    ! Get the internal faces
+                    if (npfacesB .gt. 1) then
+
+                        pfaces_dummy = pfaces
+                        do i = 1, npfacesB
+                            pfaces_dummy = pack(pfaces_dummy, pfaces_dummy /= pfacesB(i))
+                        end do 
+                        pfacesI = pfaces_dummy
+
+                    elseif (npfacesB == 1) then
+                        pfacesI = pack(pfaces, pfaces /= pfacesB)
+                    end if
+
+                    ! Do not start the tube if following conditions
+                    if ((npfacesB == 0).or. (size(pfaces) == 3 .and. size(pfacesB) == 1)) then
+                        start_cell = .false.
+                    end if
+
+                    ! Sticking out triangle tube (one cell)
+                    if ((size(pfaces) == 2) .and. (size(pfacesB) == 2)) then
+
+                        start_cell = .false.
+
+                        ! Get the tube of one cell
+                        tube(1) = ic1
+                        tube_cv = 1
+
+                        tube_fc(1) = pfaces(1)
+                        tube_fc(2) = pfaces(2)
+                        tube_count_fc = 2
+
+                        ! Save
+                        tube_count = tube_count + 1
+
+                        ftCvP(tube_count,2) = tube_cv
+                        cv_tot_count = cv_tot_count + 1
+                        ftCv(cv_tot_count) = tube(1)
+
+
+                        ftFcP(tube_count,2) = tube_count_fc
+                        
+                        ftFc(fc_tot_count+1:fc_tot_count + tube_count_fc) = tube_fc(1:tube_count_fc)
+                        fc_tot_count = fc_tot_count + tube_count_fc
+
+                        if (tube_count == 1) then
+                            ftCvP(1,1) = 1
+                            ftFcP(1,1) = 2
+                        else
+                            ftCvP(tube_count,2) = ftCvP(tube_count-1,1) + ftCvP(tube_count-1,2)
+                            ftFcP(tube_count,2) = ftFcP(tube_count-1,1) + ftFcP(tube_count-1,2)
+                        end if
+
+                        in_ftCv(tube_fc(1:tube_count_fc)) = .true.
+                        tube = 0
+                        tube_fc = 0
+
+                    end if
+
+                    ! Regular tube 
+                    if (start_cell) then
+
+                        ! Add this cell to the tube
+                        tube(1) = ic1
+                        build_tube = .true.
+                        tube_cv = 1
+
+                        ! Add faces
+                        npfacesB = size(pfacesB)
+                        if (npfacesB .gt. 1) then ! Trapezoid at boundary
+
+                            ! Pick the most aligned face with the internal face
+                            allocate(cosf(npfacesB))
+                            cosf = 0
+
+                            ! Tangential vector to internal face
+                            v1 = f%vert(pfacesI(1),1)
+                            v2 = f%vert(pfacesI(1),2)
+                            vecX_i = v%x(v2) - v%x(v1)
+                            vecY_i = v%y(v2) - v%y(v1)
+                            
+                            ! Compute cosines of other faces
+                            do i = 1, npfacesB
+
+                                ifc = pfacesB(i)
+                                v1 = f%vert(ifc,1)
+                                v2 = f%vert(ifc,2)
+                                vecX_B = v%x(v2) - v%x(v1)
+                                vecY_B = v%y(v2) - v%y(v1)
+
+                                cosf(i) = vecX_i*vecX_B + vecY_i*vecY_B
+
+                            end do
+
+                            ! Get most aligned face
+                            ind = maxloc(abs(cosf),1)
+
+                            ! Attritube faces in tube
+                            tube_fc(1) = pfacesB(ind)
+                            tube_fc(2) = pfacesI(1)
+
+                            deallocate(cosf)
+                        else
+
+                            ! Attritube faces in tube
+                            tube_fc(1) = pfacesB(1)
+                            pfaces_dummy = pack(pfaces,pfaces /= pfacesB)
+                            tube_fc(2) = pfaces_dummy(1)
+
+                        end if 
+                    end if 
+
+                    ! Update counter
+                    tube_count_fc = 2
+
+                    ! Marching algo
+                    ! Get the internal poloidal faces
+                    ipface = pfacesI
+                    if (size(ipface) /= 1) then
+                        build_tube = .false.
+                    end if
+
+                    if (build_tube) then
+
+                        do while (f%label(ipface(1)) == 0) 
+
+                            ! Get cells of ipface
+                            cvs = GetFaceCell(f,ipface(1))
+                            ic_dummy = pack(cvs,cvs /= ic1)
+                            next_ic = ic_dummy(1)
+
+                            if (any(next_ic == tube)) then
+
+                                exit
+
+                            else
+
+                                tube_cv = tube_cv + 1
+                                tube(tube_cv) = next_ic
+
+                            end if
+
+                            ! Get ipface
+                            ic1 = next_ic
+
+                            fcs = GetCellFace(c, ic1)
+                            pfaces = pack(fcs, f%aligned(fcs) == 0)
+                            ipface = pack(pfaces, pfaces /= ipface)
+
+                            ! Eliminate possible poloidal boundary faces
+                            nipface = size(ipface)
+                            if (nipface .ge. 1) then
+                                if (nipface .gt. 1) then
+
+                                    if (sum(f%label(ipface)) == nipface) then
+
+                                            ipface = ipface(1)
+                                    else
+                                            ! Only keep the non-boundary ipface
+                                            ipface = pack(ipface,f%label(ipface) /= 0)
+
+                                    end if
+                                end if
+                                if (size(ipface) /= 1) then
+
+                                    call gdErrorHandler('BuildOpenTubeUS: not supported case')
+
+                                end if 
+                            else if (nipface == 0) then
+
+                                print *, 'Warning: BuildOpenTubesUS: No ipface found, put boundary face in tube'
+                                faceB = pack(fcs,f%label(fcs) /= 0)
+                                ipface = faceB(1)
+
+                            end if
+
+                        end do
+
+                        ! Save
+
+                        tube_count = tube_count + 1
+                        ftCvP(tube_count,1) = cv_tot_count + 1
+                        ftCvP(tube_count,2) = tube_cv
+                        ftCv(cv_tot_count+1:cv_tot_count+tube_cv) = tube(1:tube_cv)
+                        cv_tot_count = cv_tot_count + tube_cv
+
+                        ftFcP(tube_count,1) = fc_tot_count + 1
+                        ftFcP(tube_count,2) = tube_count_fc
+                        ftFc(fc_tot_count+1:fc_tot_count+tube_count_fc) = tube_fc(1:tube_count_fc)
+
+                        in_ftCv(tube(1:tube_cv)) = .true.
+                        tube = 0
+                        tube_fc = 0
+
+                    end if
+
+                end if
+
+            end if
+
+        end do
 
     
         end associate
     end subroutine
 
-    subroutine BuildClosedTubes(grid, options, ft_open_us, first_core_tube)
+    subroutine BuildClosedTubes(grid, options, ft_open_us, ftCv, ftCvP, ftFc, ftFcP)
 
         ! Description
         !============
@@ -524,9 +767,15 @@ module gamod_utility
         type(GridUDT) :: grid
         type(GAoptionsUDT) :: options
         logical :: ft_open_us
-        integer(I8), allocatable, intent(out), optional :: first_core_tube(:)
+        integer(I8), allocatable, intent(inout) :: ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
 
         ! Auxiliary
+        integer(I8) :: i, j, nc, cv, tube_count, nbv, counterc, counter_tube, &
+            fc1, ifs, iv, cv1
+        integer(I8), allocatable, dimension(:) :: cvLookUp, fcLbl_loc, bf_core, bv_core, &
+            bc_core, cvs, fs_closed, tube, indFc, tube1, bc_core1
+        logical, allocatable :: in_tube(:)
+        logical :: core_in_ftCv
 
         ! Associate
         associate(&
@@ -535,14 +784,301 @@ module gamod_utility
             v => grid%vert, &
             fd => grid%data%fluxdata &
             )
+        
+        ! Initialize
+        allocate(fcLbl_loc(f%ntot))
+        allocate(bc_core(c%ntot))
+        allocate(in_tube(c%ntot))
+        allocate(fs_closed(fd%nFs))
+        allocate(tube(c%ntot))
+        tube_count = size(ftCvP(:,1))
+        cvLookUp = GetCvLookUp(c)
+        bc_core = 0
+        in_tube = .false.
 
+        ! Face labelling
+        fcLbl_loc = GetfcLbl(f, options)
+
+        ! Build the core tube
+        if ((tube_count == 0) .or. (ft_open_us)) then
+
+            ! Build the core tube
+            indFc = (/ (i, i = 1, f%ntot)/)
+            bf_core = pack(indFc, fcLbl_loc == 2) ! Boundary faces of the core
+            bv_core = GetVxsFromFcs(f, bf_core)
+            nbv = size(bv_core)
+            counterc = 0
+
+            do i = 1, nbv
+
+                iv = bv_core(i)
+                cvs = GetVertCell(v, iv)
+                nc = size(cvs)
+
+                do j = 1, nc
+
+                    cv = cvs(j) 
+                    if (.not.in_tube(cv)) then 
+
+                        counterc = counterc + 1
+                        bc_core(counterc) = cv
+                        in_tube(cv) = .true.
+
+                    end if
+
+                end do
+
+            end do
+
+
+        end if
+
+        ! Trim
+        core_in_ftCv = any(bc_core(1) == ftCv)
+
+        ! Save the tube
+        if (tube_count == 0) then
+
+            ftCvP(1,1) = 1
+            ftCvP(1,2) = counterc
+            tube_count = 1
+            in_tube(bc_core(1:counterc)) = .true.
+
+        else if ((ft_open_us).and.(.not.core_in_ftCv)) then
+
+            tube_count = tube_count + 1
+            ftCvP(tube_count,1) = ftCvP(tube_count-1,1) + ftCvP(tube_count-1,2)
+            ftCvP(tube_count,2) = counterc
+            ftCv(ftCvP(tube_count,1):ftCvP(tube_count,1)+counterc-1) = bc_core(1:counterc)
+            in_tube(bc_core(1:counterc)) = .true.
+
+            ! Also add faces in ftFc and ftFcP
+            bc_core1 = bc_core(1:counterc)
+            call GiveFtFc(f, c, v, ftFc, ftFcP, bc_core1, tube_count)
+
+        end if
+        
+        ! Initiate ftFc and ftFcP for output of function
+        if (.not.ft_open_us) then
+
+            allocate(ftFc(f%ntot))
+            allocate(ftFcP(f%ntot,2))
+            ftFc = 0
+            ftFcP = 0
+
+        end if
+
+        ! First determine the start and end cells of the tubes
+        ! INFORMATION SAVED SHOULD BE CORRECT BEFORE!!!! CHECK THIS - TODO
+        !call GiveXpoints(grid, .false., cvLookUp)
+        !call GiveSeparatrices(grid, .false., .false., .true., cvLookUp)
+
+        ! Recycle the in_tube array
+        ! Try without requiring a core cut
+        ! But base on the flux surface
+        fs_closed = 0
+
+        do ifs = 1, fd%nFs
+
+            if ((fd%fluxsurfacevertsP(ifs,2) == fd%fluxsurfacefacesP(ifs,2)) &
+                .and. (.not.any(ifs == grid%data%sepID))) then
+                fs_closed(ifs) = 1
+
+                ! Build the tube
+                fc1 = fd%fluxsurfacefaces(fd%fluxsurfacefacesP(ifs, 1))
+                cvs = GetFaceCell(f, fc1)
+
+                do j = 1, size(cvs)
+                    cv1 = cvs(j)
+
+                    if (.not.in_tube(cv)) then
+
+                        ! Start a new tube
+                        call TraceCloseFluxTube(grid, in_tube, cv1, tube, counter_tube)
+
+                        ! Add tube to ftCv and ftCvP
+                        tube_count = tube_count + 1
+                        ftCvP(tube_count,1) = ftCvP(tube_count-1,1) + ftCvP(tube_count-1,2)
+                        ftCvP(tube_count,2) = counter_tube
+                        ftCv(ftCvP(tube_count,1):ftCvP(tube_count,1)+ftCvP(tube_count,2)-1) = tube(1:counter_tube)
+
+                        ! Also add ftFc if ft_open_us through intersection of mean psi (should work for the core)
+                        tube1 = tube(1:counter_tube)
+                        if (ft_open_us) call GiveFtFc(f, c, v, ftFc, ftFcP, tube1, tube_count)                     
+
+                    end if
+
+                end do
+
+            end if
+        end do 
 
         end associate
 
 
     end subroutine
 
-    subroutine AddSeparatrixTube(grid, first_core_tube) 
+    ! Auxiliary subroutine for BuildClosedTubes
+    subroutine GiveFtFc(f, c, v, ftFc, ftFcP, tube, tube_count)
+
+        ! Description
+        !============
+        ! Add poloidal faces of a tube to ftFc and ftFcP
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(FaceUDT), intent(in) :: f
+        type(CellUDT), intent(in) :: c
+        type(VertexUDT), intent(in) :: v
+        integer(I8), allocatable, intent(inout) :: ftFc(:), ftFcP(:,:), tube(:)
+        integer(I8), intent(in) :: tube_count
+
+        ! Auxiliary
+        integer(I8), allocatable :: fc_tube(:), cells(:), tf(:), tv(:), &
+            pfaces(:), fc_tube_clean(:)
+        integer(I8) :: fc_count, k, j, ic, np, ifc
+        real(R8), allocatable :: psi_vert(:)
+        real(R8) :: psic, v1p, v2p
+        
+        allocate(fc_tube(f%ntot)) 
+        fc_tube = 0
+        cells = tube
+
+        do k = 1, size(cells)
+
+            ! Get faces and verts
+            ic = cells(k)
+            tf = GetCellFace(c, ic)
+            tv = GetCellVert(c, ic)
+
+            ! Mean psi
+            psi_vert = v%psi(tv)
+            psic = 0.5_R8 * (maxval(psi_vert) + minval(psi_vert))
+
+            ! Get poloidal faces
+            pfaces = pack(tf, f%aligned(tf) == 0)
+            np = size(pfaces)
+
+            ! Loop over poloidal faces
+            do j = 1, np
+
+                ! Add the face if it gets intersection by the mean psi of the cell
+                ifc = pfaces(j)
+                v1p = v%psi(f%vert(ifc,1))
+                v2p = v%psi(f%vert(ifc,2))
+                if ((psic .gt. min(v1p, v2p)) .and. (psic .lt. max(v1p, v2p)))  then
+
+                    fc_count = fc_count + 1
+                    fc_tube(fc_count) = ifc
+
+                end if
+
+            end do
+
+        end do
+
+        ! Remove duplicates
+        call Unique(fc_tube(1:fc_count),fc_tube_clean)
+        
+        ! Add tube to ftFc
+        ftFcP(tube_count,1) = ftFcP(tube_count-1,1) + ftFcP(tube_count-1,2)
+        ftFcP(tube_count,2) = size(fc_tube_clean)
+        ftFc(ftFcP(tube_count,1):ftFcP(tube_count,1)+ftFcP(tube_count,2)-1) = fc_tube_clean
+
+    end subroutine
+
+    subroutine TraceCloseFluxTube(grid, in_tube, cv1, tube, counter)
+
+        ! Description
+        !============
+        ! Trace a close flux tube
+        ! cv1 = starting cell
+        ! in_tube = array indicating whether a cell is already in a tube 
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(in) :: grid
+        logical, allocatable, intent(inout) :: in_tube(:)
+        integer(I8), intent(in) :: cv1
+        integer(I8), intent(out) :: counter
+        integer(I8), allocatable, intent(out) :: tube(:)
+
+        ! Auxiliary
+        logical :: looped
+        integer(I8), allocatable :: fcs(:), p_fcs(:), cvs(:)
+        integer(I8) :: ic, opp_face
+        character(:), allocatable :: meth
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        allocate(tube(c%ntot))
+        tube = 0
+        tube(1) = cv1
+        counter = 1
+        in_tube(cv1) = .true.
+        looped = .false.
+
+        ! Find common face
+        fcs = GetCellFace(c, cv1)
+        p_fcs = pack(fcs, f%aligned(fcs) == 0)
+        if (size(p_fcs) /= 2) call gdErrorHandler('TraceClosedFluxTube: Something went wrong, cell has no two poloidal faces')
+
+        ! Initialize while loop
+        ic = cv1
+        opp_face = p_fcs(1)
+
+        ! Start the while loop
+        do while (.not.looped)
+
+            ! Find the oppostive face to the common face
+            meth = 'pol'
+            opp_face = GetOppositeFace(opp_face,ic, grid, meth)
+
+            ! Add the second cell
+            cvs = GetFaceCell(f, opp_face)
+
+            if (size(cvs) /= 2) call gdErrorHandler('TraceClosedFluxTube: poloidal face in the core has no two cells')
+
+            if ((cvs(1) /= cv1) .and. (.not.in_tube(cvs(1)))) then
+
+                ! Add cvs(1)
+                ic = cvs(1)
+                counter = counter + 1
+                tube(counter) = ic
+                in_tube(ic) = .true.
+
+            else if ((cvs(2) /= cv1) .and. (.not.in_tube(cvs(2)))) then
+
+                ! Add cvs(2)
+                ic = cvs(2)
+                counter = counter + 1
+                tube(counter) = ic
+                in_tube(ic) = .true.
+            
+            else
+
+                ! The tube is closed
+                looped = .true.
+
+            end if
+            
+        end do
+
+        
+        end associate
+
+
+    end subroutine
+
+    !subroutine AddSeparatrixTube(grid, ftCv, ftCvP, ftFc, ftFcP, first_core_tube) 
 
         ! Description
         !============
@@ -552,10 +1088,14 @@ module gamod_utility
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT) :: grid
-        integer(I8), allocatable :: first_core_tube(:)
+        !type(GridUDT) :: grid
+        !integer(I8), allocatable :: ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
+        !integer(I8) :: first_core_tube(:)
 
-    end subroutine
+        ! Auxiliary
+        !logical, allocatable :: in_first_core_tube
+
+    !end subroutine
 
 
     subroutine BuildFtFc(grid)
@@ -701,6 +1241,117 @@ module gamod_utility
     !                                                                  !
     !==================================================================!     
 
+    function GetCvLookUp(cell) result(res)
+        type(CellUDT)       :: cell
+        integer(I8)         :: nc, ic, nv, s, i               
+        integer(I8), allocatable :: res(:), range(:)
 
+        nc = cell%ntot
+        range = (/ (i, i = 1,(cell%vertP(nc,1)+cell%vertP(nc,2)-1))/)
+
+        allocate(res(1:cell%vertP(nc,1)+cell%vertP(nc,2)-1))
+        res = 0
+
+        do ic = 1, nc
+            s = cell%vertP(ic,1)
+            nv = cell%vertP(ic,2)
+            range = (/ (i, i = s, (s+nv-1)) /)
+            res(range) = ic
+        end do
+    end function    
+
+    function GetfcLbl(f,options) result(res)
+        type(FaceUDT) :: f
+        type(GAoptionsUDT) :: options
+        integer(I8) :: res(1:f%ntot), indFc(1:f%ntot), i 
+
+        res = f%label
+        indFc = (/ (i, i=1,f%ntot) /)
+        do i = 1, size(options%facelabelmappingGG)
+            res(pack(indFc, f%label == options%facelabelmappingGG(i))) &
+                = options%facelabelmappingGA(i)
+        end do
+
+    end function
+
+    function GetVxsFromFcs(f,fcs) result(res)
+        type(FaceUDT) :: f
+        integer(I8), allocatable :: fcs(:), verts(:), res(:)
+        integer(I8) :: nf
+
+        nf = size(fcs)
+        allocate(verts(1:nf*2))
+        verts = 0
+        verts(1:nf) = f%vert(fcs,1)
+        verts(nf+1:nf*2) = f%vert(fcs,2)
+        call Unique(verts, res)
+
+    end function    
+
+    function GetOppositeFace(ifc, ic, grid, meth) result(res)
+
+        ! Description
+        !============
+        ! Give a face opposite to a given face in an aligned quad or pent.
+        ! Assummes sequential ordening of the cell faces   
+        
+        ! Declare variables
+        ! =================
+        ! Arguments
+        type(GridUDT) :: grid
+        integer(I8) :: ifc, ic, res
+        character(:), allocatable :: meth
+
+        ! Auxiliary
+        integer(I8), allocatable :: fcs(:), fcs1(:), fcs2(:), &
+            indf(:), ind(:)
+        integer(I8) :: vsF(1:2), i, ind_com_face, ind_opp_face, &
+            vs(1:2), nf
+        real(R8) :: psic
+
+        res = 0
+        fcs = GetCellFace(grid%cell, ic)
+
+        select case (meth)
+
+        case ('pol')
+            
+            vsF = grid%face%vert(ifc,:)
+            psic = 0.5_R8*sum(grid%vert%psi(vsF))
+            fcs1 = pack(fcs, fcs /= ifc)
+            fcs2 = pack(fcs1, grid%face%aligned(fcs1) == 1)
+            do i = 1, size(fcs2)
+                vs = grid%face%vert(fcs2(i),:)
+                if ((psic .gt. minval(grid%vert%psi(vs))) &
+                    .and. psic .lt. maxval(grid%vert%psi(vs))) then
+                        res = fcs2(i)
+                        exit
+                end if
+
+            end do
+
+            if (res == 0) res = fcs2(1)
+
+        case ('ordened_quad')
+
+            nf = size(fcs)
+            if (nf == 4) then
+                indf = (/ (i, i = 1, nf)/)
+                ind = pack(indf, fcs == ifc)
+                ind_com_face = ind(1)
+                ind_opp_face = ind_com_face + 2
+                if (ind_opp_face .gt. nf) ind_opp_face = ind_opp_face - nf 
+                res = fcs(ind_opp_face)
+
+            end if
+        case default
+
+            call gdErrorHandler("GetOppositeFace: not yet implemented")
+
+        end select
+
+        if (res == 0) call gdErrorHandler('GetOppositeFace: no opposite face found')
+
+    end function
 
 end module 
