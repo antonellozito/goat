@@ -1119,7 +1119,8 @@ module ggmod_gridgeneration2D
         ! Remove non-convex cells
         call SplitNonConvexCells(ggtmdata, grid) 
 
-        ! 
+        ! Clean
+        call CleanGGTMData(ggtmdata)
 
         ! Extract the necessary gridding data
         !====================================
@@ -4439,7 +4440,8 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: vtemp
         integer(I8), allocatable, dimension(:)  :: v1, v2, fID, &
-            sortind, dv1, dv2, tsortind, tv2, tfID, fIDnew
+            sortind, dv1, dv2, tsortind, tv2, tfID, fIDnew, &
+            delta
         integer(I8), allocatable                :: fvert(:, :)
         logical, allocatable, dimension(:)      :: delind 
         
@@ -4512,21 +4514,33 @@ module ggmod_gridgeneration2D
         ! If both are zero, set delind to true
         delind = [.false., (dv1 == 0) .and. (dv2 == 0)]
 
-        ! Resort according to face ID
-        allocate(sortind(size(fID)))
-        call Sort(fID, ind=sortind)
-        delind = delind(sortind)
-        deallocate(sortind)
-
         ! Construct mapping
         fIDnew = fID
         k = 0
         do i = 1, size(fID)
             if (.not. delind(i)) then 
-                k = k + 1
+                k = i
             end if 
-            fIDnew(i) = k
+            fIDnew(i) = fID(k)
         end do
+        allocate(sortind(size(fID)))
+        call Sort(fID, ind=sortind)
+        delind = delind(sortind)
+        fIDnew = fIDnew(sortind)
+        deallocate(sortind)
+
+        allocate(delta(size(fIDnew)))
+        delta = 0
+        if (delind(1)) then 
+            delta(1) = 1
+        end if  
+        do i = 2, size(fIDnew)
+            delta(i) = delta(i-1)
+            if (delind(i)) then 
+                delta(i) = delta(i) + 1
+            end if 
+        end do 
+        fIDnew = fIDnew - delta(fIDnew)
 
         ! Remove faces from grid
         fID = pack(fID, delind)
@@ -16141,6 +16155,9 @@ module ggmod_gridgeneration2D
                             else 
                                 BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
                             end if 
+                            if (any(face%aligned(tf) == 0)) then 
+                                print *, 'here'
+                            end if 
                         end if 
                         if (seg(tseg)%refoptions%doBLend) then 
                             ! Unpack
@@ -16151,6 +16168,9 @@ module ggmod_gridgeneration2D
                                 BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
                             else 
                                 BLind(tf(tfc+nsf:tfc+nsf-nBLf+1:-1)) = [(cc, cc = 1, nBLf)]
+                            end if 
+                            if (any(face%aligned(tf) == 0)) then 
+                                print *, 'here'
                             end if 
                         end if
 
