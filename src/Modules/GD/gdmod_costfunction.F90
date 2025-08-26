@@ -17,6 +17,7 @@ module gdmod_costfunction
     !============
     ! Load modules
     use mod_precision
+    use mod_utility
     use mod_sparseinterface
     use gdmod_types 
     use gdmod_designvariables
@@ -346,6 +347,89 @@ module gdmod_costfunction
 
     end type
 
+    ! Cell angle cost function
+    type, extends(CostfunctionGDUDT)    :: CostFunctionCAUDT 
+
+        ! Description
+        !============
+        ! This cost function penalizes the angle between two faces and
+        ! is called the 'cell angle' cost function, because one typically 
+        ! wants to have rectangular cells (90° angles of course) or 
+        ! 'nice' triangle with 60° angles. Obviously this may be    
+        ! suboptimal due to magnetic field curvature etc but eh. It 
+        ! should at least give some good first idea. Obviously, other, 
+        ! non-cell-based vertex pairs can also be used. 
+
+        ! Fields
+        real(R8)                    :: lambda ! scaling constant
+        real(R8), allocatable       :: wt(:) ! weight 
+        real(R8), allocatable       :: theta0(:) ! desired angle
+        integer(I8), allocatable    :: vpairs(:, :) ! vertex pairs (v1, v2, v3, v4)
+        integer(I8)                 :: nvpairs ! total number of vertex pairs
+        real(R8), allocatable       :: Jv(:) ! cost function value per vertex 
+
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionCA
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionCA
+
+        ! Data output
+        procedure :: WriteData              => WriteCostFunctionDataCA
+
+        ! Housekeeping
+        procedure :: Allocate               => AllocateCostFunctionCA
+        procedure :: Deallocate             => DeallocateCostFunctionCA
+        final :: DestroyCostFunctionCA
+
+    end type
+
+    ! Length distribution cost function
+    type, extends(CostfunctionGDUDT)    :: CostFunctionLDUDT 
+
+        ! Description
+        !============
+        ! This cost function targets a certain desired length 
+        ! distribution l0(x, y) for each face. The weight should be used
+        ! to mark regions where the distribution is actually important.
+        ! Each cost function contribution is then computed as: 
+        !
+        !   Ji = 0.5*wti(xf, yf)*( (li - l0(xf, yf))/l0(xf, yf) )**2
+        !
+        ! where xf, yf are the face coordinates, li the face length,    
+        ! and l0 the desired length distribution. The distribution here
+        ! is only allowed to be a 2D distance distribution w.r.t. 
+        ! certain coordinates. This should allow sufficient flexibility
+        ! for local refinement.
+
+        ! Fields
+        real(R8)                            :: lambda ! scaling constant
+        type(Coordinates2DDistanceDFUDT)    :: wt, l0 ! weight and desired length distribution
+        integer(I8), allocatable            :: vpairs(:, :) ! vertex pairs (v1, v2)
+        integer(I8)                         :: nvpairs ! total number of vertex pairs
+        real(R8), allocatable               :: Jv(:) ! cost function value per vertex 
+
+    contains
+
+        ! Initialization
+        procedure :: Initialize             => InitializeCostfunctionLD
+
+        ! Evaluation
+        procedure :: Evaluate               => EvaluateCostFunctionLD
+
+        ! Data output
+        procedure :: WriteData              => WriteCostFunctionDataLD
+
+        ! Housekeeping
+        procedure :: Allocate               => AllocateCostFunctionLD
+        procedure :: Deallocate             => DeallocateCostFunctionLD
+        final :: DestroyCostFunctionLD
+
+    end type
+
     ! Psi ratio, psi based
     type, extends(CostfunctionGDUDT)    :: CostfunctionPRPBUDT 
 
@@ -487,10 +571,12 @@ module gdmod_costfunction
         type(CostFunctionFAUDT)         :: cfv_fa
         type(CostfunctionPRPB2UDT)      :: cfv_prpb
         type(CostfunctionLRrad2UDT)     :: cfv_lrrad
+        type(CostfunctionCAUDT)         :: cfv_ca
+        type(CostfunctionLDUDT)         :: cfv_ld
 
         ! Switches
         logical                         :: doLR, doFA, doFAD, doPRPB, &
-            doLRrad
+            doLRrad, doCA, doLD
 
     contains 
 
@@ -926,8 +1012,7 @@ module gdmod_costfunction
         real(R8)                        :: dx1, dx2, dy1, dy2, d1, d2, rat
         integer(I8), allocatable        :: row(:), col(:) 
         real(R8), allocatable           :: valxx(:),  valxy(:), &
-                                        valyx(:), valyy(:)
-                                        
+                                        valyx(:), valyy(:)                                        
         ! Associate
         !==========
         associate(&
@@ -3989,6 +4074,1387 @@ module gdmod_costfunction
     end subroutine
 
     !------------------------------------------------------------------!
+    !                             CELL ANGLE                           !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionCA(costfunction, grid, &
+        magneticField, environment, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. 
+
+        ! Modules
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionCAUDT)            :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
+
+        ! Loop variables
+        integer(I8)                         :: i, j
+
+        ! Auxiliary variables
+        !type(StructuredPLF2DDistanceDFUDT)  :: dfwt
+        integer(I8)                         :: ntv 
+        integer(I8), allocatable            :: vpairs(:, :), tv(:)
+
+        real(R8), allocatable               :: wt(:), theta0(:)
+
+        ! logical, allocatable                :: isvesselvertex(:), &
+        !    isvesselface(:)
+
+        ! Data
+        
+        ! Initialize
+        !===========
+        ! Set the scaling constant
+        costfunction%lambda = options%CA%lambda
+
+        ! Initialize temporary arrays (too big for now, trim later)
+        allocate(vpairs(size(grid%cell%face), 4), theta0(size(grid%cell%face)))
+
+        ! Associate
+        associate(&
+            cell        => grid%cell,   &
+            x           => grid%vert%x, &
+            y           => grid%vert%y, &
+            fieldlineID => grid%vert%fieldlineID,   &
+            nvpairs     => costfunction%nvpairs)
+
+        ! Initialize counter
+        nvpairs = 0
+
+        ! Determine vertex pairs
+        !=======================
+        ! Loop
+        do i = 1, cell%ntot
+            ! Get vertices
+            tv = GetCellVert(cell, i)
+            ntv = size(tv)
+
+            ! Extend for ease
+            tv = [tv, tv(1), tv(2)]
+
+            ! Add and compute desired angle
+            do j = 1, size(tv)-2
+                nvpairs = nvpairs + 1
+                vpairs(nvpairs, :) = [tv(j+1), tv(j), tv(j+1), tv(j+2)] ! order matters here
+                theta0(nvpairs) = (ntv - 2)*Pi_R8/real(ntv, kind=R8)
+                
+            end do 
+        end do
+
+        ! Allocate and add
+        call costfunction%Allocate(nvpairs, grid%vert%ntot)
+        costfunction%vpairs = vpairs(1:nvpairs, :)
+        costfunction%theta0 = theta0
+
+        
+        ! Determine weigths
+        !==================
+        ! Simply one for now
+        ! Initialize (magnetic field as dummy since unsigned anyway)
+        !call dfwt%Initialize(magneticField%interp, &
+        !    environment%vessel%plfvessel, environment%vessel%plfvessel, &
+        !    options%CA%weightatvessel, options%CA%weightatinf, &
+        !    options%CA%decaylength, 'unsigned')
+
+        ! Evaluate
+        allocate(wt(nvpairs))
+        wt = 1.0_R8/costfunction%theta0**2
+        !call dfwt%Evaluate(xf, yf, wt)
+
+        ! Visualize
+        !call dfwt%Visualize([minval(x), maxval(x)], &
+        !    [minval(y), maxval(y)], 100, 100, 'costfunctionFA_weights')
+
+        ! Add
+        costfunction%wt = wt
+
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+        ! Write data
+        !===========
+        if (options%writedata == 1) then 
+            call costfunction%WriteData(grid)
+        end if 
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionCA(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. The 
+        ! cost function penalizes the angle between the magnetic field 
+        ! and the face normal. It is assumed that the optimal angle is
+        ! zero. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionCAUDT)        :: costfunction 
+        real(R8)                        :: J
+        real(R8), allocatable           :: gradJ(:) 
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
+        ! Loop variables
+        integer(I8)                     :: i, cc 
+
+        ! Auxiliary
+        integer(I8), allocatable        :: row(:), col(:) 
+
+        real(R8), allocatable, dimension(:)     :: dx1v, dx2v, dy1v, &
+            dy2v, dpv, cpv, thetav, valxx, valxy, valyx, valyy
+        real(R8), allocatable, dimension(:, :)  :: xv, yv
+                                        
+        ! Associate
+        !==========
+        associate(&
+            vert    => grid%vert, &
+            vpairs  => costfunction%vpairs, &
+            nvpairs => costfunction%nvpairs, &
+            x       => grid%vert%x, &
+            y       => grid%vert%y, &
+            nv      => grid%vert%ntot, &
+            lambda  => costfunction%lambda, &
+            theta0v => costfunction%theta0, &
+            Jv      => costfunction%Jv,     &
+            wtv     => costfunction%wt)
+
+        ! Initialize
+        !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
+        ! Cost function
+        J = 0
+        Jv = 0
+
+        ! Gradient
+        gradJ = 0
+
+        ! Precompute
+        !===========
+        ! Coordinates
+        allocate(xv(nvpairs, 4), yv(nvpairs, 4))
+        allocate(dx1v(nvpairs), dy1v(nvpairs), dx2v(nvpairs), dy2v(nvpairs), &
+            dpv(nvpairs), cpv(nvpairs), thetav(nvpairs))
+        do i = 1, size(vpairs, 2)
+            xv(:, i) = x(vpairs(:, i))
+            yv(:, i) = y(vpairs(:, i))
+        end do
+
+        ! Face vectors
+        dx1v = xv(:, 2) - xv(:, 1)
+        dy1v = yv(:, 2) - yv(:, 1)
+        dx2v = xv(:, 4) - xv(:, 3)
+        dy2v = yv(:, 4) - yv(:, 3)
+
+        dpv = dx1v*dx2v + dy1v*dy2v
+        cpv = dx1v*dy2v - dy1v*dx2v
+
+        thetav = atan2(cpv, dpv)
+
+        ! Compute cost function
+        !======================
+        ! Compute
+        J = sum(0.5*wtv*(thetav - theta0v)**2)
+        do i = 1, nvpairs 
+            Jv(vpairs(i, 1)) = Jv(vpairs(i, 1)) + 0.25_R8*(0.5*wtv(i)*(thetav(i) - theta0v(i))**2)
+            Jv(vpairs(i, 2)) = Jv(vpairs(i, 2)) + 0.25_R8*(0.5*wtv(i)*(thetav(i) - theta0v(i))**2)
+            Jv(vpairs(i, 3)) = Jv(vpairs(i, 3)) + 0.25_R8*(0.5*wtv(i)*(thetav(i) - theta0v(i))**2)
+            Jv(vpairs(i, 4)) = Jv(vpairs(i, 4)) + 0.25_R8*(0.5*wtv(i)*(thetav(i) - theta0v(i))**2)
+        end do 
+
+        ! Scale
+        J = lambda*J
+        Jv = lambda*Jv
+
+        ! Compute derivatives
+        !====================
+        select case (designvariables%type) 
+
+        case ('coordinates', 'coordinates_desiredflux') ! no flux contributions
+
+            ! Initialize
+            hessJ%nval = 64*nvpairs 
+            if (.not. allocated(hessJ%row)) then 
+                ! Allocate
+                call hessJ%Allocate()
+
+            end if 
+            if (dohessian) then 
+
+                ! Allocate local variables
+                allocate(valxx(16*nvpairs), valxy(16*nvpairs), &
+                    valyx(16*nvpairs), valyy(16*nvpairs), row(16*nvpairs), &
+                    col(16*nvpairs))
+                
+            end if 
+
+            ! Gradient
+            if (dogradient) then 
+                do i = 1, nvpairs
+                    ! Unpack
+                    associate(&
+                        wti     => wtv(i),   &
+                        dx1     => dx1v(i),  &
+                        dy1     => dy1v(i),  &
+                        dx2     => dx2v(i),  &
+                        dy2     => dy2v(i),  &
+                        dp      => dpv(i),   &
+                        cp      => cpv(i),   &
+                        theta   => thetav(i),    &
+                        theta0  => theta0v(i)    &
+                    )
+
+                    ! Evaluate gradient
+                    gradJ(vpairs(i, 1)) = gradJ(vpairs(i, 1)) + &
+                        0.5*wti*(theta - theta0)*(2*cp*dx2/(cp**2 + dp**2) - 2*dp*dy2/(cp**2 + dp**2)) !x1
+                    gradJ(vpairs(i, 2)) = gradJ(vpairs(i, 2)) + &
+                        0.5*wti*(theta - theta0)*(-2*cp*dx2/(cp**2 + dp**2) + 2*dp*dy2/(cp**2 + dp**2)) !x2
+                    gradJ(vpairs(i, 3)) = gradJ(vpairs(i, 3)) + &
+                        0.5*wti*(theta - theta0)*(2*cp*dx1/(cp**2 + dp**2) + 2*dp*dy1/(cp**2 + dp**2)) !x3
+                    gradJ(vpairs(i, 4)) = gradJ(vpairs(i, 4)) + &
+                        0.5*wti*(theta - theta0)*(-2*cp*dx1/(cp**2 + dp**2) - 2*dp*dy1/(cp**2 + dp**2)) !x4
+
+                    gradJ(vpairs(i, 1)+nv) = gradJ(vpairs(i, 1)+nv) + &
+                        0.5*wti*(theta - theta0)*(2*cp*dy2/(cp**2 + dp**2) + 2*dp*dx2/(cp**2 + dp**2))!y1
+                    gradJ(vpairs(i, 2)+nv) = gradJ(vpairs(i, 2)+nv) + &
+                        0.5*wti*(theta - theta0)*(-2*cp*dy2/(cp**2 + dp**2) - 2*dp*dx2/(cp**2 + dp**2))!y2
+                    gradJ(vpairs(i, 3)+nv) = gradJ(vpairs(i, 3)+nv) + &
+                        0.5*wti*(theta - theta0)*(2*cp*dy1/(cp**2 + dp**2) - 2*dp*dx1/(cp**2 + dp**2))!y3
+                    gradJ(vpairs(i, 4)+nv) = gradJ(vpairs(i, 4)+nv) + &
+                        0.5*wti*(theta - theta0)*(-2*cp*dy1/(cp**2 + dp**2) + 2*dp*dx1/(cp**2 + dp**2))!y4
+
+                    ! Housekeeping
+                    end associate
+                end do
+            end if 
+
+            ! Scale
+            gradJ = lambda*gradJ
+
+            ! Hessian
+            if (dohessian) then 
+                ! Initialize
+                cc = 1
+                do i = 1, nvpairs
+                    ! Unpack
+                    associate(&
+                        wti     => wtv(i),   &
+                        dx1     => dx1v(i),  &
+                        dy1     => dy1v(i),  &
+                        dx2     => dx2v(i),  &
+                        dy2     => dy2v(i),  &
+                        dp      => dpv(i),   &
+                        cp      => cpv(i),   &
+                        theta   => thetav(i),    &
+                        theta0  => theta0v(i)    &
+                    )
+                    ! v1 v1
+                    row(cc) = vpairs(i, 1)  
+                    col(cc) = vpairs(i, 1) 
+                    valxx(cc) = -wti*(-cp*dx2 + dp*dy2)* & 
+                        (cp*dx2 - dp*dy2 + 2*(-theta + theta0)* &
+                        (-cp*dy2 - dp*dx2))/(cp**2 + dp**2)**2 !x1x1
+                    valxy(cc) = wti*(-1.0*(-theta + theta0)* &
+                        (2*cp*dx2*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) - &
+                        2*dp*dy2*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) + dx2**2 + dy2**2) + &
+                        (-cp*dx2 + dp*dy2)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2) !x1y1
+                    valyx(cc) = valxy(cc)  !y1x1
+                    valyy(cc) = 1.0*wti*(-cp*dy2 - dp*dx2)*(-cp*dy2 - &
+                        dp*dx2 + 2*(-theta + theta0)*(-cp*dx2 + dp*dy2))/ &
+                        (cp**2 + dp**2)**2 !y1y1
+                    cc = cc+1 
+                    
+                    ! v1 v2
+                    row(cc) = vpairs(i, 1)  
+                    col(cc) = vpairs(i, 2) 
+                    valxx(cc) = -wti*(2.0*(-theta + theta0)*(cp*dx2 - dp*dy2)* &
+                        (-cp*dy2 - dp*dx2) + 1.0*(-cp*dx2 + dp*dy2)**2)/(cp**2 + dp**2)**2!x1x2
+                    valxy(cc) = wti*((-theta + theta0)* &
+                        (2*cp*dx2*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) - &
+                        2*dp*dy2*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) + dx2**2 + dy2**2) - &
+                        1.0*(-cp*dx2 + dp*dy2)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2) !x1y2
+                    valyx(cc) = wti*((-theta + theta0)* &
+                        (-2*cp*dx2*(cp*dx2 - dp*dy2)/(cp**2 + dp**2) + &
+                        2*dp*dy2*(cp*dx2 - dp*dy2)/(cp**2 + dp**2) + dx2**2 + dy2**2) - &
+                        1.0*(-cp*dx2 + dp*dy2)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2) !y1x2
+                    valyy(cc) = -wti*(-cp*dy2 - dp*dx2)* &
+                        (-1.0*cp*dy2 - 1.0*dp*dx2 + 2.0*(-theta + theta0)* &
+                        (-cp*dx2 + dp*dy2))/(cp**2 + dp**2)**2!y1y2
+                    cc = cc+1 
+
+                    ! v2 v1
+                    row(cc) = vpairs(i,2)  
+                    col(cc) = vpairs(i,1) 
+                    valxx(cc) = valxx(cc-1)  ! x2x1
+                    valxy(cc) = valyx(cc-1)  !x2y1
+                    valyx(cc) = valxy(cc-1)  !y2x1
+                    valyy(cc) = valyy(cc-1)  !y2y1
+                    cc = cc+1 
+
+                    ! v1 v3
+                    row(cc) = vpairs(i, 1)  
+                    col(cc) = vpairs(i, 3) 
+                    valxx(cc) = wti*(-2.0*(-theta + theta0)* & 
+                        (-cp*dx2*(cp*dy1 - dp*dx1)/(cp**2 + dp**2) + &
+                        dp*dy2*(cp*dy1 - dp*dx1)/(cp**2 + dp**2) + dx2*dy1) + &
+                        (-cp*dx1 - dp*dy1)*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2))/(cp**2 + dp**2) !x1x3
+                    valxy(cc) = -1.0*wti*(2*(-theta + theta0)* &
+                        (-cp*dx2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        dp*dy2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dy1*dy2) + &
+                        (-cp*dx2 + dp*dy2)*(cp*dy1 - dp*dx1)/(cp**2 + dp**2))/(cp**2 + dp**2)!x1y3
+                    valyx(cc) = wti*(-2.0*(-theta + theta0)* &
+                        (cp*dx1*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) + &
+                        dp*dy1*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) - dy1*dy2) + &
+                        (-cp*dx1 - dp*dy1)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2)!y1x3
+                    valyy(cc) = wti*(2*(-theta + theta0)* &
+                        (cp*dy2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        dp*dx2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dx1*dy2) - &
+                        1.0*(cp*dy1 - dp*dx1)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2)!y1y3
+                    cc = cc+1 
+
+                    ! v3 v1
+                    row(cc) = vpairs(i, 3)  
+                    col(cc) = vpairs(i, 1) 
+                    valxx(cc) = valxx(cc-1)  ! x3x1
+                    valxy(cc) = valyx(cc-1)  !x3y1
+                    valyx(cc) = valxy(cc-1)  !y3x1
+                    valyy(cc) = valyy(cc-1)  !y3y1
+                    cc = cc+1 
+                    
+                    ! v1 v4
+                    row(cc) = vpairs(i, 1)  
+                    col(cc) = vpairs(i, 4) 
+                    valxx(cc) = wti*(2*(-theta + theta0)* &
+                        (cp*dx2*(-cp*dy1 + dp*dx1)/(cp**2 + dp**2) - &
+                        dp*dy2*(-cp*dy1 + dp*dx1)/(cp**2 + dp**2) + dx2*dy1) - &
+                        1.0*(-cp*dx1 - dp*dy1)*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2))/(cp**2 + dp**2) !x1x4
+                    valxy(cc) = wti*(2*(-theta + theta0)* &
+                        (-cp*dx2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        dp*dy2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dy1*dy2) + &
+                        (-cp*dx2 + dp*dy2)*(cp*dy1 - dp*dx1)/(cp**2 + dp**2))/(cp**2 + dp**2)!x1y4
+                    valyx(cc) = wti*(2*(-theta + theta0)* &
+                        (-cp*dx1*(cp*dx2 - dp*dy2)/(cp**2 + dp**2) - &
+                        dp*dy1*(cp*dx2 - dp*dy2)/(cp**2 + dp**2) - dy1*dy2) - &
+                        1.0*(-cp*dx1 - dp*dy1)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2) !y1x4
+                    valyy(cc) = wti*(-2.0*(-theta + theta0)* &
+                        (cp*dy2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        dp*dx2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dx1*dy2) + &
+                        (cp*dy1 - dp*dx1)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2) !y1y4
+                    cc = cc+1 
+
+                    ! v4 v1
+                    row(cc) = vpairs(i, 4)  
+                    col(cc) = vpairs(i, 1) 
+                    valxx(cc) = valxx(cc-1)  ! x4x1
+                    valxy(cc) = valyx(cc-1)  !x4y1
+                    valyx(cc) = valxy(cc-1)  !y4x1
+                    valyy(cc) = valyy(cc-1)  !y4y1
+                    cc = cc+1 
+                    
+                    ! v2 v2
+                    row(cc) = vpairs(i,2)  
+                    col(cc) = vpairs(i,2) 
+                    valxx(cc) = -1.0*wti*(-cp*dx2 + dp*dy2)* &
+                        (cp*dx2 - dp*dy2 + 2*(-theta + theta0)* &
+                        (-cp*dy2 - dp*dx2))/(cp**2 + dp**2)**2!x2x2
+                    valxy(cc) = wti*(-1.0*(-theta + theta0)* &
+                        (2*cp*dx2*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) - &
+                        2*dp*dy2*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) + dx2**2 + dy2**2) + &
+                        (-cp*dx2 + dp*dy2)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2) !x2y2
+                    valyx(cc) = valxy(cc)  !y2x2
+                    valyy(cc) = 1.0*wti*(-cp*dy2 - dp*dx2)* &
+                        (-cp*dy2 - dp*dx2 + 2*(-theta + theta0)* &
+                        (-cp*dx2 + dp*dy2))/(cp**2 + dp**2)**2 !y2y2
+                    cc = cc+1 
+
+                    ! v2 v3
+                    row(cc) = vpairs(i,2)  
+                    col(cc) = vpairs(i,3) 
+                    valxx(cc) = wti*(2*(-theta + theta0)* &
+                        (-cp*dx2*(cp*dy1 - dp*dx1)/(cp**2 + dp**2) + &
+                        dp*dy2*(cp*dy1 - dp*dx1)/(cp**2 + dp**2) + dx2*dy1) - &
+                        1.0*(-cp*dx1 - dp*dy1)*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2))/(cp**2 + dp**2) !x2x3
+                    valxy(cc) = wti*(2*(-theta + theta0)* &
+                        (-cp*dx2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        dp*dy2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dy1*dy2) + &
+                        (-cp*dx2 + dp*dy2)*(cp*dy1 - dp*dx1)/(cp**2 + dp**2))/(cp**2 + dp**2) !x2y3
+                    valyx(cc) = -1.0*wti*(2*(-theta + theta0)* &
+                        (-cp*dx1*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) - &
+                        dp*dy1*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) + dy1*dy2) + &
+                        (-cp*dx1 - dp*dy1)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2)!y2x3
+                    valyy(cc) = wti*(-2.0*(-theta + theta0)* &
+                        (cp*dy2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        dp*dx2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dx1*dy2) + &
+                        (cp*dy1 - dp*dx1)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2) !y2y3
+                    cc = cc+1 
+
+                    ! v3 v2
+                    row(cc) = vpairs(i, 3)  
+                    col(cc) = vpairs(i, 2) 
+                    valxx(cc) = valxx(cc-1)  ! x3x2
+                    valxy(cc) = valyx(cc-1)  !x3y2
+                    valyx(cc) = valxy(cc-1)  !y3x2
+                    valyy(cc) = valyy(cc-1)  !y3y2
+                    cc = cc+1 
+
+                    ! v2 v4
+                    row(cc) = vpairs(i,2)  
+                    col(cc) = vpairs(i,4)
+                    valxx(cc) = wti*(-2.0*(-theta + theta0)* &
+                        (-cp*dx2*(cp*dy1 - dp*dx1)/(cp**2 + dp**2) + &
+                        dp*dy2*(cp*dy1 - dp*dx1)/(cp**2 + dp**2) + dx2*dy1) + &
+                        (-cp*dx1 - dp*dy1)*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2))/(cp**2 + dp**2) !x2x4
+                    valxy(cc) = -1.0*wti*(2*(-theta + theta0)* &
+                        (-cp*dx2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        dp*dy2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dy1*dy2) + &
+                        (-cp*dx2 + dp*dy2)*(cp*dy1 - dp*dx1)/(cp**2 + dp**2))/(cp**2 + dp**2)!x2y4
+                    valyx(cc) = wti*(2*(-theta + theta0)* &
+                        (-cp*dx1*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) - &
+                        dp*dy1*(-cp*dx2 + dp*dy2)/(cp**2 + dp**2) + dy1*dy2) + &
+                        (-cp*dx1 - dp*dy1)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2) !y2x4
+                    valyy(cc) = wti*(2*(-theta + theta0)* &
+                        (cp*dy2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        dp*dx2*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dx1*dy2) - &
+                        1.0*(cp*dy1 - dp*dx1)*(-cp*dy2 - dp*dx2)/(cp**2 + dp**2))/(cp**2 + dp**2) !y2y4
+                    cc = cc+1 
+
+                    ! v4 v2
+                    row(cc) = vpairs(i, 4)  
+                    col(cc) = vpairs(i, 2) 
+                    valxx(cc) = valxx(cc-1)  ! x3x2
+                    valxy(cc) = valyx(cc-1)  !x3y2
+                    valyx(cc) = valxy(cc-1)  !y3x2
+                    valyy(cc) = valyy(cc-1)  !y3y2
+                    cc = cc+1 
+
+                    ! v3 v3
+                    row(cc) = vpairs(i,3)  
+                    col(cc) = vpairs(i,3) 
+                    valxx(cc) = 1.0*wti*(-cp*dx1 - dp*dy1)* &
+                        (-cp*dx1 - dp*dy1 - 2*(-theta + theta0)* &
+                        (cp*dy1 - dp*dx1))/(cp**2 + dp**2)**2!x3x3
+                    valxy(cc) = wti*((-theta + theta0)* &
+                        (2*cp*dx1*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        2*dp*dy1*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dx1**2 + dy1**2) - &
+                        1.0*(-cp*dx1 - dp*dy1)*(cp*dy1 - dp*dx1)/(cp**2 + dp**2))/(cp**2 + dp**2) !x3y3
+                    valyx(cc) = valxy(cc)  !y3x3
+                    valyy(cc) = 1.0*wti*(cp*dy1 - dp*dx1)* &
+                        (cp*dy1 - dp*dx1 + 2*(-theta + theta0)* &
+                        (-cp*dx1 - dp*dy1))/(cp**2 + dp**2)**2 !y3y3
+                    cc = cc+1 
+
+                    ! v3 v4
+                    row(cc) = vpairs(i,3)  
+                    col(cc) = vpairs(i,4) 
+                    valxx(cc) = wti*(-cp*dx1 - dp*dy1)* &
+                        (1.0*cp*dx1 + 1.0*dp*dy1 + 2.0*(-theta + theta0)* &
+                        (cp*dy1 - dp*dx1))/(cp**2 + dp**2)**2 !x3x4
+                    valxy(cc) = wti*(-1.0*(-theta + theta0)* &
+                        (2*cp*dx1*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        2*dp*dy1*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dx1**2 + dy1**2) + &
+                        (-cp*dx1 - dp*dy1)*(cp*dy1 - dp*dx1)/(cp**2 + dp**2))/(cp**2 + dp**2) !x3y4
+                    valyx(cc) = wti*(-1.0*(-theta + theta0)* &
+                        (2*cp*dx1*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        2*dp*dy1*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dx1**2 + dy1**2) + &
+                        (-cp*dx1 - dp*dy1)*(cp*dy1 - dp*dx1)/(cp**2 + dp**2))/(cp**2 + dp**2) !y3x4
+                    valyy(cc) = wti*(2.0*(-theta + theta0)* &
+                        (-cp*dx1 - dp*dy1)*(-cp*dy1 + dp*dx1) - 1.0*(cp*dy1 - dp*dx1)**2)/(cp**2 + dp**2)**2 !y3y4
+                    cc = cc+1 
+
+                    ! v4 v3
+                    row(cc) = vpairs(i, 4)  
+                    col(cc) = vpairs(i, 3) 
+                    valxx(cc) = valxx(cc-1)  !x4x3
+                    valxy(cc) = valyx(cc-1)  !x4y3
+                    valyx(cc) = valxy(cc-1)  !y4x3
+                    valyy(cc) = valyy(cc-1)  !y4y3
+                    cc = cc + 1
+
+                    ! v4 v4
+                    row(cc) = vpairs(i,4)  
+                    col(cc) = vpairs(i,4) 
+                    valxx(cc) = 1.0*wti*(-cp*dx1 - dp*dy1)* &
+                        (-cp*dx1 - dp*dy1 - 2*(-theta + theta0)* &
+                        (cp*dy1 - dp*dx1))/(cp**2 + dp**2)**2 !x4x4
+                    valxy(cc) = wti*((-theta + theta0)* &
+                        (2*cp*dx1*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + &
+                        2*dp*dy1*(-cp*dx1 - dp*dy1)/(cp**2 + dp**2) + dx1**2 + dy1**2) - &
+                        1.0*(-cp*dx1 - dp*dy1)*(cp*dy1 - dp*dx1)/(cp**2 + dp**2))/(cp**2 + dp**2) !x4y4
+                    valyx(cc) = valxy(cc)  !y4x4
+                    valyy(cc) = 1.0*wti*(cp*dy1 - dp*dx1)* &
+                        (cp*dy1 - dp*dx1 + 2*(-theta + theta0)* &
+                        (-cp*dx1 - dp*dy1))/(cp**2 + dp**2)**2 !y4y4
+                    cc = cc+1 
+
+                    ! Housekeeping
+                    end associate
+
+                end do
+
+                ! Build full hessian
+                hessJ%row = [row, row, row+vert%ntot, row+vert%ntot]
+                hessJ%col = [col, col+vert%ntot, col, col+vert%ntot]
+                hessJ%val = [valxx, valxy, valyx, valyy]
+
+                ! Scale
+                hessJ%val = lambda*hessJ%val
+
+            end if 
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('design variable type "' // designvariables%type &
+                // '" not yet implemented for face angle cost function')
+
+        end select
+
+        ! Other derivatives
+        !==================
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
+       
+        ! Deassociate
+        !============
+        end associate
+
+    end subroutine
+
+    ! Cost function data writing 
+    subroutine WriteCostFunctionDataCA(costfunction, grid)
+
+        ! Description
+        !============
+        ! Write out the cost function data for the CA cost function.
+        ! Here, this consists of the vertex pair data in IDn, xn, yn 
+        ! format
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionCAUDT)        :: costfunction 
+        type(GridUDT)                   :: grid
+
+        ! Auxiliary
+        integer(I8)                     :: ncol, nrow 
+
+        integer(I8), allocatable        :: IDn(:, :) 
+        real(R8), allocatable           :: xn(:, :), yn(:, :)
+        character(:), allocatable       :: filename 
+
+        ! Loop
+        integer(I8)                     :: j 
+
+        ! Initialize
+        !===========
+        ! Set filename
+        allocate(character(len('costfunction_vertexpairs_CA')) :: filename)
+        filename = 'costfunction_vertexpairs_CA'
+
+        ! Allocate
+        nrow = size(costfunction%vpairs, 1)
+        ncol = size(costfunction%vpairs, 2)
+        allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
+
+        ! Unpack
+        associate(&
+            vpairs      => costfunction%vpairs,         &
+            x           => grid%vert%x,                 &
+            y           => grid%vert%y)
+
+        ! Loop
+        do j = 1, ncol 
+            IDn(:, j) = vpairs(:, j) 
+            xn(:, j) = x(vpairs(:, j)) 
+            yn(:, j) = y(vpairs(:, j)) 
+        end do
+
+        ! Call writer
+        !============
+        call WriteVertexPairData(IDn, xn, yn, filename)
+
+        ! Housekeeping
+        !=============
+        end associate
+        deallocate(IDn, xn, yn)
+        
+
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionCA(costfunction, nvp, nv)
+
+        ! Description
+        !============
+        ! Allocate, assumed that costfunction%nvpairs is given
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionCAUDT)        :: costfunction
+        integer(I8)                     :: nvp, nv
+
+        ! Allocate
+        !=========
+        allocate(costfunction%vpairs(nvp, 2))
+        allocate(costfunction%theta0(nvp))
+        allocate(costfunction%wt(nvp))
+        allocate(costfunction%Jv(nv))
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionCA(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionCAUDT)        :: costfunction
+
+        ! Deallocate
+        !===========
+        if (allocated(costfunction%vpairs)) then 
+            deallocate(costfunction%vpairs)
+            deallocate(costfunction%wt)
+            deallocate(costfunction%Jv)
+            deallocate(costfunction%theta0)
+        end if
+
+    end subroutine
+
+    subroutine DestroyCostFunctionCA(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionCAUDT)        :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%Deallocate()
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                         LENGTH DISTRIBUTION                      !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionLD(costfunction, grid, &
+        magneticField, environment, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. 
+
+        ! Modules
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLDUDT)            :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
+
+        ! Loop variables
+        integer(I8)                         :: i
+
+        ! Auxiliary variables
+        integer(I8), allocatable            :: vpairs(:, :)
+        real(R8), allocatable, dimension(:) :: xp, yp, d0, val0, &
+            vd0, vval0
+        logical, allocatable, dimension(:)  :: includevert 
+
+        ! Data
+        
+        ! Initialize
+        !===========
+        ! Set the scaling constant
+        costfunction%lambda = options%LD%lambda
+
+        ! Initialize temporary arrays (too big for now, trim later)
+        allocate(vpairs(size(grid%cell%face), 2))
+
+        ! Associate
+        associate(&
+            face        => grid%face,   &
+            x           => grid%vert%x, &
+            y           => grid%vert%y, &
+            nv          => grid%vert%ntot,  &
+            fieldlineID => grid%vert%fieldlineID,   &
+            nvpairs     => costfunction%nvpairs)
+
+        ! Initialize counter
+        nvpairs = 0
+
+        ! Determine vertex pairs
+        !=======================
+        ! Simply take vertices of all aligned faces
+        nvpairs = count(face%aligned == 1)
+        vpairs(1:nvpairs, 1) = pack(face%vert(:, 1), face%aligned == 1) 
+        vpairs(1:nvpairs, 2) = pack(face%vert(:, 2), face%aligned == 1) 
+
+        ! Allocate and add
+        call costfunction%Allocate(nvpairs, nv)
+        costfunction%vpairs = vpairs(1:nvpairs, :)
+        
+        ! Determine weigths
+        !==================
+        ! Initialize
+        allocate(includevert(nv), vd0(nv), vval0(nv))
+        allocate(xp(0), yp(0), d0(0), val0(0))
+        vd0 = 1.0_R8
+        val0 = 0.0_R8
+        includevert = .false. 
+
+        ! Check which vertices of faces with specified label to include
+        do i = 1, size(options%ld%wtfacelabel)
+            ! Mark vertices of faces with this label
+            where (face%TMfacelabel == options%ld%wtfacelabel(i)) 
+                includevert(face%vert(:, 1)) = .true.
+                includevert(face%vert(:, 2)) = .true.
+                vd0(face%vert(:, 1)) = options%ld%wtdecaylengthface(i)
+                vd0(face%vert(:, 2)) = options%ld%wtdecaylengthface(i)
+                vval0(face%vert(:, 1)) = options%ld%wtatface(i)
+                vval0(face%vert(:, 2)) = options%ld%wtatface(i)
+            end where
+        end do 
+        xp = [xp, pack(x, includevert)]
+        yp = [yp, pack(y, includevert)]
+        d0 = [d0, pack(vd0, includevert)]
+        val0 = [val0, pack(vval0, includevert)]
+
+        ! Check which other coordinates to include 
+        xp = [xp, options%ld%wtx]
+        yp = [yp, options%ld%wty]
+        d0 = [d0, options%ld%wtd0]
+        val0 = [val0, options%ld%wtval0]
+
+        ! Initialize distribution
+        call costfunction%wt%Initialize(xp, yp, val0, options%ld%wtatinf, d0)
+
+        ! Housekeeping
+        deallocate(xp, yp, d0, val0)
+
+        ! Determine length distribution
+        !==============================
+        ! Check which vertices of structures to include 
+        allocate(xp(0), yp(0), d0(0), val0(0))
+        vd0 = 1.0_R8
+        val0 = 0.0_R8
+        includevert = .false. 
+
+        ! Check which vertices of faces with specified label to include
+        do i = 1, size(options%ld%l0facelabel)
+            ! Mark vertices of faces with this label
+            where (face%TMfacelabel == options%ld%l0facelabel(i)) 
+                includevert(face%vert(:, 1)) = .true.
+                includevert(face%vert(:, 2)) = .true.
+                vd0(face%vert(:, 1)) = options%ld%l0decaylengthface(i)
+                vd0(face%vert(:, 2)) = options%ld%l0decaylengthface(i)
+                vval0(face%vert(:, 1)) = options%ld%l0atface(i)
+                vval0(face%vert(:, 2)) = options%ld%l0atface(i)
+            end where
+        end do 
+        xp = [xp, pack(x, includevert)]
+        yp = [yp, pack(y, includevert)]
+        d0 = [d0, pack(vd0, includevert)]
+        val0 = [val0, pack(vval0, includevert)]
+
+        ! Check which other coordinates to include 
+        xp = [xp, options%ld%l0x]
+        yp = [yp, options%ld%l0y]
+        d0 = [d0, options%ld%l0d0]
+        val0 = [val0, options%ld%l0val0]
+
+        ! Initialize distribution
+        call costfunction%l0%Initialize(xp, yp, val0, options%ld%l0atinf, d0)
+
+        ! Housekeeping
+        deallocate(xp, yp, d0, val0)
+
+        ! Housekeeping
+        !=============
+        ! End associate
+        end associate
+
+        ! Write data
+        !===========
+        if (options%writedata == 1) then 
+            call costfunction%WriteData(grid)
+        end if 
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionLD(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. The 
+        ! cost function penalizes the angle between the magnetic field 
+        ! and the face normal. It is assumed that the optimal angle is
+        ! zero. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLDUDT)        :: costfunction 
+        real(R8)                        :: J
+        real(R8), allocatable           :: gradJ(:) 
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
+        ! Loop variables
+        integer(I8)                     :: i, cc 
+
+        ! Auxiliary
+        integer(I8), allocatable        :: row(:), col(:) 
+
+        real(R8), allocatable, dimension(:)     :: dxv, dyv, xf, yf, &
+            valxx, valxy, valyx, valyy, liv, &
+            wtiv, l0v, dwtvdx, dwtvdy, d2wtvdx2, d2wtvdxdy, d2wtvdy2, &
+            dl0vdx, dl0vdy, d2l0vdx2, d2l0vdxdy, d2l0vdy2, ratv
+        real(R8), allocatable, dimension(:, :)  :: xv, yv
+                                        
+        ! Associate
+        !==========
+        associate(&
+            vert    => grid%vert, &
+            vpairs  => costfunction%vpairs, &
+            nvpairs => costfunction%nvpairs, &
+            x       => grid%vert%x, &
+            y       => grid%vert%y, &
+            nv      => grid%vert%ntot, &
+            lambda  => costfunction%lambda, &
+            Jv      => costfunction%Jv)
+
+        ! Initialize
+        !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
+        ! Cost function
+        J = 0
+        Jv = 0
+
+        ! Gradient
+        gradJ = 0
+
+        ! Precompute
+        !===========
+        ! Coordinates
+        allocate(xv(nvpairs, 2), yv(nvpairs, 2))
+        allocate(dxv(nvpairs), dyv(nvpairs), liv(nvpairs), wtiv(nvpairs), &
+            l0v(nvpairs))
+        do i = 1, size(vpairs, 2)
+            xv(:, i) = x(vpairs(:, i))
+            yv(:, i) = y(vpairs(:, i))
+        end do
+
+        ! Face vectors
+        dxv = xv(:, 2) - xv(:, 1)
+        dyv = yv(:, 2) - yv(:, 1)
+        xf = 0.5*(xv(:, 1) + xv(:, 2))
+        yf = 0.5*(yv(:, 1) + yv(:, 2))
+
+        ! Lengths, weights
+        liv = sqrt(dxv**2 + dyv**2)
+        call costfunction%wt%Evaluate(xf, yf, wtiv)
+        call costfunction%l0%Evaluate(xf, yf, l0v)
+
+        ! Cost function contributions
+        ratv = (liv - l0v)/l0v
+
+        ! Compute cost function
+        !======================
+        ! Compute
+        J = sum(0.5*wtiv*(ratv)**2)
+        do i = 1, nvpairs 
+            Jv(vpairs(i, 1)) = Jv(vpairs(i, 1)) + 0.5_R8*(0.5*wtiv(i)*(ratv(i))**2)
+            Jv(vpairs(i, 2)) = Jv(vpairs(i, 2)) + 0.5_R8*(0.5*wtiv(i)*(ratv(i))**2)
+        end do 
+
+        ! Scale
+        J = lambda*J
+        Jv = lambda*Jv
+
+        ! Compute derivatives
+        !====================
+        select case (designvariables%type) 
+
+        case ('coordinates', 'coordinates_desiredflux') ! no flux contributions
+
+            ! Initialize
+            hessJ%nval = 16*nvpairs 
+            if (.not. allocated(hessJ%row)) then 
+                ! Allocate
+                call hessJ%Allocate()
+
+            end if 
+            if (dogradient .or. dohessian) then 
+
+                ! Evaluate derivatives
+                allocate(dl0vdx(nvpairs), dl0vdy(nvpairs), &
+                    dwtvdx(nvpairs), dwtvdy(nvpairs))
+                call costfunction%wt%EvaluateDerivative(xf, yf, 1, 0, dwtvdx)
+                call costfunction%wt%EvaluateDerivative(xf, yf, 0, 1, dwtvdy)
+                call costfunction%l0%EvaluateDerivative(xf, yf, 1, 0, dl0vdx)
+                call costfunction%l0%EvaluateDerivative(xf, yf, 0, 1, dl0vdy)
+
+            end if 
+            if (dohessian) then 
+
+                ! Evaluate second order derivatives
+                allocate(d2l0vdx2(nvpairs), d2l0vdy2(nvpairs), d2l0vdxdy(nvpairs), &
+                    d2wtvdx2(nvpairs), d2wtvdy2(nvpairs), d2wtvdxdy(nvpairs))
+                call costfunction%wt%EvaluateDerivative(xf, yf, 2, 0, d2wtvdx2)
+                call costfunction%wt%EvaluateDerivative(xf, yf, 1, 1, d2wtvdxdy)
+                call costfunction%wt%EvaluateDerivative(xf, yf, 0, 2, d2wtvdy2)
+                call costfunction%l0%EvaluateDerivative(xf, yf, 2, 0, d2l0vdx2)
+                call costfunction%l0%EvaluateDerivative(xf, yf, 1, 1, d2l0vdxdy)
+                call costfunction%l0%EvaluateDerivative(xf, yf, 0, 2, d2l0vdy2)
+
+                ! Allocate local variables
+                allocate(valxx(4*nvpairs), valxy(4*nvpairs), &
+                    valyx(4*nvpairs), valyy(4*nvpairs), row(4*nvpairs), &
+                    col(4*nvpairs))
+                
+            end if 
+
+            ! Gradient
+            if (dogradient) then 
+                do i = 1, nvpairs
+                    ! Unpack
+                    associate(&
+                        wti     => wtiv(i),     &
+                        l0i     => l0v(i),      &
+                        li      => liv(i),      &
+                        dx      => dxv(i),      &
+                        dy      => dyv(i),      &
+                        rat     => ratv(i),     &
+                        dwtdx   => dwtvdx(i),   &
+                        dwtdy   => dwtvdy(i),   &
+                        dl0dx   => dl0vdx(i),   &
+                        dl0dy   => dl0vdy(i)    &
+                    )
+
+                    ! Evaluate gradient
+                    gradJ(vpairs(i, 1)) = gradJ(vpairs(i, 1)) + &
+                        -0.5*dl0dx*rat**2*wti/l0i + 0.25*dwtdx*rat**2 + 0.5*rat*wti*(-1.0*dl0dx - 2*dx/li)/l0i !x1
+                    gradJ(vpairs(i, 2)) = gradJ(vpairs(i, 2)) + &
+                        -0.5*dl0dx*rat**2*wti/l0i + 0.25*dwtdx*rat**2 + 0.5*rat*wti*(-1.0*dl0dx + 2*dx/li)/l0i !x2
+
+                    gradJ(vpairs(i, 1)+nv) = gradJ(vpairs(i, 1)+nv) + &
+                        -0.5*dl0dy*rat**2*wti/l0i + 0.25*dwtdy*rat**2 + 0.5*rat*wti*(-1.0*dl0dy - 2*dy/li)/l0i !y1
+                    gradJ(vpairs(i, 2)+nv) = gradJ(vpairs(i, 2)+nv) + &
+                        -0.5*dl0dy*rat**2*wti/l0i + 0.25*dwtdy*rat**2 + 0.5*rat*wti*(-1.0*dl0dy + 2*dy/li)/l0i !y2
+
+                    ! Housekeeping
+                    end associate
+                end do
+            end if 
+
+            ! Scale
+            gradJ = lambda*gradJ
+
+            ! Hessian
+            if (dohessian) then 
+                ! Initialize
+                cc = 1
+                do i = 1, nvpairs
+                    ! Unpack
+                    associate(&
+                        wti     => wtiv(i),     &
+                        l0i     => l0v(i),      &
+                        li      => liv(i),      &
+                        dx      => dxv(i),      &
+                        dy      => dyv(i),      &
+                        rat     => ratv(i),     &
+                        dwtdx   => dwtvdx(i),   &
+                        dwtdy   => dwtvdy(i),   &
+                        d2wtdx2     => d2wtvdx2(i),     &
+                        d2wtdxdy    => d2wtvdxdy(i),    &
+                        d2wtdy2     => d2wtvdy2(i),     &
+                        dl0dx   => dl0vdx(i),   &
+                        dl0dy   => dl0vdy(i),   &
+                        d2l0dx2     => d2l0vdx2(i),     &
+                        d2l0dxdy    => d2l0vdxdy(i),    &
+                        d2l0dy2     => d2l0vdy2(i)      &
+                    )
+
+                    ! v1 v1
+                    row(cc) = vpairs(i, 1)  
+                    col(cc) = vpairs(i, 1) 
+                    valxx(cc) = (0.125*d2wtdx2*(-l0i + li)**2 - &
+                        0.5*dl0dx*dwtdx*rat*(-l0i + li) - &
+                        2.0*dl0dx*rat*wti*(-0.5*dl0dx - dx/li) + &
+                        1.0*dwtdx*(-0.5*dl0dx - dx/li)*(-l0i + li) - &
+                        1.0*rat*wti*(0.25*d2l0dx2 - 0.75*dl0dx**2/l0i)*(-l0i + li) + &
+                        1.0*wti*((-0.5*dl0dx - dx/li)**2 - &
+                        (-l0i + li)*(0.25*d2l0dx2 + dx**2/li**3 - 1/li)))/l0i**2 !x1x1
+                    valxy(cc) = (-0.25*d2l0dxdy*rat*wti*(-l0i + li) + &
+                        0.125*d2wtdxdy*(-l0i + li)**2 + &
+                        0.75*dl0dx*dl0dy*rat**2*wti - 0.25*dl0dx*dwtdy*rat*(-l0i + li) - &
+                        1.0*dl0dx*rat*wti*(-0.5*dl0dy - dy/li) - &
+                        0.25*dl0dy*dwtdx*rat*(-l0i + li) - 1.0*dl0dy*rat*wti*(-0.5*dl0dx - dx/li) + &
+                        0.5*dwtdx*(-0.5*dl0dy - dy/li)*(-l0i + li) + &
+                        0.5*dwtdy*(-0.5*dl0dx - dx/li)*(-l0i + li) - &
+                        1.0*wti*(0.25*d2l0dxdy + dx*dy/li**3)*(-l0i + li) + &
+                        wti*(-0.5*dl0dx - dx/li)*(-0.5*dl0dy - dy/li))/l0i**2 !x1y1
+                    valyx(cc) = valxy(cc)  !y1x1
+                    valyy(cc) = (0.125*d2wtdy2*(-l0i + li)**2 - &
+                        0.5*dl0dy*dwtdy*rat*(-l0i + li) - &
+                        2.0*dl0dy*rat*wti*(-0.5*dl0dy - dy/li) + &
+                        1.0*dwtdy*(-0.5*dl0dy - dy/li)*(-l0i + li) - &
+                        1.0*rat*wti*(0.25*d2l0dy2 - 0.75*dl0dy**2/l0i)*(-l0i + li) + &
+                        1.0*wti*((-0.5*dl0dy - dy/li)**2 - &
+                        (-l0i + li)*(0.25*d2l0dy2 + dy**2/li**3 - 1/li)))/l0i**2 !y1y1
+                    cc = cc+1 
+                    
+                    ! v1 v2
+                    row(cc) = vpairs(i, 1)  
+                    col(cc) = vpairs(i, 2) 
+                    valxx(cc) = (-0.25*d2l0dx2*rat*wti*(-l0i + li) + &
+                        0.125*d2wtdx2*(-l0i + li)**2 + 0.75*dl0dx**2*rat**2*wti - &
+                        0.5*dl0dx*dwtdx*rat*(-l0i + li) - &
+                        1.0*dl0dx*rat*wti*(-0.5*dl0dx - dx/li) + &
+                        1.0*dl0dx*rat*wti*(0.5*dl0dx - dx/li) + &
+                        0.5*dwtdx*(-0.5*dl0dx - dx/li)*(-l0i + li) - &
+                        0.5*dwtdx*(0.5*dl0dx - dx/li)*(-l0i + li) - &
+                        1.0*wti*(-0.5*dl0dx - dx/li)*(0.5*dl0dx - dx/li) - &
+                        1.0*wti*(-l0i + li)*(0.25*d2l0dx2 - dx**2/li**3 + 1/li))/l0i**2 !x1x2
+                    valxy(cc) = (-0.25*d2l0dxdy*rat*wti*(-l0i + li) + &
+                        0.125*d2wtdxdy*(-l0i + li)**2 + 0.75*dl0dx*dl0dy*rat**2*wti - &
+                        0.25*dl0dx*dwtdy*rat*(-l0i + li) + &
+                        1.0*dl0dx*rat*wti*(0.5*dl0dy - dy/li) - &
+                        0.25*dl0dy*dwtdx*rat*(-l0i + li) - &
+                        1.0*dl0dy*rat*wti*(-0.5*dl0dx - dx/li) - &
+                        0.5*dwtdx*(0.5*dl0dy - dy/li)*(-l0i + li) + &
+                        0.5*dwtdy*(-0.5*dl0dx - dx/li)*(-l0i + li) + &
+                        wti*(-0.25*d2l0dxdy + dx*dy/li**3)*(-l0i + li) - &
+                        1.0*wti*(-0.5*dl0dx - dx/li)*(0.5*dl0dy - dy/li))/l0i**2 !x1y2
+                    valyx(cc) = (-0.25*d2l0dxdy*rat*wti*(-l0i + li) + &
+                        0.125*d2wtdxdy*(-l0i + li)**2 + 0.75*dl0dx*dl0dy*rat**2*wti - &
+                        0.25*dl0dx*dwtdy*rat*(-l0i + li) - &
+                        1.0*dl0dx*rat*wti*(-0.5*dl0dy - dy/li) - &
+                        0.25*dl0dy*dwtdx*rat*(-l0i + li) + &
+                        1.0*dl0dy*rat*wti*(0.5*dl0dx - dx/li) + &
+                        0.5*dwtdx*(-0.5*dl0dy - dy/li)*(-l0i + li) - &
+                        0.5*dwtdy*(0.5*dl0dx - dx/li)*(-l0i + li) + &
+                        wti*(-0.25*d2l0dxdy + dx*dy/li**3)*(-l0i + li) - &
+                        1.0*wti*(0.5*dl0dx - dx/li)*(-0.5*dl0dy - dy/li))/l0i**2 !y1x2
+                    valyy(cc) = (-0.25*d2l0dy2*rat*wti*(-l0i + li) + &
+                        0.125*d2wtdy2*(-l0i + li)**2 + &
+                        0.75*dl0dy**2*rat**2*wti - 0.5*dl0dy*dwtdy*rat*(-l0i + li) - &
+                        1.0*dl0dy*rat*wti*(-0.5*dl0dy - dy/li) + &
+                        1.0*dl0dy*rat*wti*(0.5*dl0dy - dy/li) + &
+                        0.5*dwtdy*(-0.5*dl0dy - dy/li)*(-l0i + li) - &
+                        0.5*dwtdy*(0.5*dl0dy - dy/li)*(-l0i + li) - &
+                        1.0*wti*(-0.5*dl0dy - dy/li)*(0.5*dl0dy - dy/li) - &
+                        1.0*wti*(-l0i + li)*(0.25*d2l0dy2 - dy**2/li**3 + 1/li))/l0i**2 !y1y2
+                    cc = cc+1 
+
+                    ! v2 v1
+                    row(cc) = vpairs(i,2)  
+                    col(cc) = vpairs(i,1) 
+                    valxx(cc) = valxx(cc-1)  ! x2x1
+                    valxy(cc) = valyx(cc-1)  !x2y1
+                    valyx(cc) = valxy(cc-1)  !y2x1
+                    valyy(cc) = valyy(cc-1)  !y2y1
+                    cc = cc+1 
+                    
+                    ! v2 v2
+                    row(cc) = vpairs(i,2)  
+                    col(cc) = vpairs(i,2) 
+                    valxx(cc) = (0.125*d2wtdx2*(-l0i + li)**2 - &
+                        0.5*dl0dx*dwtdx*rat*(-l0i + li) + &
+                        2.0*dl0dx*rat*wti*(0.5*dl0dx - dx/li) - &
+                        1.0*dwtdx*(0.5*dl0dx - dx/li)*(-l0i + li) - &
+                        1.0*rat*wti*(0.25*d2l0dx2 - 0.75*dl0dx**2/l0i)*(-l0i + li) + &
+                        1.0*wti*((0.5*dl0dx - dx/li)**2 - &
+                        (-l0i + li)*(0.25*d2l0dx2 + dx**2/li**3 - 1/li)))/l0i**2 !x2x2
+                    valxy(cc) = (-0.25*d2l0dxdy*rat*wti*(-l0i + li) + &
+                        0.125*d2wtdxdy*(-l0i + li)**2 + &
+                        0.75*dl0dx*dl0dy*rat**2*wti - &
+                        0.25*dl0dx*dwtdy*rat*(-l0i + li) + &
+                        1.0*dl0dx*rat*wti*(0.5*dl0dy - dy/li) - &
+                        0.25*dl0dy*dwtdx*rat*(-l0i + li) + &
+                        1.0*dl0dy*rat*wti*(0.5*dl0dx - dx/li) - &
+                        0.5*dwtdx*(0.5*dl0dy - dy/li)*(-l0i + li) - &
+                        0.5*dwtdy*(0.5*dl0dx - dx/li)*(-l0i + li) - &
+                        1.0*wti*(0.25*d2l0dxdy + dx*dy/li**3)*(-l0i + li) + &
+                        wti*(0.5*dl0dx - dx/li)*(0.5*dl0dy - dy/li))/l0i**2 !x2y2
+                    valyx(cc) = valxy(cc)  !y2x2
+                    valyy(cc) = (0.125*d2wtdy2*(-l0i + li)**2 - &
+                        0.5*dl0dy*dwtdy*rat*(-l0i + li) + &
+                        2.0*dl0dy*rat*wti*(0.5*dl0dy - dy/li) - &
+                        1.0*dwtdy*(0.5*dl0dy - dy/li)*(-l0i + li) - &
+                        1.0*rat*wti*(0.25*d2l0dy2 - 0.75*dl0dy**2/l0i)*(-l0i + li) + &
+                        1.0*wti*((0.5*dl0dy - dy/li)**2 - &
+                        (-l0i + li)*(0.25*d2l0dy2 + dy**2/li**3 - 1/li)))/l0i**2 !y2y2
+                    cc = cc+1 
+
+                    ! Housekeeping
+                    end associate
+
+                end do
+
+                ! Build full hessian
+                hessJ%row = [row, row, row+vert%ntot, row+vert%ntot]
+                hessJ%col = [col, col+vert%ntot, col, col+vert%ntot]
+                hessJ%val = [valxx, valxy, valyx, valyy]
+
+                ! Scale
+                hessJ%val = lambda*hessJ%val
+
+            end if 
+
+        case default 
+
+            ! Throw error
+            call gdErrorHandler('design variable type "' // designvariables%type &
+                // '" not yet implemented for face angle cost function')
+
+        end select
+
+        ! Other derivatives
+        !==================
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
+       
+        ! Deassociate
+        !============
+        end associate
+
+    end subroutine
+
+    ! Cost function data writing 
+    subroutine WriteCostFunctionDataLD(costfunction, grid)
+
+        ! Description
+        !============
+        ! Write out the cost function data for the LD cost function.
+        ! Here, this consists of the vertex pair data in IDn, xn, yn 
+        ! format
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionLDUDT)        :: costfunction 
+        type(GridUDT)                   :: grid
+
+        ! Auxiliary
+        integer(I8)                     :: ncol, nrow 
+
+        integer(I8), allocatable        :: IDn(:, :) 
+        real(R8), allocatable           :: xn(:, :), yn(:, :)
+        character(:), allocatable       :: filename 
+
+        ! Loop
+        integer(I8)                     :: j 
+
+        ! Initialize
+        !===========
+        ! Set filename
+        allocate(character(len('costfunction_vertexpairs_LD')) :: filename)
+        filename = 'costfunction_vertexpairs_LD'
+
+        ! Allocate
+        nrow = size(costfunction%vpairs, 1)
+        ncol = size(costfunction%vpairs, 2)
+        allocate(IDn(nrow, ncol), xn(nrow, ncol), yn(nrow, ncol))
+
+        ! Unpack
+        associate(&
+            vpairs      => costfunction%vpairs,         &
+            x           => grid%vert%x,                 &
+            y           => grid%vert%y)
+
+        ! Loop
+        do j = 1, ncol 
+            IDn(:, j) = vpairs(:, j) 
+            xn(:, j) = x(vpairs(:, j)) 
+            yn(:, j) = y(vpairs(:, j)) 
+        end do
+
+        ! Call writer
+        !============
+        call WriteVertexPairData(IDn, xn, yn, filename)
+
+        ! Housekeeping
+        !=============
+        end associate
+        deallocate(IDn, xn, yn)
+        
+
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionLD(costfunction, nvp, nv)
+
+        ! Description
+        !============
+        ! Allocate, assumed that costfunction%nvpairs is given
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLDUDT)        :: costfunction
+        integer(I8)                     :: nvp, nv
+
+        ! Allocate
+        !=========
+        allocate(costfunction%vpairs(nvp, 2))
+        allocate(costfunction%Jv(nv))
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionLD(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionLDUDT)        :: costfunction
+
+        ! Deallocate
+        !===========
+        if (allocated(costfunction%vpairs)) then 
+            deallocate(costfunction%vpairs)
+            deallocate(costfunction%Jv)
+        end if
+
+    end subroutine
+
+    subroutine DestroyCostFunctionLD(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionLDUDT)        :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%Deallocate()
+
+    end subroutine
+
+    !------------------------------------------------------------------!
     !                           LENGTH RATIO 2                         !
     !------------------------------------------------------------------!
 
@@ -4680,9 +6146,13 @@ module gdmod_costfunction
         ! Check and switch
         sgn1 = thispsival(:, 1) - thispsival(:, 2)
         sgn2 = thispsival(:, 3) - thispsival(:, 1)
+        wtp = wtp(1:npp)
         if (any(sgn1*sgn2 < 0)) then 
-            ! Shouldn't happen, throw error
-            call gdErrorHandler('Something wrong with initial psi values')
+            ! Shouldn't happen, throw warning and set weight to zero
+            print *, 'FinalizeInitializationCostFunctionPRPB: ' // & 
+                'Something wrong with initial psi values, setting weight ' // &
+                'of these pairs to zero. Results may be unexpected...' 
+            where (sgn1*sgn2 < 0) wtp = 0.0_R8
         end if 
         doflip = (sgn1 < 0) .and. (sgn2 < 0)
         do i = 1, npp
@@ -5634,6 +7104,8 @@ module gdmod_costfunction
         costfunction%doFA       = .false.
         costfunction%doPRPB     = .false. 
         costfunction%doLRrad    = .false.
+        costfunction%doCA       = .false.
+        costfunction%doLD       = .false. 
 
         ! Check based on cost function type
         select case (costfunction%type)
@@ -5644,32 +7116,44 @@ module gdmod_costfunction
             options%FA%lambda       = -1
             options%PRPB%lambda     = -1
             options%LRrad%lambda    = -1
+            options%CA%lambda       = -1
+            options%LD%lambda       = -1
             
         case ('LR_FAD_FA')
 
             ! Set lambda of other contributions
             options%PRPB%lambda     = -1
             options%LRrad%lambda    = -1
+            options%CA%lambda       = -1
+            options%LD%lambda       = -1
 
         case ('LR_FAD_PRPB')
 
             ! Set lambda of other contributions
             options%FA%lambda       = -1
             options%LRrad%lambda    = -1
+            options%CA%lambda       = -1
+            options%LD%lambda       = -1
 
         case ('LR_FAD_PRPB_FA')
 
             ! Set lambda of other contributions
             options%LRrad%lambda    = -1
+            options%CA%lambda       = -1
+            options%LD%lambda       = -1
 
         case ('LR_FAD_PRPB_LRrad')
 
             ! Set lambda of other contributions
             options%FA%lambda    = -1
+            options%CA%lambda       = -1
+            options%LD%lambda       = -1
 
         case ('LR_FAD_PRPB_LRrad_FA')
 
             ! Set lambda of other contributions
+            options%CA%lambda       = -1
+            options%LD%lambda       = -1
 
         case ('general')
 
@@ -5706,6 +7190,16 @@ module gdmod_costfunction
         if (options%LRrad%lambda > 0) then 
             costfunction%doLRrad = .true.
             call costfunction%cfv_lrrad%Initialize(grid, magneticField, &
+                environment, options)
+        end if
+        if (options%CA%lambda > 0) then 
+            costfunction%doCA = .true.
+            call costfunction%cfv_ca%Initialize(grid, magneticField, &
+                environment, options)
+        end if
+        if (options%LD%lambda > 0) then 
+            costfunction%doLD = .true.
+            call costfunction%cfv_ld%Initialize(grid, magneticField, &
                 environment, options)
         end if
 
@@ -5754,6 +7248,8 @@ module gdmod_costfunction
         real(R8), allocatable               :: values(:), Jv(:)
         real(R8), allocatable               :: dJdvar(:), dJdvartemp(:) 
         type(MySparseUDT)                   :: dgradJdvar, dgradJdvartemp
+
+        real(R8)                            :: tstart, tend
 
         ! Loop variables
 
@@ -5829,7 +7325,7 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lr_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lr_val_vertices')
         Jv = 0.0_R8
         
         ! Face angle difference
@@ -5855,7 +7351,7 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fad_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fad_val_vertices')
         Jv = 0.0_R8
 
         ! Face angle
@@ -5881,7 +7377,7 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fa_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_fa_val_vertices')
         Jv = 0.0_R8
 
         ! Psi ratio, psi based
@@ -5908,7 +7404,7 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv,'cfv_prpb_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv,'cfv_prpb_val_vertices')
         Jv = 0.0_R8
 
         ! Length ratio, radial
@@ -5934,7 +7430,59 @@ module gdmod_costfunction
             call hessJtemp%Deallocate()
             call dgradJdvartemp%Deallocate()
         end if 
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lrrad_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_lrrad_val_vertices')
+        Jv = 0.0_R8
+
+        ! Cell angle
+        if (costfunction%doCA) then 
+            ! Compute
+            call costfunction%cfv_ca%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, grid, magneticField, environment, dogradient, &
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+            Jv = costfunction%cfv_ca%Jv 
+            
+            ! Add
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for CA'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
+        end if 
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_ca_val_vertices')
+        Jv = 0.0_R8
+
+        ! Length distribution
+        if (costfunction%doLD) then 
+            ! Compute
+            call costfunction%cfv_ld%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, grid, magneticField, environment, dogradient, &
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+            Jv = costfunction%cfv_ld%Jv 
+            
+            ! Add
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for LD'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
+        end if 
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_ld_val_vertices')
         Jv = 0.0_R8
 
         ! Housekeeping
@@ -5981,6 +7529,8 @@ module gdmod_costfunction
         call costfunction%cfv_fa%Deallocate()
         call costfunction%cfv_prpb%Deallocate()
         call costfunction%cfv_lrrad%Deallocate()
+        call costfunction%cfv_ca%Deallocate()
+        call costfunction%cfv_ld%Deallocate()
 
     end subroutine
 
@@ -6002,6 +7552,8 @@ module gdmod_costfunction
         if (costfunction%doFA) call costfunction%cfv_fa%Deallocate()
         if (costfunction%doPRPB) call costfunction%cfv_prpb%Deallocate()
         if (costfunction%doLRrad) call costfunction%cfv_lrrad%Deallocate()
+        if (costfunction%doCA) call costfunction%cfv_ca%Deallocate()
+        if (costfunction%doLD) call costfunction%cfv_ld%Deallocate()
 
     end subroutine
     

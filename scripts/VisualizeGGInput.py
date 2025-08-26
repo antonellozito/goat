@@ -17,7 +17,8 @@ import sys
 
 # Data directory
 #---------------
-# Simply the current directory
+# Simply the current directory + output directory
+datadir = dh.GetDataDirectory()
 
 # Print
 print('VisualizeGGInput: reading from directory: ' + os.getcwd())
@@ -50,7 +51,7 @@ try:
     plotter.PlotStructured2DContour(R, Z, Psi, 1, levels=mylevels)
 
 except:
-    print("Could not load the magnetic field")
+    print("Could not load the magnetic field from rzpsi.dat")
 
 # Structure
 try:

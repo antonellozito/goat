@@ -1122,6 +1122,7 @@ module goatmod_types
         grid%face%label(flist)              = fdatai(:, 3)
         grid%face%reg(flist)                = fdatai(:, 4)
         grid%face%aligned                   = fdatai(:, 5) 
+        grid%face%TMfacelabel               = grid%face%label
     
         ! Flux tubes
         !-----------

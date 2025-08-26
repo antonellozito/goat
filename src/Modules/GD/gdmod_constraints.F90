@@ -32,6 +32,7 @@ module gdmod_constraints
     !============
     ! Load modules
     use mod_precision
+    use mod_utility
     use mod_sparseinterface
     use optmod_constraints
     use gdmod_types
@@ -1025,7 +1026,7 @@ module gdmod_constraints
         real(R8), allocatable           :: G_ffv(:), lambda_ffv(:)
         type(MySparseUDT)               :: gradG_ffv, hessG_ffv, &
             dG_ffvdvar, dgradG_ffvdvar
-
+        real(R8)                        :: tstart, tend
         ! Initialize
         !===========
         ! Check inputs
@@ -1113,6 +1114,7 @@ module gdmod_constraints
             ic = ic + constraints%boundaryfunction%ncon
 
         end if
+        
 
         ! Flux function constraints
         !--------------------------
@@ -2401,7 +2403,7 @@ module gdmod_constraints
         end do
 
         ! write to file
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_ff_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_ff_val_vertices')
 
         ! Derivatives
         !============
@@ -6022,7 +6024,7 @@ module gdmod_constraints
         end do
 
         ! Write
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_orth_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_orth_val_vertices')
 
         ! Constraint gradient
         !====================
@@ -6332,7 +6334,7 @@ module gdmod_constraints
             tvID(:), tfsIDs(:), allvertIDs(:), tvn(:), tv(:), tpind(:), &
             tptype(:), tvnID(:), uniqueID(:)
 
-        logical                         :: dowarning, dolonelyfluxsurfaces, &
+        logical                         :: dowarning, &
             islonely
         logical, allocatable            :: doesIDoccur(:), &
             hasbeenfound(:), isvesselvertex(:), isvesselface(:), &
@@ -6345,7 +6347,6 @@ module gdmod_constraints
 
         ! Checks
         !=======
-        dolonelyfluxsurfaces = .false.
         ! Allocation status
         if (allocated(constraints%psiind)) then 
             deallocate(constraints%psiind)
@@ -6375,6 +6376,7 @@ module gdmod_constraints
             y               => grid%vert%y,             &
             fieldlineID     => grid%vert%fieldlineID,   &
             docoreflux      => options%ffvoptions%fixcoreflux,  &
+            dotpflux        => options%ffvoptions%fixtpflux,    &
             doouterflux     => options%ffvoptions%fixouterflux  & 
             )
 
@@ -6590,7 +6592,7 @@ module gdmod_constraints
         ! Lonely flux surfaces
         !=====================
         ! Basically flux surfaces with only one non-zero neighbour
-        if (dolonelyfluxsurfaces) then 
+        if (dotpflux) then 
             ! Loop over all flux surfaces
             do i = 1, nfs
                 ! Initialize

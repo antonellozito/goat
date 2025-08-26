@@ -1937,6 +1937,15 @@ module DistributionFunction
                     v = v - c(i)/d0(i)*exp(-d/d0(i))*dddy
                 end do
 
+            case (2)
+
+                ! d2fdy2
+                do i = 1, size(xa)
+                    ! Distance 
+                    d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
+                    v = v + c(i)*(-1/d + (y - ya(i))**2/(d**2*d0(i)) + (y - ya(i))**2/d**3)*exp(-d/d0(i))/d0(i)
+                end do
+
             case default
 
                 call gdErrorHandler('EvaluateDerivativeCoordinates2DDistanceDF: ' // & 
@@ -1960,7 +1969,40 @@ module DistributionFunction
                     v = v - c(i)/d0(i)*exp(-d/d0(i))*dddx
                 end do
 
+            case (1)
+
+                ! d2fdxdy
+                do i = 1, size(xa)
+                    ! Distance 
+                    d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
+
+                    ! Value
+                    v = v + c(i)*(x - xa(i))*(y - ya(i))*(1/(d**2*d0(i)) + d**(-3))*exp(-d/d0(i))/d0(i)
+                end do 
+
             case default
+
+                call gdErrorHandler('EvaluateDerivativeCoordinates2DDistanceDF: ' // & 
+                    'derivative not implemented')
+
+            end select
+
+        case (2)
+
+            select case(derivy)
+
+            case (0)
+
+                ! d2fdx2
+                do i = 1, size(xa)
+                    ! Distance 
+                    d = sqrt((x - xa(i))**2 + (y - ya(i))**2)
+
+                    ! Value
+                    v = v + c(i)*(-1/d + (x - xa(i))**2/(d**2*d0(i)) + (x - xa(i))**2/d**3)*exp(-d/d0(i))/d0(i)
+                end do 
+
+            case default 
 
                 call gdErrorHandler('EvaluateDerivativeCoordinates2DDistanceDF: ' // & 
                     'derivative not implemented')
