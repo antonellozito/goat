@@ -14,7 +14,7 @@ VERSION 1.00.00
 # Input file locations 
 #'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
 #'goat.gridfilepath'                 'traduit.out.b2us_basegeom'
-'goat.gridfilepath'                 'traduit.out.b2us_gg'
+'goat.gridfilepath'                 'traduit.out.b2us'
 'goat.magneticfieldfilepath'        'tcvx23_equil.equ'
 'goat.structurefilepath'            'structure.dat'
 'goat.GDinputfilepath'              'GOAToptions.dat'
@@ -204,7 +204,23 @@ VERSION 1.00.00
 'gd.design.cfv.par.FA.weightatinf'          '100'
 'gd.design.cfv.par.FA.decaylength'          '0.5'
 'gd.design.cfv.par.FA.lambda'		 		'0e-5'
-'gd.design.cfv.par.PRPB.lambda'		 		'1e-5'
+
+'gd.design.cfv.par.CA.lambda'		 		'1e-6'
+'gd.design.cfv.par.CA.weightatvessel'       '1.0'
+'gd.design.cfv.par.CA.weightatinf'          '1.0'
+'gd.design.cfv.par.CA.decaylength'          '0.5'
+
+'gd.design.cfv.par.LD.lambda'		 		'0e-4'
+'gd.design.cfv.par.LD.weight.face.label'    '[2, 4]'
+'gd.design.cfv.par.LD.weight.face.val'      '[1.0*2]'
+'gd.design.cfv.par.LD.weight.face.d'        '[0.5*2]'
+'gd.design.cfv.par.LD.weight.valinf'        '1e-1'
+'gd.design.cfv.par.LD.length.face.label'    '[2, 4]'
+'gd.design.cfv.par.LD.length.face.val'      '[1e-3*2]'
+'gd.design.cfv.par.LD.length.face.d'        '[0.25*2]'
+'gd.design.cfv.par.LD.length.valinf'        '0.01'
+
+'gd.design.cfv.par.PRPB.lambda'		 		'1e-6'
 'gd.design.cfv.par.PRPB.biasdecaylength'	'0.5'
 'gd.design.cfv.par.PRPB.biasatsep'		    '1.0'
 'gd.design.cfv.par.PRPB.biasatinf'		    '1.0'
@@ -219,9 +235,9 @@ VERSION 1.00.00
 'gd.design.ec.boundaryfunctions'    '1'
 'gd.design.ec.fluxfunction'         '1'
 'gd.design.ec.xpoints'              '1'
-'gd.design.ec.edgelengths'          '1'
+'gd.design.ec.edgelengths'          '0'
 'gd.design.ec.lengthratio'          '0'
-'gd.design.ec.orthogonality'        '1'
+'gd.design.ec.orthogonality'        '0'
 'gd.design.ec.fixedfluxvalues'      '1'
 
 # Inequality constraints
