@@ -369,7 +369,6 @@ module gamod_driver
 
     end subroutine
 
-
     subroutine PostProcessingGridInformation(grid,magneticField,options)
 
         ! Description
@@ -392,7 +391,7 @@ module gamod_driver
         ! Arguments
         type(GridUDT), intent(inout)        :: grid
         type(MagneticFieldUDT), intent(in)  :: magneticField
-        type(GAoptionsUDT), intent(in)      :: options 
+        type(GAoptionsUDT), intent(inout)      :: options 
 
         ! Auxiliary
         logical :: trias_present, pents_present
@@ -459,26 +458,33 @@ module gamod_driver
         trias_present = any(c%vertP(:,2) == 3)
         pents_present = any(c%vertP(:,2) == 5)
 
-        if (.not.trias_present .and. .not.pents_present) then
+        if (.not.options%rem_small_trias) then
+        
+            print *, "Warning: Postprocessing: BuildFluxTube goes to shit if small triangle present"
 
-            ! For grids that can be stored as structured grid
-            ctype = 'all'
-            call BuildFluxTubeData(grid,options,magneticField,ctype)
+        else 
 
-        elseif (trias_present .and. .not. pents_present) then
+            if (.not.trias_present .and. .not.pents_present) then
 
-            ! For grids with triangles (so fully unstructured) but without pentagons
-            ctype = 'all_us'
-            call BuildFluxTubeData(grid,options,magneticField,ctype); 
+                ! For grids that can be stored as structured grid
+                ctype = 'all'
+                call BuildFluxTubeData(grid,options,magneticField,ctype)
 
-        elseif (pents_present) then
+            elseif (trias_present .and. .not. pents_present) then
 
-            ! For unstructured grids it is sufficient to give the closed flux tubes
-            ! in the core and the first tube in the SOL of cells neighbouring the core. 
-            ctype = 'closed'
-            call BuildFluxTubeData(grid,options,magneticField,ctype);             
+                ! For grids with triangles (so fully unstructured) but without pentagons
+                ctype = 'all_us'
+                call BuildFluxTubeData(grid,options,magneticField,ctype); 
 
-        end if
+            elseif (pents_present) then
+
+                ! For unstructured grids it is sufficient to give the closed flux tubes
+                ! in the core and the first tube in the SOL of cells neighbouring the core. 
+                ctype = 'closed'
+                call BuildFluxTubeData(grid,options,magneticField,ctype);             
+
+            end if
+        end if 
 
         ! Recalculate fsPsi
         fsPsi = 0
@@ -498,9 +504,28 @@ module gamod_driver
 
     end subroutine
 
+    subroutine CarryOverOptions(goatoptions, gaoptions)
 
+        ! Description
+        !============
+        ! Carry over some options from goatoptions to gaoptions
 
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GoatoptionsUDT), intent(in)    :: goatoptions
+        type(GAoptionsUDT), intent(inout)   :: gaoptions
+        
+        gaoptions%vesselmode            = goatoptions%vesselmode 
+        gaoptions%slab                  = goatoptions%slab
+        gaoptions%debug                 = goatoptions%debug 
+        gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
+        gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
+        gaoptions%OMP_r                 = goatoptions%OMP_r
+        gaoptions%OMP_z                 = goatoptions%OMP_z
+        gaoptions%IMP_r                 = goatoptions%IMP_r
+        gaoptions%IMP_z                 = goatoptions%IMP_z
 
-
+    end subroutine
 
 end module

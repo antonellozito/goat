@@ -488,14 +488,14 @@ module gamod_utility
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:) :: tube, tube_fc, fcs, & 
-            pfaces, pfacesB, pfacesI, pfaces_dummy, ipface, cvs, faceB, &
-            ic_dummy
+            pfaces, pfacesB, pfacesI, pfaces_dummy, pfaces_dummy2, cvs, faceB, &
+            ic_dummy, ipface_dummy, ipface_dummy2
         integer(I8) :: tube_count, ic, ic1, npfacesB, i, tube_cv, tube_count_fc, &
-            cv_tot_count, fc_tot_count, ifc, ind, next_ic, v1, v2, nipface
+            cv_tot_count, fc_tot_count, ifc, ind, next_ic, v1, v2, nipface, ipface, nt
         real(R8), allocatable :: fcX(:), fcY(:), vecX_i, vecY_i, vecX_B, vecY_B, &
             cosf(:)
         logical :: start_cell,  build_tube
-        logical, allocatable :: in_ftCv(:)
+        logical, allocatable :: in_ftCv(:), test(:)
 
 
         ! Associate
@@ -527,8 +527,8 @@ module gamod_utility
         in_ftCv = .false.
         cv_tot_count = 0
         fc_tot_count = 0
-        fcX = 0.5_R8 * v%x(f%vert(:,1)) + v%x(f%vert(:,2))
-        fcY = 0.5_R8 * v%y(f%vert(:,1)) + v%y(f%vert(:,2))
+        fcX = 0.5_R8 * (v%x(f%vert(:,1)) + v%x(f%vert(:,2)))
+        fcY = 0.5_R8 * (v%y(f%vert(:,1)) + v%y(f%vert(:,2)))
 
         ! Loop over all cells
         do ic = 1, c%ntot
@@ -546,21 +546,37 @@ module gamod_utility
 
                     ! Eliminate if cells is trapezoid
                     start_cell = .true.
+                    if (allocated(pfaces)) deallocate(pfaces)
+                    allocate(pfaces(count(f%aligned(fcs) /= 0)))
                     pfaces = pack(fcs, f%aligned(fcs) /= 0)
+
+                    if (allocated(pfacesB)) deallocate(pfacesB)
+                    allocate(pfacesB(count(f%label(pfaces) /= 0)))
                     pfacesB = pack(pfaces, f%label(pfaces) /= 0)
                     npfacesB = size(pfacesB)
 
                     ! Get the internal faces
                     if (npfacesB .gt. 1) then
+                        if (npfacesB == 2) then
+                            allocate(pfaces_dummy(count(pfaces /= pfacesB(1))))
+                            pfaces_dummy = pack(pfaces, pfaces /= pfacesB(1)) 
 
-                        pfaces_dummy = pfaces
-                        do i = 1, npfacesB
-                            pfaces_dummy = pack(pfaces_dummy, pfaces_dummy /= pfacesB(i))
-                        end do 
-                        pfacesI = pfaces_dummy
+                            allocate(pfaces_dummy2(count(pfaces_dummy /= pfacesB(2))))
+                            pfaces_dummy2 = pack(pfaces_dummy, pfaces_dummy /= pfacesB(2))
+
+                            allocate(pfacesI(size(pfaces_dummy2)))
+                            pfacesI = pfaces_dummy2
+
+                            deallocate(pfaces_dummy)
+                            deallocate(pfaces_dummy2)
+                        else
+                            call gdErrorHandler('BuildOpenTubesUS: cell with three boundary faces not yet implemented')
+                        end if
 
                     elseif (npfacesB == 1) then
-                        pfacesI = pack(pfaces, pfaces /= pfacesB)
+                        if (allocated(pfacesI)) deallocate(pfacesI)
+                        allocate(pfacesI(count(pfaces /= pfacesB(1))))
+                        pfacesI = pack(pfaces, pfaces /= pfacesB(1))
                     end if
 
                     ! Do not start the tube if following conditions
@@ -655,30 +671,40 @@ module gamod_utility
 
                             ! Attritube faces in tube
                             tube_fc(1) = pfacesB(1)
-                            pfaces_dummy = pack(pfaces,pfaces /= pfacesB)
+                            pfaces_dummy = pack(pfaces,pfaces /= pfacesB(1))
                             tube_fc(2) = pfaces_dummy(1)
 
                         end if 
-                    end if 
+                    end if
+                    
+                    ! Housekeeping
+                    deallocate(pfaces)
+                    deallocate(pfacesB)
 
                     ! Update counter
                     tube_count_fc = 2
 
                     ! Marching algo
                     ! Get the internal poloidal faces
-                    ipface = pfacesI
-                    if (size(ipface) /= 1) then
+                    allocate(ipface_dummy(size(pfacesI)))
+                    ipface_dummy = pfacesI
+                    if (size(ipface_dummy) /= 1) then
                         build_tube = .false.
+                    else 
+                        ipface = ipface_dummy(1)
                     end if
+                    deallocate(ipface_dummy)
 
                     if (build_tube) then
 
-                        do while (f%label(ipface(1)) == 0) 
+                        do while (f%label(ipface) == 0) 
 
                             ! Get cells of ipface
-                            cvs = GetFaceCell(f,ipface(1))
+                            cvs = GetFaceCell(f,ipface)
+                            allocate(ic_dummy(count(cvs /= ic1)))
                             ic_dummy = pack(cvs,cvs /= ic1)
                             next_ic = ic_dummy(1)
+                            deallocate(ic_dummy)
 
                             if (any(next_ic == tube)) then
 
@@ -695,28 +721,45 @@ module gamod_utility
                             ic1 = next_ic
 
                             fcs = GetCellFace(c, ic1)
+                            if (allocated(pfaces)) deallocate(pfaces)
+                            allocate(pfaces(count(f%aligned(fcs) == 0)))
                             pfaces = pack(fcs, f%aligned(fcs) == 0)
-                            ipface = pack(pfaces, pfaces /= ipface)
+
+                            allocate(ipface_dummy(count(pfaces /= ipface)))
+                            ipface_dummy = pack(pfaces, pfaces /= ipface)  
 
                             ! Eliminate possible poloidal boundary faces
-                            nipface = size(ipface)
+                            nipface = size(ipface_dummy)
                             if (nipface .ge. 1) then
                                 if (nipface .gt. 1) then
 
-                                    if (sum(f%label(ipface)) == nipface) then
+                                    ! Eliminate a internal poloidal face
+                                    if (count(f%label(ipface_dummy) /= 0) == nipface) then
 
-                                            ipface = ipface(1)
+                                            ipface = ipface_dummy(1)
                                     else
                                             ! Only keep the non-boundary ipface
-                                            ipface = pack(ipface,f%label(ipface) /= 0)
+                                            !if (count(f%label(ipface_dummy) == 0) /= 1) then
+                                            test = isBoundaryFace1D(ipface_dummy,f)
+                                            nt = count(.not.test)
+                                            if (count(.not.test) /= 1) then
+                                                call gdErrorHandler('BuildOpenTubeUS: not supported case')
+                                            end if
+
+                                            ipface_dummy2 = pack(ipface_dummy,f%label(ipface_dummy) == 0)
+                                            ipface = ipface_dummy2(1)
 
                                     end if
+                                else if (nipface .eq. 1) then
+
+                                    ipface = ipface_dummy(1)
+
                                 end if
-                                if (size(ipface) /= 1) then
 
-                                    call gdErrorHandler('BuildOpenTubeUS: not supported case')
+                                ! Add face to tube_fc
+                                tube_count_fc = tube_count_fc + 1
+                                tube_fc(tube_count_fc) = ipface
 
-                                end if 
                             else if (nipface == 0) then
 
                                 print *, 'Warning: BuildOpenTubesUS: No ipface found, put boundary face in tube'
@@ -724,6 +767,10 @@ module gamod_utility
                                 ipface = faceB(1)
 
                             end if
+
+                            ! Housekeeping
+                            deallocate(ipface_dummy)
+                            deallocate(pfaces)
 
                         end do
 
@@ -1228,7 +1275,7 @@ module gamod_utility
         !==================
         ! Arguments
         type(GridUDT), intent(inout)    :: grid
-        type(GAoptionsUDT), intent(in)  :: options        
+        type(GAoptionsUDT), intent(inout)  :: options        
 
         ! Auxiliary
         integer(I8) :: mode
@@ -1236,25 +1283,25 @@ module gamod_utility
 
         ! OMP
         mode = 1
-        call CvIntersectionsGOAT(options%OMPr,options%OMPz,grid,mode,cvOMP,fcOMP)
+        call CvIntersectionsGOAT(options%OMP_r,options%OMP_z,grid,mode,cvOMP,fcOMP)
         
         ! IMP
         mode = 1
-        call CvIntersectionsGOAT(options%IMPr,options%IMPz,grid,mode,cvIMP,fcIMP)
+        call CvIntersectionsGOAT(options%IMP_r,options%IMP_z,grid,mode,cvIMP,fcIMP)
 
         ! Save
         grid%data%OMPcell   = cvOMP
-        grid%data%OMPncell  = size(cvOMP)
+        grid%data%nOMPcell  = size(cvOMP)
         grid%data%OMPface   = fcOMP
-        grid%data%OMPnface  = size(fcOMP)
+        grid%data%nOMPface  = size(fcOMP)
         grid%data%IMPcell   = cvIMP
-        grid%data%IMPncell  = size(cvIMP)
+        grid%data%nIMPcell  = size(cvIMP)
         grid%data%IMPface   = fcIMP
-        grid%data%IMPnface  = size(fcIMP)
+        grid%data%nIMPface  = size(fcIMP)
 
     end subroutine
 
-    subroutine CvIntersectionsGOAT(segm_r, segm_z, grid, mode, listcv, listff)
+    subroutine CvIntersectionsGOAT(segm_r, segm_z, grid, mode, listcv, listfc)
 
         ! Description
         !============
@@ -1265,12 +1312,274 @@ module gamod_utility
         ! Declare variables
         ! =================
         ! Arguments
-        real(R8), intent(in) :: segm_r(1:2), segm_z(1:2)
+        real(R8), intent(inout) :: segm_r(1:2), segm_z(1:2)
         type(GridUDT) :: grid
         integer(I8) :: mode
-        integer(I8), allocatable :: listcv, listff
+        integer(I8), allocatable :: listcv(:), listfc(:)
+
+        ! Auxiliary
+        integer(I8) :: nn, ii, kk, cv, ifc, nc, nomp
+        integer(I8), allocatable :: cvs(:), &
+            listcv_dummy(:), listfc_dummy(:)
+        logical :: no_intersections, found
+        real(R8) :: m, a, b, cc
+        real(R8), allocatable, dimension(:) :: dist_vert, p1, &
+            q1, p2, q2
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        allocate(listcv_dummy(200))
+        allocate(listfc_dummy(200))
+        allocate(dist_vert(v%ntot))
+        nn = 1
+
+        ! Check whether the segment intersects any vertices, if so shift the
+        ! segment
+        ! a line : a*x+ b*y + c = 0
+        ! Combined with y-y_a = m (x - x_a)
+        ! with m = (y_b - y_a)/(x_b - x_a)
+        ! Gives : a = m, b = -1, c = y_a - m x_a   
+        no_intersections = .false.
+
+        do while (.not.no_intersections)
+
+            ! Parameterize line
+            m = (segm_z(2) - segm_z(1))/(segm_r(2) - segm_r(1))
+            a = m 
+            b = -1.0_R8
+            cc = segm_z(1) - m*segm_r(1)
+
+            ! Distance to vertices
+            dist_vert = abs(a*v%x + b*v%y + cc)/sqrt(a**2 + b**2)
+
+            if (minval(dist_vert) .lt. 1e-10_R8) then
+
+                ! Adjust the segment and test again 
+                segm_r = segm_r + 1e-6_R8
+                segm_z = segm_z + 1e-6_R8
+                no_intersections = .false.
+
+            else
+
+                ! Continue with current segment
+                no_intersections = .true.
+
+            end if
+
+        end do
+
+        ! Segment
+        p1 = [segm_r(1), segm_z(1)]
+        q1 = [segm_r(2), segm_z(2)]
+
+        ! Loop over all faces
+        do ifc = 1, f%ntot
+
+            p2 = [ v%x(f%vert(ifc,1)), v%y(f%vert(ifc,1)) ]
+            q2 = [ v%x(f%vert(ifc,2)), v%y(f%vert(ifc,2)) ]
+            
+            if (Intersects(p1,q1,p2,q2) == 1) then
+
+                cvs = GetFaceCell(f, ifc)
+                nc = size(cvs)
+                do ii = 1, nc
+                    cv = cvs(ii)
+                    found = .false.
+                    kk = 1
+                    do while (.not.found .and. kk .le. nn)
+
+                        if (listcv(kk) == cv) then 
+                            found = .true.
+                        end if
+                        kk = kk + 1
+                    end do
+                    if (.not.found) then
+
+                        listcv_dummy(nn) = cv
+                        listfc_dummy(nn) = ifc
+                        nn = nn + 1
+                    end if
+
+                end do
+
+            end if
+
+        end do
+
+        ! Trim
+        nn = nn - 1
+        listcv = listcv_dummy(1:nn)
+        listfc = listfc_dummy(1:nn)
+
+        ! Sorting
+        nomp = size(listcv)
+
+        ! Sorting - direction does not matter for now
+        call SortOmpListGOAT(grid,nomp,listcv,mode,segm_r,segm_z);
+
+
+
+        end associate
 
     end subroutine 
+
+    subroutine SortOmpListGOAT(grid,nomp,listcv,mode,segm_r,segm_z)
+
+        ! Description
+        !============
+        ! Sort the cells in the intersection cell list
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(in) :: grid
+        integer(I8), intent(in) :: nomp, mode
+        integer(I8), allocatable, intent(inout) :: listcv(:)
+        real(R8), intent(in) :: segm_r(2), segm_z(2)
+
+        ! Auxiliary
+        integer(I8) :: i, j, ic, nc, l, ic1, iv, ifc
+        integer(I8), allocatable :: omp_cv_sorted(:), omp_cv(:), cvs(:), cvLookUp(:)
+        logical :: found, in_list, in_list_sorted
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        cvLookUp = GetCvLookUp(c)
+        omp_cv = listcv
+
+        ! Find a boundary cell to start
+        allocate(omp_cv_sorted(nomp))
+        omp_cv_sorted = 0
+
+        do i = nomp, 1, -1
+            ic = omp_cv(i)
+
+            if (omp_cv_sorted(1) == 0) then
+                omp_cv_sorted(1) = ic
+            elseif (mode == 1 .and. c%x(ic) .lt. c%x(omp_cv_sorted(1))) then
+                omp_cv_sorted(1) = ic
+            elseif (mode == 2 .and. c%y(ic) .lt. c%y(omp_cv_sorted(1))) then
+                omp_cv_sorted(1) = ic
+            end if
+
+        end do
+
+        ! Sorting itself
+        ! First via poloidal faces
+        found = .true.
+        do i = 1, nomp-1
+
+            ic = omp_cv_sorted(i)
+            do j = c%faceP(ic,2), 1, -1
+
+                ifc = c%face(c%faceP(ic,1)+j-1)
+                if (f%aligned(ifc) == 0) then
+
+                    cvs = GetFaceCell(f, ifc)
+                    nc = size(cvs)
+                    do l = 1, nc
+
+                        in_list = .false.
+                        in_list_sorted = .false.
+                        ic1 = cvs(l)
+
+                        if (ic1 /= ic .and. omp_cv_sorted(i+1) == 0) then
+
+                            ! Check whether ic1 is in omp_cv and not in omp_cv_sorted
+                            if (any(omp_cv == ic1) .and. .not. any(omp_cv_sorted(1:i) == ic1)) &
+                                omp_cv_sorted(i+1) = ic1
+                 
+                        end if
+
+                    end do
+
+                end if
+            end do
+            
+            ! Then through aligned faces
+            if (omp_cv_sorted(i+1) == 0 ) then
+
+                do j = c%faceP(ic,2), 1, -1
+
+                    ifc = c%face(c%faceP(ic, 1)+j-1)
+                    if (f%aligned(ifc) == 1) then
+
+                        cvs = GetFaceCell(f, ifc)
+                        nc = size(cvs)
+
+                        do l = 1, nc
+
+                            ic1 = cvs(l)
+                            if (ic1 /= ic .and. omp_cv_sorted(i+1) == 0) then
+                                if (any(omp_cv == ic1) .and. .not. any(omp_cv_sorted(1:i) == ic1)) &
+                                omp_cv_sorted(i+1) = ic1
+
+                            end if
+                        end do
+                    end if
+                end do
+
+                
+            end if 
+
+            ! if no next cell is found, allow to go over vertices
+            ! if no next cell is found through face neigbours, look at vertex
+            ! neighbours   
+            if (omp_cv_sorted(i+1) == 0) then
+
+                do j = 1, c%vertP(ic, 2)
+
+                    iv = c%vert(c%vertP(ic,1)+j-1)
+                    cvs = GetVertCell(v, i)
+                    nc = size(cvs)
+
+                    do l = 1, nc
+
+                        ic = cvs(l)
+                        if (ic1 /= ic .and. omp_cv_sorted(i+1) == 0) then
+                            if (any(omp_cv == ic1) .and. .not. any(omp_cv_sorted(1:i) == ic1)) &
+                            omp_cv_sorted(i+1) = ic1
+
+                        end if                        
+                    end do
+
+                end do
+
+            end if
+
+            ! If there would be no next cell - error => change segment
+            if (omp_cv_sorted(i+1) == 0) then
+                found = .false.;
+                exit
+            end if          
+
+        end do
+
+        if (.not.found) then
+            print *, "Warning: CvIntersectionsGOAT: possibly multiple grid intersections found, // &
+             & check the position of the MP segments"
+            omp_cv_sorted = 0
+        end if
+
+        ! Save
+        listcv = omp_cv_sorted
+
+        end associate
+
+    end subroutine
 
 
     !==================================================================!
@@ -1391,5 +1700,110 @@ module gamod_utility
         if (res == 0) call gdErrorHandler('GetOppositeFace: no opposite face found')
 
     end function
+
+    function Intersects(p1, q1, p2, q2) result(res)
+        real(R8) :: p1(2), q1(2), p2(2), q2(2)
+        integer(I8) :: res, o1, o2, o3, o4
+
+
+        o1 = Orient(p1, q1, p2)
+        o2 = Orient(p1, q1, q2)
+        o3 = Orient(p2, q2, p1)
+        o4 = Orient(p2, q2, q2)
+
+        res = 1
+
+        if (o1 /= o2 .and. o3 /= o4) then
+            return
+        end if
+
+        !c1 = 
+        if (o1 == 0 .and. OnSegment(p1, p2, q1) == 1) then 
+            return
+        end if
+    
+        if (o2 == 0 .and. OnSegment(p1, q2, q1) == 1) then
+            return
+        end if
+    
+        if (o3 == 0 .and. OnSegment(p2, p1, q2) == 1) then
+            return 
+        end if
+    
+        if (o4 == 0 .and. OnSegment(p2, q1, q2) == 1) then
+            return 
+        end if
+
+        res = 0;
+
+    end function
+
+    function Orient(p, q, r)  result(res)
+        real(R8) :: p(2), q(2), r(2), val
+        integer(I8) :: res
+
+        val = (q(2) - p(2)) * (r(1) - q(1)) - (q(1) - p(1)) * (r(2) - q(2))
+
+        if (val > 0) then
+
+            res = 1
+            return
+
+        else
+
+            if (val < 0) then
+                res = 2
+                return
+            else
+                res = 0
+                return
+            end if
+
+        end if
+
+    end function
+
+    function OnSegment(p, q, r) result(res)
+        real(R8) :: p(2), q(2), r(2)
+        integer(I8) :: res 
+
+        res = 0
+        if ( (q(1) <= max(p(1), r(1))) .and. (q(1) >= min(p(1), r(1))) .and. &
+             (q(2) <= max(p(2), r(2))) .and.  (q(2) >= min(p(2), r(2))) ) then
+            res = 1
+        end if
+        
+        return               
+    end function
+
+    function isBoundaryFace0D(ifc, f) result(res)
+        integer(I8) :: ifc
+        type(FaceUDT) :: f
+        logical :: res
+
+        res = .true. 
+        if (f%label(ifc) == 0) then
+            res = .false.
+        end if
+    end function
+
+    function isBoundaryFace1D(fc, f) result(res)
+        integer(I8), allocatable :: fc(:)
+        integer(I8) :: i
+        type(FaceUDT) :: f
+        logical, allocatable :: res(:)
+
+        allocate(res(size(fc)))
+        res = .true. 
+        do i = 1, size(fc)
+            if (f%label(fc(i)) == 0) then
+                res(i) = .false.
+            end if
+        end do
+
+    end function
+
+
+
 
 end module 

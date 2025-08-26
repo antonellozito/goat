@@ -269,10 +269,10 @@ module goatmod_userinput
         ! fcRegmappingGA
         integer(I8)                 :: fcRegmappingGA(1:7)
 
-        real(R8)                    :: OMPr
-        real(R8)                    :: OMPz
-        real(R8)                    :: IMPr
-        real(R8)                    :: IMPz
+        real(R8), allocatable       :: OMP_r(:)
+        real(R8), allocatable       :: OMP_z(:)
+        real(R8), allocatable       :: IMP_r(:)
+        real(R8), allocatable       :: IMP_z(:)
 
 
     contains

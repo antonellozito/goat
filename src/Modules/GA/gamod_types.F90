@@ -451,7 +451,7 @@ module gamod_types
     !------------------------------------------------------------------!
     !                  QUALITY METRIC COMPUTATIONS                     !
     !------------------------------------------------------------------!
-    subroutine ComputeQM(qm,grid,options)
+    subroutine ComputeQM(qm,grid,options, magneticField)
 
         ! Description
         !============
@@ -462,18 +462,326 @@ module gamod_types
         !==================
         ! Arguments
         class(QualityMetric), intent(inout)     :: qm
-        type(GridUDT), intent(in)               :: grid
+        type(GAGridUDT), intent(in)             :: grid
         type(GAoptionsUDT), intent(in)          :: options
+        type(MagneticFieldUDT), intent(in)      :: magneticField
 
         ! Auxiliary
-        real(R8) :: vec_n(grid%face%ntot,2), fcH(grid%face%ntot,2), &
-         ncpf(grid%face%ntot), fccv(grid%face%ntot,2), &
-         fcxx(grid%face%ntot)
+        real(R8) :: fcH(grid%face%ntot,2), psic, &
+            mean_psi, isx(4), isy(4), &
+            h_rad_int, v1p, v2p, cvx1, cvy1, cvx2, cvy2, t0, &
+            min_vpsi, max_vpsi
+        real(R8), allocatable, dimension(:) :: v1x, v1y, &
+            v2x, v2y, fcX, fcY, fcS, fcBx, fcBy, fcs_fcs, &
+            vx, vy, vertsX, vertsY, vpsi, cx, cy, h_pol, &
+            h_rad, h_rad_psi, cvS,  cvAR, fcBias, psi_verts,  &
+            fcqalfc, fcxx
+        real(R8), allocatable :: fcBb(:,:), vec_n(:,:)
+        integer(I8), allocatable, dimension(:) :: vx1, vx2, &
+            tv, tf, tc, indCv, ncpf
+        integer(I8) :: i, ic, nv, ii, ifc, ir, v1, v2
+        integer(I8), allocatable :: fccv(:,:) 
+        logical :: not_aligned_f(grid%face%ntot), &
+            comp_range(grid%cell%ntot)
+
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        allocate(vx1(f%ntot), vx2(f%ntot), v1x(f%ntot), v1y(f%ntot), &
+            v2x(f%ntot), v2y(f%ntot), fcX(f%ntot), fcY(f%ntot), &
+            vec_n(f%ntot,2), vx(v%ntot), vy(v%ntot), vpsi(v%ntot), &
+            h_pol(c%ntot), h_rad(c%ntot), h_rad_psi(c%ntot), &
+            cvS(c%ntot), cvAR(c%ntot), fcBias(f%ntot), fccv(f%ntot,2), &
+            indCv(c%ntot), fcqalfc(f%ntot), ncpf(f%ntot), fcxx(f%ntot))
+
+
+
+        vx1 = f%vert1%GetAllElements()
+        vx2 = f%vert2%GetAllElements()
+        vx = v%x%GetAllElements()
+        vy = v%y%GetAllElements()
+        vpsi = v%psi%GetAllElements()
+        cx = c%x%GetAllElements()
+        cy = c%y%GetAllElements()
+
+        ! Calculate face properties
+        v1x = v%x%GetMultipleElements(vx1)
+        v1y = v%y%GetMultipleElements(vx1)
+        v2x = v%x%GetMultipleElements(vx2)
+        v2y = v%y%GetMultipleElements(vx2)
+
+        fcX = 0.5_R8 * (v1x + v2x)
+        fcY = 0.5_R8 * (v1y + v2y)
+
+        fcS = sqrt( (v2x - v1x)**2 + (v2y - v1y)**2 )
+
+        ! Normal vectors
+        vec_n(:,1) = (v2y - v1y) / fcS
+        vec_n(:,2) = -(v2x - v1x) / fcS
+
+        call magneticField%interp%Evaluate(fcX,fcY,1,0,fcBx)
+        call magneticField%interp%Evaluate(fcX,fcY,0,1,fcBy)
+
+        fcBb(:,1) = -fcBy / sqrt(fcBx**2 + fcBy**2)
+        fcBb(:,2) =  fcBx / sqrt(fcBx**2 + fcBy**2)
+
+        fcqalfc = (fcBb(:,1)*vec_n(:,1) + fcBb(:,2)*vec_n(:,2));
+
+        ! Pre-process non aligned faces
+        !==============================
+        not_aligned_f = (f%aligned%GetAllElements() == 0)
+
+        indCv = (/ (i, i = 1, c%ntot )/)
+        comp_range = indCv .le. qm%nCv
+
+        ! Cell loop 
+        !==========
+        do ic = 1, c%ntot
+
+            tv = GetCellVertGA(c, ic)
+            tf = GetCellFaceGA(c, ic)
+            nv = size(tv)
+
+            psi_verts = vpsi(tv)
+            max_vpsi = maxval(psi_verts)
+            min_vpsi = minval(psi_verts)
+
+            ! Add faces to an array
+            ncpf(tf) = ncpf(tf) + 1
+            do i = 1, nv
+                fccv(tf(i), ncpf(tf(i))) = ic
+            end do
+
+            ! Aspect ratio
+            fcs_fcs = fcs(tf)
+            cvAR(ic) = maxval(fcs_fcs) / minval(fcs_fcs)
+
+            if (comp_range(ic) .and. .not.options%slab) then
+
+                if (.not.(cvAR(ic) == qm%cvAR(ic))) then
+
+                    !TODO - group in :: call CalcCvMetric(ic,tv,vx,vy,max_vpsi,min_vpsi,tf,vx1,vx2)
+
+                    ! Area
+                    !=====
+                    vertsX = vx(tv)
+                    vertsY = vy(tv)
+                    if (nv == 4) then ! Quad
+
+                        cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))  &
+                        + TriangleArea(vertsX(1),vertsY(1),vertsX(3),vertsY(3),vertsX(4),vertsY(4))
+
+                    elseif (nv == 3) then
+
+                        cvS(ic) = triangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))
+
+                    elseif (nv == 2) then
+
+                        cvS(ic) = 0
+
+                    elseif (nv == 5) then
+
+                        cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3)) &
+                        + TriangleArea(vertsX(3),vertsY(3),vertsX(4),vertsY(4),vertsX(5),vertsY(5)) & 
+                        + TriangleArea(vertsX(3),vertsY(3),vertsX(1),vertsY(1),vertsX(5),vertsY(5))
+
+                    else
+
+                        call gdErrorHandler('ComputeQM: cell type not implemented')
+
+                    end if
+
+                    ! H pol
+                    !======
+                    mean_psi = 0.5_R8* (max_vpsi + min_vpsi) 
+
+                    isx = 0
+                    isy = 0
+                    ii = 0
+                    ir = 0
+                    h_rad_int = 0
+                    do i = 1, nv
+                        ifc = tf(i)
+                        v1 = vx1(ifc)
+                        v2 = vx2(ifc)
+                        v1p = vpsi(v1)
+                        v2p = vpsi(v2)
+                        if ((psic .gt. min(v1p, v2p)) &
+                            .and. (psic .lt. max(v1p, v2p)) ) then
+                            
+                            t0 = (psic - v1p) / (v2p - v1p)
+                            ii = ii + 1
+                            isx(ii) = vx(v1) + t0 *(vx(v2) - vx(v1))
+                            isy(ii) = vy(v1) + t0 *(vy(v2) - vy(v1))
+
+                            if (not_aligned_f(ifc)) then
+                                ir = ir + 1
+                                h_rad_int = h_rad_int + fcS(ifc)*abs(fcqalfc(ifc))
+                            end if
+                            
+                        end if 
+                    end do
+
+                    if (ii /= 2) call gdErrorHandler('ComputeQM: insufficient intersection with mean psi value found')
+
+                    h_pol(ic) = sqrt( ( isx(2) - isx(1) )**2 + ( isy(2) - isy(1) )**2 )
+                    h_rad(ic) = h_rad_int / ir
+                    h_rad_psi(ic) = abs(max_vpsi - min_vpsi)
+
+                else
+
+                    ! Is aspect ratios are the same, the metric are not recalculated
+                    h_pol(ic) = qm%h_pol(ic);
+                    h_rad(ic) = qm%h_rad(ic);
+                    h_rad_psi(ic) = qm%h_rad_psi(ic);
+                    cvS(ic) = qm%cvS(ic);
+
+
+                end if
+
+            else 
+
+                ! For new cells
+                ! Area
+                !=====
+                vertsX = vx(tv)
+                vertsY = vy(tv)
+                if (nv == 4) then ! Quad
+
+                    cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))  &
+                    + TriangleArea(vertsX(1),vertsY(1),vertsX(3),vertsY(3),vertsX(4),vertsY(4))
+
+                elseif (nv == 3) then
+
+                    cvS(ic) = triangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))
+
+                elseif (nv == 2) then
+
+                    cvS(ic) = 0
+
+                elseif (nv == 5) then
+
+                    cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3)) &
+                    + TriangleArea(vertsX(3),vertsY(3),vertsX(4),vertsY(4),vertsX(5),vertsY(5)) & 
+                    + TriangleArea(vertsX(3),vertsY(3),vertsX(1),vertsY(1),vertsX(5),vertsY(5))
+
+                else
+
+                    call gdErrorHandler('ComputeQM: cell type not implemented')
+
+                end if
+
+                ! H pol
+                !======
+                mean_psi = 0.5_R8* (max_vpsi + min_vpsi) 
+
+                isx = 0
+                isy = 0
+                ii = 0
+                ir = 0
+                h_rad_int = 0
+                do i = 1, nv
+                    ifc = tf(i)
+                    v1 = vx1(ifc)
+                    v2 = vx2(ifc)
+                    v1p = vpsi(v1)
+                    v2p = vpsi(v2)
+                    if ((psic .gt. min(v1p, v2p)) &
+                        .and. (psic .lt. max(v1p, v2p)) ) then
+                        
+                        t0 = (psic - v1p) / (v2p - v1p)
+                        ii = ii + 1
+                        isx(ii) = vx(v1) + t0 *(vx(v2) - vx(v1))
+                        isy(ii) = vy(v1) + t0 *(vy(v2) - vy(v1))
+
+                        if (not_aligned_f(ifc)) then
+                            ir = ir + 1
+                            h_rad_int = h_rad_int + fcS(ifc)*abs(fcqalfc(ifc))
+                        end if
+                        
+                    end if 
+                end do
+
+                if (ii /= 2) call gdErrorHandler('ComputeQM: insufficient intersection with mean psi value found')
+
+                h_pol(ic) = sqrt( ( isx(2) - isx(1) )**2 + ( isy(2) - isy(1) )**2 )
+                h_rad(ic) = h_rad_int / ir
+                h_rad_psi(ic) = abs(max_vpsi - min_vpsi)
+            end if
+
+
+        end do
+
+        ! Face loop
+        do ifc = 1, f%ntot
+
+            tc = fccv(ifc,:)
+            cvx1 = cx(tc(1))
+            cvy1 = cy(tc(2))
+            fcH(ifc,1) = sqrt( (fcX(ifc) - cvx1)**2 + (fcY(ifc) - cvy1)**2  )
+            if (ncpf(ifc) == 2) then
+                cvx2 = cx(tc(2));
+                cvy2 = cy(tc(2))
+                fcH(ifc,2) = sqrt( (fcX(iFc) - cvx2)**2 + (fcY(iFc) - cvy2)**2  )
+                fcxx(ifc) = sqrt( (cvx1 - cvx2)**2 + (cvy1 - cvy2)**2  )
+            else
+                fcxx(ifc) = sqrt( (cvx1 - fcX(ifc))**2 + (cvy1 - fcY(ifc))**2  )
+            end if
+
+            fcBias(ifc) = maxval(fcH(ifc,:)) / minval(fcH(ifc,:))
+
+        end do
+
+        ! Initialize the qm arrays?? - TODO
+        if (allocated(qm%fcBias)) then
+            deallocate(qm%fcBias)
+            deallocate(qm%fcqalfc)
+            deallocate(qm%fcS)
+            deallocate(qm%cvS)
+            deallocate(qm%cvAR)
+            deallocate(qm%h_pol)
+            deallocate(qm%h_rad)
+            deallocate(qm%h_rad_psi)
+        end if
+        allocate(qm%fcBias(grid%face%ntot))
+        allocate(qm%fcqalfc(grid%face%ntot))
+        allocate(qm%fcS(grid%face%ntot))
+        allocate(qm%cvS(grid%cell%ntot))
+        allocate(qm%cvAR(grid%cell%ntot))
+        allocate(qm%h_pol(grid%cell%ntot))
+        allocate(qm%h_rad(grid%cell%ntot))
+        allocate(qm%h_rad_psi(grid%cell%ntot))
+
+        ! Save computed data
+        qm%fcBias   = fcBias
+        qm%fcqalfc  = fcqalfc
+        qm%fcS      = fcS
+        qm%cvS      = cvS
+        qm%cvAR     = cvAR
+        qm%h_pol    = h_pol
+        qm%h_rad    = h_rad
+        qm%h_rad_psi= h_rad_psi
+        qm%nCv      = c%ntot
+
+
+
+
+        
+        end associate
+
+
 
         
     end subroutine
 
-    subroutine CalculateQualityMetrics(grid,options,qm)
+    subroutine CalculateQualityMetrics(grid,options,magneticField,qm)
         ! Description
         !============
         ! Compute metric and criteria of cells necessary to execute grid adaptation.
@@ -481,12 +789,13 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT), intent(in)           :: grid
+        type(GAGridUDT), intent(in)         :: grid
         type(GAoptionsUDT), intent(in)      :: options
+        type(MagneticFieldUDT), intent(in)  :: magneticField
         type(QualityMetric), intent(inout)  :: qm
 
         ! Calculate cv metric
-        call qm%ComputeQM(grid,options)
+        call qm%ComputeQM(grid,options,magneticField)
 
 
         ! Selecting splitting cell
@@ -2260,6 +2569,7 @@ module gamod_types
         !Initialize
         allocate(mFS(fd%nFs,2))
         allocate(hasID(v%ntot))
+        allocate(fieldlineID(v%ntot))
         fieldlineID = 0
         hasID = 0
         mFS = 0
@@ -2277,7 +2587,7 @@ module gamod_types
                 ! vertices detected that belong to multiple flux surfaces
                 ! Indicate the surfaces to merge
                 fID = fieldlineID(tfv)
-                ar = fID(hasID(tfv))
+                ar = pack(fID,hasID(tfv) == 1)
                 ifs1 = ar(1)
                 if (size(ar) .gt. 1) &
                     print *, 'Warning: MergeFS: merging of multiple flux surfaces not yet supported'
@@ -2903,5 +3213,22 @@ module gamod_types
         
     end function
 
+    function isBoundaryFace1GA(ifc, f) result(res)
+        integer(I8) :: ifc
+        type(GAFaceUDT) :: f
+        logical :: res
+
+        res = .true. 
+        if (f%label%Get(ifc) == 0) then
+            res = .false.
+        end if
+    end function
+
+    function TriangleArea(x0, y0, x1, y1, x2, y2) result(res)
+        real(R8) :: x0, y0, x1, y1, x2, y2, res
+
+        res = 0.5_R8 * abs( (x1-x0)*(y2-y0) - (y1-y0)*(x2-x0) )
+
+    end function 
 
 end module 

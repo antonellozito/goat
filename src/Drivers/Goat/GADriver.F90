@@ -39,16 +39,8 @@ subroutine GADriver(goatoptions)
     gaoptions%inputfilepath         = goatoptions%inputfilepath
     call gaoptions%Set()
 
-    ! Override options from goatoptions
-    gaoptions%vesselmode            = goatoptions%vesselmode 
-    gaoptions%slab                  = goatoptions%slab
-    gaoptions%debug                 = goatoptions%debug 
-    gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
-    gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
-    gaoptions%OMPr                  = goatoptions%OMPr
-    gaoptions%OMPz                  = goatoptions%OMPz
-    gaoptions%IMPr                  = goatoptions%IMPr
-    gaoptions%IMPz                  = goatoptions%IMPz
+    ! Carry-over options from goatoptions
+    call CarryOverOptions(goatoptions, gaoptions)
 
     ! Translate Grid to GAGrid with dynamic arrays
     call TranslateGridTOGAGrid(grid,GAgrid)
@@ -60,7 +52,6 @@ subroutine GADriver(goatoptions)
     ! Translate GAGrid to Grid
     call TranslateGAGridTOGrid(grid,GAgrid,gaoptions)
 
-    
     ! Post-processing
     !================
     call PostProcessingGridInformation(grid,magneticField,gaoptions)
