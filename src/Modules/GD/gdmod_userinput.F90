@@ -411,8 +411,10 @@ module gdmod_userinput
         ! - edgedistxpoint:     desired distance    
 
         integer(I8)                 :: dovesseledges, doTP, doWG, &
-            doxpointedges 
+            doxpointedges
+        logical                     :: usegoatdata, useoriginallength
         real(R8)                    :: edgedistvessel, edgedistxpoint
+        real(R8), allocatable, dimension(:)     :: edgedistgoat 
 
     contains 
 
@@ -960,6 +962,12 @@ module gdmod_userinput
         options%doxpointedges = 0
         options%edgedistvessel = 1e-3
         options%edgedistxpoint = 1e-3
+
+        ! Goat data options
+        options%usegoatdata = .true. 
+        options%useoriginallength = .true. 
+        if (allocated(options%edgedistgoat)) deallocate(options%edgedistgoat)
+        allocate(options%edgedistgoat(0))
 
     end subroutine 
 
@@ -2090,6 +2098,15 @@ module gdmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%edgedistvessel)
         field = 'gd.design.ec.par.edgelengths.edgedistxpoint'
         call ExtractOptionValueReal0D(fid, field, options%edgedistxpoint)
+
+        ! Goat data options
+        field = 'gd.design.ec.par.edgelengths.usegoatdata'
+        call ExtractOptionValuelogical0D(fid, field, options%usegoatdata)
+        field = 'gd.design.ec.par.edgelengths.useoriginallength'
+        call ExtractOptionValuelogical0D(fid, field, options%useoriginallength)
+        field = 'gd.design.ec.par.edgelengths.edgedistgoat'
+        call ExtractOptionValueReal1D(fid, field, options%edgedistgoat)
+
         
         ! Housekeeping
         !=============
