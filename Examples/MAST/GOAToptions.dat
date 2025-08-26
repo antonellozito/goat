@@ -9,18 +9,18 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # General options
 'goat.debug'                        '0'
-'goat.meth'                         'GG'
+'goat.meth'                         'GD'
 
 # Input file locations 
 #'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
 #'goat.gridfilepath'                 'traduit.out.b2us_basegeom'
-'goat.gridfilepath'                 'traduit.out.b2us_norefxp2'
+'goat.gridfilepath'                 'traduit.out.b2us'
 'goat.magneticfieldfilepath'        'rzpsi.dat'
 'goat.structurefilepath'            'structure.dat'
 'goat.GDinputfilepath'              'GOAToptions.dat'
 
 # Output file locations 
-'goat.writefilepath'                'traduit.out.b2us'  
+'goat.writefilepath'                'traduit.out.b2us_gd'  
 
 # Output options 
 'goat.write_final'                  '1'
@@ -60,8 +60,8 @@ VERSION 1.00.00
 # Face label mappings between GG and GA (grid adaptation)
 'goat.GGtoGD.facelabelsubfrom'   '[]'
 'goat.GGtoGD.facelabelsubto'     '[]'
-'goat.GGtoGD.facelabelmappingGG' '[-4, -5, -6, -7, -1, -2, -3]'
-'goat.GGtoGD.facelabelmappingGD' '[1, 1, 1, 1, 2, 3, 3]'
+'goat.GGtoGD.facelabelmappingGG' '[1:4, 5:18, -21]'
+'goat.GGtoGD.facelabelmappingGD' '[1*4, 4*14, 2]'
 
 #-------------------------------------------------------------------------#
 #                          GRID OPTIONS                                   #
@@ -167,30 +167,49 @@ VERSION 1.00.00
 'gd.design.savefinaldesign'     '1' # save final design (old files will be overwritten!)? 
 
 # Cost function
-'gd.design.cfv.type'        	'LR_FAD_PRPB_FA'
+'gd.design.cfv.type'        	'general'
 
 # Cost function parameters 
-'gd.design.cfv.par.LR.lambda'		 		'1e-4'
-'gd.design.cfv.par.LR.biasatvessel' 		'1.1'
+'gd.design.cfv.par.LR.lambda'		 		'1e-5 '
+'gd.design.cfv.par.LR.biasatvessel' 		'1.0'
 'gd.design.cfv.par.LR.lengthparam'			'0.1'
 'gd.design.cfv.par.LR.linefoldingpenfac'    '0'
 'gd.design.cfv.par.LR.dovesseledges'        '1'
 'gd.design.cfv.par.LR.minedgelength'        '1e-4'
 'gd.design.cfv.par.LR.eta'                  '1e-5'
-'gd.design.cfv.par.LRrad.lambda'            '0e-5'
+
+'gd.design.cfv.par.LRrad.lambda'            '0e-4'
 'gd.design.cfv.par.LRrad.includecutcellfaces'   '1'
 'gd.design.cfv.par.LRrad.excludedomainfaces'    '1'
-'gd.design.cfv.par.FAD.lambda'		 		'1e-4'
-'gd.design.cfv.par.FAD.weightatvessel'       '0.1'
+
+'gd.design.cfv.par.FAD.lambda'		 		'1e-5'
+'gd.design.cfv.par.FAD.weightatvessel'       '1.0'
 'gd.design.cfv.par.FAD.weightatinf'          '1'
 'gd.design.cfv.par.FAD.decaylength'          '0.5'
+
+'gd.design.cfv.par.FA.lambda'		 		'0e-5'
 'gd.design.cfv.par.FA.weightatvessel'       '0.1'
 'gd.design.cfv.par.FA.weightatinf'          '1'
-'gd.design.cfv.par.FA.decaylength'          '0.1'
-'gd.design.cfv.par.FA.lambda'		 		'1e-5'
-'gd.design.cfv.par.PRPB.lambda'		 		'1e-3'
+'gd.design.cfv.par.FA.decaylength'          '0.5'
+
+'gd.design.cfv.par.CA.lambda'		 		'1e-6'
+'gd.design.cfv.par.CA.weightatvessel'       '1.0'
+'gd.design.cfv.par.CA.weightatinf'          '1.0'
+'gd.design.cfv.par.CA.decaylength'          '0.5'
+
+'gd.design.cfv.par.LD.lambda'		 		'0e-4'
+'gd.design.cfv.par.LD.weight.face.label'    '[2, 4]'
+'gd.design.cfv.par.LD.weight.face.val'      '[1.0*2]'
+'gd.design.cfv.par.LD.weight.face.d'        '[0.5*2]'
+'gd.design.cfv.par.LD.weight.valinf'        '1e-1'
+'gd.design.cfv.par.LD.length.face.label'    '[2, 4]'
+'gd.design.cfv.par.LD.length.face.val'      '[1e-3*2]'
+'gd.design.cfv.par.LD.length.face.d'        '[0.25*2]'
+'gd.design.cfv.par.LD.length.valinf'        '0.01'
+
+'gd.design.cfv.par.PRPB.lambda'		 		'1e-6'
 'gd.design.cfv.par.PRPB.biasdecaylength'	'0.5'
-'gd.design.cfv.par.PRPB.biasatsep'		    '0.5'
+'gd.design.cfv.par.PRPB.biasatsep'		    '0.7'
 'gd.design.cfv.par.PRPB.biasatinf'		    '1.0'
 'gd.design.cfv.par.PRPB.weightdecaylength'	'0.5'
 'gd.design.cfv.par.PRPB.weightatsep'	    '10'
@@ -203,10 +222,10 @@ VERSION 1.00.00
 'gd.design.ec.boundaryfunctions'    '1'
 'gd.design.ec.fluxfunction'         '1'
 'gd.design.ec.xpoints'              '1'
-'gd.design.ec.edgelengths'          '1'
+'gd.design.ec.edgelengths'          '0'
 'gd.design.ec.lengthratio'          '0'
-'gd.design.ec.orthogonality'        '1'
-'gd.design.ec.fixedfluxvalues'      '1'
+'gd.design.ec.orthogonality'        '0'
+'gd.design.ec.fixedfluxvalues'      '0'
 
 # Inequality constraints
 'gd.design.inec.convexity' 			'0'
@@ -243,7 +262,7 @@ VERSION 1.00.00
 # Orthogonality constraint parameters 
 'gd.design.ec.par.orthogonality.checkperp'				'1'
 'gd.design.ec.par.orthogonality.epsperp' 				'0.2'
-'gd.design.ec.par.orthogonality.includecutcellvert'     '1'
+'gd.design.ec.par.orthogonality.includecutcellvert'     '0'
 'gd.design.ec.par.orthogonality.includeboxx' 			'[6.0, 7.0]' 
 'gd.design.ec.par.orthogonality.includeboxy' 			'[-2.0, 2.0]' 
 'gd.design.ec.par.orthogonality.excludeboxx' 			'[1.45, 1.55]' 
@@ -274,6 +293,7 @@ VERSION 1.00.00
 'gd.design.ec.par.fixedfluxvalues.fixouterflux'     '0'
 'gd.design.ec.par.fixedfluxvalues.fixouterfluxmeth' 'auto'
 'gd.design.ec.par.fixedfluxvalues.outerfluxval'     '0.2'
+'gd.design.ec.par.fixedfluxvalues.fixtpflux'        '0'
 
 # Convexity constraints
 'gd.design.inec.par.convexity.excludebndpairs' 	'1'
@@ -294,7 +314,7 @@ VERSION 1.00.00
 # See SetNumParams.m for the default settings
 
 # General optimization
-'gd.opt.num.itmax'                  '60'
+'gd.opt.num.itmax'                  '1000'
 'gd.opt.num.tol'                    '1e-10'
 
 # KKT driver (see also GridKKTDriver.m)
@@ -336,7 +356,7 @@ VERSION 1.00.00
 'gd.num.KKTdriver.dovisualization'  '1'
 'gd.num.KKTdriver.makevideo'        '1'
 'gd.num.KKTdriver.stabilize'        '0'
-'gd.num.KKTdriver.doconhess'        '1'
+'gd.num.KKTdriver.doconhess'        '0'
 
 # KKT system solver (see also SolveLinearizedKKT.m)
 'gd.num.KKTsolver'                  'direct'

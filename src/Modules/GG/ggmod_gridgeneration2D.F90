@@ -1119,12 +1119,14 @@ module ggmod_gridgeneration2D
         ! Remove non-convex cells
         call SplitNonConvexCells(ggtmdata, grid) 
 
-        ! 
+        ! Clean
+        call CleanGGTMData(ggtmdata)
 
         ! Extract the necessary gridding data
         !====================================
         ! Extract
-        call ExtractSimulationGrid(simgrid, grid, magneticField, topomesh)
+        call ExtractSimulationGrid(simgrid, grid, magneticField, &
+            topomesh, ggtmdata)
 
         ! Diagnostics
         !============
@@ -4436,9 +4438,10 @@ module ggmod_gridgeneration2D
         type(GGTMDataUDT), intent(inout)        :: ggtmdata
 
         ! Auxiliary
-        integer(I8)                             :: vtemp, thisfID
+        integer(I8)                             :: vtemp
         integer(I8), allocatable, dimension(:)  :: v1, v2, fID, &
-            sortind, dv1, dv2, tsortind, tv2, tfID, fIDnew
+            sortind, dv1, dv2, tsortind, tv2, tfID, fIDnew, &
+            delta
         integer(I8), allocatable                :: fvert(:, :)
         logical, allocatable, dimension(:)      :: delind 
         
@@ -4475,6 +4478,7 @@ module ggmod_gridgeneration2D
         call Sort(v1, ind=sortind)
         v2 = v2(sortind)
         fID = fID(sortind)
+        deallocate(sortind)
 
         ! Sort v2 per segment of equal v1
         k = 0
@@ -4512,13 +4516,31 @@ module ggmod_gridgeneration2D
 
         ! Construct mapping
         fIDnew = fID
-        thisfID = fID(1)
+        k = 0
         do i = 1, size(fID)
             if (.not. delind(i)) then 
-                thisfID = fID(i)
+                k = i
             end if 
-            fIDnew(i) = thisfID
+            fIDnew(i) = fID(k)
         end do
+        allocate(sortind(size(fID)))
+        call Sort(fID, ind=sortind)
+        delind = delind(sortind)
+        fIDnew = fIDnew(sortind)
+        deallocate(sortind)
+
+        allocate(delta(size(fIDnew)))
+        delta = 0
+        if (delind(1)) then 
+            delta(1) = 1
+        end if  
+        do i = 2, size(fIDnew)
+            delta(i) = delta(i-1)
+            if (delind(i)) then 
+                delta(i) = delta(i) + 1
+            end if 
+        end do 
+        fIDnew = fIDnew - delta(fIDnew)
 
         ! Remove faces from grid
         fID = pack(fID, delind)
@@ -4982,7 +5004,7 @@ module ggmod_gridgeneration2D
         end if 
 
     end subroutine
-    
+
     ! Vertex distribution over faces
     subroutine DistributeVerticesTopologicalMeshFaces(grid, ggtmdata, topomesh, &
         vd, GGTMlinerefiner, facetypes)
@@ -15120,7 +15142,8 @@ module ggmod_gridgeneration2D
     !------------------------------------------------------------------!
 
     ! Simulation grid extraction
-    subroutine ExtractSimulationGrid(simgrid, grid, magneticField, topomesh)
+    subroutine ExtractSimulationGrid(simgrid, grid, magneticField, &
+        topomesh, ggtmdata)
 
         ! Description
         !============
@@ -15140,6 +15163,7 @@ module ggmod_gridgeneration2D
         type(GGGridUDT), intent(in)             :: grid 
         type(MagneticFieldUDT), intent(in)      :: magneticField
         class(TopomeshUDT), intent(in)          :: topomesh
+        type(GGTMDataUDT), intent(in)           :: ggtmdata
 
         ! Auxiliary
         logical, allocatable, dimension(:)      :: hasfaceID
@@ -15302,6 +15326,7 @@ module ggmod_gridgeneration2D
         ! Additional grid data
         call ComputeGridData(simgrid, magneticField)
         call ComputeTopologicalData(simgrid, topomesh)
+        call ComputeGoatGGData(simgrid, topomesh, ggtmdata)
 
         ! Grid boundary
         !call ComputeGridBoundaries(simgrid)
@@ -16033,6 +16058,200 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Goat grid generator data 
+    subroutine ComputeGoatGGData(simgrid, topomesh, ggtmdata)
+
+        ! Description
+        !============
+        ! This routine writes out a .dat file with useful info that is 
+        ! additional to the standard traduit.out.b2us format. Currently, 
+        ! the following data is written:
+        ! - faces: ID, topomesh face type, boundary layer face number
+        ! - vert: ID, topomesh vertex type
+        ! The face boundary layer number is either zero (face is not 
+        ! a boundary layer face) or a positive integer that indicates
+        ! it's position w.r.t. the boundary (i.e. 1 is adjacent to the 
+        ! boundary, 2 is after 1, etc). 
+
+        ! Notes:
+        !=======
+        ! Note 1: when the amount of boundary faces that should have
+        ! been imposed is larger than the actual number of faces in the 
+        ! line, these faces are not considered to be boundary faces.
+
+        ! Note 2: the face label mappings are computed based on the 
+        ! topological mesh data. Any label translation afterwards will 
+        ! (very likely) invalidate this mapping. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)            :: simgrid 
+        type(TopomeshUDT), intent(in)           :: topomesh 
+        type(GGTMDataUDT), intent(in)           :: ggtmdata 
+
+        ! Auxiliary
+        integer(I8)                             :: nBLf, nsf
+        integer(I8), allocatable, dimension(:)  :: TMfacetype, BLind, &
+            TMverttype, tf, facelabelsGG, facelabelsGD
+
+        ! Loop
+        integer(I8)                             :: i, j, k, tfc, tseg, &
+            cc
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            face        => simgrid%face,    &
+            vert        => simgrid%vert,    &
+            seg         => ggtmdata%seg,    &
+            celldata    => ggtmdata%cell,   &
+            facedata    => ggtmdata%face,   &
+            vertdata    => ggtmdata%vert    &
+            )
+
+        ! Allocate & initialize
+        allocate(TMfacetype(face%ntot), BLind(face%ntot))
+        allocate(TMverttype(vert%ntot))
+        TMfacetype  = 0
+        BLind       = 0
+        TMverttype  = 0
+
+        ! Compute data
+        !=============
+        ! Face data
+        do i = 1, size(celldata)
+            associate(tubes     => celldata(i)%tubes)
+            do j = 1, size(tubes)
+                associate(&
+                    hfline    => tubes(j)%hfline,   &
+                    lfline    => tubes(j)%lfline)
+
+                ! Hfline
+                !-------
+                tf = tubes(j)%hfface%Get()
+                if (size(tf) > 0) then 
+                    where (hfline%TMfaceID /= 0) TMfacetype(tf) = topomesh%face%type(hfline%TMfaceID)
+                    tfc = 0
+                    do k = 1, hfline%ns
+                        ! Unpack
+                        tseg = hfline%segID(k)
+                        
+                        ! Check
+                        nsf = seg(tseg)%nv-1
+                        if (seg(tseg)%refoptions%ncBLstart + seg(tseg)%refoptions%ncBLend >= nsf) then 
+                            cycle 
+                        end if 
+
+                        ! Determine boundary layer IDs
+                        if (seg(tseg)%refoptions%doBLstart) then 
+                            ! Unpack
+                            nBLf = seg(tseg)%refoptions%ncBLstart
+
+                            ! Check if we need to flip
+                            if (hfline%flipseg(k)) then
+                                BLind(tf(tfc+nsf:tfc+nsf-nBLf+1:-1)) = [(cc, cc = 1, nBLf)]
+                            else 
+                                BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
+                            end if 
+                            if (any(face%aligned(tf) == 0)) then 
+                                print *, 'here'
+                            end if 
+                        end if 
+                        if (seg(tseg)%refoptions%doBLend) then 
+                            ! Unpack
+                            nBLf = seg(tseg)%refoptions%ncBLend
+
+                            ! Check if we need to flip
+                            if (hfline%flipseg(k)) then
+                                BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
+                            else 
+                                BLind(tf(tfc+nsf:tfc+nsf-nBLf+1:-1)) = [(cc, cc = 1, nBLf)]
+                            end if 
+                            if (any(face%aligned(tf) == 0)) then 
+                                print *, 'here'
+                            end if 
+                        end if
+
+                        ! Update face counter
+                        tfc = tfc + nsf
+                    end do
+                end if 
+                
+                ! Lfline
+                !-------
+                tf = tubes(j)%lfface%Get()
+                if (size(tf) > 0) then 
+                    where (lfline%TMfaceID /= 0) TMfacetype(tf) = topomesh%face%type(lfline%TMfaceID) 
+                    tfc = 0
+                    do k = 1, lfline%ns
+                        ! Unpack
+                        tseg = lfline%segID(k)
+                        
+                        ! Check
+                        nsf = seg(tseg)%nv-1
+                        if (seg(tseg)%refoptions%ncBLstart + seg(tseg)%refoptions%ncBLend >= nsf) then 
+                            cycle 
+                        end if 
+
+                        ! Determine boundary layer IDs
+                        if (seg(tseg)%refoptions%doBLstart) then 
+                            ! Unpack
+                            nBLf = seg(tseg)%refoptions%ncBLstart
+
+                            ! Check if we need to flip
+                            if (lfline%flipseg(k)) then
+                                BLind(tf(tfc+nsf:tfc+nsf-nBLf+1:-1)) = [(cc, cc = 1, nBLf)]
+                            else 
+                                BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
+                            end if 
+                        end if 
+                        if (seg(tseg)%refoptions%doBLend) then 
+                            ! Unpack
+                            nBLf = seg(tseg)%refoptions%ncBLend
+
+                            ! Check if we need to flip
+                            if (lfline%flipseg(k)) then
+                                BLind(tf(tfc+1:tfc+nBLf)) = [(cc, cc = 1, nBLf)]
+                            else 
+                                BLind(tf(tfc+nsf:tfc+nsf-nBLf+1:-1)) = [(cc, cc = 1, nBLf)]
+                            end if 
+                        end if
+                    
+                        ! Update face counter
+                        tfc = tfc + nsf
+                    end do
+                end if 
+                end associate
+            end do
+            end associate
+        end do 
+
+        ! Vertex data
+        do i = 1, topomesh%vert%ntot
+            TMverttype(i) = topomesh%vert%type(i)
+        end do 
+
+        ! Get label mapping
+        call GetGridFaceLabelMappingGD(simgrid, topomesh, facelabelsGG, facelabelsGD)
+
+        ! Add
+        !====
+        simgrid%data%goatggdata%TMfacetype = TMfacetype
+        simgrid%data%goatggdata%TMverttype = TMverttype
+        simgrid%data%goatggdata%BLind      = BLind
+        simgrid%data%goatggdata%facelabelsGG = facelabelsGG
+        simgrid%data%goatggdata%facelabelsGD = facelabelsGD
+        simgrid%data%hasGoatGGData         = .true. 
+        
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
     ! Label translation
     subroutine TranslateGridLabels(simgrid, topomesh, vessel, options, &
         formattype)
@@ -16109,8 +16328,15 @@ module ggmod_gridgeneration2D
         ! Note 1: it is assumed that the initial face labels identify the
         ! topological mesh boundary ID
 
+        ! Note 2: goat grid data mappings are recomputed here to match 
+        ! the new face labels
+
         ! Declare variables
         !==================
+        ! Module variables
+        use mod_definitions, only: targetID, coreID, outerboundaryID, &
+            vesselID
+
         ! Arguments
         type(VesselUDT), intent(in)                 :: vessel
         type(GridUDT), intent(inout)                :: simgrid 
@@ -16123,16 +16349,17 @@ module ggmod_gridgeneration2D
         integer(I8), allocatable, dimension(:)      :: IFlabels, &
             TPlabels, bndlabels, fl_orig, fl_new, Clabels, &
             facelabelmapping, allfID, tfID, &
-            sortindex, ind, solpslabels, psind, coreIDs, &
+            sortindex, ind, solpslabels, gdlabels, psind, coreIDs, &
             cellregionmapping, veslabels, WGlabels, OFlabels, tfc, &
             allsepIDs, tfv, tfsepv, allTPlabels, uvesstructlabels, &
-            reslabels
+            reslabels, facelabelsGG, facelabelsGD, allstructurelabels, &
+            uallstructurelabels
         integer(I8), allocatable                    :: edges(:, :), &
             vesstructlabels(:, :), flabels(:, :)
         real(R8), allocatable, dimension(:)         :: xf, yf
         logical, allocatable, dimension(:)          :: &
             ispolygonstart, isbranchingpolygon, islabelfound, &
-            keepvert, isvesselface
+            keepvert, isvesselface, keepind
         ! type(PolygonSetUDT)                         :: tempps
 
         ! Loop
@@ -16142,7 +16369,7 @@ module ggmod_gridgeneration2D
         ! Initialize
         !===========
         ! Allocate
-        allocate(reslabels(0))
+        allocate(reslabels(0), facelabelsGG(0), facelabelsGD(0))
 
         ! Initialize
         isvesselface = simgrid%face%BF ! adjusted later
@@ -16157,6 +16384,9 @@ module ggmod_gridgeneration2D
         solpslabels = [(k, k = 1, 3)]
         TPlabel = maxval(solpslabels)+1
 
+        ! Set GD temporary labels
+        gdlabels = [coreID, outerboundaryID, vesselID]
+
         ! Get vessel vertex labels (first one, structures)
         call vessel%polygonset%GetLabels(vesstructlabels)
         
@@ -16165,6 +16395,8 @@ module ggmod_gridgeneration2D
 
         ! Add labels already 
         reslabels = [reslabels, uvesstructlabels]
+        facelabelsGG = [facelabelsGG, uvesstructlabels]
+        facelabelsGD = [facelabelsGD, spread(vesselID, 1, size(uvesstructlabels))]
 
         ! Map
         !====
@@ -16248,6 +16480,7 @@ module ggmod_gridgeneration2D
 
                         ! Update
                         solpslabels = [solpslabels, TPlabel]
+                        gdlabels    = [gdlabels, targetID]
                         TPlabel = TPlabel + 1
                         
                     elseif (facelabelmapping(TPlabels(i)) /= 0 .and. facelabelmapping(TPlabels(j)) == 0) then 
@@ -16319,6 +16552,8 @@ module ggmod_gridgeneration2D
 
             ! Add to reserved face labels
             reslabels = [reslabels, flccore]
+            facelabelsGG = [facelabelsGG, flccore]
+            facelabelsGD = [facelabelsGD, gdlabels(j)]
 
             ! Get indices
             ind = [(k, k = psind(i), psind(i+1)-1)]
@@ -16366,6 +16601,8 @@ module ggmod_gridgeneration2D
 
                 ! Set label
                 simgrid%face%label(tfID(sortindex(ind))) = flc 
+                facelabelsGG = [facelabelsGG, flc]
+                facelabelsGD = [facelabelsGD, gdlabels(j)]
 
                 ! Update vessel faces
                 if (j == 2) then 
@@ -16393,10 +16630,39 @@ module ggmod_gridgeneration2D
             call vessel%exactplfvessel%EvaluateLabel(xf, yf, flabels)
 
             ! Extract
+            allocate(allstructurelabels(count(isvesselface)))
             where (isvesselface) simgrid%face%label = abs(flabels(:, 1))
+            allstructurelabels = pack(abs(flabels(:, 1)), isvesselface)
+            call Unique(allstructurelabels, uallstructurelabels)
+
+            ! Remap GG to GD labels
+            do i = 1, size(uallstructurelabels)
+                where (facelabelsGG == uallstructurelabels(i)) facelabelsGD = vesselID
+                if (.not. any(uallstructurelabels(i) == facelabelsGG)) then 
+                    facelabelsGG = [facelabelsGG, uallstructurelabels(i)]
+                    facelabelsGD = [facelabelsGD, vesselID]
+                end if 
+            end do 
             
             ! Housekeeping
             end associate
+        end if 
+
+        ! Clean mapping
+        allocate(keepind(size(facelabelsGG)))
+        keepind = .true.
+        do i = 1, size(facelabelsGG) 
+            if (.not. any(facelabelsGG(i) == simgrid%face%label)) then 
+                keepind(i) = .false.
+            end if 
+        end do 
+        facelabelsGG = pack(facelabelsGG, keepind)
+        facelabelsGD = pack(facelabelsGD, keepind)
+
+        ! Add mapping
+        if (simgrid%data%hasGoatGGData) then 
+            simgrid%data%goatggdata%facelabelsGG = facelabelsGG
+            simgrid%data%goatggdata%facelabelsGD = facelabelsGD
         end if 
 
         ! Cell regions
@@ -16467,9 +16733,6 @@ module ggmod_gridgeneration2D
             fcregID = fcregID + 1
             where (fl_new == allTPlabels(i)) simgrid%face%reg = fcregID 
         end do
-
-        
-
 
     end subroutine
 
