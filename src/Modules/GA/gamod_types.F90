@@ -1058,8 +1058,8 @@ module gamod_types
         type(GAoptionsUDT), intent(in)  :: options
 
         ! Auxiliary
-        integer(I8) :: i, indFc(GAgrid%face%ntot), fcLbl_loc(GAgrid%face%ntot), nfb
-        integer(I8), allocatable :: fcsbnd(:), vxsbnd(:)
+        !integer(I8) :: i, indFc(GAgrid%face%ntot), fcLbl_loc(GAgrid%face%ntot), nfb
+        !integer(I8), allocatable :: fcsbnd(:), vxsbnd(:)
 
 
         ! Give information in GAgrid to grid
