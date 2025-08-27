@@ -49,6 +49,7 @@ module gamod_types
 
     contains
     
+        procedure :: CalculateQualityMetrics
         procedure :: ComputeQM
 
     end type 
@@ -427,7 +428,7 @@ module gamod_types
         procedure :: Initialize         => InitializeGAGrid
 
 
-        ! Various operations
+        ! Pre- and PostProcessing
         procedure :: CheckVertOrder
         procedure :: ReorderCellConn
         procedure :: GetFsVxFromFsFc
@@ -437,6 +438,24 @@ module gamod_types
         procedure :: CheckUnstructuredGrid
         procedure :: RecalcMagn
         procedure :: MergeFS
+
+        ! Grid adaptation
+        !================
+
+        ! Removal Small Triangles
+        procedure :: RemoveSmallTriangle
+        procedure :: DetectSmallTrias
+        procedure :: DetermineRemovalMethod
+        procedure :: LocalSmallTriangleRemoval
+
+        ! Merging
+        procedure :: GiveForbiddenMergeFaces
+
+        ! Grid information utility
+        procedure :: GetCutsXpoints
+        procedure :: GetTangencyPoints
+        procedure :: GetRadLineFaces
+        procedure :: RecursiveGridMarching
 
     end type  
 
@@ -781,7 +800,7 @@ module gamod_types
         
     end subroutine
 
-    subroutine CalculateQualityMetrics(grid,options,magneticField,qm)
+    subroutine CalculateQualityMetrics(qm,grid,options,magneticField, select_split, select_merge)
         ! Description
         !============
         ! Compute metric and criteria of cells necessary to execute grid adaptation.
@@ -789,18 +808,24 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
+        class(QualityMetric), intent(inout)  :: qm
         type(GAGridUDT), intent(in)         :: grid
         type(GAoptionsUDT), intent(in)      :: options
         type(MagneticFieldUDT), intent(in)  :: magneticField
-        type(QualityMetric), intent(inout)  :: qm
+        logical :: select_split, select_merge
+
 
         ! Calculate cv metric
         call qm%ComputeQM(grid,options,magneticField)
 
 
         ! Selecting splitting cell
+        if (select_split) then
+        end if
 
         ! Selecting merging face
+        if (select_merge) then
+        end if
         
 
 
@@ -2353,7 +2378,7 @@ module gamod_types
             !voor alle faces, minstens 1 cell, 
             ! de twee vertices van het face moeten voorkomen in de verts van de (beide) cell
 
-            !first make the cv_look_up
+            !first make the cvLookUp
             nvert = c%vertP1%Get(c%ntot)+c%vertP2%Get(c%ntot)-1
             allocate(cvLookUp(nvert))
             cvLookUp = GetCvLookUpGA(c)
@@ -2543,7 +2568,7 @@ module gamod_types
         ! Description
         !============
         ! Checks whether flux surfaces should be merged to one and performs the
-!        mergeing.   
+        ! mergeing.   
 
         ! Declare variables
         !==================
@@ -2658,8 +2683,10 @@ module gamod_types
             fd%nFs = fd%nFs - 1
 
             range = (/ (j, j = ifs1, fd%nFs)/)
-            call fd%fluxsurfacevertsP1%SetMultipleElements(range, fd%fluxsurfacevertsP1%GetMultipleElements(range) - nv1)
-            call fd%fluxsurfacefacesP1%SetMultipleElements(range, fd%fluxsurfacefacesP1%GetMultipleElements(range) - nf1)
+            call fd%fluxsurfacevertsP1%SumMask(range, -nv1)
+            call fd%fluxsurfacefacesP1%SumMask(range, -nf1)
+            !call fd%fluxsurfacevertsP1%SetMultipleElements(range, fd%fluxsurfacevertsP1%GetMultipleElements(range) - nv1)
+            !call fd%fluxsurfacefacesP1%SetMultipleElements(range, fd%fluxsurfacefacesP1%GetMultipleElements(range) - nf1)
 
             ifs2 = ifs2 - 1
             call fd%fluxsurfacevertsP1%RemoveSingleElement(ifs2)
@@ -2669,8 +2696,10 @@ module gamod_types
             fd%nFs = fd%nFs - 1
 
             range = (/ (j, j = ifs2, fd%nFs)/)
-            call fd%fluxsurfacevertsP1%SetMultipleElements(range,fd%fluxsurfacevertsP1%GetMultipleElements(range) - nv2)
-            call fd%fluxsurfacefacesP1%SetMultipleElements(range,fd%fluxsurfacefacesP1%GetMultipleElements(range) - nf2)
+            call fd%fluxsurfacevertsP1%SumMask(range, -nv2)
+            call fd%fluxsurfacefacesP1%SumMask(range, -nf2)
+            !call fd%fluxsurfacevertsP1%SetMultipleElements(range,fd%fluxsurfacevertsP1%GetMultipleElements(range) - nv2)
+            !call fd%fluxsurfacefacesP1%SetMultipleElements(range,fd%fluxsurfacefacesP1%GetMultipleElements(range) - nf2)
 
             ! Add new flux surface
             fd%nFs = fd%nFs + 1
@@ -2712,6 +2741,528 @@ module gamod_types
         
         
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                       GAGRID ADAPTATIONS                         !
+    !------------------------------------------------------------------!
+    
+    ! Removing small triangles
+    !=========================
+    subroutine RemoveSmallTriangle(grid, qm, options, magneticField)
+
+        ! Description
+        !============
+        ! Removing of very small triangles
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(QualityMetric), intent(inout)  :: qm
+        type(GAoptionsUDT), intent(in)      :: options
+        type(MagneticFieldUDT)              :: magneticField
+
+        ! Auxiliary
+        integer(I8) :: small_tria, faceA, faceB, faceC
+        logical :: plain_merging
+
+        ! Show progress
+        print *, 'Remove small triangles'
+    
+        ! Recalculate areas and poloidal distances ! should be done!!!
+
+        ! Detect small triangles
+        !=======================
+        small_tria = 0
+        call grid%DetectSmallTrias(qm, options, small_tria)
+
+
+        ! Remove the triangles
+        !=====================
+        do while (small_tria /= 0)
+
+            ! Determine removal method
+            call grid%DetermineRemovalMethod(qm, small_tria, faceA, faceB, faceC, plain_merging)
+
+            if (plain_merging) then
+
+                print *, 'Applied cell merging'
+
+
+            else 
+
+                ! Use local method
+                print *, 'Applied local removal method'
+
+                ! Visualize - TODO
+
+                call grid%LocalSmallTriangleRemoval(small_tria, faceA, faceB, faceC)
+
+                if (.not.options%slab) call grid%RecalcMagn(magneticField)
+
+
+
+            end if
+
+            if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+
+            ! Redection
+            call qm%ComputeQM(grid, options, magneticField)
+
+            call grid%DetectSmallTrias(qm, options, small_tria)
+        end do
+
+        ! Show progress
+        print *, 'Ended removing small triangles'
+
+
+
+    end subroutine
+
+    subroutine DetectSmallTrias(grid, qm, options, small_tria)
+
+        ! Description
+        !============
+        ! Detects small triangles according to criteria, cut_off_pol
+        ! and cut_off_surf. One triangle is select at a time because
+        ! cell numbers change when doing adaptation, so detecting
+        ! all the small triangles at the same time would require
+        ! elaborate operations on the small_trias array
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        type(QualityMetric), intent(in) :: qm
+        type(GAoptionsUDT), intent(in)  :: options
+        integer(I8), intent(out)        :: small_tria
+
+        ! Auxiliary
+        integer(I8) :: i, j, nb, ic, indmax, int_face, ic_neig
+        integer(I8), allocatable :: cvLookUp(:), indCv(:), b_trias(:), &
+            tf_int(:), cvs(:), neigs(:), tf(:)
+        real(R8) :: ratio_s, ratio_psi, ratio_surf
+        real(R8), allocatable :: dpsi(:)
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        small_tria = 0
+        cvLookUp = GetCvLookUpGA(c)
+        indCv = (/ (i, i= 1,c%ntot)/)
+
+        ! Find all boundary triangles
+
+        nb = count(c%vertP2%Get() == 3 .and. c%cflags%Get() == 3)
+        allocate(b_trias(nb))
+        b_trias = pack(indCv,c%vertP2%Get() == 3 .and. c%cflags%Get() == 3)
+
+        do i = 1, nb
+
+            ! Get cell number
+            ic = b_trias(ic)
+
+            ! Find the internal face of the triangle which is no boundary face
+            tf = GetCellFaceGA(c, ic)
+
+            allocate(tf_int(count(.not.isBoundaryFace1DGA(tf, f)))) ! Note: in matlab using c%face to determine this, not the face labels
+            tf_int = pack(tf,.not.isBoundaryFace1DGA(tf, f))
+
+            ! Find the poloidal face
+            dpsi = abs( v%psi%Get(f%vert1%Get(tf_int)) - v%psi%Get(f%vert2%Get(tf_int)))
+            indmax = maxloc(dpsi,1)
+            int_face = tf_int(indmax)
+
+            ! Get the cells and its neighbouring cells to compute criteria
+            cvs = GetFaceCellGA(c, int_face, cvLookUp)
+
+            do j = 1, size(cvs)
+                if (cvs(j) /= ic) ic_neig = cvs(j)
+            end do
+
+            neigs = GetCellNeigsGA(grid, ic, cvLookUp)
+
+            ! Criteria
+            if ((c%reg%Get(ic) == c%reg%Get(ic_neig)) &
+                .and. (minval(c%vertP2%Get(neigs)) .gt. 3)) then
+
+                ! Size citerion
+                ratio_s = qm%h_pol(ic) / qm%h_pol(ic_neig)
+
+                ! Width criterion - if tria spans the whole flux tube => other removal method needed
+                ratio_psi = qm%h_rad_psi(ic) / qm%h_rad_psi(ic_neig)
+
+                ! Surface criterion
+                ratio_surf = qm%cvS(ic) / sum(qm%cvS(neigs))
+
+                ! Selection
+                if (ratio_psi .lt. 0.9) then
+
+                    if ((ratio_s .lt. options%cut_off_pol) &
+                        .or. (ratio_surf .lt. options%cut_off_surf) &
+                        .or. (ratio_psi .lt. 0.4)) then
+
+                            small_tria = ic
+                            return
+                    end if
+
+                end if
+
+            end if
+
+        end do
+
+        end associate
+
+    end subroutine
+
+    subroutine DetermineRemovalMethod(grid, qm, small_tria, faceA, faceB, faceC, plain_merging)
+
+        ! Description
+        !============
+        ! Determines which method to use for small triangle removal.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        type(QualityMetric), intent(in) :: qm
+        integer(I8), intent(in)         :: small_tria
+        integer(I8), intent(out)        :: faceA, faceB, faceC
+        logical, intent(out)            :: plain_merging
+
+        ! Auxiliary
+        integer(I8) :: i, ic,  indmin, neigA
+        integer(I8), allocatable, dimension(:) :: faceA_dummy, faceB_dummy, &
+            tf, cvLookUp, cvs, forbidden_fcs
+        real(R8), allocatable :: dpsi_f(:)
+        logical, allocatable :: is_aligned(:), is_boundary(:)
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        ic  = small_tria
+        cvLookUp = GetCvLookUpGA(c)
+
+        ! Get faces
+        tf = GetCellFaceGA(c, ic)
+
+        ! Find align face of the tria
+        is_aligned = f%aligned%Get(tf) == 1;
+
+        if ((count(is_aligned)) /= 1) then
+
+            ! Most aligned faces
+            dpsi_f = abs(v%psi%Get(f%vert1%Get(tf)) - v%psi%Get(f%vert2%Get(tf)))
+            indmin = minloc(dpsi_f,1)
+            faceA = tf(indmin)
+
+        else
+
+            faceA_dummy = pack(tf, is_aligned)
+            faceA = faceA_dummy(1)
+
+        end if
+
+        ! Find boundary face of the triangle
+        is_boundary = isBoundaryFace1DGA(tf, f)
+
+        ! Get boundary face
+        faceB_dummy = pack(tf, is_boundary)
+        faceB = faceB_dummy(1)
+
+        ! Get other face
+        do i = 1, size(tf)
+            if ((tf(i) /= faceA) .and.(tf(i) /= faceB)) faceC = tf(i)
+        end do
+
+        ! Get neighboring cells at the aligned face
+        cvs = GetFaceCellGA(c, faceA, cvLookUp)
+        do i = 1, size(cvs)
+            if (cvs(i) /= ic) neigA = cvs(i)
+        end do
+
+        ! Face length criterion
+        plain_merging = .false.
+        if ((qm%fcS(faceA) * 1.5_R8) .gt. qm%h_pol(neigA)) then
+
+            ! Check whether faceC is not a region boundary face
+            cvs = GetFaceCellGA(c, faceC, cvLookUp)
+
+            if (c%reg%Get(cvs(1)) == c%reg%Get(cvs(2))) then
+
+                ! Check whether faceC is not a forbidden face
+                call grid%GiveForbiddenMergeFaces(forbidden_fcs)
+                if (.not.any(faceC == forbidden_fcs)) then
+                    plain_merging = .true.
+                end if
+
+            end if
+
+        end if
+
+        end associate
+
+    end subroutine
+
+    subroutine LocalSmallTriangleRemoval(grid, small_tria, faceA, faceB, faceC)
+
+        ! Description 
+        !============
+        ! Removes the small triangle on the classical method
+        ! - faceA is the aligned face
+        ! - faceB is the boundary face
+        ! - faceC is the other (usually poloidal) face of the triangle
+        ! checks
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT) :: grid
+        integer(I8), intent(in) ::  small_tria, faceA, faceB, faceC
+
+
+    end subroutine
+
+    subroutine GiveForbiddenMergeFaces(grid, forbidden_fcs)
+
+        ! Description
+        !============
+        ! Determine forbidden merging faces
+        ! The forbidden merging faces are
+        ! - the separatrix faces
+        ! - the faces of the core cut
+        ! - boundary faces
+        ! Important note: faces which are a region boundary can also not be used
+        ! for merging. So always check whether the regions of the cells of a face
+        ! are from the same region.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), allocatable, intent(out)   :: forbidden_fcs(:)
+
+        ! Auxiliary
+        integer(I8) :: i, indFc(grid%face%ntot), nb, nc, nr
+        integer(I8), allocatable, dimension(:) :: cvLookUp, b_faces, tang_points, &
+            rad_faces, fcsAll, core_faces
+        
+        ! Precompute
+        cvLookUp = GetCvLookUpGA(grid%cell)
+
+        ! 1. faces iFs of separatrix
+        ! [~,~,grid] = give_iFs_sep(grid,grid.n_sep,cv_look_up,grid.iFs_sep);
+        ! s = grid.fs.faceP(grid.iFs_sep,1);
+        ! faces_sep = grid.fs.face(s:s+grid.fs.faceP(grid.iFs_sep,2)-1);
+
+        ! 2. cuts around xpoint
+        call grid%GetCutsXpoints(cvLookUp, core_faces)
+
+        ! 3. boundary faces
+        indFc = (/ (i, i = 1,grid%face%ntot) /)
+        b_faces = pack(indFc, grid%face%label%Get() /= 0);
+
+        ! 4. region boundary - too expensive
+        !     cv_look_up = give_cv_look_up(grid);
+        !     int_faces = faces(grid.fcLbl == 0);
+        !    face_regions = zeros(round(grid.nFc/2),1); %over estimation
+        !     counter = 0;
+        !     for i = 1:length(int_faces)
+        !         iFc = int_faces(i);
+        !         cvs = give_cells_of_face(iFc,grid.cvFc,grid.cvFcP,cv_look_up);
+        !        if grid.cvReg(cvs(1)) ~= grid.cvReg(cvs(2))
+        !             counter = counter + 1;
+        !             face_regions(counter) = iFc;
+        !         end
+        !     end
+        !     face_regions = face_regions(1:counter);
+
+        ! 5. tangency points - radial line faces
+        call grid%GetTangencyPoints(b_faces, tang_points)
+        call grid%GetRadLineFaces(tang_points,rad_faces)
+    
+        ! Compose forbidden faces array
+        nc = size(core_faces)
+        nb = size(b_faces)
+        nr = size(rad_faces)
+        allocate(fcsAll(nc+nb+nr))
+        fcsAll(1:nc) = core_faces
+        fcsAll(nc+1:nc+nb) = b_faces
+        fcsAll(nc+nb+1:nc+nb+nr) = rad_faces
+        call Unique(fcsAll,forbidden_fcs)
+    
+
+    end subroutine
+
+    subroutine GetCutsXpoints(grid, cvLookUp, fcs)
+
+        ! Description
+        !============
+        ! Give the poloidal and radial faces out of an Xpoint which should not be used to merge
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), allocatable, intent(in)    :: cvLookUp(:)
+        integer(I8), allocatable, intent(out)   :: fcs(:)
+
+        ! Auxiliary
+        integer(I8) :: fcsD(grid%face%ntot), counterf, i, &
+            counter1, counter2, fcs1(grid%face%ntot), fcs2(grid%face%ntot)
+        logical :: b_flag(grid%face%ntot), in_flag1(grid%face%ntot), &
+            in_flag2(grid%face%ntot)
+
+
+        ! Initialize
+        call grid%GiveXpoints(.true.,cvLookUp)
+        fcsD = 0
+        counterf = 0
+        counter1 = 0
+        counter2 = 0
+        b_flag = (grid%face%label%Get() == 0)
+        in_flag1 = .false.
+        in_flag2 = .false.
+        fcs1 = 0
+        fcs2 = 0
+
+        ! Loop over the Xpoints
+        do i = 1, grid%data%nxp
+
+            ! Get the poloidal and radial faces
+            call grid%RecursiveGridMarching(grid%data%xpointID(i),fcs1,0,counter1,b_flag,in_flag1)
+            call grid%RecursiveGridMarching(grid%data%xpointID(i),fcs2,1,counter2,b_flag,in_flag2)
+
+            ! Add fcs1
+            fcs(counterf+1:counterf+counter1) = fcs1(1:counter1)
+            counterf = counterf + counter1
+
+            ! Add fcs2
+            fcs(counterf+1:counterf+counter2) = fcs2(1:counter2)
+            counterf = counterf + counter2
+
+        end do
+
+        ! Trim
+        fcs = fcsD(1:counterf)
+
+    end subroutine
+
+    subroutine GetTangencyPoints(grid, b_Faces, tang_points)
+
+        ! Description
+        !============
+        ! Give tangency points of a grid
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), allocatable, intent(in) :: b_faces(:)
+        integer(I8), allocatable, intent(out) :: tang_points(:)
+    end subroutine
+
+    subroutine GetRadLineFaces(grid, tang_points, rad_faces)
+
+        ! Description
+        !============
+        ! Gives the faces of radial lines of the give vertices
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), allocatable, intent(in) :: tang_points(:)
+        integer(I8), allocatable, intent(out) :: rad_faces(:)
+    end subroutine
+
+    recursive subroutine RecursiveGridMarching(grid, iv, faces, aligned, counter, b_flag, in_flag)
+
+        ! Description
+        !============
+        ! Recursive Grid Marching starting from a vertex.
+        ! Input:
+        ! - starting vertex
+        ! - grid
+        ! - faces: should be empty to start
+        ! - aligned: poloidal marching => aligned = 0
+        !            radial marching   => aligned = 1
+        ! - counter: should be 0 to start
+        ! - b_flag = logical for boundary faces (1 == boundary face)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: iv, aligned
+        integer(I8), intent(inout)      :: counter 
+        integer(I8), intent(inout)      :: faces(grid%face%ntot)
+        logical, intent(in)             :: b_flag(grid%face%ntot)
+        logical, intent(inout)          :: in_flag(grid%face%ntot)
+
+        ! Auxiliary
+        integer(I8) :: i, nf, vs(1:2), iv_next
+        integer(I8), allocatable :: fcs1(:), fcs2(:), fcs3(:), fcs4(:)
+
+        ! Give faces
+        fcs1 = GetVertFaceGA(grid%face, iv)
+
+        ! Eliminate faces based on marching direction - TODO replace all pack by 1 pack by combining the criteria
+        allocate(fcs2(count(grid%face%aligned%Get(fcs1) == aligned)))
+        fcs2 = pack(fcs1,grid%face%aligned%Get(fcs1) == aligned)
+
+        ! Eliminate boundary faces
+        allocate(fcs3(count(.not.b_flag(fcs2))))
+        fcs3 = pack(fcs2,.not.b_flag(fcs2))
+
+        ! Eliminate faces which are in array faces
+        allocate(fcs4(count(.not.in_flag(fcs3))))
+        fcs4 = pack(fcs3,.not.in_flag(fcs3))
+
+        ! Add remaining faces - if fcs would be empty, RecursiveGridMarching just
+        ! returns faces and counter
+        nf = size(fcs4)
+        do i = 1, nf
+            counter = counter + 1
+            faces(counter) = fcs4(i)
+            in_flag(fcs4(i)) = .true.
+
+            ! Select new vertex
+            vs(1) = grid%face%vert1%Get(fcs4(i))
+            vs(2) = grid%face%vert2%Get(fcs4(i))
+
+            if (vs(1) /= iv) then
+                iv_next = vs(1)
+            else if (vs(2) /= iv) then
+                iv_next = vs(2)
+            else
+
+                call gdErrorHandler('RecursiveMarching: something went wrong')
+
+            end if
+
+            ! Recursive Marching on new vertex
+            call grid%RecursiveGridMarching(iv_next, faces, aligned, counter, b_flag, in_flag)
+
+
+        end do
+
+
+    end subroutine
+        
 
     !------------------------------------------------------------------!
     !                        GAFACE ROUTINES                           !
@@ -3083,6 +3634,40 @@ module gamod_types
         range = (/ (j, j = s, (s + cell%faceP2%Get(i) - 1)) /)
         res = cell%face%GetMultipleElements(range)   
     end function
+
+    ! Get neighboring cells of a cell
+    function GetCellNeigsGA(g, ic, cvLookUp) result(res)
+        type(GAGridUDT) :: g
+        integer(I8) :: ic, i, j, s, ifc, counter, nf
+        integer(I8), allocatable, optional :: cvLookUp(:)
+        integer(I8), allocatable :: cvs(:), res(:), res_dummy(:)
+
+        if (.not.present(cvLookUp)) then
+            cvLookUp = GetCvLookUpGA(g%cell)
+        end if
+
+        s = g%cell%faceP1%Get(ic)
+        nf = g%cell%faceP2%Get(ic)
+        counter = 0
+        allocate(res_dummy(nf))
+        do i = 1, nf
+            ifc = g%cell%face%Get(s+i-1)
+            cvs = GetFaceCellGA(g%cell,ifc,cvLookUp)
+
+            ! Add cell if not equal to ic
+            do j = 1,size(cvs)
+                if (cvs(j) /= ic) then
+                    counter = counter + 1
+                    res_dummy(counter) = cvs(j) 
+                end if
+            end do
+
+        end do
+
+        res = res_dummy(1:counter)
+
+    end function
+
     ! Get cells of a face with dynamic arrays
     function GetFaceCellGA(cell, i, cvLookUp) result(res)
         integer(I8)                 :: i 
@@ -3095,6 +3680,29 @@ module gamod_types
         end if
 
         res = pack(cvLookUp,cell%face%GetAllElements().eq.i)
+    end function
+
+    ! Get faces of a vertex with dynamic arrays
+    function GetVertFaceGA(face, i) result(res)
+        type(GAFaceUDT) :: face
+        integer(I8) :: i, n1, n2, &
+            fv1(face%ntot), fv2(face%ntot)
+        integer(I8), allocatable :: res(:), res1(:), &
+            res2(:), res3(:)
+
+        fv1 = face%vert1%Get()
+        fv2 = face%vert2%Get()
+
+        res1 = pack(fv1,fv1 == i)
+        res2 = pack(fv2,fv2 == i)
+        n1 = size(res1)
+        n2 = size(res2)
+        allocate(res3(n1+n2))
+        res3(1:n1) = res1 
+        res3(n1+1:n1+n2) = res2 
+
+        call Unique(res3, res)
+
     end function
 
     function GetFluxSurfaceFcsGA(fd, i) result(res)
@@ -3213,7 +3821,7 @@ module gamod_types
         
     end function
 
-    function isBoundaryFace1GA(ifc, f) result(res)
+    function isBoundaryFace0DGA(ifc, f) result(res)
         integer(I8) :: ifc
         type(GAFaceUDT) :: f
         logical :: res
@@ -3224,11 +3832,29 @@ module gamod_types
         end if
     end function
 
+    function isBoundaryFace1DGA(tf, f) result(res)
+        integer(I8), allocatable :: tf(:)
+        type(GAFaceUDT) :: f
+        logical, allocatable :: res(:)
+
+        allocate(res(size(tf)))
+        res = (f%label%Get(tf) /= 0)
+
+        !do i = 1, nf
+        !    if (f%label%Get(i) == 0) then
+        !        res = .false.
+        !    end if
+        !end do
+
+    end function
+
     function TriangleArea(x0, y0, x1, y1, x2, y2) result(res)
         real(R8) :: x0, y0, x1, y1, x2, y2, res
 
         res = 0.5_R8 * abs( (x1-x0)*(y2-y0) - (y1-y0)*(x2-x0) )
 
     end function 
+
+
 
 end module 

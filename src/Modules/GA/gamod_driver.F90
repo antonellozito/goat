@@ -203,9 +203,17 @@ module gamod_driver
         type(EnvironmentUDT), intent(in)     :: environment
         type(MagneticFieldUDT), intent(in)   :: magneticField
 
+        ! Auxiliary
+        type(QualityMetric) :: qm
+
         ! Calculate quality metric
+        call qm%CalculateQualityMetrics(grid, options, magneticField,.false.,.false.)
 
         ! Remove Small triangles
+        if (options%rem_small_trias) &
+            call grid%RemoveSmallTriangle(qm,options,magneticField)
+
+
 
         ! Remove flux tubes with only two triangles
 
@@ -395,7 +403,7 @@ module gamod_driver
 
         ! Auxiliary
         logical :: trias_present, pents_present
-        integer(I8):: vxs(1:100), s, nv, ic, i, ifs
+        integer(I8):: vxs(1:100), vxsfd(grid%vert%ntot), s, nv, ic, i, ifs
         real(R8) :: bp(grid%cell%ntot), bt(grid%cell%ntot), &
             bpvx(grid%vert%ntot), fsPsi(grid%data%fluxdata%nFs), &
             r
@@ -492,8 +500,8 @@ module gamod_driver
         do ifs = 1, grid%data%fluxdata%nFs
             s = grid%data%fluxdata%fluxsurfacevertsP(ifs,1)
             nv = grid%data%fluxdata%fluxsurfacevertsP(ifs,2)
-            vxs(1:nv) = grid%data%fluxdata%fluxsurfaceverts(s:s+nv-1)
-            fsPsi(ifs) = sum(v%psi(vxs(1:nv))) / real(nv, kind=R8)
+            vxsfd(1:nv) = grid%data%fluxdata%fluxsurfaceverts(s:s+nv-1)
+            fsPsi(ifs) = sum(v%psi(vxsfd(1:nv))) / real(nv, kind=R8)
         end do
 
         ! Determine OMP and IMP - TODO

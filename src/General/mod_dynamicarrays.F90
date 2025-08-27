@@ -124,6 +124,9 @@ module mod_dynamicarrays
         ! Number of element getter
         procedure   :: Size                  => GetSizeRDA
 
+        ! Sum with Mask
+        procedure   :: SumMask               => SumRDAScalarMask
+
     end type 
 
     ! Integer dynamic array class
@@ -181,6 +184,9 @@ module mod_dynamicarrays
 
         ! Number of element getter
         procedure   :: Size                  => GetSizeIDA
+
+        ! Sum with Mask
+        procedure   :: SumMask               => SumIDAScalarMask
 
     end type 
 
@@ -593,6 +599,29 @@ contains
         s = size(rda%val)
 
     end function 
+
+    ! Sum with Mask
+    subroutine SumRDAScalarMask(rda,loc,val) 
+
+        ! Description
+        !============
+        ! Increment the value of multiple elements on a specified location with val. If
+        ! the location is larger than the current array size, the array
+        ! is extended with zeros up to the required array size.
+        
+        ! Declare variables
+        !==================
+        class(RealDynamicArrayUDT)      :: rda 
+        integer(ik), intent(in)         :: loc(:) 
+        integer(rk)                     :: val
+
+        if (rda%Size() < maxval(loc)) then 
+            call rda%Append(spread(0.0_R8, 1, maxval(loc) - rda%Size()))
+        end if 
+
+        rda%val(loc) = rda%val(loc) + val
+        
+    end subroutine
 
     ! Elementray array operations
     !============================
@@ -1178,6 +1207,29 @@ contains
         s = size(ida%val)
 
     end function 
+
+    ! Sum with Mask
+    subroutine SumIDAScalarMask(ida,loc,val) 
+
+        ! Description
+        !============
+        ! Increment the value of multiple elements on a specified location with val. If
+        ! the location is larger than the current array size, the array
+        ! is extended with zeros up to the required array size.
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayUDT)   :: ida 
+        integer(ik), intent(in)         :: loc(:) 
+        integer(ik)                     :: val
+
+        if (ida%Size() < maxval(loc)) then 
+            call ida%Append(spread(0_I8, 1, maxval(loc) - ida%Size()))
+        end if 
+
+        ida%val(loc) = ida%val(loc) + val
+        
+    end subroutine
 
     ! Elementray array operations
     !============================
