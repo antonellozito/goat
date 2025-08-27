@@ -11076,16 +11076,16 @@ module ggmod_topology2D
         end if 
 
         ! Number of wide and narrow grid cells
-        if (nwgc > 0) then 
-            issinglenull = .false.
-        elseif (topomesh%cell%ntot /= 3) then
-            issinglenull = .false.
-        end if 
+        !if (nwgc > 0) then 
+        !    issinglenull = .false.
+        !elseif (topomesh%cell%ntot /= 3) then
+        !    issinglenull = .false.
+        !end if 
 
         ! Core cells
-        if (ncc /= 1) then 
-            issinglenull = .false.
-        end if 
+        !if (ncc /= 1) then 
+        !    issinglenull = .false.
+        !end if 
 
         ! Double null
         !============
@@ -11095,21 +11095,21 @@ module ggmod_topology2D
         end if 
 
         ! Strike point checks
-        if (nsp /= 4) then 
-            isdoublenull = .false. 
-        end if 
+        !if (nsp /= 4) then 
+        !    isdoublenull = .false. 
+        !end if 
 
         ! Number of wide and narrow grid cells
-        if (nwgc > 0) then 
-            isdoublenull = .false.
-        elseif (topomesh%cell%ntot /= 3) then
-            isdoublenull = .false.
-        end if 
+        !if (nwgc > 0) then 
+        !    isdoublenull = .false.
+        !elseif (topomesh%cell%ntot /= 3) then
+        !    isdoublenull = .false.
+        !end if 
 
         ! Core cells
-        if (ncc /= 2) then 
-            isdoublenull = .false.
-        end if 
+        !if (ncc /= 2) then 
+        !    isdoublenull = .false.
+        !end if 
 
         ! Determine flag
         !===============
