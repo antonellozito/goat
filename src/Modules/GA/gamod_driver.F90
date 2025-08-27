@@ -207,6 +207,7 @@ module gamod_driver
         type(QualityMetric) :: qm
 
         ! Calculate quality metric
+        call qm%Initialize(grid)
         call qm%CalculateQualityMetrics(grid, options, magneticField,.false.,.false.)
 
         ! Remove Small triangles

@@ -48,7 +48,8 @@ module gamod_types
         integer(I8) :: nCv
 
     contains
-    
+
+        procedure :: Initialize
         procedure :: CalculateQualityMetrics
         procedure :: ComputeQM
 
@@ -470,6 +471,49 @@ module gamod_types
     !------------------------------------------------------------------!
     !                  QUALITY METRIC COMPUTATIONS                     !
     !------------------------------------------------------------------!
+    subroutine Initialize(qm, grid)
+
+        ! Description
+        !============
+        ! Initialize quality metric type
+
+        ! Declare variables
+        !==================
+        class(QualityMetric)    :: qm
+        type(GAGridUDT)         :: grid
+
+                ! Initialize the qm arrays?? - TODO
+        if (allocated(qm%fcBias)) then
+            deallocate(qm%fcBias)
+            deallocate(qm%fcqalfc)
+            deallocate(qm%fcS)
+            deallocate(qm%cvS)
+            deallocate(qm%cvAR)
+            deallocate(qm%h_pol)
+            deallocate(qm%h_rad)
+            deallocate(qm%h_rad_psi)
+        end if
+        allocate(qm%fcBias(grid%face%ntot))
+        allocate(qm%fcqalfc(grid%face%ntot))
+        allocate(qm%fcS(grid%face%ntot))
+        allocate(qm%cvS(grid%cell%ntot))
+        allocate(qm%cvAR(grid%cell%ntot))
+        allocate(qm%h_pol(grid%cell%ntot))
+        allocate(qm%h_rad(grid%cell%ntot))
+        allocate(qm%h_rad_psi(grid%cell%ntot))
+
+        ! Set to zero
+        qm%fcBias       = 0
+        qm%fcqalfc      = 0
+        qm%fcS          = 0
+        qm%cvS          = 0
+        qm%cvAR         = 0
+        qm%h_pol        = 0
+        qm%h_rad        = 0
+        qm%h_rad_psi    = 0
+
+    end subroutine
+
     subroutine ComputeQM(qm,grid,options, magneticField)
 
         ! Description
@@ -487,9 +531,8 @@ module gamod_types
 
         ! Auxiliary
         real(R8) :: fcH(grid%face%ntot,2), psic, &
-            mean_psi, isx(4), isy(4), &
-            h_rad_int, v1p, v2p, cvx1, cvy1, cvx2, cvy2, t0, &
-            min_vpsi, max_vpsi
+            isx(4), isy(4), min_vpsi, max_vpsi, &
+            h_rad_int, v1p, v2p, cvx1, cvy1, cvx2, cvy2, t0
         real(R8), allocatable, dimension(:) :: v1x, v1y, &
             v2x, v2y, fcX, fcY, fcS, fcBx, fcBy, fcs_fcs, &
             vx, vy, vertsX, vertsY, vpsi, cx, cy, h_pol, &
@@ -518,9 +561,11 @@ module gamod_types
             vec_n(f%ntot,2), vx(v%ntot), vy(v%ntot), vpsi(v%ntot), &
             h_pol(c%ntot), h_rad(c%ntot), h_rad_psi(c%ntot), &
             cvS(c%ntot), cvAR(c%ntot), fcBias(f%ntot), fccv(f%ntot,2), &
-            indCv(c%ntot), fcqalfc(f%ntot), ncpf(f%ntot), fcxx(f%ntot))
-
-
+            indCv(c%ntot), fcqalfc(f%ntot), ncpf(f%ntot), fcxx(f%ntot), &
+            fcBx(f%ntot), fcBy(f%ntot),fcBb(f%ntot,2))
+        ncpf = 0
+        fccv = 0
+        fcxx = 0
 
         vx1 = f%vert1%GetAllElements()
         vx2 = f%vert2%GetAllElements()
@@ -555,7 +600,7 @@ module gamod_types
 
         ! Pre-process non aligned faces
         !==============================
-        not_aligned_f = (f%aligned%GetAllElements() == 0)
+        not_aligned_f = (f%aligned%Get() == 0)
 
         indCv = (/ (i, i = 1, c%ntot )/)
         comp_range = indCv .le. qm%nCv
@@ -619,7 +664,7 @@ module gamod_types
 
                     ! H pol
                     !======
-                    mean_psi = 0.5_R8* (max_vpsi + min_vpsi) 
+                    psic = 0.5_R8* (max_vpsi + min_vpsi) 
 
                     isx = 0
                     isy = 0
@@ -699,7 +744,7 @@ module gamod_types
 
                 ! H pol
                 !======
-                mean_psi = 0.5_R8* (max_vpsi + min_vpsi) 
+                psic = 0.5_R8* (max_vpsi + min_vpsi) 
 
                 isx = 0
                 isy = 0
@@ -743,7 +788,7 @@ module gamod_types
 
             tc = fccv(ifc,:)
             cvx1 = cx(tc(1))
-            cvy1 = cy(tc(2))
+            cvy1 = cy(tc(1))
             fcH(ifc,1) = sqrt( (fcX(ifc) - cvx1)**2 + (fcY(ifc) - cvy1)**2  )
             if (ncpf(ifc) == 2) then
                 cvx2 = cx(tc(2));
@@ -2800,8 +2845,6 @@ module gamod_types
 
                 if (.not.options%slab) call grid%RecalcMagn(magneticField)
 
-
-
             end if
 
             if (options%debug) call grid%CheckUnstructuredGrid(.false.)
@@ -2809,6 +2852,7 @@ module gamod_types
             ! Redection
             call qm%ComputeQM(grid, options, magneticField)
 
+            small_tria = 0
             call grid%DetectSmallTrias(qm, options, small_tria)
         end do
 
@@ -2866,7 +2910,7 @@ module gamod_types
         do i = 1, nb
 
             ! Get cell number
-            ic = b_trias(ic)
+            ic = b_trias(i)
 
             ! Find the internal face of the triangle which is no boundary face
             tf = GetCellFaceGA(c, ic)
@@ -2915,6 +2959,9 @@ module gamod_types
                 end if
 
             end if
+
+            ! Housekeeping
+            deallocate(tf_int)
 
         end do
 
@@ -3173,9 +3220,92 @@ module gamod_types
         class(GAGridUDT), intent(in) :: grid
         integer(I8), allocatable, intent(in) :: b_faces(:)
         integer(I8), allocatable, intent(out) :: tang_points(:)
+
+        ! Auxiliary
+        integer(I8) :: i, j, counter, nbv, iv, ifs, nfa
+        integer(I8), allocatable, dimension(:) :: vxsB, cvLookUp, fsvLookUp, &
+            tf, tang_pointsD, tf_aligned, cvs, int_face
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+        
+        ! Initialize 
+        allocate(tang_pointsD(nint(grid%vert%ntot/10.0_R8)))
+        tang_pointsD = 0
+        counter = 0
+
+        ! Get boundary faces - check if necessary TODO
+
+        
+        ! Get boundary vertices
+        vxsB = GetVxsFromFcsGA(f, b_faces)
+        nbv = size(vxsB)
+
+        ! Precompute
+        cvLookUp = GetCvLookUpGA(c)
+        fsvLookUp = GetFsvLookUpGA(grid%data%fluxdata)
+
+        ! Loop over boundary vertices
+        do i = 1, nbv
+            
+            iv = vxsB(i)
+
+            ! Get flux surface
+            ifs = GetVertFsvGA(grid%data%fluxdata, iv, fsvLookUp)
+
+            if (ifs /= 0) then
+
+                ! Get faces of vertex
+                tf = GetVertFaceGA(f, iv)
+
+                ! Get aligned faces
+                nfa = count(f%aligned%Get(tf) == 1)
+                allocate(tf_aligned(nfa))
+                tf_aligned = pack(tf, f%aligned%Get(tf) == 1)
+
+                if (nfa == 2) then ! Otherwise just end point of surface
+
+                    ! Check whether faces are external of internal
+                    allocate(int_face(nfa))
+                    int_face = 0
+
+                    do j = 1, nfa
+
+                        cvs = GetFaceCellGA(c, tf_aligned(j), cvLookUp)
+                        if (size(cvs) == 2) then
+
+                            int_face(j) = 1
+
+                        end if
+
+                    end do
+
+                    ! Add tangency point
+                    if (sum(int_face) .gt. 0) then
+
+                        counter = counter + 1
+                        tang_pointsD(counter) = iv
+
+                    end if
+                end if
+
+
+            end if
+
+        end do 
+
+        ! Trim
+        tang_points = tang_pointsD(1:counter)
+
+        end associate
+
     end subroutine
 
-    subroutine GetRadLineFaces(grid, tang_points, rad_faces)
+    subroutine GetRadLineFaces(grid, verts, faces)
 
         ! Description
         !============
@@ -3185,8 +3315,31 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(in) :: grid
-        integer(I8), allocatable, intent(in) :: tang_points(:)
-        integer(I8), allocatable, intent(out) :: rad_faces(:)
+        integer(I8), allocatable, intent(in) :: verts(:)
+        integer(I8), allocatable, intent(out) :: faces(:)
+
+        ! Auxiliary
+        integer(I8) :: i, nv, faces1(grid%face%ntot), counter
+        logical :: b_flag(grid%face%ntot), in_flag(grid%face%ntot)
+
+        ! Initialize
+        faces1 = 0
+        counter = 0
+        nv = size(verts)
+        b_flag = (grid%face%label%Get() /= 0)
+        in_flag = .false.
+
+        ! Loop over vertices
+        do i = 1, nv
+
+            call grid%RecursiveGridMarching(verts(i), faces1, 0, counter, b_flag, in_flag)
+
+        end do 
+
+        ! Trim
+        faces = faces1(1:counter)
+
+
     end subroutine
 
     recursive subroutine RecursiveGridMarching(grid, iv, faces, aligned, counter, b_flag, in_flag)
@@ -3705,6 +3858,22 @@ module gamod_types
 
     end function
 
+    ! Get the fluxsurface of a vertex
+    function GetVertFsvGA(fd, i, fsvLookUp) result(res)
+        type(GAFluxDataUDT) :: fd
+        integer(I8) :: i, res
+        integer(I8), allocatable :: res1(:)
+        integer(I8), allocatable, optional :: fsvLookUp(:)
+
+        res = 0
+
+        if (.not.present(fsvLookUp)) fsvLookUp = GetFsvLookUpGA(fd)
+
+        res1 = pack(fsvLookUp,fd%fluxsurfaceverts%Get() == i)
+        res = res1(1)
+
+    end function
+
     function GetFluxSurfaceFcsGA(fd, i) result(res)
         integer(I8) :: i, s, nf, j
         type(GAFluxDataUDT) :: fd
@@ -3744,20 +3913,35 @@ module gamod_types
 
     function GetCvLookUpGA(cell) result(res)
         type(GACellUDT)       :: cell
-        integer(I8)         :: nc, ic, nv, s, i               
-        integer(I8), allocatable :: res(:), range(:)
+        integer(I8)         :: nc, ic, nv, s               
+        integer(I8), allocatable :: res(:)! , range(:)
 
         nc = cell%ntot
-        range = (/ (i, i = 1,(cell%vertP1%Get(nc)+cell%vertP2%Get(nc)-1))/)
+        !range = (/ (i, i = 1,(cell%vertP1%Get(nc)+cell%vertP2%Get(nc)-1))/)
 
-        allocate(res(1:cell%vertP1%Get(nc)+cell%vertP2%Get(nc)-1))
+        allocate(res(cell%vertP1%Get(nc)+cell%vertP2%Get(nc)-1))
         res = 0
 
         do ic = 1, nc
             s = cell%vertP1%Get(ic)
             nv = cell%vertP2%Get(ic)
-            range = (/ (i, i = s, (s+nv-1)) /)
-            res(range) = ic
+            res(s:s+nv-1) = ic
+            !range = (/ (i, i = s, (s+nv-1)) /)
+            !res(range) = ic
+        end do
+    end function
+
+    function GetFsvLookUpGA(fd) result(res)
+        type(GAFluxDataUDT) :: fd
+        integer(I8) :: ifs, nv, sv
+        integer(I8), allocatable :: res(:)
+        allocate(res(fd%fluxsurfacevertsP1%Get(fd%nFs) +  &
+            fd%fluxsurfacevertsP2%Get(fd%nFs)-1)) 
+        res = 0
+        do ifs = 1, fd%nFs
+            nv = fd%fluxsurfacevertsP2%Get(ifs)
+            sv = fd%fluxsurfacevertsP1%Get(ifs)
+            res(sv:sv+nv-1) = ifs
         end do
     end function
 
