@@ -16734,6 +16734,9 @@ module ggmod_gridgeneration2D
             where (fl_new == allTPlabels(i)) simgrid%face%reg = fcregID 
         end do
 
+        ! SOLPS topology identification and face region remapping
+        call IdentifySOLPSTopology(simgrid, topomesh, options)
+
     end subroutine
 
     subroutine TranslateGridLabelsGD(simgrid, topomesh)
@@ -16782,6 +16785,220 @@ module ggmod_gridgeneration2D
         where (simgrid%face%label == vesselIDs)     simgrid%face%label = vesselID
         where (simgrid%face%label == lastfsIDs)     simgrid%face%label = outerboundaryID
         where (simgrid%face%label == interiorIDs)   simgrid%face%label = interiorID
+
+    end subroutine
+
+    ! Topology identification for SOLPS
+    subroutine IdentifySOLPSTopology(simgrid, topomesh, options)
+
+        ! Description
+        !============
+        ! This routine attempts to map the current topology to an 
+        ! existing SOLPS topology. There is NO GUARANTEE that this will
+        ! be compatible, or give reasonable/expected results, in SOLPS.
+        ! The following is done: 
+        !
+        ! Topology  |   # X points  | # O points
+        ! linear    |   0           | 0
+        ! single X  |   1           | 1
+        ! double X  |   2           | 1
+
+        ! Linear:
+        ! - fcReg: 1, 2 for targets, random (non-target) values elsewhere (0 in domain)
+        ! - cvReg: everywhere equal to 1
+        ! - ftReg: everywhere equal to 1
+
+        ! Single x: 
+        ! - fcReg: 1, 4 for two targets, random (non-target) values elsewhere (0 in domain)
+        ! - cvReg: 1  in core, random (non-core) values elsewhere
+        ! - ftReg: equal to cvReg
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)            :: simgrid 
+        type(TopomeshUDT), intent(in)           :: topomesh
+        type(GGOptionsUDT), intent(in)          :: options
+
+        ! Auxiliary
+        integer(I8)                             :: TMTop, tubeID, &
+            tubeface1, tubeface2, ngridface1, ngridface2, ne, &
+            fcRegID
+        integer(I8), allocatable, dimension(:)  :: gridface1, &
+            gridface2, tubeface, resfcReg, allfID, &
+            tfID, sortindex, psind, ind, remfcReg
+        integer(I8), allocatable, dimension(:, :)   :: edges
+
+        logical, allocatable, dimension(:)      :: ispolygonstart, &
+            isbranchingpolygon 
+
+        ! Loop
+        integer(I8)                             :: i, j, k 
+
+        ! Initialize
+        !===========
+        ! Print a warning message
+        print *, '!====================================================!'
+        print *, 'Running SOLPS topology identification. There is '
+        print *, '     NO GUARANTEE WHATSOEVER'
+        print *, 'that this routine will yield proper results for SOLPS.'
+        print *, 'Please examine the resulting fcReg, cvReg and ftReg '
+        print *, 'carefully afterwards'
+        print *, '!====================================================!'
+
+        ! Determine topology type
+        !========================
+        ! Get topomesh topology
+        TMTop = IdentifyTopologicalMeshType(topomesh)
+
+        ! Print
+        if (TMTop == TMTopL) then 
+            print *, 'Identified a linear topology'
+        elseif (TMTop == TMTopSN) then
+            print *, 'Identified a single null topology'
+        elseif (TMTop == TMTopDN) then 
+            print *, 'Identified a double null topology'
+        elseif (TMTop == TMTopGeneral) then 
+            print *, 'Identified a general topology - exiting...'
+        else
+            print *, 'Identified an unknown topology - exiting...'
+            return
+        end if 
+
+        ! Remap cvReg
+        !============
+        select case (TMTop)
+
+        case (TMTopL)
+
+            ! Simply one everywhere
+            simgrid%cell%reg = 1
+
+        case default 
+
+            ! Do nothing for other cases
+
+        end select 
+
+        ! Remap fcReg
+        !============
+        ! Precompute some data 
+
+        ! Remap for each case
+        select case (TMTop)
+
+        case (TMTopL)
+
+            ! Select an open topomesh tube
+            tubeID = 1
+            do while (tubeID <= topomesh%tube%ntot)
+                ! Checks
+                if (topomesh%tube%isclosed(tubeID)) then 
+                    tubeID = tubeID + 1
+                else 
+                    exit 
+                end if 
+            end do 
+
+            ! Check if the ID was found, if not: exit
+            if (tubeID > topomesh%tube%ntot) then 
+                print *, 'Could not find open tube, not applying mapping ' // &
+                    'and returning...'
+                return 
+            end if 
+
+            ! Determine topomesh boundary faces at the top and bottom 
+            ! of this tube
+            tubeface = topomesh%tube%GetFace(tubeID)
+            tubeface1 = tubeface(1)
+            tubeface2 = tubeface(size(tubeface))
+            if (tubeface1 == tubeface2) then 
+                call gdErrorHandler('IdentifySOLPStopology: open tube ' // & 
+                    'detected with the same start and end face - unexpected')
+            end if 
+
+            ! Determine which grid boundary faces belong to these 
+            ! boundaries
+            ngridface1 = count(simgrid%face%TMfacelabel == tubeface1)
+            ngridface2 = count(simgrid%face%TMfacelabel == tubeface2)
+            allocate(gridface1(ngridface1), gridface2(ngridface2))
+            gridface1 = pack([(k, k = 1, simgrid%face%ntot)], simgrid%face%TMfacelabel == tubeface1)
+            gridface2 = pack([(k, k = 1, simgrid%face%ntot)], simgrid%face%TMfacelabel == tubeface2)
+
+            ! Sanity checks
+            if (ngridface1 == 0 .or. ngridface2 == 0) then 
+                print *, 'Could not find grid faces for some topological ' // &
+                    'faces, not changing fcReg...'
+                return 
+            end if 
+            if (.not. all(simgrid%face%BF([gridface1, gridface2]))) then 
+                ! Should only happen in case the topomesh is horribly wrong
+                call gdErrorHandler('IdentifySOLPStopology: some faces ' // & 
+                    'are not boundary faces as expected')
+            end if 
+
+            ! Set fcReg reserved labels
+            resfcReg = [1, 2]
+
+            ! Map fcReg for reserved labels
+            simgrid%face%reg = 0
+            simgrid%face%reg(gridface1) = resfcReg(1)
+            simgrid%face%reg(gridface2) = resfcReg(2)
+
+            ! Sort remaining boundary faces and remap
+            ! Extract faces
+            remfcReg = [0]
+            allfID = [(k, k = 1, simgrid%face%ntot)]
+            fcRegID = maxval(resfcReg) 
+            do i = 1, size(remfcReg)
+                ! Get faces
+                ne = count((remfcReg(i) == simgrid%face%reg) .and. &
+                    simgrid%face%BF)
+                allocate(tfID(ne), edges(ne, 2), sortindex(ne), &
+                ispolygonstart(ne), isbranchingpolygon(ne)) ! 
+                tfID = pack(allfID, simgrid%face%BF .and. &
+                    simgrid%face%reg == remfcReg(i))
+                edges = simgrid%face%vert(tfID, :)
+                call SortPolygonEdges(edges, ne, sortindex, ispolygonstart, &
+                    isbranchingpolygon)
+                allocate(psind(count(ispolygonstart)))
+
+                ! Set labels for each distinct polygon piece
+                psind = pack([(k, k = 1, ne)], ispolygonstart)
+                psind = [psind, ne+1]
+                do j = 1, count(ispolygonstart)
+
+                    ! Update fcReg
+                    fcRegID = fcRegID + 1
+
+                    ! Get indices
+                    ind = [(k, k = psind(j), psind(j+1)-1)]
+
+                    ! Set label
+                    simgrid%face%reg(tfID(sortindex(ind))) = fcRegID 
+
+                end do 
+                deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
+            end do 
+
+        case (TMTopSN)
+
+            ! Get strike point vertices
+
+            ! Get for each strike point its neighbouring topomesh faces
+            ! that are vessel boundary faces
+
+            ! Check if some strike points have the same face. If so,  
+
+        case (TMTopDN)
+
+        case (TMTopGeneral)
+            
+        case default
+
+            ! Do nothing for other cases
+
+        end select
 
     end subroutine
 
