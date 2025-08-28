@@ -186,7 +186,16 @@ module mod_dynamicarrays
         procedure   :: Size                  => GetSizeIDA
 
         ! Sum with Mask
-        procedure   :: SumMask               => SumIDAScalarMask
+        procedure   :: SumMask1D               => SumIDAScalarMask1D
+        procedure   :: SumMask0D               => SumIDAScalarMask0D
+        generic     :: SumMask                 => &
+            SumMask0D, SumMask1D
+
+        ! Replace
+        procedure   :: Replace               => ReplaceIDA
+
+        ! Update after entry removal
+        procedure   :: UpdateArray
 
     end type 
 
@@ -1208,8 +1217,62 @@ contains
 
     end function 
 
-    ! Sum with Mask
-    subroutine SumIDAScalarMask(ida,loc,val) 
+    ! Replace
+    subroutine ReplaceIDA(ida,loc_begin,loc_end,val)
+        
+        ! Description
+        !============
+        ! Replaces the array elements located from index loc_begin
+        ! till index loc_end, with the array val. This operation
+        ! is a short cut for removing and inserting elements
+        ! with different sizes at the same location.
+        ! Note: it is not check whether loc_begin and loc_end are
+        ! in the array size!
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayUDT)   :: ida
+        integer(ik), intent(in)         :: loc_begin
+        integer(ik), intent(in)         :: loc_end
+        integer(ik), allocatable        :: val(:)
+
+        ! Auxiliary
+        integer(ik), allocatable           :: temp1(:), temp2(:)
+
+        ! Insert val
+        !===========
+        ! Split up array
+        temp1 = ida%val(1:loc_begin-1)
+        temp2 = ida%val(loc_end+1:size(ida%val))
+
+        ! Reconstruct
+        ida%val = [temp1, val, temp2]        
+
+    end subroutine
+
+    ! Sum with Mask as single location
+    subroutine SumIDAScalarMask0D(ida,loc,val) 
+
+        ! Description
+        !============
+        ! Increment the value of one elements on a specified location with val.
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayUDT)   :: ida 
+        integer(ik), intent(in)         :: loc 
+        integer(ik)                     :: val
+
+        !if (ida%Size() < loc) then 
+        !    call ida%Append(spread(0_I8, 1, loc - ida%Size()))
+        !end if 
+
+        ida%val(loc) = ida%val(loc) + val
+        
+    end subroutine
+
+    ! Sum with Mask as 1D array
+    subroutine SumIDAScalarMask1D(ida,loc,val) 
 
         ! Description
         !============
@@ -1219,9 +1282,9 @@ contains
 
         ! Declare variables
         !==================
-        class(IntegerDynamicArrayUDT)   :: ida 
-        integer(ik), intent(in)         :: loc(:) 
-        integer(ik)                     :: val
+        class(IntegerDynamicArrayUDT)           :: ida 
+        integer(ik), intent(in), allocatable    :: loc(:) 
+        integer(ik)                             :: val
 
         if (ida%Size() < maxval(loc)) then 
             call ida%Append(spread(0_I8, 1, maxval(loc) - ida%Size()))
@@ -1229,6 +1292,34 @@ contains
 
         ida%val(loc) = ida%val(loc) + val
         
+    end subroutine
+
+    subroutine UpdateArray(ida,val)
+
+        ! Description
+        !============
+        ! In the case where a entry of an array got removed
+        ! and all the entry of the array which are larger than
+        ! the removed array need to be decreased by one
+        ! F.e. a vertex got removed out of vert%x etc. So 
+        ! all vertices with larger number need to decrease by one
+        ! in cell%vert and face%vert. This routine bundels the 
+        ! needed operations
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayUDT) :: ida
+        integer(I8) :: val
+
+        ! Auxiliary
+        integer(I8) :: j 
+        integer(I8), allocatable :: ind(:), loc(:)
+
+        ind = (/ (j, j = 1, size(ida%val)) /)
+        loc = pack(ind, ida%val .gt. val)
+        ida%val(loc) = ida%val(loc) - 1
+
+
     end subroutine
 
     ! Elementray array operations

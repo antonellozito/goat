@@ -458,6 +458,13 @@ module gamod_types
         procedure :: GetRadLineFaces
         procedure :: RecursiveGridMarching
 
+        ! Grid operation
+        procedure :: RemoveCells
+        procedure :: RemoveFaces
+        procedure :: RemoveVertices
+
+
+
     end type  
 
     !==================================================================!
@@ -877,7 +884,7 @@ module gamod_types
     end subroutine
 
     !------------------------------------------------------------------!
-    !                        GAGRID OPERATIONS                         !
+    !                        GAGRID ROUTINES                           !
     !------------------------------------------------------------------!  
 
     subroutine InitializeGAGrid(grid)
@@ -2464,7 +2471,7 @@ module gamod_types
                 fcs = GetCellFaceGA(c, ic)
                 if (ccflags(ic) == 1) then
                     do i = 1, nf
-                        if (.not.( size( pack(cvLookUp,cf == fcs(i)) ) .eq. 2 ) ) then
+                        if (.not.( count(cf == fcs(i)) .eq. 2 ) ) then
                             call gdErrorHandler('CheckUnstructuredGrid: check 4, not all internal faces have two cells')
                         end if
 
@@ -2514,13 +2521,14 @@ module gamod_types
             allocate(b_cells(nb))
             indCv = (/ (i, i = 1, c%ntot) /)
             b_cells = pack(indCv,ccflags .eq. 3) ! boundary cells
-            do ic = 1, nb
+            do i = 1, nb
+                ic = b_cells(i)
                 nf = cfaceP2(ic);
                 fcs = GetCellFaceGA(c, ic)
 
                 counter = 0;
                 do j = 1,nf
-                    if (size(pack(cvLookUp,cf == fcs(j)) ) .eq. 1 )  then
+                    if (count(cf == fcs(j)) .eq. 1 )  then
                         counter = counter + 1;
                     end if
                 end do
@@ -2535,7 +2543,7 @@ module gamod_types
                 end if
             end do
 
-            ! Extra check on the extra connectivity fields
+            ! Extra check on the extra connectivity fields - TODO
             if (check_extra_conn) then
 
                 ! Not necessary for GAgrid I believe, and these field are not present anyway
@@ -2657,6 +2665,7 @@ module gamod_types
                 ! vertices detected that belong to multiple flux surfaces
                 ! Indicate the surfaces to merge
                 fID = fieldlineID(tfv)
+                allocate(ar(count(hasID(tfv) == 1)))
                 ar = pack(fID,hasID(tfv) == 1)
                 ifs1 = ar(1)
                 if (size(ar) .gt. 1) &
@@ -2665,6 +2674,9 @@ module gamod_types
                 counter = counter + 1
                 mFS(counter,1) = ifs1
                 mFS(counter,2) = ifs
+
+                deallocate(ar)
+
             end if
 
             ! Set the fieldline ID
@@ -2841,7 +2853,7 @@ module gamod_types
 
                 ! Visualize - TODO
 
-                call grid%LocalSmallTriangleRemoval(small_tria, faceA, faceB, faceC)
+                call grid%LocalSmallTriangleRemoval(small_tria, faceA, faceB, faceC, options)
 
                 if (.not.options%slab) call grid%RecalcMagn(magneticField)
 
@@ -3018,8 +3030,10 @@ module gamod_types
 
         else
 
+            allocate(faceA_dummy(count(is_aligned)))
             faceA_dummy = pack(tf, is_aligned)
             faceA = faceA_dummy(1)
+            deallocate(faceA_dummy)
 
         end if
 
@@ -3027,8 +3041,10 @@ module gamod_types
         is_boundary = isBoundaryFace1DGA(tf, f)
 
         ! Get boundary face
+        allocate(faceB_dummy(count(is_boundary)))
         faceB_dummy = pack(tf, is_boundary)
         faceB = faceB_dummy(1)
+        deallocate(faceB_dummy)
 
         ! Get other face
         do i = 1, size(tf)
@@ -3064,7 +3080,7 @@ module gamod_types
 
     end subroutine
 
-    subroutine LocalSmallTriangleRemoval(grid, small_tria, faceA, faceB, faceC)
+    subroutine LocalSmallTriangleRemoval(grid, cell, faceA, faceB, faceC, options)
 
         ! Description 
         !============
@@ -3078,8 +3094,168 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT) :: grid
-        integer(I8), intent(in) ::  small_tria, faceA, faceB, faceC
+        integer(I8), intent(in) ::  cell, faceA, faceB, faceC
+        type(GAoptionsUDT) :: options
 
+        ! Auxiliary
+        integer(I8) :: j, k, n, n_oc, s, vx_common, vx_rem(2), indexf, cellA, &
+            vertsA(2), vertsB(2), cellC, indf, indv
+        integer(I8), allocatable :: fda(:), cell_rem(:), &
+            tv_cellA(:), tv_cellC(:), new_verts_cellC(:),&
+            range(:), new_verts_cellA(:), &
+            faces(:), fsFc(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert, &
+            fd => grid%data%fluxdata &
+            )
+
+        ! Check if flux surface surfaces are unique
+        if (options%debug) then
+            allocate(fsFc(count(fd%fluxsurfacefaces%Get() /= 0)))
+            fsFc = pack(fd%fluxsurfacefaces%Get(),fd%fluxsurfacefaces%Get() /= 0)
+            call Unique(fsFc,fda)
+            if (size(fsFc) /= size(fda)) &
+                call gdErrorHandler('LocalSmallTriangleRemoval: fluxsurfacefaces is not unique')
+            deallocate(fsFc)
+        end if
+
+        ! Find vertex which is both in faceA and faceB
+        vertsA = [f%vert1%Get(faceA), f%vert2%Get(faceA)]
+        vertsB = [f%vert1%Get(faceB), f%vert2%Get(faceB)]
+
+        vx_rem = 0
+
+        if (any(vertsB == vertsA(1))) then
+            vx_common = vertsA(1)
+            vx_rem(1) = vertsA(2)
+        else
+            vx_common = vertsA(2)
+            vx_rem(1) = vertsA(1)
+        end if
+
+        do j = 1, 2
+            if (vertsB(j) /= vx_common) vx_rem(2) = vertsB(j)
+        end do
+
+        ! META state starts here
+        allocate(cell_rem(1))
+        cell_rem = cell
+        call grid%RemoveCells(cell_rem)
+
+        ! Aligned cell
+        !-------------
+        ! Find the cell at the aligned face
+        indexf = findloc(c%face%Get(), faceA, 1)
+        cellA = GetCellFromFaceIndex(c, indexf)
+
+        !n_f = indexf - c%faceP1%Get(cellA) + 1
+
+        !tf_cellA = GetCellFaceGA(c, cellA)
+
+        ! Remove the aligned face in that cell and set the remaining faces => become triangle
+        call c%face%Remove(indexf)
+        call c%faceP2%SumMask(cellA, -1)
+        range = (/ (j, j = cellA+1, c%faceP1%Size())/)
+        call c%faceP1%SumMask(range, -1)
+        !allocate(new_face_cellA(3))
+        !new_face_cellA = [tf_cellA(1:nf_1), tf_cellA(n_f+1:size(tf_cellA))]
+        !s = grid%cell%faceP1%Get(cellA)
+        !n = grid%cell%faceP2%Get(cellA)
+        !call grid%cell%face%Replace(s,s+n-1,new_face_cellA)
+
+        ! Remove the vertex of the aligned face in that cell
+        tv_cellA = GetCellVertGA(c, cellA)
+        indv = findloc(tv_cellA, vx_rem(1), 1) ! ordering of vertices matters!!
+
+        new_verts_cellA = [tv_cellA(1:indv-1), tv_cellA(indv+1:size(tv_cellA)) ]
+        s = c%vertP1%Get(cellA)
+        n = c%vertP2%Get(cellA)
+        call c%vert%Replace(s,s+n-1,new_verts_cellA) 
+
+        call c%vertP2%SumMask(cellA, -1)
+        range = (/ (j, j = cellA+1, c%vertP1%Size())/)
+        call c%vertP1%SumMask(range, -1)
+
+        ! Cell at non-aligned and non-boundary face
+        !------------------------------------------
+        ! Find the cell at the non-boundary faces and non-aligned face
+        indexf = findloc(c%face%Get(),faceC, 1)
+        cellC = GetCellFromFaceIndex(c, indexf)
+
+        call c%face%Remove(indexf)
+        call c%faceP2%SumMask(cellC, -1)
+        range = (/ (j, j = cellC+1, c%faceP1%Size())/)
+        call c%faceP1%SumMask(range, -1)
+
+
+        ! Remove the vertex of the aligned face in that cell
+        tv_cellC = GetCellVertGA(c, cellC)
+        indv = findloc(tv_cellC, vx_rem(1), 1) 
+
+        new_verts_cellC = [tv_cellC(1:indv-1), tv_cellC(indv+1:size(tv_cellC))]
+        s = c%vertP1%Get(cellC)
+        n = c%vertP2%Get(cellC)        
+        call c%vert%Replace(s,s+n-1,new_verts_cellC)
+        call c%vertP2%SumMask(cellC, -1)
+        range = (/ (j, j = cellC+1, c%vertP1%Size())/)
+        call c%vertP1%SumMask(range, -1)
+
+        ! Find cells where vx_rem(1:2) is and replace is by the common vertex (vx_com)
+        do j = 1, 2
+
+            ! cell%vert
+            indv = findloc(c%vert%Get(), vx_rem(j), 1)
+            call c%vert%Set(indv, vx_common)
+            
+            ! face%vert
+            n_oc = count(f%vert1%Get() == vx_rem(j))
+            do k = 1,n_oc
+                indf = findloc(f%vert1%Get(), vx_rem(j), 1)
+                call f%vert1%Set(indf, vx_common)
+            enddo
+
+            n_oc = count(f%vert2%Get() == vx_rem(j))
+            do k = 1,n_oc
+                indf = findloc(f%vert2%Get(), vx_rem(j), 1)
+                call f%vert2%Set(indf, vx_common)
+            enddo
+
+        end do
+        
+        ! Check flux surface faces
+        if (options%debug) then
+            allocate(fsFc(count(fd%fluxsurfacefaces%Get() /= 0)))
+            fsFc = pack(fd%fluxsurfacefaces%Get(),fd%fluxsurfacefaces%Get() /= 0)
+            call Unique(fsFc,fda)
+            if (size(fsFc) /= size(fda)) &
+                call gdErrorHandler('LocalSmallTriangleRemoval: fluxsurfacefaces is not unique')
+            deallocate(fsFc)
+        end if
+        
+        ! Now faces of small triangle can get removed
+        faces = [faceA, faceB, faceC]
+        call grid%RemoveFaces(faces)
+
+        ! Now vertices can get removed
+        !RemoveVertices(vx_rem)
+
+
+        ! Check flux surface faces
+        if (options%debug) then
+            allocate(fsFc(count(fd%fluxsurfacefaces%Get() /= 0)))
+            fsFc = pack(fd%fluxsurfacefaces%Get(),fd%fluxsurfacefaces%Get() /= 0)
+            call Unique(fsFc,fda)
+            if (size(fsFc) /= size(fda)) &
+                call gdErrorHandler('LocalSmallTriangleRemoval: fluxsurfacefaces is not unique')
+            deallocate(fsFc)
+        end if
+
+
+        end associate
 
     end subroutine
 
@@ -3120,6 +3296,7 @@ module gamod_types
 
         ! 3. boundary faces
         indFc = (/ (i, i = 1,grid%face%ntot) /)
+        allocate(b_faces(count(grid%face%label%Get() /= 0)))
         b_faces = pack(indFc, grid%face%label%Get() /= 0);
 
         ! 4. region boundary - too expensive
@@ -3252,6 +3429,7 @@ module gamod_types
         ! Loop over boundary vertices
         do i = 1, nbv
             
+            ! Get vertex number
             iv = vxsB(i)
 
             ! Get flux surface
@@ -3292,6 +3470,9 @@ module gamod_types
 
                     end if
                 end if
+
+                ! Housekeeping
+                deallocate(tf_aligned)
 
 
             end if
@@ -3415,6 +3596,251 @@ module gamod_types
 
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                       GAGRID OPERATIONS                          !
+    !------------------------------------------------------------------!  
+
+    subroutine RemoveCells(grid, cells)
+        
+        ! Description
+        !============
+        ! Remove cells from the grid data
+        ! But does not change the geometry of neighboring cells!
+        ! Therefore, only cells that are obsolete should be removed with this routine        
+        ! Input
+        !-----
+        ! grid%cell: struct with unstructured grid data as in Make_traduitoutb2us.m
+        ! cells_to_remove: list of cells to remove ordered from small to larg cell number 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), allocatable, intent(in)    :: cells(:)
+
+        ! Auxiliary
+        integer(I8) :: i, j, s, n, nv, ic, nc, counter, c_num, &
+            rem_ind_dummy(grid%cell%ntot)
+        integer(I8), allocatable :: cellsU(:), rem_ind(:), range(:)
+
+
+        ! Make unique
+        call Unique(cells,cellsU) 
+
+        associate(&
+            c => grid%cell &
+            )
+
+        nc = size(cellsU)
+        if (nc /= 0) then
+
+            call c%x%Remove(cellsU)
+            call c%y%Remove(cellsU)
+            call c%psi%Remove(cellsU)
+            call c%bp%Remove(cellsU)
+            call c%bt%Remove(cellsU)
+            call c%cflags%Remove(cellsU)
+            call c%reg%Remove(cellsU)
+            call c%ft%Remove(cellsU)
+
+            ! Adjust the c%vert and c%face array
+            rem_ind_dummy = 0
+            counter = 0
+            do i = 1, nc
+                ic = cellsU(i)
+                s = c%faceP1%Get(ic)
+                n = c%faceP2%Get(ic)
+                rem_ind_dummy(counter+1:counter+n) = (/ (j, j=s, s+n-1)/)
+                counter = counter + n
+            end do
+
+            rem_ind = rem_ind_dummy(1:counter)
+
+            call c%vert%Remove(rem_ind)
+            call c%face%Remove(rem_ind)
+
+            ! Adjust the pointers
+            do i = 1, nc
+
+                ! Determine correct cell number
+                c_num = cellsU(i) - (i-1)
+
+                ! Get nv
+                nv = c%vertP2%Get(c_num)
+
+                ! Remove and adjust
+                call c%vertP1%Remove(c_num)
+                call c%vertP2%Remove(c_num)
+                range = (/ (j, j = c_num, c%vertP1%Size())/)
+                call c%vertP1%SumMask(range, -nv)
+
+                ! Copy for c%face
+                call c%faceP1%SetAllElementsArray(c%vertP1%Get())
+                call c%faceP2%SetAllElementsArray(c%vertP2%Get())
+
+            end do
+
+            ! Change number of cells
+            c%ntot = c%ntot - nc
+
+        end if
+
+        end associate
+
+    end subroutine
+
+    subroutine RemoveFaces(grid, faces)
+
+        ! Description
+        !============
+        ! Removes faces out of face%vert and adapts the face number in cell%face
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), allocatable, intent(in)    :: faces(:)
+
+        ! Auxiliary
+        integer(I8) :: i, nf, ind, ifs, face_num
+        integer(I8), allocatable :: facesU(:)
+
+        ! Make unique
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            fd => grid%data%fluxdata &
+            )
+        
+        call Unique(faces, facesU)
+
+        nf = size(facesU)
+        if (nf /= 0) then
+
+            call f%vert1%Remove(facesU)
+            call f%vert2%Remove(facesU)
+            call f%label%Remove(facesU)
+            call f%reg%Remove(facesU)
+            call f%aligned%Remove(facesU)
+
+            do i = 1, nf
+
+                ! Adjusting all face number in cell%face
+                face_num = facesU(i) - (i-1)
+
+                call c%face%UpdateArray(face_num)
+
+                ! Remove face from fluxsurface if in a flux tube
+                ind = findloc(fd%fluxsurfacefacesP1%Get(), face_num, 1)
+
+                if (ind /= 0) then
+
+                    ifs = GetFsFcFromFaceIndex(fd, ind)
+                    call fd%fluxsurfacefaces%Remove(ind)
+                    call fd%fluxsurfacefacesP2%SumMask(ifs, -1)
+                    call fd%fluxsurfacefacesP1%UpdateArray(fd%fluxsurfacefacesP1%Get(ifs))
+
+                end if
+
+                ! Change other facenumber
+                call fd%fluxsurfacefaces%UpdateArray(face_num)
+
+
+            end do
+
+            ! Adjust 
+            f%ntot = f%ntot - nf
+
+        end if
+
+        end associate
+
+    end subroutine
+
+    subroutine RemoveVertices(grid, verts)
+
+        ! Description
+        !============
+        !  Removes vertices out of coordinate and magnetic field data
+        ! Adapts also the vertexnumbering in cell.vert and face.vert
+        ! change coordinate data
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), allocatable, intent(in) :: verts(:)
+
+        ! Auxiliary
+        integer(I8) :: i, j, nv, vx_num, ind, ifs
+        integer(I8), allocatable :: vertsU(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert, &
+            fd => grid%data%fluxdata &
+        )
+
+        call Unique(verts, vertsU)
+
+        nv = size(vertsU)
+        if (nv /= 0) then
+
+            call v%x%Remove(vertsU)
+            call v%y%Remove(vertsU)
+            call v%psi%Remove(vertsU)
+            call v%bx%Remove(vertsU)
+            call v%by%Remove(vertsU)
+            call v%ffbz%Remove(vertsU)
+
+        end if
+
+        do i = 1, nv
+
+            ! Determine correct vertex number
+            vx_num = vertsU(i) - (i-1)
+
+            ! Cell%vert
+            call c%vert%UpdateArray(vx_num)       
+
+            ! Change face%vert
+            call f%vert1%UpdateArray(vx_num)
+            call f%vert2%UpdateArray(vx_num)
+
+            ! Remove vertex from fsVx
+            ind = findloc(fd%fluxsurfaceverts%Get(), vx_num, 1)
+
+            if (ind /= 0) then
+
+                ifs = GetFsVxFromVertInd(fd, ind)
+                call fd%fluxsurfaceverts%Remove(ind)
+                call fd%fluxsurfacevertsP2%SumMask(ifs, -1)
+                call fd%fluxsurfacevertsP1%UpdateArray(fd%fluxsurfacevertsP1%Get(ifs))
+
+            end if
+
+            ! Update fsVx
+            call fd%fluxsurfaceverts%UpdateArray(vx_num)
+
+            ! Update xpointID
+            do j = 1, grid%data%nxp
+                if (grid%data%xpointID(j) .gt. vx_num) &
+                    grid%data%xpointID(j) = grid%data%xpointID(j) - 1
+            end do
+           
+        end do
+
+        ! Change v%ntot
+        v%ntot = v%ntot - nv
+
+        ! Remove duplicated Face - TODO - probably not necessary
+
+        end associate
+
+    end subroutine
         
 
     !------------------------------------------------------------------!
@@ -3534,7 +3960,9 @@ module gamod_types
                         call gdErrorHandler('ChainFaces: Something went wont, probably faces can not form a chain')
                     end if
 
+                    ! Housekeeping
                     deallocate(a)
+
                 end do
 
             end do
@@ -3602,6 +4030,7 @@ module gamod_types
             !=====================================
             ! Take the target vertices
             indFc = (/ (i, i = 1, f%ntot)/)
+            allocate(fcs_t1(count(fcLbl_loc.ge.4)))
             fcs_t1 = pack(indFc, fcLbl_loc.ge.4 )
 
             vxs_t1 = GetVxsFromFcsGA(f,fcs_t1)
@@ -3821,6 +4250,20 @@ module gamod_types
 
     end function
 
+    function GetCellFromFaceIndex(c, indf) result(res)
+        type(GACellUDT) :: c
+        integer(I8) :: i, indf, n_el, res, faceP1(c%ntot)
+        integer(I8), allocatable :: b(:), ind(:)
+
+        faceP1 = c%faceP1%Get()
+        n_el = count(faceP1.le.indf)
+        allocate(b(n_el))
+        ind = (/ (i, i = 1, n_el)/)
+        b = pack(ind, faceP1.le.indf)
+        res = b(n_el)
+
+    end function
+
     ! Get cells of a face with dynamic arrays
     function GetFaceCellGA(cell, i, cvLookUp) result(res)
         integer(I8)                 :: i 
@@ -3831,7 +4274,7 @@ module gamod_types
         if (.not.present(cvLookUp)) then
             cvLookUp = GetCvLookUpGA(cell)
         end if
-
+        allocate(res(count(cell%face%GetAllElements().eq.i)))
         res = pack(cvLookUp,cell%face%GetAllElements().eq.i)
     end function
 
@@ -3846,6 +4289,8 @@ module gamod_types
         fv1 = face%vert1%Get()
         fv2 = face%vert2%Get()
 
+        allocate(res1(count(fv1 == i)))
+        allocate(res2(count(fv2 == i)))
         res1 = pack(fv1,fv1 == i)
         res2 = pack(fv2,fv2 == i)
         n1 = size(res1)
@@ -3868,10 +4313,38 @@ module gamod_types
         res = 0
 
         if (.not.present(fsvLookUp)) fsvLookUp = GetFsvLookUpGA(fd)
-
+        allocate(res1(count(fd%fluxsurfaceverts%Get() == i)))
         res1 = pack(fsvLookUp,fd%fluxsurfaceverts%Get() == i)
+        if (count(fd%fluxsurfaceverts%Get() == i) .lt. 1) return
         res = res1(1)
 
+    end function
+ 
+    function GetFsFcFromFaceIndex(fd, indf) result(res)
+        type(GAFluxDataUDT) :: fd
+        integer(I8) :: i, n_el, indf, res, fdP1(fd%nFs)
+        integer(I8), allocatable :: b(:), ind(:)
+
+        fdP1 = fd%fluxsurfacefacesP1%Get()
+        n_el = count(fdP1.le.indf)
+        allocate(b(n_el))
+        ind = (/ (i, i = 1, n_el)/)
+        b = pack(ind, fdP1.le.indf)
+        res = b(n_el)
+
+    end function
+
+    function GetFsVxFromVertInd(fd, indv) result(res)
+        type(GAFluxDataUDT) :: fd 
+        integer(I8) :: i, n_el, indv, res, fdP1(fd%nFs)
+        integer(I8), allocatable :: b(:), ind(:)
+
+        fdP1 = fd%fluxsurfacevertsP1%Get()
+        n_el = count(fdP1.le.indv)
+        allocate(b(n_el))
+        ind = (/ (i, i = 1, n_el) /)
+        b = pack(ind, fdP1.le.indv)
+        res = b(n_el)       
     end function
 
     function GetFluxSurfaceFcsGA(fd, i) result(res)
@@ -3907,7 +4380,7 @@ module gamod_types
         if (.not.present(cvLookUp)) then
             cvLookUp = GetCvLookUpGA(cell)
         end if
-            
+        allocate(res(count(cell%vert%GetAllElements().eq.i)))
         res = pack(cvLookUp,cell%vert%GetAllElements().eq.i)
     end function
 
@@ -4029,6 +4502,50 @@ module gamod_types
         !        res = .false.
         !    end if
         !end do
+
+    end function
+
+    function GetCommonVert(f, f1, f2) result(res)
+        type(GAFaceUDT) :: f
+        integer(I8) :: i, f1, f2, res, vx1(2), vx2(2)
+
+        res = 0
+
+        if (HaveCommonVert(f,f1,f2)) then
+            vx1(1) = f%vert1%Get(f1) 
+            vx1(2) = f%vert2%Get(f1) 
+            vx2(1) = f%vert1%Get(f2) 
+            vx2(2) = f%vert2%Get(f2) 
+
+            do i = 1, 2
+                if (vx1(i) == vx2(1)) then
+                    res = vx2(1)
+                elseif (vx1(i) == vx2(2)) then
+                    res = vx2(2)
+                end if
+            end do
+        else
+
+            call gdErrorHandler('GetCommonVert: face1 and face2 have no common vertex')
+        end if
+
+    end function
+
+    function HaveCommonVert(f, f1, f2) result(res)
+        type(GAFaceUDT) :: f
+        integer(I8) :: i, f1, f2, vx1(2), vx2(2)
+        logical :: res
+        res = .false.
+        if ((f1 == 0) .or. (f2 == 0)) return
+
+        vx1(1) = f%vert1%Get(f1) 
+        vx1(2) = f%vert2%Get(f1) 
+        vx2(1) = f%vert1%Get(f2) 
+        vx2(2) = f%vert2%Get(f2) 
+
+        do i = 1, 2
+            if (any(vx1(i) == vx2)) res = .true.
+        end do
 
     end function
 
