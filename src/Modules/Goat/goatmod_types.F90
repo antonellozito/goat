@@ -4003,6 +4003,10 @@ module goatmod_types
     
         ! Visualize
         call magneticField%interp%Visualize('magneticfield_visualization')
+        call magneticField%interp%Visualize('magneticfield_dpsidx_visualization', &
+            xderivin=1, yderivin=0)
+        call magneticField%interp%Visualize('magneticfield_dpsidy_visualization', &
+            xderivin=0, yderivin=1)
     
     end subroutine
     

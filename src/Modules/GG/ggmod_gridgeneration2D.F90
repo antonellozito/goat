@@ -16734,6 +16734,9 @@ module ggmod_gridgeneration2D
             where (fl_new == allTPlabels(i)) simgrid%face%reg = fcregID 
         end do
 
+        ! SOLPS topology identification and face region remapping
+        call IdentifySOLPSTopology(simgrid, topomesh, options)
+
     end subroutine
 
     subroutine TranslateGridLabelsGD(simgrid, topomesh)
@@ -16782,6 +16785,459 @@ module ggmod_gridgeneration2D
         where (simgrid%face%label == vesselIDs)     simgrid%face%label = vesselID
         where (simgrid%face%label == lastfsIDs)     simgrid%face%label = outerboundaryID
         where (simgrid%face%label == interiorIDs)   simgrid%face%label = interiorID
+
+    end subroutine
+
+    ! Topology identification for SOLPS
+    subroutine IdentifySOLPSTopology(simgrid, topomesh, options)
+
+        ! Description
+        !============
+        ! This routine attempts to map the current topology to an 
+        ! existing SOLPS topology. There is NO GUARANTEE that this will
+        ! be compatible, or give reasonable/expected results, in SOLPS.
+        ! The following is done: 
+        !
+        ! Linear:
+        ! - fcReg: 1, 2 for targets, random (non-target) values elsewhere (0 in domain)
+        ! - cvReg: everywhere equal to 1
+
+        ! Single x: 
+        ! - fcReg: 1, 4 for two targets, random (non-target) values elsewhere (0 in domain)
+        ! - cvReg: 1  in core, random (non-core) values elsewhere
+
+        ! Double x:
+        ! - fcReg: 1, 4, 5, 8 for four targets, random (non-target) values elsewhere (0 in domain)
+        ! - cvReg: 1  in core, random (non-core) values elsewhere
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)            :: simgrid 
+        type(TopomeshUDT), intent(in)           :: topomesh
+        type(GGOptionsUDT), intent(in)          :: options
+
+        ! Auxiliary
+        integer(I8)                             :: TMTop, tubeID, &
+            tubeface1, tubeface2, ngridface1, ngridface2, ne, &
+            fcRegID, thisxp, thisxp2
+        integer(I8), allocatable, dimension(:)  :: gridface1, &
+            gridface2, tubeface, resfcReg, allfID, &
+            tfID, sortindex, psind, ind, remfcReg, targetID, xpID, &
+            pxpID, spxpID, spID
+        integer(I8), allocatable, dimension(:, :)   :: edges
+
+        logical                                 :: isxpfound
+        logical, allocatable, dimension(:)      :: ispolygonstart, &
+            isbranchingpolygon 
+
+        ! Loop
+        integer(I8)                             :: i, j, k 
+
+        ! Initialize
+        !===========
+        ! Print a warning message
+        print *, '!====================================================!'
+        print *, 'Running SOLPS topology identification. There is '
+        print *, '     NO GUARANTEE WHATSOEVER'
+        print *, 'that this routine will yield proper results for SOLPS.'
+        print *, 'Please examine the resulting fcReg, cvReg and ftReg '
+        print *, 'carefully afterwards'
+        print *, '!====================================================!'
+
+        ! Determine topology type
+        !========================
+        ! Get topomesh topology
+        TMTop = IdentifyTopologicalMeshType(topomesh)
+
+        ! Print
+        if (TMTop == TMTopL) then 
+            print *, 'Identified a linear topology'
+        elseif (TMTop == TMTopSN) then
+            print *, 'Identified a single null topology'
+        elseif (TMTop == TMTopDN) then 
+            print *, 'Identified a double null topology'
+        elseif (TMTop == TMTopGeneral) then 
+            print *, 'Identified a general topology - exiting...'
+        else
+            print *, 'Identified an unknown topology - exiting...'
+            return
+        end if 
+
+        ! Remap cvReg
+        !============
+        select case (TMTop)
+
+        case (TMTopL)
+
+            ! Simply one everywhere
+            simgrid%cell%reg = 1
+
+        case default 
+
+            ! Do nothing for other cases
+
+        end select 
+
+        ! Remap fcReg
+        !============
+        ! Precompute some data 
+
+        ! Remap for each case
+        select case (TMTop)
+
+        case (TMTopL)
+
+            ! Select an open topomesh tube
+            tubeID = 1
+            do while (tubeID <= topomesh%tube%ntot)
+                ! Checks
+                if (topomesh%tube%isclosed(tubeID)) then 
+                    tubeID = tubeID + 1
+                else 
+                    exit 
+                end if 
+            end do 
+
+            ! Check if the ID was found, if not: exit
+            if (tubeID > topomesh%tube%ntot) then 
+                print *, 'Could not find open tube, not applying mapping ' // &
+                    'and returning...'
+                return 
+            end if 
+
+            ! Determine topomesh boundary faces at the top and bottom 
+            ! of this tube
+            tubeface = topomesh%tube%GetFace(tubeID)
+            tubeface1 = tubeface(1)
+            tubeface2 = tubeface(size(tubeface))
+            if (tubeface1 == tubeface2) then 
+                call gdErrorHandler('IdentifySOLPStopology: open tube ' // & 
+                    'detected with the same start and end face - unexpected')
+            end if 
+
+            ! Determine which grid boundary faces belong to these 
+            ! boundaries
+            ngridface1 = count(simgrid%face%TMfacelabel == tubeface1)
+            ngridface2 = count(simgrid%face%TMfacelabel == tubeface2)
+            allocate(gridface1(ngridface1), gridface2(ngridface2))
+            gridface1 = pack([(k, k = 1, simgrid%face%ntot)], simgrid%face%TMfacelabel == tubeface1)
+            gridface2 = pack([(k, k = 1, simgrid%face%ntot)], simgrid%face%TMfacelabel == tubeface2)
+
+            ! Sanity checks
+            if (ngridface1 == 0 .or. ngridface2 == 0) then 
+                print *, 'Could not find grid faces for some topological ' // &
+                    'faces, not changing fcReg...'
+                return 
+            end if 
+            if (.not. all(simgrid%face%BF([gridface1, gridface2]))) then 
+                ! Should only happen in case the topomesh is horribly wrong
+                call gdErrorHandler('IdentifySOLPStopology: some faces ' // & 
+                    'are not boundary faces as expected')
+            end if 
+
+            ! Set fcReg reserved labels
+            resfcReg = [1, 2]
+
+            ! Map fcReg for reserved labels
+            simgrid%face%reg = 0
+            simgrid%face%reg(gridface1) = resfcReg(1)
+            simgrid%face%reg(gridface2) = resfcReg(2)
+
+            ! Sort remaining boundary faces and remap
+            ! Extract faces
+            remfcReg = [0]
+            allfID = [(k, k = 1, simgrid%face%ntot)]
+            fcRegID = maxval(resfcReg) 
+            do i = 1, size(remfcReg)
+                ! Get faces
+                ne = count((remfcReg(i) == simgrid%face%reg) .and. &
+                    simgrid%face%BF)
+                allocate(tfID(ne), edges(ne, 2), sortindex(ne), &
+                ispolygonstart(ne), isbranchingpolygon(ne)) ! 
+                tfID = pack(allfID, simgrid%face%BF .and. &
+                    simgrid%face%reg == remfcReg(i))
+                edges = simgrid%face%vert(tfID, :)
+                call SortPolygonEdges(edges, ne, sortindex, ispolygonstart, &
+                    isbranchingpolygon)
+                allocate(psind(count(ispolygonstart)))
+
+                ! Set labels for each distinct polygon piece
+                psind = pack([(k, k = 1, ne)], ispolygonstart)
+                psind = [psind, ne+1]
+                do j = 1, count(ispolygonstart)
+
+                    ! Update fcReg
+                    fcRegID = fcRegID + 1
+
+                    ! Get indices
+                    ind = [(k, k = psind(j), psind(j+1)-1)]
+
+                    ! Set label
+                    simgrid%face%reg(tfID(sortindex(ind))) = fcRegID 
+
+                end do 
+                deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
+            end do 
+
+        case (TMTopSN)
+
+            ! Get target faces and strike point indices
+            targetID = topomesh%GetTargetFaceIDs()
+            spID = topomesh%GetStrikePointIDs()
+
+            ! Check
+            if (size(targetID) == 0) then 
+                print *, 'No target faces detected, cannot continue. ' // & 
+                    'face regions are not adjusted!'
+                return 
+            end if
+
+            ! Get (primary) X point IDs
+            xpID = topomesh%GetXPointIDs()
+            pxpID = topomesh%GetPrimaryXPointIDs()
+            spxpID = topomesh%GetStrikePointXPointIDs()
+
+            ! Check which X-point to consider
+            isxpfound = .false. 
+            thisxp = 0
+            if (.not. isxpfound) then 
+                k = 1
+                do while(k <= size(pxpID))
+                    ! Check if it has strike points
+                    if (any(pxpID(k) == spxpID)) then 
+                        isxpfound = .true. 
+                        thisxp = pxpID(k)
+                        exit
+                    end if
+
+                    ! Update k
+                    k = k + 1
+                end do
+            end if 
+            if (.not. isxpfound) then 
+                k = 1
+                do while(k <= size(xpID))
+                    ! Check if it has strike points
+                    if (any(xpID(k) == spxpID)) then 
+                        isxpfound = .true. 
+                        thisxp = xpID(k)
+                        exit
+                    end if
+
+                    ! Update k
+                    k = k + 1
+                end do
+            end if 
+            if (.not. isxpfound) then 
+                print *, 'could not find X-point that has strike points, ' // & 
+                    'exiting without updating face regions'
+                return
+            end if 
+
+            ! Check which strike points have the current X-point and 
+            ! remap fcReg
+            simgrid%face%reg = 0
+            resfcReg = [1, 4] ! max 2 regions for single X
+            k = 1
+            do i = 1, size(spID)
+                ! Check if we should exit
+                if (k > size(resfcReg)) then 
+                    exit
+                end if
+                if (spxpID(i) == thisxp) then 
+                    ! Check which target faces belong to this strike point
+                    do j = 1, size(targetID)
+                        if (topomesh%face%vert(targetID(j), 1) == spID(i) .or. &
+                            topomesh%face%vert(targetID(j), 2) == spID(i)) then 
+                            ! Set the face regions
+                            where (simgrid%face%TMfacelabel == targetID(j)) 
+                                simgrid%face%reg = resfcReg(k)
+                            end where
+                        end if 
+                    end do
+                    
+                    ! Update fcreg counter
+                    k = k + 1
+                end if 
+            end do 
+
+            ! Sort remaining boundary faces and remap
+            ! Extract faces
+            remfcReg = [0]
+            allfID = [(k, k = 1, simgrid%face%ntot)]
+            fcRegID = maxval(resfcReg) 
+            do i = 1, size(remfcReg)
+                ! Get faces
+                ne = count((remfcReg(i) == simgrid%face%reg) .and. &
+                    simgrid%face%BF)
+                allocate(tfID(ne), edges(ne, 2), sortindex(ne), &
+                ispolygonstart(ne), isbranchingpolygon(ne)) ! 
+                tfID = pack(allfID, simgrid%face%BF .and. &
+                    simgrid%face%reg == remfcReg(i))
+                edges = simgrid%face%vert(tfID, :)
+                call SortPolygonEdges(edges, ne, sortindex, ispolygonstart, &
+                    isbranchingpolygon)
+                allocate(psind(count(ispolygonstart)))
+
+                ! Set labels for each distinct polygon piece
+                psind = pack([(k, k = 1, ne)], ispolygonstart)
+                psind = [psind, ne+1]
+                do j = 1, count(ispolygonstart)
+
+                    ! Update fcReg
+                    fcRegID = fcRegID + 1
+
+                    ! Get indices
+                    ind = [(k, k = psind(j), psind(j+1)-1)]
+
+                    ! Set label
+                    simgrid%face%reg(tfID(sortindex(ind))) = fcRegID 
+
+                end do 
+                deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
+            end do 
+
+        case (TMTopDN)
+
+            ! Get target faces and strike point indices
+            targetID = topomesh%GetTargetFaceIDs()
+            spID = topomesh%GetStrikePointIDs()
+
+            ! Check
+            if (size(targetID) == 0) then 
+                print *, 'No target faces detected, cannot continue. ' // & 
+                    'face regions are not adjusted!'
+                return 
+            end if
+
+            ! Get (primary) X point IDs
+            xpID = topomesh%GetXPointIDs()
+            pxpID = topomesh%GetPrimaryXPointIDs()
+            spxpID = topomesh%GetStrikePointXPointIDs()
+
+            ! Check which X-points to consider
+            isxpfound = .false. 
+            thisxp = 0
+            thisxp2 = 0
+            if (.not. isxpfound) then 
+                k = 1
+                do while(k <= size(pxpID))
+                    ! Check if it has strike points
+                    if (any(pxpID(k) == spxpID)) then 
+                        if (thisxp == 0) then 
+                            thisxp = pxpID(k)
+                        elseif (thisxp2 == 0) then 
+                            thisxp2 = pxpID(k)
+                            isxpfound = .true.
+                            exit
+                        else
+                            isxpfound = .true.
+                            exit
+                        end if  
+                    end if
+
+                    ! Update k
+                    k = k + 1
+                end do
+            end if 
+            if (.not. isxpfound) then 
+                k = 1
+                do while(k <= size(xpID))
+                    ! Check if it has strike points
+                    if (any(xpID(k) == spxpID)) then 
+                        if (thisxp == 0) then 
+                            thisxp = xpID(k)
+                        elseif (thisxp2 == 0) then 
+                            thisxp2 = xpID(k)
+                            isxpfound = .true.
+                            exit
+                        else
+                            isxpfound = .true.
+                            exit
+                        end if  
+                    end if
+
+                    ! Update k
+                    k = k + 1
+                end do
+            end if 
+            if (.not. isxpfound) then 
+                print *, 'could not find both X-points that have strike points, ' // & 
+                    'exiting without updating face regions'
+                return
+            end if 
+
+            ! Check which strike points have the current X-point and 
+            ! remap fcReg
+            simgrid%face%reg = 0
+            resfcReg = [1, 4, 5, 8] ! max 4 regions for double X
+            k = 1
+            do i = 1, size(spID)
+                ! Check if we should exit
+                if (k > size(resfcReg)) then 
+                    exit
+                end if
+                if (spxpID(i) == thisxp .or. spxpID(i) == thisxp2) then 
+                    ! Check which target faces belong to this strike point
+                    do j = 1, size(targetID)
+                        if (topomesh%face%vert(targetID(j), 1) == spID(i) .or. &
+                            topomesh%face%vert(targetID(j), 2) == spID(i)) then 
+                            ! Set the face regions
+                            where (simgrid%face%TMfacelabel == targetID(j)) 
+                                simgrid%face%reg = resfcReg(k)
+                            end where
+                        end if 
+                    end do
+                    
+                    ! Update fcreg counter
+                    k = k + 1
+                end if 
+            end do 
+
+            ! Sort remaining boundary faces and remap
+            ! Extract faces
+            remfcReg = [0]
+            allfID = [(k, k = 1, simgrid%face%ntot)]
+            fcRegID = maxval(resfcReg) 
+            do i = 1, size(remfcReg)
+                ! Get faces
+                ne = count((remfcReg(i) == simgrid%face%reg) .and. &
+                    simgrid%face%BF)
+                allocate(tfID(ne), edges(ne, 2), sortindex(ne), &
+                ispolygonstart(ne), isbranchingpolygon(ne)) ! 
+                tfID = pack(allfID, simgrid%face%BF .and. &
+                    simgrid%face%reg == remfcReg(i))
+                edges = simgrid%face%vert(tfID, :)
+                call SortPolygonEdges(edges, ne, sortindex, ispolygonstart, &
+                    isbranchingpolygon)
+                allocate(psind(count(ispolygonstart)))
+
+                ! Set labels for each distinct polygon piece
+                psind = pack([(k, k = 1, ne)], ispolygonstart)
+                psind = [psind, ne+1]
+                do j = 1, count(ispolygonstart)
+
+                    ! Update fcReg
+                    fcRegID = fcRegID + 1
+
+                    ! Get indices
+                    ind = [(k, k = psind(j), psind(j+1)-1)]
+
+                    ! Set label
+                    simgrid%face%reg(tfID(sortindex(ind))) = fcRegID 
+
+                end do 
+                deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
+            end do 
+
+        case (TMTopGeneral)
+            
+        case default
+
+            ! Do nothing for other cases
+
+        end select
 
     end subroutine
 

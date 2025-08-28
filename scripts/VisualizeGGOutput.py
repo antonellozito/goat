@@ -188,6 +188,39 @@ try:
 except:
     print("Could not plot intersection data")
 
+
+# Face regions
+try:
+    # At this point, the simulation grid has to be loaded or it will not 
+    # work anyway
+
+    # Visualize
+    plotter.PlotGridCells(simgrid, 11)
+    plotter.PlotGridFaceRegions(simgrid, 11)
+    thisaxes = plt.gca()
+    thisaxes.set_title('Face regions')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+
+except: 
+    print("Could not plot face regions")
+
+# Cell regions
+try:
+    # At this point, the simulation grid has to be loaded or it will not 
+    # work anyway
+
+    # Visualize
+    plotter.PlotGridCells(simgrid, 12)
+    plotter.PlotCellBasedQuantity2D(simgrid, simgrid.cell.region, 12)
+    thisaxes = plt.gca()
+    thisaxes.set_title('Cell regions')
+    thisaxes.set_xlabel('x [m]')
+    thisaxes.set_ylabel('y [m]')
+
+except: 
+    print("Could not plot cell regions")
+
 # Show figures
 #-------------
 plotter.ShowFigures()

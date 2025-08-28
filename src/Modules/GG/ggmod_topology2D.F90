@@ -11021,7 +11021,7 @@ module ggmod_topology2D
 
         ! Auxiliary
         logical                                 :: issinglenull, &
-            isdoublenull
+            isdoublenull, islinear
         integer(I8)                             :: nxp, nop, nwgc, nsp, &
             ncc
         integer(I8), allocatable, dimension(:)  :: xp, op, wgc, sp, cc
@@ -11054,6 +11054,14 @@ module ggmod_topology2D
         ! Initialize
         issinglenull = .true.
         isdoublenull = .true.
+        islinear     = .true. 
+
+        ! Linear case
+        !============
+        ! X-point and O-point checks
+        if (nxp /= 0 .or. nop /= 0) then 
+            islinear = .false. 
+        end if 
 
         ! Single null
         !============        
@@ -11068,16 +11076,16 @@ module ggmod_topology2D
         end if 
 
         ! Number of wide and narrow grid cells
-        if (nwgc > 0) then 
-            issinglenull = .false.
-        elseif (topomesh%cell%ntot /= 3) then
-            issinglenull = .false.
-        end if 
+        !if (nwgc > 0) then 
+        !    issinglenull = .false.
+        !elseif (topomesh%cell%ntot /= 3) then
+        !    issinglenull = .false.
+        !end if 
 
         ! Core cells
-        if (ncc /= 1) then 
-            issinglenull = .false.
-        end if 
+        !if (ncc /= 1) then 
+        !    issinglenull = .false.
+        !end if 
 
         ! Double null
         !============
@@ -11087,31 +11095,32 @@ module ggmod_topology2D
         end if 
 
         ! Strike point checks
-        if (nsp /= 4) then 
-            isdoublenull = .false. 
-        end if 
+        !if (nsp /= 4) then 
+        !    isdoublenull = .false. 
+        !end if 
 
         ! Number of wide and narrow grid cells
-        if (nwgc > 0) then 
-            isdoublenull = .false.
-        elseif (topomesh%cell%ntot /= 3) then
-            isdoublenull = .false.
-        end if 
+        !if (nwgc > 0) then 
+        !    isdoublenull = .false.
+        !elseif (topomesh%cell%ntot /= 3) then
+        !    isdoublenull = .false.
+        !end if 
 
         ! Core cells
-        if (ncc /= 2) then 
-            isdoublenull = .false.
-        end if 
+        !if (ncc /= 2) then 
+        !    isdoublenull = .false.
+        !end if 
 
         ! Determine flag
         !===============
         ! Sanity checks
-        if (count([issinglenull, isdoublenull]) > 1) then 
+        if (count([issinglenull, isdoublenull, islinear]) > 1) then 
             ! Probably we missed something in the definition then
             print *, 'IdentifyTopologicalMeshType: multiple topologies ' // & 
                 'appear valid, this is likely a bug. Setting flag to ' // & 
                 'general flag...'
-
+        elseif (islinear) then 
+            TMlabel = TMTopL
         elseif (issinglenull) then 
             TMlabel = TMTopSN
         elseif (isdoublenull) then 
