@@ -128,7 +128,7 @@ module Interpolant2D
 
     ! Visualization
     subroutine VisualizeInterpolant2D(interp, savefilepath, &
-        nxin, nyin)
+        nxin, nyin, xderivin, yderivin)
 
     ! Description
     !============
@@ -143,10 +143,11 @@ module Interpolant2D
     ! Arguments
     class(GenericInterpolant2DUDT)           :: interp 
     character(*), intent(in)                 :: savefilepath
-    integer(I8), intent(in), optional        :: nxin, nyin
+    integer(I8), intent(in), optional        :: nxin, nyin, xderivin, &
+        yderivin 
     
     ! Auxiliary
-    integer(I8)                         :: nx, ny
+    integer(I8)                         :: nx, ny, xderiv, yderiv 
     real(R8), allocatable               :: xgv(:), ygv(:), xg(:), &
         yg(:), vg(:)
     real(R8)                            :: xmin, ymin, xmax, ymax, &
@@ -167,6 +168,16 @@ module Interpolant2D
         ny = nyin 
     else
         ny = 200
+    end if 
+    if (present(xderivin)) then 
+        xderiv = xderivin 
+    else
+        xderiv = 0
+    end if 
+    if (present(yderivin)) then 
+        yderiv = yderivin
+    else
+        yderiv = 0
     end if 
 
     ! Allocate
@@ -197,7 +208,7 @@ module Interpolant2D
     ! Evaluate
     !=========
     ! Call evaluator
-    call interp%Evaluate(xg, yg, 0, 0, vg)
+    call interp%Evaluate(xg, yg, xderiv, yderiv, vg)
 
     ! Write data
     !===========
