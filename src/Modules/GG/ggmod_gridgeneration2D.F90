@@ -16858,10 +16858,42 @@ module ggmod_gridgeneration2D
         elseif (TMTop == TMTopDN) then 
             print *, 'Identified a double null topology'
         elseif (TMTop == TMTopGeneral) then 
-            print *, 'Identified a general topology - exiting...'
+            print *, 'Identified a general topology'
         else
-            print *, 'Identified an unknown topology - exiting...'
-            return
+            print *, 'Identified an unknown topology'
+        end if 
+
+        ! Check if we want to force a topology
+        if (options%forceSOLPStopology) then 
+            ! Check which one to use
+            select case (options%SOLPStopology)
+
+            case ('linear', 'L', 'l')
+
+                if (TMTop /= TMTopL) then 
+                    print *, 'attempting to force linear topology...'
+                    TMTop = TMTopL
+                end if 
+
+            case ('single_null', 'SN', 'sn')
+
+                if (TMTop /= TMTopSN) then 
+                    print *, 'attempting to force single null topology...'
+                    TMTop = TMTopSN 
+                end if 
+
+            case ('double_null', 'DN', 'dn')
+
+                if (TMTop /= TMTopDN) then 
+                    print *, 'attempting to force double null topology...'
+                    TMTop = TMTopDN
+                end if 
+
+            case default
+
+                print *, 'unknown topology, continuing with identified topology'
+
+            end select
         end if 
 
         ! Remap cvReg

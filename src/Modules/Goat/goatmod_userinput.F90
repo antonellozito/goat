@@ -641,6 +641,8 @@ module goatmod_userinput
 
         ! Label translation options:
         !   - structurebasedlabels:     base labels on structure IDs 
+        !   - forceSOLPStopology:       force certain topology for region translation etc
+        !   - SOLPStopology:            desired topology ('linear','single_null', 'double_null')
 
         ! Diagnostics
         ! - dogriddiagnostics   run grid diagnostics. Will be time consuming!
@@ -652,7 +654,8 @@ module goatmod_userinput
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
             radrefdlBLlengthbased, vdrdoxp, structurebasedlabels, &
-            dogriddiagnostics, evtnoBL, refBLdostructure
+            dogriddiagnostics, evtnoBL, refBLdostructure, &
+            forceSOLPStopology
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp, refBLncstructure
@@ -676,7 +679,7 @@ module goatmod_userinput
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
             cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
             refdatafile, radrefmeth, reflengthtype, radreflengthtype, &
-            legalcellstyle 
+            legalcellstyle, SOLPStopology
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -1001,7 +1004,6 @@ module goatmod_userinput
         options%gcresx = 100 
         options%gcresy = 100
         options%coarsencontours = .false.
-        options%structurebasedlabels = .false.
 
         ! Options for poloidal vertex distribution
         options%vdptype             = 'densitybased'
@@ -1108,6 +1110,12 @@ module goatmod_userinput
 
         ! Diagnostics
         options%dogriddiagnostics = .true. ! default true 
+
+        ! Label translation
+        options%structurebasedlabels    = .false.
+        options%forceSOLPStopology      = .false.
+        options%SOLPStopology           = ''
+
 
     end subroutine 
 
@@ -1817,6 +1825,10 @@ module goatmod_userinput
         ! Label translation
         field = 'gg.labels.structurebased'
         call ExtractOptionValueLogical0D(fid, field, options%structurebasedlabels)
+        field = 'gg.labels.forceSOLPStopology'
+        call ExtractOptionValueLogical0D(fid, field, options%forceSOLPStopology)
+        field = 'gg.labels.SOLPStopology'
+        call ExtractOptionValueCharacter(fid, field, options%SOLPStopology)
 
         ! Refinement options (general)
         field = 'gg.ref.meth'
