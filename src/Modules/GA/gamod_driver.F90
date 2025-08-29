@@ -133,7 +133,7 @@ module gamod_driver
         end if 
 
         ! Get fsVx from fsFc
-        call grid%GetFsVxFromFsFc()
+        call grid%GetFsVxFromFsFc(options)
 
         ! Determine Xpoints and separatrices
         cvLookUp = GetCvLookUpGA(c)
