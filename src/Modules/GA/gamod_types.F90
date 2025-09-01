@@ -3790,7 +3790,7 @@ module gamod_types
         case ('4444')
 
             ! This is the case in a internal regular grid. Probably this is the starting point
-            !call grid%Merge4444()
+            call grid%Merge4444(fc, cvs)
 
         case ('4443')
 
@@ -3808,6 +3808,10 @@ module gamod_types
 
         case ('3433')
         case ('334')
+
+            ! Merging to triangles
+            call grid%Merge334(fc, cvs)
+
         case ('333')
         case ('53')
         case ('53B')
@@ -4339,6 +4343,53 @@ module gamod_types
 
     end subroutine
 
+    subroutine Merge4444(grid, fc, cvs)
+
+        ! Description
+        !============
+        ! Merges two quads to a hex in starting position
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT) :: grid
+        integer(I8) :: fc, cvs(2)
+
+        ! Auxiliary
+        integer(I8) :: ic
+        integer(I8), allocatable, dimension(:) :: vx1, vx2, fc1, fc2, new_verts, new_facesD, &
+            new_faces, fc_rem, cv_rem, vertsD, facesD
+
+        ! Make hexagon
+        vx1 = GetCellVertGA(grid%cell, cvs(1))
+        vx2 = GetCellVertGA(grid%cell, cvs(2))
+        fc1 = GetCellFaceGA(grid%cell, cvs(1))
+        fc2 = GetCellFaceGA(grid%cell, cvs(2))
+
+        ! Verts
+        vertsD = [vx1, vx2]
+        call Unique(vertsD, new_verts)
+
+        ! Faces
+        facesD = [fc1, fc2]
+        call Unique(facesD, new_facesD)
+        allocate(new_faces(count(new_facesD /= fc)))
+        new_faces = pack(new_facesD, new_facesD /= fc)
+
+        ! Add new cell
+        call grid%AddCell(new_faces, new_verts, ic)
+        call grid%cell%reg%Set(ic, grid%cell%reg%Get(cvs(1)))
+
+        ! Remove face
+        fc_rem = fc
+        call grid%RemoveFaces(fc_rem)
+
+        ! Remove cells
+        cv_rem = cvs
+        call grid%RemoveCells(cv_rem)
+
+    end subroutine
+
     subroutine Merge3443(grid, fc, cvs, starter)
 
         ! Description
@@ -4589,6 +4640,57 @@ module gamod_types
         end associate
 
     end subroutine
+
+    subroutine Merge334(grid, fc, cvs)
+
+        ! Description
+        !============
+        ! Merges two triangles without merged cells around
+
+        ! Declare variables
+        !==================
+        class(GAGridUDT) :: grid
+        integer(I8) :: fc, cvs(2)
+
+        ! Auxiliary
+        integer(I8) :: ic, n_al
+        integer(I8), allocatable, dimension(:) :: vx1, vx2, fc1, fc2, vertsD, new_verts, facesD, &
+            new_faces, fc_rem, cell_rem
+
+        ! Make merge cell
+        vx1 = GetCellVertGA(grid%cell, cvs(1))
+        vx2 = GetCellVertGA(grid%cell, cvs(2))
+
+        fc1 = GetCellFaceGA(grid%cell, cvs(1))
+        fc2 = GetCellFaceGA(grid%cell, cvs(2))
+
+        ! Verts
+        vertsD = [vx1, vx2]
+        call Unique(vertsD, new_verts)
+
+        ! Faces
+        facesD = [fc1, fc2]
+        allocate(new_faces(count(facesD /= fc)))
+        new_faces = pack(facesD, facesD /= fc)
+
+        ! Add new cell
+        call grid%AddCell(new_faces, new_verts, ic)
+
+        call grid%cell%reg%Set(ic, grid%cell%reg%Get(cvs(1)))
+
+        n_al = count(grid%face%aligned%Get(new_faces) == 1)
+
+        if (n_al /= 2) call grid%cell%cflags%Set(ic, 4)  ! If two aligned faces, the new cell is a proper quad
+
+        ! Remove fc
+        fc_rem = fc
+        call grid%RemoveFaces(fc_rem)
+
+        ! Remove cells
+        cell_rem = cvs
+        call grid%RemoveCells(cell_rem)
+
+    end subroutine 
 
     subroutine MakeMergePent(grid,three_vert, fc, cvs, f1n, fc23, ic)
 
