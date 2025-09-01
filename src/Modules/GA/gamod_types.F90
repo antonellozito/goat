@@ -458,7 +458,14 @@ module gamod_types
         procedure :: OneMerge
         procedure :: MergeRec
         procedure :: DetermineMergeCaseID
+        procedure :: Merge4444
         procedure :: Merge3443
+        procedure :: Merge4443
+        procedure :: Merge4433
+        procedure :: Merge334
+        procedure :: MakeMergePent
+        procedure :: MakeNewThreeFace
+        procedure :: AdaptNeigThreeVert
 
         ! Grid information utility
         procedure :: GetForbiddenMergeFaces
@@ -467,6 +474,7 @@ module gamod_types
         procedure :: GetRadLineFaces
         procedure :: RecursiveGridMarching
         procedure :: DetermineCflags
+        procedure :: AreaConstraintPents
 
         ! Grid operation
         procedure :: RemoveCells
@@ -2481,8 +2489,8 @@ module gamod_types
                 allocate(cellnumbers(nc))
                 cellnumbers = pack(cvLookUp,cf == j)
                 if (nc .gt. 2) then
-                    call gdErrorHandler('CheckUnstructuredGrid: check 3, more than two // &
-                     & cells connected to a face')
+                    call gdErrorHandler('CheckUnstructuredGrid: check 3, more than two' // &
+                     & 'cells connected to a face')
                 end if
 
                 !get vertices of cells
@@ -2492,8 +2500,8 @@ module gamod_types
                     !verts_of_face moeten voorkomen in verts_of_cells
                     do i = 1,2
                         if (.not.any(verts_of_cell == verts_of_face(i))) then
-                                call gdErrorHandler('CheckUnstructuredGrid: check 3, vertices // &
-                                & of face not in vertices of the cells of that face')
+                                call gdErrorHandler('CheckUnstructuredGrid: check 3, vertices' // &
+                                & 'of face not in vertices of the cells of that face')
                         end if
                     end do
                 end do
@@ -3786,7 +3794,13 @@ module gamod_types
 
         case ('4443')
 
+            ! This case is most often called in a grid with quads, so optimize this
+            call grid%Merge4443(fc, cvs)
+
         case ('4433')
+
+            ! Merge two quads to a quad at a boundary
+            call grid%Merge4433(fc, cvs)
 
         case ('3443')
 
@@ -3816,8 +3830,9 @@ module gamod_types
         ! Description
         !============
         ! Merges cells recursively to avoid pentagonal and hexagonal cells.
-        ! Free verts are vertices from pentagonal or hexagonal cells which should be
-        ! removed to obtain only quadrilateral or triangular cells.
+        ! Free verts (= hanging nodes) are vertices from pentagonal or
+        ! hexagonal cells which should be removed to obtain only
+        ! quadrilateral or triangular cells.
 
         ! Declare variables
         !==================
@@ -3825,9 +3840,235 @@ module gamod_types
         class(GAGridUDT), intent(inout) :: grid
         type(GAoptionsUDT), intent(in)  :: options
 
-        ! TODO
+        ! Auxiliary
+        logical :: pent_to_tria, special_case 
+        integer(I8) :: i, j, k, lim, fc
+        integer(I8), allocatable, dimension(:) :: cellsD2, cellsD, cells, indCv, &
+            verts, cvs, fcs, bfcs, cvP, cvs_b, vs1, vs2, cvLookUp
 
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        allocate(indCv(c%ntot))
+        indCv = (/ (i, i = 1, c%ntot)/)
+        pent_to_tria = .false.
+        special_case = .false.
+        cvLookUp = GetCvLookUpGA(c)        
+
+        ! Get cells to merge
+        if (options%no_pents) then
+            if (options%no_pents_area_merge) then
+                call grid%AreaConstraintPents(options,options%dist_function_threshold_merge,cellsD)
+            else
+                cellsD = (/ (i, i = 1, c%ntot )/)
+            end if
+            allocate(cellsD2(count(c%faceP2%Get(cellsD) .ge. 5)))
+            cellsD2 = pack(cellsD, c%faceP2%Get(cellsD) .ge. 5)
+            lim = 4
+
+        else if (options%no_hex) then
+
+            allocate(cellsD2(count(c%cflags%Get() .gt. 5)))
+            cellsD2 = pack(indCv, c%cflags%Get() .gt. 5)
+            lim = 5
+
+        end if
+
+        ! Also ad tria4 cases
+        allocate(cells(size(cellsD2) + count(c%cflags%Get() == 4)))
+        cells = [cellsD2, pack(indCv, c%cflags%Get() == 4)]
+        deallocate(cellsD2)
+
+        ! Get the correct face to merge cells by finding handing nodes
+        if (size(cells) /= 0) then
+
+            ! Loop over chosen cells
+            do k = 1, size(cells)
+
+                ! Get vertices
+                verts = GetCellVertGA(c, cells(k))
+
+                ! Find a merge face
+                fc = 0
+                do i = 1, size(verts)
+
+                    ! Check faces of vertices
+                    fcs = GetVertFaceGA(f, verts(i))
+
+                    ! Hanging nodes inside the mesh have three faces or less
+                    if ((size(fcs) .le. 3) .and. .not.isBoundaryVertGA(grid, verts(i))) then
+
+                        ! Get the correct merge face
+                        do j = 1, size(fcs)
+
+                            cvs = GetFaceCellGA(c, fcs(j),cvLookUp)
+                            if (.not.any(cells(k) == cvs)) then
+
+                                fc = fcs(j)
+                                exit
+
+                            end if
+
+                        end do
+
+                    end if
+                end do
+
+                ! If no merge face was found yet
+                ! Allow boundary vertices for special case where hanging node of
+                ! pentagon lays on the boundary  
+                if (fc == 0) then
+
+                    fcs = GetCellFaceGA(c, cells(k))
+                    if (size(fcs) == 5 .and. count(isBoundaryFaceGA(f, fcs)) == 2) then
+
+                        pent_to_tria = .true.
+                        allocate(bfcs(2))
+                        bfcs = pack(fcs, isBoundaryFaceGA(f, fcs))
+                        fc = bfcs(1)
+
+                        deallocate(bfcs)
+                    else
+
+                        ! Loop over vertices of cell
+                        do i = 1, size(verts)
+
+                            fcs = GetVertFaceGA(f, verts(i))
+
+                            if (size(fcs) .lt. 3) then
+
+                                do j = 1, size(fcs)
+
+                                    cvs = GetFaceCellGA(c, fcs(j), cvLookUp)
+                                    if (size(cvs) == 2) then
+
+                                        cvP = c%faceP2%Get(cvs)
+
+                                        if (maxval(cvP) == 5) then
+                                            if ((cvP(1)==3 .and. cvP(2)==5) &
+                                                .or.(cvP(1)==5 .and. cvP(1)==3)) then
+                                                
+                                                fc = fcs(j)
+                                                exit
+                                            end if
+                                        else
+
+                                            fc = fcs(j)
+                                            exit
+
+                                        end if
+
+                                    end if
+
+                                end do
+
+                            end if
+
+                        end do
+
+                    end if
+
+
+
+                end if
+
+                ! Special case where two following cells to merge only have one
+                ! vertex in common  
+                if (fc == 0) then
+
+                    cvs = GetCellNeigsGA(grid, cells(k), cvLookUp)
+
+                    allocate(cvs_b(count(isBoundaryCellGA(grid, cvs))))
+                    cvs_b = pack(cvs, isBoundaryCellGA(grid, cvs))
+
+                    if (size(cvs_b) == 2) then
+
+                        ! Check whether they only have one common vert
+                        vs1 = GetCellVertGA(c, cvs_b(1))
+                        vs2 = GetCellVertGA(c, cvs_b(2))
+
+                        if (count(isMember(vs1, vs2)) == 1) then
+
+                            special_case = .true.
+
+                            ! Get common face
+                            fc = GetCommonFace(c,cells(k), cvs_b(1))
+
+                        end if
+                    else
+
+                        call gdErrorHandler('MergeRec: case not yet implemented')
+
+                    end if
+
+                end if
+
+                if ((fc /= 0) .and. .not.special_case) then
+
+                    ! Avoid merging a pentagon with a quad
+                    cvs = GetFaceCellGA(c, fc, cvLookUp)
+                    if (size(cvs) == 2) then
+                        
+                        cvP = c%vertP2%Get(cvs)
+                        if (((cvP(1) == 5) .and. (cvP(2) == 4)) &
+                            .or. ((cvP(1)==4) .and. (cvP(2)==5))) then
+
+                            ! Set an indicator to not merge this cell
+                            fc = 0                                   
+                            call c%cflags%Set(cells(k), 7)
+
+                        end if
+
+                    end if
+
+                end if
+
+                if (fc /= 0) exit
+
+            end do
+
+            ! Do a one merge with fc
+            if (fc /= 0) then
+
+                call grid%OneMerge(fc, .false., pent_to_tria, special_case)
+
+            end if
+
+        end if
+
+        ! Housekeeping
+        deallocate(cells)
+        
+        ! Recursive call
+        ! Determine cells
+        if (options%no_pents_area_merge) then
+
+            call grid%AreaConstraintPents(options,options%dist_function_threshold_merge,cellsD)
+
+            ! Detect pents in the no_pents_area which are not mergeable
+            allocate(cells(count(c%cflags%Get(cellsD) /= 7 )))
+            cells = pack(cellsD, c%cflags%Get(cellsD) /= 7 )
+        else
+
+            cells = (/ (i, i = 1, c%ntot)/)
+
+        end if 
+
+        if ((maxval(c%faceP2%Get(cells)) .gt. lim) &
+            .or. (any(c%cflags%Get() == 4)) ) then
+
+                call grid%MergeRec(options)
+
+        end if
+
+        end associate
     end subroutine
+
 
 
     subroutine DetermineMergeCaseID(grid, fc, starter, pent_to_tria, special_case, caseID, cvs)
@@ -3942,11 +4183,13 @@ module gamod_types
         
             if ( nfc1 == 4 .and. nfc2 == 4) then
 
+                caseID = '4444'
+
             elseif ( (nfc1 == 3 .and. nfc2 == 4) &
                    .or. (nfc1 == 4 .and. nfc2 == 3)) then
                 ! For special case where on quad is a boundary cell and one of the
                 ! vertices of the merge face is also a boundary cell
-                
+                caseID = '4443'
                 v1 = isBoundaryVertGA(grid, vc)
                 if (count(v1) == 1) then
 
@@ -3979,10 +4222,6 @@ module gamod_types
 
                     end if
 
-                else
-
-                    call gdErrorHandler('DetermineMergeCaseID: undefined case')
-
                 end if
                 
 
@@ -4009,8 +4248,24 @@ module gamod_types
             end if
 
         else if (cvtypes(1) == 3 .and. cvtypes(2) == 3) then
+
+            if (min(nfc1, nfc2) == 3 .and. starter) then
+
+                caseID = '334'
+
+            elseif (min(nfc1, nfc2) == 3 .and. starter) then
+
+                caseID = '333'
+
+            elseif (min(nfc1, nfc2) == 4) then
+
+                caseID = '334'
+
+            end if
+
         else if ((cvtypes(1) == 5 .and. cvtypes(2) == 3) &
                 .or. (cvtypes(1) == 3 .and. cvtypes(2) == 5)) then
+
             caseID = '53'
             if (cvtypes(1) == 3) then
                 tria = cvs(1)
@@ -4032,6 +4287,58 @@ module gamod_types
  
     end subroutine
 
+    subroutine AreaConstraintPents(grid, options, threshold, cells)
+
+        ! Description
+        !============
+        ! Give cells which are not allow to be a pentagon and should be selected for
+        ! splitting/merging
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT)    :: grid
+        type(GAoptionsUDT)  :: options
+        real(R8) :: threshold
+        integer(I8), allocatable, intent(out) :: cells(:)
+
+        ! Auxiliary
+        integer(I8) :: i
+        integer(I8), allocatable :: indCv(:)
+        real(R8), allocatable ::  val(:)
+
+        ! Initiliaze
+        indCv = (/ (i, i = 1, grid%cell%ntot)/)
+
+        select case (options%no_pents_area_type)
+            case ('coordinates')
+
+                allocate(cells(count(grid%cell%x%Get() .lt. options%no_pents_area_maxR &
+                        .and. grid%cell%x%Get() .lt. options%no_pents_area_minR &
+                        .and. grid%cell%y%Get() .lt. options%no_pents_area_maxZ &
+                        .and. grid%cell%y%Get() .lt. options%no_pents_area_minZ)))
+
+                cells = pack(indCv, grid%cell%x%Get() .lt. options%no_pents_area_maxR &
+                        .and. grid%cell%x%Get() .lt. options%no_pents_area_minR &
+                        .and. grid%cell%y%Get() .lt. options%no_pents_area_maxZ &
+                        .and. grid%cell%y%Get() .lt. options%no_pents_area_minZ)
+
+            case ('dist_function')
+                
+                call grid%fun%distr%Evaluate(grid%cell%x%Get(),grid%cell%y%Get(), val)
+                allocate(cells(count(val > threshold)))
+                cells = pack(indCv, val > threshold)
+
+            case default
+
+                call gdErrorHandler('AreaConstraintPents: method not implemented')
+
+        end select
+
+        if (size(cells) == 0) call gdErrorHandler('AreaConstraintPents: no cells in area')    
+
+    end subroutine
+
     subroutine Merge3443(grid, fc, cvs, starter)
 
         ! Description
@@ -4047,10 +4354,9 @@ module gamod_types
         logical :: starter
 
         ! Auxiliary
-        integer(I8) :: i, ic, vxF(2), nv1cvs, nv2cvs, three_vert, f1n, counter
-        integer(I8), allocatable, dimension(:) :: v1cvs, v2cvs, fc3, fc23, &
-            vc3, vf1n, vx1, vx2, fc1, fc2, new_verts, new_vertsUD, new_vertsD, &
-            new_faces, new_facesD, new_facesUD, new_facesL        
+        integer(I8) :: i, ic, vxF(2), nv1cvs, nv2cvs, three_vert, f1n
+        integer(I8), allocatable, dimension(:) :: v1cvs, v2cvs, fc23, &
+            cells_rem, faces_rem, verts_ic, fcs_v, verts_rem        
 
         ! Associate
         associate(&
@@ -4081,31 +4387,239 @@ module gamod_types
             end if
         end if
 
-        ! Make new face
-        fc3 = GetVertFaceGA(f, three_vert)
-        allocate(fc23(count(fc3 /= fc)))
-        fc23 = pack(fc3, fc3 /= fc)
-
-        allocate(vc3(size(fc23)*2))
-        vc3 = [f%vert1%Get(fc23(1)), f%vert1%Get(fc23(2)), &
-               f%vert2%Get(fc23(1)), f%vert2%Get(fc23(2)) ]
-        allocate(vf1n(count(vc3 /= three_vert)))
-        vf1n = pack(vc3, vc3 /= three_vert)
-
-        ! Create new face
-        call grid%GetFaceNumber(vf1n(1), vf1n(2), 2, f1n)
-        call f%label%Set(f1n,f%label%Get(fc23(1))) 
-        if ( f%aligned%Get(fc23(1)) == 1 .and. f%aligned%Get(fc23(2)) == 1 ) &
-            call f%aligned%Set(f1n,1)
-        call grid%AddFaceToFsFc(f1n, fc23)
-
         ! Make merge cell
         !================
-        vx1 = GetCellVertGA(c, cvs(1))
-        vx2 = GetCellVertGA(c, cvs(2))
+        call grid%MakeMergePent(three_vert, fc, cvs, f1n, fc23, ic)
 
-        fc1 = GetCellFaceGA(c, cvs(1))
-        fc2 = GetCellFaceGA(c, cvs(2))
+        ! Adapt the neighbor, if there is any
+        !====================================
+        call grid%AdaptNeigThreeVert(three_vert, cvs, fc23, f1n, cells_rem)
+
+        ! Remove fc
+        faces_rem = [fc, fc23]
+        call grid%RemoveFaces(faces_rem)
+
+        ! Remove cells
+        call grid%RemoveCells(cells_rem)
+        
+        ! Mark the new cells as tria4 if necessary
+        ic = ic - size(cells_rem)
+        verts_ic = GetCellVertGA(c, ic)
+        do i = 1, size(verts_ic)
+            fcs_v = GetVertFaceGA(f, verts_ic(i))
+            if (size(fcs_v) == 3 .and. .not.isBoundaryVertGA(grid, verts_ic(i))) then
+                call c%cflags%Set(ic, 4)
+            end if
+        end do
+
+        ! Remove vertex
+        allocate(verts_rem(1))
+        verts_rem = three_vert
+        call grid%RemoveVertices(verts_rem)
+
+        end associate
+
+    end subroutine
+
+    subroutine Merge4443(grid, fc, cvs)
+
+        ! Description
+        !============
+        ! Merges two quads to a pent as one of  
+        ! the commonface vertices has only three faces attached
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT) :: grid
+        integer(I8) :: fc, cvs(2)
+
+        ! Auxiliary
+        integer(I8) :: three_vert, vxF(2), nv1cvs, nv2cvs, f1n, ic 
+        integer(I8), allocatable, dimension(:) :: v1cvs, v2cvs, fc23, faces_rem, verts_rem, &
+            cells_rem
+
+
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+            
+        ! Verts
+        vxF = [f%vert1%Get(fc), f%vert2%Get(fc)]
+        ! Three vert
+        v1cvs = GetVertCellGA(c, vxF(1))
+        v2cvs = GetVertCellGA(c, vxF(2))
+        nv1cvs = size(v1cvs)
+        nv2cvs = size(v2cvs)
+
+        ! Determine three vert
+        if (nv1cvs .lt. 4) then
+            three_vert = vxF(1)
+        else if (nv2cvs .lt. 4) then
+            three_vert = vxF(2)
+        end if
+
+        ! Make new three face and build new pentagon cell
+        call grid%MakeMergePent(three_vert, fc, cvs, f1n, fc23, ic)
+
+        ! Adapt neighbor of three_vert
+        call grid%AdaptNeigThreeVert(three_vert, cvs, fc23, f1n, cells_rem)
+
+        ! Remove fc
+        faces_rem = [fc, fc23]
+        call grid%RemoveFaces(faces_rem)
+
+        ! Remove cells
+        call grid%RemoveCells(cells_rem)
+        
+        ! Remove vertex
+        allocate(verts_rem(1))
+        verts_rem = three_vert
+        call grid%RemoveVertices(verts_rem)
+
+        end associate
+
+    end subroutine
+
+    subroutine Merge4433(grid, fc, cvs)
+
+        ! Description
+        !============
+        ! Merges two quads to a quad at a boundary 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT) :: grid
+        integer(I8) :: fc, cvs(2)
+
+        ! Auxiliary
+        integer(I8) :: i, ic, vxF(2), nv1cvs, nv2cvs, three_vert, f1n, f2n, counter, b_vert
+        integer(I8), allocatable, dimension(:) :: v1cvs, v2cvs, fc3, fc23, fc3b, &
+            fc23b , fc1, fc2, new_verts, new_vertsUD, new_vertsD, new_vertsD2, fc_rem, &
+            new_facesUD, new_facesL, new_facesD, fc_rem2, cells_rem1, cells_rem2, cells_remD, &
+            cells_rem, vx_rem, new_faces, vx1, vx2
+
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+            
+        ! Verts
+        vxF = [f%vert1%Get(fc), f%vert2%Get(fc)]
+        ! Three vert
+        v1cvs = GetVertCellGA(c, vxF(1))
+        v2cvs = GetVertCellGA(c, vxF(2))
+        nv1cvs = size(v1cvs)
+        nv2cvs = size(v2cvs)
+
+        ! Determine three vert
+        if ((nv1cvs == 3).and.(nv2cvs == 2)) then
+            three_vert = vxF(1)
+            b_vert = vxF(2)
+        else if ((nv2cvs == 3) .and. (nv1cvs == 2)) then
+            three_vert = vxF(2)
+            b_vert = vxF(1)
+        else ! does not matter, do check later
+            three_vert = vxF(1)
+            b_vert = vxF(2)
+        end if
+
+        ! Make new face a three_vert
+        call grid%MakeNewThreeFace(three_vert, fc, fc3, fc23, f1n)
+        call grid%MakeNewThreeFace(b_vert, fc, fc3b, fc23b, f2n)
+
+        ! Make merge cell at the boundary
+        vx1 = GetCellVertGA(grid%cell, cvs(1))
+        vx2 = GetCellVertGA(grid%cell, cvs(2))
+
+        fc1 = GetCellFaceGA(grid%cell, cvs(1))
+        fc2 = GetCellFaceGA(grid%cell, cvs(2))
+
+        ! Verts
+        new_vertsD = [vx1, vx2]
+        call Unique(new_vertsD, new_vertsUD)
+        allocate(new_vertsD2(count(new_vertsUD /= three_vert)))
+        new_vertsD2 = pack(new_vertsUD,new_vertsUD /= three_vert)
+
+        allocate(new_verts(count(new_vertsD2 /= b_vert)))
+        new_verts = pack(new_vertsD2, new_vertsD2 /= b_vert)
+
+        ! Faces
+        new_facesD = [fc1, fc2, f1n, f2n]
+        call Unique(new_facesD, new_facesUD)
+        
+        allocate(new_facesL(size(new_facesUD)))
+        new_facesL = 0
+        counter = 0
+        fc_rem  = [fc3, fc23b]
+        do i = 1, size(new_facesUD)
+            if (.not.any(new_facesUD(i) == fc_rem)) then
+                counter = counter + 1
+                new_facesL(counter) = new_facesUD(i)
+            end if
+        end do
+
+        ! Trim 
+        new_faces = new_facesL(1:counter)
+
+        ! Add new cell
+        call grid%AddCell(new_faces, new_verts, ic)
+        call grid%cell%reg%Set(ic,grid%cell%reg%Get(cvs(1))) 
+        call grid%cell%cflags%Set(ic, maxval(grid%cell%cflags%Get(cvs)))
+
+        ! Adapt neighboring cell
+        call grid%AdaptNeigThreeVert(three_vert, cvs, fc23, f1n, cells_rem1)
+        call grid%AdaptNeigThreeVert(b_vert, cvs, fc23b, f2n, cells_rem2)
+
+        ! Remove fc 
+        fc_rem2 = [fc_rem, fc23]
+        call grid%RemoveFaces(fc_rem2)
+
+        ! Remove cells
+        cells_remD = [cells_rem1, cells_rem2]
+        call Unique(cells_remD, cells_rem)
+        call grid%RemoveCells(cells_rem)
+
+        ! Remove vertices
+        vx_rem = vxF
+        call grid%RemoveVertices(vx_rem)
+
+        end associate
+
+    end subroutine
+
+    subroutine MakeMergePent(grid,three_vert, fc, cvs, f1n, fc23, ic)
+
+        ! Description
+        !============
+        ! Commonly used piece of code to make a new face at across faces connected by a 
+        ! hanging node or vertex with only three faces attached.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT) :: grid
+        integer(I8), intent(in) :: three_vert, fc, cvs(2)
+        integer(I8), intent(out) :: f1n, ic 
+        integer(I8), allocatable, intent(out) :: fc23(:)
+
+        ! Auxiliary
+        integer(I8) :: counter, i
+        integer(I8), allocatable, dimension(:) :: fc3, vx1, vx2, &
+            fc1, fc2, new_vertsD, new_vertsUD, new_verts, new_facesD, new_facesUD, &
+            new_facesL, new_faces
+
+        ! Make new three_face
+        call grid%MakeNewThreeFace(three_vert, fc, fc3, fc23, f1n)
+
+        ! Make new cell with hanging node
+        vx1 = GetCellVertGA(grid%cell, cvs(1))
+        vx2 = GetCellVertGA(grid%cell, cvs(2))
+
+        fc1 = GetCellFaceGA(grid%cell, cvs(1))
+        fc2 = GetCellFaceGA(grid%cell, cvs(2))
 
         ! Verts
         new_vertsD = [vx1, vx2]
@@ -4132,21 +4646,129 @@ module gamod_types
 
         ! Add new cell
         call grid%AddCell(new_faces, new_verts, ic)
-        call c%reg%Set(ic,c%reg%Get(cvs(1))) 
-
-        ! Adapt the neighbor, if there is any
-        ! TODO
-
-
-
-
-
+        call grid%cell%reg%Set(ic,grid%cell%reg%Get(cvs(1)))        
 
         
+    end subroutine
 
 
+    subroutine MakeNewThreeFace(grid, three_vert, fc, fc3, fc23, f1n)
 
-        end associate
+        ! Description
+        !============
+        ! Make a new face from two faces connect with hanging node
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT) :: grid
+        integer(I8), intent(in) :: three_vert, fc
+        integer(I8), intent(out) :: f1n
+        integer(I8), allocatable, intent(out) :: fc3(:), fc23(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:) :: vf1n, vc3
+
+        fc3 = GetVertFaceGA(grid%face, three_vert)
+        allocate(fc23(count(fc3 /= fc)))
+        fc23 = pack(fc3, fc3 /= fc)
+
+        allocate(vc3(size(fc23)*2))
+        vc3 = [grid%face%vert1%Get(fc23(1)), grid%face%vert1%Get(fc23(2)), &
+               grid%face%vert2%Get(fc23(1)), grid%face%vert2%Get(fc23(2)) ]
+        allocate(vf1n(count(vc3 /= three_vert)))
+        vf1n = pack(vc3, vc3 /= three_vert)
+
+        ! Create new face
+        call grid%GetFaceNumber(vf1n(1), vf1n(2), 3, f1n) ! Fast method
+        call grid%face%label%Set(f1n,grid%face%label%Get(fc23(1))) 
+        if (grid%face%label%Get(fc23(1)) /= grid%face%label%Get(fc23(2))) &
+            print *, 'MakeNewThreeFace: face%label of merged faces were not equal!'
+        if ( grid%face%aligned%Get(fc23(1)) == 1 .and. grid%face%aligned%Get(fc23(2)) == 1 ) &
+            call grid%face%aligned%Set(f1n,1)
+        call grid%AddFaceToFsFc(f1n, fc23)
+
+    end subroutine
+
+    subroutine AdaptNeigThreeVert(grid, three_vert, cvs, fc23, f1n, cells_rem)
+
+        ! Description
+        !============
+        ! Commonly used piece of code to adapt the neighbor to the merged cells
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT) :: grid
+        integer(I8), intent(in) :: three_vert, f1n, cvs(2)
+        integer(I8), allocatable, intent(in) :: fc23(:)
+        integer(I8), allocatable, intent(out) :: cells_rem(:)
+
+        ! Auxiliary
+        integer(I8) :: counter, ic, i
+        integer(I8), allocatable, dimension(:) :: cells_n, neigD, verts_n, new_vertsN, &
+            faces_n, faces_nD, new_faces_n
+
+        ! Get neighbors in radial direction
+        cells_n = GetVertCellGA(grid%cell, three_vert)
+
+        ! Eliminate cvs
+        allocate(neigD(size(cells_n)))
+        neigD = 0
+        counter = 0
+        do i = 1, size(cells_n)
+            if ((cells_n(i) /= cvs(1)) .and. (cells_n(i) /= cvs(2))) then
+                counter = counter + 1
+                neigD(counter) = cells_n(i)
+            end if
+        end do
+
+        if (counter == 1) then
+
+            ! Verts
+            verts_n = GetCellVertGA(grid%cell, neigD(1))
+            allocate(new_vertsN(count(verts_n /= three_vert)))
+            new_vertsN = pack(verts_n, verts_n /= three_vert)
+
+            ! Face 
+            faces_n = GetCellFaceGA(grid%cell, neigD(1))
+
+            ! Eliminate fc23
+            allocate(faces_nD(size(faces_n)))
+            faces_nD = 0
+            counter = 0
+            do i = 1, size(faces_n)
+                if (faces_n(i) /= fc23(1) .and. faces_n(i) /= fc23(2)) then
+                    counter = counter + 1
+                    faces_nD(counter) = faces_n(i)
+                end if
+            end do
+
+            allocate(new_faces_n(counter+1))
+            new_faces_n = [faces_nD(1:counter), f1n]
+
+            ! Add new cell
+            call grid%AddCell(new_faces_n, new_vertsN, ic)
+
+            call grid%cell%reg%Set(ic, grid%cell%reg%Get(neigD(1)))
+
+            ! To remove
+            allocate(cells_rem(3))
+            cells_rem = [cvs, neigD(1)]
+
+
+        elseif (counter == 0) then
+
+            if (grid%face%label%Get(fc23(1)) /= grid%face%label%Get(fc23(2))) then
+                print *, 'AdaptNeigThreeVert: face%label of merged faces were not equal!'
+            end if 
+            cells_rem = cvs
+        else if (counter .gt. 1) then
+
+            call gdErrorHandler('AdaptNeigThreeVert: case not implemented')
+
+        end if
+
 
     end subroutine
 
@@ -4518,12 +5140,12 @@ module gamod_types
                 if (ind(i) /= 0) ifss(i) = GetFsFcFromFaceIndex(fd,ind(i))
             end do
 
+            ! Unique 
+            call Unique(ifss, ifssU)
+
         end if
 
-        ! Unique 
-        call Unique(ifss, ifssU)
-
-        if (size(ifssU) == 1) then
+        if (allocated(ifssU)) then
 
             ! Add the face to that flux surface
             ifs = ifssU(1)
@@ -4541,10 +5163,6 @@ module gamod_types
             call fd%fluxsurfacefacesP2%Set(ifs, size(new_faces))
             loc = (/ (i, i = ifs+1, fd%nFs)/)
             call fd%fluxsurfacefacesP1%SumMask(loc,1)
-
-        else
-
-            call gdErrorHandler('AddFaceToFsFc: multiple fluxsurfaces found')
 
         end if
             
@@ -4571,6 +5189,11 @@ module gamod_types
         associate(&
             c => grid%cell &
             )
+
+        ! Check
+        if (size(faces) /= size(verts)) then
+            call gdErrorHandler('AddCell: size faces and size verts is not the same')
+        end if
 
         ! Adjust and add the cell
         c%ntot = c%ntot + 1
@@ -5360,6 +5983,27 @@ module gamod_types
             end if   
         end do
      
+    end function
+
+    function GetCommonFace(cell, ic1, ic2) result(res)
+        type(GACellUDT) :: cell
+        integer(I8) :: ic1, ic2, res, i
+        integer(I8), allocatable :: fcs1(:), fcs2(:)
+
+        res = 0
+
+        fcs1 = GetCellFaceGA(cell, ic1)
+        fcs2 = GetCellFaceGA(cell, ic2)
+
+        do i = 1, size(fcs1)
+            if (any(fcs1(i) == fcs2)) then
+                res = fcs1(i)
+                return
+            end if
+        end do
+
+        if (res == 0) call gdErrorHandler('GetCommonFace: cells have no common face')
+
     end function
 
     function GetCommonVert(f, f1, f2) result(res)

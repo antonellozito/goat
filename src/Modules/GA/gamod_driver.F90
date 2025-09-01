@@ -215,7 +215,6 @@ module gamod_driver
             call grid%RemoveSmallTriangle(qm,options,magneticField)
 
 
-
         ! Remove flux tubes with only two triangles
 
         ! Stacked to cutcell
@@ -236,6 +235,8 @@ module gamod_driver
         ! Remove stickout quad
 
         ! Boundary layer grid
+
+        ! Visualize - TODO
 
 
 
