@@ -33,7 +33,7 @@ module mod_sort
     implicit none 
     private 
     public :: Sort, Unique, Setdiff, CountOccurrence, SearchSortedArray, &
-        GetBinIndexSortedArray
+        GetBinIndexSortedArray, isMember
 
     !==================================================================!
     !                                                                  !
@@ -1051,6 +1051,33 @@ module mod_sort
 
 
     end function 
+
+    ! isMember for integer arrays
+    function isMember(a, b) result(res) 
+
+        ! Description
+        !============
+        !   res = isMember(A,B) for arrays A and B returns an array of the same
+        !   size as A containing true where the elements of A are in B and false
+        !   otherwise.
+
+        ! Declare arguments
+        !==================
+        ! Arguments
+        integer(I8), allocatable :: a(:), b(:)
+        logical, allocatable :: res(:)
+
+        ! Auxiliary
+        integer(I8) :: i
+
+        allocate(res(size(a)))
+        res = .false.
+
+        do i = 1, size(a)
+            if (any(a(i) == b)) res(i) = .true.
+        end do 
+
+    end function
 
 
 
