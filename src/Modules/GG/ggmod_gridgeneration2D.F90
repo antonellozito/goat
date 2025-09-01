@@ -11724,6 +11724,18 @@ module ggmod_gridgeneration2D
         svlf = 1
         evhf = size(hflinevert)
         evlf = size(lflinevert)
+        if (evhf > 1) then 
+            if (hflinevert(1) == hflinevert(evhf)) then 
+                ! Skip the last vertex, is the same as the first one
+                evhf = evhf-1
+            end if 
+        end if 
+        if (evlf > 1) then 
+            if (lflinevert(1) == lflinevert(evlf)) then 
+                ! Skip the last vertex, is the same as the first one
+                evlf = evlf-1
+            end if 
+        end if 
 
         ! Loop over hfline vertices
         do i = svhf, evhf
