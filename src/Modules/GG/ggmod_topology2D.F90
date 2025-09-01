@@ -2524,6 +2524,7 @@ module ggmod_topology2D
         ! Trim the topological mesh
         call WriteTopologicalMesh(topomesh, 'topomesh_temp')
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
+        call SimplifyTopologicalMeshFaces(topomesh)
 
         ! Split boundaries
         call WriteTopologicalMesh(topomesh, 'topomesh_temp')
@@ -6518,6 +6519,9 @@ module ggmod_topology2D
         ! in boundary faces are removed as well, since they shouldn't be
         ! critical for the topological mesh. 
 
+        ! Note 4: radial faces are only retained if they start or end in
+        ! a minimum or maximum (other radial faces should not be required)
+
         ! Declare variables
         !==================
         ! Arguments
@@ -6576,7 +6580,8 @@ module ggmod_topology2D
         rmface = (topomesh%face%vert(:, 1) == 0) .or. &
             (topomesh%face%vert(:, 2) == 0)
 
-        ! Also remove separatrix faces without saddle points or splitting points
+        ! Remove separatrix faces that have only intersections with
+        ! boundary faces
         do i = 1, topomesh%face%ntot
             if (topomesh%face%type(i) == TMfacesepID) then 
                 ! Set to true, will be set to false if saddle point present
@@ -6590,25 +6595,18 @@ module ggmod_topology2D
                     ! Make sure is removed because of zero vertex
                     rmface(i) = .true.
                 end if 
-                !if (topomesh%face%vert(i, 1) /= 0) then 
-                !    if ((topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsaddleID) .or. &
-                !        (topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsplitID)) then 
-                !        rmface(i) = .false. 
-                !    end if 
-                !else 
-                !    ! Make sure is removed because of zero vertex
-                !    rmface(i) = .true.
-                !    
-                !end if 
-                !if (topomesh%face%vert(i, 2) /= 0) then 
-                !    if ((topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsaddleID) .or. &
-                !        (topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsplitID)) then 
-                !        rmface(i) = .false. 
-                !    end if 
-                !else 
-                !    ! Make sure is removed because of zero vertex
-                !    rmface(i) = .true.
-                !end if 
+            end if 
+        end do 
+
+        ! Remove radial faces that do not start and end in an extremum
+        do i = 1, topomesh%face%ntot
+            if ((topomesh%face%type(i) == TMfaceradID) .and. .not. rmface(i)) then ! this should skip faces with zero vertex indices
+                if (all(topomesh%vert%type(topomesh%face%vert(i, 1)) /= &
+                        [TMvertexmaxID, TMvertexminID, TMvertexsaddleID]) .or. &
+                    all(topomesh%vert%type(topomesh%face%vert(i, 2)) /= &
+                        [TMvertexmaxID, TMvertexminID, TMvertexsaddleID])) then 
+                    rmface(i) = .true. 
+                end if 
             end if 
         end do 
 
