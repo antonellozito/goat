@@ -121,6 +121,7 @@ alias mgv "python3 ${GOAT_VISUALIZATION}/MonitorGridAndVessel.py"
 alias pgginput "python3 ${GOAT_VISUALIZATION}/VisualizeGGInput.py"
 alias pggoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGGOutput.py"
 alias pspp "python3 ${GOAT_VISUALIZATION}/SolpsPostProcess.py"
+alias pgaoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGAoutput.py"
 
 # Create environment cache for faster loading (setenv, unsetenv, and aliases)
 set setup_post = `mktemp`

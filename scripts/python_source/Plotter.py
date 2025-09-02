@@ -1308,7 +1308,42 @@ def PlotGridCells(grid, fignum):
 
      # Set axes
     SetAxesLimits2D(plt.gca(), xb, yb)
-    
+
+# Grid generation data plotting: cells and indicated aligned faces
+def PlotGridCellsAlignedFaces(grid, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)
+
+    # Plot vertexID
+    #for i in np.arange(0, grid.vert.ntot, 1):
+    #    PlotPoints2D(grid.vert.x[i], grid.vert.y[i], fignum, marker='.', color='r', label=str(grid.vert.ID[i]))
+
+
+    # Plot aligned faces
+    xf = 0.5*(grid.vert.x[grid.face.v1-1] + grid.vert.x[grid.face.v2-1])
+    yf = 0.5*(grid.vert.y[grid.face.v1-1] + grid.vert.y[grid.face.v2-1]) 
+    for i in np.arange(0, grid.face.ntot, 1): 
+        if (grid.face.aligned[i] == 1) :
+            PlotPoints2D(xf[i], yf[i], fignum, marker='.', color='b')
+
+# Grid generation data plotting: cells and indicated boundary faces
+def PlotGridCellsBoundaryFaces(grid, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)
+
+    # Plot vertexID
+    #for i in np.arange(0, grid.vert.ntot, 1):
+    #    PlotPoints2D(grid.vert.x[i], grid.vert.y[i], fignum, marker='.', color='r', label=str(grid.vert.ID[i]))
+
+
+    # Plot aligned faces
+    xf = 0.5*(grid.vert.x[grid.face.v1-1] + grid.vert.x[grid.face.v2-1])
+    yf = 0.5*(grid.vert.y[grid.face.v1-1] + grid.vert.y[grid.face.v2-1]) 
+    for i in np.arange(0, grid.face.ntot, 1):
+        if (not(grid.face.label[i] ==  0)) :
+            PlotPoints2D(xf[i], yf[i], fignum, marker='.', color='b')
+
+
 # Grid topological data
 def PlotGridTopologicalData(grid, fignum):
     # Description
