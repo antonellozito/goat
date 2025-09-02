@@ -96,7 +96,7 @@ module gamod_types
 
         ! Logicals and indices
         !logical, allocatable                          :: BV(:)
-        class(IntegerDynamicArrayUDT), allocatable        :: fieldlineID 
+        class(IntegerDynamicArrayUDT), allocatable    :: fieldlineID 
         integer(I8)                                   :: ntot = 0
 
         !type(IntegerDynamicArrayUDT), allocatable     :: faceP(:,:)
@@ -483,6 +483,10 @@ module gamod_types
         procedure :: GetFaceNumber
         procedure :: AddFaceToFsFc
         procedure :: AddCell
+
+        ! Visualization
+        !==============
+        procedure :: WriteData => WriteGAGridData
 
 
 
@@ -3804,12 +3808,13 @@ module gamod_types
 
         case ('3443')
 
+            ! Merging a quad and triangle at a boundary
             call grid%Merge3443(fc, cvs, starter)
 
         case ('3433')
         case ('334')
 
-            ! Merging to triangles
+            ! Merging to triangles 
             call grid%Merge334(fc, cvs)
 
         case ('333')
@@ -4655,7 +4660,7 @@ module gamod_types
         ! Auxiliary
         integer(I8) :: ic, n_al
         integer(I8), allocatable, dimension(:) :: vx1, vx2, fc1, fc2, vertsD, new_verts, facesD, &
-            new_faces, fc_rem, cell_rem
+            new_faces, fc_rem, cell_rem, fcs_al
 
         ! Make merge cell
         vx1 = GetCellVertGA(grid%cell, cvs(1))
@@ -4678,9 +4683,16 @@ module gamod_types
 
         call grid%cell%reg%Set(ic, grid%cell%reg%Get(cvs(1)))
 
+        ! Determine cflag
         n_al = count(grid%face%aligned%Get(new_faces) == 1)
-
-        if (n_al /= 2) call grid%cell%cflags%Set(ic, 4)  ! If two aligned faces, the new cell is a proper quad
+        if (n_al == 2) then
+            allocate(fcs_al(n_al))
+            fcs_al = pack(new_faces, grid%face%aligned%Get(new_faces) == 1)
+            if (HaveCommonVert(grid%face, fcs_al(1),fcs_al(2)))  call grid%cell%cflags%Set(ic, 4) 
+            deallocate(fcs_al)
+        else 
+            call grid%cell%cflags%Set(ic, 4)
+        end if
 
         ! Remove fc
         fc_rem = fc
@@ -5329,6 +5341,144 @@ module gamod_types
 
 
         end associate
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                         VISUALIZATION                            !
+    !------------------------------------------------------------------!    
+
+    subroutine WriteGAGridData(grid, filename)
+
+        ! Description
+        !============
+        ! Writing out the GAgrid to plot it.
+
+        ! 'vertices'
+        ! <vert%ntot>
+        ! 'ID, x, y, fieldlineID'
+        ! <ID, x, y, fieldlineID>
+        ! 'faces'
+        ! <face%ntot> 
+        ! 'ID, v1, v2, label, region'
+        ! <ID, v1, v2, label, region>
+        ! 'cells'
+        ! <cell%ntot, cell%nvert> 
+        ! 'ID, vp1, vp2, region>'
+        ! <ID, vp1, vp2, region>
+        ! 'cell vertices'
+        ! <cell%vert> 
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+
+
+        ! Arguments
+        class(GAGridUDT)                        :: grid
+        character(*), intent(in)                :: filename 
+
+        ! Auxiliary
+        integer                                 :: fu
+        real(R8), allocatable, dimension(:)     :: x, y, cx, cy
+        integer(I8), allocatable, dimension(:)  :: fID, v1, v2, region, &   
+            label, vc, aligned
+        character(:), allocatable               :: dir
+
+        ! Loop
+        integer(I8)                             :: i
+
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            f       => grid%face,   &
+            c       => grid%cell,   &
+            v       => grid%vert    &
+        )
+
+        ! Construct writing directory
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Write header
+        write(fu, *) 'VERSION3.00.00'
+
+        ! Write vertex data
+        !==================
+        ! Unpack
+        x = v%x%Get()
+        y = v%y%Get()
+        fID = v%fieldlineID%Get()
+
+        ! Number of vertices
+        write (fu, *) 'vertices'
+        write (fu, *) v%ntot 
+
+        ! Vertex data
+        write (fu, *) 'ID, x, y, fieldlineID'
+        do i = 1, v%ntot 
+            write (fu, *) i, x(i), y(i), fID(i)
+        end do 
+
+        ! Write face data
+        !================
+        ! Unpack
+        v1 = f%vert1%Get()
+        v2 = f%vert2%Get()
+        region = f%reg%Get()
+        label = f%label%Get()
+        aligned = f%aligned%Get()
+
+        ! Number of faces
+        write (fu, *) 'faces'
+        write (fu, *) f%ntot
+
+        ! Face data
+        write (fu, *) 'ID, v1, v2, label, region, aligned'
+        do i = 1, f%ntot
+            write (fu, *) i, v1(i), v2(i), label(i), region(i), aligned(i)
+        end do 
+
+        ! Write cell data
+        !================
+        ! Unpack
+        vc = c%vert%Get()
+        v1 = c%vertP1%Get()
+        v2 = c%vertP2%Get()
+        region = c%reg%Get()
+        cx = c%x%Get()
+        cy = c%y%Get()
+
+        ! Number of cells
+        write (fu, *) 'cells'
+        write (fu, *) c%ntot, size(vc)
+
+        ! Cell data
+        write (fu, *) 'ID, vp1, vp2, region, x, y'
+        do i = 1, c%ntot
+            write (fu, *) i, v1(i), v2(i), region(i), cx(i), cy(i)
+        end do 
+
+        ! Cell vertices
+        write (fu, *) 'cell vertices'
+        do i = 1, size(vc)
+            write (fu, *) vc(i)
+        end do 
+
+        ! Housekeeping
+        !=============
+        ! Deallocate again
+
+        ! Others
+        end associate
+        close(fu)
 
     end subroutine
         

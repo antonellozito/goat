@@ -56,7 +56,7 @@ module gamod_utility
         logical :: ft_open, ft_open_us, ft_closed
         integer(I8), allocatable :: cvs(:), cvs_rev(:), ind(:), fcs(:), fcs_rev(:), &
              ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
-        integer(I8) :: nc, c1, c2, sv, nv, sf, nf, i, ift
+        integer(I8) :: nc, c1, c2, sv, nv, sf, nf, i, ift, ic, indc
         real(R8) :: c1_bx, c1_by, d, c1_bpolx, c1_bpoly, con_x, con_Y, d2, cosin, &
             dpsidx(grid%cell%ntot), dpsidy(grid%cell%ntot)
 
@@ -94,6 +94,7 @@ module gamod_utility
         end select
 
         ! Build open tubes
+        !=================
         if (ft_open) then
 
             ! Build the open tubes connecting the target for structured grids   
@@ -107,6 +108,7 @@ module gamod_utility
         end if
 
         ! Build closed tubes
+        !===================
         if (ft_open .and. ft_closed) then
 
             ! Build the core flux tubes while open flux tubes were build
@@ -131,13 +133,21 @@ module gamod_utility
             call BuildFtFc(grid)
         end if
 
-        ! Store
+
         associate(&
             c => grid%cell, &
             f => grid%face, &
             v => grid%vert, &
             fd => grid%data%fluxdata &
         )
+
+        ! Store
+        fd%nFt = count(ftCvP(:,1) /= 0)
+        fd%fluxtubecells = ftCv(1:ftCvP(fd%nFt,1)+ftCvP(fd%nFt,2)-1)
+        fd%fluxtubecellsP = ftCvP(1:fd%nFt,:)
+        fd%fluxtubefaces = ftFc(1:ftFcP(fd%nFt,1)+ftFcP(fd%nFt,2)-1)
+        fd%fluxtubefacesP = ftFcP(1:fd%nFt,:)
+
 
         ! Orden the flux tubes along positive poloidal magnetic field
         call magneticField%interp%Evaluate(c%x,c%y,1,0,dpsidx)
@@ -175,7 +185,7 @@ module gamod_utility
                 if (cosin .lt. 0.0_R8) then
 
                     ! Cells
-                    ind = (/ (i, i = nv,-1,1) /)
+                    ind = (/ (i, i = nc,1,-1) /)
                     cvs_rev = cvs(ind)
 
                     sv = fd%fluxtubecellsP(ift,1)
@@ -183,7 +193,7 @@ module gamod_utility
                     
                     ind = (/ (i, i = sv, sv+nv-1)/)
                     fd%fluxtubecells(ind) = cvs_rev
-                    deallocate(ind)
+
 
                     ! Faces
                     sf = fd%fluxtubefacesP(ift,1)
@@ -191,16 +201,40 @@ module gamod_utility
 
                     fcs = fd%fluxtubefaces(sf:sf+nf-1)
 
-                    fcs_rev = fcs(nf:-1:1)
-                    fd%fluxtubefaces(sf:sf+nf-1) = fcs_rev
+                    ind = (/ (i, i = nf,1,-1) /)
+                    fcs_rev = fcs(ind)
+
+                    ind = (/ (i, i = sf, sf+nf-1)/)
+                    fd%fluxtubefaces(ind) = fcs_rev
+                    deallocate(ind)
 
                 end if
             end if 
         end do
 
         ! Make cvFt -- inverse of ftCv
+        c%ft = 0
+        do ic = 1, c%ntot
+            indc = findloc(fd%fluxtubecells, ic, 1)
+            if (indc == 0) then
+                print *, 'BuildFluxTubeData: cell without flux tube'
+                c%ft(ic) = fd%nFt + 1 ! Convection to avoid zeros
+            else 
+                ift = GetFluxTubeFromCellIndex(fd, indc)
+                c%ft(ic) = ift
+            end if
+        end do
+
     
         ! Make ftReg
+        ! 1 = core
+        ! 2 = SOL
+        ! 3 = PF
+        fd%fluxtuberegID = 0
+        do ift = 1, fd%nFt
+            cvs = GetFTCell(fd, ift)
+            fd%fluxtuberegID(ift) = minval(c%reg(cvs))
+        end do 
 
         end associate
 
@@ -241,7 +275,7 @@ module gamod_utility
         allocate(fcLbl_loc(f%ntot))
         allocate(indFc(f%ntot))
         allocate(ftCv(c%ntot))
-        allocate(ftCvP(c%ntot,2)) ! fd%nFt not known !!!!! TODO
+        allocate(ftCvP(c%ntot,2)) 
         allocate(tube(c%ntot))
         ftCv = 0
         ftCvP = 0
@@ -547,8 +581,8 @@ module gamod_utility
                     ! Eliminate if cells is trapezoid
                     start_cell = .true.
                     if (allocated(pfaces)) deallocate(pfaces)
-                    allocate(pfaces(count(f%aligned(fcs) /= 0)))
-                    pfaces = pack(fcs, f%aligned(fcs) /= 0)
+                    allocate(pfaces(count(f%aligned(fcs) == 0)))
+                    pfaces = pack(fcs, f%aligned(fcs) == 0)
 
                     if (allocated(pfacesB)) deallocate(pfacesB)
                     allocate(pfacesB(count(f%label(pfaces) /= 0)))
@@ -671,108 +705,120 @@ module gamod_utility
 
                             ! Attritube faces in tube
                             tube_fc(1) = pfacesB(1)
+                            allocate(pfaces_dummy(count(pfaces /= pfacesB(1))))
                             pfaces_dummy = pack(pfaces,pfaces /= pfacesB(1))
                             tube_fc(2) = pfaces_dummy(1)
+                            deallocate(pfaces_dummy)
 
                         end if 
-                    end if
+
                     
-                    ! Housekeeping
-                    deallocate(pfaces)
-                    deallocate(pfacesB)
+                        ! Housekeeping
+                        deallocate(pfaces)
+                        deallocate(pfacesB)
 
-                    ! Update counter
-                    tube_count_fc = 2
+                        ! Update counter
+                        tube_count_fc = 2
 
-                    ! Marching algo
-                    ! Get the internal poloidal faces
-                    allocate(ipface_dummy(size(pfacesI)))
-                    ipface_dummy = pfacesI
-                    if (size(ipface_dummy) /= 1) then
-                        build_tube = .false.
-                    else 
-                        ipface = ipface_dummy(1)
-                    end if
-                    deallocate(ipface_dummy)
+                        ! Marching algo
+                        ! Get the internal poloidal faces
+                        allocate(ipface_dummy(size(pfacesI)))
+                        ipface_dummy = pfacesI
+                        if (size(ipface_dummy) /= 1) then
+                            build_tube = .false.
+                        else 
+                            ipface = ipface_dummy(1)
+                        end if
+                        deallocate(ipface_dummy)
 
-                    if (build_tube) then
+                        if (build_tube) then
 
-                        do while (f%label(ipface) == 0) 
+                            do while (f%label(ipface) == 0) 
 
-                            ! Get cells of ipface
-                            cvs = GetFaceCell(f,ipface)
-                            allocate(ic_dummy(count(cvs /= ic1)))
-                            ic_dummy = pack(cvs,cvs /= ic1)
-                            next_ic = ic_dummy(1)
-                            deallocate(ic_dummy)
+                                ! Get cells of ipface
+                                cvs = GetFaceCell(f,ipface)
+                                allocate(ic_dummy(count(cvs /= ic1)))
+                                ic_dummy = pack(cvs,cvs /= ic1)
+                                next_ic = ic_dummy(1)
+                                deallocate(ic_dummy)
 
-                            if (any(next_ic == tube)) then
+                                if (any(next_ic == tube)) then
 
-                                exit
+                                    exit
 
-                            else
+                                else
 
-                                tube_cv = tube_cv + 1
-                                tube(tube_cv) = next_ic
-
-                            end if
-
-                            ! Get ipface
-                            ic1 = next_ic
-
-                            fcs = GetCellFace(c, ic1)
-                            if (allocated(pfaces)) deallocate(pfaces)
-                            allocate(pfaces(count(f%aligned(fcs) == 0)))
-                            pfaces = pack(fcs, f%aligned(fcs) == 0)
-
-                            allocate(ipface_dummy(count(pfaces /= ipface)))
-                            ipface_dummy = pack(pfaces, pfaces /= ipface)  
-
-                            ! Eliminate possible poloidal boundary faces
-                            nipface = size(ipface_dummy)
-                            if (nipface .ge. 1) then
-                                if (nipface .gt. 1) then
-
-                                    ! Eliminate a internal poloidal face
-                                    if (count(f%label(ipface_dummy) /= 0) == nipface) then
-
-                                            ipface = ipface_dummy(1)
-                                    else
-                                            ! Only keep the non-boundary ipface
-                                            !if (count(f%label(ipface_dummy) == 0) /= 1) then
-                                            test = isBoundaryFace1D(ipface_dummy,f)
-                                            nt = count(.not.test)
-                                            if (count(.not.test) /= 1) then
-                                                call gdErrorHandler('BuildOpenTubeUS: not supported case')
-                                            end if
-
-                                            ipface_dummy2 = pack(ipface_dummy,f%label(ipface_dummy) == 0)
-                                            ipface = ipface_dummy2(1)
-
-                                    end if
-                                else if (nipface .eq. 1) then
-
-                                    ipface = ipface_dummy(1)
+                                    tube_cv = tube_cv + 1
+                                    tube(tube_cv) = next_ic
 
                                 end if
 
-                                ! Add face to tube_fc
-                                tube_count_fc = tube_count_fc + 1
-                                tube_fc(tube_count_fc) = ipface
+                                ! Get ipface
+                                ic1 = next_ic
 
-                            else if (nipface == 0) then
+                                fcs = GetCellFace(c, ic1)
+                                if (allocated(pfaces)) deallocate(pfaces)
+                                allocate(pfaces(count(f%aligned(fcs) == 0)))
+                                pfaces = pack(fcs, f%aligned(fcs) == 0)
 
-                                print *, 'Warning: BuildOpenTubesUS: No ipface found, put boundary face in tube'
-                                faceB = pack(fcs,f%label(fcs) /= 0)
-                                ipface = faceB(1)
+                                if (.not.any(pfaces == ipface)) then
+                                    call gdErrorHandler('Something wrong')
+                                end if
 
-                            end if
+                                allocate(ipface_dummy(count(pfaces /= ipface)))
+                                ipface_dummy = pack(pfaces, pfaces /= ipface)  
 
-                            ! Housekeeping
-                            deallocate(ipface_dummy)
-                            deallocate(pfaces)
+                                ! Eliminate possible poloidal boundary faces
+                                nipface = size(ipface_dummy)
+                                if (nipface .ge. 1) then
+                                    if (nipface .gt. 1) then
 
-                        end do
+                                        ! Eliminate a internal poloidal face
+                                        if (count(f%label(ipface_dummy) /= 0) == nipface) then
+
+                                                ! Poloidal faces are all boundary faces
+                                                ipface = ipface_dummy(1)
+
+                                        else
+                                                ! Only keep the non-boundary ipface
+                                                !if (count(f%label(ipface_dummy) == 0) /= 1) then
+                                                test = isBoundaryFace1D(ipface_dummy,f)
+                                                nt = count(.not.test)
+                                                if (count(.not.test) /= 1) then 
+                                                    call gdErrorHandler('BuildOpenTubeUS: not supported case')
+                                                end if
+
+                                                allocate(ipface_dummy2(count(f%label(ipface_dummy) == 0)))
+                                                ipface_dummy2 = pack(ipface_dummy,f%label(ipface_dummy) == 0)
+                                                ipface = ipface_dummy2(1)
+                                                deallocate(ipface_dummy2)
+
+                                        end if
+                                    else if (nipface .eq. 1) then
+
+                                        ipface = ipface_dummy(1)
+
+                                    end if
+
+                                    ! Add face to tube_fc
+                                    tube_count_fc = tube_count_fc + 1
+                                    tube_fc(tube_count_fc) = ipface
+
+                                else if (nipface == 0) then
+
+                                    print *, 'Warning: BuildOpenTubesUS: No ipface found, put boundary face in tube'
+                                    faceB = pack(fcs,f%label(fcs) /= 0)
+                                    ipface = faceB(1)
+
+                                end if
+
+                                ! Housekeeping
+                                deallocate(ipface_dummy)
+                                deallocate(pfaces)
+
+                            end do ! Marching algo
+
+                        end if
 
                         ! Save
 
@@ -838,7 +884,8 @@ module gamod_utility
         allocate(in_tube(c%ntot))
         allocate(fs_closed(fd%nFs))
         allocate(tube(c%ntot))
-        tube_count = size(ftCvP(:,1))
+        tube_count = count(ftCvP(:,1) /= 0)
+        tube = 0
         cvLookUp = GetCvLookUp(c)
         bc_core = 0
         in_tube = .false.
@@ -938,7 +985,7 @@ module gamod_utility
                 do j = 1, size(cvs)
                     cv1 = cvs(j)
 
-                    if (.not.in_tube(cv)) then
+                    if (.not.in_tube(cv1)) then
 
                         ! Start a new tube
                         call TraceCloseFluxTube(grid, in_tube, cv1, tube, counter_tube)
@@ -990,6 +1037,7 @@ module gamod_utility
         
         allocate(fc_tube(f%ntot)) 
         fc_tube = 0
+        fc_count = 0
         cells = tube
 
         do k = 1, size(cells)
@@ -1004,6 +1052,7 @@ module gamod_utility
             psic = 0.5_R8 * (maxval(psi_vert) + minval(psi_vert))
 
             ! Get poloidal faces
+            allocate(pfaces(count(f%aligned(tf) == 0)))
             pfaces = pack(tf, f%aligned(tf) == 0)
             np = size(pfaces)
 
@@ -1022,6 +1071,8 @@ module gamod_utility
                 end if
 
             end do
+
+            deallocate(pfaces)
 
         end do
 
@@ -1070,6 +1121,7 @@ module gamod_utility
         tube = 0
         tube(1) = cv1
         counter = 1
+        in_tube = .false.
         in_tube(cv1) = .true.
         looped = .false.
 
@@ -1665,8 +1717,10 @@ module gamod_utility
             
             vsF = grid%face%vert(ifc,:)
             psic = 0.5_R8*sum(grid%vert%psi(vsF))
+            allocate(fcs1(count(fcs /= ifc)))
             fcs1 = pack(fcs, fcs /= ifc)
-            fcs2 = pack(fcs1, grid%face%aligned(fcs1) == 1)
+            allocate(fcs2(count(grid%face%aligned(fcs1) == 0)))
+            fcs2 = pack(fcs1, grid%face%aligned(fcs1) == 0)
             do i = 1, size(fcs2)
                 vs = grid%face%vert(fcs2(i),:)
                 if ((psic .gt. minval(grid%vert%psi(vs))) &
@@ -1803,7 +1857,17 @@ module gamod_utility
 
     end function
 
+    function GetFluxTubeFromCellIndex(fd, indc) result(res)
+        type(FluxDataUDT) :: fd
+        integer(I8) :: i, indc, n_el, res
+        integer(I8), allocatable :: b(:), ind(:)
 
+        n_el = count(fd%fluxtubecellsP(:,1).le.indc)
+        allocate(b(n_el))
+        ind = (/ (i, i = 1, n_el)/)
+        b = pack(ind, fd%fluxtubecellsP(:,1).le.indc)
+        res = b(n_el)
+    end function
 
 
 end module 
