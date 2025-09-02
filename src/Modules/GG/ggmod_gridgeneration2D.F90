@@ -11724,6 +11724,18 @@ module ggmod_gridgeneration2D
         svlf = 1
         evhf = size(hflinevert)
         evlf = size(lflinevert)
+        if (evhf > 1) then 
+            if (hflinevert(1) == hflinevert(evhf)) then 
+                ! Skip the last vertex, is the same as the first one
+                evhf = evhf-1
+            end if 
+        end if 
+        if (evlf > 1) then 
+            if (lflinevert(1) == lflinevert(evlf)) then 
+                ! Skip the last vertex, is the same as the first one
+                svlf = svlf+1 ! appears first because of flipping of lfline
+            end if 
+        end if 
 
         ! Loop over hfline vertices
         do i = svhf, evhf
@@ -11741,6 +11753,9 @@ module ggmod_gridgeneration2D
 
                 ! Skip check
                 !===========
+                if ((vp(hfv(i)) /= v1 ) .or. (vp(lfv(j)) /= v2 )) then 
+                    print *, 'hmmm'
+                end if 
                 ! Cycle if both vertices have the same ID
                 if (v1 == v2) then 
                     cycle 
@@ -11759,9 +11774,7 @@ module ggmod_gridgeneration2D
                 ! Edge in polygon check
                 !======================
                 ! Check if edge starts and ends in the interior 
-                if ((vp(hfv(i)) /= v1 ) .or. (vp(lfv(j)) /= v2 )) then 
-                    print *, 'hmmm'
-                end if 
+                
                 isintube = IsEdgeInClosedSimplePolygon(xp, yp, vp, hfv(i), &
                     lfv(j))
                 if (.not. isintube) then 
