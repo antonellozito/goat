@@ -90,6 +90,10 @@ VERSION 1.00.00
 # Vessel geometry & reading method
 'goat.vessel.readmeth'          'read_structure'
 
+# Refinement options for vessel
+'goat.vessel.refinevessel'          '1'
+'goat.vessel.maxvesseldist'         '1e-3'
+
 # Target plate definition
 'goat.vessel.TP'                    '[11, 12]'
 'goat.vessel.TPind'                 '[1, 2]'
@@ -287,7 +291,7 @@ VERSION 1.00.00
 # See SetNumParams.m for the default settings
 
 # General optimization
-'gd.opt.num.itmax'                  10$00'
+'gd.opt.num.itmax'                  1000'
 'gd.opt.num.tol'                    '1e-10'
 
 # KKT driver (see also GridKKTDriver.m)
@@ -405,19 +409,33 @@ VERSION 1.00.00
 # Grid and magnetic field options are set through the standard grid 
 # deformation options thereof. Here, only grid generation specific options
 # are set. 
+# General options
+'gg.verbosity'                          '1'
+'gg.vertexconstructionmethod'           'orthogonal'
+'gg.TMcellgriddingorder'                'sequential'
+'gg.cellconstructionmethod'             'quads_triangles'
+'gg.ref.readexistingrefdata'            '0'
+'gg.labels.structurebased'              '1'
+'gg.dogriddiagnostics'                  '1' 
 
 #-------------------------------------------------------------------------#
 #                         TOPOLOGICAL MESH OPTIONS                        #
 #-------------------------------------------------------------------------#
 # Read exising file? 
-'gg.tm.readexistingTM'          '1'
-'gg.tm.TMfilepath'              './output/topomesh_base.dat'
+'gg.tm.readexistingTM'          '0'
+'gg.tm.readexistingtracers'     '0'
+'gg.tm.TMfilepath'              './output/topomesh.dat'
+'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
+'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
 
 # Magnetic field: tracing & resolution (description is determined by GD options)
 'gg.tm.field.resx'              '1200'
 'gg.tm.field.resy'              '1200'
 'gg.tm.field.donewton'          '1'
 'gg.tm.fieldtol'                '1e-8'
+
+# Tangency point tangency point treatment 
+'gg.tm.dotpvesselbased'         '1' # best used in combination with vessel refinement
 
 # Vessel contour tracing (vessel description is determined by GD options)
 'gg.tm.vessel.resx'             '300'
@@ -428,7 +446,7 @@ VERSION 1.00.00
 'gg.tm.contour.npmax'           '10000'
 'gg.tm.contour.dl'              '0.02'
 
-# Core boundary and region treatment
+# Topomesh adaptations
 'gg.tm.doadaptations'           '1'
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '0'
@@ -437,16 +455,27 @@ VERSION 1.00.00
 'gg.tm.removecoreregions'       '1'
 'gg.tm.removewidegridregions'   '0'
 'gg.tm.mergetangencypointtubes' '1'
-'gg.tm.dpsimintangencypointtubes'   '0.5'
+'gg.tm.mergeavptubes'           '1'
+'gg.tm.dpsimintangencypointtubes'   '0.0'
+'gg.tm.lradmintangencypointtubes'   '0.5e-2'
+
+'gg.tm.removevesselregions'     '0'
+'gg.tm.rvrretain'               '0'
+'gg.tm.rvrvesselIDs'            '[2, 3]'
+'gg.tm.rvrdocascade'            '1'
+'gg.tm.rvrcascadedir'           'up'
+'gg.tm.rvrfullycovered'         '1'
+
+'gg.tm.alignvesselparts'        '1'
+'gg.tm.avpminangle'             '5.0'
 
 #-------------------------------------------------------------------------#
 #                         VERTEX DISTRIBUTION OPTIONS                     #
 #-------------------------------------------------------------------------#
-# General options
-'gg.verbosity'                          '1'
-'gg.vertexconstructionmethod'           'orthogonal'
-'gg.cellconstructionmethod'             'quads_triangles'
-'gg.TMcellgriddingorder'                'sequential'
+# adaptations
+'gg.adap.extendtptubes'                 '1'
+'gg.adap.extendvesseltubes'             '1'
+'gg.adap.evt.maxvessellength'           '0.2'
 
 # Refinement options
 'gg.ref.readexistingrefdata'            '0'

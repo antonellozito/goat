@@ -66,5 +66,6 @@ module mod_definitions
         SOLPScorefclblIDincr = -4
    
     ! Topological mesh identification number
-    integer(I8), parameter :: TMTopSN = 1, TMTopDN = 2, TMTopGeneral = 0
+    integer(I8), parameter :: TMTopSN = 1, TMTopDN = 2, TMTopGeneral = 0, &
+        TMTopL = 3
 end module
