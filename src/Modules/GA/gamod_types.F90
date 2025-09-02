@@ -453,6 +453,12 @@ module gamod_types
         procedure :: DetermineRemovalMethod
         procedure :: LocalSmallTriangleRemoval
 
+        ! Stacked triangles
+        procedure :: StackedTrais
+        procedure :: DetectCutCell
+        procedure :: GetFirstTrap
+        procedure :: GetNextTraps
+
         ! Merging
         procedure :: MergeCells
         procedure :: OneMerge
@@ -2848,63 +2854,6 @@ module gamod_types
         
     end subroutine
 
-    subroutine DetermineCflags(grid, cells, b_flag)
-
-        !  Description
-        !=============
-        ! Computes the cflags for cells. 
-        ! A speed-up method is to pass precomputed data b_flag which is an logical array of
-        ! all faces indicating whether a face is a boundary face.
-
-        ! Declare variables
-        !==================
-        ! Argument
-        class(GAGridUDT), intent(inout) :: grid
-        integer(I8), allocatable :: cells(:)
-        logical , optional :: b_flag(grid%face%ntot)
-
-        ! Auxiliary
-        integer(I8) :: i, j, nb, indFc(grid%face%ntot)
-        integer(I8), allocatable :: b_faces(:), cvs(:), cvLookUp(:), ar(:)
-
-        ! Initialize - TODO - method without using face label - check if necessary
-        if (.not.present(b_flag)) then
-
-            ! Loop over cells
-            do i = 1, size(cells)
-
-                if (isBoundaryCellGA(grid,cells(i))) then
-                    call grid%cell%cflags%Set(cells(i), 3)
-                else
-                    call grid%cell%cflags%Set(cells(i), 1)
-                end if
-
-            end do
-
-        else 
-
-            ! Initiliaze
-            cvLookUp = GetCvLookUpGA(grid%cell)
-            ar = (/ (1, j = 1, size(cells))/)
-            call grid%cell%cflags%SetMultipleElements(cells,ar)
-            indFc = (/ (i, i= 1, grid%face%ntot)/)
-            nb = count(b_flag)
-            allocate(b_faces(nb))
-            b_faces = pack(indFc, b_flag)
-
-            ! Loop over boundary cells
-            do i = 1, nb
-                cvs = GetFaceCellGA(grid%cell, b_faces(i), cvLookUp)
-                ar = (/ (3, j = 1, size(cvs))/)
-                call grid%cell%cflags%SetMultipleElements(cvs, ar)
-            end do
-
-        end if
-
-
-
-    end subroutine
-
     !------------------------------------------------------------------!
     !                       GAGRID ADAPTATIONS                         !
     !------------------------------------------------------------------!
@@ -3364,345 +3313,404 @@ module gamod_types
 
     end subroutine
 
-    subroutine GetForbiddenMergeFaces(grid, forbidden_fcs)
+    ! Stacked Triangles
+    !==================
+    subroutine StackedTrais(grid, qm, options)
 
         ! Description
         !============
-        ! Determine forbidden merging faces
-        ! The forbidden merging faces are
-        ! - the separatrix faces
-        ! - the faces of the core cut
-        ! - boundary faces
-        ! Important note: faces which are a region boundary can also not be used
-        ! for merging. So always check whether the regions of the cells of a face
-        ! are from the same region.
+        ! Transforms a cut-cell triangles to stacked triangles
+        ! Con_vert is the vertex to which all triangles are attached
 
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)         :: grid
-        integer(I8), allocatable, intent(out)   :: forbidden_fcs(:)
+        class(GAGridUDT), intent(inout) :: grid
+        type(QualityMetric), intent(in) :: qm
+        type(GAoptionsUDT)              :: options
 
         ! Auxiliary
-        integer(I8) :: i, indFc(grid%face%ntot), nb, nc, nr
-        integer(I8), allocatable, dimension(:) :: cvLookUp, b_faces, tang_points, &
-            rad_faces, fcsAll, core_faces
+        integer(I8), allocatable, dimension(:) :: cctria, cctraps
+        integer(I8), allocatable :: cctrapsP(:,:)
+
+        ! Detection
+        !==========
+        ! Number of cells should not change, so try to detect whole group of cells
+        call grid%DetectCutCell(qm, options, cctria, cctraps, cctrapsP)
+
+
+
+
         
-        ! Precompute
-        cvLookUp = GetCvLookUpGA(grid%cell)
-
-        ! 1. faces iFs of separatrix
-        ! [~,~,grid] = give_iFs_sep(grid,grid.n_sep,cv_look_up,grid.iFs_sep);
-        ! s = grid.fs.faceP(grid.iFs_sep,1);
-        ! faces_sep = grid.fs.face(s:s+grid.fs.faceP(grid.iFs_sep,2)-1);
-
-        ! 2. cuts around xpoint
-        call grid%GetCutsXpoints(cvLookUp, core_faces)
-
-        ! 3. boundary faces
-        indFc = (/ (i, i = 1,grid%face%ntot) /)
-        allocate(b_faces(count(grid%face%label%Get() /= 0)))
-        b_faces = pack(indFc, grid%face%label%Get() /= 0);
-
-        ! 4. region boundary - too expensive to do with every merge proposition - do in the determinecase
-        !     cv_look_up = give_cv_look_up(grid);
-        !     int_faces = faces(grid.fcLbl == 0);
-        !    face_regions = zeros(round(grid.nFc/2),1); %over estimation
-        !     counter = 0;
-        !     for i = 1:length(int_faces)
-        !         iFc = int_faces(i);
-        !         cvs = give_cells_of_face(iFc,grid.cvFc,grid.cvFcP,cv_look_up);
-        !        if grid.cvReg(cvs(1)) ~= grid.cvReg(cvs(2))
-        !             counter = counter + 1;
-        !             face_regions(counter) = iFc;
-        !         end
-        !     end
-        !     face_regions = face_regions(1:counter);
-
-        ! 5. tangency points - radial line faces
-        call grid%GetTangencyPoints(b_faces, tang_points)
-        call grid%GetRadLineFaces(tang_points,rad_faces)
-    
-        ! Compose forbidden faces array
-        nc = size(core_faces)
-        nb = size(b_faces)
-        nr = size(rad_faces)
-        allocate(fcsAll(nc+nb+nr))
-        fcsAll(1:nc) = core_faces
-        fcsAll(nc+1:nc+nb) = b_faces
-        fcsAll(nc+nb+1:nc+nb+nr) = rad_faces
-        call Unique(fcsAll,forbidden_fcs)
-    
-
     end subroutine
 
-    subroutine GetCutsXpoints(grid, cvLookUp, fcs)
+    subroutine DetectCutCell(grid, qm, options, cctria, cctraps, cctrapsP)
 
         ! Description
         !============
-        ! Give the poloidal and radial faces out of an Xpoint which should not be used to merge
+        ! Detecting cutcells in the grid to be transformed to stacked triangles
 
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)         :: grid
-        integer(I8), allocatable, intent(in)    :: cvLookUp(:)
-        integer(I8), allocatable, intent(out)   :: fcs(:)
-
+        class(GAGridUDT), intent(inout) :: grid
+        type(QualityMetric), intent(in) :: qm
+        type(GAoptionsUDT)              :: options 
+        integer(I8), allocatable, intent(out) :: cctria(:), cctraps(:), cctrapsP(:,:)
+        
         ! Auxiliary
-        integer(I8) :: fcsD(grid%face%ntot), counterf, i, &
-            counter1, counter2, fcs1(grid%face%ntot), fcs2(grid%face%ntot)
-        logical :: b_flag(grid%face%ntot), in_flag1(grid%face%ntot), &
-            in_flag2(grid%face%ntot)
-
-
-        ! Initialize
-        call grid%GiveXpoints(.true.,cvLookUp)
-        fcsD = 0
-        counterf = 0
-        counter1 = 0
-        counter2 = 0
-        b_flag = (grid%face%label%Get() == 0)
-        in_flag1 = .false.
-        in_flag2 = .false.
-        fcs1 = 0
-        fcs2 = 0
-
-        ! Loop over the Xpoints
-        do i = 1, grid%data%nxp
-
-            ! Get the poloidal and radial faces
-            call grid%RecursiveGridMarching(grid%data%xpointID(i),fcs1,0,counter1,b_flag,in_flag1)
-            call grid%RecursiveGridMarching(grid%data%xpointID(i),fcs2,1,counter2,b_flag,in_flag2)
-
-            ! Add fcs1
-            fcs(counterf+1:counterf+counter1) = fcs1(1:counter1)
-            counterf = counterf + counter1
-
-            ! Add fcs2
-            fcs(counterf+1:counterf+counter2) = fcs2(1:counter2)
-            counterf = counterf + counter2
-
-        end do
-
-        ! Trim
-        fcs = fcsD(1:counterf)
-
-    end subroutine
-
-    subroutine GetTangencyPoints(grid, b_Faces, tang_points)
-
-        ! Description
-        !============
-        ! Give tangency points of a grid
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        integer(I8), allocatable, intent(in) :: b_faces(:)
-        integer(I8), allocatable, intent(out) :: tang_points(:)
-
-        ! Auxiliary
-        integer(I8) :: i, j, counter, nbv, iv, ifs, nfa
-        integer(I8), allocatable, dimension(:) :: vxsB, cvLookUp, fsvLookUp, &
-            tf, tang_pointsD, tf_aligned, cvs, int_face
-
+        integer(I8) :: i, ic, counter, trap1, counter_tria, counter_trapgroups, s
+        integer(I8), allocatable :: cctrapsPD(:,:)
+        integer(I8), allocatable, dimension(:) :: cctriaD, cctrapsD, trias, &
+            triasD, cvLookUp, vxs, indCv, traps
+        real(R8) :: dpsi_max
+        real(R8), allocatable :: rpolrad(:)
+        logical, allocatable :: in_cutcell(:)
 
         ! Associate
         associate(&
             c => grid%cell, &
-            f => grid%face &
+            f => grid%face, &
+            v => grid%vert &
             )
-        
-        ! Initialize 
-        allocate(tang_pointsD(nint(grid%vert%ntot/10.0_R8)))
-        tang_pointsD = 0
+
+        ! Initialize
+        allocate(cctriaD(c%ntot))
+        allocate(cctrapsD(c%ntot))
+        allocate(cctrapsPD(c%ntot,2))
+        allocate(in_cutcell(c%ntot))
+        allocate(traps(c%ntot))
         counter = 0
-
-        ! Get boundary faces - check if necessary TODO
-
-        
-        ! Get boundary vertices
-        vxsB = GetVxsFromFcsGA(f, b_faces)
-        nbv = size(vxsB)
-
-        ! Precompute
+        counter_tria = 0
+        counter_trapgroups = 0
+        cctriaD = 0
+        cctrapsD = 0 
+        cctrapsPD = 0 
+        traps = 0
+        in_cutcell = .false.
         cvLookUp = GetCvLookUpGA(c)
-        fsvLookUp = GetFsvLookUpGA(grid%data%fluxdata)
 
-        ! Loop over boundary vertices
-        do i = 1, nbv
+        rpolrad = qm%h_pol / qm%h_rad
+
+        ! Get triangles 
+        indCv = (/ (i, i = 1, c%ntot)/)
+        if (options%stacked_trias_checkAR) then
+
+            allocate(triasD(count(c%faceP2%Get() == 3)))
+            triasD = pack(indCv, c%faceP2%Get() == 3)
+            allocate(trias(count(rpolrad(triasD) .lt. options%stacked_trias_maxAR)))
+            trias = pack(triasD,rpolrad(triasD) .lt. options%stacked_trias_maxAR )
+            deallocate(triasD)
+
+        else
+
+            allocate(trias(count(c%faceP2%Get() == 3)))
+            trias = pack(indCv, c%faceP2%Get() == 3)
+
+        end if
+
+        ! Loop over triangles
+        do i = 1, size(trias)
+
+            ! Get cell
+            ic = trias(i)
             
-            ! Get vertex number
-            iv = vxsB(i)
+            ! Only boundary cells
+            if (c%cflags%Get(ic) == 3) then
 
-            ! Get flux surface
-            ifs = GetVertFsvGA(grid%data%fluxdata, iv, fsvLookUp)
+                ! Get vertices and dpsi_max
+                vxs = GetCellVertGA(c, ic)
+                dpsi_max = abs(maxval(v%psi%Get(vxs)) - minval(v%psi%Get(vxs)))
 
-            if (ifs /= 0) then
+                ! Get the first trapezoidal cells on top
+                call grid%GetFirstTrap(ic, trap1, cvLookUp)
 
-                ! Get faces of vertex
-                tf = GetVertFaceGA(f, iv)
+                ! Continue if found
+                if (trap1 /= 0) then
 
-                ! Get aligned faces
-                nfa = count(f%aligned%Get(tf) == 1)
-                allocate(tf_aligned(nfa))
-                tf_aligned = pack(tf, f%aligned%Get(tf) == 1)
+                    ! Add to traps array
+                    counter = counter + 1
+                    traps(1) = trap1
 
-                if (nfa == 2) then ! Otherwise just end point of surface
+                    ! Get the other traps above
+                    call grid%GetNextTraps(ic, cvLookUp, traps, counter)
 
-                    ! Check whether faces are external of internal
-                    allocate(int_face(nfa))
-                    int_face = 0
-
-                    do j = 1, nfa
-
-                        cvs = GetFaceCellGA(c, tf_aligned(j), cvLookUp)
-                        if (size(cvs) == 2) then
-
-                            int_face(j) = 1
-
-                        end if
-
-                    end do
-
-                    ! Add tangency point
-                    if (sum(int_face) .gt. 0) then
-
-                        counter = counter + 1
-                        tang_pointsD(counter) = iv
-
+                    ! Check if there is no Xpoint to near
+                    if (any(isMember(vxs,grid%data%xpointID))) then
+                        traps = 0 ! Reset
+                        counter = 0
                     end if
 
-                    ! Housekeeping
-                    deallocate(int_face)
+                    ! Check if some trapezoids where already in another 
+                    ! group of cutcells
+                    if (any(in_cutcell(traps(1:counter)))) then
+                        traps = 0
+                        counter = 0
+                    end if
 
-                end if
 
-                ! Housekeeping
-                deallocate(tf_aligned)
+                    if (counter /= 0) then
 
+                        ! Save 
+                        counter_tria = counter_tria + 1
+                        cctriaD(counter_tria) = ic
+
+                        counter_trapgroups = counter_trapgroups + 1
+                        if (counter_trapgroups == 1) then
+                            cctrapsPD(1,1) =   1
+                        else
+                            cctrapsPD(counter_trapgroups,1) =   &
+                                cctrapsPD(counter_trapgroups-1,1) + cctrapsPD(counter_trapgroups-1,2)
+                        end if
+                        cctrapsPD(counter_trapgroups,2) = counter
+                        s = cctrapsPD(counter_trapgroups,1)
+                        cctrapsD(s:s+counter-1) = traps(1:counter)
+
+
+                        ! Save in_cutcell
+                        in_cutcell(ic) = .true.
+                        in_cutcell(traps(1:counter)) = .true.
+                        
+                    end if
+
+                end if 
 
             end if
 
-        end do 
+        end do
 
         ! Trim
-        tang_points = tang_pointsD(1:counter)
+        cctria = cctriaD(1:counter_trapgroups)
+        cctrapsP = cctrapsPD(1:counter_trapgroups,:)
+        cctraps = cctraps(1:cctrapsPD(counter_trapgroups,1)+cctrapsPD(counter_trapgroups,2)-1)
 
         end associate
 
     end subroutine
 
-    subroutine GetRadLineFaces(grid, verts, faces)
+    subroutine GetFirstTrap(grid, ic, trap1, cvLookUp)
 
         ! Description
         !============
-        ! Gives the faces of radial lines of the give vertices
+        ! Find the first trapezoidal cells of a triangle
 
         ! Declare variables
         !==================
         ! Arguments
         class(GAGridUDT), intent(in) :: grid
-        integer(I8), allocatable, intent(in) :: verts(:)
-        integer(I8), allocatable, intent(out) :: faces(:)
+        integer(I8), intent(in) :: ic
+        integer(I8), allocatable, intent(in) :: cvLookUp(:)
+        integer(I8), intent(out) :: trap1
 
         ! Auxiliary
-        integer(I8) :: i, nv, faces1(grid%face%ntot), counter
-        logical :: b_flag(grid%face%ntot), in_flag(grid%face%ntot)
+        integer(I8) :: j, counter_b, common_face, indmin
+        integer(I8), allocatable, dimension(:) :: vxs, neigs, b_neig, b_neig2, &
+            fcs_neig, b_face_neig, bvxs, bface_neig_verts
+        real(R8) :: dpsi_max, dpsi_b
+        real(R8), allocatable :: dpsi(:) 
 
-        ! Initialize
-        faces1 = 0
-        counter = 0
-        nv = size(verts)
-        b_flag = (grid%face%label%Get() /= 0)
-        in_flag = .false.
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
 
-        ! Loop over vertices
-        do i = 1, nv
+        ! Get vertices and dpsi_max
+        vxs = GetCellVertGA(c, ic)
+        dpsi_max = abs(maxval(v%psi%Get(vxs)) - minval(v%psi%Get(vxs)))   
 
-            call grid%RecursiveGridMarching(verts(i), faces1, 0, counter, b_flag, in_flag)
+        ! Get the first trapezoidal cells on top
+        neigs = GetCellNeigsGA(grid, ic, cvLookUp)
+        allocate(b_neig(count(c%cflags%Get(neigs) == 3)))
+        b_neig = pack(neigs, c%cflags%Get(neigs) == 3) ! Boundary cells only
 
-        end do 
+        counter_b = 0 
+        allocate(b_neig2(size(b_neig)))
+        b_neig2 = 0
+        do j = 1, size(b_neig)
 
-        ! Trim
-        faces = faces1(1:counter)
+            ! No triangles
+            if (c%vertP2%Get(b_neig(j)) .gt. 3) then
 
+                common_face = GetCommonFace(c, b_neig(j), ic)
+                fcs_neig = GetCellFaceGA(c, b_neig(j))
+                allocate(b_face_neig(count(isBoundaryFaceGA(f, fcs_neig))))
+                b_face_neig = pack(fcs_neig, isBoundaryFaceGA(f, fcs_neig))
+
+                ! Check for common vertex with triangle
+                allocate(bface_neig_verts(2))
+                bface_neig_verts(1) = f%vert1%Get(b_face_neig(1))
+                bface_neig_verts(2) = f%vert2%Get(b_face_neig(1))
+
+
+                ! Dpsi of the neighbor
+                bvxs = GetCellVertGA(c, b_neig(j))
+                dpsi_b = abs(maxval(v%psi%Get(bvxs)) - minval(v%psi%Get(bvxs)))
+
+                if ((f%aligned%Get(common_face) == 0) &
+                    .and. (f%aligned%Get(b_face_neig(1)) == 0) &
+                    .and. (any(isMember(bface_neig_verts, vxs))) &
+                    .and. (dpsi_b .gt. (dpsi_max* 1.001_R8)) ) then
+                    
+                    ! Keep the cell
+                    counter_b = counter_b + 1
+                    b_neig2(counter_b) = b_neig(j)
+
+                end if
+
+            end if
+
+        end do
+
+        ! If multiple neighbors are left, choose the one with the most
+        ! similar psi value
+        if (counter_b .ge. 2) then
+
+            dpsi = abs(c%psi%Get(ic) - c%psi%Get(b_neig2(1:counter_b)))
+            indmin = minloc(dpsi,1)
+            trap1 = b_neig2(indmin) 
+
+        elseif (counter_b == 1) then
+
+            trap1 = b_neig2(1)
+
+        else if (counter_b == 0) then
+
+            trap1 = 0
+
+        end if
+
+
+        end associate
 
     end subroutine
-
-    recursive subroutine RecursiveGridMarching(grid, iv, faces, aligned, counter, b_flag, in_flag)
+    
+    subroutine GetNextTraps(grid, ic, cvLookUp, traps, counter)
 
         ! Description
         !============
-        ! Recursive Grid Marching starting from a vertex.
-        ! Input:
-        ! - starting vertex
-        ! - grid
-        ! - faces: should be empty to start
-        ! - aligned: poloidal marching => aligned = 0
-        !            radial marching   => aligned = 1
-        ! - counter: should be 0 to start
-        ! - b_flag = logical for boundary faces (1 == boundary face)
+        ! Find the next trapezoidal cells, given the triangle and the first trapezoid
 
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in)    :: grid
-        integer(I8), intent(in)         :: iv, aligned
-        integer(I8), intent(inout)      :: counter 
-        integer(I8), intent(inout)      :: faces(grid%face%ntot)
-        logical, intent(in)             :: b_flag(grid%face%ntot)
-        logical, intent(inout)          :: in_flag(grid%face%ntot)
-
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), intent(in) :: ic
+        integer(I8), allocatable, intent(in) :: cvLookUp(:)
+        integer(I8), intent(inout) :: traps(:)
+        integer(I8), intent(inout) :: counter
+ 
         ! Auxiliary
-        integer(I8) :: i, nf, vs(1:2), iv_next
-        integer(I8), allocatable :: fcs1(:), fcs2(:), fcs3(:), fcs4(:)
+        integer(I8), allocatable, dimension(:) :: neigs, b_neig, b_verts, b_faces, &
+            trap_verts, trap_faces, bface_trap, bvert_trap, bvert_neig, bfaces_neig, &
+            verts_last, trap_cells
+        integer(I8) ::  trap_next, nc_vert, trap_last, indmin
+        real(R8), allocatable, dimension(:) :: dpsi, dpsi_max_b, b_neig_psi, min_psi, &
+            max_psi, dpsi_max
+        logical, allocatable :: log(:)
 
-        ! Give faces
-        fcs1 = GetVertFaceGA(grid%face, iv)
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
 
-        ! Eliminate faces based on marching direction - TODO replace all pack by 1 pack by combining the criteria
-        allocate(fcs2(count(grid%face%aligned%Get(fcs1) == aligned)))
-        fcs2 = pack(fcs1,grid%face%aligned%Get(fcs1) == aligned)
+        ! Initialize
+        trap_last = traps(1)
+        verts_last = GetCellVertGA(c, trap_last)
+        dpsi_max = abs(maxval(v%psi%Get(verts_last)-minval(v%psi%Get(verts_last))))
+        counter = 1
+        do while (trap_last /= 0)
 
-        ! Eliminate boundary faces
-        allocate(fcs3(count(.not.b_flag(fcs2))))
-        fcs3 = pack(fcs2,.not.b_flag(fcs2))
+            ! Get neigs
+            neigs = GetCellNeigsGA(grid, trap_last, cvLookUp)
+            trap_cells = traps(1:counter)
 
-        ! Eliminate faces which are in array faces
-        allocate(fcs4(count(.not.in_flag(fcs3))))
-        fcs4 = pack(fcs3,.not.in_flag(fcs3))
+            ! Get b_neig
+            log = (c%cflags%Get(neigs) == 3 &
+                .and. c%faceP2%Get(neigs) == 4 &
+                .and. .not.isMember(neigs, trap_cells))
 
-        ! Add remaining faces - if fcs would be empty, RecursiveGridMarching just
-        ! returns faces and counter
-        nf = size(fcs4)
-        do i = 1, nf
-            counter = counter + 1
-            faces(counter) = fcs4(i)
-            in_flag(fcs4(i)) = .true.
+            allocate(b_neig(count(log)))
+            b_neig = pack(neigs,log)
 
-            ! Select new vertex
-            vs(1) = grid%face%vert1%Get(fcs4(i))
-            vs(2) = grid%face%vert2%Get(fcs4(i))
+            if (size(b_neig) .ge. 2) then
 
-            if (vs(1) /= iv) then
-                iv_next = vs(1)
-            else if (vs(2) /= iv) then
-                iv_next = vs(2)
-            else
+                dpsi = abs(c%psi%Get(trap_last) - c%psi%Get(b_neig))
+                indmin = minloc(dpsi,1)
+                trap_next = b_neig(indmin)
 
-                call gdErrorHandler('RecursiveMarching: something went wrong')
+            else if (size(b_neig) == 1) then
+
+                trap_next = b_neig(1)
+            
+            else 
+
+                trap_next = 0
 
             end if
 
-            ! Recursive Marching on new vertex
-            call grid%RecursiveGridMarching(iv_next, faces, aligned, counter, b_flag, in_flag)
 
+            ! Check extra criteria
+            if (trap_next /= 0) then
+
+                ! Criteria based on psi values
+                b_verts = GetCellVertGA(c, trap_next)
+                b_faces = GetCellFaceGA(c, trap_next)
+                dpsi_max_b = abs(maxval(v%psi%Get(b_verts)) - minval(v%psi%Get(b_verts)))
+    
+                b_neig_psi = c%psi%Get(trap_next)
+                trap_verts = GetCellVertGA(c, trap_last)
+                min_psi = minval(v%psi%Get(trap_verts))
+                max_psi = maxval(v%psi%Get(trap_verts))
+
+                ! Criteria based on connectivity - boundary faces need 
+                ! to have at least a common vertex
+                trap_faces = GetCellFaceGA(c, trap_last)
+                allocate(bface_trap(count(f%label%Get(trap_faces) /= 0)))
+                bface_trap = pack(trap_faces, f%label%Get(trap_faces) /= 0)
+                bvert_trap = GetVxsFromFcsGA(f, bface_trap) 
+
+                allocate(bfaces_neig(count(f%label%Get(b_faces) /= 0)))
+                bfaces_neig = pack(b_faces, f%label%Get(b_faces) /= 0)
+                bvert_neig = GetVxsFromFcsGA(f, bfaces_neig)
+                nc_vert = count(isMember(bvert_neig, bvert_trap))
+
+                ! Apply criteria
+                if ( (dpsi_max_b(1) .gt. (dpsi_max(1)*1.01_R8)) &
+                     .and. (b_neig_psi(1) .gt. min_psi(1)) &
+                     .and. (b_neig_psi(1) .lt. max_psi(1)) &
+                     .and. (nc_vert .gt. 0)) then
+
+                        ! Add cell
+                        counter = counter + 1
+                        traps(counter) = trap_next
+                        trap_last = trap_next
+                        dpsi_max = dpsi_max_b
+
+                else
+                    
+                    ! Exit the loop
+                    trap_last = 0
+                    
+                end if
+
+                ! Housekeeping
+                deallocate(bface_trap)
+                deallocate(bfaces_neig)
+                
+            else
+
+                ! No trap_next found so exit the loop
+                trap_last = 0
+
+            end if
 
         end do
 
+        end associate
 
     end subroutine
 
@@ -4078,8 +4086,6 @@ module gamod_types
         end associate
     end subroutine
 
-
-
     subroutine DetermineMergeCaseID(grid, fc, starter, pent_to_tria, special_case, caseID, cvs)
 
         ! Description
@@ -4294,58 +4300,6 @@ module gamod_types
 
         end associate
  
-    end subroutine
-
-    subroutine AreaConstraintPents(grid, options, threshold, cells)
-
-        ! Description
-        !============
-        ! Give cells which are not allow to be a pentagon and should be selected for
-        ! splitting/merging
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(GAGridUDT)    :: grid
-        type(GAoptionsUDT)  :: options
-        real(R8) :: threshold
-        integer(I8), allocatable, intent(out) :: cells(:)
-
-        ! Auxiliary
-        integer(I8) :: i
-        integer(I8), allocatable :: indCv(:)
-        real(R8), allocatable ::  val(:)
-
-        ! Initiliaze
-        indCv = (/ (i, i = 1, grid%cell%ntot)/)
-
-        select case (options%no_pents_area_type)
-            case ('coordinates')
-
-                allocate(cells(count(grid%cell%x%Get() .lt. options%no_pents_area_maxR &
-                        .and. grid%cell%x%Get() .lt. options%no_pents_area_minR &
-                        .and. grid%cell%y%Get() .lt. options%no_pents_area_maxZ &
-                        .and. grid%cell%y%Get() .lt. options%no_pents_area_minZ)))
-
-                cells = pack(indCv, grid%cell%x%Get() .lt. options%no_pents_area_maxR &
-                        .and. grid%cell%x%Get() .lt. options%no_pents_area_minR &
-                        .and. grid%cell%y%Get() .lt. options%no_pents_area_maxZ &
-                        .and. grid%cell%y%Get() .lt. options%no_pents_area_minZ)
-
-            case ('dist_function')
-                
-                call grid%fun%distr%Evaluate(grid%cell%x%Get(),grid%cell%y%Get(), val)
-                allocate(cells(count(val > threshold)))
-                cells = pack(indCv, val > threshold)
-
-            case default
-
-                call gdErrorHandler('AreaConstraintPents: method not implemented')
-
-        end select
-
-        if (size(cells) == 0) call gdErrorHandler('AreaConstraintPents: no cells in area')    
-
     end subroutine
 
     subroutine Merge4444(grid, fc, cvs)
@@ -4765,7 +4719,6 @@ module gamod_types
         
     end subroutine
 
-
     subroutine MakeNewThreeFace(grid, three_vert, fc, fc3, fc23, f1n)
 
         ! Description
@@ -4882,6 +4835,461 @@ module gamod_types
             call gdErrorHandler('AdaptNeigThreeVert: case not implemented')
 
         end if
+
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                   GAGRID INFORMATION UTILITY                     !
+    !------------------------------------------------------------------! 
+
+    subroutine GetForbiddenMergeFaces(grid, forbidden_fcs)
+
+        ! Description
+        !============
+        ! Determine forbidden merging faces
+        ! The forbidden merging faces are
+        ! - the separatrix faces
+        ! - the faces of the core cut
+        ! - boundary faces
+        ! Important note: faces which are a region boundary can also not be used
+        ! for merging. So always check whether the regions of the cells of a face
+        ! are from the same region.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), allocatable, intent(out)   :: forbidden_fcs(:)
+
+        ! Auxiliary
+        integer(I8) :: i, indFc(grid%face%ntot), nb, nc, nr
+        integer(I8), allocatable, dimension(:) :: cvLookUp, b_faces, tang_points, &
+            rad_faces, fcsAll, core_faces
+        
+        ! Precompute
+        cvLookUp = GetCvLookUpGA(grid%cell)
+
+        ! 1. faces iFs of separatrix
+        ! [~,~,grid] = give_iFs_sep(grid,grid.n_sep,cv_look_up,grid.iFs_sep);
+        ! s = grid.fs.faceP(grid.iFs_sep,1);
+        ! faces_sep = grid.fs.face(s:s+grid.fs.faceP(grid.iFs_sep,2)-1);
+
+        ! 2. cuts around xpoint
+        call grid%GetCutsXpoints(cvLookUp, core_faces)
+
+        ! 3. boundary faces
+        indFc = (/ (i, i = 1,grid%face%ntot) /)
+        allocate(b_faces(count(grid%face%label%Get() /= 0)))
+        b_faces = pack(indFc, grid%face%label%Get() /= 0);
+
+        ! 4. region boundary - too expensive to do with every merge proposition - do in the determinecase
+        !     cv_look_up = give_cv_look_up(grid);
+        !     int_faces = faces(grid.fcLbl == 0);
+        !    face_regions = zeros(round(grid.nFc/2),1); %over estimation
+        !     counter = 0;
+        !     for i = 1:length(int_faces)
+        !         iFc = int_faces(i);
+        !         cvs = give_cells_of_face(iFc,grid.cvFc,grid.cvFcP,cv_look_up);
+        !        if grid.cvReg(cvs(1)) ~= grid.cvReg(cvs(2))
+        !             counter = counter + 1;
+        !             face_regions(counter) = iFc;
+        !         end
+        !     end
+        !     face_regions = face_regions(1:counter);
+
+        ! 5. tangency points - radial line faces
+        call grid%GetTangencyPoints(b_faces, tang_points)
+        call grid%GetRadLineFaces(tang_points,rad_faces)
+    
+        ! Compose forbidden faces array
+        nc = size(core_faces)
+        nb = size(b_faces)
+        nr = size(rad_faces)
+        allocate(fcsAll(nc+nb+nr))
+        fcsAll(1:nc) = core_faces
+        fcsAll(nc+1:nc+nb) = b_faces
+        fcsAll(nc+nb+1:nc+nb+nr) = rad_faces
+        call Unique(fcsAll,forbidden_fcs)
+    
+
+    end subroutine
+
+    subroutine GetCutsXpoints(grid, cvLookUp, fcs)
+
+        ! Description
+        !============
+        ! Give the poloidal and radial faces out of an Xpoint which should not be used to merge
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), allocatable, intent(in)    :: cvLookUp(:)
+        integer(I8), allocatable, intent(out)   :: fcs(:)
+
+        ! Auxiliary
+        integer(I8) :: fcsD(grid%face%ntot), counterf, i, &
+            counter1, counter2, fcs1(grid%face%ntot), fcs2(grid%face%ntot)
+        logical :: b_flag(grid%face%ntot), in_flag1(grid%face%ntot), &
+            in_flag2(grid%face%ntot)
+
+
+        ! Initialize
+        call grid%GiveXpoints(.true.,cvLookUp)
+        fcsD = 0
+        counterf = 0
+        counter1 = 0
+        counter2 = 0
+        b_flag = (grid%face%label%Get() == 0)
+        in_flag1 = .false.
+        in_flag2 = .false.
+        fcs1 = 0
+        fcs2 = 0
+
+        ! Loop over the Xpoints
+        do i = 1, grid%data%nxp
+
+            ! Get the poloidal and radial faces
+            call grid%RecursiveGridMarching(grid%data%xpointID(i),fcs1,0,counter1,b_flag,in_flag1)
+            call grid%RecursiveGridMarching(grid%data%xpointID(i),fcs2,1,counter2,b_flag,in_flag2)
+
+            ! Add fcs1
+            fcs(counterf+1:counterf+counter1) = fcs1(1:counter1)
+            counterf = counterf + counter1
+
+            ! Add fcs2
+            fcs(counterf+1:counterf+counter2) = fcs2(1:counter2)
+            counterf = counterf + counter2
+
+        end do
+
+        ! Trim
+        fcs = fcsD(1:counterf)
+
+    end subroutine
+
+    subroutine GetTangencyPoints(grid, b_Faces, tang_points)
+
+        ! Description
+        !============
+        ! Give tangency points of a grid
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), allocatable, intent(in) :: b_faces(:)
+        integer(I8), allocatable, intent(out) :: tang_points(:)
+
+        ! Auxiliary
+        integer(I8) :: i, j, counter, nbv, iv, ifs, nfa
+        integer(I8), allocatable, dimension(:) :: vxsB, cvLookUp, fsvLookUp, &
+            tf, tang_pointsD, tf_aligned, cvs, int_face
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+        
+        ! Initialize 
+        allocate(tang_pointsD(nint(grid%vert%ntot/10.0_R8)))
+        tang_pointsD = 0
+        counter = 0
+
+        ! Get boundary faces - check if necessary TODO
+
+        
+        ! Get boundary vertices
+        vxsB = GetVxsFromFcsGA(f, b_faces)
+        nbv = size(vxsB)
+
+        ! Precompute
+        cvLookUp = GetCvLookUpGA(c)
+        fsvLookUp = GetFsvLookUpGA(grid%data%fluxdata)
+
+        ! Loop over boundary vertices
+        do i = 1, nbv
+            
+            ! Get vertex number
+            iv = vxsB(i)
+
+            ! Get flux surface
+            ifs = GetVertFsvGA(grid%data%fluxdata, iv, fsvLookUp)
+
+            if (ifs /= 0) then
+
+                ! Get faces of vertex
+                tf = GetVertFaceGA(f, iv)
+
+                ! Get aligned faces
+                nfa = count(f%aligned%Get(tf) == 1)
+                allocate(tf_aligned(nfa))
+                tf_aligned = pack(tf, f%aligned%Get(tf) == 1)
+
+                if (nfa == 2) then ! Otherwise just end point of surface
+
+                    ! Check whether faces are external of internal
+                    allocate(int_face(nfa))
+                    int_face = 0
+
+                    do j = 1, nfa
+
+                        cvs = GetFaceCellGA(c, tf_aligned(j), cvLookUp)
+                        if (size(cvs) == 2) then
+
+                            int_face(j) = 1
+
+                        end if
+
+                    end do
+
+                    ! Add tangency point
+                    if (sum(int_face) .gt. 0) then
+
+                        counter = counter + 1
+                        tang_pointsD(counter) = iv
+
+                    end if
+
+                    ! Housekeeping
+                    deallocate(int_face)
+
+                end if
+
+                ! Housekeeping
+                deallocate(tf_aligned)
+
+
+            end if
+
+        end do 
+
+        ! Trim
+        tang_points = tang_pointsD(1:counter)
+
+        end associate
+
+    end subroutine
+
+    subroutine GetRadLineFaces(grid, verts, faces)
+
+        ! Description
+        !============
+        ! Gives the faces of radial lines of the give vertices
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), allocatable, intent(in) :: verts(:)
+        integer(I8), allocatable, intent(out) :: faces(:)
+
+        ! Auxiliary
+        integer(I8) :: i, nv, faces1(grid%face%ntot), counter
+        logical :: b_flag(grid%face%ntot), in_flag(grid%face%ntot)
+
+        ! Initialize
+        faces1 = 0
+        counter = 0
+        nv = size(verts)
+        b_flag = (grid%face%label%Get() /= 0)
+        in_flag = .false.
+
+        ! Loop over vertices
+        do i = 1, nv
+
+            call grid%RecursiveGridMarching(verts(i), faces1, 0, counter, b_flag, in_flag)
+
+        end do 
+
+        ! Trim
+        faces = faces1(1:counter)
+
+
+    end subroutine
+
+    recursive subroutine RecursiveGridMarching(grid, iv, faces, aligned, counter, b_flag, in_flag)
+
+        ! Description
+        !============
+        ! Recursive Grid Marching starting from a vertex.
+        ! Input:
+        ! - starting vertex
+        ! - grid
+        ! - faces: should be empty to start
+        ! - aligned: poloidal marching => aligned = 0
+        !            radial marching   => aligned = 1
+        ! - counter: should be 0 to start
+        ! - b_flag = logical for boundary faces (1 == boundary face)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: iv, aligned
+        integer(I8), intent(inout)      :: counter 
+        integer(I8), intent(inout)      :: faces(grid%face%ntot)
+        logical, intent(in)             :: b_flag(grid%face%ntot)
+        logical, intent(inout)          :: in_flag(grid%face%ntot)
+
+        ! Auxiliary
+        integer(I8) :: i, nf, vs(1:2), iv_next
+        integer(I8), allocatable :: fcs1(:), fcs2(:), fcs3(:), fcs4(:)
+
+        ! Give faces
+        fcs1 = GetVertFaceGA(grid%face, iv)
+
+        ! Eliminate faces based on marching direction - TODO replace all pack by 1 pack by combining the criteria
+        allocate(fcs2(count(grid%face%aligned%Get(fcs1) == aligned)))
+        fcs2 = pack(fcs1,grid%face%aligned%Get(fcs1) == aligned)
+
+        ! Eliminate boundary faces
+        allocate(fcs3(count(.not.b_flag(fcs2))))
+        fcs3 = pack(fcs2,.not.b_flag(fcs2))
+
+        ! Eliminate faces which are in array faces
+        allocate(fcs4(count(.not.in_flag(fcs3))))
+        fcs4 = pack(fcs3,.not.in_flag(fcs3))
+
+        ! Add remaining faces - if fcs would be empty, RecursiveGridMarching just
+        ! returns faces and counter
+        nf = size(fcs4)
+        do i = 1, nf
+            counter = counter + 1
+            faces(counter) = fcs4(i)
+            in_flag(fcs4(i)) = .true.
+
+            ! Select new vertex
+            vs(1) = grid%face%vert1%Get(fcs4(i))
+            vs(2) = grid%face%vert2%Get(fcs4(i))
+
+            if (vs(1) /= iv) then
+                iv_next = vs(1)
+            else if (vs(2) /= iv) then
+                iv_next = vs(2)
+            else
+
+                call gdErrorHandler('RecursiveMarching: something went wrong')
+
+            end if
+
+            ! Recursive Marching on new vertex
+            call grid%RecursiveGridMarching(iv_next, faces, aligned, counter, b_flag, in_flag)
+
+
+        end do
+
+
+    end subroutine
+
+    subroutine AreaConstraintPents(grid, options, threshold, cells)
+
+        ! Description
+        !============
+        ! Give cells which are not allow to be a pentagon and should be selected for
+        ! splitting/merging
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT)    :: grid
+        type(GAoptionsUDT)  :: options
+        real(R8) :: threshold
+        integer(I8), allocatable, intent(out) :: cells(:)
+
+        ! Auxiliary
+        integer(I8) :: i
+        integer(I8), allocatable :: indCv(:)
+        real(R8), allocatable ::  val(:)
+
+        ! Initiliaze
+        indCv = (/ (i, i = 1, grid%cell%ntot)/)
+
+        select case (options%no_pents_area_type)
+            case ('coordinates')
+
+                allocate(cells(count(grid%cell%x%Get() .lt. options%no_pents_area_maxR &
+                        .and. grid%cell%x%Get() .lt. options%no_pents_area_minR &
+                        .and. grid%cell%y%Get() .lt. options%no_pents_area_maxZ &
+                        .and. grid%cell%y%Get() .lt. options%no_pents_area_minZ)))
+
+                cells = pack(indCv, grid%cell%x%Get() .lt. options%no_pents_area_maxR &
+                        .and. grid%cell%x%Get() .lt. options%no_pents_area_minR &
+                        .and. grid%cell%y%Get() .lt. options%no_pents_area_maxZ &
+                        .and. grid%cell%y%Get() .lt. options%no_pents_area_minZ)
+
+            case ('dist_function')
+                
+                call grid%fun%distr%Evaluate(grid%cell%x%Get(),grid%cell%y%Get(), val)
+                allocate(cells(count(val > threshold)))
+                cells = pack(indCv, val > threshold)
+
+            case default
+
+                call gdErrorHandler('AreaConstraintPents: method not implemented')
+
+        end select
+
+        if (size(cells) == 0) call gdErrorHandler('AreaConstraintPents: no cells in area')    
+
+    end subroutine
+
+    subroutine DetermineCflags(grid, cells, b_flag)
+
+        !  Description
+        !=============
+        ! Computes the cflags for cells. 
+        ! A speed-up method is to pass precomputed data b_flag which is an logical array of
+        ! all faces indicating whether a face is a boundary face.
+
+        ! Declare variables
+        !==================
+        ! Argument
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), allocatable :: cells(:)
+        logical , optional :: b_flag(grid%face%ntot)
+
+        ! Auxiliary
+        integer(I8) :: i, j, nb, indFc(grid%face%ntot)
+        integer(I8), allocatable :: b_faces(:), cvs(:), cvLookUp(:), ar(:)
+
+        ! Initialize - TODO - method without using face label - check if necessary
+        if (.not.present(b_flag)) then
+
+            ! Loop over cells
+            do i = 1, size(cells)
+
+                if (isBoundaryCellGA(grid,cells(i))) then
+                    call grid%cell%cflags%Set(cells(i), 3)
+                else
+                    call grid%cell%cflags%Set(cells(i), 1)
+                end if
+
+            end do
+
+        else 
+
+            ! Initiliaze
+            cvLookUp = GetCvLookUpGA(grid%cell)
+            ar = (/ (1, j = 1, size(cells))/)
+            call grid%cell%cflags%SetMultipleElements(cells,ar)
+            indFc = (/ (i, i= 1, grid%face%ntot)/)
+            nb = count(b_flag)
+            allocate(b_faces(nb))
+            b_faces = pack(indFc, b_flag)
+
+            ! Loop over boundary cells
+            do i = 1, nb
+                cvs = GetFaceCellGA(grid%cell, b_faces(i), cvLookUp)
+                ar = (/ (3, j = 1, size(cvs))/)
+                call grid%cell%cflags%SetMultipleElements(cvs, ar)
+            end do
+
+        end if
+
 
 
     end subroutine
@@ -6255,6 +6663,26 @@ module gamod_types
         end do
 
         if (res == 0) call gdErrorHandler('GetCommonFace: cells have no common face')
+
+    end function
+
+    function HaveCommonFace(cell, ic1, ic2) result(res)
+        type(GACellUDT) :: cell
+        integer(I8) :: ic1, ic2, i
+        integer(I8), allocatable :: fcs1(:), fcs2(:)
+        logical :: res
+
+        res = .false.
+
+        fcs1 = GetCellFaceGA(cell, ic1)
+        fcs2 = GetCellFaceGA(cell, ic2)
+
+        do i = 1, size(fcs1)
+            if (any(fcs1(i) == fcs2)) then
+                res = .true.
+                return
+            end if
+        end do
 
     end function
 
