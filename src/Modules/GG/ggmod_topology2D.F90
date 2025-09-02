@@ -6598,18 +6598,6 @@ module ggmod_topology2D
             end if 
         end do 
 
-        ! Remove radial faces that do not start and end in an extremum
-        do i = 1, topomesh%face%ntot
-            if ((topomesh%face%type(i) == TMfaceradID) .and. .not. rmface(i)) then ! this should skip faces with zero vertex indices
-                if (all(topomesh%vert%type(topomesh%face%vert(i, 1)) /= &
-                        [TMvertexmaxID, TMvertexminID, TMvertexsaddleID]) .or. &
-                    all(topomesh%vert%type(topomesh%face%vert(i, 2)) /= &
-                        [TMvertexmaxID, TMvertexminID, TMvertexsaddleID])) then 
-                    rmface(i) = .true. 
-                end if 
-            end if 
-        end do 
-
         ! Remove
         call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
         call WriteTopologicalMesh(topomesh, 'topomesh_temp')
