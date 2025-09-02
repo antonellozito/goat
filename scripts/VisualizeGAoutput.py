@@ -14,24 +14,46 @@ datadir = dh.GetDataDirectory()
 
 # Print
 print('VisualizeGAoutput: reading from directory: ' + datadir)
-fullgridfile = 'grid_after_GA.dat'
 
+# Grid before GA
+fullgridfile_in = 'grid_before_GA.dat'
 
-# Reading
-#--------
-filepath = datadir + '/' + fullgridfile
-grid = dh.ReadGAGridDataFile(filepath)
+# Grid after GA
+fullgridfile_out = 'grid_after_GA.dat'
 
-print('Total number of cells: ' + str(grid.cell.ntot))
-print('Total number of faces: ' + str(grid.face.ntot))
-print('Total number of vertices: ' + str(grid.vert.ntot))
+# Reading input grid
+#-------------------
+filepath = datadir + '/' + fullgridfile_in
+grid1 = dh.ReadGAGridDataFile(filepath)
+
+print('Before GA')
+print('---------')
+print('Total number of cells : ' + str(grid1.cell.ntot))
+print('Total number of faces: ' + str(grid1.face.ntot))
+print('Total number of vertices: ' + str(grid1.vert.ntot))
 
 # Design
 #-------
 # Plot the grid
-plotter.PlotGridCells(grid,0)
-plotter.PlotGridCellsAlignedFaces(grid,1)
-plotter.PlotGridCellsBoundaryFaces(grid,2)
+plotter.PlotGridCells(grid1,0)
+
+# Reading output grid
+#--------------------
+filepath = datadir + '/' + fullgridfile_out
+grid2 = dh.ReadGAGridDataFile(filepath)
+print('\n')
+print('After GA')
+print('---------')
+print('Total number of cells: ' + str(grid2.cell.ntot))
+print('Total number of faces: ' + str(grid2.face.ntot))
+print('Total number of vertices: ' + str(grid2.vert.ntot))
+
+# Design
+#-------
+# Plot the grid
+plotter.PlotGridCells(grid2,1)
+#plotter.PlotGridCellsAlignedFaces(grid,1)
+#plotter.PlotGridCellsBoundaryFaces(grid,2)
 
 
 # Show figures

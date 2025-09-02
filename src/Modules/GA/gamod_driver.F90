@@ -178,11 +178,14 @@ module gamod_driver
             call grid%CheckUnstructuredGrid(.false.)
         end if
 
-        ! correct face labels - TODO
+        ! correct face labels - TODO - on for wide grid
 
-        ! Remove some connectivity field - TODO
+        ! Remove some connectivity field - TODO - not required here
 
-        ! Identify farSOL cells - TODO
+        ! Identify farSOL cells - TODO 
+
+        ! Visualize starting grid
+        call grid%WriteData('grid_before_GA')
 
         end associate        
 
@@ -235,10 +238,6 @@ module gamod_driver
         ! Remove stickout quad
 
         ! Boundary layer grid
-
-        ! Visualize - TODO
-
-
 
 
     end subroutine
@@ -371,10 +370,11 @@ module gamod_driver
             end if
         end do
 
+        ! Save
         call grid%face%reg%SetAllElementsArray(fcReg)
 
-        ! Visualize end grid - TODO
-
+        ! Visualize end grid
+        call grid%WriteData('grid_after_GA')
 
 
     end subroutine
@@ -470,7 +470,8 @@ module gamod_driver
 
         if (.not.options%rem_small_trias) then
         
-            print *, "Warning: Postprocessing: BuildFluxTube goes to shit if small triangle present"
+            print *, "Warning: Postprocessing: BuildFluxTube can not handle the" // & 
+            & "presence of mini triangles as the face%aligned array is not correct"
 
         else 
 
