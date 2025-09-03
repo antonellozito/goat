@@ -221,8 +221,8 @@ module gamod_driver
         ! Remove flux tubes with only two triangles
 
         ! Stacked to cutcell
-        !if (options%stacked_to_cutcell) &
-        !    call grid%StackedToCutcell()
+        if (options%stacked_to_cutcell) &
+            call grid%StackedToCutcell(options)
 
         ! Splitting non-alinged quads
 

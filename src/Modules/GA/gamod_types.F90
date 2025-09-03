@@ -462,6 +462,10 @@ module gamod_types
         procedure :: CheckStackedTriaOverlap
         procedure :: StackAdaptation
 
+        ! Stacked to cutcell
+        procedure :: StackedToCutcell
+        procedure :: DetectStackedTrias
+
         ! Merging
         procedure :: MergeCells
         procedure :: OneMerge
@@ -1299,8 +1303,8 @@ module gamod_types
         ! Declare variables
         !==================
         class(GAGridUDT)            :: grid
-        logical, intent(inout)      :: is_ordered(grid%cell%ntot) &
-        , cells(grid%cell%ntot)
+        logical, intent(out)        :: is_ordered(grid%cell%ntot)
+        logical, intent(in)         :: cells(grid%cell%ntot)
 
         ! Auxiliary
         real(R8) ::  sin1, sin2
@@ -4205,7 +4209,195 @@ module gamod_types
 
     end subroutine
 
+    ! Stacked to Cutcell
+    !===================
+    subroutine StackedToCutcell(grid, options)
 
+        ! Description
+        !============
+        ! Convert stacked triangle back to cutcells. This will give better
+        ! possiblities for merging and splitting.
+        ! The boundary face will be uniformly splitted in the right number of cells
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(GAoptionsUDT), intent(in)         :: options
+
+        ! Auxiliary
+        integer(I8) :: nc
+        integer(I8), allocatable :: cvs(:)
+        logical :: found
+
+        ! Detection of stacked triangles
+        call grid%DetectStackedTrias(found, cvs, nc)
+
+        ! Adaptation
+        do while (found)
+
+            ! Get boundary face
+
+        end do
+
+        ! Order - maybe not necessary - check TODO
+        !cells = .true.
+        !call grid%CheckVertOrder(is_ordered,cells)
+        !call grid%ReorderCellConn(is_ordered)
+
+    end subroutine
+
+    subroutine DetectStackedTrias(grid, found, cvs, counter)
+
+        ! Description
+        !============
+        ! Detect stacked triangle. If a group of triangle goes from one boundary
+        ! face to another only a part of the triangle group will be considered
+        ! depending on the length ratio of the boundary face.
+
+        ! Declare variables
+        !==================
+        class(GAGridUDT), intent(in)    :: grid
+        logical, intent(out)            :: found
+        integer(I8), intent(out)        :: counter
+        integer(I8), allocatable, intent(out) :: cvs(:)
+
+        ! Auxiliary
+        integer(I8) :: i, v11, v12, v21, v22, nf, fcs, ifc, prev_cv, &
+            prev_face
+        integer(I8), allocatable, dimension(:) :: cvsD, bfaces, cv, fcsD, &
+            fcsD2, fcs3, fcs3_nal, cvs2, cvLookUp, indfc
+        real(R8) :: fcs_b1, fcs_b2, r 
+        logical, allocatable :: log(:)
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        found = .false.
+        allocate(cvsD(c%ntot))
+        counter = 0
+        cvLookUp = GetCvLookUpGA(c)
+
+        ! Get boundary faces
+        indfc = (/ (i, i = 1, f%ntot)/)
+        log = isBoundaryFaceGA(f, indfc)
+        allocate(bfaces(count(log)))
+        bfaces = pack(indfc,log)
+
+        ! Loop over boundary faces
+        do i = 1, size(bfaces)
+
+            ! Get boundary face
+            ifc = bfaces(i)
+            fcs = bfaces(i)
+
+            ! Get boundary cells
+            cv = GetFaceCellGA(c, ifc, cvLookUp)
+
+            ! Continue if triangle
+            nf = c%faceP2%Get(cv(1))
+
+            do while (nf == 3) 
+
+                ! Store
+                counter = counter + 1
+                cvsD(counter) = cv(1)
+
+                ! Boundary face is prev face
+                prev_face = fcs
+                prev_cv = cv(1)
+
+                ! Take new poloidal faces
+                fcsD = GetCellFaceGA(c, cv(1))
+                log = ((fcsD /= prev_face) .and. (f%aligned%Get(fcsD) == 0))
+                allocate(fcsD2(count(log)))
+                fcsD2 = pack(fcsD, log)
+                fcs = fcsD2(1)
+
+                ! Get next cell
+                if (.not.isBoundaryFaceGA(f, fcs)) then
+
+                    ! Get the next face
+                    cvs2 = GetFaceCellGA(c, fcs, cvLookUp)
+                    cv = pack(cvs2, cvs2 /= prev_cv)
+
+                    nf = c%faceP2%Get(cv(1))
+
+                    ! Check to continue
+                    if (nf == 3) then
+
+                        ! Get faces
+                        fcs3 = GetCellFaceGA(c, cv(1))
+                        
+                        ! Do not continue if any non-aligned face is a boundary face
+                        fcs3_nal = pack(fcs3, f%aligned%Get(fcs3) == 0)
+                        if (any(isBoundaryFaceGA(f, fcs3_nal)))  nf = 0
+
+                    end if
+
+                else
+
+                    ! Exit
+                    nf = 0
+
+                end if
+
+
+            end do
+
+            if (counter .gt. 1) then
+
+                exit
+
+            else
+
+                ! Reinitialization
+                cvsD = 0
+                counter = 0 
+
+            end if
+
+        end do
+
+        ! Post-process
+        if (counter .gt. 1) then
+
+            if (nf == 0) then
+
+                ! Other boundary face reached
+                ! Compute ratio of boundary faces
+                v11 = f%vert1%Get(ifc)
+                v12 = f%vert1%Get(ifc)
+                fcs_b1 = sqrt( (v%x%Get(v11) - v%x%Get(v12))**2 + (v%y%Get(v11) - v%y%Get(v12))**2 )
+
+                v21 = f%vert1%Get(fcs)
+                v22 = f%vert1%Get(fcs)
+                fcs_b2 = sqrt( (v%x%Get(v21) - v%x%Get(v22))**2 + (v%y%Get(v21) - v%y%Get(v22))**2 )
+
+                r = fcs_b1 / (fcs_b1 + fcs_b2)
+
+                ! Rescale counter
+                counter = nint(counter*r)
+
+            end if
+
+            ! Flag
+            found = .true.
+
+        end if
+
+        ! Trim
+        cvs = cvsD(1:counter)
+
+        end associate
+
+    end subroutine
 
     ! Merging
     !========
