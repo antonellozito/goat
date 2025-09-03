@@ -1633,7 +1633,6 @@ module gamod_utility
 
     end subroutine
 
-
     !==================================================================!
     !                                                                  !
     !                           FUNCTIONS                              !

@@ -454,10 +454,13 @@ module gamod_types
         procedure :: LocalSmallTriangleRemoval
 
         ! Stacked triangles
-        procedure :: StackedTrais
+        procedure :: StackedTrias
         procedure :: DetectCutCell
         procedure :: GetFirstTrap
         procedure :: GetNextTraps
+        procedure :: GetConnectionVertex
+        procedure :: CheckStackedTriaOverlap
+        procedure :: StackAdaptation
 
         ! Merging
         procedure :: MergeCells
@@ -542,7 +545,7 @@ module gamod_types
         class(QualityMetric)    :: qm
         type(GAGridUDT)         :: grid
 
-                ! Initialize the qm arrays?? - TODO
+        ! Initialize the qm arrays?? - TODO
         if (allocated(qm%fcBias)) then
             deallocate(qm%fcBias)
             deallocate(qm%fcqalfc)
@@ -2445,7 +2448,7 @@ module gamod_types
         ! Auxiliary
         integer(I8), allocatable, dimension(:) :: cvLookUp, v1n, v2n, cf, &
             cellnumbers, verts_of_cell, cvertP2, cfaceP2, fcs, ccflags, nvxs, &
-            b_cells, indCv
+            b_cells, indCv, cvertP1, cfaceP1
         integer(I8) :: verts_of_face(1:2), nc, nf, l, ic, nb, i, j, counter, &
             nface, nvert
 
@@ -2465,9 +2468,23 @@ module gamod_types
             v1n = f%vert1%GetAllElements()
             v2n = f%vert2%GetAllElements()
             cf  = c%face%GetAllElements()
+            cvertP1 = c%vertP1%GetAllElements()
             cvertP2 = c%vertP2%GetAllElements()
+            cfaceP1 = c%faceP1%GetAllElements()
             cfaceP2 = c%faceP2%GetAllElements()
             ccflags = c%cflags%GetAllElements()
+
+            ! Check 0 - Check pointer consistency
+            do ic = 2, c%ntot
+                if (cvertP1(ic) /= cvertP1(ic-1)+cvertP2(ic-1)) then
+                    print *, 'Cell:', ic 
+                    call gdErrorHandler('CheckUnstructuredGrid: check 0, point cvertP not consistent')
+                endif
+                if (cfaceP1(ic) /= cfaceP1(ic-1)+cfaceP2(ic-1)) then
+                    call gdErrorHandler('CheckUnstructuredGrid: check 0, point cfaceP not consistent')
+                endif
+
+            end do
 
             ! Check 1 - Equal lengths of data
             if ((c%vertP1%Size() /= c%ntot) .or. (c%faceP1%Size() /=  c%ntot) &
@@ -2499,8 +2516,9 @@ module gamod_types
                 allocate(cellnumbers(nc))
                 cellnumbers = pack(cvLookUp,cf == j)
                 if (nc .gt. 2) then
+                    print *, 'Face: ', j
                     call gdErrorHandler('CheckUnstructuredGrid: check 3, more than two' // &
-                     & 'cells connected to a face')
+                     & 'cells connected to face')
                 end if
 
                 !get vertices of cells
@@ -2510,8 +2528,15 @@ module gamod_types
                     !verts_of_face moeten voorkomen in verts_of_cells
                     do i = 1,2
                         if (.not.any(verts_of_cell == verts_of_face(i))) then
+                                print *, 'Face: ', j
+                                print *, 'V1 :', verts_of_face(1)
+                                print *, 'x coor: ', v%x%Get(verts_of_face(1))
+                                print *, 'y coor: ', v%y%Get(verts_of_face(1))
+                                print *, 'V2 :', verts_of_face(2)
+                                print *, 'x coor: ', v%x%Get(verts_of_face(2))
+                                print *, 'y coor: ', v%y%Get(verts_of_face(2))    
                                 call gdErrorHandler('CheckUnstructuredGrid: check 3, vertices' // &
-                                & 'of face not in vertices of the cells of that face')
+                                & ' of face not in vertices of the cells of that face')
                         end if
                     end do
                 end do
@@ -3315,7 +3340,7 @@ module gamod_types
 
     ! Stacked Triangles
     !==================
-    subroutine StackedTrais(grid, qm, options)
+    subroutine StackedTrias(grid, magneticField, qm, options)
 
         ! Description
         !============
@@ -3325,22 +3350,84 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid
-        type(QualityMetric), intent(in) :: qm
-        type(GAoptionsUDT)              :: options
+        class(GAGridUDT), intent(inout)         :: grid
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        type(QualityMetric), intent(inout)      :: qm
+        type(GAoptionsUDT), intent(in)          :: options
 
         ! Auxiliary
-        integer(I8), allocatable, dimension(:) :: cctria, cctraps
+        integer(I8) :: i, tria, con_vert
+        integer(I8), allocatable, dimension(:) :: cctria, cctraps, traps, ctest1, ctest2
         integer(I8), allocatable :: cctrapsP(:,:)
+        logical :: approved
+
+        ! Printing
+        print *, 'Apply Stacked Triangle adaptation'
+
+        ! Calculating quality metric
+        call qm%CalculateQualityMetrics(grid, options, magneticField, .false., .false.)
 
         ! Detection
         !==========
         ! Number of cells should not change, so try to detect whole group of cells
         call grid%DetectCutCell(qm, options, cctria, cctraps, cctrapsP)
 
+        ! For visualization
+        if (options%debug) then
+            call WriteArray(cctria, 'cctria')
+            call WriteArray(cctraps, 'cctraps')
+            ctest1 = cctrapsP(:,1)
+            call WriteArray(ctest1, 'cctrapsP1')
+            ctest2 = cctrapsP(:,2)
+            call WriteArray(ctest2, 'cctrapsP2')
+        end if
 
 
+        ! Adaptation
+        !===========
+        do i = 1, size(cctria)
 
+            ! Unpack
+            tria = cctria(i)
+            traps = cctraps(cctrapsP(i,1):cctrapsP(i,1)+cctrapsP(i,2)-1)
+
+            ! Get the connection vertex
+            call grid%GetConnectionVertex(tria, traps, con_vert)
+
+            ! Check cell overlap when transformation would be done
+            if (con_vert /= 0) &
+                call grid%CheckStackedTriaOverlap(tria, traps, con_vert, approved)
+            
+            !if (options%debug) then
+            !    print *, con_vert
+            !    print *, 'x-coor: ' , grid%vert%x%Get(con_vert)
+            !    print *, 'y-coor: ' , grid%vert%y%Get(con_vert)
+            !    print *, approved
+            !end if
+
+            ! Do the adaptation if oké
+            if (con_vert /= 0 .and. approved) &
+                call grid%StackAdaptation(tria, traps, con_vert)
+
+        end do
+
+        ! Merge some triangles if to shallow angle
+        if (options%merge_stacked_trias) then
+            ! call grid%MergeStackedTrias() - TODO
+
+        end if
+
+        ! Check from boundary trapezoids which should be included in the stacked triangle
+        if (options%merge_trap_into_stacked) then
+            ! call grid%MergeTrapIntoStacked() - TODO
+        end if
+
+
+        ! Recalculate the magneticfield
+        if (.not. options%slab) call grid%RecalcMagn(magneticField)
+
+        ! Printing
+        print *, 'Ended Stacked Triangle adaptation'
         
     end subroutine
 
@@ -3482,7 +3569,7 @@ module gamod_types
         ! Trim
         cctria = cctriaD(1:counter_trapgroups)
         cctrapsP = cctrapsPD(1:counter_trapgroups,:)
-        cctraps = cctraps(1:cctrapsPD(counter_trapgroups,1)+cctrapsPD(counter_trapgroups,2)-1)
+        cctraps = cctrapsD(1:cctrapsPD(counter_trapgroups,1)+cctrapsPD(counter_trapgroups,2)-1)
 
         end associate
 
@@ -3605,9 +3692,9 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: neigs, b_neig, b_verts, b_faces, &
             trap_verts, trap_faces, bface_trap, bvert_trap, bvert_neig, bfaces_neig, &
             verts_last, trap_cells
-        integer(I8) ::  trap_next, nc_vert, trap_last, indmin
-        real(R8), allocatable, dimension(:) :: dpsi, dpsi_max_b, b_neig_psi, min_psi, &
-            max_psi, dpsi_max
+        integer(I8) :: trap_next, nc_vert, trap_last, indmin
+        real(R8), allocatable, dimension(:) :: dpsi
+        real(R8) :: dpsi_max, dpsi_max_b, b_neig_psi, min_psi, max_psi
         logical, allocatable :: log(:)
 
         ! Associate
@@ -3679,9 +3766,9 @@ module gamod_types
                 nc_vert = count(isMember(bvert_neig, bvert_trap))
 
                 ! Apply criteria
-                if ( (dpsi_max_b(1) .gt. (dpsi_max(1)*1.01_R8)) &
-                     .and. (b_neig_psi(1) .gt. min_psi(1)) &
-                     .and. (b_neig_psi(1) .lt. max_psi(1)) &
+                if ( (dpsi_max_b .gt. (dpsi_max*1.01_R8)) &
+                     .and. (b_neig_psi .gt. min_psi) &
+                     .and. (b_neig_psi .lt. max_psi) &
                      .and. (nc_vert .gt. 0)) then
 
                         ! Add cell
@@ -3708,11 +3795,417 @@ module gamod_types
 
             end if
 
+            deallocate(b_neig)
+
         end do
 
         end associate
 
     end subroutine
+
+    subroutine GetConnectionVertex(grid, tria, traps, con_vert)
+
+        ! Description
+        !============
+        ! Finds the connection vertex to which all stacked triangles
+        ! need to be connected, based on information on cutcells
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), intent(in) :: tria
+        integer(I8), allocatable, intent(in) :: traps(:)
+        integer(I8), intent(out) :: con_vert
+
+        ! Auxiliary
+        integer(I8) :: i, k, big_trap, indmin, indmax, lt, vxs2(2)
+        integer(I8), allocatable, dimension(:) :: vxs, cvs, cv2, &
+             vx, bfcs, ts, vxs_lt, fcs
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        con_vert = 0
+        big_trap = traps(size(traps))
+        vxs = GetCellVertGA(c, big_trap)
+        indmin = minloc(v%psi%Get(vxs),1)
+        indmax = maxloc(v%psi%Get(vxs),1)
+
+        do i = 1, size(vxs)
+
+            ! Must be a boundary vertex
+            if (isBoundaryVertGA(grid, vxs(i))) then
+
+                ! Get cells
+                cvs = GetVertCellGA(c, vxs(i))
+                if ((size(cvs) .gt. 2) .and. (i == indmax .or. i == indmin)) then
+                    con_vert = vxs(i)
+                    exit
+                end if
+
+            end if
+
+        end do
+
+        ! To capture con_vert of cut cells in the outermost fluxsurface flux tube
+        if (con_vert == 0) then
+
+            ts = [ tria, traps ]
+            lt = ts(size(ts)-1)
+            vxs_lt = GetCellVertGA(c, lt)
+
+            do i = 1, size(vxs)
+
+                if (isBoundaryVertGA(grid, vxs(i))) then
+
+                    ! Get cells
+                    cvs = GetVertCellGA(c, vxs(i))
+                    allocate(cv2(count(cvs /= big_trap)))
+                    cv2 = pack(cvs, cvs /= big_trap)
+
+                    fcs = GetVertFaceGA(f, vxs(i))
+                    allocate(bfcs(count(isBoundaryFaceGA(f, fcs))))
+                    bfcs = pack(fcs, isBoundaryFaceGA(f, fcs))
+
+                    ! If the other cells are not part of the cutcells
+                    if (.not.any(isMember(cv2, ts))) then
+
+                        do k = 1, size(bfcs)
+                            vxs2(1) = f%vert1%Get(bfcs(k)) 
+                            vxs2(2) = f%vert2%Get(bfcs(k)) 
+                            allocate(vx(count(vxs2 /= vxs(i))))
+                            vx = pack(vxs2, vxs2 /= vxs(i))
+
+                            if (any(isMember(vx, vxs_lt))) then
+                                con_vert = vxs(i)
+                                exit
+                            end if
+
+                            deallocate(vx)
+
+                        end do
+                    end if
+
+                    if (con_vert /= 0) exit
+
+                    deallocate(cv2)
+                    deallocate(bfcs)
+
+                end if
+
+            end do
+
+        end if
+
+        end associate
+
+    end subroutine
+
+    subroutine CheckStackedTriaOverlap(grid, tria, traps, con_vert, approved)
+
+        ! Description
+        !============
+        ! % Check whether it is allow to transform to stacked triangle
+        ! Method
+        ! 1) make the vector between the tria_tip and the con_vert
+        ! 2) get the vertices of the trapezoids which are not boundary vertices
+        ! 3) make vectors from the tria_tip and these vertices
+        ! 4) the sine between the vector from tria_tip and con_vert, and the
+        ! vectors to the trapezoid vertices, should be bigger than 0
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), intent(in) :: tria, con_vert
+        integer(I8), allocatable, intent(in) :: traps(:)
+        logical, intent(out) :: approved
+
+        ! Auxiliary
+        integer(I8) :: nt, counter_v, j, prev_icv, ind, nvix, nvt
+        integer(I8), allocatable, dimension(:) :: verts_trap, vxs, fcs_al, &
+            vix, tria_tip, vxs_trap1, vxs_tria, verts_trapUD, fcs, vtrap
+        real(R8) :: vec_outx, vec_outy, norm_vec_out
+        real(R8), allocatable :: vec_inx(:), vec_iny(:), norm_vec_in(:), sint(:)
+        logical, allocatable :: log(:)
+        type(IntegerDynamicArrayUDT), allocatable :: verts_trapU
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        nt = size(traps)
+        allocate(verts_trap(nt*2))
+        counter_v = 0
+        approved = .true.
+
+        ! Loop over the trapezoids
+        do j = 1, nt
+
+            ! Get internal vertices
+            vxs = GetCellVertGA(c, traps(j))
+            log = (.not.isBoundaryVertGA(grid, vxs))
+            nvix = count(log)
+
+            if (nvix /= 2) then
+
+                ! Take the vertices of the aligned faces
+                fcs = GetCellFaceGA(c, traps(j))
+                allocate(fcs_al(count(f%aligned%Get(fcs) == 1)))
+                fcs_al = pack(fcs, f%aligned%Get(fcs) == 1)
+
+                allocate(vix(2))
+                vix(1) = f%vert1%Get(fcs_al(1))
+                vix(2) = f%vert2%Get(fcs_al(1))
+
+
+                deallocate(fcs_al)
+
+            else 
+
+                ! Take the non-boundary vertices
+                allocate(vix(count(log)))
+                vix = pack(vxs, log)
+
+            end if
+
+            ! Add vertices to verts_trap
+            verts_trap(counter_v + 1: counter_v + size(vix)) = vix
+            counter_v = counter_v + nvix
+
+            deallocate(vix)
+
+        end do
+
+        ! Unique on vertstrap
+        call Unique(verts_trap, verts_trapUD)
+        allocate(IntegerDynamicArrayUDT :: verts_trapU)
+        verts_trapU = ConstructIntegerDynamicArray(verts_trapUD)
+
+        ! Loop over the trapezoids
+        do j = 1, nt
+
+            if (j == 1) then
+
+                ! Get the tria vert = tip_vert
+                vxs_tria = GetCellVertGA(c, tria)
+                vxs_trap1 = GetCellVertGA(c, traps(1))
+                
+                log = (.not.isMember(vxs_tria, vxs_trap1))
+                allocate(tria_tip(count(log)))
+                tria_tip = pack(vxs_tria, log)
+
+            else if (j == 2) then
+
+                ! Tria tip has to become the next vertex
+                prev_icv = tria
+                vxs = GetCellVertGA(c, prev_icv)
+                vtrap = verts_trapU%Get()
+                allocate(tria_tip(count(isMember(vxs,vtrap))))
+                tria_tip = pack(vxs, isMember(vxs,vtrap))
+
+                ! And remove it from the verts_trap
+                ind = findloc(verts_trapU%Get(), tria_tip(1), 1)
+                call verts_trapU%Remove(ind) 
+                
+            else
+
+                ! Tria tip has to become the next vertex
+                prev_icv = traps(j-2)
+                vxs = GetCellVertGA(c, prev_icv)
+                vtrap = verts_trapU%Get()
+                allocate(tria_tip(count(isMember(vxs,vtrap))))
+                tria_tip = pack(vxs, isMember(vxs,vtrap))
+
+                ! And remove it from the verts_trap
+                ind = findloc(verts_trapU%Get(), tria_tip(1), 1)
+                call verts_trapU%Remove(ind) 
+
+            end if
+
+            ! Make outer vector between the tria_tip and 
+            vec_outx = v%x%Get(con_vert) -  v%x%Get(tria_tip(1))
+            vec_outy = v%y%Get(con_vert) -  v%y%Get(tria_tip(1))
+            norm_vec_out = sqrt(vec_outx**2 + vec_outy**2)
+
+            ! Make vectors
+            vec_inx = v%x%Get(verts_trapU%Get()) -  v%x%Get(tria_tip(1))
+            vec_iny = v%y%Get(verts_trapU%Get()) -  v%y%Get(tria_tip(1))
+            norm_vec_in = sqrt(vec_inx**2 + vec_iny**2)
+
+            ! Compute sine for each case
+            ! Calculate angles (sin = |a x b| / norm(a)*norm(b))
+            sint = (vec_outx * vec_iny - vec_inx * vec_outy) / (norm_vec_out * norm_vec_in )
+
+            ! If all sines are positive or all are negative, and first triangle
+            ! not to skewed
+            nvt = verts_trapU%Size()
+            if (.not.((count(sint .lt. 0) == nvt) .or. (count(sint .gt. 0) == nvt))) then
+                approved = .false.
+                exit
+            end if  
+            
+            ! Housekeeping
+            deallocate(tria_tip)
+
+        end do
+
+        end associate
+
+    end subroutine 
+
+    subroutine StackAdaptation(grid, tria, traps, con_vert)
+
+        ! Description
+        !============
+        ! Perform the adaptation from cutcell to stacked triangles
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in) :: tria, con_vert
+        integer(I8), allocatable, intent(in) :: traps(:)
+
+        ! Auxiliary
+        integer(I8) :: i, j, ic, common_face, b_vert, counterv, &
+            counterf, nv, nvT
+        integer(I8), allocatable, dimension(:) :: trapsC, facesQ, &
+            b_facesQD, b_facesQ, vertsQ, indbvert, indbvert1, indbvert2, &
+            indcv, indfc, ar, ar1, ar2, vx_remD, vx_rem, fc_remD, fc_rem, &
+            vertsT, loc1, facesQD, vertsQD
+        real(R8) :: cx, cy
+        logical, allocatable :: log(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        trapsC = [tria, traps]
+        allocate(vx_remD(v%ntot))
+        allocate(fc_remD(f%ntot))
+        vx_remD = 0
+        fc_remD = 0
+        counterv = 0
+        counterf = 0
+
+        ! Begin with the last trap
+
+        do i = 1, (size(trapsC)-1)
+
+            ic = trapsC(size(trapsC)+1-i)
+            facesQ = GetCellFaceGA(c, ic)
+            allocate(b_facesQD(count(isBoundaryFaceGA(f, facesQ))))
+            b_facesQD = pack(facesQ, isBoundaryFaceGA(f, facesQ))
+
+            if (size(b_facesQD) .gt. 1) then
+                allocate(b_facesQ(count(f%aligned%Get(b_facesQD) == 0)))
+                b_facesQ = pack(b_facesQD, f%aligned%Get(b_facesQD) == 0)
+            else
+                allocate(b_facesQ(size(b_facesQD)))
+                b_facesQ = b_facesQD
+            end if
+
+            ! Get common face with next trap
+            common_face = GetCommonFace(c, ic, trapsC(size(trapsC)-i))
+
+            b_vert = GetCommonVert(f, common_face, b_facesQ(1))
+
+            ! Replace the occurrence of bvert with con_vert in cell%vert
+            log = (c%vert%Get() == b_vert)
+            allocate(indbvert(count(log)))
+            indcv = (/ (j, j = 1, c%vertP1%Get(c%ntot)+c%vertP2%Get(c%ntot)-1) /)
+            indbvert = pack(indcv,log)
+            ar = (/ (con_vert, j = 1, size(indbvert) ) /)
+            call c%vert%Set(indbvert, ar)
+
+            ! Replace the occurrence of bvert with con_vert in face%vert
+            allocate(indbvert1(count(f%vert1%Get() == b_vert)))
+            allocate(indbvert2(count(f%vert2%Get() == b_vert)))
+            indfc = (/ (j, j = 1, f%ntot) /)
+            indbvert1 = pack(indfc, f%vert1%Get() == b_vert)
+            indbvert2 = pack(indfc, f%vert2%Get() == b_vert)
+            ar1 = (/ (con_vert, j = 1, size(indbvert1) ) /)
+            ar2 = (/ (con_vert, j = 1, size(indbvert2) ) /)
+            call f%vert1%Set(indbvert1, ar1)
+            call f%vert2%Set(indbvert2, ar2)
+
+            ! Remove bvert out of cell%vert
+            vertsQD = GetCellVertGA(c, ic)
+            call Unique(vertsQD, vertsQ)
+            call c%vert%Replace(c%vertP1%Get(ic),c%vertP1%Get(ic)+c%vertP2%Get(ic)-1, vertsQ)
+            nv = c%vertP2%Get(ic) - 1
+            call c%vertP2%Set(ic, nv)
+            loc1 = (/ (j, j = ic+1 , c%vertP1%Size()) /)
+            call c%vertP1%SumMask(loc1, -1)
+
+            ! Adjust centroid
+            cx = sum(v%x%Get(vertsQ))/(real(nv, kind=R8))
+            cy = sum(v%y%Get(vertsQ))/(real(nv, kind=R8))
+            call c%x%Set(ic, cx)
+            call c%y%Set(ic, cy)
+
+            ! Remove boundaryFace out of cell%face
+            allocate(facesQD(count(facesQ /= b_facesQ(1))))
+            facesQD = pack(facesQ, facesQ /= b_facesQ(1))
+            call c%face%Replace(c%faceP1%Get(ic),c%faceP1%Get(ic)+c%faceP2%Get(ic)-1, facesQD)
+            call c%faceP2%SumMask(ic, -1)
+            loc1 = (/ (j, j = ic+1 , c%faceP1%Size()) /)            
+            call c%faceP1%SumMask(loc1, -1)
+
+            ! Save vertices and face to remove
+            counterv = counterv + 1
+            counterf = counterf + 1
+            vx_remD(counterv) = b_vert
+            fc_remD(counterf) = b_facesQ(1)
+
+            deallocate(b_facesQ)
+            deallocate(b_facesQD)
+            deallocate(indbvert)
+            deallocate(indbvert1)
+            deallocate(indbvert2)
+            deallocate(facesQD)
+
+        end do
+
+        ! Trim
+        fc_rem = fc_remD(1:counterf)
+        vx_rem = vx_remD(1:counterv)
+
+        ! Adjust centroid van tria
+        nvT = c%vertP2%Get(tria)
+        vertsT = GetCellVertGA(c, tria)
+        cx = sum(v%x%Get(vertsT))/real(nvT, kind=R8)
+        cy = sum(v%y%Get(vertsT))/real(nvT, kind=R8)
+        call c%x%Set(tria, cx)
+        call c%y%Set(tria, cy)
+
+        ! Remove faces & vertices
+        call grid%RemoveFaces(fc_rem)
+        call grid%RemoveVertices(vx_rem)
+
+        ! Determine cflags
+        call grid%DetermineCflags(trapsC)
+
+        end associate
+
+    end subroutine
+
+
 
     ! Merging
     !========
@@ -4999,7 +5492,7 @@ module gamod_types
         tang_pointsD = 0
         counter = 0
 
-        ! Get boundary faces - check if necessary TODO
+        ! Get boundary faces locally - check if necessary TODO
 
         
         ! Get boundary vertices
@@ -6436,7 +6929,8 @@ module gamod_types
         integer(I8)                 :: i, j, k, counter, cell_num
         type(GACellUDT)               :: cell
         integer(I8), allocatable, optional    :: cvLookUp(:)
-        integer(I8), allocatable    :: res(:), indc(:), ind(:), covD(:) 
+        integer(I8), allocatable    :: res(:), indc(:), ind(:), covD(:)
+        logical, allocatable :: log(:) 
         
         if (.not.present(cvLookUp)) then
             ! Do without cvLookUp
@@ -6446,7 +6940,9 @@ module gamod_types
             counter = 0
 
             indc = (/( j, j = 1, cell%vertP1%Get(cell%ntot) + cell%vertP2%Get(cell%ntot)-1)/)
-            ind = pack(indc, cell%vert%Get() == i)
+            log = (cell%vert%Get() == i)
+            allocate(ind(count(log)))
+            ind = pack(indc, log)
 
             do k = 1, size(ind)
                 cell_num = GetCellFromVertIndex(cell, ind(k))
@@ -6456,8 +6952,9 @@ module gamod_types
 
             res = covD(1:counter)
         else
-            allocate(res(count(cell%vert%GetAllElements().eq.i)))
-            res = pack(cvLookUp,cell%vert%GetAllElements().eq.i)
+            log = (cell%vert%Get().eq.i)
+            allocate(res(count(log)))
+            res = pack(cvLookUp,log)
         end if
 
     end function
@@ -6748,6 +7245,48 @@ module gamod_types
         call Unique(ida0,ida0U)
         if (size(ida0) /= size(ida0U)) &
             call gdErrorHandler('CheckUniqueness: integer array not unique')
+
+    end subroutine
+
+    subroutine WriteArray(a, filename)
+
+        ! Description
+        !============
+        ! Write an array in a file
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+
+        ! Arguments
+        integer(I8), allocatable :: a(:)
+        character(*), intent(in) :: filename 
+
+        ! Auxiliary
+        integer :: fu     
+        integer(I8) :: i
+        character(:), allocatable               :: dir
+
+        ! Construct writing directory
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Size data
+        write (fu, *) 'Elements'
+        write (fu, *) size(a)
+
+        ! Array
+        write (fu, *) 'ID val(ID)'
+        do i = 1, size(a)
+            write(fu, *) i, a(i)
+        end do
+
+        close(fu)
 
     end subroutine
 

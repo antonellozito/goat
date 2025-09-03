@@ -221,6 +221,8 @@ module gamod_driver
         ! Remove flux tubes with only two triangles
 
         ! Stacked to cutcell
+        !if (options%stacked_to_cutcell) &
+        !    call grid%StackedToCutcell()
 
         ! Splitting non-alinged quads
 
@@ -229,6 +231,8 @@ module gamod_driver
         ! Splitting  and merging
 
         ! Stacked triangles
+        if (options%stacked_trias) &
+            call grid%StackedTrias(magneticField, qm, options)
 
 
         ! Remove sticking out triangles
@@ -301,7 +305,8 @@ module gamod_driver
 
                 if (nvi /= 1) then
 
-                    ! Visualize TODO
+                    ! Give error information
+                    print *, 'Vertex without flux surface: ', iv
                     print *, grid%vert%x%Get(iv)
                     print *, grid%vert%y%Get(iv)
                     call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
