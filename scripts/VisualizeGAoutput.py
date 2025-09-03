@@ -55,6 +55,21 @@ plotter.PlotGridCells(grid2,1)
 #plotter.PlotGridCellsAlignedFaces(grid,1)
 #plotter.PlotGridCellsBoundaryFaces(grid,2)
 
+# Reading cutcell arrays
+#-----------------------
+filepath = datadir + '/' + 'cctria.dat'
+cctria = dh.ReadGAArrayFile(filepath)
+filepath = datadir + '/' + 'cctrapsP1.dat'
+cctrapsP1 = dh.ReadGAArrayFile(filepath)
+filepath = datadir + '/' + 'cctrapsP2.dat'
+cctrapsP2 = dh.ReadGAArrayFile(filepath)
+filepath = datadir + '/' + 'cctraps.dat'
+cctraps = dh.ReadGAArrayFile(filepath)
+
+print(str(cctria[0]))
+plotter.PlotGridCellCutcells(grid2,cctria,cctrapsP1,cctrapsP2,cctraps, 2)
+
+
 
 # Show figures
 #-------------

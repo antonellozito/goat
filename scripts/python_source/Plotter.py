@@ -1343,6 +1343,23 @@ def PlotGridCellsBoundaryFaces(grid, fignum):
         if (not(grid.face.label[i] ==  0)) :
             PlotPoints2D(xf[i], yf[i], fignum, marker='.', color='b')
 
+def PlotGridCellCutcells(grid,cctria,cctrapsP1,cctrapsP2,cctraps, fignum ):
+    # Plot cells only
+    PlotGridCells(grid, fignum)
+
+    # Plot cutcells
+    for i in np.arange(0,len(cctria), 1):
+        PlotPoints2D(grid.cell.x[cctria[i]-1], grid.cell.y[cctria[i]-1], fignum, marker='.', color='b')
+
+    for i in np.arange(0,len(cctrapsP1), 1):
+        s = cctrapsP1[i]-1
+        n = cctrapsP2[i]
+        if (n == 1) :
+            cells = cctraps[s]
+        else: 
+            cells = cctraps[s:s+n]
+        PlotPoints2D(grid.cell.x[cells-1], grid.cell.y[cells-1], fignum, marker='.', color='g')
+
 
 # Grid topological data
 def PlotGridTopologicalData(grid, fignum):

@@ -693,8 +693,8 @@ class GACell:
         self.region = np.zeros(nc, dtype=int)
 
         # Coordinates
-        self.x  = np.zeros(0, dtype=float)
-        self.y  = np.zeros(0, dtype=float)
+        self.x  = np.zeros(nc, dtype=float)
+        self.y  = np.zeros(nc, dtype=float)
 
     # Initializer
     def Initialize(self, nc, ncv):
