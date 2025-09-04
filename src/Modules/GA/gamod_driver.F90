@@ -215,25 +215,28 @@ module gamod_driver
 
         ! Remove Small triangles
         if (options%rem_small_trias) &
-            call grid%RemoveSmallTriangle(qm,options,magneticField)
+            call grid%RemoveSmallTriangle(magneticField, qm, options)
 
 
         ! Remove flux tubes with only two triangles
 
         ! Stacked to cutcell
         if (options%stacked_to_cutcell) &
-            call grid%StackedToCutcell(options)
+            call grid%StackedToCutcell(magneticField, options)
 
-        ! Splitting non-alinged quads
+        ! Splitting non-aligned quads
 
         ! Splitting trapezoids in concave shaved-off flux tube
 
         ! Splitting  and merging
+        ! Merging
+        if (options%merging) then
+            call grid%DoMerging(magneticField, qm, options)
+        end if
 
         ! Stacked triangles
         if (options%stacked_trias) &
             call grid%StackedTrias(magneticField, qm, options)
-
 
         ! Remove sticking out triangles
 

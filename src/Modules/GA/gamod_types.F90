@@ -34,7 +34,7 @@ module gamod_types
     !                                                                  !
     !==================================================================!   
 
-    type :: QualityMetric
+    type :: QualityMetricUDT
 
         ! Type that included several metrics
         real(R8), allocatable :: fcBias(:)
@@ -56,6 +56,7 @@ module gamod_types
         procedure :: Initialize
         procedure :: CalculateQualityMetrics
         procedure :: ComputeQM
+        procedure :: SelectMergingFace
 
     end type 
     
@@ -467,6 +468,7 @@ module gamod_types
         procedure :: DetectStackedTrias
 
         ! Merging
+        procedure :: DoMerging
         procedure :: MergeCells
         procedure :: OneMerge
         procedure :: MergeRec
@@ -496,6 +498,12 @@ module gamod_types
         procedure :: GetFaceNumber
         procedure :: AddFaceToFsFc
         procedure :: AddCell
+
+        ! Computing
+        !===========
+        procedure :: CalcCentroid0DGA
+        procedure :: CalcCentroid1DGA
+        generic   :: CalcCentroidGA => CalcCentroid0DGA, CalcCentroid1DGA
 
         ! Visualization
         !==============
@@ -546,7 +554,7 @@ module gamod_types
 
         ! Declare variables
         !==================
-        class(QualityMetric)    :: qm
+        class(QualityMetricUDT)    :: qm
         type(GAGridUDT)         :: grid
 
         ! Initialize the qm arrays?? - TODO
@@ -591,7 +599,7 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(QualityMetric), intent(inout)     :: qm
+        class(QualityMetricUDT), intent(inout)  :: qm
         type(GAGridUDT), intent(in)             :: grid
         type(GAoptionsUDT), intent(in)          :: options
         type(MagneticFieldUDT), intent(in)      :: magneticField
@@ -920,10 +928,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(QualityMetric), intent(inout)  :: qm
-        type(GAGridUDT), intent(in)         :: grid
-        type(GAoptionsUDT), intent(in)      :: options
-        type(MagneticFieldUDT), intent(in)  :: magneticField
+        class(QualityMetricUDT), intent(inout)  :: qm
+        type(GAGridUDT), intent(in)             :: grid
+        type(GAoptionsUDT), intent(in)          :: options
+        type(MagneticFieldUDT), intent(in)      :: magneticField
         logical :: select_split, select_merge
 
 
@@ -937,11 +945,145 @@ module gamod_types
 
         ! Selecting merging face
         if (select_merge) then
+            call qm%SelectMergingFace(grid, options)
         end if
         
 
 
     end subroutine
+
+    subroutine SelectMergingFace(qm, grid, options)
+
+        ! Description
+        !============
+        ! Select a face to merge the two cell of
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(QualityMetricUDT)     :: qm
+        type(GAGridUDT)             :: grid
+        type(GAoptionsUDT)          :: options
+
+        ! Auxiliary 
+        integer(I8) :: i
+        integer(I8), allocatable, dimension(:) :: forbidden_fcs, &
+            indsort
+        real(R8) :: crit
+        real(R8), allocatable :: dfunv(:), area_small_cells(:)
+        logical, allocatable :: log(:), log2(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            fd => grid%data%fluxdata
+            )
+
+        ! Determine forbidden merge faces iFs of separatrix
+        if (.not.options%slab) forbidden_fcs = GetForbiddenMergeFaces(forbidden_fcs)
+
+        ! Initialize
+        qm%merge_fc = 0
+        cvLookUp = GetCvLookUpGA(c)
+
+        ! Criteria
+        select case (options%merge_crit)
+
+        case ('tria_to_quad')
+
+            ! NOT IN MATLAB
+            ! Determine merge face
+            ! Aligned face in other flux surface, or aligned faces have no common vertex
+
+
+
+        case ('min_area')
+
+            ! Initialize criteria
+            crit = sum(qm%cvS) / c%ntot
+
+            ! Distance function 
+            dfunv = grid%fun%distr%Evaluate(c%x%Get(), c%y%Get())
+            log = (dfunv .lt. options%dist_function_threshold_merge)
+            indcv = (/ (i, i = 1, c%ntot)/)
+            allocate(cells(count(log)))
+            cells = pack(indcv, log)
+
+            ! Get small cells
+            log2 = ((qm%cvS(cells) < crit) .and. (c%reg%Get(cells) /= 3) .and. (c%reg%Get(cells) /= 4))
+            allocate(small_cells(count(log2)))
+            small_cells = pack(cells, log2)
+
+            ! Sort small cells for area
+            area_small_cells = qm%cvS(small_cells)
+            call Sort(area_small_cells, indsort, .true.)
+            small_cells = small_cells(indsort)
+
+            ! Find merge face
+            if (size(small_cells) /= 0) then
+
+                do i = 1, size(small_cells)
+
+                    ! Get faces
+                    fcs = GetCellFaceGA(c, small_cells(i))
+
+                    do j = 1, size(fcs)
+
+                        cvs = GetFaceCellGA(c, fcs(j), cvLookUp)
+                        if (size(cvs) == 2) then
+
+                            if (cvs(1) /= small_cells(i)) then
+                                neig = cvs(1)
+                            else if (cvs(2) /= small_cells(i)) then
+                                neig = cvs(2)
+                            end if
+                            
+                            ! TODO
+                            if (f%aligned%Get(fcs(j)) == 0 &
+                                .and. .not.isMember(fcs(j), forbidden_fcs) &
+                                .and. isMember(neig, small_cells)) then
+
+                                    if (c%reg%Get(cvs(1)) == c%reg%Get(cvs(2))) then
+
+                                        qm%merge_fc = fcs(j)
+
+                                    end if
+
+                            end if
+
+                        end if
+                        
+                    end do
+
+                    ! Exit when face is found
+                    if (qm%merge_fc /= 0) exit
+
+                end do
+
+            end if
+            
+        case default
+
+            call gdErrorHandler('SelectMergingFace: merge criterium not implemented')
+
+        end select
+
+
+
+
+
+
+
+
+
+
+
+
+        end associate
+
+    end subroutine
+
 
     !------------------------------------------------------------------!
     !                        GAGRID ROUTINES                           !
@@ -2889,7 +3031,7 @@ module gamod_types
     
     ! Removing small triangles
     !=========================
-    subroutine RemoveSmallTriangle(grid, qm, options, magneticField)
+    subroutine RemoveSmallTriangle(grid, magneticField, qm, options)
 
         ! Description
         !============
@@ -2907,10 +3049,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)     :: grid
-        type(QualityMetric), intent(inout)  :: qm
-        type(GAoptionsUDT), intent(in)      :: options
-        type(MagneticFieldUDT)              :: magneticField
+        class(GAGridUDT), intent(inout)         :: grid
+        type(QualityMetricUDT), intent(inout)   :: qm
+        type(GAoptionsUDT), intent(in)          :: options
+        type(MagneticFieldUDT)                  :: magneticField
 
         ! Auxiliary
         integer(I8) :: small_tria, faceA, faceB, faceC
@@ -2989,10 +3131,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in)    :: grid
-        type(QualityMetric), intent(in) :: qm
-        type(GAoptionsUDT), intent(in)  :: options
-        integer(I8), intent(out)        :: small_tria
+        class(GAGridUDT), intent(in)        :: grid
+        type(QualityMetricUDT), intent(in)  :: qm
+        type(GAoptionsUDT), intent(in)      :: options
+        integer(I8), intent(out)            :: small_tria
 
         ! Auxiliary
         integer(I8) :: i, j, nb, ic, indmax, int_face, ic_neig
@@ -3091,11 +3233,11 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid
-        type(QualityMetric), intent(in) :: qm
-        integer(I8), intent(in)         :: small_tria
-        integer(I8), intent(out)        :: faceA, faceB, faceC
-        logical, intent(out)            :: plain_merging
+        class(GAGridUDT), intent(inout)     :: grid
+        type(QualityMetricUDT), intent(in)  :: qm
+        integer(I8), intent(in)             :: small_tria
+        integer(I8), intent(out)            :: faceA, faceB, faceC
+        logical, intent(out)                :: plain_merging
 
         ! Auxiliary
         integer(I8) :: i, ic,  indmin, neigA
@@ -3356,7 +3498,7 @@ module gamod_types
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
         type(MagneticFieldUDT), intent(in)      :: magneticField
-        type(QualityMetric), intent(inout)      :: qm
+        type(QualityMetricUDT), intent(inout)   :: qm
         type(GAoptionsUDT), intent(in)          :: options
 
         ! Auxiliary
@@ -3444,9 +3586,9 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid
-        type(QualityMetric), intent(in) :: qm
-        type(GAoptionsUDT)              :: options 
+        class(GAGridUDT), intent(inout)     :: grid
+        type(QualityMetricUDT), intent(in)  :: qm
+        type(GAoptionsUDT)                  :: options 
         integer(I8), allocatable, intent(out) :: cctria(:), cctraps(:), cctrapsP(:,:)
         
         ! Auxiliary
@@ -4211,7 +4353,7 @@ module gamod_types
 
     ! Stacked to Cutcell
     !===================
-    subroutine StackedToCutcell(grid, options)
+    subroutine StackedToCutcell(grid, magneticField, options)
 
         ! Description
         !============
@@ -4223,12 +4365,34 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)     :: grid
-        type(GAoptionsUDT), intent(in)         :: options
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        type(GAoptionsUDT), intent(in)      :: options
 
         ! Auxiliary
-        integer(I8) :: nc
-        integer(I8), allocatable :: cvs(:)
+        integer(I8) :: i, ic, nc, nv, v1, v2, start_vertex, end_vertex, ind, &
+            bfcs, lbl, vxs(2), face_num, new_verts3(3), new_faces3(3), &
+            new_verts4(4), new_faces4(4), fcsA, fcst_up_correct, fcst_al, &
+            c_fcs
+        integer(I8), allocatable, dimension(:) :: cvs, fcs, &
+             cvs_v1, cvs_v2, new_vertex, vecV, ar,  &
+            cvs1, cvs2, fcst_up,  new_bfcs, i_verts, new_ifcs, regs, &
+            rem_faces, rem_cells, cells, cvLookUp, fcst,  &
+            new_faces, new_verts
+        real(R8) :: vec_x, vec_y
+        real(R8), allocatable, dimension(:) :: v1_nx, v1_ny, v1_psi, &
+            v1_ffbz, v1_bx, v1_by, fcA_length, fcA_length_int, &
+            Vdistribution, inVdistribution, fcA_dist
+
         logical :: found
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        print *, 'Apply StackedToCutcell'
 
         ! Detection of stacked triangles
         call grid%DetectStackedTrias(found, cvs, nc)
@@ -4237,13 +4401,293 @@ module gamod_types
         do while (found)
 
             ! Get boundary face
+            fcs = GetCellFaceGA(c, cvs(1))
+            ind = findloc(isBoundaryFaceGA(f, fcs), .true. ,1)
+            bfcs = fcs(ind)
+            lbl = f%label%Get(bfcs)
+
+            ! Save the regions
+            regs = c%reg%Get()
+
+            ! New vertices
+            nv = nc - 1
+
+            ! Initialize some arrays
+            allocate(new_bfcs(nc))            
+            allocate(i_verts(nv))
+            allocate(new_ifcs(nv))
+
+            ! Vector tangential to boundary face
+            cvLookUp = GetCvLookUpGA(c)
+
+            ! Start vertex
+            v1 = f%vert1%Get(bfcs)
+            v2 = f%vert2%Get(bfcs)
+
+            cvs_v1 = GetVertCellGA(c, v1, cvLookUp)
+            cvs_v2 = GetVertCellGA(c, v2, cvLookUp)
+
+            if (count(isMember(cvs_v1,cvs)) == 1) then
+                start_vertex = v1
+                end_vertex = v2               
+            else if (count(isMember(cvs_v2,cvs)) == 1) then
+                start_vertex = v2
+                end_vertex = v1                  
+            end if
+
+            vec_x = v%x%Get(end_vertex) - v%x%Get(start_vertex);
+            vec_y = v%y%Get(end_vertex) - v%y%Get(start_vertex);
+
+            new_vertex = (/ (i, i = v%ntot+1, v%ntot+nv) /)
+
+            ! Get the vertex distribution along the line
+            if (options%stacked_to_cutcell_nonuniform) then
+
+                ! Non-uniform distribution based on sizes of aligned faces
+                allocate(fcA_length(nc))
+                allocate(fcA_length_int(nc))
+                allocate(fcA_dist(nc))
+                fcA_length = 0
+                fcA_length_int = 0
+
+                do i = 1, nc
+                    fcs = GetCellFaceGA(c, cvs(i))
+                    ind = findloc(f%aligned%Get(fcs), 1, 1)
+                    fcsA = fcs(ind)
+
+                    v1 = f%vert1%Get(fcsA)
+                    v2 = f%vert2%Get(fcsA)
+
+                    fcA_length(i) = sqrt( (v%x%Get(v1) - v%x%Get(v2))**2 &
+                        + (v%y%Get(v1) - v%y%Get(v2))**2)
+
+                    if (i == 1) then
+                        fcA_length_int(i) = fcA_length(i)
+                    else
+                        fcA_length_int(i) = fcA_length(i) + fcA_length_int(i-1)
+                    end if
+
+                end do
+
+                ! Save non-uniform distribution
+                fcA_dist = fcA_length_int / sum(fcA_length)
+                Vdistribution = fcA_dist(1:nv)
+                inVdistribution = 1 - Vdistribution
+
+                deallocate(fcA_length) 
+                deallocate(fcA_length_int) 
+                deallocate(fcA_dist)
+
+            else
+
+                ! Uniform distribution
+                vecV = (/(i, i = 1, nv)/)
+                Vdistribution = vecV / nc
+                inVdistribution = 1 - Vdistribution
+
+            end if
+
+            ! Append the vertices
+            v1_nx = v%x%Get(start_vertex) + vec_x * Vdistribution
+            v1_ny = v%y%Get(start_vertex) + vec_y * Vdistribution
+            v1_psi = v%psi%Get(start_vertex)*inVdistribution + v%psi%Get(end_vertex)*Vdistribution
+            v1_ffbz = v%ffbz%Get(start_vertex)*inVdistribution + v%ffbz%Get(end_vertex)*Vdistribution
+            allocate(v1_bx(size(v1_nx)))
+            allocate(v1_by(size(v1_nx)))
+            call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+            call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)
+
+            call v%x%Append(v1_nx)
+            call v%y%Append(v1_ny)
+            call v%psi%Append(v1_psi)
+            call v%ffbz%Append(v1_ffbz)
+            call v%bx%Append(v1_bx)
+            call v%by%Append(v1_by)
+            v%ntot = v%ntot + nv
+
+            deallocate(v1_bx)
+            deallocate(v1_by)
+
+            ! Make the new boundary faces
+            new_bfcs = 0
+            do i = 1, nc
+                if (i == 1) then
+                    call grid%GetFaceNumber(start_vertex, new_vertex(i), 3, face_num)
+                else if (i == nc) then
+                    call grid%GetFaceNumber(new_vertex(i-1), end_vertex, 3, face_num)
+                else
+                    call grid%GetFaceNumber(new_vertex(i-1), new_vertex(i), 3, face_num)
+                end if
+                new_bfcs(i) = face_num
+            end do
+
+            ! Give face label
+            ar = (/ (lbl, i = 1, nc)/)
+            call f%label%Set(new_bfcs,ar)
+
+            ! Make new internal faces
+            ! Get the internal vertixes 
+            i_verts = 0
+            do i = 1, nv
+
+                ! Get common face
+                c_fcs = GetCommonFace(c, cvs(i), cvs(i+1))
+
+                vxs = [f%vert1%Get(c_fcs), f%vert2%Get(c_fcs)]
+
+                if (vxs(1) /= end_vertex) then
+                    i_verts(i) = vxs(1)
+                else if (vxs(2) /= end_vertex) then
+                    i_verts(i) = vxs(i)
+                end if
+
+            end do
+
+            ! Connect
+
+            new_ifcs = 0
+            do i = 1, nv
+                call grid%GetFaceNumber(new_vertex(i),i_verts(i), 3, face_num)
+                new_ifcs(i) = face_num
+            end do
+
+            ! Make the cells
+            do i = 1, nc
+
+                ! Get aligned face
+                fcst = GetCellFaceGA(c, cvs(i))
+                ind = findloc(f%aligned%Get(fcst), 1, 1)
+                fcst_al = fcst(ind)
+
+                if (i == 1) then
+                    
+                    ! Bottom triangle
+                    new_verts3 = 0
+                    new_faces3 = 0
+
+                    new_faces3(1) = fcst_al
+                    new_faces3(2) = new_ifcs(i)
+                    new_faces3(3) = new_bfcs(i)
+
+                    new_verts3(1) = f%vert1%Get(fcst_al)
+                    new_verts3(2) = f%vert2%Get(fcst_al)
+                    new_verts3(3) = new_vertex(i)
+
+                    new_faces = new_faces3
+                    new_verts = new_verts3
+
+                else if (i == nc) then
+
+                    ! Last trapezoid
+                    new_verts4 = 0
+                    new_faces4 = 0
+
+                    ! Get upper face
+                    allocate(fcst_up(count(fcst /= fcst_al)))
+                    fcst_up = pack(fcst, fcst /= fcst_al)
+
+                    ! Test with cells of fcst_up
+                    cvs1 = GetFaceCellGA(c, fcst_up(1), cvLookUp)
+                    cvs2 = GetFaceCellGA(c, fcst_up(2), cvLookUp)
+
+                    if (count(isMember(cvs1, cvs)) == 1) then
+                        fcst_up_correct = fcst_up(1)
+                    elseif (count(isMember(cvs2, cvs)) == 1) then
+                        fcst_up_correct = fcst_up(2)
+                    end if
+
+                    new_faces4(1) = fcst_al
+                    new_faces4(2) = fcst_up_correct
+                    new_faces4(3) = new_bfcs(i)
+                    new_faces4(4) = new_ifcs(i-1)
+
+                    new_verts4(1) = f%vert1%Get(fcst_al)
+                    new_verts4(2) = f%vert2%Get(fcst_al)
+                    new_verts4(3) = f%vert1%Get(new_bfcs(i))
+                    new_verts4(4) = f%vert2%Get(new_bfcs(i))    
+                    
+                    new_faces = new_faces4
+                    new_verts = new_verts4
+
+                    deallocate(fcst_up)
+                    
+                else
+
+                    ! Inner trapezoid
+                    new_verts4 = 0
+                    new_faces4 = 0      
+
+                    new_faces4(1) = fcst_al;
+                    new_faces4(2) = new_ifcs(i)
+                    new_faces4(3) = new_bfcs(i)
+                    new_faces4(4) = new_ifcs(i-1)
+
+                    new_verts4(1) = f%vert1%Get(fcst_al)
+                    new_verts4(2) = f%vert2%Get(fcst_al)
+                    new_verts4(3) = f%vert1%Get(new_bfcs(i))
+                    new_verts4(4) = f%vert2%Get(new_bfcs(i))
+
+                    new_faces = new_faces4
+                    new_verts = new_verts4
+
+                end if
+
+                ! Add the cell
+                call grid%AddCell(new_faces, new_verts, ic)
+
+                ! Adjust centroid
+                call grid%CalcCentroidGA(c%ntot)
+
+                ! Give region
+                call c%reg%Set(c%ntot, regs(i))
+
+                ! Give correct cflag
+                allocate(cells(1))
+                cells = c%ntot
+                call grid%DetermineCflags(cells)
+
+                ! Housekeeping
+                deallocate(cells)
+
+
+            end do
+            
+            ! House keeping
+            deallocate(i_verts)
+            deallocate(new_ifcs)
+            deallocate(new_bfcs)
+
+            ! Remove faces - boundary faces and all non-aligned faces
+            allocate(rem_faces(nc))
+            rem_faces(1) = bfcs
+            do i = 2, nc
+                rem_faces(i) = GetCommonFace(c, cvs(i-1), cvs(i))
+            end do
+
+            rem_cells = cvs
+
+            call grid%RemoveFaces(rem_faces)
+            call grid%RemoveCells(rem_cells)
+
+            ! Detection
+            call grid%DetectStackedTrias(found, cvs, nc)
+
+            ! Housekeeping
+            deallocate(rem_faces)
 
         end do
+
+        ! Recalculate the magneticfield
+        if (.not. options%slab) call grid%RecalcMagn(magneticField)
+
+        print *, 'Ended StackedToCutcell'
 
         ! Order - maybe not necessary - check TODO
         !cells = .true.
         !call grid%CheckVertOrder(is_ordered,cells)
         !call grid%ReorderCellConn(is_ordered)
+
+        end associate
 
     end subroutine
 
@@ -4348,6 +4792,9 @@ module gamod_types
 
                 end if
 
+                ! Housekeeping
+                deallocate(fcsD2)
+
 
             end do
 
@@ -4401,6 +4848,52 @@ module gamod_types
 
     ! Merging
     !========
+    subroutine DoMerging(grid, magneticField, qm, options)
+
+        ! Description
+        !============
+        ! Wrapper function for merging operations
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT)        :: grid
+        type(MagneticFieldUDT)  :: magneticField
+        type(QualityMetricUDT)  :: qm
+        type(GAoptionsUDT)      :: options
+
+        ! Auxiliary
+        integer(I8) :: i
+
+
+        ! Calculate metrics
+        call qm%CalculateQualityMetrics(options, magneticField,.false.,.true.)
+
+        i = 0
+        do while ((qm%merge_fc /= 0) .and. (i .lt. options%n_merge))
+
+            ! Merge
+            call grid%MergeCells(qm, options)
+
+            ! Update counter
+            i = i + 1
+
+            ! Recalculate magneticField
+            if (.not.options%slab) call grid%RecalcMagn(magneticField)
+
+            ! Recompute metrics
+            call qm%CalculateQualityMetrics(options, magneticField,.false.,.true.)  
+            
+            ! Check grid
+            if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+
+        end do
+
+        ! Transform remaining pentagons into triangles - TODO
+
+
+    end subroutine
+
     subroutine MergeCells(grid, qm, options)
 
         ! Description
@@ -4411,7 +4904,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        type(QualityMetric), intent(inout)  :: qm
+        type(QualityMetricUDT), intent(inout)  :: qm
         type(GAoptionsUDT) :: options
 
         ! Auxiliary
@@ -7425,6 +7918,27 @@ module gamod_types
         res = 0.5_R8 * abs( (x1-x0)*(y2-y0) - (y1-y0)*(x2-x0) )
 
     end function 
+
+    subroutine CalcCentroid0DGA(grid, ic)
+        class(GAGridUDT) :: grid
+        integer(I8) :: ic
+        integer(I8), allocatable :: vxs(:)
+        vxs = GetCellVertGA(grid%cell, ic)
+        call grid%cell%x%Set(ic, sum(grid%vert%x%Get(vxs)/real(size(vxs), kind=R8)))
+        call grid%cell%y%Set(ic, sum(grid%vert%y%Get(vxs)/real(size(vxs), kind=R8)))
+
+    end subroutine
+
+    subroutine CalcCentroid1DGA(grid, cells)
+        class(GAGridUDT) :: grid
+        integer(I8) :: i
+        integer(I8), allocatable :: vxs(:), cells(:)
+        do i = 1, size(cells)
+            vxs = GetCellVertGA(grid%cell, cells(i))
+            call grid%cell%x%Set(cells(i), sum(grid%vert%x%Get(vxs)/real(size(vxs), kind=R8)))
+            call grid%cell%y%Set(cells(i), sum(grid%vert%y%Get(vxs)/real(size(vxs), kind=R8)))
+        end do
+    end subroutine
 
     subroutine CheckUniqueness(ida)
         type(IntegerDynamicArrayUDT) :: ida
