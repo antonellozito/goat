@@ -201,7 +201,7 @@ module goatmod_userinput
         logical                     :: merge_trap_into_stacked
 
         logical                     :: stacked_to_cutcell
-        logical                     :: stacked_to_cutcell_uniform
+        logical                     :: stacked_to_cutcell_nonuniform
 
         logical                     :: split_shaved_off_tube
 
@@ -932,7 +932,7 @@ module goatmod_userinput
         options%merge_trap_into_stacked             = .true.
 
         options%stacked_to_cutcell                  = .false.
-        options%stacked_to_cutcell_uniform          = .true.
+        options%stacked_to_cutcell_nonuniform          = .true.
 
         options%split_shaved_off_tube               = .false.
 
@@ -1611,8 +1611,8 @@ module goatmod_userinput
         ! Stacked to cutcell
         field = 'ga.stacked_to_cutcell'
         call ExtractOptionValueLogical0D(fid, field, options%stacked_to_cutcell)
-        field = 'ga.stacked_to_cutcell_uniform'
-        call ExtractOptionValueLogical0D(fid, field, options%stacked_to_cutcell_uniform) 
+        field = 'ga.stacked_to_cutcell_nonuniform'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_to_cutcell_nonuniform) 
                
         ! Splitting and merging
         field = 'ga.splitting'
