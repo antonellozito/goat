@@ -966,22 +966,22 @@ module gamod_types
         type(GAoptionsUDT)          :: options
 
         ! Auxiliary 
-        integer(I8) :: i
+        integer(I8) :: i, j, neig
         integer(I8), allocatable, dimension(:) :: forbidden_fcs, &
-            indsort
-        real(R8) :: crit
-        real(R8), allocatable :: dfunv(:), area_small_cells(:)
+            indsort, cells, small_cells, fcs, cvs, cvLookUp, indcv
+        real(R8) :: crit, dfunv(grid%cell%ntot)
+        real(R8), allocatable :: area_small_cells(:)
         logical, allocatable :: log(:), log2(:)
 
         ! Associate
         associate(&
             c => grid%cell, &
             f => grid%face, &
-            fd => grid%data%fluxdata
+            fd => grid%data%fluxdata &
             )
 
         ! Determine forbidden merge faces iFs of separatrix
-        if (.not.options%slab) forbidden_fcs = GetForbiddenMergeFaces(forbidden_fcs)
+        if (.not.options%slab) call grid%GetForbiddenMergeFaces(forbidden_fcs)
 
         ! Initialize
         qm%merge_fc = 0
@@ -1004,7 +1004,7 @@ module gamod_types
             crit = sum(qm%cvS) / c%ntot
 
             ! Distance function 
-            dfunv = grid%fun%distr%Evaluate(c%x%Get(), c%y%Get())
+            call grid%fun%distr%Evaluate(c%x%Get(), c%y%Get(), dfunv)
             log = (dfunv .lt. options%dist_function_threshold_merge)
             indcv = (/ (i, i = 1, c%ntot)/)
             allocate(cells(count(log)))
@@ -1041,8 +1041,8 @@ module gamod_types
                             
                             ! TODO
                             if (f%aligned%Get(fcs(j)) == 0 &
-                                .and. .not.isMember(fcs(j), forbidden_fcs) &
-                                .and. isMember(neig, small_cells)) then
+                                .and. .not.any(fcs(j) == forbidden_fcs) &
+                                .and. any(neig == small_cells)) then
 
                                     if (c%reg%Get(cvs(1)) == c%reg%Get(cvs(2))) then
 
@@ -2595,8 +2595,9 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: cvLookUp, v1n, v2n, cf, &
             cellnumbers, verts_of_cell, cvertP2, cfaceP2, fcs, ccflags, nvxs, &
             b_cells, indCv, cvertP1, cfaceP1
-        integer(I8) :: verts_of_face(1:2), nc, nf, l, ic, nb, i, j, counter, &
-            nface, nvert
+        integer(I8) :: verts_of_face(1:2), nf, l, ic, nb, i, j, counter, &
+            nface, nvert, ncpf(grid%face%ntot)
+        logical, allocatable :: logcf(:)   
 
         ! Associate
         associate(&
@@ -2621,16 +2622,28 @@ module gamod_types
             ccflags = c%cflags%GetAllElements()
 
             ! Check 0 - Check pointer consistency
-            do ic = 2, c%ntot
-                if (cvertP1(ic) /= cvertP1(ic-1)+cvertP2(ic-1)) then
-                    print *, 'Cell:', ic 
-                    call gdErrorHandler('CheckUnstructuredGrid: check 0, point cvertP not consistent')
-                endif
-                if (cfaceP1(ic) /= cfaceP1(ic-1)+cfaceP2(ic-1)) then
-                    call gdErrorHandler('CheckUnstructuredGrid: check 0, point cfaceP not consistent')
-                endif
+            if (any(cvertP1(2:c%ntot) /= (cvertP1(1:c%ntot-1)+cvertP2(1:c%ntot-1)))) then
 
-            end do
+                ! Get where the inconsistency is 
+                do ic = 2, c%ntot
+                    if (cvertP1(ic) /= cvertP1(ic-1)+cvertP2(ic-1)) then
+                        print *, 'Cell:', ic 
+                        call gdErrorHandler('CheckUnstructuredGrid: check 0, point cvertP not consistent')
+                    endif
+                end do 
+
+            end if 
+            if (any(cfaceP1(2:c%ntot) /= cfaceP1(1:c%ntot-1)+cfaceP2(1:c%ntot-1))) then
+
+                ! Get where the inconsistency is 
+                do ic = 2, c%ntot
+                    if (cfaceP1(ic) /= cfaceP1(ic-1)+cfaceP2(ic-1)) then
+                        print *, 'Cell:', ic 
+                        call gdErrorHandler('CheckUnstructuredGrid: check 0, point cfaceP not consistent')
+                    endif                    
+                end do
+
+            end if
 
             ! Check 1 - Equal lengths of data
             if ((c%vertP1%Size() /= c%ntot) .or. (c%faceP1%Size() /=  c%ntot) &
@@ -2648,29 +2661,32 @@ module gamod_types
             !voor alle faces, minstens 1 cell, 
             ! de twee vertices van het face moeten voorkomen in de verts van de (beide) cell
 
-            !first make the cvLookUp
+            ! Initialize
             nvert = c%vertP1%Get(c%ntot)+c%vertP2%Get(c%ntot)-1
             allocate(cvLookUp(nvert))
             cvLookUp = GetCvLookUpGA(c)
+            allocate(cellnumbers(10))
+            cellnumbers = 0
+            allocate(logcf(size(cf))) 
 
             do j = 1,f%ntot
                 verts_of_face(1) = v1n(j)
                 verts_of_face(2) = v2n(j)
 
-                ! find a cell where the face is attached
-                nc = count(cf == j)
-                allocate(cellnumbers(nc))
-                cellnumbers = pack(cvLookUp,cf == j)
-                if (nc .gt. 2) then
+                ! Find a cell where the face is attached
+                logcf = (cf == j)
+                ncpf(j) = count(logcf)
+                !allocate(cellnumbers(nc))
+                cellnumbers(1:ncpf(j)) = pack(cvLookUp,logcf)
+                if (ncpf(j) .gt. 2) then
                     print *, 'Face: ', j
                     call gdErrorHandler('CheckUnstructuredGrid: check 3, more than two' // &
                      & 'cells connected to face')
                 end if
 
                 !get vertices of cells
-                do l = 1, nc
-                    ic = cellnumbers(l);
-                    verts_of_cell = GetCellVertGA(c,ic)
+                do l = 1, ncpf(j)
+                    verts_of_cell = GetCellVertGA(c,cellnumbers(l))
                     !verts_of_face moeten voorkomen in verts_of_cells
                     do i = 1,2
                         if (.not.any(verts_of_cell == verts_of_face(i))) then
@@ -2686,18 +2702,17 @@ module gamod_types
                         end if
                     end do
                 end do
-                
-                deallocate(cellnumbers)
 
             end do
 
             ! Check 4 - whether all internal cells have faces which are connected to two cells
             do ic = 1, c%ntot
-                nf = cfaceP2(ic);
-                fcs = GetCellFaceGA(c, ic)
+
+                ! Only internal faces
                 if (ccflags(ic) == 1) then
-                    do i = 1, nf
-                        if (.not.( count(cf == fcs(i)) .eq. 2 ) ) then
+                    fcs = GetCellFaceGA(c, ic)
+                    do i = 1, size(fcs)
+                        if (.not.( ncpf(fcs(i)) .eq. 2 ) ) then
                             call gdErrorHandler('CheckUnstructuredGrid: check 4, not all internal faces have two cells')
                         end if
 
@@ -2716,6 +2731,7 @@ module gamod_types
             !    plot(fcX(dup_faces),fcY(dup_faces),'g*')
             !    error('CheckUnstructuredGrid: Check 5, overlapping faces')
             !end
+
             ! Check 6 every vertex is only once in a flux surface
             if (allocated(fd%fluxsurfaceverts)) then
                 if (fd%fluxsurfaceverts%Size() /= 0) then
@@ -2748,14 +2764,14 @@ module gamod_types
             indCv = (/ (i, i = 1, c%ntot) /)
             b_cells = pack(indCv,ccflags .eq. 3) ! boundary cells
             do i = 1, nb
-                ic = b_cells(i)
-                nf = cfaceP2(ic);
-                fcs = GetCellFaceGA(c, ic)
 
-                counter = 0;
+                nf = cfaceP2(b_cells(i))
+                fcs = GetCellFaceGA(c, b_cells(i))
+
+                counter = 0
                 do j = 1,nf
-                    if (count(cf == fcs(j)) .eq. 1 )  then
-                        counter = counter + 1;
+                    if ( ncpf(fcs(j)) .eq. 1 )  then
+                        counter = counter + 1
                     end if
                 end do
 
@@ -4867,7 +4883,7 @@ module gamod_types
 
 
         ! Calculate metrics
-        call qm%CalculateQualityMetrics(options, magneticField,.false.,.true.)
+        call qm%CalculateQualityMetrics(grid, options, magneticField,.false.,.true.)
 
         i = 0
         do while ((qm%merge_fc /= 0) .and. (i .lt. options%n_merge))
@@ -4882,7 +4898,7 @@ module gamod_types
             if (.not.options%slab) call grid%RecalcMagn(magneticField)
 
             ! Recompute metrics
-            call qm%CalculateQualityMetrics(options, magneticField,.false.,.true.)  
+            call qm%CalculateQualityMetrics(grid, options, magneticField,.false.,.true.)  
             
             ! Check grid
             if (options%debug) call grid%CheckUnstructuredGrid(.false.)

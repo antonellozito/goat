@@ -207,7 +207,7 @@ module gamod_driver
         type(MagneticFieldUDT), intent(in)   :: magneticField
 
         ! Auxiliary
-        type(QualityMetric) :: qm
+        type(QualityMetricUDT) :: qm
 
         ! Calculate quality metric
         call qm%Initialize(grid)
