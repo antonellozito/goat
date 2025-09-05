@@ -199,6 +199,75 @@ module mod_dynamicarrays
 
     end type 
 
+    ! Integer dynamic array efficient class
+    type :: IntegerDynamicArrayGAUDT
+
+        ! Description
+        !============
+        ! This is the base dynamic array type for general purpose 
+        ! dynamic array operations. Only for Integer values (integer has 
+        ! its own UDT). This type of array is typically larger than
+        ! the amount of values to have less events where the 
+        ! array size need to change when new elements are appended.
+
+        integer(kind=ik), allocatable   :: val(:) ! values
+        integer(kind=ik)                :: nel    ! number of element in use
+        
+    contains
+
+        ! Expand array
+        procedure   :: Expand                   => ExpandIDAGA
+
+        ! Element insertion
+        procedure   :: InsertSingleElement      => InsertSingleElementIDAGA
+        procedure   :: InsertMultipleElements   => InsertMultipleElementsIDAGA
+        generic     :: Insert                   => &
+            InsertSingleElement, InsertMultipleElements
+
+        ! Element appending
+        procedure   :: AppendSingleElement      => AppendSingleElementIDAGA
+        procedure   :: AppendMultipleElements   => AppendMultipleElementsIDAGA
+        generic     :: Append                   => &
+            AppendSingleElement, AppendMultipleElements
+
+        ! Element removal
+        procedure   :: RemoveSingleElement      => RemoveSingleElementIDAGA
+        procedure   :: RemoveMultipleElements   => RemoveMultipleElementsIDAGA
+        generic     :: Remove                   => &
+            RemoveSingleElement, RemoveMultipleElements
+
+        ! Element getter
+        procedure   :: GetSingleElement      => GetSingleElementIDAGA
+        procedure   :: GetMultipleElements   => GetMultipleElementsIDAGA
+        procedure   :: GetAllElements        => GetAllElementsIDAGA
+        generic     :: Get                   => &
+            GetSingleElement, GetMultipleElements, GetAllElements
+
+        ! Element setter
+        procedure   :: SetSingleElement      => SetSingleElementIDAGA
+        procedure   :: SetMultipleElements   => SetMultipleElementsIDAGA
+        procedure   :: SetAllElementsScalar  => SetAllElementsScalarIDAGA
+        procedure   :: SetAllElementsArray   => SetAllElementsArrayIDAGA
+        generic     :: Set                   => &
+            SetSingleElement, SetMultipleElements, SetAllElementsScalar, &
+            SetAllElementsArray
+
+        ! Number of element getter
+        procedure   :: Size                  => GetSizeIDAGA
+
+        ! Sum with Mask
+        procedure   :: SumMask1D               => SumIDAScalarMask1DGA
+        procedure   :: SumMask0D               => SumIDAScalarMask0DGA
+        generic     :: SumMask                 => &
+            SumMask0D, SumMask1D
+
+        ! Replace
+        procedure   :: Replace               => ReplaceIDAGA
+
+        ! Update after entry removal
+        procedure   :: UpdateArray           => UpdateArrayIDAGA
+
+    end type
     !==================================================================!
     !                                                                  !
     !                            INTERFACES                            !
@@ -1533,5 +1602,580 @@ contains
 
     end function
     
+
+    !------------------------------------------------------------------!
+    !                    INTEGER DYNAMIC GA ARRAY                      !
+    !------------------------------------------------------------------!
+
+    ! Constructors
+    !=============
+    ! General constructor
+    function ConstructIntegerDynamicArrayGA(val) result(ida)
+
+        ! Description
+        !============
+        ! Arrays are constructed empty by default. Adding values should
+        ! be done later on (if the optional argument 'val' is given, 
+        ! then these values are constructed directly)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(IntegerDynamicArrayGAUDT)      :: ida 
+        integer(I8), intent(in), optional   :: val(:)
+
+        ! Auxiliary
+
+
+        ! Construct
+        !==========
+        if (present(val)) then 
+            ida%nel = size(val)
+            allocate(ida%val(nint(ida%nel*1.1_R8)))
+            ida%val(1:ida%nel) = val 
+        else 
+            ! empty array
+            allocate(ida%val(0))
+        end if 
+        
+    end function   
+    
+    ! Array manipulators
+    !===================
+    ! Expanding array
+    subroutine ExpandIDAGA(ida, n)
+
+        ! Description
+        !============
+        ! Expands an array with 10% extra size
+        ! above the minimal needed expansion
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayGAUDT) :: ida
+        integer(ik), intent(in)         :: n
+
+        ! Auxiliary
+        integer(ik), allocatable        :: val1(:)
+
+        ! Determine new size
+        val1 = ida%val
+        deallocate(ida%val)
+        allocate(ida%val(nint(size(val1)*1.1_R8) + n))
+        ida%val = 0
+        ida%val(1:size(val1)) = val1
+
+    end subroutine
+
+    ! Single element appending 
+    subroutine AppendSingleElementIDAGA(ida, val)
+
+        ! Description
+        !============
+        ! Append a single element to the end of the array.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayGAUDT)          :: ida 
+        integer(ik), intent(in)                :: val 
+
+        ! Append
+        !=======
+        ! Update counter
+        ida%nel = ida%nel + 1
+            
+        if (ida%nel .gt. size(ida%val)) then
+            ! Make the array larger
+            call ida%Expand(1)
+        end if
+
+        ida%val(ida%nel) = val
+
+    end subroutine 
+
+    ! Multiple element appending
+    subroutine AppendMultipleElementsIDAGA(ida, val)
+
+        ! Description
+        !============
+        ! Append a multiple elements to the end of the array.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayGAUDT)          :: ida 
+        integer(ik), intent(in)                :: val(:) 
+
+        ! Auxiliary
+        integer(ik)                             :: old_size
+
+        ! Append
+        !=======
+        ! Update counter
+        old_size = ida%nel
+        ida%nel = ida%nel + size(val)
+            
+        if (ida%nel .gt. size(ida%val)) then
+
+            ! Make the array larger
+            call ida%Expand(size(val))
+
+        end if
+
+        ida%val(old_size+1:ida%nel) = val
+
+    end subroutine   
+    
+    ! Single element insertion
+    subroutine InsertSingleElementIDAGA(ida, val, loc)
+
+        ! Description
+        !============
+        ! Add a single element to an arbitrary location to the array. 
+        ! Note that we don't explicitly check for a feasible location
+        ! value! In case it is negative, then the element will simply be
+        ! added to the beginning of the array. If it's higher than the 
+        ! array size, it will be appended. 
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(IntegerDynamicArrayGAUDT)       :: ida 
+        integer(ik), intent(in)             :: val 
+        integer(ik), intent(in)             :: loc 
+
+        ! Auxiliary
+        integer(ik), allocatable           :: temp1(:)
+
+        ! Insert
+        !=======
+        ! Split up array
+        temp1 = ida%val(loc:ida%nel)
+
+        ! Update counter
+        ida%nel = ida%nel + 1
+
+        if (ida%nel .gt. size(ida%val)) then
+            call ida%Expand(1)
+        end if
+
+        ! Reconstruct
+        ida%val(loc:ida%nel) = [val, temp1]
+
+    end subroutine
+
+    ! Multiple element insertion
+    subroutine InsertMultipleElementsIDAGA(ida, val, loc)
+
+        ! Description
+        !============
+        ! Add multiple elements to an arbitrary location to the array. 
+        ! Here, we simply call the single insertion routine multiple
+        ! times and update the location as needed. Probably not the 
+        ! most efficient way for many elements or when called many times
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(IntegerDynamicArrayGAUDT)       :: ida 
+        integer(ik), intent(in)             :: val(:) 
+        integer(ik), intent(in)             :: loc(:) 
+
+        ! Auxiliary
+        integer(ik)                     :: nval
+        integer(ik)                     :: tloc(size(val))
+
+        ! Loop
+        integer(ik)                     :: i
+
+        ! Check
+        !======
+        if (size(loc) /= size(val)) then 
+            call gdErrorHandler('InsertMultipleElementsIDAGA: incompatible ' // &
+                'sizes of val and loc')
+        end if 
+
+        ! Add
+        !====
+        tloc = loc
+        nval = size(val)
+        do i = 1, nval
+            ! Add the next element
+            call ida%Insert(val(i), tloc(i))
+
+            ! Update the location
+            where (tloc >= tloc(i)) tloc = tloc + 1
+        end do 
+
+    end subroutine 
+
+    ! Single element deletion
+    subroutine RemoveSingleElementIDAGA(ida, loc)
+
+        ! Description
+        !============
+        ! Remove a single element at a certain array location. We do 
+        ! not explicitly check if the location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(IntegerDynamicArrayGAUDT)     :: ida 
+        integer(ik), intent(in)             :: loc 
+
+        ! Auxiliary
+        integer(ik), allocatable            :: temp1(:)
+
+        ! Remove
+        !=======
+        if (loc > size(ida%val)) then 
+            call gdErrorHandler('RemoveSingleElementGAIDA: index is out of bounds')
+        end if 
+
+        ! Split up array - take only slice that moves
+        temp1 = ida%val(loc+1:ida%nel)
+
+        ! Reconstruct
+        ida%nel = ida%nel - 1
+        ida%val(loc:ida%nel) = temp1
+        ida%val(ida%nel + 1:size(ida%val) ) = 0
+
+    end subroutine
+
+    ! Multiple element deletion
+    subroutine RemoveMultipleElementsIDAGA(ida, loc)
+
+        ! Description
+        !============
+        ! Remove multiple elements at a certain array location. We do 
+        ! not explicitly check if the location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments 
+        class(IntegerDynamicArrayGAUDT)     :: ida 
+        integer(ik), intent(in)             :: loc(:)
+
+        ! Auxiliary
+        logical, allocatable                :: mask(:)
+        integer(ik)                         :: old_size
+
+        ! Remove
+        !=======
+        ! Set mask
+        old_size = ida%nel
+        if (any(loc > size(ida%val))) then 
+            call gdErrorHandler('RemoveSingleElementIDAGA: index is out of bounds')
+        end if 
+        allocate(mask(old_size))
+        mask = .true.
+        mask(loc) = .false. 
+
+        ! Remove
+        ida%nel = ida%nel - size(loc)
+        ida%val(1:ida%nel) = pack(ida%val(1:old_size), mask)
+        ida%val(ida%nel+1:size(ida%val)) = 0
+
+        ! Maybe shrink the array if size is big difference - TODO
+
+
+    end subroutine 
+
+    ! Single element getter
+    function GetSingleElementIDAGA(ida, loc) result(val)
+
+        ! Description
+        !============
+        ! Get the value of a single element on a specified location. It
+        ! is checked whether this location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayGAUDT) :: ida 
+        integer(ik), intent(in)         :: loc 
+        integer(ik)                     :: val 
+
+        ! Get 
+        !====
+        val = ida%val(loc)
+
+        if (loc .gt. ida%nel) then
+            call gdErrorHandler('GetSingleElementIDAGA: invald location')
+        end if
+
+    end function
+
+    ! Multiple element getter
+    function GetMultipleElementsIDAGA(ida, loc) result(val)
+
+        ! Description
+        !============
+        ! Get the value of multiple elements on a specified location. It
+        ! is not checked whether this location is valid. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayGAUDT)   :: ida 
+        integer(ik), intent(in)         :: loc(:) 
+        integer(ik)                     :: val(size(loc))
+
+        ! Get 
+        !====
+        val = ida%val(loc)
+
+        if (maxval(loc) .gt. ida%nel) then
+            call gdErrorHandler('GetMultipleElementsIDAGA: invalid location')
+        end if
+        
+    end function
+
+    ! All element getter
+    function GetAllElementsIDAGA(ida) result(val)
+
+        ! Description
+        !============
+        ! Get the value of all elements as an array. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayGAUDT)     :: ida 
+        integer(ik)                         :: val(ida%nel)
+
+        ! Get 
+        !====
+        val = ida%val(1:ida%nel)
+        
+    end function
+
+    ! Single element setter
+    subroutine SetSingleElementIDAGA(ida, loc, val)
+
+        ! Description
+        !============
+        ! Set the value of a single element on a specified location. If
+        ! the location is larger than the current array size, the array
+        ! is extended with zeros up to the required array size and
+        ! 10 percent longer.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayGAUDT)   :: ida 
+        integer(ik), intent(in)         :: loc 
+        integer(ik)                     :: val 
+
+        ! Set 
+        !====
+        if (size(ida%val) < loc) then 
+            call ida%Expand(loc - size(ida%val))
+            ida%nel = loc
+        end if 
+        if (loc > ida%nel) then
+            ida%nel = loc
+        end if
+        ida%val(loc) = val
+
+    end subroutine
+    ! Multiple element setter
+    subroutine SetMultipleElementsIDAGA(ida, loc, val)
+
+        ! Description
+        !============
+        ! Set the value of multiple elements on a specified location. If
+        ! the location is larger than the current array size, the array
+        ! is extended with zeros up to the required array size and
+        ! 10 procent more. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayGAUDT) :: ida 
+        integer(ik), intent(in)         :: loc(:) 
+        integer(ik)                     :: val(size(loc))
+
+        ! Set 
+        !====
+        if (size(ida%val) < maxval(loc)) then 
+            call ida%Expand(maxval(loc) - size(ida%val))
+            ida%nel = maxval(loc)
+        end if 
+        if (maxval(loc) .gt. ida%nel) then
+            ida%nel = maxval(loc)
+        end if
+        ida%val(loc) = val
+        
+    end subroutine
+
+    ! All element setter
+    subroutine SetAllElementsScalarIDAGA(ida, val) 
+
+        ! Description
+        !============
+        ! Set the value of all elements to a single scalar value
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayGAUDT)  :: ida 
+        integer(ik)                    :: val
+
+        ! Set 
+        !====
+        ida%val(1:ida%nel) = val
+        
+    end subroutine
+
+    ! All element setter
+    subroutine SetAllElementsArrayIDAGA(ida, val) 
+
+        ! Description
+        !============
+        ! Set the value of all elements to a single scalar value
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(IntegerDynamicArrayGAUDT)  :: ida 
+        integer(ik), dimension(:)      :: val
+
+        ! Set 
+        !====
+        ida%val(1:ida%nel) = val
+        
+    end subroutine
+    
+    ! Size getter
+    function GetSizeIDAGA(ida) result(s)
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayGAUDT)   :: ida 
+        integer(ik)                     :: s 
+
+        ! Determine size
+        !===============
+        ! easy here
+        s = ida%nel
+
+    end function 
+
+    ! Replace
+    subroutine ReplaceIDAGA(ida,loc_begin,loc_end,val)
+        
+        ! Description
+        !============
+        ! Replaces the array elements located from index loc_begin
+        ! till index loc_end, with the array val. This operation
+        ! is a short cut for removing and inserting elements
+        ! with different sizes at the same location.
+        ! Note: if the size loc_begin to loc_end is longer than
+        ! the size of val, the rest of the element will be zeros
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayGAUDT)     :: ida
+        integer(ik), intent(in)             :: loc_begin
+        integer(ik), intent(in)             :: loc_end
+        integer(ik), allocatable            :: val(:)
+
+        ! Auxiliary
+        integer(ik)                         :: size_place
+
+        ! Insert val
+        !===========
+        ! Check size of locations
+        size_place = loc_end - loc_begin + 1
+        if (size_place .lt. size(val)) then
+
+            call gdErrorHandler('ReplaceIDAGA: not able to replace')
+
+        end if 
+
+        ! Check whether appending is needed
+        if (loc_end .gt. size(ida%val)) then
+            call ida%Expand(loc_end - size(ida%val))
+            ida%nel = loc_end
+        end if
+        if (loc_end .gt. ida%nel) then
+            ida%nel = loc_end
+        end if 
+
+        ! Assign
+        ida%val(loc_begin:loc_end) = 0
+        ida%val(loc_begin:loc_begin+size(val)-1) = val        
+
+    end subroutine
+
+    ! Sum with Mask as single location
+    subroutine SumIDAScalarMask0DGA(ida,loc,val) 
+
+        ! Description
+        !============
+        ! Increment the value of one elements on a specified location with val.
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayGAUDT)   :: ida 
+        integer(ik), intent(in)         :: loc 
+        integer(ik)                     :: val
+
+        ! Sum
+        ida%val(loc) = ida%val(loc) + val
+        
+    end subroutine  
+    
+    ! Sum with Mask as 1D array
+    subroutine SumIDAScalarMask1DGA(ida,loc,val) 
+
+        ! Description
+        !============
+        ! Increment the value of multiple elements on a specified location with val. If
+        ! the location is larger than the current array size, the array
+        ! is extended with zeros up to the required array size.
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayGAUDT)           :: ida 
+        integer(ik), intent(in), allocatable    :: loc(:) 
+        integer(ik)                             :: val
+
+        if (size(ida%val) < maxval(loc)) then 
+            call ida%Append(spread(0_I8, 1, maxval(loc) - size(ida%val)))
+        end if 
+
+        ida%val(loc) = ida%val(loc) + val
+        
+    end subroutine 
+    
+    subroutine UpdateArrayIDAGA(ida,val)
+
+        ! Description
+        !============
+        ! In the case where a entry of an array got removed
+        ! and all the entry of the array which are larger than
+        ! the removed array need to be decreased by one
+        ! F.e. a vertex got removed out of vert%x etc. So 
+        ! all vertices with larger number need to decrease by one
+        ! in cell%vert and face%vert. This routine bundels the 
+        ! needed operations
+
+        ! Declare variables
+        !==================
+        class(IntegerDynamicArrayGAUDT) :: ida
+        integer(I8) :: val
+
+        ! Auxiliary
+        integer(I8) :: j 
+        integer(I8), allocatable :: ind(:), loc(:)
+
+        ind = (/ (j, j = 1, ida%nel) /)
+        loc = pack(ind, ida%val(1:ida%nel) .gt. val)
+        ida%val(loc) = ida%val(loc) - 1
+
+    end subroutine  
 
 end module 
