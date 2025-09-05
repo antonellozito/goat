@@ -966,12 +966,14 @@ module gamod_types
         type(GAoptionsUDT)          :: options
 
         ! Auxiliary 
-        integer(I8) :: i, j, neig
+        integer(I8) :: i, j, neig, nf
         integer(I8), allocatable, dimension(:) :: forbidden_fcs, &
-            indsort, cells, small_cells, fcs, cvs, cvLookUp, indcv
-        real(R8) :: crit, dfunv(grid%cell%ntot)
-        real(R8), allocatable :: area_small_cells(:)
-        logical, allocatable :: log(:), log2(:)
+            indsort, cells, small_cells, fcs, cvs, cvLookUp, indcv, &
+            no_cells, trias, cells2, indfc, pol_faces, fcs1, fcs2
+        real(R8) :: crit, dfunv(grid%cell%ntot), h_pol_no_cells_crit
+        real(R8), allocatable, dimension(:) :: area_small_cells, &
+            h_pol_no_cells_sorted, h_pol_cells, h_pol_cvs, bias
+        logical, allocatable :: log(:), log2(:), trias_log(:)
 
         ! Associate
         associate(&
@@ -1039,8 +1041,7 @@ module gamod_types
                                 neig = cvs(2)
                             end if
                             
-                            ! TODO
-                            if (f%aligned%Get(fcs(j)) == 0 &
+                            if (isPoloidal(grid, fcs(j), cvLookUp) &
                                 .and. .not.any(fcs(j) == forbidden_fcs) &
                                 .and. any(neig == small_cells)) then
 
@@ -1063,6 +1064,136 @@ module gamod_types
 
             end if
             
+        case ('minimal_grid')
+
+            call gdErrorHandler('SelectMergingFace: merge criterium minimal grid not implemented')
+
+        case ('h_pol')
+
+            ! Remove merge cells with too small h_pol
+
+            ! Distance function 
+            call grid%fun%distr%Evaluate(c%x%Get(), c%y%Get(), dfunv)
+            log = (dfunv .lt. options%dist_function_threshold_merge)
+            indcv = (/ (i, i = 1, c%ntot)/)
+            allocate(cells(count(log)))
+            cells = pack(indcv, log)
+
+            ! Second distance function use
+            log = (dfunv .gt. options%dist_function_threshold_merge + 0.01_R8)
+            indcv = (/ (i, i = 1, c%ntot)/)
+            allocate(no_cells(count(log)))
+            no_cells = pack(indcv, log)
+
+            !  Take the 10 percentile biggest cell to avoid large Xcells
+            ! influencing
+            h_pol_no_cells_sorted = qm%h_pol(no_cells)
+            allocate(indsort(size(h_pol_no_cells_sorted)))
+            call Sort(h_pol_no_cells_sorted,indsort,.false.)
+            deallocate(indsort)
+            h_pol_no_cells_crit = h_pol_no_cells_sorted(nint(size(no_cells)/real(10, kind=R8)))
+
+            ! Multiplication of criterium = criterium for good size
+            ! All cells smaller should be merged
+            crit = h_pol_no_cells_crit * options%merge_h_pol_factor
+
+            ! Give triangles artifical larger h_pol
+            trias_log = (c%vertP2%Get() ==3)
+            allocate(trias(count(trias_log)))
+            trias = pack(indcv, trias_log)
+            qm%h_pol(trias) = qm%h_pol(trias)*2
+
+
+            allocate(cells2(count(qm%h_pol(cells) .lt. crit)))
+            cells2 = pack(cells, qm%h_pol(cells) .lt. crit)  
+            h_pol_cells = qm%h_pol(cells2)
+            allocate(indsort(size(h_pol_cells)))
+            call Sort(h_pol_cells, indsort)    
+            cells2 = cells2(indsort)
+
+            ! Find the most interesting merge face
+            if (size(cells2) /= 0) then
+
+                do i = 1, size(cells2)
+
+                    ! Get faces
+                    fcs = GetCellFaceGA(c, cells2(i))
+
+                    do j = 1, size(fcs)
+
+                        cvs = GetFaceCellGA(c, fcs(j), cvLookUp)
+                        if (size(cvs) == 2) then
+
+                            if (cvs(1) /= cells2(i)) then
+                                neig = cvs(1)
+                            else if (cvs(2) /= cells2(i)) then
+                                neig = cvs(2)
+                            end if
+                            
+                            if (isPoloidal(grid, fcs(j), cvLookUp) &
+                                .and. .not.any(fcs(j) == forbidden_fcs) &
+                                .and. any(neig == cells2)) then
+
+                                    if (c%reg%Get(cvs(1)) == c%reg%Get(cvs(2))) then
+
+                                        qm%merge_fc = fcs(j)
+
+                                    end if
+
+                            end if
+
+                        end if
+                        
+                    end do
+
+                    ! Exit when face is found
+                    if (qm%merge_fc /= 0) exit
+
+                end do
+
+            end if
+
+
+        case ('bias')
+
+            ! Merge the cells with strong bias
+            ! Get non-aligned faces
+            indfc = (/ (i, i = 1, f%ntot) /)
+            log = (f%aligned%Get() == 0 .and. .not.isMember(indfc,forbidden_fcs))
+            allocate(pol_faces(count(log)))
+            pol_faces = pack(indfc, log)
+
+            nf = size(pol_faces)
+            allocate(bias(nf))
+            bias = 0
+            do i = 1, nf
+
+                cvs = GetFaceCellGA(c, pol_faces(i), cvLookUp)
+                if (size(cvs) == 2) then
+                    if (c%reg%Get(cvs(1)) == c%reg%Get(cvs(2))) then
+
+                        ! Get faces
+                        fcs1 = GetCellFaceGA(c, cvs(1))
+                        fcs2 = GetCellFaceGA(c, cvs(2))
+
+                        if (sum(f%aligned%Get(fcs1)) == 2 .and. sum(f%aligned%Get(fcs2)) == 2) then
+                            h_pol_cvs = qm%h_pol(cvs)
+                            bias(i) = maxval(h_pol_cvs) / minval(h_pol_cvs)
+                        end if
+
+                    end if
+
+                end if
+
+            end do
+
+            ! Sort for descending bias
+            call Sort(bias, indsort, .false.)
+            pol_faces = pol_faces(indsort)
+            if (bias(1) .gt. options%merge_bias_limit) then
+                qm%merge_fc = pol_faces(1)
+            end if
+        
         case default
 
             call gdErrorHandler('SelectMergingFace: merge criterium not implemented')
@@ -4881,6 +5012,9 @@ module gamod_types
         ! Auxiliary
         integer(I8) :: i
 
+        ! Printing
+        print *, 'Merging: ', options%merge_crit
+
 
         ! Calculate metrics
         call qm%CalculateQualityMetrics(grid, options, magneticField,.false.,.true.)
@@ -4894,6 +5028,9 @@ module gamod_types
             ! Update counter
             i = i + 1
 
+            ! Printing
+            print *, 'Applied cell merging ', i
+
             ! Recalculate magneticField
             if (.not.options%slab) call grid%RecalcMagn(magneticField)
 
@@ -4906,6 +5043,10 @@ module gamod_types
         end do
 
         ! Transform remaining pentagons into triangles - TODO
+
+        ! Printing
+        print *, 'Ended merging: ', options%merge_crit
+
 
 
     end subroutine
@@ -7522,7 +7663,7 @@ module gamod_types
     function GetFaceCellGA(cell, i, cvLookUp) result(res)
         integer(I8)                 :: i 
         type(GACellUDT)               :: cell
-        integer(I8), allocatable, optional    :: cvLookUp(:)
+        integer(I8), allocatable, optional  :: cvLookUp(:)
         integer(I8), allocatable    :: res(:)  
         
         if (.not.present(cvLookUp)) then
@@ -7843,6 +7984,51 @@ module gamod_types
      
     end function
 
+    function isPoloidal(grid, fcs, cvLookUp) result(res)
+        type(GAGridUDT) :: grid
+        integer(I8) :: fcs
+        logical :: res
+        integer(I8), allocatable :: fcs1(:), fcs2(:), cvs(:), &
+            faces(:), cvLookUp(:)
+
+        res = .false.
+        if (grid%face%aligned%Get(fcs) == 0) then
+            cvs = GetFaceCellGA(grid%cell, fcs, cvLookUp)
+            if (size(cvs) == 2) then
+                fcs1 = GetCellFaceGA(grid%cell, cvs(1))
+                fcs2 = GetCellFaceGA(grid%cell, cvs(2))
+
+                if (size(fcs1) + size(fcs1) == 8) then
+
+                    faces = [fcs1, fcs2]
+                    if ((sum(grid%face%aligned%Get(faces)) == 4) &
+                        .or. (sum(grid%face%aligned%Get(faces)) == 3)) &
+                        res = .true.
+
+                else if (size(fcs1) == 3 .and. size(fcs2) == 4) then
+
+                    if ((sum(grid%face%aligned%Get(fcs1)) == 1) &
+                        .and. (sum(grid%face%aligned%Get(fcs2)) == 2)) &
+                        res = .true.
+
+                else if (size(fcs1) == 4 .and. size(fcs2) == 3) then
+                    if ((sum(grid%face%aligned%Get(fcs1)) == 2) &
+                        .and. (sum(grid%face%aligned%Get(fcs2)) == 1)) &
+                        res = .true.                    
+                end if
+
+            else ! boundary face
+                fcs1 = GetCellFaceGA(grid%cell, cvs(1))
+                if (size(fcs1) == 3) then
+                   if (sum(grid%face%aligned%Get(fcs1))== 1) res = .true.
+                else if (size(fcs1) == 4) then
+                   if (sum(grid%face%aligned%Get(fcs1))== 2) res = .true. 
+                end if
+            end if
+        end if
+
+    end function
+    
     function GetCommonFace(cell, ic1, ic2) result(res)
         type(GACellUDT) :: cell
         integer(I8) :: ic1, ic2, res, i
