@@ -972,7 +972,8 @@ module gamod_types
             no_cells, trias, cells2, indfc, pol_faces, fcs1, fcs2
         real(R8) :: crit, dfunv(grid%cell%ntot), h_pol_no_cells_crit
         real(R8), allocatable, dimension(:) :: area_small_cells, &
-            h_pol_no_cells_sorted, h_pol_cells, h_pol_cvs, bias
+            h_pol_no_cells_sorted, h_pol_cells, h_pol_cvs, bias, &
+            pol_fluxdens_est
         logical, allocatable :: log(:), log2(:), trias_log(:)
 
         ! Associate
@@ -1206,7 +1207,7 @@ module gamod_types
             call grid%fun_r%distr%Evaluate(c%x%Get(cells), c%y%Get(cells), pol_fluxdens_est)
 
             log = (pol_fluxdens_est .lt. 0.5_R8)
-            
+
 
 
 
@@ -1399,6 +1400,7 @@ module gamod_types
         ! Arguments
         type(GridUDT), intent(in)       :: grid
         type(GAGridUDT), intent(out)    :: GAgrid
+
 
         ! Initialize GAGrid
         call GAgrid%Initialize()
