@@ -1193,6 +1193,31 @@ module gamod_types
             if (bias(1) .gt. options%merge_bias_limit) then
                 qm%merge_fc = pol_faces(1)
             end if
+
+        case ('pol_flux')
+
+            ! Distance function fun_r
+            ! Only use cells in SOL
+            log = (c%reg%Get() == 2)
+            allocate(cells(count(log)))
+            cells = pack(indcv, log)
+
+            allocate(pol_fluxdens_est(size(cells)))
+            call grid%fun_r%distr%Evaluate(c%x%Get(cells), c%y%Get(cells), pol_fluxdens_est)
+
+            log = (pol_fluxdens_est .lt. 0.5_R8)
+            
+
+
+
+        case ('h_rad')
+        case ('h_rad_core')
+        case ('bias_rad_farSOL')
+        case ('bias_rad')
+        case ('skew_tria')
+        case ('manual')
+
+            call gdErrorHandler('SelectMergingFace: manual merging via input not possible in precompile code')
         
         case default
 
