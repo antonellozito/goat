@@ -463,6 +463,11 @@ module gamod_driver
             bpvx = 0
         end do
 
+        ! Save
+        c%bp = bp
+        c%bt = bt
+
+
         ! Recalculate psi at cell centers
         call magneticField%interp%Evaluate(c%x,c%y,0,0,c%psi)
 
@@ -514,6 +519,9 @@ module gamod_driver
             vxsfd(1:nv) = grid%data%fluxdata%fluxsurfaceverts(s:s+nv-1)
             fsPsi(ifs) = sum(v%psi(vxsfd(1:nv))) / real(nv, kind=R8)
         end do
+
+        ! Save
+        grid%data%fluxdata%fluxsurfacepsi = fsPsi
 
         ! Determine OMP and IMP - TODO
         call DetermineMPs(grid, options)

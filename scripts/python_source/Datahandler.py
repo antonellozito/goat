@@ -1256,7 +1256,7 @@ def ReadGAGridDataFile(filepath):
 
     # Read vertex data
     while i < len(alllines):
-        if "ID, x, y, fieldlineID" in alllines[i]:
+        if "ID, x, y" in alllines[i]:
             break 
         else: 
             i = i + 1
@@ -1271,11 +1271,9 @@ def ReadGAGridDataFile(filepath):
         ID = ID[0]
         x = np.fromstring(values[1], dtype=float, count=1, sep =' ')
         y = np.fromstring(values[2], dtype=float, count=1, sep =' ')
-        fID = np.fromstring(values[3], dtype=int, count=1, sep =' ')
         grid.vert.ID[ID-1] = ID
         grid.vert.x[ID-1] = x[0]
-        grid.vert.y[ID-1] = y[0]
-        grid.vert.fieldlineID[ID-1] = fID[0] 
+        grid.vert.y[ID-1] = y[0] 
 
     # Read in face data
     #------------------
@@ -1299,7 +1297,7 @@ def ReadGAGridDataFile(filepath):
 
     # Read vertex data
     while i < len(alllines):
-        if "ID, v1, v2, label, region, aligned" in alllines[i]:
+        if "ID, v1, v2, label, aligned" in alllines[i]:
             break 
         else: 
             i = i + 1
@@ -1315,13 +1313,11 @@ def ReadGAGridDataFile(filepath):
         v1 = np.fromstring(values[1], dtype=int, count=1, sep =' ')
         v2 = np.fromstring(values[2], dtype=int, count=1, sep =' ')
         label = np.fromstring(values[3], dtype=int, count=1, sep =' ')
-        region = np.fromstring(values[4], dtype=int, count=1, sep =' ')
         aligned = np.fromstring(values[5], dtype=int, count=1, sep =' ')
         grid.face.ID[ID-1] = ID
         grid.face.v1[ID-1] = v1[0]
         grid.face.v2[ID-1] = v2[0]
         grid.face.label[ID-1] = label[0] 
-        grid.face.region[ID-1] = region[0]
         grid.face.aligned[ID-1] = aligned[0]
 
     # Read in cell data

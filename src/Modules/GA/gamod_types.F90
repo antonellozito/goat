@@ -97,7 +97,7 @@ module gamod_types
 
         ! Logicals and indices
         !logical, allocatable                          :: BV(:)
-        class(IntegerDynamicArrayUDT), allocatable    :: fieldlineID 
+        !class(IntegerDynamicArrayUDT), allocatable    :: fieldlineID 
         integer(I8)                                   :: ntot = 0
 
         !type(IntegerDynamicArrayUDT), allocatable     :: faceP(:,:)
@@ -114,7 +114,8 @@ module gamod_types
 
         ! Other data
         class(RealDynamicArrayUDT), allocatable :: bx, &
-            by, psi, ffbz 
+            by, psi
+        real(R8) :: ffbz 
     contains
 
         ! Initializer
@@ -203,9 +204,8 @@ module gamod_types
 
         integer(I8)                                       :: ntot = 0, ngc
         
-        class(RealDynamicArrayUDT), allocatable           :: psi, &
-            bp, bt, x, y
-        class(IntegerDynamicArrayUDT), allocatable        :: cflags, reg, ft
+        class(RealDynamicArrayUDT), allocatable           :: psi, x, y
+        class(IntegerDynamicArrayUDT), allocatable        :: cflags, reg
     contains
 
         ! Initialize
@@ -271,10 +271,10 @@ module gamod_types
         class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacefacesP1
         class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacefacesP2
         class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacefaces
-        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceID
+        !class(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceID
         !type(IntegerDynamicArrayUDT), allocatable :: &
         !    fluxsurfaceneig(:), fluxsurfaceneigP(:, :)
-        class(RealDynamicArrayUDT), allocatable    :: fluxsurfacepsi
+        !class(RealDynamicArrayUDT), allocatable    :: fluxsurfacepsi
         class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacevertsP1
         class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacevertsP2
         class(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceverts
@@ -1281,13 +1281,11 @@ module gamod_types
         !===========
         if (allocated(GAvert%x)) then 
             ! Assume all allocated
-            deallocate(GAvert%x, GAvert%y, GAvert%fieldlineID, &
-                GAvert%psi, GAvert%bx, GAvert%by, GAvert%ffbz)
+            deallocate(GAvert%x, GAvert%y, &
+                GAvert%psi, GAvert%bx, GAvert%by)
         end if 
         allocate(RealDynamicArrayUDT::GAvert%x, GAvert%y, &
-            GAvert%psi, GAvert%bx, GAvert%by, GAvert%ffbz)
-        allocate(IntegerDynamicArrayUDT:: GAvert%fieldlineID)
-
+            GAvert%psi, GAvert%bx, GAvert%by)
 
 
     end subroutine
@@ -1307,8 +1305,8 @@ module gamod_types
         !===========
         if (allocated(GAface%vert1)) then 
             ! assume all allocated
-            deallocate(GAface%vert1, GAface%vert2, GAface%label, GAface%reg, &
-                GAface%aligned)
+            deallocate(GAface%vert1, GAface%vert2, GAface%label,  &
+                GAface%reg, GAface%aligned)
         end if 
         allocate(IntegerDynamicArrayUDT:: GAface%vert1, GAface%vert2, GAface%label, &
              GAface%reg, GAface%aligned)
@@ -1333,15 +1331,12 @@ module gamod_types
             ! assume all allocated
             deallocate(GAcell%vertP1, GAcell%vertP2, GAcell%vert, &
                 GAcell%faceP1, GAcell%faceP2, GAcell%face, GAcell%psi, &
-                GAcell%bp, GAcell%bt, &
-                GAcell%x, GAcell%y, GAcell%cflags, GAcell%reg, &
-                GAcell%ft )
+                GAcell%x, GAcell%y, GAcell%cflags, GAcell%reg)
         end if 
-        allocate(RealDynamicArrayUDT:: GAcell%psi, GAcell%bp, &
-                 GAcell%bt, GAcell%x, GAcell%y )
+        allocate(RealDynamicArrayUDT:: GAcell%psi, GAcell%x, GAcell%y )
         allocate(IntegerDynamicArrayUDT:: GAcell%vertP1, GAcell%vertP2, &
                  GAcell%vert, GAcell%faceP1, GAcell%faceP2, GAcell%face, &
-                 GAcell%cflags, GAcell%reg, GAcell%ft )
+                 GAcell%cflags, GAcell%reg)
 
     end subroutine
 
@@ -1377,15 +1372,13 @@ module gamod_types
         if (allocated(GAfluxdata%fluxsurfacefaces)) then 
             ! assume all allocated
             deallocate(GAfluxdata%fluxsurfacefacesP1, GAfluxdata%fluxsurfacefacesP2, &
-                GAfluxdata%fluxsurfacefaces, GAfluxdata%fluxsurfaceID, &
-                GAfluxdata%fluxsurfacevertsP1, GAfluxdata%fluxsurfacevertsP2, &
-                GAfluxdata%fluxsurfaceverts, GAfluxdata%fluxsurfacepsi)
+                GAfluxdata%fluxsurfacefaces,  GAfluxdata%fluxsurfacevertsP1, &
+                GAfluxdata%fluxsurfacevertsP2, GAfluxdata%fluxsurfaceverts)
         end if 
-        allocate(RealDynamicArrayUDT:: GAfluxdata%fluxsurfacepsi)
         allocate(IntegerDynamicArrayUDT:: GAfluxdata%fluxsurfacefacesP1, &
                 GAfluxdata%fluxsurfacefacesP2, GAfluxdata%fluxsurfacefaces, &
-                GAfluxdata%fluxsurfaceID, GAfluxdata%fluxsurfacevertsP1, &
-                GAfluxdata%fluxsurfacevertsP2, GAfluxdata%fluxsurfaceverts)
+                GAfluxdata%fluxsurfacevertsP1, GAfluxdata%fluxsurfacevertsP2, &
+                GAfluxdata%fluxsurfaceverts)
 
 
     end subroutine
@@ -1424,15 +1417,13 @@ module gamod_types
         GAv%bx          = ConstructRealDynamicArray(gv%bx)
         GAv%by          = ConstructRealDynamicArray(gv%by)
         GAv%psi         = ConstructRealDynamicArray(gv%psi)
-        GAv%ffbz        = ConstructRealDynamicArray(gv%ffbz)
-        GAv%fieldlineID = ConstructIntegerDynamicArray(gv%fieldlineID)
+        GAv%ffbz        = gv%ffbz(1)
         GAv%ntot        = gv%ntot
 
         ! Face information
         GAf%vert1   = ConstructIntegerDynamicArray(gf%vert(:,1))
         GAf%vert2   = ConstructIntegerDynamicArray(gf%vert(:,2))
         GAf%label   = ConstructIntegerDynamicArray(gf%label)
-        GAf%reg     = ConstructIntegerDynamicArray(gf%reg)
         GAf%aligned = ConstructIntegerDynamicArray(gf%aligned)
         GAf%ntot    = gf%ntot
 
@@ -1445,10 +1436,7 @@ module gamod_types
         GAc%face    = ConstructIntegerDynamicArray(gc%face)
         GAc%cflags  = ConstructIntegerDynamicArray(gc%cflags)
         GAc%reg     = ConstructIntegerDynamicArray(gc%reg)
-        GAc%ft      = ConstructIntegerDynamicArray(gc%ft)
         GAc%psi     = ConstructRealDynamicArray(gc%psi)
-        GAc%bp      = ConstructRealDynamicArray(gc%bp)
-        GAc%bt      = ConstructRealDynamicArray(gc%bt)
         GAc%x       = ConstructRealDynamicArray(gc%x)
         GAc%y       = ConstructRealDynamicArray(gc%y)
         GAc%ntot    = gc%ntot
@@ -1468,8 +1456,6 @@ module gamod_types
         GAfd%fluxsurfacevertsP1 = ConstructIntegerDynamicArray(gfd%fluxsurfacevertsP(:,1))
         GAfd%fluxsurfacevertsP2 = ConstructIntegerDynamicArray(gfd%fluxsurfacevertsP(:,2))
         GAfd%fluxsurfaceverts   = ConstructIntegerDynamicArray(gfd%fluxsurfaceverts)
-        GAfd%fluxsurfaceID      = ConstructIntegerDynamicArray(gfd%fluxsurfaceID)
-        GAfd%fluxsurfacepsi     = ConstructRealDynamicArray(gfd%fluxsurfacepsi)
         GAfd%nFs                = gfd%nFs
         GAfd%nFt                = gfd%nFt
 
@@ -1539,8 +1525,7 @@ module gamod_types
         gv%bx           = GAv%bx%GetAllElements()
         gv%by           = GAv%by%GetAllElements()
         gv%psi          = GAv%psi%GetAllElements()
-        gv%ffbz         = GAv%ffbz%GetAllElements()
-        gv%fieldlineID  = GAv%fieldlineID%GetAllElements()
+        gv%ffbz         = GAv%ffbz
 
         ! Face information
         gf%vert(:,1)    = GAf%vert1%GetAllElements()
@@ -1557,10 +1542,8 @@ module gamod_types
         gc%faceP(:,2)   = GAc%faceP2%GetAllElements()
         gc%face         = GAc%face%GetAllElements()
         gc%cflags       = GAc%cflags%GetAllElements()
-        gc%ft           = GAc%ft%GetAllElements()
+        gc%reg          = Gac%reg%GetAllElements()
         gc%psi          = GAc%psi%GetAllElements()
-        gc%bp           = GAc%bp%GetAllElements()
-        gc%bt           = GAc%bt%GetAllElements()
         gc%x            = GAc%x%GetAllElements()
         gc%y            = GAc%y%GetAllElements()
 
@@ -1575,11 +1558,11 @@ module gamod_types
         gfd%fluxsurfacevertsP(:,1)  = GAfd%fluxsurfacevertsP1%GetAllElements()
         gfd%fluxsurfacevertsP(:,2)  = GAfd%fluxsurfacevertsP2%GetAllElements()
         gfd%fluxsurfaceverts        = GAfd%fluxsurfaceverts%GetAllElements()
-        gfd%fluxsurfaceID           = GAfd%fluxsurfaceID%GetAllElements()
-        gfd%fluxsurfacepsi          = GAfd%fluxsurfacepsi%GetAllElements()
 
         ! Problem need to compute some extra fields for grid 
         ! See what is needed for WriteGOAT: TODO
+        ! To give to grid deformation
+        ! => fd%fluxsurfaceID, vert%fieldlineID
 
 
 
@@ -1943,7 +1926,7 @@ module gamod_types
             n , nc
         integer(I8), allocatable            :: vxs(:), cells(:), &
             regions(:), creg(:)
-        logical :: use_sepID, start, use_fieldlineID, use_nsep
+        logical :: use_sepID, start, use_nsep
         
 
         ! Initialize
@@ -1970,12 +1953,12 @@ module gamod_types
             end if
 
             ! Determine whether to use the vert.fieldlineID to determine the Xpoint
-            use_fieldlineID = .false.
-            if (allocated(v%fieldlineID)) then
-                if (v%fieldlineID%Size().eq.v%ntot) then
-                    use_fieldlineID = .true.
-                end if
-            end if
+            !use_fieldlineID = .false.
+            !if (allocated(v%fieldlineID)) then
+            !    if (v%fieldlineID%Size().eq.v%ntot) then
+            !        use_fieldlineID = .true.
+            !    end if
+            !end if
 
             !if (use_fieldlineID) then
 
@@ -1984,7 +1967,7 @@ module gamod_types
             !    grid%data%xpointID  = xpind
             !    grid%data%nxp       = nxpind 
 
-            if ((allocated(v%fieldlineID))) then!.and.(allocated(v%cellP1))) then
+            if ((allocated(fd%fluxsurfaceverts))) then!.and.(allocated(v%cellP1))) then
 
                 ! Only check the vertices on the separatrices
                 cvLookUp = GetCvLookUpGA(c)
@@ -4554,7 +4537,7 @@ module gamod_types
             new_faces, new_verts
         real(R8) :: vec_x, vec_y
         real(R8), allocatable, dimension(:) :: v1_nx, v1_ny, v1_psi, &
-            v1_ffbz, v1_bx, v1_by, fcA_length, fcA_length_int, &
+            v1_bx, v1_by, fcA_length, fcA_length_int, &
             Vdistribution, inVdistribution, fcA_dist
 
         logical :: found
@@ -4665,7 +4648,6 @@ module gamod_types
             v1_nx = v%x%Get(start_vertex) + vec_x * Vdistribution
             v1_ny = v%y%Get(start_vertex) + vec_y * Vdistribution
             v1_psi = v%psi%Get(start_vertex)*inVdistribution + v%psi%Get(end_vertex)*Vdistribution
-            v1_ffbz = v%ffbz%Get(start_vertex)*inVdistribution + v%ffbz%Get(end_vertex)*Vdistribution
             allocate(v1_bx(size(v1_nx)))
             allocate(v1_by(size(v1_nx)))
             call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
@@ -4674,7 +4656,6 @@ module gamod_types
             call v%x%Append(v1_nx)
             call v%y%Append(v1_ny)
             call v%psi%Append(v1_psi)
-            call v%ffbz%Append(v1_ffbz)
             call v%bx%Append(v1_bx)
             call v%by%Append(v1_by)
             v%ntot = v%ntot + nv
@@ -4807,13 +4788,10 @@ module gamod_types
                 end if
 
                 ! Add the cell
-                call grid%AddCell(new_faces, new_verts, ic)
+                call grid%AddCell(new_faces, new_verts, regs(i), ic)
 
                 ! Adjust centroid
                 call grid%CalcCentroidGA(c%ntot)
-
-                ! Give region
-                call c%reg%Set(c%ntot, regs(i))
 
                 ! Give correct cflag
                 allocate(cells(1))
@@ -5698,8 +5676,7 @@ module gamod_types
         new_faces = pack(new_facesD, new_facesD /= fc)
 
         ! Add new cell
-        call grid%AddCell(new_faces, new_verts, ic)
-        call grid%cell%reg%Set(ic, grid%cell%reg%Get(cvs(1)))
+        call grid%AddCell(new_faces, new_verts, grid%cell%reg%Get(cvs(1)), ic)
 
         ! Remove face
         fc_rem = fc
@@ -5937,8 +5914,7 @@ module gamod_types
         new_faces = new_facesL(1:counter)
 
         ! Add new cell
-        call grid%AddCell(new_faces, new_verts, ic)
-        call grid%cell%reg%Set(ic,grid%cell%reg%Get(cvs(1))) 
+        call grid%AddCell(new_faces, new_verts, grid%cell%reg%Get(cvs(1)), ic) 
         call grid%cell%cflags%Set(ic, maxval(grid%cell%cflags%Get(cvs)))
 
         ! Adapt neighboring cell
@@ -5995,9 +5971,7 @@ module gamod_types
         new_faces = pack(facesD, facesD /= fc)
 
         ! Add new cell
-        call grid%AddCell(new_faces, new_verts, ic)
-
-        call grid%cell%reg%Set(ic, grid%cell%reg%Get(cvs(1)))
+        call grid%AddCell(new_faces, new_verts, grid%cell%reg%Get(cvs(1)), ic)
 
         ! Determine cflag
         n_al = count(grid%face%aligned%Get(new_faces) == 1)
@@ -6075,8 +6049,7 @@ module gamod_types
         new_faces = new_facesL(1:counter)
 
         ! Add new cell
-        call grid%AddCell(new_faces, new_verts, ic)
-        call grid%cell%reg%Set(ic,grid%cell%reg%Get(cvs(1)))        
+        call grid%AddCell(new_faces, new_verts, grid%cell%reg%Get(cvs(1)), ic)        
 
         
     end subroutine
@@ -6177,9 +6150,7 @@ module gamod_types
             new_faces_n = [faces_nD(1:counter), f1n]
 
             ! Add new cell
-            call grid%AddCell(new_faces_n, new_vertsN, ic)
-
-            call grid%cell%reg%Set(ic, grid%cell%reg%Get(neigD(1)))
+            call grid%AddCell(new_faces_n, new_vertsN, grid%cell%reg%Get(neigD(1)), ic)
 
             ! To remove
             allocate(cells_rem(3))
@@ -6697,11 +6668,8 @@ module gamod_types
             call c%x%Remove(cellsU)
             call c%y%Remove(cellsU)
             call c%psi%Remove(cellsU)
-            call c%bp%Remove(cellsU)
-            call c%bt%Remove(cellsU)
             call c%cflags%Remove(cellsU)
             call c%reg%Remove(cellsU)
-            call c%ft%Remove(cellsU)
 
             ! Adjust the c%vert and c%face array
             rem_ind_dummy = 0
@@ -6780,7 +6748,6 @@ module gamod_types
             call f%vert1%Remove(facesU)
             call f%vert2%Remove(facesU)
             call f%label%Remove(facesU)
-            call f%reg%Remove(facesU)
             call f%aligned%Remove(facesU)
 
             do i = 1, nf
@@ -6853,7 +6820,6 @@ module gamod_types
             call v%psi%Remove(vertsU)
             call v%bx%Remove(vertsU)
             call v%by%Remove(vertsU)
-            call v%ffbz%Remove(vertsU)
 
         end if
 
@@ -6953,7 +6919,6 @@ module gamod_types
                 call grid%face%vert1%Append(v1)
                 call grid%face%vert2%Append(v2)
                 call grid%face%label%Append(0)
-                call grid%face%reg%Append(0)
                 call grid%face%aligned%Append(0)
                 grid%face%ntot = face_num
 
@@ -6971,7 +6936,6 @@ module gamod_types
             call grid%face%vert1%Append(v1)
             call grid%face%vert2%Append(v2)
             call grid%face%label%Append(0)
-            call grid%face%reg%Append(0)
             call grid%face%aligned%Append(0)
             grid%face%ntot = face_num
 
@@ -7054,7 +7018,7 @@ module gamod_types
 
     end subroutine
 
-    subroutine AddCell(grid, faces, verts, ic)
+    subroutine AddCell(grid, faces, verts, reg, ic)
 
         ! Description
         !============
@@ -7065,6 +7029,7 @@ module gamod_types
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
         integer(I8), allocatable, intent(in) :: faces(:), verts(:)
+        integer(I8), intent(in) :: reg
         integer(I8), intent(out) :: ic
 
         ! Auxiliary
@@ -7098,10 +7063,9 @@ module gamod_types
         
         ! Cell
         call c%cflags%Append(0)
+        call c%reg%Append(reg)        
         call c%psi%Append(0.0_R8)
-        call c%bp%Append(0.0_R8)
-        call c%bt%Append(0.0_R8)
-        call c%ft%Append(0) ! Give the correct number in postprocessing
+
 
         ! Calculate centroid
         call c%x%Append(sum(grid%vert%x%Get(verts))/real(nv, kind=R8))
@@ -7126,12 +7090,12 @@ module gamod_types
 
         ! 'vertices'
         ! <vert%ntot>
-        ! 'ID, x, y, fieldlineID'
-        ! <ID, x, y, fieldlineID>
+        ! 'ID, x, y'
+        ! <ID, x, y>
         ! 'faces'
         ! <face%ntot> 
-        ! 'ID, v1, v2, label, region'
-        ! <ID, v1, v2, label, region>
+        ! 'ID, v1, v2, label'
+        ! <ID, v1, v2, label>
         ! 'cells'
         ! <cell%ntot, cell%nvert> 
         ! 'ID, vp1, vp2, region>'
@@ -7153,7 +7117,7 @@ module gamod_types
         ! Auxiliary
         integer                                 :: fu
         real(R8), allocatable, dimension(:)     :: x, y, cx, cy
-        integer(I8), allocatable, dimension(:)  :: fID, v1, v2, region, &   
+        integer(I8), allocatable, dimension(:)  :: v1, v2, region, &   
             label, vc, aligned
         character(:), allocatable               :: dir
 
@@ -7185,16 +7149,15 @@ module gamod_types
         ! Unpack
         x = v%x%Get()
         y = v%y%Get()
-        fID = v%fieldlineID%Get()
 
         ! Number of vertices
         write (fu, *) 'vertices'
         write (fu, *) v%ntot 
 
         ! Vertex data
-        write (fu, *) 'ID, x, y, fieldlineID'
+        write (fu, *) 'ID, x, y'
         do i = 1, v%ntot 
-            write (fu, *) i, x(i), y(i), fID(i)
+            write (fu, *) i, x(i), y(i)
         end do 
 
         ! Write face data
@@ -7202,7 +7165,6 @@ module gamod_types
         ! Unpack
         v1 = f%vert1%Get()
         v2 = f%vert2%Get()
-        region = f%reg%Get()
         label = f%label%Get()
         aligned = f%aligned%Get()
 
@@ -7211,9 +7173,9 @@ module gamod_types
         write (fu, *) f%ntot
 
         ! Face data
-        write (fu, *) 'ID, v1, v2, label, region, aligned'
+        write (fu, *) 'ID, v1, v2, label, aligned'
         do i = 1, f%ntot
-            write (fu, *) i, v1(i), v2(i), label(i), region(i), aligned(i)
+            write (fu, *) i, v1(i), v2(i), label(i), aligned(i)
         end do 
 
         ! Write cell data
