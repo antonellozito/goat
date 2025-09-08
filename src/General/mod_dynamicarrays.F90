@@ -2117,28 +2117,40 @@ contains
 
         ! Auxiliary
         integer(ik)                         :: size_place
+        real(rk), allocatable               :: temp1(:)  
 
         ! Insert val
         !===========
-        ! Check size of locations
+        ! Split up array
+        temp1 = rda%val(loc_end+1:rda%nel)
+
+        ! Reconstruct
         size_place = loc_end - loc_begin + 1
-        if (size_place .lt. size(val)) then
-
-            call gdErrorHandler('ReplaceRDABuf: not able to replace')
-
+        rda%nel = rda%nel + size(val) - size_place
+        if (rda%nel .gt. size(rda%val)) then
+            call rda%Expand(size(val) - size_place)
         end if 
+        rda%val(loc_begin:rda%nel) = [val, temp1]
+
+        ! Check size of locations
+        !size_place = loc_end - loc_begin + 1
+        !if (size_place .lt. size(val)) then
+
+        !    call gdErrorHandler('ReplaceRDABuf: not able to replace')
+
+        !end if 
 
         ! Check whether appending is needed
-        if (loc_end .gt. size(rda%val)) then
-            call rda%Expand(loc_end - size(rda%val))
-            rda%nel = loc_end
-        else if (loc_end .gt. rda%nel) then
-            rda%nel = loc_end
-        end if 
+        !if (loc_end .gt. size(rda%val)) then
+        !    call rda%Expand(loc_end - size(rda%val))
+        !    rda%nel = loc_end
+        !else if (loc_end .gt. rda%nel) then
+        !    rda%nel = loc_end
+        !end if 
 
         ! Assign
-        rda%val(loc_begin:loc_end) = 0
-        rda%val(loc_begin:loc_begin+size(val)-1) = val        
+        !rda%val(loc_begin:loc_end) = 0
+        !rda%val(loc_begin:loc_begin+size(val)-1) = val        
 
     end subroutine
 
@@ -2159,7 +2171,7 @@ contains
         if (size(rda%val) < loc) then 
             call rda%Append(spread(0.0_R8, 1, loc - size(rda%val)))
         end if 
-        
+
         ! Sum
         rda%val(loc) = rda%val(loc) + val
         
@@ -2654,6 +2666,13 @@ contains
 
         ! Set 
         !====
+        ida%val = 0
+        ida%nel = size(val)
+        if (ida%nel .gt. size(ida%val)) then
+            call ida%Expand(size(val)-ida%nel)
+            ida%nel = size(val)
+        end if
+
         ida%val(1:ida%nel) = val
         
     end subroutine
@@ -2694,28 +2713,40 @@ contains
 
         ! Auxiliary
         integer(ik)                         :: size_place
+        integer(ik), allocatable            :: temp1(:)
 
         ! Insert val
         !===========
-        ! Check size of locations
+        ! Split up array
+        temp1 = ida%val(loc_end+1:ida%nel)
+
+        ! Reconstruct
         size_place = loc_end - loc_begin + 1
-        if (size_place .lt. size(val)) then
+        ida%nel = ida%nel + size(val) - size_place
+        if (ida%nel .gt. size(ida%val)) then
+            call ida%Expand(size(val) - size_place)
+        end if
+        ida%val(loc_begin:ida%nel) = [val, temp1]
 
-            call gdErrorHandler('ReplaceIDABuf: not able to replace')
+        ! Check size of locations
+        !size_place = loc_end - loc_begin + 1
+        !if (size_place .lt. size(val)) then
 
-        end if 
+        !    call gdErrorHandler('ReplaceIDABuf: not able to replace')
+
+        !end if 
 
         ! Check whether appending is needed
-        if (loc_end .gt. size(ida%val)) then
-            call ida%Expand(loc_end - size(ida%val))
-            ida%nel = loc_end
-        else if (loc_end .gt. ida%nel) then
-            ida%nel = loc_end
-        end if 
+        !if (loc_end .gt. size(ida%val)) then
+        !    call ida%Expand(loc_end - size(ida%val))
+        !    ida%nel = loc_end
+        !else if (loc_end .gt. ida%nel) then
+        !    ida%nel = loc_end
+        !end if 
 
         ! Assign
-        ida%val(loc_begin:loc_end) = 0
-        ida%val(loc_begin:loc_begin+size(val)-1) = val        
+        !ida%val(loc_begin:loc_end) = 0
+        !ida%val(loc_begin:loc_begin+size(val)-1) = val        
 
     end subroutine
 

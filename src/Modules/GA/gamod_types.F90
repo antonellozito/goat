@@ -93,7 +93,7 @@ module gamod_types
         ! - ffbz            : ???
 
         ! Coordinates
-        class(RealDynamicArrayUDT), allocatable        :: x, y
+        class(RealDynamicArrayBufferedUDT), allocatable        :: x, y
 
         ! Logicals and indices
         !logical, allocatable                          :: BV(:)
@@ -113,7 +113,7 @@ module gamod_types
         !integer(I8)                                   :: nneig = 0
 
         ! Other data
-        class(RealDynamicArrayUDT), allocatable :: bx, &
+        class(RealDynamicArrayBufferedUDT), allocatable :: bx, &
             by, psi
         real(R8) :: ffbz 
     contains
@@ -143,10 +143,9 @@ module gamod_types
 
 
         ! Logicals and indices
-        class(IntegerDynamicArrayUDT), allocatable         :: vert1
-        class(IntegerDynamicArrayUDT), allocatable         :: vert2
-
-        class(IntegerDynamicArrayUDT), allocatable         :: &
+        class(IntegerDynamicArrayBufferedUDT), allocatable         :: vert1
+        class(IntegerDynamicArrayBufferedUDT), allocatable         :: vert2
+        class(IntegerDynamicArrayBufferedUDT), allocatable         :: &
             label, reg, aligned
 
         !logical :: aligned(:)
@@ -190,22 +189,22 @@ module gamod_types
 
 
         ! Logicals and indices
-        class(IntegerDynamicArrayUDT), allocatable        :: vertP1
-        class(IntegerDynamicArrayUDT), allocatable        :: vertP2
-        class(IntegerDynamicArrayUDT), allocatable        :: vert
+        class(IntegerDynamicArrayBufferedUDT), allocatable        :: vertP1
+        class(IntegerDynamicArrayBufferedUDT), allocatable        :: vertP2
+        class(IntegerDynamicArrayBufferedUDT), allocatable        :: vert
         integer(I8)                                       :: nvert = 0
 
-        class(IntegerDynamicArrayUDT), allocatable        :: faceP1
-        class(IntegerDynamicArrayUDT), allocatable        :: faceP2
-        class(IntegerDynamicArrayUDT), allocatable        :: face
+        class(IntegerDynamicArrayBufferedUDT), allocatable        :: faceP1
+        class(IntegerDynamicArrayBufferedUDT), allocatable        :: faceP2
+        class(IntegerDynamicArrayBufferedUDT), allocatable        :: face
         integer(I8)                                       :: nface = 0
 
         !logical, allocatable                             :: GC(:)
 
         integer(I8)                                       :: ntot = 0, ngc
         
-        class(RealDynamicArrayUDT), allocatable           :: psi, x, y
-        class(IntegerDynamicArrayUDT), allocatable        :: cflags, reg
+        class(RealDynamicArrayBufferedUDT), allocatable           :: psi, x, y
+        class(IntegerDynamicArrayBufferedUDT), allocatable        :: cflags, reg
     contains
 
         ! Initialize
@@ -268,16 +267,16 @@ module gamod_types
         !logical, allocatable                :: isclosedft(:)
 
         ! Arrays, flux surface data
-        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacefacesP1
-        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacefacesP2
-        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacefaces
+        class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacefacesP1
+        class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacefacesP2
+        class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacefaces
         !class(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceID
         !type(IntegerDynamicArrayUDT), allocatable :: &
         !    fluxsurfaceneig(:), fluxsurfaceneigP(:, :)
         !class(RealDynamicArrayUDT), allocatable    :: fluxsurfacepsi
-        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacevertsP1
-        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfacevertsP2
-        class(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceverts
+        class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacevertsP1
+        class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacevertsP2
+        class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfaceverts
 
     contains
 
@@ -642,19 +641,19 @@ module gamod_types
         fccv = 0
         fcxx = 0
 
-        vx1 = f%vert1%GetAllElements()
-        vx2 = f%vert2%GetAllElements()
-        vx = v%x%GetAllElements()
-        vy = v%y%GetAllElements()
-        vpsi = v%psi%GetAllElements()
-        cx = c%x%GetAllElements()
-        cy = c%y%GetAllElements()
+        vx1 = f%vert1%Get()
+        vx2 = f%vert2%Get()
+        vx = v%x%Get()
+        vy = v%y%Get()
+        vpsi = v%psi%Get()
+        cx = c%x%Get()
+        cy = c%y%Get()
 
         ! Calculate face properties
-        v1x = v%x%GetMultipleElements(vx1)
-        v1y = v%y%GetMultipleElements(vx1)
-        v2x = v%x%GetMultipleElements(vx2)
-        v2y = v%y%GetMultipleElements(vx2)
+        v1x = v%x%Get(vx1)
+        v1y = v%y%Get(vx1)
+        v2x = v%x%Get(vx2)
+        v2y = v%y%Get(vx2)
 
         fcX = 0.5_R8 * (v1x + v2x)
         fcY = 0.5_R8 * (v1y + v2y)
@@ -688,6 +687,9 @@ module gamod_types
             tf = GetCellFaceGA(c, ic)
             nv = size(tv)
 
+            if (any(tv .gt. size(vpsi)) .or. any(tv .lt. 1)) then
+                print * , tv
+            end if
             psi_verts = vpsi(tv)
             max_vpsi = maxval(psi_verts)
             min_vpsi = minval(psi_verts)
@@ -1284,7 +1286,7 @@ module gamod_types
             deallocate(GAvert%x, GAvert%y, &
                 GAvert%psi, GAvert%bx, GAvert%by)
         end if 
-        allocate(RealDynamicArrayUDT::GAvert%x, GAvert%y, &
+        allocate(RealDynamicArrayBufferedUDT::GAvert%x, GAvert%y, &
             GAvert%psi, GAvert%bx, GAvert%by)
 
 
@@ -1308,7 +1310,7 @@ module gamod_types
             deallocate(GAface%vert1, GAface%vert2, GAface%label,  &
                 GAface%reg, GAface%aligned)
         end if 
-        allocate(IntegerDynamicArrayUDT:: GAface%vert1, GAface%vert2, GAface%label, &
+        allocate(IntegerDynamicArrayBufferedUDT:: GAface%vert1, GAface%vert2, GAface%label, &
              GAface%reg, GAface%aligned)
 
     end subroutine
@@ -1333,8 +1335,8 @@ module gamod_types
                 GAcell%faceP1, GAcell%faceP2, GAcell%face, GAcell%psi, &
                 GAcell%x, GAcell%y, GAcell%cflags, GAcell%reg)
         end if 
-        allocate(RealDynamicArrayUDT:: GAcell%psi, GAcell%x, GAcell%y )
-        allocate(IntegerDynamicArrayUDT:: GAcell%vertP1, GAcell%vertP2, &
+        allocate(RealDynamicArrayBufferedUDT:: GAcell%psi, GAcell%x, GAcell%y )
+        allocate(IntegerDynamicArrayBufferedUDT:: GAcell%vertP1, GAcell%vertP2, &
                  GAcell%vert, GAcell%faceP1, GAcell%faceP2, GAcell%face, &
                  GAcell%cflags, GAcell%reg)
 
@@ -1375,7 +1377,7 @@ module gamod_types
                 GAfluxdata%fluxsurfacefaces,  GAfluxdata%fluxsurfacevertsP1, &
                 GAfluxdata%fluxsurfacevertsP2, GAfluxdata%fluxsurfaceverts)
         end if 
-        allocate(IntegerDynamicArrayUDT:: GAfluxdata%fluxsurfacefacesP1, &
+        allocate(IntegerDynamicArrayBufferedUDT:: GAfluxdata%fluxsurfacefacesP1, &
                 GAfluxdata%fluxsurfacefacesP2, GAfluxdata%fluxsurfacefaces, &
                 GAfluxdata%fluxsurfacevertsP1, GAfluxdata%fluxsurfacevertsP2, &
                 GAfluxdata%fluxsurfaceverts)
@@ -1412,33 +1414,34 @@ module gamod_types
 
         ! Give information in grid to GAgrid
         ! Vertex infromation
-        GAv%x           = ConstructRealDynamicArray(gv%x)
-        GAv%y           = ConstructRealDynamicArray(gv%y)
-        GAv%bx          = ConstructRealDynamicArray(gv%bx)
-        GAv%by          = ConstructRealDynamicArray(gv%by)
-        GAv%psi         = ConstructRealDynamicArray(gv%psi)
+        GAv%x           = ConstructRealDynamicArrayBuffered(gv%x)
+        GAv%y           = ConstructRealDynamicArrayBuffered(gv%y)
+        GAv%bx          = ConstructRealDynamicArrayBuffered(gv%bx)
+        GAv%by          = ConstructRealDynamicArrayBuffered(gv%by)
+        GAv%psi         = ConstructRealDynamicArrayBuffered(gv%psi)
         GAv%ffbz        = gv%ffbz(1)
         GAv%ntot        = gv%ntot
 
         ! Face information
-        GAf%vert1   = ConstructIntegerDynamicArray(gf%vert(:,1))
-        GAf%vert2   = ConstructIntegerDynamicArray(gf%vert(:,2))
-        GAf%label   = ConstructIntegerDynamicArray(gf%label)
-        GAf%aligned = ConstructIntegerDynamicArray(gf%aligned)
+        GAf%vert1   = ConstructIntegerDynamicArrayBuffered(gf%vert(:,1))
+        GAf%vert2   = ConstructIntegerDynamicArrayBuffered(gf%vert(:,2))
+        GAf%label   = ConstructIntegerDynamicArrayBuffered(gf%label)
+        GAf%reg     = ConstructIntegerDynamicArrayBuffered(gf%reg)
+        GAf%aligned = ConstructIntegerDynamicArrayBuffered(gf%aligned)
         GAf%ntot    = gf%ntot
 
         ! Cell information
-        GAc%vertP1  = ConstructIntegerDynamicArray(gc%vertP(:,1))
-        GAc%vertP2  = ConstructIntegerDynamicArray(gc%vertP(:,2))
-        GAc%vert    = ConstructIntegerDynamicArray(gc%vert)
-        GAc%faceP1  = ConstructIntegerDynamicArray(gc%faceP(:,1))
-        GAc%faceP2  = ConstructIntegerDynamicArray(gc%faceP(:,2))
-        GAc%face    = ConstructIntegerDynamicArray(gc%face)
-        GAc%cflags  = ConstructIntegerDynamicArray(gc%cflags)
-        GAc%reg     = ConstructIntegerDynamicArray(gc%reg)
-        GAc%psi     = ConstructRealDynamicArray(gc%psi)
-        GAc%x       = ConstructRealDynamicArray(gc%x)
-        GAc%y       = ConstructRealDynamicArray(gc%y)
+        GAc%vertP1  = ConstructIntegerDynamicArrayBuffered(gc%vertP(:,1))
+        GAc%vertP2  = ConstructIntegerDynamicArrayBuffered(gc%vertP(:,2))
+        GAc%vert    = ConstructIntegerDynamicArrayBuffered(gc%vert)
+        GAc%faceP1  = ConstructIntegerDynamicArrayBuffered(gc%faceP(:,1))
+        GAc%faceP2  = ConstructIntegerDynamicArrayBuffered(gc%faceP(:,2))
+        GAc%face    = ConstructIntegerDynamicArrayBuffered(gc%face)
+        GAc%cflags  = ConstructIntegerDynamicArrayBuffered(gc%cflags)
+        GAc%reg     = ConstructIntegerDynamicArrayBuffered(gc%reg)
+        GAc%psi     = ConstructRealDynamicArrayBuffered(gc%psi)
+        GAc%x       = ConstructRealDynamicArrayBuffered(gc%x)
+        GAc%y       = ConstructRealDynamicArrayBuffered(gc%y)
         GAc%ntot    = gc%ntot
         GAc%ngc     = gc%ngc
         GAc%nvert   = gc%nvert
@@ -1450,16 +1453,16 @@ module gamod_types
         GAgrid%data%nxp         = grid%data%nxp
         GAgrid%data%sepID       = grid%data%sepID
         GAgrid%data%nsep        = grid%data%nsep
-        GAfd%fluxsurfacefacesP1 = ConstructIntegerDynamicArray(gfd%fluxsurfacefacesP(:,1))
-        GAfd%fluxsurfacefacesP2 = ConstructIntegerDynamicArray(gfd%fluxsurfacefacesP(:,2))
-        GAfd%fluxsurfacefaces   = ConstructIntegerDynamicArray(gfd%fluxsurfacefaces)
-        GAfd%fluxsurfacevertsP1 = ConstructIntegerDynamicArray(gfd%fluxsurfacevertsP(:,1))
-        GAfd%fluxsurfacevertsP2 = ConstructIntegerDynamicArray(gfd%fluxsurfacevertsP(:,2))
-        GAfd%fluxsurfaceverts   = ConstructIntegerDynamicArray(gfd%fluxsurfaceverts)
+        GAfd%fluxsurfacefacesP1 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacefacesP(:,1))
+        GAfd%fluxsurfacefacesP2 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacefacesP(:,2))
+        GAfd%fluxsurfacefaces   = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacefaces)
+        GAfd%fluxsurfacevertsP1 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacevertsP(:,1))
+        GAfd%fluxsurfacevertsP2 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacevertsP(:,2))
+        GAfd%fluxsurfaceverts   = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfaceverts)
         GAfd%nFs                = gfd%nFs
-        GAfd%nFt                = gfd%nFt
+        GAfd%nFt                = gfd%nFt            
 
-    
+
         end associate
 
         ! Deallocate grid 
@@ -2707,7 +2710,7 @@ module gamod_types
         if (allocated(grid%data%fluxdata%fluxsurfacefaces)) then
             if (grid%data%fluxdata%fluxsurfacefaces%Size() /= 0) then
                 facealigned = 0
-                call Unique(grid%data%fluxdata%fluxsurfacefaces%GetAllElements(), fcs)
+                call Unique(grid%data%fluxdata%fluxsurfacefaces%Get(), fcs)
                 facealigned(fcs(2:size(fcs))) = 1  
             end if
         end if
@@ -2876,7 +2879,7 @@ module gamod_types
             ! Check 6 every vertex is only once in a flux surface
             if (allocated(fd%fluxsurfaceverts)) then
                 if (fd%fluxsurfaceverts%Size() /= 0) then
-                    call Unique(fd%fluxsurfaceverts%GetAllElements(), nvxs)
+                    call Unique(fd%fluxsurfaceverts%Get(), nvxs)
                     if (fd%fluxsurfaceverts%Size() /= size(nvxs)) then
                         !figure,plotgeo_us(grid,'fast'),hold on
                         !fs = grid.fs;
@@ -3146,14 +3149,14 @@ module gamod_types
             call Unique([tv1, tv2], new_verts)
             call Unique([tf1, tf2], new_faces)
 
-            call fd%fluxsurfacevertsP1%AppendSingleElement(fd%fluxsurfacevertsP1%Get(fd%nFs-1)+ &
+            call fd%fluxsurfacevertsP1%Append(fd%fluxsurfacevertsP1%Get(fd%nFs-1)+ &
                 fd%fluxsurfacevertsP2%Get(fd%nFs-1))
-            call fd%fluxsurfacevertsP2%AppendSingleElement(size(new_verts))
-            call fd%fluxsurfaceverts%AppendMultipleElements(new_verts)
-            call fd%fluxsurfacefacesP1%AppendSingleElement(fd%fluxsurfacefacesP1%Get(fd%nFs-1)+ &
+            call fd%fluxsurfacevertsP2%Append(size(new_verts))
+            call fd%fluxsurfaceverts%Append(new_verts)
+            call fd%fluxsurfacefacesP1%Append(fd%fluxsurfacefacesP1%Get(fd%nFs-1)+ &
                 fd%fluxsurfacefacesP2%Get(fd%nFs-1))
-            call fd%fluxsurfacefacesP2%AppendSingleElement(size(new_faces))
-            call fd%fluxsurfacefaces%AppendMultipleElements(new_faces)
+            call fd%fluxsurfacefacesP2%Append(size(new_faces))
+            call fd%fluxsurfacefaces%Append(new_faces)
 
             ! Update other flux surface indices in mFS
             allocate(mFS_update(size(mFS(:,1)),2))
@@ -8132,7 +8135,7 @@ module gamod_types
     end subroutine
 
     subroutine CheckUniqueness(ida)
-        type(IntegerDynamicArrayUDT) :: ida
+        type(IntegerDynamicArrayBufferedUDT) :: ida
         integer(I8), allocatable :: ida0(:), &
             ida_loc(:), ida0U(:)
 
