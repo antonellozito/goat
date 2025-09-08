@@ -199,8 +199,8 @@ module mod_dynamicarrays
 
     end type 
 
-    ! Integer dynamic array efficient class
-    type :: IntegerDynamicArrayGAUDT
+    ! Integer dynamic array memory efficient class
+    type, extends(IntegerDynamicArrayUDT) :: IntegerDynamicArrayBufferedUDT
 
         ! Description
         !============
@@ -210,62 +210,62 @@ module mod_dynamicarrays
         ! the amount of values to have less events where the 
         ! array size need to change when new elements are appended.
 
-        integer(kind=ik), allocatable   :: val(:) ! values
+        !integer(kind=ik), allocatable   :: val(:) ! values
         integer(kind=ik)                :: nel    ! number of element in use
         
     contains
 
         ! Expand array
-        procedure   :: Expand                   => ExpandIDAGA
+        procedure   :: Expand                   => ExpandIDABuf
 
         ! Element insertion
-        procedure   :: InsertSingleElement      => InsertSingleElementIDAGA
-        procedure   :: InsertMultipleElements   => InsertMultipleElementsIDAGA
-        generic     :: Insert                   => &
-            InsertSingleElement, InsertMultipleElements
+        procedure   :: InsertSingleElement      => InsertSingleElementIDABuf
+        procedure   :: InsertMultipleElements   => InsertMultipleElementsIDABuf
+        !generic     :: Insert                   => &
+        !    InsertSingleElement, InsertMultipleElements
 
         ! Element appending
-        procedure   :: AppendSingleElement      => AppendSingleElementIDAGA
-        procedure   :: AppendMultipleElements   => AppendMultipleElementsIDAGA
-        generic     :: Append                   => &
-            AppendSingleElement, AppendMultipleElements
+        procedure   :: AppendSingleElement      => AppendSingleElementIDABuf
+        procedure   :: AppendMultipleElements   => AppendMultipleElementsIDABuf
+        !generic     :: Append                   => &
+        !    AppendSingleElement, AppendMultipleElements
 
         ! Element removal
-        procedure   :: RemoveSingleElement      => RemoveSingleElementIDAGA
-        procedure   :: RemoveMultipleElements   => RemoveMultipleElementsIDAGA
-        generic     :: Remove                   => &
-            RemoveSingleElement, RemoveMultipleElements
+        procedure   :: RemoveSingleElement      => RemoveSingleElementIDABuf
+        procedure   :: RemoveMultipleElements   => RemoveMultipleElementsIDABuf
+        !generic     :: Remove                   => &
+        !    RemoveSingleElement, RemoveMultipleElements
 
         ! Element getter
-        procedure   :: GetSingleElement      => GetSingleElementIDAGA
-        procedure   :: GetMultipleElements   => GetMultipleElementsIDAGA
-        procedure   :: GetAllElements        => GetAllElementsIDAGA
-        generic     :: Get                   => &
-            GetSingleElement, GetMultipleElements, GetAllElements
+        procedure   :: GetSingleElement      => GetSingleElementIDABuf
+        procedure   :: GetMultipleElements   => GetMultipleElementsIDABuf
+        procedure   :: GetAllElements        => GetAllElementsIDABuf
+        !generic     :: Get                   => &
+        !    GetSingleElement, GetMultipleElements, GetAllElements
 
         ! Element setter
-        procedure   :: SetSingleElement      => SetSingleElementIDAGA
-        procedure   :: SetMultipleElements   => SetMultipleElementsIDAGA
-        procedure   :: SetAllElementsScalar  => SetAllElementsScalarIDAGA
-        procedure   :: SetAllElementsArray   => SetAllElementsArrayIDAGA
-        generic     :: Set                   => &
-            SetSingleElement, SetMultipleElements, SetAllElementsScalar, &
-            SetAllElementsArray
+        procedure   :: SetSingleElement      => SetSingleElementIDABuf
+        procedure   :: SetMultipleElements   => SetMultipleElementsIDABuf
+        procedure   :: SetAllElementsScalar  => SetAllElementsScalarIDABuf
+        procedure   :: SetAllElementsArray   => SetAllElementsArrayIDABuf
+        !generic     :: Set                   => &
+        !    SetSingleElement, SetMultipleElements, SetAllElementsScalar, &
+        !    SetAllElementsArray
 
         ! Number of element getter
-        procedure   :: Size                  => GetSizeIDAGA
+        procedure   :: Size                  => GetSizeIDABuf
 
         ! Sum with Mask
-        procedure   :: SumMask1D               => SumIDAScalarMask1DGA
-        procedure   :: SumMask0D               => SumIDAScalarMask0DGA
-        generic     :: SumMask                 => &
-            SumMask0D, SumMask1D
+        procedure   :: SumMask1D               => SumIDAScalarMask1DBuf
+        procedure   :: SumMask0D               => SumIDAScalarMask0DBuf
+        !generic     :: SumMask                 => &
+        !    SumMask0D, SumMask1D
 
         ! Replace
-        procedure   :: Replace               => ReplaceIDAGA
+        procedure   :: Replace               => ReplaceIDABuf
 
         ! Update after entry removal
-        procedure   :: UpdateArray           => UpdateArrayIDAGA
+        procedure   :: UpdateArray           => UpdateArrayIDABuf
 
     end type
     !==================================================================!
@@ -1610,7 +1610,7 @@ contains
     ! Constructors
     !=============
     ! General constructor
-    function ConstructIntegerDynamicArrayGA(val) result(ida)
+    function ConstructIntegerDynamicArrayBuffered(val) result(ida)
 
         ! Description
         !============
@@ -1621,7 +1621,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        type(IntegerDynamicArrayGAUDT)      :: ida 
+        type(IntegerDynamicArrayBufferedUDT)      :: ida 
         integer(I8), intent(in), optional   :: val(:)
 
         ! Auxiliary
@@ -1643,7 +1643,7 @@ contains
     ! Array manipulators
     !===================
     ! Expanding array
-    subroutine ExpandIDAGA(ida, n)
+    subroutine ExpandIDABuf(ida, n)
 
         ! Description
         !============
@@ -1652,7 +1652,7 @@ contains
 
         ! Declare variables
         !==================
-        class(IntegerDynamicArrayGAUDT) :: ida
+        class(IntegerDynamicArrayBufferedUDT) :: ida
         integer(ik), intent(in)         :: n
 
         ! Auxiliary
@@ -1668,7 +1668,7 @@ contains
     end subroutine
 
     ! Single element appending 
-    subroutine AppendSingleElementIDAGA(ida, val)
+    subroutine AppendSingleElementIDABuf(ida, val)
 
         ! Description
         !============
@@ -1677,7 +1677,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayGAUDT)          :: ida 
+        class(IntegerDynamicArrayBufferedUDT)          :: ida 
         integer(ik), intent(in)                :: val 
 
         ! Append
@@ -1695,7 +1695,7 @@ contains
     end subroutine 
 
     ! Multiple element appending
-    subroutine AppendMultipleElementsIDAGA(ida, val)
+    subroutine AppendMultipleElementsIDABuf(ida, val)
 
         ! Description
         !============
@@ -1704,7 +1704,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayGAUDT)          :: ida 
+        class(IntegerDynamicArrayBufferedUDT)          :: ida 
         integer(ik), intent(in)                :: val(:) 
 
         ! Auxiliary
@@ -1728,7 +1728,7 @@ contains
     end subroutine   
     
     ! Single element insertion
-    subroutine InsertSingleElementIDAGA(ida, val, loc)
+    subroutine InsertSingleElementIDABuf(ida, val, loc)
 
         ! Description
         !============
@@ -1741,7 +1741,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments 
-        class(IntegerDynamicArrayGAUDT)       :: ida 
+        class(IntegerDynamicArrayBufferedUDT)       :: ida 
         integer(ik), intent(in)             :: val 
         integer(ik), intent(in)             :: loc 
 
@@ -1766,7 +1766,7 @@ contains
     end subroutine
 
     ! Multiple element insertion
-    subroutine InsertMultipleElementsIDAGA(ida, val, loc)
+    subroutine InsertMultipleElementsIDABuf(ida, val, loc)
 
         ! Description
         !============
@@ -1778,7 +1778,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments 
-        class(IntegerDynamicArrayGAUDT)       :: ida 
+        class(IntegerDynamicArrayBufferedUDT)       :: ida 
         integer(ik), intent(in)             :: val(:) 
         integer(ik), intent(in)             :: loc(:) 
 
@@ -1792,7 +1792,7 @@ contains
         ! Check
         !======
         if (size(loc) /= size(val)) then 
-            call gdErrorHandler('InsertMultipleElementsIDAGA: incompatible ' // &
+            call gdErrorHandler('InsertMultipleElementsIDABuf: incompatible ' // &
                 'sizes of val and loc')
         end if 
 
@@ -1811,7 +1811,7 @@ contains
     end subroutine 
 
     ! Single element deletion
-    subroutine RemoveSingleElementIDAGA(ida, loc)
+    subroutine RemoveSingleElementIDABuf(ida, loc)
 
         ! Description
         !============
@@ -1821,7 +1821,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments 
-        class(IntegerDynamicArrayGAUDT)     :: ida 
+        class(IntegerDynamicArrayBufferedUDT)     :: ida 
         integer(ik), intent(in)             :: loc 
 
         ! Auxiliary
@@ -1844,7 +1844,7 @@ contains
     end subroutine
 
     ! Multiple element deletion
-    subroutine RemoveMultipleElementsIDAGA(ida, loc)
+    subroutine RemoveMultipleElementsIDABuf(ida, loc)
 
         ! Description
         !============
@@ -1854,7 +1854,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments 
-        class(IntegerDynamicArrayGAUDT)     :: ida 
+        class(IntegerDynamicArrayBufferedUDT)     :: ida 
         integer(ik), intent(in)             :: loc(:)
 
         ! Auxiliary
@@ -1866,7 +1866,7 @@ contains
         ! Set mask
         old_size = ida%nel
         if (any(loc > size(ida%val))) then 
-            call gdErrorHandler('RemoveSingleElementIDAGA: index is out of bounds')
+            call gdErrorHandler('RemoveSingleElementIDABuf: index is out of bounds')
         end if 
         allocate(mask(old_size))
         mask = .true.
@@ -1883,7 +1883,7 @@ contains
     end subroutine 
 
     ! Single element getter
-    function GetSingleElementIDAGA(ida, loc) result(val)
+    function GetSingleElementIDABuf(ida, loc) result(val)
 
         ! Description
         !============
@@ -1893,7 +1893,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayGAUDT) :: ida 
+        class(IntegerDynamicArrayBufferedUDT) :: ida 
         integer(ik), intent(in)         :: loc 
         integer(ik)                     :: val 
 
@@ -1902,13 +1902,13 @@ contains
         val = ida%val(loc)
 
         if (loc .gt. ida%nel) then
-            call gdErrorHandler('GetSingleElementIDAGA: invald location')
+            call gdErrorHandler('GetSingleElementIDABuf: invald location')
         end if
 
     end function
 
     ! Multiple element getter
-    function GetMultipleElementsIDAGA(ida, loc) result(val)
+    function GetMultipleElementsIDABuf(ida, loc) result(val)
 
         ! Description
         !============
@@ -1918,7 +1918,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayGAUDT)   :: ida 
+        class(IntegerDynamicArrayBufferedUDT)   :: ida 
         integer(ik), intent(in)         :: loc(:) 
         integer(ik)                     :: val(size(loc))
 
@@ -1927,13 +1927,13 @@ contains
         val = ida%val(loc)
 
         if (maxval(loc) .gt. ida%nel) then
-            call gdErrorHandler('GetMultipleElementsIDAGA: invalid location')
+            call gdErrorHandler('GetMultipleElementsIDABuf: invalid location')
         end if
         
     end function
 
     ! All element getter
-    function GetAllElementsIDAGA(ida) result(val)
+    function GetAllElementsIDABuf(ida) result(val)
 
         ! Description
         !============
@@ -1942,7 +1942,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayGAUDT)     :: ida 
+        class(IntegerDynamicArrayBufferedUDT)     :: ida 
         integer(ik)                         :: val(ida%nel)
 
         ! Get 
@@ -1952,7 +1952,7 @@ contains
     end function
 
     ! Single element setter
-    subroutine SetSingleElementIDAGA(ida, loc, val)
+    subroutine SetSingleElementIDABuf(ida, loc, val)
 
         ! Description
         !============
@@ -1964,7 +1964,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayGAUDT)   :: ida 
+        class(IntegerDynamicArrayBufferedUDT)   :: ida 
         integer(ik), intent(in)         :: loc 
         integer(ik)                     :: val 
 
@@ -1973,15 +1973,14 @@ contains
         if (size(ida%val) < loc) then 
             call ida%Expand(loc - size(ida%val))
             ida%nel = loc
-        end if 
-        if (loc > ida%nel) then
+        else if (loc > ida%nel) then
             ida%nel = loc
         end if
         ida%val(loc) = val
 
     end subroutine
     ! Multiple element setter
-    subroutine SetMultipleElementsIDAGA(ida, loc, val)
+    subroutine SetMultipleElementsIDABuf(ida, loc, val)
 
         ! Description
         !============
@@ -1993,7 +1992,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayGAUDT) :: ida 
+        class(IntegerDynamicArrayBufferedUDT) :: ida 
         integer(ik), intent(in)         :: loc(:) 
         integer(ik)                     :: val(size(loc))
 
@@ -2002,8 +2001,7 @@ contains
         if (size(ida%val) < maxval(loc)) then 
             call ida%Expand(maxval(loc) - size(ida%val))
             ida%nel = maxval(loc)
-        end if 
-        if (maxval(loc) .gt. ida%nel) then
+        else if (maxval(loc) .gt. ida%nel) then
             ida%nel = maxval(loc)
         end if
         ida%val(loc) = val
@@ -2011,7 +2009,7 @@ contains
     end subroutine
 
     ! All element setter
-    subroutine SetAllElementsScalarIDAGA(ida, val) 
+    subroutine SetAllElementsScalarIDABuf(ida, val) 
 
         ! Description
         !============
@@ -2020,7 +2018,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayGAUDT)  :: ida 
+        class(IntegerDynamicArrayBufferedUDT)  :: ida 
         integer(ik)                    :: val
 
         ! Set 
@@ -2030,7 +2028,7 @@ contains
     end subroutine
 
     ! All element setter
-    subroutine SetAllElementsArrayIDAGA(ida, val) 
+    subroutine SetAllElementsArrayIDABuf(ida, val) 
 
         ! Description
         !============
@@ -2039,7 +2037,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayGAUDT)  :: ida 
+        class(IntegerDynamicArrayBufferedUDT)  :: ida 
         integer(ik), dimension(:)      :: val
 
         ! Set 
@@ -2049,11 +2047,11 @@ contains
     end subroutine
     
     ! Size getter
-    function GetSizeIDAGA(ida) result(s)
+    function GetSizeIDABuf(ida) result(s)
 
         ! Declare variables
         !==================
-        class(IntegerDynamicArrayGAUDT)   :: ida 
+        class(IntegerDynamicArrayBufferedUDT)   :: ida 
         integer(ik)                     :: s 
 
         ! Determine size
@@ -2064,7 +2062,7 @@ contains
     end function 
 
     ! Replace
-    subroutine ReplaceIDAGA(ida,loc_begin,loc_end,val)
+    subroutine ReplaceIDABuf(ida,loc_begin,loc_end,val)
         
         ! Description
         !============
@@ -2077,7 +2075,7 @@ contains
 
         ! Declare variables
         !==================
-        class(IntegerDynamicArrayGAUDT)     :: ida
+        class(IntegerDynamicArrayBufferedUDT)     :: ida
         integer(ik), intent(in)             :: loc_begin
         integer(ik), intent(in)             :: loc_end
         integer(ik), allocatable            :: val(:)
@@ -2091,7 +2089,7 @@ contains
         size_place = loc_end - loc_begin + 1
         if (size_place .lt. size(val)) then
 
-            call gdErrorHandler('ReplaceIDAGA: not able to replace')
+            call gdErrorHandler('ReplaceIDABuf: not able to replace')
 
         end if 
 
@@ -2099,8 +2097,7 @@ contains
         if (loc_end .gt. size(ida%val)) then
             call ida%Expand(loc_end - size(ida%val))
             ida%nel = loc_end
-        end if
-        if (loc_end .gt. ida%nel) then
+        else if (loc_end .gt. ida%nel) then
             ida%nel = loc_end
         end if 
 
@@ -2111,7 +2108,7 @@ contains
     end subroutine
 
     ! Sum with Mask as single location
-    subroutine SumIDAScalarMask0DGA(ida,loc,val) 
+    subroutine SumIDAScalarMask0DBuf(ida,loc,val) 
 
         ! Description
         !============
@@ -2119,7 +2116,7 @@ contains
 
         ! Declare variables
         !==================
-        class(IntegerDynamicArrayGAUDT)   :: ida 
+        class(IntegerDynamicArrayBufferedUDT)   :: ida 
         integer(ik), intent(in)         :: loc 
         integer(ik)                     :: val
 
@@ -2129,7 +2126,7 @@ contains
     end subroutine  
     
     ! Sum with Mask as 1D array
-    subroutine SumIDAScalarMask1DGA(ida,loc,val) 
+    subroutine SumIDAScalarMask1DBuf(ida,loc,val) 
 
         ! Description
         !============
@@ -2139,7 +2136,7 @@ contains
 
         ! Declare variables
         !==================
-        class(IntegerDynamicArrayGAUDT)           :: ida 
+        class(IntegerDynamicArrayBufferedUDT)           :: ida 
         integer(ik), intent(in), allocatable    :: loc(:) 
         integer(ik)                             :: val
 
@@ -2151,7 +2148,7 @@ contains
         
     end subroutine 
     
-    subroutine UpdateArrayIDAGA(ida,val)
+    subroutine UpdateArrayIDABuf(ida,val)
 
         ! Description
         !============
@@ -2165,7 +2162,7 @@ contains
 
         ! Declare variables
         !==================
-        class(IntegerDynamicArrayGAUDT) :: ida
+        class(IntegerDynamicArrayBufferedUDT) :: ida
         integer(I8) :: val
 
         ! Auxiliary
