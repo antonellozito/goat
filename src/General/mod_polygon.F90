@@ -2626,9 +2626,9 @@ module mod_polygon
         !                   index of a new polygon. The edges of this 
         !                   polygon are all edges between this true value 
         !                   and the next. 
-        ! - isbranchingpolygon  : np-by-1 array indicating if the polygon
+        ! - isbranchingpolygon  : ne-by-1 array indicating if the polygon
         !                       is branching or not
-        ! - polygonID           :: np-by-1 array with polygon IDs 
+        ! - polygonID           :: ne-by-1 array with polygon IDs 
         !                       (optional). Useful to reconstruct branching
         !                       polygons
     
