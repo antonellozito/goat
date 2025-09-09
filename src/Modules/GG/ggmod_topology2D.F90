@@ -4113,45 +4113,51 @@ module ggmod_topology2D
         !============
         ! General merging
         !----------------
-        wasmerged = .false.
-        appliedsplitting = .false.
-        do while (.true.) 
-            call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-            ! Is there a simple merge that can be done? 
-            if (.not. appliedsplitting) then ! skip if we splitted previously, already doing complex merge
-                call MergeTopologicalMeshFluxTubesSimple(topomesh, &
-                    magneticField, vessel, options, wasmerged)
-                if (wasmerged) then 
-                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-                    print *, 'applied simple merge'
+        if (options%mergetubes) then 
+            wasmerged = .false.
+            appliedsplitting = .false.
+            do while (.true.) 
+                call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                ! Is there a simple merge that can be done? 
+                if (.not. appliedsplitting) then ! skip if we splitted previously, already doing complex merge
+                    call MergeTopologicalMeshFluxTubesSimple(topomesh, &
+                        magneticField, vessel, options, wasmerged)
+                    if (wasmerged) then 
+                        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                        print *, 'applied simple merge'
+                        cycle
+                    end if 
+                end if 
+
+                ! Is there a complex merge that can be done?
+                call MergeTopologicalMeshFluxTubesComplex(topomesh, &
+                    magneticField, vessel, fieldtracer, options, wasmerged, &
+                    appliedsplitting)
+                if (wasmerged .or. appliedsplitting) then 
+                    if (wasmerged) then 
+                        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                        print *, 'applied complex merge'
+                    elseif (appliedsplitting) then 
+                        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                        print *, 'applied splitting'
+                    end if
                     cycle
                 end if 
-            end if 
 
-            ! Is there a complex merge that can be done?
-            call MergeTopologicalMeshFluxTubesComplex(topomesh, &
-                magneticField, vessel, fieldtracer, options, wasmerged, &
-                appliedsplitting)
-            if (wasmerged .or. appliedsplitting) then 
-                if (wasmerged) then 
-                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-                    print *, 'applied complex merge'
-                elseif (appliedsplitting) then 
-                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-                    print *, 'applied splitting'
-                end if
-                cycle
-            end if 
-
-            ! If no merging operations have been done, exit
-            if (.not. (wasmerged .or. appliedsplitting)) then 
-                exit 
-            end if 
-        end do 
+                ! If no merging operations have been done, exit
+                if (.not. (wasmerged .or. appliedsplitting)) then 
+                    exit 
+                end if 
+            end do 
+        end if 
 
         ! Tangency point tubes
         !---------------------
         if (options%mergetangencypointtubes) then 
+            ! Issue deprecated code warning
+            print *, 'MergeTopologicalMeshFluxTubes: tangency point ' // & 
+                'merging option is deprecated, please switch to general ' // & 
+                'topological mesh tube merging method'
             ! Loop over all tubes to find eligible tubes for merging
             i = 1
             do while (i <= tube%ntot)
@@ -4457,6 +4463,11 @@ module ggmod_topology2D
         ! Aligned vessel part tubes
         !--------------------------
         if (options%mergeavptubes) then 
+            ! Issue deprecated code warning
+            print *, 'MergeTopologicalMeshFluxTubes: tangency point ' // & 
+                'merging option is deprecated, please switch to general ' // & 
+                'topological mesh tube merging method'
+
             ! Initialize
             if (allocated(delf)) deallocate(delf)
             allocate(delf(face%ntot))
@@ -4625,12 +4636,12 @@ module ggmod_topology2D
 
             ! Evaluate psi criterion
             val(i, 1)           = maxval(GetTMFaceDeltaPsi(topomesh, tf))
-            lowerbound(i, 1)    = options%dpsimintangencypointtubes ! name change later on?
+            lowerbound(i, 1)    = options%dpsimintubes ! name change later on?
             faceID(i, 1)        = tf(maxloc(GetTMFaceDeltaPsi(topomesh, tf), 1))
 
             ! Evaluate radial length criterion
             val(i, 2)           = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
-            lowerbound(i, 2)    = options%lradmintangencypointtubes
+            lowerbound(i, 2)    = options%lradmintubes
             faceID(i, 2)        = tf(maxloc(GetTMFaceRadialLength(topomesh, magneticField, tf), 1))
 
         end do 
@@ -5304,12 +5315,12 @@ module ggmod_topology2D
         integer(I8)                                 :: ne
         integer(I8), allocatable, dimension(:)      :: hfface1, &
             hfface2, lfface1, lfface2, tf, tf1, tf2, sortind, polygonID, &
-            mergefaces, mergevert, tv1, tv2
+            mergefaces, mergevert, tv1, tv2, coreIDs, tc
         integer(I8), allocatable, dimension(:, :)   :: tfv
         real(R8), allocatable, dimension(:)         :: tf1psi, tf2psi
         logical                                     :: isbranchingmerge
         logical, allocatable, dimension(:)          :: ispolygonstart, &
-            isbranchingpolygon
+            isbranchingpolygon, iscorecell
 
         ! Loop
         integer(I8)                                 :: i
@@ -5443,6 +5454,54 @@ module ggmod_topology2D
         if (any(isbranchingpolygon)) then 
             isbranchingmerge = .true.
         end if
+
+        ! Check for illegal merge surfaces
+        !=================================
+        ! Check if we merge over a flux surface that is prohibited by
+        ! the user (e.g. separatrix, core, PF, ...)
+        if (.not. options%mtallowseparatrix) then 
+            if (any(topomesh%face%type(mergefaces) == TMfacesepID)) then 
+                return 
+            end if 
+        end if
+        if (.not. options%mtallowcore) then 
+            ! Core surfaces are only defined when core regions are already 
+            ! removed - this may not yet be the case. Therefore we 
+            ! determine core regions here and don't allow merging if one
+            ! of the tubes has a core. 
+
+            ! Check for faces
+            if (any(topomesh%face%type(mergefaces) == TMfacecoreID)) then 
+                return 
+            end if 
+
+            ! Check for core regions
+            coreIDs = topomesh%GetCoreCellIDs()
+            allocate(iscorecell(topomesh%cell%ntot))
+            iscorecell = .false.
+            iscorecell(coreIDs) = .true. 
+
+            ! Check first set of tubes
+            do i  = 1, size(tubes1)
+                tc =  topomesh%tube%GetCell(tubes1(i))
+                if (any(iscorecell(tc))) then 
+                    return 
+                end if 
+            end do 
+
+            ! Check second set of tubes
+            do i  = 1, size(tubes2)
+                tc =  topomesh%tube%GetCell(tubes2(i))
+                if (any(iscorecell(tc))) then 
+                    return 
+                end if 
+            end do 
+        end if 
+        if (.not. options%mtallowpf) then 
+            if (any(topomesh%face%type(mergefaces) == TMfacePFID)) then 
+                return 
+            end if 
+        end if 
 
         ! Housekeeping
         end associate
@@ -5831,18 +5890,18 @@ module ggmod_topology2D
         ! Auxiliary
         logical, allocatable, dimension(:)      :: remf, remv
         integer(I8)                             :: ne, ind1, ind2, &
-            thisf, v1, v2
+            thisf, v1, v2, si, ei
         integer(I8), allocatable, dimension(:)  :: tf, tfb, &
             nonbndmergefaces, tempi, tfbv, mergevert, sortind, &
             polygonID, bndvert1, bndvert2, bndvert3, bndvert4, &
-            tvf, tempf
+            tvf, tempf, avpfsID, tv, tvfsID
         integer(I8), allocatable, dimension(:, :)   :: tfv
         logical                                 :: noalignedfacev1tov2, &
             noalignedfacev2tov1
         logical, allocatable, dimension(:)      :: ispolygonstart, &
-            isbranchingpolygon, isavp, retypevert
+            isbranchingpolygon, isavp, retypevert, iscurrentavp
         real(R8), allocatable, dimension(:)     :: mergepsival, tpsi, &
-            dpsi
+            dpsi, tvfval
         type(IntegerDynamicArrayUDT)            :: tfbida
 
         ! Loop
@@ -5950,8 +6009,9 @@ module ggmod_topology2D
         noalignedfacev1tov2 = .false.
         noalignedfacev2tov1 = .false.
         allocate(bndvert1(0), bndvert2(0), bndvert3(0), bndvert4(0))
-        allocate(isavp(size(tfb)))
+        allocate(isavp(size(tfb)), avpfsID(size(tfb)), iscurrentavp(size(tfb)))
         isavp = .true. ! will be set to false where applicable later
+        avpfsID = 0 ! flux surface ID for aligned vessel parts
         where (.not. (topomesh%face%type(tfb) == TMfacebndID)) isavp = .false. ! also ignore non-vessel boundaries
 
         ! Find v1, v2 in closed polygon 
@@ -5979,6 +6039,7 @@ module ggmod_topology2D
             ! Check if it is a vessel boundary
             if (topomesh%face%type(thisf) == TMfacebndID) then 
                 isavp(k) = .false. 
+                iscurrentavp(k) = .false.
             elseif (any(topomesh%face%type(thisf) == TMfacealignedID)) then 
                 ! Aligned boundary found, exit
                 exit
@@ -6103,8 +6164,46 @@ module ggmod_topology2D
                 'in tube with no aligned faces, not yet supported')
         end if 
 
-        ! Check which vessel parts to align
-        where (isavp) topomesh%face%type(tfb) = TMfacealbndID
+        ! Check which vessel parts to align and determine flux surface IDs
+        if (any(isavp)) then 
+            si = 0
+            ei = 0
+            do while (.true.)
+                ! Find avp segment
+                si = findloc(isavp(ei+1:), .true., 1, back=.false.) + ei
+                if (si == ei) then 
+                    ! No more parts found, exit
+                    exit 
+                end if 
+                ei = findloc(isavp(si:), .false., 1, back=.false.) + si - 2
+                if (ei == si-2) then 
+                    ei = size(isavp)
+                end if 
+
+                ! Set type
+                topomesh%face%type(tfb(si:ei)) = TMfacealbndID
+
+                ! Determine flux surface ID based on flux values of vertices
+                call SetDiff([topomesh%face%vert(tfb(si:ei), 1), topomesh%face%vert(tfb(si:ei), 2)], &
+                    [topomesh%face%vert(mergefaces, 1), topomesh%face%vert(mergefaces, 2)], tv)
+                tvfsID = topomesh%vert%fsID(tv)
+
+                ! Keep only vertices with flux surface ID
+                tv = pack(tv, tvfsID /= 0)
+                tvfsID = pack(tvfsID, tvfsID /= 0)
+                tvfval = topomesh%fsfval%Get(tvfsID)
+                
+                ! Compute minimal distance in terms of psi value w.r.t.
+                ! the merging faces & set flux surface ID
+                if (abs(maxval(tvfval) - minval(mergepsival)) <  abs(minval(tvfval) - maxval(mergepsival))) then 
+                    topomesh%face%fsID(tfb(si:ei)) = tvfsID(maxloc(tvfval, 1))
+                else
+                    topomesh%face%fsID(tfb(si:ei)) = tvfsID(minloc(tvfval, 1))
+                end if
+                
+            end do 
+        end if 
+        
 
         ! Retype vertices 
         !================
@@ -6174,7 +6273,7 @@ module ggmod_topology2D
 
         else
             ! Need to retype all 'inner' boundary vertices to regular 
-            ! boundary vertices for removal later on
+            ! boundary vertices for removal later on 
 
             ! Bndvert 2, 3 (does not go to v2, so we can retype here)
             topomesh%vert%type(bndvert2(2:size(bndvert2)-1)) = TMvertexbndID
@@ -6232,6 +6331,8 @@ module ggmod_topology2D
 
         ! Data (recompute)
         call AddTopologicalMeshData(topomesh)
+
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
 
         ! Compute interconnection data
         call AddTopologicalMeshInterconnectionData(topomesh)

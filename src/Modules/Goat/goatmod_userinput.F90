@@ -420,19 +420,29 @@ module goatmod_userinput
         !                       topomesh from a previous one. field and
         !                       vessel filepaths should be fully specified
         !                       in TMfieldtracerfilepath and TMvesseltracerfilepath
-        ! - mergetangencypointtubes     merge tubes that are too small 
+        ! - (deprecated) mergetangencypointtubes     merge tubes that are too small 
         !                       and that have tangency point tubes 
         !                       as neighbours. 'too small' is based on 
         !                       the (absolute) difference in flux values
         !                       of the tube's radial face vertices
-        ! - mergeavptubes       merge tubes typically originating from 
+        ! - (deprecated) mergeavptubes       merge tubes typically originating from 
         !                       the aligned vessel parts topomesh 
         !                       modification routine (same criteria as
         !                       mergetangencypointtubes)
-        ! - dpsimintangencypointtubes   minimal delta psi for tangency 
+        ! - mergetubes          apply general merging (should outperform 
+        !                       mergetangencypointtubes and mergeavptubes)
+        ! - dpsimintubes        minimal psi difference for topomesh tubes (below
+        !                       which we try to merge - set to 0 to ignore)
+        ! - lradmintubes        minimal radial length for topomesh tubes
+        !                       (below which we try to merge - set to 0 to ignore)
+        ! - mtallowseparatrix   allow merging over the separatrix for 
+        !                       the general merge case
+        ! - mtallowcore, mtallowpf  same as separatrix, but for core and 
+        !                       pf contours
+        ! - (deprecated) dpsimintangencypointtubes   minimal delta psi for tangency 
         !                       point tubes (if below, we attempt to 
         !                       merge)
-        ! - lradmintangencypointtubes   minimal radial length for tangency
+        ! - (deprecated) lradmintangencypointtubes   minimal radial length for tangency
         !                       point tubes (if below, we attempt to 
         !                       merge)
         ! - alignvesselparts    define certain vessel parts as aligned 
@@ -449,10 +459,10 @@ module goatmod_userinput
         !                       considered as potential aligned part 
         !                       (avp: aligned vessel parts). This angle
         !                       should be given in degrees!
-        ! - avprefinevessel     switch to refine vessel boundaries, similar
+        ! - (deprecated) avprefinevessel     switch to refine vessel boundaries, similar
         !                       to full vessel refinement (see vessel options)
-        ! - avpmaxvesseldist    maximal vessel edge length
-        ! - avpminreffac        minimal refinement factor for vessel edge refinement                    
+        ! - (deprecated) avpmaxvesseldist    maximal vessel edge length
+        ! - (deprecated) avpminreffac        minimal refinement factor for vessel edge refinement                    
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax, avpminreffac
@@ -462,10 +472,11 @@ module goatmod_userinput
             readexistingTM, removenoncoreregions, mergetangencypointtubes, &
             doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
             rvrdocascade, rvrfullycovered, alignvesselparts, avprefinevessel, &
-            readexistingtracers, mergeavptubes
+            readexistingtracers, mergeavptubes, mergetubes, mtallowcore, &
+            mtallowpf, mtallowseparatrix
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes, &
-            avpminangle, avpmaxvesseldist
+            avpminangle, avpmaxvesseldist, dpsimintubes, lradmintubes
         character(:), allocatable   :: TMfilepath, rvrcascadedir, &
             TMfieldtracerfilepath, TMvesseltracerfilepath
     contains 
@@ -967,8 +978,14 @@ module goatmod_userinput
         options%removenoncoreregions        = .false.
         options%mergetangencypointtubes     = .false.
         options%mergeavptubes               = .false.
+        options%mergetubes                  = .false. 
+        options%mtallowcore                 = .false.
+        options%mtallowpf                   = .false.
+        options%mtallowseparatrix           = .false.
         options%dpsimintangencypointtubes   = 0.0_R8 ! zero to ignore
         options%lradmintangencypointtubes   = 0.0_R8 ! zero to ignore
+        options%dpsimintubes                = 0.0_R8 ! zero to ignore
+        options%lradmintubes                = 0.0_R8 ! zero to ignore
 
         options%removevesselregions         = .false. 
         if (allocated(options%rvrvesselIDs)) deallocate(options%rvrvesselIDs)
@@ -1730,12 +1747,24 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%removenoncoreregions)
         field = 'gg.tm.mergetangencypointtubes'
         call ExtractOptionValueLogical0D(fid, field, options%mergetangencypointtubes)
+        field = 'gg.tm.mergetubes'
+        call ExtractOptionValueLogical0D(fid, field, options%mergetubes)
+        field = 'gg.tm.mergetubes.allowseparatrix'
+        call ExtractOptionValueLogical0D(fid, field, options%mtallowseparatrix)
+        field = 'gg.tm.mergetubes.allowcore'
+        call ExtractOptionValueLogical0D(fid, field, options%mtallowcore)
+        field = 'gg.tm.mergetubes.allowpf'
+        call ExtractOptionValueLogical0D(fid, field, options%mtallowpf)
         field = 'gg.tm.mergeavptubes'
         call ExtractOptionValueLogical0D(fid, field, options%mergeavptubes)
         field = 'gg.tm.dpsimintangencypointtubes'
         call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
         field = 'gg.tm.lradmintangencypointtubes'
         call ExtractOptionValueReal0D(fid, field, options%lradmintangencypointtubes)
+        field = 'gg.tm.dpsimintubes'
+        call ExtractOptionValueReal0D(fid, field, options%dpsimintubes)
+        field = 'gg.tm.lradmintubes'
+        call ExtractOptionValueReal0D(fid, field, options%lradmintubes)
 
         field = 'gg.tm.removevesselregions'
         call ExtractOptionValueLogical0D(fid, field, options%removevesselregions)
