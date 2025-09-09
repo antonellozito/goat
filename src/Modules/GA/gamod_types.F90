@@ -968,14 +968,18 @@ module gamod_types
         type(GAoptionsUDT)          :: options
 
         ! Auxiliary 
-        integer(I8) :: i, j, k, neig, nf, fcs_al1, fcs_al2
+        integer(I8) :: i, j, k, neig, nf, fcs_al1, fcs_al2, ind, &
+            common_face, counter
         integer(I8), allocatable, dimension(:) :: forbidden_fcs, &
             indsort, cells, small_cells, fcs, cvs, cvLookUp, indcv, &
-            no_cells, trias, cells2, indfc, pol_faces, fcs1, fcs2, cellsD
-        real(R8) :: crit, dfunv(grid%cell%ntot), h_pol_no_cells_crit
+            no_cells, trias, cells2, indfc, pol_faces, fcs1, fcs2, cellsD, &
+            ind_sort, neigs, vxs, cvs_sep, cvs_sepU, core_faces, Xcells, &
+            core_facesD
+        real(R8) :: crit, dfunv(grid%cell%ntot), h_pol_no_cells_crit, &
+            mean_pol_flux, bench
         real(R8), allocatable, dimension(:) :: area_small_cells, &
             h_pol_no_cells_sorted, h_pol_cells, h_pol_cvs, bias, &
-            pol_fluxdens_est, pol_fluxdens_estD
+            pol_fluxdens_est, pol_fluxdens_estD, h_rad_cells
         logical, allocatable :: log(:), log2(:), trias_log(:)
 
         ! Associate
@@ -1115,7 +1119,7 @@ module gamod_types
             
         case ('minimal_grid')
 
-            call gdErrorHandler('SelectMergingFace: merge criterium minimal grid not implemented')
+            call gdErrorHandler('SelectMergingFace: merge criterium minimal grid not implemented') ! TODO
 
         case ('h_pol')
 
@@ -1258,12 +1262,156 @@ module gamod_types
             allocate(cells(count(log)))
             cells = pack(cellsD, log)
 
+            allocate(pol_fluxdens_est(count(log)))
+            pol_fluxdens_est = pack(pol_fluxdens_est, log)
 
+            pol_fluxdens_est = pol_fluxdens_est*qm%h_rad(cells)
+            mean_pol_flux = sum(pol_fluxdens_est)/size(pol_fluxdens_est)
 
+            call Sort(pol_fluxdens_est, ind_sort)
+            cells = cells(ind_sort)
 
+            do i = 1, size(pol_fluxdens_est)
+
+                if (pol_fluxdens_est(i) .lt. mean_pol_flux * 0.2_R8) then
+
+                    neigs = GetCellNeigsGA(grid, cells(i), cvLookUp)
+                    bench = 1000.0_R8
+                    do j = 1, size(neigs)
+                        if (any(neigs(j) == cells)) then
+                            ind = findloc(cells, neigs(j), 1)
+                            if (pol_fluxdens_est(ind) .lt. bench) then
+                                common_face = GetCommonFace(c, cells(i), neigs(j))
+                                if ((f%aligned%Get(common_face) == 1) .and.(f%label%Get(common_face) == 0)) then
+                                    qm%merge_fc = common_face
+                                    bench = pol_fluxdens_est(ind)
+                                end if
+                            end if
+                        end if
+                    end do
+
+                    if (qm%merge_fc /= 0) exit
+
+                end if
+
+            end do
 
         case ('h_rad')
+
+            ! Initialize
+            ! Get all cells around the separatrices
+            call grid%GiveSeparatrices(.true.,.true.,.false.,cvLookUp)
+            counter = 0
+            allocate(cvs_sep(c%ntot))
+            do k = 1, grid%data%nsep
+                vxs = GetFluxSurfaceVxsGA(fd, grid%data%sepID(k))
+                cvs_sep = 0 
+                do i = 1, size(vxs)
+                    cvs = GetVertCellGA(c, vxs(i), cvLookUp)
+                    do j = 1, size(cvs)
+                        cvs_sep(counter + j) = cvs(j)
+                    end do
+                    counter = counter + size(cvs)
+                end do
+            end do
+
+            call Unique(cvs_sep(1:counter), cvs_sepU) 
+
+            ! Find cells with smallest psi width
+            ! First only pick the cells smaller than h_rad_threshold and from creg 1 or 2
+            cellsD = (/(i, i = 1, c%ntot)/)
+            log = (qm%h_rad .lt. options%h_rad_threshold .and. c%reg%Get() .lt. 3)
+            allocate(cells(count(log)))
+            cells = pack(cellsD, log)
+
+            ! Sort cells for smallest h_rad_psi
+            h_rad_cells = qm%h_rad_psi(cells)
+            call Sort(h_rad_cells, ind_sort)
+            cells = cells(ind_sort)
+
+            do i = 1, size(cells)
+
+                if ((.not.any(cells(i) == cvs_sepU))) then
+                    neigs = GetCellNeigsGA(grid, cells(i), cvLookUp)
+                    bench = 1e10_R8
+
+                    ! Loop over neigs
+                    do j = 1, size(neigs)
+
+                        ! If neig is also in cells, not next to separatrix and smaller than threshold
+                        if (any(neigs(j) == cells) &
+                            .and. (.not.any(neigs(j) == cvs_sepU)) &
+                            .and. (qm%h_rad(neigs(j)) .lt. options%h_rad_threshold) ) then
+
+                                if (qm%h_rad_psi(neigs(j)) .lt. bench) then
+
+                                    common_face = GetCommonFace(c, cells(i), neigs(j))
+                                    if ((f%aligned%Get(common_face) == 1) .and. (f%label%Get(common_face) == 0)) then
+
+                                        qm%merge_fc = common_face
+                                        bench = qm%h_rad_psi(neigs(j))
+
+                                    end if
+                                end if
+
+                        end if
+                    end do
+
+
+                end if
+
+                if (qm%merge_fc /= 0) exit
+
+            end do
+
         case ('h_rad_core')
+
+            ! Initialize
+            call grid%GetCutsXpoints(cvLookUp, core_facesD)
+            Xcells = GetVertCellGA(c, grid%data%xpointID(1), cvLookUp)
+            allocate(core_faces(count(f%aligned%Get(core_facesD)==0)))
+            core_faces = pack(core_facesD,f%aligned%Get(core_facesD)==0)
+
+            allocate(cells(size(core_faces)*2))
+            cells = 0
+            do i = 1, size(core_faces)
+                cvs = GetFaceCellGA(c, core_faces(i), cvLookUp)
+                cells(2*i-1) = cvs(1)
+                cells(2*i) = cvs(2)
+            end do
+
+            ! Sort to smallest h_rad
+            h_rad_cells = qm%h_rad(cells)
+            call Sort(h_rad_cells, ind_sort)
+            cells = cells(ind_sort)
+            
+            do i = 1, size(cells)
+                if (.not.any(cells(i)==Xcells) .and. (qm%h_rad(cells(i)) .lt. options%h_rad_core_threshold)) then
+
+                    neigs = GetCellNeigsGA(grid, cells(i), cvLookUp)
+                    bench = 1e10_R8
+                    do j = 1, size(neigs)
+                        if (any(neigs(j) == cells) .and. (.not.any(neigs(j) == Xcells)) &
+                            .and. (qm%h_rad(neigs(j)) .lt. options%h_rad_core_threshold)) then
+                            if (qm%h_rad(neigs(j)) .lt. bench) then
+                                common_face = GetCommonFace(c, cells(i), neigs(j))
+                                if (f%aligned%Get(common_face) == 1 .and. f%label%Get(common_face)== 0) then
+                                    qm%merge_fc = common_face
+                                    bench = qm%h_rad(neigs(j))
+                                end if
+                            end if
+                        end if
+                    end do
+
+                end if
+
+                if (qm%merge_fc /= 0) exit
+
+            end do
+
+
+
+
         case ('bias_rad_farSOL')
         case ('bias_rad')
         case ('skew_tria')
@@ -2001,7 +2149,7 @@ module gamod_types
                 use_nsep = .false.
                 use_sepID = .false.
                 start = .true.
-                call GiveSeparatrices(grid,use_nsep,use_sepID,start,cvLookUp)
+                call grid%GiveSeparatrices(use_nsep,use_sepID,start,cvLookUp)
             end if
 
             ! Determine whether to use the vert.fieldlineID to determine the Xpoint
