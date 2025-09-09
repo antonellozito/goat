@@ -968,14 +968,14 @@ module gamod_types
         type(GAoptionsUDT)          :: options
 
         ! Auxiliary 
-        integer(I8) :: i, j, neig, nf
+        integer(I8) :: i, j, k, neig, nf, fcs_al1, fcs_al2
         integer(I8), allocatable, dimension(:) :: forbidden_fcs, &
             indsort, cells, small_cells, fcs, cvs, cvLookUp, indcv, &
-            no_cells, trias, cells2, indfc, pol_faces, fcs1, fcs2
+            no_cells, trias, cells2, indfc, pol_faces, fcs1, fcs2, cellsD
         real(R8) :: crit, dfunv(grid%cell%ntot), h_pol_no_cells_crit
         real(R8), allocatable, dimension(:) :: area_small_cells, &
             h_pol_no_cells_sorted, h_pol_cells, h_pol_cvs, bias, &
-            pol_fluxdens_est
+            pol_fluxdens_est, pol_fluxdens_estD
         logical, allocatable :: log(:), log2(:), trias_log(:)
 
         ! Associate
@@ -998,9 +998,55 @@ module gamod_types
         case ('tria_to_quad')
 
             ! NOT IN MATLAB
-            ! Determine merge face
+            ! Determine merge face (case for when a quad consists of two triangles)
             ! Aligned face in other flux surface, or aligned faces have no common vertex
+            indcv = (/ (i, i = 1, c%ntot)/)
+            allocate(trias(count(c%faceP2%Get() == 3)))
+            trias = pack(indcv, c%faceP2%Get() == 3)
+            do i = 1, size(trias)
 
+                ! Get faces and check if it is not aligned and has another triangle as neighbor
+                fcs = GetCellFaceGA(c, trias(i))
+                do j = 1, 3
+
+                    if (f%aligned%Get(fcs(j)) == 0) then
+
+                        cvs = GetFaceCellGA(c, fcs(j), cvLookUp)
+                        if (size(cvs) == 2) then
+                            if ((c%faceP2%Get(cvs(1)) == 3) .and. (c%faceP2%Get(cvs(2)) == 3)) then
+                                ! Every triangle should have one aligned face
+                                ! In this case the merge can happend if those aligned faces 
+                                ! do not have a common vertex
+                                fcs1 = GetCellFaceGA(c, cvs(1))
+                                fcs2 = GetCellFaceGA(c, cvs(2))
+                                fcs_al1 = 0
+                                fcs_al2 = 0
+                                do k = 1, 3
+                                    if (f%aligned%Get(fcs1(k)) == 1) fcs_al1 = fcs1(k)
+                                    if (f%aligned%Get(fcs2(k)) == 1) fcs_al2 = fcs2(k)
+                                end do
+
+                                ! If faces are found and have no common vertex, the trias can be merged
+                                if (fcs_al1 /= 0 .and. fcs_al2 /= 0) then
+
+                                    if (.not.HaveCommonVert(f, fcs_al1, fcs_al2)) then
+                                        qm%merge_fc = fcs(j)
+                                        exit
+                                    end if
+
+                                end if
+
+                            end if
+
+                        end if
+
+                    end if
+
+                end do
+
+                if (qm%merge_fc /= 0) exit
+
+            end do
 
 
         case ('min_area')
@@ -1202,13 +1248,16 @@ module gamod_types
             ! Distance function fun_r
             ! Only use cells in SOL
             log = (c%reg%Get() == 2)
+            allocate(cellsD(count(log)))
+            cellsD = pack(indcv, log)
+
+            allocate(pol_fluxdens_estD(size(cellsD)))
+            call grid%fun_r%distr%Evaluate(c%x%Get(cellsD), c%y%Get(cellsD), pol_fluxdens_estD)
+
+            log = (pol_fluxdens_estD .lt. 0.5_R8)
             allocate(cells(count(log)))
-            cells = pack(indcv, log)
+            cells = pack(cellsD, log)
 
-            allocate(pol_fluxdens_est(size(cells)))
-            call grid%fun_r%distr%Evaluate(c%x%Get(cells), c%y%Get(cells), pol_fluxdens_est)
-
-            log = (pol_fluxdens_est .lt. 0.5_R8)
 
 
 
