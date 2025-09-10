@@ -481,6 +481,31 @@ module gamod_types
         procedure :: MakeNewThreeFace
         procedure :: AdaptNeigThreeVert
 
+        ! Splitting 
+        procedure :: DoSplitting
+        procedure :: Splitting
+        procedure :: OneSplit
+        procedure :: SplitPentsRec
+        procedure :: DetermineTcaseID
+        procedure :: SelectSplitPent
+        procedure :: GetRadSplitFacePent
+        procedure :: GetNeigTypeFromFace
+        procedure :: GetIntersectedPsiFaces
+        procedure :: GetPents
+        procedure :: SplitTQ
+        procedure :: SplitTP
+        procedure :: SplitTB
+        procedure :: SplitQTB
+        procedure :: SplitBTB
+        procedure :: SplitTTB
+        procedure :: SplitTTT
+        procedure :: SplitTTQ
+
+
+        ! Boundary layer grid
+        procedure :: BoundaryLayerGrid
+
+
         ! Grid information utility
         procedure :: GetForbiddenMergeFaces
         procedure :: GetCutsXpoints
@@ -489,6 +514,7 @@ module gamod_types
         procedure :: RecursiveGridMarching
         procedure :: DetermineCflags
         procedure :: AreaConstraintPents
+        procedure :: GetXcellsGeometric
 
         ! Grid operation
         procedure :: RemoveCells
@@ -974,7 +1000,7 @@ module gamod_types
             indsort, cells, small_cells, fcs, cvs, cvLookUp, indcv, &
             no_cells, trias, cells2, indfc, pol_faces, fcs1, fcs2, cellsD, &
             ind_sort, neigs, vxs, cvs_sep, cvs_sepU, core_faces, Xcells, &
-            core_facesD
+            core_facesD, rad_facesD, rad_faces
         real(R8) :: crit, dfunv(grid%cell%ntot), h_pol_no_cells_crit, &
             mean_pol_flux, bench
         real(R8), allocatable, dimension(:) :: area_small_cells, &
@@ -1413,8 +1439,60 @@ module gamod_types
 
 
         case ('bias_rad_farSOL')
+
+            ! Remove cells with strong bias in the radial direction in the farSOL region - TODO after detect farSOL
+
+
         case ('bias_rad')
+
+            ! Remove cells with strong bias in the radial direction
+
+            ! Get aligned faces
+            indfc = (/(i, i = 1, f%ntot)/)
+            allocate(rad_facesD(count(f%aligned%Get() == 1)))
+            rad_facesD = pack(indfc, f%aligned%Get() == 1)
+
+            log = (.not.isMember(rad_facesD, forbidden_fcs))
+            allocate(rad_faces(count(log)))
+            rad_faces = pack(rad_facesD, log)
+
+            ! Compute bias for these faces
+            allocate(bias(size(rad_faces)))
+            bias = 0
+            do i = 1, size(rad_faces)
+
+                cvs = GetFaceCellGA(c, rad_faces(i), cvLookUp)
+                if (size(cvs) == 2) then
+                    if (c%reg%Get(cvs(1)) == c%reg%Get(cvs(2))) then
+
+                        ! Both only quads
+                        fcs1 = GetCellFaceGA(c, cvs(1))
+                        fcs2 = GetCellFaceGA(c, cvs(2))
+
+                        if ((count(f%aligned%Get(fcs1) == 1) .gt. 1) .and. (count(f%aligned%Get(fcs2) == 1) .gt. 1)) then
+
+                            bias(i) = maxval(qm%h_rad(cvs)) / minval(qm%h_rad(cvs))
+    
+                        end if
+
+                    end if
+
+                end if
+
+            end do
+
+            ! Pick the largest bias
+            call Sort(bias, indsort, .false.)
+            rad_faces = rad_faces(indsort)
+            if (bias(1) .gt. options%merge_bias_limit) then
+                qm%merge_fc = rad_faces(1)
+            end if
+
+
         case ('skew_tria')
+
+            ! TODO 
+
         case ('manual')
 
             call gdErrorHandler('SelectMergingFace: manual merging via input not possible in precompile code')
@@ -6372,6 +6450,943 @@ module gamod_types
 
     end subroutine
 
+    ! Splitting
+    !==========
+    subroutine DoSplitting(grid, magneticField, qm, options)
+
+        ! Description
+        !============
+        ! Wrapper function for splitting operation
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        type(QualityMetricUDT), intent(inout)   :: qm
+        type(GAoptionsUDT), intent(inout)       :: options
+
+        ! Auxiliary
+        integer(I8) :: j
+        character(:), allocatable :: t1, t2, t3
+        logical :: rad_splitting
+
+
+        ! Printing
+        select case (options%splittype)
+        case ('rad')
+            t1 = 'radial'
+            t2 = options%rad_type
+            t3 = 'Applied radial splitting'
+            rad_splitting = .true.
+        case ('pol')
+            t1 = 'poloidal'
+            t2 = options%pol_type
+            t3 = 'Applied poloidal splitting'
+            rad_splitting  = .false.
+        end select
+        print *,  'Splitting: ', t1, ' ', t2
+        
+        if (options%slab) call grid%vert%psi%Set(grid%vert%x%Get())
+
+        ! Calculate metric and find splitting cell
+        call qm%CalculateQualityMetrics(grid, options, magneticField, .true., .false.)
+        j = 0
+
+        ! While a splitting cell is found
+        do while (qm%split_cv /= 0 .and. j .lt. options%n_split)
+
+            call grid%Splitting(qm, options, magneticField)
+
+            if (.not.options%slab) call grid%RecalcMagn(magneticField)
+
+            ! Update counter
+            j = j + 1
+
+            ! Printing 
+            print *, t3, ' ', j
+
+            ! Check grid
+            if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+
+            if (rad_splitting) then
+
+                ! Remove small triangle which were possibly created
+                ! Calculate quality metric
+                call qm%CalculateQualityMetrics(grid, options, magneticField, .false., .false.)
+
+                ! Remove Small triangles
+                if (options%rem_small_trias) then
+
+                    print *, 'Removing small triangles'
+                    call grid%RemoveSmallTriangle(magneticField, qm, options)
+                    print *, 'Ended removing small triangles'
+
+                    if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+
+                end if
+
+            end if
+
+            ! Recalculate quality metric and find a split cell
+            call qm%CalculateQualityMetrics(grid, options, magneticField, .true., .false.)
+
+            
+        end do
+
+        ! Transform remaining pentagons into triangles
+        !if (options%pents_to_tria) call grid%TransPentsToTrias() - TODO
+
+        ! Ordening not necessary probably
+
+
+    end subroutine
+
+    subroutine Splitting(grid, qm, options, magneticField)
+
+        ! Description
+        !============
+        ! Splits cells based on indication of certain cell
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        type(QualityMetricUDT), intent(inout)   :: qm
+        type(GAoptionsUDT), intent(inout)       :: options
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+
+        ! Auxiliary
+        integer(I8) :: cv
+
+        ! Get splitting case and do the split on cell cv
+        call grid%OneSplit(qm%split_cv,options)
+
+        ! If pentagons are not allowed
+
+        if (options%no_pents) then
+            cv = 0
+            call grid%SplitPentsRec(options,cv)
+        end if
+
+        ! Do ordering for nice plots -  not necessary
+
+    end subroutine
+
+    subroutine OneSplit(grid, cv, options)
+
+        ! Description
+        !============
+        ! Performs splitting on one cell and adjusts neighbouring cells
+        ! topology
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(GAoptionsUDT), intent(inout)   :: options
+        integer(I8), intent(inout)          :: cv
+
+        ! Auxiliary
+        integer(I8) :: rface1, rface2, neig1, neig2
+        integer(I8), allocatable :: fcs(:), Xcells(:)
+        character(:), allocatable :: caseID, type
+
+
+
+        ! Get faces
+        fcs = GetCellFaceGA(grid%cell, cv)
+
+        ! Determine if cv in Xradcells for geometric splitting strategy
+        call grid%GetXcellsGeometric(Xcells)
+        options%XpointSplitting = .false.
+        if (any(cv == Xcells)) then
+            options%XpointSplitting = .true.
+        end if
+
+        ! Determine the correct split case
+        type = options%splittype
+        select case (grid%cell%cflags%Get(cv))
+
+        case (1:3)
+
+            select case (size(fcs))
+
+            case (3)
+
+                call grid%DetermineTcaseID(cv, fcs, type, options%typeT, options, caseID, rface1, rface2, neig1, neig2)
+
+                select case (caseID)
+
+                case ('34')
+                    call grid%SplitTQ(cv,rface1,neig1,type,options)
+                case ('35')
+                    call grid%SplitTP(cv,rface1,neig1,type,options)
+                case ('30')
+                    call grid%SplitTB(cv,rface1,type)
+                case ('430','034')
+                    call grid%SplitQTB(cv,rface1,rface2,neig1,neig2,type,options%typeT)
+                case ('030')
+                    call grid%SplitBTB(cv,rface1,rface2,type,options%typeT)
+                case ('033','330')
+                    call grid%SplitTTB(cv,rface1,rface2,neig1,neig2,type,options%typeT)
+                case ('333')
+                    call grid%SplitTTT(cv,rface1,rface2,neig1,neig2,type) 
+                case ('334','433')
+                    call grid%SplitTTQ(cv,rface1,rface2,neig1,neig2,type)
+                case default
+
+                    call gdErrorHandler('OneSplit: Tcase, case not implemented')
+
+                end select
+
+            case (4)
+
+                !call grid%DetermineQcaseID()
+
+            case (5)
+
+                !call grid%DeterminePcaseID()
+
+            end select
+
+        case (4) ! triangles that where turned into quad
+
+            !call grid%DetermineT4caseID()
+
+        case default
+
+            call gdErrorHandler('OneSplit: not determined')
+
+        end select
+
+
+    end subroutine
+
+    recursive subroutine SplitPentsRec(grid, options, cv)
+
+        ! Description
+        !============
+        ! Splits pentagons recursively, so by splitting a cell.
+        ! Also included triangles with one split face (triangle4)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(GAoptionsUDT), intent(inout)   :: options
+        integer(I8), intent(inout)          :: cv
+        
+        ! Auxiliary
+        integer(I8) :: i
+        integer(I8), allocatable :: cells(:), pents(:)
+
+        ! Select the cell to split
+        ! Area constraints
+        if (options%no_pents_area_split) then
+            call AreaConstraintPents(grid, options, options%dist_function_threshold_split, cells)
+        else
+            cells = (/ (i, i = 1, grid%cell%ntot) /)
+        end if
+
+        ! Get the cell
+        if (cv == 0) then
+
+            ! Search pents to split
+            call grid%GetPents(cells, pents)
+
+            if (size(pents) /= 0) then
+
+                call grid%SelectSplitPent(pents, options, cv)
+
+                if (cv /= 0) then
+
+                    call grid%OneSplit(cv, options)
+
+                end if
+
+            end if
+
+        else 
+
+            call grid%OneSplit(cv, options)
+
+        end if
+
+        ! Recursive part
+        if (options%no_pents_area_split) then
+
+            call grid%AreaConstraintPents(options, options%dist_function_threshold_split, cells)
+
+        else 
+
+            cells = (/ (i, i = 1, grid%cell%ntot)/)
+
+        end if
+
+        ! Get pentagonal and triangle4 cells
+        call grid%GetPents(cells, pents)
+
+        ! Eliminate cells which should not be split
+        if (size(pents) /= 0) then
+
+            call grid%SelectSplitPent(pents, options, cv)
+
+            if (cv /= 0) then
+
+                call grid%SplitPentsRec(options, cv)
+
+            end if
+
+        end if
+
+
+
+    end subroutine
+
+    subroutine SelectSplitPent(grid, pents, options, cv)
+
+        ! Description
+        !============
+        ! Selects a pentagon or a triangle4 to be split based on surrounding cells
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), allocatable        :: pents(:)
+        type(GAoptionsUDT), intent(in)  :: options
+        integer(I8), intent(inout)      :: cv
+ 
+        ! Auxiliary
+        integer(I8) :: i, j, ic, indmax, splitface, counter, splitface_n
+        integer(I8), allocatable :: fcs(:), neigs5(:), fcs_n(:), neigs(:)
+        real(R8), allocatable :: dpsi(:)
+        logical, allocatable :: log(:)
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        cv = 0
+        if (options%split_out) return
+
+        do i = 1, size(pents)
+
+            ic = pents(i)
+            if (c%faceP2%Get(ic) == 5) then
+
+                select case (options%splittype)
+
+                case ('rad')
+
+                    ! If the poloidal faces that should be split is also in an
+                    ! existing pentagon, the splitting is not possible
+                    neigs = GetCellNeigsGA(grid, ic)
+
+                    if (any(c%faceP2%Get(neigs) == 5) .or. any(c%cflags%Get(neigs) == 4)) then
+
+                        fcs = GetCellFaceGA(c, ic)
+                        dpsi = abs(v%psi%Get(f%vert1%Get(fcs)) - v%psi%Get(f%vert2%Get(fcs)))
+                        indmax = maxloc(dpsi,1)
+                        splitface = fcs(indmax)
+
+                        log = (c%faceP2%Get(neigs) == 5)
+                        allocate(neigs5(count(log)))
+                        neigs5 = pack(neigs, log)
+
+                        counter = 0
+                        do j = 1, size(neigs5)
+
+                            fcs_n = GetCellFaceGA(c, neigs5(j))
+                            if (any(splitface == fcs_n)) then
+
+                                dpsi = abs(v%psi%Get(f%vert1%Get(fcs_n)) - v%psi%Get(f%vert2%Get(fcs_n)))
+                                indmax = maxloc(dpsi, 1)
+                                if (fcs_n(indmax) == splitface) then
+                                    cv = ic
+                                    exit
+                                end if
+
+                            else
+
+                                counter = counter + 1
+
+                            end if
+
+                        end do
+
+                        if (counter == size(neigs5)) then ! So for a neighboring pent the split face ws not a common face
+
+                            cv = ic
+                            return
+
+                        end if
+                            
+
+                        ! Housekeeping
+                        deallocate(neigs5)
+                        
+                    else
+
+                        cv = ic
+                        return
+
+                    end if
+
+
+                case ('pol')
+
+                    ! If the radial faces that should be split is also in an
+                    ! existing pentagon, the splitting is not possible, expect
+                    ! when it is a correct splitting face for the pentagon
+                    neigs = GetCellNeigsGA(grid, ic)
+                    if (any(c%faceP2%Get(neigs) ==5) .or. any(c%cflags%Get(neigs) == 4)) then
+
+                        fcs = GetCellFaceGA(c, ic)
+                        call grid%GetRadSplitFacePent(fcs, splitface)
+
+                        allocate(neigs5(count(c%faceP2%Get(neigs) == 5)))
+                        neigs5 = pack(neigs, c%faceP2%Get(neigs) == 5)
+
+                        counter = 0
+                        do j = 1, size(neigs5)
+                            fcs_n = GetCellFaceGA(c, neigs5(j))
+                            if (any(splitface == fcs_n)) then
+                                call grid%GetRadSplitFacePent(fcs, splitface_n)
+                                if (splitface_n == splitface) then
+                                    cv = ic
+                                    exit
+                                else
+                                    cv = neigs5(j)
+                                end if
+
+                            else 
+
+                                counter = counter + 1
+
+                            end if
+                        end do
+
+                        if (counter == size(neigs5)) then ! So for the neigboring pents the split face was not a common face
+                            cv = ic
+                            return
+                        end if
+                    
+                    else
+
+                        cv = ic
+                        return
+
+                    end if
+
+                end select
+
+            else if (c%cflags%Get(ic) == 4) then
+
+                cv = ic
+                return
+
+            else
+
+                call gdErrorHandler('SelectSplitPent: not yet implemented')
+
+            end if
+
+        end do
+
+        end associate
+
+    end subroutine
+
+    subroutine GetRadSplitFacePent(grid, faces, splitface)
+
+        ! Description
+        !============
+        ! Give the radial split face of a pentagon (for poloidal splitting), the
+        ! pentagon has good alignment. 
+        ! Assumption splitted face is a radial face
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), allocatable, intent(in)    :: faces(:)
+        integer(I8), intent(out)                :: splitface
+
+        ! Auxiliary
+        integer(I8) :: rface1, rface2, rface3, indmin
+        real(R8), allocatable :: dpsi(:)
+
+
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+        )
+
+        ! Get radial faces
+        dpsi = abs(v%psi%Get(f%vert1%Get(faces)) - v%psi%Get(f%vert2%Get(faces)))
+        indmin = minloc(dpsi,1)
+        rface1 = faces(indmin) ! Radial face1
+        dpsi(indmin) = 1e99_R8
+
+        indmin = minloc(dpsi,1)
+        rface2 = faces(indmin) ! Radial face2
+        dpsi(indmin) = 1e99_R8
+
+        indmin = minloc(dpsi,1)
+        rface3 = faces(indmin) ! Radial face3
+
+        ! Radial faces with common vertex are faces on the side of
+        ! the two quads
+        if (HaveCommonVert(f, rface1, rface2)) then
+            splitface = rface3
+        else if (HaveCommonVert(f, rface1, rface3)) then
+            splitface = rface2
+        else
+            splitface = rface1
+        end if
+
+        end associate
+
+    end subroutine
+
+    subroutine DetermineTcaseID(grid, cv, fcs, type, typeT, options, caseID, rface1, rface2, neig1, neig2)
+
+        ! Description
+        !============
+        ! Determine the splitting case for a (aligned) triangle. Because in plasma
+        ! grid always field aligned, a triangle at least has one aligned face.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: cv
+        integer(I8), allocatable, intent(in)    :: fcs(:)
+        character(:), allocatable, intent(in)   :: type, typeT
+        type(GAoptionsUDT), intent(in)          :: options
+        character(:), allocatable, intent(out)  :: caseID
+        integer(I8), intent(out)   :: rface1, rface2, neig1, neig2
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:) :: rface1D, faceB, cells1, rfaces, int_faces
+        integer(I8) :: neig1type, neig2type
+        character(:), allocatable :: x1, x2
+
+        ! Determine the case
+        select case (type)
+
+        case ('pol') ! Poloidal splitting
+
+            select case (typeT)
+
+            case ('stacked')
+
+                ! Get radial face
+                allocate(rface1D(count(grid%face%aligned%Get(fcs) == 1)))
+                rface1D = pack(fcs, grid%face%aligned%Get(fcs) == 1)
+                
+                if (size(rface1D) == 0) call gdErrorHandler('DetermineTcaseID: Triangle should have an aligned face')
+
+                rface1 = rface1D(1)
+
+                call grid%GetNeigTypeFromFace(rface1, cv, neig1, neig1type)
+
+
+                write (x1, '(I1.1)') neig1type
+                caseID = '3' // x1 
+
+            case ('cutcell')
+
+                ! Get radial face
+                allocate(rface1D(count(grid%face%aligned%Get(fcs) == 1)))
+                rface1D = pack(fcs, grid%face%aligned%Get(fcs) == 1)
+                
+                if (size(rface1D) == 0) call gdErrorHandler('DetermineTcaseID: Triangle should have an aligned face')
+
+                rface1 = rface1D(1)
+
+                if (isBoundaryFaceGA(grid%face, rface1)) then
+
+                    neig1 = 0
+                    neig1type = 0
+
+                    if (count(isBoundaryFaceGA(grid%face, fcs)) == 2) then
+
+                        allocate(faceB(count(isBoundaryFaceGA(grid%face, fcs))))
+                        faceB = pack(fcs, isBoundaryFaceGA(grid%face, fcs))
+                        rface2 = faceB(1) 
+                        neig2 = 0
+                        neig2type = 0
+
+                    else
+
+                        call gdErrorHandler('DetermineTcaseID: geometry not considered')
+
+                    end if
+
+                else
+
+                    ! Get radial neighbors
+                    cells1 = GetFaceCellGA(grid%cell, rface1)
+                    if (cells1(1) /= cv) then
+                        neig1 = cells1(1)
+                    else if (cells1(2) /= cv) then
+                        neig1 = cells1(2)
+                    end if
+                    neig1type = grid%cell%faceP2%Get(neig1)
+
+                    ! Get boundary face
+                    allocate(faceB(count(isBoundaryFaceGA(grid%face, fcs))))
+                    faceB = pack(fcs, isBoundaryFaceGA(grid%face, fcs))
+                    rface2 = faceB(1)
+                    neig2 = 0
+                    neig2type = 0
+
+                end if
+
+                ! Make caseID
+                write (x1, '(I1.1)') neig1type
+                write (x2, '(I1.1)') neig2type
+                caseID =  x1 // '3' // x2
+                
+
+            end select
+
+        case ('rad')
+
+            ! Get the rfaces
+            if (options%rad_type == 'no_aligned_faces') then
+
+                ! Check which faces are intersected
+                call grid%GetIntersectedPsiFaces(cv, fcs, int_faces)
+
+                ! Extract faces
+                rface1 = int_faces(1)
+                rface2 = int_faces(2)
+
+                call gdErrorHandler('DetermineTcaseID: triangle without aligned faces are not supported yet')
+
+            else 
+
+                ! Get the poloidal faces
+                allocate(rfaces(count(grid%face%aligned%Get(fcs) == 0)))
+                rfaces = pack(fcs, grid%face%aligned%Get(fcs) == 0)
+
+                rface1 = rfaces(1)
+                rface2 = rfaces(2)
+
+
+            end if
+
+            ! Get the neighbors and neighbor types
+            call grid%GetNeigTypeFromFace(rface1, cv, neig1, neig1type)
+            call grid%GetNeigTypeFromFace(rface2, cv, neig2, neig2type)
+
+            ! Make caseID
+            write (x1, '(I1.1)') neig1type
+            write (x2, '(I1.1)') neig2type
+            if (options%rad_type == 'no_aligned_faces') then
+
+                caseID = x1 // '3' // x2 // 'A'
+
+            else
+
+                caseID  = x1 // '3' // x2
+
+            end if
+
+        end select
+
+    end subroutine
+
+    subroutine GetNeigTypeFromFace(grid, rface, cv, neig, neigtype)
+
+        ! Description
+        !============
+        ! Getting neighbor cell and neigtype of a radial face from a split cell
+
+        ! Declare variables
+        !==================
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: cv, rface
+        integer(I8), intent(out)        :: neig, neigtype
+
+        ! Auxiliary
+        integer(I8), allocatable :: cvs(:)
+        
+        if (isBoundaryFaceGA(grid%face, rface)) then
+
+            neig = 0
+            neigtype = 0
+
+        else
+
+            ! Get radial neighbors
+            cvs = GetFaceCellGA(grid%cell, rface)
+            if (cvs(1) /= cv) then
+                neig = cvs(1)
+            else if (cvs(2) /= cv) then
+                neig = cvs(2)
+            end if
+            neigtype = grid%cell%faceP2%Get(neig)
+
+        end if
+
+    end subroutine
+
+    subroutine GetIntersectedPsiFaces(grid, cv, fcs, int_faces, psic)
+
+        ! Description
+        !============
+        ! Returns the two faces which were intersecting by the average psi of
+        ! cell cv of a specified psic. The intersection points are stored in isx and isy.
+
+        ! Declare variables
+        !==================
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: cv
+        integer(I8), allocatable, intent(in)    :: fcs(:)
+        integer(I8), allocatable, intent(out)   :: int_faces(:)
+        real(R8), optional                      :: psic
+
+        ! Auxiliary
+        integer(I8) :: ii, int_facesD(4), v1, v2, i
+        integer(I8), allocatable :: vxs(:)
+        real(R8) :: isxD(4), isyD(4), v1p, v2p, t0
+        real(R8), allocatable :: isx(:), isy(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        int_facesD = 0
+        isx = 0
+        isy = 0
+        ii = 0
+
+        ! Get the intersected faces
+        if (.not.present(psic)) then
+            vxs = GetCellVertGA(c, cv)
+            psic = 0.5_R8*(maxval(v%psi%Get(vxs)) + minval(v%psi%Get(vxs)))
+        end if 
+
+        do i = 1, c%vertP2%Get(cv)
+            v1 = f%vert1%Get(fcs(i))
+            v2 = f%vert2%Get(fcs(i))
+            v1p = v%psi%Get(v1)
+            v2p = v%psi%Get(v2)
+
+            if ((psic .gt. min(v1p, v2p)) .and. (psic .lt. max(v1p, v2p))) then
+                t0 = (psic - v1p) / (v2p - v1p)
+                ii = ii + 1
+                isxD(ii) = v%x%Get(v1) + t0 * (v%x%Get(v2) - v%x%Get(v1))
+                isyD(ii) = v%y%Get(v1) + t0 * (v%y%Get(v2) - v%y%Get(v1))
+                int_facesD(ii) = fcs(i)
+            end if
+
+        end do
+
+        if (ii /= 2) then
+            call gdErrorHandler('GetIntersectedPsiFaces: no 2 intersections found')
+        end if
+
+        ! Trim
+        isx = isxD(1:ii)
+        isy = isyD(1:ii)
+        int_faces = int_facesD(1:ii)
+
+
+        end associate
+
+    end subroutine  
+
+    subroutine GetPents(grid, cells, pents)
+
+        ! Description
+        !============
+        ! Get the pentagonal and triangle4 cells
+
+        ! Declare variables
+        !==================
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), allocatable, intent(in)    :: cells(:)
+        integer(I8), allocatable, intent(out)   :: pents(:)
+
+        ! Auxiliary
+        logical, allocatable :: log(:), log2(:)
+        integer(I8) :: i
+        integer(I8), allocatable :: pentsD(:), triangle4(:), indcv(:)
+
+        log = (grid%cell%faceP2%Get(cells) == 5)
+        allocate(pentsD(count(log)))
+        pentsD = pack(cells, log)
+        log2 = (grid%cell%cflags%Get() == 4)
+        allocate(triangle4(count(log2)))
+        indcv = (/ (i, i = 1, grid%cell%ntot)/)
+        triangle4 = pack(indcv, log2)
+        pents = [pentsD, triangle4]
+
+    end subroutine
+
+    
+    subroutine SplitTQ(grid, cv, rface1, neig1, type, options)
+
+        ! Description
+        !============
+        !
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid 
+        integer(I8), intent(in)         :: cv, rface1, neig1
+        character(:), allocatable       :: type
+        type(GAoptionsUDT), intent(in)  :: options
+
+
+    end subroutine
+
+    subroutine SplitTP(grid, cv, rface1, neig1, type, options)
+
+        ! Description
+        !============
+        !
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid 
+        integer(I8), intent(in)         :: cv, rface1, neig1
+        character(:), allocatable       :: type
+        type(GAoptionsUDT), intent(in)  :: options
+
+
+    end subroutine   
+
+    subroutine SplitTB(grid, cv, rface1, type)
+
+        ! Description
+        !============
+        !
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid 
+        integer(I8), intent(in)         :: cv, rface1
+        character(:), allocatable       :: type
+
+
+    end subroutine   
+
+    subroutine SplitQTB(grid, cv, rface1, rface2, neig1, neig2, type, typeT)
+
+        ! Description
+        !============
+        !
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid 
+        integer(I8), intent(in)         :: cv, rface1, rface2, neig1, neig2
+        character(:), allocatable       :: type, typeT
+
+
+    end subroutine   
+
+    subroutine SplitBTB(grid, cv, rface1, rface2, type, typeT)
+
+        ! Description
+        !============
+        !
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid 
+        integer(I8), intent(in)         :: cv, rface1, rface2
+        character(:), allocatable       :: type, typeT
+
+
+    end subroutine   
+
+    subroutine SplitTTB(grid, cv, rface1, rface2, neig1, neig2, type, typeT)
+
+        ! Description
+        !============
+        !
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid 
+        integer(I8), intent(in)         :: cv, rface1, rface2, neig1, neig2
+        character(:), allocatable       :: type, typeT
+
+
+    end subroutine  
+ 
+    subroutine SplitTTT(grid, cv, rface1, rface2, neig1, neig2, type)
+
+        ! Description
+        !============
+        !
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid 
+        integer(I8), intent(in)         :: cv, rface1, rface2, neig1, neig2
+        character(:), allocatable       :: type
+
+
+    end subroutine 
+
+    subroutine SplitTTQ(grid, cv, rface1, rface2, neig1, neig2, type)
+
+        ! Description
+        !============
+        !
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid 
+        integer(I8), intent(in)         :: cv, rface1, rface2, neig1, neig2
+        character(:), allocatable       :: type
+
+
+    end subroutine 
+
+    ! Boundary layer grid
+    !====================
+    subroutine BoundaryLayerGrid(grid, magneticField, options)
+
+        ! Description
+        !============
+        ! 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        type(GAoptionsUDT), intent(in)      :: options
+  
+    end subroutine
+
     !------------------------------------------------------------------!
     !                   GAGRID INFORMATION UTILITY                     !
     !------------------------------------------------------------------! 
@@ -6824,6 +7839,30 @@ module gamod_types
         end if
 
 
+
+    end subroutine
+
+    subroutine GetXcellsGeometric(grid, Xcells)
+        ! Description
+        !============
+        ! Determine the cells which should be splitted via an geometric method to
+        ! avoid problems near the X-point due to noisy magnetic field.
+        ! For the moment just cells around the Xpoints
+
+        class(GAGridUDT) :: grid
+        integer(I8) :: counter, i
+        integer(I8), allocatable :: Xcells(:), cvLookUp(:), cvs(:), XcellsD(:)
+
+        cvLookUp = GetCvLookUpGA(grid%cell) 
+
+        ! Cells directly around the Xpoint
+        do i = 1, grid%data%nxp
+            cvs = GetVertCellGA(grid%cell, grid%data%xpointID(i), cvLookUp)
+            XcellsD(counter+1:counter+size(cvs)) = cvs
+        end do 
+
+        ! Trim
+        Xcells = XcellsD(1:counter)
 
     end subroutine
 
@@ -7797,7 +8836,49 @@ module gamod_types
         integer(I8), allocatable :: cvs(:), res(:), res_dummy(:)
 
         if (.not.present(cvLookUp)) then
-            cvLookUp = GetCvLookUpGA(g%cell)
+
+            s = g%cell%faceP1%Get(ic)
+            nf = g%cell%faceP2%Get(ic)
+            counter = 0
+            allocate(res_dummy(nf))
+            do i = 1, nf
+                ifc = g%cell%face%Get(s+i-1)
+                cvs = GetFaceCellGA(g%cell,ifc)
+
+                ! Add cell if not equal to ic
+                do j = 1,size(cvs)
+                    if (cvs(j) /= ic) then
+                        counter = counter + 1
+                        res_dummy(counter) = cvs(j) 
+                    end if
+                end do
+
+            end do
+
+            res = res_dummy(1:counter)
+
+        else 
+
+            s = g%cell%faceP1%Get(ic)
+            nf = g%cell%faceP2%Get(ic)
+            counter = 0
+            allocate(res_dummy(nf))
+            do i = 1, nf
+                ifc = g%cell%face%Get(s+i-1)
+                cvs = GetFaceCellGA(g%cell,ifc,cvLookUp)
+
+                ! Add cell if not equal to ic
+                do j = 1,size(cvs)
+                    if (cvs(j) /= ic) then
+                        counter = counter + 1
+                        res_dummy(counter) = cvs(j) 
+                    end if
+                end do
+
+            end do
+
+            res = res_dummy(1:counter)
+
         end if
 
         s = g%cell%faceP1%Get(ic)
@@ -7850,16 +8931,28 @@ module gamod_types
 
     ! Get cells of a face with dynamic arrays
     function GetFaceCellGA(cell, i, cvLookUp) result(res)
-        integer(I8)                 :: i 
+        integer(I8)                 :: i, j
         type(GACellUDT)               :: cell
         integer(I8), allocatable, optional  :: cvLookUp(:)
-        integer(I8), allocatable    :: res(:)  
+        integer(I8), allocatable    :: res(:), indcf(:), ind(:)
+        logical, allocatable :: log(:) 
         
-        if (.not.present(cvLookUp)) then
-            cvLookUp = GetCvLookUpGA(cell)
+        if (present(cvLookUp)) then
+            allocate(res(count(cell%face%GetAllElements().eq.i)))
+            res = pack(cvLookUp,cell%face%GetAllElements().eq.i)
+        else 
+            log = (cell%face%Get() == i)
+            allocate(ind(count(log)))
+            indcf = (/ (j, j = 1, cell%face%Size()) /)
+            ind = pack(indcf, log)
+
+            allocate(res(size(ind)))
+            do j = 1, size(ind)
+                res(j) = GetCellFromFaceIndex(cell, ind(j))
+            end do
+
         end if
-        allocate(res(count(cell%face%GetAllElements().eq.i)))
-        res = pack(cvLookUp,cell%face%GetAllElements().eq.i)
+
     end function
 
     ! Get faces of a vertex with dynamic arrays

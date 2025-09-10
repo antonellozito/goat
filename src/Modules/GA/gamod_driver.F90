@@ -47,7 +47,7 @@ module gamod_driver
         type(GAGridUDT), intent(inout)              :: grid
         type(EnvironmentUDT), intent(in)            :: environment
         type(MagneticFieldUDT), intent(in)          :: magneticField     
-        type(GAoptionsUDT), intent(in)              :: options
+        type(GAoptionsUDT), intent(inout)           :: options
 
         ! Initialize grid adaptation
         !===========================
@@ -202,7 +202,7 @@ module gamod_driver
         !==================
         ! Argument
         type(GAGridUDT), intent(inout)       :: grid
-        type(GAoptionsUDT), intent(in)       :: options
+        type(GAoptionsUDT), intent(inout)    :: options
         type(EnvironmentUDT), intent(in)     :: environment
         type(MagneticFieldUDT), intent(in)   :: magneticField
 
@@ -234,6 +234,10 @@ module gamod_driver
             call grid%DoMerging(magneticField, qm, options)
         end if
 
+        if (options%splitting) then
+            call grid%DoSplitting(magneticField, qm, options)
+        end if
+
         ! Stacked triangles
         if (options%stacked_trias) &
             call grid%StackedTrias(magneticField, qm, options)
@@ -245,6 +249,9 @@ module gamod_driver
         ! Remove stickout quad
 
         ! Boundary layer grid
+        if (options%BLG) then
+            call grid%BoundaryLayerGrid(magneticField, options)
+        end if
 
 
     end subroutine
