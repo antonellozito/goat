@@ -212,6 +212,9 @@ module goatmod_userinput
         real(R8)                    :: h_rad_threshold
         real(R8)                    :: h_rad_core_threshold
 
+        logical                     :: BLG
+        integer(I8)                 :: BLG_n_layers
+
         logical                     :: rem_stickout_trias
         logical                     :: rem_trias_flux
         real(R8)                    :: rem_tube_outershell_threshold
@@ -273,6 +276,9 @@ module goatmod_userinput
         real(R8), allocatable       :: OMP_z(:)
         real(R8), allocatable       :: IMP_r(:)
         real(R8), allocatable       :: IMP_z(:)
+
+        ! Splitting
+        logical                     :: XpointSplitting
 
 
     contains
@@ -941,6 +947,9 @@ module goatmod_userinput
         options%merging                             = .false.
         options%h_rad_threshold                     = 0.01
         options%h_rad_core_threshold                = 0.04
+
+        options%BLG                                 = .false.
+        options%BLG_n_layers                        = 0
 
         options%rem_stickout_trias                  = .false.
         options%rem_trias_flux                      = .false.
@@ -1625,6 +1634,12 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%h_rad_threshold)                
         field = 'ga.h_rad_core_threshold'
         call ExtractOptionValueReal0D(fid, field, options%h_rad_core_threshold)  
+
+        ! Boundary layer grid
+        field = 'ga.BLG'
+        call ExtractOptionValueLogical0D(fid, field, options%BLG)
+        field = 'ga.BLG_n_layers'
+        call ExtractOptionValueInteger0D(fid, field, options%BLG_n_layers)
 
         ! Special operations
         field = 'ga.rem_stickout_trias'
