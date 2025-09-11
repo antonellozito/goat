@@ -420,6 +420,8 @@ module goatmod_userinput
         !                       topomesh from a previous one. field and
         !                       vessel filepaths should be fully specified
         !                       in TMfieldtracerfilepath and TMvesseltracerfilepath
+        ! - writedebugoutput    write (many) more intermediate topomesh 
+        !                       files for visual debuggging (default false)
         ! - (deprecated) mergetangencypointtubes     merge tubes that are too small 
         !                       and that have tangency point tubes 
         !                       as neighbours. 'too small' is based on 
@@ -473,7 +475,7 @@ module goatmod_userinput
             doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
             rvrdocascade, rvrfullycovered, alignvesselparts, avprefinevessel, &
             readexistingtracers, mergeavptubes, mergetubes, mtallowcore, &
-            mtallowpf, mtallowseparatrix
+            mtallowpf, mtallowseparatrix, writedebugoutput
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes, &
             avpminangle, avpmaxvesseldist, dpsimintubes, lradmintubes
@@ -943,6 +945,7 @@ module goatmod_userinput
         options%TMfilepath = 'topomesh.dat'
         options%TMfieldtracerfilepath = './output/TMfieldtracer.dat'
         options%TMvesseltracerfilepath = './output/TMvesseltracer.dat'
+        options%writedebugoutput = .false.
         
         ! Contouring (field)
         options%fresx = 100
@@ -1692,6 +1695,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%readexistingTM)
         field = 'gg.tm.readexistingtracers'
         call ExtractOptionValueLogical0D(fid, field, options%readexistingtracers)
+        field = 'gg.tm.writedebugoutput'
+        call ExtractOptionValueLogical0D(fid, field, options%writedebugoutput)
         field = 'gg.tm.TMfilepath'
         call ExtractOptionValueCharacter(fid, field, options%TMfilepath)
         field = 'gg.tm.TMfieldtracerfilepath'

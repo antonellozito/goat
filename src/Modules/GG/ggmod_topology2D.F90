@@ -428,14 +428,18 @@ module ggmod_topology2D
             magneticField, options)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_afterextrema')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_afterextrema')
+        end if 
 
         ! Remove parts that do not lie inside the vessel
         newvessel = vessel
         call TrimTopologicalMesh(topomesh, magneticField, newvessel)
 
-            ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        ! Do temporary writing
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        end if 
 
         ! Process points
         !===============
@@ -463,13 +467,17 @@ module ggmod_topology2D
         call AddTopologicalMeshVertexFaces(topomesh)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        end if 
 
         ! Remove garbage tangency points
         call RemoveGarbageTangencyPoints(topomesh)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        end if 
 
         ! Eliminate limiter-like configurations
         !======================================
@@ -481,7 +489,9 @@ module ggmod_topology2D
         call SimplifyTopologicalMeshFaces(topomesh)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        end if 
 
         ! Add necessary data
         !===================
@@ -557,7 +567,9 @@ module ggmod_topology2D
         call SimplifyTopologicalMeshFaces(topomesh)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        end if 
 
         ! Compute additional interconnnection data
         !=========================================
@@ -574,7 +586,9 @@ module ggmod_topology2D
         call AddTopologicalMeshInterconnectionData(topomesh)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        end if 
 
         ! Remove regions
         !===============
@@ -583,7 +597,9 @@ module ggmod_topology2D
             vessel, fieldtracer, options)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_aftermerge1')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_aftermerge1')
+        end if 
 
 
         ! Insert aligned vessel parts?
@@ -621,16 +637,22 @@ module ggmod_topology2D
             vessel, fieldtracer, options)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_aftermerge2')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_aftermerge2')
+        end if 
 
         ! Remove regions if desired
         call RemoveTopologicalMeshRegions(topomesh, vessel, options)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_afterregion')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_afterregion')
+        end if 
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_afteravp')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_afteravp')
+        end if
 
     end subroutine
 
@@ -2525,12 +2547,16 @@ module ggmod_topology2D
         deallocate(bndpol)
 
         ! Trim the topological mesh
-        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+        end if 
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
         call SimplifyTopologicalMeshFaces(topomesh)
 
         ! Split boundaries
-        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+        end if 
         call SplitTopologicalMeshFaces(topomesh)   
         
         ! Boundary split vertex contours
@@ -3464,7 +3490,9 @@ module ggmod_topology2D
         if (options%removecoreregions) then 
             call RemoveTopologicalMeshCoreRegions(topomesh)
         end if 
-        call WriteTopologicalMesh(topomesh, 'topomesh_aftercore')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_aftercore')
+        end if 
 
         ! Wide grid regions
         if (options%removewidegridregions) then 
@@ -3481,7 +3509,9 @@ module ggmod_topology2D
         if (options%removevesselregions) then 
             call RemoveTopologicalMeshVesselRegions(topomesh, vessel, options)
         end if 
-        call WriteTopologicalMesh(topomesh, 'topomesh_aftervessel')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_aftervessel')
+        end if 
 
 
     end subroutine
@@ -4117,14 +4147,18 @@ module ggmod_topology2D
             wasmerged = .false.
             appliedsplitting = .false.
             do while (.true.) 
-                call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                if (options%writedebugoutput) then 
+                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                end if 
                 ! Is there a simple merge that can be done? 
                 if (.not. appliedsplitting) then ! skip if we splitted previously, already doing complex merge
                     call MergeTopologicalMeshFluxTubesSimple(topomesh, &
-                        magneticField, vessel, options, wasmerged)
+                        magneticField, fieldtracer, vessel, options, wasmerged)
                     if (wasmerged) then 
-                        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-                        print *, 'applied simple merge'
+                        if (options%writedebugoutput) then 
+                            call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                        end if 
+                        print *, 'MergeTopologicalMeshFluxTubes: applied simple merge'
                         cycle
                     end if 
                 end if 
@@ -4135,11 +4169,15 @@ module ggmod_topology2D
                     appliedsplitting)
                 if (wasmerged .or. appliedsplitting) then 
                     if (wasmerged) then 
-                        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-                        print *, 'applied complex merge'
+                        if (options%writedebugoutput) then 
+                            call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                        end if 
+                        print *, 'MergeTopologicalMeshFluxTubes: applied complex merge'
                     elseif (appliedsplitting) then 
-                        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-                        print *, 'applied splitting'
+                        if (options%writedebugoutput) then 
+                            call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                        end if 
+                        print *, 'MergeTopologicalMeshFluxTubes: applied splitting'
                     end if
                     cycle
                 end if 
@@ -4430,7 +4468,9 @@ module ggmod_topology2D
                     call AddBoundarySplitVertexContours(topomesh, &
                         magneticField, vessel, fieldtracer)
 
-                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                    if (options%writedebugoutput) then 
+                        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                    end if 
 
                     ! Recompute all interconnections, cells, etc
                     ! Vertex faces
@@ -4448,7 +4488,9 @@ module ggmod_topology2D
                     ! Compute interconnection data
                     call AddTopologicalMeshInterconnectionData(topomesh)
 
-                    call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                    if (options%writedebugoutput) then 
+                        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
+                    end if 
 
                 else
                     i = i + 1
@@ -4575,7 +4617,7 @@ module ggmod_topology2D
 
     ! Merge criterion evaluation
     subroutine EvaluateTopologicalMeshFluxTubeMergeCriterion(topomesh, &
-        magneticField, vessel, options, val, lowerbound, faceID)
+        fieldtracer, magneticField, vessel, options, val, lowerbound)
 
         ! Description
         !============
@@ -4599,15 +4641,16 @@ module ggmod_topology2D
         ! Arguments
         type(TopomeshUDT), intent(in)           :: topomesh 
         type(MagneticFieldUDT), intent(in)      :: magneticField 
+        class(ContourtracerUDT), intent(in)     :: fieldtracer
         type(VesselUDT), intent(in)             :: vessel 
         type(TopomeshOptionsUDT), intent(in)    :: options 
         real(R8), allocatable, dimension(:, :), intent(out)     :: val, &
             lowerbound 
-        integer(I8), allocatable, dimension(:, :), intent(out)  :: faceID
 
         ! Auxiliary
         integer(I8)                             :: ncrit
         integer(I8), allocatable, dimension(:)  :: tf 
+        real(R8)                                :: psimin, psimax, lrad
 
         ! Loop
         integer(I8)                             :: i 
@@ -4623,8 +4666,7 @@ module ggmod_topology2D
         ncrit = 2 ! currently two criteria
         if (allocated(val)) deallocate(val)
         if (allocated(lowerbound)) deallocate(lowerbound)
-        allocate(val(tube%ntot, ncrit), lowerbound(tube%ntot, ncrit), &
-            faceID(tube%ntot, ncrit))
+        allocate(val(tube%ntot, ncrit), lowerbound(tube%ntot, ncrit))
         val = 0.0_R8 
         lowerbound = 0.0_R8
 
@@ -4635,14 +4677,15 @@ module ggmod_topology2D
             tf = tube%GetFace(i)
 
             ! Evaluate psi criterion
-            val(i, 1)           = maxval(GetTMFaceDeltaPsi(topomesh, tf))
-            lowerbound(i, 1)    = options%dpsimintubes ! name change later on?
-            faceID(i, 1)        = tf(maxloc(GetTMFaceDeltaPsi(topomesh, tf), 1))
+            call GetTMTubePsiLimits(topomesh, i, psimin, psimax)
+            val(i, 1)           = max(psimax - psimin, 0.0_R8) 
+            lowerbound(i, 1)    = options%dpsimintubes 
 
             ! Evaluate radial length criterion
-            val(i, 2)           = maxval(GetTMFaceRadialLength(topomesh, magneticField, tf))
+            call GetTMTubeRadialWidth(topomesh, fieldtracer, magneticField, &
+                i, lrad)
+            val(i, 2)           = lrad
             lowerbound(i, 2)    = options%lradmintubes
-            faceID(i, 2)        = tf(maxloc(GetTMFaceRadialLength(topomesh, magneticField, tf), 1))
 
         end do 
 
@@ -4654,7 +4697,7 @@ module ggmod_topology2D
 
     ! Simple flux tube pair merging
     subroutine MergeTopologicalMeshFluxTubesSimple(topomesh, magneticField, &
-        vessel, options, wasmerged)
+        fieldtracer, vessel, options, wasmerged)
 
         ! Description
         !============
@@ -4672,6 +4715,7 @@ module ggmod_topology2D
         ! Arguments
         type(TopomeshUDT), intent(inout)        :: topomesh 
         type(MagneticFieldUDT), intent(in)      :: magneticField 
+        class(ContourtracerUDT), intent(in)     :: fieldtracer
         type(VesselUDT), intent(in)             :: vessel 
         type(TopomeshOptionsUDT), intent(in)    :: options 
         logical, intent(out)                    :: wasmerged 
@@ -4680,7 +4724,6 @@ module ggmod_topology2D
         integer(I8)                             :: tubepairind 
         integer(I8), allocatable, dimension(:)  :: tnb1, tnb2, tf, &
             tnbf, tube1, tube2
-        integer(I8), allocatable, dimension(:, :)   :: faceID
         logical, allocatable, dimension(:)      :: ismarked, ismarkedpair
         real(R8), allocatable, dimension(:, :)  :: val, lowerbound, &
             dval, dvalpair
@@ -4696,7 +4739,7 @@ module ggmod_topology2D
 
         ! Compute criteria
         call EvaluateTopologicalMeshFluxTubeMergeCriterion(topomesh, &
-            magneticField, vessel, options, val, lowerbound, faceID)
+            fieldtracer, magneticField, vessel, options, val, lowerbound)
         dval = val - lowerbound ! if negative, then marked
         ismarked = any(dval < 0.0_R8, 2)
 
@@ -4869,7 +4912,6 @@ module ggmod_topology2D
         integer(I8)                             :: ind, tubepairind
         integer(I8), allocatable, dimension(:)  :: tnb, &
             tube1, tube2, splittubes
-        integer(I8), allocatable, dimension(:, :)   :: faceID
         logical, allocatable, dimension(:)      :: ismarked, &
             ismarkedpair, ishfnb, islfnb, tracetubehf, tracetubelf, &
             istubefound, issplittable, dolfside, dohfside
@@ -4891,7 +4933,7 @@ module ggmod_topology2D
 
         ! Compute criteria
         call EvaluateTopologicalMeshFluxTubeMergeCriterion(topomesh, &
-            magneticField, vessel, options, val, lowerbound, faceID)
+            fieldtracer, magneticField, vessel, options, val, lowerbound)
         dval = val - lowerbound ! if negative, then marked
         ismarked = any(dval < 0.0_R8, 2)
 
@@ -6332,8 +6374,6 @@ module ggmod_topology2D
         ! Data (recompute)
         call AddTopologicalMeshData(topomesh)
 
-        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
-
         ! Compute interconnection data
         call AddTopologicalMeshInterconnectionData(topomesh)
 
@@ -6407,11 +6447,11 @@ module ggmod_topology2D
         integer(I8)                             :: tf
         integer(I8), allocatable, dimension(:)  :: tracetubes, tubeind, &
             tubef, temps1, temps2, tubefID, sortind, faceind, tracefaces
-        integer(I8), allocatable, dimension(:, :)   :: faceID
-        real(R8)                                :: lffval, hffval
+        real(R8)                                :: lffval, hffval, &
+            psimin, psimax, lrad
         real(R8), allocatable, dimension(:)     :: hftracex, lftracex, &
-            hftracey, lftracey, x, y, dx, dy, xf, yf, fval, dfval, dl, &
-            dlc, bx, by, bn, tracex, tracey, temp, s2r, tempx, &
+            hftracey, lftracey, x, y, fval, &
+            dlc, tracex, tracey, temp, s2r, tempx, &
             tempy, temps1r, temps2r, xint, yint
         real(R8), allocatable, dimension(:, :)  :: val, lowerbound, &
             dval
@@ -6426,7 +6466,9 @@ module ggmod_topology2D
         ! Initialize
         !===========
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_beforetubesplitting')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_beforetubesplitting')
+        end if 
 
         ! Initialize
         tracehf = dohfside 
@@ -6439,12 +6481,11 @@ module ggmod_topology2D
 
         ! Compute criteria
         call EvaluateTopologicalMeshFluxTubeMergeCriterion(topomesh, &
-            magneticField, vessel, options, val, lowerbound, faceID)
+            fieldtracer, magneticField, vessel, options, val, lowerbound)
 
         ! Extract criteria for current tubes
         val = val(tubes, :)
         lowerbound = lowerbound(tubes, :)
-        faceID = faceID(tubes, :)
 
         ! Sanity checks
         dval = val - 2*lowerbound ! if negative, then tube shouldn't have been marked for splitting
@@ -6478,51 +6519,36 @@ module ggmod_topology2D
         hftracey = hftracex
         lftracey = hftracex
         do i = 1, size(tubes)
-            ! Get the face of the criterion that is minimal
-            tf = faceID(i, minloc(dval(i, :), 1))
-            tracefaces(i) = tf
-
-            ! Get the face metrics
-            x = topomesh%face%x(tf)%Get()
-            y = topomesh%face%y(tf)%Get()
-            dx = (x(2:) - x(1:size(x)-1))
-            dy = (y(2:) - y(1:size(y)-1))
-            dl = sqrt(dx**2 + dy**2)
-            allocate(dlc(size(x)))
-            dlc = 0.0_R8
-            do j = 2, size(x)
-                dlc(j) = dlc(j-1) + dl(j-1)
-            end do  
-
-            ! Evaluate psi values using field tracer
-            fval = fieldtracer%Evaluate(x, y)
-
-            ! Check if psi increases or decreases
-            isstartlf = (fval(size(fval)) - fval(1) >= 0.0_R8)
+            ! Get the tube radial faces
+            tubef = topomesh%tube%GetFace(tubes(i))
 
             ! Check which criterion to follow and determine tracing points
             if (minloc(dval(i, :), 1) == 1) then ! Psi-based
+
+                ! Here, we should be able to take any face of the tube, 
+                ! as the bounds should be present on all radial faces
+                tf = tubef(1)
+                tracefaces(i) = tf
+
+                ! Get the face coordinates and psi values
+                x = topomesh%face%x(tf)%Get()
+                y = topomesh%face%y(tf)%Get()
+                fval = GetTMFacePsiValueDistribution(topomesh, fieldtracer, &
+                    tf)
+
+                ! Check if psi increases or decreases
+                isstartlf = (fval(size(fval)) - fval(1) >= 0.0_R8)
+
+                ! Evaluate tube psi bounds
+                call GetTMTubePsiLimits(topomesh, tubes(i), psimin, psimax)
                 
-                ! Hedge for non-monotonous behavior
-                dfval = fval(2:) - fval(1:size(fval)-1)
-                if (isstartlf) then 
-                    where (dfval < 0.0_R8) dfval = 0.0_R8
-                else
-                    where (dfval > 0.0_R8) dfval = 0.0_R8
-                end if 
-                do j = 2, size(fval)
-                    fval(j) = fval(j-1) + dfval(j-1)
-                end do
 
                 ! Compute flux values for tracing
+                lffval = psimin + lowerbound(i, 1)
+                hffval = psimax - lowerbound(i, 1)
                 if (isstartlf) then 
-                    lffval = fval(1) + lowerbound(i, 1)
-                    hffval = fval(size(fval)) - lowerbound(i, 1)
                 else
-                    lffval = fval(size(fval)) + lowerbound(i, 1)
-                    hffval = fval(1) - lowerbound(i, 1)
-
-                    ! Also switch fval, x, y for interpolation
+                    ! Switch fval, x, y for interpolation
                     fval = fval(size(fval):1:-1)
                     x = x(size(x):1:-1)
                     y = y(size(y):1:-1) 
@@ -6557,40 +6583,21 @@ module ggmod_topology2D
                 end if 
 
             elseif (minloc(dval(i, :), 1) == 2) then  ! Radial length based
-                ! Note: we need to watch out here that we don't 
-                ! accidentally trace a contour for a psi value that is 
-                ! not found on another boundary. 
-                xf = 0.5*(x(2:) + x(1:size(x)-1))
-                yf = 0.5*(y(2:) + y(1:size(y)-1))
-                allocate(bx(size(xf)), by(size(xf)))
-                call magneticField%interp%Evaluate(xf, yf, 1, 0, bx)
-                call magneticField%interp%Evaluate(xf, yf, 0, 1, by)
-                bn = sqrt(bx**2 + by**2)
-                bx = bx/bn
-                by = by/bn
 
-                ! Set to zero at non-monotonous parts
-                dfval = fval(2:) - fval(1:size(fval)-1)
-                if (isstartlf) then 
-                    ! first part is low flux side, so dpsi > 0
-                    where (dfval <= 0.0_R8)
-                        dx = 0.0_R8
-                        dy = 0.0_R8
-                    end where
-                else
-                    ! first part is high flux side, so dpsi < 0
-                    where (dfval >= 0.0_R8)
-                        dx = 0.0_R8
-                        dy = 0.0_R8
-                    end where
-                end if
+                ! Re-evaluate the criterion and also query the face and
+                ! the used length distribution
+                call GetTMTubeRadialWidth(topomesh, fieldtracer, &
+                    magneticField, tubes(i), lrad, tf, dlc)
+                tracefaces(i) = tf
 
-                ! Compute radial length increment
-                dl = abs(bx*dx + by*dy)
-                dlc = spread(0.0_R8, 1, size(x))
-                do j = 2, size(x)
-                    dlc(j) = dlc(j-1) + dl(j-1)
-                end do 
+                ! Get the face coordinates and psi values
+                x = topomesh%face%x(tf)%Get()
+                y = topomesh%face%y(tf)%Get()
+                fval = GetTMFacePsiValueDistribution(topomesh, fieldtracer, &
+                    tf)
+
+                ! Check if psi increases or decreases
+                isstartlf = (fval(size(fval)) - fval(1) >= 0.0_R8)
 
                 ! Compute radial length values for tracing
                 if (isstartlf) then 
@@ -6628,10 +6635,12 @@ module ggmod_topology2D
                     lftracey(i) = temp(1)
 
                 end if 
-
-                ! Housekeeping
-                deallocate(bx, by)
             end if
+
+            ! Check
+            if (any(isnan([hftracex(i), hftracey(i), lftracex(i), lftracey(i)]))) then 
+                print *,'SplitTMTubesMergeCriterionBased: NaNs detected in tracing points'
+            end if 
 
             ! Housekeeping
             deallocate(dlc)
@@ -6655,13 +6664,6 @@ module ggmod_topology2D
                 
                 ! Reformat into single contour
                 if (size(tempc) == 1) then 
-                    ! Closure should be the same
-                    if (.not. (tempc(1)%isclosed .eqv. topomesh%tube%isclosed(tracetubes(i)))) then 
-                        call gdErrorHandler('SplitTMTubesMergeCriterionBased: ' // & 
-                            'closed or open contour encountered while tube is ' // & 
-                            'open or closed, resp.')
-                    end if  
-
                     ! Add
                     allc = [allc, tempc(1)]
                 elseif (size(tempc) == 2) then 
@@ -6700,11 +6702,6 @@ module ggmod_topology2D
         ! For open contours, check which parts to keep (only parts that 
         ! intersect with the tube faces)
         do i = 1, size(allc)
-            ! Skip closed contours - those shouldn't give issues
-            if (allc(i)%isclosed) then 
-                cycle
-            end if
-
             ! Get tube faces
             tubef = topomesh%tube%GetFace(tubeind(i))
 
@@ -6749,32 +6746,92 @@ module ggmod_topology2D
             ! Keep only parts that intersect with the tracing surface
             allocate(keepind(size(s2r)))
             keepind = .false. 
-            do j = 1, size(s2r)
-                if (j > 1) then 
-                    if (tubefID(j-1) == faceind(i)) then 
-                        keepind(j) = .true.
-                    end if 
-                end if
-                if (j < size(s2r)) then 
-                    if (tubefID(j+1) == faceind(i)) then 
-                        keepind(j) = .true.
-                    end if 
-                end if
-                if (tubefID(j) == faceind(i)) then 
-                    keepind(j) = .true.
-                end if 
-            end do
-            s2r = pack(s2r, keepind)
-            xint = pack(xint, keepind)
-            yint = pack(yint, keepind)
+            if (allc(i)%isclosed .and. .not. topomesh%tube%isclosed(tubeind(i))) then
+                ! closed contour for open tube - need to check differently. 
+                ! Normally, the first and last intersection should be exactly
+                ! in a tube face, since we trace from there. Therefore, 
+                ! we can normally apply the same algorithm as an open
+                ! contour. 
+                
+                ! Print message
+                print *, 'SplitTMTubesMergeCriterionBased: closed contour for ' // & 
+                    'open tube detected, code not yet verified'
 
-            ! Keep only part inbetween intersections
-            allc(i)%x = [xint(minloc(s2r, 1)), &
-                allc(i)%x(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
-                xint(maxloc(s2r, 1))]
-            allc(i)%y = [yint(minloc(s2r, 1)), &
-                allc(i)%y(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
-                yint(maxloc(s2r, 1))]
+                ! Checks
+                if ((s2r(1) /= 0.0_R8) .or. (s2r(size(s2r)) /= size(allc(i)%x)-1)) then 
+                    ! Unexpected
+                    call gdErrorHandler('SplitTMTubesMergeCriterionBased: '  // &
+                        'contour does not seem to start and end in a tube face, ' // &
+                        'unexpected since tracing should start from face')
+                end if 
+
+                ! Check which ones to keep
+                do j = 1, size(s2r)
+                    if (j > 1) then 
+                        if (tubefID(j-1) == faceind(i)) then 
+                            keepind(j) = .true.
+                        end if 
+                    end if
+                    if (j < size(s2r)) then 
+                        if (tubefID(j+1) == faceind(i)) then 
+                            keepind(j) = .true.
+                        end if 
+                    end if
+                    if (tubefID(j) == faceind(i)) then 
+                        keepind(j) = .true.
+                    end if 
+                end do
+
+                ! Remove
+                s2r = pack(s2r, keepind)
+                xint = pack(xint, keepind)
+                yint = pack(yint, keepind)
+
+                ! Keep only part inbetween intersections
+                allc(i)%x = [xint(minloc(s2r, 1)), &
+                    allc(i)%x(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
+                    xint(maxloc(s2r, 1))]
+                allc(i)%y = [yint(minloc(s2r, 1)), &
+                    allc(i)%y(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
+                    yint(maxloc(s2r, 1))]
+
+            elseif (allc(i)%isclosed .and. topomesh%tube%isclosed(tubeind(i))) then 
+                ! Should be fine, nothing to check
+                cycle
+
+            else ! both are open
+                ! Check which ones to keep
+                do j = 1, size(s2r)
+                    if (j > 1) then 
+                        if (tubefID(j-1) == faceind(i)) then 
+                            keepind(j) = .true.
+                        end if 
+                    end if
+                    if (j < size(s2r)) then 
+                        if (tubefID(j+1) == faceind(i)) then 
+                            keepind(j) = .true.
+                        end if 
+                    end if
+                    if (tubefID(j) == faceind(i)) then 
+                        keepind(j) = .true.
+                    end if 
+                end do
+
+                ! Remove
+                s2r = pack(s2r, keepind)
+                xint = pack(xint, keepind)
+                yint = pack(yint, keepind)
+
+                ! Keep only part inbetween intersections
+                allc(i)%x = [xint(minloc(s2r, 1)), &
+                    allc(i)%x(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
+                    xint(maxloc(s2r, 1))]
+                allc(i)%y = [yint(minloc(s2r, 1)), &
+                    allc(i)%y(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
+                    yint(maxloc(s2r, 1))]
+
+            end if 
+            
 
             ! Housekeeping
             deallocate(s2r, xint, yint, tubefID, keepind)
@@ -6823,7 +6880,9 @@ module ggmod_topology2D
         call AddTopologicalMeshInterconnectionData(topomesh)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_aftertubesplitting')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_aftertubesplitting')
+        end if
 
     end subroutine
 
@@ -7588,7 +7647,9 @@ module ggmod_topology2D
         !end do 
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_duringavp0')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_duringavp0')
+        end if 
 
         ! Post-process
         !=============
@@ -7811,14 +7872,18 @@ module ggmod_topology2D
         topomesh%nFs = nfs
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_duringavp1', .false.)
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_duringavp1', .false.)
+        end if 
 
         ! Trim - normally, original tangency points etc shouldn't be removed
         ! so we can map the vertexmark logical index back
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_duringavp2', .false.)
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_duringavp2', .false.)
+        end if 
 
         ! Split boundaries (should probably not happen but ok)
         call SplitTopologicalMeshFaces(topomesh)
@@ -7872,7 +7937,9 @@ module ggmod_topology2D
         end do 
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_duringavp3', .false.)
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_duringavp3', .false.)
+        end if 
 
         ! Recompute tubes
         !================
@@ -7897,7 +7964,9 @@ module ggmod_topology2D
         call AddTopologicalMeshTubeData(topomesh)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_duringavp4', .false.)
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_duringavp4', .false.)
+        end if 
 
         ! Mark faces for deletion
         !========================
@@ -7969,7 +8038,9 @@ module ggmod_topology2D
         call SimplifyTopologicalMeshFaces(topomesh)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_duringavp5', .false.)
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_duringavp5', .false.)
+        end if 
 
         ! Recompute interconnection data
         !===============================
@@ -7986,7 +8057,9 @@ module ggmod_topology2D
         call AddTopologicalMeshInterconnectionData(topomesh)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_afteravp')
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_afteravp')
+        end if 
     
     end subroutine
 
@@ -8539,7 +8612,6 @@ module ggmod_topology2D
                 call AddTopologicalMeshFace(topomesh, [vf1(i), vf2(i)], xfda(i), &
                     yfda(i), topomesh%face%type(fID(k)), topomesh%face%fsID(fID(k)), fsfval)
 
-                ! call WriteTopologicalMesh(topomesh, 'topomesh_temp')
             end do 
 
         end do 
@@ -8905,7 +8977,6 @@ module ggmod_topology2D
 
         ! Remove
         call RemoveTopologicalMeshFaceLogical(topomesh, rmface)
-        call WriteTopologicalMesh(topomesh, 'topomesh_temp')
         call plf%ps%WriteData('vesselpolygon')
         ! call plf%Visualize('vesselplf', nxin=1000, nyin=1000)
 
@@ -13708,6 +13779,357 @@ module ggmod_topology2D
         end do 
 
     end function
+
+    function GetTMFacePsiValueDistribution(topomesh, fieldtracer, &
+        faceID) result(psi)
+
+        ! Description
+        !============
+        ! This function returns the monotonized psi value distribution 
+        ! on a topological mesh face. If it's an aligned face, then 
+        ! the distribution is uniform and equal to the flux surface 
+        ! ID of the face. If it is not an aligned face, then the 
+        ! distribution is evaluated using the fieldtracer at all 
+        ! face points and made monotonically increasing or decreasing, 
+        ! depending on the values in the face vertices. 
+
+        ! Note: for aligned boundary faces, this routine will give 
+        ! inaccurate results, since there is likely some variation along
+        ! the face. Thread carefully in that case. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(TopomeshUDT), intent(in)                   :: topomesh
+        class(ContourtracerUDT), intent(in)             :: fieldtracer
+        integer(I8), intent(in)                         :: faceID
+        real(R8), allocatable, dimension(:)             :: psi 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)             :: xf, yf, dpsi
+
+        ! Loop
+        integer(I8)                                     :: i
+
+        ! Compute
+        !========
+        ! Get face coordinates
+        xf = topomesh%face%x(faceID)%Get()
+        yf = topomesh%face%y(faceID)%Get()
+
+        ! Initialize
+        psi = spread(0.0_R8, 1, size(xf))
+        
+        ! Hedge for aligned faces
+        if (topomesh%face%fsID(faceID) /= 0) then 
+            ! Set uniform distribution and return
+            psi = topomesh%fsfval%Get(topomesh%Face%fsID(faceID))
+            return 
+        end if
+
+        ! If we got here, it is a non-aligned face
+        psi = fieldtracer%Evaluate(xf, yf)
+        psi(1) = topomesh%vert%fval(topomesh%face%vert(faceID, 1))
+        psi(size(psi)) = topomesh%vert%fval(topomesh%face%vert(faceID, 2))
+
+        ! Monotonize
+        dpsi = psi(2:) - psi(1:size(psi)-1)
+        if (psi(1) < psi(size(psi))) then 
+            ! Increasing psi
+            where (dpsi <= 0.0_R8) dpsi = 0.0_R8 
+        else
+            ! Decreasing psi
+            where (dpsi >= 0.0_R8) dpsi = 0.0_R8 
+        end if
+
+        ! Recompute psi
+        do i = 2, size(psi)
+            psi(i) = psi(i-1) + dpsi(i-1)
+        end do
+
+    end function 
+
+    function GetTMFaceRadialLengthDistribution(topomesh, fieldtracer, &
+        magneticField, faceID) result(dlcrad)
+
+        ! Description
+        !============
+        ! This function computes the (absolute) length distribution of a face along
+        ! the radial direction. This is determined as the sum of the 
+        ! radial lengths of the face's edges. 
+
+        ! Note: if parts of the face exhibit non-monotonous behavior 
+        ! in terms of psi value, the length of these parts is set to zero
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(in)      :: topomesh 
+        class(ContourtracerUDT), intent(in) :: fieldtracer
+        integer(I8), intent(in)             :: faceID
+        type(MagneticFieldUDT), intent(in)  :: magneticField 
+        real(R8), allocatable, dimension(:) :: dlcrad 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:) :: x, y, dx, dy, bx, by, &
+            xf, yf, bn, psi, dpsi, dlrad
+
+        ! Loop
+        integer(I8)                         :: i
+
+        ! Compute
+        !========
+        ! Get face coordinates
+        x = topomesh%face%x(faceID)%Get()
+        y = topomesh%face%y(faceID)%Get()
+        
+        ! Initialize
+        dlcrad = spread(0.0_R8, 1, size(x))
+
+        ! Compute edge center coordinates and lengths, and psi gradient
+        dx = x(2:) - x(1:size(x)-1)
+        dy = y(2:) - y(1:size(y)-1)
+        xf = 0.5*(x(2:) + x(1:size(x)-1))
+        yf = 0.5*(y(2:) + y(1:size(y)-1))
+        allocate(bx(size(xf)), by(size(xf)), psi(size(xf)))
+        call magneticField%interp%Evaluate(xf, yf, 0, 0, psi)
+        call magneticField%interp%Evaluate(xf, yf, 1, 0, bx)
+        call magneticField%interp%Evaluate(xf, yf, 0, 1, by)
+        bn = sqrt(bx**2 + by**2)
+        bx = bx/bn
+        by = by/bn
+        dpsi = psi(2:) - psi(1:size(psi)-1)
+
+        ! Set to zero at non-monotonous parts
+        if (psi(1) <= psi(size(psi))) then 
+            ! first part is low flux side, so dpsi > 0
+            where (dpsi <= 0.0_R8)
+                dx = 0.0_R8
+                dy = 0.0_R8
+            end where
+        else
+            ! first part is high flux side, so dpsi < 0
+            where (dpsi >= 0.0_R8)
+                dx = 0.0_R8
+                dy = 0.0_R8
+            end where
+        end if
+
+
+        ! Compute length distribution
+        dlrad = abs(bx*dx + by*dy)
+        do i = 2, size(dlcrad)
+            dlcrad(i) = dlcrad(i-1) + dlrad(i-1)
+        end do
+
+        ! Housekeeping
+        deallocate(bx, by, psi)
+
+    end function
+
+    subroutine GetTMTubePsiLimits(topomesh, tubeID, psimin, psimax)
+
+        ! Description
+        !============
+        ! Get the tube psi value limits (i.e. the maximal value of 
+        ! psi at the low psi value bound and the minimal value of psi 
+        ! at the high value bound - then all contours traced in between
+        ! those bounds should lie nicely within the tube). If, for 
+        ! whatever reason, the psi values overlap, then psimin will be 
+        ! larger than psimax and a message will be shown. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(TopomeshUDT), intent(in)           :: topomesh 
+        integer(I8), intent(in)                 :: tubeID
+        real(R8), intent(out)                   :: psimin, psimax
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tf1, tf2, tv1, tv2
+        real(R8), allocatable, dimension(:)     :: psi1, psi2
+
+        ! Loop
+
+        ! Initialize
+        !===========
+        ! Unpack for ease
+        associate(&
+            tube        => topomesh%tube,   &
+            vert        => topomesh%vert,   &
+            face        => topomesh%face    &
+            )
+
+        ! Compute bounds
+        !===============
+        ! Get faces and vertices at both sides
+        tf1 = tube%GetBndFace(tubeID, 1)
+        tf2 = tube%GetBndFace(tubeID, 2)
+        tv1 = tube%GetBndVert(tubeID, 1)
+        tv2 = tube%GetBndVert(tubeID, 2)
+
+        ! Keep only vertices and faces with non-zero ID (should 
+        ! always be the case actually)
+        tf1 = pack(tf1, face%fsID(tf1) /= 0)
+        tf2 = pack(tf2, face%fsID(tf2) /= 0)
+        tv1 = pack(tv1, vert%fsID(tv1) /= 0)
+        tv2 = pack(tv2, vert%fsID(tv2) /= 0)
+
+        ! Get psi values
+        psi1 = [topomesh%fsfval%Get(vert%fsID(tv1)), topomesh%fsfval%Get(face%fsID(tf1))]
+        psi2 = [topomesh%fsfval%Get(vert%fsID(tv2)), topomesh%fsfval%Get(face%fsID(tf2))]
+
+        ! Check which side is low and which is high
+        if (all(minval(psi1) > psi2)) then 
+            ! First side is high flux boundary
+            psimax = minval(psi1)
+            psimin = maxval(psi2)
+        elseif (all(minval(psi2) > psi1)) then 
+            ! Second side is high flux boundary
+            psimax = minval(psi2)
+            psimin = maxval(psi1)
+        else 
+            print *, 'GetTMTubePsiLimits: psi values seem to overlap, ' // &
+                'could not determine high and low psi side. psimin will ' // &
+                'be larger than psimax...'
+            psimax = minval(psi1)
+            psimin = maxval(psi2)
+        end if 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+
+    end subroutine
+
+    subroutine GetTMTubeRadialWidth(topomesh, fieldtracer, magneticField, &
+        tubeID, lrad, faceID, dlcradface)
+
+        ! Description
+        !============
+        ! This routine returns the radial width of a topological mesh 
+        ! tube, taking into account also possible differences in psi 
+        ! value of the bounding flux surfaces. The radial length is 
+        ! computed as follows: 
+        ! - for each face of the tube, the radial length is computed
+        ! - the minimal value of this radial length is determined and
+        ! returned
+        ! - the radial length is computed only between the psi value 
+        ! bounds of the tube. The field tracer is used to determine the
+        ! psi values on each face to ensure discretely consistent results
+        ! - if the psi value bounds overlap, then the radial width is zero
+        ! Optionally, the routine also returns the faceID with the 
+        ! minimal length and its radial length distribution on all of 
+        ! its vertices. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(TopomeshUDT), intent(in)           :: topomesh
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        class(ContourtracerUDT), intent(in)     :: fieldtracer
+        integer(I8), intent(in)                 :: tubeID 
+        real(R8), intent(out)                   :: lrad
+        integer(I8), intent(out), optional      :: faceID
+        real(R8), allocatable, dimension(:), intent(out), optional  :: dlcradface
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: tubef
+        real(R8)                                :: psimin, psimax, &
+            thislrad
+        real(R8), allocatable, dimension(:)     :: xf, yf, psif, dlcradf, &
+            lradminmax
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Initialize
+        lrad = posinfval_R8()
+
+        ! Unpack
+        associate(&
+            tube    => topomesh%tube,   &
+            face    => topomesh%face    &
+            )
+
+        ! Compute
+        !========
+        ! Psi bounds
+        call GetTMTubePsiLimits(topomesh, tubeID, psimin, psimax)
+
+        ! Get tube faces
+        tubef = tube%GetFace(tubeID)
+
+        ! Check
+        if (psimin >= psimax) then 
+            print *, 'GetTMTubeRadialWidth: psimin >= psimax, returning ' // &
+                'zero radial width'
+            lrad = 0.0_R8 
+            if (present(faceID)) then 
+                faceID = tubef(1)
+            end if 
+            if (present(dlcradface)) then 
+                xf = face%x(tubef(1))%Get()
+                dlcradface = spread(0.0_R8, 1, size(xf))
+            end if 
+            return 
+        end if 
+
+        ! Loop over faces
+        do i = 1, size(tubef)
+            ! Get face coordinates and monotonized psi distribution 
+            xf = face%x(tubef(i))%Get()
+            yf = face%y(tubef(i))%Get()
+            psif = GetTMFacePsiValueDistribution(topomesh, fieldtracer, tubef(i))
+
+            ! Compute the monotonized face radial length distribution
+            dlcradf = GetTMFaceRadialLengthDistribution(topomesh, fieldtracer, &
+                magneticField, tubef(i))
+
+            ! Compute radial length coordinate where psimin and psimax occur
+            if (psif(1) > psif(size(psif))) then 
+                ! switch for interpolation
+                psif = psif(size(psif):1:-1)
+                dlcradf = dlcradf(size(dlcradf):1:-1)
+                call Interpolate1D([psimin, psimax], lradminmax, psif, dlcradf)
+
+                ! Switch back
+                dlcradf = dlcradf(size(dlcradf):1:-1)
+            else
+                call Interpolate1D([psimin, psimax], lradminmax, psif, dlcradf)
+            end if 
+            
+
+            ! Check
+            if (any(isnan(lradminmax))) then 
+                call gdErrorHandler('GetTMTubeRadialWidth: nans detected ' // & 
+                    'when evaluating radial length at psi boundaries of ' // &
+                    'tube. This indicates these psi values are not present ' // & 
+                    'on the face, unexpected')
+            end if 
+
+            ! Compute radial length
+            thislrad = abs(lradminmax(1) - lradminmax(2))
+
+            ! Check
+            if (thislrad < lrad) then 
+                lrad = thislrad
+                if (present(faceID)) then 
+                    faceID = tubef(i)
+                end if 
+                if (present(dlcradface)) then 
+                    dlcradface = dlcradf
+                end if 
+            end if 
+        end do 
+
+        ! Housekeeping
+        end associate
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                 TOPOLOGICAL MESH CELL OPERATORS                  !
