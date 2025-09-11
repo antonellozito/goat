@@ -6432,6 +6432,10 @@ module ggmod_topology2D
         ! is checked here and an error is thrown if this is not 
         ! the case. 
 
+        ! Modules
+        !========
+        use mod_search, only: findloc1D
+
         ! Declare variables
         !==================
         ! Arguments
@@ -6444,7 +6448,7 @@ module ggmod_topology2D
         type(TopomeshOptionsUDT), intent(in)    :: options
 
         ! Auxiliary
-        integer(I8)                             :: tf
+        integer(I8)                             :: tf, ind
         integer(I8), allocatable, dimension(:)  :: tracetubes, tubeind, &
             tubef, temps1, temps2, tubefID, sortind, faceind, tracefaces
         real(R8)                                :: lffval, hffval, &
@@ -6589,6 +6593,7 @@ module ggmod_topology2D
                 call GetTMTubeRadialWidth(topomesh, fieldtracer, &
                     magneticField, tubes(i), lrad, tf, dlc)
                 tracefaces(i) = tf
+                call GetTMTubePsiLimits(topomesh, tubes(i), psimin, psimax)
 
                 ! Get the face coordinates and psi values
                 x = topomesh%face%x(tf)%Get()
@@ -6641,9 +6646,6 @@ module ggmod_topology2D
             if (any(isnan([hftracex(i), hftracey(i), lftracex(i), lftracey(i)]))) then 
                 print *,'SplitTMTubesMergeCriterionBased: NaNs detected in tracing points'
             end if 
-
-            ! Housekeeping
-            deallocate(dlc)
         end do 
 
         ! Trace contours
@@ -6801,21 +6803,19 @@ module ggmod_topology2D
 
             else ! both are open
                 ! Check which ones to keep
-                do j = 1, size(s2r)
-                    if (j > 1) then 
-                        if (tubefID(j-1) == faceind(i)) then 
-                            keepind(j) = .true.
-                        end if 
-                    end if
-                    if (j < size(s2r)) then 
-                        if (tubefID(j+1) == faceind(i)) then 
-                            keepind(j) = .true.
-                        end if 
-                    end if
-                    if (tubefID(j) == faceind(i)) then 
-                        keepind(j) = .true.
-                    end if 
-                end do
+                ind = findloc1D(tubefID, tubef)
+                if (ind == 0) then 
+                    ! Check for reverse order
+                    ind = findloc1D(tubefID, tubef(size(tubef):1:-1))
+                end if 
+                if (ind == 0) then 
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                    call Write2DCoordinateData(allc(i)%x, allc(i)%y, 'splitTMTubes_contour')
+                    call gdErrorHandler('SplitTMTubesMergeCriterionBased: ' // & 
+                        'could not find contour part that intersects with ' // & 
+                        'all tube faces in the right order')
+                end if 
+                keepind(ind:ind+size(tubef)-1) = .true.
 
                 ! Remove
                 s2r = pack(s2r, keepind)
@@ -7026,7 +7026,7 @@ module ggmod_topology2D
         integer(I8), allocatable, dimension(:)  :: tf, tfbnd, afstartind, &
             afendind, tfmark, facevert, tfnb1, tfnb2, newfsIDs,  &
             markedtpIDs, sortind, vindI, vindJ, tsc, tfaceind, &
-            vertexmarkIDs, tfnbv1, tfnbv2, tubecase_override
+            vertexmarkIDs, tfnbv1, tfnbv2, tubecase_override, tvf
         real(R8)                                :: avpminangle, highpsi, &
             lowpsi, tdl
         real(R8), allocatable, dimension(:)     :: tx, ty, xf, yf, dx, &
@@ -7036,7 +7036,7 @@ module ggmod_topology2D
 
         type(ContourUDT), allocatable           :: tempc(:), allc(:)
         type(IntegerDynamicArrayUDT)            :: fsIDs, curvetypes, &
-            cface
+            cface, mergefsID
         type(IntegerDynamicArrayUDT), allocatable, dimension(:)     :: &
             sc, sf, faceind, contourind
         type(RealDynamicArrayUDT), allocatable, dimension(:)        :: &
@@ -7074,6 +7074,7 @@ module ggmod_topology2D
         fsIDs       = ConstructIntegerDynamicArray()
         curvetypes  = ConstructIntegerDynamicArray()
         cface       = ConstructIntegerDynamicArray()
+        mergefsID   = ConstructIntegerDynamicArray()
 
         ! Refine boundary faces if desired
         if (options%avprefinevessel) then 
@@ -7891,6 +7892,9 @@ module ggmod_topology2D
         ! Simplify 
         call SimplifyTopologicalMeshFaces(topomesh)
 
+        ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
         ! Recompute marked vertex logical to deal with tubecase 2 later
         deallocate(vertexmark)
         allocate(vertexmark(topomesh%vert%ntot))
@@ -7935,6 +7939,24 @@ module ggmod_topology2D
                 end if 
             end if
         end do 
+        do i = 1, topomesh%vert%ntot
+            ! Check if the vertex has the same flux surface ID as one 
+            ! of the marked tangency points and if it's a boundary vertex
+            if (any(topomesh%vert%fsID(i) == topomesh%vert%fsID(markedtpIDs)) .and. &
+                (topomesh%vert%type(i) == TMvertexbndID)) then 
+                ! Get the vertex face neighbours
+                tvf = topomesh%vert%GetFace(i)
+
+                ! If it has an aligned boundary, all other boundary faces 
+                ! should become aligned too 
+                if (any(topomesh%face%type(tvf) == TMfacealbndID)) then 
+                    where (topomesh%face%type(tvf) == TMfacebndID) 
+                        topomesh%face%type(tvf) = TMfacealbndID
+                        topomesh%face%fsID(tvf) = topomesh%vert%fsID(i)
+                    end where
+                end if 
+            end if 
+        end do 
 
         ! Do temporary writing
         if (options%writedebugoutput) then 
@@ -7943,9 +7965,7 @@ module ggmod_topology2D
 
         ! Recompute tubes
         !================
-        ! Vertex faces
-        call AddTopologicalMeshVertexFaces(topomesh)
-
+        
         ! Data 
         call AddTopologicalMeshData(topomesh)
 
@@ -10859,6 +10879,8 @@ module ggmod_topology2D
                 end if 
                 if (all(fc(faceneig) <= 0)) then 
                     ! No neighbours with counter left
+                    print *, 'vertex: ', tv
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
                     call gdErrorHandler('AddTopologicalMeshCells: all ' // & 
                         'neighbouring faces cannot be taken anymore, ' // &
                         'faces do not seem to form cell')
@@ -10872,6 +10894,8 @@ module ggmod_topology2D
                     
                     ! Check counter
                     if (fc(nf) <= 0) then 
+                        print *, 'vertex: ', tv
+                        call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
                         call gdErrorHandler('AddTopologicalMeshCells: ' // & 
                             'next face is forced by turning direction ' // & 
                             'but is not available')
@@ -12343,6 +12367,10 @@ module ggmod_topology2D
             call gdErrorHandler('RemoveTopologicalMeshFaceLogical: ' // & 
                 'illegal size of rmface')
         end if 
+        if (any((topomesh%face%type == TMfacealbndID) .and. rmface)) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_temp', .false.)
+            print *, 'RemoveTopologicalMeshFaceLogical: removing aligned boundary faces'
+        end if 
 
         ! Determine ID shift
         allocate(diffIDf(nf))
@@ -13806,7 +13834,7 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)             :: psi 
 
         ! Auxiliary
-        real(R8), allocatable, dimension(:)             :: xf, yf, dpsi
+        real(R8), allocatable, dimension(:)             :: xf, yf
 
         ! Loop
         integer(I8)                                     :: i
@@ -13818,7 +13846,8 @@ module ggmod_topology2D
         yf = topomesh%face%y(faceID)%Get()
 
         ! Initialize
-        psi = spread(0.0_R8, 1, size(xf))
+        allocate(psi(size(xf)))
+        psi = 0.0_R8
         
         ! Hedge for aligned faces
         if (topomesh%face%fsID(faceID) /= 0) then 
@@ -13833,19 +13862,22 @@ module ggmod_topology2D
         psi(size(psi)) = topomesh%vert%fval(topomesh%face%vert(faceID, 2))
 
         ! Monotonize
-        dpsi = psi(2:) - psi(1:size(psi)-1)
         if (psi(1) < psi(size(psi))) then 
             ! Increasing psi
-            where (dpsi <= 0.0_R8) dpsi = 0.0_R8 
+            do i = 2, size(psi)
+                if (psi(i) < psi(i-1)) then 
+                    psi(i) = psi(i-1)
+                end if 
+            end do  
         else
             ! Decreasing psi
-            where (dpsi >= 0.0_R8) dpsi = 0.0_R8 
+            do i = 2, size(psi)
+                if (psi(i) > psi(i-1)) then 
+                    psi(i) = psi(i-1)
+                end if 
+            end do
         end if
 
-        ! Recompute psi
-        do i = 2, size(psi)
-            psi(i) = psi(i-1) + dpsi(i-1)
-        end do
 
     end function 
 
@@ -13872,7 +13904,7 @@ module ggmod_topology2D
 
         ! Auxiliary
         real(R8), allocatable, dimension(:) :: x, y, dx, dy, bx, by, &
-            xf, yf, bn, psi, dpsi, dlrad
+            xf, yf, bn, psi
 
         ! Loop
         integer(I8)                         :: i
@@ -13884,43 +13916,42 @@ module ggmod_topology2D
         y = topomesh%face%y(faceID)%Get()
         
         ! Initialize
-        dlcrad = spread(0.0_R8, 1, size(x))
+        allocate(dlcrad(size(x)))
+        dlcrad = 0.0_R8
 
         ! Compute edge center coordinates and lengths, and psi gradient
         dx = x(2:) - x(1:size(x)-1)
         dy = y(2:) - y(1:size(y)-1)
         xf = 0.5*(x(2:) + x(1:size(x)-1))
         yf = 0.5*(y(2:) + y(1:size(y)-1))
-        allocate(bx(size(xf)), by(size(xf)), psi(size(xf)))
-        call magneticField%interp%Evaluate(xf, yf, 0, 0, psi)
+        allocate(bx(size(xf)), by(size(xf)), psi(size(x)))
+        call magneticField%interp%Evaluate(x , y , 0, 0, psi)
         call magneticField%interp%Evaluate(xf, yf, 1, 0, bx)
         call magneticField%interp%Evaluate(xf, yf, 0, 1, by)
         bn = sqrt(bx**2 + by**2)
         bx = bx/bn
         by = by/bn
-        dpsi = psi(2:) - psi(1:size(psi)-1)
 
-        ! Set to zero at non-monotonous parts
-        if (psi(1) <= psi(size(psi))) then 
-            ! first part is low flux side, so dpsi > 0
-            where (dpsi <= 0.0_R8)
-                dx = 0.0_R8
-                dy = 0.0_R8
-            end where
+        ! Monotonize
+        if (psi(1) < psi(size(psi))) then 
+            ! Increasing psi
+            do i = 2, size(psi)
+                if (psi(i) < psi(i-1)) then 
+                    dlcrad(i) = dlcrad(i-1)
+                else
+                    dlcrad(i) = dlcrad(i-1) + abs(bx(i-1)*dx(i-1) + by(i-1)*dy(i-1))
+                end if 
+            end do  
         else
-            ! first part is high flux side, so dpsi < 0
-            where (dpsi >= 0.0_R8)
-                dx = 0.0_R8
-                dy = 0.0_R8
-            end where
+            ! Decreasing psi
+            do i = 2, size(psi)
+                if (psi(i) > psi(i-1)) then 
+                    dlcrad(i) = dlcrad(i-1)
+                else
+                    dlcrad(i) = dlcrad(i-1) + abs(bx(i-1)*dx(i-1) + by(i-1)*dy(i-1))
+                end if 
+            end do
         end if
-
-
-        ! Compute length distribution
-        dlrad = abs(bx*dx + by*dy)
-        do i = 2, size(dlcrad)
-            dlcrad(i) = dlcrad(i-1) + dlrad(i-1)
-        end do
 
         ! Housekeeping
         deallocate(bx, by, psi)
@@ -14039,10 +14070,10 @@ module ggmod_topology2D
         real(R8)                                :: psimin, psimax, &
             thislrad
         real(R8), allocatable, dimension(:)     :: xf, yf, psif, dlcradf, &
-            lradminmax
+            lradminmax, dlradf
 
         ! Loop
-        integer(I8)                             :: i 
+        integer(I8)                             :: i, j
 
         ! Initialize
         !===========
@@ -14073,7 +14104,8 @@ module ggmod_topology2D
             end if 
             if (present(dlcradface)) then 
                 xf = face%x(tubef(1))%Get()
-                dlcradface = spread(0.0_R8, 1, size(xf))
+                allocate(dlcradface(size(xf)))
+                dlcradface = 0.0_R8
             end if 
             return 
         end if 
@@ -14098,10 +14130,11 @@ module ggmod_topology2D
 
                 ! Switch back
                 dlcradf = dlcradf(size(dlcradf):1:-1)
+                psif = psif(size(psif):1:-1)
             else
                 call Interpolate1D([psimin, psimax], lradminmax, psif, dlcradf)
             end if 
-            
+            dlradf = dlcradf(2:) - dlcradf(1:size(dlcradf)-1)
 
             ! Check
             if (any(isnan(lradminmax))) then 
@@ -14110,9 +14143,19 @@ module ggmod_topology2D
                     'tube. This indicates these psi values are not present ' // & 
                     'on the face, unexpected')
             end if 
+            
+            ! Adjust dlcrad
+            dlcradf = 0.0_R8 ! Rebuild
+            do j = 2, size(psif)
+                if ((psif(j) < psimin) .or. psif(j) > psimax) then 
+                    dlcradf(j) = dlcradf(j-1)
+                else
+                    dlcradf(j) = dlcradf(j-1) + dlradf(j-1)
+                end if 
+            end do  
 
             ! Compute radial length
-            thislrad = abs(lradminmax(1) - lradminmax(2))
+            thislrad = dlcradf(size(dlcradf))
 
             ! Check
             if (thislrad < lrad) then 
