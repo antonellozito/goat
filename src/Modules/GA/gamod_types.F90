@@ -16,6 +16,7 @@ module gamod_types
     ! Load modules
     use mod_sort   
     use mod_precision
+    use mod_polygon
     use mod_dynamicarrays    
     use goatmod_types 
     use DistributionFunction
@@ -57,6 +58,7 @@ module gamod_types
         procedure :: CalculateQualityMetrics
         procedure :: ComputeQM
         procedure :: SelectMergingFace
+        procedure :: SelectSplitCell
 
     end type 
     
@@ -522,7 +524,11 @@ module gamod_types
         procedure :: RemoveVertices
         procedure :: GetFaceNumber
         procedure :: AddFaceToFsFc
+        procedure :: AddVertToFsVx
         procedure :: AddCell
+        procedure :: AddVert
+        procedure :: AddFluxSurface
+        procedure :: AddIntoExistingSurface
 
         ! Computing
         !===========
@@ -969,6 +975,7 @@ module gamod_types
 
         ! Selecting splitting cell
         if (select_split) then
+            call qm%SelectSplitCell(grid, options)
         end if
 
         ! Selecting merging face
@@ -1267,11 +1274,17 @@ module gamod_types
             end do
 
             ! Sort for descending bias
-            call Sort(bias, indsort, .false.)
-            pol_faces = pol_faces(indsort)
-            if (bias(1) .gt. options%merge_bias_limit) then
-                qm%merge_fc = pol_faces(1)
+            ! Get pol_faces with largest bias
+            ind = maxloc(bias,1)
+            if (bias(ind) .gt. options%merge_bias_limit) then
+                qm%merge_fc = pol_faces(ind)
             end if
+
+            !call Sort(bias, indsort, .false.)
+            !pol_faces = pol_faces(indsort)
+            !if (bias(1) .gt. options%merge_bias_limit) then
+            !    qm%merge_fc = pol_faces(1)
+            !end if
 
         case ('pol_flux')
 
@@ -1503,20 +1516,480 @@ module gamod_types
 
         end select
 
+        end associate
+
+    end subroutine
+
+    subroutine SelectSplitCell(qm, grid, options)
+
+        ! Description
+        !============
+        ! Select a cell to split based on the criteria chosen in options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(QualityMetricUDT), intent(inout)  :: qm
+        type(GAGridUDT), intent(in)             :: grid
+        type(GAoptionsUDT), intent(in)          :: options
+
+        ! Auxiliary
+        integer(I8) :: i, k, ind, nal1, nal2, fcs1_al, fcs2_al, indmin, &
+            splitfaces(2), n_sub
+        integer(I8), allocatable, dimension(:) :: indcv, cells,  &
+            cellsD, indsort, cells2, fcs, fcs_sep, indf, b_faces, b_verts, &
+            cvLookUp, cvs, cvsD, fcs1, fcs2, tria_cells, subset_tria
+        real(R8) :: mean_tot_flux, threshold
+        real(R8), allocatable, dimension(:) :: h_rad_cells, pol_fluxdens_est, dfunv, &
+            dpsi, cvAR_tria, cvS_tria, h_pol_sol_cells
+        logical, allocatable :: log(:), log2(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert, &
+            fd => grid%data%fluxdata &
+            )
+
+        ! Initialize
+        qm%split_cv = 0
+        indcv = (/ (i, i = 1, c%ntot )/)
+
+        select case (options%splittype)
+
+        case ('rad')
+
+            ! Apply distance function or area constraint
+            if (options%dist_function) then
+
+                call grid%fun%distr%Evaluate(c%x%Get(), c%y%Get(), dfunv)
+                log = (dfunv .lt. options%dist_function_threshold_split)
+                allocate(cellsD(count(log)))
+                cellsD = pack(indcv, log)
+
+            else if (options%no_pents_area_split) then
+
+                call grid%AreaConstraintPents(options, options%dist_function_threshold_split, cellsD)
+
+            end if
+
+            ! Only select quads to start radial splitting
+            allocate(cells(count(c%faceP2%Get(cellsD) == 4)))
+            cells = pack(cellsD, c%faceP2%Get(cellsD) == 4)
+
+            ! Select split criterium
+            select case (options%rad_type)
+
+            case ('h_rad_psi')
+
+                ! Sort for decreasing h_rad_psi
+                h_rad_cells = qm%h_rad_psi(cells)
+                call Sort(h_rad_cells, indsort, .false.)
+                cells = cells(indsort)
+
+                ! Find split cell
+                i = 1
+                do while (qm%split_cv == 0)
+
+                    if (c%reg%Get(cells(i)) == 2 .and. c%cflags%Get(cells(i)) /= 3) then
+                        qm%split_cv = cells(i)
+                    else 
+                        i = i + 1
+                    end if
+
+                end do
+ 
+            case ('h_rad')
+
+                ! Sort for decreasing h_rad_psi
+                h_rad_cells = qm%h_rad(cells)
+                call Sort(h_rad_cells, indsort, .false.)
+                cells = cells(indsort)
+
+                ! Find split cell
+                i = 1
+                do while (qm%split_cv == 0)
+
+                    if (c%reg%Get(cells(i)) /= 1 .and. c%cflags%Get(cells(i)) /= 3) then
+                        qm%split_cv = cells(i)
+                    else 
+                        i = i + 1
+                    end if
+
+                end do
+
+            case ('pol_flux')
+
+                ! Distance function fun_r
+                allocate(cells2(count(c%reg%Get(cells) == 2)))
+                cells2 = pack(cells, c%reg%Get(cells) == 2)
+                call grid%fun_r%distr%Evaluate(c%x%Get(cells2),c%y%Get(cells2), pol_fluxdens_est)
+                pol_fluxdens_est = pol_fluxdens_est * qm%h_rad(cells2)
+                mean_tot_flux = sum(pol_fluxdens_est) / size(pol_fluxdens_est)
+
+                ! Sort for descending absolute poloidal flux
+                call Sort(pol_fluxdens_est, indsort, .false.)
+                cells2 = cells2(indsort)
+
+                ! Get separatrix
+                cvLookUp = GetCvLookUpGA(c)
+                call grid%GiveSeparatrices(.true., .true., .false., cvLookUp)
+                if (grid%data%nsep == 1) then
+                    fcs_sep = GetFluxSurfaceFcsGA(fd, grid%data%sepID(1))
+                else
+                    call gdErrorHandler('SelectSplitCell: pol_flux criterion, multiple separatrix not implemented yet')
+                end if
+
+                do i = 1, size(fcs_sep)
+                    if (pol_fluxdens_est(i) .gt. mean_tot_flux*2) then
+
+                        fcs = GetCellFaceGA(c, cells2(i))
+                        if (.not.any(fcs == fcs_sep)) then
+                            qm%split_cv = cells2(i)
+                            exit
+                        end if
+
+                    end if
+
+                end do
 
 
 
+            case ('farSOL')
+
+                ! TODO
+
+            case ('farSOLrefinement')
+
+                ! TODO
+
+            case ('farSOLrefinement_targets')
+
+                ! TODO
+
+            case ('no_aligned_faces')
+
+                ! Loop over cells
+                do i = 1, c%ntot
+
+                    fcs = GetCellFaceGA(c, i)
+
+                    if (.not.any(f%aligned%Get(fcs) == 1) .and. size(fcs) == 4) then
+
+                        qm%split_cv = i
+                        exit
+
+                    end if
+                
+                end do
+
+            case ('shaved_off_tubes')
+
+                ! Automatic option, used before splitting and merging
+                ! Get boundary vertices
+                indf = (/ (i, i = 1, f%ntot)/)
+                log = isBoundaryFaceGA(f, indf)
+                allocate(b_faces(count(log)))
+                b_faces = pack(indf, log)
+                b_verts = GetVxsFromFcsGA(f, b_faces)
+
+                cvLookUp = GetCvLookUpGA(c)
+                threshold = 0.1_R8
+                do i = 1, size(b_verts)
+
+                    ! Get boundary cells of vertex
+                    cvsD = GetVertCellGA(c, b_verts(i), cvLookUp)
+                    log2 = (isBoundaryCellGA(grid, cvsD))
+                    allocate(cvs(count(log2)))
+                    cvs = pack(cvsD, log2)
+
+                    if (size(cvs) == 2) then ! Boundary vertices has two boundary cells
+
+                        ! Check if both cells are trapezoids
+                        fcs1 = GetCellFaceGA(c, cvs(1))
+                        fcs2 = GetCellFaceGA(c, cvs(2))
+
+                        nal1 = count(f%aligned%Get(fcs1) == 1)
+                        nal2 = count(f%aligned%Get(fcs2) == 1)
+
+                        ! Check triangles and quad combinations - futher
+                        ! checks not required if both triangles
+                        if (size(fcs1) == 4 .and. size(fcs2) == 4) then
+
+                            ! Determine specific case
+                            if (nal1 == 1 .and. nal2 == 1) then
+
+                                ! Two trapezoids - check the trapezoids are neighbors with a common face
+                                if (HaveCommonFace(c, cvs(1), cvs(2))) then
+
+                                    ! Look at the psi values of cells and the vert
+                                    ! Get vertices of boundary faces to check
+                                    ! the inclination via the psi values
+                                    if (CheckCellPsiIntersection(grid,b_verts(i),cvs(1)) &
+                                        .and. CheckCellPsiIntersection(grid,b_verts(i),cvs(2)) ) then
+
+                                        ! Check whether position of intersection is not to close to another vertex
+                                        if (CompareCellPsiIntersection(grid, cvs(1), fcs1, b_verts(i), threshold)) then
+                                            qm%split_cv = cvs(1)
+                                            exit
+                                        else if (CompareCellPsiIntersection(grid, cvs(2), fcs2, b_verts(i), threshold)) then
+                                            qm%split_cv = cvs(2)
+                                            exit
+                                        end if
+
+                                    end if
+
+                                end if
+
+                            else if (nal1 == 1 .and. nal2 /= 1) then
+                                ! One trapezoids and one aligned quad, so
+                                ! split the trapezoids if concave 
+                                ! Check for concave boundary
+                                ! configuration
+                                if (CheckCellPsiIntersection(grid,b_verts(i), cvs(1))) then
+                                    if (CompareCellPsiIntersection(grid, cvs(1), fcs1, b_verts(i), threshold)) then
+                                        qm%split_cv = cvs(1)
+                                        exit
+                                    end if
+                                end if
+
+                            else if (nal1 /= 1 .and. nal2 == 1) then
+                                ! One trapezoids and one aligned quad, so
+                                ! split the trapezoids
+                                if (CheckCellPsiIntersection(grid,b_verts(i), cvs(2))) then
+                                    if (CompareCellPsiIntersection(grid, cvs(2), fcs2, b_verts(i), threshold)) then
+                                        qm%split_cv = cvs(2)
+                                        exit
+                                    end if
+                                end if
+
+                            end if
+
+                        else if (size(fcs1) == 3 .and. size(fcs2) == 4) then
+                            ! Triangle and quad
+                            if (nal2 == 1) then
+                                ! Check if the aligned faces of both cells
+                                ! are on the same flux surface
+                                ind = findloc(f%aligned%Get(fcs1), 1, 1)
+                                fcs1_al = fcs1(ind)
+                                ind = findloc(f%aligned%Get(fcs2), 1, 1)
+                                fcs2_al = fcs2(ind)
+
+                                if (.not.HaveCommonVert(f, fcs1_al, fcs2_al) &
+                                    .and. CheckCellPsiIntersection(grid, b_verts(i), cvs(2))) then
+
+                                        if (CompareCellPsiIntersection(grid, cvs(2), fcs2, b_verts(i), threshold)) then
+                                            qm%split_cv = cvs(2)
+                                            exit
+                                        end if
+
+                                end if
+
+                            end if
+
+                        else if (size(fcs1) == 4 .and. size(fcs2) == 3) then
+
+                            if (nal1 == 1) then ! Trapezoid
+                                ! Check if the aligned faces of both cells
+                                ! are on the same flux surface
+                                ind = findloc(f%aligned%Get(fcs1), 1, 1)
+                                fcs1_al = fcs1(ind)
+                                ind = findloc(f%aligned%Get(fcs2), 1, 1)
+                                fcs2_al = fcs2(ind)
+
+                                if (.not.HaveCommonVert(f, fcs1_al, fcs2_al) &
+                                    .and. CheckCellPsiIntersection(grid, b_verts(i), cvs(1))) then
+
+                                        if (CompareCellPsiIntersection(grid, cvs(1), fcs1, b_verts(i), threshold)) then
+                                            qm%split_cv = cvs(1)
+                                            exit
+                                        end if
+
+                                end if
+                            end if
+
+                        end if
+
+                    end if
+
+                end do
+
+
+            case ('manual')
+
+                call gdErrorHandler('SelectSplitCell: manual selection method is not supported in pre-compiled framework')
+
+            case default
+
+                call gdErrorHandler('SelectSplitCell: split criterion not implemented')
+
+            end select
+
+
+        case ('pol')
+
+            select case (options%pol_type)
+
+            case ('trias_cvS')
+
+                ! Get triangles with largest area
+                log = (c%faceP2%Get(indcv) == 3)
+                allocate(tria_cells(count(log)))
+                tria_cells = pack(indcv, log)
+
+                ! Sort for descending surface area
+                ! Get triangle with largest area
+                ind = maxloc(qm%cvS(tria_cells),1)
+                qm%split_cv = tria_cells(ind)
+
+            case ('h_pol')
+                
+                ! Restrict to area where pents are allowed
+                if (options%no_pents) then
+                    call grid%AreaConstraintPents(options, options%dist_function_threshold_split, cells)
+                end if
+
+                ! Criterion
+                h_pol_sol_cells = qm%h_pol(cells)
+                call Sort(h_pol_sol_cells, indsort, .false.)
+                cells = cells(indsort)
+                i = 1
+                cvLookUp = GetCvLookUpGA(c)
+                do while (qm%split_cv == 0) 
+
+                    qm%split_cv = cells(i)
+
+                    if (c%faceP2%Get(qm%split_cv) == 4) then
+
+                        ! Get faces and check whether the cell has two split faces
+                        fcs = GetCellFaceGA(c, qm%split_cv)
+
+                        dpsi = abs(v%psi%Get(f%vert1%Get(fcs)) - v%psi%Get(f%vert2%Get(fcs)))
+                        indmin = minloc(dpsi,1)
+                        splitfaces(1) = fcs(indmin)
+                        
+                        dpsi(indmin) = 1e99_R8
+                        indmin = minloc(dpsi,1)
+                        splitfaces(2) = fcs(indmin)
+                        
+                        do k = 1, 2
+                            cvs = GetFaceCellGA(c, splitfaces(k), cvLookUp)
+                            if (any(c%faceP2%Get(cvs) == 5)) then
+                                qm%split_cv = 0
+                                i = i + 1
+                                exit
+                            end if
+                        end do
+
+                    else if (c%faceP2%Get(qm%split_cv) == 3 .or. c%cflags%Get(qm%split_cv) == 3) then
+
+                        qm%split_cv = 0
+                        i = i + 1
+
+                    end if
+
+                end do
+
+            case ('trias_farSOL')
+
+                ! Get triangular cells
+                log = (c%faceP2%Get() ==3)
+                allocate(tria_cells(count(log)))
+                tria_cells = pack(indcv, log)
+                
+                ! Get largest triangles by area
+                cvS_tria = qm%cvS(tria_cells)
+                n_sub = max(nint(size(tria_cells)/1.5_R8), 1)
+
+                call Sort(cvS_tria, indsort, .false.)
+                tria_cells = tria_cells(indsort)
+                subset_tria = tria_cells(1:n_sub)
+
+                ! Get triangles with the highest AR
+                cvAR_tria = qm%cvAR(subset_tria)
+                call Sort(cvAR_tria, indsort, .false.)
+                subset_tria = subset_tria(indsort)
+
+                do i = 1, n_sub
+                    if (cvAR_tria(i) .gt. 3) then
+                        qm%split_cv = subset_tria(i)
+                        exit
+                    end if
+                end do
 
 
 
+            case ('farSOLrefinement_hpol')
 
+                ! TODO
 
+            case ('farSOLrefinement_targets')
 
+                ! TODO
 
+            case ('manual')
+
+                call gdErrorHandler('SelectSplitCell: manual selection method is not supported in pre-compiled framework')
+
+            case default
+
+                call gdErrorHandler('SelectSplitCell: split criterion not implemented')
+
+            end select
+
+        end select
 
         end associate
 
     end subroutine
+
+    function CheckCellPsiIntersection(grid, iv, ic) result(res)
+        type(GAGridUDT) :: grid
+        integer(I8) :: iv, ic
+        logical :: res
+
+        integer(I8), allocatable :: vxs(:)
+        real(R8) :: psi_iv
+        real(R8), allocatable :: psi_cv(:)
+
+        res = .false.
+        vxs = GetCellVertGA(grid%cell, iv)
+        psi_cv = grid%vert%psi%Get(vxs)
+        psi_iv = grid%vert%psi%Get(iv)
+        if (psi_iv .lt. maxval(psi_cv) .and. psi_iv .gt. minval(psi_cv)) then
+            res = .true.
+        end if
+
+    end function
+
+    function CompareCellPsiIntersection(grid, ic, fcs, iv, threshold) result(res)
+        type(GAGridUDT) :: grid
+        integer(I8) :: iv, ic
+        integer(I8), allocatable :: fcs(:), int_faces(:)
+        real(R8) :: threshold, psic, min_dpsi, dpsi_v(2)
+        real(R8), allocatable :: psi_f1(:), psi_f2(:), dpsi_f(:)
+        logical :: res 
+        
+        res = .false.
+        psic = grid%vert%psi%Get(iv)
+        call grid%GetIntersectedPsiFaces(ic, fcs, int_faces, psic)
+        if (size(int_faces) .gt. 1) then
+            call gdErrorHandler('CompareCellPsiIntersection: more sections than expected (one expected)')
+        else
+            psi_f1 = grid%vert%psi%Get(grid%face%vert1%Get(int_faces))
+            psi_f2 = grid%vert%psi%Get(grid%face%vert2%Get(int_faces))
+            dpsi_f = abs(psi_f1(1) - psi_f2(1))
+            dpsi_v(1) = abs(psi_f1(1) - psic)
+            dpsi_v(2) = abs(psi_f2(1) - psic)
+            min_dpsi = minval(dpsi_v)
+
+            if ((min_dpsi/dpsi_f(1)) .gt. threshold) then
+                res = .true.
+            end if
+        end if
+        
+    end function
 
 
     !------------------------------------------------------------------!
@@ -5348,10 +5821,10 @@ module gamod_types
         type(GAoptionsUDT) :: options
 
         ! Auxiliary
-        integer(I8) :: i, ne
+        integer(I8) :: i
         integer(I8), allocatable :: empty_surf(:), indfs(:), cvLookUp(:), &
             cells(:)
-        logical, allocatable :: b_flag(:)
+        logical, allocatable :: b_flag(:), log(:)
        
 
         ! Get separatrix
@@ -5372,10 +5845,10 @@ module gamod_types
         call grid%DetermineCflags(cells, b_flag)
 
         ! Remove empty flux surfaces
-        ne = count(grid%data%fluxdata%fluxsurfacefacesP2%Get() == 0)
-        allocate(empty_surf(ne))
+        log = (grid%data%fluxdata%fluxsurfacefacesP2%Get() == 0)
+        allocate(empty_surf(count(log)))
         indfs = (/ (i, i= 1, grid%data%fluxdata%fluxsurfacefacesP2%Size() )/)
-        empty_surf = pack(indfs, grid%data%fluxdata%fluxsurfacefacesP2%Get() == 0)
+        empty_surf = pack(indfs, log)
 
         call grid%data%fluxdata%fluxsurfacefacesP1%Remove(empty_surf)
         call grid%data%fluxdata%fluxsurfacefacesP2%Remove(empty_surf)
@@ -5384,8 +5857,7 @@ module gamod_types
         grid%data%fluxdata%nFs = grid%data%fluxdata%fluxsurfacefacesP1%Size()
 
         ! Check uniqueness
-        call CheckUniqueness(grid%data%fluxdata%fluxsurfacefaces)
-
+        if (options%debug) call CheckUniqueness(grid%data%fluxdata%fluxsurfacefaces)
 
         ! Recover flux surface vertices
         call grid%GetFsVxFromFsFc(options)
@@ -6560,20 +7032,20 @@ module gamod_types
         integer(I8) :: cv
 
         ! Get splitting case and do the split on cell cv
-        call grid%OneSplit(qm%split_cv,options)
+        call grid%OneSplit(magneticField,  options, qm%split_cv)
 
         ! If pentagons are not allowed
 
         if (options%no_pents) then
             cv = 0
-            call grid%SplitPentsRec(options,cv)
+            call grid%SplitPentsRec(magneticField, options, cv)
         end if
 
         ! Do ordering for nice plots -  not necessary
 
     end subroutine
 
-    subroutine OneSplit(grid, cv, options)
+    subroutine OneSplit(grid, magneticField, options, cv)
 
         ! Description
         !============
@@ -6584,6 +7056,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
         type(GAoptionsUDT), intent(inout)   :: options
         integer(I8), intent(inout)          :: cv
 
@@ -6619,21 +7092,21 @@ module gamod_types
                 select case (caseID)
 
                 case ('34')
-                    call grid%SplitTQ(cv,rface1,neig1,type,options)
+                    call grid%SplitTQ(magneticField, cv, rface1, neig1, type, options)
                 case ('35')
-                    call grid%SplitTP(cv,rface1,neig1,type,options)
+                    call grid%SplitTP(magneticField, cv, rface1, neig1, type, options)
                 case ('30')
-                    call grid%SplitTB(cv,rface1,type)
+                    call grid%SplitTB(magneticField, cv, rface1, type)
                 case ('430','034')
-                    call grid%SplitQTB(cv,rface1,rface2,neig1,neig2,type,options%typeT)
+                    call grid%SplitQTB(magneticField, cv, rface1, rface2, neig1, neig2, type, options%typeT)
                 case ('030')
-                    call grid%SplitBTB(cv,rface1,rface2,type,options%typeT)
+                    call grid%SplitBTB(magneticField, cv, rface1, rface2, type, options%typeT)
                 case ('033','330')
-                    call grid%SplitTTB(cv,rface1,rface2,neig1,neig2,type,options%typeT)
+                    call grid%SplitTTB(magneticField, cv, rface1, rface2, neig1, neig2, type, options%typeT)
                 case ('333')
-                    call grid%SplitTTT(cv,rface1,rface2,neig1,neig2,type) 
+                    call grid%SplitTTT(magneticField, cv, rface1, rface2, neig1, neig2, type) 
                 case ('334','433')
-                    call grid%SplitTTQ(cv,rface1,rface2,neig1,neig2,type)
+                    call grid%SplitTTQ(magneticField, cv, rface1, rface2, neig1, neig2, type)
                 case default
 
                     call gdErrorHandler('OneSplit: Tcase, case not implemented')
@@ -6663,7 +7136,7 @@ module gamod_types
 
     end subroutine
 
-    recursive subroutine SplitPentsRec(grid, options, cv)
+    recursive subroutine SplitPentsRec(grid, magneticField, options, cv)
 
         ! Description
         !============
@@ -6674,6 +7147,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
         type(GAoptionsUDT), intent(inout)   :: options
         integer(I8), intent(inout)          :: cv
         
@@ -6701,7 +7175,7 @@ module gamod_types
 
                 if (cv /= 0) then
 
-                    call grid%OneSplit(cv, options)
+                    call grid%OneSplit(magneticField, options, cv)
 
                 end if
 
@@ -6709,7 +7183,7 @@ module gamod_types
 
         else 
 
-            call grid%OneSplit(cv, options)
+            call grid%OneSplit(magneticField, options, cv)
 
         end if
 
@@ -6734,7 +7208,7 @@ module gamod_types
 
             if (cv /= 0) then
 
-                call grid%SplitPentsRec(options, cv)
+                call grid%SplitPentsRec(magneticField, options, cv)
 
             end if
 
@@ -7197,8 +7671,10 @@ module gamod_types
 
         end do
 
-        if (ii /= 2) then
-            call gdErrorHandler('GetIntersectedPsiFaces: no 2 intersections found')
+        if (.not.present(psic)) then
+            if (ii /= 2) then
+                call gdErrorHandler('GetIntersectedPsiFaces: no 2 intersections found')
+            end if
         end if
 
         ! Trim
@@ -7240,24 +7716,74 @@ module gamod_types
     end subroutine
 
     
-    subroutine SplitTQ(grid, cv, rface1, neig1, type, options)
+    subroutine SplitTQ(grid, magneticField, cv, tface, neig1, type, options)
 
         ! Description
         !============
-        !
+        ! Splits a triangle 
+        ! Tface is the aligned faces of the triangle
 
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid 
-        integer(I8), intent(in)         :: cv, rface1, neig1
-        character(:), allocatable       :: type
-        type(GAoptionsUDT), intent(in)  :: options
+        class(GAGridUDT), intent(inout)     :: grid 
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: cv, tface, neig1
+        character(:), allocatable           :: type
+        type(GAoptionsUDT), intent(in)      :: options
 
+        ! Auxiliary
+        integer(I8) :: v1n, free_vert, f1n, f2n, &
+            f3n, i
+        integer(I8), allocatable, dimension(:) :: fcs, vxs
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Make new vertices
+        call grid%AddVert(magneticField, tface, v1n)
+
+        ! Determine free vertex of the triangle by eliminate vertices of tface
+        vxs = GetCellVertGA(c, cv)
+        do i = 1, 3
+            if (vxs(i) /= f%vert1%Get(tface) .and. vxs(i) /= f%vert2%Get(tface)) free_vert = vxs(i)
+        end do
+
+        ! Make new faces
+        call grid%GetFaceNumber(v1n, f%vert1%Get(tface), 3, f1n)
+        call f%aligned%Set(f1n, f%aligned%Get(tface))
+        call grid%GetFaceNumber(v1n, f%vert2%Get(tface), 3, f2n)
+        call f%aligned%Set(f2n, f%aligned%Get(tface))        
+        call grid%GetFaceNumber(v1n, free_vert, 3, f3n)
+
+        ! Add new vert to correct flux surface
+        if (.not.options%slab) then
+            select case (type)
+            case ('pol')
+                
+                vxs = v1n
+                fcs = [f1n, f2n]
+                call grid%AddVertToFsVx(vxs, fcs, tface, type)
+
+            case ('rad')
+
+                vxs = [v1n, free_vert]
+                fcs = f3n
+                call grid%AddVertToFsVx(vxs, fcs, 0, type)
+
+            end select
+        end if
+        
+
+
+        end associate
 
     end subroutine
 
-    subroutine SplitTP(grid, cv, rface1, neig1, type, options)
+    subroutine SplitTP(grid, magneticField, cv, rface1, neig1, type, options)
 
         ! Description
         !============
@@ -7266,15 +7792,16 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid 
-        integer(I8), intent(in)         :: cv, rface1, neig1
-        character(:), allocatable       :: type
-        type(GAoptionsUDT), intent(in)  :: options
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField         
+        integer(I8), intent(in)             :: cv, rface1, neig1
+        character(:), allocatable           :: type
+        type(GAoptionsUDT), intent(in)      :: options
 
 
     end subroutine   
 
-    subroutine SplitTB(grid, cv, rface1, type)
+    subroutine SplitTB(grid, magneticField, cv, rface1, type)
 
         ! Description
         !============
@@ -7283,14 +7810,15 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid 
-        integer(I8), intent(in)         :: cv, rface1
-        character(:), allocatable       :: type
+        class(GAGridUDT), intent(inout)     :: grid 
+        type(MagneticFieldUDT), intent(in)  :: magneticField        
+        integer(I8), intent(in)             :: cv, rface1
+        character(:), allocatable           :: type
 
 
     end subroutine   
 
-    subroutine SplitQTB(grid, cv, rface1, rface2, neig1, neig2, type, typeT)
+    subroutine SplitQTB(grid, magneticField, cv, rface1, rface2, neig1, neig2, type, typeT)
 
         ! Description
         !============
@@ -7299,14 +7827,15 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid 
-        integer(I8), intent(in)         :: cv, rface1, rface2, neig1, neig2
-        character(:), allocatable       :: type, typeT
+        class(GAGridUDT), intent(inout)     :: grid 
+        type(MagneticFieldUDT), intent(in)  :: magneticField        
+        integer(I8), intent(in)             :: cv, rface1, rface2, neig1, neig2
+        character(:), allocatable           :: type, typeT
 
 
     end subroutine   
 
-    subroutine SplitBTB(grid, cv, rface1, rface2, type, typeT)
+    subroutine SplitBTB(grid, magneticField, cv, rface1, rface2, type, typeT)
 
         ! Description
         !============
@@ -7315,14 +7844,15 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid 
-        integer(I8), intent(in)         :: cv, rface1, rface2
-        character(:), allocatable       :: type, typeT
+        class(GAGridUDT), intent(inout)     :: grid 
+        type(MagneticFieldUDT), intent(in)  :: magneticField        
+        integer(I8), intent(in)             :: cv, rface1, rface2
+        character(:), allocatable           :: type, typeT
 
 
     end subroutine   
 
-    subroutine SplitTTB(grid, cv, rface1, rface2, neig1, neig2, type, typeT)
+    subroutine SplitTTB(grid, magneticField, cv, rface1, rface2, neig1, neig2, type, typeT)
 
         ! Description
         !============
@@ -7331,14 +7861,15 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid 
-        integer(I8), intent(in)         :: cv, rface1, rface2, neig1, neig2
-        character(:), allocatable       :: type, typeT
+        class(GAGridUDT), intent(inout)     :: grid 
+        type(MagneticFieldUDT), intent(in)  :: magneticField        
+        integer(I8), intent(in)             :: cv, rface1, rface2, neig1, neig2
+        character(:), allocatable           :: type, typeT
 
 
     end subroutine  
  
-    subroutine SplitTTT(grid, cv, rface1, rface2, neig1, neig2, type)
+    subroutine SplitTTT(grid, magneticField, cv, rface1, rface2, neig1, neig2, type)
 
         ! Description
         !============
@@ -7347,14 +7878,15 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid 
-        integer(I8), intent(in)         :: cv, rface1, rface2, neig1, neig2
-        character(:), allocatable       :: type
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField         
+        integer(I8), intent(in)             :: cv, rface1, rface2, neig1, neig2
+        character(:), allocatable           :: type
 
 
     end subroutine 
 
-    subroutine SplitTTQ(grid, cv, rface1, rface2, neig1, neig2, type)
+    subroutine SplitTTQ(grid, magneticField, cv, rface1, rface2, neig1, neig2, type)
 
         ! Description
         !============
@@ -7363,9 +7895,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid 
-        integer(I8), intent(in)         :: cv, rface1, rface2, neig1, neig2
-        character(:), allocatable       :: type
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField         
+        integer(I8), intent(in)             :: cv, rface1, rface2, neig1, neig2
+        character(:), allocatable           :: type
 
 
     end subroutine 
@@ -8313,6 +8846,426 @@ module gamod_types
 
 
 
+        end associate
+
+    end subroutine
+
+    subroutine AddVert(grid, magneticField, face, vert, type, psic, common_vert)
+
+        ! Description
+        !============
+        ! Add a new vertex on the segment defined by the face
+
+        ! Declare variables
+        !==================
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: face
+        integer(I8), intent(out)            :: vert
+        character(:), allocatable, optional :: type
+        real(R8), optional                  :: psic
+        integer(I8), optional               :: common_vert
+
+        ! Auxiliary
+        integer(I8) :: v1, v2
+        real(R8) :: t0, v1x, v1y, v2x, v2y, fcX, fcY, d, &
+            t1, vec_v1(2), vec_v2(2), X1(2), Y1(2), X2(2), Y2(2), &
+            x_int, y_int, vcx, vcy, d_v1(2), d_v2(2), d2, dn, &
+            fcX_int, fcY_int, d1, vec_c(2)
+        real(R8), allocatable, dimension(:) :: v1_nx, v1_ny, v1_psi, v1_bx, v1_by
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        if (.not.present(type)) then
+
+            ! Make new vertices at the crossing with psic
+            v1 = f%vert1%Get(face)
+            v2 = f%vert2%Get(face)
+            v1_nx = 0.5_R8 * (v%x%Get(v1) + v%y%Get(v2))
+            v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
+            call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+            call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+            call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)
+
+        else 
+
+            select case (type)
+
+            case ('psi')
+
+                ! Make new vertices at the crossing with psic
+                v1 = f%vert1%Get(face)
+                v2 = f%vert2%Get(face)
+                t0 = (psic - v%psi%Get(v1)) / (v%psi%Get(v2) - v%psi%Get(v1))
+
+                ! Get vertex properties
+                v1_nx = v%x%Get(v1) + t0 * (v%x%Get(v2) - v%x%Get(v1))
+                v1_ny = v%y%Get(v1) + t0 * (v%y%Get(v2) - v%y%Get(v1))
+                v1_psi = psic
+                call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+                call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)
+            
+            case ('pol')
+
+                ! Make new vertices on the average of intersection of constant psi vectors 
+                ! and the face center if face is aligned - TODO upgrade to construct Cubic Hermite polynomal for psi-curve
+                v1 = f%vert1%Get(face)
+                v2 = f%vert2%Get(face)
+                if (f%aligned%Get(face) == 1) then
+
+                    v1x = v%x%Get(v1)
+                    v1y = v%y%Get(v1)
+                    v2x = v%x%Get(v2)
+                    v2y = v%y%Get(v2)
+                    fcX = 0.5_R8 * (v1x + v2x)
+                    fcY = 0.5_R8 * (v1y + v2y)
+                    d = sqrt((v1x-v2x)**2 + (v1y-v2y)**2)
+
+                    ! Normalized vector out of vert1
+                    d1 = sqrt(v%bx%Get(v1)**2 + v%by%Get(v1)**2)
+                    vec_v1(1) = -v%by%Get(v1)/d1
+                    vec_v1(2) = v%bx%Get(v1)/d1
+
+                    ! Face normal
+                    t0 = v2y - v1y
+                    t1 = -(v2x - v1x)
+                    dn = sqrt(t0**2 + t1**2)
+                    vec_v2(1) = t0/dn
+                    vec_v2(2) = t1/dn
+
+                    ! Normalized vector out of vert2
+                    X1 = [v1x + vec_v1(1)*2*d, v1x - vec_v1(1)*2*d]
+                    Y1 = [v1y + vec_v1(2)*2*d, v1y - vec_v1(2)*2*d]
+                    X2 = [fcX + vec_v2(1)*2*d, fcX - vec_v2(1)*2*d]
+                    Y2 = [fcY + vec_v2(2)*2*d, fcY - vec_v2(2)*2*d]
+
+                    call SegmentIntersections(x_int, y_int, X1(1), Y1(1), X1(2), Y1(2), X2(1), Y2(1), X2(2), Y2(2))
+
+                    if (.not.isnan(x_int)) then
+
+                        ! Approximate constant psi curve - average of intersection
+                        ! point and old face center
+                        v1_nx = 0.5_R8 *(x_int + 0.5_R8 * (v1x + v2x))
+                        v1_ny = 0.5_R8 *(y_int + 0.5_R8 * (v1y + v2y))
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+
+                    else 
+
+                        call gdErrorHandler('AddVert: no intersection found')
+
+                    end if
+
+                else 
+
+                    ! Geometric splitting
+                    v1_nx = 0.5_R8 * (v%x%Get(v1) + v%y%Get(v2))
+                    v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
+                    call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+                    call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+                    call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)                   
+
+                end if
+
+            case ('pol_ortho')
+
+                ! Make new vertices on intersection of constant psi vectors
+                ! if face is aligned
+                v1 = f%vert1%Get(face)
+                v2 = f%vert2%Get(face)
+                if (f%aligned%Get(face) == 1) then
+
+                    v1x = v%x%Get(v1)
+                    v1y = v%y%Get(v1)
+                    v2x = v%x%Get(v2)
+                    v2y = v%y%Get(v2)
+                    vcx = v%x%Get(common_vert)
+                    vcy = v%y%Get(common_vert)
+                    fcX = 0.5_R8 * (v1x + v2x)
+                    fcY = 0.5_R8 * (v1y + v2y)
+                    d = sqrt((v1x-v2x)**2 + (v1y-v2y)**2)
+
+                    d_v1(1) = v1x - fcX
+                    d_v1(2) = v1y - fcY
+
+                    d_v2(1) = v2x - fcX
+                    d_v2(2) = v2y - fcY
+
+                    ! Normalized vector out of vert1
+                    d1 = sqrt(v%bx%Get(v1)**2 + v%by%Get(v1)**2) 
+                    vec_v1(1) = - v%by%Get(v1) / d1
+                    vec_v1(2) = v%bx%Get(v1) / d1
+
+                    ! Face normal
+                    t0 = v2y - v1y
+                    t1 = -(v2x - v1x)
+                    dn = sqrt(t0**2 + t1**2)
+                    vec_v2(1) = t0/dn
+                    vec_v2(2) = t1/dn
+
+                    ! ORTHOGONAL INTERSECTION
+                    ! FcX_int and fcY_int is the intersection point of orthogonal line
+                    ! out of the hanging node of the pentagon with opposite face in that pentagon
+                    ! The orthogonal line starts in the common vert
+                    ! Normalized vector out of common vert
+                    d2 = sqrt(v%bx%Get(common_vert)**2 + v%by%Get(common_vert)**2)
+                    vec_c(1) = v%bx%Get(common_vert) / d2
+                    vec_c(2) = v%by%Get(common_vert) / d2  
+                    
+                    ! Define segment 75% of original face centers around the face center
+                    X1 = [fcX + 0.75_R8 * d_v2(1), fcX + 0.75_R8 * d_v1(1)] 
+                    Y1 = [fcX + 0.75_R8 * d_v2(2), fcX + 0.75_R8 * d_v1(2)]
+
+                    ! Orthogonal vector out of the common vertex (hanging node of pentagon)
+                    X2 = [vcx + vec_c(1)*10*d, vcx - vec_c(1)*10*d]
+                    Y2 = [vcy + vec_c(2)*10*d, vcy - vec_c(2)*10*d]
+
+                    call SegmentIntersections(fcX_int, fcY_int, X1(1), Y1(1), X1(2), Y1(2), X2(1), Y2(1), X2(2), Y2(2))
+
+                    if (isnan(fcX_int)) call gdErrorHandler('AddVert: No intersection found')
+
+                    ! Average face center with new face intersection
+                    fcX = 0.3*fcX + 0.7*fcX_int
+                    fcY = 0.3*fcY + 0.7*fcY_int
+
+                    ! INTERSECTION FOR NEW POINT
+                    ! intersection between face normal out if new (fcX,fcY)
+                    ! and the magnetic vector out of v1
+
+                    X1 = [v1x + vec_v1(1)*d, v1x - vec_v1(1)*d]
+                    Y1 = [v1y + vec_v1(2)*d, v1y - vec_v1(2)*d]
+                    X2 = [fcX + vec_v2(1)*d, fcX - vec_v2(1)*d]
+                    Y2 = [fcY + vec_v2(2)*d, fcY - vec_v2(2)*d]
+
+                    call SegmentIntersections(x_int, y_int, X1(1), Y1(1), X1(2), Y1(2), X2(1), Y2(1), X2(2), Y2(2))
+
+                    if (.not.isnan(x_int)) then
+
+                        ! Approximate constant psi curve - average of intersection and old face center
+                        v1_nx = 0.5_R8 * (x_int + fcX)
+                        v1_ny = 0.5_R8 * (y_int + fcY)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)
+
+                    else
+
+                        call gdErrorHandler('AddVert: no intersection found')
+
+                    end if
+
+                else 
+
+                    ! Geometric splitting
+                    v1_nx = 0.5_R8 * (v%x%Get(v1) + v%y%Get(v2))
+                    v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
+                    call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+                    call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+                    call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_by) 
+
+                end if
+            case ('geometric')
+
+                ! Geometric splitting
+                v1 = f%vert1%Get(face)
+                v2 = f%vert2%Get(face)
+                v1_nx = 0.5_R8 * (v%x%Get(v1) + v%y%Get(v2))
+                v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
+                call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+                call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+                call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_by)  
+
+            case default
+
+                call gdErrorHandler('AddVert: other type of face splitting not implemented.')
+
+            end select
+
+        end if
+
+        ! Append the vertex
+        call v%x%Append(v1_nx)
+        call v%y%Append(v1_ny)
+        call v%psi%Append(v1_psi)
+        call v%bx%Append(v1_bx)
+        call v%by%Append(v1_by)
+
+        ! Increase total number of vertices and output the vertex number
+        v%ntot = v%ntot + 1
+        vert = v%ntot
+
+        end associate
+
+    end subroutine 
+
+    subroutine AddVertToFsVx(grid, new_v, new_f, old_f, type)
+
+        ! Description
+        !============
+        ! Adds the new vertices to the correct flux surface if possible based
+        ! on information from the existing faces.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), allocatable, intent(in)    :: new_v(:), new_f(:)
+        integer(I8), intent(in)                 :: old_f
+        character(:), allocatable, intent(in)   :: type
+
+        ! Auxiliary
+        integer(I8) :: i, ind, ifs, ind_good
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert, &
+            fd => grid%data%fluxdata &
+            )
+
+        select case (type)
+
+        case ('pol')
+
+            ! Find the ifs of the face, only for aligned faces
+            if (f%aligned%Get(old_f) == 1) then
+
+                if (count(fd%fluxsurfacefaces%Get() == old_f) /= 1) then
+                    call gdErrorHandler('AddVertToFsVx: multiple possible flux surface to add vertex to')
+                else
+                    ind = findloc(fd%fluxsurfacefaces%Get(), old_f, 1)
+                end if
+
+                ! If old face not in a surface, add new surface
+                if (ind == 0) then
+
+                    call grid%AddFluxSurface(new_v, new_f)
+
+                !  Or at the same surface of the old face
+                else 
+
+                    ! Get the flux surface id
+                    ifs = GetFsFcFromFaceIndex(fd, ind)
+                    call grid%AddIntoExistingSurface(ifs, new_v, new_f)
+                             
+                end if
+                
+            end if
+
+        case ('rad')
+
+            ! Find ifs of the given vertex
+            ind_good = 0
+            do i = 1, size(new_v)
+                ind = findloc(fd%fluxsurfaceverts%Get(), new_v(i), 1)
+                if (ind /= 0) then
+                    ind_good = ind
+                    exit
+                end if
+            end do
+
+            if (ind_good == 0) then
+
+                call grid%AddFluxSurface(new_v, new_f)
+
+            else
+
+                ifs = GetFsVxFromVertInd(fd, ind_good)
+                call grid%AddIntoExistingSurface(ifs, new_v, new_f)
+
+            end if
+
+
+        end select
+
+        end associate
+
+    end subroutine
+
+    subroutine AddFluxSurface(grid, vxs, fcs)
+
+        ! Description
+        !============
+        ! Adding a new flux surface in fsFc and fsVx
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), allocatable, intent(in)    :: vxs(:), fcs(:)
+
+        ! Auxiliary
+
+        associate(&
+            fd => grid%data%fluxdata &
+            )
+
+        ! Increase number of flux surfaces
+        fd%nFs = fd%nFs + 1
+
+        ! Verts
+        call fd%fluxsurfacevertsP1%Append(fd%fluxsurfacevertsP1%Get(fd%nFs-1) + fd%fluxsurfacevertsP2%Get(fd%nFs-1))
+        call fd%fluxsurfacevertsP2%Append(size(vxs))
+        call fd%fluxsurfaceverts%Append(vxs)
+
+        ! Faces
+        call fd%fluxsurfacefacesP1%Append(fd%fluxsurfacefacesP1%Get(fd%nFs-1) + fd%fluxsurfacefacesP2%Get(fd%nFs-1))
+        call fd%fluxsurfacefacesP2%Append(size(fcs))
+        call fd%fluxsurfaceverts%Append(fcs)
+
+        end associate
+
+    end subroutine
+
+    subroutine AddIntoExistingSurface(grid, ifs, vxs, fcs)
+
+        ! Description
+        !============
+        ! Add vxs and fcs into an existing flux surface
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), intent(in)                 :: ifs
+        integer(I8), allocatable, intent(in)    :: vxs(:), fcs(:)
+
+        ! Auxiliary
+        integer(I8) :: s, j
+        integer(I8), allocatable :: vxs_current(:), fcs_current(:), &
+            new_verts(:), new_vertsD(:), new_faces(:), new_facesD(:), range(:)
+
+        associate(&
+            fd => grid%data%fluxdata &
+            )
+
+        ! Add the vertex to that flux surface
+        vxs_current = GetFluxSurfaceVxsGA(fd, ifs)
+        new_vertsD = [vxs_current, vxs]
+        call Unique(new_vertsD, new_verts)
+        s = fd%fluxsurfacevertsP1%Get(ifs)
+        call fd%fluxsurfaceverts%Replace(s,s+fd%fluxsurfacevertsP2%Get(ifs)-1, new_verts)
+        call fd%fluxsurfacevertsP2%Set(ifs, size(new_verts))
+        range = (/ (j, j = ifs+1, fd%nFs)/)
+        call fd%fluxsurfacefacesP1%SumMask(range, size(vxs))
+
+        ! Add the faces to that flux surfaces
+        fcs_current = GetFluxSurfaceFcsGA(fd, ifs)
+        new_facesD = [fcs_current, fcs]
+        call Unique(new_facesD, new_faces)
+        s = fd%fluxsurfacefacesP1%Get(ifs)
+        call fd%fluxsurfacefaces%Replace(s,s+fd%fluxsurfacefacesP2%Get(ifs)-1, new_faces)
+        call fd%fluxsurfacefacesP2%Set(ifs, size(new_faces))
+        call fd%fluxsurfacefacesP1%SumMask(range, size(fcs)) 
+        
         end associate
 
     end subroutine

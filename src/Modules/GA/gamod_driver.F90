@@ -208,6 +208,7 @@ module gamod_driver
 
         ! Auxiliary
         type(QualityMetricUDT) :: qm
+        type(GAoptionsUDT) :: options1
 
         ! Calculate quality metric
         call qm%Initialize(grid)
@@ -225,8 +226,22 @@ module gamod_driver
             call grid%StackedToCutcell(magneticField, options)
 
         ! Splitting non-aligned quads
+        if (options%split_noalignedquads) then
+            options1 = options
+            options1%splittype = 'rad'
+            options1%rad_type = 'no_aligned_faces'
+            options1%n_split = grid%cell%ntot
+            call grid%DoSplitting(magneticField, qm, options1)
+        end if
 
         ! Splitting trapezoids in concave shaved-off flux tube
+        if (options%split_shaved_off_tube) then
+            options1 = options
+            options1%splittype = 'rad'
+            options1%rad_type = 'shaved-off_tubes'
+            options1%n_split = grid%cell%ntot
+            call grid%DoSplitting(magneticField, qm, options1)
+        end if
 
         ! Splitting  and merging
         ! Merging
