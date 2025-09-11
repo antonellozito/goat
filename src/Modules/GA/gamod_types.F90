@@ -1539,8 +1539,8 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: indcv, cells,  &
             cellsD, indsort, cells2, fcs, fcs_sep, indf, b_faces, b_verts, &
             cvLookUp, cvs, cvsD, fcs1, fcs2, tria_cells, subset_tria
-        real(R8) :: mean_tot_flux, threshold
-        real(R8), allocatable, dimension(:) :: h_rad_cells, pol_fluxdens_est, dfunv, &
+        real(R8) :: mean_tot_flux, threshold, dfunv(grid%cell%ntot)
+        real(R8), allocatable, dimension(:) :: h_rad_cells, pol_fluxdens_est, &
             dpsi, cvAR_tria, cvS_tria, h_pol_sol_cells
         logical, allocatable :: log(:), log2(:)
 
@@ -1852,6 +1852,7 @@ module gamod_types
 
                 ! Criterion
                 h_pol_sol_cells = qm%h_pol(cells)
+                allocate(indsort(size(cells)))
                 call Sort(h_pol_sol_cells, indsort, .false.)
                 cells = cells(indsort)
                 i = 1
@@ -1902,12 +1903,15 @@ module gamod_types
                 cvS_tria = qm%cvS(tria_cells)
                 n_sub = max(nint(size(tria_cells)/1.5_R8), 1)
 
+                allocate(indsort(size(tria_cells)))
                 call Sort(cvS_tria, indsort, .false.)
                 tria_cells = tria_cells(indsort)
+                deallocate(indsort)
                 subset_tria = tria_cells(1:n_sub)
 
                 ! Get triangles with the highest AR
                 cvAR_tria = qm%cvAR(subset_tria)
+                allocate(indsort(size(subset_tria)))
                 call Sort(cvAR_tria, indsort, .false.)
                 subset_tria = subset_tria(indsort)
 
@@ -8284,7 +8288,7 @@ module gamod_types
         ! Auxiliary
         integer(I8) :: i
         integer(I8), allocatable :: indCv(:)
-        real(R8), allocatable ::  val(:)
+        real(R8) ::  val(grid%cell%ntot)
 
         ! Initiliaze
         indCv = (/ (i, i = 1, grid%cell%ntot)/)
@@ -8383,8 +8387,8 @@ module gamod_types
         ! For the moment just cells around the Xpoints
 
         class(GAGridUDT) :: grid
-        integer(I8) :: counter, i
-        integer(I8), allocatable :: Xcells(:), cvLookUp(:), cvs(:), XcellsD(:)
+        integer(I8) :: counter, i, XcellsD(grid%cell%ntot)
+        integer(I8), allocatable :: Xcells(:), cvLookUp(:), cvs(:) 
 
         cvLookUp = GetCvLookUpGA(grid%cell) 
 
@@ -9833,6 +9837,9 @@ module gamod_types
             res = res_dummy(1:counter)
 
         end if
+
+        ! House keeping
+        deallocate(res_dummy)
 
         s = g%cell%faceP1%Get(ic)
         nf = g%cell%faceP2%Get(ic)
