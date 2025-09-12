@@ -502,6 +502,12 @@ module gamod_types
         procedure :: SplitTTB
         procedure :: SplitTTT
         procedure :: SplitTTQ
+        procedure :: SplitFace
+        procedure :: SplitTria
+        procedure :: QuadToPent
+        procedure :: SplitCenterPent
+        procedure :: DetermineFreeVertTria
+        procedure :: DetermineHangingNodePent
 
 
         ! Boundary layer grid
@@ -563,6 +569,11 @@ module gamod_types
     ! General isBoundaryCell
     interface isBoundaryVertGA
         module procedure isBoundaryVert0DGA, isBoundaryVert1DGA
+    end interface
+
+    ! General norm
+    interface Norm
+        module procedure Norm0D, Norm1D
     end interface
 
 
@@ -963,7 +974,7 @@ module gamod_types
         !==================
         ! Arguments
         class(QualityMetricUDT), intent(inout)  :: qm
-        type(GAGridUDT), intent(in)             :: grid
+        type(GAGridUDT), intent(inout)          :: grid
         type(GAoptionsUDT), intent(in)          :: options
         type(MagneticFieldUDT), intent(in)      :: magneticField
         logical :: select_split, select_merge
@@ -1530,7 +1541,7 @@ module gamod_types
         !==================
         ! Arguments
         class(QualityMetricUDT), intent(inout)  :: qm
-        type(GAGridUDT), intent(in)             :: grid
+        type(GAGridUDT), intent(inout)          :: grid
         type(GAoptionsUDT), intent(in)          :: options
 
         ! Auxiliary
@@ -2672,9 +2683,9 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)  :: grid
-        logical, intent(in)             :: use_sep  
-        integer(I8), allocatable, optional :: cvLookUp(:)            
+        class(GAGridUDT), intent(inout)     :: grid
+        logical, intent(in)                 :: use_sep  
+        integer(I8), allocatable, optional  :: cvLookUp(:)            
 
         ! Auxiliary
         integer(I8)                         :: i, j, iv, xpoints(1:100), counter, & 
@@ -2926,9 +2937,9 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT)        :: grid
-        logical, intent(in)                  :: use_nsep, use_sepID, start
-        integer(I8), allocatable, optional :: cvLookUp(:)
+        class(GAGridUDT), intent(inout)     :: grid
+        logical, intent(in)                 :: use_nsep, use_sepID, start
+        integer(I8), allocatable, optional  :: cvLookUp(:)
 
         ! Initialize
         logical    :: use_xpointID     
@@ -2941,8 +2952,6 @@ module gamod_types
         counter = 0
         counter_dummy = 0
         
-        
-
         ! Associate
         associate(&
             c   => grid%cell, &
@@ -3250,8 +3259,8 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)            :: grid
-        type(GAoptionsUDT), intent(in)          :: options
+        class(GAGridUDT), intent(inout)      :: grid
+        type(GAoptionsUDT), intent(in)       :: options
         type(MagneticFieldUDT), intent(in)   :: magneticField
         
         ! Auxiliary
@@ -3484,8 +3493,8 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        logical :: check_extra_conn
+        class(GAGridUDT), intent(in)    :: grid
+        logical                         :: check_extra_conn
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:) :: cvLookUp, v1n, v2n, cf, &
@@ -4248,9 +4257,9 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT) :: grid
+        class(GAGridUDT)        :: grid
         integer(I8), intent(in) ::  cell, faceA, faceB, faceC
-        type(GAoptionsUDT) :: options
+        type(GAoptionsUDT)      :: options
 
         ! Auxiliary
         integer(I8) :: j, k, n, n_oc, s, vx_common, indexf, cellA, &
@@ -4498,10 +4507,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)     :: grid
-        type(QualityMetricUDT), intent(in)  :: qm
-        type(GAoptionsUDT)                  :: options 
-        integer(I8), allocatable, intent(out) :: cctria(:), cctraps(:), cctrapsP(:,:)
+        class(GAGridUDT), intent(inout)         :: grid
+        type(QualityMetricUDT), intent(in)      :: qm
+        type(GAoptionsUDT)                      :: options 
+        integer(I8), allocatable, intent(out)   :: cctria(:), cctraps(:), cctrapsP(:,:)
         
         ! Auxiliary
         integer(I8) :: i, ic, counter, trap1, counter_tria, counter_trapgroups, s
@@ -4642,10 +4651,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        integer(I8), intent(in) :: ic
-        integer(I8), allocatable, intent(in) :: cvLookUp(:)
-        integer(I8), intent(out) :: trap1
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: ic
+        integer(I8), intent(in)                 :: cvLookUp(:)
+        integer(I8), intent(out)                :: trap1
 
         ! Auxiliary
         integer(I8) :: j, counter_b, common_face, indmin
@@ -4740,11 +4749,11 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        integer(I8), intent(in) :: ic
-        integer(I8), allocatable, intent(in) :: cvLookUp(:)
-        integer(I8), intent(inout) :: traps(:)
-        integer(I8), intent(inout) :: counter
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: ic
+        integer(I8), intent(in)                 :: cvLookUp(:)
+        integer(I8), intent(inout)              :: traps(:)
+        integer(I8), intent(inout)              :: counter
  
         ! Auxiliary
         integer(I8), allocatable, dimension(:) :: neigs, b_neig, b_verts, b_faces, &
@@ -4871,10 +4880,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        integer(I8), intent(in) :: tria
-        integer(I8), allocatable, intent(in) :: traps(:)
-        integer(I8), intent(out) :: con_vert
+        class(GAGridUDT), intent(in)  :: grid
+        integer(I8), intent(in)       :: tria
+        integer(I8), intent(in)       :: traps(:)
+        integer(I8), intent(out)      :: con_vert
 
         ! Auxiliary
         integer(I8) :: i, k, big_trap, indmin, indmax, lt, vxs2(2)
@@ -4980,10 +4989,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        integer(I8), intent(in) :: tria, con_vert
-        integer(I8), allocatable, intent(in) :: traps(:)
-        logical, intent(out) :: approved
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: tria, con_vert
+        integer(I8), intent(in)         :: traps(:)
+        logical, intent(out)            :: approved
 
         ! Auxiliary
         integer(I8) :: nt, counter_v, j, prev_icv, ind, nvix, nvt
@@ -5132,8 +5141,8 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8), intent(in) :: tria, con_vert
-        integer(I8), allocatable, intent(in) :: traps(:)
+        integer(I8), intent(in)         :: tria, con_vert
+        integer(I8), intent(in)         :: traps(:)
 
         ! Auxiliary
         integer(I8) :: i, j, ic, common_face, b_vert, counterv, &
@@ -5820,9 +5829,9 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid
-        type(QualityMetricUDT), intent(inout)  :: qm
-        type(GAoptionsUDT) :: options
+        class(GAGridUDT), intent(inout)         :: grid
+        type(QualityMetricUDT), intent(inout)   :: qm
+        type(GAoptionsUDT)                      :: options
 
         ! Auxiliary
         integer(I8) :: i
@@ -5879,8 +5888,8 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8), intent(in) :: fc
-        logical :: starter, pent_to_tria, special_case
+        integer(I8), intent(in)         :: fc
+        logical                         :: starter, pent_to_tria, special_case
 
         ! Auxiliary
         integer(I8), allocatable :: cvs(:)
@@ -6189,11 +6198,11 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout) :: grid
-        integer(I8), intent(in) :: fc
-        logical, intent(in) :: starter, pent_to_tria, special_case
-        character(:), allocatable, intent(out) :: caseID
-        integer(I8), allocatable, intent(out) :: cvs(:)
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), intent(in)                 :: fc
+        logical, intent(in)                     :: starter, pent_to_tria, special_case
+        character(:), allocatable, intent(out)  :: caseID
+        integer(I8), allocatable, intent(out)   :: cvs(:)
 
         ! Auxiliary
         integer(I8) :: i, j, nfc1, nfc2, faces_sepD(grid%face%ntot), &
@@ -6405,8 +6414,8 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT) :: grid
-        integer(I8) :: fc, cvs(2)
+        class(GAGridUDT)    :: grid
+        integer(I8)         :: fc, cvs(2)
 
         ! Auxiliary
         integer(I8) :: ic
@@ -6453,8 +6462,8 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8) :: fc, cvs(2)
-        logical :: starter
+        integer(I8)                     :: fc, cvs(2)
+        logical                         :: starter
 
         ! Auxiliary
         integer(I8) :: i, ic, vxF(2), nv1cvs, nv2cvs, three_vert, f1n
@@ -6535,7 +6544,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT) :: grid
-        integer(I8) :: fc, cvs(2)
+        integer(I8)      :: fc, cvs(2)
 
         ! Auxiliary
         integer(I8) :: three_vert, vxF(2), nv1cvs, nv2cvs, f1n, ic 
@@ -6595,7 +6604,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT) :: grid
-        integer(I8) :: fc, cvs(2)
+        integer(I8)      :: fc, cvs(2)
 
         ! Auxiliary
         integer(I8) :: i, ic, vxF(2), nv1cvs, nv2cvs, three_vert, f1n, f2n, counter, b_vert
@@ -6758,10 +6767,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT) :: grid
-        integer(I8), intent(in) :: three_vert, fc, cvs(2)
-        integer(I8), intent(out) :: f1n, ic 
-        integer(I8), allocatable, intent(out) :: fc23(:)
+        class(GAGridUDT)                        :: grid
+        integer(I8), intent(in)                 :: three_vert, fc, cvs(2)
+        integer(I8), intent(out)                :: f1n, ic 
+        integer(I8), allocatable, intent(out)   :: fc23(:)
 
         ! Auxiliary
         integer(I8) :: counter, i
@@ -6817,10 +6826,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT) :: grid
-        integer(I8), intent(in) :: three_vert, fc
-        integer(I8), intent(out) :: f1n
-        integer(I8), allocatable, intent(out) :: fc3(:), fc23(:)
+        class(GAGridUDT)                        :: grid
+        integer(I8), intent(in)                 :: three_vert, fc
+        integer(I8), intent(out)                :: f1n
+        integer(I8), allocatable, intent(out)   :: fc3(:), fc23(:)
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:) :: vf1n, vc3
@@ -6855,10 +6864,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT) :: grid
-        integer(I8), intent(in) :: three_vert, f1n, cvs(2)
-        integer(I8), allocatable, intent(in) :: fc23(:)
-        integer(I8), allocatable, intent(out) :: cells_rem(:)
+        class(GAGridUDT)                        :: grid
+        integer(I8), intent(in)                 :: three_vert, f1n, cvs(2)
+        integer(I8), intent(in)                 :: fc23(:)
+        integer(I8), allocatable, intent(out)   :: cells_rem(:)
 
         ! Auxiliary
         integer(I8) :: counter, ic, i
@@ -7232,7 +7241,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(in)    :: grid
-        integer(I8), allocatable        :: pents(:)
+        integer(I8), intent(in)         :: pents(:)
         type(GAoptionsUDT), intent(in)  :: options
         integer(I8), intent(inout)      :: cv
  
@@ -7392,9 +7401,9 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in)            :: grid
-        integer(I8), allocatable, intent(in)    :: faces(:)
-        integer(I8), intent(out)                :: splitface
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: faces(:)
+        integer(I8), intent(out)        :: splitface
 
         ! Auxiliary
         integer(I8) :: rface1, rface2, rface3, indmin
@@ -7445,12 +7454,11 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(in)            :: grid
-        integer(I8), intent(in)                 :: cv
-        integer(I8), allocatable, intent(in)    :: fcs(:)
+        integer(I8), intent(in)                 :: cv, fcs(:)
         character(:), allocatable, intent(in)   :: type, typeT
         type(GAoptionsUDT), intent(in)          :: options
         character(:), allocatable, intent(out)  :: caseID
-        integer(I8), intent(out)   :: rface1, rface2, neig1, neig2
+        integer(I8), intent(out)                :: rface1, rface2, neig1, neig2
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:) :: rface1D, faceB, cells1, rfaces, int_faces
@@ -7629,8 +7637,7 @@ module gamod_types
         ! Declare variables
         !==================
         class(GAGridUDT), intent(in)            :: grid
-        integer(I8), intent(in)                 :: cv
-        integer(I8), allocatable, intent(in)    :: fcs(:)
+        integer(I8), intent(in)                 :: cv, fcs(:)
         integer(I8), allocatable, intent(out)   :: int_faces(:)
         real(R8), optional                      :: psic
 
@@ -7738,8 +7745,79 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: v1n, free_vert, f1n, f2n, &
-            f3n, i
-        integer(I8), allocatable, dimension(:) :: fcs, vxs
+            f3n, cv1, cv2, face_old
+        integer(I8), allocatable, dimension(:) :: fcs, vxs, face_rem, cells
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Split tface
+        call grid%SplitFace(magneticField, tface, v1n, f1n, f2n)
+
+        ! Determine free vertex of the triangle by eliminate vertices of tface
+        call grid%DetermineFreeVertTria(cv, tface, free_vert)
+
+        ! Make new face     
+        call grid%GetFaceNumber(v1n, free_vert, 3, f3n)
+
+        ! Add new vert to correct flux surface
+        if (.not.options%slab) then
+            select case (type)
+            case ('pol')
+                vxs = v1n
+                fcs = [f1n, f2n]
+                face_old = tface
+            case ('rad')
+                vxs = [v1n, free_vert]
+                fcs = f3n
+                face_old = 0
+            end select
+        end if
+        call grid%AddVertToFsVx(vxs, fcs, face_old, type)
+
+        ! Build new cells
+
+        ! Split cv in two triangles
+        print *, 'Consider name change for routine SplitTneig to SplitTria'
+        call grid%SplitTria(cv, Tface, v1n, free_vert, cv1, cv2)
+
+        ! Neig1 => becomes pentagonal cell
+        call grid%QuadToPent(neig1, Tface, f1n, f2n, v1n)
+
+        ! Remove tface
+        face_rem = Tface
+        call grid%RemoveFaces(face_rem)
+
+        ! Determine cflags
+        call grid%DetermineCflags(cells)
+        
+        end associate
+
+    end subroutine
+
+    subroutine SplitTP(grid, magneticField, cv, tface, neig1, type, options)
+
+        ! Description
+        !============
+        ! Splits a triangle neighbored by a pentagon in half
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField         
+        integer(I8), intent(in)             :: cv, tface, neig1
+        character(:), allocatable           :: type
+        type(GAoptionsUDT), intent(in)      :: options
+
+        ! Auxiliary
+        integer(I8) :: i, counter, free_vert, v1n, common_vert, qface, &
+            pfaces(5), face_old, cvT1, cvT2, cvP1, cvP2, f1n, f2n, f3n, f4n 
+        integer(I8), allocatable, dimension(:) :: fcs, rfaces, face_rem, cells, &
+            vxs
 
         ! Associate
         associate(&
@@ -7748,77 +7826,122 @@ module gamod_types
             )
 
         ! Make new vertices
-        call grid%AddVert(magneticField, tface, v1n)
+        call grid%SplitFace(magneticField, tface, v1n, f1n, f2n)
 
-        ! Determine free vertex of the triangle by eliminate vertices of tface
-        vxs = GetCellVertGA(c, cv)
-        do i = 1, 3
-            if (vxs(i) /= f%vert1%Get(tface) .and. vxs(i) /= f%vert2%Get(tface)) free_vert = vxs(i)
-        end do
+        ! Determine free vertex of triangle
+        call grid%DetermineFreeVertTria(cv, tface, free_vert)
+
+        ! Determine common vert of pentagon
+        fcs = GetCellFaceGA(c, neig1)
+        call grid%DetermineHangingNodePent(neig1, fcs, type, common_vert, qface, rfaces)
 
         ! Make new faces
-        call grid%GetFaceNumber(v1n, f%vert1%Get(tface), 3, f1n)
-        call f%aligned%Set(f1n, f%aligned%Get(tface))
-        call grid%GetFaceNumber(v1n, f%vert2%Get(tface), 3, f2n)
-        call f%aligned%Set(f2n, f%aligned%Get(tface))        
         call grid%GetFaceNumber(v1n, free_vert, 3, f3n)
+        call grid%GetFaceNumber(v1n, common_vert, 3, f4n)
 
-        ! Add new vert to correct flux surface
-        if (.not.options%slab) then
-            select case (type)
-            case ('pol')
-                
-                vxs = v1n
-                fcs = [f1n, f2n]
-                call grid%AddVertToFsVx(vxs, fcs, tface, type)
+        ! For alignement of f4_n, determine the two faces which are not rfaces
+        pfaces = 0
+        counter = 0
+        do i = 1, size(fcs)
+            if (.not.any(fcs(i) == rfaces)) then
+                counter = counter + 1
+                pfaces(counter) = fcs(i)
+            end if
+        end do
+        if (counter .lt. 2) call gdErrorHandler('SplitTP: not enough poloidal faces in the pentagon')
+        if (f%aligned%Get(pfaces(1)) == 1 .and.  f%aligned%Get(pfaces(2)) == 1) call f%aligned%Set(f4n, 1)
 
-            case ('rad')
+        ! Add new vert to correct flux sruface
+        select case (type)
+        case ('pol')
+            vxs = v1n
+            fcs = [f1n, f2n]
+            face_old = tface
+        case ('rad')
+            vxs = [v1n, free_vert, common_vert]
+            fcs = [f3n, f4n]
+            face_old = 0
+        end select
+        call grid%AddVertToFsVx(vxs, fcs, face_old, type)
 
-                vxs = [v1n, free_vert]
-                fcs = f3n
-                call grid%AddVertToFsVx(vxs, fcs, 0, type)
+        ! Build new cell
+        !===============
+        ! Split cv in two triangles
+        call grid%SplitTria(cv, tface, v1n, free_vert, cvT1, cvT2)
 
-            end select
-        end if
-        
+        ! Split pent in two quads
+        call grid%SplitCenterPent(neig1,tface, v1n, common_vert, f4n, f1n, f2n, cvP1, cvP2)
 
+        ! Remove tface
+        face_rem = tface
+        call grid%RemoveFaces(face_rem)
+
+        ! Determine cflags
+        call grid%DetermineCflags(cells)
 
         end associate
 
-    end subroutine
-
-    subroutine SplitTP(grid, magneticField, cv, rface1, neig1, type, options)
-
-        ! Description
-        !============
-        !
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(GAGridUDT), intent(inout)     :: grid
-        type(MagneticFieldUDT), intent(in)  :: magneticField         
-        integer(I8), intent(in)             :: cv, rface1, neig1
-        character(:), allocatable           :: type
-        type(GAoptionsUDT), intent(in)      :: options
-
-
     end subroutine   
 
-    subroutine SplitTB(grid, magneticField, cv, rface1, type)
+    subroutine SplitTB(grid, magneticField, cv, tface, type)
 
         ! Description
         !============
-        !
+        ! Split a boundary triangle
 
         ! Declare variables
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)     :: grid 
         type(MagneticFieldUDT), intent(in)  :: magneticField        
-        integer(I8), intent(in)             :: cv, rface1
+        integer(I8), intent(in)             :: cv, tface
         character(:), allocatable           :: type
 
+        ! Auxiliary
+        integer(I8) :: free_vert, face_old, cv1, cv2, f1n, f2n, f3n, v1n
+        integer(I8), allocatable :: vxs(:), fcs(:), cells(:), face_rem(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Split Tface
+        call grid%SplitFace(magneticField, tface, v1n, f1n, f2n)
+
+        ! Determine free vertex of the triangle
+        call grid%DetermineFreeVertTria(cv, tface, free_vert)
+
+        ! Make new faces
+        call grid%GetFaceNumber(v1n, free_vert, 3, f3n)
+
+        ! Add new vert to correct flux sruface
+        select case (type)
+        case ('pol')
+            vxs = v1n
+            fcs = [f1n, f2n]
+            face_old = tface
+        case ('rad')
+            vxs = [v1n, free_vert]
+            fcs = f3n
+            face_old = 0
+        end select
+        call grid%AddVertToFsVx(vxs, fcs, face_old, type) 
+        
+        ! Build new cells
+        ! Split cv in two triangles
+        call grid%SplitTria(cv, tface, v1n, free_vert, cv1, cv2)
+
+        ! Remove Tface
+        face_rem = tface
+        call grid%RemoveFaces(face_rem)
+
+        ! Determine cflags
+        cells = [cv1, cv2]
+        call grid%DetermineCflags(cells)
+
+        end associate
 
     end subroutine   
 
@@ -7826,7 +7949,8 @@ module gamod_types
 
         ! Description
         !============
-        !
+        !  Does the radial or poloidal splitting of a starting triangle which is a boundary cell
+        ! and has a quad neigbour.
 
         ! Declare variables
         !==================
@@ -7906,6 +8030,471 @@ module gamod_types
 
 
     end subroutine 
+
+    subroutine SplitFace(grid, magneticField, face_in, v1n, f1n, f2n)
+
+        ! Description
+        !============
+        ! Splitting a face into two providing two new faces and the new vertex
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: face_in
+        integer(I8), intent(out)            :: v1n, f1n, f2n
+
+        ! Make new vertices
+        call grid%AddVert(magneticField, face_in, v1n)
+        
+        ! Make new faces
+        call grid%GetFaceNumber(v1n, grid%face%vert1%Get(face_in),3, f1n)
+        call grid%GetFaceNumber(v1n, grid%face%vert2%Get(face_in),3, f2n)
+        call grid%face%aligned%Set(f1n, grid%face%aligned%Get(face_in))     
+        call grid%face%aligned%Set(f2n, grid%face%aligned%Get(face_in))     
+        call grid%face%label%Set(f1n, grid%face%label%Get(face_in))     
+        call grid%face%label%Set(f2n, grid%face%label%Get(face_in)) 
+
+
+    end subroutine
+
+    subroutine SplitTria(grid, cv, Tface, new_v, free_vert, cv1, cv2)
+
+        ! Description
+        !============
+        ! Splits the triangular cv where the aligned face is splitted in two
+        ! new_v is the new vertex
+        ! Tface is the original face which is split in half and is
+        ! split by new_v.
+        ! Free_vert is the vertex which is not part of the Tface.
+        ! cv1 and cv2 are the new triangles
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: cv, Tface, new_v, free_vert
+        integer(I8), intent(out)        :: cv1, cv2 
+
+        ! Auxiliary
+        integer(I8) :: s, f1_T1, f2_T1, f3_T1, f1_T2, f2_T2, f3_T2
+            
+        integer(I8), allocatable :: verts_T1(:), verts_T2(:), &
+            faces_T1(:), faces_T2(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! The original triangle is split into two new triangles Tneig1 and Tneig2.
+
+        ! cv => split in two trianlges
+        cv1 = cv
+        verts_T1 = [new_v , f%vert1%Get(Tface) , free_vert]
+        s = c%vertP1%Get(cv1)
+        call c%vert%Replace(s,s+c%vertP2%Get(cv1)-1, verts_T1 )
+
+        call grid%GetFaceNumber(new_v,f%vert1%Get(Tface),1, f1_T1)
+        call grid%GetFaceNumber(f%vert1%Get(Tface),free_vert,1, f2_T1)
+        call grid%GetFaceNumber(free_vert,new_v,1, f3_T1)
+
+        faces_T1 = [f1_T1 , f2_T1 , f3_T1]
+        s = c%faceP1%Get(cv1)
+        call c%face%Replace(s, s + c%faceP2%Get(cv1) - 1, faces_T1)
+
+        ! Tneig2
+        verts_T2 = [new_v , f%vert2%Get(Tface) , free_vert]
+
+        call grid%GetFaceNumber(new_v,f%vert2%Get(Tface),1, f1_T2)
+        call grid%GetFaceNumber(f%vert2%Get(Tface),free_vert, 1, f2_T2)
+        call grid%GetFaceNumber(free_vert,new_v, 1, f3_T2)
+
+        faces_T2 = [f1_T2 , f2_T2 , f3_T2]
+
+        ! Add new cell Tneig2
+        call grid%AddCell(faces_T2, verts_T2, c%reg%Get(cv1) , cv2)
+
+        end associate
+
+    end subroutine
+
+    subroutine QuadToPent(grid, cv, ifc, new_f1, new_f2, new_v)
+
+        ! Description
+        !============
+        ! Turns a quad in a pentagonal cell. cv is the cell number. 
+        ! ifc is the original face which is split in two
+        ! new_f1 and new_f2 are the new faces
+        ! new_v is the new vertex
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: cv, ifc, new_f1, new_f2, new_v
+
+        ! Auxiliary
+        integer(I8) :: s, i, ind
+        integer(I8), allocatable :: faces1D(:), faces1(:), verts1D(:), verts1(:), &
+            range(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Construct thepentagon
+        ! Faces
+        faces1D = GetCellFaceGA(c, cv)
+        ind = findloc(faces1D, ifc, 1)
+        if (ind == 0) call gdErrorHandler('QuadToPent: old face not in quads faces')
+        faces1D(ind) = new_f1
+        faces1 = [faces1D, new_f2]
+
+        s = c%faceP1%Get(cv)
+        call c%face%Replace(s, s + c%faceP2%Get(cv) - 1, faces1)
+        call c%faceP2%Set(cv, size(faces1)) ! should be five
+        range = (/(i, i = cv+1, c%faceP1%Size() )/)
+        call c%faceP1%SumMask(range, 1)
+
+        ! Vertices
+        verts1D = GetCellVertGA(c, cv)
+        verts1 = [verts1D, new_v]
+
+        s = c%vertP1%Get(cv)
+        call c%vert%Replace(s, s + c%vertP2%Get(cv) - 1, verts1)
+        call c%vertP2%Set(cv, size(verts1))
+        call c%vertP1%SumMask(range, 1)
+        
+        end associate
+
+    end subroutine
+
+    subroutine SplitCenterPent(grid, cv, face, new_v1, common_vert, fc_new, f1_new, f2_new, cv1, cv2)
+
+        ! Description
+        !============
+        ! Splits the center pentagonal cv
+        ! new_v1 is the new vertex
+        ! face is  the original face which is split in half and is split by new_v1
+        ! The common vert is the vertex of the pentagon that splits a face is two.
+        ! fc_new is the new face created between the hanging node and new_v1.
+        ! f1_new and f2_new are the new faces created by splitting 'face'.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in) :: cv, face, new_v1, common_vert, &
+            fc_new, f1_new, f2_new
+        integer(I8), intent(out) :: cv1, cv2
+
+        ! Auxiliary
+        integer(I8) :: i, s, v1, v2, f1_cv1, f2_cv1, f3_cv1, f4_cv1, &
+            f1_cv2, f2_cv2, f3_cv2, f4_cv2, vertp
+        integer(I8), allocatable, dimension(:) :: verts_faces_cv, query_faces, &
+            ind, pface, verts_pface, faces_cv, verts_cv1, range, query5, &
+            faces_cv1, ind1, ind2, ind3, faces_cv2, verts_cv2
+        logical, allocatable :: log(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! cv1 => pent becomes quad, on the side of grid%face%vert1%Get(face)
+        cv1 = cv
+        faces_cv = GetCellFaceGA(c, cv)
+        allocate(verts_cv1(4))
+        verts_cv1 = 0
+        v1 = f%vert1%Get(face)
+        verts_cv1(1:3) = [common_vert, new_v1, v1]
+
+        ! Get faces where grid.face.vert(face,1) is vertex of to find all correct vertices
+        verts_faces_cv = [ f%vert1%Get(faces_cv), f%vert2%Get(faces_cv) ]
+        query_faces = [ faces_cv, faces_cv ]
+        
+        allocate(ind(count(verts_faces_cv == v1)))
+        ind = pack(query_faces, verts_faces_cv == v1)
+
+        allocate(pface(count(ind /= face)))
+        pface = pack(ind, ind /= face)
+        verts_pface = [f%vert1%Get(pface(1)), f%vert2%Get(pface(1))]
+        deallocate(pface)
+        if (verts_pface(1) /= v1) then
+            verts_cv1(4) = verts_pface(1)
+        else if (verts_pface(1) /= v1) then
+            verts_cv1(4) = verts_pface(2)
+        end if
+        vertp = verts_cv1(4)
+
+        ! Put verts in c%vert
+        s = c%vertP1%Get(cv1)
+        call c%vert%Replace(s, s+c%vertP2%Get(cv1)-1, verts_cv1)
+        call c%vertP2%Set(cv1, size(verts_cv1))
+        range = (/ (i, i = cv1+1, c%vertP1%Size())/)
+        call c%vertP1%SumMask(range, -1)
+
+        ! Get face for cv1
+        f1_cv1 = fc_new
+        f2_cv1 = f1_new
+
+        ! Get third and fourth face
+        query5 = [ (/(i, i = 1, 5)/), (/(i, i = 1, 5)/)]
+        log = (verts_faces_cv == vertp .and. verts_faces_cv == v1)
+        allocate(ind1(count(log)))
+        ind1 = pack(query5, log)
+        f3_cv1 = faces_cv(ind1(1))
+        deallocate(ind1)
+
+        log = (verts_faces_cv == vertp .and. verts_faces_cv == common_vert)
+        allocate(ind2(count(log)))
+        ind2 = pack(query5, log)
+        f4_cv1 = faces_cv(ind2(1))
+        deallocate(ind2)
+
+        faces_cv1 = [f1_cv1, f2_cv1, f3_cv1, f4_cv1]
+
+        ! Put faces in c%face
+        s = c%faceP1%Get(cv1)
+        call c%face%Replace(s, s+c%faceP2%Get(cv1)-1, faces_cv1)
+        call c%faceP2%Set(cv1, size(faces_cv1))
+        call c%faceP1%SumMask(range, -1)
+
+        ! cv2 => new quad, on the side of f%vert2%Get(face)
+        !==================================================
+        v2 = f%vert2%Get(face)
+        allocate(verts_cv2(4))
+        verts_cv2 = 0
+        verts_cv2(1:3) = [common_vert, new_v1, v2]
+
+        allocate(ind3(count(verts_faces_cv == v2)))
+        ind3 = pack(query_faces, verts_faces_cv == v2)
+
+        allocate(pface(count(ind /= face)))
+        pface = pack(ind, ind /= face)
+        verts_pface = [f%vert1%Get(pface(1)), f%vert2%Get(pface(1))]
+        if (verts_pface(1) /= v2) then
+            verts_cv2(4) = verts_pface(1)
+        else if (verts_pface(1) /= v2) then
+            verts_cv2(4) = verts_pface(2)
+        end if 
+        vertp = verts_cv2(4)
+        
+        ! Faces
+        f1_cv2 = fc_new
+        f2_cv2 = f2_new
+        log = (verts_faces_cv == vertp .and. verts_faces_cv == v2)
+        allocate(ind1(count(log)))
+        f3_cv2 = faces_cv(ind1(1))
+        log = (verts_faces_cv == vertp .and. verts_faces_cv == common_vert)
+        allocate(ind2(count(log)))
+        f4_cv2 = faces_cv(ind2(1))
+
+        faces_cv2 = [f1_cv2, f2_cv2, f3_cv2, f4_cv2]
+
+        ! Add new cv2
+        call grid%AddCell(faces_cv2, verts_cv2, c%reg%Get(cv1), cv2)
+
+        end associate
+
+    end subroutine
+
+    subroutine DetermineFreeVertTria(grid, cv, tface, free_vert)
+
+        ! Description
+        !============
+        ! Determine the vertex of a triangle that is nog in the aligned face tface
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), intent(in)      :: cv, tface
+        integer(I8), intent(out)     :: free_vert
+
+        ! Auxiliary
+        integer(I8) :: i
+        integer(I8), allocatable :: vxs(:)
+
+        vxs = GetCellVertGA(grid%cell, cv)
+        do i = 1, size(vxs)
+            if (vxs(i) /= grid%face%vert1%Get(tface) .and. vxs(i) /= grid%face%vert2%Get(tface)) then
+                free_vert = vxs(i)
+                exit
+            end if
+        end do
+        
+    end subroutine
+
+    subroutine DetermineHangingNodePent(grid, cv, faces, type, common_vert, qface, rfaces)
+
+        ! Description
+        !============
+        ! Determine the hanging node of a pentagon
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: cv, faces(:)
+        character(:), allocatable, intent(in)   :: type
+        integer(I8), intent(out)                :: common_vert, qface
+        integer(I8), allocatable, intent(out)   :: rfaces(:)    
+
+        ! Auxiliary
+        integer(I8) :: i, iv, rface1, rface2, rface3, nr, &
+                vx, indmin, pfaces(5), counter
+        integer(I8), allocatable, dimension(:) :: vxs, rfaces_na, &
+            vxs_faces1, vxs_faces2, vxs_faces, indf, query_facesD, query_faces
+        real(R8), allocatable, dimension(:) :: fcX, fcY, sin
+        real(R8) :: vec_vf1_x, vec_vf1_y, vec_vf2_x, vec_vf2_y
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        select case (type)
+
+        case ('pol')
+
+            ! ASSUMPTION: SPLITTED FACES IS A RADIAL FACE
+            ! Get radial faces
+            allocate(rfaces(count(f%aligned%Get(faces) == 1)))
+            rfaces = pack(faces, f%aligned%Get(faces) == 1)
+            rface1 = rfaces(1)
+            rface2 = rfaces(2)
+            nr = size(rfaces)
+            if (nr == 3) then
+                rface3 = rfaces(3)
+            else if (nr .gt. 3) then
+                call gdErrorHandler('DetermineHangingNodePent: too many radial faces in a pentagon')
+            end if
+
+        case ('rad')
+
+            ! Get poloidal faces
+            allocate(rfaces_na(count(f%aligned%Get(faces) == 0)))
+            rfaces_na = pack(faces, f%aligned%Get(faces) == 0)
+
+            ! Normal procedure
+            allocate(rfaces_na(count(.not.isBoundaryFaceGA(f, faces))))
+            rfaces = pack(rfaces_na, .not.isBoundaryFaceGA(f, faces))
+            rface1 = rfaces(1)
+            rface2 = rfaces(2)          
+            nr = size(rfaces)
+            if (c%vertP2%Get(cv) == 5) then
+                if (size(rfaces_na) == 4) nr = 4   ! Trapezoid with splitted poloidal face
+            end if
+
+            if (nr == 3) then
+                rface3 = rfaces(3)
+            else if (nr .gt. 3) then
+
+                ! Compute angle of check if it is a trapezoidal pentagon
+                vxs = GetCellVertGA(c, cv)
+                vxs_faces1 = f%vert1%Get(faces)
+                vxs_faces2 = f%vert2%Get(faces)
+                fcX = 0.5_R8 * (v%x%Get(vxs_faces1) + v%x%Get(vxs_faces2))
+                fcY = 0.5_R8 * (v%y%Get(vxs_faces1) + v%y%Get(vxs_faces2))
+
+                ! Get faces of vert
+                vxs_faces = [vxs_faces1, vxs_faces2]
+                query_facesD = (/ (i, i = 1, size(faces))/)
+                query_faces = [ query_faces, query_faces]
+                ! MAKE A QUERY
+                allocate(sin(size(vxs)))
+                
+                sin = 0
+                do i = 1, size(vxs)
+                    iv = vxs(i)
+                    allocate(indf(count(vxs_faces == iv)))
+                    indf = pack(query_faces, vxs_faces == iv)
+                    if (size(indf) .lt. 2) call gdErrorHandler('DetermineHangingNodePent: vertex only once in faces of cells')
+
+                    vec_vf1_x = fcX(indf(1)) - v%x%Get(iv)
+                    vec_vf1_y = fcY(indf(1)) - v%y%Get(iv)
+                    vec_vf2_x = fcX(indf(2)) - v%x%Get(iv)
+                    vec_vf2_y = fcY(indf(2)) - v%y%Get(iv)
+
+                    ! Calculate angles (sin = |a x b| / norm(a)*norm(b))
+                    ! with |a x b | = ax*by - bx*ay
+                    sin(i) = (vec_vf1_x*vec_vf2_y - vec_vf2_x*vec_vf1_y) &
+                             / (Norm(vec_vf1_x,vec_vf1_y)*Norm(vec_vf2_x,vec_vf2_y))
+                    
+                    ! Housekeeping
+                    deallocate(indf)
+
+                end do
+
+                ! Common vert
+                indmin = minloc(abs(sin),1)
+                vx = vxs(indmin)
+
+                ! Faces of common vert
+                allocate(indf(count(vxs_faces == vx)))
+                indf = pack(query_faces, vxs_faces == vx)
+                rface1 = faces(indf(1))
+                rface2 = faces(indf(2))
+                nr = 2
+
+            end if
+
+        end select
+
+        ! Radial faces with common vertex are faces on the side of the two quads
+        if (nr == 2) then
+
+            common_vert = GetCommonVert(f, rface1, rface2)
+
+            ! Determine Qface = face without common vert
+            pfaces = 0
+            counter = 0
+            do i = 1, size(faces)
+                if (faces(i) /= rface1 .and. faces(i) /= rface2) then
+                    counter = counter + 1
+                    pfaces(counter) = faces(i)
+                end if
+            end do
+
+            do i = 1, counter
+                if (.not.HaveCommonVert(f, pfaces(i), rface1) .and. .not.HaveCommonVert(f, pfaces(i), rface2)) then
+                    qface = pfaces(i)
+                end if
+            end do
+
+        else if (nr == 3) then
+
+            if (HaveCommonVert(f, rface1, rface2)) then
+
+                qface = rface3
+                common_vert = GetCommonVert(f, rface1, rface2)
+
+            else if (HaveCommonVert(f, rface1, rface3)) then
+
+                qface = rface2
+                common_vert = GetCommonVert(f, rface1, rface3)
+
+            else 
+
+                qface = rface1
+                common_vert = GetCommonVert(f, rface2, rface3)
+
+            end if
+        end if
+
+        end associate
+
+    end subroutine
 
     ! Boundary layer grid
     !====================
@@ -8040,11 +8629,11 @@ module gamod_types
             call grid%RecursiveGridMarching(grid%data%xpointID(i),fcs2,1,counter2,b_flag,in_flag2)
 
             ! Add fcs1
-            fcs(counterf+1:counterf+counter1) = fcs1(1:counter1)
+            fcsD(counterf+1:counterf+counter1) = fcs1(1:counter1)
             counterf = counterf + counter1
 
             ! Add fcs2
-            fcs(counterf+1:counterf+counter2) = fcs2(1:counter2)
+            fcsD(counterf+1:counterf+counter2) = fcs2(1:counter2)
             counterf = counterf + counter2
 
         end do
@@ -8063,9 +8652,9 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        integer(I8), allocatable, intent(in) :: b_faces(:)
-        integer(I8), allocatable, intent(out) :: tang_points(:)
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8),  intent(in)                :: b_faces(:)
+        integer(I8), allocatable, intent(out)   :: tang_points(:)
 
         ! Auxiliary
         integer(I8) :: i, j, counter, nbv, iv, ifs, nfa
@@ -8168,9 +8757,9 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        integer(I8), allocatable, intent(in) :: verts(:)
-        integer(I8), allocatable, intent(out) :: faces(:)
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: verts(:)
+        integer(I8), allocatable, intent(out)   :: faces(:)
 
         ! Auxiliary
         integer(I8) :: i, nv, faces1(grid%face%ntot), counter
@@ -8280,10 +8869,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT)    :: grid
-        type(GAoptionsUDT)  :: options
-        real(R8) :: threshold
-        integer(I8), allocatable, intent(out) :: cells(:)
+        class(GAGridUDT)                        :: grid
+        type(GAoptionsUDT)                      :: options
+        real(R8)                                :: threshold
+        integer(I8), allocatable, intent(out)   :: cells(:)
 
         ! Auxiliary
         integer(I8) :: i
@@ -8334,8 +8923,8 @@ module gamod_types
         !==================
         ! Argument
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8), allocatable :: cells(:)
-        logical , optional :: b_flag(grid%face%ntot)
+        integer(I8), intent(in)         :: cells(:)
+        logical , optional              :: b_flag(grid%face%ntot)
 
         ! Auxiliary
         integer(I8) :: i, j, nb, indFc(grid%face%ntot)
@@ -8423,7 +9012,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        integer(I8), allocatable, intent(in)    :: cells(:)
+        integer(I8), intent(in)                 :: cells(:)
 
         ! Auxiliary
         integer(I8) :: i, j, s, n, nv, ic, nc, counter, c_num, &
@@ -8503,7 +9092,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        integer(I8), allocatable, intent(in)    :: faces(:)
+        integer(I8), intent(in)                 :: faces(:)
 
         ! Auxiliary
         integer(I8) :: i, nf, ind, ifs, face_num
@@ -8572,7 +9161,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8), allocatable, intent(in) :: verts(:)
+        integer(I8), intent(in)         :: verts(:)
 
         ! Auxiliary
         integer(I8) :: i, j, nv, vx_num, ind, ifs
@@ -8735,8 +9324,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8), intent(in) :: new_f
-        integer(I8), allocatable :: old_fs(:)
+        integer(I8), intent(in)         :: new_f, old_fs(:)    
 
         ! Auxiliary
         integer(I8) :: i, old_nf, s, ifs, nf
@@ -8804,9 +9392,8 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8), allocatable, intent(in) :: faces(:), verts(:)
-        integer(I8), intent(in) :: reg
-        integer(I8), intent(out) :: ic
+        integer(I8), intent(in)         :: reg, faces(:), verts(:)
+        integer(I8), intent(out)        :: ic
 
         ! Auxiliary
         integer(I8) :: ind, nv
@@ -9120,8 +9707,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        integer(I8), allocatable, intent(in)    :: new_v(:), new_f(:)
-        integer(I8), intent(in)                 :: old_f
+        integer(I8), intent(in)                 :: old_f, new_v(:), new_f(:)
         character(:), allocatable, intent(in)   :: type
 
         ! Auxiliary
@@ -9204,7 +9790,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        integer(I8), allocatable, intent(in)    :: vxs(:), fcs(:)
+        integer(I8), intent(in)                 :: vxs(:), fcs(:)
 
         ! Auxiliary
 
@@ -9239,8 +9825,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        integer(I8), intent(in)                 :: ifs
-        integer(I8), allocatable, intent(in)    :: vxs(:), fcs(:)
+        integer(I8), intent(in)                 :: ifs, vxs(:), fcs(:)
 
         ! Auxiliary
         integer(I8) :: s, j
@@ -9428,7 +10013,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAFaceUDT), intent(in)            :: face
-        integer(I8), allocatable, intent(in)    :: f_list(:)
+        integer(I8), intent(in)                 :: f_list(:)
         integer(I8), allocatable, intent(out)   :: f_ord(:,:), nf(:)
 
         ! Auxiliary
@@ -9789,7 +10374,7 @@ module gamod_types
     function GetCellNeigsGA(g, ic, cvLookUp) result(res)
         type(GAGridUDT) :: g
         integer(I8) :: ic, i, j, s, ifc, counter, nf
-        integer(I8), allocatable, optional :: cvLookUp(:)
+        integer(I8), optional :: cvLookUp(:)
         integer(I8), allocatable :: cvs(:), res(:), res_dummy(:)
 
         if (.not.present(cvLookUp)) then
@@ -9892,10 +10477,10 @@ module gamod_types
     ! Get cells of a face with dynamic arrays
     function GetFaceCellGA(cell, i, cvLookUp) result(res)
         integer(I8)                 :: i, j
-        type(GACellUDT)               :: cell
-        integer(I8), allocatable, optional  :: cvLookUp(:)
+        type(GACellUDT)             :: cell
+        integer(I8), optional       :: cvLookUp(:)
         integer(I8), allocatable    :: res(:), indcf(:), ind(:)
-        logical, allocatable :: log(:) 
+        logical, allocatable        :: log(:) 
         
         if (present(cvLookUp)) then
             allocate(res(count(cell%face%GetAllElements().eq.i)))
@@ -10012,7 +10597,7 @@ module gamod_types
     function GetVertCellGA(cell, i, cvLookUp) result(res)
         integer(I8)                 :: i, j, k, counter, cell_num
         type(GACellUDT)               :: cell
-        integer(I8), allocatable, optional    :: cvLookUp(:)
+        integer(I8), optional    :: cvLookUp(:)
         integer(I8), allocatable    :: res(:), indc(:), ind(:), covD(:)
         logical, allocatable :: log(:) 
         
@@ -10093,7 +10678,8 @@ module gamod_types
 
     function GetVxsFromFcsGA(f,fcs) result(res)
         type(GAFaceUDT) :: f
-        integer(I8), allocatable :: fcs(:), verts(:), res(:)
+        integer(I8) :: fcs(:)
+        integer(I8), allocatable :: verts(:), res(:)
         integer(I8) :: nf
 
         nf = size(fcs)
@@ -10109,9 +10695,9 @@ module gamod_types
         ! Description
         !============
         ! Check whethere is a core region on one side of the flux surface
-        integer(I8) :: ifs, nf, counter, i, step, ifc, reg1, reg2, sepIDloc(1:100)
+        integer(I8) :: ifs, nf, counter, i, step, ifc, reg1, reg2, sepIDloc(1:100), cvLookUp(:)
         type(GACellUDT) ::  cell
-        integer(I8), allocatable :: cvLookUp(:), faces(:), cvs(:), res(:), creg(:)
+        integer(I8), allocatable :: faces(:), cvs(:), res(:), creg(:)
 
         ! Initialize
         res = sepIDloc
@@ -10149,7 +10735,7 @@ module gamod_types
     end function
 
     function isBoundaryFace1DGA(f, tf) result(res)
-        integer(I8), allocatable :: tf(:)
+        integer(I8) :: tf(:)
         type(GAFaceUDT) :: f
         logical, allocatable :: res(:)
 
@@ -10182,7 +10768,7 @@ module gamod_types
         integer(I8), allocatable :: fcs(:)
         type(GAGridUDT) :: grid
         logical, allocatable :: b_flag(:)
-        integer(I8), allocatable :: cell(:)
+        integer(I8) :: cell(:)
         logical, allocatable :: res(:)
         integer(I8) :: i
 
@@ -10211,9 +10797,9 @@ module gamod_types
 
     function isBoundaryVert1DGA(grid, verts) result(res)
         type(GAGridUDT) :: grid
-        integer(I8) :: i
+        integer(I8) :: i, verts(:)
         logical, allocatable :: res(:)
-        integer(I8), allocatable :: fcs(:), verts(:)
+        integer(I8), allocatable :: fcs(:) 
 
         allocate(res(size(verts)))
         res = .false.
@@ -10228,10 +10814,10 @@ module gamod_types
 
     function isPoloidal(grid, fcs, cvLookUp) result(res)
         type(GAGridUDT) :: grid
-        integer(I8) :: fcs
+        integer(I8) :: fcs, cvLookUp(:)
         logical :: res
         integer(I8), allocatable :: fcs1(:), fcs2(:), cvs(:), &
-            faces(:), cvLookUp(:)
+            faces(:)
 
         res = .false.
         if (grid%face%aligned%Get(fcs) == 0) then
@@ -10363,6 +10949,17 @@ module gamod_types
 
     end function 
 
+    function Norm0D(x0, y0) result(res)
+        real(R8) :: x0, y0, res
+        res = sqrt(x0**2 + y0**2)
+    end function
+
+    function Norm1D(x0, y0) result(res)
+        real(R8) :: x0(:), y0(:)
+        real(R8), allocatable :: res(:)
+        res = sqrt(x0**2 + y0**2)
+    end function
+
     subroutine CalcCentroid0DGA(grid, ic)
         class(GAGridUDT) :: grid
         integer(I8) :: ic
@@ -10375,8 +10972,8 @@ module gamod_types
 
     subroutine CalcCentroid1DGA(grid, cells)
         class(GAGridUDT) :: grid
-        integer(I8) :: i
-        integer(I8), allocatable :: vxs(:), cells(:)
+        integer(I8) :: i, cells(:)
+        integer(I8), allocatable :: vxs(:)
         do i = 1, size(cells)
             vxs = GetCellVertGA(grid%cell, cells(i))
             call grid%cell%x%Set(cells(i), sum(grid%vert%x%Get(vxs)/real(size(vxs), kind=R8)))
@@ -10417,7 +11014,7 @@ module gamod_types
         ! Auxiliary
         integer :: fu     
         integer(I8) :: i
-        character(:), allocatable               :: dir
+        character(:), allocatable :: dir
 
         ! Construct writing directory
         dir = plotdir // filesepchar // filename // '.dat'
