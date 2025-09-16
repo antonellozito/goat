@@ -164,6 +164,7 @@ module gamod_types
         ! Initialize
         procedure :: Initialize     => InitializeGAFace
         procedure :: ChainFaces
+        procedure :: CheckFace
 
     end type
 
@@ -491,6 +492,7 @@ module gamod_types
         procedure :: DetermineTcaseID
         procedure :: DetermineQcaseID
         procedure :: DeterminePcaseID
+        procedure :: DetermineT4caseID
         procedure :: SelectSplitPent
         procedure :: GetRadSplitFacePent
         procedure :: GetNeigTypeFromFace
@@ -498,27 +500,31 @@ module gamod_types
         procedure :: GetPents
         procedure :: SplitTQ
         procedure :: SplitTP
-        procedure :: SplitTB
         procedure :: SplitQTB
         procedure :: SplitBTB
-        procedure :: SplitTTB
         procedure :: SplitTTT
         procedure :: SplitTTQ
         procedure :: SplitQQQ
-        !procedure :: SplitQQB
         !procedure :: SplitQQT
         !procedure :: SplitBQT
         !procedure :: SplitTQT
         !procedure :: SplitQshaved
+        procedure :: SplitPQ
+        procedure :: SplitPT
+        procedure :: SplitT4Q
+        procedure :: SplitT4B
         procedure :: SplitFace
         procedure :: SplitTriaStacked
         procedure :: SplitCenterTria
-        !procedure :: SplitCenterQuad
+        procedure :: SplitCenterQuad
+        procedure :: SplitT4
+        procedure :: SplitT4Stacked
         procedure :: TriaToQuad
         procedure :: QuadToPent
         procedure :: SplitCenterPent
         procedure :: DeterminePerpFaceTria
         procedure :: DeterminePerpFaceQuad
+        procedure :: DeterminePerpFacePent
         procedure :: DetermineFreeVertTria
         procedure :: DetermineHangingNodePent
 
@@ -2399,7 +2405,7 @@ module gamod_types
         fcX = 0.5_R8 * (vx(v1n) + vx(v1n))
         fcY = 0.5_R8 * (vy(v2n) + vy(v2n))
 
-        ! Lopp over the cells
+        ! Loop over the cells
         is_ordered = .true.
         do ic = 1, c%ntot
             if (cells(ic)) then
@@ -2580,7 +2586,12 @@ module gamod_types
                     ntf(1) = fcs(1) ! First face
                 elseif (sin2 .gt. 0.0_R8) then
                     ntf(1) = fcs(2)
-                end if
+                else
+                    print *, 'Error on cell: ', ic, ' ', c%cflags%Get(ic), ' ', c%faceP2%Get(ic)
+                    print *, 'cx: ', c%x%Get(ic), ' cy: ', c%y%Get(ic)
+                    print *, 'vx :', v%x%Get(tv)
+                    print *, 'vy :', v%y%Get(tv)
+                end if 
 
                 ! After the direction is fixed, implementation should be in a loop
                 do i = 2, nv
@@ -7062,20 +7073,20 @@ module gamod_types
         integer(I8) :: cv
 
         ! Get splitting case and do the split on cell cv
-        call grid%OneSplit(magneticField,  options, qm%split_cv)
+        call grid%OneSplit(qm, magneticField,  options, qm%split_cv)
 
         ! If pentagons are not allowed
 
         if (options%no_pents) then
             cv = 0
-            call grid%SplitPentsRec(magneticField, options, cv)
+            call grid%SplitPentsRec(qm, magneticField, options, cv)
         end if
 
         ! Do ordering for nice plots -  not necessary
 
     end subroutine
 
-    subroutine OneSplit(grid, magneticField, options, cv)
+    subroutine OneSplit(grid, qm, magneticField, options, cv)
 
         ! Description
         !============
@@ -7085,15 +7096,17 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)     :: grid
-        type(MagneticFieldUDT), intent(in)  :: magneticField
-        type(GAoptionsUDT), intent(inout)   :: options
-        integer(I8), intent(inout)          :: cv
+        class(GAGridUDT), intent(inout)         :: grid
+        type(QualityMetricUDT), intent(inout)   :: qm
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        type(GAoptionsUDT), intent(inout)       :: options
+        integer(I8), intent(inout)              :: cv
 
         ! Auxiliary
         integer(I8) :: rface1, rface2, neig1, neig2, Qface, neig, common_vert
         integer(I8), allocatable :: fcs(:), Xcells(:)
         character(:), allocatable :: caseID, type
+        logical, allocatable :: is_ordered(:), cells(:)
 
 
 
@@ -7118,24 +7131,21 @@ module gamod_types
             case (3)
 
                 call grid%DetermineTcaseID(cv, fcs, type, options%typeT, options, caseID, rface1, rface2, neig1, neig2)
+                if (options%debug) print *, caseID
 
                 select case (caseID)
 
-                case ('34')
+                case ('34', '30')
                     call grid%SplitTQ(magneticField, cv, rface1, neig1, type, options)
                 case ('35')
                     call grid%SplitTP(magneticField, cv, rface1, neig1, type, options)
-                case ('30')
-                    call grid%SplitTB(magneticField, cv, rface1, type)
                 case ('430','034')
                     call grid%SplitQTB(magneticField, cv, rface1, rface2, neig1, neig2, type, options%typeT)
                 case ('030')
                     call grid%SplitBTB(magneticField, cv, rface1, rface2, type, options%typeT)
-                case ('033','330')
-                    call grid%SplitTTB(magneticField, cv, rface1, rface2, neig1, neig2, type, options%typeT)
                 case ('333')
                     call grid%SplitTTT(magneticField, cv, rface1, rface2, neig1, neig2, type) 
-                case ('334','433')
+                case ('334','433','033','330')
                     call grid%SplitTTQ(magneticField, cv, rface1, rface2, neig1, neig2, type)
                 case default
 
@@ -7147,13 +7157,12 @@ module gamod_types
             case (4)
 
                 call grid%DetermineQcaseID(cv, fcs, type, options, caseID, rface1, rface2, neig1, neig2)
+                if (options%debug) print *, caseID
 
                 select case (caseID)
 
-                case ('444')
+                case ('444', '440', '044')
                     call grid%SplitQQQ(magneticField, cv, rface1, rface2, neig1, neig2, type, options)
-                case ('044', '440')
-                    !call grid%SplitQQB(magneticField, cv, rface1, rface2, neig1, neig2, type)
                 case ('344', '443')
                     !call grid%SplitQQT(magneticField, cv, rface1, rface2, neig1, neig2, type, options%typeT, options%QTtype, options)
                 case ('043', '340')
@@ -7172,19 +7181,22 @@ module gamod_types
             case (5)
 
                 call grid%DeterminePcaseID(cv, fcs, type, caseID, Qface, neig, common_vert)
+                if (options%debug) print *, caseID
 
                 select case (caseID)
 
-                case ('55')
-                case ('54')
+                !case ('55')
+                case ('54','50')
+                    call grid%SplitPQ(magneticField, cv, Qface, neig, common_vert, type, options)
                 case ('53')
-                case ('50')
-                case ('534')
-                case ('56')
-                case ('573')
-                case ('574')
-                case ('570')
-                case ('580')
+                    call grid%SplitPT(magneticField, cv, Qface, neig, common_vert, type, options%typeT)
+
+                !case ('534')
+                !case ('56')
+                !case ('573')
+                !case ('574')
+                !case ('570')
+                !case ('580')
                 case default
 
                     print *, caseID
@@ -7196,7 +7208,24 @@ module gamod_types
 
         case (4) ! triangles that where turned into quad
 
-            !call grid%DetermineT4caseID()
+            call grid%DetermineT4caseID(cv, fcs, options%splittype, caseID, rface1, neig1, common_vert)
+            if (options%debug) print *, caseID
+
+            select case (caseID)
+            case ('30')
+                call grid%SplitT4B(qm, magneticField, cv, rface1,common_vert, type, options)
+            case ('31')
+                !call grid%SplitT4BV()
+            case ('34')
+                call grid%SplitT4Q(magneticField, cv, rface1, common_vert, neig1, type)
+            case ('35')
+            case ('33')
+            case default
+
+                print *, caseID
+                call gdErrorHandler('OneSplit: T4caseID not implemented')                
+
+            end select
 
         case default
 
@@ -7204,10 +7233,17 @@ module gamod_types
 
         end select
 
+        if (options%debug) then 
+            call grid%CheckUnstructuredGrid(.false.)
+            allocate(cells(grid%cell%ntot), is_ordered(grid%cell%ntot))
+            cells = .true.
+            call grid%CheckVertOrder(is_ordered, cells)
+            call grid%ReorderCellConn(is_ordered)
+        end if
 
     end subroutine
 
-    recursive subroutine SplitPentsRec(grid, magneticField, options, cv)
+    recursive subroutine SplitPentsRec(grid, qm, magneticField, options, cv)
 
         ! Description
         !============
@@ -7217,10 +7253,11 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)     :: grid
-        type(MagneticFieldUDT), intent(in)  :: magneticField
-        type(GAoptionsUDT), intent(inout)   :: options
-        integer(I8), intent(inout)          :: cv
+        class(GAGridUDT), intent(inout)         :: grid
+        type(QualityMetricUDT), intent(inout)   :: qm
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        type(GAoptionsUDT), intent(inout)       :: options
+        integer(I8), intent(inout)              :: cv
         
         ! Auxiliary
         integer(I8) :: i
@@ -7246,7 +7283,7 @@ module gamod_types
 
                 if (cv /= 0) then
 
-                    call grid%OneSplit(magneticField, options, cv)
+                    call grid%OneSplit(qm, magneticField, options, cv)
 
                 end if
 
@@ -7254,7 +7291,7 @@ module gamod_types
 
         else 
 
-            call grid%OneSplit(magneticField, options, cv)
+            call grid%OneSplit(qm, magneticField, options, cv)
 
         end if
 
@@ -7279,7 +7316,7 @@ module gamod_types
 
             if (cv /= 0) then
 
-                call grid%SplitPentsRec(magneticField, options, cv)
+                call grid%SplitPentsRec(qm, magneticField, options, cv)
 
             end if
 
@@ -7521,7 +7558,7 @@ module gamod_types
         ! Auxiliary
         integer(I8), allocatable, dimension(:) :: rface1D, faceB, cells1, rfaces, int_faces
         integer(I8) :: neig1type, neig2type
-        character(:), allocatable :: x1, x2
+        character(len=10) :: x1, x2
 
         ! Determine the case
         select case (type)
@@ -7543,8 +7580,8 @@ module gamod_types
                 call grid%GetNeigTypeFromFace(rface1, cv, neig1, neig1type)
 
 
-                write (x1, '(I1.1)') neig1type
-                caseID = '3' // x1 
+                write (x1, '(I0)') neig1type
+                caseID = '3' // trim(x1) 
 
             case ('cutcell')
 
@@ -7596,9 +7633,9 @@ module gamod_types
                 end if
 
                 ! Make caseID
-                write (x1, '(I1.1)') neig1type
-                write (x2, '(I1.1)') neig2type
-                caseID =  x1 // '3' // x2
+                write (x1, '(I0)') neig1type
+                write (x2, '(I0)') neig2type
+                caseID =  trim(x1) // '3' // trim(x2)
                 
 
             end select
@@ -7634,15 +7671,15 @@ module gamod_types
             call grid%GetNeigTypeFromFace(rface2, cv, neig2, neig2type)
 
             ! Make caseID
-            write (x1, '(I1.1)') neig1type
-            write (x2, '(I1.1)') neig2type
+            write (x1, '(I0)') neig1type
+            write (x2, '(I0)') neig2type
             if (options%rad_type == 'no_aligned_faces') then
 
-                caseID = x1 // '3' // x2 // 'A'
+                caseID = trim(x1) // '3' // trim(x2) // 'A'
 
             else
 
-                caseID  = x1 // '3' // x2
+                caseID  = trim(x1) // '3' // trim(x2)
 
             end if
 
@@ -7667,7 +7704,7 @@ module gamod_types
         integer(I8), intent(out)                :: rface1, rface2, neig1, neig2
 
         ! Auxiliary
-        character(:), allocatable :: x1, x2
+        character(len=10) :: x1, x2
         integer(I8) :: ind, face_al, neig1type, neig2type, rface3
         integer(I8), allocatable, dimension(:) :: rfaces, rfaces2D, int_faces, cells1, cells2
 
@@ -7757,7 +7794,7 @@ module gamod_types
                 cells2 = GetFaceCellGA(c, rface2)
                 if (cells2(1) /= cv) then
                     neig2 = cells2(1)
-                else if (cells1(2) /= cv) then
+                else if (cells2(2) /= cv) then
                     neig2 = cells2(2)
                 end if
                 neig2type = c%faceP2%Get(neig2)
@@ -7769,9 +7806,9 @@ module gamod_types
         end if
 
         ! Make caseID
-        write (x1, '(I1.1)') neig1type
-        write (x2, '(I1.1)') neig2type
-        caseID = x1 // '3' // x2 
+        write (x1, '(I0)') neig1type
+        write (x2, '(I0)') neig2type
+        caseID = trim(x1) // '4' // trim(x2) 
 
         ! Special case correction
         if (type == 'rad') then
@@ -7805,7 +7842,7 @@ module gamod_types
             cvsv, vxsD
         real(R8) :: dpsi_al, dpsi_max, dpsi_min, h_pol, h_rad, AR, psic
         real(R8), allocatable :: dpsi(:), dpsi_rel(:)
-        character(:), allocatable :: x1
+        character(len=10) :: x1
 
         ! Associate
         associate(&
@@ -7941,11 +7978,156 @@ module gamod_types
 
 
         ! Construct caseID string
-        write (x1, '(I1.1)') neigtype
-        caseID = '5' // x1
+        write (x1, '(I0)') neigtype
+        caseID = '5' // trim(x1)
 
         end associate
 
+    end subroutine
+
+    subroutine DetermineT4caseID(grid, cv, fcs, type, caseID, rface1, neig, common_vert)
+
+        ! Description
+        !============
+        ! Determine the splitting case for a triangle with one face split in two
+        ! which is indicated with a cflags == 4
+        !
+        ! cv: cellnumber
+        ! fcs: faces of the cell
+        ! type: pol or rad
+
+        ! caseID: point to correct splitting routine
+        ! rface1: that will be splitted by the splitting routine
+        !         for radial splitting this is the longest poloidal face opposite to the common vert
+        !         for poloidal splitting this is the longest radial face opposite
+        !         to the common vert
+        ! neig: the cell number of a neigboring cell if any, 0 if none
+        ! common vert: is the common vertex of the earlier splitting face
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: cv, fcs(:)
+        character(:), allocatable, intent(in)   :: type
+        character(:), allocatable, intent(out)  :: caseID
+        integer(I8), intent(out)                :: rface1, neig, common_vert
+        
+        ! Auxiliary     
+        integer(I8) :: ind, pface1, pface2, neigtype, vp1(2), vp2(2)
+        integer(I8), allocatable, dimension(:) :: split_faces, facesD, pfaces, cvs, vxs
+        real(R8), allocatable :: dpsi_f(:)
+        real(R8) :: fcS1, fcS2
+        character(len=10) :: x1
+
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+ 
+        ! rface1
+        dpsi_f = abs(v%psi%Get(f%vert1%Get(fcs)) - v%psi%Get(f%vert2%Get(fcs)))
+        ind = maxloc(dpsi_f,1)
+
+        select case (type)
+        case ('pol')
+
+            ! rface1 => shoulde be the longest face of the poloidal faces
+            pface1 = fcs(ind) !poloidal face1
+
+            dpsi_f(ind) = 0
+            ind = maxloc(dpsi_f,1)
+            pface2 = fcs(ind) !poloidal face1
+
+            ! Take the longest of the two faces
+            vp1 = [f%vert1%Get(pface1), f%vert2%Get(pface1)]
+            vp2 = [f%vert1%Get(pface2), f%vert2%Get(pface2)]
+            fcS1 = sqrt( (v%x%Get(vp1(2)) - v%x%Get(vp1(1)))**2 + (v%y%Get(vp1(2)) - v%y%Get(vp1(1)))**2)
+            fcS2 = sqrt( (v%x%Get(vp2(2)) - v%x%Get(vp2(1)))**2 + (v%y%Get(vp2(2)) - v%y%Get(vp2(1)))**2)
+
+            if (fcS1 .gt. fcS2) then
+                rface1 = pface1
+            else if (fcS2 .gt. fcS1) then
+                rface1 = pface2
+            else
+                call gdErrorHandler('DetermineT4caseID: Both poloidal faces in the triangle4' // &
+                        & 'are even long which is geometrically not possible!')
+            end if
+
+            ! Common vert
+            allocate(split_faces(count(fcs /= pface2)))
+            split_faces = pack(fcs, fcs /= pface2)
+            common_vert = GetCommonVert(f, split_faces(1), split_faces(2))
+
+            ! Determine CaseID
+            vxs = GetCellVertGA(c, cv)
+
+            if (isBoundaryFaceGA(f, rface1)) then
+                neig = 0
+                neigtype = 0
+                ! SplitT4B
+            else if (count(isBoundaryVertGA(grid, vxs)) == 1) then
+                neig = 0
+                neigtype = 1
+            else
+                cvs = GetFaceCellGA(c, rface1)
+                if (cvs(1) /= cv) then
+                    neig = cvs(1)
+                else if (cvs(2) /= cv) then
+                    neig = cvs(2)
+                end if
+                neigtype = c%faceP2%Get(neig)
+            end if
+
+        case ('rad')
+
+            ! rface1
+            ! Get face that will be split
+            pface1 = fcs(ind) !poloidal face1
+            
+            ! common_vert
+            ! Determine the common vertex (vertex on split face)
+            ! lay between two faces with maximaal dpsi expect the rface1
+            allocate(facesD(count(fcs /= rface1)))
+            facesD = pack(fcs, fcs /= rface1)   
+            
+            ! Get poloidal faces
+            allocate(pfaces(count(f%aligned%Get(facesD) == 0)))
+            pfaces = pack(facesD, f%aligned%Get(facesD) == 0)
+
+            if (size(pfaces) /= 2) call gdErrorHandler('DetermineT4caseID: Something wrong with face%aligned')
+
+            pface1 = pfaces(1)
+            pface2 = pfaces(2)
+
+            ! Common vert
+            if (HaveCommonVert(f, pface1, pface2)) then
+                common_vert = GetCommonVert(f, pface1, pface2)
+            else
+                call gdErrorHandler('DetermineT4caseID: No common vertex: probably the triangle a no aligned face.')
+            end if
+
+            ! Neig
+            if (isBoundaryFaceGA(f, rface1)) then
+                neig = 0
+                neigtype = 0
+            else 
+                cvs = GetFaceCellGA(c, rface1)
+                if (cvs(1) /= cv) then
+                    neig = cvs(1)
+                else if (cvs(2) /= cv) then
+                    neig = cvs(2)
+                end if
+                neigtype = c%faceP2%Get(neig)
+            end if
+
+        end select
+
+        write (x1, '(I0)') neigtype
+        caseID = '3' // trim(x1)
+
+        end associate
     end subroutine
 
     subroutine GetNeigTypeFromFace(grid, rface, cv, neig, neigtype)
@@ -8122,10 +8304,12 @@ module gamod_types
         if (.not.options%slab) then
             select case (type)
             case ('pol')
+                allocate(vxs(1))
                 vxs = v1n
                 fcs = [f1n, f2n]
                 face_old = tface
             case ('rad')
+                allocate(fcs(1))
                 vxs = [v1n, free_vert]
                 fcs = f3n
                 face_old = 0
@@ -8136,11 +8320,10 @@ module gamod_types
         ! Build new cells
 
         ! Split cv in two triangles
-        print *, 'Consider name change for routine SplitTneig to SplitTriaStacked'
         call grid%SplitTriaStacked(cv, Tface, v1n, free_vert, cv1, cv2)
 
         ! Neig1 => becomes pentagonal cell
-        call grid%QuadToPent(neig1, Tface, f1n, f2n, v1n)
+        if (neig1 /= 0) call grid%QuadToPent(neig1, Tface, f1n, f2n, v1n)
 
         ! Remove tface
         face_rem = Tface
@@ -8209,6 +8392,7 @@ module gamod_types
         ! Add new vert to correct flux sruface
         select case (type)
         case ('pol')
+            allocate(vxs(1))
             vxs = v1n
             fcs = [f1n, f2n]
             face_old = tface
@@ -8239,68 +8423,6 @@ module gamod_types
 
     end subroutine   
 
-    subroutine SplitTB(grid, magneticField, cv, tface, type)
-
-        ! Description
-        !============
-        ! Split a boundary triangle
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(GAGridUDT), intent(inout)     :: grid 
-        type(MagneticFieldUDT), intent(in)  :: magneticField        
-        integer(I8), intent(in)             :: cv, tface
-        character(:), allocatable           :: type
-
-        ! Auxiliary
-        integer(I8) :: free_vert, face_old, cv1, cv2, f1n, f2n, f3n, v1n
-        integer(I8), allocatable :: vxs(:), fcs(:), cells(:), face_rem(:)
-
-        ! Associate
-        associate(&
-            c => grid%cell, &
-            f => grid%face &
-            )
-
-        ! Split Tface
-        call grid%SplitFace(magneticField, tface, v1n, f1n, f2n)
-
-        ! Determine free vertex of the triangle
-        call grid%DetermineFreeVertTria(cv, tface, free_vert)
-
-        ! Make new faces
-        call grid%GetFaceNumber(v1n, free_vert, 3, f3n)
-
-        ! Add new vert to correct flux sruface
-        select case (type)
-        case ('pol')
-            vxs = v1n
-            fcs = [f1n, f2n]
-            face_old = tface
-        case ('rad')
-            vxs = [v1n, free_vert]
-            fcs = f3n
-            face_old = 0
-        end select
-        call grid%AddVertToFsVx(vxs, fcs, face_old, type) 
-        
-        ! Build new cells
-        ! Split cv in two triangles
-        call grid%SplitTriaStacked(cv, tface, v1n, free_vert, cv1, cv2)
-
-        ! Remove Tface
-        face_rem = tface
-        call grid%RemoveFaces(face_rem)
-
-        ! Determine cflags
-        cells = [cv1, cv2]
-        call grid%DetermineCflags(cells)
-
-        end associate
-
-    end subroutine   
-
     subroutine SplitQTB(grid, magneticField, cv, rface1, rface2, neig1, neig2, type, typeT)
 
         ! Description
@@ -8318,7 +8440,7 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: Bface, Iface, ic, v1n, v2n, f11n, f12n, &
-            f21n, f22n, perp_face, face_old1, face_old2, cv1, cv2, f3n
+            f21n, f22n, perp_face, face_old1, cv1, cv2, f3n
         integer(I8), allocatable :: vxs1(:), fcs1(:), &
             vxs2(:), fcs2(:), face_rem(:), cells(:)
 
@@ -8350,15 +8472,15 @@ module gamod_types
         ! Add new vertices to correct flux sruface
         select case (type)
         case ('pol')
+            allocate(vxs1(1), vxs2(1))
             vxs1 = v1n
             fcs1 = [f11n, f12n]
-            face_old1 = Bface
             vxs2 = v2n
-            fcs2 = [f21n, f22n]
-            face_old2 = Iface            
-            call grid%AddVertToFsVx(vxs1, fcs1, face_old1, type)
-            call grid%AddVertToFsVx(vxs2, fcs2, face_old2, type)
+            fcs2 = [f21n, f22n]        
+            call grid%AddVertToFsVx(vxs1, fcs1, Bface, type)
+            call grid%AddVertToFsVx(vxs2, fcs2, Iface, type)
         case ('rad')
+            allocate(fcs1(1))
             vxs1 = [v1n, v2n]
             fcs1 = f3n
             face_old1 = 0
@@ -8420,7 +8542,8 @@ module gamod_types
             call grid%GetFaceNumber(v1n, v2n, 3, f3n)
             call grid%face%aligned%Set(f3n, grid%face%aligned%Get(perp_face))
 
-            ! Add new vert to flux surface
+            ! Add new vert to flux surface.
+            allocate(vxs1(1), vxs2(1))
             vxs1 = v1n
             vxs2 = v2n 
             fcs1 = [f11n, f12n]
@@ -8455,92 +8578,6 @@ module gamod_types
 
 
     end subroutine   
-
-    subroutine SplitTTB(grid, magneticField, cv, rface1, rface2, neig1, neig2, type, typeT)
-
-        ! Description
-        !============
-        ! Splitting of a boundary triangle, neighbouring another triangle in the
-        ! splitting direction
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(GAGridUDT), intent(inout)     :: grid 
-        type(MagneticFieldUDT), intent(in)  :: magneticField        
-        integer(I8), intent(in)             :: cv, rface1, rface2, neig1, neig2
-        character(:), allocatable           :: type, typeT
-
-        ! Auxiliary
-        integer(I8) :: Bface, Iface, ic, perp_face, face_old, cv1, cv2, f11n, f12n, &
-            v1n, v2n, f21n, f22n, v1B, v2B, f3n
-        integer(I8), allocatable :: face_rem(:), cells(:), &
-            vxs1(:), fcs1(:)
-        real(R8) :: psic
-
-        ! Associate
-        associate(&
-            c => grid%cell, &
-            f => grid%face, &
-            v => grid%vert &
-            )
-
-        if (type == 'rad') then
-
-            ! Determine which is the boundary face and with the internal face
-            if (neig1 == 0) then
-                Bface = rface1
-                Iface = rface2
-                ic = neig2
-            else
-                Bface = rface2
-                Iface = rface1
-                ic = neig1
-            end if
-
-            ! Determine perpendicular face
-            call grid%DeterminePerpFaceTria(cv, Bface, Iface, perp_face)
-
-            ! Split face
-            v1B = f%vert1%Get(Bface)
-            v2B = f%vert2%Get(Bface)
-            psic = 0.5_R8 * (v%psi%Get(v1B) + v%psi%Get(v2B))
-            call grid%SplitFace(magneticField, Bface, v1n, f11n, f12n, psic)
-            call grid%SplitFace(magneticField, Iface, v2n, f21n, f22n, psic)
-
-            ! Make new face
-            call grid%GetFaceNumber(v1n, v2n, 3, f3n)
-            call f%aligned%Set(f3n, f%aligned%Get(perp_face))
-
-            ! Add new vertices to flux surface
-            vxs1 = [v1n, v2n]
-            fcs1 = f3n
-            face_old = 0
-            call grid%AddVertToFsVx(vxs1, fcs1, face_old, type)
-
-            ! Internal triangle to quad
-            call grid%TriaToQuad(ic, Iface, f21n, f22n, v2n)
-
-            ! Split the center triangle
-            call grid%SplitCenterTria(cv, Bface, v1n, v2n, perp_face, cv1, cv2)
-
-            ! Remove faces
-            face_rem = [Bface, Iface]
-            call grid%RemoveFaces(face_rem)
-            
-            ! Determine cflags
-            cells = [cv1, cv2]
-            call grid%DetermineCflags(cells)
-
-        else if (type == 'pol') then
-
-            call gdErrorHandler('SplitTTB: Not yet implemented, see splitQTB')
-
-        end if
-
-        end associate
-
-    end subroutine  
  
     subroutine SplitTTT(grid, magneticField, cv, rface1, rface2, neig1, neig2, type)
 
@@ -8562,6 +8599,7 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: vxs1, fcs1, &
             face_rem, cells
         real(R8) :: psic
+        character(:), allocatable :: typeV
 
         ! Associate
         associate(&
@@ -8578,14 +8616,16 @@ module gamod_types
             
             ! Split faces
             psic = 0.5_R8 * (v%psi%Get(f%vert1%Get(rface1)) + v%psi%Get(f%vert2%Get(rface1)))
-            call grid%SplitFace(magneticField, rface1, v1n, f11n, f12n, psic)
-            call grid%SplitFace(magneticField, rface2, v2n, f21n, f22n, psic)
+            typeV = 'psi'
+            call grid%SplitFace(magneticField, rface1, v1n, f11n, f12n, typeV, psic)
+            call grid%SplitFace(magneticField, rface2, v2n, f21n, f22n, typeV, psic)
 
             ! Make new face
             call grid%GetFaceNumber(v1n, v2n, 3, f3n)
             call grid%face%aligned%Set(f3n, grid%face%aligned%Get(perp_face))
 
             ! Add new vertices to flux surface
+            allocate(fcs1(1))
             vxs1 = [v1n, v2n]
             fcs1 = f3n
             call grid%AddVertToFsVx(vxs1, fcs1, 0, type)
@@ -8633,53 +8673,73 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: Tface, Qface, cvT, cvQ, nf1, nf2, cv1, cv2, &
-            f11n, f12n, f21n, f22n, v1n, v2n, f3n, perp_face
+            f11n, f12n, f21n, f22n, v1n, v2n, f3n, perp_face, v1B, v2B
         integer(I8), allocatable :: vxs1(:), fcs1(:), face_rem(:), cells(:)
+        real(R8) :: psic
+        character(:), allocatable :: typeV
 
         ! Associate
         associate(&
             c => grid%cell, &
-            f => grid%face &
+            f => grid%face, &
+            v => grid%vert &
             )
 
         if (type == 'rad') then
 
             ! Determine which is the boundary face and with the internal face
-            nf1 = c%faceP2%Get(neig1)
-            nf2 = c%faceP2%Get(neig2)
-            if (nf1 == 3 .and. nf2 == 4) then
-                Tface = rface1
-                Qface = rface2
-                cvT = neig1
-                cvQ = neig2
-            else if (nf1 == 4 .and. nf2 == 3) then
+            if (neig1 == 0) then
                 Tface = rface2
                 Qface = rface1
                 cvT = neig2
-                cvQ = neig1         
+                cvQ = neig1 
+            else if (neig2 == 0) then
+                Tface = rface1
+                Qface = rface2
+                cvT = neig1
+                cvQ = neig2                
             else
-                call gdErrorHandler('Something wrong')
-            end if
+                nf1 = c%faceP2%Get(neig1)
+                nf2 = c%faceP2%Get(neig2)
+                if (nf1 == 3 .and. nf2 == 4) then
+                    Tface = rface1
+                    Qface = rface2
+                    cvT = neig1
+                    cvQ = neig2
+                else if (nf1 == 4 .and. nf2 == 3) then
+                    Tface = rface2
+                    Qface = rface1
+                    cvT = neig2
+                    cvQ = neig1         
+                else
+                    call gdErrorHandler('Something wrong')
+                end if
+            end if 
 
             ! Determine perpendicular face
             call grid%DeterminePerpFaceTria(cv, Qface, Tface, perp_face)
 
             ! Split faces
-            call grid%SplitFace(magneticField, Tface, v1n, f11n, f12n)
-            call grid%SplitFace(magneticField, Qface, v2n, f21n, f22n)
+            v1B = f%vert1%Get(Qface)
+            v2B = f%vert2%Get(Qface)
+            psic = 0.5_R8 * (v%psi%Get(v1B) + v%psi%Get(v2B))
+            typeV = 'psi'
+            call grid%SplitFace(magneticField, Tface, v1n, f11n, f12n, typeV, psic)
+            call grid%SplitFace(magneticField, Qface, v2n, f21n, f22n, typeV, psic)
 
             ! Make new face
             call grid%GetFaceNumber(v1n, v2n, 3, f3n)
             call f%aligned%Set(f3n, f%aligned%Get(perp_face))
 
             ! Add new vertices to flux surface
+            allocate(fcs1(1))
             vxs1 = [v1n, v2n]
             fcs1 = f3n
             call grid%AddVertToFsVx(vxs1, fcs1, 0, type)
 
             ! Build new cells
             ! cvQ => becomes pent
-            call grid%QuadToPent(cvQ, Qface, f21n, f22n, v2n)
+            if (cvQ /= 0) call grid%QuadToPent(cvQ, Qface, f21n, f22n, v2n)
 
             ! Split the center tria
             call grid%SplitCenterTria(cv, Tface, v1n, v2n, perp_face, cv1, cv2)
@@ -8726,7 +8786,7 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: i, vxs1r(2), vxs2r(2), v1n, v2n, f11n, f12n, f21n, f22n, f3n, &
-            f1n, f2n, f4n, f5n, Qface1, Qface2, face_old1, face_old2, vxsT, &
+            f1n, f2n, f4n, f5n, Qface1, Qface2, vxsT, &
             vxsQ1, vxsQ2, cv1, s, cv2, neig, split_face
         integer(I8), allocatable, dimension(:) :: verts, face_rem, cells, &
             vxs1, vxs2, fcs1, fcs2, cvsQ1, range, vxs_newp, fcs_newp, vxsD, fcsD, &
@@ -8798,8 +8858,8 @@ module gamod_types
         if (normal_flag) then
 
             ! Split faces
-            call grid%SplitFace(magneticField, rface1, v1n, f11n, f12n)
-            call grid%SplitFace(magneticField, rface2, v2n, f21n, f22n)
+            call grid%SplitFace(magneticField, rface1, v1n, f11n, f12n, typeV, psic)
+            call grid%SplitFace(magneticField, rface2, v2n, f21n, f22n, typeV, psic)
 
             ! Make new face
             call grid%GetFaceNumber(v1n, v2n, 3, f3n)
@@ -8812,28 +8872,27 @@ module gamod_types
             ! Add vert to flux surface
             select case (options%splittype)
             case ('pol')
+                allocate(vxs1(1), vxs2(1))
                 vxs1 = v1n
                 vxs2 = v2n
                 fcs1 = [f11n, f12n]
                 fcs2 = [f21n, f22n]
-                face_old1 = rface1
-                face_old2 = rface2
-                call grid%AddVertToFsVx(vxs1, fcs1, face_old1, options%splittype)
-                call grid%AddVertToFsVx(vxs2, fcs2, face_old2, options%splittype)
+                call grid%AddVertToFsVx(vxs1, fcs1, rface1, options%splittype)
+                call grid%AddVertToFsVx(vxs2, fcs2, rface2, options%splittype)
             case ('rad')
+                allocate(fcs1(1))
                 vxs1 = [v1n, v2n]
-                fcs1 = f3n
-                face_old1 = rface1      
-                call grid%AddVertToFsVx(vxs1, fcs1, face_old1, options%splittype)                         
+                fcs1 = f3n  
+                call grid%AddVertToFsVx(vxs1, fcs1, rface1, options%splittype)                         
             end select
 
             ! Build new cells
             ! neig1 => becomes pent, neig2 => becomes pent
-            call grid%QuadToPent(neig1, rface1, f11n, f12n, v1n)
-            call grid%QuadToPent(neig2, rface2, f21n, f22n, v2n)
+            if (neig1 /= 0) call grid%QuadToPent(neig1, rface1, f11n, f12n, v1n)
+            if (neig2 /= 0) call grid%QuadToPent(neig2, rface2, f21n, f22n, v2n)
 
             ! Split center quad
-            !call grid%SplitCenterQuad(cv, rface1, v1n, v2n, cv1, cv2)
+            call grid%SplitCenterQuad(cv, rface1, v1n, v2n, cv1, cv2)
 
             ! Remove faces
             face_rem = [rface1, rface2]
@@ -8876,8 +8935,9 @@ module gamod_types
             endif
 
             ! Start the splitting
-            call grid%SplitFace(magneticField, Qface1, v1n, f1n, f2n, psic)
-            call grid%SplitFace(magneticField, Qface2, v2n, f3n, f4n, psic)
+            typeV = 'psi'
+            call grid%SplitFace(magneticField, Qface1, v1n, f1n, f2n, typeV, psic)
+            call grid%SplitFace(magneticField, Qface2, v2n, f3n, f4n, typeV, psic)
 
             vxsT = GetCommonVert(f, Qface1, Qface2)
             if (f%vert1%Get(Qface1) /= vxsT) then
@@ -8895,6 +8955,7 @@ module gamod_types
             call grid%GetFaceNumber(v1n, v2n, 3, f5n)
 
             ! Add vertex to flux surface
+            allocate(fcs1(1))
             vxs1 = [v1n, v2n]
             fcs1 = f5n
             call grid%AddVertToFsVx(vxs1, fcs1, 0, options%splittype)
@@ -9009,23 +9070,12 @@ module gamod_types
                     call grid%ReOrderCellConn(is_ordered)
                 else
                     !%Only order cells which are not in the cuts
-                    !cells = 1:grid.cell.ntot;
+                    !cells = 1:grid.cell.ntot
                     !cells = cells(logical(~ismember(cells,grid.cellsCut)));
                     !is_ordered = CheckVertOrder(grid,cells);
                     !grid = ReOrderCellConn(grid,is_ordered,cells); 
                 end if
             end if
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -9036,7 +9086,447 @@ module gamod_types
 
     end subroutine 
 
-    subroutine SplitFace(grid, magneticField, face_in, v1n, f1n, f2n, psic)
+    subroutine SplitPQ(grid, magneticField, cv, Qface, neig, common_vert, type, options)
+
+        ! Description
+        !============
+        !  Splits a pentagonal cell with a quads as neighbor.
+        ! This routine is used very often to try to optimize local implementation.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: cv, Qface, neig, common_vert
+        character(:), allocatable           :: type
+        type(GAoptionsUDT), intent(in)      :: options
+
+        ! Auxiliary
+        integer(I8) :: face_old, v1n, f1n, f2n, f3n, cv1, cv2
+        integer(I8), allocatable, dimension(:) :: perp_faces, vxs1, fcs1, cells, face_rem
+        real(R8) :: psic
+        character(:), allocatable :: typeV
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        psic = 0_R8
+        if (.not.options%XpointSplitting) then
+            if (type == 'pol') then
+                typeV = 'pol'
+            else if (type == 'rad') then
+                typeV = 'psi'
+                psic = v%psi%Get(common_vert)
+            end if
+        else 
+            typeV = 'geometric'
+        end if 
+
+        ! Split faces
+        call grid%SplitFace(magneticField, Qface, v1n, f1n, f2n, typeV, psic)
+
+        ! Determine perpendicular faces
+        call grid%DeterminePerpFacePent(cv, Qface, perp_faces)
+
+        ! Make new face
+        call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
+
+        if (all(f%aligned%Get(perp_faces) == 1)) call f%aligned%Set(f3n, 1)
+
+        ! Add new vert to flux surface
+        select case (type)
+        case ('pol')
+            allocate(vxs1(1))
+            vxs1 = v1n
+            fcs1 = [f1n, f2n]
+            face_old = Qface
+        case ('rad')
+            allocate(fcs1(1))
+            vxs1 = [v1n, common_vert]
+            fcs1 = f3n
+            face_old = 0
+        end select
+        call grid%AddVertToFsVx(vxs1, fcs1, face_old, type)
+
+        ! Build new cells
+        ! neig1 => become pent
+        if (neig /= 0) call grid%QuadToPent(neig, Qface, f1n, f2n, v1n)
+
+        ! Split pent in two quad
+        call grid%SplitCenterPent(cv, Qface, v1n, common_vert, f3n, f1n, f2n, cv1, cv2)
+
+        ! Remove Qface
+        allocate(face_rem(1))
+        face_rem = Qface  
+        call grid%RemoveFaces(face_rem)
+
+        ! Determine cflags
+        cells = [cv1, cv2]
+        call grid%DetermineCflags(cells)
+
+        end associate
+
+    end subroutine 
+
+    subroutine SplitPT(grid, magneticField, cv, Tface, Tneig, common_vert, type, typeT)
+
+        ! Description
+        !============
+        ! Splits a pentagonal cell with a triangle as neigbor in the poloidal or direction
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: cv, Tface, Tneig, common_vert
+        character(:), allocatable           :: type, typeT
+
+        ! Auxiliary
+        integer(I8) :: v1n, f1n, f2n, f3n, f4n, free_vert, face_old, cv1, cv2, Tneig1, Tneig2
+        integer(I8), allocatable, dimension(:) ::  vxs1, fcs1, face_rem, perp_faces, cells
+        character(:), allocatable :: typeV
+        real(R8) :: psic
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        psic = 0
+        if (type == 'pol') then
+            typeV = 'pol'
+        else if (type == 'rad') then
+            typeV = 'psic'
+            psic = v%psi%Get(common_vert)
+        end if
+
+        ! Split Tface
+        call grid%SplitFace(magneticField, Tface, v1n, f1n, f2n, typeV, psic)
+
+        ! Determine free_vert and make new face
+        if (type == 'pol' .and. typeT == 'stacked') then
+                call grid%DetermineFreeVertTria(Tneig, Tface, free_vert)
+                call grid%GetFaceNumber(v1n, free_vert, 3, f4n)
+        end if
+
+        ! Make new face in pentagon
+        call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
+        if (type == 'rad') then
+            call grid%DeterminePerpFacePent(cv, Tface, perp_faces)
+            if (all(f%aligned%Get(perp_faces) == 1)) call f%aligned%Set(f3n, 1)
+        end if
+
+        ! Add new vert to fsVx
+        if (type == 'pol') then
+            allocate(vxs1(1))
+            vxs1 = v1n
+            fcs1 = [f1n, f2n]
+            face_old = Tface
+        else if (type == 'rad') then
+            allocate(fcs1(1))
+            vxs1 = [v1n, common_vert]
+            fcs1 = f3n
+            face_old = 0
+        end if
+        call grid%AddVertToFsVx(vxs1, fcs1, face_old, type)
+
+        ! Build new cells
+        ! Neighboring triangle
+        if (type == 'pol' .and. typeT == 'stacked') then
+            call grid%SplitTriaStacked(Tneig, Tface, v1n, free_vert, Tneig1, Tneig2)
+        else
+            call grid%TriaToQuad(Tneig, Tface, f1n, f2n, v1n)
+        end if
+
+        ! Split pent in two quads
+        call grid%SplitCenterPent(cv, Tface, v1n, common_vert, f3n, f1n, f2n, cv1, cv2)
+
+        ! Remove Tface
+        allocate(face_rem(1))
+        face_rem = Tface
+        call grid%RemoveFaces(face_rem)
+
+        ! Determine cflags
+        if (type == 'pol' .and. typeT == 'stacked') then
+            cells = [Tneig1, Tneig2, cv1, cv2]
+        else
+            cells = [cv1, cv2]
+        end if
+        call grid%DetermineCflags(cells)
+
+        end associate
+
+    end subroutine
+
+    !subroutine SplitPB(grid, magneticField, cv, Qface, common_vert, type)
+
+        ! Description
+        !============
+        ! Splitting of pentagonal boundary cells with the internal
+        ! cell as the splitted face. Qface is the face the should be splitted.
+        ! Common_vert is the vertex of the pentagon that splits the internal radial
+        ! face.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        !class(GAGridUDT), intent(inout)     :: grid
+        !type(MagneticFieldUDT), intent(in)  :: magneticField
+        !integer(I8), intent(in)             :: cv, Qface, common_vert
+        !character(:), allocatable           :: type
+
+        ! Auxiliary
+        !integer(I8), allocatable :: perp_faces(:)
+        !real(R8) :: psic
+        !character(:), allocatable :: typeV
+
+        ! Determine method
+        !psic = 0
+        !if (type == 'pol') then
+        !    typeV = 'pol'
+        !else if (type == 'rad') then
+        !    typeV = 'psi'
+        !    psic = v%psi%Get(common_vert)
+        !end if
+
+        ! Determine perp faces
+        !call grid%DeterminePerpFacePent(cv, Qface, perp_faces)
+
+        ! Split face
+
+
+
+    !end subroutine
+    
+    subroutine SplitT4B(grid, qm, magneticField, cv, rface1, common_vert, type, options)
+
+        ! Description
+        !============
+        !  Splitting of triangle4 boundary cell
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        type(QualityMetricUDT), intent(inout)   :: qm
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        integer(I8), intent(in)                 :: cv, rface1, common_vert
+        character(:), allocatable               :: type
+        type(GAoptionsUDT), intent(in)          :: options
+
+        ! Auxiliary
+        integer(I8) :: v1n, f1n, f2n, cv1, cv2, f3n, face_old, b_fcs, free_vert
+        integer(I8), allocatable, dimension(:) :: perp_faces, face_rem, cells, &
+            fcs1, vxs1, b_fcsD, fcs_perp, fcs_al, fcs
+        real(R8) :: psic
+        character(:), allocatable :: typeV
+        type(GAoptionsUDT) :: options2
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        select case (type)
+        case ('rad')
+
+            ! Split face
+            psic = v%psi%Get(common_vert)
+            typeV = 'psi'
+            call grid%SplitFace(magneticField, rface1, v1n, f1n, f2n, typeV, psic)
+
+            ! Determine perpendicular faces
+            call grid%DeterminePerpFacePent(cv, rface1, perp_faces)
+
+            ! Make new face
+            call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
+
+            ! Add new vertex in flux surface
+            allocate(fcs1(1))
+            vxs1 = [v1n, common_vert]
+            fcs1 = f3n
+            face_old = 0
+            call grid%AddVertToFsVx(vxs1, fcs1, face_old, type)
+
+            ! Build new cells
+            call grid%SplitT4(cv, rface1, v1n, common_vert, cv1, cv2)
+
+            ! Remove face rface1
+            allocate(face_rem(1))
+            face_rem = rface1
+            call grid%RemoveFaces(face_rem)
+
+            ! Determine cflags
+            cells = [cv1, cv2]
+            call grid%DetermineCflags(cells)
+
+            ! Do a poloidal split
+            options2 = options
+            options2%splittype = 'pol'
+            options2%QTtype = 'pol-rad'
+            qm%split_cv = cv2
+            call grid%Splitting(qm, options2, magneticField)
+
+        case ('pol')
+
+            ! Get non-aligned faces
+            fcs = GetCellFaceGA(c, cv)
+            allocate(fcs_perp(count(f%aligned%Get(fcs) == 0)))
+            fcs_perp = pack(fcs, f%aligned%Get(fcs) == 0)
+            allocate(fcs_al(count(f%aligned%Get(fcs) == 1)))
+            fcs_al = pack(fcs, f%aligned%Get(fcs) == 1)
+
+            if (size(fcs_perp) /= 2) call gdErrorHandler('SplitT4B: something wrong')
+
+            select case (options%typeT)
+            case ('stacked')
+
+                ! Get free vert
+                free_vert = GetCommonVert(f, fcs_perp(1), fcs_perp(2))
+
+                ! Make new face
+                call grid%GetFaceNumber(free_vert, common_vert, 3, f1n)
+
+                ! Build new cells
+                call grid%SplitT4Stacked(cv, f1n, free_vert, fcs_perp, fcs_al, cv1, cv2)
+
+                ! cflags
+                cells = [cv1, cv2]
+                call grid%DetermineCflags(cells)
+
+
+            case ('cutcell')
+
+                ! Get boundary faces
+                allocate(b_fcsD(count(isBoundaryFaceGA(f, fcs))))
+                b_fcsD = pack(fcs, isBoundaryFaceGA(f, fcs))
+                b_fcs = b_fcsD(1)
+
+                ! Split face
+                typeV = 'pol'
+                psic = 0_R8
+                call grid%SplitFace(magneticField, b_fcs, v1n, f1n, f2n, typeV, psic)
+
+                ! Make new face
+                call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
+
+                ! Add new vert to flux surface
+                allocate(vxs1(1))
+                vxs1 = v1n
+                fcs1 = [f1n, f2n]
+                call grid%AddVertToFsVx(vxs1, fcs1, b_fcs, type)
+
+                ! Build new cells
+                call grid%SplitT4(cv, b_fcs, v1n, common_vert, cv1, cv2)
+
+                ! Remove face
+                allocate(face_rem(1))
+                face_rem = b_fcs
+                call grid%RemoveFaces(face_rem)
+
+                ! Determine cflags
+                cells = [cv1, cv2]
+                call grid%DetermineCflags(cells)
+
+            end select
+
+        end select
+
+        end associate
+
+    end subroutine
+
+    subroutine SplitT4Q(grid, magneticField, cv, rface1, common_vert, neig1, type)
+
+        ! Description
+        !============
+        ! Radial splitting of triangle4 internal cell with a quad neighboring
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: cv, rface1, neig1, common_vert
+        character(:), allocatable           :: type
+
+        ! Auxiliary 
+        integer(I8) :: face_old, v1n, f1n, f2n, f3n, cv1, cv2
+        integer(I8), allocatable, dimension(:) :: vxs1, fcs1, perp_faces, &
+            face_rem, cells  
+        character(:), allocatable :: typeV
+        real(R8) :: psic
+         
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+            
+        psic = 0_R8
+        if (type == 'pol') then
+            typeV = 'pol'
+        else if (type == 'rad') then
+            typeV = 'psi'
+            psic = v%psi%Get(common_vert)
+        end if
+
+        ! Determine perpendicular faces
+        call grid%DeterminePerpFacePent(cv, rface1, perp_faces) ! cv is not a pent but works as well
+
+        ! Split faces
+        call grid%SplitFace(magneticField, rface1, v1n, f1n, f2n)
+
+        ! Make new face
+        call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
+        call f%aligned%Set(f3n, f%aligned%Get(perp_faces(1)))
+
+        ! Add new vertices to flux surface
+        select case (type)
+        case ('pol')
+            allocate(vxs1(1))
+            vxs1 = v1n
+            fcs1 = [f1n, f2n]
+            face_old = rface1
+        case ('rad')
+            allocate(fcs1(1))
+            vxs1 = [v1n, common_vert]
+            fcs1 = f3n
+            face_old = 0
+        end select
+        call grid%AddVertToFsVx(vxs1, fcs1, face_old, type)
+
+        ! Build new cells
+        call grid%SplitT4(cv, rface1, v1n, common_vert, cv1, cv2)
+
+        if (neig1 /= 0) call grid%QuadToPent(neig1, rface1, f1n, f2n, v1n)
+
+        ! Remove rface1
+        allocate(face_rem(1))
+        face_rem = rface1
+        call grid%RemoveFaces(face_rem)
+
+        ! Determine cflags
+        cells = [cv1, cv2]
+        call grid%DetermineCflags(cells)
+
+        end associate
+
+    end subroutine
+
+    subroutine SplitFace(grid, magneticField, face_in, v1n, f1n, f2n, type, psic)
 
         ! Description
         !============
@@ -9045,15 +9535,16 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)     :: grid
-        type(MagneticFieldUDT), intent(in)  :: magneticField
-        integer(I8), intent(in)             :: face_in
-        integer(I8), intent(out)            :: v1n, f1n, f2n
-        real(R8), intent(in), optional      :: psic
+        class(GAGridUDT), intent(inout)                     :: grid
+        type(MagneticFieldUDT), intent(in)                  :: magneticField
+        integer(I8), intent(in)                             :: face_in
+        integer(I8), intent(out)                            :: v1n, f1n, f2n
+        character(:), allocatable, optional, intent(in)     :: type
+        real(R8), intent(in), optional                      :: psic
 
         ! Make new vertices
-        if (present(psic)) then
-            call grid%AddVert(magneticField, face_in, v1n, 'psi', psic)
+        if (present(type)) then
+            call grid%AddVert(magneticField, face_in, v1n, type, psic)
         else 
             call grid%AddVert(magneticField, face_in, v1n)
         end if
@@ -9179,6 +9670,9 @@ module gamod_types
         s = c%faceP1%Get(cv)         
         call grid%cell%vert%Replace(s, s + c%faceP1%Get(cv) - 1, verts_cv1)
         call grid%cell%face%Replace(s, s + c%faceP1%Get(cv) - 1, faces_cv1)
+        
+        ! Recalculate centroid
+        call grid%CalcCentroidGA(cv1)
 
         ! cv2 => the quad
         ! Verts
@@ -9204,6 +9698,263 @@ module gamod_types
         faces_cv2 = [f1_cv1, f2_cv2, f3_cv2, f4_cv2]
 
         ! Add new cell cv2
+        call grid%AddCell(faces_cv2, verts_cv2, c%reg%Get(cv1), cv2)
+
+        end associate
+
+    end subroutine
+
+    subroutine SplitCenterQuad(grid, cv, face, v1n, v2n, cv1, cv2)
+
+        ! Description
+        !============
+        ! Splits the center quad cv
+        ! new_v1 and new_v2 are the new vertices
+        ! face is one of the original two faces which are split in half and is
+        ! split by new_v1.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: cv, face, v1n, v2n
+        integer(I8), intent(out)        :: cv1, cv2
+
+        ! Auxiliary
+        integer(I8) :: s, pface, v1, f1_cv1, f2_cv1, f3_cv1, f4_cv1, vertp, &
+            f2_cv2, f3_cv2, f4_cv2, v2
+        integer(I8), allocatable, dimension(:) :: faces_cv, verts_cv, query_faces, fcs_a, &
+            faces_cv1, verts_cv1, fcs_b, faces_cv2, verts_cv2
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! cv1 
+        cv1 = cv
+        v1 = f%vert1%Get(face)
+        faces_cv = GetCellFaceGA(c, cv1)
+        verts_cv = [ f%vert1%Get(faces_cv), f%vert2%Get(faces_cv)]
+        query_faces = [faces_cv, faces_cv]
+        allocate(fcs_a(count(verts_cv == v1)))
+        fcs_a = pack(query_faces, verts_cv == v1)
+
+        if (fcs_a(1) /= face) then
+            pface = fcs_a(1)
+        else if (fcs_a(2) /= face) then
+            pface = fcs_a(2)
+        end if
+
+        if (f%vert1%Get(pface) /= v1) then
+            vertp = f%vert1%Get(pface)
+        else if (f%vert2%Get(pface) /= v1) then
+            vertp = f%vert2%Get(pface)
+        end if
+        
+        verts_cv1 = [v2n, v1n, v1, vertp]
+
+        call grid%GetFaceNumber(v1n, v2n, 1, f1_cv1)
+        call grid%GetFaceNumber(v1n, v1, 1, f2_cv1)
+        call grid%GetFaceNumber(vertp, v1, 1, f3_cv1)
+        call grid%GetFaceNumber(vertp, v2n, 1, f4_cv1)
+
+        faces_cv1 = [f1_cv1, f2_cv1, f3_cv1, f4_cv1]
+
+        ! Add in connectivity
+        s = c%faceP1%Get(cv1)
+        call c%face%Replace(s, s + c%faceP2%Get(cv1) - 1, faces_cv1)
+        call c%vert%Replace(s, s + c%vertP2%Get(cv1) - 1, verts_cv1)
+
+        ! Recalculate centroid
+        call grid%CalcCentroidGA(cv1)
+
+        ! Second cell cv2
+        v2 = f%vert2%Get(face)
+        allocate(fcs_b(count(verts_cv == v2)))
+        fcs_b = pack(query_faces, verts_cv == v2)
+
+        if (fcs_b(1) /= face) then
+            pface = fcs_b(1)
+        else if (fcs_b(2) /= face) then
+            pface = fcs_b(2)
+        end if
+
+        if (f%vert1%Get(pface) /= v2) then
+            vertp = f%vert1%Get(pface)
+        else if (f%vert2%Get(pface) /= v2) then
+            vertp = f%vert2%Get(pface)
+        end if
+
+        verts_cv2 = [v2n, v1n, v2, vertp]
+
+        call grid%GetFaceNumber(v1n, v2, 1, f2_cv2)
+        call grid%GetFaceNumber(vertp, v2, 1, f3_cv2)
+        call grid%GetFaceNumber(vertp, v2n, 1, f4_cv2)
+
+        faces_cv2 = [f1_cv1, f2_cv2, f3_cv2, f4_cv2]
+
+        ! Add cell cv2
+        call grid%AddCell(faces_cv2, verts_cv2, c%reg%Get(cv1), cv2)
+
+        end associate
+
+    end subroutine
+
+    subroutine SplitT4(grid, cv, face, v1n, common_vert, cv1, cv2)
+
+        ! Description
+        !============
+        ! Splits a triangle in half resulting in a quad and triangle
+        ! The original cv number is used for the triangle, a new cell is made for
+        ! the triangle
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        integer(I8), intent(in)             :: cv, face, v1n, common_vert
+        integer(I8), intent(out)            :: cv1, cv2
+
+        ! Auxiliary
+        integer(I8) :: i, s, f1, tria_vert, vert1, vert2, f1_cv1, f2_cv1, f3_cv1, &
+            f2_cv2, f3_cv2, f4_cv2
+        integer(I8), allocatable, dimension(:) :: verts_cv, test_verts, range, &
+            verts_cv2_rest, faces_cv2, verts_cv2, faces_cv1, verts_cv1
+
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Save verts_cv for later
+        verts_cv = GetCellVertGA(c, cv)
+
+        ! cv1 => triangle becomes other triangle
+        cv1 = cv
+
+        ! verts of triangle are v1_n, common_vert, ... and the vertex which is in
+        !face and also has already a face together with the common vert 
+        test_verts = [f%vert1%Get(face), f%vert2%Get(face)]
+        call f%CheckFace(common_vert, test_verts(1), f1)
+
+        if (f1 /= 0) then
+            tria_vert = test_verts(1)
+        else 
+            tria_vert = test_verts(2)
+        end if
+
+        verts_cv1 = [common_vert, v1n, tria_vert]
+
+        ! Verts
+        s = c%vertP1%Get(cv1)
+        call c%vert%Replace(s, s + c%vertP2%Get(cv1) - 1, verts_cv1)
+        call c%vertP2%Set(cv1, size(verts_cv1))
+        range = (/ (i, i = cv+1, c%vertP1%Size())/)
+        call c%vertP1%SumMask(range, -1)
+
+        ! Faces
+        call grid%GetFaceNumber(common_vert, v1n, 1, f1_cv1)
+        call grid%GetFaceNumber(v1n, tria_vert, 1, f2_cv1)
+        call grid%GetFaceNumber(tria_vert, common_vert, 1, f3_cv1)
+
+        faces_cv1 = [f1_cv1, f2_cv1, f3_cv1]
+        call c%face%Replace(s, s + c%faceP2%Get(cv1) - 1, faces_cv1)
+        call c%faceP2%Set(cv1, size(faces_cv1))
+        call c%faceP1%SumMask(range, -1)
+
+
+        ! cv2
+        allocate(verts_cv2_rest(count(verts_cv /= tria_vert .and. verts_cv /= common_vert)))
+        verts_cv2_rest = pack(verts_cv, verts_cv /= tria_vert .and. verts_cv /= common_vert)
+
+        ! Get vert connect to v1n
+        if (test_verts(1) /= tria_vert) then
+            vert1 = test_verts(1)
+        else if (test_verts(2) /= tria_vert) then
+            vert1 = test_verts(2)
+        end if
+        if (verts_cv2_rest(1) /= common_vert) then
+            vert2 = verts_cv2_rest(1)
+        else if (verts_cv2_rest(2) /= common_vert) then
+            vert2 = verts_cv2_rest(2)
+        end if
+
+        verts_cv2 = [v1n, common_vert, vert2, vert1]
+
+        call grid%GetFaceNumber(common_vert, vert2, 1, f2_cv2)
+        call grid%GetFaceNumber(vert2, vert1, 1, f3_cv2)
+        call grid%GetFaceNumber(vert1, common_vert, 1, f4_cv2)
+
+        faces_cv2 = [f1_cv1, f2_cv2, f3_cv2, f4_cv2]
+
+        ! Add cell cv2
+        call grid%AddCell(faces_cv2, verts_cv2, c%reg%Get(cv1), cv2)
+
+        end associate
+    end subroutine
+    
+    subroutine SplitT4Stacked(grid, cv, f1n, free_vert, fcs_perp, fcs_al, cv1, cv2)
+
+        ! Description
+        !============
+        ! Splitting a 4 triangle poloidally with stacked method
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAgridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: cv, f1n, free_vert, fcs_perp(:), fcs_al(:)
+        integer(I8), intent(out)        :: cv1, cv2
+
+        ! Auxiliary
+        integer(I8) :: fcP1, fcA1, fcP2, fcA2, s, i
+        integer(I8), allocatable :: fcs(:), range(:), faces_cv1(:), verts_cv1(:), &
+            faces_cv2(:), verts_cv2(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        fcs = GetCellFaceGA(c, cv)
+
+        ! Group correctly
+        if (HaveCommonVert(f, fcs_perp(1), fcs_al(1))) then
+            fcP1 = fcs_perp(1)
+            fcA1 = fcs_al(1)
+            fcP2 = fcs_perp(2)
+            fcA2 = fcs_al(2)
+        else if (HaveCommonVert(f, fcs_perp(1), fcs_al(2))) then
+            fcP1 = fcs_perp(1)
+            fcA1 = fcs_al(2)
+            fcP2 = fcs_perp(2)
+            fcA2 = fcs_al(1)           
+        end if
+
+
+        ! cv1 => 4 triangle become real triangle
+        cv1 = cv
+        faces_cv1 = [ fcA1, fcP1, f1n]
+        s = c%faceP1%Get(cv1)
+        call c%face%Replace(s, s + c%faceP2%Get(cv1) - 1, faces_cv1)
+        call c%faceP2%Set(cv1, size(faces_cv1))
+        range = (/ (i, i = cv1+1, c%faceP1%Size() )/)
+        call c%faceP1%SumMask(range, -1)
+
+        verts_cv1 = [f%vert1%Get(fcA1), f%vert2%Get(fcA1), free_vert]
+        call c%vert%Replace(s, s + c%vertP2%Get(cv1) - 1, verts_cv1)
+        call c%vertP2%Set(cv1, size(verts_cv1))
+        range = (/ (i, i = cv1+1, c%vertP1%Size() )/)
+        call c%vertP1%SumMask(range, -1)
+
+        ! cv2, new cell
+        faces_cv2 = [fcA2, fcP2, f1n]
+        verts_cv2 = [f%vert1%Get(fcA2), f%vert2%Get(fcA2), free_vert]
+
+        ! Add new cell
         call grid%AddCell(faces_cv2, verts_cv2, c%reg%Get(cv1), cv2)
 
         end associate
@@ -9345,7 +10096,7 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: verts_faces_cv, query_faces, &
             ind, pface, verts_pface, faces_cv, verts_cv1, range, query5, &
             faces_cv1, ind1, ind2, ind3, faces_cv2, verts_cv2
-        logical, allocatable :: log(:)
+        logical, allocatable, dimension(:) :: log, log1, log2, log3, log4, log5, log6
 
         ! Associate
         associate(&
@@ -9374,7 +10125,7 @@ module gamod_types
         deallocate(pface)
         if (verts_pface(1) /= v1) then
             verts_cv1(4) = verts_pface(1)
-        else if (verts_pface(1) /= v1) then
+        else if (verts_pface(2) /= v1) then
             verts_cv1(4) = verts_pface(2)
         end if
         vertp = verts_cv1(4)
@@ -9391,14 +10142,20 @@ module gamod_types
         f2_cv1 = f1_new
 
         ! Get third and fourth face
-        query5 = [ (/(i, i = 1, 5)/), (/(i, i = 1, 5)/)]
-        log = (verts_faces_cv == vertp .and. verts_faces_cv == v1)
+        query5 = (/(i, i = 1, 5)/)
+        log1 = (verts_faces_cv == vertp)
+        log2 = (log1(1:5) .or. log1(6:10))
+        log1 = (verts_faces_cv == v1)
+        log3 = (log1(1:5) .or. log1(6:10))
+        log = (log2 .and. log3)
         allocate(ind1(count(log)))
         ind1 = pack(query5, log)
         f3_cv1 = faces_cv(ind1(1))
         deallocate(ind1)
 
-        log = (verts_faces_cv == vertp .and. verts_faces_cv == common_vert)
+        log1 = (verts_faces_cv ==  common_vert)
+        log4 = (log1(1:5) .or. log1(6:10))
+        log = (log2 .and. log4)
         allocate(ind2(count(log)))
         ind2 = pack(query5, log)
         f4_cv1 = faces_cv(ind2(1))
@@ -9412,6 +10169,9 @@ module gamod_types
         call c%faceP2%Set(cv1, size(faces_cv1))
         call c%faceP1%SumMask(range, -1)
 
+        ! Recalculate centroid
+        call grid%CalcCentroidGA(cv1)
+
         ! cv2 => new quad, on the side of f%vert2%Get(face)
         !==================================================
         v2 = f%vert2%Get(face)
@@ -9422,12 +10182,12 @@ module gamod_types
         allocate(ind3(count(verts_faces_cv == v2)))
         ind3 = pack(query_faces, verts_faces_cv == v2)
 
-        allocate(pface(count(ind /= face)))
-        pface = pack(ind, ind /= face)
+        allocate(pface(count(ind3 /= face)))
+        pface = pack(ind3, ind3 /= face)
         verts_pface = [f%vert1%Get(pface(1)), f%vert2%Get(pface(1))]
         if (verts_pface(1) /= v2) then
             verts_cv2(4) = verts_pface(1)
-        else if (verts_pface(1) /= v2) then
+        else if (verts_pface(2) /= v2) then
             verts_cv2(4) = verts_pface(2)
         end if 
         vertp = verts_cv2(4)
@@ -9435,11 +10195,18 @@ module gamod_types
         ! Faces
         f1_cv2 = fc_new
         f2_cv2 = f2_new
-        log = (verts_faces_cv == vertp .and. verts_faces_cv == v2)
+        log1 = (verts_faces_cv == vertp)
+        log5 = (log1(1:5) .or. log1(6:10))        
+        log1 = (verts_faces_cv == v2)
+        log6 = (log1(1:5) .or. log1(6:10))
+        log = (log5 .and. log6)
         allocate(ind1(count(log)))
+        ind1 = pack(query5, log)
         f3_cv2 = faces_cv(ind1(1))
-        log = (verts_faces_cv == vertp .and. verts_faces_cv == common_vert)
+
+        log = (log5 .and. log4)
         allocate(ind2(count(log)))
+        ind2 = pack(query5, log)
         f4_cv2 = faces_cv(ind2(1))
 
         faces_cv2 = [f1_cv2, f2_cv2, f3_cv2, f4_cv2]
@@ -9497,6 +10264,32 @@ module gamod_types
         allocate(perp_faces(count(fcs /= face1 .and. fcs /= face2)))
         perp_faces = pack(fcs, fcs /= face1 .and. fcs /= face2)
         
+    end subroutine
+
+    subroutine DeterminePerpFacePent(grid, cv, Qface, perp_faces)
+
+        ! Description
+        !============
+        ! Get the perpendicular faces from a pentagon by eliminating radial faces face1 and face2
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: cv, Qface
+        integer(I8), allocatable, intent(out)   :: perp_faces(:)
+
+        ! Auxiliary
+        integer(I8) :: n
+        integer(I8), allocatable :: fcs(:)
+
+        ! Get perpendicular faces
+        fcs = GetCellFaceGA(grid%cell, cv)
+        n = 1
+        if (grid%face%aligned%Get(Qface) == 1)  n = 0
+        allocate(perp_faces(count(grid%face%aligned%Get(fcs) == n)))
+        perp_faces = pack(fcs, grid%face%aligned%Get(fcs) == n)
+
     end subroutine
 
     subroutine DetermineFreeVertTria(grid, cv, tface, free_vert)
@@ -10465,7 +11258,7 @@ module gamod_types
                         exit
                     end if
                 end do
-                if (face_num /= 0) exit
+                if (face_num /= 0) return
             end do
 
             ! Create new face if necessary
@@ -10666,12 +11459,14 @@ module gamod_types
             v => grid%vert &
             )
 
+        allocate(v1_nx(1), v1_ny(1), v1_psi(1), v1_bx(1), v1_by(1))
+
         if (.not.present(type)) then
 
             ! Make new vertices at the crossing with psic
             v1 = f%vert1%Get(face)
             v2 = f%vert2%Get(face)
-            v1_nx = 0.5_R8 * (v%x%Get(v1) + v%y%Get(v2))
+            v1_nx = 0.5_R8 * (v%x%Get(v1) + v%x%Get(v2))
             v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
             call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
             call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
@@ -10750,7 +11545,7 @@ module gamod_types
                 else 
 
                     ! Geometric splitting
-                    v1_nx = 0.5_R8 * (v%x%Get(v1) + v%y%Get(v2))
+                    v1_nx = 0.5_R8 * (v%x%Get(v1) + v%x%Get(v2))
                     v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
                     call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
                     call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
@@ -10848,7 +11643,7 @@ module gamod_types
                 else 
 
                     ! Geometric splitting
-                    v1_nx = 0.5_R8 * (v%x%Get(v1) + v%y%Get(v2))
+                    v1_nx = 0.5_R8 * (v%x%Get(v1) + v%x%Get(v2))
                     v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
                     call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
                     call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
@@ -10860,7 +11655,7 @@ module gamod_types
                 ! Geometric splitting
                 v1 = f%vert1%Get(face)
                 v2 = f%vert2%Get(face)
-                v1_nx = 0.5_R8 * (v%x%Get(v1) + v%y%Get(v2))
+                v1_nx = 0.5_R8 * (v%x%Get(v1) + v%x%Get(v2))
                 v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
                 call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
                 call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
@@ -11317,6 +12112,47 @@ module gamod_types
 
     end subroutine
 
+    subroutine CheckFace(f, v1, v2, face_num)
+
+        ! Description
+        !============
+        ! Gives face number of face between two verts if any
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAFaceUDT), intent(in)    :: f
+        integer(I8), intent(in)         :: v1, v2
+        integer(I8), intent(out)        :: face_num
+
+        ! Auxiliary
+        integer(I8) :: i, j
+        integer(I8), allocatable :: fc1(:), fc2(:)
+
+
+        ! Checks
+        if (v1 == v2) call gdErrorHandler('CheckFace: Same vertices')
+
+        ! Initialize
+        face_num = 0
+
+        ! Check wheter face exist
+        fc1 = GetVertFaceGA(f, v1)
+        fc2 = GetVertFaceGA(f, v2)
+
+        ! Search common face
+        do i = 1, size(fc1)
+            do j = 1, size(fc2)
+                if (fc1(i) == fc2(j)) then
+                    face_num = fc1(i)
+                    exit
+                end if
+            end do
+            if (face_num /= 0) exit
+        end do
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                        DISTANCE FUNCTIONS                        !
     !------------------------------------------------------------------! 
@@ -11534,8 +12370,6 @@ module gamod_types
         end associate
 
     end subroutine
-
-
 
     !==================================================================!
     !                                                                  !
