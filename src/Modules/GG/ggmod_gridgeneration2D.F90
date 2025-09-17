@@ -5298,30 +5298,10 @@ module ggmod_gridgeneration2D
             tubec = tube%GetCell(i)
             tubef = tube%GetFace(i)
 
-            ! Get the tube boundary vertices and faces
-            tubebndf1 = tube%GetBndFace(i, 1)
-            tubebndf2 = tube%GetBndFace(i, 2)
-            tubebndv1 = tube%GetBndVert(i, 1)
-            tubebndv2 = tube%GetBndVert(i, 2)
-
-            ! Determine psi values at both sides
-            tubebndval1 = topomesh%fsfval%Get([face%fsID(tubebndf1), vert%fsID(tubebndv1)])
-            tubebndval2 = topomesh%fsfval%Get([face%fsID(tubebndf2), vert%fsID(tubebndv2)])
-            if (minval(tubebndval1) > maxval(tubebndval2)) then 
-                tubehfval = tubebndval1
-                tubelfval = tubebndval2
-                tubehfvert = tubebndv1 
-                tubelfvert = tubebndv2
-            elseif (minval(tubebndval2) > maxval(tubebndval1)) then 
-                tubehfval = tubebndval2
-                tubelfval = tubebndval1
-                tubehfvert = tubebndv2 
-                tubelfvert = tubebndv1
-            else
-                call gdErrorHandler('AddTopologicalMeshGriddingData: ' // & 
-                    'tube psi values seem to overlap, could not determine ' // &
-                    'high and low field value. ')
-            end if 
+            ! Get the tube boundary vertices and faces at high and 
+            ! low field side (according to tube data)
+            tubehfvert = tube%GetHighFluxBndVert(i)
+            tubelfvert = tube%GetLowFluxBndVert(i)
 
             ! Loop over all tube cells
             do j = 1, size(tubec)
@@ -5402,24 +5382,6 @@ module ggmod_gridgeneration2D
                                 'aligned face vertices do not appear only in  ' // & 
                                 'high or low field vertices of tube. Unexpected')
                         end if 
-
-                        !dhf1 = abs(tcfv1val(k) - hfval)
-                        !dhf2 = abs(tcfv2val(k) - hfval)
-                        !dlf1 = abs(tcfv1val(k) - lfval)
-                        !dlf2 = abs(tcfv2val(k) - lfval)
-                        !if ((dhf1 < dlf1) .and. (dhf2 < dlf2)) then 
-                        !    ! High field face
-                        !    ishfface(k) = .true. 
-                        !elseif ((dhf1 > dlf1) .and. (dhf1 > dlf1)) then 
-                        !    ! Low field face
-                        !    islfface(k) = .true. 
-                        !else 
-                        !    ! Undetermined - throw error (should actually
-                        !    ! not happen)
-                        !    call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
-                        !        'could not determine based on field value ' // & 
-                        !        'if poloidal face is high or low field.')
-                        !end if 
                     end if 
                 end do 
 
@@ -5467,15 +5429,10 @@ module ggmod_gridgeneration2D
 
 
                 ! Determine high field and low field vertices (unsorted)
-                ishfvert = abs(tcvfval - hfval) < abs(tcvfval - lfval)
-
-                ! Extract
-                allocate(hffaces(count(ishfface)), lffaces(count(islfface)), &
-                    hfvert(count(ishfvert)), lfvert(count(.not.ishfvert)))
-                hffaces = pack(tcf, ishfface)
-                lffaces = pack(tcf, islfface)
-                hfvert = pack(tcv, ishfvert)
-                lfvert = pack(tcv, .not. ishfvert)
+                hfvert = GetCommonElements(tcv, tubehfvert)
+                lfvert = GetCommonElements(tcv, tubelfvert)
+                allocate(hffaces(0), lffaces(0))
+                ! ishfvert = abs(tcvfval - hfval) < abs(tcvfval - lfval)
 
                 ! Overwrite to sort 
                 if (size(tf1) > 0) then 
@@ -5501,8 +5458,7 @@ module ggmod_gridgeneration2D
 
 
                 ! Housekeeping
-                deallocate(hffaces, lffaces, ishfface, islfface, hfvert, &
-                    lfvert)
+                deallocate(ishfface, islfface, hffaces, lffaces)
             end do 
         end do 
 
@@ -5660,9 +5616,28 @@ module ggmod_gridgeneration2D
             elseif (all(maxval(tubelfval) < tubehfval) .and. all(minval(tubehfval) > tubelfval)) then 
                 ! All good
             else
-                call gdErrorHandler('TraceTopologicalMeshTubeContours: ' // & 
-                    'could not determine high and low flux value of tube, ' // &
-                    'values between hf and lf side seem to overlap')
+                ! Tube values overlap, no point in tracing contours. 
+                ! Just initialize cell data and continue to next tube
+                do k = 1, size(tubec)
+                    ! Check allocation status
+                    if (allocated(celldata(tubec(k))%lines)) deallocate(celldata(tubec(k))%lines)
+                    if (allocated(celldata(tubec(k))%srfvert)) deallocate(celldata(tubec(k))%srfvert)
+                    if (allocated(celldata(tubec(k))%erfvert)) deallocate(celldata(tubec(k))%erfvert)
+
+                    ! Allocate to zero size
+                    allocate(celldata(tubec(k))%lines(0), &
+                        celldata(tubec(k))%srfvert(0), celldata(tubec(k))%erfvert(0))
+
+                    ! Add labels of radial faces
+                    celldata(tubec(k))%srflabel = face%label(tubef(k))
+                    celldata(tubec(k))%erflabel = face%label(tubef(k+1))
+                end do 
+
+                ! Continue to next tube
+                cycle
+                !call gdErrorHandler('TraceTopologicalMeshTubeContours: ' // & 
+                !    'could not determine high and low flux value of tube, ' // &
+                !    'values between hf and lf side seem to overlap')
             end if 
 
             ! Get cell belonging to this face
@@ -6084,8 +6059,15 @@ module ggmod_gridgeneration2D
                                 call gdErrorHandler('AddTopologicalMeshCellGriddingData :' // & 
                                     'expected two open contours, but found less')
                             elseif (count(c1%ID == allIDS) > 2) then 
-                                call gdErrorHandler('AddTopologicalMeshCellGriddingData :' // & 
-                                    'expected two open contours, but found more')
+                                ! Probably crossed a pre-existing saddle 
+                                ! point, remove this contour
+                                print *, 'AddTopologicalMeshCellGriddingData: ' // & 
+                                    'found more than two open contours, ' // & 
+                                    'probably crossed pseudo saddle point that was ' // & 
+                                    'not included in the final topomesh. Removing this contour...'
+                                where (allIDS == c1%ID) keepind = .false. 
+                                iscontourfound(c1%ID) = .true.
+                                cycle
                             end if 
 
                             ! If we got here, only two contours left. 

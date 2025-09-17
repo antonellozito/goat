@@ -177,6 +177,10 @@ module ggmod_topology2D
         procedure :: GetNeig        => GetTMTubeNeig
         procedure :: GetHighFluxNeig    => GetTMTubeHighFluxNeig
         procedure :: GetLowFluxNeig     => GetTMTubeLowFluxNeig
+        procedure :: GetHighFluxBndFace     => GetTMTubeHighFluxBndFace
+        procedure :: GetLowFluxBndFace      => GetTMTubeLowFluxBndFace
+        procedure :: GetHighFluxBndVert     => GetTMTubeHighFluxBndVert
+        procedure :: GetLowFluxBndVert      => GetTMTubeLowFluxBndVert
 
     end type 
 
@@ -438,7 +442,7 @@ module ggmod_topology2D
 
         ! Do temporary writing
         if (options%writedebugoutput) then 
-            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+            call WriteTopologicalMesh(topomesh, 'topomesh_afterextrema_trimmed')
         end if 
 
         ! Process points
@@ -468,16 +472,11 @@ module ggmod_topology2D
 
         ! Do temporary writing
         if (options%writedebugoutput) then 
-            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+            call WriteTopologicalMesh(topomesh, 'topomesh_aftercontours')
         end if 
 
         ! Remove garbage tangency points
         call RemoveGarbageTangencyPoints(topomesh)
-
-        ! Do temporary writing
-        if (options%writedebugoutput) then 
-            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
-        end if 
 
         ! Eliminate limiter-like configurations
         !======================================
@@ -490,7 +489,7 @@ module ggmod_topology2D
 
         ! Do temporary writing
         if (options%writedebugoutput) then 
-            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+            call WriteTopologicalMesh(topomesh, 'topomesh_afterlimiterremoval')
         end if 
 
         ! Add necessary data
@@ -557,19 +556,25 @@ module ggmod_topology2D
                 vessel, fieldtracer, options)
         end if 
 
+        ! Write output
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_aftercoreboundaries', .false.)
+        end if 
+
         ! 'PF' boundaries?
         if (options%addPFboundaries) then 
             call AddTopologicalMeshPFBoundaries(topomesh, magneticField, &
                 vessel, fieldtracer, options)
         end if
 
+        ! Write output
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_afterpfboundaries', .false.)
+        end if 
+
+
         ! Simplify
         call SimplifyTopologicalMeshFaces(topomesh)
-
-        ! Do temporary writing
-        if (options%writedebugoutput) then 
-            call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
-        end if 
 
         ! Compute additional interconnnection data
         !=========================================
@@ -648,11 +653,6 @@ module ggmod_topology2D
         if (options%writedebugoutput) then 
             call WriteTopologicalMesh(topomesh, 'topomesh_afterregion')
         end if 
-
-        ! Do temporary writing
-        if (options%writedebugoutput) then 
-            call WriteTopologicalMesh(topomesh, 'topomesh_afteravp')
-        end if
 
     end subroutine
 
@@ -4119,7 +4119,7 @@ module ggmod_topology2D
         integer(I8), allocatable, dimension(:)  :: tf, tfv, tnb, &
             tfmerge, tnbmerge, tfvu, tfradmerge, &
             thisv, bndt1, bndt2, bndv1, bndv2, bndv, bndvf1, bndvf2, &
-            bndr, bndf
+            bndr, bndf, illegalfsIDs
         real(R8)                                :: dpsi, dpsinb1, dpsinb2, &
             thisdeletedfval, lrad, lradnb1, lradnb2
         real(R8), allocatable, dimension(:)     :: thisvfval
@@ -4127,33 +4127,28 @@ module ggmod_topology2D
         ! Loop
         integer(I8)                             :: i, j
 
-        ! Initialize
-        !===========
-        ! Associate
-        associate(&
-            vert        => topomesh%vert,   &
-            face        => topomesh%face,   &
-            cell        => topomesh%cell,   &
-            tube        => topomesh%tube    &
-            )
-
-        
-
         ! Merge tubes
         !============
         ! General merging
         !----------------
         if (options%mergetubes) then 
+            ! Initialize
             wasmerged = .false.
             appliedsplitting = .false.
+            allocate(illegalfsIDs(0))
+
+            ! Loop until all are merged
             do while (.true.) 
+                ! Write output
                 if (options%writedebugoutput) then 
                     call WriteTopologicalMesh(topomesh, 'topomesh_temp')
                 end if 
+
                 ! Is there a simple merge that can be done? 
                 if (.not. appliedsplitting) then ! skip if we splitted previously, already doing complex merge
                     call MergeTopologicalMeshFluxTubesSimple(topomesh, &
-                        magneticField, fieldtracer, vessel, options, wasmerged)
+                        magneticField, fieldtracer, vessel, options, wasmerged, &
+                        illegalfsIDs)
                     if (wasmerged) then 
                         if (options%writedebugoutput) then 
                             call WriteTopologicalMesh(topomesh, 'topomesh_temp')
@@ -4166,7 +4161,7 @@ module ggmod_topology2D
                 ! Is there a complex merge that can be done?
                 call MergeTopologicalMeshFluxTubesComplex(topomesh, &
                     magneticField, vessel, fieldtracer, options, wasmerged, &
-                    appliedsplitting)
+                    appliedsplitting, illegalfsIDs)
                 if (wasmerged .or. appliedsplitting) then 
                     if (wasmerged) then 
                         if (options%writedebugoutput) then 
@@ -4188,6 +4183,16 @@ module ggmod_topology2D
                 end if 
             end do 
         end if 
+
+        ! Initialize
+        !===========
+        ! Associate
+        associate(&
+            vert        => topomesh%vert,   &
+            face        => topomesh%face,   &
+            cell        => topomesh%cell,   &
+            tube        => topomesh%tube    &
+            )
 
         ! Tangency point tubes
         !---------------------
@@ -4607,8 +4612,6 @@ module ggmod_topology2D
 
         end  if 
 
-        
-
         ! Housekeeping
         !=============
         end associate
@@ -4697,7 +4700,7 @@ module ggmod_topology2D
 
     ! Simple flux tube pair merging
     subroutine MergeTopologicalMeshFluxTubesSimple(topomesh, magneticField, &
-        fieldtracer, vessel, options, wasmerged)
+        fieldtracer, vessel, options, wasmerged, illegalfsIDs)
 
         ! Description
         !============
@@ -4719,6 +4722,7 @@ module ggmod_topology2D
         type(VesselUDT), intent(in)             :: vessel 
         type(TopomeshOptionsUDT), intent(in)    :: options 
         logical, intent(out)                    :: wasmerged 
+        integer(I8), allocatable, intent(inout) :: illegalfsIDs(:)
         
         ! Auxiliary
         integer(I8)                             :: tubepairind 
@@ -4851,7 +4855,7 @@ module ggmod_topology2D
 
             ! Attempt to merge
             call MergeTMTubes(topomesh, [tube1(tubepairind)], [tube2(tubepairind)], &
-                options, wasmerged)
+                options, wasmerged, illegalfsIDs)
 
         end do 
 
@@ -4859,7 +4863,8 @@ module ggmod_topology2D
 
     ! Complex flux tube pair merging
     subroutine MergeTopologicalMeshFluxTubesComplex(topomesh, magneticField, &
-        vessel, fieldtracer, options, wasmerged, appliedsplitting)
+        vessel, fieldtracer, options, wasmerged, appliedsplitting, &
+        illegalfsIDS)
 
         ! Description
         !============
@@ -4887,7 +4892,9 @@ module ggmod_topology2D
         ! 4) Insert contours where applicable into the topomesh and 
         ! rebuild. Go to 1)
 
-        ! Note: in practice, we are agnostic that this routine is called
+        ! Notes
+        !======
+        ! Note 1: in practice, we are agnostic that this routine is called
         ! by an overarching routine that loops until all desired/possible
         ! merges are done. Therefore, in the case of step 3, we only 
         ! apply the splitting operation and then return, setting 
@@ -4895,6 +4902,12 @@ module ggmod_topology2D
         ! case, the overarching routine can recall this function to 
         ! perform the merge, and we avoid having to make this a 
         ! recursive subroutine with possibly undesired side effects
+
+        ! Note 2: we prevent for now merging of tubes that would result
+        ! in a final tube with overlapping psi values. In many 
+        ! conventional setups, this would likely not happen, but for more
+        ! complex vessel geometries this is actually a potentially common 
+        ! case. 
 
         ! Declare variables
         !==================
@@ -4907,14 +4920,18 @@ module ggmod_topology2D
         class(ContourTracerUDT), intent(in)     :: fieldtracer
         logical, intent(out)                    :: wasmerged, &
             appliedsplitting
+        integer(I8), allocatable, intent(inout) :: illegalfsIDs(:)
         
         ! Auxiliary
         integer(I8)                             :: ind, tubepairind
         integer(I8), allocatable, dimension(:)  :: tnb, &
-            tube1, tube2, splittubes
+            tube1, tube2, splittubes, tv, mergefaces
         logical, allocatable, dimension(:)      :: ismarked, &
             ismarkedpair, ishfnb, islfnb, tracetubehf, tracetubelf, &
-            istubefound, issplittable, dolfside, dohfside
+            istubefound, issplittable, dolfside, dohfside, isillegalfsID, &
+            isillegalface, isillegalpair
+        real(R8)                                :: psimin, psimax, &
+            newpsimin, newpsimax
         real(R8), allocatable, dimension(:)     :: dvalpair
         real(R8), allocatable, dimension(:, :)  :: val, lowerbound, &
             dval
@@ -4923,7 +4940,7 @@ module ggmod_topology2D
             tube2ida(:)
 
         ! Loop
-        integer(I8)                             :: i, tpc
+        integer(I8)                             :: i, j, tpc
 
         ! Initialize
         !===========
@@ -4944,7 +4961,15 @@ module ggmod_topology2D
 
         ! Check which tubes are splittable (if not splittable, it is 
         ! mergeable but not necessarily marked)
-        issplittable = all(dval > lowerbound, 2)
+        issplittable = all(dval > 2*lowerbound, 2)
+
+        ! Check if the tube has <= 0 minimal delta psi 
+        do i = 1, topomesh%tube%ntot
+            call GetTMTubePsiLimits(topomesh, i, psimin, psimax, .true.)
+            if (psimin >= psimax) then 
+                issplittable(i) = .false. 
+            end if 
+        end do 
 
         ! Determine mergeable tube pairs
         !===============================
@@ -5180,20 +5205,81 @@ module ggmod_topology2D
         !============
         ! Check if there are any tube pairs that consist fully of 
         ! mergeable pairs (i.e. none are splittable)
-        allocate(ismarkedpair(tpc), dvalpair(tpc))
+        allocate(ismarkedpair(tpc), dvalpair(tpc), isillegalface(topomesh%face%ntot), &
+            isillegalfsID(topomesh%nfs), isillegalpair(tpc))
+        isillegalfsID = .false.
+        isillegalpair = .false.
+        isillegalfsID(illegalfsIDs) = .true.
+        where (topomesh%face%fsID /= 0)
+            isillegalface = isillegalfsID(topomesh%face%fsID)
+        elsewhere
+            isillegalface = .false. 
+        end where
         ismarkedpair = .false. 
         do i = 1, tpc
             ! Get tubes
             tube1 = tube1ida(i)%Get()
             tube2 = tube2ida(i)%Get()
 
-            ! Check
+            ! Check if all tubes are mergeable
             if (.not. any(issplittable([tube1, tube2]))) then 
                 ismarkedpair(i) = .true.
                 dvalpair(i) = minval(dval(tube1, 1)) + minval(dval(tube2, 1))
             else
+                ismarkedpair(i) = .false.
                 dvalpair(i) = posinfval_R8()
             end if 
+
+            ! Check if the merge would result in a tube with 
+            ! overlapping psi values - in that case, don't allow the
+            ! merge
+            newpsimax = posinfval_R8()
+            newpsimin = -posinfval_R8()
+            allocate(mergefaces(0))
+            do j = 1, size(tube1)
+                call GetTMTubePsiLimits(topomesh, tube1(j), psimin, psimax)
+                newpsimax = min(newpsimax, psimax)
+                if (psimin >= psimax) then 
+                    tv = [topomesh%tube%GetBndVert(tube1(j), 1), topomesh%tube%GetBndVert(tube1(j), 2)]
+                    print *, tv
+                    call WriteTopologicalMesh(topomesh, 'topomesh_temp', .false.)
+                    ismarkedpair(i) = .false.
+                    dvalpair(i) = posinfval_R8()
+                end if 
+            end do 
+            do j = 1, size(tube2)
+                call GetTMTubePsiLimits(topomesh, tube2(j), psimin, psimax)
+                newpsimin = max(newpsimin, psimin)
+                if (psimin >= psimax) then 
+                    tv = [topomesh%tube%GetBndVert(tube2(j), 1), topomesh%tube%GetBndVert(tube2(j), 2)]
+                    print *, tv
+                    call WriteTopologicalMesh(topomesh, 'topomesh_temp', .false.)
+                    ismarkedpair(i) = .false.
+                    dvalpair(i) = posinfval_R8()
+                end if 
+            end do 
+            if ((newpsimax - newpsimin) <= 0.0_R8) then 
+                ismarkedpair(i) = .false.
+                isillegalpair(i) = .true. 
+                dvalpair(i) = posinfval_R8()
+            end if 
+
+            ! Check if the merge happens over any illegal flux surface 
+            ! IDs 
+            do j = 1, size(tube1)
+                mergefaces = [mergefaces, topomesh%tube%GetLowFluxBndFace(tube1(j))]
+            end do 
+            do j = 1, size(tube2)
+                mergefaces = [mergefaces, topomesh%tube%GetHighFluxBndFace(tube2(j))]
+            end do 
+            if (any(isillegalface(mergefaces))) then 
+                ismarkedpair(i) = .false.
+                isillegalpair(i) = .true. 
+                dvalpair(i) = posinfval_R8()
+            end if 
+
+            ! Housekeeping
+            deallocate(mergefaces)
         end do
 
         ! If any pairs were found, merge these
@@ -5207,7 +5293,7 @@ module ggmod_topology2D
 
             ! Attempt to merge
             call MergeTMTubes(topomesh, tube1ida(tubepairind)%Get(), tube2ida(tubepairind)%Get(), &
-                options, wasmerged)
+                options, wasmerged, illegalfsIDs)
 
         end do 
 
@@ -5223,16 +5309,18 @@ module ggmod_topology2D
 
             ! Check if we should apply any splitting
             do i = 1, tpc
-                ! Get tubes
-                tube1 = tube1ida(i)%Get()
-                tube2 = tube2ida(i)%Get()
-                
-                ! Check which side to split
-                if (any(ismarked(tube1)) .or. any(ismarked(tube2))) then ! tube 1 is hf side
-                    dohfside(tube2) = .true. ! Need to split at high flux side of tube 2
-                    dolfside(tube1) = .true. ! Need to split at low field side of tube 1 
-                    call splittubesida%Append(pack(tube2, issplittable(tube2)))
-                    call splittubesida%Append(pack(tube1, issplittable(tube1)))
+                if (.not. isillegalpair(i)) then ! Don't allow splitting for illegal pairs - will lead to cyclic behavior of merge/split!
+                    ! Get tubes
+                    tube1 = tube1ida(i)%Get()
+                    tube2 = tube2ida(i)%Get()
+                    
+                    ! Check which side to split
+                    if (any(ismarked(tube1)) .or. any(ismarked(tube2))) then ! tube 1 is hf side
+                        dohfside(tube2) = .true. ! Need to split at high flux side of tube 2
+                        dolfside(tube1) = .true. ! Need to split at low field side of tube 1 
+                        call splittubesida%Append(pack(tube2, issplittable(tube2)))
+                        call splittubesida%Append(pack(tube1, issplittable(tube1)))
+                    end if 
                 end if 
             end do
 
@@ -5248,7 +5336,8 @@ module ggmod_topology2D
     end subroutine
 
     ! Topological tube merging operator 
-    subroutine MergeTMTubes(topomesh, tubes1, tubes2, options, wasmerged)
+    subroutine MergeTMTubes(topomesh, tubes1, tubes2, options, &
+        wasmerged, illegalfsIDs)
 
         ! Description
         !============
@@ -5352,6 +5441,7 @@ module ggmod_topology2D
         integer(I8), dimension(:), intent(in)       :: tubes1, tubes2
         type(TopomeshOptionsUDT), intent(in)        :: options
         logical, intent(out)                        :: wasmerged
+        integer(I8), allocatable, intent(inout)     :: illegalfsIDs(:)
 
         ! Auxiliary
         integer(I8)                                 :: ne
@@ -5389,50 +5479,16 @@ module ggmod_topology2D
         ! Get all high and low field faces of tubes
         allocate(hfface1(0), hfface2(0), lfface1(0), lfface2(0))
         do i = 1, size(tubes1)
-            ! Boundary faces
-            tf1 = tube%GetBndFace(tubes1(i), 1)
-            tf2 = tube%GetBndFace(tubes1(i), 2)
-
-            ! Boundary vert
-            tv1 = tube%GetBndVert(tubes1(i), 1)
-            tv2 = tube%GetBndVert(tubes1(i), 2)
-
-            ! Check if high field or low field
-            tf1psi = [topomesh%fsfval%Get(face%fsID(tf1)), topomesh%vert%fval(tv1)]
-            tf2psi = [topomesh%fsfval%Get(face%fsID(tf2)), topomesh%vert%fval(tv2)]
-            if (all(minval(tf1psi) >= tf2psi)) then 
-                hfface1 = [hfface1, tf1]
-                lfface1 = [lfface1, tf2]
-            elseif (all(minval(tf2psi) >= tf1psi)) then 
-                hfface1 = [hfface1, tf2]
-                lfface1 = [lfface1, tf1]
-            else
-                call gdErrorHandler('MergeTMTubes: could not distinguish ' // & 
-                    'between low and high field side of tube')
-            end if 
+            tf1 = tube%GetHighFluxBndFace(tubes1(i))
+            tf2 = tube%GetLowFluxBndFace(tubes1(i))
+            hfface1 = [hfface1, tf1]
+            lfface1 = [lfface1, tf2]
         end do 
         do i = 1, size(tubes2)
-            ! Boundary faces
-            tf1 = tube%GetBndFace(tubes2(i), 1)
-            tf2 = tube%GetBndFace(tubes2(i), 2)
-
-            ! Boundary vert
-            tv1 = tube%GetBndVert(tubes2(i), 1)
-            tv2 = tube%GetBndVert(tubes2(i), 2)
-
-            ! Check if high field or low field
-            tf1psi = [topomesh%fsfval%Get(face%fsID(tf1)), topomesh%vert%fval(tv1)]
-            tf2psi = [topomesh%fsfval%Get(face%fsID(tf2)), topomesh%vert%fval(tv2)]
-            if (all(minval(tf1psi) >= tf2psi)) then 
-                hfface2 = [hfface2, tf1]
-                lfface2 = [lfface2, tf2]
-            elseif (all(minval(tf2psi) >= tf1psi)) then 
-                hfface2 = [hfface2, tf2]
-                lfface2 = [lfface2, tf1]
-            else
-                call gdErrorHandler('MergeTMTubes: could not distinguish ' // & 
-                    'between low and high field side of tube')
-            end if 
+            tf1 = tube%GetHighFluxBndFace(tubes2(i))
+            tf2 = tube%GetLowFluxBndFace(tubes2(i))
+            hfface2 = [hfface2, tf1]
+            lfface2 = [lfface2, tf2]
         end do 
 
         ! Sanity checks
@@ -5553,7 +5609,7 @@ module ggmod_topology2D
         if (isbranchingmerge) then 
             ! Separatrix merge 
             call MergeTMTubesS(topomesh, tubes1, tubes2, &
-                mergefaces, wasmerged)
+                mergefaces, wasmerged, illegalfsIDs)
 
             ! Issue message in case of failure
             if (.not. wasmerged) then 
@@ -5581,7 +5637,7 @@ module ggmod_topology2D
 
                     ! Closed-closed merge
                     call MergeTMTubesCC(topomesh, tubes1(1), tubes2(1), &
-                        mergefaces, wasmerged)
+                        mergefaces, wasmerged, illegalfsIDS)
 
                     ! Issue message in case of failure
                     if (.not. wasmerged) then 
@@ -5592,7 +5648,7 @@ module ggmod_topology2D
 
                     ! Open-closed merge
                     call MergeTMTubesOC(topomesh, tubes1(1), tubes2(1), &
-                        mergefaces, wasmerged)
+                        mergefaces, wasmerged, illegalfsIDs)
 
                     ! Issue message in case of failure
                     if (.not. wasmerged) then 
@@ -5603,7 +5659,7 @@ module ggmod_topology2D
 
                     ! Open-closed merge
                     call MergeTMTubesOC(topomesh, tubes1(1), tubes2(1), &
-                        mergefaces, wasmerged)
+                        mergefaces, wasmerged, illegalfsIDs)
 
                     ! Issue message in case of failure
                     if (.not. wasmerged) then 
@@ -5622,7 +5678,7 @@ module ggmod_topology2D
             else
                 ! Open-open merge
                 call MergeTMTubesOO(topomesh, tubes1, tubes2, mergefaces, &
-                    wasmerged)
+                    wasmerged, illegalfsIDs)
 
                 ! Issue message in case of failure
                 if (.not. wasmerged) then 
@@ -5636,7 +5692,7 @@ module ggmod_topology2D
 
     ! Closed-closed flux tube pair merging (non-separatrix)
     subroutine MergeTMTubesCC(topomesh, tube1, tube2, mergefaces, &
-        wasmerged)
+        wasmerged, illegalfsIDs)
 
         ! Description
         !============
@@ -5662,6 +5718,7 @@ module ggmod_topology2D
         integer(I8), intent(in)                 :: tube1, tube2
         integer(I8), dimension(:), intent(in)   :: mergefaces
         logical, intent(out)                    :: wasmerged
+        integer(I8), allocatable, intent(inout) :: illegalfsIDs(:)
 
         ! Auxiliary
         logical, allocatable, dimension(:)      :: remf, remv
@@ -5756,7 +5813,7 @@ module ggmod_topology2D
 
     ! Open-closed flux tube pair merging (non-separatrix)
     subroutine MergeTMTubesOC(topomesh, tube1, tube2, mergefaces, &
-        wasmerged)
+        wasmerged, illegalfsIDs)
 
         ! Description
         !============
@@ -5789,6 +5846,7 @@ module ggmod_topology2D
         integer(I8), intent(in)                 :: tube1, tube2
         integer(I8), dimension(:), intent(in)   :: mergefaces
         logical, intent(out)                    :: wasmerged
+        integer(I8), allocatable, intent(inout) :: illegalfsIDs(:)
 
         ! Auxiliary
         logical, allocatable, dimension(:)      :: remf, remv
@@ -5826,6 +5884,9 @@ module ggmod_topology2D
                 'open tube are vessel boundary faces, unexpected')
         end if 
         topomesh%face%type(tf([1, size(tf)])) = TMfacealbndID 
+
+        ! Assign flux surface IDs (just take one of the vertices...)
+        topomesh%face%fsID(tf([1, size(tf)])) = topomesh%vert%fsID(topomesh%face%vert(tf(1), 1))
 
         ! Mark merge faces for removal
         remf(mergefaces) = .true. 
@@ -5878,7 +5939,7 @@ module ggmod_topology2D
 
     ! Open-open flux tube pair merging (non-separatrix)
     subroutine MergeTMTubesOO(topomesh, tube1, tube2, mergefaces, &
-        wasmerged)
+        wasmerged, illegalfsIDs)
 
         ! Description
         !============
@@ -5921,6 +5982,19 @@ module ggmod_topology2D
         ! but don't remove any boundary merge faces
         ! 5) Rebuild the topomesh
 
+        ! Notes
+        !======
+        ! Note 1: in this type of merge, it is actually possible to 
+        ! form tubes that have overlapping psi values between high and
+        ! low flux side. This is not desireable, since these tubes 
+        ! have maximally zero radial length/delta psi and will therefore
+        ! always pop up in a merge, leading to excessive tube merging.
+        ! Hence, it also leads to excessively coarse grids. Therefore, 
+        ! we will not perform the merge if this case is detected 
+        ! (a message will be shown). Flux surface IDs of the merge 
+        ! faces will be added to the illegal flux surfaces to merge 
+        ! over (these should not change during topomesh adaptations)
+
         ! Declare variables
         !==================
         ! Arguments
@@ -5928,6 +6002,7 @@ module ggmod_topology2D
         integer(I8), dimension(:), intent(in)   :: mergefaces, tube1, &
             tube2
         logical, intent(out)                    :: wasmerged
+        integer(I8), allocatable, intent(inout) :: illegalfsIDs(:)
 
         ! Auxiliary
         logical, allocatable, dimension(:)      :: remf, remv
@@ -5936,14 +6011,15 @@ module ggmod_topology2D
         integer(I8), allocatable, dimension(:)  :: tf, tfb, &
             nonbndmergefaces, tempi, tfbv, mergevert, sortind, &
             polygonID, bndvert1, bndvert2, bndvert3, bndvert4, &
-            tvf, tempf, avpfsID, tv, tvfsID
+            tvf, tempf, avpfsID, tv, tvfsID, bndf1, bndf2, &
+            bndfv1, bndfv2
         integer(I8), allocatable, dimension(:, :)   :: tfv
         logical                                 :: noalignedfacev1tov2, &
             noalignedfacev2tov1
         logical, allocatable, dimension(:)      :: ispolygonstart, &
-            isbranchingpolygon, isavp, retypevert, iscurrentavp
+            isbranchingpolygon, isavp, retypevert, isbndf1, isbndf2
         real(R8), allocatable, dimension(:)     :: mergepsival, tpsi, &
-            dpsi, tvfval
+            dpsi, tvfval, psibnd1, psibnd2
         type(IntegerDynamicArrayUDT)            :: tfbida
 
         ! Loop
@@ -6051,8 +6127,11 @@ module ggmod_topology2D
         noalignedfacev1tov2 = .false.
         noalignedfacev2tov1 = .false.
         allocate(bndvert1(0), bndvert2(0), bndvert3(0), bndvert4(0))
-        allocate(isavp(size(tfb)), avpfsID(size(tfb)), iscurrentavp(size(tfb)))
+        allocate(isavp(size(tfb)), avpfsID(size(tfb)), isbndf1(size(tfb)), &
+            isbndf2(size(tfb)))
         isavp = .true. ! will be set to false where applicable later
+        isbndf1 = .true.
+        isbndf2 = .true. 
         avpfsID = 0 ! flux surface ID for aligned vessel parts
         where (.not. (topomesh%face%type(tfb) == TMfacebndID)) isavp = .false. ! also ignore non-vessel boundaries
 
@@ -6068,6 +6147,17 @@ module ggmod_topology2D
                 'not appear in tube polygon, unexpected')
         end if
 
+        ! Set logicals determining boundary faces to false where necessary
+        if (ind1 < ind2) then 
+            isbndf1(1:max(ind1-1, 1)) = .false.
+            isbndf1(min(ind2, size(tfb)):) = .false.
+            isbndf2 = .not. isbndf1
+        else
+            isbndf2(1:max(ind2-1, 1)) = .false.
+            isbndf2(min(ind1, size(tfb)):) = .false.
+            isbndf1= .not. isbndf2
+        end if 
+
         ! Step 'forward' for v1 
         k = ind1
         bndvert1 = [bndvert1, tfbv(k)]
@@ -6080,8 +6170,8 @@ module ggmod_topology2D
 
             ! Check if it is a vessel boundary
             if (topomesh%face%type(thisf) == TMfacebndID) then 
-                isavp(k) = .false. 
-                iscurrentavp(k) = .false.
+                isavp(k) = .false.
+                isbndf1(k) = .false.  
             elseif (any(topomesh%face%type(thisf) == TMfacealignedID)) then 
                 ! Aligned boundary found, exit
                 exit
@@ -6117,6 +6207,7 @@ module ggmod_topology2D
             ! Check if it is a vessel boundary
             if (topomesh%face%type(thisf) == TMfacebndID) then 
                 isavp(k) = .false. 
+                isbndf2(k) = .false. ! stepping along other side now!
             elseif (any(topomesh%face%type(thisf) == TMfacealignedID)) then 
                 ! Aligned boundary found, exit
                 exit
@@ -6146,6 +6237,7 @@ module ggmod_topology2D
             ! Check if it is a vessel boundary
             if (topomesh%face%type(thisf) == TMfacebndID) then 
                 isavp(k) = .false. 
+                isbndf2(k) = .false. 
             elseif (any(topomesh%face%type(thisf) == TMfacealignedID)) then 
                 ! Aligned boundary found, exit
                 exit
@@ -6181,6 +6273,7 @@ module ggmod_topology2D
             ! Check if it is a vessel boundary
             if (topomesh%face%type(thisf) == TMfacebndID) then 
                 isavp(k) = .false. 
+                isbndf1(k) = .false. ! Stepping along other side now!
             elseif (any(topomesh%face%type(thisf) == TMfacealignedID)) then 
                 ! Aligned boundary found, exit
                 exit
@@ -6206,6 +6299,110 @@ module ggmod_topology2D
                 'in tube with no aligned faces, not yet supported')
         end if 
 
+        ! Check if resulting tube would lead to overlapping psi values. 
+        ! If so, abort the merge
+        if (noalignedfacev1tov2) then 
+            ! Normally no faces present, but check
+            if (any(isbndf1)) then 
+                call gdErrorHandler('MergeTMTubesOO: aligned faces found ' // & 
+                    'for boundary 1 though there should not be any')
+            end if 
+
+            ! Get the tangency point
+            ! Sanity check
+            if (all(topomesh%vert%type(bndvert1) /= TMvertextp1ID)) then 
+                call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                print *, 'vertices: ', bndvert1
+                call gdErrorHandler('MergeTMTubesOO: expected to have ' // & 
+                    'at least one tangency point type 1 in boundary but ' // & 
+                    'found none')
+            end if 
+
+            ! Determine tangency point type 1 vertex with maximal distance
+            ! to merge boundary
+            tpsi = topomesh%vert%fval(bndvert1)
+            dpsi = abs(maxval(mergepsival) - tpsi)
+            where (topomesh%vert%type(bndvert1) /= TMvertextp1ID) dpsi = -posinfval_R8()
+            psibnd1 = [tpsi(maxloc(dpsi))]
+            
+        else
+            ! Sanity check
+            if (.not. any (isbndf1 .and. (topomesh%face%type(tfb) /= TMfacealbndID))) then 
+                call gdErrorHandler('MergeTMTubesOO: expected to have ' // & 
+                    'at least one non-vessel aligned boundary face on side 1 but found ' // &
+                    'none')
+            end if 
+
+            ! Get boundary faces
+            allocate(bndf1(count(isbndf1)))
+            bndf1 = pack(tfb, isbndf1)
+            bndf1 = pack(bndf1, topomesh%face%type(bndf1) /= TMfacealbndID) ! remove aligned boundaries
+            bndfv1 = [topomesh%face%vert(bndf1, 1), topomesh%face%vert(bndf1, 2)]
+            psibnd1 = topomesh%vert%fval(bndfv1)
+
+            ! Housekeeping
+            deallocate(bndf1)
+        end if 
+        if (noalignedfacev2tov1) then 
+            ! Normally no faces present, but check
+            if (any(isbndf2)) then 
+                call gdErrorHandler('MergeTMTubesOO: aligned faces found ' // & 
+                    'for boundary 2 though there should not be any')
+            end if 
+
+            ! Get the tangency point
+            ! Sanity check
+            if (all(topomesh%vert%type(bndvert2) /= TMvertextp1ID)) then 
+                call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                print *, 'vertices: ', bndvert2
+                call gdErrorHandler('MergeTMTubesOO: expected to have ' // & 
+                    'at least one tangency point type 1 in boundary but ' // & 
+                    'found none')
+            end if 
+
+            ! Determine tangency point type 1 vertex with maximal distance
+            ! to merge boundary
+            tpsi = topomesh%vert%fval(bndvert2)
+            dpsi = abs(maxval(mergepsival) - tpsi)
+            where (topomesh%vert%type(bndvert1) /= TMvertextp1ID) dpsi = -posinfval_R8()
+            psibnd2 = [tpsi(maxloc(dpsi))]
+            
+        else
+            ! Sanity check
+            if (.not. any (isbndf2 .and. (topomesh%face%type(tfb) /= TMfacealbndID))) then 
+                call gdErrorHandler('MergeTMTubesOO: expected to have ' // & 
+                    'at least one non-vessel aligned boundary face on side 2 but found ' // &
+                    'none')
+            end if 
+
+            ! Get boundary faces
+            allocate(bndf2(count(isbndf2)))
+            bndf2 = pack(tfb, isbndf2)
+            bndf2 = pack(bndf2, topomesh%face%type(bndf2) /= TMfacealbndID) ! remove aligned boundaries
+            bndfv2 = [topomesh%face%vert(bndf2, 1), topomesh%face%vert(bndf2, 2)]
+            psibnd2 = topomesh%vert%fval(bndfv2)
+
+            ! Housekeeping
+            deallocate(bndf2)
+        end if
+        if (.false.) then 
+            if (all(minval(psibnd1) > psibnd2)) then 
+                ! All good, boundary 1 is high flux boundary
+            elseif (all(minval(psibnd2) > psibnd1)) then 
+                ! All good, boundary 2 is high flux boundary
+            else
+                ! Overlapping psi values, print message, add flux surface IDs
+                ! of non-boundary faces to illegal ones and exit
+                print *, 'MergeTMTubesOO: merging of tubes would lead to ' // & 
+                    'tube with overlapping psi values, not merging...'
+                illegalfsIDs = [illegalfsIDs, topomesh%face%fsID(nonbndmergefaces)]
+                wasmerged = .false.     
+                return 
+            end if   
+        end if     
+
+        ! Retype faces
+        !=============
         ! Check which vessel parts to align and determine flux surface IDs
         if (any(isavp)) then 
             si = 0
@@ -6246,7 +6443,6 @@ module ggmod_topology2D
             end do 
         end if 
         
-
         ! Retype vertices 
         !================
         ! First part
@@ -6384,7 +6580,7 @@ module ggmod_topology2D
 
     ! Separatrix flux tube pair merging 
     subroutine MergeTMTubesS(topomesh, tube1, tube2, mergefaces, &
-        wasmerged)
+        wasmerged, illegalfsIDs)
 
         ! Description
         !============
@@ -6400,6 +6596,7 @@ module ggmod_topology2D
         type(TopomeshUDT), intent(inout)        :: topomesh
         integer(I8), dimension(:), intent(in)   :: mergefaces, tube1, tube2
         logical                                 :: wasmerged
+        integer(I8), allocatable, intent(inout) :: illegalfsIDs(:)
 
         ! Initialize
         !===========
@@ -6492,14 +6689,14 @@ module ggmod_topology2D
         lowerbound = lowerbound(tubes, :)
 
         ! Sanity checks
-        dval = val - 2*lowerbound ! if negative, then tube shouldn't have been marked for splitting
+        dval = val - 3*lowerbound ! if negative, then tube shouldn't have been marked for splitting
         if (any(dval < 0.0_R8)) then 
             call gdErrorHandler('SplitTMTubesMergeCriterionBased: tubes ' // & 
                 'were marked for splitting that are not wide enough, cannot continue')
         end if 
 
         ! Check for cases where both hf and lf should be traced if val > 3*lowerbound
-        where (dohfside .and. dolfside .and. (any(val < 3*lowerbound, 2))) tracelf = .false. 
+        where (dohfside .and. dolfside .and. (any(val < 4*lowerbound, 2))) tracelf = .false. 
 
         ! Sanity check: only 2 criteria implemented currently
         if (size(val, 2) /= 2) then 
@@ -6666,8 +6863,7 @@ module ggmod_topology2D
                 
                 ! Reformat into single contour
                 if (size(tempc) == 1) then 
-                    ! Add
-                    allc = [allc, tempc(1)]
+                    ! Do nothing, will add later on
                 elseif (size(tempc) == 2) then 
                     ! Should be open contour
                     if (topomesh%tube%isclosed(tracetubes(i))) then 
@@ -6799,7 +6995,6 @@ module ggmod_topology2D
 
             elseif (allc(i)%isclosed .and. topomesh%tube%isclosed(tubeind(i))) then 
                 ! Should be fine, nothing to check
-                cycle
 
             else ! both are open
                 ! Check which ones to keep
@@ -8947,15 +9142,15 @@ module ggmod_topology2D
             mfinterp    => magneticField%interp)
 
         ! Rebuild the vessel description to be sure
-            allocate(bndpol(count((topomesh%face%type == TMfacebndID) .or. &
-                (topomesh%face%type == TMfacealbndID))))
-            bndpol = pack(topomesh%face%pol, (topomesh%face%type == TMfacebndID) .or. &
-                (topomesh%face%type == TMfacealbndID))
-            call bndps%Construct(bndpol)
-            call ConstructVesselPolygonSet(vessel, bndps)
-            allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
-            call InitializePolygonLevelsetFunction2D(vessel%plfvessel, &
-                vessel%polygonset, bndplfoptions)
+        !    allocate(bndpol(count((topomesh%face%type == TMfacebndID) .or. &
+        !        (topomesh%face%type == TMfacealbndID))))
+        !    bndpol = pack(topomesh%face%pol, (topomesh%face%type == TMfacebndID) .or. &
+        !        (topomesh%face%type == TMfacealbndID))
+        !    call bndps%Construct(bndpol)
+        !    call ConstructVesselPolygonSet(vessel, bndps)
+        !    allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
+        !    call InitializePolygonLevelsetFunction2D(vessel%plfvessel, &
+        !        vessel%polygonset, bndplfoptions)
 
         ! Vertices
         !=========
@@ -12023,6 +12218,7 @@ module ggmod_topology2D
             
             if (any(face%fsID(tf1) == 0) .or. any(face%fsID(tf2) == 0)) then 
                 print *, 'something weird'
+                call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
             end if 
 
             ! Get all flux values (include vertex values for tangency point cases)
@@ -12055,11 +12251,38 @@ module ggmod_topology2D
                 ! Also set hfside
                 tube%hfside(i) = 2
             else
-                ! Something wrong, shouldn't be happening
-                print *, 'tube: ', i
-                call gdErrorHandler('AddTopologicalMeshTubeData: ' // & 
+                ! May originate due to merging. In that case, compare
+                ! extremal values
+                call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
+                print *, 'vertices: ', [tv1, tv2]
+                print *, 'AddTopologicalMeshTubeData: ' // & 
                     'boundaries of tube have different psi values and ' // & 
-                    'overlap - could not distinguish between low and high field side')
+                    'overlap - trying to distinguish based on maximal and ' // & 
+                    'minimal value. This may happen during tube merging...'
+                if (all(maxval(tpsi1) > tpsi2)) then 
+                    ! First boundary is high field boundary 
+                    ev1 = [ev1, tnb1]
+                    ev2 = [ev2, spread(i, 1, size(tnb1))]
+                    
+                    ev1 = [ev1, spread(i, 1, size(tnb2))]
+                    ev2 = [ev2, tnb2]
+
+                    ! Also set hfside
+                    tube%hfside(i) = 1
+                else
+                    ! Second boundary is high field boundary 
+                    ev1 = [ev1, tnb2]
+                    ev2 = [ev2, spread(i, 1, size(tnb2))]
+                    
+                    ev1 = [ev1, spread(i, 1, size(tnb1))]
+                    ev2 = [ev2, tnb1]
+
+                    ! Also set hfside
+                    tube%hfside(i) = 2
+                end if 
+
+                
+
             end if 
 
         end do 
@@ -12796,6 +13019,54 @@ module ggmod_topology2D
             res = tube%bndf1(tube%bndf1P(i, 1):(tube%bndf1P(i, 1) + tube%bndf1P(i, 2) - 1))
         else 
             res = tube%bndf2(tube%bndf2P(i, 1):(tube%bndf2P(i, 1) + tube%bndf2P(i, 2) - 1))
+        end if 
+    end function
+
+    function GetTMTubeHighFluxBndFace(tube, i) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i
+        integer(I8), allocatable    :: res(:)
+        
+        if (tube%hfside(i) == 1) then 
+            res = tube%bndf1(tube%bndf1P(i, 1):(tube%bndf1P(i, 1) + tube%bndf1P(i, 2) - 1))
+        else 
+            res = tube%bndf2(tube%bndf2P(i, 1):(tube%bndf2P(i, 1) + tube%bndf2P(i, 2) - 1))
+        end if 
+    end function
+
+    function GetTMTubeLowFluxBndFace(tube, i) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i
+        integer(I8), allocatable    :: res(:)
+        
+        if (tube%hfside(i) == 1) then 
+            res = tube%bndf2(tube%bndf2P(i, 1):(tube%bndf2P(i, 1) + tube%bndf2P(i, 2) - 1))
+        else 
+            res = tube%bndf1(tube%bndf1P(i, 1):(tube%bndf1P(i, 1) + tube%bndf1P(i, 2) - 1))
+        end if 
+    end function
+
+    function GetTMTubeHighFluxBndVert(tube, i) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i
+        integer(I8), allocatable    :: res(:)
+
+        if (tube%hfside(i) == 1) then 
+            res = tube%bndv1(tube%bndv1P(i, 1):(tube%bndv1P(i, 1) + tube%bndv1P(i, 2) - 1))
+        else 
+            res = tube%bndv2(tube%bndv2P(i, 1):(tube%bndv2P(i, 1) + tube%bndv2P(i, 2) - 1))
+        end if 
+    end function
+
+    function GetTMTubeLowFluxBndVert(tube, i) result(res)
+        class(TopomeshTubeUDT)      :: tube
+        integer(I8), intent(in)     :: i
+        integer(I8), allocatable    :: res(:)
+
+        if (tube%hfside(i) == 2) then 
+            res = tube%bndv1(tube%bndv1P(i, 1):(tube%bndv1P(i, 1) + tube%bndv1P(i, 2) - 1))
+        else 
+            res = tube%bndv2(tube%bndv2P(i, 1):(tube%bndv2P(i, 1) + tube%bndv2P(i, 2) - 1))
         end if 
     end function
 
@@ -13544,8 +13815,10 @@ module ggmod_topology2D
                     deallocate(tf, sortind, ispolygonstart, isbranchingpolygon)
                     cycle
                 elseif (count(ispolygonstart) > 1) then 
-                    call gdErrorHandler('GetClosedContourTangencyPointIDs: ' // & 
-                        'found multiple polygons, unexpected')
+                    ! Possible if aligned vessel parts were inserted, 
+                    ! skip
+                    deallocate(tf, sortind, ispolygonstart, isbranchingpolygon)
+                    cycle
                 end if 
                 if (count(isbranchingpolygon) /= 0) then 
                     call gdErrorHandler('GetClosedContourTangencyPointIDs: ' // &
@@ -13958,7 +14231,7 @@ module ggmod_topology2D
 
     end function
 
-    subroutine GetTMTubePsiLimits(topomesh, tubeID, psimin, psimax)
+    subroutine GetTMTubePsiLimits(topomesh, tubeID, psimin, psimax, includealbndin)
 
         ! Description
         !============
@@ -13969,21 +14242,37 @@ module ggmod_topology2D
         ! whatever reason, the psi values overlap, then psimin will be 
         ! larger than psimax and a message will be shown. 
 
+        ! Note: contributions of aligned boundary faces are no longer
+        ! included here by default. The reason is that this routine is used to
+        ! compute merging criteria, and aligned boundaries cannot be 
+        ! merged away. We should find a more elegant solution at some 
+        ! point... If aligned boundaries should be included, one can 
+        ! use the optional argument includealbndin and set it to .true. 
+
         ! Declare variables
         !==================
         ! Arguments
         type(TopomeshUDT), intent(in)           :: topomesh 
         integer(I8), intent(in)                 :: tubeID
         real(R8), intent(out)                   :: psimin, psimax
+        logical, intent(in), optional           :: includealbndin
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:)  :: tf1, tf2, tv1, tv2
         real(R8), allocatable, dimension(:)     :: psi1, psi2
+        logical                                 :: includealbnd
 
         ! Loop
 
         ! Initialize
         !===========
+        ! Check if we should include aligned boundaries 
+        if (present(includealbndin)) then 
+            includealbnd = includealbndin
+        else
+            includealbnd = .false. 
+        end if 
+
         ! Unpack for ease
         associate(&
             tube        => topomesh%tube,   &
@@ -13999,12 +14288,38 @@ module ggmod_topology2D
         tv1 = tube%GetBndVert(tubeID, 1)
         tv2 = tube%GetBndVert(tubeID, 2)
 
-        ! Keep only vertices and faces with non-zero ID (should 
-        ! always be the case actually)
-        tf1 = pack(tf1, face%fsID(tf1) /= 0)
-        tf2 = pack(tf2, face%fsID(tf2) /= 0)
-        tv1 = pack(tv1, vert%fsID(tv1) /= 0)
-        tv2 = pack(tv2, vert%fsID(tv2) /= 0)
+        if (includealbnd) then 
+            ! Keep only vertices and faces with non-zero ID and any 
+            ! vertices that are not type 1 tangency points
+            tf1 = pack(tf1, (face%fsID(tf1) /= 0))
+            tf2 = pack(tf2, (face%fsID(tf2) /= 0))
+            tv1 = pack(tv1, vert%fsID(tv1) /= 0) ! keep all vertices with flux surface ID - flux surface value of aligned boundaries may be inaccurate
+            tv2 = pack(tv2, vert%fsID(tv2) /= 0)
+        else
+            ! Keep only vertices and faces with non-zero ID and remove any
+            ! faces that are aligned boundaries and any vertices that are not 
+            ! type 1 tangency points
+            tf1 = pack(tf1, (face%fsID(tf1) /= 0) .and. (face%type(tf1) /= TMfacealbndID))
+            tf2 = pack(tf2, (face%fsID(tf2) /= 0) .and. (face%type(tf2) /= TMfacealbndID))
+            tv1 = pack(tv1, vert%type(tv1) == TMvertextp1ID .or. &
+                vert%type(tv1) == TMvertexminID .or. vert%type(tv1) == TMvertexmaxID) !only keep type 1 TPs, max and min
+            tv2 = pack(tv2, vert%type(tv2) == TMvertextp1ID .or. &
+                vert%type(tv2) == TMvertexminID .or. vert%type(tv2) == TMvertexmaxID)
+        end if 
+
+        ! Check
+        if ((size(tf1) + size(tv1)) == 0) then 
+            ! Should not happen
+            call WriteTopologicalMesh(topomesh, 'topomesh_error')
+            call gdErrorHandler('GetTMTubePsiLimits: tube has only aligned ' // &
+                'boundary faces as neighbour at side 1, unexpected')
+        end if 
+        if ((size(tf2) + size(tv2)) == 0) then 
+            ! Should not happen
+            call WriteTopologicalMesh(topomesh, 'topomesh_error')
+            call gdErrorHandler('GetTMTubePsiLimits: tube has only aligned ' // &
+                'boundary faces as neighbour at side 2, unexpected')
+        end if 
 
         ! Get psi values
         psi1 = [topomesh%fsfval%Get(vert%fsID(tv1)), topomesh%fsfval%Get(face%fsID(tf1))]
@@ -14116,6 +14431,10 @@ module ggmod_topology2D
             xf = face%x(tubef(i))%Get()
             yf = face%y(tubef(i))%Get()
             psif = GetTMFacePsiValueDistribution(topomesh, fieldtracer, tubef(i))
+
+            ! Hedge for psimin/psimax not lying on this face
+            psimin = max(psimin, minval(psif))
+            psimax = min(psimax, maxval(psif))
 
             ! Compute the monotonized face radial length distribution
             dlcradf = GetTMFaceRadialLengthDistribution(topomesh, fieldtracer, &
