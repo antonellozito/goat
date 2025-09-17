@@ -1339,7 +1339,7 @@ contains
         class(IntegerDynamicArrayUDT)   :: ida
         integer(ik), intent(in)         :: loc_begin
         integer(ik), intent(in)         :: loc_end
-        integer(ik), allocatable        :: val(:)
+        integer(ik)                     :: val(:)
 
         ! Auxiliary
         integer(ik), allocatable           :: temp1(:), temp2(:)
@@ -2301,7 +2301,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayBufferedUDT)          :: ida 
+        class(IntegerDynamicArrayBufferedUDT)  :: ida 
         integer(ik), intent(in)                :: val 
 
         ! Append
@@ -2328,7 +2328,7 @@ contains
         ! Declare variables
         !==================
         ! Arguments
-        class(IntegerDynamicArrayBufferedUDT)          :: ida 
+        class(IntegerDynamicArrayBufferedUDT)  :: ida 
         integer(ik), intent(in)                :: val(:) 
 
         ! Auxiliary
@@ -2669,7 +2669,7 @@ contains
         ida%val = 0
         ida%nel = size(val)
         if (ida%nel .gt. size(ida%val)) then
-            call ida%Expand(size(val)-ida%nel)
+            call ida%Expand(size(val)-size(ida%val))
             ida%nel = size(val)
         end if
 
@@ -2709,7 +2709,7 @@ contains
         class(IntegerDynamicArrayBufferedUDT)     :: ida
         integer(ik), intent(in)             :: loc_begin
         integer(ik), intent(in)             :: loc_end
-        integer(ik), allocatable            :: val(:)
+        integer(ik)                         :: val(:)
 
         ! Auxiliary
         integer(ik)                         :: size_place
@@ -2760,8 +2760,8 @@ contains
         ! Declare variables
         !==================
         class(IntegerDynamicArrayBufferedUDT)   :: ida 
-        integer(ik), intent(in)         :: loc 
-        integer(ik)                     :: val
+        integer(ik), intent(in)                 :: loc 
+        integer(ik)                             :: val
 
         ! Sum
         ida%val(loc) = ida%val(loc) + val
@@ -2780,8 +2780,8 @@ contains
         ! Declare variables
         !==================
         class(IntegerDynamicArrayBufferedUDT)           :: ida 
-        integer(ik), intent(in), allocatable    :: loc(:) 
-        integer(ik)                             :: val
+        integer(ik), intent(in), allocatable            :: loc(:) 
+        integer(ik)                                     :: val
 
         if (size(ida%val) < maxval(loc)) then 
             call ida%Append(spread(0_I8, 1, maxval(loc) - size(ida%val)))

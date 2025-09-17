@@ -1868,5 +1868,4 @@ module gamod_utility
         res = b(n_el)
     end function
 
-
 end module 

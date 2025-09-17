@@ -212,6 +212,8 @@ module gamod_types
 
         ! Initialize
         procedure :: Initialize     => InitializeGACell
+        procedure :: ReplaceVerts
+        procedure :: ReplaceFaces
 
     end type
 
@@ -489,6 +491,7 @@ module gamod_types
         procedure :: Splitting
         procedure :: OneSplit
         procedure :: SplitPentsRec
+        procedure :: PropagatePolSplitting
         procedure :: DetermineTcaseID
         procedure :: DetermineQcaseID
         procedure :: DeterminePcaseID
@@ -510,7 +513,11 @@ module gamod_types
         !procedure :: SplitTQT
         !procedure :: SplitQshaved
         procedure :: SplitPQ
+        procedure :: SplitPQPolRad
         procedure :: SplitPT
+        procedure :: SplitPT4
+        procedure :: SplitPTrap
+        procedure :: SplitPtrapPSIB2
         procedure :: SplitT4Q
         procedure :: SplitT4B
         procedure :: SplitFace
@@ -519,6 +526,7 @@ module gamod_types
         procedure :: SplitCenterQuad
         procedure :: SplitT4
         procedure :: SplitT4Stacked
+        procedure :: SplitTrap2
         procedure :: TriaToQuad
         procedure :: QuadToPent
         procedure :: SplitCenterPent
@@ -592,6 +600,11 @@ module gamod_types
     ! General isBoundaryCell
     interface isBoundaryVertGA
         module procedure isBoundaryVert0DGA, isBoundaryVert1DGA
+    end interface
+
+    ! Get vxs from fcs
+    interface GetVxsFromFcsGA
+        module procedure GetVxsFromFcsGA0D, GetVxsFromFcsGA1D
     end interface
 
     ! General norm
@@ -1139,6 +1152,7 @@ module gamod_types
 
             ! Sort small cells for area
             area_small_cells = qm%cvS(small_cells)
+            allocate(indsort(size(small_cells)))
             call Sort(area_small_cells, indsort, .true.)
             small_cells = small_cells(indsort)
 
@@ -1155,11 +1169,7 @@ module gamod_types
                         cvs = GetFaceCellGA(c, fcs(j), cvLookUp)
                         if (size(cvs) == 2) then
 
-                            if (cvs(1) /= small_cells(i)) then
-                                neig = cvs(1)
-                            else if (cvs(2) /= small_cells(i)) then
-                                neig = cvs(2)
-                            end if
+                            neig = Pack2(cvs, cvs /= small_cells(i))
                             
                             if (isPoloidal(grid, fcs(j), cvLookUp) &
                                 .and. .not.any(fcs(j) == forbidden_fcs) &
@@ -1244,11 +1254,7 @@ module gamod_types
                         cvs = GetFaceCellGA(c, fcs(j), cvLookUp)
                         if (size(cvs) == 2) then
 
-                            if (cvs(1) /= cells2(i)) then
-                                neig = cvs(1)
-                            else if (cvs(2) /= cells2(i)) then
-                                neig = cvs(2)
-                            end if
+                            neig = Pack2(cvs, cvs /= cells2(i))
                             
                             if (isPoloidal(grid, fcs(j), cvLookUp) &
                                 .and. .not.any(fcs(j) == forbidden_fcs) &
@@ -1341,6 +1347,7 @@ module gamod_types
             pol_fluxdens_est = pol_fluxdens_est*qm%h_rad(cells)
             mean_pol_flux = sum(pol_fluxdens_est)/size(pol_fluxdens_est)
 
+            allocate(indsort(size(cells)))
             call Sort(pol_fluxdens_est, ind_sort)
             cells = cells(ind_sort)
 
@@ -1399,6 +1406,7 @@ module gamod_types
 
             ! Sort cells for smallest h_rad_psi
             h_rad_cells = qm%h_rad_psi(cells)
+            allocate(indsort(size(cells)))
             call Sort(h_rad_cells, ind_sort)
             cells = cells(ind_sort)
 
@@ -1455,6 +1463,7 @@ module gamod_types
 
             ! Sort to smallest h_rad
             h_rad_cells = qm%h_rad(cells)
+            allocate(indsort(size(cells)))
             call Sort(h_rad_cells, ind_sort)
             cells = cells(ind_sort)
             
@@ -1529,6 +1538,7 @@ module gamod_types
             end do
 
             ! Pick the largest bias
+            allocate(indsort(size(rad_faces)))
             call Sort(bias, indsort, .false.)
             rad_faces = rad_faces(indsort)
             if (bias(1) .gt. options%merge_bias_limit) then
@@ -1619,6 +1629,7 @@ module gamod_types
 
                 ! Sort for decreasing h_rad_psi
                 h_rad_cells = qm%h_rad_psi(cells)
+                allocate(indsort(size(cells)))
                 call Sort(h_rad_cells, indsort, .false.)
                 cells = cells(indsort)
 
@@ -1638,6 +1649,7 @@ module gamod_types
 
                 ! Sort for decreasing h_rad_psi
                 h_rad_cells = qm%h_rad(cells)
+                allocate(indsort(size(cells)))
                 call Sort(h_rad_cells, indsort, .false.)
                 cells = cells(indsort)
 
@@ -1663,6 +1675,7 @@ module gamod_types
                 mean_tot_flux = sum(pol_fluxdens_est) / size(pol_fluxdens_est)
 
                 ! Sort for descending absolute poloidal flux
+                allocate(indsort(size(cells2)))
                 call Sort(pol_fluxdens_est, indsort, .false.)
                 cells2 = cells2(indsort)
 
@@ -2182,7 +2195,6 @@ module gamod_types
         type(GridUDT), intent(in)       :: grid
         type(GAGridUDT), intent(out)    :: GAgrid
 
-
         ! Initialize GAGrid
         call GAgrid%Initialize()
 
@@ -2241,10 +2253,11 @@ module gamod_types
         GAgrid%data%nsep        = grid%data%nsep
         GAfd%fluxsurfacefacesP1 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacefacesP(:,1))
         GAfd%fluxsurfacefacesP2 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacefacesP(:,2))
-        GAfd%fluxsurfacefaces   = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacefaces)
+        GAfd%fluxsurfacefaces   = ConstructIntegerDynamicArrayBuffered( &
+            gfd%fluxsurfacefaces(1:gfd%fluxsurfacefacesP(gfd%nFs,1) + gfd%fluxsurfacefacesP(gfd%nFs,2)))
         GAfd%fluxsurfacevertsP1 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacevertsP(:,1))
         GAfd%fluxsurfacevertsP2 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacevertsP(:,2))
-        GAfd%fluxsurfaceverts   = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfaceverts)
+        GAfd%fluxsurfaceverts   = ConstructIntegerDynamicArrayBuffered()
         GAfd%nFs                = gfd%nFs
         GAfd%nFt                = gfd%nFt            
 
@@ -2309,44 +2322,44 @@ module gamod_types
 
 
         ! Vertex information
-        gv%x            = GAv%x%GetAllElements()
-        gv%y            = GAv%y%GetAllElements()
-        gv%bx           = GAv%bx%GetAllElements()
-        gv%by           = GAv%by%GetAllElements()
-        gv%psi          = GAv%psi%GetAllElements()
+        gv%x            = GAv%x%Get()
+        gv%y            = GAv%y%Get()
+        gv%bx           = GAv%bx%Get()
+        gv%by           = GAv%by%Get()
+        gv%psi          = GAv%psi%Get()
         gv%ffbz         = GAv%ffbz
 
         ! Face information
-        gf%vert(:,1)    = GAf%vert1%GetAllElements()
-        gf%vert(:,2)    = GAf%vert2%GetAllElements()
-        gf%label        = GAf%label%GetAllElements()
-        gf%reg          = GAf%reg%GetAllElements()
-        gf%aligned      = GAf%aligned%GetAllElements()
+        gf%vert(:,1)    = GAf%vert1%Get()
+        gf%vert(:,2)    = GAf%vert2%Get()
+        gf%label        = GAf%label%Get()
+        gf%reg          = GAf%reg%Get()
+        gf%aligned      = GAf%aligned%Get()
 
         ! Cell information
-        gc%vertP(:,1)   = GAc%vertP1%GetAllElements() 
-        gc%vertP(:,2)   = GAc%vertP2%GetAllElements() 
-        gc%vert         = GAc%vert%GetAllElements() 
-        gc%faceP(:,1)   = GAc%faceP1%GetAllElements()
-        gc%faceP(:,2)   = GAc%faceP2%GetAllElements()
-        gc%face         = GAc%face%GetAllElements()
-        gc%cflags       = GAc%cflags%GetAllElements()
-        gc%reg          = Gac%reg%GetAllElements()
-        gc%psi          = GAc%psi%GetAllElements()
-        gc%x            = GAc%x%GetAllElements()
-        gc%y            = GAc%y%GetAllElements()
+        gc%vertP(:,1)   = GAc%vertP1%Get() 
+        gc%vertP(:,2)   = GAc%vertP2%Get() 
+        gc%vert         = GAc%vert%Get() 
+        gc%faceP(:,1)   = GAc%faceP1%Get()
+        gc%faceP(:,2)   = GAc%faceP2%Get()
+        gc%face         = GAc%face%Get()
+        gc%cflags       = GAc%cflags%Get()
+        gc%reg          = Gac%reg%Get()
+        gc%psi          = GAc%psi%Get()
+        gc%x            = GAc%x%Get()
+        gc%y            = GAc%y%Get()
 
         ! Grid data - flux surface data
         grid%data%xpointID          = GAgrid%data%xpointID
         grid%data%nxp               = GAgrid%data%nxp
         grid%data%sepID             = GAgrid%data%sepID
         grid%data%nsep              = GAgrid%data%nsep
-        gfd%fluxsurfacefacesP(:,1)  = GAfd%fluxsurfacefacesP1%GetAllElements()
-        gfd%fluxsurfacefacesP(:,2)  = GAfd%fluxsurfacefacesP2%GetAllElements()
-        gfd%fluxsurfacefaces        = GAfd%fluxsurfacefaces%GetAllElements()
-        gfd%fluxsurfacevertsP(:,1)  = GAfd%fluxsurfacevertsP1%GetAllElements()
-        gfd%fluxsurfacevertsP(:,2)  = GAfd%fluxsurfacevertsP2%GetAllElements()
-        gfd%fluxsurfaceverts        = GAfd%fluxsurfaceverts%GetAllElements()
+        gfd%fluxsurfacefacesP(:,1)  = GAfd%fluxsurfacefacesP1%Get()
+        gfd%fluxsurfacefacesP(:,2)  = GAfd%fluxsurfacefacesP2%Get()
+        gfd%fluxsurfacefaces        = GAfd%fluxsurfacefaces%Get()
+        gfd%fluxsurfacevertsP(:,1)  = GAfd%fluxsurfacevertsP1%Get()
+        gfd%fluxsurfacevertsP(:,2)  = GAfd%fluxsurfacevertsP2%Get()
+        gfd%fluxsurfaceverts        = GAfd%fluxsurfaceverts%Get()
 
         ! Problem need to compute some extra fields for grid 
         ! See what is needed for WriteGOAT: TODO
@@ -2396,12 +2409,12 @@ module gamod_types
         allocate(fcX(f%ntot), fcY(f%ntot), v1n(f%ntot), &
             v2n(f%ntot), cx(c%ntot), cy(c%ntot), vx(v%ntot), &
             vy(v%ntot)) 
-        v1n = f%vert1%GetAllElements()
-        v2n = f%vert2%GetAllElements()
-        vx = v%x%GetAllElements()
-        vy = v%y%GetAllElements()
-        cx = c%x%GetAllElements()
-        cy = c%y%GetAllElements()
+        v1n = f%vert1%Get()
+        v2n = f%vert2%Get()
+        vx = v%x%Get()
+        vy = v%y%Get()
+        cx = c%x%Get()
+        cy = c%y%Get()
         fcX = 0.5_R8 * (vx(v1n) + vx(v1n))
         fcY = 0.5_R8 * (vy(v2n) + vy(v2n))
 
@@ -2515,12 +2528,12 @@ module gamod_types
         ! Compute face centers
         allocate(fcX(f%ntot), fcY(f%ntot), v1n(f%ntot), &
             v2n(f%ntot), vx(v%ntot), vy(v%ntot))
-        v1n = f%vert1%GetAllElements()
-        v2n = f%vert2%GetAllElements()        
-        vx = v%x%GetAllElements()
-        vy = v%y%GetAllElements()
-        cx = c%x%GetAllElements()
-        cy = c%y%GetAllElements()        
+        v1n = f%vert1%Get()
+        v2n = f%vert2%Get()        
+        vx = v%x%Get()
+        vy = v%y%Get()
+        cx = c%x%Get()
+        cy = c%y%Get()        
         fcX = 0.5_R8 * (vx(v1n) + vx(v2n))
         fcY = 0.5_R8 * (vy(v1n) + vy(v2n))
 
@@ -2668,8 +2681,8 @@ module gamod_types
         ! Initialize
         allocate(fsVx(v%ntot), fsVxP(fd%nFs,2),verts(v%ntot), &
             v1n(f%ntot), v2n(f%ntot))
-        v1n = f%vert1%GetAllElements()
-        v2n = f%vert2%GetAllElements()
+        v1n = f%vert1%Get()
+        v2n = f%vert2%Get()
         fsVx = 0
         fsVxP = 0
         nv_counter = 0
@@ -2736,7 +2749,7 @@ module gamod_types
             )
 
             ! Initialize
-            creg = c%reg%GetAllElements()
+            creg = c%reg%Get()
 
             ! Find separatrix if not given
             if (.not.use_sep) then
@@ -2987,7 +3000,7 @@ module gamod_types
             )
 
             ! Initialize
-            creg = c%reg%GetAllElements()
+            creg = c%reg%Get()
             use_xpointID = .false.
             
 
@@ -3319,10 +3332,10 @@ module gamod_types
         fcLbl_loc(f%ntot), b_flag(f%ntot), indFc(f%ntot), abs_cos(f%ntot), &
         v1n(f%ntot), v2n(f%ntot), vpsi(v%ntot), ccflags(c%ntot))
 
-        v1n = f%vert1%GetAllElements()
-        v2n = f%vert2%GetAllElements()
-        fcX = 0.5_R8*(v%x%GetMultipleElements(v1n) + v%x%GetMultipleElements(v2n))
-        fcY = 0.5_R8*(v%y%GetMultipleElements(v1n) + v%y%GetMultipleElements(v2n))
+        v1n = f%vert1%Get()
+        v2n = f%vert2%Get()
+        fcX = 0.5_R8*(v%x%Get(v1n) + v%x%Get(v2n))
+        fcY = 0.5_R8*(v%y%Get(v1n) + v%y%Get(v2n))
         facealigned = 0
 
         ! Sort faces - Already done in GAInit
@@ -3336,10 +3349,10 @@ module gamod_types
 
         abs_cos = 0
         ! Tangential vector
-        t1x = v%x%GetMultipleElements(v1n)
-        t2x = v%x%GetMultipleElements(v2n)
-        t1y = v%y%GetMultipleElements(v1n)
-        t2y = v%y%GetMultipleElements(v2n)
+        t1x = v%x%Get(v1n)
+        t2x = v%x%Get(v2n)
+        t1y = v%y%Get(v1n)
+        t2y = v%y%Get(v2n)
 
         t1x = t2x - t1x
         t1y = t2y - t1y
@@ -3371,7 +3384,7 @@ module gamod_types
         ! Initialize
         ind3 = (/ (i, i=1,3) /)
         ind4 = (/ (i, i=1,4) /)
-        vpsi = v%psi%GetAllElements()
+        vpsi = v%psi%Get()
 
         do ic = 1, c%ntot
             tf = GetCellFaceGA(c, ic)
@@ -3455,7 +3468,7 @@ module gamod_types
         facealigned(pack(indFc,fcLbl_loc==2)) = 1
 
         ! Check for quads with three aligned faces and triangles with two aligned faces
-        ccflags = c%cflags%GetAllElements()
+        ccflags = c%cflags%Get()
         do ic = 1, c%ntot
             tf = GetCellFaceGA(c, ic)
             n_al = sum(facealigned(tf))
@@ -3545,14 +3558,14 @@ module gamod_types
             allocate(v1n(f%ntot), v2n(f%ntot), cf(nface), &
                 cvertP2(c%ntot), cfaceP2(c%ntot), ccflags(c%ntot), &
                 indCv(c%ntot))
-            v1n = f%vert1%GetAllElements()
-            v2n = f%vert2%GetAllElements()
-            cf  = c%face%GetAllElements()
-            cvertP1 = c%vertP1%GetAllElements()
-            cvertP2 = c%vertP2%GetAllElements()
-            cfaceP1 = c%faceP1%GetAllElements()
-            cfaceP2 = c%faceP2%GetAllElements()
-            ccflags = c%cflags%GetAllElements()
+            v1n = f%vert1%Get()
+            v2n = f%vert2%Get()
+            cf  = c%face%Get()
+            cvertP1 = c%vertP1%Get()
+            cvertP2 = c%vertP2%Get()
+            cfaceP1 = c%faceP1%Get()
+            cfaceP2 = c%faceP2%Get()
+            ccflags = c%cflags%Get()
 
             ! Check 0 - Check pointer consistency
             if (any(cvertP1(2:c%ntot) /= (cvertP1(1:c%ntot-1)+cvertP2(1:c%ntot-1)))) then
@@ -3773,10 +3786,10 @@ module gamod_types
             cy(grid%cell%ntot)
 
         ! Initialize
-        vx = grid%vert%x%GetAllElements()
-        vy = grid%vert%y%GetAllElements()
-        cx = grid%cell%x%GetAllElements()
-        cy = grid%cell%y%GetAllElements()
+        vx = grid%vert%x%Get()
+        vy = grid%vert%y%Get()
+        cx = grid%cell%x%Get()
+        cy = grid%cell%y%Get()
 
         ! Evaluate magneticField
         call magneticField%interp%Evaluate(cx,cy,0,0,psi_cv)
@@ -3904,34 +3917,30 @@ module gamod_types
             counterf = counterf + nf2
 
             ! Remove in fsVx and fsFc
-            call fd%fluxsurfaceverts%RemoveMultipleElements(rem_ind_v(1:counterv))
-            call fd%fluxsurfacefaces%RemoveMultipleElements(rem_ind_f(1:counterf))
+            call fd%fluxsurfaceverts%Remove(rem_ind_v(1:counterv))
+            call fd%fluxsurfacefaces%Remove(rem_ind_f(1:counterf))
 
             ! Remove and adjust pointer arrays
-            call fd%fluxsurfacevertsP1%RemoveSingleElement(ifs1)
-            call fd%fluxsurfacevertsP2%RemoveSingleElement(ifs1)
-            call fd%fluxsurfacefacesP1%RemoveSingleElement(ifs1)
-            call fd%fluxsurfacefacesP2%RemoveSingleElement(ifs1)
+            call fd%fluxsurfacevertsP1%Remove(ifs1)
+            call fd%fluxsurfacevertsP2%Remove(ifs1)
+            call fd%fluxsurfacefacesP1%Remove(ifs1)
+            call fd%fluxsurfacefacesP2%Remove(ifs1)
             fd%nFs = fd%nFs - 1
 
             range = (/ (j, j = ifs1, fd%nFs)/)
             call fd%fluxsurfacevertsP1%SumMask(range, -nv1)
             call fd%fluxsurfacefacesP1%SumMask(range, -nf1)
-            !call fd%fluxsurfacevertsP1%SetMultipleElements(range, fd%fluxsurfacevertsP1%GetMultipleElements(range) - nv1)
-            !call fd%fluxsurfacefacesP1%SetMultipleElements(range, fd%fluxsurfacefacesP1%GetMultipleElements(range) - nf1)
 
             ifs2 = ifs2 - 1
-            call fd%fluxsurfacevertsP1%RemoveSingleElement(ifs2)
-            call fd%fluxsurfacevertsP2%RemoveSingleElement(ifs2)
-            call fd%fluxsurfacefacesP1%RemoveSingleElement(ifs2)
-            call fd%fluxsurfacefacesP2%RemoveSingleElement(ifs2)
+            call fd%fluxsurfacevertsP1%Remove(ifs2)
+            call fd%fluxsurfacevertsP2%Remove(ifs2)
+            call fd%fluxsurfacefacesP1%Remove(ifs2)
+            call fd%fluxsurfacefacesP2%Remove(ifs2)
             fd%nFs = fd%nFs - 1
 
             range = (/ (j, j = ifs2, fd%nFs)/)
             call fd%fluxsurfacevertsP1%SumMask(range, -nv2)
             call fd%fluxsurfacefacesP1%SumMask(range, -nf2)
-            !call fd%fluxsurfacevertsP1%SetMultipleElements(range,fd%fluxsurfacevertsP1%GetMultipleElements(range) - nv2)
-            !call fd%fluxsurfacefacesP1%SetMultipleElements(range,fd%fluxsurfacefacesP1%GetMultipleElements(range) - nf2)
 
             ! Add new flux surface
             fd%nFs = fd%nFs + 1
@@ -4290,7 +4299,7 @@ module gamod_types
         type(GAoptionsUDT)      :: options
 
         ! Auxiliary
-        integer(I8) :: j, k, n, n_oc, s, vx_common, indexf, cellA, &
+        integer(I8) :: j, k, n_oc, vx_common, indexf, cellA, &
             vertsA(2), vertsB(2), cellC, indf, indv
         integer(I8), allocatable :: cell_rem(:), &
             tv_cellA(:), tv_cellC(:), new_verts_cellC(:),&
@@ -4347,24 +4356,13 @@ module gamod_types
         call c%faceP2%SumMask(cellA, -1)
         range = (/ (j, j = cellA+1, c%faceP1%Size())/)
         call c%faceP1%SumMask(range, -1)
-        !allocate(new_face_cellA(3))
-        !new_face_cellA = [tf_cellA(1:nf_1), tf_cellA(n_f+1:size(tf_cellA))]
-        !s = grid%cell%faceP1%Get(cellA)
-        !n = grid%cell%faceP2%Get(cellA)
-        !call grid%cell%face%Replace(s,s+n-1,new_face_cellA)
 
         ! Remove the vertex of the aligned face in that cell
         tv_cellA = GetCellVertGA(c, cellA)
         indv = findloc(tv_cellA, vx_rem(1), 1) ! ordering of vertices matters!!
 
         new_verts_cellA = [tv_cellA(1:indv-1), tv_cellA(indv+1:size(tv_cellA)) ]
-        s = c%vertP1%Get(cellA)
-        n = c%vertP2%Get(cellA)
-        call c%vert%Replace(s,s+n-1,new_verts_cellA) 
-
-        call c%vertP2%SumMask(cellA, -1)
-        range = (/ (j, j = cellA+1, c%vertP1%Size())/)
-        call c%vertP1%SumMask(range, -1)
+        call c%ReplaceVerts(cellA, new_verts_cellA)
 
         ! Cell at non-aligned and non-boundary face
         !------------------------------------------
@@ -4383,12 +4381,7 @@ module gamod_types
         indv = findloc(tv_cellC, vx_rem(1), 1) 
 
         new_verts_cellC = [tv_cellC(1:indv-1), tv_cellC(indv+1:size(tv_cellC))]
-        s = c%vertP1%Get(cellC)
-        n = c%vertP2%Get(cellC)        
-        call c%vert%Replace(s,s+n-1,new_verts_cellC)
-        call c%vertP2%SumMask(cellC, -1)
-        range = (/ (j, j = cellC+1, c%vertP1%Size())/)
-        call c%vertP1%SumMask(range, -1)
+        call c%ReplaceVerts(cellC, new_verts_cellC)
 
         ! Find cells where vx_rem(1:2) is and replace is by the common vertex (vx_com)
         do j = 1, 2
@@ -5178,7 +5171,7 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: trapsC, facesQ, &
             b_facesQD, b_facesQ, vertsQ, indbvert, indbvert1, indbvert2, &
             indcv, indfc, ar, ar1, ar2, vx_remD, vx_rem, fc_remD, fc_rem, &
-            vertsT, loc1, facesQD, vertsQD
+            vertsT, facesQD, vertsQD
         real(R8) :: cx, cy
         logical, allocatable :: log(:)
 
@@ -5242,11 +5235,7 @@ module gamod_types
             ! Remove bvert out of cell%vert
             vertsQD = GetCellVertGA(c, ic)
             call Unique(vertsQD, vertsQ)
-            call c%vert%Replace(c%vertP1%Get(ic),c%vertP1%Get(ic)+c%vertP2%Get(ic)-1, vertsQ)
-            nv = c%vertP2%Get(ic) - 1
-            call c%vertP2%Set(ic, nv)
-            loc1 = (/ (j, j = ic+1 , c%vertP1%Size()) /)
-            call c%vertP1%SumMask(loc1, -1)
+            call c%ReplaceVerts(ic, vertsQ)
 
             ! Adjust centroid
             cx = sum(v%x%Get(vertsQ))/(real(nv, kind=R8))
@@ -5257,10 +5246,7 @@ module gamod_types
             ! Remove boundaryFace out of cell%face
             allocate(facesQD(count(facesQ /= b_facesQ(1))))
             facesQD = pack(facesQ, facesQ /= b_facesQ(1))
-            call c%face%Replace(c%faceP1%Get(ic),c%faceP1%Get(ic)+c%faceP2%Get(ic)-1, facesQD)
-            call c%faceP2%SumMask(ic, -1)
-            loc1 = (/ (j, j = ic+1 , c%faceP1%Size()) /)            
-            call c%faceP1%SumMask(loc1, -1)
+            call c%ReplaceFaces(ic, facesQD)
 
             ! Save vertices and face to remove
             counterv = counterv + 1
@@ -5482,11 +5468,7 @@ module gamod_types
 
                 vxs = [f%vert1%Get(c_fcs), f%vert2%Get(c_fcs)]
 
-                if (vxs(1) /= end_vertex) then
-                    i_verts(i) = vxs(1)
-                else if (vxs(2) /= end_vertex) then
-                    i_verts(i) = vxs(i)
-                end if
+                i_verts(i) = Pack2(vxs, vxs /= end_vertex)
 
             end do
 
@@ -6413,11 +6395,7 @@ module gamod_types
                 .or. (cvtypes(1) == 3 .and. cvtypes(2) == 5)) then
 
             caseID = '53'
-            if (cvtypes(1) == 3) then
-                tria = cvs(1)
-            else if (cvtypes(2) == 3) then
-                tria = cvs(2)
-            end if
+            tria = Pack2(cvs, cvtypes == 3)
 
             vertsT = GetCellVertGA(c, tria)
             if (count(isBoundaryVertGA(grid, vertsT)) == 3) caseID = '53B'
@@ -7009,7 +6987,7 @@ module gamod_types
         ! While a splitting cell is found
         do while (qm%split_cv /= 0 .and. j .lt. options%n_split)
 
-            call grid%Splitting(qm, options, magneticField)
+            call grid%Splitting(qm%split_cv, options, magneticField)
 
             if (.not.options%slab) call grid%RecalcMagn(magneticField)
 
@@ -7055,7 +7033,7 @@ module gamod_types
 
     end subroutine
 
-    subroutine Splitting(grid, qm, options, magneticField)
+    subroutine Splitting(grid, cv, options, magneticField)
 
         ! Description
         !============
@@ -7065,28 +7043,25 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        type(QualityMetricUDT), intent(inout)   :: qm
+        integer(I8), intent(inout)              :: cv 
         type(GAoptionsUDT), intent(inout)       :: options
         type(MagneticFieldUDT), intent(in)      :: magneticField
 
-        ! Auxiliary
-        integer(I8) :: cv
-
         ! Get splitting case and do the split on cell cv
-        call grid%OneSplit(qm, magneticField,  options, qm%split_cv)
+        call grid%OneSplit(magneticField, options,cv)
 
         ! If pentagons are not allowed
 
         if (options%no_pents) then
             cv = 0
-            call grid%SplitPentsRec(qm, magneticField, options, cv)
+            call grid%SplitPentsRec(magneticField, options, cv)
         end if
 
         ! Do ordering for nice plots -  not necessary
 
     end subroutine
 
-    subroutine OneSplit(grid, qm, magneticField, options, cv)
+    subroutine OneSplit(grid, magneticField, options, cv)
 
         ! Description
         !============
@@ -7097,7 +7072,6 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        type(QualityMetricUDT), intent(inout)   :: qm
         type(MagneticFieldUDT), intent(in)      :: magneticField
         type(GAoptionsUDT), intent(inout)       :: options
         integer(I8), intent(inout)              :: cv
@@ -7106,9 +7080,7 @@ module gamod_types
         integer(I8) :: rface1, rface2, neig1, neig2, Qface, neig, common_vert
         integer(I8), allocatable :: fcs(:), Xcells(:)
         character(:), allocatable :: caseID, type
-        logical, allocatable :: is_ordered(:), cells(:)
-
-
+        !logical, allocatable :: is_ordered(:), cells(:)
 
         ! Get faces
         fcs = GetCellFaceGA(grid%cell, cv)
@@ -7187,16 +7159,17 @@ module gamod_types
 
                 !case ('55')
                 case ('54','50')
-                    call grid%SplitPQ(magneticField, cv, Qface, neig, common_vert, type, options)
-                case ('53')
+                    call grid%SplitPQ(magneticField, cv, Qface, neig, common_vert, type, options%XpointSplitting)
+                case ('53', '573')
                     call grid%SplitPT(magneticField, cv, Qface, neig, common_vert, type, options%typeT)
-
-                !case ('534')
-                !case ('56')
-                !case ('573')
-                !case ('574')
-                !case ('570')
-                !case ('580')
+                case ('534') ! poloidal and radial
+                    call grid%SplitPT4(magneticField, cv, Qface, neig, common_vert, type)
+                case ('56')
+                    call grid%SplitPTrap(magneticField, cv, type)
+                case ('574', '570')  ! Only radial splitting
+                    call grid%SplitPQ(magneticField, cv, Qface, neig, common_vert, type, .false.)
+                case ('580')
+                    call grid%SplitPtrapPSIB2(magneticField, cv, Qface, common_vert, type, options)
                 case default
 
                     print *, caseID
@@ -7213,7 +7186,7 @@ module gamod_types
 
             select case (caseID)
             case ('30')
-                call grid%SplitT4B(qm, magneticField, cv, rface1,common_vert, type, options)
+                call grid%SplitT4B(magneticField, cv, rface1,common_vert, type, options)
             case ('31')
                 !call grid%SplitT4BV()
             case ('34')
@@ -7234,16 +7207,17 @@ module gamod_types
         end select
 
         if (options%debug) then 
-            call grid%CheckUnstructuredGrid(.false.)
-            allocate(cells(grid%cell%ntot), is_ordered(grid%cell%ntot))
-            cells = .true.
-            call grid%CheckVertOrder(is_ordered, cells)
-            call grid%ReorderCellConn(is_ordered)
+            call grid%GetFsVxFromFsFc(options)
+            !call grid%CheckUnstructuredGrid(.false.)
+            !allocate(cells(grid%cell%ntot), is_ordered(grid%cell%ntot))
+            !cells = .true.
+            !call grid%CheckVertOrder(is_ordered, cells)
+            !call grid%ReorderCellConn(is_ordered)
         end if
 
     end subroutine
 
-    recursive subroutine SplitPentsRec(grid, qm, magneticField, options, cv)
+    recursive subroutine SplitPentsRec(grid, magneticField, options, cv)
 
         ! Description
         !============
@@ -7254,7 +7228,6 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        type(QualityMetricUDT), intent(inout)   :: qm
         type(MagneticFieldUDT), intent(in)      :: magneticField
         type(GAoptionsUDT), intent(inout)       :: options
         integer(I8), intent(inout)              :: cv
@@ -7283,7 +7256,7 @@ module gamod_types
 
                 if (cv /= 0) then
 
-                    call grid%OneSplit(qm, magneticField, options, cv)
+                    call grid%OneSplit(magneticField, options, cv)
 
                 end if
 
@@ -7291,7 +7264,7 @@ module gamod_types
 
         else 
 
-            call grid%OneSplit(qm, magneticField, options, cv)
+            call grid%OneSplit(magneticField, options, cv)
 
         end if
 
@@ -7316,13 +7289,84 @@ module gamod_types
 
             if (cv /= 0) then
 
-                call grid%SplitPentsRec(qm, magneticField, options, cv)
+                call grid%SplitPentsRec(magneticField, options, cv)
 
             end if
 
         end if
 
 
+
+    end subroutine
+
+    subroutine PropagatePolSplitting(grid, magneticField, options)
+
+        ! Description
+        !============
+        ! Propagate the splitting through in the poloidal direction
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        type(GAoptionsUDT), intent(in)      :: options
+        
+        ! Auxiliary
+        integer(I8) :: i, fcs_common, next_pent
+        integer(I8), allocatable :: cells(:), pents(:), neigs(:)
+        type(GAoptionsUDT) :: options2
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        options2 = options
+        options2%splittype = 'pol'
+        cells = (/(i, i = 1, c%ntot)/)
+        call grid%GetPents(cells, pents)
+
+        ! Only select the pent if it is neigbouring a recently maded cells
+        ! i.e. cellnumber = cell.ntot is a neighbour
+        next_pent = 0
+        do i = 1, size(pents)
+
+            ! Get common face
+            fcs_common = GetCommonFace(c, pents(i), c%ntot)
+            
+            ! Get common face
+            if (fcs_common /= 0) then
+                if (f%aligned%Get(fcs_common) == 1) then ! common face needs to aligned to propagate in poloidal direction 
+                    next_pent = pents(i)
+                    exit
+                end if
+            end if
+
+        end do
+        
+        do while (next_pent /= 0)
+            call grid%OneSplit(magneticField, options2, next_pent)
+    
+            cells = (/(i, i = 1, c%ntot)/)
+            call grid%GetPents(cells, pents)
+        
+            ! Only select the pent if it is neigbouring a recently maded cells
+            ! i.e. cellnumber = cell.ntot is a neighbour
+            next_pent = 0
+            do i = 1, size(pents)
+                neigs = GetCellNeigsGA(grid, pents(i));
+                if (any(c%ntot == neigs)) then
+                    next_pent = pents(i)
+                    exit
+                end if
+
+            end do
+
+        end do
+
+        end associate
 
     end subroutine
 
@@ -7616,11 +7660,7 @@ module gamod_types
 
                     ! Get radial neighbors
                     cells1 = GetFaceCellGA(grid%cell, rface1)
-                    if (cells1(1) /= cv) then
-                        neig1 = cells1(1)
-                    else if (cells1(2) /= cv) then
-                        neig1 = cells1(2)
-                    end if
+                    neig1 = Pack2(cells1, cells1 /= cv)
                     neig1type = grid%cell%faceP2%Get(neig1)
 
                     ! Get boundary face
@@ -7777,11 +7817,7 @@ module gamod_types
         else
             ! Get radial neighbours
             cells1 = GetFaceCellGA(c, rface1)
-            if (cells1(1) /= cv) then
-                neig1 = cells1(1)
-            else if (cells1(2) /= cv) then
-                neig1 = cells1(2)
-            end if
+            neig1 = Pack2(cells1, cells1 /= cv)
             neig1type = c%faceP2%Get(neig1)             
         end if
 
@@ -7792,11 +7828,7 @@ module gamod_types
             else
                 ! Get radial neighbours
                 cells2 = GetFaceCellGA(c, rface2)
-                if (cells2(1) /= cv) then
-                    neig2 = cells2(1)
-                else if (cells2(2) /= cv) then
-                    neig2 = cells2(2)
-                end if
+                neig2 = Pack2(cells2, cells2 /= cv)
                 neig2type = c%faceP2%Get(neig2)
             end if
         else
@@ -7860,11 +7892,8 @@ module gamod_types
             neigtype = 0
         else
             cells = GetFaceCellGA(c, Qface)
-            if (cells(1) /= cv) then
-                neig = cells(1) 
-            else if (cells(2) /= cv) then
-                neig = cells(2)
-            end if
+
+            neig = Pack2(cells, cells /= cv)
             neigtype = c%faceP2%Get(neig)
             if (c%cflags%Get(neig) == 4) then
                 neigtype = 34
@@ -7934,7 +7963,7 @@ module gamod_types
                         end if
                     end do
 
-                    if (Qface /= 0) then
+                    if (Qface == 0) then
                         call gdErrorHandler('DeterminePcaseID: No psic crossing found, which should be impossible!')
                     end if
 
@@ -7956,11 +7985,7 @@ module gamod_types
 
                         ! Determine neig 
                         cvs = GetFaceCellGA(c, Qface)
-                        if (cvs(1) /= cv) then
-                            neig = cvs(1)
-                        else if (cvs(2) /= cv) then
-                            neig = cvs(2)
-                        end if
+                        neig = Pack2(cvs, cvs /= cv)
                         if (c%vertP2%Get(neig) == 3) then
                             neigtype = 73
                         elseif (c%vertP2%Get(neig) == 4) then
@@ -8033,7 +8058,7 @@ module gamod_types
         select case (type)
         case ('pol')
 
-            ! rface1 => shoulde be the longest face of the poloidal faces
+            ! rface1 => should be the longest face of the poloidal faces
             pface1 = fcs(ind) !poloidal face1
 
             dpsi_f(ind) = 0
@@ -8056,8 +8081,8 @@ module gamod_types
             end if
 
             ! Common vert
-            allocate(split_faces(count(fcs /= pface2)))
-            split_faces = pack(fcs, fcs /= pface2)
+            allocate(split_faces(count(fcs /= pface1 .and. fcs /= pface2)))
+            split_faces = pack(fcs, fcs /= pface1 .and. fcs /= pface2)
             common_vert = GetCommonVert(f, split_faces(1), split_faces(2))
 
             ! Determine CaseID
@@ -8072,11 +8097,7 @@ module gamod_types
                 neigtype = 1
             else
                 cvs = GetFaceCellGA(c, rface1)
-                if (cvs(1) /= cv) then
-                    neig = cvs(1)
-                else if (cvs(2) /= cv) then
-                    neig = cvs(2)
-                end if
+                neig = Pack2(cvs, cvs /= cv)
                 neigtype = c%faceP2%Get(neig)
             end if
 
@@ -8114,11 +8135,7 @@ module gamod_types
                 neigtype = 0
             else 
                 cvs = GetFaceCellGA(c, rface1)
-                if (cvs(1) /= cv) then
-                    neig = cvs(1)
-                else if (cvs(2) /= cv) then
-                    neig = cvs(2)
-                end if
+                neig = Pack2(cvs, cvs /= cv)
                 neigtype = c%faceP2%Get(neig)
             end if
 
@@ -8154,11 +8171,7 @@ module gamod_types
 
             ! Get radial neighbors
             cvs = GetFaceCellGA(grid%cell, rface)
-            if (cvs(1) /= cv) then
-                neig = cvs(1)
-            else if (cvs(2) /= cv) then
-                neig = cvs(2)
-            end if
+            neig = Pack2(cvs, cvs /= cv)
             neigtype = grid%cell%faceP2%Get(neig)
 
         end if
@@ -8787,9 +8800,9 @@ module gamod_types
         ! Auxiliary
         integer(I8) :: i, vxs1r(2), vxs2r(2), v1n, v2n, f11n, f12n, f21n, f22n, f3n, &
             f1n, f2n, f4n, f5n, Qface1, Qface2, vxsT, &
-            vxsQ1, vxsQ2, cv1, s, cv2, neig, split_face
+            vxsQ1, vxsQ2, cv1, cv2, neig, split_face
         integer(I8), allocatable, dimension(:) :: verts, face_rem, cells, &
-            vxs1, vxs2, fcs1, fcs2, cvsQ1, range, vxs_newp, fcs_newp, vxsD, fcsD, &
+            vxs1, vxs2, fcs1, fcs2, cvsQ1, vxs_newp, fcs_newp, vxsD, fcsD, &
             vertsT, facesT, fcs_al, fcs, vxs, perp_faces, int_faces, cvs, fcs_cv1, &
             vxs_fcs, ind, fcs_vxsQ1, query_faces
         real(R8) :: psic, vp1(2), vp2(2)
@@ -8928,11 +8941,7 @@ module gamod_types
 
             ! Identify quad neighbour
             cvsQ1 = GetFaceCellGA(c, Qface1)
-            if (cvsQ1(1) /= cv) then
-                neig1 = cvsQ1(1)
-            else if (cvsQ1(2) /= cv) then
-                neig1 = cvsQ1(2)
-            endif
+            neig1 = Pack2(cvsQ1, cvsQ1 /= cv)
 
             ! Start the splitting
             typeV = 'psi'
@@ -8975,16 +8984,10 @@ module gamod_types
 
             ! Face
             cv1 = cv
-            s = c%faceP1%Get(cv1)
-            call c%face%Replace(s, s + c%faceP2%Get(cv1) - 1, fcs_newp)
-            call c%faceP2%Set(cv1, 5)
-            range = (/ (i, i = cv1+1, c%faceP1%Size())/)
-            call c%faceP1%SumMask(range, -1)
+            call c%ReplaceFaces(cv1, fcs_newp)
 
             ! Verts
-            call c%vert%Replace(s, s + c%faceP2%Get(cv1) - 1, vxs_newp)
-            call c%vertP2%Set(cv1, 5)
-            call c%vertP1%SumMask(range, -1)
+            call c%ReplaceVerts(cv1, vxs_newp)
 
             ! Turn quad on the Qface1 side into a pent
             ! neig1 => become pent
@@ -9013,13 +9016,9 @@ module gamod_types
 
                 ! Get cells across the aligned face
                 cvs = GetFaceCellGA(c, fcs_al(1))
-                if (cvs(1) /= cv1) then
-                    neig = cvs(1)
-                else if (cvs(2) /= cv1) then
-                    neig = cvs(2)
-                end if
+                neig = Pack2(cvs, cvs /= cv1)
                 type2 = 'pol'
-                ! call grid%SplitPQpol_rad(cv1, fcs_al, neig, v2n, type2)
+                call grid%SplitPQPolRad(magneticField, cv1, fcs_al(1), neig, v2n, type2)
 
             else 
 
@@ -9039,13 +9038,9 @@ module gamod_types
                 allocate(ind(count(vxs_fcs /= vxsQ1)))
                 ind = pack(query_faces, vxs_fcs /= vxsQ1)
                 fcs_vxsQ1 = fcs_cv1(ind)
-                if (fcs_vxsQ1(1) /= f1n) then
-                    split_face = fcs_vxsQ1(1) 
-                else if (fcs_vxsQ1(2) /= f1n) then
-                    split_face = fcs_vxsQ1(2)                     
-                end if
+                split_face = Pack2(fcs_vxsQ1, fcs_vxsQ1 /= f1n)
                 
-                !call grid%SplitPQpol_rad(grid,cv1,split_face,neig,v2n,type2)            
+                call grid%SplitPQPolRad(magneticField, cv1, split_face, neig, v2n, type2)
             end if
 
             ! Extract fsVx from fsFc
@@ -9057,7 +9052,7 @@ module gamod_types
             ! Make sure only the splitting in radial direction is continiued in this
             ! routine
             if (options%no_pents) then
-                !call grid%PropagatePolSplitting(options)    
+                call grid%PropagatePolSplitting(magneticField, options)
             end if            
 
 
@@ -9086,7 +9081,7 @@ module gamod_types
 
     end subroutine 
 
-    subroutine SplitPQ(grid, magneticField, cv, Qface, neig, common_vert, type, options)
+    subroutine SplitPQ(grid, magneticField, cv, Qface, neig, common_vert, type, XpointSplitting)
 
         ! Description
         !============
@@ -9100,7 +9095,7 @@ module gamod_types
         type(MagneticFieldUDT), intent(in)  :: magneticField
         integer(I8), intent(in)             :: cv, Qface, neig, common_vert
         character(:), allocatable           :: type
-        type(GAoptionsUDT), intent(in)      :: options
+        logical, intent(in)                 :: XpointSplitting
 
         ! Auxiliary
         integer(I8) :: face_old, v1n, f1n, f2n, f3n, cv1, cv2
@@ -9116,7 +9111,7 @@ module gamod_types
             )
 
         psic = 0_R8
-        if (.not.options%XpointSplitting) then
+        if (.not.XpointSplitting) then
             if (type == 'pol') then
                 typeV = 'pol'
             else if (type == 'rad') then
@@ -9173,11 +9168,94 @@ module gamod_types
 
     end subroutine 
 
+    subroutine SplitPQPolRad(grid, magneticField, cv, Qface, neig, common_vert, type)
+
+        ! Description
+        !============
+        ! Splits a pentagonal cell in the a direction
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        integer(I8), intent(in)                 :: cv, Qface, neig, common_vert
+        character(:), allocatable, intent(in)   :: type
+
+        ! Auxiliary
+        integer(I8) :: v1n, f1n, f2n, f3n, face_old, cv1, cv2
+        integer(I8), allocatable :: perp_faces(:), vxs1(:), fcs1(:), &
+            face_rem(:), cells(:)
+        real(R8) :: psic
+        character(:), allocatable :: typeV
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        psic = 0
+        if (type == 'pol') then
+            typeV = 'pol'
+        else if (type == 'rad') then
+            typeV = 'rad'
+            psic = v%psi%Get(common_vert)
+        end if
+
+        ! Split face
+        call grid%SplitFace(magneticField, Qface, v1n, f1n, f2n, typeV, psic)
+
+        ! Determine perpendicular faces
+        call grid%DeterminePerpFacePent(cv, Qface, perp_faces)
+
+        ! Make new face
+        call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
+        if (all(f%aligned%Get(perp_faces) == 1)) call f%aligned%Set(f3n, 1)
+
+        ! Add new vert to flux surface
+        select case (type)
+        case ('pol')
+            allocate(vxs1(1))
+            vxs1 = v1n
+            fcs1 = [f1n, f2n]
+            face_old = Qface
+        case ('rad')
+            allocate(fcs1(1))
+            vxs1 = [v1n, common_vert]
+            fcs1 = f3n
+            face_old = 0
+        end select
+        call grid%AddVertToFsVx(vxs1, fcs1, face_old, type)
+
+        ! Build new cells
+        !================
+        ! neig => becomes pent
+        call grid%QuadToPent(neig, Qface, f1n, f2n, v1n)
+
+        ! Split pent in two quads
+        call grid%SplitCenterPent(cv, Qface, v1n, common_vert, f3n, f1n, f2n, cv1, cv2)
+
+        ! Remove Qface
+        allocate(face_rem(1))
+        face_rem = Qface
+        call grid%RemoveFaces(face_rem)
+
+        ! Determine cflags
+        cells = [cv1, cv2]
+        call grid%DetermineCflags(cells)
+
+
+        end associate
+
+    end subroutine
+
     subroutine SplitPT(grid, magneticField, cv, Tface, Tneig, common_vert, type, typeT)
 
         ! Description
         !============
-        ! Splits a pentagonal cell with a triangle as neigbor in the poloidal or direction
+        ! Splits a pentagonal cell with a triangle as neigbor in the poloidal or radial direction
         
         ! Declare variables
         !==================
@@ -9266,47 +9344,327 @@ module gamod_types
 
     end subroutine
 
-    !subroutine SplitPB(grid, magneticField, cv, Qface, common_vert, type)
+    subroutine SplitPT4(grid, magneticField, cv, rface1, neig, common_vert, type)
 
         ! Description
         !============
-        ! Splitting of pentagonal boundary cells with the internal
-        ! cell as the splitted face. Qface is the face the should be splitted.
-        ! Common_vert is the vertex of the pentagon that splits the internal radial
-        ! face.
+        ! Radial splitting of triangle4 internal cell with a pent neighboring
 
         ! Declare variables
         !==================
         ! Arguments
-        !class(GAGridUDT), intent(inout)     :: grid
-        !type(MagneticFieldUDT), intent(in)  :: magneticField
-        !integer(I8), intent(in)             :: cv, Qface, common_vert
-        !character(:), allocatable           :: type
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: cv, rface1, neig, common_vert
+        character(:), allocatable           :: type
 
         ! Auxiliary
-        !integer(I8), allocatable :: perp_faces(:)
-        !real(R8) :: psic
-        !character(:), allocatable :: typeV
+        integer(I8) :: pface1, pface2, pface3, common_vertT, v1n, f1n, f2n, &
+            f3n, f4n, face_old, cv1, cv2, cv1T, cv2T
+        integer(I8), allocatable :: perp_faces(:), pfaces(:), faces(:), rfaceT(:), &
+            vxs1(:), fcs1(:), face_rem(:), cells(:)
+        real(R8) :: psic
+        character(:), allocatable :: typeV
 
-        ! Determine method
-        !psic = 0
-        !if (type == 'pol') then
-        !    typeV = 'pol'
-        !else if (type == 'rad') then
-        !    typeV = 'psi'
-        !    psic = v%psi%Get(common_vert)
-        !end if
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
 
-        ! Determine perp faces
-        !call grid%DeterminePerpFacePent(cv, Qface, perp_faces)
+        psic = 0
+        if (type == 'pol') then
+            typeV = 'pol'
+        else if (type == 'rad') then
+            typeV = 'psi'
+            psic = v%psi%Get(common_vert)
+        end if
+
+
+        ! Determine perpendicular faces
+        call grid%DeterminePerpFacePent(cv, rface1, perp_faces)
+
+        ! Determine common_vertT of triangle4
+        faces = GetCellFaceGA(c, neig)
+
+        ! Get poloidal faces
+        allocate(pfaces(count(f%aligned%Get(faces)==0)))
+        pfaces = pack(faces,f%aligned%Get(faces)==0)
+        pface1 = pfaces(1)
+        pface2 = pfaces(2)
+        pface3 = pfaces(3)
+        allocate(rfaceT(count(faces /= pfaces)))
+        rfaceT = pack(faces, faces /= pfaces)
+
+        if (HaveCommonVert(f, pface2, pface3)) then
+            common_vertT = GetCommonVert(f, pface2, pface3)
+        else if (HaveCommonVert(f, pface1, pface3)) then
+            common_vertT = GetCommonVert(f, pface1, pface3)
+        else if (HaveCommonVert(f, pface1, pface2)) then
+            common_vertT = GetCommonVert(f, pface1, pface2)
+        else 
+            call gdErrorHandler('SplitPT4: no common_vertT')
+        end if
+
+        ! Split faces
+        call grid%SplitFace(magneticField, rface1, v1n, f1n, f2n)
+
+        ! Make new face
+        call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
+        if (all(f%aligned%Get(perp_faces)==1)) call f%aligned%Set(f3n, 1)
+        call grid%GetFaceNumber(v1n, common_vertT, 3, f4n)
+        call f%aligned%Set(f4n, f%aligned%Get(rfaceT(1)))
+
+        ! Add new to flux surface
+        if (type == 'pol') then
+            allocate(vxs1(1))
+            vxs1 = v1n
+            fcs1 = [f1n, f2n]
+            face_old = rface1
+        else if (type == 'rad') then
+            vxs1 = [v1n, common_vert, common_vertT]
+            fcs1 = [f3n, f4n]
+        end if
+        call grid%AddVertToFsVx(vxs1, fcs1, face_old, type)
+
+        ! Build new cells
+        ! Split pent in two quads
+        call grid%SplitCenterPent(cv, rface1, v1n, common_vert, f3n, f1n, f2n, cv1, cv2)
+
+        call grid%SplitT4(neig, rface1, v1n, common_vertT, cv1T, cv2T)
+        
+        ! Remove rface1
+        face_rem = rface1
+        call grid%RemoveFaces(face_rem) 
+
+        ! Determine cells
+        cells = [cv1, cv2, cv1T, cv2T]
+        call grid%DetermineCflags(cells)
+
+        end associate
+         
+    end subroutine
+
+    subroutine SplitPTrap(grid, magneticField, cv, type)
+
+        ! Description
+        !============
+        ! Splits a trapezoidal pentagon in a triangle and a quad
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: cv
+        character(:), allocatable           :: type
+
+        ! Auxiliary
+        integer(I8) :: i, pface, verts_p_face(2), common_vert(2), f1n, &
+            verts_a_face(2), cv1, cv2
+        integer(I8), allocatable, dimension(:) :: faces_cv, aligned_face, vxs_fcs, &
+            query_faces, vxs1, fcs1, a, cells
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Check type
+        if (type == 'pol') call gdErrorHandler('SplitPTrap: should not be done for poloidal splitting')
+
+        ! Find the common_vert1 and common_vert2
+        faces_cv = GetCellFaceGA(c, cv)
+        allocate(aligned_face(count(f%aligned%Get(faces_cv) == 1)))
+        aligned_face = pack(faces_cv, f%aligned%Get(faces_cv) == 1)
+        verts_a_face = [f%vert1%Get(aligned_face(1)), f%vert1%Get(aligned_face(2))]
+
+        ! Get poloidal faces of verts_a_face(1) and (2)
+        vxs_fcs = [f%vert1%Get(faces_cv), f%vert2%Get(faces_cv)]
+        query_faces = [faces_cv, faces_cv]
+
+        do i = 1, 2
+            allocate(a(count(vxs_fcs == verts_a_face(i))))
+            a = pack(query_faces, vxs_fcs == verts_a_face(i))
+            pface = Pack2(a, a /= aligned_face(1))
+            deallocate(a)
+
+            ! Get the other vert of the poloidal face
+            verts_p_face = [f%vert1%Get(pface), f%vert2%Get(pface)]
+            common_vert(i) = Pack2(verts_p_face, verts_p_face /= verts_a_face(i))
+        end do
+
+        ! Make splitting face
+        call grid%GetFaceNumber(common_vert(1),common_vert(2), 3, f1n)
+        call f%aligned%Set(f1n, f%aligned%Get(aligned_face(1)))
+
+        ! Add new vert to fsVx
+        vxs1 = common_vert
+        fcs1 = f1n
+        call grid%AddVertToFsVx(vxs1, fcs1, 0, type)
+
+        ! Build new cells
+        call grid%SplitTrap2(cv, common_vert(1), common_vert(2), aligned_face(1))
+
+        ! Determine cflags
+        cells = [cv1, cv2]
+        call grid%DetermineCflags(cells)
+
+        end associate
+
+    end subroutine
+
+    subroutine SplitPtrapPSIB2(grid, magneticField, cv, Qface, common_vert, type, options)
+
+        ! Description
+        !============
+        !  Splitting a trapezoidal cell according to psi-value which is 
+        ! intersecting the boundary face. Splitting results in a triangle and a
+        ! pentagon. if no pentagons are allowed, this pentagon wil be splitted 
+        ! further in the opposite direction.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: cv, Qface, common_vert
+        character(:), allocatable           :: type
+        type(GAoptionsUDT), intent(in)      :: options
+
+        ! Auxiliary
+        integer(I8) :: s, v1n, f1n, f2n, f3n, fT1, fP1, fT2, vxT, fT3, &
+            cv1, cv2, neig
+        integer(I8), allocatable, dimension(:) :: fcs, fcs_al, fcs_com, vxs_cv, &
+            vxs_fcs, vxs_fcs_com1, vxs_fcs_com2, query_faces, vxs_newpD, &
+            vxs_newp, fcs_newpD, fcs_newp, face_rem, cvs, cells, vertsT, facesT, &
+            vxs1, fcs1
+        real(R8) :: psic
+        character(:), allocatable :: typeV
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        fcs = GetCellFaceGA(c, cv)
+        vxs_cv = GetCellVertGA(c, cv)
+        
+        ! Aligned faces
+        allocate(fcs_al(count(f%aligned%Get(fcs) == 1)))
+        fcs_al = pack(fcs, f%aligned%Get(fcs) == 1)
+        if (size(fcs_al) /= 1) call gdErrorHandler('SplitPtrapPSIB2: something wrong')
+
+        ! Faces connected to common_vert
+        vxs_fcs = [f%vert1%Get(fcs), f%vert2%Get(fcs)]
+        query_faces = [fcs, fcs]
+        allocate(fcs_com(count(vxs_fcs == common_vert)))
+        fcs_com = pack(query_faces, vxs_fcs == common_vert)
+        if (size(fcs_com) /= 2) call gdErrorHandler('SplitPtrapPSIB2: something wrong')
 
         ! Split face
+        typeV = 'psi'
+        psic = v%psi%Get(common_vert)
+        call grid%SplitFace(magneticField, Qface, v1n, f1n, f2n, typeV, psic)
 
+        ! Make new face
+        call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
+        call f%aligned%Set(f3n, 1)
 
+        ! Add new vert to flux surface
+        vxs1 = [v1n, common_vert]
+        allocate(fcs1(1))
+        fcs1 = f3n
+        call grid%AddVertToFsVx(vxs1, fcs1, 0, type)
 
-    !end subroutine
+        ! Find other vertex for the triangle
+        vxs_fcs_com1 = [f%vert1%Get(fcs_com(1)), f%vert2%Get(fcs_com(1))]
+        vxs_fcs_com2 = [f%vert1%Get(fcs_com(2)), f%vert2%Get(fcs_com(2))]
+
+        if (any(vxs_fcs_com1 == f%vert1%Get(Qface))) then
+            fT1 = fcs_com(1)
+            fP1 = f2n
+            fT2 = f1n
+            vxT = f%vert1%Get(Qface)          
+        else if (any(vxs_fcs_com1 == f%vert2%Get(Qface))) then
+            fT1 = fcs_com(1)
+            fP1 = f1n
+            fT2 = f2n
+            vxT = f%vert2%Get(Qface)
+        else if (any(vxs_fcs_com2 == f%vert1%Get(Qface))) then
+            fT1 = fcs_com(2)
+            fP1 = f2n
+            fT2 = f1n
+            vxT = f%vert1%Get(Qface)           
+        else if (any(vxs_fcs_com2 == f%vert2%Get(Qface))) then
+            fT1 = fcs_com(2)
+            fP1 = f1n
+            fT2 = f2n
+            vxT = f%vert2%Get(Qface)
+        else
+            call gdErrorHandler('SplitPtrapPSIB2: something wrong')
+        end if
+        fT3 = f3n
+
+        ! Get faces and vertices for new pentagon
+        vxs_newpD = pack(vxs_cv, vxs_cv /= vxT)
+        vxs_newp = [vxs_newpD, v1n]
+        if (size(vxs_newp) /= 5) call gdErrorHandler('SplitPtrapPSIB2: Something wrong')
+
+        fcs_newpD = pack(fcs, fcs /= Qface .and. fcs /= fT1)
+        fcs_newp = [fcs_newpD, f3n, fP1]
+        if (size(fcs_newp) /= 5) call gdErrorHandler('SplitPtrapPSIB2: Something wrong')
+
+        ! Build new cells
+        !================
+        ! Pentagon - replace
+        cv1 = cv
+        s = c%faceP1%Get(cv1) 
+        call c%face%Replace(s, s + c%faceP2%Get(cv1) - 1, fcs_newp)
+        call c%vert%Replace(s, s + c%vertP2%Get(cv1) - 1, vxs_newp)
+
+        ! Triangle
+        vertsT = [v1n, common_vert, vxT]
+        facesT = [fT1, fT2, fT3]
+        call grid%AddCell(facesT, vertsT, c%reg%Get(cv1), cv2)
+
+        ! Remove Qface
+        allocate(face_rem(1))
+        face_rem = Qface
+        call grid%RemoveFaces(face_rem)
+        if (fcs_al(1) .gt. Qface) fcs_al(1) = fcs_al(1) - 1
+
+        ! Determine cflags
+        cells = [cv1, cv2]
+        call grid%DetermineCflags(cells)
+
+        ! Split further in the radial direction (to reduce poloidal length)
+        cvs = GetFaceCellGA(c, fcs_al(1))
+        neig = Pack2(cvs, cvs /= cv1)
+        type = 'pol'
+        call grid%SplitPQPolRad(magneticField, cv1, fcs_al(1), neig, v1n, type)
+
+        ! Go to next step to get to recursive splitting
+        ! Extract fsVx from fsFc
+        if (.not.options%slab) call grid%GetFsVxFromFsFc(options)
+
+        if (options%no_pents) then
+            call grid%PropagatePolSplitting(magneticField, options)
+        end if
+
+        ! Do ordening of vert and face for nice plot - not necessary
+
+        end associate
+
+    end subroutine 
     
-    subroutine SplitT4B(grid, qm, magneticField, cv, rface1, common_vert, type, options)
+    subroutine SplitT4B(grid, magneticField, cv, rface1, common_vert, type, options)
 
         ! Description
         !============
@@ -9316,7 +9674,6 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        type(QualityMetricUDT), intent(inout)   :: qm
         type(MagneticFieldUDT), intent(in)      :: magneticField
         integer(I8), intent(in)                 :: cv, rface1, common_vert
         character(:), allocatable               :: type
@@ -9374,8 +9731,7 @@ module gamod_types
             options2 = options
             options2%splittype = 'pol'
             options2%QTtype = 'pol-rad'
-            qm%split_cv = cv2
-            call grid%Splitting(qm, options2, magneticField)
+            call grid%Splitting(cv2, options2, magneticField)
 
         case ('pol')
 
@@ -9668,7 +10024,7 @@ module gamod_types
         faces_cv1 = [f1_cv1, f2_cv1, f3_cv1]
 
         s = c%faceP1%Get(cv)         
-        call grid%cell%vert%Replace(s, s + c%faceP1%Get(cv) - 1, verts_cv1)
+        call grid%cell%vert%Replace(s, s + c%vertP1%Get(cv) - 1, verts_cv1)
         call grid%cell%face%Replace(s, s + c%faceP1%Get(cv) - 1, faces_cv1)
         
         ! Recalculate centroid
@@ -9722,7 +10078,7 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: s, pface, v1, f1_cv1, f2_cv1, f3_cv1, f4_cv1, vertp, &
-            f2_cv2, f3_cv2, f4_cv2, v2
+            f2_cv2, f3_cv2, f4_cv2, v2, vpface(2)
         integer(I8), allocatable, dimension(:) :: faces_cv, verts_cv, query_faces, fcs_a, &
             faces_cv1, verts_cv1, fcs_b, faces_cv2, verts_cv2
 
@@ -9741,17 +10097,9 @@ module gamod_types
         allocate(fcs_a(count(verts_cv == v1)))
         fcs_a = pack(query_faces, verts_cv == v1)
 
-        if (fcs_a(1) /= face) then
-            pface = fcs_a(1)
-        else if (fcs_a(2) /= face) then
-            pface = fcs_a(2)
-        end if
-
-        if (f%vert1%Get(pface) /= v1) then
-            vertp = f%vert1%Get(pface)
-        else if (f%vert2%Get(pface) /= v1) then
-            vertp = f%vert2%Get(pface)
-        end if
+        pface = Pack2(fcs_a, fcs_a /= face)
+        vpface = [f%vert1%Get(pface), f%vert2%Get(pface)]
+        vertp = Pack2(vpface, vpface /= v1)
         
         verts_cv1 = [v2n, v1n, v1, vertp]
 
@@ -9775,17 +10123,9 @@ module gamod_types
         allocate(fcs_b(count(verts_cv == v2)))
         fcs_b = pack(query_faces, verts_cv == v2)
 
-        if (fcs_b(1) /= face) then
-            pface = fcs_b(1)
-        else if (fcs_b(2) /= face) then
-            pface = fcs_b(2)
-        end if
-
-        if (f%vert1%Get(pface) /= v2) then
-            vertp = f%vert1%Get(pface)
-        else if (f%vert2%Get(pface) /= v2) then
-            vertp = f%vert2%Get(pface)
-        end if
+        pface = Pack2(fcs_b, fcs_b /= face)
+        vpface = [f%vert1%Get(pface), f%vert2%Get(pface)]
+        vertp = Pack2(vpface, vpface /= v2)
 
         verts_cv2 = [v2n, v1n, v2, vertp]
 
@@ -9818,9 +10158,9 @@ module gamod_types
         integer(I8), intent(out)            :: cv1, cv2
 
         ! Auxiliary
-        integer(I8) :: i, s, f1, tria_vert, vert1, vert2, f1_cv1, f2_cv1, f3_cv1, &
+        integer(I8) :: f1, tria_vert, vert1, vert2, f1_cv1, f2_cv1, f3_cv1, &
             f2_cv2, f3_cv2, f4_cv2
-        integer(I8), allocatable, dimension(:) :: verts_cv, test_verts, range, &
+        integer(I8), allocatable, dimension(:) :: verts_cv, test_verts, &
             verts_cv2_rest, faces_cv2, verts_cv2, faces_cv1, verts_cv1
 
         associate(&
@@ -9848,11 +10188,7 @@ module gamod_types
         verts_cv1 = [common_vert, v1n, tria_vert]
 
         ! Verts
-        s = c%vertP1%Get(cv1)
-        call c%vert%Replace(s, s + c%vertP2%Get(cv1) - 1, verts_cv1)
-        call c%vertP2%Set(cv1, size(verts_cv1))
-        range = (/ (i, i = cv+1, c%vertP1%Size())/)
-        call c%vertP1%SumMask(range, -1)
+        call c%ReplaceVerts(cv1, verts_cv1)
 
         ! Faces
         call grid%GetFaceNumber(common_vert, v1n, 1, f1_cv1)
@@ -9860,32 +10196,24 @@ module gamod_types
         call grid%GetFaceNumber(tria_vert, common_vert, 1, f3_cv1)
 
         faces_cv1 = [f1_cv1, f2_cv1, f3_cv1]
-        call c%face%Replace(s, s + c%faceP2%Get(cv1) - 1, faces_cv1)
-        call c%faceP2%Set(cv1, size(faces_cv1))
-        call c%faceP1%SumMask(range, -1)
 
+        call c%ReplaceFaces(cv1, faces_cv1)
+
+        call grid%CalcCentroidGA(cv1)
 
         ! cv2
         allocate(verts_cv2_rest(count(verts_cv /= tria_vert .and. verts_cv /= common_vert)))
         verts_cv2_rest = pack(verts_cv, verts_cv /= tria_vert .and. verts_cv /= common_vert)
 
         ! Get vert connect to v1n
-        if (test_verts(1) /= tria_vert) then
-            vert1 = test_verts(1)
-        else if (test_verts(2) /= tria_vert) then
-            vert1 = test_verts(2)
-        end if
-        if (verts_cv2_rest(1) /= common_vert) then
-            vert2 = verts_cv2_rest(1)
-        else if (verts_cv2_rest(2) /= common_vert) then
-            vert2 = verts_cv2_rest(2)
-        end if
+        vert1 = Pack2(test_verts, test_verts /= tria_vert)
+        vert2 = Pack2(verts_cv2_rest, verts_cv2_rest /= vert1)
 
         verts_cv2 = [v1n, common_vert, vert2, vert1]
 
         call grid%GetFaceNumber(common_vert, vert2, 1, f2_cv2)
         call grid%GetFaceNumber(vert2, vert1, 1, f3_cv2)
-        call grid%GetFaceNumber(vert1, common_vert, 1, f4_cv2)
+        call grid%GetFaceNumber(vert1, v1n, 1, f4_cv2)
 
         faces_cv2 = [f1_cv1, f2_cv2, f3_cv2, f4_cv2]
 
@@ -9909,8 +10237,8 @@ module gamod_types
         integer(I8), intent(out)        :: cv1, cv2
 
         ! Auxiliary
-        integer(I8) :: fcP1, fcA1, fcP2, fcA2, s, i
-        integer(I8), allocatable :: fcs(:), range(:), faces_cv1(:), verts_cv1(:), &
+        integer(I8) :: fcP1, fcA1, fcP2, fcA2
+        integer(I8), allocatable :: fcs(:), faces_cv1(:), verts_cv1(:), &
             faces_cv2(:), verts_cv2(:)
 
         ! Associate
@@ -9934,21 +10262,15 @@ module gamod_types
             fcA2 = fcs_al(1)           
         end if
 
-
         ! cv1 => 4 triangle become real triangle
         cv1 = cv
         faces_cv1 = [ fcA1, fcP1, f1n]
-        s = c%faceP1%Get(cv1)
-        call c%face%Replace(s, s + c%faceP2%Get(cv1) - 1, faces_cv1)
-        call c%faceP2%Set(cv1, size(faces_cv1))
-        range = (/ (i, i = cv1+1, c%faceP1%Size() )/)
-        call c%faceP1%SumMask(range, -1)
+        call c%ReplaceFaces(cv1, faces_cv1)
 
         verts_cv1 = [f%vert1%Get(fcA1), f%vert2%Get(fcA1), free_vert]
-        call c%vert%Replace(s, s + c%vertP2%Get(cv1) - 1, verts_cv1)
-        call c%vertP2%Set(cv1, size(verts_cv1))
-        range = (/ (i, i = cv1+1, c%vertP1%Size() )/)
-        call c%vertP1%SumMask(range, -1)
+        call c%ReplaceVerts(cv1, verts_cv1)
+
+        call grid%CalcCentroidGA(cv1)
 
         ! cv2, new cell
         faces_cv2 = [fcA2, fcP2, f1n]
@@ -9956,6 +10278,49 @@ module gamod_types
 
         ! Add new cell
         call grid%AddCell(faces_cv2, verts_cv2, c%reg%Get(cv1), cv2)
+
+        end associate
+
+    end subroutine
+
+    subroutine SplitTrap2(grid, cv, common_vert1, common_vert2, aligned_face)
+
+        ! Description
+        !============
+        ! Split a trapezoidal pentagonal cv in triangle and quad
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: cv, common_vert1, common_vert2, aligned_face
+
+        ! Auxiliary
+        integer(I8) :: verts_aligned_face(2), cv1, f1_cv1, f2_cv1, f3_cv1, f4_cv1
+        integer(I8), allocatable, dimension(:) :: verts_cv, verts_cv1, faces_cv1
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! cv1 => pent becomes quad
+        cv1 = cv
+        verts_cv = GetCellVertGA(c, cv)
+        verts_aligned_face = [f%vert1%Get(aligned_face), f%vert2%Get(aligned_face)]
+        verts_cv1 = [common_vert1, verts_aligned_face(1), verts_aligned_face(2), common_vert2]
+
+        call c%ReplaceVerts(cv1, verts_cv1)
+
+        call grid%GetFaceNumber(common_vert1, verts_aligned_face(1), 1, f1_cv1)
+        call grid%GetFaceNumber(verts_aligned_face(1), verts_aligned_face(2), 1, f2_cv1)
+        call grid%GetFaceNumber(verts_aligned_face(2), common_vert2, 1, f3_cv1)
+        call grid%GetFaceNumber(common_vert1, common_vert2, 1, f4_cv1)
+
+        faces_cv1 = [f1_cv1, f2_cv1, f3_cv1, f4_cv1]
+
+        call c%ReplaceFaces(cv1, faces_cv1)
 
         end associate
 
@@ -9977,8 +10342,7 @@ module gamod_types
         integer(I8), intent(in)         :: cv, face, new_f1, new_f2, new_v
 
         ! Auxiliary
-        integer(I8) :: i, s
-        integer(I8), allocatable :: fcs1D(:), fcs1(:), faces_cv(:), range(:), &
+        integer(I8), allocatable :: fcs1D(:), fcs1(:), faces_cv(:), &
             vxs1D(:), verts_cv(:)
 
         ! Associate
@@ -9997,19 +10361,14 @@ module gamod_types
         faces_cv = [fcs1, new_f1, new_f2]
 
         ! Replace faces
-        s = c%faceP1%Get(cv)
-        call c%face%Replace(s, s + c%faceP2%Get(cv) - 1,  faces_cv)
-        call c%faceP2%Set(cv, size(faces_cv))
-        range = (/(i, i = cv+1, c%faceP1%Size() )/)
-        call c%faceP1%SumMask(range, 1)
+        call c%ReplaceFaces(cv, faces_cv)
 
         ! Vertices
         vxs1D = GetCellVertGA(c, cv)
         verts_cv = [vxs1D, new_v]
 
-        call c%vert%Replace(s, s + c%vertP2%Get(cv) - 1,  verts_cv)
-        call c%vertP2%Set(cv, size(verts_cv))
-        call c%vertP1%SumMask(range, 1)
+        ! Replace verts
+        call c%ReplaceVerts(cv, verts_cv)
         
         ! To signal this cell (because should be removed)
         call c%cflags%Set(cv, 4) ! triangle with 4 vertices
@@ -10034,9 +10393,8 @@ module gamod_types
         integer(I8), intent(in)         :: cv, ifc, new_f1, new_f2, new_v
 
         ! Auxiliary
-        integer(I8) :: s, i, ind
-        integer(I8), allocatable :: faces1D(:), faces1(:), verts1D(:), verts1(:), &
-            range(:)
+        integer(I8) :: ind
+        integer(I8), allocatable :: faces1D(:), faces1(:), verts1D(:), verts1(:)
 
         ! Associate
         associate(&
@@ -10044,7 +10402,7 @@ module gamod_types
             f => grid%face &
             )
 
-        ! Construct thepentagon
+        ! Construct the pentagon
         ! Faces
         faces1D = GetCellFaceGA(c, cv)
         ind = findloc(faces1D, ifc, 1)
@@ -10052,20 +10410,14 @@ module gamod_types
         faces1D(ind) = new_f1
         faces1 = [faces1D, new_f2]
 
-        s = c%faceP1%Get(cv)
-        call c%face%Replace(s, s + c%faceP2%Get(cv) - 1, faces1)
-        call c%faceP2%Set(cv, size(faces1)) ! should be five
-        range = (/(i, i = cv+1, c%faceP1%Size() )/)
-        call c%faceP1%SumMask(range, 1)
+        call c%ReplaceFaces(cv, faces1)
 
         ! Vertices
         verts1D = GetCellVertGA(c, cv)
         verts1 = [verts1D, new_v]
 
-        s = c%vertP1%Get(cv)
-        call c%vert%Replace(s, s + c%vertP2%Get(cv) - 1, verts1)
-        call c%vertP2%Set(cv, size(verts1))
-        call c%vertP1%SumMask(range, 1)
+        call c%ReplaceVerts(cv, verts1)
+
         
         end associate
 
@@ -10091,10 +10443,10 @@ module gamod_types
         integer(I8), intent(out) :: cv1, cv2
 
         ! Auxiliary
-        integer(I8) :: i, s, v1, v2, f1_cv1, f2_cv1, f3_cv1, f4_cv1, &
+        integer(I8) :: i, v1, v2, f1_cv1, f2_cv1, f3_cv1, f4_cv1, &
             f1_cv2, f2_cv2, f3_cv2, f4_cv2, vertp
         integer(I8), allocatable, dimension(:) :: verts_faces_cv, query_faces, &
-            ind, pface, verts_pface, faces_cv, verts_cv1, range, query5, &
+            ind, pface, verts_pface, faces_cv, verts_cv1, query5, &
             faces_cv1, ind1, ind2, ind3, faces_cv2, verts_cv2
         logical, allocatable, dimension(:) :: log, log1, log2, log3, log4, log5, log6
 
@@ -10123,19 +10475,11 @@ module gamod_types
         pface = pack(ind, ind /= face)
         verts_pface = [f%vert1%Get(pface(1)), f%vert2%Get(pface(1))]
         deallocate(pface)
-        if (verts_pface(1) /= v1) then
-            verts_cv1(4) = verts_pface(1)
-        else if (verts_pface(2) /= v1) then
-            verts_cv1(4) = verts_pface(2)
-        end if
-        vertp = verts_cv1(4)
+        vertp = Pack2(verts_pface, verts_pface /= v1)
+        verts_cv1(4) = vertp
 
         ! Put verts in c%vert
-        s = c%vertP1%Get(cv1)
-        call c%vert%Replace(s, s+c%vertP2%Get(cv1)-1, verts_cv1)
-        call c%vertP2%Set(cv1, size(verts_cv1))
-        range = (/ (i, i = cv1+1, c%vertP1%Size())/)
-        call c%vertP1%SumMask(range, -1)
+        call c%ReplaceVerts(cv1, verts_cv1)
 
         ! Get face for cv1
         f1_cv1 = fc_new
@@ -10164,10 +10508,7 @@ module gamod_types
         faces_cv1 = [f1_cv1, f2_cv1, f3_cv1, f4_cv1]
 
         ! Put faces in c%face
-        s = c%faceP1%Get(cv1)
-        call c%face%Replace(s, s+c%faceP2%Get(cv1)-1, faces_cv1)
-        call c%faceP2%Set(cv1, size(faces_cv1))
-        call c%faceP1%SumMask(range, -1)
+        call c%ReplaceFaces(cv1, faces_cv1)
 
         ! Recalculate centroid
         call grid%CalcCentroidGA(cv1)
@@ -10185,12 +10526,8 @@ module gamod_types
         allocate(pface(count(ind3 /= face)))
         pface = pack(ind3, ind3 /= face)
         verts_pface = [f%vert1%Get(pface(1)), f%vert2%Get(pface(1))]
-        if (verts_pface(1) /= v2) then
-            verts_cv2(4) = verts_pface(1)
-        else if (verts_pface(2) /= v2) then
-            verts_cv2(4) = verts_pface(2)
-        end if 
-        vertp = verts_cv2(4)
+        vertp = Pack2(verts_pface, verts_pface /= v2)
+        verts_cv2(4) = vertp
         
         ! Faces
         f1_cv2 = fc_new
@@ -10338,7 +10675,7 @@ module gamod_types
         integer(I8) :: i, iv, rface1, rface2, rface3, nr, &
                 vx, indmin, pfaces(5), counter
         integer(I8), allocatable, dimension(:) :: vxs, rfaces_na, &
-            vxs_faces1, vxs_faces2, vxs_faces, indf, query_facesD, query_faces
+            vxs_faces1, vxs_faces2, vxs_faces, indf, query_faces
         real(R8), allocatable, dimension(:) :: fcX, fcY, sin
         real(R8) :: vec_vf1_x, vec_vf1_y, vec_vf2_x, vec_vf2_y
 
@@ -10373,8 +10710,8 @@ module gamod_types
             rfaces_na = pack(faces, f%aligned%Get(faces) == 0)
 
             ! Normal procedure
-            allocate(rfaces_na(count(.not.isBoundaryFaceGA(f, faces))))
-            rfaces = pack(rfaces_na, .not.isBoundaryFaceGA(f, faces))
+            allocate(rfaces(count(.not.isBoundaryFaceGA(f, rfaces_na))))
+            rfaces = pack(rfaces_na, .not.isBoundaryFaceGA(f, rfaces_na))
             rface1 = rfaces(1)
             rface2 = rfaces(2)          
             nr = size(rfaces)
@@ -10395,8 +10732,7 @@ module gamod_types
 
                 ! Get faces of vert
                 vxs_faces = [vxs_faces1, vxs_faces2]
-                query_facesD = (/ (i, i = 1, size(faces))/)
-                query_faces = [ query_faces, query_faces]
+                query_faces = [ (/ (i, i = 1, size(faces))/), (/ (i, i = 1, size(faces))/) ]
                 ! MAKE A QUERY
                 allocate(sin(size(vxs)))
                 
@@ -10826,15 +11162,7 @@ module gamod_types
             vs(1) = grid%face%vert1%Get(fcs4(i))
             vs(2) = grid%face%vert2%Get(fcs4(i))
 
-            if (vs(1) /= iv) then
-                iv_next = vs(1)
-            else if (vs(2) /= iv) then
-                iv_next = vs(2)
-            else
-
-                call gdErrorHandler('RecursiveMarching: something went wrong')
-
-            end if
+            iv_next = Pack2(vs, vs /= iv)
 
             ! Recursive Marching on new vertex
             call grid%RecursiveGridMarching(iv_next, faces, aligned, counter, b_flag, in_flag)
@@ -11797,7 +12125,11 @@ module gamod_types
         ! Faces
         call fd%fluxsurfacefacesP1%Append(fd%fluxsurfacefacesP1%Get(fd%nFs-1) + fd%fluxsurfacefacesP2%Get(fd%nFs-1))
         call fd%fluxsurfacefacesP2%Append(size(fcs))
-        call fd%fluxsurfaceverts%Append(fcs)
+        if (size(fcs) /= 1) then
+            call fd%fluxsurfacefaces%Append(fcs)
+        else 
+            call fd%fluxsurfacefaces%Set(fd%fluxsurfacefacesP1%Get(fd%nFs-1) + fd%fluxsurfacefacesP2%Get(fd%nFs-1), fcs(1))
+        end if
 
         end associate
 
@@ -11832,7 +12164,7 @@ module gamod_types
         call fd%fluxsurfaceverts%Replace(s,s+fd%fluxsurfacevertsP2%Get(ifs)-1, new_verts)
         call fd%fluxsurfacevertsP2%Set(ifs, size(new_verts))
         range = (/ (j, j = ifs+1, fd%nFs)/)
-        call fd%fluxsurfacefacesP1%SumMask(range, size(vxs))
+        call fd%fluxsurfacevertsP1%SumMask(range, size(new_verts) - size(vxs_current))
 
         ! Add the faces to that flux surfaces
         fcs_current = GetFluxSurfaceFcsGA(fd, ifs)
@@ -11841,7 +12173,7 @@ module gamod_types
         s = fd%fluxsurfacefacesP1%Get(ifs)
         call fd%fluxsurfacefaces%Replace(s,s+fd%fluxsurfacefacesP2%Get(ifs)-1, new_faces)
         call fd%fluxsurfacefacesP2%Set(ifs, size(new_faces))
-        call fd%fluxsurfacefacesP1%SumMask(range, size(fcs)) 
+        call fd%fluxsurfacefacesP1%SumMask(range, size(new_faces) - size(fcs_current)) 
         
         end associate
 
@@ -11982,8 +12314,59 @@ module gamod_types
         close(fu)
 
     end subroutine
-        
 
+    !------------------------------------------------------------------!
+    !                        GACEll ROUTINES                           !
+    !------------------------------------------------------------------!  
+
+    subroutine ReplaceVerts(c, ic, verts)
+
+        ! Description
+        !============
+        ! Replace the verts of a cell with other faces and adjust pointer array
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GACellUDT), intent(in) :: c
+        integer(I8) :: ic, verts(:)
+
+        ! Auxiliary
+        integer(I8) :: s, n, i
+        integer(I8), allocatable :: range(:)
+
+        s = c%vertP1%Get(ic)
+        n = c%vertP2%Get(ic)
+        call c%vert%Replace(s, s + n - 1, verts)
+        call c%vertP2%Set(ic, size(verts))
+        range = (/ (i, i = ic+1, c%vertP1%Size())/)
+        call c%vertP1%SumMask(range, size(verts) - n)
+
+    end subroutine    
+
+    subroutine ReplaceFaces(c, ic, faces)
+
+        ! Description
+        !============
+        ! Replace the faces of a cell with other faces and adjust pointer array
+
+        ! Declare variables
+        !==================
+        class(GACellUDT), intent(in) :: c
+        integer(I8) :: ic, faces(:)     
+
+        ! Auxiliary
+        integer(I8) :: s, n, i
+        integer(I8), allocatable :: range(:)
+
+        s = c%faceP1%Get(ic)
+        n = c%faceP2%Get(ic)
+        call c%face%Replace(s, s + n - 1, faces)
+        call c%faceP2%Set(ic, size(faces))
+        range = (/ (i, i = ic+1, c%faceP1%Size())/)
+        call c%faceP1%SumMask(range, size(faces) - n)
+
+    end subroutine  
     !------------------------------------------------------------------!
     !                        GAFACE ROUTINES                           !
     !------------------------------------------------------------------!    
@@ -12013,8 +12396,8 @@ module gamod_types
         ! Initialize
         nfcs = size(f_list)
         allocate(verts_list(nfcs,2), indv(nfcs,2))
-        v1n = face%vert1%GetAllElements()
-        v2n = face%vert2%GetAllElements()
+        v1n = face%vert1%Get()
+        v2n = face%vert2%Get()
         verts_list(:,1) = v1n(f_list)
         verts_list(:,2) = v2n(f_list)
         ends = 0
@@ -12200,10 +12583,10 @@ module gamod_types
             ! Initialize
             allocate(fcX(f%ntot),fcY(f%ntot), vx(v%ntot), vy(v%ntot), &
                 indFc(f%ntot), fcLbL_loc(f%ntot))
-            v1n = f%vert1%GetAllElements()
-            v2n = f%vert2%GetAllElements()
-            vx  = v%x%GetAllElements()
-            vy  = v%y%GetAllElements()
+            v1n = f%vert1%Get()
+            v2n = f%vert2%Get()
+            vx  = v%x%Get()
+            vy  = v%y%Get()
 
             ! Get GA facelabels
             fcLbl_loc = GetfcLblGA(f,options)
@@ -12384,7 +12767,7 @@ module gamod_types
         integer(I8), allocatable :: res(:), range(:)
         s = cell%vertP1%Get(i)
         range = (/ (j, j = s, (s + cell%vertP2%Get(i) - 1)) /)
-        res = cell%vert%GetMultipleElements(range)   
+        res = cell%vert%Get(range)   
     end function
 
     ! Get vertices of a cell and dynamic arrays
@@ -12394,7 +12777,7 @@ module gamod_types
         integer(I8), allocatable :: res(:), range(:)
         s = cell%faceP1%Get(i)        
         range = (/ (j, j = s, (s + cell%faceP2%Get(i) - 1)) /)
-        res = cell%face%GetMultipleElements(range)   
+        res = cell%face%Get(range)   
     end function
 
     ! Get neighboring cells of a cell
@@ -12510,8 +12893,8 @@ module gamod_types
         logical, allocatable        :: log(:) 
         
         if (present(cvLookUp)) then
-            allocate(res(count(cell%face%GetAllElements().eq.i)))
-            res = pack(cvLookUp,cell%face%GetAllElements().eq.i)
+            allocate(res(count(cell%face%Get().eq.i)))
+            res = pack(cvLookUp,cell%face%Get().eq.i)
         else 
             log = (cell%face%Get() == i)
             allocate(ind(count(log)))
@@ -12605,7 +12988,12 @@ module gamod_types
         nf = fd%fluxsurfacefacesP2%Get(i)
         s = fd%fluxsurfacefacesP1%Get(i)
         range = (/(j, j = s, (s+nf-1) )/)
-        res = fd%fluxsurfacefaces%GetMultipleElements(range)
+        if (size(range) /= 1) then
+            res = fd%fluxsurfacefaces%Get(range)
+        else 
+            allocate(res(1))
+            res = fd%fluxsurfacefaces%Get(s)
+        end if
 
     end function   
     
@@ -12617,7 +13005,7 @@ module gamod_types
         nf = fd%fluxsurfacevertsP2%Get(i)
         s = fd%fluxsurfacevertsP1%Get(i)
         range = (/(j, j = s, (s+nf-1) )/)
-        res = fd%fluxsurfaceverts%GetMultipleElements(range)
+        res = fd%fluxsurfaceverts%Get(range)
     end function
 
     ! Get cells of a vertex without using vert%cell and dynamic arrays
@@ -12694,16 +13082,26 @@ module gamod_types
         type(GAoptionsUDT) :: options
         integer(I8) :: res(1:f%ntot), indFc(1:f%ntot), i 
 
-        res = f%label%GetAllElements()
+        res = f%label%Get()
         indFc = (/ (i, i=1,f%ntot) /)
         do i = 1, size(options%facelabelmappingGG)
-            res(pack(indFc, f%label%GetAllElements() == options%facelabelmappingGG(i))) &
+            res(pack(indFc, f%label%Get() == options%facelabelmappingGG(i))) &
                 = options%facelabelmappingGA(i)
         end do
 
     end function
 
-    function GetVxsFromFcsGA(f,fcs) result(res)
+    function GetVxsFromFcsGA0D(f,fcs) result(res)
+        type(GAFaceUDT) :: f
+        integer(I8) :: fcs, verts(2)
+        integer(I8), allocatable :: res(:)
+
+        verts = [f%vert1%Get(fcs), f%vert2%Get(fcs)]
+        call Unique(verts, res)
+
+    end function
+
+    function GetVxsFromFcsGA1D(f,fcs) result(res)
         type(GAFaceUDT) :: f
         integer(I8) :: fcs(:)
         integer(I8), allocatable :: verts(:), res(:)
@@ -12712,8 +13110,8 @@ module gamod_types
         nf = size(fcs)
         allocate(verts(1:nf*2))
         verts = 0
-        verts(1:nf) = f%vert1%GetMultipleElements(fcs)
-        verts(nf+1:nf*2) = f%vert2%GetMultipleElements(fcs)
+        verts(1:nf) = f%vert1%Get(fcs)
+        verts(nf+1:nf*2) = f%vert2%Get(fcs)
         call Unique(verts, res)
 
     end function
@@ -12728,7 +13126,7 @@ module gamod_types
 
         ! Initialize
         res = sepIDloc
-        creg = cell%reg%GetAllElements()
+        creg = cell%reg%Get()
 
         do i = 1, nf, step
             ifc = faces(i)
