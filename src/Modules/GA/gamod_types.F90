@@ -511,7 +511,7 @@ module gamod_types
         procedure :: SplitQQT
         procedure :: SplitBQT
         procedure :: SplitTQT
-        !procedure :: SplitQshaved
+        procedure :: SplitQshaved
         procedure :: SplitNonRegularQ
         procedure :: SplitPQ
         procedure :: SplitPQPolRad
@@ -521,6 +521,7 @@ module gamod_types
         procedure :: SplitPtrapPSIB2
         procedure :: SplitT4Q
         procedure :: SplitT4B
+        procedure :: SplitT4BV
         procedure :: SplitFace
         procedure :: SplitTriaStacked
         procedure :: SplitCenterTria
@@ -529,6 +530,7 @@ module gamod_types
         procedure :: SplitT4
         procedure :: SplitT4Stacked
         procedure :: SplitTrap2
+        procedure :: SplitTrapQT
         procedure :: TriaToQuad
         procedure :: QuadToPent
         procedure :: SplitCenterPent
@@ -7147,7 +7149,7 @@ module gamod_types
                     call grid%SplitTQT(magneticField, cv, rface1, rface2, neig1, neig2, type, options%typeT, &
                         options%QTtype)
                 case('4shaved')
-                    !call grid%SpltQshaved(magneticField, cv, rface1,rface2,neig1,neig2)
+                    call grid%SplitQshaved(magneticField, cv, rface1,rface2,neig1,neig2)
                 case default
 
                     print * , caseID
@@ -7193,11 +7195,13 @@ module gamod_types
             case ('30')
                 call grid%SplitT4B(magneticField, cv, rface1,common_vert, type, options)
             case ('31')
-                !call grid%SplitT4BV()
+                call grid%SplitT4BV(magneticField, cv, common_vert)
             case ('34')
                 call grid%SplitT4Q(magneticField, cv, rface1, common_vert, neig1, type)
             case ('35')
+                ! TODO
             case ('33')
+                ! TODO
             case default
 
                 print *, caseID
@@ -9438,6 +9442,104 @@ module gamod_types
 
     end subroutine 
 
+    subroutine SplitQshaved(grid, magneticField, cv, rface1, rface2, neig1, neig2)
+
+        !  Description
+        !=============
+        ! Radial splitting of a trapezoid from a shaved off-tube
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        integer(I8), intent(in)                 :: cv, rface1, rface2
+        integer(I8), intent(inout)              :: neig1, neig2
+
+        ! Auxiliary
+        integer(I8) :: vx_al(2), ind, vx_start, rface1_vx(2), rface2_vx(2), &
+            neig_change, face_change, cv1, cv2, f1n, f2n, f3n , v1n
+        integer(I8), allocatable, dimension(:) :: verts, faces, fc_al, &
+            vx_nal, int_fcs, face_rem, cells, fcs1, vxs1
+        real(R8) :: psic
+        real(R8), allocatable :: dpsi(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Get the starting vertex
+        verts = GetCellVertGA(c, cv)
+        faces = GetCellFaceGA(c, cv)
+
+        fc_al = pack(faces, f%aligned%Get(faces) == 1)
+        vx_al = [f%vert1%Get(fc_al(1)), f%vert2%Get(fc_al(1))]
+        allocate(vx_nal(count(verts /= vx_al(1) .and. verts /= vx_al(2))))
+        vx_nal = pack(verts, verts /= vx_al(1) .and. verts /= vx_al(2))
+
+        dpsi = abs( v%psi%Get(vx_nal) - v%psi%Get(vx_al(1)))
+        ind = minloc(dpsi,1)
+
+        vx_start = vx_nal(ind)
+        psic = v%psi%Get(vx_start)
+        rface1_vx = [f%vert1%Get(rface1), f%vert2%Get(rface1)]
+        rface2_vx = [f%vert1%Get(rface2), f%vert2%Get(rface2)]
+
+        if (any(vx_start == rface1_vx)) then
+            neig_change = neig2
+            face_change = rface2
+        else if (any(vx_start == rface2_vx)) then
+            neig_change = neig1
+            face_change = rface1
+        else 
+            call gdErrorHandler('SplitQshaved: something wrong')
+        end if
+
+        ! Make new faces
+        call grid%GetIntersectedPsiFaces(cv, faces, int_fcs, psic)
+        call grid%SplitFace(magneticField, int_fcs(1), v1n, f1n, f2n, 'psi', psic)
+        call grid%GetFaceNumber(v1n, vx_start, 3, f3n)
+        call f%aligned%Set(f3n, 1)
+
+        ! Add vert to flux surface
+        allocate(fcs1(1))
+        vxs1 = [v1n, vx_start]
+        fcs1 = f3n
+        call grid%AddVertToFsVx(vxs1, fcs1, 0, 'rad')
+
+        ! Build new cells
+        ! neig_change => becomes pent
+        call grid%QuadToPent(neig_change, face_change, f1n, f2n, v1n)
+
+        ! Other neighbor does not change
+        ! Splitting trapezoid into a quad and a triangle
+        call grid%SplitTrapQT(cv, face_change, fc_al(1), vx_start, v1n, cv1, cv2)
+
+        ! Remove face_change
+        allocate(face_rem(1))
+        face_rem = face_change
+        call grid%RemoveFaces(face_rem)
+
+        ! Determine cflags
+        cells = [cv1, cv2]
+        call grid%DetermineCflags(cells)
+
+
+
+
+
+
+
+        
+
+
+        end associate
+
+    end subroutine
+
     subroutine SplitNonRegularQ(grid, magneticField, cv, psic, type, options)
 
         ! Description
@@ -10347,6 +10449,60 @@ module gamod_types
 
     end subroutine
 
+    subroutine SplitT4BV(grid, magneticField, cv, common_vert)
+
+        ! Description
+        !============
+        ! Split a triangle which has one boundary vertex. Only possible for poloidal
+        ! splitting at the moment. The triangle is splitted into two triangle along
+        ! the line connecting the common vertex and the boundary vertex.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        integer(I8), intent(in)             :: cv, common_vert
+
+        ! Auxiliary
+        integer(I8) :: f1n, cv1, cv2
+        integer(I8), allocatable :: verts(:), bvert(:), fcs(:), &
+            fcs_perp(:), fcs_al(:), cells(:)
+        logical, allocatable :: log(:)
+    
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Get boundary vertices
+        verts = GetCellVertGA(c, cv)
+        log = isBoundaryVertGA(grid, verts)
+        allocate(bvert(count(log)))
+        bvert = pack(verts, log)
+
+        ! Get non-aligned faces
+        fcs = GetCellFaceGA(c, cv)
+        allocate(fcs_perp(count(f%aligned%Get(fcs) == 0)))
+        fcs_perp = pack(fcs, f%aligned%Get(fcs) == 0)
+        allocate(fcs_al(count(f%aligned%Get(fcs) == 1)))
+        fcs_al = pack(fcs, f%aligned%Get(fcs) == 1)
+
+        ! Make new face
+        call grid%GetFaceNumber(bvert(1), common_vert, 3, f1n)
+
+        ! Split the triangle
+        call grid%SplitT4Stacked(cv, f1n, bvert(1), fcs_perp, fcs_al, cv1, cv2)
+
+        ! Determine cflags
+        cells = [cv1, cv2]
+        call grid%DetermineCflags(cells)
+
+        end associate
+
+    end subroutine
+
     subroutine SplitT4Q(grid, magneticField, cv, rface1, common_vert, neig1, type)
 
         ! Description
@@ -10939,6 +11095,75 @@ module gamod_types
         call c%ReplaceFaces(cv1, faces_cv1)
 
         call grid%CalcCentroidGA(cv1)
+
+        end associate
+
+    end subroutine
+
+    subroutine SplitTrapQT(grid, cv, face, face_al, vx_start, vx_new, cv1, cv2)
+
+        ! Description
+        !============
+        ! Split a trapezoid in a quad and a triangle.
+        ! face is splitted face
+        ! face_al is aligned face of trapezoid
+        ! vx_start is the vertex used for the psi value of the split 
+        ! vx_new is the new vertices created
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        integer(I8), intent(in)             :: cv, face, face_al, vx_start, vx_new
+        integer(I8), intent(out)            :: cv1, cv2
+
+        ! Auxiliary
+        integer(I8) :: vx_al(2), vx_f(2), va, f1_cv1, f2_cv1, f3_cv1, f4_cv1, & 
+            vt, f2_cv2, f3_cv2, s
+        integer(I8), allocatable :: verts_cv1(:), vp(:), verts_cv2(:), &
+            faces_cv1(:), faces_cv2(:)
+        logical, allocatable :: log(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! cv1 = quad
+        cv1 = cv
+        vx_al = [f%vert1%Get(face_al), f%vert2%Get(face_al)]
+        vx_f = [f%vert1%Get(face), f%vert2%Get(face)]
+
+        verts_cv1 = [vx_start, vx_new, vx_al ]
+        log = isMember(vx_al, vx_f)
+        allocate(vp(count(log)))
+        vp = pack(vx_al, log)
+        va = Pack2(vx_al, vx_al /= vp(1))
+
+        call grid%GetFaceNumber(vx_start, vx_new, 1, f1_cv1)
+        call grid%GetFaceNumber(vx_new, vp(1), 1, f2_cv1)
+        f3_cv1 = face_al
+        call grid%GetFaceNumber(vx_start, va, 1, f4_cv1)
+
+        faces_cv1 = [f1_cv1, f2_cv1, f3_cv1, f4_cv1]
+
+        ! Replace 
+        s = c%vertP1%Get(cv1)
+        call c%vert%Replace(s, s + 3, verts_cv1)
+        call c%face%Replace(s, s + 3, faces_cv1)
+
+        ! cv2
+        vt = Pack2(vx_f, vx_f /= vp(1))
+        verts_cv2 = [vx_start, vx_new, vt]
+
+        call grid%GetFaceNumber(vx_new, vt, 1, f2_cv2)
+        call grid%GetFaceNumber(vx_start, vt, 1, f3_cv2)
+
+        faces_cv2 = [f1_cv1, f2_cv2, f3_cv2]
+
+        ! Add new cell cv2
+        call grid%AddCell(faces_cv2, verts_cv2, c%reg%Get(cv1), cv2)
 
         end associate
 
@@ -12643,9 +12868,9 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)         :: grid
-        integer(I8), intent(in)                 :: old_f, new_v(:), new_f(:)
-        character(:), allocatable, intent(in)   :: type
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: old_f, new_v(:), new_f(:)
+        character(*), intent(in)        :: type
 
         ! Auxiliary
         integer(I8) :: i, ind, ifs, ind_good

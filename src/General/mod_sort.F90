@@ -1069,8 +1069,8 @@ module mod_sort
         ! Declare arguments
         !==================
         ! Arguments
-        integer(I8), allocatable :: a(:), b(:)
-        logical, allocatable :: res(:)
+        integer(I8)             :: a(:), b(:)
+        logical, allocatable    :: res(:)
 
         ! Auxiliary
         integer(I8) :: i
