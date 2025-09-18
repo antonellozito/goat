@@ -230,6 +230,8 @@ module gamod_utility
         ! 1 = core
         ! 2 = SOL
         ! 3 = PF
+        deallocate(fd%fluxtuberegID)
+        allocate(fd%fluxtuberegID(fd%nFt))
         fd%fluxtuberegID = 0
         do ift = 1, fd%nFt
             cvs = GetFTCell(fd, ift)
