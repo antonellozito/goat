@@ -16348,7 +16348,7 @@ module ggmod_gridgeneration2D
             cellregionmapping, veslabels, WGlabels, OFlabels, tfc, &
             allsepIDs, tfv, tfsepv, allTPlabels, uvesstructlabels, &
             reslabels, facelabelsGG, facelabelsGD, allstructurelabels, &
-            uallstructurelabels
+            uallstructurelabels, vesselfID
         integer(I8), allocatable                    :: edges(:, :), &
             vesstructlabels(:, :), flabels(:, :)
         real(R8), allocatable, dimension(:)         :: xf, yf
@@ -16617,17 +16617,20 @@ module ggmod_gridgeneration2D
                 fv      => simgrid%face%vert  &
                 )
             
-            ! Compute face coordinates
+            ! Compute face coordinates of boundary faces (other labels are
+            ! zero)
             xf = 0.5*(xv(fv(:, 1)) + xv(fv(:, 2)))
             yf = 0.5*(yv(fv(:, 1)) + yv(fv(:, 2)))
 
             ! Interpolate
-            call vessel%exactplfvessel%EvaluateLabel(xf, yf, flabels)
+            call vessel%exactplfvessel%EvaluateLabel(pack(xf, isvesselface), pack(yf, isvesselface), flabels)
 
             ! Extract
-            allocate(allstructurelabels(count(isvesselface)))
-            where (isvesselface) simgrid%face%label = abs(flabels(:, 1))
-            allstructurelabels = pack(abs(flabels(:, 1)), isvesselface)
+            allocate(vesselfID(count(isvesselface)))
+            vesselfID = pack([(k, k = 1, simgrid%face%ntot)], isvesselface)
+            simgrid%face%label(vesselfID) = abs(flabels(:, 1))
+            where (.not. isvesselface) simgrid%face%label = 0
+            allstructurelabels = flabels(:, 1)
             call Unique(allstructurelabels, uallstructurelabels)
 
             ! Remap GG to GD labels
