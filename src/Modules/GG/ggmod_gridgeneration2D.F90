@@ -5263,13 +5263,11 @@ module ggmod_gridgeneration2D
             indsrf, minind, maxind, minindloc
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
-            tf1, tf2, tubebndf1, tubebndf2, tubebndv1, tubebndv2, &
-            tubehfvert, tubelfvert
+            tf1, tf2, tubehfvert, tubelfvert
         real(R8)                                :: hfval, lfval
         real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
-            tcfv2val, tubelfval, tubehfval, tubebndval1, tubebndval2
-        logical, allocatable, dimension(:)      :: ishfface, islfface, &
-            ishfvert
+            tcfv2val
+        logical, allocatable, dimension(:)      :: ishfface, islfface
 
         ! Diagnostics
 

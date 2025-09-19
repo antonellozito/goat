@@ -7249,8 +7249,6 @@ module gdmod_costfunction
         real(R8), allocatable               :: dJdvar(:), dJdvartemp(:) 
         type(MySparseUDT)                   :: dgradJdvar, dgradJdvartemp
 
-        real(R8)                            :: tstart, tend
-
         ! Loop variables
 
         ! Auxiliary
