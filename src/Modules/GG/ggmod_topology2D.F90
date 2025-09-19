@@ -35,6 +35,7 @@ module ggmod_topology2D
     use PolygonLevelsetFunction2D
     use mod_sparseinterface
     use mod_constants, only: posinfval_R8
+    use mod_utility, only: wall_time
     implicit none
     private 
     public :: TopomeshUDT, ConstructTopologicalMesh, TraceExtrema2D, &
@@ -658,6 +659,7 @@ module ggmod_topology2D
         ! Remove regions
         !===============
         ! Merge tubes (before aligned vessel parts)?
+        call wall_time(ts)
         if (options%mtoldstyle) then 
             call MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
                 vessel, fieldtracer, options)
@@ -668,6 +670,8 @@ module ggmod_topology2D
 
             call tmadaptor%MergeTMTubesDriver(topomesh, options)
         end if 
+        call wall_time(te)
+        print *, 'time spent in adaptations = ', te - ts
 
 
         ! Do temporary writing
@@ -5657,6 +5661,7 @@ module ggmod_topology2D
 
         ! Compute data
         !=============
+        call wall_time(ts)
         ! Face psi values and radial length
         !$omp parallel do if (.not. omp_in_parallel()) &
         !$omp private(i, temp) &
@@ -5670,6 +5675,8 @@ module ggmod_topology2D
             tmadaptor%facedlcrad(i) = ConstructRealDynamicArray(temp)
         end do 
         !$omp end parallel do
+        call wall_time(te)
+        print *, 'time spent in adaptor setup = ', te - ts
 
         ! Housekeeping
         end associate
@@ -5998,7 +6005,7 @@ module ggmod_topology2D
         ! Auxiliary
         integer(I8)                             :: tubepairind
         integer(I8), allocatable, dimension(:)  :: tube1, tube2, &
-            splittubes, mergefaces
+            splittubes
         logical, allocatable, dimension(:)      :: ismarked, &
             ismarkedpair, issplittable, dolfside, dohfside, ismergeable
         real(R8), allocatable, dimension(:)     :: dvalpair, dpsi, dlrad
@@ -6070,9 +6077,6 @@ module ggmod_topology2D
                 ismarkedpair(i) = .false.
                 dvalpair(i) = posinfval_R8()
             end if 
-
-            ! Housekeeping
-            deallocate(mergefaces)
         end do
 
         ! If any pairs were found, merge these
@@ -7462,8 +7466,8 @@ module ggmod_topology2D
         dlrad = thislrad - tmadaptor%lradmin
 
         ! Sanity checks
-        dval = [thispsi(tubes) - 3*tmadaptor%dpsimin, &
-            thislrad(tubes) - 3*tmadaptor%lradmin] ! if negative, then tube shouldn't have been marked for splitting
+        dval = [thispsi - 3*tmadaptor%dpsimin, &
+            thislrad - 3*tmadaptor%lradmin] ! if negative, then tube shouldn't have been marked for splitting
         if (any(dval < 0.0_R8)) then 
             call gdErrorHandler('SplitTMTubesTA: tubes ' // & 
                 'were marked for splitting that are not wide enough, cannot continue')
