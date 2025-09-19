@@ -441,6 +441,7 @@ module goatmod_userinput
         !                       the general merge case
         ! - mtallowcore, mtallowpf  same as separatrix, but for core and 
         !                       pf contours
+        ! - mtoldstyle          use old style of doing tube merging adaptations
         ! - (deprecated) dpsimintangencypointtubes   minimal delta psi for tangency 
         !                       point tubes (if below, we attempt to 
         !                       merge)
@@ -465,6 +466,7 @@ module goatmod_userinput
         !                       to full vessel refinement (see vessel options)
         ! - (deprecated) avpmaxvesseldist    maximal vessel edge length
         ! - (deprecated) avpminreffac        minimal refinement factor for vessel edge refinement                    
+        ! 
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax, avpminreffac
@@ -475,7 +477,7 @@ module goatmod_userinput
             doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
             rvrdocascade, rvrfullycovered, alignvesselparts, avprefinevessel, &
             readexistingtracers, mergeavptubes, mergetubes, mtallowcore, &
-            mtallowpf, mtallowseparatrix, writedebugoutput
+            mtallowpf, mtallowseparatrix, writedebugoutput, mtoldstyle
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes, &
             avpminangle, avpmaxvesseldist, dpsimintubes, lradmintubes
@@ -985,6 +987,7 @@ module goatmod_userinput
         options%mtallowcore                 = .false.
         options%mtallowpf                   = .false.
         options%mtallowseparatrix           = .false.
+        options%mtoldstyle                  = .false. 
         options%dpsimintangencypointtubes   = 0.0_R8 ! zero to ignore
         options%lradmintangencypointtubes   = 0.0_R8 ! zero to ignore
         options%dpsimintubes                = 0.0_R8 ! zero to ignore
@@ -1770,6 +1773,8 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%dpsimintubes)
         field = 'gg.tm.lradmintubes'
         call ExtractOptionValueReal0D(fid, field, options%lradmintubes)
+        field = 'gg.tm.mergetubes.oldstyle'
+        call ExtractOptionValueLogical0D(fid, field, options%mtoldstyle)
 
         field = 'gg.tm.removevesselregions'
         call ExtractOptionValueLogical0D(fid, field, options%removevesselregions)
