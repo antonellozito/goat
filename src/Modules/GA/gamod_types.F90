@@ -6619,6 +6619,7 @@ module gamod_types
             three_vert = vxF(2)
             b_vert = vxF(1)
         else 
+
             three_vert = vxF(1)
             b_vert = vxF(2)        
         end if
@@ -6632,8 +6633,8 @@ module gamod_types
         ! Make new merge cells
         vx1 = GetCellVertGA(c, cvs(1))
         vx2 = GetCellVertGA(c, cvs(2))
-        fc1 = GetCellVertGA(c, cvs(1))
-        fc2 = GetCellVertGA(c, cvs(2))
+        fc1 = GetCellFaceGA(c, cvs(1))
+        fc2 = GetCellFaceGA(c, cvs(2))
 
         ! Verts
         new_vertsD = [vx1, vx2]
@@ -6726,8 +6727,8 @@ module gamod_types
         ! Verts
         vxF = [f%vert1%Get(fc), f%vert2%Get(fc)]
         ! Three vert
-        v1cvs = GetVertCellGA(c, vxF(1))
-        v2cvs = GetVertCellGA(c, vxF(2))
+        v1cvs = GetVertFaceGA(f, vxF(1))
+        v2cvs = GetVertFaceGA(f, vxF(2))
         nv1cvs = size(v1cvs)
         nv2cvs = size(v2cvs)
 
@@ -7337,8 +7338,8 @@ module gamod_types
         vxF = [f%vert1%Get(fc), f%vert2%Get(fc)]
 
         ! Three vert
-        v1cvs = GetVertCellGA(c, vxF(1))
-        v2cvs = GetVertCellGA(c, vxF(2))
+        v1cvs = GetVertFaceGA(f, vxF(1))
+        v2cvs = GetVertFaceGA(f, vxF(2))
         nv1cvs = size(v1cvs)
         nv2cvs = size(v2cvs)
 
@@ -7385,8 +7386,8 @@ module gamod_types
         if (size(facesA) == 0) then
             err = .true.
         else 
-            vertsA = [f%vert1%Get(facesA(1)), f%vert2%Get(facesA(1))]
-            log = isMember(verts, vertsA)
+            vertsA = [f%vert1%Get(facesA), f%vert2%Get(facesA)]
+            log = .not.isMember(verts, vertsA)
             allocate(v_change(count(log)))
             v_change = pack(verts, log)
             if (size(v_change) == 0) then
@@ -7399,8 +7400,8 @@ module gamod_types
                     err = .true.
                 else 
                     vB = [f%vert1%Get(faceB(1)), f%vert2%Get(faceB(1))]
-                    allocate(v_end(count(vB /= v_change)))
-                    v_end = pack(vB, vB /= v_change)
+                    allocate(v_end(count(vB /= v_change(1))))
+                    v_end = pack(vB, vB /= v_change(1))
 
                     if (size(v_end) /= 1) err = .true.
 
@@ -7491,16 +7492,12 @@ module gamod_types
         call ReplaceElement(fd%fluxsurfaceverts, v_change(1), v_end(1))
 
         ! Removement
+        deallocate(face_rem)
         allocate(face_rem(1))
-        allocate(verts_rem(1))
         face_rem = faceB
         verts_rem = v_change
         call grid%RemoveFaces(face_rem)
         call grid%RemoveVertices(verts_rem)
-
-
-
-
 
         end associate
 
@@ -7949,9 +7946,9 @@ module gamod_types
         logical, intent(out)            :: intersection_flag
 
         ! Auxiliary
-        integer(I8) :: i, j, k, vxs_changeD(2), vx(2)
+        integer(I8) :: i, j, k, vx(2)
         integer(I8), allocatable, dimension(:) :: vxs, neigs, cvLookUp, &
-            in, verts, neigsD, fcs_change, vxs_change, fcs
+            in, verts, neigsD, fcs_change, vxs_change, fcs, vxs_changeD
         real(R8) :: p1(2), q1(2), p2(2), q2(2) 
 
         ! Associate
@@ -14097,22 +14094,26 @@ module gamod_types
 
         if (allocated(ifssU)) then
 
-            ! Add the face to that flux surface
-            ifs = ifssU(1)
-            old_nf = fd%fluxsurfacefacesP2%Get(ifs)
-            s = fd%fluxsurfacefacesP1%Get(ifs)
-            fcs = GetFluxSurfaceFcsGA(fd, ifs)
+            if(size(ifssU) == 1) then
 
-            ! Build new faces
-            allocate(new_faces(old_nf + 1))
-            new_faces =  [fcs , new_f]
-            call Unique(new_faces, new_facesU)
+                ! Add the face to that flux surface
+                ifs = ifssU(1)
+                old_nf = fd%fluxsurfacefacesP2%Get(ifs)
+                s = fd%fluxsurfacefacesP1%Get(ifs)
+                fcs = GetFluxSurfaceFcsGA(fd, ifs)
 
-            ! Put in the data 
-            call fd%fluxsurfacefaces%Replace(s,s+old_nf-1,new_faces)
-            call fd%fluxsurfacefacesP2%Set(ifs, size(new_faces))
-            loc = (/ (i, i = ifs+1, fd%nFs)/)
-            call fd%fluxsurfacefacesP1%SumMask(loc,1)
+                ! Build new faces
+                allocate(new_faces(old_nf + 1))
+                new_faces =  [fcs , new_f]
+                call Unique(new_faces, new_facesU)
+
+                ! Put in the data 
+                call fd%fluxsurfacefaces%Replace(s,s+old_nf-1,new_faces)
+                call fd%fluxsurfacefacesP2%Set(ifs, size(new_faces))
+                loc = (/ (i, i = ifs+1, fd%nFs)/)
+                call fd%fluxsurfacefacesP1%SumMask(loc,1)
+
+            end if
 
         end if
             
@@ -15934,6 +15935,7 @@ module gamod_types
 
     subroutine CheckUniqueness(ida)
         type(IntegerDynamicArrayBufferedUDT) :: ida
+        integer(I8) :: i, n
         integer(I8), allocatable :: ida0(:), &
             ida_loc(:), ida0U(:)
 
@@ -15941,8 +15943,22 @@ module gamod_types
         allocate(ida0(count(ida_loc /= 0)))
         ida0 = pack(ida_loc,ida_loc /= 0)
         call Unique(ida0,ida0U)
-        if (size(ida0) /= size(ida0U)) &
+        if (size(ida0) /= size(ida0U)) then
+
+            ! Find what the problem is
+            do i = 1, size(ida0)
+                if (count(ida0 == ida0(i)) .gt. 1) then
+                    n = count(ida0 == ida0(i))
+                    print *, 'Element: ', i
+                    print *, 'Value: ', ida0(i)
+                    print *, 'Occuring ', n, 'times'
+                end if
+            end do
+
             call gdErrorHandler('CheckUniqueness: integer array not unique')
+
+        end if
+
 
     end subroutine
 
