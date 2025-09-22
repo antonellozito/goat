@@ -21,6 +21,7 @@ module gamod_utility
     use goatmod_userinput
     !use gdmod_utility_optimization
     use gamod_types
+    use gamod_math
 
 
     ! The usual
@@ -1179,26 +1180,6 @@ module gamod_utility
 
     end subroutine
 
-    !subroutine AddSeparatrixTube(grid, ftCv, ftCvP, ftFc, ftFcP, first_core_tube) 
-
-        ! Description
-        !============
-        ! Add the separatrix flux tube based on fsFc only where it is connected with
-        ! the core region
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        !type(GridUDT) :: grid
-        !integer(I8), allocatable :: ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
-        !integer(I8) :: first_core_tube(:)
-
-        ! Auxiliary
-        !logical, allocatable :: in_first_core_tube
-
-    !end subroutine
-
-
     subroutine BuildFtFc(grid)
 
         ! Description
@@ -1316,8 +1297,7 @@ module gamod_utility
 
         end associate
 
-    end subroutine BuildFtFc
-
+    end subroutine
 
     subroutine DetermineMPs(grid, options)
 
@@ -1754,81 +1734,6 @@ module gamod_utility
 
         if (res == 0) call gdErrorHandler('GetOppositeFace: no opposite face found')
 
-    end function
-
-    function Intersects(p1, q1, p2, q2) result(res)
-        real(R8) :: p1(2), q1(2), p2(2), q2(2)
-        integer(I8) :: res, o1, o2, o3, o4
-
-
-        o1 = Orient(p1, q1, p2)
-        o2 = Orient(p1, q1, q2)
-        o3 = Orient(p2, q2, p1)
-        o4 = Orient(p2, q2, q2)
-
-        res = 1
-
-        if (o1 /= o2 .and. o3 /= o4) then
-            return
-        end if
-
-        !c1 = 
-        if (o1 == 0 .and. OnSegment(p1, p2, q1) == 1) then 
-            return
-        end if
-    
-        if (o2 == 0 .and. OnSegment(p1, q2, q1) == 1) then
-            return
-        end if
-    
-        if (o3 == 0 .and. OnSegment(p2, p1, q2) == 1) then
-            return 
-        end if
-    
-        if (o4 == 0 .and. OnSegment(p2, q1, q2) == 1) then
-            return 
-        end if
-
-        res = 0;
-
-    end function
-
-    function Orient(p, q, r)  result(res)
-        real(R8) :: p(2), q(2), r(2), val
-        integer(I8) :: res
-
-        val = (q(2) - p(2)) * (r(1) - q(1)) - (q(1) - p(1)) * (r(2) - q(2))
-
-        if (val > 0) then
-
-            res = 1
-            return
-
-        else
-
-            if (val < 0) then
-                res = 2
-                return
-            else
-                res = 0
-                return
-            end if
-
-        end if
-
-    end function
-
-    function OnSegment(p, q, r) result(res)
-        real(R8) :: p(2), q(2), r(2)
-        integer(I8) :: res 
-
-        res = 0
-        if ( (q(1) <= max(p(1), r(1))) .and. (q(1) >= min(p(1), r(1))) .and. &
-             (q(2) <= max(p(2), r(2))) .and.  (q(2) >= min(p(2), r(2))) ) then
-            res = 1
-        end if
-        
-        return               
     end function
 
     function isBoundaryFace0D(ifc, f) result(res)

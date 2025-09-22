@@ -22,6 +22,8 @@ module gamod_types
     use DistributionFunction
     !use goatmod_userinput
     !use gdmod_utility_optimization
+    !use gamod_utility
+    use gamod_math
 
 
     ! The usual
@@ -486,6 +488,10 @@ module gamod_types
         procedure :: Merge333
         procedure :: Merge53
         procedure :: Merge53B
+        procedure :: Merge4443B1
+        procedure :: Merge5T3
+        procedure :: Merge5spec
+        procedure :: CheckIntersectionMerge4443B1
         procedure :: MakeMergePent
         procedure :: MakeNewThreeFace
         procedure :: AdaptNeigThreeVert
@@ -618,13 +624,6 @@ module gamod_types
     interface GetVxsFromFcsGA
         module procedure GetVxsFromFcsGA0D, GetVxsFromFcsGA1D
     end interface
-
-    ! General norm
-    interface Norm
-        module procedure Norm0D, Norm1D
-    end interface
-
-
 
     contains 
     !==================================================================!
@@ -5972,9 +5971,21 @@ module gamod_types
             ! Merging pentagon and triangle
             call grid%Merge53B(fc, cvs)
 
-        case ('4433B1')
+        case ('4443B1')
+
+            !  Merges two quads to a pent (special case)
+            call grid%Merge4443B1(fc, cvs)
+
         case ('5T3')
+
+            ! Transforming a pentagon into three triangle
+            call grid%Merge5T3(cvs)
+
         case ('5spec')
+
+            !  Merging of special case where the common vert of the pentagon is a boundary vertex
+            call grid%Merge5spec(cvs)
+
         case ('99')
 
             print *, 'Merge can not be done because not allow, try to smooth first'
@@ -6375,7 +6386,7 @@ module gamod_types
                         vs_fcB(1) = f%vert1%Get(tfB(1))
                         vs_fcB(2) = f%vert2%Get(tfB(1))
 
-                        if (any(vB == vs_fcB)) caseID = '443B1'
+                        if (any(vB == vs_fcB)) caseID = '4443B1'
 
                         if (size(tfB) .gt. 1) call gdErrorHandler('DetermineMergeCaseID:extra implementation needed')
 
@@ -7291,8 +7302,8 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT)    :: grid
-        integer(I8)         :: fc, cvs(2)
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: fc, cvs(2)
 
         ! Auxiliary
         integer(I8) :: cv1, cv2, vxF(2), nv1cvs, nv2cvs, f1n, ic, &
@@ -7440,7 +7451,7 @@ module gamod_types
         end if
 
         ! Check intersection
-        !call grid%CheckIntersectionMerge4443B1(v_end, v_change, ic, intersection_flag) - TODO
+        call grid%CheckIntersectionMerge4443B1(v_end(1), v_change(1), ic, intersection_flag)
 
         ! If there was an intersection
         if (intersection_flag) then
@@ -7452,7 +7463,7 @@ module gamod_types
             v_change = v_change2
 
             ! Check again for intersection
-            !call grid%CheckIntersectionMerge4443B1(v_end, v_change, ic, intersection_flag) - TODO  
+            call grid%CheckIntersectionMerge4443B1(v_end(1), v_change(1), ic, intersection_flag) 
 
             if (intersection_flag) then
                 call gdErrorHandler('Merge4443B1: grid adaptation not possible, try avoid this adaptation by reducing' // &
@@ -7494,6 +7505,534 @@ module gamod_types
         end associate
 
     end subroutine
+
+    subroutine Merge5T3(grid, cvs)
+
+        ! Description
+        !============
+        ! Transforming a pentagon (cvs) into three triangles
+        ! Schematic
+        !----------
+        ! v for vertex
+        ! f for face
+
+        !    v2 ----f4---v4
+        !    |   \     /  |
+        !    f2   f3 f5   f6
+        !    |     \/     |
+        !    v1-f1-vc--f7-v5
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: cvs(:)
+
+        ! Auxiliary 
+        integer(I8) :: i, common_vert, ind5, verts1(2), vert1, &
+            f1, f2, verts2(2), vert2, f3, cv1, cv2, cv3, f4, verts4(2), &
+            vert4, f5, verts5(2), vert5, f6, f7
+        integer(I8), allocatable, dimension(:) :: faces_cv, fcAligned, &
+            rfaces, verts_cvF, query_faces, ind, ind2, ind_f2, ind3, &
+            ind_f4, faces_new1, verts_new1, faces_new2, verts_new2, &
+            faces_new3, verts_new3, cells, cell_rem, ind4, ind_f6
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Indeficiation of pentagon faces
+        faces_cv = GetCellFaceGA(c, cvs(1))
+
+        ! Determine the common vert via aligned faces
+        fcAligned = f%aligned%Get(faces_cv)
+
+        if (count(fcAligned == 1) == 3) then
+
+            ! Radial faces contain common vert
+            allocate(rfaces(3))
+            rfaces = pack(faces_cv, fcAligned == 1)
+
+        elseif (count(fcAligned == 1) == 2) then   
+
+            ! Poloidal faces contain common vert
+            allocate(rfaces(2))
+            rfaces = pack(faces_cv, fcAligned == 0) 
+
+        else
+           
+            call gdErrorHandler('Merge5T3: less than 2 aligned faces in the pentagon')
+
+        end if
+
+        ! Get the common vert based on the rfaces
+        if (HaveCommonVert(f, rfaces(1), rfaces(2))) then
+            common_vert = GetCommonVert(f, rfaces(1), rfaces(2))
+        elseif (HaveCommonVert(f,rfaces(1),rfaces(3))) then
+            common_vert = GetCommonVert(f, rfaces(1),rfaces(3))
+        else
+            common_vert = GetCommonVert(f, rfaces(2),rfaces(3))
+        end if
+
+        ! Get first triangle
+        !-------------------
+        verts_cvF = [f%vert1%Get(faces_cv), f%vert2%Get(faces_cv)]
+        query_faces = [(/ (i, i = 1, size(faces_cv))/), (/ (i, i = 1, size(faces_cv))/)]
+
+        allocate(ind(count(verts_cvF == common_vert)))
+        ind = pack(query_faces, verts_cvF == common_vert)
+        ind5 = ind(2)
+
+        ! Choose first sides
+        f1 = faces_cv(ind(1))
+        verts1 = [f%vert1%Get(f1), f%vert2%Get(f1)]
+        vert1 = Pack2(verts1, verts1 /= common_vert)
+
+        ! Find last vertex of first triangle
+        allocate(ind2(count(verts_cvF == vert1)))
+        ind2 = pack(query_faces, verts_cvF == vert1)
+        allocate(ind_f2(count(ind2 /= ind(1))))
+        ind_f2 = pack(ind2, ind2 /= ind(1))
+        f2 = faces_cv(ind_f2(1))
+
+        verts2 = [f%vert1%Get(f2), f%vert2%Get(f2)]
+        vert2 = Pack2(verts2, verts2 /= vert1)
+
+        ! Make the new face of the first triangle
+        call grid%GetFaceNumber(common_vert, vert2, 3, f3)
+
+        ! Add triangle 1
+        faces_new1 = [f1, f2, f3]
+        verts_new1 = [common_vert, vert1, vert2]
+        call grid%AddCell(faces_new1, verts_new1, c%reg%Get(cvs(1)), cv1)
+
+        ! Make second triangle
+        !---------------------
+        allocate(ind3(count(verts_cvF == vert2)))
+        ind3 = pack(verts_cvF, verts_cvF == vert2)
+
+        allocate(ind_f4(count(ind3 /= ind_f2)))
+        ind_f4 = pack(ind3, ind3 /= ind_f2)
+        f4 = faces_cv(ind_f4(1))
+
+        verts4 = [f%vert1%Get(f4), f%vert2%Get(f4)]
+        vert4 = Pack2(verts4, verts4 /= vert2)
+
+        ! Make new face for second triangle
+        call grid%GetFaceNumber(common_vert, vert4, 3, f5)
+
+        ! Add triangle 2
+        faces_new2 = [f3, f4, f5]
+        verts_new2 = [common_vert, vert2, vert4]
+        call grid%AddCell(faces_new2, verts_new2, c%reg%Get(cvs(1)), cv2)
+
+        ! Make thrid triangle
+        !====================
+        allocate(ind4(count(verts_cvF == vert4)))
+        ind4 = pack(verts_cvF, verts_cvF == vert4)
+        allocate(ind_f6(count(ind4 /= ind_f4)))
+        ind_f6 = pack(ind4, ind4 /= ind_f4)
+        f6 = faces_cv(ind_f6(1))
+
+        verts5 = [f%vert1%Get(f6), f%vert2%Get(f6)]
+        vert5 = Pack2(verts5, verts5 /= vert4)
+
+        f7 = faces_cv(ind5)
+
+        ! Add triangle 3
+        faces_new3 = [f5, f6, f7]
+        verts_new3 = [common_vert, vert4, vert5]
+        call grid%AddCell(faces_new3, verts_new3, c%reg%Get(cvs(1)), cv3)
+
+        ! Post
+        !-----
+        cells = [cv1, cv2, cv3]
+        call grid%DetermineCflags(cells)
+
+        ! Remove pentagon
+        allocate(cell_rem(1))
+        cell_rem = cvs(1)
+        call grid%RemoveCells(cell_rem)
+
+        end associate
+
+    end subroutine
+
+    subroutine Merge5spec(grid, cvs)
+
+        ! Description
+        !============
+        ! Merging of special case where the common vert of the pentagon is a
+        ! boundary vertex and the two cells to merge have this common vertex 
+        ! in common.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: cvs(:)
+
+        ! Auxiliary
+        integer(I8) :: i, pent, c1, c2, fc1, fc2, vs1(2), vs2(2), &
+            common_vert, v1, v2, fc_side1, fc_side2, vs_side1(2), &
+            vs_side2(2), v_side1, v_side2, f1n, f2n, ic, fcsB, vxsB(2), &
+            v_insideQ, v_sideQ, v_sideT, fc_sideQ, fc_sideT, vQ, vT, &
+            cvQ
+        integer(I8), allocatable, dimension(:) :: neigs, neigs_b, &
+            faces_p_org, faces_pD, faces_p, verts_p_org, verts_p, &
+            faces_rem, verts_rem, cells_rem, fc_neig1, fc_neig2, &
+            vsn1, vsn2, query_faces1, query_faces2, ind1, ind2, &
+            fcs1, fcs2, old_fs, old_fsb, lbls, fc_neig1b, &
+            fc_neig2b, new_faces, new_verts, lbls_neig, vsn1U, &
+            vsn2U, indvQ, fcsQ, fc_neigQb, fc_neigTb, vsnQ, vsnT, &
+            vsnQU, vsnTU, fcsBar, fc_rem1, fc_rem2, vs_rem1, vs_rem2, &
+            fc_neigQ, fc_neigT, old_fs2
+        logical, allocatable :: log(:)
+        logical :: flag
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Get pentagon
+        pent = Pack2(cvs, c%vertP2%Get(cvs) == 5)
+
+        ! Get neighbors
+        neigs = GetCellNeigsGA(grid, pent)
+        log = isBoundaryCellGA(grid, neigs)
+        allocate(neigs_b(count(log)))
+        neigs_b = pack(neigs, log)
+
+        ! Determine method
+        if (size(neigs_b) == 2) then
+
+            ! Get common faces
+            c1 = neigs_b(1)
+            fc1 = GetCommonFace(c, pent, c1)
+            c2 = neigs_b(2)
+            fc2 = GetCommonFace(c, pent, c2)
+
+            ! Get common vert
+            vs1 = [f%vert1%Get(fc1), f%vert2%Get(fc1)]
+            vs2 = [f%vert1%Get(fc2), f%vert2%Get(fc2)]
+            common_vert = Pack2(vs1, isMember(vs1, vs2))
+
+            v1 = Pack2(vs1, vs1 /= common_vert)
+            v2 = Pack2(vs2, vs2 /= common_vert)
+
+            ! Get side faces of neigs
+            fc_neig1 = GetCellFaceGA(c, c1)
+            fc_neig2 = GetCellFaceGA(c, c2)
+            allocate(fc_neig1b(count(isBoundaryFaceGA(f, fc_neig1))))
+            allocate(fc_neig2b(count(isBoundaryFaceGA(f, fc_neig2))))
+            fc_neig1b = pack(fc_neig1, isBoundaryFaceGA(f, fc_neig1))
+            fc_neig2b = pack(fc_neig2, isBoundaryFaceGA(f, fc_neig2))
+
+            vsn1 = [f%vert1%Get(fc_neig1), f%vert2%Get(fc_neig1)]
+            vsn2 = [f%vert1%Get(fc_neig2), f%vert2%Get(fc_neig2)]
+            query_faces1 = [(/(i, i = 1, size(fc_neig1))/), (/(i, i = 1, size(fc_neig1))/)]
+            query_faces2 = [(/(i, i = 1, size(fc_neig2))/), (/(i, i = 1, size(fc_neig2))/)]
+
+            allocate(ind1(count(vsn1 == v1)))
+            ind1 = pack(query_faces1, vsn1 == v1)
+            allocate(ind2(count(vsn2 == v2)))
+            ind2 = pack(query_faces2, vsn2 == v2)
+
+            fcs1 = fc_neig1(ind1)
+            fc_side1 = Pack2(fcs1, fcs1 /= fc1)
+            fcs2 = fc_neig2(ind2)
+            fc_side2 = Pack2(fcs2, fcs2 /= fc2)
+
+            vs_side1 = [f%vert1%Get(fc_side1), f%vert2%Get(fc_side1)]
+            vs_side2 = [f%vert1%Get(fc_side2), f%vert2%Get(fc_side2)]
+            v_side1 = Pack2(vs_side1, vs_side1 /= v1)
+            v_side2 = Pack2(vs_side2, vs_side2 /= v2)  
+            
+            ! Make new faces
+            call grid%GetFaceNumber(v1, v2, 3, f1n)
+            call f%label%Set(f1n, f%label%Get(fc1))
+            old_fs = [fc1, fc2]
+            if (all(f%aligned%Get(old_fs) == 1)) call f%aligned%Set(f1n, 1)
+            call grid%AddFaceToFsFc(f1n, old_fs)  
+            
+            ! Check if one of the cells is a quad and if the quad has boundary faces
+            flag = .false.
+            if (count(c%faceP2%Get(neigs_b) == 3) == 1 .and. count(c%faceP2%Get(neigs_b) == 4) == 1) then
+
+                ! Get the quad 
+                cvQ = Pack2(neigs_b, c%faceP2%Get(neigs_b) == 4)
+                if (cvQ == c1) then
+
+                    allocate(indvQ(count(vsn1 == v_side1)))
+                    indvQ = pack(query_faces1, vsn1 == v_side1)
+                    fcsQ = fc_neig1(indvQ)
+                    fcsB = Pack2(fcsQ, fcsQ /= fc_side1)
+                    vxsB = [f%vert1%Get(fcsB), f%vert2%Get(fcsB)]
+                    v_insideQ = Pack2(vxsB, vxsB /= v_side1)
+                    v_sideQ = v_side1
+                    v_sideT = v_side2
+                    fc_neigQb = fc_neig1b
+                    fc_neigTb = fc_neig2b
+                    fc_neigQ = fc_neig1
+                    fc_neigT = fc_neig2
+                    fc_sideQ = fc_side1
+                    fc_sideT = fc_side2
+                    vsnQ     = vsn1 
+                    vsnT     = vsn2 
+                    vQ       = v1
+                    vT       = v2
+
+                else if (cvQ == c2) then
+
+                    allocate(indvQ(count(vsn2 == v_side2)))
+                    indvQ = pack(query_faces2, vsn2 == v_side2)
+                    fcsQ = fc_neig2(indvQ)
+                    fcsB = Pack2(fcsQ, fcsQ /= fc_side2)
+                    vxsB = [f%vert1%Get(fcsB), f%vert2%Get(fcsB)]
+                    v_insideQ = Pack2(vxsB, vxsB /= v_side2)
+                    v_sideQ = v_side2
+                    v_sideT = v_side1
+                    fc_neigQb = fc_neig2b
+                    fc_neigTb = fc_neig1b
+                    fc_neigQ = fc_neig2
+                    fc_neigT = fc_neig1
+                    fc_sideQ = fc_side2
+                    fc_sideT = fc_side1
+                    vsnQ     = vsn2 
+                    vsnT     = vsn1
+                    vQ       = v2
+                    vT       = v1
+
+                endif
+
+                if (isBoundaryFaceGA(f, fcsB)) flag = .true.
+
+            end if
+
+            if (all(c%faceP2%Get(neigs_b) == 3) .or. flag) then ! Two triangle or quad with correct boundary face
+
+                ! Make a new quad with the two cells that only have the common vert in common
+                ! Make connection face
+                call grid%GetFaceNumber(v_side1, v_side2, 3, f2n)
+                old_fsb = [fc_neig1b, fc_neig2b]
+                lbls_neig = f%label%Get(old_fsb)
+                call Unique(lbls_neig, lbls)
+                call f%label%Set(f2n, lbls(1))
+                if (all(f%aligned%Get(old_fs) == 1)) call f%aligned%Set(f2n, 1)
+
+                ! Make merge cells
+                new_verts = [v1, v_side1, v_side2, v2]
+                new_faces = [f1n, fc_side1, f2n, fc_side2]
+
+                ! Elements that needs to be removed
+                allocate(fc_rem1(count(fc_neig1 /= fc_side1)))
+                fc_rem1 = pack(fc_neig1, fc_neig1 /= fc_side1)
+                allocate(fc_rem2(count(fc_neig2 /= fc_side2)))
+                fc_rem2 = pack(fc_neig2, fc_neig2 /= fc_side2)
+
+                faces_rem = [fc_rem1, fc_rem2]
+
+                call Unique(vsn1, vsn1U)
+                allocate(vs_rem1(count(vsn1U /= v1 .and. vsn1U /= v_side1)))
+                vs_rem1 = pack(vsn1U, vsn1U /= v1 .and. vsn1U /= v_side1)
+                call Unique(vsn2, vsn2U)
+                allocate(vs_rem2(count(vsn2U /= v2 .and. vsn2U /= v_side2 .and. vsn2U /= common_vert)))
+                vs_rem2 = pack(vsn2U, vsn2U /= v2 .and. vsn2U /= v_side2 .and. vsn2U /= common_vert)    
+                
+                verts_rem = [vs_rem1, vs_rem2]
+
+            else if (count(c%faceP2%Get(neigs_b) == 3) == 1 .and. count(c%faceP2%Get(neigs_b) == 4) == 1 .and. .not. flag) then
+
+
+                if (.not.isBoundaryFaceGA(f, fcsB)) then ! So the quad has a neighboring cells along the merging direction
+
+                    ! Make a new pentagon with the two cells that only have the common vert in common
+                    ! Make connection face
+                    call grid%GetFaceNumber(v_insideQ, v_sideT, 3, f2n)
+                    old_fsb = [fc_neigQb, fc_neigTb]
+                    lbls_neig = f%label%Get(old_fsb)
+                    call Unique(lbls_neig, lbls)
+                    call f%label%Set(f2n, lbls(1))
+                    old_fs2 = [fc1, fc2, fcsB ]
+                    if (all(f%aligned%Get(old_fs2) == 1)) call f%aligned%Set(f2n, 1)
+                    allocate(fcsBar(1))
+                    fcsBar = fcsB
+                    call grid%AddFaceToFsFc(f2n, fcsBar)
+
+                    ! Make merge cells
+                    new_verts = [v1, v_side1, v_insideQ, v_side2, v2]
+                    new_faces = [f1n, fc_side1, fcsB, f2n, fc_side2]
+
+                    ! Elements that needs to be removed
+                    allocate(fc_rem1(count(fc_neigQ /= fc_sideQ .and. fc_neigQ /= fcsB)))
+                    fc_rem1 = pack(fc_neigQ, fc_neigQ /= fc_sideQ  .and. fc_neigQ /= fcsB)
+                    allocate(fc_rem2(count(fc_neigT /= fc_sideT)))
+                    fc_rem2 = pack(fc_neigT, fc_neigT /= fc_sideT)
+
+                    faces_rem = [fc_rem1, fc_rem2]
+
+                    call Unique(vsnQ, vsnQU)
+                    allocate(vs_rem1(count(vsnQU /= vQ .and. vsnQU /= v_sideQ)))
+                    vs_rem1 = pack(vsnQU, vsnQU /= vQ .and. vsnQU /= v_sideQ)
+                    call Unique(vsnT, vsnTU)
+                    allocate(vs_rem2(count(vsnTU /= vT .and. vsnTU /= v_sideT .and. vsnTU /= common_vert)))
+                    vs_rem2 = pack(vsn2U, vsnTU /= vT .and. vsnTU /= v_sideT .and. vsnTU /= common_vert)    
+                    
+                    verts_rem = [vs_rem1, vs_rem2]
+
+                else
+
+                    call gdErrorHandler('Merge5spec: something wrong')
+                        
+                end if
+
+
+            else
+
+                call gdErrorHandler('Merge5spec: configuration not supported for now')
+
+            end if
+
+            ! Make new merge cells
+            call grid%AddCell(new_faces, new_verts, c%reg%Get(pent), ic)
+
+            ! Change pentagon to a quad
+            !--------------------------
+            ! Faces
+            faces_p_org = GetCellFaceGA(c, pent)
+            allocate(faces_pD(count(faces_p_org /= fc1 .and. faces_p_org /= fc2)))
+            faces_pD = pack(faces_p, faces_p_org /= fc1 .and. faces_p_org /= fc2)
+            faces_p = [faces_pD, f1n]
+
+            call c%ReplaceFaces(pent, faces_p)
+
+            ! Verts
+            verts_p_org = GetCellVertGA(c, pent)
+            allocate(verts_p(count(verts_p_org /= common_vert)))
+            verts_p = pack(verts_p_org, verts_p_org /= common_vert)
+
+            call c%ReplaceVerts(pent, verts_p)
+
+            ! Remove faces, vertices and cells
+            call grid%RemoveFaces(faces_rem)
+            call grid%RemoveVertices(verts_rem)
+            cells_rem = [c1, c2]
+            call grid%RemoveCells(cells_rem)
+
+        else 
+
+            call gdErrorHandler('Merge5spec: configuration not supported')
+
+        end if
+
+        end associate
+
+    end subroutine
+
+    subroutine CheckIntersectionMerge4443B1(grid, v_end, v_change, ic, intersection_flag)
+
+        ! Description
+        !============
+        ! Check for potential intersection with surrounding cells by grid
+        ! adaptation where v_change is moved to v_end.
+        ! ic is the cell where both v_change and v_end are part of. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: v_end, v_change, ic
+        logical, intent(out)            :: intersection_flag
+
+        ! Auxiliary
+        integer(I8) :: i, j, k, vxs_changeD(2), vx(2)
+        integer(I8), allocatable, dimension(:) :: vxs, neigs, cvLookUp, &
+            in, verts, neigsD, fcs_change, vxs_change, fcs
+        real(R8) :: p1(2), q1(2), p2(2), q2(2) 
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Get verts of cv
+        verts = GetCellVertGA(c, ic)
+
+        ! Check for intersecting faces of potentially maded grid
+        ! Determine neigs  
+        cvLookUp = GetCvLookUpGA(c)
+        neigsD = GetCellNeigsGA(grid, ic, cvLookUp)
+
+        ! Remove neigs where v_change is one of its verts
+        allocate(in(size(neigsD)))
+        in = 1
+        do i = 1, size(neigsD)
+            vxs = GetCellVertGA(c, neigsD(i))
+
+            if (any(v_change == vxs) .or. any(v_end == vxs)) then
+                in(i) = 0
+            end if
+        end do
+        allocate(neigs(count(in == 1)))
+        neigs = pack(neigsD, in == 1)
+
+        ! Calculate intersections
+        ! get new segment
+        intersection_flag = .false.
+        fcs_change = GetVertFaceGA(f, v_change)
+        vxs_changeD = [f%vert1%Get(fcs_change), f%vert2%Get(fcs_change)]
+
+        ! Exclude verts of pentagon
+        allocate(vxs_change(count(.not.isMember(vxs_changeD,verts))))
+        vxs_change = pack(vxs_changeD,.not.isMember(vxs_changeD,verts))
+
+        ! Loop over segments
+        do k = 1, size(vxs_change)
+
+            ! Segment 1
+            p1 = [v%x%Get(v_end), v%y%Get(v_end)]
+            q1 = [v%x%Get(vxs_change(k)), v%y%Get(vxs_change(k))]
+
+            do  i = 1, size(neigs)
+
+                fcs = GetCellFaceGA(c, neigs(i))
+
+                do j = 1, size(fcs)
+
+                    ! Vertices
+                    vx = [f%vert1%Get(fcs(j)), f%vert2%Get(fcs(j))]
+                
+                    ! Define segment 2
+                    p2 = [v%x%Get(vx(1)), v%y%Get(vx(1)) ]
+                    q2 = [v%x%Get(vx(2)), v%y%Get(vx(2)) ]
+                    
+                    ! Check intersection
+                    if (Intersects(p1,q1,p2,q2) == 1) then
+                        intersection_flag = .true.
+                        exit
+                    end if
+
+                end do
+
+                if (intersection_flag) exit
+                    
+            end do
+
+            if (intersection_flag) exit 
+
+
+        end do
+
+        end associate
+
+    end subroutine
+
 
     subroutine MakeMergePent(grid,three_vert, fc, cvs, f1n, fc23, ic)
 
@@ -13628,13 +14167,9 @@ module gamod_types
         call c%reg%Append(reg)        
         call c%psi%Append(0.0_R8)
 
-
         ! Calculate centroid
         call c%x%Append(sum(grid%vert%x%Get(verts))/real(nv, kind=R8))
         call c%y%Append(sum(grid%vert%y%Get(verts))/real(nv, kind=R8))
-
-
-
 
         end associate
 
@@ -15256,24 +15791,6 @@ module gamod_types
             if (any(vx1(i) == vx2)) res = .true.
         end do
 
-    end function
-
-    function TriangleArea(x0, y0, x1, y1, x2, y2) result(res)
-        real(R8) :: x0, y0, x1, y1, x2, y2, res
-
-        res = 0.5_R8 * abs( (x1-x0)*(y2-y0) - (y1-y0)*(x2-x0) )
-
-    end function 
-
-    function Norm0D(x0, y0) result(res)
-        real(R8) :: x0, y0, res
-        res = sqrt(x0**2 + y0**2)
-    end function
-
-    function Norm1D(x0, y0) result(res)
-        real(R8) :: x0(:), y0(:)
-        real(R8), allocatable :: res(:)
-        res = sqrt(x0**2 + y0**2)
     end function
 
     subroutine CalcCentroid0DGA(grid, ic)
