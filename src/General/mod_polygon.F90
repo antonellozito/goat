@@ -153,6 +153,9 @@ module mod_polygon
         procedure, private  :: GetPolygonVertexID
         generic   :: GetVert            => GetPolygonVertexID
 
+        ! Adaptations
+        procedure :: Compress           => CompressPolygon  
+
     end type 
 
     ! The polygonset type
@@ -193,6 +196,9 @@ module mod_polygon
             GetPolygonSetVerticesID
         procedure :: GetLabels              => GetPolygonSetVertexLabels
         procedure :: UpdateCoordinates      => UpdatePolygonSetVertexCoordinates
+
+        ! Adaptations
+        procedure :: Compress               => CompressPolygonSet          
 
         ! I/O
         procedure :: WriteData              => WritePolygonSetData        
@@ -515,6 +521,33 @@ module mod_polygon
         do i = 1, polygonset%np
             call polygonset%polygons(i)%Refine(dlmax, minsplit)
         end do
+
+    end subroutine
+
+    ! Polygon set compressor 
+    subroutine CompressPolygonSet(polygonset)
+
+        ! Description
+        !============
+        ! 'Compress' the polygon set by removing points that do not 
+        ! contribute to the shape of the polygon. Primarily useful to 
+        ! simplify polygons that were refined before. Differences in the
+        ! order of machine precision may originate from using this 
+        ! function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Call polygon compressor
+        !========================
+        do i = 1, polygonset%np
+            call polygonset%polygons(i)%Compress()
+        end do 
 
     end subroutine
 
@@ -1851,6 +1884,100 @@ module mod_polygon
         ! Housekeeping
         end associate
         
+
+    end subroutine
+
+    ! Polygon compressor
+    subroutine CompressPolygon(polygon)
+
+        ! Description
+        !============
+        ! Wrapper of the CompressSimplePolygon for polygon objects. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)               :: polygon
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: x, y
+        integer(I8), allocatable, dimension(:, :)   :: labels
+
+        ! Loop
+
+        ! Initialize
+        !===========
+        ! Unpack original vertices ()
+        x = polygon%x(polygon%vert)
+        y = polygon%y(polygon%vert)
+        labels = labels(polygon%vert, :)
+
+        ! Compress
+        !=========
+        call CompressSimplePolygon(x, y, labels)
+
+        ! Reconstruct
+        !============
+        call Polygon%Construct(x, y, labels)
+
+    end subroutine
+
+    ! Simple polygon compression
+    subroutine CompressSimplePolygon(x, y, labels)
+
+        ! Description
+        !============
+        ! Compress a polygon by removing vertices that lie on straight
+        ! line segments (measured by computing the angle between 
+        ! neighbouring edges and comparing to pi). Machine precision 
+        ! effects may occur though, so use wisely. Useful for polygons
+        ! that have previously been refined and have to be coarsened 
+        ! again to their initial state. Should (apart from aforementioned
+        ! precision effects) not influence the shape of the polygon. 
+        ! Differences in labels are not accounted for. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), allocatable, intent(inout)        :: x(:), y(:) 
+        integer(I8), allocatable, intent(inout)     :: labels(:, :)
+
+        ! Auxiliary
+        integer(I8)                                 :: np
+        real(R8), allocatable, dimension(:)         :: dx, dy, theta, &
+            tempx, tempy
+        logical, allocatable, dimension(:)          :: keepind 
+        integer(I8), allocatable                    :: templabels(:, :)
+
+        ! Loop
+        integer(I8)                                 :: i 
+
+        ! Initialize
+        !===========
+        np = size(x)
+        allocate(keepind(np-2)) ! first and last point can never be deleted
+        keepind = .true.
+
+        ! Compute angles
+        !===============
+        dx = x(2:) - x(1:np-1)
+        dy = x(2:) - x(1:np-1)
+        theta = atan2(dx(1:np-2)*dy(2:np-1) - dx(2:np-1)*dy(1:np-2), &
+            dx(1:np-2)*dx(2:np-1) + dx(2:np-1)*dx(1:np-2))
+
+        ! Simplify
+        !=========
+        where (abs(theta) <= 1e-13_R8) keepind = .false.
+        allocate(tempx(count(keepind)), tempy(count(keepind)), &
+            templabels(count(keepind), size(labels, 2)))
+        tempx = pack(x, keepind)
+        tempy = pack(y, keepind)
+        do i = 1, size(labels, 2)
+            templabels(:, i) = pack(labels(:, i), keepind)
+        end do 
+        x = tempx
+        y = tempy
+        labels = templabels  
 
     end subroutine
     
