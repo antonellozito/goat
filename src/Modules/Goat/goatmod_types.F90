@@ -5181,7 +5181,7 @@ module goatmod_types
     end subroutine
 
     ! Vessel polygon construction
-    subroutine ConstructVesselPolygonSet(vessel, ps)
+    subroutine ConstructVesselPolygonSet(vessel, ps, compress)
 
         ! Description
         !============
@@ -5235,6 +5235,12 @@ module goatmod_types
         ! the polygon and the 'dangling' nodes are removed. It is assumed 
         ! that this information is already available through the polygon
         ! labels field, which should be setup in ExtractVesselData.F90. 
+
+        ! Note 5: sometimes it may be desireable to 'compress' the 
+        ! initial polygon set, i.e. remove any redundant straight edges
+        ! that do not influence the actual form of the polygon. In that
+        ! case, the optional argument 'compress' should be parsed and 
+        ! set to true. Machine precision effects may arise though. 
     
         ! Modules
         !========
@@ -5245,11 +5251,12 @@ module goatmod_types
         ! Arguments
         type(VesselUDT)             :: vessel
         type(PolygonSetUDT)         :: ps 
+        logical, intent(in), optional   :: compress
     
         ! Auxiliary
         integer(I8)                 :: ni, nfinpol, thisp, firstpolygon, &
             c1, c2, nvest, nvv, tempnv, nextp, sv, ev, flag, vID, indis, indie
-        logical                     :: polygonnotfound, doflip  
+        logical                     :: polygonnotfound, doflip, docompression
         real(R8)                    :: nan, xs, ys, xe, ye 
     
         real(R8), allocatable       :: xi(:), yi(:), tempx(:), tempy(:), &
@@ -5268,14 +5275,17 @@ module goatmod_types
     
         ! Initialize
         !===========
-        ! Checks - seem unnecessary?
-        !if (size(vesseloptions%TPind) == 0 ) then 
-        !    call gdErrorHandler('ConstructVesselPolygon: no target plates are specified, check input')
-        !elseif (size(vesseloptions%TPind) .ne. size(vesseloptions%TP)) then 
-        !    call gdErrorHandler('ConstructVesselPolygon: number of ' &
-        !        // 'elements in vesseloptions%TPind does not correspond' &
-        !        // ' to number of structures in vesseloptions%TP')
-        !end if 
+        ! Checks 
+        if (present(compress)) then
+            docompression = compress
+        else
+            docompression = .false.
+        end if 
+        
+        ! If desired, compress the given polygon set 
+        if (docompression) then 
+            call ps%Compress()
+        end if 
     
         ! Set NaN
         nan = IEEE_VALUE(nan, IEEE_QUIET_NAN)

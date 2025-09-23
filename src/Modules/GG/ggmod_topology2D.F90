@@ -2614,7 +2614,7 @@ module ggmod_topology2D
         allocate(bndpol(count(topomesh%face%type == TMfacebndID)))
         bndpol = pack(topomesh%face%pol, topomesh%face%type == TMfacebndID)
         call bndps%Construct(bndpol)
-        call ConstructVesselPolygonSet(vessel, bndps)
+        call ConstructVesselPolygonSet(vessel, bndps, .true.)
         allocate(PLF2DClosedExactOptionsUDT::bndplfoptions)
         call InitializePolygonLevelsetFunction2D(vessel%plfvessel, vessel%polygonset, bndplfoptions)
         deallocate(bndpol)
@@ -7630,6 +7630,10 @@ module ggmod_topology2D
 
         ! Trace
         allocate(allc(0), tubeind(0), faceind(0))
+        !$omp parallel do if (.not. omp_in_parallel()) &
+        !$omp shared(tracec, tmadaptor, tracex, tracey, topomesh, allc, &
+        !$omp tracetubes, tracefaces, tubeind, faceind) &
+        !$omp private(tempc) default(none)
         do i = 1, size(tracec)
             if (tracec(i)) then 
                 ! Trace the contour
@@ -7660,11 +7664,14 @@ module ggmod_topology2D
                 end if 
 
                 ! Add
+                !$omp critical
                 allc = [allc, tempc(1)]
                 tubeind = [tubeind, tracetubes(i)]
                 faceind = [faceind, tracefaces(i)]
+                !$omp end critical
             end if
         end do 
+        !$omp end parallel do
 
         ! Process contours
         !=================
@@ -7673,6 +7680,12 @@ module ggmod_topology2D
 
         ! For open contours, check which parts to keep (only parts that 
         ! intersect with the tube faces)
+        !$omp parallel do if (.not. omp_in_parallel()) & 
+        !$omp default(none) &
+        !$omp private(i, j, tubef, s2r, tubefID, xint, yint, tempx, &
+        !$omp tempy, temps1, temps2, temps1r, temps2r, sortind, keepind, &
+        !$omp ind) &
+        !$omp shared(topomesh, tubeind, allc, faceind)
         do i = 1, size(allc)
             ! Get tube faces
             tubef = topomesh%tube%GetFace(tubeind(i))
@@ -7805,6 +7818,7 @@ module ggmod_topology2D
             ! Housekeeping
             deallocate(s2r, xint, yint, tubefID, keepind)
         end do 
+        !$omp end parallel do
 
         ! Clean again
         call CleanContours(allc)
