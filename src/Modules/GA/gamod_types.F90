@@ -556,7 +556,10 @@ module gamod_types
 
         ! Boundary layer grid
         procedure :: BoundaryLayerGrid
-
+        procedure :: AdjustEnds
+        procedure :: GetRadialFaceGA
+        procedure :: GetRadialIntersection
+        procedure :: ThicknessSmoothing
 
         ! Grid information utility
         procedure :: GetForbiddenMergeFaces
@@ -568,6 +571,7 @@ module gamod_types
         procedure :: DetermineCflagTria4
         procedure :: AreaConstraintPents
         procedure :: GetXcellsGeometric
+        procedure :: GetHighInclinedTrias
 
         ! Grid operation
         procedure :: RemoveCells
@@ -709,8 +713,6 @@ module gamod_types
         integer(I8), allocatable :: fccv(:,:) 
         logical :: not_aligned_f(grid%face%ntot), &
             comp_range(grid%cell%ntot)
-
-
 
         ! Associate
         associate(&
@@ -860,8 +862,6 @@ module gamod_types
                         end if 
                     end do
 
-                    if (ii /= 2) call gdErrorHandler('ComputeQM: insufficient intersection with mean psi value found')
-
                     h_pol(ic) = sqrt( ( isx(2) - isx(1) )**2 + ( isy(2) - isy(1) )**2 )
                     h_rad(ic) = h_rad_int / ir
                     h_rad_psi(ic) = abs(max_vpsi - min_vpsi)
@@ -940,13 +940,10 @@ module gamod_types
                     end if 
                 end do
 
-                if (ii /= 2) call gdErrorHandler('ComputeQM: insufficient intersection with mean psi value found')
-
                 h_pol(ic) = sqrt( ( isx(2) - isx(1) )**2 + ( isy(2) - isy(1) )**2 )
                 h_rad(ic) = h_rad_int / ir
                 h_rad_psi(ic) = abs(max_vpsi - min_vpsi)
             end if
-
 
         end do
 
@@ -1001,15 +998,8 @@ module gamod_types
         qm%h_rad_psi= h_rad_psi
         qm%nCv      = c%ntot
 
-
-
-
-        
         end associate
 
-
-
-        
     end subroutine
 
     subroutine CalculateQualityMetrics(qm,grid,options,magneticField, select_split, select_merge)
@@ -1030,7 +1020,6 @@ module gamod_types
         ! Calculate cv metric
         call qm%ComputeQM(grid,options,magneticField)
 
-
         ! Selecting splitting cell
         if (select_split) then
             call qm%SelectSplitCell(grid, options)
@@ -1041,8 +1030,6 @@ module gamod_types
             call qm%SelectMergingFace(grid, options)
         end if
         
-
-
     end subroutine
 
     subroutine SelectMergingFace(qm, grid, options)
@@ -1060,17 +1047,20 @@ module gamod_types
 
         ! Auxiliary 
         integer(I8) :: i, j, k, neig, nf, fcs_al1, fcs_al2, ind, &
-            common_face, counter
+            common_face, counter, ncc, trap
         integer(I8), allocatable, dimension(:) :: forbidden_fcs, &
             indsort, cells, small_cells, fcs, cvs, cvLookUp, indcv, &
             no_cells, trias, cells2, indfc, pol_faces, fcs1, fcs2, cellsD, &
             ind_sort, neigs, vxs, cvs_sep, cvs_sepU, core_faces, Xcells, &
-            core_facesD, rad_facesD, rad_faces
+            core_facesD, rad_facesD, rad_faces, cctria, cctraps, &
+            nums, fcs_cv, fcs_m
+        integer(I8), allocatable :: cctrapsP(:,:)
         real(R8) :: crit, dfunv(grid%cell%ntot), h_pol_no_cells_crit, &
             mean_pol_flux, bench
         real(R8), allocatable, dimension(:) :: area_small_cells, &
             h_pol_no_cells_sorted, h_pol_cells, h_pol_cvs, bias, &
-            pol_fluxdens_est, pol_fluxdens_estD, h_rad_cells
+            pol_fluxdens_est, pol_fluxdens_estD, h_rad_cells, incl, &
+            ARtot
         logical, allocatable :: log(:), log2(:), trias_log(:)
 
         ! Associate
@@ -1559,7 +1549,30 @@ module gamod_types
 
         case ('skew_tria')
 
-            ! TODO 
+            ! Get the highly inclined trianlge
+            call grid%GetHighInclinedTrias(qm, options, ARtot, incl, cctria, cctraps, cctrapsP, nums, ncc)
+
+            ! Sort for highest ARtot
+            allocate(indsort(size(ARtot)))
+            call Sort(ARtot,indsort)
+            nums = nums(indsort)
+            incl = incl(indsort)
+
+            do i = 1, ncc
+
+                trap = cctraps(cctrapsP(nums(i),1)+cctrapsP(nums(i),2)-1)
+                if ((ARtot(i) .gt. 3) .and. qm%h_rad_psi(trap) .gt. minval(qm%h_rad_psi)*10 .and. incl(i) .lt. 0.2) then
+
+                    ! Get poloidal faces of triangle
+                    fcs_cv = GetCellFaceGA(c, cctria(nums(i)))
+                    log = (.not.isBoundaryFaceGA(f, fcs_cv) .and. f%aligned%Get(fcs_cv) == 0)
+                    allocate(fcs_m(count(log)))
+                    fcs_m = pack(fcs_cv, log)
+                    qm%merge_fc = fcs_m(1)
+                    exit
+
+                end if
+            end do
 
         case ('manual')
 
@@ -4539,7 +4552,7 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)         :: grid
+        class(GAGridUDT), intent(in)            :: grid
         type(QualityMetricUDT), intent(in)      :: qm
         type(GAoptionsUDT)                      :: options 
         integer(I8), allocatable, intent(out)   :: cctria(:), cctraps(:), cctrapsP(:,:)
@@ -4744,6 +4757,10 @@ module gamod_types
                     b_neig2(counter_b) = b_neig(j)
 
                 end if
+
+                ! Housekeeping
+                deallocate(b_face_neig)
+                deallocate(bface_neig_verts)
 
             end if
 
@@ -6112,11 +6129,11 @@ module gamod_types
 
                             fcs = GetVertFaceGA(f, verts(i))
 
-                            if (size(fcs) .lt. 3) then
+                            if (size(fcs) .le. 3) then
 
                                 do j = 1, size(fcs)
 
-                                    cvs = GetFaceCellGA(c, fcs(j), cvLookUp)
+                                    cvs = GetFaceCellGA(c, fcs(j))
                                     if (size(cvs) == 2) then
 
                                         cvP = c%faceP2%Get(cvs)
@@ -6490,6 +6507,7 @@ module gamod_types
         call grid%AddCell(new_faces, new_verts, grid%cell%reg%Get(cvs(1)), ic)
 
         ! Remove face
+        allocate(fc_rem(1))
         fc_rem = fc
         call grid%RemoveFaces(fc_rem)
 
@@ -7072,7 +7090,7 @@ module gamod_types
             rem_vert = Pack2(vxF, vxF /= shift_vert)
             allocate(verts2(count(verts /= rem_vert)))
             verts2 = pack(verts, verts /= rem_vert)
-            free_vert = Pack2(verts2, verts /= shift_vert)
+            free_vert = Pack2(verts2, verts2 /= shift_vert)
 
             ! faces
             allocate(rem_faceD(count(isBoundaryFaceGA(f, faces))))
@@ -7089,6 +7107,7 @@ module gamod_types
                 allocate(up_cellD(count(cells /= cv2)))
                 up_cellD = pack(cells, cells /= cv2)
                 up_cell = up_cellD(1)
+                if (c%vertP2%Get(up_cell) == 3) up_cell = 0
 
             end if
 
@@ -7139,9 +7158,10 @@ module gamod_types
         deallocate(faces_p)
 
         ! Verts
-        verts_cv1 = GetCellFaceGA(c, cv1)
+        verts_cv1 = GetCellVertGA(c, cv1)
         call Unique(verts_cv1, verts_p)
-        call c%ReplaceVerts(cv1, verts)
+        call c%ReplaceVerts(cv1, verts_p)
+        deallocate(verts_p)
 
         if (up_cell /= 0) then
 
@@ -7178,6 +7198,7 @@ module gamod_types
         else
 
             ! Determine elements to remove
+            allocate(verts_rem(1))
             face_rem = [fc, rem_face]
             verts_rem = rem_vert
 
@@ -13217,7 +13238,8 @@ module gamod_types
 
         ! Description
         !============
-        ! 
+        ! Builds a boundary layer grid, i.e. a layer of grids is added 
+        ! at the targets
 
         ! Declare variables
         !==================
@@ -13225,7 +13247,471 @@ module gamod_types
         class(GAGridUDT), intent(inout)     :: grid
         type(MagneticFieldUDT), intent(in)  :: magneticField
         type(GAoptionsUDT), intent(in)      :: options
+
+        ! Auxiliary
+        integer(I8) :: i, j, counter, rface, rface_verts(2), point_vert
+        integer(I8), allocatable :: verts_move_I8(:,:), f1ord(:,:),  f2ord(:,:)
+        integer(I8), allocatable, dimension(:) :: fcLbl_loc, indf, &
+            f1, f2, f3, f4, target_fcs, nf1, nf2, f1D, f2D, fcs_v, fcsB_v, &
+            verts
+        real(R8) :: vecx, vecy, isx, isy, rescaling, new_locx, new_locy
+        real(R8), allocatable :: verts_move_R8(:,:)
+        logical :: found
+        logical, allocatable :: cells_log(:), is_ordered(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Targets are identified by fcLbl == 1 or 2
+
+        ! Calculate movement vectors, size base on the length of face in radial
+        ! direction, movement vector is along the radial face
+        ! problem with triangle not fillen the flux tube radially
+
+        ! Unpack
+        rescaling = options%BLG_rescaling_factor
+
+        ! Locally generalize the face labels
+        fcLbl_loc = GetfcLblGA(f, options)
+
+        ! Get target faces and chain faces
+        indf = (/ (i, i = 1, f%ntot)/)
+        allocate(f1(count(fcLbl_loc == 4)))
+        f1 = pack(indf, fcLbl_loc == 4)
+        call f%ChainFaces(f1, f1ord, nf1)
+        if (size(nf1) /= 1) call gdErrorHandler('BoundaryLayerGrid: inner target not one chain')
+
+        allocate(f2(count(fcLbl_loc == 5)))
+        f2 = pack(indf, fcLbl_loc == 5)
+        call f%ChainFaces(f2, f2ord, nf2)
+        if (size(nf2) /= 1) call gdErrorHandler('BoundaryLayerGrid: outer target not one chain')
+
+        ! Adapt fcLbl to avoid end effect
+        if (.not.options%slab .and. .not.options%vesselmode) then
+            f1D = f1ord(:,1)
+            f2D = f2ord(:,1)
+            call grid%AdjustEnds(fcLbl_loc, f1D, f3) ! TODO
+            call grid%AdjustEnds(fcLbl_loc, f2D, f4) ! TODO
+        end if
+
+        target_fcs = [f3, f4]
+
+        ! Loop over the target faces
+        allocate(verts_move_I8(size(target_fcs)*2,4))
+        allocate(verts_move_R8(size(target_fcs)*2,6))
+        verts_move_I8 = 0
+        verts_move_R8 = 0.0_R8        
+        do i = 1, size(target_fcs)
+
+            ! Get vertices
+            verts = [f%vert1%Get(target_fcs(i)), f%vert2%Get(target_fcs(i))]
+
+            ! Loop over verts
+            do j = 1, 2
+
+                if (.not.any(verts(j) == verts_move_I8(:,1))) then
+
+                    ! Determine displacement of the vertex
+                    fcs_v = GetVertFaceGA(f, verts(j))
+                    allocate(fcsB_v(count(isBoundaryFaceGA(f, fcs_v))))
+                    fcsB_v = pack(fcs_v, isBoundaryFaceGA(f, fcs_v))
+
+                    if (options%vesselmode .and. size(fcs_v) .gt. 2 &
+                        .and. (count(f%aligned%Get(fcsB_v)==1) .gt. 0 &
+                        .or. minval(fcLbl_loc(fcsB_v)) .gt. 5)) then
+
+                        ! No replacement because corner vertex
+                        vecx = 0.0_R8
+                        vecy = 0.0_R8
+                        rface = 0
+                        isx = v%x%Get(verts(j))
+                        isy = v%y%Get(verts(j))
+
+                    else
+
+                        ! Compute displacement
+                        call grid%GetRadialFaceGA(verts(j), rface)
+
+                        if (rface == 0) then
+
+                            ! Get the intersection with the cell in the radial direction
+                            call grid%GetRadialIntersection(verts(j), isx, isy, found) ! TODO
+                            if (.not.found) then
+                                isx = v%x%Get(verts(j))
+                                isy = v%y%Get(verts(j))
+                            end if
+
+                        else
+
+                            ! Get intersection based on rface
+                            rface_verts = [f%vert1%Get(rface), f%vert2%Get(rface)]
+                            point_vert = Pack2(rface_verts, rface_verts /= verts(j))
+
+                            isx = v%x%Get(point_vert)
+                            isy = v%y%Get(point_vert)
+
+                        end if
+
+                        vecx = (isx - v%x%Get(verts(j))) / rescaling
+                        vecy = (isy - v%y%Get(verts(j))) / rescaling
+
+                    end if
+
+                    ! Thickness smoothing
+                    call grid%ThicknessSmoothing(verts(j), vecx, vecy, isx, isy, rescaling, &
+                        counter, verts_move_I8, verts_move_R8) ! TODO
+
+                    ! Compute new location of vertex
+                    new_locx = v%x%Get(verts(j)) + vecx
+                    new_locy = v%y%Get(verts(j)) + vecy
+
+                    ! Store
+                    counter = counter + 1
+                    verts_move_I8(counter,:) = [verts(j), 0, 0, rface]
+                    verts_move_R8(counter,:) = [v%x%Get(verts(j)), v%y%Get(verts(j)), vecx, vecy, new_locx, new_locy]
+
+                end if
+
+            end do
+
+
+        end do
+
+        ! Place target vertices upstream
+        do i = 1, counter
+        end do
+
+        ! Make faces between the new vertices along the boundary
+        ! A parallel face connects
+        do j = 1, size(target_fcs)
+        end do
+
+        ! Finalize
+        !---------
+        ! Get fsVx correct
+        call grid%GetFsVxFromFsFc(options)
+     
+        ! Orderen 
+        allocate(cells_log(c%ntot))
+        cells_log = .true.
+        call grid%CheckVertOrder(is_ordered, cells_log)
+        call grid%ReOrderCellConn(is_ordered)
+
+        ! Check consistency
+        if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+
+        ! Recalculate magneticfield
+        call grid%RecalcMagn(magneticField)
+
+        end associate
   
+    end subroutine
+
+    subroutine AdjustEnds(grid, fcLbl_loc, f_in, f_out)
+
+        ! Description
+        !============
+        ! Adjust ends of faces target chain
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), allocatable, intent(in)    :: f_in(:), fcLbl_loc(:)
+        integer(I8), allocatable, intent(out)   :: f_out(:)
+
+        ! Auxiliary
+        integer(I8) :: n, m, p, nf, ifc, ic, f_ends(2)
+        integer(I8), allocatable :: bc(:), neigs_bc(:), f_outD(:), &
+            facesTB(:), facesT(:), lbl(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Get GA face label of the target
+        call Unique(fcLbl_loc(f_in), lbl)
+        if (size(lbl) /= 1) call gdErrorHandler('AdjustEnds: multiple face labels in one target')
+
+        ! Get ends of face chain
+        f_ends = [f_in(1), f_in(size(f_in))]
+
+
+        ! Check both ends for a boundary face to include
+        allocate(f_outD(f%ntot))
+        nf = size(f_in)
+        f_outD = 0
+        f_outD(1:nf) = f_in
+        do n = 1, 2
+
+            ! Get neigbhoring cells of ends
+            ifc = f_ends(n)
+            bc = GetFaceCellGA(c, ifc)
+            neigs_bc = GetCellNeigsGA(grid, bc(1))
+
+            ! Loop over neigbhoring faces
+            do m = 1, size(neigs_bc)
+
+                ic = neigs_bc(m)
+                if (c%cflags%Get(ic) == 3) then
+                    
+                    facesT = GetCellFaceGA(c, ic)
+                    allocate(facesTB(count(isBoundaryFaceGA(f, facesT))))
+                    facesTB = pack(facesT, isBoundaryFaceGA(f, facesT)) 
+
+                    ! Loop over boundary faces
+                    do p = 1, size(facesTB)
+                        if ((HaveCommonVert(f, facesTB(p), ifc)) .and. (fcLbl_loc(facesTB(p)) /= lbl(1))) then
+
+                            if (n == 1) then
+                                f_outD(1:nf+1) = [facesTB(p), f_outD(1:nf)]
+                            else 
+                                f_outD(nf+1) = facesTB(p)
+                            end if
+
+                            ! Update number of faces
+                            nf = nf + 1
+
+                        end if
+                    end do
+
+                end if
+
+            end do
+
+        end do
+
+        ! Trim
+        f_out = f_outD(1:nf)
+
+        end associate
+
+    end subroutine
+
+    subroutine GetRadialFaceGA(grid, iv, rface)
+
+        ! Description
+        !============
+        ! Get the radial faces of a boundary vertex
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: iv
+        integer(I8), intent(out)        :: rface
+        
+        ! Auxiliary
+        integer(I8) :: i, indmin
+        integer(I8), allocatable :: faces(:), cells_rface(:)
+        real(R8), allocatable :: dpsi(:) 
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+        
+        ! Get faces
+        faces = GetVertFaceGA(f, iv)
+
+        dpsi = abs(v%psi%Get(f%vert1%Get(faces)) - v%psi%Get(f%vert2%Get(faces)))
+        indmin = minloc(dpsi,1)
+        rface = faces(indmin)
+
+        if (isBoundaryFaceGA(f, rface) .and. size(faces) /= 2 .and.  f%aligned%Get(rface) == 0) then
+
+            ! if the vertex has only 2 faces, it is possible that the radial
+            ! face is a boundary face
+            rface = 0
+
+        end if
+
+        if (rface /= 0 .and. .not.isBoundaryFaceGA(f, rface)) then
+
+            !if face is part of a triangle, it can only be a aligned face of the triangle!!
+            cells_rface = GetFaceCellGA(c, rface)
+
+            ! Loop over the cells of rface
+            do i = 1, 2
+
+                    ! If triangle => rface should be the most aligned face of the triangle
+                    if (c%faceP2%Get(cells_rface(i)) == 3) then
+
+                        faces = GetCellFaceGA(c, cells_rface(i))
+                        if (any(rface == faces)) then
+                            dpsi = abs(v%psi%Get(f%vert1%Get(faces)) - v%psi%Get(f%vert2%Get(faces)))
+                            indmin = minloc(dpsi,1) 
+                            if (faces(indmin) /= rface) rface = 0
+
+                        end if
+
+                    end if
+
+            end do
+
+        end if
+
+
+        end associate
+
+    end subroutine 
+
+    subroutine GetRadialIntersection(grid, iv, isx, isy, found)
+
+        ! Description
+        !============
+        ! Get radial intersection
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: iv
+        real(R8), intent(inout)         :: isx, isy
+        logical, intent(out)            :: found
+
+        ! Auxiliary
+        integer(I8) :: i, j, counter
+        integer(I8), allocatable :: cells(:), faces(:), verts(:)
+        real(R8) :: psic, safety_factor, t0, diff_psi
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Get cells of vertex
+        cells = GetVertCellGA(c, iv)
+
+        ! Initialize
+        psic = v%psi%Get(iv)
+        isx = 0.0_R8
+        isy = 0.0_R8
+        counter = 0
+        found = .false.
+        safety_factor = 0.01_R8
+
+        ! Loop over cells
+        do i = 1, size(cells)
+
+            faces = GetCellFaceGA(c, cells(i))
+            do j = 1, size(faces)
+                verts = [f%vert1%Get(faces(j)), f%vert2%Get(faces(j))]
+                diff_psi = abs(v%psi%Get(verts(2)) - v%psi%Get(verts(1)))
+                if ((psic .gt. (minval(v%psi%Get(verts)) + safety_factor*diff_psi)) &
+                    .and. (psic .lt. (maxval(v%psi%Get(verts)) - safety_factor*diff_psi))) then
+                    
+                        t0 = (psic - v%psi%Get(verts(1))) / (v%psi%Get(verts(2)) - v%psi%Get(verts(1)))
+                        isx = v%x%Get(verts(1)) + t0 * (v%x%Get(verts(2)) - v%x%Get(verts(1)))
+                        isy = v%y%Get(verts(1)) + t0 * (v%y%Get(verts(2)) - v%y%Get(verts(1)))
+                        counter = counter + 1
+                        found = .true.
+
+                end if
+
+            end do
+
+        enddo
+
+        if (.not.found) then
+            call gdErrorHandler('GetRadialIntersection: no intersection found')
+        else if (counter == 2) then
+            found = .false.
+            isx = 0.0_R8
+            isy = 0.0_R8
+            call gdErrorHandler('GetRadialIntersection: two intersection found instead of one')
+        end if
+
+        end associate
+
+    end subroutine 
+
+    subroutine ThicknessSmoothing(grid, iv, vecx, vecy, isx, isy, rescaling_factor, &
+                        counter, verts_move_I8, verts_move_R8)
+
+        ! Description
+        !============
+        ! Smoothing out the displacement of vertices
+
+        ! Declare variables
+        !==================
+        ! Argument
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), intent(in) :: iv, counter, verts_move_I8(:,:)
+        real(R8), intent(inout) :: vecx, vecy
+        real(R8), intent(in) :: isx, isy, rescaling_factor, verts_move_R8(:,:)
+
+        ! Auxiliary
+        integer(I8) :: common_vert
+        integer(I8), allocatable, dimension(:) :: cvs, t_cvs, n_aligned_f, &
+            faces
+        real(R8) :: d, d_prev, ratio
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Check 
+        if (vecx /= 0) then
+
+            ! Try to damp the wiggles in the boundary layer due to
+            ! free_vert of a triangle repositions
+            cvs = GetVertCellGA(c, iv)
+            allocate(t_cvs(count(c%faceP2%Get(cvs) == 3)))
+            t_cvs = pack(cvs, c%faceP2%Get(cvs) == 3)
+
+            if (size(t_cvs) /= 0) then
+                ! Get the free_vert, assumption: verts which are not
+                ! free_vert are part of an algined face
+                faces = GetCellFaceGA(c, t_cvs(1))
+                allocate(n_aligned_f(count(f%aligned%Get(faces) == 0)))
+                n_aligned_f = pack(faces, f%aligned%Get(faces) == 0)
+                common_vert = GetCommonVert(f, n_aligned_f(1),n_aligned_f(2))
+                
+                if (common_vert == iv) then
+                    vecx = (isx - v%x%Get(iv)) / (2.0_R8*rescaling_factor)
+                    vecy = (isy - v%y%Get(iv))/  (2.0_R8*rescaling_factor)
+                end if              
+            end if
+
+            ! Some extra smoothing
+            if (counter .gt. 1) then
+                d = Norm(vecx, vecy)
+                d_prev = Norm(verts_move_R8(counter-1,3),verts_move_R8(counter-1,4)) ! isx and isy
+                if (d_prev /= 0) then
+
+                    if (d .gt. d_prev*1.2_R8) then
+
+                        ratio = d/d_prev
+                        if (ratio .gt. 1.5_R8) then
+                            ratio = 1.5_R8
+                        end if
+                        vecx = vecx / ratio
+                        vecy = vecy / ratio
+
+                    end if
+
+                end if
+
+            end if
+
+        end if
+
+        end associate
+
     end subroutine
 
     !------------------------------------------------------------------!
@@ -13724,6 +14210,132 @@ module gamod_types
 
         ! Trim
         Xcells = XcellsD(1:counter)
+
+    end subroutine
+
+    subroutine GetHighInclinedTrias(grid, qm, options, ARtot, incl, &
+        cctria, cctraps, cctrapsP, nums, ncc)
+
+        ! Description
+        !============
+        ! Find highly inclined triangle in cutcell configuration
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        type(QualityMetricUDT), intent(in)      :: qm
+        type(GAoptionsUDT), intent(in)          :: options
+        real(R8), allocatable, intent(out)      :: ARtot(:), incl(:)
+        integer(I8), allocatable, intent(out)   :: cctria(:), cctraps(:), &
+            cctrapsP(:,:), nums(:)
+        integer(I8), intent(out)                :: ncc
+
+        ! Auxiliary
+        integer(I8) :: i, trap1, trap_end, trap_end2
+        integer(I8), allocatable, dimension(:) :: fcs_al, vxs_tria, vxs_trap1, &
+            vxs_trap1_b, vxs_tria_down, vxs_trap_end, vxs_trap_end2, fcs_B, &
+            vxs_trap_end_b, vxs_trap_up, fcs
+        real(R8) :: x1, y1, x2, y2, Lst
+        real(R8), allocatable :: fcs_alS(:)
+        logical, allocatable :: log(:), log2(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Detect cutcells
+        call grid%DetectCutCell(qm, options, cctria, cctraps, cctrapsP)
+
+        ! Poloidal merging if the resulting stacked trias would be
+        ! to skewed
+        ! ARtot = longest face of stacked trias / ...
+        !        length of aligned face of triangle
+
+        ! For now just with most cells
+        ncc = size(cctria)
+        allocate(ARtot(ncc), incl(ncc))
+        nums = (/(i, i = 1, ncc)/)
+
+        do i = 1, ncc
+
+            ! Get aligned faces of triangle
+            fcs = GetCellFaceGA(c, cctria(i))
+            allocate(fcs_al(count(f%aligned%Get(fcs) == 1)))
+            fcs_al = pack(fcs, f%aligned%Get(fcs) == 1)
+            fcs_alS = qm%fcS(fcs_al)
+            allocate(fcs_B(count(isBoundaryFaceGA(f, fcs))))
+            fcs_B = pack(fcs, isBoundaryFaceGA(f, fcs))
+
+            ! Get vertices of longest face of stacked trias 
+            ! Triangle vertices
+            vxs_tria = GetCellVertGA(c, cctria(i))
+            trap1 = cctraps(cctrapsP(i,1))
+            vxs_trap1 = GetCellVertGA(c, trap1)
+            log = (.not.isMember(vxs_tria, vxs_trap1))
+            allocate(vxs_tria_down(count(log)))
+            vxs_tria_down = pack(vxs_tria, log)
+
+            if (size(vxs_tria_down) /= 1) &
+                call gdErrorHandler('GetHighInclinedTrias: something wrong')
+
+            ! Trapezoid vertex
+            if (cctrapsP(i,2) == 1) then
+
+                log = isBoundaryVertGA(grid, vxs_trap1)
+                allocate(vxs_trap1_b(count(log)))
+                vxs_trap1_b = pack(vxs_trap1, log)
+                log2 = .not.isMember(vxs_trap1_b, vxs_tria)
+                allocate(vxs_trap_up(count(log2)))
+                vxs_trap_up = pack(vxs_trap1_b, log2)
+
+                if (size(vxs_trap_up) /= 1) &
+                    call gdErrorHandler('GetHighInclinedTrias: something wrong')
+
+                ! Housekeeping
+                deallocate(vxs_trap1_b)
+
+            else 
+
+                trap_end = cctraps(cctrapsP(i,1)+cctrapsP(i,2)-1)
+                vxs_trap_end = GetCellVertGA(c, trap_end)
+
+                trap_end2 = cctraps(cctrapsP(i,1)+cctrapsP(i,2)-2)
+                vxs_trap_end2 = GetCellVertGA(c, trap_end2)
+
+                log = isBoundaryVertGA(grid, vxs_trap_end)
+                allocate(vxs_trap_end_b(count(log)))
+                vxs_trap_end_b = pack(vxs_trap_end, log)
+                log2 = .not.isMember(vxs_trap_end_b, vxs_trap_end2)
+                allocate(vxs_trap_up(count(log2)))
+                vxs_trap_up = pack(vxs_trap_end_b, log2)
+                if (size(vxs_trap_up) /= 1) &
+                    call gdErrorHandler('GetHighInclinedTrias: something wrong')
+
+                ! Housekeeping
+                deallocate(vxs_trap_end_b)
+
+            end if
+
+            ! Compute distance
+            x1 = v%x%Get(vxs_tria_down(1))
+            y1 = v%y%Get(vxs_tria_down(1))
+            x2 = v%x%Get(vxs_trap_up(1))
+            y2 = v%y%Get(vxs_trap_up(1))
+
+            Lst = sqrt((x1 - x2)**2 + (y1 - y2)**2)
+            ARtot(i) = Lst/fcs_alS(1)
+            incl(i) = abs(qm%fcqalfc(fcs_B(1)))
+
+            ! Housekeeping
+            deallocate(fcs_al, fcs_B, vxs_tria_down, vxs_trap_up)
+
+        end do
+
+        end associate
 
     end subroutine
 
