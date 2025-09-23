@@ -564,7 +564,8 @@ module mod_contour2D
  
         ! Main loop
         !==========
-        !$omp parallel default(none) if(.not. omp_in_parallel()) &
+        !$omp parallel default(none) if(.not. omp_in_parallel() .and. &
+        !$omp (size(tracevalues) >= omp_get_num_threads())) &
         !$omp shared(tracevalues, V, X, Y, superquadflags, &
         !$omp superquadfacexflags, superquadfaceyflags, nx, ny, &
         !$omp contours) &
@@ -758,7 +759,8 @@ module mod_contour2D
 
         ! Main loop
         !==========
-        !$omp parallel do default(none) if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp parallel do default(none) if(.not. omp_in_parallel() .and. (nt >= omp_get_num_threads())) &
+        !$omp schedule(dynamic) & 
         !$omp shared(xt, yt, nt, V, X, Y, superquadflags, &
         !$omp superquadfacexflags, superquadfaceyflags, nx, ny, contours) &
         !$omp private(txt, tyt, i, j, tempcontours) & 
@@ -1045,9 +1047,13 @@ module mod_contour2D
         cc = 0
 
         ! Check nodal values
+        !$omp parallel if(.not. omp_in_parallel())
+        !$omp workshare
         Vtrace = V
         hasvv = Vtrace > tv 
         isexactv = Vtrace == tv 
+        !$omp end workshare
+        !$omp end parallel
 
         ! Check if any values found, if not: add empty contour and 
         ! continue to next value
@@ -1719,6 +1725,7 @@ module mod_contour2D
         Vtrace = V
         hasvv = Vtrace > tv 
         isexactv = Vtrace == tv 
+
 
         ! Values found, check if we need to perturb some locations
         if (any(isexactv)) then 
