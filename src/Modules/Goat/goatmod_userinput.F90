@@ -214,6 +214,7 @@ module goatmod_userinput
 
         logical                     :: BLG
         integer(I8)                 :: BLG_n_layers
+        real(R8)                    :: BLG_rescaling_factor
 
         logical                     :: rem_stickout_trias
         logical                     :: rem_trias_flux
@@ -950,6 +951,7 @@ module goatmod_userinput
 
         options%BLG                                 = .false.
         options%BLG_n_layers                        = 0
+        options%BLG_rescaling_factor                = 1
 
         options%rem_stickout_trias                  = .false.
         options%rem_trias_flux                      = .false.
@@ -1640,6 +1642,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%BLG)
         field = 'ga.BLG_n_layers'
         call ExtractOptionValueInteger0D(fid, field, options%BLG_n_layers)
+        field = 'ga.rescaling_factor'
+        call ExtractOptionValueReal0D(fid, field, options%BLG_rescaling_factor)
 
         ! Special operations
         field = 'ga.rem_stickout_trias'
