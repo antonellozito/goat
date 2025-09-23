@@ -13383,6 +13383,10 @@ module gamod_types
 
         ! Place target vertices upstream
         do i = 1, counter
+            if (verts_move_R8(i, 3) /= .or. verts_move_R8(i, 4)) then
+
+                ! Continue here - TODO
+            end if
         end do
 
         ! Make faces between the new vertices along the boundary
