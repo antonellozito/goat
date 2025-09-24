@@ -951,7 +951,7 @@ module goatmod_userinput
 
         options%BLG                                 = .false.
         options%BLG_n_layers                        = 0
-        options%BLG_rescaling_factor                = 1
+        options%BLG_rescaling_factor                = 2
 
         options%rem_stickout_trias                  = .false.
         options%rem_trias_flux                      = .false.

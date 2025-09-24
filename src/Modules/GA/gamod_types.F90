@@ -557,6 +557,7 @@ module gamod_types
         ! Boundary layer grid
         procedure :: BoundaryLayerGrid
         procedure :: AdjustEnds
+        procedure :: EliminateCutcellBoundaryFaces
         procedure :: GetRadialFaceGA
         procedure :: GetRadialIntersection
         procedure :: ThicknessSmoothing
@@ -10995,6 +10996,7 @@ module gamod_types
         if (options%debug) then
             if (.not.options%slab) then
                 allocate(cells_log(c%ntot))
+                allocate(is_ordered(c%ntot))
                 cells_log = .true.
                 call grid%CheckVertOrder(is_ordered, cells_log)
                 call grid%ReOrderCellConn(is_ordered)
@@ -13234,30 +13236,37 @@ module gamod_types
 
     ! Boundary layer grid
     !====================
-    subroutine BoundaryLayerGrid(grid, magneticField, options)
+    subroutine BoundaryLayerGrid(grid, qm, magneticField, options)
 
         ! Description
         !============
-        ! Builds a boundary layer grid, i.e. a layer of grids is added 
-        ! at the targets
+        ! Builds a boundary layer grid, i.e. a layer of quadrilateral cells is added 
+        ! at the targets. For vesselmode grids the first and last vertex of each
+        ! target is not shifted resulting in the addition of a triangle at the
+        ! ends of each target.
 
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(inout)     :: grid
-        type(MagneticFieldUDT), intent(in)  :: magneticField
-        type(GAoptionsUDT), intent(in)      :: options
+        class(GAGridUDT), intent(inout)         :: grid
+        type(QualityMetricUDT), intent(inout)   :: qm
+        type(MagneticFieldUDT), intent(in)      :: magneticField
+        type(GAoptionsUDT), intent(in)          :: options
 
         ! Auxiliary
-        integer(I8) :: i, j, counter, rface, rface_verts(2), point_vert
-        integer(I8), allocatable :: verts_move_I8(:,:), f1ord(:,:),  f2ord(:,:)
+        integer(I8) :: i, j, k, n, counter, rface, rface_verts(2), point_vert, &
+            vert1, vert2, iv, face_number, vs(2), ind1, ind2, new_vert1, &
+            new_vert2, ic, bcc, ifc
+        integer(I8), allocatable, dimension(:,:):: verts_move_I8, f1ord, f2ord
         integer(I8), allocatable, dimension(:) :: fcLbl_loc, indf, &
             f1, f2, f3, f4, target_fcs, nf1, nf2, f1D, f2D, fcs_v, fcsB_v, &
-            verts
-        real(R8) :: vecx, vecy, isx, isy, rescaling, new_locx, new_locy
+            verts, vxs1, fcs1, cell_facesD, cell_faces, cell_vertsD, cell_verts, &
+            c1s, c2s, cells, verts_bcc, bc
+        real(R8) :: vecx, vecy, isx, isy, rescaling, new_locx, new_locy, &
+            old_locx, old_locy
         real(R8), allocatable :: verts_move_R8(:,:)
-        logical :: found
-        logical, allocatable :: cells_log(:), is_ordered(:)
+        logical :: found, move
+        logical, allocatable :: cells_log(:), is_ordered(:), verts_move_log(:)
 
         ! Associate
         associate(&
@@ -13266,150 +13275,300 @@ module gamod_types
             v => grid%vert &
             )
 
-        ! Targets are identified by fcLbl == 1 or 2
+        ! Loop for number of layers
+        do n = 1, options%BLG_n_layers
 
-        ! Calculate movement vectors, size base on the length of face in radial
-        ! direction, movement vector is along the radial face
-        ! problem with triangle not fillen the flux tube radially
+            ! Display progress
+            print *, 'Apply boundary layer grid adapation ', n, ' of ', options%BLG_n_layers
 
-        ! Unpack
-        rescaling = options%BLG_rescaling_factor
+            ! Calculate metric
+            if (options%vesselmode) &
+                call qm%CalculateQualityMetrics(grid, options, magneticField, .false., .false.)
 
-        ! Locally generalize the face labels
-        fcLbl_loc = GetfcLblGA(f, options)
+            ! Targets are identified by fcLbl_loc == 4 or 5
 
-        ! Get target faces and chain faces
-        indf = (/ (i, i = 1, f%ntot)/)
-        allocate(f1(count(fcLbl_loc == 4)))
-        f1 = pack(indf, fcLbl_loc == 4)
-        call f%ChainFaces(f1, f1ord, nf1)
-        if (size(nf1) /= 1) call gdErrorHandler('BoundaryLayerGrid: inner target not one chain')
+            ! Calculate movement vectors, size base on the length of face in radial
+            ! direction, movement vector is along the radial face
+            ! problem with triangle not fillen the flux tube radially
 
-        allocate(f2(count(fcLbl_loc == 5)))
-        f2 = pack(indf, fcLbl_loc == 5)
-        call f%ChainFaces(f2, f2ord, nf2)
-        if (size(nf2) /= 1) call gdErrorHandler('BoundaryLayerGrid: outer target not one chain')
+            ! Unpack
+            rescaling = options%BLG_rescaling_factor
 
-        ! Adapt fcLbl to avoid end effect
-        if (.not.options%slab .and. .not.options%vesselmode) then
+            ! Locally generalize the face labels
+            fcLbl_loc = GetfcLblGA(f, options)
+
+            ! Get target faces and chain faces
+            indf = (/ (i, i = 1, f%ntot)/)
+            allocate(f1(count(fcLbl_loc == 4)))
+            allocate(f2(count(fcLbl_loc == 5)))        
+            f1 = pack(indf, fcLbl_loc == 4)
+            f2 = pack(indf, fcLbl_loc == 5)
+            call f%ChainFaces(f1, f1ord, nf1)
+            call f%ChainFaces(f2, f2ord, nf2)
+            deallocate(f1, f2)
+
+            ! Test chaines
+            if (size(nf1) /= 1) call gdErrorHandler('BoundaryLayerGrid: inner target not one chain')
+            if (size(nf2) /= 1) call gdErrorHandler('BoundaryLayerGrid: outer target not one chain')
+
+            ! Adapt fcLbl to avoid end effect
             f1D = f1ord(:,1)
-            f2D = f2ord(:,1)
-            call grid%AdjustEnds(fcLbl_loc, f1D, f3) ! TODO
-            call grid%AdjustEnds(fcLbl_loc, f2D, f4) ! TODO
-        end if
+            f2D = f2ord(:,1)        
+            if (.not.options%slab .and. .not.options%vesselmode) then
+                call grid%AdjustEnds(fcLbl_loc, f1D, f3) 
+                call grid%AdjustEnds(fcLbl_loc, f2D, f4) 
+            else if (options%vesselmode) then
+                call grid%EliminateCutcellBoundaryFaces(fcLbl_loc, f1D, f3)
+                call grid%EliminateCutcellBoundaryFaces(fcLbl_loc, f2D, f4)
+            end if
+            target_fcs = [f3, f4]
 
-        target_fcs = [f3, f4]
+            ! Loop over the target faces
+            if (.not.allocated(verts_move_I8)) then
+                allocate(verts_move_I8(size(target_fcs)*2,4))
+                allocate(verts_move_R8(size(target_fcs)*2,6))
+                allocate(verts_move_log(size(target_fcs)*2))
+            end if
+            verts_move_I8 = 0
+            verts_move_R8 = 0.0_R8     
+            verts_move_log = .true.   
+            move = .true.
+            counter = 0
+            do i = 1, size(target_fcs)
 
-        ! Loop over the target faces
-        allocate(verts_move_I8(size(target_fcs)*2,4))
-        allocate(verts_move_R8(size(target_fcs)*2,6))
-        verts_move_I8 = 0
-        verts_move_R8 = 0.0_R8        
-        do i = 1, size(target_fcs)
+                ! Get vertices
+                verts = [f%vert1%Get(target_fcs(i)), f%vert2%Get(target_fcs(i))]
 
-            ! Get vertices
-            verts = [f%vert1%Get(target_fcs(i)), f%vert2%Get(target_fcs(i))]
+                ! Loop over verts
+                do j = 1, 2
 
-            ! Loop over verts
-            do j = 1, 2
+                    ! Reset
+                    move = .true.
 
-                if (.not.any(verts(j) == verts_move_I8(:,1))) then
+                    ! If vertex is not in vert_move_I8 yet
+                    if (.not.any(verts(j) == verts_move_I8(:,1))) then
 
-                    ! Determine displacement of the vertex
-                    fcs_v = GetVertFaceGA(f, verts(j))
-                    allocate(fcsB_v(count(isBoundaryFaceGA(f, fcs_v))))
-                    fcsB_v = pack(fcs_v, isBoundaryFaceGA(f, fcs_v))
+                        ! Determine displacement of the vertex
+                        fcs_v = GetVertFaceGA(f, verts(j))
+                        allocate(fcsB_v(count(isBoundaryFaceGA(f, fcs_v))))
+                        fcsB_v = pack(fcs_v, isBoundaryFaceGA(f, fcs_v))
 
-                    if (options%vesselmode .and. size(fcs_v) .gt. 2 &
-                        .and. (count(f%aligned%Get(fcsB_v)==1) .gt. 0 &
-                        .or. minval(fcLbl_loc(fcsB_v)) .gt. 5)) then
+                        if (options%vesselmode .and. size(fcs_v) .gt. 2 &
+                            .and. (count(f%aligned%Get(fcsB_v)==1) .gt. 0 &
+                            .or. minval(fcLbl_loc(fcsB_v)) .lt. 4)) then
 
-                        ! No replacement because corner vertex
-                        vecx = 0.0_R8
-                        vecy = 0.0_R8
-                        rface = 0
-                        isx = v%x%Get(verts(j))
-                        isy = v%y%Get(verts(j))
+                            ! No replacement because corner vertex
+                            vecx = 0.0_R8
+                            vecy = 0.0_R8
+                            rface = 0
+                            isx = v%x%Get(verts(j))
+                            isy = v%y%Get(verts(j))
+                            move = .false.
+                        
+                        else if (options%vesselmode .and. minval(fcLbl_loc(fcsB_v)) .lt. 4) then
 
-                    else
-
-                        ! Compute displacement
-                        call grid%GetRadialFaceGA(verts(j), rface)
-
-                        if (rface == 0) then
-
-                            ! Get the intersection with the cell in the radial direction
-                            call grid%GetRadialIntersection(verts(j), isx, isy, found) ! TODO
-                            if (.not.found) then
-                                isx = v%x%Get(verts(j))
-                                isy = v%y%Get(verts(j))
-                            end if
+                            ! No replacement because end vertex of target
+                            vecx = 0.0_R8
+                            vecy = 0.0_R8
+                            rface = 0
+                            isx = v%x%Get(verts(j))
+                            isy = v%y%Get(verts(j))
+                            move = .false.
 
                         else
 
-                            ! Get intersection based on rface
-                            rface_verts = [f%vert1%Get(rface), f%vert2%Get(rface)]
-                            point_vert = Pack2(rface_verts, rface_verts /= verts(j))
+                            ! Compute displacement
+                            call grid%GetRadialFaceGA(verts(j), rface)
 
-                            isx = v%x%Get(point_vert)
-                            isy = v%y%Get(point_vert)
+                            if (rface == 0) then
+
+                                ! Get the intersection with the cell in the radial direction
+                                call grid%GetRadialIntersection(verts(j), isx, isy, found) ! TODO
+                                if (.not.found) then
+                                    isx = v%x%Get(verts(j))
+                                    isy = v%y%Get(verts(j))
+                                    move = .false.
+                                end if
+
+                            else
+
+                                ! Get intersection based on rface
+                                rface_verts = [f%vert1%Get(rface), f%vert2%Get(rface)]
+                                point_vert = Pack2(rface_verts, rface_verts /= verts(j))
+
+                                isx = v%x%Get(point_vert)
+                                isy = v%y%Get(point_vert)
+
+                            end if
+
+                            vecx = (isx - v%x%Get(verts(j))) / rescaling
+                            vecy = (isy - v%y%Get(verts(j))) / rescaling
 
                         end if
 
-                        vecx = (isx - v%x%Get(verts(j))) / rescaling
-                        vecy = (isy - v%y%Get(verts(j))) / rescaling
+                        ! Housekeeping
+                        deallocate(fcsB_v)
+
+                        ! Thickness smoothing
+                        call grid%ThicknessSmoothing(verts(j), vecx, vecy, isx, isy, rescaling, &
+                            counter, verts_move_I8, verts_move_R8)
+
+                        ! Compute new location of vertex
+                        new_locx = v%x%Get(verts(j)) + vecx
+                        new_locy = v%y%Get(verts(j)) + vecy
+
+                        ! Store
+                        counter = counter + 1
+                        verts_move_I8(counter,:) = [verts(j), 0, 0, rface]
+                        verts_move_R8(counter,:) = [v%x%Get(verts(j)), v%y%Get(verts(j)), vecx, vecy, new_locx, new_locy]
+                        verts_move_log(counter) = move
 
                     end if
 
-                    ! Thickness smoothing
-                    call grid%ThicknessSmoothing(verts(j), vecx, vecy, isx, isy, rescaling, &
-                        counter, verts_move_I8, verts_move_R8) ! TODO
+                end do
 
-                    ! Compute new location of vertex
-                    new_locx = v%x%Get(verts(j)) + vecx
-                    new_locy = v%y%Get(verts(j)) + vecy
 
-                    ! Store
-                    counter = counter + 1
-                    verts_move_I8(counter,:) = [verts(j), 0, 0, rface]
-                    verts_move_R8(counter,:) = [v%x%Get(verts(j)), v%y%Get(verts(j)), vecx, vecy, new_locx, new_locy]
+            end do
+
+            ! Place target vertices upstream
+            do i = 1, counter
+                if (verts_move_log(i)) then
+
+                    ! Collect data
+                    iv = verts_move_I8(i, 1)
+                    new_locx = verts_move_R8(i, 5)
+                    new_locy = verts_move_R8(i, 6)
+
+                    ! Move vertex
+                    call v%x%Set(iv, new_locx)
+                    call v%y%Set(iv, new_locy)
+
+                    ! Place new vertices on the original target vertices
+                    old_locx = verts_move_R8(i, 1)
+                    old_locy = verts_move_R8(i, 2)
+                    v%ntot = v%ntot + 1
+                    call v%x%Set(v%ntot, old_locx)
+                    call v%y%Set(v%ntot, old_locy)
+
+                    ! Save new vertex number
+                    verts_move_I8(i, 2) = v%ntot
+
+                    ! Make a face between new and old location
+                    vert1 = iv
+                    vert2 = verts_move_I8(i, 2)
+                    call grid%GetFaceNumber(vert1, vert2, 3, face_number)
+                    verts_move_I8(i, 3) = face_number
+                    if (verts_move_I8(i, 4) /= 0) then
+
+                        if (f%label%Get(verts_move_I8(i,4)) /= 0) then
+                            call f%label%Set(face_number, f%label%Get(verts_move_I8(i,4)))
+                        end if 
+
+                    end if
+
+                    ! Set alignment
+                    call f%aligned%Set(face_number, 1)
+
+                    ! vxPsi must be equal - bx, by calculat
+                    call v%psi%Set(v%ntot, v%psi%Get(iv))
+                    call v%bx%Set(v%ntot, 0.0_R8) 
+                    call v%by%Set(v%ntot, 0.0_R8) 
+                    
+                    ! Add new vert and face to fsVx and fsFc
+                    allocate(fcs1(1))
+                    vxs1 = [vert1, vert2] ! Also provide old vertex to find current flux surface
+                    fcs1 = face_number
+                    call grid%AddVertToFsVx(vxs1, fcs1, verts_move_I8(i,4), 'rad')
+                    deallocate(fcs1)
 
                 end if
 
             end do
 
+            ! Make faces between the new vertices along the boundary
+            ! A parallel face connects
+            do j = 1, size(target_fcs)
 
-        end do
+                ifc = target_fcs(j)
+                bc = GetFaceCellGA(c, ifc)
+                if (size(bc) /= 1) call gdErrorHandler('BoundaryLayerGrid: multiple or no boundary cell')
 
-        ! Place target vertices upstream
-        do i = 1, counter
-            if (verts_move_R8(i, 3) /= .or. verts_move_R8(i, 4)) then
+                vs = [f%vert1%Get(ifc), f%vert2%Get(ifc)]
+                ind1 = findloc(verts_move_I8(:,1), vs(1), 1)
+                ind2 = findloc(verts_move_I8(:,1), vs(2), 1)
+                new_vert1 = verts_move_I8(ind1, 2)
+                new_vert2 = verts_move_I8(ind2, 2)
 
-                ! Continue here - TODO
-            end if
-        end do
+                if (new_vert1 /= 0 .or. new_vert2 /= 0) then
 
-        ! Make faces between the new vertices along the boundary
-        ! A parallel face connects
-        do j = 1, size(target_fcs)
+                    if (new_vert1 == 0) new_vert1 = vs(1) ! Put in the old vertex
+                    if (new_vert2 == 0) new_vert2 = vs(2) ! Put in the old vertex
+
+                    ! Make almost parallel face along the wall
+                    call grid%GetFaceNumber(new_vert1, new_vert2, 3, face_number)
+                    call f%label%Set(face_number, f%label%Get(ifc))
+                    call f%label%Set(ifc, 0)
+
+                    ! Make the cell
+                    cell_facesD = [face_number, verts_move_I8(ind1, 3), ifc, verts_move_I8(ind2, 3)]
+                    allocate(cell_faces(count(cell_facesD /= 0)))
+                    cell_faces = pack(cell_facesD, cell_facesD /= 0) 
+                    cell_vertsD = [new_vert1, new_vert2, vs(1), vs(2)]
+                    call Unique(cell_vertsD, cell_verts)
+
+                    ! Add cell connectivity
+                    call grid%AddCell(cell_faces, cell_verts, c%reg%Get(bc(1)), ic)
+
+                    ! cflags
+                    call c%cflags%Set(ic, 3) ! Becomes boundary cell
+                    if (isBoundaryCellGA(grid, bc(1))) then
+                        call c%cflags%Set(bc(1), 3)
+                    else 
+                        call c%cflags%Set(bc(1), 1) ! Previous boundary cell become internal cell, in most of the cases
+                    end if
+
+                    ! Centroid of new cell - already done
+                    ! Centroid of adjusted cells
+                    c1s = GetVertCellGA(c, vs(1))
+                    c2s = GetVertCellGA(c, vs(2))
+                    cells = [c1s, c2s]
+                    do k = 1, size(cells)
+
+                        bcc = cells(k)
+                        verts_bcc = GetCellVertGA(c, bcc)
+                        call c%x%Set(bcc, sum(v%x%Get(verts_bcc))/real(size(verts_bcc), kind=R8))
+                        call c%y%Set(bcc, sum(v%y%Get(verts_bcc))/real(size(verts_bcc), kind=R8))
+
+                    end do
+
+                    ! Housekeeping
+                    deallocate(cell_faces)
+
+                end if
+
+            end do
+
+            ! Finalize
+            !---------
+            ! Get fsVx correct
+            call grid%GetFsVxFromFsFc(options)
+
+            ! Recalculate magneticfield
+            call grid%RecalcMagn(magneticField) 
+
         end do
 
         ! Finalize
         !---------
-        ! Get fsVx correct
-        call grid%GetFsVxFromFsFc(options)
-     
-        ! Orderen 
+        ! Orden connectivity
         allocate(cells_log(c%ntot))
+        allocate(is_ordered(c%ntot))            
         cells_log = .true.
         call grid%CheckVertOrder(is_ordered, cells_log)
         call grid%ReOrderCellConn(is_ordered)
 
         ! Check consistency
         if (options%debug) call grid%CheckUnstructuredGrid(.false.)
-
-        ! Recalculate magneticfield
-        call grid%RecalcMagn(magneticField)
 
         end associate
   
@@ -13496,6 +13655,53 @@ module gamod_types
 
         end associate
 
+    end subroutine
+
+    subroutine  EliminateCutcellBoundaryFaces(grid, fcLbl_loc, f_in, f_out)
+
+        ! Description
+        !============
+        ! Eliminate boundary faces of targets where cutcells are to avoid problematic flux tube
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: f_in(:)
+        integer(I8), intent(inout)              :: fcLbl_loc(:)
+        integer(I8), allocatable, intent(out)   :: f_out(:)
+
+        ! Auxiliary
+        integer(I8) :: i, counter
+        integer(I8), allocatable :: f_outD(:), cvLookUp(:), cvs(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Check if the boundary is at cutcell
+        cvLookUp = GetCvLookUpGA(c)
+        allocate(f_outD(size(f_in)))
+        f_outD = 0
+        counter = 0
+        do i = 1, size(f_in)
+            cvs = GetFaceCellGA(c, f_in(i), cvLookUp)
+
+            if (.not.isTrapezoid(grid, cvs(1)).and..not.isCutcellTria(grid, cvs(1))) then
+                counter = counter + 1
+                f_outD(counter) = f_in(i)
+            else
+                fcLbl_loc(f_in(i)) = 1
+            end if
+        end do
+
+        ! Trim
+        f_out = f_outD(1:counter)
+
+        end associate
+    
     end subroutine
 
     subroutine GetRadialFaceGA(grid, iv, rface)
@@ -14160,9 +14366,6 @@ module gamod_types
             end do
 
         end if
-
-
-
     end subroutine
 
     subroutine DetermineCflagTria4(grid, ic)
@@ -15098,7 +15301,7 @@ module gamod_types
                     ! Get the flux surface id
                     ifs = GetFsFcFromFaceIndex(fd, ind)
                     call grid%AddIntoExistingSurface(ifs, new_v, new_f)
-                             
+                            
                 end if
                 
             end if
@@ -16407,6 +16610,37 @@ module gamod_types
         do i = 1, 2
             if (any(vx1(i) == vx2)) res = .true.
         end do
+
+    end function
+
+    function isTrapezoid(g, ic) result(res)
+        type(GAGridUDT) :: g
+        integer(I8) :: ic
+        integer(I8), allocatable :: fcs(:)
+        logical :: res
+        fcs = GetCellFaceGA(g%cell, ic)
+        res = .false.
+        if (size(fcs) == 4 .and. count(g%face%aligned%Get(fcs) == 1) == 1) res = .true.
+    end function
+
+    function isCutcellTria(g, ic) result(res)
+        type(GAGridUDT) :: g
+        integer(I8) :: ic, free_vert 
+        integer(I8), allocatable :: fcs(:), Tfcs(:), neig(:), cvs(:)      
+        logical :: res
+        res = .false.
+        fcs = GetCellFaceGA(g%cell, ic)
+        if (size(fcs) == 3) then
+            allocate(Tfcs(count(g%face%aligned%Get(fcs) == 1)))
+            Tfcs = pack(fcs, g%face%aligned%Get(fcs) == 1)
+            call g%DetermineFreeVertTria(ic,Tfcs(1),free_vert)
+            cvs = GetVertCellGA(g%cell, free_vert)
+            allocate(neig(count(cvs /= ic)))
+            neig = pack(cvs, cvs /= ic)
+            if (size(neig) == 1) then
+                if (isTrapezoid(g, neig(1))) res = .true.
+            end if
+        end if
 
     end function
 

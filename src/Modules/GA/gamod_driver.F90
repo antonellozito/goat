@@ -265,7 +265,7 @@ module gamod_driver
 
         ! Boundary layer grid
         if (options%BLG) then
-            call grid%BoundaryLayerGrid(magneticField, options)
+            call grid%BoundaryLayerGrid(qm, magneticField, options)
         end if
 
 
