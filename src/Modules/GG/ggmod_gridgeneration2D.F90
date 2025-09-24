@@ -195,7 +195,7 @@ module ggmod_gridgeneration2D
             dll, dllc, dlcv
         integer(I8), allocatable, dimension(:)      :: vert
         integer(I8)                                 :: nv, nl, sv, ev, &
-            fsID, TMfaceID
+            fsID, TMfaceID, TMfacetype
         logical                                     :: isvertex, isclosed
         type(GGTMFieldlineRefinementOptionsUDT)     :: refoptions
 
@@ -2911,6 +2911,17 @@ module ggmod_gridgeneration2D
         end do 
         !$omp end single
         !$omp end parallel 
+
+        do i = 1, cell%ntot 
+            do j = 1, size(celldata(i)%tubes)
+                if ((celldata(i)%tubes(j)%hfline%vert(1) == &
+                    celldata(i)%tubes(j)%hfline%vert(celldata(i)%tubes(j)%hfline%nv)) .and. &
+                    (celldata(i)%tubes(j)%lfline%vert(1) == &
+                        celldata(i)%tubes(j)%lfline%vert(celldata(i)%tubes(j)%lfline%nv))) then 
+                    call celldata(i)%tubes(j)%VisualizeGraph('lpgraph')
+                end if 
+            end do 
+        end do 
         
         ! Housekeeping
         !=============
@@ -4858,7 +4869,7 @@ module ggmod_gridgeneration2D
 
             ! Initialize segment
             call ggtmdata%seg(nseg)%Initialize([vert%x(i), vert%x(i)], &
-                [vert%y(i), vert%y(i)], vert%fsID(i), i, i, i)
+                [vert%y(i), vert%y(i)], vert%fsID(i), i, i, i, vert%type(i))
 
             ! Initialize line
             call vertdata(i)%line%Initialize(ggtmdata, [nseg])
@@ -4871,7 +4882,8 @@ module ggmod_gridgeneration2D
 
             ! Initialize segment
             call ggtmdata%seg(nseg)%Initialize(face%x(i)%Get(), &
-                face%y(i)%Get(), face%fsID(i), i, face%vert(i, 1), face%vert(i, 2))
+                face%y(i)%Get(), face%fsID(i), i, face%vert(i, 1), face%vert(i, 2), &
+                face%type(i))
 
             ! Initialize line
             call facedata(i)%line%Initialize(ggtmdata, [nseg])
@@ -6588,7 +6600,7 @@ module ggmod_gridgeneration2D
                         yl(size(yl)) = yl(1)
                     end if 
                     call ggtmdata%seg(nseg)%Initialize(xl, yl, fsID(j), &
-                        0_I8, vertexID(j, k), vertexID(j, k+1))
+                        0_I8, vertexID(j, k), vertexID(j, k+1), 0_I8)
 
                     ! Add 
                     call celldata(tubec(k))%lines(j)%Initialize(ggtmdata, [nseg])
@@ -7404,13 +7416,13 @@ module ggmod_gridgeneration2D
 
                 ! Check if any are strike point IDs
                 do j = 1, size(tv1)
-                    if (any(tv1(j) == strikepointIDs) .or. vert%type(tv1(j)) == TMvertexsaddleID) then 
+                    if (any(tv1(j) == strikepointIDs)) then 
                         ! Do boundary layer at start
                         tubedata(i)%linerefoptions%doBLstart = .true. 
                     end if 
                 end do 
                 do j = 1, size(tv2)
-                    if (any(tv2(j) == strikepointIDs) .or. vert%type(tv2(j)) == TMvertexsaddleID) then 
+                    if (any(tv2(j) == strikepointIDs)) then 
                         ! Do boundary layer at start
                         tubedata(i)%linerefoptions%doBLend = .true. 
                     end if 
@@ -9575,7 +9587,7 @@ module ggmod_gridgeneration2D
 
     ! Initialization
     subroutine InitializeGGTMSegment(segment, xl, yl, fsID, TMfaceID, &
-        sv, ev)
+        sv, ev, TMfacetype)
 
         ! Description
         !============
@@ -9598,7 +9610,7 @@ module ggmod_gridgeneration2D
         class(GGTMSegmentUDT)                       :: segment 
         real(R8), intent(in), dimension(:)          :: xl, yl 
         integer(I8), intent(in)                     :: fsID, TMfaceID, &
-            sv, ev 
+            sv, ev, TMfacetype
 
         ! Auxiliary
         
@@ -9612,6 +9624,7 @@ module ggmod_gridgeneration2D
         segment%yl = yl 
         segment%fsID = fsID 
         segment%TMfaceID = TMfaceID 
+        segment%TMfacetype = TMfacetype
         segment%sv = sv 
         segment%ev = ev 
         segment%nl = size(xl)
@@ -10500,7 +10513,8 @@ module ggmod_gridgeneration2D
 
         ! Get segment data and initialize
         call ggtmdata%seg(ggtmdata%nseg-1)%Initialize(txl, tyl, &
-            tseg%fsID, tseg%TMfaceID, line%vert(segvind(1)), line%vert(vind))
+            tseg%fsID, tseg%TMfaceID, line%vert(segvind(1)), line%vert(vind), &
+            tseg%TMfacetype)
 
         ! Initialize vertices
         tdlcv = line%dlcv(segvind(1)+1:vind-1) - line%dlcv(segvind(1)) ! exclude end vertices
@@ -10520,7 +10534,8 @@ module ggmod_gridgeneration2D
 
         ! Get segment data and initialize
         call ggtmdata%seg(ggtmdata%nseg)%Initialize(txl, tyl, &
-            tseg%fsID, tseg%TMfaceID, line%vert(vind), line%vert(segvind(2)))
+            tseg%fsID, tseg%TMfaceID, line%vert(vind), line%vert(segvind(2)), &
+            tseg%TMfacetype)
 
         ! Initialize vertices
         tdlcv = line%dlcv(vind+1:segvind(2)-1) - line%dlcv(vind) ! exclude end vertices
@@ -10784,7 +10799,8 @@ module ggmod_gridgeneration2D
                 ! Initialize segment coordinates
                 segID = segID + 1
                 call ggtmdata%seg(segID)%Initialize(txl, tyl, &
-                    tseg%fsID, tseg%TMfaceID, segvID(j), segvID(j+1))
+                    tseg%fsID, tseg%TMfaceID, segvID(j), segvID(j+1), &
+                    tseg%TMfacetype)
 
                 ! Initialize segment vertices
                 tdlcv = line%dlcv(linevind(j)+1:linevind(j+1)-1) - line%dlcv(linevind(j))
@@ -11707,13 +11723,13 @@ module ggmod_gridgeneration2D
         if (evhf > 1) then 
             if (hflinevert(1) == hflinevert(evhf)) then 
                 ! Skip the last vertex, is the same as the first one
-                evhf = evhf-1
+            !    evhf = evhf-1
             end if 
         end if 
         if (evlf > 1) then 
             if (lflinevert(1) == lflinevert(evlf)) then 
                 ! Skip the last vertex, is the same as the first one
-                svlf = svlf+1 ! appears first because of flipping of lfline
+            !    svlf = svlf+1 ! appears first because of flipping of lfline
             end if 
         end if 
 
@@ -11772,6 +11788,14 @@ module ggmod_gridgeneration2D
             end associate
         end do
 
+        ! Hedge for closed tubes
+        if ((hfline%vert(1) == hfline%vert(hfline%nv)) .and. &
+            (lfline%vert(1) == lfline%vert(lfline%nv))) then 
+                ev1 = [ev1, hflinevert(1)]
+                ev2 = [ev2, lflinevert(1)]
+        end if 
+
+
         ! Construct graph
         !================
         ! Construct
@@ -11814,8 +11838,7 @@ module ggmod_gridgeneration2D
         character(*), intent(in)                :: filename
 
         ! Auxiliary
-        integer(I8), allocatable, dimension(:, :)   :: edges
-        type(PolygonSetUDT)     :: tps 
+        real(R8), allocatable, dimension(:)         :: x, y
 
         ! Loop 
         integer(I8)                             :: i 
@@ -11826,19 +11849,20 @@ module ggmod_gridgeneration2D
         associate(graph => linepair%graph)
 
         ! Construct edges
-        allocate(edges(graph%ne, 2))
+        allocate(x(graph%ne*3), y(graph%ne*3))
         do i = 1, graph%ne
-            edges(i, 1) = graph%ev1(i)
-            edges(i, 2) = graph%ev2(i)
+            x(3*i-2) = linepair%graphxv(graph%ev1(i))
+            x(3*i-1) = linepair%graphxv(graph%ev2(i))
+            x(3*i) = nanval_R8()
+            y(3*i-2) = linepair%graphyv(graph%ev1(i))
+            y(3*i-1) = linepair%graphyv(graph%ev2(i))
+            y(3*i) = nanval_R8()
         end do 
-
-        ! Construct polygonset
-        call tps%Construct(edges, linepair%graphxv, linepair%graphyv)
 
         ! Visualize
         !==========
         ! Print edges
-        call tps%WriteData(filename // '_edges')
+        call Write2DPolygonData(x, y, filename // '_edges')
 
         ! Print vertex coordinates
         call Write2DCoordinateData(linepair%graphxv, linepair%graphyv, filename // '_vert')
@@ -12427,7 +12451,7 @@ module ggmod_gridgeneration2D
                 ! Adjust the segment and update the line
                 call tseg%Initialize(tseg%xl([1, tseg%nl]), &
                     tseg%yl([1, tseg%nl]), tseg%fsID, tseg%TMfaceID, &
-                    tseg%sv, tseg%ev)
+                    tseg%sv, tseg%ev, tseg%TMfacetype)
                 call srfline%UpdateLineData(ggtmdata)
 
                 ! Recompute the magnetic field
@@ -12625,7 +12649,7 @@ module ggmod_gridgeneration2D
                 ! Adjust the segment and update the line
                 call tseg%Initialize(tseg%xl([1, tseg%nl]), &
                     tseg%yl([1, tseg%nl]), tseg%fsID, tseg%TMfaceID, &
-                    tseg%sv, tseg%ev)
+                    tseg%sv, tseg%ev, tseg%TMfacetype)
                 call erfline%UpdateLineData(ggtmdata)
 
                 ! Recompute the dot product
@@ -12979,6 +13003,7 @@ module ggmod_gridgeneration2D
                 if (options%radrefLBdosp) then 
                     ! Add all strike and x-points
                     tv = [topomesh%GetStrikePointIDs(), topomesh%GetXPointIDs()]
+                    tv = topomesh%GetStrikePointIDs()
                     xp = [xp, topomesh%vert%x(tv)]
                     yp = [yp, topomesh%vert%y(tv)]
                     valpLmin = [valpLmin, spread(options%radrefLBLminsp, 1, size(tv))]
@@ -14682,6 +14707,65 @@ module ggmod_gridgeneration2D
             end do 
             refiner%linedllc = dllc
 
+        case ('poloidal_mono')
+
+            ! Length along poloidal direction, monotonized. Note that
+            ! we only monotonize if 
+            ! - the segment has TMfacetype /= 0 (0 is reserved for non TM faces that are aligned)
+            ! - the segment has TMfacetype that is a wall or aligned wall
+            ! Otherwise we just use the euler length, as that should
+            ! correspond with the poloidal_mono distribution
+
+            ! Check
+            if (any(seg%TMfacetype == [TMfacebndID, TMfacealbndID, TMfaceradID])) then 
+                ! Initialize
+                allocate(psi(seg%nl))
+                call refiner%field%interp%Evaluate(seg%xl, seg%yl, 0, 0, psi)
+                dx = seg%xl(2:seg%nl) - seg%xl(1:seg%nl-1)
+                dy = seg%yl(2:seg%nl) - seg%yl(1:seg%nl-1) 
+                xf = 0.5*(seg%xl(2:seg%nl) + seg%xl(1:seg%nl-1))
+                yf = 0.5*(seg%yl(2:seg%nl) + seg%yl(1:seg%nl-1)) 
+                allocate(bx(seg%nl-1), by(seg%nl-1))
+                call refiner%field%interp%Evaluate(xf, yf, 0, 1, bx)
+                call refiner%field%interp%Evaluate(xf, yf, 1, 0, by)
+                bn = sqrt(bx**2 + by**2)
+                bx = -bx/bn 
+                by = by/bn 
+
+                ! Project and take absolute value
+                dll = abs(dx*bx + dy*by)
+                
+                ! Compute accumulative length
+                allocate(dllc(seg%nl))
+                dllc = 0.0_R8
+                if (psi(seg%nl) > psi(1)) then 
+                    ! increasing psi values
+                    do i = 2, seg%nl
+                        if (psi(i) >= psi(i-1)) then  
+                            dllc(i) = dllc(i-1) + dll(i-1)
+                        else
+                            ! don't add to length
+                            dllc(i) = dllc(i-1)
+                        end if 
+                    end do 
+                else
+                    ! decreasing psi values
+                    do i = 2, seg%nl
+                        if (psi(i) <= psi(i-1)) then  
+                            dllc(i) = dllc(i-1) + dll(i-1)
+                        else
+                            ! don't add to length
+                            dllc(i) = dllc(i-1)
+                        end if 
+                    end do 
+                end if 
+                refiner%linedllc = dllc
+
+            else
+                ! Simple euler
+                refiner%linedllc = seg%dllc
+            end if 
+            
         case ('psi')
 
             ! Evaluate psi values on seg
@@ -14856,7 +14940,7 @@ module ggmod_gridgeneration2D
             ! Simply return line%dlcv
             dlcv = seg%dlcv
 
-        case ('radial', 'psi')
+        case ('radial', 'psi', 'poloidal_mono')
 
             ! Need to interpolate 
             call Interpolate1D(seg%dlcv, dlcv, seg%dllc, refiner%linedllc)
@@ -14896,7 +14980,7 @@ module ggmod_gridgeneration2D
             ! Simply return line%dlcv
             dlcv = line%dlcv
 
-        case ('radial', 'psi')
+        case ('radial', 'psi', 'poloidal_mono')
 
             ! Need to interpolate 
             call Interpolate1D(line%dlcv, dlcv, line%dllc, refiner%linedllc)
@@ -14939,7 +15023,7 @@ module ggmod_gridgeneration2D
             ! Simply call line method
             call seg%AddVertexCoordinates(dlcv)
 
-        case ('radial', 'psi')
+        case ('radial', 'psi', 'poloidal_mono')
 
             ! Need to interpolate first
             call Interpolate1D(dlcv, newdlcv, refiner%linedllc, seg%dllc)
@@ -14988,7 +15072,7 @@ module ggmod_gridgeneration2D
             ! Simply call line method
             call line%AddVertexCoordinates(dlcv)
 
-        case ('radial', 'psi')
+        case ('radial', 'psi', 'poloidal_mono')
 
             ! Need to interpolate first
             call Interpolate1D(dlcv, newdlcv, refiner%linedllc, line%dllc)
@@ -16627,7 +16711,7 @@ module ggmod_gridgeneration2D
             allocate(vesselfID(count(isvesselface)))
             vesselfID = pack([(k, k = 1, simgrid%face%ntot)], isvesselface)
             simgrid%face%label(vesselfID) = abs(flabels(:, 1))
-            where (.not. isvesselface) simgrid%face%label = 0
+            where (.not. simgrid%face%BF) simgrid%face%label = 0
             allstructurelabels = flabels(:, 1)
             call Unique(allstructurelabels, uallstructurelabels)
 
