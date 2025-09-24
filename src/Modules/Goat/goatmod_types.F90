@@ -903,7 +903,8 @@ module goatmod_types
     
             ! Allocate
             allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
-                grid%data%spointID(idum(2)), grid%data%isprimaryxp(idum(0)), &
+                grid%data%spointID(idum(2)), grid%data%tpointID(idum(3)), &
+                grid%data%isprimaryxp(idum(0)), &
                 grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
                 grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
                 grid%data%spointxpID(grid%data%nsp))
