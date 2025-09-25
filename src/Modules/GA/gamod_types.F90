@@ -3646,7 +3646,7 @@ module gamod_types
             ind_sep, ind, na, ind_first, ind_last, first_fs, last_fs
         integer(I8), allocatable, dimension(:) :: fcLbl_loc, fcs, fcsD, f_ord, vxs,  &
             vxsU, indf, vxs_ordered, nfD, fs_target, fs_1, fsvLookUp, a, verts, vx_t1, fcs2, &
-            vx_t2, fs_vx_t2, vx_t2D, vx_fs1, fcs2D, vx_final, vx_fs2
+            vx_t2, fs_vx_t2, vx_t2D, vx_fs1, fcs2D, vx_final, vx_fs2, vx_merge1, vx_merge2
         integer(I8), allocatable, dimension(:,:) :: f_ordD, vxs_corner, fcs_targets, &
             vxs_targets, fcs_targetsC, vxs_targetsC, inters
 
@@ -3816,7 +3816,9 @@ module gamod_types
         call grid%FarSOLGetChainVerts(last_fs, vx_fs2, .true., options)
 
         ! Chain the vertex chains together: first_fs, target1, last_fs, target2
-        vx_final = vx_fs1
+        call MergeVertexChains(vx_fs1, vx_t1, vx_merge1)
+        call MergeVertexChains(vx_merge1, vx_fs2, vx_merge2)
+        call MergeVertexChains(vx_merge2, vx_t2, vx_final)
         
 
 
@@ -3869,8 +3871,6 @@ module gamod_types
         call grid%face%ChainVertices(fcs, vx_fs)
 
     end subroutine
-
-
 
     subroutine ChainFacesOfSepToTargets(grid, f_list, options, f_ord)
 
@@ -4023,6 +4023,48 @@ module gamod_types
         f_ord = f_ordD(1:nf,1)
 
         end associate
+
+    end subroutine
+
+    subroutine MergeVertexChains(v1, v2, v_out)
+
+        ! Description
+        !============
+        ! Merging vertex chains
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(inout)              :: v1(:), v2(:)
+        integer(I8), allocatable, intent(out)   :: v_out(:)
+
+        ! Auxiliary
+        integer(I8) :: nv1, nv2
+
+        ! Find where vertices chains can be merged
+        nv1 = size(v1)
+        nv2 = size(v2)
+        if (v2(1) == v1(nv1)) then
+            v_out= [v1, v2(2:nv2)]
+            return
+        else if (v2(nv2) == v1(nv1)) then
+            ! reverse v2
+            v2 = ReverseArray(v2)
+        else if (v2(1) == v1(1)) then
+            ! reverse v1
+            v1 = ReverseArray(v1)
+        else if (v2(nv2) == v1(1)) then
+            ! reverse both
+            v1 = ReverseArray(v1)
+            v2 = ReverseArray(v2)
+        end if
+
+        ! Merge altered chains
+        if (v2(1) == v1(nv1)) then
+            v_out = [v1, v2(2:nv2)]
+        else
+            call gdErrorHandler('MergeVertexChains: non matching vertex segment')
+        end if
 
     end subroutine
     
@@ -16966,6 +17008,7 @@ module gamod_types
         end do
     
     end function
+
     function isBoundaryVert0DGA(grid, iv) result(res)
         type(GAGridUDT) :: grid
         integer(I8) :: iv
@@ -17325,6 +17368,18 @@ module gamod_types
 
 
     end subroutine
+
+    function ReverseArray(a) result(b)
+        integer(I8) :: a(:), na, i
+        integer(I8), allocatable :: b(:)
+        
+        na = size(a)
+        allocate(b(na))
+        do i = 1, na
+            b(i) = a(na+1-i)
+        end do
+
+    end function
 
     subroutine ReplaceElement(ida, el_old, el_new)
 
