@@ -253,7 +253,7 @@ MODULE_FILES_GOAT =  src/Modules/Goat/goatmod_userinput.F90 src/Modules/Goat/goa
 MODULE_FILES_GD = src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
     src/Modules/GD/gdmod_utility_optimization.F90 src/Modules/GD/gdmod_constraints.F90\
     $(wildcard src/Modules/GD/*.F90)
-MODULE_FILES_GA = src/Modules/GA/gamod_types.F90 src/Modules/GA/gamod_utility.F90 src/Modules/GA/gamod_driver.F90  \
+MODULE_FILES_GA = src/Modules/GA/gamod_math.F90 src/Modules/GA/gamod_types.F90 src/Modules/GA/gamod_utility.F90 src/Modules/GA/gamod_driver.F90  \
     $(wildcard src/Modules/GA/*.F90)    
 MODULE_FILES_GG = src/Modules/GG/ggmod_topology2D.F90 src/Modules/GG/ggmod_vertexdistribution2D.F90 \
     src/Modules/GG/ggmod_gridgeneration2D.F90 src/Modules/GG/ggmod_gridgenerator.F90

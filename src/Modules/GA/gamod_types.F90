@@ -447,6 +447,7 @@ module gamod_types
         procedure :: GiveXpoints
         procedure :: GiveSeparatrices
         procedure :: IdentifyAlignedFaces
+        procedure :: CheckFcLbl
         procedure :: CheckUnstructuredGrid
         procedure :: RecalcMagn
         procedure :: MergeFS
@@ -1198,7 +1199,8 @@ module gamod_types
             
         case ('minimal_grid')
 
-            call gdErrorHandler('SelectMergingFace: merge criterium minimal grid not implemented. Better reside to the grid generator')
+            call gdErrorHandler('SelectMergingFace: merge criterium minimal' // &
+                & 'grid not implemented. Better reside to the grid generator')
 
         case ('h_pol')
 
@@ -1566,7 +1568,7 @@ module gamod_types
 
                     ! Get poloidal faces of triangle
                     fcs_cv = GetCellFaceGA(c, cctria(nums(i)))
-                    log = (.not.isBoundaryFaceGA(f, fcs_cv) .and. f%aligned%Get(fcs_cv) == 0)
+                    log = (.not.isBoundaryFaceGA(grid, fcs_cv) .and. f%aligned%Get(fcs_cv) == 0)
                     allocate(fcs_m(count(log)))
                     fcs_m = pack(fcs_cv, log)
                     qm%merge_fc = fcs_m(1)
@@ -1761,7 +1763,7 @@ module gamod_types
                 ! Automatic option, used before splitting and merging
                 ! Get boundary vertices
                 indf = (/ (i, i = 1, f%ntot)/)
-                log = isBoundaryFaceGA(f, indf)
+                log = isBoundaryFaceGA(grid, indf)
                 allocate(b_faces(count(log)))
                 b_faces = pack(indf, log)
                 b_verts = GetVxsFromFcsGA(f, b_faces)
@@ -3548,6 +3550,80 @@ module gamod_types
         end associate
 
     end subroutine
+
+    subroutine CheckFcLbl(grid, options)
+
+        ! Description
+        !============
+        ! Checks and corrects when a face has a face label but is not a boundary
+        ! face. The specific numbering is not checked.
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        type(GAoptionsUDT), intent(in)  :: options
+
+        ! Auxiliary
+        integer(I8) :: i
+        integer(I8), allocatable, dimension(:) :: indf, cvLookUp, fcs, fcs1, &
+            fcs2, faces, cvs, b_faces, fcLbl_loc, ar
+        logical, allocatable :: log(:), log2(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Get GA face labels
+        fcLbl_loc = GetfcLblGA(f, options)
+        cvLookUp = GetCvLookUpGA(c)
+
+        ! Get boundary faces
+        indf = (/(i, i = 1, f%ntot)/)
+        log = f%label%Get() /= 0 .and. fcLbl_loc /= 0
+        allocate(fcs(count(log)))
+        fcs = pack(indf, log)
+
+        ! Loop over face wth a non-zero face label
+        do i = 1, size(fcs)
+
+            ! Get cells 
+            cvs = GetFaceCellGA(c, fcs(i), cvLookUp)
+
+            ! For internal faces
+            if (size(cvs) .gt. 1) then
+                ! Internal face => should not have face label
+                ! Give the face label to a boundary face if it is empty
+                fcs1 = GetCellFaceGA(c, cvs(1))
+                fcs2 = GetCellFaceGA(c, cvs(2))
+                faces = [fcs1, fcs2]
+
+                ! Determine which faces are boundary  faces
+                log2 = isBoundaryFaceGA(grid, faces, 1)
+                allocate(b_faces(count(log2)))
+                b_faces = pack(faces, log2)
+
+                ! Give boundary faces the face label
+                ar = (/(f%label%Get(fcs(i)), i = 1, size(b_faces))/)
+                call f%label%Set(b_faces, ar)
+
+                ! Set the face label of iFc to zero as it is an internal face
+                call f%label%Set(fcs(i), 0)     
+
+                ! Housekeeping
+                deallocate(b_faces)
+
+            end if
+        end do
+
+
+
+
+        end associate
+
+    end subroutine
     
     subroutine CheckUnstructuredGrid(grid)
 
@@ -4119,8 +4195,8 @@ module gamod_types
             ! Find the internal face of the triangle which is no boundary face
             tf = GetCellFaceGA(c, ic)
 
-            allocate(tf_int(count(.not.isBoundaryFaceGA(f, tf)))) ! Note: in matlab using c%face to determine this, not the face labels
-            tf_int = pack(tf,.not.isBoundaryFaceGA(f, tf))
+            allocate(tf_int(count(.not.isBoundaryFaceGA(grid, tf)))) ! Note: in matlab using c%face to determine this, not the face labels
+            tf_int = pack(tf,.not.isBoundaryFaceGA(grid, tf))
 
             ! Find the poloidal face
             dpsi = abs( v%psi%Get(f%vert1%Get(tf_int)) - v%psi%Get(f%vert2%Get(tf_int)))
@@ -4230,7 +4306,7 @@ module gamod_types
         end if
 
         ! Find boundary face of the triangle
-        is_boundary = isBoundaryFaceGA(f, tf)
+        is_boundary = isBoundaryFaceGA(grid, tf)
 
         ! Get boundary face
         allocate(faceB_dummy(count(is_boundary)))
@@ -4701,8 +4777,8 @@ module gamod_types
 
                 common_face = GetCommonFace(c, b_neig(j), ic)
                 fcs_neig = GetCellFaceGA(c, b_neig(j))
-                allocate(b_face_neig(count(isBoundaryFaceGA(f, fcs_neig))))
-                b_face_neig = pack(fcs_neig, isBoundaryFaceGA(f, fcs_neig))
+                allocate(b_face_neig(count(isBoundaryFaceGA(grid, fcs_neig))))
+                b_face_neig = pack(fcs_neig, isBoundaryFaceGA(grid, fcs_neig))
 
                 ! Check for common vertex with triangle
                 allocate(bface_neig_verts(2))
@@ -4953,8 +5029,8 @@ module gamod_types
                     cv2 = pack(cvs, cvs /= big_trap)
 
                     fcs = GetVertFaceGA(f, vxs(i))
-                    allocate(bfcs(count(isBoundaryFaceGA(f, fcs))))
-                    bfcs = pack(fcs, isBoundaryFaceGA(f, fcs))
+                    allocate(bfcs(count(isBoundaryFaceGA(grid, fcs))))
+                    bfcs = pack(fcs, isBoundaryFaceGA(grid, fcs))
 
                     ! If the other cells are not part of the cutcells
                     if (.not.any(isMember(cv2, ts))) then
@@ -5192,8 +5268,8 @@ module gamod_types
 
             ic = trapsC(size(trapsC)+1-i)
             facesQ = GetCellFaceGA(c, ic)
-            allocate(b_facesQD(count(isBoundaryFaceGA(f, facesQ))))
-            b_facesQD = pack(facesQ, isBoundaryFaceGA(f, facesQ))
+            allocate(b_facesQD(count(isBoundaryFaceGA(grid, facesQ))))
+            b_facesQD = pack(facesQ, isBoundaryFaceGA(grid, facesQ))
 
             if (size(b_facesQD) .gt. 1) then
                 allocate(b_facesQ(count(f%aligned%Get(b_facesQD) == 0)))
@@ -5333,7 +5409,7 @@ module gamod_types
 
             ! Get boundary face
             fcs = GetCellFaceGA(c, cvs(1))
-            ind = findloc(isBoundaryFaceGA(f, fcs), .true. ,1)
+            ind = findloc(isBoundaryFaceGA(grid, fcs), .true. ,1)
             bfcs = fcs(ind)
             lbl = f%label%Get(bfcs)
 
@@ -5655,7 +5731,7 @@ module gamod_types
 
         ! Get boundary faces
         indfc = (/ (i, i = 1, f%ntot)/)
-        log = isBoundaryFaceGA(f, indfc)
+        log = isBoundaryFaceGA(grid, indfc)
         allocate(bfaces(count(log)))
         bfaces = pack(indfc,log)
 
@@ -5690,7 +5766,7 @@ module gamod_types
                 fcs = fcsD2(1)
 
                 ! Get next cell
-                if (.not.isBoundaryFaceGA(f, fcs)) then
+                if (.not.isBoundaryFaceGA(grid, fcs)) then
 
                     ! Get the next face
                     cvs2 = GetFaceCellGA(c, fcs, cvLookUp)
@@ -5706,7 +5782,7 @@ module gamod_types
                         
                         ! Do not continue if any non-aligned face is a boundary face
                         fcs3_nal = pack(fcs3, f%aligned%Get(fcs3) == 0)
-                        if (any(isBoundaryFaceGA(f, fcs3_nal)))  nf = 0
+                        if (any(isBoundaryFaceGA(grid, fcs3_nal)))  nf = 0
 
                     end if
 
@@ -6084,11 +6160,11 @@ module gamod_types
                 if (fc == 0) then
 
                     fcs = GetCellFaceGA(c, cells(k))
-                    if (size(fcs) == 5 .and. count(isBoundaryFaceGA(f, fcs)) == 2) then
+                    if (size(fcs) == 5 .and. count(isBoundaryFaceGA(grid, fcs)) == 2) then
 
                         pent_to_tria = .true.
                         allocate(bfcs(2))
-                        bfcs = pack(fcs, isBoundaryFaceGA(f, fcs))
+                        bfcs = pack(fcs, isBoundaryFaceGA(grid, fcs))
                         fc = bfcs(1)
 
                         deallocate(bfcs)
@@ -6367,8 +6443,8 @@ module gamod_types
                             cvB = cvs(2)
                         end if       
                         tf = GetCellFaceGA(c, cvB)   
-                        allocate(tfB(count( isBoundaryFaceGA(f, tf)) ))
-                        tfB = pack(tf, isBoundaryFaceGA(f, tf))
+                        allocate(tfB(count( isBoundaryFaceGA(grid, tf)) ))
+                        tfB = pack(tf, isBoundaryFaceGA(grid, tf))
 
                         vs_fcB(1) = f%vert1%Get(tfB(1))
                         vs_fcB(2) = f%vert2%Get(tfB(1))
@@ -7063,8 +7139,8 @@ module gamod_types
             free_vert = Pack2(verts2, verts2 /= shift_vert)
 
             ! faces
-            allocate(rem_faceD(count(isBoundaryFaceGA(f, faces))))
-            rem_faceD = pack(faces, isBoundaryFaceGA(f, faces))
+            allocate(rem_faceD(count(isBoundaryFaceGA(grid, faces))))
+            rem_faceD = pack(faces, isBoundaryFaceGA(grid, faces))
             rem_face = rem_faceD(1)
             allocate(shift_faceD(count(faces /= fc .and. faces /= rem_face)))
             shift_faceD = pack(faces, faces /= fc .and. faces /= rem_face)
@@ -7372,8 +7448,8 @@ module gamod_types
         err = .false.
         allocate(facesAD(count(f%aligned%Get(faces) == 1)))
         facesAD = pack(faces, f%aligned%Get(faces) == 1)
-        allocate(facesA(count(.not.isBoundaryFaceGA(f, facesAD))))
-        facesA = pack(facesAD, .not.isBoundaryFaceGA(f, facesAD))
+        allocate(facesA(count(.not.isBoundaryFaceGA(grid, facesAD))))
+        facesA = pack(facesAD, .not.isBoundaryFaceGA(grid, facesAD))
         if (size(facesA) == 0) then
             err = .true.
         else 
@@ -7385,8 +7461,8 @@ module gamod_types
                 err = .true.
             else
 
-                allocate(faceB(count(isBoundaryFaceGA(f, faces))))
-                faceB = pack(faces, isBoundaryFaceGA(f, faces))
+                allocate(faceB(count(isBoundaryFaceGA(grid, faces))))
+                faceB = pack(faces, isBoundaryFaceGA(grid, faces))
                 if (size(faceB) == 0) then
                     err = .true.
                 else 
@@ -7402,8 +7478,8 @@ module gamod_types
 
         if (err) then ! catch
 
-            allocate(b_face(count(isBoundaryFaceGA(f, faces))))
-            b_face = pack(faces, isBoundaryFaceGA(f, faces))
+            allocate(b_face(count(isBoundaryFaceGA(grid, faces))))
+            b_face = pack(faces, isBoundaryFaceGA(grid, faces))
 
             if (size(b_face) == 1) then
                 if (f%aligned%Get(b_face(1)) == 0) then
@@ -7715,10 +7791,10 @@ module gamod_types
             ! Get side faces of neigs
             fc_neig1 = GetCellFaceGA(c, c1)
             fc_neig2 = GetCellFaceGA(c, c2)
-            allocate(fc_neig1b(count(isBoundaryFaceGA(f, fc_neig1))))
-            allocate(fc_neig2b(count(isBoundaryFaceGA(f, fc_neig2))))
-            fc_neig1b = pack(fc_neig1, isBoundaryFaceGA(f, fc_neig1))
-            fc_neig2b = pack(fc_neig2, isBoundaryFaceGA(f, fc_neig2))
+            allocate(fc_neig1b(count(isBoundaryFaceGA(grid, fc_neig1))))
+            allocate(fc_neig2b(count(isBoundaryFaceGA(grid, fc_neig2))))
+            fc_neig1b = pack(fc_neig1, isBoundaryFaceGA(grid, fc_neig1))
+            fc_neig2b = pack(fc_neig2, isBoundaryFaceGA(grid, fc_neig2))
 
             vsn1 = [f%vert1%Get(fc_neig1), f%vert2%Get(fc_neig1)]
             vsn2 = [f%vert1%Get(fc_neig2), f%vert2%Get(fc_neig2)]
@@ -7797,7 +7873,7 @@ module gamod_types
 
                 endif
 
-                if (isBoundaryFaceGA(f, fcsB)) flag = .true.
+                if (isBoundaryFaceGA(grid, fcsB)) flag = .true.
 
             end if
 
@@ -7836,7 +7912,7 @@ module gamod_types
             else if (count(c%faceP2%Get(neigs_b) == 3) == 1 .and. count(c%faceP2%Get(neigs_b) == 4) == 1 .and. .not. flag) then
 
 
-                if (.not.isBoundaryFaceGA(f, fcsB)) then ! So the quad has a neighboring cells along the merging direction
+                if (.not.isBoundaryFaceGA(grid, fcsB)) then ! So the quad has a neighboring cells along the merging direction
 
                     ! Make a new pentagon with the two cells that only have the common vert in common
                     ! Make connection face
@@ -8906,15 +8982,15 @@ module gamod_types
 
                 rface1 = rface1D(1)
 
-                if (isBoundaryFaceGA(grid%face, rface1)) then
+                if (isBoundaryFaceGA(grid, rface1)) then
 
                     neig1 = 0
                     neig1type = 0
 
-                    if (count(isBoundaryFaceGA(grid%face, fcs)) == 2) then
+                    if (count(isBoundaryFaceGA(grid, fcs)) == 2) then
 
-                        allocate(faceB(count(isBoundaryFaceGA(grid%face, fcs))))
-                        faceB = pack(fcs, isBoundaryFaceGA(grid%face, fcs))
+                        allocate(faceB(count(isBoundaryFaceGA(grid, fcs))))
+                        faceB = pack(fcs, isBoundaryFaceGA(grid, fcs))
                         rface2 = faceB(1) 
                         neig2 = 0
                         neig2type = 0
@@ -8933,8 +9009,8 @@ module gamod_types
                     neig1type = grid%cell%faceP2%Get(neig1)
 
                     ! Get boundary face
-                    allocate(faceB(count(isBoundaryFaceGA(grid%face, fcs))))
-                    faceB = pack(fcs, isBoundaryFaceGA(grid%face, fcs))
+                    allocate(faceB(count(isBoundaryFaceGA(grid, fcs))))
+                    faceB = pack(fcs, isBoundaryFaceGA(grid, fcs))
                     rface2 = faceB(1)
                     neig2 = 0
                     neig2type = 0
@@ -9034,8 +9110,8 @@ module gamod_types
             if (size(rfaces) == 2) then
                 rface2 = rfaces(2)
             elseif (size(rfaces) == 1) then
-                allocate(rfaces2D(count(isBoundaryFaceGA(f, fcs)))) 
-                rfaces2D = pack(fcs, isBoundaryFaceGA(f, fcs))
+                allocate(rfaces2D(count(isBoundaryFaceGA(grid, fcs)))) 
+                rfaces2D = pack(fcs, isBoundaryFaceGA(grid, fcs))
                 rface2 = rfaces2D(1)
             else 
                 call gdErrorHandler('DetermineQcaseID: polooidal splitting of quad without aligned faces not implemented')
@@ -9080,7 +9156,7 @@ module gamod_types
         end select
 
         ! Determine case
-        if (isBoundaryFaceGA(f, rface1)) then
+        if (isBoundaryFaceGA(grid, rface1)) then
             neig1 = 0 ! indication that rface1 is boundary
             neig1type = 0
         else
@@ -9091,7 +9167,7 @@ module gamod_types
         end if
 
         if (rface2 /= 0) then
-            if (isBoundaryFaceGA(f, rface2)) then
+            if (isBoundaryFaceGA(grid, rface2)) then
                 neig2 = 0
                 neig2type = 0
             else
@@ -9156,7 +9232,7 @@ module gamod_types
         call grid%DetermineHangingNodePent(cv, fcs, type, common_vert, Qface, rfaces)
 
         ! Determine case
-        if (isBoundaryFaceGA(f, Qface)) then
+        if (isBoundaryFaceGA(grid, Qface)) then
             neig = 0
             neigtype = 0
         else
@@ -9236,7 +9312,7 @@ module gamod_types
                         call gdErrorHandler('DeterminePcaseID: No psic crossing found, which should be impossible!')
                     end if
 
-                    if (isBoundaryFaceGA(f, Qface)) then
+                    if (isBoundaryFaceGA(grid, Qface)) then
                         if (Qface_old /= Qface) then
 
                             ! Here the psi splitting
@@ -9357,7 +9433,7 @@ module gamod_types
             ! Determine CaseID
             vxs = GetCellVertGA(c, cv)
 
-            if (isBoundaryFaceGA(f, rface1)) then
+            if (isBoundaryFaceGA(grid, rface1)) then
                 neig = 0
                 neigtype = 0
                 ! SplitT4B
@@ -9399,7 +9475,7 @@ module gamod_types
             end if
 
             ! Neig
-            if (isBoundaryFaceGA(f, rface1)) then
+            if (isBoundaryFaceGA(grid, rface1)) then
                 neig = 0
                 neigtype = 0
             else 
@@ -9431,7 +9507,7 @@ module gamod_types
         ! Auxiliary
         integer(I8), allocatable :: cvs(:)
         
-        if (isBoundaryFaceGA(grid%face, rface)) then
+        if (isBoundaryFaceGA(grid, rface)) then
 
             neig = 0
             neigtype = 0
@@ -10842,10 +10918,10 @@ module gamod_types
         call grid%GetIntersectedPsiFaces(cv, fcs, int_faces)
 
         ! Identify boundary face, if any
-        if (isBoundaryFaceGA(f, int_faces(1))) then
+        if (isBoundaryFaceGA(grid, int_faces(1))) then
             Qface2 = int_faces(1)
             Qface1 = int_faces(2)
-        else if (isBoundaryFaceGA(f, int_faces(2))) then
+        else if (isBoundaryFaceGA(grid, int_faces(2))) then
             Qface2 = int_faces(2)
             Qface1 = int_faces(1)
         else 
@@ -11769,8 +11845,8 @@ module gamod_types
             case ('cutcell')
 
                 ! Get boundary faces
-                allocate(b_fcsD(count(isBoundaryFaceGA(f, fcs))))
-                b_fcsD = pack(fcs, isBoundaryFaceGA(f, fcs))
+                allocate(b_fcsD(count(isBoundaryFaceGA(grid, fcs))))
+                b_fcsD = pack(fcs, isBoundaryFaceGA(grid, fcs))
                 b_fcs = b_fcsD(1)
 
                 ! Split face
@@ -12421,7 +12497,7 @@ module gamod_types
         allocate(perp_faces(count(f%aligned%Get(fcsQ) == 0)))
         perp_faces = pack(fcsQ,f%aligned%Get(fcsQ) == 0)
 
-        int_face = Pack2(perp_faces, .not.isBoundaryFaceGA(f, perp_faces))
+        int_face = Pack2(perp_faces, .not.isBoundaryFaceGA(grid, perp_faces))
         bface = Pack2(perp_faces, perp_faces /= int_face)
 
         if (HaveCommonVert(f, int_face, f1n)) then
@@ -13100,8 +13176,8 @@ module gamod_types
             rfaces_na = pack(faces, f%aligned%Get(faces) == 0)
 
             ! Normal procedure
-            allocate(rfaces(count(.not.isBoundaryFaceGA(f, rfaces_na))))
-            rfaces = pack(rfaces_na, .not.isBoundaryFaceGA(f, rfaces_na))
+            allocate(rfaces(count(.not.isBoundaryFaceGA(grid, rfaces_na))))
+            rfaces = pack(rfaces_na, .not.isBoundaryFaceGA(grid, rfaces_na))
             rface1 = rfaces(1)
             rface2 = rfaces(2)          
             nr = size(rfaces)
@@ -13324,8 +13400,8 @@ module gamod_types
 
                         ! Determine displacement of the vertex
                         fcs_v = GetVertFaceGA(f, verts(j))
-                        allocate(fcsB_v(count(isBoundaryFaceGA(f, fcs_v))))
-                        fcsB_v = pack(fcs_v, isBoundaryFaceGA(f, fcs_v))
+                        allocate(fcsB_v(count(isBoundaryFaceGA(grid, fcs_v))))
+                        fcsB_v = pack(fcs_v, isBoundaryFaceGA(grid, fcs_v))
 
                         if (options%vesselmode .and. size(fcs_v) .gt. 2 &
                             .and. (count(f%aligned%Get(fcsB_v)==1) .gt. 0 &
@@ -13599,8 +13675,8 @@ module gamod_types
                 if (c%cflags%Get(ic) == 3) then
                     
                     facesT = GetCellFaceGA(c, ic)
-                    allocate(facesTB(count(isBoundaryFaceGA(f, facesT))))
-                    facesTB = pack(facesT, isBoundaryFaceGA(f, facesT)) 
+                    allocate(facesTB(count(isBoundaryFaceGA(grid, facesT))))
+                    facesTB = pack(facesT, isBoundaryFaceGA(grid, facesT)) 
 
                     ! Loop over boundary faces
                     do p = 1, size(facesTB)
@@ -13710,7 +13786,7 @@ module gamod_types
         indmin = minloc(dpsi,1)
         rface = faces(indmin)
 
-        if (isBoundaryFaceGA(f, rface) .and. size(faces) /= 2 .and.  f%aligned%Get(rface) == 0) then
+        if (isBoundaryFaceGA(grid, rface) .and. size(faces) /= 2 .and.  f%aligned%Get(rface) == 0) then
 
             ! if the vertex has only 2 faces, it is possible that the radial
             ! face is a boundary face
@@ -13718,7 +13794,7 @@ module gamod_types
 
         end if
 
-        if (rface /= 0 .and. .not.isBoundaryFaceGA(f, rface)) then
+        if (rface /= 0 .and. .not.isBoundaryFaceGA(grid, rface)) then
 
             !if face is part of a triangle, it can only be a aligned face of the triangle!!
             cells_rface = GetFaceCellGA(c, rface)
@@ -14445,8 +14521,8 @@ module gamod_types
             allocate(fcs_al(count(f%aligned%Get(fcs) == 1)))
             fcs_al = pack(fcs, f%aligned%Get(fcs) == 1)
             fcs_alS = qm%fcS(fcs_al)
-            allocate(fcs_B(count(isBoundaryFaceGA(f, fcs))))
-            fcs_B = pack(fcs, isBoundaryFaceGA(f, fcs))
+            allocate(fcs_B(count(isBoundaryFaceGA(grid, fcs))))
+            fcs_B = pack(fcs, isBoundaryFaceGA(grid, fcs))
 
             ! Get vertices of longest face of stacked trias 
             ! Triangle vertices
@@ -16365,24 +16441,38 @@ module gamod_types
         
     end function
 
-    function isBoundaryFace0DGA(f, ifc) result(res)
+    function isBoundaryFace0DGA(g, ifc, meth) result(res)
         integer(I8) :: ifc
-        type(GAFaceUDT) :: f
+        type(GAGridUDT) :: g
         logical :: res
+        integer(I8), optional :: meth
 
-        res = .true. 
-        if (f%label%Get(ifc) == 0) then
+        if (.not.present(meth)) then
+            res = .true. 
+            if (g%face%label%Get(ifc) == 0) res = .false.
+        else if (meth == 1) then ! Method to not use fcLbl
             res = .false.
+            if (count(g%cell%face%Get() == ifc) == 1) res = .true. 
         end if
     end function
 
-    function isBoundaryFace1DGA(f, tf) result(res)
-        integer(I8) :: tf(:)
-        type(GAFaceUDT) :: f
+    function isBoundaryFace1DGA(g, tf, meth) result(res)
+        integer(I8) :: tf(:), i
+        type(GAGridUDT) :: g
         logical, allocatable :: res(:)
+        integer(I8), optional :: meth
+        integer(I8), allocatable :: cf(:)
 
         allocate(res(size(tf)))
-        res = (f%label%Get(tf) /= 0)
+        if (.not.present(meth)) then
+            res = (g%face%label%Get(tf) /= 0)
+        else if (meth == 1) then
+            cf = g%cell%face%Get()
+            res = .false.
+            do i = 1, size(tf)
+                if (count(cf == tf(i)) == 1) res(i) = .true.
+            end do
+        end if
 
         !do i = 1, nf
         !    if (f%label%Get(i) == 0) then
@@ -16431,7 +16521,7 @@ module gamod_types
 
         res = .false.
         fcs = GetVertFaceGA(grid%face, iv)
-        if (any(isBoundaryFaceGA(grid%face,fcs))) then
+        if (any(isBoundaryFaceGA(grid,fcs))) then
             res = .true.
         end if
 
@@ -16447,7 +16537,7 @@ module gamod_types
         res = .false.
         do i = 1, size(verts)
             fcs = GetVertFaceGA(grid%face, verts(i))
-            if (any(isBoundaryFaceGA(grid%face, fcs))) then
+            if (any(isBoundaryFaceGA(grid, fcs))) then
                 res(i) = .true.
             end if   
         end do

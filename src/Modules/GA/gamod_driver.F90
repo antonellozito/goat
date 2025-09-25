@@ -178,9 +178,8 @@ module gamod_driver
             call grid%CheckUnstructuredGrid()
         end if
 
-        ! correct face labels - TODO - on for wide grid
-
-        ! Remove some connectivity field - TODO - not required here
+        ! Correct face labels - TODO - on for wide grid
+        call grid%CheckFcLbl(options)
 
         ! Identify farSOL cells - TODO 
 
