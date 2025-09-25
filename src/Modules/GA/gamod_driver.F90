@@ -175,7 +175,7 @@ module gamod_driver
 
         ! Check the connectivity
         if (options%debug) then
-            call grid%CheckUnstructuredGrid(.false.)
+            call grid%CheckUnstructuredGrid()
         end if
 
         ! correct face labels - TODO - on for wide grid
@@ -296,7 +296,7 @@ module gamod_driver
 
         ! Check consistency
         if (options%debug) then
-            call grid%CheckUnstructuredGrid(.false.)
+            call grid%CheckUnstructuredGrid()
         end if
 
         ! Order correctly

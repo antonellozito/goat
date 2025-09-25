@@ -1198,7 +1198,7 @@ module gamod_types
             
         case ('minimal_grid')
 
-            call gdErrorHandler('SelectMergingFace: merge criterium minimal grid not implemented') ! TODO
+            call gdErrorHandler('SelectMergingFace: merge criterium minimal grid not implemented. Better reside to the grid generator')
 
         case ('h_pol')
 
@@ -3549,7 +3549,7 @@ module gamod_types
 
     end subroutine
     
-    subroutine CheckUnstructuredGrid(grid,check_extra_conn)
+    subroutine CheckUnstructuredGrid(grid)
 
         ! Description
         !============
@@ -3560,7 +3560,6 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(in)    :: grid
-        logical                         :: check_extra_conn
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:) :: cvLookUp, v1n, v2n, cf, &
@@ -3755,37 +3754,6 @@ module gamod_types
                     call gdErrorHandler('CheckUnstructuredGrid: check 7, boundary cell has no boundary face')
                 end if
             end do
-
-            ! Extra check on the extra connectivity fields - TODO
-            if (check_extra_conn) then
-
-                ! Not necessary for GAgrid I believe, and these field are not present anyway
-
-                !%% Check 7
-                !if any(face.cellP(:,2)==0)
-                !    flags(7) = 1;
-                !    error('CheckUnstructuredGrid: check 7, face(s) with zero cells')
-                !end
-
-                !%% Check 8
-                !if any(vert.cellP(:,2)==0)
-                !    flags(8) = 1;
-                !    figure,plotgeo_us(grid,'fast'),hold on
-                !    plot(vert.x(vert.cellP(:,2)==0),vert.y(vert.cellP(:,2)==0),'g*')
-                !    error('CheckUnstructuredGrid: check 8, vertex with zero cells')
-                    
-                !end
-
-                !%% Check 9
-                !if any(vert.faceP(:,2)==0)
-                !    flags(9) = 1;
-                !        figure,plotgeo_us(grid,'fast'),hold on
-                !    plot(vert.x(vert.cellP(:,2)==0),vert.y(vert.cellP(:,2)==0),'g*')
-                !    error('CheckUnstructuredGrid: check 9, vertex with zero faces')
-                !end
-
-
-            end if 
 
         end associate
 
@@ -4077,15 +4045,13 @@ module gamod_types
                 ! Method2 2: Local method
                 print *, 'Apply local removal method'
 
-                ! Visualize - TODO
-
                 call grid%LocalSmallTriangleRemoval(small_tria, faceA, faceB, faceC, options)
 
                 if (.not.options%slab) call grid%RecalcMagn(magneticField)
 
             end if
 
-            if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+            if (options%debug) call grid%CheckUnstructuredGrid()
 
             ! Redection
             small_tria = 0            
@@ -5347,8 +5313,8 @@ module gamod_types
         real(R8), allocatable, dimension(:) :: v1_nx, v1_ny, v1_psi, &
             v1_bx, v1_by, fcA_length, fcA_length_int, &
             Vdistribution, inVdistribution, fcA_dist
-
         logical :: found
+        logical, allocatable :: cells_log(:), is_ordered(:)
 
         ! Associate
         associate(&
@@ -5638,10 +5604,13 @@ module gamod_types
 
         print *, 'Ended StackedToCutcell'
 
-        ! Order - maybe not necessary - check TODO
-        !cells = .true.
-        !call grid%CheckVertOrder(is_ordered,cells)
-        !call grid%ReorderCellConn(is_ordered)
+        ! Order - maybe not necessary
+        if (options%debug) then
+            allocate(cells_log(c%ntot), is_ordered(c%ntot))
+            cells_log = .true.
+            call grid%CheckVertOrder(is_ordered,cells_log)
+            call grid%ReorderCellConn(is_ordered)
+        end if 
 
         end associate
 
@@ -5776,11 +5745,11 @@ module gamod_types
                 ! Other boundary face reached
                 ! Compute ratio of boundary faces
                 v11 = f%vert1%Get(ifc)
-                v12 = f%vert1%Get(ifc)
+                v12 = f%vert2%Get(ifc)
                 fcs_b1 = sqrt( (v%x%Get(v11) - v%x%Get(v12))**2 + (v%y%Get(v11) - v%y%Get(v12))**2 )
 
                 v21 = f%vert1%Get(fcs)
-                v22 = f%vert1%Get(fcs)
+                v22 = f%vert2%Get(fcs)
                 fcs_b2 = sqrt( (v%x%Get(v21) - v%x%Get(v22))**2 + (v%y%Get(v21) - v%y%Get(v22))**2 )
 
                 r = fcs_b1 / (fcs_b1 + fcs_b2)
@@ -5847,7 +5816,7 @@ module gamod_types
             call qm%CalculateQualityMetrics(grid, options, magneticField,.false.,.true.)  
             
             ! Check grid
-            if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+            if (options%debug) call grid%CheckUnstructuredGrid()
 
         end do
 
@@ -7399,7 +7368,7 @@ module gamod_types
         verts = GetCellVertGA(c, ic)
 
 
-        ! try - TODO
+        ! try
         err = .false.
         allocate(facesAD(count(f%aligned%Get(faces) == 1)))
         facesAD = pack(faces, f%aligned%Get(faces) == 1)
@@ -8277,6 +8246,8 @@ module gamod_types
         ! While a splitting cell is found
         do while (qm%split_cv /= 0 .and. j .lt. options%n_split)
 
+            if (options%debug) print *, 'Cell: ', qm%split_cv
+
             call grid%Splitting(qm%split_cv, options, magneticField)
 
             if (.not.options%slab) call grid%RecalcMagn(magneticField)
@@ -8288,7 +8259,7 @@ module gamod_types
             print *, t3, ' ', j
 
             ! Check grid
-            if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+            if (options%debug) call grid%CheckUnstructuredGrid()
 
             if (rad_splitting) then
 
@@ -8303,7 +8274,7 @@ module gamod_types
                     call grid%RemoveSmallTriangle(magneticField, qm, options)
                     print *, 'Ended removing small triangles'
 
-                    if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+                    if (options%debug) call grid%CheckUnstructuredGrid()
 
                 end if
 
@@ -8319,6 +8290,9 @@ module gamod_types
         !if (options%pents_to_tria) call grid%TransPentsToTrias() - TODO
 
         ! Ordening not necessary probably
+
+        ! Display progress
+        print *, 'Ended splitting: ', t2
 
 
     end subroutine
@@ -13383,7 +13357,7 @@ module gamod_types
                             if (rface == 0) then
 
                                 ! Get the intersection with the cell in the radial direction
-                                call grid%GetRadialIntersection(verts(j), isx, isy, found) ! TODO
+                                call grid%GetRadialIntersection(verts(j), isx, isy, found)
                                 if (.not.found) then
                                     isx = v%x%Get(verts(j))
                                     isy = v%y%Get(verts(j))
@@ -13568,7 +13542,7 @@ module gamod_types
         call grid%ReOrderCellConn(is_ordered)
 
         ! Check consistency
-        if (options%debug) call grid%CheckUnstructuredGrid(.false.)
+        if (options%debug) call grid%CheckUnstructuredGrid()
 
         end associate
   
@@ -14083,9 +14057,6 @@ module gamod_types
         allocate(tang_pointsD(nint(grid%vert%ntot/10.0_R8)))
         tang_pointsD = 0
         counter = 0
-
-        ! Get boundary faces locally - check if necessary TODO
-
         
         ! Get boundary vertices
         vxsB = GetVxsFromFcsGA(f, b_faces)
