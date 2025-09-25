@@ -178,10 +178,18 @@ module gamod_driver
             call grid%CheckUnstructuredGrid()
         end if
 
-        ! Correct face labels - TODO - on for wide grid
+        ! Correct face labels on for wide grid
         call grid%CheckFcLbl(options)
 
+        ! Detect cells at cut for artificial slabs - TODO
+
         ! Identify farSOL cells - TODO 
+        if (options%vesselmode .and. maxval(options%facelabelmappingGA) .lt. 6) then
+            call grid%IdentifyfarSOLcells(options)
+        else if (maxval(options%facelabelmappingGA) .gt. 5) then
+            call gdErrorHandler('GAInit: no farSOL indentified as algorithm is not supporting double null cases yet!') ! TODO
+
+        end if
 
         ! Visualize starting grid
         call grid%WriteData('grid_before_GA')

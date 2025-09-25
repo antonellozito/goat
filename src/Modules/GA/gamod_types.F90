@@ -166,6 +166,7 @@ module gamod_types
         ! Initialize
         procedure :: Initialize     => InitializeGAFace
         procedure :: ChainFaces
+        procedure :: ChainVertices
         procedure :: CheckFace
 
     end type
@@ -448,6 +449,9 @@ module gamod_types
         procedure :: GiveSeparatrices
         procedure :: IdentifyAlignedFaces
         procedure :: CheckFcLbl
+        procedure :: IdentifyfarSOLcells
+        procedure :: ChainFacesOfSepToTargets
+        procedure :: FarSOLGetChainVerts
         procedure :: CheckUnstructuredGrid
         procedure :: RecalcMagn
         procedure :: MergeFS
@@ -3620,6 +3624,403 @@ module gamod_types
 
 
 
+
+        end associate
+
+    end subroutine
+
+    subroutine IdentifyfarSOLcells(grid, options)
+
+        ! Description
+        !============
+        ! Identify farSOL cells
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        type(GAoptionsUDT), intent(in)  :: options
+
+        ! Auxiliary
+        integer(I8) :: i, j, k, s, nt, nf_max, nv_max, nf, iFs_sep, &
+            ind_sep, ind, na, ind_first, ind_last, first_fs, last_fs
+        integer(I8), allocatable, dimension(:) :: fcLbl_loc, fcs, fcsD, f_ord, vxs,  &
+            vxsU, indf, vxs_ordered, nfD, fs_target, fs_1, fsvLookUp, a, verts, vx_t1, fcs2, &
+            vx_t2, fs_vx_t2, vx_t2D, vx_fs1, fcs2D, vx_final, vx_fs2
+        integer(I8), allocatable, dimension(:,:) :: f_ordD, vxs_corner, fcs_targets, &
+            vxs_targets, fcs_targetsC, vxs_targetsC, inters
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert, &
+            fd => grid%data%fluxdata &
+            )
+        
+        ! Get GA labels
+        fcLbl_loc = GetfcLblGA(f, options)
+
+        ! Take the target vertices
+        nt = maxval(fcLbl_loc) - 3
+        indf = (/ (i, i = 1, f%ntot)/)
+        allocate(fcs_targets(f%ntot, nt), vxs_targets(v%ntot, nt), vxs_corner(2, nt))
+        fcs_targets = 0
+        vxs_targets = 0
+        vxs_corner = 0
+        nf_max = 0
+        nv_max = 0
+        do i = 4, nt + 3
+            allocate(fcs(count(fcLbl_loc == i)))
+            fcs = pack(indf, fcLbl_loc == i)
+            call f%ChainFaces(fcs, f_ordD, nfD)
+            if (size(nfD) .gt. 1) call gdErrorHandler('IdentifyfarSOLcells: something wrong with target labels')
+            nf = nfD(1)
+            f_ord = f_ordD(1:nf,1)
+            vxs = [f%vert1%Get(f_ord), f%vert2%Get(f_ord)]
+
+            ! Save verts and faces in columns
+            fcs_targets(1:nf, i-3) = f_ord
+            call Unique(vxs, vxsU)
+            vxs_targets(1:size(vxsU), i-3) = vxsU
+
+            ! Define max length to save faces and vertices in trimmed matrices
+            nf_max = max(nf, nf_max)
+            nv_max = max(size(vxsU), nv_max)
+
+            ! Housekeeping
+            deallocate(fcs)
+
+        end do
+
+        ! Cut-off
+        fcs_targetsC = fcs_targets(1:nf_max,:)
+        vxs_targetsC = vxs_targets(1:nv_max,:)
+
+        ! Try to find other flux surfaces
+        if (nt .gt. 2) print *, 'IdentifyfarSOLcells: not properly ' // &
+                & 'implemented for more than 2 target plates'
+
+        ! Marche over points of targets
+        ! Get list of ordered vertices of first target
+        fcsD = fcs_targetsC(:,1)
+        allocate(fcs(count(fcsD /= 0)))
+        fcs = pack(fcsD, fcsD /= 0)
+        call f%ChainVertices(fcs, vxs_ordered)
+
+        ! Run over the vertices and check intersection with other targets
+        ! Keep the first and the last 
+        allocate(fs_target(nf+1))
+        allocate(inters(nf+1, nf))
+        fs_target = 0
+        inters = 0
+        fsvLookUp = GetFsvLookUpGA(fd)
+        k = 1
+        do i = 1, nf+1
+
+            ! Get flux surface id of the vertex
+            fs_1 = GetVertFsvGA(fd, vxs_ordered(i), fsvLookUp)
+            if (size(fs_1) /= 0) then
+
+                ! Get the vertices of that flux surface
+                fs_target(i) = fs_1(1)
+                verts = GetFluxSurfaceVxsGA(fd, fs_1(1))
+
+                ! Check whether one of the vertices occur in other targets
+                ! This would mean the starting target is connected with another target through a flux surface  
+                do j = 1, nt
+                    if (k /= j) then
+                        if (any(isMember(verts,vxs_targets(:,j)))) inters(i,j) = fs_1(1)
+                    end if
+                end do
+            else
+                inters(i,:) = -1 
+            end if
+        end do
+
+        ! Remove -1 out of second column, keep the flux surfaces that connect the targets
+        allocate(a(count(inters(:,2) /= -1)))
+        a = pack(inters(:,2), inters(:,2) /= -1)
+
+        ! Loop over 'a' to identify groups
+        ! Get the separatrix of lower null   
+        if (grid%data%nsep .gt. 1) then
+            print *, 'Warning: IdentifyfarSOLcells: no proper identification of ' // &
+                & 'inner separatix, first separatrix should be inner one'
+        end if
+        iFs_sep = grid%data%sepID(1)
+        first_fs = 0
+        last_fs = 0
+
+        ! To determine start and end of connection between targets
+        ! Marching over starting from the separatrix in two direction
+        ind_sep = findloc(a, iFs_sep, 1)
+        ind = ind_sep
+        na = size(a)
+        do while (first_fs == 0)
+            if (ind .gt. 1) then
+                if (a(ind-1) == 0 .and. a(ind) /= 0) first_fs = a(ind)
+            else if (a(ind) /= 0) then
+                first_fs = a(ind)
+            end if
+
+            ! Update index
+            ind = ind - 1
+
+        end do
+
+        ind = ind_sep
+        do while (last_fs == 0)
+            if (ind .lt. na) then
+                if (a(ind+1) == 0 .and. a(ind) /= 0) last_fs = a(ind)
+            else if (a(ind) /= 0) then
+                last_fs = a(ind)
+            end if
+
+            ! Update index
+            ind = ind + 1
+        end do
+
+        ! Get indices of vertices on the first and last fs of target 1 
+        ind_first = findloc(inters(:,2), first_fs, 1)
+        ind_last = findloc(inters(:,2), last_fs, 1)
+        
+        ! Target 1
+        vx_t1 = vxs_ordered(ind_first:ind_last)
+
+        ! Target 2
+        fcs2D = fcs_targetsC(:,2)
+        allocate(fcs2(count(fcs2D /= 0)))
+        fcs2 = pack(fcs2D, fcs2D /= 0)
+        call ChainVertices(f, fcs2, vx_t2D)
+        allocate(fs_vx_t2(size(vx_t2D)))
+        do i = 1, size(vx_t2D)
+            s = GetVertFsvGA(fd, vx_t2D(i), fsvLookUp)
+            if (s /= 0) fs_vx_t2(i) = s
+        end do
+
+        ind_first = findloc(fs_vx_t2, first_fs, 1) 
+        ind_last = findloc(fs_vx_t2, last_fs, 1) 
+
+        if (ind_first .lt. ind_last) then
+            vx_t2 = vx_t2D(ind_first:ind_last)
+        else if (ind_first .gt. ind_last) then
+            vx_t2 = vx_t2D(ind_last:ind_first)
+        else 
+            call gdErrorHandler('IdentifyfarSOL: first and last fs is the same or one is undefined')
+        end if
+
+        ! Flux surfaces
+        ! First flux surface
+        call grid%FarSOLGetChainVerts(first_fs, vx_fs1, .false., options)
+        call grid%FarSOLGetChainVerts(last_fs, vx_fs2, .true., options)
+
+        ! Chain the vertex chains together: first_fs, target1, last_fs, target2
+        vx_final = vx_fs1
+        
+
+
+
+        end associate
+
+    end subroutine
+
+    subroutine FarSOLGetChainVerts(grid, fs, vx_fs, test, options)
+
+        ! Description
+        !============
+        ! Helper function for identify farSOL
+
+        ! Declare variables
+        !==================
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: fs
+        integer(I8), allocatable, intent(out)   :: vx_fs(:)
+        logical, intent(in)                     :: test
+        type(GAoptionsUDT)                      :: options
+
+        ! Auxiliary
+        integer(I8) :: i, nf
+        integer(I8), allocatable, dimension(:) :: fcsD, fcs, nfD, vxs, vxsU
+        integer(I8), allocatable, dimension(:,:) :: f_ordD
+
+
+        fcsD = GetFluxSurfaceFcsGA(grid%data%fluxdata, fs)
+        if (any(fs == grid%data%sepID)) then
+            ! Excluded faces that are not directly connected to a target
+            call grid%ChainFacesOfSepToTargets(fcsD,options, fcs)
+        else 
+
+            if (test) then
+                ! Hedge for possibility that another X-point lies on this last flux surface!
+                vxs = [grid%face%vert1%Get(fcsD), grid%face%vert2%Get(fcsD)]
+                call Unique(vxs, vxsU)
+                do i = 1, size(vxsU)
+                    if (count(vxs == vxsU(i)) .gt. 2) call gdErrorHandler('FarSOLGetChainVerts: Xpoint is on the ' // &
+                    & 'last surface connecting the main targets, implement to get the proper last surface')
+                end do
+            end if 
+
+            call grid%face%ChainFaces(fcsD, f_ordD, nfD)
+            if (size(nfD) .gt. 1) call gdErrorHandler('FarSOLGetChainVerts: something wrong')
+            nf = nfD(1)
+            fcs = f_ordD(1:nf,1)
+        end if 
+        call grid%face%ChainVertices(fcs, vx_fs)
+
+    end subroutine
+
+
+
+    subroutine ChainFacesOfSepToTargets(grid, f_list, options, f_ord)
+
+        ! Description
+        !============
+        ! Order a list of faces that represent a separatix by chaining then together. 
+        ! The faces which are only connected to a target via an X-point are
+        ! excluded.
+        ! For disconnected double null, only works if upper target are no target!!!
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: f_list(:)
+        type(GAoptionsUDT), intent(in)  :: options
+        integer(I8), intent(out)        :: f_ord(:) 
+        
+        ! Auxiliary
+        integer(I8) :: i, j, k, m, nt, nf_max, nv_max, nf, & 
+            counter, com_vert(2), counter2(2)
+        integer(I8), allocatable, dimension(:) :: fcLbl_loc, nfD, fcsD, fcs, vxs, vxsU, &
+            f_list2, XpointfacesD, a, indf, query_faces, verts_list, Xpointfaces
+        integer(I8), allocatable, dimension(:,:) :: fcs_targets, vxs_targets, vxs_corner, &
+            fcs_targetsC, vxs_targetsC, f_ordD, f_ord2, verts_list2
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+       
+        print *, 'For disconnected double null, upper targets should not be targets!!'  
+        
+        ! Get GA labels
+        fcLbl_loc = GetfcLblGA(f, options)
+
+        ! Take the target vertices
+        nt = maxval(fcLbl_loc) - 3
+        allocate(fcs_targets(f%ntot, nt), vxs_targets(v%ntot, nt), vxs_corner(2, nt))
+        indf = (/(i, i = 1, f%ntot)/)
+        fcs_targets = 0
+        vxs_targets = 0
+        vxs_corner = 0
+        nf_max = 0
+        nv_max = 0
+        do i = 4, nt + 3
+            allocate(fcsD(count(fcLbl_loc == i)))
+            fcsD = pack(indf, fcLbl_loc == i)
+            call f%ChainFaces(fcsD, f_ordD, nfD)
+            if (size(nfD) /= 1) call gdErrorHandler('ChainFacesOfSepToTargets: something wrong')
+            nf = nfD(1)
+            fcs = f_ordD(1:nf, 1)
+            vxs = [f%vert1%Get(fcs), f%vert2%Get(fcs)]
+
+            ! Save vertes and faces
+            fcs_targets(1:nf, i-3) = fcs
+            call Unique(vxs, vxsU)
+            vxs_targets(1:size(vxsU), i-3) = vxsU
+
+            nf_max = max(nf, nf_max)
+            nv_max = max(size(vxsU), nv_max)
+
+            ! Housekeeping
+            deallocate(fcs)
+
+        end do
+
+        ! Cut-off
+        fcs_targetsC = fcs_targets(1:nf_max, :)
+        vxs_targetsC = vxs_targets(1:nv_max, :)
+
+        ! Check which faces intersect with a target
+        allocate(verts_list2(size(f_list),2))
+        verts_list2(:,1) = f%vert1%Get(f_list)
+        verts_list2(:,2) = f%vert2%Get(f_list)
+        verts_list = [f%vert1%Get(f_list), f%vert2%Get(f_list)]
+        query_faces = [(/(i, i = 1, size(f_list))/), (/(i, i = 1, size(f_list))/)]
+        allocate(f_ord2(size(f_list), 2))
+        f_ord2 = 0
+        counter = 0
+        do i = 1, size(f_list)
+            do j = 1, 2
+                if (count(vxs_targets == verts_list2(i,j)) == 1) then
+                    counter = counter + 1
+                    f_ord2(1, counter) = f_list(i)
+                end if
+            end do
+        end do
+
+        ! Find the next - has one common vertex
+        allocate(XpointfacesD(f%ntot))
+        counter2 = 0
+        XpointfacesD = 0 
+        counter = 0
+        do i = 1, grid%data%nxp
+            fcs = GetVertFaceGA(f, grid%data%xpointID(i))
+            counter = counter + size(fcs)
+            XpointfacesD(counter-size(fcs)+1:counter) = fcs
+        end do
+
+        ! Trim
+        Xpointfaces = XpointfacesD(1:counter)
+
+        do j = 1, 2
+            do i = 2, size(f_list)
+
+                com_vert = [f%vert1%Get(f_ord2(i-1, j)), f%vert2%Get(f_ord2(i-1, j))]
+
+                do k = 1, 2
+                    
+                    ! Get vertices
+                    allocate(a(count(verts_list == com_vert(k))))
+                    a = pack(query_faces, verts_list == com_vert(k))
+                    if (size(a) .gt. 0) then
+
+                        do m = 1, size(a)
+
+                            if (.not.any(f_list(a(m)) == f_ord2(:,j))) then
+                                f_ord2(i,j) = f_list(a(m))
+                                counter2(j) = counter2(j) + 1
+                                exit
+                            end if
+                     
+                        end do
+
+                    else
+                        call gdErrorHandler('ChainFacesOfSepToTargets: something wrong: probably faces ' // &
+                            & 'can not form a chain')
+                    end if
+
+                    ! Housekeeping
+                    deallocate(a)
+
+                end do
+                if (any(f_ord2(i,j) == Xpointfaces)) exit
+
+            end do
+
+        end do
+
+        ! Put boh chains in one list
+        f_list2 = [f_ord2(1:counter2(1),1), f_ord2(1:counter2(2),2)]
+
+        ! Chain them together
+        call f%ChainFaces(f_list2, f_ordD, nfD)
+        if (size(nfD) /= 1) call gdErrorHandler('ChainFacesOfSepToTargets: something wrong')
+        nf = nfD(1)
+        f_ord = f_ordD(1:nf,1)
 
         end associate
 
@@ -15788,6 +16189,56 @@ module gamod_types
 
     end subroutine
 
+    subroutine ChainVertices(f, fcs, v_ord)
+
+        ! Description
+        !============
+        ! Orders vertices by giving a list of connected faces in a chain
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAFaceUDT), intent(in)            :: f
+        integer(I8), intent(in)                 :: fcs(:)
+        integer(I8), allocatable, intent(out)   :: v_ord(:)
+
+        ! Auxiliary
+        integer(I8) :: i, nf, vx(2), vx2(2)
+        integer(I8), allocatable :: vxs(:), v(:)
+        logical, allocatable :: log(:)
+
+        ! Initialize
+        nf = size(fcs)
+        vxs = [f%vert1%Get(fcs), f%vert2%Get(fcs)]
+        allocate(v_ord(nf+1))
+        v_ord = 0
+
+        ! Loop over faces
+        do i = 1, nf-1
+            vx = [vxs(i), vxs(i+nf)]
+            vx2 = [vxs(i+1), vxs(i+1+nf)]
+            log = .not.isMember(vx, vx2)
+            allocate(v(count(log)))
+            v = pack(vx, log)
+            if (size(v) /= 0) then
+                v_ord(i) = v(1)
+            else
+                call gdErrorHandler('ChainVertices: chain of faces not connected')
+            end if
+            deallocate(v)
+        end do
+
+        ! End vertices
+        vx = [vxs(nf), vxs(2*nf)]
+        vx2 = [vxs(nf-1), vxs(2*nf-1)]
+        log = isMember(vx, vx2)
+        allocate(v(count(log)))
+        v = pack(vx, log)
+        v_ord(nf) = v(1)
+        v_ord(nf+1) = Pack2(vx, vx /= v_ord(nf))
+
+    end subroutine
+
     subroutine CheckFace(f, v1, v2, face_num)
 
         ! Description
@@ -16235,13 +16686,15 @@ module gamod_types
         integer(I8) :: i, res
         integer(I8), allocatable :: res1(:)
         integer(I8), allocatable, optional :: fsvLookUp(:)
+        logical, allocatable :: log(:)
 
         res = 0
 
         if (.not.present(fsvLookUp)) fsvLookUp = GetFsvLookUpGA(fd)
-        allocate(res1(count(fd%fluxsurfaceverts%Get() == i)))
-        res1 = pack(fsvLookUp,fd%fluxsurfaceverts%Get() == i)
-        if (count(fd%fluxsurfaceverts%Get() == i) .lt. 1) return
+        log = fd%fluxsurfaceverts%Get() == i
+        allocate(res1(count(log)))
+        res1 = pack(fsvLookUp,log)
+        if (count(log) .lt. 1) return
         res = res1(1)
 
     end function
