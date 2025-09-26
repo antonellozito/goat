@@ -5423,7 +5423,9 @@ module mod_polygon
         ! Simple function that computes the (signed) surface area 
         ! enclosed by the polygon. For this, we employ the simple
         ! trapezoidal rule for integration, which is exact for 
-        ! piecewise-linear polygons. 
+        ! piecewise-linear polygons. The surface area is negative
+        ! in case of a right-turning polygon, and positive for a
+        ! left-turning.
 
         ! Note: this is the closed polygon surface area. If the polygon
         ! is open, the last vertex will be connected to the first one

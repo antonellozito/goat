@@ -17,12 +17,10 @@ module gamod_types
     use mod_sort   
     use mod_precision
     use mod_polygon
-    use mod_dynamicarrays    
+    use mod_dynamicarrays 
+    use mod_structured2Dgridding   
     use goatmod_types 
     use DistributionFunction
-    !use goatmod_userinput
-    !use gdmod_utility_optimization
-    !use gamod_utility
     use gamod_math
 
 
@@ -71,50 +69,13 @@ module gamod_types
         !============
         ! Fields:
         ! - x, y            : coordinates [m]
-        ! - BV              : logical index to indicate if vertex lies
-        !                   on boundary
-        ! - fieldlineID     : ID of the field line the vertex lies on
-        ! - ntot            : total number of vertices  
-        ! - faceP           : ntot-by-2 array containing in the first 
-        !                   column the starting index and in the second
-        !                   column the number of faces of the cell 
-        !                   (for querying the faces of the cell
-        !                   stored in vert%facelist)            
-        ! - facelist        : list of vertex faces, to be queried as 
-        !                   vert%facelist(vert%faceP(i,1):
-        !                   vert%faceP(i,1)+vert%faceP(i,2)-1) 
-        ! - nfacelist       : length of facelist   
-        ! - cellP           : similar to faceP, but for vertex cells
-        ! - celllist        : similar to facelist, but for vertex cells
-        ! - ncellist        : length of celllist    
-        ! - neiglist        : list of neighbouring vertices (nneiglist-
-        !                   by-1)
-        ! - nneiglist       : dimension of neiglist (scalar)
-        ! - neigP           : ntot-by-2 array, analogous to faceP and 
-        !                   cellP, but for neiglist.
         ! - psi             : psi values at vertex locations    
         ! - bx, by          : magnetic field vector at vertex locations  
-        ! - ffbz            : ???
+        ! - ffbz            : toroidal component of ????
 
         ! Coordinates
         class(RealDynamicArrayBufferedUDT), allocatable        :: x, y
-
-        ! Logicals and indices
-        !logical, allocatable                          :: BV(:)
-        !class(IntegerDynamicArrayUDT), allocatable    :: fieldlineID 
         integer(I8)                                   :: ntot = 0
-
-        !type(IntegerDynamicArrayUDT), allocatable     :: faceP(:,:)
-        !type(IntegerDynamicArrayUDT), allocatable     :: face(:)
-        !integer(I8)                                   :: nface = 0
-
-        !type(IntegerDynamicArrayUDT), allocatable     :: cellP(:,:)
-        !type(IntegerDynamicArrayUDT), allocatable     :: cell(:)
-        !integer(I8)                                   :: ncell = 0
-
-        !type(IntegerDynamicArrayUDT), allocatable     :: neigP(:,:)
-        !type(IntegerDynamicArrayUDT), allocatable     :: neig(:)
-        !integer(I8)                                   :: nneig = 0
 
         ! Other data
         class(RealDynamicArrayBufferedUDT), allocatable :: bx, &
@@ -133,16 +94,10 @@ module gamod_types
         !============
         ! Fields:
         ! - ntot            : total number of faces
-        ! - vert            : set of (two) vertices belonging to that 
-        !                   face
-        ! - cell            : list of cell neighbours (max 2)
-        ! - cellP           : pointer for list of cell neighbours
-        ! - neig            : cell neighbours of face
-        ! - BF              : logical index that is true if the face
-        !                   is a boundary face
-        ! - label           : face labels
-        ! - TMfacelabel     : face label corresponding to topomesh ID (only when GG is used)
-        ! - reg             : face regions
+        ! - vert1           : first column of typical set of (two) vertices belonging to that face
+        ! - vert2           : second column of typical set of (two) vertices belonging to that face
+        ! - label           : face labels according to SOLPS convention
+        ! - reg             : face regions according SOLPS convention
         ! - aligned         : integer that is 1 if the face is aligned
 
 
@@ -152,14 +107,7 @@ module gamod_types
         class(IntegerDynamicArrayBufferedUDT), allocatable         :: &
             label, reg, aligned
 
-        !logical :: aligned(:)
-        !type(IntegerDynamicArrayUDT), allocatable         :: cell(:)    
-        !type(IntegerDynamicArrayUDT), allocatable         :: cellP(:,:)
-        !integer(I8)                                       :: ncell = 0
-
         integer(I8)                                       :: ntot = 0
-        !type(IntegerDynamicArrayUDT), allocatable         :: BF(:)
-        !logical, allocatable                                 :: BF(:)
 
     contains
 
@@ -178,20 +126,25 @@ module gamod_types
         !============
         ! Fields:   
         ! - ntot            : total number of cells
-        ! - vertP           : ntot-by-2 array containing in the first 
-        !                   column the starting index and in the second
-        !                   column the number of vertices of the cell 
-        !                   (for querying the vertices of the cell
-        !                   stored in cells%vert)            
+        ! - ngc             : number of guard cells
+        ! - vertP1          : ntot-by-1 array containing the starting index of vertices of the cell 
+        !                     (for querying the vertices of the cell stored in cell%vert)
+        ! - vertP2          : ntot-by-1 array containing the number of vertices of the cell 
+        !                     (for querying the vertices of the cell stored in cell%vert)            
         ! - vert            : list of cell vertices, to be queried as 
-        !                   cells%vert(cells%vertP(i,1):
-        !                   cells%vertP(i,1)+cells%vertP(i,2)-1) 
-        ! - nvert          : length of vert
-        ! - faceP           : similar to vertP, but for faces
+        !                     cells%vert(cells%vertP1(i):cells%vertP1(i)+cells%vertP2(i)-1) 
+        ! - nvert           : length of vert
+        ! - faceP1          : similar to vertP1, but for faces
+        ! - faceP2          : similar to vertP2, but for faces
         ! - face            : similar to vert, but for faces
-        ! - nface          : similar to nvert, but for faces
-        ! - GC              : ntot-by-1 logical vector indicating if the
-        !                   cell is a guard cell
+        ! - nface           : similar to nvert, but for faces
+        ! - cflags          : indicating whether the cell is a internal cell (1) or 
+        !                     boundary cell (3). Something used to save special indicators
+        ! - reg             : the cell region defined by the topology according to SOLPS conventions
+        ! - x               : x-coordinate of cell center
+        ! - y               : y-coordinate of cell center    
+        ! - psi             : psi value at cell center
+
 
 
         ! Logicals and indices
@@ -205,12 +158,13 @@ module gamod_types
         class(IntegerDynamicArrayBufferedUDT), allocatable        :: face
         integer(I8)                                       :: nface = 0
 
-        !logical, allocatable                             :: GC(:)
 
         integer(I8)                                       :: ntot = 0, ngc
         
         class(RealDynamicArrayBufferedUDT), allocatable           :: psi, x, y
         class(IntegerDynamicArrayBufferedUDT), allocatable        :: cflags, reg
+        type(StructuredInterpolant2DUDT)                          :: farSOL_interpolant 
+
     contains
 
         ! Initialize
@@ -233,55 +187,23 @@ module gamod_types
         !                   read in)
         ! - nFs:            : total number of flux surfaces (scalar, to be
         !                   read in)
-        ! - fluxtubecellsP  : nFt-by-2 array where the first index 
-        !                   is the start index in the fluxtubecells 
-        !                   array, and the second the amount of cells of
-        !                   the flux tube.
-        ! - fluxtubecells   : nCv(number of cells)-by-1 array containing 
-        !                   the cell numbers that correspond to flux 
-        !                   tubes. 
-        ! - fluxtubefacesP  : nFt-by-2 array where the first index 
-        !                   is the start index in the fluxtubefaces 
-        !                   array, and the second the amount of faces of
-        !                   the flux tube.
-        ! - fluxtubefsIDs   : flux surface IDs that bound the flux tube
-        !                   (nFt-by-2)
-        ! - fluxtubefaces   : nFv(number of faces)-by-1 array containing 
-        !                   the face numbers that correspond to flux 
-        !                   tubes. 
-        ! - fluxsurfacefacesP  : nFs-by-2 array where the first index 
-        !                   is the start index in the fluxsurfacefaces
-        !                   array, and the second the amount of faces of
-        !                   the flux surface.
-        ! - fluxsurfacefaces   : nFv(number of faces)-by-1 array containing 
-        !                   the face numbers that correspond to flux 
-        !                   surfaces. 
-        ! - fluxsurfaceID   : nv(number of vertices)-by-1 array 
-        !                   containing the flux tube ID of each vertex
+        ! - fluxsurfacefacesP1  : nFs-by-1 array containing the start index in the fluxsurfaceface array 
+        ! - fluxsurfacefacesP2  : nFs-by-1 array containing the amount of faces of the flux surface
+        ! - fluxsurfacefaces    : array containing the face numbers that correspond to flux surfaces. 
+        ! - fluxsurfacevertsP1  : nFs-by-1 array containing the start index in the fluxsurfaceverts
+        !                        array
+        ! - fluxsurfacevertsP2  : nFs-by-1 array containing the amount of vertices of the flux surface.
+        ! - fluxsurfaceverts    : nFv(number of faces)-by-1 array containing 
+        !                         the face numbers that correspond to flux surfaces. 
 
         ! Logicals and indices
         integer(I8)                         :: nFt = 0
         integer(I8)                         :: nFs = 0
 
-        ! Arrays, flux tube data
-        !type(IntegerDynamicArrayUDT), allocatable :: &
-        !    fluxtubecellsP(:,:)
-        !type(IntegerDynamicArrayUDT), allocatable :: fluxtubecells(:)
-        !type(IntegerDynamicArrayUDT), allocatable :: &
-        !    fluxtubefacesP(:,:)
-        !type(IntegerDynamicArrayUDT), allocatable :: fluxtubefaces(:)
-        !type(IntegerDynamicArrayUDT), allocatable :: &
-        !    fluxtubefsIDs(:, :), fluxtuberegID(:)
-        !logical, allocatable                :: isclosedft(:)
-
         ! Arrays, flux surface data
         class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacefacesP1
         class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacefacesP2
         class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacefaces
-        !class(IntegerDynamicArrayUDT), allocatable :: fluxsurfaceID
-        !type(IntegerDynamicArrayUDT), allocatable :: &
-        !    fluxsurfaceneig(:), fluxsurfaceneigP(:, :)
-        !class(RealDynamicArrayUDT), allocatable    :: fluxsurfacepsi
         class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacevertsP1
         class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfacevertsP2
         class(IntegerDynamicArrayBufferedUDT), allocatable :: fluxsurfaceverts
@@ -307,63 +229,21 @@ module gamod_types
         !
         ! - fluxdata            : UDT with all flux data such as flux
         !                       flux tube data, flux surfaces, ... 
-        ! - sglegacy            : data from legacy structured grids
-        ! - OMPcell, OMPface    : cells and faces belonging to outer mid
-        !                       plane
-        ! - IMPcell, IMPface    : same, but inner mid plane
-        ! - OMPr, OMPz          : points defining line segment of OMP
-        ! - IMPr, IMPz          : same but for inner mid plane
-        ! - topoflag            : flag indicating the topological mesh 
-        !                       type (see also mod_definitions)
         ! - xpointID            : array containing all X-point vertex IDs
         ! - isprimaryxp         : integer array which is 1 if the 
         !                       x-point is a primary x-point (i.e. it 
         !                       lies on a separatrix that is connected
         !                       directly to a core region), otherwise 0
         ! - nxp                 : number of x-points
-        ! - spointID            : array containing all strike point vertex IDs
-        ! - nsp                 : number of strike points
-        ! - opointID            : O point IDs (in the grid)
-        ! - nop                 : number of o points
-        ! - tpointID            : Tangency point IDs (but here tangency 
-        !                       points are only those tangency points 
-        !                       that have a closed contour in the grid!)
-        ! - ntp                 : number of t points
-        ! - spointxpID          : x-point vertex number of the x-point 
-        !                       the strike point belongs to
-        ! - ndiv                : number of divertor targets/plates
-        ! - spointdivID         : list of targets that belong to strike 
-        !                       points (one target each)
-        ! - tpointdivID         : same as above but for tangency points
-        ! - ndivFc              : total number of divertor faces
-        ! - divFc               : list of divertor faces
-        ! - divFcP              : pointer for the list of divertor faces
+        ! - sepID               : array containing all separatrix flux surface IDs
+
 
         ! Flux data
         type(GAFluxDataUDT)           :: fluxdata
 
-        ! Legacy data of structured grid
-        !type(StructuredGridDataUDT) :: sglegacy
-
-        ! Topological mesh type
-        !integer(I8)                             :: topoflag
-        
-        ! OMP & IMP
-        !integer(I8), allocatable, dimension(:)  :: OMPcell, OMPface, &
-        !    IMPcell, IMPface
-        !integer(I8)                             :: nOMPcell, nOMPface, &
-        !    nIMPcell, nIMPface
-        !real(R8), dimension(1:2)                :: OMPr, OMPz, IMPr, &
-        !    IMPz
-
-        ! X-point(s), strike points, o points, ...
+        ! X-point(s), separatrices
         integer(I8), allocatable, dimension(:)  :: xpointID, sepID
-        !integer(I8), allocatable, dimension(:)  :: spointID, opointID, tpointID, isprimaryxp, spointxpID, &
-        !    divFc, spointdivID, tpointdivID
-        !integer(I8), allocatable, dimension(:, :)   :: divFcP
         integer(I8)                             :: nxp, nsep
-        !integer(I8)                             :: nsp, nop, ntp, &
-        !    ndiv, ndivFc  
             
     contains
 
@@ -379,10 +259,10 @@ module gamod_types
         !============
         ! Data type to save an interpolant with certain property used to indicate grid regions spatially.
 
-        ! - d_char:  characteristic length
-        ! - dist_type: type of distance function
-        ! - d_rescale: 
-        ! - d_char_type: option to choose characteristic length   
+        ! - d_char      : characteristic length
+        ! - dist_type   : type of distance function
+        ! - d_rescale   : real to rescale the characteristic length
+        ! - d_char_type : option to choose characteristic length   
 
         ! Properties
         character(:), allocatable           :: dist_type
@@ -408,12 +288,12 @@ module gamod_types
         ! Fields:
         !
         ! - vert            : see type definition for description
-        ! - face           
-        ! - cell
-        ! - data
-        ! - bnd
-        !
-        ! Note: the bnd substructure has to be allocated separately
+        ! - face            : see type definition for description
+        ! - cell            : see type definition for description
+        ! - data            : see type definition for description
+        ! - fun             : distance function depending on user input
+        ! - fun_r           : distance function for high poloidal flux next to the separatrix   
+        ! - fun_wall        : distance function for wall proximity
 
         ! Vertices
         type(GAVertexUDT)                     :: vert
@@ -427,9 +307,6 @@ module gamod_types
         ! Additional data
         type(GAGridDataUDT)                   :: data
 
-        ! Boundaries
-        !type(BndUDT), allocatable           :: bnd(:)
-
         ! Distance functions
         type(DistFunctUDT)                    :: fun 
         type(DistFunctUDT)                    :: fun_r
@@ -439,7 +316,6 @@ module gamod_types
 
         ! Initialize
         procedure :: Initialize         => InitializeGAGrid
-
 
         ! Pre- and PostProcessing
         procedure :: CheckVertOrder
@@ -596,7 +472,8 @@ module gamod_types
         procedure :: CalcHpol0D
         generic   :: CalcHpol => CalcHpol0D  
         procedure :: CalcHrad0D
-        generic   :: CalcHrad => CalcHrad0D         
+        procedure :: CalcHrad1D
+        generic   :: CalcHrad => CalcHrad0D, CalcHrad1D         
         procedure :: CalcCentroid0DGA
         procedure :: CalcCentroid1DGA
         generic   :: CalcCentroidGA => CalcCentroid0DGA, CalcCentroid1DGA
@@ -633,6 +510,11 @@ module gamod_types
     ! Get vxs from fcs
     interface GetVxsFromFcsGA
         module procedure GetVxsFromFcsGA0D, GetVxsFromFcsGA1D
+    end interface
+
+    ! Write array
+    interface WriteArray
+        module procedure WriteArrayI8, WriteArrayR8
     end interface
 
     contains 
@@ -2216,6 +2098,7 @@ module gamod_types
     end subroutine
 
     subroutine TranslateGridTOGAGrid(grid,GAgrid)
+
         ! Description
         ! ===========
         ! Translating the information in the GridUDT type to a GAGridUDT type with dynamic arrays
@@ -3643,12 +3526,18 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: i, j, k, s, nt, nf_max, nv_max, nf, iFs_sep, &
-            ind_sep, ind, na, ind_first, ind_last, first_fs, last_fs
+            ind_sep, ind, na, ind_first, ind_last, first_fs, last_fs, fs_1, &
+            nx, ny
         integer(I8), allocatable, dimension(:) :: fcLbl_loc, fcs, fcsD, f_ord, vxs,  &
-            vxsU, indf, vxs_ordered, nfD, fs_target, fs_1, fsvLookUp, a, verts, vx_t1, fcs2, &
-            vx_t2, fs_vx_t2, vx_t2D, vx_fs1, fcs2D, vx_final, vx_fs2, vx_merge1, vx_merge2
+            vxsU, indf, vxs_ordered, nfD, fs_target, fsvLookUp, a, verts, vx_t1, fcs2, &
+            vx_t2, fs_vx_t2, vx_t2D, vx_fs1, fcs2D, vx_final, vx_fs2, vx_merge1, vx_merge2, indout, indxy, farSOL
         integer(I8), allocatable, dimension(:,:) :: f_ordD, vxs_corner, fcs_targets, &
             vxs_targets, fcs_targetsC, vxs_targetsC, inters
+        real(R8) :: xbmin, xbmax, ybmin, ybmax, stepx, stepy
+        real(R8), allocatable :: xv(:), yv(:), xg(:), yg(:), farSOLv(:,:), int(:)
+        logical, allocatable :: in(:)
+        type(PolygonUDT) :: polygon
+        character(:), allocatable :: meth
 
         ! Associate
         associate(&
@@ -3706,12 +3595,13 @@ module gamod_types
         fcsD = fcs_targetsC(:,1)
         allocate(fcs(count(fcsD /= 0)))
         fcs = pack(fcsD, fcsD /= 0)
+        nf = size(fcs)
         call f%ChainVertices(fcs, vxs_ordered)
 
         ! Run over the vertices and check intersection with other targets
         ! Keep the first and the last 
         allocate(fs_target(nf+1))
-        allocate(inters(nf+1, nf))
+        allocate(inters(nf+1, nt))
         fs_target = 0
         inters = 0
         fsvLookUp = GetFsvLookUpGA(fd)
@@ -3720,17 +3610,17 @@ module gamod_types
 
             ! Get flux surface id of the vertex
             fs_1 = GetVertFsvGA(fd, vxs_ordered(i), fsvLookUp)
-            if (size(fs_1) /= 0) then
+            if (fs_1 /= 0) then
 
                 ! Get the vertices of that flux surface
-                fs_target(i) = fs_1(1)
-                verts = GetFluxSurfaceVxsGA(fd, fs_1(1))
+                fs_target(i) = fs_1
+                verts = GetFluxSurfaceVxsGA(fd, fs_1)
 
                 ! Check whether one of the vertices occur in other targets
                 ! This would mean the starting target is connected with another target through a flux surface  
                 do j = 1, nt
                     if (k /= j) then
-                        if (any(isMember(verts,vxs_targets(:,j)))) inters(i,j) = fs_1(1)
+                        if (any(isMember(verts,vxs_targets(:,j)))) inters(i,j) = fs_1
                     end if
                 end do
             else
@@ -3819,10 +3709,62 @@ module gamod_types
         call MergeVertexChains(vx_fs1, vx_t1, vx_merge1)
         call MergeVertexChains(vx_merge1, vx_fs2, vx_merge2)
         call MergeVertexChains(vx_merge2, vx_t2, vx_final)
+
+        ! Construct a polygon
+        call polygon%Construct(v%x%Get(vx_final), v%y%Get(vx_final))
+
+        ! Construct a 2D structured grid
+        ! Determine resolution => minimal h_rad in the grid
+        !indc = (/(i, i = 1, c%ntot)/)
+        !call grid%CalcHrad(indc, h_rad)
+        !step = minval(h_rad)*10
         
+        ! Bounds
+        xbmin = minval(v%x%Get())
+        xbmax = maxval(v%x%Get())
+        ybmin = minval(v%y%Get())
+        ybmax = maxval(v%y%Get()) 
 
+        ! Make x and y array
+        nx = 200
+        ny = 200
+        stepx = (xbmax - xbmin) / (nx - 1)
+        stepy = (ybmax - ybmin) / (ny - 1)
+        allocate(xv(nx), yv(ny))
+        do i = 1, nx
+            xv(i) = xbmin + (i - 1)*stepx
+        end do
+        do i = 1, ny
+            yv(i) = ybmin + (i - 1)*stepy
+        end do
 
+        ! Construct the 2D grid
+        allocate(xg(nx*ny), yg(nx*ny))
+        call Construct2DStructuredGrid(xv, yv, nx, ny, xg, yg)
 
+        ! Define area outside the polygon
+        call polygon%Inpolygon(xg, yg, in)
+        allocate(farSOL(nx*ny))
+        farSOL = 0.0_R8
+        indxy = (/(i, i = 1, nx*ny)/)
+        allocate(indout(count(.not.in)))
+        indout = pack(indxy, .not.in)
+        farSOL(indout) = 1.0_R8
+        allocate(farSOLv(nx,ny))
+        do i = 1, ny
+            farSOLv(1:nx,i) = farSOL(nx*(i-1) + 1:nx*i)
+        end do
+
+        ! Make interpolant
+        meth = 'uniformgrid'
+        call c%farSOL_interpolant%SetParameters(meth, 3, 6)
+        call c%farSOL_interpolant%ConstructStructured(xv, yv, farSOLv)
+
+        ! Test
+        !allocate(int(c%ntot))
+        !call c%farSOL_interpolant%Evaluate(c%x%Get(), c%y%Get(), 0, 0, int)
+        !call WriteArray(int, 'farSOLint')
+        
         end associate
 
     end subroutine
@@ -17340,6 +17282,68 @@ module gamod_types
 
     end subroutine
 
+    subroutine CalcHrad1D(grid, cells, h_rad)
+
+        ! Description
+        !============
+        ! Calculate radial length of a cell
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: cells(:)
+        real(R8), allocatable, intent(out)      :: h_rad(:)
+
+        ! Auxiliary
+        integer(I8) :: i, j, vs(2)
+        integer(I8), allocatable, dimension(:) :: fcs, verts1, verts2
+        real(R8) :: dx, dy, ds, vec_v1x, vec_v1y, d1, c1, dist
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        allocate(h_rad(size(cells)))
+        h_rad = 0.0_R8
+        do j = 1, size(cells)
+        
+            fcs = GetCellFaceGA(c, cells(j))
+            verts1 = f%vert1%Get(fcs)
+            verts2 = f%vert2%Get(fcs)
+
+            do i = 1, size(fcs)
+                vs = [verts1(i), verts2(i)]
+
+                ! Face vector
+                dx = v%x%Get(vs(2)) - v%x%Get(vs(1))
+                dy = v%y%Get(vs(2)) - v%y%Get(vs(1))
+                ds = Norm(dx, dy)
+
+                ! Magnetic field vector
+                vec_v1x = v%bx%Get(vs(1))
+                vec_v1y = v%by%Get(vs(1))
+                d1 = Norm(vec_v1x, vec_v1y)
+
+                ! Project distance
+                c1 = abs(dx*vec_v1x + dy*vec_v1y) / (ds*d1)
+                dist = c1*ds
+
+                h_rad(j) = h_rad(j) + dist
+            end do
+
+        end do
+
+        ! Gone all around the cell 
+        h_rad = h_rad / 2
+
+        end associate
+
+    end subroutine    
+
     subroutine CheckUniqueness(ida)
         type(IntegerDynamicArrayBufferedUDT) :: ida
         integer(I8) :: i, n
@@ -17410,11 +17414,11 @@ module gamod_types
 
     end subroutine
 
-    subroutine WriteArray(a, filename)
+    subroutine WriteArrayI8(a, filename)
 
         ! Description
         !============
-        ! Write an array in a file
+        ! Write an integer array in a file
 
         ! Declare variables
         !==================
@@ -17452,5 +17456,46 @@ module gamod_types
 
     end subroutine
 
+    subroutine WriteArrayR8(a, filename)
+
+        ! Description
+        !============
+        ! Write an integer array in a file
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+
+        ! Arguments
+        real(R8), allocatable :: a(:)
+        character(*), intent(in) :: filename 
+
+        ! Auxiliary
+        integer :: fu     
+        integer(I8) :: i
+        character(:), allocatable :: dir
+
+        ! Construct writing directory
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Size data
+        write (fu, *) 'Elements'
+        write (fu, *) size(a)
+
+        ! Array
+        write (fu, *) 'ID val(ID)'
+        do i = 1, size(a)
+            write(fu, *) i, a(i)
+        end do
+
+        close(fu)
+
+    end subroutine
 
 end module 

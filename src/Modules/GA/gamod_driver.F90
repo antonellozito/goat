@@ -35,7 +35,8 @@ module gamod_driver
 
         ! Description
         !============
-        ! Overarching driver for grid adaptation, one lever lower than GADriver. ! Adapts topology of unstructured grid with the goal to improve grid  quality based on grid metric and user inputs
+        ! Overarching driver for grid adaptation, one lever lower than GADriver. 
+        ! Adapts topology of unstructured grid with the goal to improve grid quality based on grid metric and user inputs.
 
         ! Initialize
         !===========
