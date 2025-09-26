@@ -1492,14 +1492,18 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: i, k, ind, nal1, nal2, fcs1_al, fcs2_al, indmin, &
-            splitfaces(2), n_sub
+            splitfaces(2), n_sub, ncc, trap, vxs(2), ncell
         integer(I8), allocatable, dimension(:) :: indcv, cells,  &
             cellsD, indsort, cells2, fcs, fcs_sep, indf, b_faces, b_verts, &
-            cvLookUp, cvs, cvsD, fcs1, fcs2, tria_cells, subset_tria
-        real(R8) :: mean_tot_flux, threshold, dfunv(grid%cell%ntot)
+            cvLookUp, cvs, cvsD, fcs1, fcs2, tria_cells, subset_tria, &
+            nums, cctria, cctraps, cellsD2, bfcs
+        integer(I8), allocatable :: cctrapsP(:,:)
+        real(R8) :: mean_tot_flux, threshold, dfunv(grid%cell%ntot), nx, ny, &
+            fbx, fby
         real(R8), allocatable, dimension(:) :: h_rad_cells, pol_fluxdens_est, &
-            dpsi, cvAR_tria, cvS_tria, h_pol_sol_cells
-        logical, allocatable :: log(:), log2(:)
+            dpsi, cvAR_tria, cvS_tria, h_pol_sol_cells, ARtot, incl, farSOLv, &
+            inc_angle, inc_angle_hpol
+        logical, allocatable :: log(:), log2(:), b_flagfcs(:), b_flag(:)
 
         ! Associate
         associate(&
@@ -1618,15 +1622,131 @@ module gamod_types
 
             case ('farSOL')
 
-                ! TODO
+                ! Get the highly inclined trianlge
+                call grid%GetHighInclinedTrias(qm, options, ARtot, incl, cctria, cctraps, cctrapsP, nums, ncc)
+
+                ! Sort for highest ARtot
+                allocate(indsort(size(ARtot)))
+                call Sort(ARtot,indsort)
+                nums = nums(indsort)
+                incl = incl(indsort)
+
+                do i = 1, ncc
+
+                    trap = cctraps(cctrapsP(nums(i),1)+cctrapsP(nums(i),2)-1)
+                    if ((ARtot(i) .gt. 3) .and. qm%h_rad_psi(trap) .gt. minval(qm%h_rad_psi)*10 .and. incl(i) .lt. 0.1) then
+
+                        qm%split_cv = trap
+                        exit
+
+                    end if
+                end do
 
             case ('farSOLrefinement')
 
-                ! TODO
+                ! Apply distance function
+                if (options%dist_function) then
+
+                    call grid%fun%distr%Evaluate(c%x%Get(), c%y%Get(), dfunv)
+                    log = (dfunv .lt. options%dist_function_threshold_split)
+                    allocate(cellsD(count(log)))
+                    cellsD = pack(indcv, log)
+
+                else if (options%no_pents_area_split) then
+
+                    call grid%AreaConstraintPents(options, options%dist_function_threshold_split, cellsD)
+
+                end if
+
+                ! Apply farSOL interpolant
+                allocate(farSOLv(size(cellsD)))
+                call c%farSOL_interpolant%Evaluate(c%x%Get(cellsD),c%y%Get(cellsD), 0, 0, farSOLv)
+                allocate(cells(count(farSOLv .gt. 0.95_R8)))
+                cells = pack(cellsD, farSOLv .gt. 0.95_R8)
+
+                ! Sort  for
+                h_rad_cells = qm%h_rad_psi(cells)
+                allocate(indsort(size(cells)))
+                call Sort(h_rad_cells, indsort, .false.)
+                cells = cells(indsort)
+                i = 1
+                do while (qm%split_cv == 0)
+                    if ( c%reg%Get(cells(i)) /= 1 .and. c%cflags%Get(cells(i)) /= 3) then
+
+                        qm%split_cv = cells(i)
+
+                    else
+                        i = i + 1
+                    end if
+                end do
 
             case ('farSOLrefinement_targets')
 
-                ! TODO
+                ! Apply wall distance function
+                if (options%dist_function) then
+
+                    call grid%fun_wall%distr%Evaluate(c%x%Get(), c%y%Get(), dfunv)
+                    log = (dfunv .lt. options%dist_function_threshold_split)
+                    allocate(cellsD(count(log)))
+                    cellsD = pack(indcv, log)
+
+                else if (options%no_pents_area_split) then
+
+                    call grid%AreaConstraintPents(options, options%dist_function_threshold_split, cellsD)
+
+                end if
+
+                ! Apply farSOL interpolant
+                allocate(farSOLv(size(cellsD)))
+                call c%farSOL_interpolant%Evaluate(c%x%Get(cellsD),c%y%Get(cellsD), 0, 0, farSOLv)
+                allocate(cellsD2(count(farSOLv .gt. 0.95_R8)))
+                cellsD2 = pack(cellsD, farSOLv .gt. 0.95_R8)
+
+                ! Get boundary cells in farSOL
+                log = isBoundaryCellGA(grid, cellsD2)
+                allocate(cells(count(log)))
+                cells = pack(cellsD2, log)
+
+                ! Compute incidence angle for every cell, compute sine
+                b_flag = (f%label%Get() /= 0)
+                ncell = size(cells)
+                do i = 1, ncell
+                    fcs = GetCellFaceGA(c, cells(i))
+                    b_flagfcs = b_flag(fcs)
+                    if (count(b_flagfcs) == 1) then
+                        allocate(bfcs(1))
+                        bfcs = pack(fcs, b_flagfcs)
+
+                        ! Interpolate magnetic field vector
+                        vxs = [f%vert1%Get(bfcs), f%vert2%Get(bfcs)]
+                        fbx = 0.5_R8*sum(-v%by%Get(vxs))
+                        fby = 0.5_R8*sum(v%bx%Get(vxs))
+
+                        ! Get normal vector
+                        nx = v%y%Get(vxs(2)) - v%y%Get(vxs(1))
+                        ny = -(v%x%Get(vxs(2)) - v%x%Get(vxs(1)))
+
+                        ! Compute sine
+                        inc_angle(i) = abs(nx*fbx + ny*fby)/(Norm(fbx, fby)*Norm(nx,ny))             
+                        deallocate(bfcs)
+
+                    end if
+
+                end do
+
+                ! Maximal sin first
+                h_rad_cells = qm%h_rad_psi(cells)
+                inc_angle_hpol = inc_angle * h_rad_cells
+                allocate(indsort(size(cells)))
+                call Sort(inc_angle_hpol, indsort, .false.)
+                cells = cells(indsort)
+                inc_angle = inc_angle(indsort)
+                do i = 1, nint(ncell/10.0_R8)
+                    if (inc_angle(i) .gt. 0.5_R8) then
+                        qm%split_cv = cells(i)
+                        exit
+                    end if
+                end do
 
             case ('no_aligned_faces')
 
@@ -1886,7 +2006,43 @@ module gamod_types
 
             case ('farSOLrefinement_hpol')
 
-                ! TODO
+                ! Apply distance function
+                if (options%dist_function) then
+
+                    call grid%fun_wall%distr%Evaluate(c%x%Get(), c%y%Get(), dfunv)
+                    log = (dfunv .lt. options%dist_function_threshold_split)
+                    allocate(cellsD(count(log)))
+                    cellsD = pack(indcv, log)
+
+                else if (options%no_pents_area_split) then
+
+                    call grid%AreaConstraintPents(options, options%dist_function_threshold_split, cellsD)
+
+                end if
+
+                ! Apply farSOL interpolant
+                allocate(farSOLv(size(cellsD)))
+                call c%farSOL_interpolant%Evaluate(c%x%Get(cellsD),c%y%Get(cellsD), 0, 0, farSOLv)
+                allocate(cells(count(farSOLv .gt. 0.95_R8)))
+                cells = pack(cellsD, farSOLv .gt. 0.95_R8)
+
+                ! Sort for descending h_pol
+                h_pol_sol_cells = qm%h_pol(cells)
+                allocate(indsort(size(cells)))
+                call Sort(h_pol_sol_cells, indsort, .false.)
+                cells = cells(indsort)
+                i = 1
+
+                do while (qm%split_cv == 0)
+                    
+                    ! Set
+                    qm%split_cv = cells(i)
+
+                    ! TODO
+
+                end do
+
+
 
             case ('farSOLrefinement_targets')
 
@@ -3534,7 +3690,7 @@ module gamod_types
         integer(I8), allocatable, dimension(:,:) :: f_ordD, vxs_corner, fcs_targets, &
             vxs_targets, fcs_targetsC, vxs_targetsC, inters
         real(R8) :: xbmin, xbmax, ybmin, ybmax, stepx, stepy
-        real(R8), allocatable :: xv(:), yv(:), xg(:), yg(:), farSOLv(:,:), int(:)
+        real(R8), allocatable :: xv(:), yv(:), xg(:), yg(:), farSOLv(:,:)
         logical, allocatable :: in(:)
         type(PolygonUDT) :: polygon
         character(:), allocatable :: meth
@@ -3764,7 +3920,7 @@ module gamod_types
         !allocate(int(c%ntot))
         !call c%farSOL_interpolant%Evaluate(c%x%Get(), c%y%Get(), 0, 0, int)
         !call WriteArray(int, 'farSOLint')
-        
+
         end associate
 
     end subroutine
@@ -4295,39 +4451,7 @@ module gamod_types
         mFS = 0
         counter = 0
 
-        ! Augment to mergeFS and mergeFSP
-        do ifs = 1, fd%nFs
-
-            ! Get vertices of flux surface
-            tfv = GetFluxSurfaceVxsGA(fd, ifs)
-
-            ! Check if already attributed
-            if (any(hasID(tfv).eq.1)) then
-
-                ! vertices detected that belong to multiple flux surfaces
-                ! Indicate the surfaces to merge
-                fID = fieldlineID(tfv)
-                allocate(ar(count(hasID(tfv) == 1)))
-                ar = pack(fID,hasID(tfv) == 1)
-                ifs1 = ar(1)
-                if (size(ar) .gt. 1) &
-                    print *, 'Warning: MergeFS: merging of multiple flux surfaces not yet supported'
-
-                counter = counter + 1
-                mFS(counter,1) = ifs1
-                mFS(counter,2) = ifs
-
-                deallocate(ar)
-
-            end if
-
-            ! Set the fieldline ID
-            fieldlineID(tfv) = ifs
-            hasID(tfv) = 1
-
-        end do
-
-        ! Merge indicated flux surfaces - augment to n-fluxsurface - TODO
+        ! Merge indicated flux surfaces - augment to n-fluxsurface - TODO - just do this routine multiple times
         do i = 1, counter
 
             ! Get flux surface indices
@@ -4432,9 +4556,7 @@ module gamod_types
 
         end associate
 
-        
-        
-        
+    
     end subroutine
 
     !------------------------------------------------------------------!
@@ -15211,8 +15333,6 @@ module gamod_types
 
         ! Change v%ntot
         v%ntot = v%ntot - nv
-
-        ! Remove duplicated Face - TODO - probably not necessary
 
         end associate
 
