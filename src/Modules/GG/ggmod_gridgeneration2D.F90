@@ -15441,15 +15441,16 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: nfsf, nfsftot, &
-            nftftot, nftc, si, ei, np
+            nftftot, nftc, si, ei, np, nFs_orig
         integer(I8), allocatable, dimension(:)  :: ffsID, fID, vID, &
             sortind, polind, tfind, ftf, ftc, tcf, IDs, allcellreg, ind, &
-            nfsneig, tcv
-        integer(I8), allocatable, dimension(:, :)   :: tfnb
+            nfsneig, tcv, fsIDmap
+        integer(I8), allocatable, dimension(:, :)   :: tfnb, tempf
         real(R8), allocatable, dimension(:)     :: vpsi, xf, yf, xc, yc, &
             ccx, ccy, bfx, bfy, dp
         logical, allocatable, dimension(:)      :: temp, tf, &
-            ispolygonstart, tc, isbranchingpolygon, hasbndf1, hasbndf2
+            ispolygonstart, tc, isbranchingpolygon, hasbndf1, hasbndf2, &
+            keepind
 
         ! Loop
         integer(I8)                             :: i, j, k, cc, ncell, &
@@ -15467,6 +15468,11 @@ module ggmod_gridgeneration2D
         !==============
         ! Set initial number of flux surfaces 
         fd%nFs      = maxval(v%fieldlineID)
+
+        ! Initialize logical array to determine which flux surfaces to keep
+        allocate(keepind(fd%nFs), fsIDmap(fd%nFs))
+        keepind = .true.
+        fsIDmap = 0_I8
         
         ! Initialize other fields
         if (allocated(fd%fluxsurfacefacesP)) then 
@@ -15517,13 +15523,50 @@ module ggmod_gridgeneration2D
             ! Set ID
             fd%fluxsurfaceID(i) = i
 
-            ! Compute psi value as mean of vertex psi value (assumed computed)
+            ! Get flux surface vertices
             allocate(vpsi(count(v%fieldlineID == i)))
             vpsi = pack(v%psi, v%fieldlineID == i)
-            fd%fluxsurfacepsi(i) = sum(vpsi)/real(size(vpsi), kind=R8)
+
+            ! Mark surface for deletion if necessary
+            if (size(vpsi) == 0) then 
+                keepind(i) = .false. 
+                fd%fluxsurfacepsi(i) = nanval_R8()
+            else
+                 ! Compute psi value as mean of vertex psi value (assumed computed)
+                fd%fluxsurfacepsi(i) = sum(vpsi)/real(size(vpsi), kind=R8)
+            end if
+
+            ! Housekeeping
             deallocate(vpsi)
 
         end do 
+
+        ! Remove empty flux surfaces
+        !===========================
+        ! Initialize
+        nFs_orig = fd%nFs 
+
+        ! Construct the mapping
+        k = 0
+        do i = 1, nFs_orig
+            if (keepind(i)) then 
+                k = k + 1
+                fsIDmap(i) = k
+            else
+                fsIDmap(i) = 0
+            end if 
+        end do 
+
+        ! Remap vert%fieldlineID
+        where (v%fieldlineID /= 0) v%fieldlineID = fsIDmap(v%fieldlineID)
+
+        ! Remove pointer entries (since deletd flux surfaces have no faces, we can simply remove those pointer entries)
+        fd%nFs = maxval(fsIDmap)
+        tempf = fd%fluxsurfacefacesP
+        deallocate(fd%fluxsurfacefacesP)
+        allocate(fd%fluxsurfacefacesP(fd%nFs, 2))
+        fd%fluxsurfacefacesP(:, 1) = pack(tempf(:, 1), keepind)
+        fd%fluxsurfacefacesP(:, 2) = pack(tempf(:, 2), keepind)
 
         ! Flux tubes
         !===========
