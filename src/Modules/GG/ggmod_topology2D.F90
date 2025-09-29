@@ -358,6 +358,10 @@ module ggmod_topology2D
                 topomesh, fieldtracer, vesseltracer, streamlinetracer)
         end if 
 
+        ! Clean
+        !======
+        call CleanTopologicalMesh(topomesh)
+
         ! Write
         !======
         call WriteTopologicalMesh(topomesh, 'topomesh')
@@ -4293,6 +4297,94 @@ module ggmod_topology2D
         ! Housekeeping
         !=============
         end associate
+
+    end subroutine
+
+    ! Topomesh cleaner
+    subroutine CleanTopologicalMesh(topomesh)
+
+        ! Description
+        !============
+        ! This routine cleans up the topological mesh without further 
+        ! modifying it (this routine should only be called at the 
+        ! end of topomesh construction). At the moment, this only 
+        ! includes removal of flux surface IDs that are not present 
+        ! anymore in any of the faces or vertices. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(inout)           :: topomesh
+
+        ! Auxiliary
+        logical, allocatable, dimension(:)          :: keepind
+        integer(I8)                                 :: nfsold
+        integer(I8), allocatable, dimension(:)      :: fsIDold, fsIDmap
+        real(R8), allocatable, dimension(:)         :: fsfvalold
+
+        ! Loop
+        integer(I8)                                 :: i, k 
+
+        ! Initialize
+        !===========
+        ! Unpack
+        nfsold      = topomesh%nFs
+        fsIDold     = topomesh%fsID%Get()
+        fsfvalold   = topomesh%fsfval%Get()
+
+        ! Initialize
+        allocate(fsIDmap(nfsold), keepind(nfsold))
+        keepind = .false. ! will be set to true if found
+        fsIDmap = 0_I8
+
+        ! Determine used flux surface IDs
+        !================================
+        ! Used by vertices
+        do i = 1, topomesh%vert%ntot
+            if (topomesh%vert%fsID(i) /= 0) then 
+                keepind(topomesh%vert%fsID(i)) = .true.
+            end if 
+        end do 
+
+        ! Used by faces
+        do i = 1, topomesh%face%ntot
+            if (topomesh%face%fsID(i) /= 0) then 
+                keepind(topomesh%face%fsID(i)) = .true.
+            end if 
+        end do 
+
+        ! Construct mapping
+        !==================
+        k = 0
+        do i = 1, nfsold
+            if (keepind(i)) then 
+                k = k + 1
+                fsIDmap(i) = k
+            else
+                fsIDmap(i) = 0
+            end if
+        end do 
+
+        ! Remap
+        !======
+        ! Vertices
+        do i = 1, topomesh%vert%ntot
+            if (topomesh%vert%fsID(i) /= 0) then 
+                topomesh%vert%fsID(i) = fsIDmap(topomesh%vert%fsID(i))
+            end if 
+        end do 
+
+        ! Faces
+        do i = 1, topomesh%face%ntot
+            if (topomesh%face%fsID(i) /= 0) then 
+                topomesh%face%fsID(i) = fsIDmap(topomesh%face%fsID(i))
+            end if 
+        end do 
+
+        ! Delete
+        topomesh%nFs = maxval(fsIDmap)
+        topomesh%fsID = ConstructIntegerDynamicArray([(k, k = 1, topomesh%nFs)])
+        topomesh%fsfval = ConstructRealDynamicArray(pack(topomesh%fsfval%Get(), keepind))
 
     end subroutine
 
