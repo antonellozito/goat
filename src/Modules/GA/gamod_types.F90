@@ -331,6 +331,7 @@ module gamod_types
         procedure :: CheckUnstructuredGrid
         procedure :: RecalcMagn
         procedure :: MergeFS
+        procedure :: DetectMergeFS
 
         ! Grid adaptation
         !================
@@ -349,6 +350,9 @@ module gamod_types
         procedure :: GetConnectionVertex
         procedure :: CheckStackedTriaOverlap
         procedure :: StackAdaptation
+        procedure :: MergeStackedTriasWrapper
+        procedure :: MergeStackedTrias
+        procedure :: MergeTrapIntoStacked
 
         ! Stacked to cutcell
         procedure :: StackedToCutcell
@@ -376,6 +380,7 @@ module gamod_types
         procedure :: MakeMergePent
         procedure :: MakeNewThreeFace
         procedure :: AdaptNeigThreeVert
+        procedure :: TransPentsToTrias
 
         ! Splitting 
         procedure :: DoSplitting
@@ -538,7 +543,7 @@ module gamod_types
         class(QualityMetricUDT)    :: qm
         type(GAGridUDT)         :: grid
 
-        ! Initialize the qm arrays?? - TODO
+        ! Initialize the qm arrays
         if (allocated(qm%fcBias)) then
             deallocate(qm%fcBias)
             deallocate(qm%fcqalfc)
@@ -855,7 +860,7 @@ module gamod_types
 
         end do
 
-        ! Initialize the qm arrays?? - TODO
+        ! Initialize the qm arrays
         if (allocated(qm%fcBias)) then
             deallocate(qm%fcBias)
             deallocate(qm%fcqalfc)
@@ -935,7 +940,7 @@ module gamod_types
 
         ! Auxiliary 
         integer(I8) :: i, j, k, neig, nf, fcs_al1, fcs_al2, ind, &
-            common_face, counter, ncc, trap
+            common_face, counter, ncc, trap, indmax
         integer(I8), allocatable, dimension(:) :: forbidden_fcs, &
             indsort, cells, small_cells, fcs, cvs, cvLookUp, indcv, &
             no_cells, trias, cells2, indfc, pol_faces, fcs1, fcs2, cellsD, &
@@ -944,17 +949,18 @@ module gamod_types
             nums, fcs_cv, fcs_m
         integer(I8), allocatable :: cctrapsP(:,:)
         real(R8) :: crit, dfunv(grid%cell%ntot), h_pol_no_cells_crit, &
-            mean_pol_flux, bench
+            mean_pol_flux, bench, bias_max
         real(R8), allocatable, dimension(:) :: area_small_cells, &
             h_pol_no_cells_sorted, h_pol_cells, h_pol_cvs, bias, &
             pol_fluxdens_est, pol_fluxdens_estD, h_rad_cells, incl, &
-            ARtot
+            ARtot, farSOLv, fcX, fcY
         logical, allocatable :: log(:), log2(:), trias_log(:)
 
         ! Associate
         associate(&
             c => grid%cell, &
             f => grid%face, &
+            v => grid%vert, &
             fd => grid%data%fluxdata &
             )
 
@@ -1386,8 +1392,50 @@ module gamod_types
 
         case ('bias_rad_farSOL')
 
-            ! Remove cells with strong bias in the radial direction in the farSOL region - TODO after detect farSOL
+            ! Remove cells with strong bias in the radial direction in the farSOL region
+            ! Get aligned faces in farSOL
+            indfc = (/(i, i = 1, f%ntot)/)
 
+            fcX = 0.5_R8 * (v%x%Get(f%vert1%Get()) + v%x%Get(f%vert2%Get()))
+            fcY = 0.5_R8 * (v%y%Get(f%vert1%Get()) + v%y%Get(f%vert2%Get()))
+
+            ! Apply farSOL interpolant
+            allocate(farSOLv(f%ntot))
+            call c%farSOL_interpolant%Evaluate(fcX,fcY, 0, 0, farSOLv)
+            allocate(fcs(count(farSOLv .gt. 0.95_R8)))
+            fcs = pack(indfc, farSOLv .gt. 0.95_R8)
+
+            allocate(rad_facesD(count(f%aligned%Get(fcs) == 1)))
+            rad_facesD = pack(fcs, f%aligned%Get(fcs) == 1)
+            log = .not.isMember(rad_facesD, forbidden_fcs)
+            allocate(rad_faces(count(log))) 
+            rad_faces = pack(rad_facesD, log)
+
+            ! Compute bias for these faces
+            allocate(bias(size(rad_faces)))
+            bias = 0
+            cvLookUp = GetCvLookUpGA(c)
+            do i = 1, size(rad_faces)
+                cvs = GetFaceCellGA(c, rad_faces(i), cvLookUp)
+                if (size(cvs) == 2) then
+                    if (c%reg%Get(cvs(1)) == c%reg%Get(cvs(2))) then
+
+                        ! Get faces of cells
+                        fcs1 = GetCellFaceGA(c, cvs(1))
+                        fcs2 = GetCellFaceGA(c, cvs(2))
+
+                        ! Compute bias 
+                        if (count(f%aligned%Get(fcs1) == 1) == 2 &
+                            .and. count(f%aligned%Get(fcs2) == 1) == 2) then
+                            bias(i) = maxval(qm%h_rad_psi(cvs)) / minval(qm%h_rad_psi(cvs))
+                        end if
+                    end if
+                end if
+            end do
+
+            indmax = maxloc(bias, 1)
+            bias_max = maxval(bias)
+            if (bias_max .gt. options%merge_bias_limit) qm%merge_fc = rad_faces(indmax)
 
         case ('bias_rad')
 
@@ -1502,7 +1550,7 @@ module gamod_types
             fbx, fby
         real(R8), allocatable, dimension(:) :: h_rad_cells, pol_fluxdens_est, &
             dpsi, cvAR_tria, cvS_tria, h_pol_sol_cells, ARtot, incl, farSOLv, &
-            inc_angle, inc_angle_hpol
+            inc_angle, inc_angle_hpol, h_pol_cells
         logical, allocatable :: log(:), log2(:), b_flagfcs(:), b_flag(:)
 
         ! Associate
@@ -2038,7 +2086,31 @@ module gamod_types
                     ! Set
                     qm%split_cv = cells(i)
 
-                    ! TODO
+                    if (c%faceP2%Get(qm%split_cv) == 3 .or. c%cflags%Get(qm%split_cv) == 3) then
+                        qm%split_cv = 0
+                        i = i + 1
+                    else if (c%faceP2%Get(qm%split_cv) == 4) then
+                        fcs = GetCellFaceGA(c, qm%split_cv)
+
+                        dpsi = abs(v%psi%Get(f%vert1%Get(fcs)) - v%psi%Get(f%vert2%Get(fcs)))
+                        indmin = minloc(dpsi, 1)
+                        splitfaces(1) = fcs(indmin)
+                        dpsi(indmin) = 1e99_R8
+
+                        indmin = minloc(dpsi, 1)
+                        splitfaces(2) = fcs(indmin)
+
+                        ! Loop over splitfaces
+                        do k = 1, 2
+                            cvs = GetFaceCellGA(c, splitfaces(k))
+                            if (any(c%faceP2%Get(cvs) == 5)) then
+                                qm%split_cv = 0
+                                i = i + 1
+                                exit
+                            end if
+                        end do
+
+                    end if
 
                 end do
 
@@ -2046,7 +2118,71 @@ module gamod_types
 
             case ('farSOLrefinement_targets')
 
-                ! TODO
+                ! Apply distance function
+                if (options%dist_function) then
+
+                    call grid%fun%distr%Evaluate(c%x%Get(), c%y%Get(), dfunv)
+                    log = (dfunv .lt. options%dist_function_threshold_split)
+                    allocate(cellsD(count(log)))
+                    cellsD = pack(indcv, log)
+
+                else if (options%no_pents_area_split) then
+
+                    call grid%AreaConstraintPents(options, options%dist_function_threshold_split, cellsD)
+
+                end if
+
+                ! Apply farSOL interpolant
+                allocate(farSOLv(size(cellsD)))
+                call c%farSOL_interpolant%Evaluate(c%x%Get(cellsD),c%y%Get(cellsD), 0, 0, farSOLv)
+                allocate(cellsD2(count(farSOLv .gt. 0.95_R8)))
+                cellsD2 = pack(cellsD, farSOLv .gt. 0.95_R8)
+
+                ! Get boundary cells in farSOL
+                log = isBoundaryCellGA(grid, cellsD2)
+                allocate(cells(count(log)))
+                cells = pack(cellsD2, log)   
+                
+                ! Compute incidence angle for every cell, compute sine
+                b_flag = (f%label%Get() /= 0)
+                ncell = size(cells)
+                do i = 1, ncell
+                    fcs = GetCellFaceGA(c, cells(i))
+                    b_flagfcs = b_flag(fcs)
+                    if (count(b_flagfcs) == 1) then
+                        allocate(bfcs(1))
+                        bfcs = pack(fcs, b_flagfcs)
+
+                        ! Interpolate magnetic field vector
+                        vxs = [f%vert1%Get(bfcs), f%vert2%Get(bfcs)]
+                        fbx = 0.5_R8*sum(-v%by%Get(vxs))
+                        fby = 0.5_R8*sum(v%bx%Get(vxs))
+
+                        ! Get normal vector
+                        nx = v%y%Get(vxs(2)) - v%y%Get(vxs(1))
+                        ny = -(v%x%Get(vxs(2)) - v%x%Get(vxs(1)))
+
+                        ! Compute sine
+                        inc_angle(i) = abs(nx*fbx + ny*fby)/(Norm(fbx, fby)*Norm(nx,ny))             
+                        deallocate(bfcs)
+
+                    end if
+
+                end do
+
+                ! Maximal sin first
+                h_pol_cells = qm%h_pol(cells)
+                inc_angle_hpol = (inc_angle * h_pol_cells)**2
+                allocate(indsort(size(cells)))
+                call Sort(inc_angle_hpol, indsort, .false.)
+                cells = cells(indsort)
+                inc_angle = inc_angle(indsort)
+                do i = 1, nint(ncell/10.0_R8)
+                    if (inc_angle(i) .gt. 0.5_R8) then
+                        qm%split_cv = cells(i)
+                        exit
+                    end if
+                end do                
 
             case ('manual')
 
@@ -4428,10 +4564,10 @@ module gamod_types
 
         ! Auxiliary
         integer(I8), allocatable ::  mFS(:,:), mFS_update(:,:)
-        integer(I8), allocatable, dimension(:) :: fieldlineID, tfv, ar, tv1, &
-            tf1, tv2, tf2, new_faces, new_verts, rem_ind_v, rem_ind_f, fID, &
-            hasID, range
-        integer(I8) :: i, j, ifs, counter, ifs1, ifs2, nv1, nf1, nv2, &
+        integer(I8), allocatable, dimension(:) :: tv1, &
+            tf1, tv2, tf2, new_faces, new_verts, rem_ind_v, rem_ind_f, &
+            range
+        integer(I8) :: i, j, counter, ifs1, ifs2, nv1, nf1, nv2, &
             nf2, counterv, counterf
 
         ! Associate
@@ -4443,6 +4579,148 @@ module gamod_types
             )
 
         !Initialize
+        call grid%DetectMergeFS(mFS, counter)
+
+        ! Merge indicated flux surfaces
+        do while (counter /= 0)
+            do i = 1, counter
+
+                ! Get flux surface indices
+                ifs1 = mFS(i,1)
+                ifs2 = mFS(i,2)
+
+                ! Get vertices and faces
+                tv1 = GetFluxSurfaceVxsGA(fd, ifs1)
+                nv1 = fd%fluxsurfacevertsP2%Get(ifs1)
+                tf1 = GetFluxSurfaceFcsGA(fd, ifs1)
+                nf1 = fd%fluxsurfacefacesP2%Get(ifs1)
+                tv2 = GetFluxSurfaceVxsGA(fd, ifs2)
+                nv2 = fd%fluxsurfacevertsP2%Get(ifs2)
+                tf2 = GetFluxSurfaceFcsGA(fd, ifs2)
+                nf2 = fd%fluxsurfacefacesP2%Get(ifs2)
+
+                ! Remove both of them and add one at the back
+                ! Get the indices to remove out of fsVx and fsFc
+                allocate(rem_ind_v(v%ntot))
+                allocate(rem_ind_f(f%ntot))
+                rem_ind_v = 0
+                rem_ind_f = 0
+
+                counterv = 0
+                counterf = 0
+
+                ! First ifs
+                rem_ind_v(counterv + 1: counterv+nv1) = (/ (j, j = fd%fluxsurfacevertsP1%Get(ifs1),&
+                    fd%fluxsurfacevertsP1%Get(ifs1)+nv1-1) /)
+                counterv = counterv + nv1
+                rem_ind_f(counterf + 1: counterf+nf1) = (/ (j, j = fd%fluxsurfacefacesP1%Get(ifs1),&
+                    fd%fluxsurfacefacesP1%Get(ifs1)+nf1-1) /)
+                counterf = counterf + nf1
+
+                ! Second ifs
+                rem_ind_v(counterv + 1: counterv+nv2) = (/ (j, j = fd%fluxsurfacevertsP1%Get(ifs2),&
+                    fd%fluxsurfacevertsP1%Get(ifs2)+nv2-1) /)
+                counterv = counterv + nv2
+                rem_ind_f(counterf + 1: counterf+nf2) = (/ (j, j = fd%fluxsurfacefacesP1%Get(ifs2),&
+                    fd%fluxsurfacefacesP1%Get(ifs2)+nf2-1) /)
+                counterf = counterf + nf2
+
+                ! Remove in fsVx and fsFc
+                call fd%fluxsurfaceverts%Remove(rem_ind_v(1:counterv))
+                call fd%fluxsurfacefaces%Remove(rem_ind_f(1:counterf))
+
+                ! Remove and adjust pointer arrays
+                call fd%fluxsurfacevertsP1%Remove(ifs1)
+                call fd%fluxsurfacevertsP2%Remove(ifs1)
+                call fd%fluxsurfacefacesP1%Remove(ifs1)
+                call fd%fluxsurfacefacesP2%Remove(ifs1)
+                fd%nFs = fd%nFs - 1
+
+                range = (/ (j, j = ifs1, fd%nFs)/)
+                call fd%fluxsurfacevertsP1%SumMask(range, -nv1)
+                call fd%fluxsurfacefacesP1%SumMask(range, -nf1)
+
+                ifs2 = ifs2 - 1
+                call fd%fluxsurfacevertsP1%Remove(ifs2)
+                call fd%fluxsurfacevertsP2%Remove(ifs2)
+                call fd%fluxsurfacefacesP1%Remove(ifs2)
+                call fd%fluxsurfacefacesP2%Remove(ifs2)
+                fd%nFs = fd%nFs - 1
+
+                range = (/ (j, j = ifs2, fd%nFs)/)
+                call fd%fluxsurfacevertsP1%SumMask(range, -nv2)
+                call fd%fluxsurfacefacesP1%SumMask(range, -nf2)
+
+                ! Add new flux surface
+                fd%nFs = fd%nFs + 1
+                call Unique([tv1, tv2], new_verts)
+                call Unique([tf1, tf2], new_faces)
+
+                call fd%fluxsurfacevertsP1%Append(fd%fluxsurfacevertsP1%Get(fd%nFs-1)+ &
+                    fd%fluxsurfacevertsP2%Get(fd%nFs-1))
+                call fd%fluxsurfacevertsP2%Append(size(new_verts))
+                call fd%fluxsurfaceverts%Append(new_verts)
+                call fd%fluxsurfacefacesP1%Append(fd%fluxsurfacefacesP1%Get(fd%nFs-1)+ &
+                    fd%fluxsurfacefacesP2%Get(fd%nFs-1))
+                call fd%fluxsurfacefacesP2%Append(size(new_faces))
+                call fd%fluxsurfacefaces%Append(new_faces)
+
+                ! Update other flux surface indices in mFS
+                allocate(mFS_update(size(mFS(:,1)),2))
+                mFS_update = 0
+                do j = i+1, counter
+
+                    if (mFS(j,1) .gt. ifs1) mFS_update(j,1) = mFS_update(j,1) + 1 
+                    if (mFS(j,2) .gt. ifs1) mFS_update(j,2) = mFS_update(j,2) + 1 
+                    if (mFS(j,1) .gt. ifs2+1) mFS_update(j,1) = mFS_update(j,1) + 1 
+                    if (mFS(j,2) .gt. ifs2+1) mFS_update(j,2) = mFS_update(j,2) + 1 
+
+                end do
+
+                ! Update
+                mFS = mFs - mFS_update
+                deallocate(mFS_update)
+                deallocate(rem_ind_f)
+                deallocate(rem_ind_v)
+
+            end do
+
+            ! Detect new merging
+            call grid%DetectMergeFS(mFS, counter)
+
+        end do
+
+        end associate
+
+    
+    end subroutine
+
+    subroutine DetectMergeFS(grid, mFS, counter)
+
+        ! Description
+        !============
+        ! Detect which fluxsurfaces need to be merged
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), allocatable, intent(out)   :: mFS(:,:)
+        integer(I8), intent(out)                :: counter
+
+        ! Auxiliary
+        integer(I8) :: ifs, ifs1
+        integer(I8), allocatable, dimension(:) :: tfv, fieldlineID, hasID, fID, &
+            ar
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert, &
+            fd => grid%data%fluxdata &
+            )
+
         allocate(mFS(fd%nFs,2))
         allocate(hasID(v%ntot))
         allocate(fieldlineID(v%ntot))
@@ -4451,112 +4729,40 @@ module gamod_types
         mFS = 0
         counter = 0
 
-        ! Merge indicated flux surfaces - augment to n-fluxsurface - TODO - just do this routine multiple times
-        do i = 1, counter
+       ! Augment to mergeFS and mergeFSP
+        do ifs = 1, fd%nFs
 
-            ! Get flux surface indices
-            ifs1 = mFS(i,1)
-            ifs2 = mFS(i,2)
+            ! Get vertices of flux surface
+            tfv = GetFluxSurfaceVxsGA(fd, ifs)
 
-            ! Get vertices and faces
-            tv1 = GetFluxSurfaceVxsGA(fd, ifs1)
-            nv1 = fd%fluxsurfacevertsP2%Get(ifs1)
-            tf1 = GetFluxSurfaceFcsGA(fd, ifs1)
-            nf1 = fd%fluxsurfacefacesP2%Get(ifs1)
-            tv2 = GetFluxSurfaceVxsGA(fd, ifs2)
-            nv2 = fd%fluxsurfacevertsP2%Get(ifs2)
-            tf2 = GetFluxSurfaceFcsGA(fd, ifs2)
-            nf2 = fd%fluxsurfacefacesP2%Get(ifs2)
+            ! Check if already attributed
+            if (any(hasID(tfv).eq.1)) then
 
-            ! Remove both of them and add one at the back
-            ! Get the indices to remove out of fsVx and fsFc
-            allocate(rem_ind_v(v%ntot))
-            allocate(rem_ind_f(f%ntot))
-            rem_ind_v = 0
-            rem_ind_f = 0
+                ! vertices detected that belong to multiple flux surfaces
+                ! Indicate the surfaces to merge
+                fID = fieldlineID(tfv)
+                allocate(ar(count(hasID(tfv) == 1)))
+                ar = pack(fID,hasID(tfv) == 1)
+                ifs1 = ar(1)
+                if (size(ar) .gt. 1) &
+                    print *, 'Warning: MergeFS: merging of multiple flux surfaces not yet supported'
 
-            counterv = 0
-            counterf = 0
+                counter = counter + 1
+                mFS(counter,1) = ifs1
+                mFS(counter,2) = ifs
+                deallocate(ar)
 
-            ! First ifs
-            rem_ind_v(counterv + 1: counterv+nv1) = (/ (j, j = fd%fluxsurfacevertsP1%Get(ifs1),&
-                fd%fluxsurfacevertsP1%Get(ifs1)+nv1-1) /)
-            counterv = counterv + nv1
-            rem_ind_f(counterf + 1: counterf+nf1) = (/ (j, j = fd%fluxsurfacefacesP1%Get(ifs1),&
-                fd%fluxsurfacefacesP1%Get(ifs1)+nf1-1) /)
-            counterf = counterf + nf1
+            end if
 
-            ! Second ifs
-            rem_ind_v(counterv + 1: counterv+nv2) = (/ (j, j = fd%fluxsurfacevertsP1%Get(ifs2),&
-                fd%fluxsurfacevertsP1%Get(ifs2)+nv2-1) /)
-            counterv = counterv + nv2
-            rem_ind_f(counterf + 1: counterf+nf2) = (/ (j, j = fd%fluxsurfacefacesP1%Get(ifs2),&
-                fd%fluxsurfacefacesP1%Get(ifs2)+nf2-1) /)
-            counterf = counterf + nf2
-
-            ! Remove in fsVx and fsFc
-            call fd%fluxsurfaceverts%Remove(rem_ind_v(1:counterv))
-            call fd%fluxsurfacefaces%Remove(rem_ind_f(1:counterf))
-
-            ! Remove and adjust pointer arrays
-            call fd%fluxsurfacevertsP1%Remove(ifs1)
-            call fd%fluxsurfacevertsP2%Remove(ifs1)
-            call fd%fluxsurfacefacesP1%Remove(ifs1)
-            call fd%fluxsurfacefacesP2%Remove(ifs1)
-            fd%nFs = fd%nFs - 1
-
-            range = (/ (j, j = ifs1, fd%nFs)/)
-            call fd%fluxsurfacevertsP1%SumMask(range, -nv1)
-            call fd%fluxsurfacefacesP1%SumMask(range, -nf1)
-
-            ifs2 = ifs2 - 1
-            call fd%fluxsurfacevertsP1%Remove(ifs2)
-            call fd%fluxsurfacevertsP2%Remove(ifs2)
-            call fd%fluxsurfacefacesP1%Remove(ifs2)
-            call fd%fluxsurfacefacesP2%Remove(ifs2)
-            fd%nFs = fd%nFs - 1
-
-            range = (/ (j, j = ifs2, fd%nFs)/)
-            call fd%fluxsurfacevertsP1%SumMask(range, -nv2)
-            call fd%fluxsurfacefacesP1%SumMask(range, -nf2)
-
-            ! Add new flux surface
-            fd%nFs = fd%nFs + 1
-            call Unique([tv1, tv2], new_verts)
-            call Unique([tf1, tf2], new_faces)
-
-            call fd%fluxsurfacevertsP1%Append(fd%fluxsurfacevertsP1%Get(fd%nFs-1)+ &
-                fd%fluxsurfacevertsP2%Get(fd%nFs-1))
-            call fd%fluxsurfacevertsP2%Append(size(new_verts))
-            call fd%fluxsurfaceverts%Append(new_verts)
-            call fd%fluxsurfacefacesP1%Append(fd%fluxsurfacefacesP1%Get(fd%nFs-1)+ &
-                fd%fluxsurfacefacesP2%Get(fd%nFs-1))
-            call fd%fluxsurfacefacesP2%Append(size(new_faces))
-            call fd%fluxsurfacefaces%Append(new_faces)
-
-            ! Update other flux surface indices in mFS
-            allocate(mFS_update(size(mFS(:,1)),2))
-            mFS_update = 0
-            do j = i+1, counter
-
-                if (mFS(j,1) .gt. ifs1) mFS_update(j,1) = mFS_update(j,1) + 1 
-                if (mFS(j,2) .gt. ifs1) mFS_update(j,2) = mFS_update(j,2) + 1 
-                if (mFS(j,1) .gt. ifs2+1) mFS_update(j,1) = mFS_update(j,1) + 1 
-                if (mFS(j,2) .gt. ifs2+1) mFS_update(j,2) = mFS_update(j,2) + 1 
-
-            end do
-
-            ! Update
-            mFS = mFs - mFS_update
-            deallocate(mFS_update)
-            deallocate(rem_ind_f)
-            deallocate(rem_ind_v)
+            ! Set the fieldline ID
+            fieldlineID(tfv) = ifs
+            hasID(tfv) = 1
 
         end do
 
         end associate
 
-    
+
     end subroutine
 
     !------------------------------------------------------------------!
@@ -5022,6 +5228,7 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: cctria, cctraps, traps, ctest1, ctest2
         integer(I8), allocatable :: cctrapsP(:,:)
         logical :: approved
+        logical, allocatable :: approved_save(:)
 
         ! Printing
         print *, 'Apply Stacked Triangle adaptation'
@@ -5047,6 +5254,7 @@ module gamod_types
 
         ! Adaptation
         !===========
+        allocate(approved_save(size(cctria)))
         do i = 1, size(cctria)
 
             ! Unpack
@@ -5060,28 +5268,23 @@ module gamod_types
             if (con_vert /= 0) &
                 call grid%CheckStackedTriaOverlap(tria, traps, con_vert, approved)
             
-            !if (options%debug) then
-            !    print *, con_vert
-            !    print *, 'x-coor: ' , grid%vert%x%Get(con_vert)
-            !    print *, 'y-coor: ' , grid%vert%y%Get(con_vert)
-            !    print *, approved
-            !end if
-
             ! Do the adaptation if oké
             if (con_vert /= 0 .and. approved) &
                 call grid%StackAdaptation(tria, traps, con_vert)
+
+            ! Save approval
+            approved_save(i) = approved 
 
         end do
 
         ! Merge some triangles if to shallow angle
         if (options%merge_stacked_trias) then
-            ! call grid%MergeStackedTrias() - TODO
-
+            call grid%MergeStackedTriasWrapper(cctria, cctraps, cctrapsP, approved_save, options)
         end if
 
         ! Check from boundary trapezoids which should be included in the stacked triangle
         if (options%merge_trap_into_stacked) then
-            ! call grid%MergeTrapIntoStacked() - TODO
+             call grid%MergeTrapIntoStacked(options)
         end if
 
 
@@ -5865,6 +6068,602 @@ module gamod_types
 
     end subroutine
 
+    subroutine MergeStackedTriasWrapper(grid, cctria, cctraps, cctrapsP, flag, options)
+
+        ! Description
+        !============
+        ! Wrapper for MergeStackedTrias
+
+        ! Declare variables
+        !==================
+        ! Argumnets
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), intent(inout)              :: cctria(:), cctrapsP(:,:)
+        integer(I8), allocatable, intent(inout) :: cctraps(:)
+        logical, intent(inout)                  :: flag(:)
+        type(GAoptionsUDT), intent(in)          :: options
+
+        ! Auxiliary
+        integer(I8) :: i, k, n_int, l, l_int
+        integer(I8), allocatable :: cctrias(:), cctriasP(:,:)
+
+        ! Initialize
+        allocate(cctriasP(size(cctrapsP, 1), 2))
+        cctriasP = 0
+
+        ! Detect stacked triangles
+        call grid%MergeStackedTrias(&
+            cctria, cctraps, cctrapsP, cctrias, cctriasP, flag, options, 'first')
+
+        n_int = 0
+        do i = 1, size(cctrapsP, 1)
+            l = cctriasP(i,2)
+            l_int = nint(log(real(l, kind=R8))/log(2.0_R8))
+            if (l_int .gt. n_int) then
+                n_int = l_int
+            end if
+        end do
+
+        do k = 1, n_int
+            call grid%MergeStackedTrias(&
+                cctria, cctraps, cctrapsP, cctrias, cctriasP, flag, options, 'later')
+            do i = 1, size(cctrapsP, 1)
+                if (cctrapsP(i,2) /= 0) flag(i) = .false.
+            end do
+        end do
+
+    end subroutine
+
+    subroutine MergeStackedTrias(grid, cctria, cctraps, cctrapsP, cctrias, cctriasP, flag, options, type)
+
+        ! Description
+        !============
+        ! Merges stack trias with have an angle in the connection vertex
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)         :: grid
+        integer(I8), intent(inout)              :: cctria(:), cctrapsP(:,:), cctriasP(:,:)
+        integer(I8), allocatable, intent(inout) :: cctraps(:), cctrias(:) 
+        type(GAoptionsUDT)                      :: options
+        logical :: flag(:)
+        character(*), intent(in) :: type 
+
+        ! Auxiliary
+        integer(I8) :: i, j, k, m, n, nc, icv_last, con_vert, counter, vx, n_trias, &
+            c1, c2, v1, v2, f1, f2, f3, cv_neig, indv2_neig, indf2_neig, loc, s, ncc
+        integer(I8), allocatable, dimension(:) :: cells, trias, con_vertD, indcc, &
+            vxs_all, bvxsD, bvxs, vxD, vxs1, vxs2, v_int, v2_int, cvs, range, &
+            vert_rem, face_rem, cell_rem, temp1, temp2, ind2, triasU, vxs, range2
+        real(R8), allocatable, dimension(:) :: vec_x, vec_y, norm_vec, sin
+        logical, allocatable :: merge_flagc(:), log2(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        nc = size(cctrapsP(:,1))
+        
+        ! Initialize
+        if (type == 'first') then
+                ncc = size(cctrapsP,1)
+                allocate(cctrias(cctrapsP(ncc,1)+cctrapsP(ncc,2)+ncc))
+                cctrias = 0
+                cctriasP = 0
+        end if
+
+        ! Loop over stacked triangle groups
+        do  i = 1, size(cctrapsP,1)
+
+            if (flag(i)) then
+
+                ! Get the connectionvert = boundary vertex of last 'trap'
+                if (type == 'first') then
+                    trias = [cctria(i), cctraps(cctrapsP(i,1):cctrapsP(i,1)+cctrapsP(i,2)-1)]
+                else if (type == 'later') then
+                    trias = cctrias(cctriasP(i,1):cctriasP(i,1)+cctriasP(i,2)-1)
+                end if
+                n_trias = size(trias)
+
+                ! Continue if multiple triangles
+                if (n_trias /= 1) then
+
+                    icv_last = trias(n_trias)
+                    vxs = GetCellVertGA(c, icv_last)
+                    allocate(con_vertD(count(isBoundaryVertGA(grid, vxs))))
+                    con_vertD = pack(vxs, isBoundaryVertGA(grid, vxs))
+                    con_vert = con_vertD(1)
+
+                    ! Get all the other vertices (just all verts of all trias, expect the convert)
+                    allocate(vxs_all(n_trias+1))
+                    vxs_all = 0
+                    counter = 0
+                    do j = 1, n_trias
+
+                        if (j == 1) then
+                            vxs = GetCellVertGA(c, trias(j))
+                            allocate(bvxs(count(isBoundaryVertGA(grid, vxs))))
+                            bvxs = pack(vxs, isBoundaryVertGA(grid, vxs))
+                            allocate(bvxsD(count(bvxs /= con_vert)))
+                            bvxsD = pack(bvxs, bvxs /= con_vert)
+                            vxs_all(j) = bvxsD(1)
+
+                            allocate(vxD(count(vxs /= vxs_all(1) .and. vxs /= con_vert)))
+                            vxD = pack(vxs, vxs /= vxs_all(1) .and. vxs /= con_vert)
+                            vxs_all(2) = vxD(1)
+                            counter = 2
+
+                            ! Housekeeping
+                            deallocate(bvxs)
+                            deallocate(bvxsD)
+                            deallocate(vxD)
+
+                        else 
+
+                            ! Loop over the vertices
+                            s = c%vertP1%Get(trias(j))
+                            do k = 1, 3
+                                loc = s+k-1
+                                vx = c%vert%Get(loc)
+                                if (vx /= con_vert .and. .not.any(vx == vxs_all)) then
+                                    counter = counter + 1
+                                    vxs_all(counter) = vx
+                                end if
+
+                            end do
+
+                        end if
+                    end do
+
+                    if (counter /= n_trias + 1) call gdErrorHandler('MergeStackedTrias: vxs_all not correct length')
+
+                    ! Build the vectors to compute the angles
+                    vec_x = v%x%Get(vxs_all) - v%x%Get(con_vert)
+                    vec_y = v%y%Get(vxs_all) - v%y%Get(con_vert)
+                    norm_vec = Norm(vec_x, vec_y)
+
+                    ! Calculate the sines
+                    ! Calculate angles (sin = |a x b| / norm(a)*norm(b))
+                    ! with |a x b | = ax*by - bx*ay  
+                    sin = (vec_x(1:n_trias) * vec_y(2:n_trias+1) - vec_x(2:n_trias+1) * vec_y(1:n_trias)) &
+                        / (norm_vec(1:n_trias) * norm_vec(2:n_trias+1))
+            
+                    ! Mark cells to merge => check sines: if to small, mark for merging
+                    merge_flagc = abs(sin) < options%merge_stacked_trias_angle_threshold*pi_R8/180.0_R8
+                    
+                    ! Merging
+                    do j = 2, size(trias)
+                        if (merge_flagc(j) .and. merge_flagc(j-1) &
+                            .or. .not.merge_flagc(j) .and. merge_flagc(j-1)) then
+
+                            print *, 'Merge triangles'
+
+                            ! Cells
+                            c1 = trias(j-1)
+                            if (c1 == 0) then
+                                c1 = trias(j-2)
+                            end if
+                            c2 = trias(j)
+
+                            ! Get the vertices
+                            vxs1 = GetCellVertGA(c, c1)
+                            vxs2 = GetCellVertGA(c, c2)
+
+                            ! Identify v1 and v2
+                            allocate(v_int(count(isMember(vxs1, vxs2))))
+                            v_int = pack(vxs1, isMember(vxs1, vxs2))
+                            v1 = Pack2(v_int, v_int /= con_vert)
+                            allocate(v2_int(count(vxs2 /= v_int(1))))
+                            v2_int = pack(vxs2, vxs2 /= v_int(1))
+                            v2 = Pack2(v2_int, v2_int /= v_int(2))
+
+                            ! Identify f1, f2, f3
+                            call grid%GetFaceNumber(v1, con_vert, 1, f1)
+                            call grid%GetFaceNumber(v2, con_vert, 1, f2)
+                            call grid%GetFaceNumber(v1, v2, 1, f3)
+
+                            ! Get neighboring cells
+                            cvs = GetFaceCellGA(c, f3)
+                            cv_neig = Pack2(cvs, cvs /= c2)
+                            if (c%vertP2%Get(cv_neig) .gt. 3) then
+
+                                ! Give properties of v2 to v1
+                                call v%x%Set(v1, v%x%Get(v2))
+                                call v%y%Set(v1, v%y%Get(v2))
+                                call v%psi%Set(v1, v%psi%Get(v2))
+                                call v%bx%Set(v1, v%bx%Get(v2))
+                                call v%by%Set(v1, v%by%Get(v2))
+
+                                ! Replace in connectivity
+                                call ReplaceElement(c%vert, v2, v1)
+                                call ReplaceElement(f%vert1, v2, v1)
+                                call ReplaceElement(f%vert2, v2, v1)
+                                call ReplaceElement(c%face, f2, f1)
+
+                                ! Remove f3 and v2 from neig
+                                s = c%vertP1%Get(cv_neig)
+                                range = (/(i, i = s, s+c%vertP2%Get(cv_neig)-1)/)
+                                indv2_neig = findloc(c%vert%Get(range), v1, 1)
+                                call c%vert%Remove(s+indv2_neig-1)
+                                call c%vertP2%Set(cv_neig, c%vertP2%Get(cv_neig)-1)
+                                range2 = (/(i, i = cv_neig + 1, c%ntot )/)
+                                call c%vertP1%SumMask(range2, -1)
+
+                                s = c%faceP1%Get(cv_neig)
+                                range = (/(i, i = s, s+c%faceP2%Get(cv_neig)-1)/)
+                                indf2_neig = findloc(c%face%Get(range), f3, 1)
+                                call c%face%Remove(s+indf2_neig-1)
+                                call c%faceP2%Set(cv_neig, c%faceP2%Get(cv_neig)-1)
+                                call c%faceP1%SumMask(range2, -1)
+                                
+                                ! Remove faces, cell and vert
+                                allocate(vert_rem(1), cell_rem(1))
+                                face_rem = [f2, f3]
+                                vert_rem = v2
+                                cell_rem = c2 
+                                call grid%RemoveFaces(face_rem)
+                                call grid%RemoveCells(cell_rem)
+                                call grid%RemoveVertices(vert_rem)
+
+                                cells = [c1, cv_neig]
+                                call grid%CalcCentroidGA(cells)
+
+                                ! Update flag
+                                merge_flagc(j) = .false.
+                                merge_flagc(j-1) = .false.
+
+                                ! Update cell number of cutcell information and trias cutcell
+                                ! cctria
+                                log2 = cctria .gt. c2
+                                indcc = (/(i, i = 1, size(cctria))/)
+                                allocate(ind2(count(log2)))
+                                ind2 = pack(indcc, log2)
+                                cctria(ind2) = cctria(ind2) - 1
+
+                                ! cctraps and cctrias
+                                do m = 1, size(cctrapsP, 1)
+
+                                    ! cctraps
+                                    !--------
+                                    ! Check to remove
+                                    do n = 1, cctrapsP(m,2)
+                                        loc = cctrapsP(m,1)+n-1
+                                        if (cctraps(loc) == c2) then
+                                            ! Remove 
+                                            temp1 = cctraps(1:loc-1)
+                                            temp2 = cctraps(loc+1:size(cctraps))
+                                            cctraps = [temp1, temp2]
+
+                                            ! Update pointer
+                                            cctrapsP(m,2) = cctrapsP(m,2) - 1
+                                            cctrapsP(m+1:size(cctrapsP, 1),1) = cctrapsP(m+1:size(cctrapsP, 1),1) - 1
+                                        end if
+                                    end do
+
+                                    ! Check to update number
+                                    do n = 1, cctrapsP(m,2)
+                                        loc = cctrapsP(m,1)+n-1
+                                        if (cctraps(loc) .gt. c2) then
+                                            cctraps(loc) = cctraps(loc) - 1
+                                        end if
+                                    end do
+                                    
+                                    ! cctrias
+                                    !--------
+                                    ! Check to remove
+                                    do n = 1, cctriasP(m,2)
+                                        loc = cctriasP(m,1)+n-1
+                                        if (cctrias(loc) == c2) then
+                                            ! Remove 
+                                            temp1 = cctrias(1:loc-1)
+                                            temp2 = cctrias(loc+1:size(cctrias))
+                                            cctrias = [temp1, temp2]
+
+                                            ! Update pointer
+                                            cctriasP(m,2) = cctriasP(m,2) - 1
+                                            cctriasP(m+1:size(cctriasP,1),1) = cctriasP(m+1:size(cctriasP,1),1) - 1
+                                        end if
+                                    end do
+
+                                    ! Check to update number
+                                    do n = 1, cctriasP(m,2)
+                                        loc = cctriasP(m,1)+n-1
+                                        if (cctrias(loc) .gt. c2) then
+                                            cctrias(loc) = cctrias(loc) - 1
+                                        end if
+                                    end do                                    
+ 
+                                end do
+
+                                ! Update trias array
+                                do n = 1, size(trias)
+                                    if (trias(n) == c2) trias(n) = 0
+                                end do
+                                do n = 1, size(trias)
+                                    if (trias(n) .gt. c2) trias(n) = trias(n) - 1
+                                end do
+
+                                ! Update con_vert index
+                                if (con_vert .gt. v2) con_vert = con_vert - 1
+
+                                ! Housekeeping
+                                deallocate(ind2, vert_rem, cell_rem)
+
+                            end if
+
+                            ! House keeping
+                            deallocate(v_int, v2_int)
+
+                        end if
+
+                    end do
+
+                    ! Save trias
+                    allocate(triasU(count(trias .gt. 0)))
+                    triasU = pack(trias, trias .gt. 0)
+
+                    if (type == 'first') then
+                        if (i == 1) then
+                            cctriasP(i,1) = 1
+                        else
+                            cctriasP(i,1) = cctriasP(i-1,1) + cctriasP(i-1,2) 
+                        end if
+                        cctriasP(i,2) = size(triasU)
+                        cctrias(cctriasP(i,1):cctriasP(i,1)+cctriasP(i,2)-1) = triasU
+                    else if (type == 'later') then
+                        ! Get location
+                        s = cctriasP(i,1)
+                        n = cctriasP(i,2)
+
+                        ! Replace
+                        temp1 = cctrias(1:s-1)
+                        temp2 = cctrias(s+n:size(cctrias))
+                        cctrias = [temp1, triasU, temp2]
+                        cctriasP(i,2) = size(triasU)
+                        cctriasP(i+1:size(cctriasP,1),1) = cctriasP(i+1:size(cctriasP,1),1) &
+                            + size(triasU) - n 
+                    end if
+
+
+                    ! Housekeeping
+                    deallocate(triasU)
+                    deallocate(con_vertD)
+                    deallocate(vxs_all)
+                    
+                end if
+
+            else
+
+                ! Still to construct correctly add to avoid problems
+                if (type == 'first') then
+                    trias = [cctria(i), cctraps(cctrapsP(i,1):cctrapsP(i,1)+cctrapsP(i,2)-1)]
+                    if (i == 1) then
+                        cctriasP(i,1) = 1
+                    else
+                        cctriasP(i,1) = cctriasP(i-1,1) + cctriasP(i-1,2) 
+                    end if
+                    cctriasP(i,2) = size(trias)
+                    cctrias(cctriasP(i,1):cctriasP(i,1)+cctriasP(i,2)-1) = trias
+                end if 
+
+            end if
+
+
+        end do
+
+        ! Recalculate all cell centers to be sure
+        cells = (/(i, i = 1, c%ntot)/)
+        call grid%CalcCentroidGA(cells)
+
+        end associate
+
+    end subroutine
+
+    subroutine MergeTrapIntoStacked(grid, options)
+
+        ! Description
+        !============
+        ! Detecting boundary trapezoids/quads which are between two groups of stacked
+        ! triangles (because these cells give problems with the sheat boundary
+        ! condition).
+        ! And changing the trapezoid into a triangle, adding them to the stacked triangle group
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        type(GAoptionsUDT), intent(in)  :: options
+
+        ! Auxiliary
+        integer(I8) :: i, s, cv, vx1, vx2, ifc, num_fcs_al, v1, v2, counter
+        integer(I8), allocatable, dimension(:) :: indf, cv_detect, bfaces, cvs, &
+            b_fcs1, b_fcs2, cv1, cv2, cv_detectD, b_fcs, fcs_vx1, fcs_vx2, face_rem, &
+            vert_rem, cvLookUp, fcs, fcs_vx1D, fcs_vx2D, indf2, indv2, range, range2, &
+            cells
+        logical, allocatable :: b_flag(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        allocate(cv_detectD(c%ntot))
+        cv_detectD = 0
+
+        ! Get boundary face
+        b_flag = (f%label%Get() /= 0)
+
+        ! Pre-compute query for face
+        cvLookUp = GetCvLookUpGA(c)
+
+        ! Loop over boundary face
+        indf = (/(i, i = 1, f%ntot)/)
+        allocate(bfaces(count(b_flag)))
+        bfaces = pack(indf, b_flag)
+        counter = 0
+        do i = 1, size(bfaces)
+
+            ! Face
+            ifc = bfaces(i)
+
+            ! Find boundary quadrilateral
+            cvs = GetFaceCellGA(c, bfaces(i), cvLookUp)
+            cv = cvs(1)
+
+            ! Quads
+            if (c%faceP2%Get(cv) == 4) then
+
+                ! Get vertices of boundary face
+                vx1 = f%vert1%Get(ifc)
+                vx2 = f%vert2%Get(ifc)
+
+                ! Check the faces of these vertices
+                fcs_vx1D = GetVertFaceGA(f, vx1)
+                allocate(fcs_vx1(count(fcs_vx1D /= ifc)))
+                fcs_vx1 = pack(fcs_vx1D, fcs_vx1D /= ifc)
+                fcs_vx2D = GetVertFaceGA(f, vx2)
+                allocate(fcs_vx2(count(fcs_vx2D /= ifc)))
+                fcs_vx2 = pack(fcs_vx2D, fcs_vx2D /= ifc)
+
+                num_fcs_al = count(f%aligned%Get(fcs_vx1) == 1) &
+                    + count(f%aligned%Get(fcs_vx2) == 1)
+
+                ! If the quad has not the triangles as neighbours and there
+                ! is only one aligned face in total connected to both
+                ! vertices
+                if (size(fcs_vx1) .gt. 2 .and. size(fcs_vx2) .gt. 2 .and. num_fcs_al == 1) then
+
+                    ! Check if both vertices are connected to a boundary face
+                    ! of a triangle
+                    allocate(b_fcs1(count(b_flag(fcs_vx1))))
+                    b_fcs1 = pack(fcs_vx1, b_flag(fcs_vx1))
+                    allocate(b_fcs2(count(b_flag(fcs_vx2))))
+                    b_fcs2 = pack(fcs_vx2, b_flag(fcs_vx2))
+
+                    ! Get boundary cell
+                    cv1 = GetFaceCellGA(c, b_fcs1(1), cvLookUp)
+                    cv2 = GetFaceCellGA(c, b_fcs2(1), cvLookUp)
+
+                    ! If both these boundary cells are triangles => found quad to change
+                    if (c%faceP2%Get(cv1(1)) == 3 .and. c%faceP2%Get(cv2(1)) == 3) then
+                        counter = counter + 1
+                        cv_detectD(counter) =  cv
+                    end if
+
+                    ! House keeping
+                    deallocate(b_fcs1, b_fcs2)
+
+                end if
+
+                ! House keeping
+                deallocate(fcs_vx1, fcs_vx2)
+
+            end if
+
+        end do
+
+        ! Cut array
+        cv_detect = cv_detectD(1:counter)
+
+        ! Grid adaptation
+        !----------------
+        allocate(face_rem(1), vert_rem(1), cells(1))
+        do i = 1, counter
+
+            ! Get cell number
+            cv = cv_detect(i)
+
+            ! Get the boundary face
+            fcs = GetCellFaceGA(c, cv)
+            allocate(b_fcs(count(isBoundaryFaceGA(grid, fcs))))
+            b_fcs = pack(fcs, isBoundaryFaceGA(grid, fcs))
+
+            ! Get vertices
+            vx1 = f%vert1%Get(b_fcs(1))
+            vx2 = f%vert2%Get(b_fcs(1))
+
+            ! Get faces of vertices
+            fcs_vx1D = GetVertFaceGA(f, vx1)
+            allocate(fcs_vx1(count(fcs_vx1D /= b_fcs(1))))
+            fcs_vx1 = pack(fcs_vx1D, fcs_vx1D /= b_fcs(1))
+            fcs_vx2D = GetVertFaceGA(f, vx2)
+            allocate(fcs_vx2(count(fcs_vx2D /= b_fcs(1))))
+            fcs_vx2 = pack(fcs_vx2D, fcs_vx2D /= b_fcs(1))      
+            
+            if (count(f%aligned%Get(fcs_vx1) == 1) == 1) then
+                v2 = vx1 ! Will be replaced
+                v1 = vx2 ! changes
+            else if (count(f%aligned%Get(fcs_vx2) == 1) == 1) then
+                v2 = vx2
+                v1 = vx1
+            else 
+                call gdErrorHandler('MergeTrapIntoStacked: something wrong')
+            end if
+
+            ! Do the adaptation
+            !------------------
+
+            ! Give the properties from v2 to v1
+            call v%x%Set(v1, v%x%Get(v2))
+            call v%y%Set(v1, v%y%Get(v2))
+            call v%psi%Set(v1, v%psi%Get(v2))
+            call v%bx%Set(v1, v%bx%Get(v2))
+            call v%by%Set(v1, v%by%Get(v2))
+
+            ! Replace in connectivity
+            call ReplaceElement(c%vert, v2, v1)
+            call ReplaceElement(f%vert1, v2, v1)
+            call ReplaceElement(f%vert2, v2, v1)
+            
+            ! Remove v2 from cv connectivty
+            s = c%vertP1%Get(cv)
+            range = (/(i, i = s, s+c%vertP2%Get(cv)-1)/)
+            indv2 = findloc(c%vert%Get(range), v1, 1)
+            call c%vert%Remove(s+indv2-1)
+            call c%vertP2%Set(cv, c%vertP2%Get(cv)-1)
+            range2 = (/(i, i = cv + 1, c%ntot )/)
+            call c%vertP1%SumMask(range2, -1)
+
+            ! Remove b_fcs from cv connectivity
+            s = c%faceP1%Get(cv)
+            range = (/(i, i = s, s+c%faceP2%Get(cv)-1)/)
+            indf2 = findloc(c%face%Get(range), b_fcs(1), 1)
+            call c%face%Remove(s+indf2-1)
+            call c%faceP2%Set(cv, c%faceP2%Get(cv)-1)
+            call c%faceP1%SumMask(range2, -1)
+
+            ! Remove fc and v2
+            face_rem = b_fcs
+            vert_rem = v2
+            call grid%RemoveFaces(face_rem)
+            call grid%RemoveVertices(vert_rem)
+
+            ! Recalculate centroid
+            call grid%CalcCentroidGA(cv)
+
+            ! Determine cflag
+            cells = cv
+            call grid%DetermineCflags(cells)
+
+            ! House keeping
+            deallocate(fcs_vx1, fcs_vx2, b_fcs)
+
+        end do
+
+        ! Recover fsVx from fsFc
+        call grid%GetFsVxFromFsFc(options)
+
+        end associate
+
+    end subroutine
+
     ! Stacked to Cutcell
     !===================
     subroutine StackedToCutcell(grid, magneticField, options)
@@ -6403,7 +7202,8 @@ module gamod_types
 
         end do
 
-        ! Transform remaining pentagons into triangles - TODO
+        ! Transform remaining pentagons into triangles
+        if (options%pents_to_tria) call grid%TransPentsToTrias()
 
         ! Printing
         print *, 'Ended merging: ', options%merge_crit
@@ -6549,7 +7349,7 @@ module gamod_types
         case ('5T3')
 
             ! Transforming a pentagon into three triangle
-            call grid%Merge5T3(cvs)
+            call grid%Merge5T3(cvs(1))
 
         case ('5spec')
 
@@ -8097,7 +8897,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8), intent(in)         :: cvs(:)
+        integer(I8), intent(in)         :: cvs
 
         ! Auxiliary 
         integer(I8) :: i, common_vert, ind5, verts1(2), vert1, &
@@ -8115,7 +8915,7 @@ module gamod_types
             )
 
         ! Indeficiation of pentagon faces
-        faces_cv = GetCellFaceGA(c, cvs(1))
+        faces_cv = GetCellFaceGA(c, cvs)
 
         ! Determine the common vert via aligned faces
         fcAligned = f%aligned%Get(faces_cv)
@@ -8177,7 +8977,7 @@ module gamod_types
         ! Add triangle 1
         faces_new1 = [f1, f2, f3]
         verts_new1 = [common_vert, vert1, vert2]
-        call grid%AddCell(faces_new1, verts_new1, c%reg%Get(cvs(1)), cv1)
+        call grid%AddCell(faces_new1, verts_new1, c%reg%Get(cvs), cv1)
 
         ! Make second triangle
         !---------------------
@@ -8197,7 +8997,7 @@ module gamod_types
         ! Add triangle 2
         faces_new2 = [f3, f4, f5]
         verts_new2 = [common_vert, vert2, vert4]
-        call grid%AddCell(faces_new2, verts_new2, c%reg%Get(cvs(1)), cv2)
+        call grid%AddCell(faces_new2, verts_new2, c%reg%Get(cvs), cv2)
 
         ! Make thrid triangle
         !====================
@@ -8215,7 +9015,7 @@ module gamod_types
         ! Add triangle 3
         faces_new3 = [f5, f6, f7]
         verts_new3 = [common_vert, vert4, vert5]
-        call grid%AddCell(faces_new3, verts_new3, c%reg%Get(cvs(1)), cv3)
+        call grid%AddCell(faces_new3, verts_new3, c%reg%Get(cvs), cv3)
 
         ! Post
         !-----
@@ -8224,7 +9024,7 @@ module gamod_types
 
         ! Remove pentagon
         allocate(cell_rem(1))
-        cell_rem = cvs(1)
+        cell_rem = cvs
         call grid%RemoveCells(cell_rem)
 
         end associate
@@ -8783,6 +9583,39 @@ module gamod_types
 
     end subroutine
 
+    subroutine TransPentsToTrias(grid)
+
+        ! Description
+        !============
+        ! Transforms al remaining pentagonal cells into triangles
+
+        ! Declare variables
+        !==================
+        ! Argument
+        class(GAGridUDT), intent(inout) :: grid
+
+        ! Auxiliary
+        integer(I8) :: i
+        integer(I8), allocatable :: cv5(:), indcv(:)
+        logical, allocatable :: log(:)
+    
+      
+        ! Loop over the pentagons
+        do i = 1, count(grid%cell%faceP2%Get() == 5)
+
+                ! Get the pentagons
+                indcv = (/(i, i = 1, grid%cell%ntot)/)
+                log = grid%cell%faceP2%Get() == 5
+                allocate(cv5(count(log)))
+                cv5 = pack(indcv, log)
+
+                ! Do the transformation
+                if (size(cv5) /= 0) call grid%Merge5T3(cv5(1))
+
+        end do
+
+    end subroutine
+
     ! Splitting
     !==========
     subroutine DoSplitting(grid, magneticField, qm, options)
@@ -8870,7 +9703,7 @@ module gamod_types
         end do
 
         ! Transform remaining pentagons into triangles
-        !if (options%pents_to_tria) call grid%TransPentsToTrias() - TODO
+        if (options%pents_to_tria) call grid%TransPentsToTrias()
 
         ! Ordening not necessary probably
 

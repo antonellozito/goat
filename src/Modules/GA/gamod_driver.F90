@@ -319,8 +319,7 @@ module gamod_driver
         call grid%GiveSeparatrices(use_nsep, use_sepID, start, cvLookUp)
         call grid%GiveXpoints(use_sepID,cvLookUp)
 
-        ! Check flux surfaces for possible merging of open surfaces - only very specific cases for vesselmode
-        ! TODO
+        ! Check flux surfaces for possible merging of open surfaces
         call grid%MergeFS()
 
         ! Recalculate bx, by
@@ -394,7 +393,6 @@ module gamod_driver
                     ! One fcReg number should only have one chain
                     if (size(nf) > 1) then
 
-                        ! Visualize TODO
                         call gdErrorHandler("PostprocessGA: more than one chain of faces detect with the fcReg value")
 
                     end if
@@ -553,7 +551,7 @@ module gamod_driver
         ! Save
         grid%data%fluxdata%fluxsurfacepsi = fsPsi
 
-        ! Determine OMP and IMP - TODO
+        ! Determine OMP and IMP - TODO - check if correct
         call DetermineMPs(grid, options)
         
 
