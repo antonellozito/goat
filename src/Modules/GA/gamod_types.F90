@@ -591,18 +591,17 @@ module gamod_types
         type(MagneticFieldUDT), intent(in)      :: magneticField
 
         ! Auxiliary
-        real(R8) :: fcH(grid%face%ntot,2), psic, &
-            isx(4), isy(4), min_vpsi, max_vpsi, &
-            h_rad_int, v1p, v2p, cvx1, cvy1, cvx2, cvy2, t0
+        real(R8) :: fcH(grid%face%ntot,2), min_vpsi, max_vpsi, &
+            cvx1, cvy1, cvx2, cvy2
         real(R8), allocatable, dimension(:) :: v1x, v1y, &
             v2x, v2y, fcX, fcY, fcS, fcBx, fcBy, fcs_fcs, &
-            vx, vy, vertsX, vertsY, vpsi, cx, cy, h_pol, &
+            vx, vy, vpsi, cx, cy, h_pol, &
             h_rad, h_rad_psi, cvS,  cvAR, fcBias, psi_verts,  &
             fcqalfc, fcxx
         real(R8), allocatable :: fcBb(:,:), vec_n(:,:)
         integer(I8), allocatable, dimension(:) :: vx1, vx2, &
             tv, tf, tc, indCv, ncpf
-        integer(I8) :: i, ic, nv, ii, ifc, ir, v1, v2
+        integer(I8) :: i, ic, nv, ifc
         integer(I8), allocatable :: fccv(:,:) 
         logical :: not_aligned_f(grid%face%ntot), &
             comp_range(grid%cell%ntot)
@@ -693,72 +692,10 @@ module gamod_types
 
                 if (.not.(cvAR(ic) == qm%cvAR(ic))) then
 
-                    !TODO - group in :: call CalcCvMetric(ic,tv,vx,vy,max_vpsi,min_vpsi,tf,vx1,vx2)
-
-                    ! Area
-                    !=====
-                    vertsX = vx(tv)
-                    vertsY = vy(tv)
-                    if (nv == 4) then ! Quad
-
-                        cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))  &
-                        + TriangleArea(vertsX(1),vertsY(1),vertsX(3),vertsY(3),vertsX(4),vertsY(4))
-
-                    elseif (nv == 3) then
-
-                        cvS(ic) = triangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))
-
-                    elseif (nv == 2) then
-
-                        cvS(ic) = 0
-
-                    elseif (nv == 5) then
-
-                        cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3)) &
-                        + TriangleArea(vertsX(3),vertsY(3),vertsX(4),vertsY(4),vertsX(5),vertsY(5)) & 
-                        + TriangleArea(vertsX(3),vertsY(3),vertsX(1),vertsY(1),vertsX(5),vertsY(5))
-
-                    else
-
-                        call gdErrorHandler('ComputeQM: cell type not implemented')
-
-                    end if
-
-                    ! H pol
-                    !======
-                    psic = 0.5_R8* (max_vpsi + min_vpsi) 
-
-                    isx = 0
-                    isy = 0
-                    ii = 0
-                    ir = 0
-                    h_rad_int = 0
-                    do i = 1, nv
-                        ifc = tf(i)
-                        v1 = vx1(ifc)
-                        v2 = vx2(ifc)
-                        v1p = vpsi(v1)
-                        v2p = vpsi(v2)
-                        if ((psic .gt. min(v1p, v2p)) &
-                            .and. (psic .lt. max(v1p, v2p)) ) then
-                            
-                            t0 = (psic - v1p) / (v2p - v1p)
-                            ii = ii + 1
-                            isx(ii) = vx(v1) + t0 *(vx(v2) - vx(v1))
-                            isy(ii) = vy(v1) + t0 *(vy(v2) - vy(v1))
-
-                            if (not_aligned_f(ifc)) then
-                                ir = ir + 1
-                                h_rad_int = h_rad_int + fcS(ifc)*abs(fcqalfc(ifc))
-                            end if
-                            
-                        end if 
-                    end do
-
-                    h_pol(ic) = sqrt( ( isx(2) - isx(1) )**2 + ( isy(2) - isy(1) )**2 )
-                    h_rad(ic) = h_rad_int / ir
-                    h_rad_psi(ic) = abs(max_vpsi - min_vpsi)
-
+                    ! Compute h_pol, h_rad, h_rad_psi, cvS of ic (changed cell)
+                    call CalcCvMetric(ic, tv, vx, vy, vpsi, max_vpsi, min_vpsi, tf, vx1, vx2, not_aligned_f, &
+                        fcqalfc, fcS, h_pol, h_rad, h_rad_psi, cvS)
+                  
                 else
 
                     ! Is aspect ratios are the same, the metric are not recalculated
@@ -771,71 +708,11 @@ module gamod_types
                 end if
 
             else 
+                
+                ! Compute h_pol, h_rad, h_rad_psi, cvS of ic (new cell)
+                call CalcCvMetric(ic, tv, vx, vy, vpsi, max_vpsi, min_vpsi, tf, vx1, vx2, not_aligned_f, &
+                    fcqalfc, fcS, h_pol, h_rad, h_rad_psi, cvS)
 
-                ! For new cells
-                ! Area
-                !=====
-                vertsX = vx(tv)
-                vertsY = vy(tv)
-                if (nv == 4) then ! Quad
-
-                    cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))  &
-                    + TriangleArea(vertsX(1),vertsY(1),vertsX(3),vertsY(3),vertsX(4),vertsY(4))
-
-                elseif (nv == 3) then
-
-                    cvS(ic) = triangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))
-
-                elseif (nv == 2) then
-
-                    cvS(ic) = 0
-
-                elseif (nv == 5) then
-
-                    cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3)) &
-                    + TriangleArea(vertsX(3),vertsY(3),vertsX(4),vertsY(4),vertsX(5),vertsY(5)) & 
-                    + TriangleArea(vertsX(3),vertsY(3),vertsX(1),vertsY(1),vertsX(5),vertsY(5))
-
-                else
-
-                    call gdErrorHandler('ComputeQM: cell type not implemented')
-
-                end if
-
-                ! H pol
-                !======
-                psic = 0.5_R8* (max_vpsi + min_vpsi) 
-
-                isx = 0
-                isy = 0
-                ii = 0
-                ir = 0
-                h_rad_int = 0
-                do i = 1, nv
-                    ifc = tf(i)
-                    v1 = vx1(ifc)
-                    v2 = vx2(ifc)
-                    v1p = vpsi(v1)
-                    v2p = vpsi(v2)
-                    if ((psic .gt. min(v1p, v2p)) &
-                        .and. (psic .lt. max(v1p, v2p)) ) then
-                        
-                        t0 = (psic - v1p) / (v2p - v1p)
-                        ii = ii + 1
-                        isx(ii) = vx(v1) + t0 *(vx(v2) - vx(v1))
-                        isy(ii) = vy(v1) + t0 *(vy(v2) - vy(v1))
-
-                        if (not_aligned_f(ifc)) then
-                            ir = ir + 1
-                            h_rad_int = h_rad_int + fcS(ifc)*abs(fcqalfc(ifc))
-                        end if
-                        
-                    end if 
-                end do
-
-                h_pol(ic) = sqrt( ( isx(2) - isx(1) )**2 + ( isy(2) - isy(1) )**2 )
-                h_rad(ic) = h_rad_int / ir
-                h_rad_psi(ic) = abs(max_vpsi - min_vpsi)
             end if
 
         end do
@@ -848,7 +725,7 @@ module gamod_types
             cvy1 = cy(tc(1))
             fcH(ifc,1) = sqrt( (fcX(ifc) - cvx1)**2 + (fcY(ifc) - cvy1)**2  )
             if (ncpf(ifc) == 2) then
-                cvx2 = cx(tc(2));
+                cvx2 = cx(tc(2))
                 cvy2 = cy(tc(2))
                 fcH(ifc,2) = sqrt( (fcX(iFc) - cvx2)**2 + (fcY(iFc) - cvy2)**2  )
                 fcxx(ifc) = sqrt( (cvx1 - cvx2)**2 + (cvy1 - cvy2)**2  )
@@ -892,6 +769,92 @@ module gamod_types
         qm%nCv      = c%ntot
 
         end associate
+
+    end subroutine
+
+    subroutine CalcCvMetric(ic, tv, vx, vy, vpsi, max_vpsi, min_vpsi, tf, vx1, vx2, not_aligned_f, &
+        fcqalfc, fcS, h_pol, h_rad, h_rad_psi, cvS)
+
+        ! Description
+        !============
+        ! Bundles computation of h_pol, h_rad, h_rad_psi and cvS for one cell
+
+        ! Declare variables
+        !==================
+        integer(I8), intent(in) :: ic, tv(:), tf(:), vx1(:), vx2(:)
+        real(R8), intent(in)    :: vx(:), vy(:), max_vpsi, min_vpsi, vpsi(:), fcqalfc(:), fcS(:)
+        real(R8), intent(inout) :: h_pol(:), h_rad(:), h_rad_psi(:), cvS(:)
+        logical, intent(in)     :: not_aligned_f(:)
+
+        ! Auxiliary
+        integer(I8) :: i, nv,  ii, ir, ifc, v1, v2
+        real(R8), allocatable :: vertsX(:), vertsY(:)
+        real(R8) :: isx(4), isy(4), psic, h_rad_int, v1p, v2p, t0
+
+        ! Area
+        !=====
+        vertsX = vx(tv)
+        vertsY = vy(tv)
+        nv = size(tv)
+        if (nv == 4) then ! Quad
+
+            cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))  &
+            + TriangleArea(vertsX(1),vertsY(1),vertsX(3),vertsY(3),vertsX(4),vertsY(4))
+
+        elseif (nv == 3) then
+
+            cvS(ic) = triangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3))
+
+        elseif (nv == 2) then
+
+            cvS(ic) = 0
+
+        elseif (nv == 5) then
+
+            cvS(ic) = TriangleArea(vertsX(1),vertsY(1),vertsX(2),vertsY(2),vertsX(3),vertsY(3)) &
+            + TriangleArea(vertsX(3),vertsY(3),vertsX(4),vertsY(4),vertsX(5),vertsY(5)) & 
+            + TriangleArea(vertsX(3),vertsY(3),vertsX(1),vertsY(1),vertsX(5),vertsY(5))
+
+        else
+
+            call gdErrorHandler('ComputeQM: cell type not implemented')
+
+        end if
+
+        ! H pol
+        !======
+        psic = 0.5_R8* (max_vpsi + min_vpsi) 
+
+        isx = 0
+        isy = 0
+        ii = 0
+        ir = 0
+        h_rad_int = 0
+        do i = 1, nv
+            ifc = tf(i)
+            v1 = vx1(ifc)
+            v2 = vx2(ifc)
+            v1p = vpsi(v1)
+            v2p = vpsi(v2)
+            if ((psic .gt. min(v1p, v2p)) &
+                .and. (psic .lt. max(v1p, v2p)) ) then
+                
+                t0 = (psic - v1p) / (v2p - v1p)
+                ii = ii + 1
+                isx(ii) = vx(v1) + t0 *(vx(v2) - vx(v1))
+                isy(ii) = vy(v1) + t0 *(vy(v2) - vy(v1))
+
+                if (not_aligned_f(ifc)) then
+                    ir = ir + 1
+                    h_rad_int = h_rad_int + fcS(ifc)*abs(fcqalfc(ifc))
+                end if
+                
+            end if 
+        end do
+
+        h_pol(ic) = sqrt( ( isx(2) - isx(1) )**2 + ( isy(2) - isy(1) )**2 )
+        h_rad(ic) = h_rad_int / ir
+        h_rad_psi(ic) = abs(max_vpsi - min_vpsi)
 
     end subroutine
 
@@ -15614,7 +15577,7 @@ module gamod_types
         ! Give faces
         fcs1 = GetVertFaceGA(grid%face, iv)
 
-        ! Eliminate faces based on marching direction - TODO replace all pack by 1 pack by combining the criteria
+        ! Eliminate faces based on marching direction
         allocate(fcs2(count(grid%face%aligned%Get(fcs1) == aligned)))
         fcs2 = pack(fcs1,grid%face%aligned%Get(fcs1) == aligned)
 
