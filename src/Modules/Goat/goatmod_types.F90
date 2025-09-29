@@ -3874,18 +3874,13 @@ module goatmod_types
 
         ! Flux surface psi values
         do i = 1, nfs 
-
-            ! Get flux surface faces
-            tf = GetFSFace(grid%data%fluxdata, i)
-
-            ! Get vertices
-            tfv = reshape(grid%face%vert(tf, :), [size(tf)*2])
-
             ! Get psi values
-            tpsi = grid%vert%psi(tfv)
+            allocate(tpsi(count(grid%vert%fieldlineID == i)))
+            tpsi = pack(grid%vert%psi, grid%vert%fieldlineID == i)
 
             ! Average and add
-            grid%data%fluxdata%fluxsurfacepsi = sum(tpsi)/size(tpsi)
+            grid%data%fluxdata%fluxsurfacepsi(i) = sum(tpsi)/size(tpsi)
+            deallocate(tpsi)
 
         end do
 
