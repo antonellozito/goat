@@ -439,7 +439,6 @@ module gamod_types
         procedure :: DetermineFreeVertTria
         procedure :: DetermineHangingNodePent
 
-
         ! Boundary layer grid
         procedure :: BoundaryLayerGrid
         procedure :: AdjustEnds
@@ -447,6 +446,11 @@ module gamod_types
         procedure :: GetRadialFaceGA
         procedure :: GetRadialIntersection
         procedure :: ThicknessSmoothing
+
+        ! Remove triangle tubes
+        procedure :: RemTriasFlux
+        procedure :: DetectTriaTubes
+        procedure :: DetectOuterShellTube
 
         ! Grid information utility
         procedure :: GetForbiddenMergeFaces
@@ -4789,7 +4793,7 @@ module gamod_types
                 options2%n_merge = 1
                 options2%merging = .true.
                 
-                call grid%MergeCells(qm, options2)
+                call grid%MergeCells(qm%merge_fc, options2)
                 if (.not.options%slab) call grid%RecalcMagn(magneticField)
 
             else 
@@ -7146,7 +7150,7 @@ module gamod_types
         do while ((qm%merge_fc /= 0) .and. (i .lt. options%n_merge))
 
             ! Merge
-            call grid%MergeCells(qm, options)
+            call grid%MergeCells(qm%merge_fc, options)
 
             ! Update counter
             i = i + 1
@@ -7175,7 +7179,7 @@ module gamod_types
 
     end subroutine
 
-    subroutine MergeCells(grid, qm, options)
+    subroutine MergeCells(grid, fc, options)
 
         ! Description
         !============
@@ -7185,7 +7189,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout)         :: grid
-        type(QualityMetricUDT), intent(inout)   :: qm
+        integer(I8), intent(in)                 :: fc
         type(GAoptionsUDT)                      :: options
 
         ! Auxiliary
@@ -7200,7 +7204,7 @@ module gamod_types
         call grid%GiveSeparatrices(.true., .true., .false., cvLookUp)
 
         ! Get merging case and do the merge for face fc
-        call grid%OneMerge(qm%merge_fc, .true., .false., .false., options)
+        call grid%OneMerge(fc, .true., .false., .false., options)
 
         ! If hexagonal and pentagonal cells are not allowed
         if (options%no_pents  .or. options%no_hex) then
@@ -10843,7 +10847,7 @@ module gamod_types
         ! Auxiliary
         integer(I8) :: ii, int_facesD(4), v1, v2, i
         integer(I8), allocatable :: vxs(:)
-        real(R8) :: isxD(4), isyD(4), v1p, v2p, t0
+        real(R8) :: isxD(4), isyD(4), v1p, v2p, t0, psicD
         real(R8), allocatable :: isx(:), isy(:)
 
         ! Associate
@@ -10855,14 +10859,16 @@ module gamod_types
 
         ! Initialize
         int_facesD = 0
-        isx = 0
-        isy = 0
+        isxD = 0
+        isyD = 0
         ii = 0
 
         ! Get the intersected faces
         if (.not.present(psic)) then
             vxs = GetCellVertGA(c, cv)
-            psic = 0.5_R8*(maxval(v%psi%Get(vxs)) + minval(v%psi%Get(vxs)))
+            psicD = 0.5_R8*(maxval(v%psi%Get(vxs)) + minval(v%psi%Get(vxs)))
+        else
+            psicD = psic
         end if 
 
         do i = 1, c%vertP2%Get(cv)
@@ -10871,8 +10877,8 @@ module gamod_types
             v1p = v%psi%Get(v1)
             v2p = v%psi%Get(v2)
 
-            if ((psic .gt. min(v1p, v2p)) .and. (psic .lt. max(v1p, v2p))) then
-                t0 = (psic - v1p) / (v2p - v1p)
+            if ((psicD .gt. min(v1p, v2p)) .and. (psicD .lt. max(v1p, v2p))) then
+                t0 = (psicD - v1p) / (v2p - v1p)
                 ii = ii + 1
                 isxD(ii) = v%x%Get(v1) + t0 * (v%x%Get(v2) - v%x%Get(v1))
                 isyD(ii) = v%y%Get(v1) + t0 * (v%y%Get(v2) - v%y%Get(v1))
@@ -15277,6 +15283,686 @@ module gamod_types
 
     end subroutine
 
+    ! Remove Triangles tubes
+    subroutine RemTriasFlux(grid, options)
+
+        ! Description
+        !============
+        ! Remove flux tubes at the vesselboundary that only contain triangles or
+        ! that contain two triangle and one quad 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout)     :: grid
+        type(GAoptionsUDT), intent(inout)   :: options
+
+        ! Auxiliary
+        integer(I8) :: i, ic, rem_trias(2), rem_faces(3), cv1, cv2, common_face, &
+            lbl, new_label, ind, vxs1(2), vxs2(2), rem_vert, counterf, &
+            counterc, counterv, nf1, cv_int, vxs(2)
+        integer(I8), allocatable, dimension(:) :: fcs1, fcs2, lblD, lblU, &
+            ar, lbls, gglabels, galabels, common_faceD, rem_faces1D, rem_faces2D, &
+            neig1, neig2, face_rem1, cell_rem, vert_rem, rem_cells, rem_facesO, &
+            rem_vertO, new_bc, fcs_n_al, fcs_b, fcs_al, fcs_alD, cvs, face_remO, &
+            vert_remO, cells, tube_rem, tube_cells, fcs
+        integer(I8), allocatable :: tube_remP(:,:)
+        logical :: found, found_shell
+        logical, allocatable, dimension(:) :: log, log_al, log_b, b_flag
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Display progress
+        print *, 'Remove triangle tubes'
+
+        ! Initialize
+        allocate(face_rem1(1))
+        allocate(cell_rem(1))
+        allocate(vert_rem(1))
+
+        ! Detection
+        call grid%DetectTriaTubes(options, found, rem_trias)
+
+        do while (found)
+
+            ! Initialize
+            rem_faces = 0
+
+            ! Remove groups of two triangles
+            cv1 = rem_trias(1)
+            cv2 = rem_trias(2)
+
+            ! Give label of an outermost flux surface if the new boundary face would be aligned
+
+            ! Get the faces - cv1 and cv2
+            fcs1 = GetCellFaceGA(c, cv1)
+            fcs2 = GetCellFaceGA(c, cv2)
+
+            log = isMember(fcs1, fcs2)
+            allocate(common_faceD(count(log)))
+            common_faceD = pack(fcs1, log)
+            if (size(common_faceD) == 1) then
+                common_face = common_faceD(1)
+                deallocate(common_faceD)
+            else
+                call gdErrorHandler('RemTriasFlux: something wrong')
+            end if
+
+            ! Fix the labels
+            if (f%aligned%Get(common_face) == 1) then
+                ! Old labels for new boundary faces
+                ! Cell1
+                lbls = f%label%Get(fcs1)
+                call Unique(lbls, lblU)
+                allocate(lblD(count(lblU /= 0)))
+                lblD = pack(lblU, lblU /= 0)
+                lbl = lblD(1) 
+                deallocate(lblD)
+                ar = (/(lbl, i= 1, size(fcs1))/)
+                call f%label%Set(fcs1, ar)
+
+                ! Cell2
+                lbls = f%label%Get(fcs2)
+                call Unique(lbls, lblU)
+                allocate(lblD(count(lblU /= 0)))
+                lblD = pack(lblU, lblU /= 0)
+                lbl = lblD(1) 
+                ar = (/(lbl, i= 1, size(fcs2))/)
+                call f%label%Set(fcs2, ar)
+
+            else
+
+                ! Make new label for a new outermost flux surface
+                ! Find a GG label for an outermost flux surface
+                if (any(options%facelabelmappingGA == 3)) then
+                    ind = findloc(options%facelabelmappingGA, 3, 1)
+                    new_label = options%facelabelmappingGG(ind)
+                else 
+                    ! Append new label
+                    new_label = maxval(options%facelabelmappingGG) + 1
+                    gglabels = options%facelabelmappingGG
+                    galabels = options%facelabelmappingGA
+                    deallocate(options%facelabelmappingGA, options%facelabelmappingGG)
+                    options%facelabelmappingGG = [gglabels, new_label]
+                    options%facelabelmappingGA = [galabels, 3]
+                end if
+
+                ! Apply new label
+                ar = (/(new_label, i = 1, size(fcs1))/)
+                call f%label%Set(fcs1, ar)
+                call f%label%Set(fcs2, ar)
+
+            end if
+
+            ! Get rem faces
+            allocate(rem_faces1D(count(isBoundaryFaceGA(grid, fcs1, 1))))
+            rem_faces1D = pack(fcs1, isBoundaryFaceGA(grid, fcs1, 1))
+            rem_faces(1) = rem_faces1D(1)
+            allocate(rem_faces2D(count(isBoundaryFaceGA(grid, fcs2, 1))))
+            rem_faces2D = pack(fcs2, isBoundaryFaceGA(grid, fcs2, 1))
+            rem_faces(2) = rem_faces2D(1)
+            deallocate(rem_faces1D, rem_faces2D)
+            rem_faces(3) = common_face
+
+            ! Get rem vertices (common vertex of boundary faces)
+            vxs1 = [f%vert1%Get(rem_faces(1)), f%vert2%Get(rem_faces(1))]
+            vxs2 = [f%vert1%Get(rem_faces(2)), f%vert2%Get(rem_faces(2))]
+            rem_vert = Pack2(vxs1, isMember(vxs1, vxs2))
+
+            ! Get neighbors and make it boundary cells
+            neig1 = GetCellNeigsGA(grid, cv1)
+            ar = (/(3, i = 1, size(neig1))/)
+            call c%cflags%Set(neig1, ar)
+            neig2 = GetCellNeigsGA(grid, cv2)
+            ar = (/(3, i = 1, size(neig2))/)
+            call c%cflags%Set(neig2, ar)
+
+            ! Remove some stuff from the first cell
+            ! Remove faces
+
+            face_rem1 = rem_faces(1)
+            call grid%RemoveFaces(face_rem1)
+            if (rem_faces(1) .lt. rem_faces(2)) rem_faces(2) = rem_faces(2) - 1
+            if (rem_faces(1) .lt. rem_faces(3)) rem_faces(3) = rem_faces(3) - 1
+
+            ! Remove cells
+            cell_rem = cv1
+            call grid%RemoveCells(cell_rem)
+            if (cv1 .lt. cv2) cv2 = cv2 - 1
+
+            ! Remove stuff from the second cell
+            call grid%RemoveFaces(rem_faces(2:3))
+
+            ! Remove cells
+            cell_rem = cv2
+            call grid%RemoveCells(cell_rem)
+
+            ! Remove vertex
+            vert_rem = rem_vert
+            call grid%RemoveVertices(vert_rem)
+
+            ! Detect again
+            call grid%DetectTriaTubes(options, found, rem_trias)     
+
+        end do
+
+        ! Check grid
+        if (options%debug) call grid%CheckUnstructuredGrid()
+
+        ! Tackle outer shell tubes
+        !-----------------------------------------
+
+        ! Out shell flux tubes that are too narrow
+        call grid%DetectOuterShellTube(options, found_shell, tube_rem, tube_remP)
+
+        ! Choose method
+        select case (options%outershell_handling)
+
+        case ('remove')
+
+            allocate(rem_facesO(f%ntot))
+            allocate(rem_vertO(v%ntot))
+            allocate(new_bc(c%ntot))
+
+            do while (found_shell)
+
+                ! Get cells of tube
+                tube_cells = tube_rem(tube_remP(1,1):tube_remP(1,1)+tube_remP(1,2)-1)
+
+                ! Get cells to remove
+                rem_cells = tube_cells
+
+                ! Get faces and vertices to remove
+                rem_facesO = 0
+                counterf = 0
+                rem_vertO = 0
+                counterv = 0
+                new_bc = 0
+                counterc = 0
+
+                do i = 1, tube_remP(1, 2)
+
+                    ! Get faces
+                    ic = tube_cells(i)
+                    fcs = GetCellFaceGA(c, ic)
+
+                    ! Add non-aligned faces
+                    log_al = f%aligned%Get(fcs) == 1
+                    allocate(fcs_n_al(count(.not.log_al)))
+                    fcs_n_al = pack(fcs, .not.log_al)
+                    nf1 = size(fcs_n_al)
+                    rem_facesO(counterf+1:counterf+nf1) = fcs_n_al
+                    counterf = counterf + nf1
+                    deallocate(fcs_n_al)
+
+                    ! Add boundary face
+                    log_b = isBoundaryFaceGA(grid, fcs)
+                    fcs_b = pack(fcs, log_b)
+                    counterf = counterf + 1
+                    rem_facesO(counterf) = fcs_b(1)
+
+                    ! Transfer label
+                    allocate(fcs_alD(count(log_al)))
+                    fcs_alD = pack(fcs, log_al)
+                    allocate(fcs_al(count(.not.isBoundaryFaceGA(grid, fcs_alD))))
+                    fcs_al = pack(fcs_alD, .not.isBoundaryFaceGA(grid, fcs_alD))
+                    if (size(fcs_al) /= 1) call gdErrorHandler('RemTriasFlux: something wrong')
+                    call f%label%Set(fcs_al(1), f%label%Get(fcs_b(1)))
+
+                    ! Give internal cells that becomes a boundary cell
+                    cvs = GetFaceCellGA(c, fcs_al(1))
+                    cv_int = Pack2(cvs, cvs /= ic)
+                    counterc = counterc + 1
+                    new_bc(counterc) = cv_int
+
+                    ! Add vertices to remove
+                    if (size(fcs) == 4) then
+                        vxs = [f%vert1%Get(fcs_b(1)), f%vert2%Get(fcs_b(1))]
+                        rem_vertO(counterv+1:counterv+2) = vxs
+                        counterv = counterv + 2
+                    end if
+
+                end do
+
+                ! Remove all
+                face_remO = rem_facesO(1:counterf)
+                vert_remO = rem_vertO(1:counterv)
+                call grid%RemoveFaces(face_remO)
+                call grid%RemoveCells(rem_cells)
+                call grid%RemoveVertices(vert_remO)
+
+                ! Determine cflags
+                b_flag = (f%label%Get() /= 0)
+                cells = (/(i, i = 1, c%ntot)/)
+                call grid%DetermineCflags(cells, b_flag)
+
+                ! Out shell flux tubes that are too narrow
+                call grid%DetectOuterShellTube(options, found_shell, tube_rem, tube_remP)
+
+            end do
+
+        case ('merge')
+
+            do while (found_shell)
+
+                ! Get tube cells
+                tube_cells = tube_rem(tube_remP(1,1):tube_remP(1,1)+tube_remP(1,2)-1)
+
+                ic = tube_cells(2)
+                fcs = GetCellFaceGA(c, ic)
+
+                ! Get merge face
+                log_al = f%aligned%Get(fcs) == 1 .and. .not.isBoundaryFaceGA(grid, fcs)
+                allocate(fcs_al(count(log_al)))
+                fcs_al = pack(fcs, log_al)
+
+                if (size(fcs_al) /= 1) call gdErrorHandler('RemTriasFlux: something wrong')
+
+                ! Set up merging
+                call grid%MergeCells(fcs_al(1), options)
+
+                ! Outer shell flux tubes that are too narrow
+                call grid%DetectOuterShellTube(options, found_shell, tube_rem, tube_remP)
+
+                ! House keeping
+                deallocate(fcs_al)
+               
+            end do
+
+        case default
+
+            call gdErrorHandler('RemTriasFlux: methond outershell handling not implemented')
+
+        end select
+
+        ! Check grid
+        if (options%debug) call grid%CheckUnstructuredGrid()
+
+        ! Display progres
+        print *, 'Ended removing triangle tubes'
+
+        end associate
+    end subroutine
+
+    subroutine DetectTriaTubes(grid, options, found, rem_trias)
+
+        ! Description
+        !============
+        ! Detect flux tubes with only triangles
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        type(GAoptionsUDT), intent(in)  :: options
+        logical, intent(out)            :: found
+        integer(I8), intent(out)        :: rem_trias(2)
+
+        ! Auxiliary
+        integer(I8) :: i, ic, pol_face, ind, cv_rad, np, rad_face, neig
+        integer(I8), allocatable, dimension(:) :: trias, indcv, b_trias, fcLbl_loc, &
+            cvLookUp, lbls, nb_face, pol_faceD, cv_radD, rad_faceD, fcs, fcs_rad
+        real(R8), allocatable :: dpsi(:)
+        logical, allocatable :: flags(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        rem_trias = 0
+        found = .false.
+
+        ! Get triangles
+        indcv = (/(i, i = 1, c%ntot)/)
+        allocate(trias(count(c%faceP2%Get() == 3)))
+        trias = pack(indcv, c%faceP2%Get() == 3)
+
+        ! Get boundary triangles
+        allocate(b_trias(count(isBoundaryCellGA(grid, trias))))
+        b_trias = pack(trias, isBoundaryCellGA(grid, trias))
+
+        ! Get GA labels
+        fcLbL_loc = GetfcLblGA(f, options)
+
+        ! Loop over boundary triangle to check face label
+        cvLookUp = GetCvLookUpGA(c)
+        do i = 1, size(b_trias)
+
+            ! Get cell
+            ic = b_trias(i)
+
+            ! Get faces
+            fcs = GetCellFaceGA(c, ic)
+
+            ! Check labels
+            lbls = fcLbl_loc(fcs)
+            flags = (lbls == 1) ! Label for farSOL vessel
+
+            ! Look at neighbours - get poloidal face
+            allocate(nb_face(count(.not.isBoundaryFaceGA(grid, fcs, 1))))
+            nb_face = pack(fcs, .not.isBoundaryFaceGA(grid, fcs, 1))
+            allocate(pol_faceD(count(f%aligned%Get(nb_face) == 0)))
+            pol_faceD = pack(nb_face,f%aligned%Get(nb_face) == 0)
+            
+            ! Get the radial cell of the poloidal facee
+            np = size(pol_faceD)
+            if (np .gt. 1) then
+
+                ! Select the aligned faces based on dpsi
+                dpsi = abs(v%psi%Get(f%vert1%Get(nb_face)) - v%psi%Get(f%vert2%Get(nb_face)))
+                ind = minloc(dpsi, 1)
+                pol_face = nb_face(ind)
+
+            else if (np == 1) then
+
+                pol_face = pol_faceD(1)
+
+            else if (np == 0) then
+
+                call gdErrorHandler('DetectTriaTubes: something wrong')
+
+            end if
+
+            ! Get radial cell
+            cv_radD = GetFaceCellGA(c, pol_face, cvLookUp)
+
+            ! Get neighbor
+            neig = 0
+            if (size(cv_radD) == 2) then
+
+                cv_rad = Pack2(cv_radD, cv_radD /= ic)
+                fcs_rad = GetCellFaceGA(c, cv_rad)
+
+                if (count(isBoundaryFaceGA(grid, fcs_rad)) .gt. 0) then
+                    neig = c%faceP2%Get(cv_rad)
+                end if
+            end if 
+
+            ! Also look at boundary over radial face - TODO - Why problematic?
+            !if (neig /= 3) then
+
+                ! Get aligned face
+            !    if (np == 1) then
+            !        allocate(rad_faceD(count(f%aligned%Get(nb_face) == 1)))
+            !        rad_faceD = pack(nb_face, f%aligned%Get(nb_face) == 1)
+            !        rad_face = rad_faceD(1)
+            !        deallocate(rad_faceD)
+            !    else if (np .gt. 1) then
+            !        ind = maxloc(dpsi, 1)
+            !        rad_face = nb_face(ind)
+            !    end if
+
+            !    cv_radD = GetFaceCellGA(c, rad_face, cvLookUp)
+                
+            !    neig = 0
+            !    if (size(cv_radD) == 2) then
+            !        cv_rad = Pack2(cv_radD, cv_radD /= ic)
+            !        fcs_rad = GetCellFaceGA(c, cv_rad)
+            !        if (count(isBoundaryFaceGA(grid, fcs_rad)) .gt. 0) !then
+            !            neig = c%faceP2%Get(cv_rad)
+            !        end if
+            !    end if
+
+            !end if
+
+            if (count(flags) == 1 .and. neig == 3) then ! More than one boundary face at the farSOL vessel
+                ! Add ic and cv_rad to the list
+                rem_trias(1) = ic
+                rem_trias(2) = cv_rad
+                found = .true.
+                call Sort(rem_trias)
+                exit
+            end if
+
+            ! House keeping
+            deallocate(nb_face, pol_faceD)
+
+        end do
+
+        end associate
+
+    end subroutine
+
+    subroutine DetectOuterShellTube(grid, options, found, tube_rem, tube_remP)
+
+        ! Description
+        !============
+        ! Detect tubes on the outside with start and end in a triangle
+        ! remove or merge if the tube is too narrow
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)            :: grid
+        type(GAoptionsUDT), intent(in)          :: options
+        logical, intent(out)                    :: found
+        integer(I8), allocatable, intent(out)   :: tube_rem(:), tube_remp(:,:)
+
+        ! Auxiliary
+
+        integer(I8) :: i, k, ic, pol_face, cv_rad, cv_test, counter, counter_saveP, &
+            ind, nbf, ncell, neig, nf_cv_rad, cv_pol
+        integer(I8), allocatable, dimension(:) :: indcv, trias, b_trias, fcLbl_loc, &
+            cvLookUp, tube_remD, nb_face, b_faceT, pol_faceD, cv_radD, cvs, tube, &
+            b_faceN, cvsD, fcs, fcs_rad, lbls, fcs_al, cv_calc, cv_radD2, cvs_al
+        integer(I8), allocatable :: tube_remPD(:,:) 
+        real(R8), allocatable :: dpsi(:), h_rads(:)  
+        logical :: found_end, no_outer_shell
+        logical, allocatable :: log(:), flags(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        found = .false.
+        cvLookUp = GetCvLookUpGA(c)
+        allocate(tube_remD(c%ntot))
+        allocate(tube_remPD(c%ntot,2))
+        allocate(tube(c%ntot))
+        ncell = 0
+        counter_saveP = 0
+        tube_remPD = 0
+        tube_remPD(1,1) = 1
+        tube_remD = 0
+
+        ! Get triangles
+        indcv = (/(i, i = 1, c%ntot)/)
+        allocate(trias(count(c%faceP2%Get() == 3)))
+        trias = pack(indcv, c%faceP2%Get() == 3)
+
+        ! Get boundary triangles
+        log = isBoundaryCellGA(grid, trias)
+        allocate(b_trias(count(log)))
+        b_trias = pack(trias, log)
+
+        ! Get GA labels
+        fcLbl_loc = GetfcLblGA(f, options)
+
+        ! Loop over boundary triangle to check face labels
+        do i = 1, size(b_trias)
+
+            ! Cell
+            ic = b_trias(i)
+
+            ! Avoid double detection
+            if (.not.any(ic == tube_remD)) then
+
+                ! Reinitialize
+                tube = 0
+
+                ! Get faces
+                fcs = GetCellFaceGA(c, ic)
+
+                ! Check labels
+                lbls = fcLbl_loc(fcs)
+                flags = (lbls == 1) ! Label for farSOL vessel
+
+                ! Look at neighbors - get poloidal face
+                allocate(nb_face(count(.not.isBoundaryFaceGA(grid, fcs, 1))))
+                nb_face = pack(fcs, .not.isBoundaryFaceGA(grid, fcs, 1))
+                allocate(pol_faceD(count(f%aligned%Get(nb_face) == 0)))
+                pol_faceD = pack(nb_face, f%aligned%Get(nb_face) == 0)
+                allocate(b_faceT(count(isBoundaryFaceGA(grid, fcs, 1))))
+                b_faceT = pack(fcs, isBoundaryFaceGA(grid, fcs, 1))
+
+                ! Get the radial cells of the poloidal face
+                if (size(pol_faceD) .gt. 1) then
+                    ! Select aligned face based on dpsi
+                    dpsi = abs(v%psi%Get(f%vert1%Get(nb_face)) &
+                            - v%psi%Get(f%vert2%Get(nb_face)))
+                    ind = minloc(dpsi, 1)
+                    pol_face = nb_face(ind)
+                else if (size(pol_faceD) == 1) then
+                    pol_face = pol_faceD(1)
+                else if (size(pol_faceD) == 0) then
+                    call gdErrorHandler('DetectOuterShellTube: no internal poloidal face found in a triangle')
+                end if
+
+                ! House keeping
+                deallocate(pol_faceD, nb_face)
+
+                ! Get neighbor 
+                cv_radD = GetFaceCellGA(c, pol_face, cvLookUp)
+                neig = 0
+                if (size(cv_radD) == 2) then
+                    cv_rad = Pack2(cv_radD, cv_radD /= ic)
+                    fcs_rad = GetCellFaceGA(c, cv_rad)
+                    allocate(b_faceN(count(isBoundaryFaceGA(grid, fcs_rad, 1))))
+                    b_faceN = pack(fcs_rad, isBoundaryFaceGA(grid, fcs_rad, 1))
+                    nbf = size(b_faceN)
+
+                    ! Only continue if triangle and quad have connected boundary faces
+                    if (nbf .gt. 0) then
+                        do k = 1, nbf
+                            if (HaveCommonVert(f, b_faceN(k), b_faceT(1))) then
+                                neig = c%faceP2%Get(cv_rad)
+                                exit
+                            end if
+                        end do
+                    end if
+
+                    ! House keeping
+                    deallocate(b_faceN, b_faceT)
+
+                end if
+
+                ! If the neighbor is a quad, continue (triangle tubes where done before)
+                if (neig == 4) then
+
+                    ! Fill in first cells
+                    tube(1) = ic
+                    tube(2) = cv_rad
+                    counter = 2
+
+                    ! Look at next poloidal neighbor
+                    found_end = .false.
+                    no_outer_shell = .false.
+                    do while (.not.found_end)
+
+                        ! Get correct neighbors
+                        cvsD = GetCellNeigsGA(grid, tube(counter),cvLookUp)
+                        allocate(cvs(count(c%cflags%Get(cvsD) == 3))) ! Bounary cell
+                        cvs = pack(cvsD, c%cflags%Get(cvsD) == 3)
+                        allocate(cv_radD2(count(cvs /= tube(counter-1))))
+                        cv_radD2 = pack(cvs, cvs /= tube(counter-1))
+
+                        if (size(cv_radD2) /= 1) then
+                            no_outer_shell = .true.
+                            found_end = .true.
+                        else
+                            cv_rad = cv_radD2(1)
+                            counter = counter + 1
+                            tube(counter) = cv_rad
+
+                            nf_cv_rad = c%faceP2%Get(cv_rad)
+                            if (nf_cv_rad == 4) then
+                                fcs = GetCellFaceGA(c, cv_rad)
+                                if (count(isBoundaryFaceGA(grid, fcs)) .ge. 2) found_end = .true.
+                            else if (nf_cv_rad == 3) then
+                                found_end = .true.
+                            else
+                                call gdErrorHandler('DetectOuterShellTube: something wrong')
+                            end if
+
+                        end if
+
+                        ! House keeping
+                        deallocate(cvs, cv_radD2)
+
+                    end do
+
+                    ! Tackle the outer shell
+                    if (.not.no_outer_shell) then
+
+                        ! Full tube detected 
+                        ! Test radial width
+                        ! Take middle cell in the tube
+                        cv_test = tube(nint((counter*0.5_R8)))
+
+                        ! Get radial internal face
+                        fcs = GetCellFaceGA(c, cv_test)
+                        allocate(fcs_al(count(f%aligned%Get(fcs)==1 .and. .not.isBoundaryFaceGA(grid, fcs))))
+                        fcs_al = pack(fcs,f%aligned%Get(fcs)==1 .and. .not.isBoundaryFaceGA(grid, fcs) )
+
+                        if (size(fcs_al) /= 1) &
+                            call gdErrorHandler('DetectOuterShell: fcs_al not length 1')
+                        
+                        ! Get next cells
+                        cvs_al = GetFaceCellGA(c, fcs_al(1))
+                        cv_pol = Pack2(cvs_al, cvs_al /= cv_test)
+
+                        ! Check radial width
+                        cv_calc = [cv_test, cv_pol]
+                        call grid%CalcHrad(cv_calc, h_rads)
+                        if (h_rads(2)/h_rads(1) .gt. options%rem_tube_outershell_threshold) then
+                            ! Save to remove
+                            tube_remD(ncell+1:ncell+counter) = tube(1:counter)
+                            ncell = ncell + counter
+
+                            counter_saveP = counter_saveP + 1
+                            tube_remPD(counter_saveP, 2) = counter
+                            if (counter_saveP /= 1) then
+                                tube_remPD(counter_saveP, 1) = tube_remPD(counter_saveP-1,1) & 
+                                + tube_remPD(counter_saveP-1,2)
+                            end if
+                        end if
+
+
+                        ! House keeping
+                        deallocate(fcs_al)
+
+                    end if
+
+                end if
+                
+            end if
+
+        end do
+
+        ! Save
+        tube_remP = tube_remPD(1:counter_saveP,:)
+        tube_rem = tube_remD(1:ncell)
+        if (counter_saveP /= 0) then
+            found = .true.
+        end if
+
+        end associate
+
+    end subroutine
+
     !------------------------------------------------------------------!
     !                   GAGRID INFORMATION UTILITY                     !
     !------------------------------------------------------------------! 
@@ -15683,7 +16369,7 @@ module gamod_types
         integer(I8) :: i, j, nb, indFc(grid%face%ntot)
         integer(I8), allocatable :: b_faces(:), cvs(:), cvLookUp(:), ar(:)
 
-        ! Initialize - TODO - method without using face label - check if necessary
+        ! Initialize
         if (.not.present(b_flag)) then
 
             ! Loop over cells

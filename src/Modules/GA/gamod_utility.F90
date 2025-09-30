@@ -841,6 +841,9 @@ module gamod_utility
 
                     end if
 
+                    ! House keeping
+                    if (allocated(pfacesI)) deallocate(pfacesI)
+
                 end if
 
             end if

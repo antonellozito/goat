@@ -67,7 +67,7 @@ module gamod_driver
         case ('aposteriori')
 
             ! Grid adaptation based on simulation information
-            ! call GAapostDriver
+            ! call GAapostDriver - TODO
 
         case default
 
@@ -227,7 +227,9 @@ module gamod_driver
             call grid%RemoveSmallTriangle(magneticField, qm, options)
 
 
-        ! Remove flux tubes with only two triangles
+        ! Remove flux tubes with only two triangles - TODO - RemTriasFlux
+        if (options%rem_trias_flux) &
+            call grid%RemTriasFlux(options)
 
         ! Stacked to cutcell
         if (options%stacked_to_cutcell) &
@@ -265,11 +267,13 @@ module gamod_driver
         if (options%stacked_trias) &
             call grid%StackedTrias(magneticField, qm, options)
 
-        ! Remove sticking out triangles
+        ! Remove sticking out triangles - TODO
 
-        ! Remove boundary flux tubes with only two triangles
+        ! Remove boundary flux tubes with only two triangles -TODO
+        if (options%rem_trias_flux) &
+            call grid%RemTriasFlux(options)
 
-        ! Remove stickout quad
+        ! Remove stickout quad - TODO
 
         ! Boundary layer grid
         if (options%BLG) then
