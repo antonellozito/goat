@@ -1910,7 +1910,7 @@ module mod_polygon
         ! Unpack original vertices ()
         x = polygon%x(polygon%vert)
         y = polygon%y(polygon%vert)
-        labels = labels(polygon%vert, :)
+        labels = polygon%labels(polygon%vert, :)
 
         ! Compress
         !=========
@@ -1961,19 +1961,19 @@ module mod_polygon
         ! Compute angles
         !===============
         dx = x(2:) - x(1:np-1)
-        dy = x(2:) - x(1:np-1)
+        dy = y(2:) - y(1:np-1)
         theta = atan2(dx(1:np-2)*dy(2:np-1) - dx(2:np-1)*dy(1:np-2), &
-            dx(1:np-2)*dx(2:np-1) + dx(2:np-1)*dx(1:np-2))
+            dx(1:np-2)*dx(2:np-1) + dy(2:np-1)*dy(1:np-2))
 
         ! Simplify
         !=========
-        where (abs(theta) <= 1e-13_R8) keepind = .false.
-        allocate(tempx(count(keepind)), tempy(count(keepind)), &
-            templabels(count(keepind), size(labels, 2)))
-        tempx = pack(x, keepind)
-        tempy = pack(y, keepind)
+        where (abs(theta) <= 1e-8_R8) keepind = .false.
+        allocate(tempx(count(keepind)+2), tempy(count(keepind)+2), &
+            templabels(count(keepind)+2, size(labels, 2)))
+        tempx = [x(1), pack(x(2:size(x)-1), keepind), x(size(x))]
+        tempy = [y(1), pack(y(2:size(y)-1), keepind), y(size(y))]
         do i = 1, size(labels, 2)
-            templabels(:, i) = pack(labels(:, i), keepind)
+            templabels(:, i) = [labels(1, i), pack(labels(2:size(x)-1, i), keepind), labels(size(x), i)]
         end do 
         x = tempx
         y = tempy
