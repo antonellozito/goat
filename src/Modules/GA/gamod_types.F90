@@ -447,10 +447,13 @@ module gamod_types
         procedure :: GetRadialIntersection
         procedure :: ThicknessSmoothing
 
-        ! Remove triangle tubes
+        ! Remove triangle tubes and sticking out cells
         procedure :: RemTriasFlux
         procedure :: DetectTriaTubes
         procedure :: DetectOuterShellTube
+        procedure :: RemoveStickOutTrias
+        procedure :: RemoveStickOutQuads
+        procedure :: DetectStickOutQuad
 
         ! Grid information utility
         procedure :: GetForbiddenMergeFaces
@@ -15604,9 +15607,9 @@ module gamod_types
         integer(I8), intent(out)        :: rem_trias(2)
 
         ! Auxiliary
-        integer(I8) :: i, ic, pol_face, ind, cv_rad, np, rad_face, neig
+        integer(I8) :: i, ic, pol_face, ind, cv_rad, np, neig
         integer(I8), allocatable, dimension(:) :: trias, indcv, b_trias, fcLbl_loc, &
-            cvLookUp, lbls, nb_face, pol_faceD, cv_radD, rad_faceD, fcs, fcs_rad
+            cvLookUp, lbls, nb_face, pol_faceD, cv_radD, fcs, fcs_rad
         real(R8), allocatable :: dpsi(:)
         logical, allocatable :: flags(:)
 
@@ -15958,6 +15961,252 @@ module gamod_types
         if (counter_saveP /= 0) then
             found = .true.
         end if
+
+        end associate
+
+    end subroutine
+
+    subroutine RemoveStickOutTrias(grid, options)
+
+        ! Description
+        !============
+        ! Remove sticking out triangle, i.e. triangles that only 
+        ! connect to the rest of the grid with one face.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        type(GAoptionsUDT), intent(in)  :: options
+
+        ! Auxiliary
+        integer(I8) :: i, j, ic, counter, rem_triasD(grid%cell%ntot), lbl
+        integer(I8), allocatable, dimension(:) :: indcv, trias, b_trias, rem_trias, &
+            fcs, fcLbl_loc, lbls, lblsD, lblU, ar, rem_vert, rem_cell, rem_faces, &
+            cvs, neig, vxs
+        logical, allocatable ::  flags(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Display progress
+        print *, 'Remove sticking out triangles'
+
+        ! Initialize
+        counter = 0
+        rem_triasD = 0
+        allocate(rem_vert(1))
+        allocate(rem_cell(1))
+
+        ! Get triangles
+        indcv = (/(i, i = 1, c%ntot)/)
+        allocate(trias(count(c%faceP2%Get() == 3)))
+        trias = pack(indcv, c%faceP2%Get() == 3)
+
+        ! Get boundary triangles
+        allocate(b_trias(count(isBoundaryCellGA(grid, trias))))
+        b_trias = pack(trias, isBoundaryCellGA(grid, trias))
+
+        ! Get GA labels
+        fcLbl_loc = GetfcLblGA(f, options)
+
+        ! Loop over boundary triangles to check face labels to find
+        ! triangles to remove
+        do i = 1, size(b_trias)
+
+            ! Get faces
+            fcs = GetCellFaceGA(c, b_trias(i))
+
+            ! Check labels
+            flags = (fcLbL_loc(fcs) == 1)
+
+            if (count(flags) .gt. 1) then
+                counter = counter + 1
+                rem_triasD(counter) = b_trias(i)
+            end if
+
+        end do
+
+        ! Trim
+        rem_trias = rem_triasD(1:counter)
+        call Sort(rem_trias)
+
+        ! Remove sticking out triangles
+        !------------------------------
+        do i = 1, counter
+
+            ! Correct ic because cells will be removed
+            ic = rem_trias(i) - (i-1)
+            rem_cell = ic
+
+            ! Give all the faces the face labels
+            fcs = GetCellFaceGA(c, ic)
+            lbls = f%label%Get(fcs)
+            allocate(lblsD(count(lbls /= 0)))
+            lblsD = pack(lbls, lbls /= 0)
+            call Unique(lblsD, lblU)
+            lbl = lblU(1)
+
+            ! Get faces to remove
+            allocate(rem_faces(size(lblsD)))
+            rem_faces = pack(fcs, lbls /= 0)
+
+            ! Set label to all faces
+            ar = (/(lbl, i = 1, size(fcs))/)
+            call f%label%Set(fcs, ar)
+
+            ! Get vertices
+            vxs = GetCellVertGA(c, ic)
+
+            ! Get verts only connected to one cell
+            do j = 1, size(vxs)
+                cvs = GetVertCellGA(c, vxs(j))
+                if (size(cvs) == 1) then
+                     rem_vert = vxs(j)
+                     exit
+                end if
+            end do
+
+            ! Get neighboring cells
+            neig = GetCellNeigsGA(grid, ic)
+            ar = (/(3, i = 1, size(neig))/)
+            call c%cflags%Set(neig, ar)
+
+            ! Remove faces, cell and vertex
+            call grid%RemoveFaces(rem_faces)
+            call grid%RemoveCells(rem_cell)
+            call grid%RemoveVertices(rem_vert)
+
+            ! House keeping
+            deallocate(lblsD, rem_faces)
+
+        end do
+
+        end associate
+
+    end subroutine
+
+    subroutine RemoveStickOutQuads(grid)
+
+        ! Description
+        !============
+        ! Remove sticking out quads, i.e. quads that only 
+        ! connect to the rest of the grid with one face, so 
+        ! have three boundary faces
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+
+        ! Auxiliary
+        integer(I8) :: i, ic, iface, iverts(2)
+        integer(I8), allocatable, dimension(:) :: cv, verts, faces, ifaceD, bfaces, &
+            rem_verts, cell_rem
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Display progress
+        print *, 'Remove sticking out quads'
+
+        ! Detection 
+        call grid%DetectStickOutQuad(cv)
+
+        ! Loop over found cells
+        allocate(cell_rem(1))
+        do i = 1, size(cv)
+
+            ! Correct cell number
+            ic = cv(i) - (i-1)
+            cell_rem = ic
+
+            ! Get vertices and faces
+            verts = GetCellVertGA(c, ic)
+            faces = GetCellFaceGA(c, ic)
+
+            ! Change face labels
+            allocate(ifaceD(count(f%label%Get(faces) == 0)))
+            ifaceD = pack(faces, f%label%Get(faces) == 0)
+            iface = ifaceD(1)
+            allocate(bfaces(count(faces /= iface)))
+            bfaces = pack(faces, faces /= iface)
+            call f%label%Set(iface, maxval(f%label%Get(bfaces)))
+
+            iverts = [f%vert1%Get(iface), f%vert2%Get(iface)]
+            allocate(rem_verts(count(verts /= iverts(1) .and. verts /= iverts(2))))
+            rem_verts = pack(verts, verts /= iverts(1) .and. verts /= iverts(2))
+
+            ! Remove cell, vertices and faces
+            call grid%RemoveCells(cell_rem)
+            call grid%RemoveVertices(rem_verts)
+            call grid%RemoveFaces(bfaces)
+
+            ! House keeping
+            deallocate(ifaceD, bfaces, rem_verts)
+
+        end do
+
+        end associate
+
+    end subroutine
+
+    subroutine DetectStickOutQuad(grid, cv)
+
+        ! Description
+        !============
+        ! Detection quadrilaterals with three boundary faces
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)           :: grid
+        integer(I8), allocatable, intent(out)  :: cv(:)
+
+        ! Auxiliary
+        integer(I8) :: i, counter, cvD(grid%cell%ntot)
+        integer(I8), allocatable :: indcv(:), bcells(:), fcs(:)
+        logical, allocatable :: bf(:), log(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Initialize
+        cvD = 0
+        counter = 0
+        bf = f%label%Get() /= 0
+
+        ! Get boundary cells
+        indcv = (/(i, i = 1, c%ntot)/)
+        log = isBoundaryCellGA(grid, indcv) .and. c%faceP2%Get() == 4
+        allocate(bcells(count(log)))
+        bcells = pack(indcv, log)
+
+        do i = 1, size(bcells)
+
+            ! Get faces
+            fcs = GetCellFaceGA(c, bcells(i))
+
+            ! Count boundary faces
+            if (count(bf(fcs)) .gt. 2) then
+                counter = counter + 1
+                cvD(counter) = bcells(i)
+            end if
+
+        end do
+
+        ! Trim
+        cv = cvD(1:counter)
+
 
         end associate
 

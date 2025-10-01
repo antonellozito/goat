@@ -42,7 +42,7 @@ module gamod_math
         o1 = Orient(p1, q1, p2)
         o2 = Orient(p1, q1, q2)
         o3 = Orient(p2, q2, p1)
-        o4 = Orient(p2, q2, q2)
+        o4 = Orient(p2, q2, q1)
 
         res = 1
 

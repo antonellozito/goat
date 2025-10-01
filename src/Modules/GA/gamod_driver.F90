@@ -62,12 +62,12 @@ module gamod_driver
         case ('simple')
 
             ! Regular grid adaption
-            call GAInternalDriver(grid,options,environment,magneticField)
+            call GAInternalDriver(grid, options, environment, magneticField)
 
         case ('aposteriori')
 
             ! Grid adaptation based on simulation information
-            ! call GAapostDriver - TODO
+            !call GAapostDriver(grid, options, environment, magneticField, state) 
 
         case default
 
@@ -91,7 +91,7 @@ module gamod_driver
         !==================
         ! Arguments
         type(GAGridUDT), intent(inout)          :: grid 
-        type(GAoptionsUDT), intent(in)          :: options
+        type(GAoptionsUDT), intent(inout)       :: options
         type(EnvironmentUDT), intent(in)        :: environment
         type(MagneticFieldUDT), intent(in)      :: magneticField
 
@@ -184,13 +184,15 @@ module gamod_driver
 
         ! Detect cells at cut for artificial slabs - TODO
 
-        ! Identify farSOL cells - TODO 
+        ! Identify farSOL cells
         if (options%vesselmode .and. maxval(options%facelabelmappingGA) .lt. 6) then
             call grid%IdentifyfarSOLcells(options)
         else if (maxval(options%facelabelmappingGA) .gt. 5) then
             call gdErrorHandler('GAInit: no farSOL indentified as algorithm is not supporting double null cases yet!') ! TODO
-
         end if
+
+        ! Check consistency of options
+        call CheckGAoptions(options)
 
         ! Visualize starting grid
         call grid%WriteData('grid_before_GA')
@@ -227,7 +229,7 @@ module gamod_driver
             call grid%RemoveSmallTriangle(magneticField, qm, options)
 
 
-        ! Remove flux tubes with only two triangles - TODO - RemTriasFlux
+        ! Remove flux tubes with only two triangles
         if (options%rem_trias_flux) &
             call grid%RemTriasFlux(options)
 
@@ -267,13 +269,17 @@ module gamod_driver
         if (options%stacked_trias) &
             call grid%StackedTrias(magneticField, qm, options)
 
-        ! Remove sticking out triangles - TODO
+        ! Remove sticking out triangles
+        if (options%rem_stickout_trias) &
+            call grid%RemoveStickOutTrias(options)
 
-        ! Remove boundary flux tubes with only two triangles -TODO
+        ! Remove boundary flux tubes with only two triangles
         if (options%rem_trias_flux) &
             call grid%RemTriasFlux(options)
 
-        ! Remove stickout quad - TODO
+        ! Remove stickout quad
+        if (options%rem_stickout_quad) &
+            call grid%RemoveStickoutQuads()
 
         ! Boundary layer grid
         if (options%BLG) then
@@ -489,7 +495,7 @@ module gamod_driver
             do i = 1, nv
                 bpvx(i) = sqrt( v%bx(i)**2 + v%by(i)**2 )
             end do
-            r = nv*2*pi_R8*c%x(ic)    ! For axissymmetry around Z = 0 ! TODO
+            r = nv*2*pi_R8*c%x(ic)    ! For axissymmetry around Z = 0, x = 0 ! TODO
             bp(ic) = -sum(bpvx(1:nv))/r
             bt(ic) = sum(v%ffbz(vxs(1:nv)))/r
             bpvx = 0
@@ -555,7 +561,7 @@ module gamod_driver
         ! Save
         grid%data%fluxdata%fluxsurfacepsi = fsPsi
 
-        ! Determine OMP and IMP - TODO - check if correct
+        ! Determine OMP and IMP
         call DetermineMPs(grid, options)
         
 
@@ -584,6 +590,32 @@ module gamod_driver
         gaoptions%OMP_z                 = goatoptions%OMP_z
         gaoptions%IMP_r                 = goatoptions%IMP_r
         gaoptions%IMP_z                 = goatoptions%IMP_z
+
+    end subroutine
+
+    subroutine CheckGAoptions(options)
+
+        ! Description
+        !============
+        ! Check the consistency of the inputted options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GAoptionsUDT), intent(inout) :: options
+
+        ! BLG, first remove small triangles
+        if (options%BLG) &
+            options%rem_small_trias = .true.
+        
+        ! Pol flux
+        if (options%rad_type == 'pol_flux' &
+            .and. options%splitting .and. .not.options%dist_function) then
+            options%dist_function = .true.
+            print *, 'Using pol_flux method for radial splitting while GAoptions.' // &
+                & 'dist_function is off. Setting this to 1.'
+            print *, 'options%dist_function: T'
+        end if
 
     end subroutine
 

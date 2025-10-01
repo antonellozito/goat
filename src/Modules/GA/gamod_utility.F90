@@ -969,7 +969,7 @@ module gamod_utility
         end if
 
         ! First determine the start and end cells of the tubes
-        ! INFORMATION SAVED SHOULD BE CORRECT BEFORE!!!! CHECK THIS - TODO
+        ! INFORMATION SAVED SHOULD BE CORRECT BEFORE!!!! (in PostprocessGA)
         !call GiveXpoints(grid, .false., cvLookUp)
         !call GiveSeparatrices(grid, .false., .false., .true., cvLookUp)
 
@@ -1375,6 +1375,8 @@ module gamod_utility
         allocate(listcv_dummy(200))
         allocate(listfc_dummy(200))
         allocate(dist_vert(v%ntot))
+        listcv_dummy = 0
+        listfc_dummy = 0
         nn = 1
 
         ! Check whether the segment intersects any vertices, if so shift the
@@ -1432,7 +1434,7 @@ module gamod_utility
                     kk = 1
                     do while (.not.found .and. kk .le. nn)
 
-                        if (listcv(kk) == cv) then 
+                        if (listcv_dummy(kk) == cv) then 
                             found = .true.
                         end if
                         kk = kk + 1
@@ -1599,7 +1601,7 @@ module gamod_utility
 
             ! If there would be no next cell - error => change segment
             if (omp_cv_sorted(i+1) == 0) then
-                found = .false.;
+                found = .false.
                 exit
             end if          
 

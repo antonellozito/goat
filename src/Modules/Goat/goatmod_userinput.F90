@@ -174,13 +174,20 @@ module goatmod_userinput
     type, extends(OptionsUDT) :: GAoptionsUDT   
 
         ! Structure containing the options for the grid adaptation part 
-        ! of GOAT. The following fields are present:
-        ! # TODO 
+        ! of GOAT. The following fields are present: ! TODO
+        ! - plt: enable general plotting
+        ! - plt_qm: enable plotting quality metrics
+        ! - meth: used method, can be 'simple' to adapt the grid based in 
+        !         on grid metric, or can be 'aposteriori' which is using
+        !         plasma state information
+        ! - facelabelmappingGG: list of face labels of the grid generator
+        ! - facelabelmappingGA: mapping of grid generator label to labels
+        !                       needed for grid adaptation
+        
 
         ! General adaptation options
         logical                     :: plt
         logical                     :: plt_qm
-        logical                     :: timing
         character(:), allocatable   :: meth
 
 
@@ -220,7 +227,7 @@ module goatmod_userinput
         logical                     :: rem_trias_flux
         real(R8)                    :: rem_tube_outershell_threshold
         character(:), allocatable   :: outershell_handling
-        logical                     :: remove_stickoutquad
+        logical                     :: rem_stickout_quad
         logical                     :: split_noalignedquads 
         
         ! Splitting options
@@ -920,7 +927,6 @@ module goatmod_userinput
         ! General options
         options%plt         = .true.
         options%plt_qm      = .false.
-        options%timing      = .false.
         options%meth        = 'simple'
 
         ! Set fcReg mapping
@@ -957,7 +963,7 @@ module goatmod_userinput
         options%rem_trias_flux                      = .false.
         options%rem_tube_outershell_threshold       = 2
         options%outershell_handling                 = 'merge' 
-        options%remove_stickoutquad                 = .false.
+        options%rem_stickout_quad                 = .false.
         options%split_noalignedquads                = .true. 
         
         ! Splitting options
@@ -1475,16 +1481,16 @@ module goatmod_userinput
             options%GGtoGAfacelabelsubto)    
 
         ! OMP and IMP
-        field = 'goat.OMPr'
+        field = 'goat.OMP_r'
         call ExtractOptionValueReal1D(fid, field, &
             options%OMP_r)
-        field = 'goat.OMPz'
+        field = 'goat.OMP_z'
         call ExtractOptionValueReal1D(fid, field, &
             options%OMP_z)
-        field = 'goat.IMPr'
+        field = 'goat.IMP_r'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_r)
-        field = 'goat.IMPz'
+        field = 'goat.IMP_z'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_z)
         
@@ -1588,9 +1594,7 @@ module goatmod_userinput
         field = 'ga.plt'
         call ExtractOptionValueLogical0D(fid, field, options%plt)
         field = 'ga.plt_qm'
-        call ExtractOptionValueLogical0D(fid, field, options%plt_qm) 
-        field = 'ga.timing'  
-        call ExtractOptionValueLogical0D(fid, field, options%timing)               
+        call ExtractOptionValueLogical0D(fid, field, options%plt_qm)              
         field = 'ga.meth'
         call ExtractOptionValueCharacter(fid, field, options%meth) 
         
@@ -1654,8 +1658,8 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%rem_tube_outershell_threshold)  
         field = 'ga.outershell_handling'
         call ExtractOptionValueCharacter(fid, field, options%outershell_handling)
-        field = 'ga.remove_stickoutquad'        
-        call ExtractOptionValueLogical0D(fid, field, options%remove_stickoutquad)
+        field = 'ga.rem_stickout_quad'        
+        call ExtractOptionValueLogical0D(fid, field, options%rem_stickout_quad)
         field = 'ga.split_noalignedquads'
         call ExtractOptionValueLogical0D(fid, field, options%split_noalignedquads) 
 
