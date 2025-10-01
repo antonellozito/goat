@@ -182,7 +182,10 @@ module gamod_driver
         ! Correct face labels on for wide grid
         call grid%CheckFcLbl(options)
 
-        ! Detect cells at cut for artificial slabs - TODO
+        ! Detect cells at cut for artificial slabs - TODO - not really supported
+        !if (options%artificial_slab) &
+        !    call grid%DetectCellsAtCut()
+
 
         ! Identify farSOL cells
         if (options%vesselmode .and. maxval(options%facelabelmappingGA) .lt. 6) then

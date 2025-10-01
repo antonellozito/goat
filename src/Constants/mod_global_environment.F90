@@ -28,6 +28,7 @@ module mod_global_environment
         solps_gridfilepath              = 'traduit.out.b2us', &
         solps_structurefilepath         = 'structure.dat', &
         solps_magneticfieldfilepath     = 'rzpsi.dat', &
+        solps_statefilepath             = 'b2fplasmf', &
         solps_writefilepath             = 'traduit_goat.out.b2us', & 
         solps_outputfilepath            = './output/'
 

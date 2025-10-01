@@ -566,6 +566,43 @@ module goatmod_types
 
     end type
 
+    ! State 
+    type StateUDT
+
+        ! Description
+        !============
+        ! User defined type containing simulation data (SOLPS-ITER) on the given grid
+        ! The following field are present:
+        !
+        ! - na:     ion density
+        ! - ne:     electron density
+        ! - ua:     parallel velocity
+        ! - uadia:  diamagnetic velocity
+        ! - te:     electron density
+        ! - ti:     ion temperature
+        ! - tn:     neutral temperature
+        ! - po:     potential
+        ! - kt:     ??
+
+        ! - resco:  residual of continuity equation
+        ! - reshe:  residual of electron temperature equation
+        ! - reshi:  residual of ion temperature equation
+        ! - reshn:  residual of neutral temperature equation
+        ! - resmo:  residual of ion momentum equation
+        ! - resmt:  residual of total momentum equation
+        ! - respo:  residual of potential equation
+        ! - reskt:  ??
+
+        ! State 
+        real(R8), allocatable               :: na(:,:), ne(:), ua(:,:), uadia(:,:,:), & 
+                                                te(:), ti(:), tn(:), po(:), kt(:)
+
+        ! Residual
+        real(R8), allocatable               :: resco (:,:), reshe(:), reshi(:), reshn(:), &
+                                                resmo(:,:), resmt(:), respo(:), reskt(:)
+
+    end type
+
     ! Vessel
     !=======
     type VesselUDT
@@ -4355,6 +4392,68 @@ module goatmod_types
     end subroutine
 
     !------------------------------------------------------------------!
+    !                               State                              !
+    !------------------------------------------------------------------!
+
+    ! State
+    !======
+    ! Main reader
+    subroutine ReadState(state, options)
+
+        ! Description
+        !============
+        ! Read in the state data. 
+
+        ! Declare variables
+        !==================
+        integer                         :: filespecifier
+        type(StateUDT)                  :: state
+        type(GoatoptionsUDT)            :: options 
+        
+        ! Loop variables
+    
+        ! Auxiliary variables 
+    
+        ! Data
+        data filespecifier /60/
+    
+        ! Main program
+        !=============
+        ! Open the file
+        if (options%readstate) then
+
+            print *, 'reading state data from file: ' // options%statefilepath
+            open(unit = filespecifier, file = options%statefilepath)   
+            
+            ! Check how to read the file
+            select case (options%readstatemeth)
+
+            case ('b2fstate')
+
+                ! Read b2fstate file - TODO
+                ! call ReadB2fstate
+
+            case ('b2fplasmf')
+
+                ! Read b2fplasmf file - TODO
+                ! call ReadB2fplasmf
+
+            case default
+
+                ! Unknown reading method, throw error
+                call gdErrorHandler('ReadState: unknown reading method') 
+
+            end select
+
+            ! Housekeeping
+            !=============
+            close(filespecifier)
+
+        end if
+
+    end subroutine
+
+    !------------------------------------------------------------------!
     !                            Environment                           !
     !------------------------------------------------------------------!
     ! Environment
@@ -6775,7 +6874,7 @@ module goatmod_types
     end subroutine
 
     ! Data extraction for other goat drivers (GD, GA, ...)
-    subroutine ExtractGoatData(grid, magneticField, environment, options)
+    subroutine ExtractGoatData(grid, magneticField, environment, state, options)
 
         ! Description
         !============
@@ -6789,6 +6888,7 @@ module goatmod_types
         type(GridUDT)                       :: grid 
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
+        type(StateUDT)                      :: state
         type(GoatoptionsUDT)                :: options 
     
         ! Auxiliary 
@@ -6845,6 +6945,9 @@ module goatmod_types
     
         ! Read magnetic field
         call ReadMagneticField(magneticField, mfoptions, options%magneticfieldfilepath)
+
+        ! Read state
+        call ReadState(state, options)
     
         ! Read additional data
         !=====================

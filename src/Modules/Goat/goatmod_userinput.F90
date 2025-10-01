@@ -20,7 +20,7 @@ module goatmod_userinput
     use mod_inputfileparser
     use mod_global_environment, only: solps, solps_inputfilepath, &
         solps_writefilepath, solps_gridfilepath, solps_magneticfieldfilepath, &
-        solps_structurefilepath, solps_outputfilepath
+        solps_statefilepath, solps_structurefilepath, solps_outputfilepath
 
     ! The usual
     implicit none
@@ -114,11 +114,15 @@ module goatmod_userinput
         character(:), allocatable   :: magneticfieldreadtype
         character(:), allocatable   :: filepath
         character(:), allocatable   :: gdinputfilepath
+        logical                     :: readstate
+        character(:), allocatable   :: readstatemeth
+
 
         ! Specify input filenames
         character(:), allocatable   :: gridfilepath
         character(:), allocatable   :: structurefilepath
         character(:), allocatable   :: magneticfieldfilepath
+        character(:), allocatable   :: statefilepath
         character(:), allocatable   :: writefilepath
 
         ! Output options
@@ -857,6 +861,7 @@ module goatmod_userinput
         options%debug           = .false. 
         options%meth            = 'GD'
         options%gdinputfilepath = './GOAToptions.dat'
+        options%readstate       = .false.
 
         ! Specify input filenames
         if (solps) then 
@@ -864,11 +869,14 @@ module goatmod_userinput
             options%gridfilepath            = solps_gridfilepath
             options%structurefilepath       = solps_structurefilepath
             options%magneticfieldfilepath   = solps_magneticfieldfilepath
+            options%statefilepath           = solps_statefilepath
         else
             options%gridfilepath            = './traduit.out.b2us'
             options%structurefilepath       = './structure.dat'
             options%magneticfieldfilepath   = './rzpsi.dat'
+            options%statefilepath           = './b2fplasmf'
         end if 
+        
 
         ! Output options
         if (solps) then 
