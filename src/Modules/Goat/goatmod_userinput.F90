@@ -174,7 +174,7 @@ module goatmod_userinput
     type, extends(OptionsUDT) :: GAoptionsUDT   
 
         ! Structure containing the options for the grid adaptation part 
-        ! of GOAT. The following fields are present: ! TODO
+        ! of GOAT. The following fields are present: 
 
         ! General adaptation options
         ! - plt: enable general plotting
@@ -249,8 +249,22 @@ module goatmod_userinput
         ! - typeT: method to split a triangle, can be 'stacked', i.e. triangle 
         !          is split into two trianlge, or 'cutcell', i.e. triangle is 
         !           split in a quad and a triangle
-        ! - rad_type: criterium to apply radial splitting (see SelectSplitCell) TODO
-        ! - pol_type: criterium to aplly poloidal splitting (see SelectSplitCell) TODO
+        ! - rad_type: criterium to apply radial splitting (see SelectSplitCell), can be:
+        !             'h_rad_psi': split cells with large psi width
+        !             'h_rad': split cells with large radial width
+        !             'pol_flux': split cells with large poloidal flux estimation based on 
+        !                           pol_flux_est distance function
+        !             'farSOL': split highly inclined triangles in the farSOL
+        !             'farSOL_refinements': split cells with large psi width in the farSOL
+        !             'farSOLrefinement_targets': split cells with large psi width and 
+        !                                         low boundary face inclination in the farSOL
+        ! - pol_type: criterium to aplly poloidal splitting (see SelectSplitCell) can be:
+        !                'trias_cvS': split triangles with largest surface area
+        !                'h_pol': split cells with largest poloidal length
+        !                'trias_farSOL': split triangles with largest surface area in the farSOL
+        !                'farSOLrefinement_hpol': split cells with largest poloidal length in the farSOL
+        !                'farSOLrefinement_targets': split cells in the farSOL with large
+        !                                   poloidal length and low inclination at the boundary face
         ! - dist_function_threshold_split: threshold for the value the distance function 
         !               for selecting a cell to split. The value should be lower than 
         !               threshold.
@@ -259,7 +273,19 @@ module goatmod_userinput
         ! Merging options
         ! - no_hex: to not allow hexagonal cells in the final grid
         ! - merge_crit: criterium to select a face from which the two cell need to be merged
-        !               can be : TODO
+        !               can be (see SelectMergingFace) :
+        !               'tria_to_quad': merging two triangles to quadrilaterals
+        !               'min_area': merging cells which are smaller the mean surface area
+        !               'h_pol': merging cells with too small poloidal length
+        !               'bias': merging based on high bias between cells in poloidal direction
+        !               'pol_flux': merging cells with low poloidal flux estimation via 
+        !                           similarly named distance function
+        !               'h_rad': merging cells with psi width smaller than h_rad_threshold
+        !               'h_rad_core': merging cells in the core radial width smaller than
+        !                            h_rad_core_threshold
+        !               'bias_rad_farSOL': merging cells with large radial bias in farSOL
+        !               'bias_rad': merging cells with large radial bias
+        !               'skew_tria': merging triangles with low inclination and high aspect ratio
         ! - merge_h_pol_factor: factor to losen merge criterium based on poloidal length
         ! - n_merge: number of merging operations allowed
         ! - merge_bias_limit: thershold on bias to merge the cells. Merge is done when
