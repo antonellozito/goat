@@ -1360,6 +1360,13 @@ def PlotGridCellCutcells(grid,cctria,cctrapsP1,cctrapsP2,cctraps, fignum ):
             cells = cctraps[s:s+n]
         PlotPoints2D(grid.cell.x[cells-1], grid.cell.y[cells-1], fignum, marker='.', color='g')
 
+def PlotGridCellValue(grid, array, threshold, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)
+
+    for i in np.arange(0, grid.cell.ntot, 1):
+        if (array[i] >  threshold) :
+            PlotPoints2D(grid.cell.x[i], grid.cell.y[i], fignum, marker='.', color='b')
 
 # Grid topological data
 def PlotGridTopologicalData(grid, fignum):

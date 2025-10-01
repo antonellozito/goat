@@ -52,22 +52,35 @@ print('Total number of vertices: ' + str(grid2.vert.ntot))
 #-------
 # Plot the grid
 plotter.PlotGridCells(grid2,1)
+
+# Intermediate
+#--------------
+#filepath = datadir + '/' + 'grid_after_53.dat'
+#grid3 = dh.ReadGAGridDataFile(filepath)
+#plotter.PlotGridCells(grid3,2)
+
 #plotter.PlotGridCellsAlignedFaces(grid,1)
 #plotter.PlotGridCellsBoundaryFaces(grid,2)
 
 # Reading cutcell arrays
 #-----------------------
 #filepath = datadir + '/' + 'cctria.dat'
-#cctria = dh.ReadGAArrayFile(filepath)
+#cctria = dh.ReadGAIntegerArrayFile(filepath)
 #filepath = datadir + '/' + 'cctrapsP1.dat'
-#cctrapsP1 = dh.ReadGAArrayFile(filepath)
+#cctrapsP1 = dh.ReadGAIntegerArrayFile(filepath)
 #filepath = datadir + '/' + 'cctrapsP2.dat'
-#cctrapsP2 = dh.ReadGAArrayFile(filepath)
+#cctrapsP2 = dh.ReadGAIntegerArrayFile(filepath)
 #filepath = datadir + '/' + 'cctraps.dat'
-#cctraps = dh.ReadGAArrayFile(filepath)
+#cctraps = dh.ReadGAIntegerArrayFile(filepath)
 
 #print(str(cctria[0]))
 #plotter.PlotGridCellCutcells(grid2,cctria,cctrapsP1,cctrapsP2,cctraps, 2)
+
+# Reading farSOL interpolation value
+#-----------------------------------
+filepath = datadir + '/' + 'farSOLint.dat'
+farSOLint = dh.ReadGARealArrayFile(filepath)
+plotter.PlotGridCellValue(grid1,farSOLint, 0.95, 2)
 
 
 

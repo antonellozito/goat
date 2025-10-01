@@ -1168,7 +1168,7 @@ def ReadGGGridDataFile(filepath):
     # Return
     return grid
 
-def ReadGAArrayFile(filepath):
+def ReadGAIntegerArrayFile(filepath):
     # Description
     # -----------
     # This routine read a file with an array as writting by WriteArray
@@ -1217,7 +1217,57 @@ def ReadGAArrayFile(filepath):
         ar[ID-1] = el[0]
 
     return ar
-      
+
+def ReadGARealArrayFile(filepath):
+    # Description
+    # -----------
+    # This routine read a file with an array as writting by WriteArray
+    # in gamod_types.F90.
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read array data
+    #----------------
+    i = 0
+    while i < len(alllines):
+        if "Elements" in alllines[i]:
+            break
+        else:
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of elements
+    values = alllines[i].split()
+    n_el = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    n_el = n_el[0]
+
+    # Read vertex data
+    while i < len(alllines):
+        if "ID val(ID)" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    ar = np.zeros(n_el, dtype=float)
+    for j in np.arange(0, n_el):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        el = np.fromstring(values[1], dtype=float, count=1, sep =' ')
+        ar[ID-1] = el[0]
+
+    return ar
+
 def ReadGAGridDataFile(filepath):
     # Description
     #------------
@@ -1313,7 +1363,7 @@ def ReadGAGridDataFile(filepath):
         v1 = np.fromstring(values[1], dtype=int, count=1, sep =' ')
         v2 = np.fromstring(values[2], dtype=int, count=1, sep =' ')
         label = np.fromstring(values[3], dtype=int, count=1, sep =' ')
-        aligned = np.fromstring(values[5], dtype=int, count=1, sep =' ')
+        aligned = np.fromstring(values[4], dtype=int, count=1, sep =' ')
         grid.face.ID[ID-1] = ID
         grid.face.v1[ID-1] = v1[0]
         grid.face.v2[ID-1] = v2[0]
