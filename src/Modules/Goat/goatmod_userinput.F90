@@ -175,15 +175,122 @@ module goatmod_userinput
 
         ! Structure containing the options for the grid adaptation part 
         ! of GOAT. The following fields are present: ! TODO
+
+        ! General adaptation options
         ! - plt: enable general plotting
         ! - plt_qm: enable plotting quality metrics
         ! - meth: used method, can be 'simple' to adapt the grid based in 
         !         on grid metric, or can be 'aposteriori' which is using
         !         plasma state information
+
+        ! Facelabel mapping
         ! - facelabelmappingGG: list of face labels of the grid generator
         ! - facelabelmappingGA: mapping of grid generator label to labels
         !                       needed for grid adaptation
+
+        ! Operation options    
+        ! - rem_small_trias: remove small triangles
+        ! - cut_off_pol: threshold for small triangles poloidal height 
+        !                   with respect to the poloidal neighbor
+        ! - cut_off_surf: threshold for small triangles on the surface
+        !                   area with respect to the surface area of its
+        !                   neighbors
+        ! - stacked_trias: apply transformation to stacked triangles
+        ! - stacked_trias_checkAR: switch on selecting triangles based on 
+        !                           its aspect ratio
+        ! - stacked_trias_maxAR: maximal aspect ratio of a triangle
+        !                        in the stacked triangle transformation
+        ! - merge_stacked_trias: switch to apply merging stacked triangles
+        !                        which are too skewed
+        ! - merge_stacked_trias_angle_threshold: threshold of stacked triangle
+        !                       too merge it (in degrees)
+        ! - merge_trap_into_stacked: switch to allow merging a trapezoid
+        !                            into a group of stacked triangles
+        ! - stacked_to_cutcell: apply transformation from stacked triangles
+        !                       to cutcell
+        ! - stacked_to_cutcell: switch to transform to cutcell based on face
+        !                       length of the aligned faces of the triangles
+        ! - split_shaved_off_tube: apply radial splitting a concavely shaved
+        !                           off fluxtube at the outer boundary
+        ! - splitting: apply splitting of cells
+        ! - merging: apply merging of cells
+        ! - pents_to_tria: transfrom all remaining pentagon into triangles
+        ! - h_rad_threshold: threshold of radial width of cell during merging,
+        !                    only smaller cells are considered
+        ! - h_rad_core_threshold: idem as above but only for cells in the core
+        ! - BLG: add a boundary layer at the main targets of a grid
+        ! - BLG_n_layers: determine the number of layers of the added 
+        !                   boundary layer
+        ! - BLG_rescaling_factor: size of the boundary layer wrt the 
+        !                           upstream cells  
+        ! - rem_stickout_trias: remove triangle that are only connected 
+        !                       with the grid via one face
+        ! - rem_trias_flux: remove flux tube with only two triangles and
+        !                   remove or merge flux tube with a both end a triangle
+        ! - rem_tube_outershell_threshold: threshold for select a flux tube
+        !                   to be merged with neighboring tube (h_rad of 
+        !                   neighboring tube / h_rad of boundary tube)
+        ! - outershell_handling: can be 'remove' or 'merge'
+        ! - rem_stickout_quad: remove quad which are only connected to the grid
+        !                       with one face
+        ! - split_noalignedquads: splitting quads without aligned faces
         
+        ! Splitting options        
+        ! - no_pents: do not allow pentagons in the final grid
+        ! - QTtype: method on how to handle radial splitting at inclined boundaries
+        !           can be 'regular', i.e. just splitting a triangle radially, or
+        !           can be 'pol-rad', i.e. continue poloidal splitting after
+        !           the radial split an inclined boundary face
+        ! - split_out: option to not split pentagons 
+        ! - splittype: can be 'rad' for radial splitting, i.e. reducing radial 
+        !              width of cells, or 'pol' for poloidal splitting, i.e. 
+        !              reducing the poloidal length of cells
+        ! - n_split: number of allowed splitting operations      
+        ! - typeT: method to split a triangle, can be 'stacked', i.e. triangle 
+        !          is split into two trianlge, or 'cutcell', i.e. triangle is 
+        !           split in a quad and a triangle
+        ! - rad_type: criterium to apply radial splitting (see SelectSplitCell) TODO
+        ! - pol_type: criterium to aplly poloidal splitting (see SelectSplitCell) TODO
+        ! - dist_function_threshold_split: threshold for the value the distance function 
+        !               for selecting a cell to split. The value should be lower than 
+        !               threshold.
+        ! - dist_function_threshold_split_wall: idem for the distance function wrt the wall
+        
+        ! Merging options
+        ! - no_hex: to not allow hexagonal cells in the final grid
+        ! - merge_crit: criterium to select a face from which the two cell need to be merged
+        !               can be : TODO
+        ! - merge_h_pol_factor: factor to losen merge criterium based on poloidal length
+        ! - n_merge: number of merging operations allowed
+        ! - merge_bias_limit: thershold on bias to merge the cells. Merge is done when
+        !                       real bias is larger than the threshold.
+        ! - dist_function_threshold_merge: threshold for the value the distance function 
+        !               for selecting a face to merge over. The value should be lower than 
+        !               threshold.
+
+        ! Pentagon options
+        ! - no_pents_area_merge: use an area constraint on where pentagons are allowed during merging
+        ! - no_pents_area_split: use an area constraint on where pentagons are allowed during splitting
+        ! - no_pents_area_type: method to defined area where no pentagons are allowed. 
+        !                       Can be 'coordinates' using no_pents_area_maxR etc. to define a box, 
+        !                       or can be 'dist_function' to use a distance function. The value of 
+        !                       the distance function should be lower the threshold (split or merge).
+        ! - no_pents_area_maxR: option to recreate a box where not pentagons are allowed, 
+        !                       idem for ..minR, ..maxZ, ..minZ
+        ! - base_func: the basic function for the construction of the distance function, 
+        !              can only be 'exp(-dist/d)'
+        ! - dist_function: switch to construct distance functions
+        ! - d_rescale: rescaling factor for characteristic length of distance function
+        ! - d_rescale: idem as above but for wall distance function
+        ! - dist_type: type of distance function can be 
+        !              'target_single_null': use targets as reference 
+        !              'target_to_vessel': use outer boundary of the mesh as reference
+        !              'pol_flux_est': use separatrix as reference
+        ! - dist_type_wall: type of distance function used for wall distance function, see above
+        ! - d_char_type: characteristic length used to construct distance function, can be:
+        !               'min_Xpoint_dist': minimal distance between targets and Xpoint
+        !               'max_Xpoint_dist': maximal distance between targets and Xpoint
+        ! The rest of the options are carried over from goatoptions or not changeable.
 
         ! General adaptation options
         logical                     :: plt

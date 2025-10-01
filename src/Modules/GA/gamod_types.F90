@@ -16586,8 +16586,8 @@ module gamod_types
             case ('dist_function')
                 
                 call grid%fun%distr%Evaluate(grid%cell%x%Get(),grid%cell%y%Get(), val)
-                allocate(cells(count(val > threshold)))
-                cells = pack(indCv, val > threshold)
+                allocate(cells(count(val .lt. threshold)))
+                cells = pack(indCv, val .lt. threshold)
 
             case default
 
