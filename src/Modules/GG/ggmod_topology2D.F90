@@ -715,8 +715,19 @@ module ggmod_topology2D
         end if 
 
         ! Merge tubes (after aligned vessel parts)?
-        call MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
-            vessel, fieldtracer, options)
+        call wall_time(ts)
+        if (options%mtoldstyle) then 
+            call MergeTopologicalMeshFluxTubes(topomesh, magneticField, &
+                vessel, fieldtracer, options)
+        else
+            ! Use adaptor
+            call tmadaptor%Initialize(topomesh, fieldtracer, magneticField, &
+                vessel, options)
+
+            call tmadaptor%MergeTMTubesDriver(topomesh, options)
+        end if 
+        call wall_time(te)
+        print *, 'time spent in adaptations = ', te - ts
 
         ! Do temporary writing
         if (options%writedebugoutput) then 
@@ -5731,6 +5742,8 @@ module ggmod_topology2D
         if (allocated(tmadaptor%illegalfsIDs)) deallocate(tmadaptor%illegalfsIDs)
         if (allocated(tmadaptor%facepsi)) deallocate(tmadaptor%facepsi)
         if (allocated(tmadaptor%facedlcrad)) deallocate(tmadaptor%facedlcrad)
+        if (allocated(tmadaptor%tubedpsi)) deallocate(tmadaptor%tubedpsi)
+        if (allocated(tmadaptor%tubelrad)) deallocate(tmadaptor%tubelrad)
         if (allocated(tmadaptor%fieldtracer)) deallocate(tmadaptor%fieldtracer)
 
         ! Initialize
@@ -5776,30 +5789,44 @@ module ggmod_topology2D
     end subroutine
 
     ! Merge criterion evaluation
-    subroutine EvaluateTMTubesMergeCriterionTA(tmadaptor, topomesh)
+    subroutine EvaluateTMTubesMergeCriterionTA(tmadaptor, topomesh, &
+        includealbndin)
 
         ! Description
         !============
         ! This routine evaluates all possible merging criteria - currently
         ! only the minimal psi width and minimal radial length criteria.
         ! These values are computed for all tubes. 
+        
+        ! Note: we now also allow passing the 'includealbndin' logical
+        ! which will lead to inclusion of aligned boundary faces if 
+        ! set to true. IF not present, default value is false. 
 
         ! Declare variables
         !==================
         ! Arguments
         class(TopomeshAdaptorUDT)               :: tmadaptor
         type(TopomeshUDT), intent(in)           :: topomesh 
+        logical, optional, intent(in)           :: includealbndin
 
         ! Auxiliary
         real(R8)                                :: lrad, psimin, &
             psimax
         integer(I8), allocatable, dimension(:)  :: tf
+        logical                                 :: includealbnd
 
         ! Loop
         integer(I8)                     :: i
 
         ! Initialize
         !===========
+        ! Check input
+        if (present(includealbndin)) then 
+            includealbnd = includealbndin
+        else
+            includealbnd = .false.
+        end if
+
         ! Check sizes
         if ((size(tmadaptor%tubedpsi) /= topomesh%tube%ntot) .or. &
             (size(tmadaptor%tubelrad) /= topomesh%tube%ntot))then 
@@ -5815,12 +5842,12 @@ module ggmod_topology2D
             tf = topomesh%tube%GetFace(i)
 
             ! Evaluate psi criterion
-            call GetTMTubePsiLimits(topomesh, i, psimin, psimax)
+            call GetTMTubePsiLimits(topomesh, i, psimin, psimax, includealbndin=includealbnd)
             tmadaptor%tubedpsi(i) = max(psimax - psimin, 0.0_R8) 
 
             ! Evaluate radial length criterion
             call GetTMTubeRadialWidthTA(tmadaptor, topomesh, &
-                i, lrad)
+                i, lrad, includealbndin=includealbnd)
             tmadaptor%tubelrad(i) = lrad
 
         end do 
@@ -5954,7 +5981,7 @@ module ggmod_topology2D
         ! Determine mergeable tube pairs
         !===============================
         ! Call dedicated subroutine
-        call GetAdjacentTubePairs(topomesh, hftubes, lftubes, ismarked)
+        call GetMergeTubePairs(topomesh, hftubes, lftubes, ismarked)
 
         ! Check which pairs are simple and are allowed to be merged
         allocate(tube1(0), tube2(0))
@@ -6115,7 +6142,7 @@ module ggmod_topology2D
         appliedsplitting = .false.
 
         ! Compute criteria
-        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh)
+        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh, includealbndin=.false.) ! don't include aligned boundary faces here
         dpsi = tmadaptor%tubedpsi - tmadaptor%dpsimin 
         dlrad = tmadaptor%tubelrad - tmadaptor%lradmin
         ismarked = (dpsi < 0.0_R8) .or. (dlrad < 0.0_R8)
@@ -6132,7 +6159,7 @@ module ggmod_topology2D
         ! Determine mergeable tube pairs
         !===============================
         ! Call dedicated subroutine
-        call GetAdjacentTubePairs(topomesh, hftubes, lftubes, ismarked)
+        call GetMergeTubePairs(topomesh, hftubes, lftubes, ismarked)
         tpc = size(hftubes)
 
         ! If no pairs were found, exit
@@ -6655,7 +6682,6 @@ module ggmod_topology2D
         call AddTopologicalMeshInterconnectionData(topomesh)
 
         ! Remove faces from adaptor
-        call tmadaptor%RemoveFaceDataLogical(remf)
 
         ! Set output
         wasmerged = .true.
@@ -6793,7 +6819,6 @@ module ggmod_topology2D
         call AddTopologicalMeshInterconnectionData(topomesh)
 
         ! Remove faces from adaptor
-        call tmadaptor%RemoveFaceDataLogical(remf)
 
         ! Set output
         wasmerged = .true.
@@ -7551,7 +7576,7 @@ module ggmod_topology2D
         end if 
 
         ! Compute 
-        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh)
+        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh, includealbndin=.false.) ! don't include - assume checks on aligned boundaries done before
         thispsi = tmadaptor%tubedpsi(tubes)
         thislrad = tmadaptor%tubelrad(tubes)
         dpsi = thispsi - tmadaptor%dpsimin 
@@ -7569,7 +7594,7 @@ module ggmod_topology2D
         where (dohfside .and. dolfside .and. &
             ((thispsi < 4*tmadaptor%dpsimin) .or. (thislrad < 4*tmadaptor%lradmin))) tracelf = .false. 
 
-        ! Set values of criteria to inf where not active (i.e. dpsi = 0 
+        ! Set val$ues of criteria to inf where not active (i.e. dpsi = 0 
         ! or dlrad = 0)
         if (tmadaptor%dpsimin == 0.0_R8) then
             thispsi = posinfval_R8() 
@@ -8144,33 +8169,17 @@ module ggmod_topology2D
         logical, allocatable, dimension(:)          :: issplittable
 
         ! Auxiliary
-        real(R8)                                    :: psimin, psimax
         real(R8), allocatable, dimension(:)         :: dpsi, dlrad
-        logical, allocatable, dimension(:)          :: ismarked
-
-        ! Loop
-        integer(I8)                                 :: i
 
         ! Check based on criterion
         !=========================
         ! Compute criteria
-        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh)
+        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh, includealbndin=.true.) ! do include here to prevent splitting of too small tubes
         dpsi = tmadaptor%tubedpsi - tmadaptor%dpsimin 
         dlrad = tmadaptor%tubelrad - tmadaptor%lradmin
-        ismarked = (dpsi < 0.0_R8) .or. (dlrad < 0.0_R8)
 
         ! Check
         issplittable = (dpsi > 2*tmadaptor%dpsimin) .and. (dlrad > 2*tmadaptor%lradmin)
-
-        ! Check for overlapping tubes
-        !============================
-        ! Check if the tube has <= 0 minimal delta psi 
-        do i = 1, topomesh%tube%ntot
-            call GetTMTubePsiLimits(topomesh, i, psimin, psimax, .true.)
-            if (psimin >= psimax) then 
-                issplittable(i) = .false. 
-            end if 
-        end do 
 
     end function
 
@@ -9471,6 +9480,619 @@ module ggmod_topology2D
             call WriteTopologicalMesh(topomesh, 'topomesh_afteravp')
         end if 
     
+    end subroutine
+
+    ! Tube pair getter for merging
+    subroutine GetMergeTubePairs(topomesh, hftubes, lftubes, &
+        includetube)
+
+        ! Description
+        !============
+        ! This routine returns sets of tubes (resp. high and low flux
+        ! tubes) that are connected to each other on the low flux 
+        ! boundary of the high flux neighbours and vice versa. Note that
+        ! the search is exhaustive, in the sense that for each found 
+        ! tube on e.g. the low side, all high flux neighbours are taken
+        ! and again their low flux neighbours are taken. This process is
+        ! repeated until no new tubes are found. Note that by definition 
+        ! the hftubes cannot be empty if the lftubes are nonempty and 
+        ! vice versa. Since this algorithm essentially assumes an acyclic
+        ! graph, we need to hedge separately for cycles occuring in the 
+        ! topomesh due to vessel structures. To this end, we identify 
+        ! the cycles using a dedicated routine and afterwards check which
+        ! tube pairs may be considered for merging. This should prevent
+        ! the occurrence of detrimental cycle topologies that cannot 
+        ! adequately be merged anymore (as long as they were not 
+        ! initially present, which shouldn't be the case if the 
+        ! topological mesh generation step went well)
+
+        ! Note: optionally, the logical 'includetube' can be passed, 
+        ! which should be a 1-by-ntubes logical indicating which tubes
+        ! to consider. If not passed, all possible pairs are computed. 
+
+        ! Note: if cycles are present in the graph, it is possible that
+        ! some low field tubes would appear twice in a tube pair. 
+        ! This only happens with 'small' cycles, since we only check
+        ! one level higher/lower than the current tube. To identify 
+        ! these pairs, we check an additional level. For example, when 
+        ! looking for high flux tubes of the current tube (so current 
+        ! tube is low flux neighbours), we check afterwards whether any
+        ! of these high flux neighbours has has flux neighbours themselves
+        ! that are already high flux neighbours of the current low flux
+        ! tube - this would indicate a pair in the cycle we shouldn't 
+        ! merge over. Consider the simple example below with tubes A, B, C:
+        !
+        !   A
+        !   |\
+        !   | B
+        !   |/ 
+        !   C 
+        ! 
+        ! Here, C is the low flux tube with A and B as high flux 
+        ! neighbours. However, A is also a high flux neighbour of B, so 
+        ! the flux tube pair ([C], [A, B]) shouldn't be considered. 
+        ! An analogous reasoning can be made for A. For B, there is no
+        ! issue: B has only A as high flux neighbour and A doesn't have
+        ! any other high flux neighbours. So the pair ([A], [B]) or 
+        ! ([B], [C]) can be considered. 
+
+        ! Algorithm
+        !----------
+        ! 1)    Take a tube
+        ! 2)    Determine all high flux neighbours of the tube. For each 
+        !       high flux neighbour, take its low flux neighbours and add.
+        !       Repeat this step for each low flux neighbour, until all
+        !       tubes have been reached. This loop can only be finite if
+        !       there are no simple cycles present (this is checked for 
+        !       and an error will be throw. However, it should be prevented
+        !       by the explicit cycle checking done afterwards)
+        ! 3)    Check if a set of tubes on high and low flux side could 
+        !       be found. If this is the case, then proceed to 4). Otherwise,
+        !       no pair could be found -> go to 5)
+        ! 4)    Hedge for cycles: for each tube in the pair that is part
+        !       of a cycle (or multiple cycles), check if any neighbour
+        !       is a bounding tube. If this is the case, the pair can 
+        !       only be considered if the following condition holds:
+        !       each non-bounding tube of the cycle should have only
+        !       bounding tubes as high and low field neighbours OR 
+        !       neighbours that are not part of the cycle (otherwise, 
+        !       merging may connect two bounding tubes directly, which 
+        !       will prevent other merging operations to take place and 
+        !       should hence be avoided).
+        !       If this is not the case, we should be able to proceed
+        ! 5)    Repeat 3)-4), but start with the low flux neighbours and 
+        !       determine the high flux neighbours.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                                      :: &
+            topomesh
+        type(IntegerDynamicArrayUDT), allocatable, intent(out)  :: &
+            hftubes(:), lftubes(:)
+        logical, dimension(:), intent(in), optional     :: includetube
+
+        ! Auxiliary
+        integer(I8)                             :: tpc, ind
+        integer(I8), allocatable, dimension(:)  :: tnb, tv, thft, tlft, &
+            ct, ctind
+        logical                                 :: addpair
+        logical, allocatable, dimension(:)      :: ishfnb, islfnb, &
+            tracetubehf, tracetubelf, istubefound, ismarked
+        type(IntegerDynamicArrayUDT)            :: hft, lft
+        type(IntegerDynamicArrayUDT), allocatable   :: tube1ida(:), &
+            tube2ida(:), cycletubes(:), cycleboundingtubeind(:), &
+            tubecycleIDs(:)
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Unpack for ease at this stage
+        associate(&
+            face    => topomesh%face,   &
+            tube    => topomesh%tube    &
+            )
+
+        ! Check optional arguments
+        if (present(includetube)) then 
+            ismarked = includetube
+        else
+            allocate(ismarked(tube%ntot))
+            ismarked = .true.
+        end if 
+
+        ! Determine cycles
+        !=================
+        ! Initialize
+        !allocate(isincycle(tube%ntot))
+        !isincycle = .false.
+
+        ! Call dedicated routine
+        !call GetTopomeshTubeCycles(topomesh, cycletubes, cycleboundingtubeind)
+
+        ! Process information for easier use later on
+        !do i = 1, size(cycletubes)
+        !    ! Get the current tubes and indices
+        !    ct = cycletubes(i)%Get()
+        !    ctind = cycleboundingtubeind(i)%Get()!
+
+            ! Set logicals
+        !    isincycle(ct) = .true.
+        !end do
+
+        ! Determine mergeable tube pairs
+        !===============================
+        ! Construct tube pairs
+        tpc = 0 ! tube pair counter
+        allocate(ishfnb(tube%ntot), islfnb(tube%ntot), tracetubehf(tube%ntot), &
+            tracetubelf(tube%ntot), istubefound(tube%ntot))
+        allocate(tube1ida(2*count(ismarked)), tube2ida(2*count(ismarked))) ! possibly too big
+        ishfnb = .false. 
+        islfnb = .false. 
+        do i = 1, tube%ntot
+            ! Skip in case tube was not makred
+            if (.not. ismarked(i)) then 
+                cycle
+            end if
+
+            ! High flux side
+            !---------------
+            ! Check if it's not already a low flux tube neighbour in 
+            ! another set - in that case it is already part of a tubeset
+            ! as low flux tube
+            if (.not. islfnb(i)) then 
+                ! Initialize
+                tracetubelf = .false. 
+                tracetubehf = .false. 
+                istubefound = .false. 
+                hft = ConstructIntegerDynamicArray()
+                lft = ConstructIntegerDynamicArray()
+            
+                ! Set as found for low flux neighbour
+                islfnb(i) = .true. 
+                istubefound(i) = .true.
+
+                ! Mark as tube to trace high flux neighbours
+                tracetubehf(i) = .true. 
+
+                ! Add to lft
+                call lft%Append(i)
+
+                ! Find all other tubes 
+                do while (any(tracetubehf) .or. any(tracetubelf))
+                    ! Trace high flux side
+                    ind = findloc(tracetubehf, .true., 1, back=.false.)
+                    if (ind /= 0) then 
+                        ! Remove from tracing
+                        tracetubehf(ind) = .false. 
+
+                        ! Find tubes at high flux side of this tube
+                        tnb = tube%GetHighFluxNeig(ind)
+
+                        ! Retain only tubes that were not found already
+                        tnb = pack(tnb, .not. istubefound(tnb))
+
+                        ! Check if none of these tubes were high flux 
+                        ! tubes already - normally this should not be the case
+                        if (any(ishfnb(tnb))) then 
+                            tv = [tube%GetBndVert(i, 1), tube%GetBndVert(i, 2)]
+                            print *, 'tube vertices of current tube: ', tv
+                            call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                            call gdErrorHandler('GetMergeTubePairs: ' // & 
+                                'tubes found that are already marked as ' // & 
+                                'high flux tubes, unexpected')
+                        end if 
+
+                        ! Mark tubes to trace their low flux side
+                        tracetubelf(tnb) = .true. 
+
+                        ! Mark tubes as found
+                        istubefound(tnb) = .true.
+                        ishfnb(tnb) = .true.
+
+                        ! Add to hft
+                        call hft%Append(tnb)
+                    end if 
+
+                    ! Trace low flux side
+                    ind = findloc(tracetubelf, .true., 1, back=.false.)
+                    if (ind /= 0) then 
+                        ! Remove from tracing
+                        tracetubelf(ind) = .false. 
+
+                        ! Find tubes at high flux side of this tube
+                        tnb = tube%GetLowFluxNeig(ind)
+
+                        ! Retain only tubes that were not found already
+                        tnb = pack(tnb, .not. istubefound(tnb))
+
+                        ! Check if none of these tubes were high flux 
+                        ! tubes already - normally this should not be the case
+                        if (any(islfnb(tnb))) then 
+                            tv = [tube%GetBndVert(i, 1), tube%GetBndVert(i, 2)]
+                            print *, 'tube vertices of current tube: ', tv
+                            call WriteTopologicalMesh(topomesh, 'topomesh_error.dat')
+                            call gdErrorHandler('GetMergeTubePairs: ' // & 
+                                'tubes found that are already marked as ' // & 
+                                'low flux tubes, unexpected')
+                        end if 
+
+                        ! Mark tubes to trace their high flux side
+                        tracetubehf(tnb) = .true. 
+                        
+                        ! Mark tubes as found
+                        istubefound(tnb) = .true.
+                        islfnb(tnb) = .true.
+
+                        ! Add to lft
+                        call lft%Append(tnb)
+                    end if 
+                end do 
+
+                ! Add pair if high flux neighbours were found and if 
+                ! none of the high flux neighbours has another high 
+                ! flux neighbour as high flux neighbour 
+                if (hft%Size() /= 0) then 
+                    ! Check high flux neighbours of high flux neighbours
+                    thft = hft%Get()
+                    addpair = .true. 
+                    do j = 1, size(thft)
+                        tnb = tube%GetHighFluxNeig(thft(j))
+                        if (size(GetCommonElements(tnb, thft)) /= 0) then
+                            addpair = .false.
+                            exit
+                        end if 
+                    end do  
+
+                    ! Add pair if possible
+                    if (addpair) then 
+                        ! Increment tube pair counter
+                        tpc = tpc + 1
+
+                        ! Initialize 
+                        tube1ida(tpc) = ConstructIntegerDynamicArray(hft%Get())
+                        tube2ida(tpc) = ConstructIntegerDynamicArray(lft%Get())
+                    else
+                        ! Allow pairs to be found again
+                        islfnb(lft%Get()) = .false.
+                        ishfnb(hft%Get()) = .false.
+                        islfnb(i) = .false.
+                    end if 
+                else
+                    ! Allow lft tubes to be found again
+                    islfnb(lft%Get()) = .false.
+                    islfnb(i) = .false.
+                end if 
+            end if 
+
+            ! Low flux side
+            !--------------
+            ! Check if it's not already a high flux tube neighbour in 
+            ! another set - in that case it is already part of a tubeset
+            ! as low flux tube
+            if (.not. ishfnb(i)) then 
+                ! Initialize
+                tracetubelf = .false. 
+                tracetubehf = .false. 
+                istubefound = .false. 
+                hft = ConstructIntegerDynamicArray()
+                lft = ConstructIntegerDynamicArray()
+            
+                ! Set as found for high flux neighbour
+                ishfnb(i) = .true. 
+                istubefound(i) = .true.
+
+                ! Mark as tube to trace high flux neighbours
+                tracetubelf(i) = .true. 
+
+                ! Add to hft
+                call hft%Append(i)
+
+                ! Find all other tubes 
+                do while (any(tracetubehf) .or. any(tracetubelf))
+                    ! Trace high flux side
+                    ind = findloc(tracetubehf, .true., 1, back=.false.)
+                    if (ind /= 0) then 
+                        ! Remove from tracing
+                        tracetubehf(ind) = .false. 
+
+                        ! Find tubes at high flux side of this tube
+                        tnb = tube%GetHighFluxNeig(ind)
+
+                        ! Retain only tubes that were not found already
+                        tnb = pack(tnb, .not. istubefound(tnb))
+
+                        ! Check if none of these tubes were high flux 
+                        ! tubes already - normally this should not be the case
+                        if (any(ishfnb(tnb))) then 
+                            tv = [tube%GetBndVert(i, 1), tube%GetBndVert(i, 2)]
+                            print *, 'tube vertices of current tube: ', tv
+                            call WriteTopologicalMesh(topomesh, 'topomesh_error.dat')
+                            call gdErrorHandler('GetMergeTubePairs: ' // & 
+                                'tubes found that are already marked as ' // & 
+                                'high flux tubes, unexpected')
+                        end if 
+
+                        ! Mark tubes to trace their low flux side
+                        tracetubelf(tnb) = .true. 
+
+                        ! Mark tubes as found
+                        istubefound(tnb) = .true.
+                        ishfnb(tnb) = .true.
+
+                        ! Add to hft
+                        call hft%Append(tnb)
+                    end if 
+
+                    ! Trace low flux side
+                    ind = findloc(tracetubelf, .true., 1, back=.false.)
+                    if (ind /= 0) then 
+                        ! Remove from tracing
+                        tracetubelf(ind) = .false. 
+
+                        ! Find tubes at high flux side of this tube
+                        tnb = tube%GetLowFluxNeig(ind)
+
+                        ! Retain only tubes that were not found already
+                        tnb = pack(tnb, .not. istubefound(tnb))
+
+                        ! Check if none of these tubes were high flux 
+                        ! tubes already - normally this should not be the case
+                        if (any(islfnb(tnb))) then 
+                            tv = [tube%GetBndVert(i, 1), tube%GetBndVert(i, 2)]
+                            print *, 'tube vertices of current tube: ', tv
+                            tv = [tube%GetBndVert(5, 1), tube%GetBndVert(5, 2)]
+                            print *, 'tube vertices of current tube: ', tv
+                            tv = [tube%GetBndVert(11, 1), tube%GetBndVert(11, 2)]
+                            print *, 'tube vertices of current tube: ', tv
+                            tv = [tube%GetBndVert(20, 1), tube%GetBndVert(20, 2)]
+                            print *, 'tube vertices of current tube: ', tv
+                            call WriteTopologicalMesh(topomesh, 'topomesh_error.dat')
+                            call gdErrorHandler('GetMergeTubePairs: ' // & 
+                                'tubes found that are already marked as ' // & 
+                                'low flux tubes, unexpected')
+                        end if 
+
+                        ! Mark tubes to trace their high flux side
+                        tracetubehf(tnb) = .true. 
+                        
+                        ! Mark tubes as found
+                        istubefound(tnb) = .true.
+                        islfnb(tnb) = .true.
+
+                        ! Add to lft
+                        call lft%Append(tnb)
+                    end if 
+                end do 
+
+                ! Add pair if low flux neighbours were found
+                if (lft%Size() /= 0) then 
+                    ! Check low flux neighbours of low flux neighbours
+                    addpair = .true.
+                    tlft = lft%Get()
+                    do j = 1, size(tlft)
+                        tnb = tube%GetLowFluxNeig(tlft(j))
+                        if (size(GetCommonElements(tnb, tlft)) /= 0) then 
+                            addpair = .false.
+                            exit
+                        end if 
+                    end do 
+                    
+                    ! Check if we can add the pair
+                    if (addpair) then 
+                        ! Increment tube pair counter
+                        tpc = tpc + 1
+
+                        ! Initialize 
+                        tube1ida(tpc) = ConstructIntegerDynamicArray(hft%Get())
+                        tube2ida(tpc) = ConstructIntegerDynamicArray(lft%Get())
+                    else
+
+                        ! Allow pairs to be found again
+                        islfnb(lft%Get()) = .false.
+                        ishfnb(hft%Get()) = .false.
+                        ishfnb(i) = .false.
+                    end if 
+                else
+                    ! Allow lft tubes to be found again
+                    islfnb(hft%Get()) = .false.
+                    ishfnb(i) = .false.
+                end if 
+            end if 
+        end do 
+
+        ! If no pairs were found, exit
+        if (tpc == 0) then 
+            allocate(hftubes(0), lftubes(0))
+            return 
+        end if 
+
+        ! Set output
+        hftubes = tube1ida(1:tpc)
+        lftubes = tube2ida(1:tpc)
+
+        ! Housekeeping
+        end associate
+
+    end subroutine
+
+    ! Tube cycle getter for merging
+    subroutine GetTopomeshTubeCycles(topomesh, tubes, boundingtubeind)
+
+        ! Description
+        !============
+        ! This is a *very* specific routine to determine cycles and 
+        ! other relevant information for topological mesh adaptations. 
+        ! We fully exploit the assumption of only having (nested) closed
+        ! boundary structures and the basic properties of the magnetic 
+        ! field (i.e. that there are low/high flux sides and that 
+        ! hence regions that are not bounded by any structure cannot 
+        ! lead to cycles). This should be faster/easier than an 
+        ! algorithm for cycle detection in graphs, which would be more
+        ! general. We return all tubes adjacent in this way to the 
+        ! polygon. Additionally, we also return the tubes that are only
+        ! adjacent by aligned vessel faces or type 2 tangency points, 
+        ! since these are 'bounding' tubes of the polygon (these should 
+        ! not occur together in a merge, unless only these two tubes are present, 
+        ! in which case this isn't a cycle anymore). Note that the amount
+        ! of bounding tubes can be larger than two, since X-points may
+        ! be present inside the closed polygon. 
+
+        ! Notes
+        !======
+        ! Note 1: the tubes are *not* returned in any sorted way
+
+        ! Algorithm
+        !==========
+        ! 1)    Find all closed polygons formed by (aligned) boundary 
+        !       polygons. Only tubes around these polygons can lead to 
+        !       cycles in the topomesh 
+        ! 2)    Take a closed polygon and continue to 3). If none are 
+        !       left, exit
+        ! 3)    Find tubes that are adjacent to the faces and vertices
+        !       of each closed polygon. 
+        ! 4)    If only two tubes are present, or if no bounding tubes 
+        !       exist, it is not a cycle. Go to 2). Otherwise, continue to 5)
+        ! 5)    Mark these tubes as bounding tubes and add data to output.
+        !       Go to 2) 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT), intent(in)              :: topomesh 
+        type(IntegerDynamicArrayUDT), intent(out), allocatable  :: &
+            boundingtubeind(:), tubes(:)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)      :: tf, sortind, tpf, &
+            tpfv, tubev, tubef
+        integer(I8), allocatable, dimension(:, :)   :: tfv
+        logical, allocatable, dimension(:)          :: isbranchingpolygon, &
+            ispolygonstart
+        type(IntegerDynamicArrayUDT)                :: thistubes, thisboundaryind
+
+        ! Loop
+        integer(I8)                                 :: i, si, ei, nc
+
+        ! Initialize
+        !===========
+        ! Associate for ease
+        associate(&
+            tube    => topomesh%tube,   &
+            cell    => topomesh%cell,   &
+            face    => topomesh%face,   &
+            vert    => topomesh%vert    &
+            )
+
+        ! Find polygons
+        !==============
+        ! Get all topomesh vessel faces & vert
+        tf = topomesh%GetVesselFaceIDs()
+        tfv = topomesh%face%vert(tf, :)
+
+        ! Sort faces
+        allocate(sortind(size(tf)), ispolygonstart(size(tf)), &
+            isbranchingpolygon(size(tf)))
+        call SortPolygonEdges(tfv, size(tf), sortind, ispolygonstart, &
+            isbranchingpolygon)
+        tfv = tfv(sortind, :)
+        tf = tf(sortind)
+
+        ! Sanity checks
+        if (any(isbranchingpolygon)) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_error')
+            call gdErrorHandler('GetTopomeshTubeCycles: boundary faces ' // & 
+                'of topomesh seem to form branching polygons, not supported')
+        end if 
+
+        ! Loop over all polygons
+        !=======================
+        ! Initialize
+        si = 0
+        ei = 0
+        nc = 0
+        allocate(tubes(count(ispolygonstart)), boundingtubeind(count(ispolygonstart))) ! overestimation
+        do while (.true.)
+            ! Take polygon
+            !-------------
+            ! Find the next polygon faces 
+            si = findloc(ispolygonstart(ei+1:), .true., 1, back=.false.) + ei 
+            if (si == ei) then 
+                ! Reached the end - exit
+                exit
+            end if 
+            if (si == size(ispolygonstart)) then 
+                ei = si 
+            else
+                ei = findloc(ispolygonstart(si+1:), .true., 1, back=.false.) + si 
+                if (ei == si) then 
+                    ! Last polygon
+                    ei = size(ispolygonstart)
+                end if 
+            end if 
+            tpf = tf(si:ei)
+
+            ! Check if the polygon is closed, otherwise skip
+            call ExtractPolygonVertices(face%vert(tpf, :), size(tpf), &
+                tpfv)
+            if (tpfv(1) /= tpfv(size(tpfv))) then
+                ! Not a closed polygon  
+                cycle
+            end if
+
+            ! If we got here, we can initialize the temporary arrays
+            thistubes = ConstructIntegerDynamicArray()
+            thisboundaryind = ConstructIntegerDynamicArray()
+
+            ! Find adjacent tubes
+            !--------------------
+            ! Simply check vertices
+            do i = 1, tube%ntot
+                ! Get tube vertices
+                tubev = [tube%GetBndVert(i, 1), tube%GetBndVert(i, 2)]
+
+                ! Check for common elements
+                if (size(GetCommonElements(tubev, tpfv)) > 0) then 
+                    ! Append
+                    call thistubes%Append(i)
+
+                    ! Check if the tube has any radial faces in common. 
+                    ! If this is not the case, the tube is a bounding tube
+                    tubef = tube%GetFace(i)
+                    if (size(GetCommonElements(tubef, tpf)) == 0) then 
+                        ! Append
+                        call thisboundaryind%Append(thistubes%Size()) ! should be last tube
+                    end if 
+                end if 
+            end do 
+
+            ! Add
+            !----
+            ! Only if it is a cycle
+            if (thistubes%Size() <= 2) then 
+                cycle
+            end if 
+            if (thisboundaryind%Size() == 0) then 
+                cycle
+            end if 
+
+            ! Add
+            nc = nc + 1
+            tubes(nc) = thistubes
+            boundingtubeind(nc) = thisboundaryind
+
+        end do 
+
+        ! Trim output
+        tubes = tubes(1:nc)
+        boundingtubeind = boundingtubeind(1:nc)
+
+        ! Housekeeping
+        !=============
+        end associate
+
     end subroutine
 
     !------------------------------------------------------------------!
@@ -17293,7 +17915,7 @@ module ggmod_topology2D
     end subroutine
 
     subroutine GetTMTubeRadialWidthTA(tmadaptor, topomesh, tubeID, &
-            lrad, faceID, dlcradface)
+            lrad, faceID, dlcradface, includealbndin)
 
         ! Description
         !============
@@ -17312,6 +17934,11 @@ module ggmod_topology2D
         ! minimal length and its radial length distribution on all of 
         ! its vertices. 
 
+        ! Note: we parse the option includealbndin to optionally include
+        ! aligned boundary psi values when computing the length. This 
+        ! may lead to zero width (we ceil the length to zero to be 
+        ! nonnegative), but may be useful in some cases. 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -17321,6 +17948,7 @@ module ggmod_topology2D
         real(R8), intent(out)                   :: lrad
         integer(I8), intent(out), optional      :: faceID
         real(R8), allocatable, dimension(:), intent(out), optional  :: dlcradface
+        logical, optional, intent(in)           :: includealbndin 
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:)  :: tubef
@@ -17328,12 +17956,20 @@ module ggmod_topology2D
             thislrad
         real(R8), allocatable, dimension(:)     :: xf, yf, psif, dlcradf, &
             lradminmax, dlradf
+        logical                                 :: includealbnd
 
         ! Loop
         integer(I8)                             :: i, j
 
         ! Initialize
         !===========
+        ! Check optional inputs
+        if (present(includealbndin)) then 
+            includealbnd = includealbndin
+        else
+            includealbnd = .false.
+        end if 
+
         ! Initialize
         lrad = posinfval_R8()
 
@@ -17346,7 +17982,7 @@ module ggmod_topology2D
         ! Compute
         !========
         ! Psi bounds
-        call GetTMTubePsiLimits(topomesh, tubeID, psimin, psimax)
+        call GetTMTubePsiLimits(topomesh, tubeID, psimin, psimax, includealbnd)
 
         ! Get tube faces
         tubef = tube%GetFace(tubeID)
@@ -17428,291 +18064,6 @@ module ggmod_topology2D
                 end if 
             end if 
         end do 
-
-        ! Housekeeping
-        end associate
-
-    end subroutine
-
-    subroutine GetAdjacentTubePairs(topomesh, hftubes, lftubes, &
-        includetube)
-
-        ! Description
-        !============
-        ! This routine returns sets of tubes (resp. high and low flux
-        ! tubes) that are connected to each other on the low flux 
-        ! boundary of the high flux neighbours and vice versa. Note that
-        ! the search is exhaustive, in the sense that for each found 
-        ! tube on e.g. the low side, all high flux neighbours are taken
-        ! and again their low flux neighbours are taken. This process is
-        ! repeated until no new tubes are found. Note that by definition 
-        ! the hftubes cannot be empty if the lftubes are nonempty and 
-        ! vice versa. 
-
-        ! Note: optionally, the logical 'includetube' can be passed, 
-        ! which should be a 1-by-ntubes logical indicating which tubes
-        ! to consider. If not passed, all possible pairs are computed. 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(TopomeshUDT)                                      :: &
-            topomesh
-        type(IntegerDynamicArrayUDT), allocatable, intent(out)  :: &
-            hftubes(:), lftubes(:)
-        logical, dimension(:), intent(in), optional     :: includetube
-
-        ! Auxiliary
-        integer(I8)                             :: tpc, ind
-        integer(I8), allocatable, dimension(:)  :: tnb
-        logical, allocatable, dimension(:)      :: ishfnb, islfnb, &
-            tracetubehf, tracetubelf, istubefound, ismarked
-        type(IntegerDynamicArrayUDT)            :: hft, lft
-        type(IntegerDynamicArrayUDT), allocatable   :: tube1ida(:), &
-            tube2ida(:)
-
-        ! Loop
-        integer(I8)                             :: i 
-
-        ! Initialize
-        !===========
-        ! Unpack for ease at this stage
-        associate(&
-            face    => topomesh%face,   &
-            tube    => topomesh%tube    &
-            )
-
-        ! Check optional arguments
-        if (present(includetube)) then 
-            ismarked = includetube
-        else
-            allocate(ismarked(tube%ntot))
-            ismarked = .true.
-        end if 
-
-        ! Determine mergeable tube pairs
-        !===============================
-        ! Construct tube pairs
-        tpc = 0 ! tube pair counter
-        allocate(ishfnb(tube%ntot), islfnb(tube%ntot), tracetubehf(tube%ntot), &
-            tracetubelf(tube%ntot), istubefound(tube%ntot))
-        allocate(tube1ida(2*count(ismarked)), tube2ida(2*count(ismarked))) ! possibly too big
-        ishfnb = .false. 
-        islfnb = .false. 
-        do i = 1, tube%ntot
-            ! Skip in case tube was not makred
-            if (.not. ismarked(i)) then 
-                cycle
-            end if
-
-            ! High flux side
-            !---------------
-            ! Check if it's not already a low flux tube neighbour in 
-            ! another set - in that case it is already part of a tubeset
-            ! as low flux tube
-            if (.not. islfnb(i)) then 
-                ! Initialize
-                tracetubelf = .false. 
-                tracetubehf = .false. 
-                istubefound = .false. 
-                hft = ConstructIntegerDynamicArray()
-                lft = ConstructIntegerDynamicArray()
-            
-                ! Set as found for low flux neighbour
-                islfnb(i) = .true. 
-                istubefound(i) = .true.
-
-                ! Mark as tube to trace high flux neighbours
-                tracetubehf(i) = .true. 
-
-                ! Add to lft
-                call lft%Append(i)
-
-                ! Find all other tubes 
-                do while (any(tracetubehf) .or. any(tracetubelf))
-                    ! Trace high flux side
-                    ind = findloc(tracetubehf, .true., 1, back=.false.)
-                    if (ind /= 0) then 
-                        ! Remove from tracing
-                        tracetubehf(ind) = .false. 
-
-                        ! Find tubes at high flux side of this tube
-                        tnb = tube%GetHighFluxNeig(ind)
-
-                        ! Retain only tubes that were not found already
-                        tnb = pack(tnb, .not. istubefound(tnb))
-
-                        ! Check if none of these tubes were high flux 
-                        ! tubes already - normally this should not be the case
-                        if (any(ishfnb(tnb))) then 
-                            call gdErrorHandler('GetAdjacentTubePairs: ' // & 
-                                'tubes found that are already marked as ' // & 
-                                'high flux tubes, unexpected')
-                        end if 
-
-                        ! Mark tubes to trace their low flux side
-                        tracetubelf(tnb) = .true. 
-
-                        ! Mark tubes as found
-                        istubefound(tnb) = .true.
-                        ishfnb(tnb) = .true.
-
-                        ! Add to hft
-                        call hft%Append(tnb)
-                    end if 
-
-                    ! Trace low flux side
-                    ind = findloc(tracetubelf, .true., 1, back=.false.)
-                    if (ind /= 0) then 
-                        ! Remove from tracing
-                        tracetubelf(ind) = .false. 
-
-                        ! Find tubes at high flux side of this tube
-                        tnb = tube%GetLowFluxNeig(ind)
-
-                        ! Retain only tubes that were not found already
-                        tnb = pack(tnb, .not. istubefound(tnb))
-
-                        ! Check if none of these tubes were high flux 
-                        ! tubes already - normally this should not be the case
-                        if (any(islfnb(tnb))) then 
-                            call gdErrorHandler('GetAdjacentTubePairs: ' // & 
-                                'tubes found that are already marked as ' // & 
-                                'low flux tubes, unexpected')
-                        end if 
-
-                        ! Mark tubes to trace their high flux side
-                        tracetubehf(tnb) = .true. 
-                        
-                        ! Mark tubes as found
-                        istubefound(tnb) = .true.
-                        islfnb(tnb) = .true.
-
-                        ! Add to lft
-                        call lft%Append(tnb)
-                    end if 
-                end do 
-
-                ! Add pair if high flux neighbours were found
-                if (hft%Size() /= 0) then 
-                    ! Increment tube pair counter
-                    tpc = tpc + 1
-
-                    ! Initialize 
-                    tube1ida(tpc) = ConstructIntegerDynamicArray(hft%Get())
-                    tube2ida(tpc) = ConstructIntegerDynamicArray(lft%Get())
-                end if 
-            end if 
-
-            ! Low flux side
-            !--------------
-            ! Check if it's not already a high flux tube neighbour in 
-            ! another set - in that case it is already part of a tubeset
-            ! as low flux tube
-            if (.not. ishfnb(i)) then 
-                ! Initialize
-                tracetubelf = .false. 
-                tracetubehf = .false. 
-                istubefound = .false. 
-                hft = ConstructIntegerDynamicArray()
-                lft = ConstructIntegerDynamicArray()
-            
-                ! Set as found for high flux neighbour
-                ishfnb(i) = .true. 
-                istubefound(i) = .true.
-
-                ! Mark as tube to trace high flux neighbours
-                tracetubelf(i) = .true. 
-
-                ! Add to hft
-                call hft%Append(i)
-
-                ! Find all other tubes 
-                do while (any(tracetubehf) .or. any(tracetubelf))
-                    ! Trace high flux side
-                    ind = findloc(tracetubehf, .true., 1, back=.false.)
-                    if (ind /= 0) then 
-                        ! Remove from tracing
-                        tracetubehf(ind) = .false. 
-
-                        ! Find tubes at high flux side of this tube
-                        tnb = tube%GetHighFluxNeig(ind)
-
-                        ! Retain only tubes that were not found already
-                        tnb = pack(tnb, .not. istubefound(tnb))
-
-                        ! Check if none of these tubes were high flux 
-                        ! tubes already - normally this should not be the case
-                        if (any(ishfnb(tnb))) then 
-                            call gdErrorHandler('GetAdjacentTubePairs: ' // & 
-                                'tubes found that are already marked as ' // & 
-                                'high flux tubes, unexpected')
-                        end if 
-
-                        ! Mark tubes to trace their low flux side
-                        tracetubelf(tnb) = .true. 
-
-                        ! Mark tubes as found
-                        istubefound(tnb) = .true.
-                        ishfnb(tnb) = .true.
-
-                        ! Add to hft
-                        call hft%Append(tnb)
-                    end if 
-
-                    ! Trace low flux side
-                    ind = findloc(tracetubelf, .true., 1, back=.false.)
-                    if (ind /= 0) then 
-                        ! Remove from tracing
-                        tracetubelf(ind) = .false. 
-
-                        ! Find tubes at high flux side of this tube
-                        tnb = tube%GetLowFluxNeig(ind)
-
-                        ! Retain only tubes that were not found already
-                        tnb = pack(tnb, .not. istubefound(tnb))
-
-                        ! Check if none of these tubes were high flux 
-                        ! tubes already - normally this should not be the case
-                        if (any(islfnb(tnb))) then 
-                            call gdErrorHandler('GetAdjacentTubePairs: ' // & 
-                                'tubes found that are already marked as ' // & 
-                                'low flux tubes, unexpected')
-                        end if 
-
-                        ! Mark tubes to trace their high flux side
-                        tracetubehf(tnb) = .true. 
-                        
-                        ! Mark tubes as found
-                        istubefound(tnb) = .true.
-                        islfnb(tnb) = .true.
-
-                        ! Add to lft
-                        call lft%Append(tnb)
-                    end if 
-                end do 
-
-                ! Add pair if low flux neighbours were found
-                if (lft%Size() /= 0) then 
-                    ! Increment tube pair counter
-                    tpc = tpc + 1
-
-                    ! Initialize 
-                    tube1ida(tpc) = ConstructIntegerDynamicArray(hft%Get())
-                    tube2ida(tpc) = ConstructIntegerDynamicArray(lft%Get())
-                end if 
-            end if 
-        end do 
-
-        ! If no pairs were found, exit
-        if (tpc == 0) then 
-            allocate(hftubes(0), lftubes(0))
-            return 
-        end if 
-
-        ! Set output
-        hftubes = tube1ida(1:tpc)
-        lftubes = tube2ida(1:tpc)
 
         ! Housekeeping
         end associate
