@@ -178,7 +178,9 @@ module goatmod_userinput
     type, extends(OptionsUDT) :: GAoptionsUDT   
 
         ! Structure containing the options for the grid adaptation part 
-        ! of GOAT. The following fields are present: ! TODO
+        ! of GOAT. The following fields are present: 
+
+        ! General adaptation options
         ! - plt: enable general plotting
         ! - plt_qm: enable plotting quality metrics
         ! - meth: used method, can be 'simple' to adapt the grid based in 
@@ -188,6 +190,88 @@ module goatmod_userinput
         ! - facelabelmappingGA: mapping of grid generator label to labels
         !                       needed for grid adaptation
         
+        ! Splitting options        
+        ! - no_pents: do not allow pentagons in the final grid
+        ! - QTtype: method on how to handle radial splitting at inclined boundaries
+        !           can be 'regular', i.e. just splitting a triangle radially, or
+        !           can be 'pol-rad', i.e. continue poloidal splitting after
+        !           the radial split an inclined boundary face
+        ! - split_out: option to not split pentagons 
+        ! - splittype: can be 'rad' for radial splitting, i.e. reducing radial 
+        !              width of cells, or 'pol' for poloidal splitting, i.e. 
+        !              reducing the poloidal length of cells
+        ! - n_split: number of allowed splitting operations      
+        ! - typeT: method to split a triangle, can be 'stacked', i.e. triangle 
+        !          is split into two trianlge, or 'cutcell', i.e. triangle is 
+        !           split in a quad and a triangle
+        ! - rad_type: criterium to apply radial splitting (see SelectSplitCell), can be:
+        !             'h_rad_psi': split cells with large psi width
+        !             'h_rad': split cells with large radial width
+        !             'pol_flux': split cells with large poloidal flux estimation based on 
+        !                           pol_flux_est distance function
+        !             'farSOL': split highly inclined triangles in the farSOL
+        !             'farSOL_refinements': split cells with large psi width in the farSOL
+        !             'farSOLrefinement_targets': split cells with large psi width and 
+        !                                         low boundary face inclination in the farSOL
+        ! - pol_type: criterium to aplly poloidal splitting (see SelectSplitCell) can be:
+        !                'trias_cvS': split triangles with largest surface area
+        !                'h_pol': split cells with largest poloidal length
+        !                'trias_farSOL': split triangles with largest surface area in the farSOL
+        !                'farSOLrefinement_hpol': split cells with largest poloidal length in the farSOL
+        !                'farSOLrefinement_targets': split cells in the farSOL with large
+        !                                   poloidal length and low inclination at the boundary face
+        ! - dist_function_threshold_split: threshold for the value the distance function 
+        !               for selecting a cell to split. The value should be lower than 
+        !               threshold.
+        ! - dist_function_threshold_split_wall: idem for the distance function wrt the wall
+        
+        ! Merging options
+        ! - no_hex: to not allow hexagonal cells in the final grid
+        ! - merge_crit: criterium to select a face from which the two cell need to be merged
+        !               can be (see SelectMergingFace) :
+        !               'tria_to_quad': merging two triangles to quadrilaterals
+        !               'min_area': merging cells which are smaller the mean surface area
+        !               'h_pol': merging cells with too small poloidal length
+        !               'bias': merging based on high bias between cells in poloidal direction
+        !               'pol_flux': merging cells with low poloidal flux estimation via 
+        !                           similarly named distance function
+        !               'h_rad': merging cells with psi width smaller than h_rad_threshold
+        !               'h_rad_core': merging cells in the core radial width smaller than
+        !                            h_rad_core_threshold
+        !               'bias_rad_farSOL': merging cells with large radial bias in farSOL
+        !               'bias_rad': merging cells with large radial bias
+        !               'skew_tria': merging triangles with low inclination and high aspect ratio
+        ! - merge_h_pol_factor: factor to losen merge criterium based on poloidal length
+        ! - n_merge: number of merging operations allowed
+        ! - merge_bias_limit: thershold on bias to merge the cells. Merge is done when
+        !                       real bias is larger than the threshold.
+        ! - dist_function_threshold_merge: threshold for the value the distance function 
+        !               for selecting a face to merge over. The value should be lower than 
+        !               threshold.
+
+        ! Pentagon options
+        ! - no_pents_area_merge: use an area constraint on where pentagons are allowed during merging
+        ! - no_pents_area_split: use an area constraint on where pentagons are allowed during splitting
+        ! - no_pents_area_type: method to defined area where no pentagons are allowed. 
+        !                       Can be 'coordinates' using no_pents_area_maxR etc. to define a box, 
+        !                       or can be 'dist_function' to use a distance function. The value of 
+        !                       the distance function should be lower the threshold (split or merge).
+        ! - no_pents_area_maxR: option to recreate a box where not pentagons are allowed, 
+        !                       idem for ..minR, ..maxZ, ..minZ
+        ! - base_func: the basic function for the construction of the distance function, 
+        !              can only be 'exp(-dist/d)'
+        ! - dist_function: switch to construct distance functions
+        ! - d_rescale: rescaling factor for characteristic length of distance function
+        ! - d_rescale: idem as above but for wall distance function
+        ! - dist_type: type of distance function can be 
+        !              'target_single_null': use targets as reference 
+        !              'target_to_vessel': use outer boundary of the mesh as reference
+        !              'pol_flux_est': use separatrix as reference
+        ! - dist_type_wall: type of distance function used for wall distance function, see above
+        ! - d_char_type: characteristic length used to construct distance function, can be:
+        !               'min_Xpoint_dist': minimal distance between targets and Xpoint
+        !               'max_Xpoint_dist': maximal distance between targets and Xpoint
+        ! The rest of the options are carried over from goatoptions or not changeable.
 
         ! General adaptation options
         logical                     :: plt
