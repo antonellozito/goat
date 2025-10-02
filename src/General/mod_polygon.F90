@@ -838,7 +838,7 @@ module mod_polygon
     end subroutine
 
     ! Orient nested closed polygons
-    subroutine OrientNestedClosedPolygons(polygonset, flag)
+    subroutine OrientNestedClosedPolygons(polygonset, flag, polygonlevels)
 
         ! Description
         !============
@@ -888,11 +888,22 @@ module mod_polygon
         ! 4:    open polygons present
         ! 5:    self-intersecting polygons present
 
+        ! Note 3: if desired, also the 'level' of the polygon is returned,
+        ! where the level indicates which nestedness level the polygon 
+        ! has. Here, level 0 indicates polygons that do not lie in any
+        ! other polygon, level 1 indicates polygons that lie in one 
+        ! upper polygon, etc. If for any reason the routine does not 
+        ! succeed, all levels are set to -1. Note that the polygon level
+        ! is easily obtained from the inpolygonmatrix, as this is simply
+        ! the column sum of that matrix (where true -> 1, false -> 0)
+
         ! Declare variables
         !==================
         ! Arguments
         class(PolygonSetUDT)        :: polygonset 
         integer(I8)                 :: flag
+        integer(I8), allocatable, dimension(:), intent(out), optional :: &
+            polygonlevels
 
         ! Auxiliary
         integer(I8)                 :: orientation, nv
@@ -911,18 +922,17 @@ module mod_polygon
         ! Set flag (zero for success, > 0 for failure)
         flag = 1
 
+        ! Set optional output if present
+        if (present(polygonlevels)) then 
+            if (allocated(polygonlevels)) deallocate(polygonlevels)
+            allocate(polygonlevels(polygonset%np))
+            polygonlevels = -1 ! initial value
+        end if 
+
         ! Associate
         associate( &
                 np  => polygonset%np, &
                 p   => polygonset%polygons)
-
-        ! Check if multiple polygons are present
-        !if (np > 1) then 
-        !    ! Issue warning
-        !    call PolygonWarningHandler('OrientNestedClosedPolygons: ' // &
-        !    'sorting part not yet verified for more than one vessel ' // &
-        !    'polygon, proceed with caution')
-        !end if 
 
         ! Check polygon status
         do i = 1, np
@@ -1036,6 +1046,14 @@ module mod_polygon
             end associate 
             deallocate(ipx, ipy, yf, dx)
         end do
+
+        ! Set levels
+        !===========
+        if (present(polygonlevels)) then 
+            do i = 1, np
+                polygonlevels(i) = count(inpolygonmatrix(:, i))
+            end do 
+        end if 
         
         ! Check orientation
         !==================
