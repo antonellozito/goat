@@ -4749,6 +4749,10 @@ module goatmod_types
         ! ID(s) of the vertex (max. 2 allowed per vertex), label(:, 3)  is 
         ! the unique vertex ID (may, after intersections, not go from 1 to 
         ! number of vertices due to exclusion of vertices)
+
+        ! Note 3: (1/10/2025) Added additional polygon 'level' label in 
+        ! labels(:, 4), which indicates the nestedness level of the 
+        ! polygon. 
     
         ! Initialize
         !===========
@@ -4815,7 +4819,7 @@ module goatmod_types
         ! Allocate (account for NaNs)
         allocate(vesselIDmap(nvs - nexcl))
         allocate(tempx(nvp+nvs-1-nexcl), tempy(nvp+nvs-1-nexcl))
-        allocate(templabels(size(tempx), 3))
+        allocate(templabels(size(tempx), 4))
         templabels = 0
         
         ! Set vertices
@@ -5261,7 +5265,7 @@ module goatmod_types
         integer(I8), allocatable    :: p1(:), p2(:), s1(:), s2(:), &
             polcat(:, :), npol(:), remp(:), tempp(:), indi(:, :), &
             si(:, :), pi(:, :), ci(:), templabels(:, :), &
-            labelsv(:, :)
+            labelsv(:, :), polygonlevels(:)
         logical, allocatable        :: notfound(:)
     
         character(:), allocatable   :: vesselpath
@@ -5299,7 +5303,7 @@ module goatmod_types
                 'based on polygons'
             do i = 1, ps%np
                 deallocate(ps%polygons(i)%labels)
-                allocate(ps%polygons(i)%labels(ps%polygons(i)%nv, 3))
+                allocate(ps%polygons(i)%labels(ps%polygons(i)%nv, 4))
                 ps%polygons(i)%labels(:, 1) = i 
                 ps%polygons(i)%labels(:, 2) = 0
                 ps%polygons(i)%labels(:, 3) = [(k, k = vID+1, vID+ps%polygons(i)%nv)]
@@ -5546,7 +5550,7 @@ module goatmod_types
         nvest = nvest*2 ! factor 2 just to be sure 
     
         ! Allocate
-        allocate(tempx(nvest), tempy(nvest), templabels(nvest, 3))
+        allocate(tempx(nvest), tempy(nvest), templabels(nvest, 4))
     
         ! Loop 
         nvv = 0 ! vessel vertex counter
@@ -5906,7 +5910,7 @@ module goatmod_types
         call vessel%polygonset%Construct(xv, yv, labelsv)
     
         ! Test orientation
-        call vessel%polygonset%OrientNestedClosedPolygons(flag)
+        call vessel%polygonset%OrientNestedClosedPolygons(flag, polygonlevels)
     
         ! Check
         if (flag .ne. 0) then  
@@ -5916,6 +5920,11 @@ module goatmod_types
                 'orient polygons, OrientNestedClosedPolygons exited with ' // &
                 'flag above')
         end if 
+
+        ! Add polygonlevels to polygons
+        do i = 1, vessel%polygonset%np
+            vessel%polygonset%polygons(i)%labels(:, 4) = polygonlevels(i)
+        end do 
     
         ! Write data
         vesselpath = 'vesselpolygon'
