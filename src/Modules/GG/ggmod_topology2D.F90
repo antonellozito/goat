@@ -225,7 +225,7 @@ module ggmod_topology2D
         ! modified and used in different adaptation routines can also be 
         ! stored here to simplify data handling. 
 
-        ! Note: in practice, this routine is primarily used for tube 
+        ! Note: in practice, this type is primarily used for tube 
         ! merging. 
 
         real(R8)                                :: dpsimin, lradmin 
@@ -262,6 +262,8 @@ module ggmod_topology2D
         procedure   :: MergeTMTubesCC       => MergeTMTubesCCTA ! closed-closed merge
         procedure   :: MergeTMTubesS        => MergeTMTubesSTA ! separatrix (or other branching polygon) merge
         procedure   :: SplitTMTubes         => SplitTMTubesTA ! tube splitter
+        procedure   :: GetMergeTubePairs    => GetMergeTubePairsTA ! merge tube pair getter
+        procedure   :: GetMergeTubeCycles   => GetTopomeshTubeCyclesTA ! merge cyclic tube getter
 
         ! Auxiliary routines for tube merging
         procedure   :: IsTubePairMergeable  => IsTubePairMergeableTA
@@ -674,6 +676,7 @@ module ggmod_topology2D
 
             call tmadaptor%MergeTMTubesDriver(topomesh, options)
         end if 
+
         call wall_time(te)
         print *, 'time spent in adaptations = ', te - ts
 
@@ -726,6 +729,7 @@ module ggmod_topology2D
 
             call tmadaptor%MergeTMTubesDriver(topomesh, options)
         end if 
+
         call wall_time(te)
         print *, 'time spent in adaptations = ', te - ts
 
@@ -5981,7 +5985,7 @@ module ggmod_topology2D
         ! Determine mergeable tube pairs
         !===============================
         ! Call dedicated subroutine
-        call GetMergeTubePairs(topomesh, hftubes, lftubes, ismarked)
+        call tmadaptor%GetMergeTubePairs(topomesh, hftubes, lftubes, ismarked)
 
         ! Check which pairs are simple and are allowed to be merged
         allocate(tube1(0), tube2(0))
@@ -6159,7 +6163,7 @@ module ggmod_topology2D
         ! Determine mergeable tube pairs
         !===============================
         ! Call dedicated subroutine
-        call GetMergeTubePairs(topomesh, hftubes, lftubes, ismarked)
+        call tmadaptor%GetMergeTubePairs(topomesh, hftubes, lftubes, ismarked)
         tpc = size(hftubes)
 
         ! If no pairs were found, exit
@@ -9483,7 +9487,7 @@ module ggmod_topology2D
     end subroutine
 
     ! Tube pair getter for merging
-    subroutine GetMergeTubePairs(topomesh, hftubes, lftubes, &
+    subroutine GetMergeTubePairsTA(tmadaptor, topomesh, hftubes, lftubes, &
         includetube)
 
         ! Description
@@ -9510,32 +9514,6 @@ module ggmod_topology2D
         ! which should be a 1-by-ntubes logical indicating which tubes
         ! to consider. If not passed, all possible pairs are computed. 
 
-        ! Note: if cycles are present in the graph, it is possible that
-        ! some low field tubes would appear twice in a tube pair. 
-        ! This only happens with 'small' cycles, since we only check
-        ! one level higher/lower than the current tube. To identify 
-        ! these pairs, we check an additional level. For example, when 
-        ! looking for high flux tubes of the current tube (so current 
-        ! tube is low flux neighbours), we check afterwards whether any
-        ! of these high flux neighbours has has flux neighbours themselves
-        ! that are already high flux neighbours of the current low flux
-        ! tube - this would indicate a pair in the cycle we shouldn't 
-        ! merge over. Consider the simple example below with tubes A, B, C:
-        !
-        !   A
-        !   |\
-        !   | B
-        !   |/ 
-        !   C 
-        ! 
-        ! Here, C is the low flux tube with A and B as high flux 
-        ! neighbours. However, A is also a high flux neighbour of B, so 
-        ! the flux tube pair ([C], [A, B]) shouldn't be considered. 
-        ! An analogous reasoning can be made for A. For B, there is no
-        ! issue: B has only A as high flux neighbour and A doesn't have
-        ! any other high flux neighbours. So the pair ([A], [B]) or 
-        ! ([B], [C]) can be considered. 
-
         ! Algorithm
         !----------
         ! 1)    Take a tube
@@ -9552,7 +9530,12 @@ module ggmod_topology2D
         ! 4)    Hedge for cycles: for each tube in the pair that is part
         !       of a cycle (or multiple cycles), check if any neighbour
         !       is a bounding tube. If this is the case, the pair can 
-        !       only be considered if the following condition holds:
+        !       only be considered if one of the following conditions hold:
+        !       for each tube of the pair that is in the cycle, all 
+        !       neighbouring tubes that belong to that cycle should 
+        !       either be non-bounding tubes or bounding tubes that are
+        !       already included in the pair
+        !       OR
         !       each non-bounding tube of the cycle should have only
         !       bounding tubes as high and low field neighbours OR 
         !       neighbours that are not part of the cycle (otherwise, 
@@ -9566,8 +9549,8 @@ module ggmod_topology2D
         ! Declare variables
         !==================
         ! Arguments
-        class(TopomeshUDT)                                      :: &
-            topomesh
+        class(TopomeshAdaptorUDT)           :: tmadaptor
+        class(TopomeshUDT), intent(in)      :: topomesh
         type(IntegerDynamicArrayUDT), allocatable, intent(out)  :: &
             hftubes(:), lftubes(:)
         logical, dimension(:), intent(in), optional     :: includetube
@@ -9575,17 +9558,17 @@ module ggmod_topology2D
         ! Auxiliary
         integer(I8)                             :: tpc, ind
         integer(I8), allocatable, dimension(:)  :: tnb, tv, thft, tlft, &
-            ct, ctind
+            ct, ctind, tct, tbtind, thfnb, tlfnb, thfnba, tlfnba, tnba
         logical                                 :: addpair
         logical, allocatable, dimension(:)      :: ishfnb, islfnb, &
-            tracetubehf, tracetubelf, istubefound, ismarked
+            tracetubehf, tracetubelf, istubefound, ismarked, isincycle, &
+            isboundingtube, isactivetube, iscycleboundingtube, &
+            keeptubepair
         type(IntegerDynamicArrayUDT)            :: hft, lft
         type(IntegerDynamicArrayUDT), allocatable   :: tube1ida(:), &
-            tube2ida(:), cycletubes(:), cycleboundingtubeind(:), &
-            tubecycleIDs(:)
-
+            tube2ida(:), cycletubes(:), cycleboundingtubeind(:)
         ! Loop
-        integer(I8)                             :: i, j
+        integer(I8)                             :: i, j, k
 
         ! Initialize
         !===========
@@ -9606,21 +9589,23 @@ module ggmod_topology2D
         ! Determine cycles
         !=================
         ! Initialize
-        !allocate(isincycle(tube%ntot))
-        !isincycle = .false.
+        allocate(isincycle(tube%ntot), isboundingtube(tube%ntot))
+        isincycle = .false.
+        isboundingtube = .false. 
 
         ! Call dedicated routine
-        !call GetTopomeshTubeCycles(topomesh, cycletubes, cycleboundingtubeind)
+        call tmadaptor%GetMergeTubeCycles(topomesh, cycletubes, cycleboundingtubeind)
 
         ! Process information for easier use later on
-        !do i = 1, size(cycletubes)
-        !    ! Get the current tubes and indices
-        !    ct = cycletubes(i)%Get()
-        !    ctind = cycleboundingtubeind(i)%Get()!
+        do i = 1, size(cycletubes)
+            ! Get the current tubes and indices
+            ct = cycletubes(i)%Get()
+            ctind = cycleboundingtubeind(i)%Get()
 
             ! Set logicals
-        !    isincycle(ct) = .true.
-        !end do
+            isincycle(ct) = .true.
+            isboundingtube(ct(ctind)) = .true. 
+        end do
 
         ! Determine mergeable tube pairs
         !===============================
@@ -9738,13 +9723,13 @@ module ggmod_topology2D
                     ! Check high flux neighbours of high flux neighbours
                     thft = hft%Get()
                     addpair = .true. 
-                    do j = 1, size(thft)
-                        tnb = tube%GetHighFluxNeig(thft(j))
-                        if (size(GetCommonElements(tnb, thft)) /= 0) then
-                            addpair = .false.
-                            exit
-                        end if 
-                    end do  
+                    !do j = 1, size(thft)
+                    !    tnb = tube%GetHighFluxNeig(thft(j))
+                    !    if (size(GetCommonElements(tnb, thft)) /= 0) then
+                    !        addpair = .false.
+                    !        exit
+                    !    end if 
+                    !end do  
 
                     ! Add pair if possible
                     if (addpair) then 
@@ -9872,13 +9857,13 @@ module ggmod_topology2D
                     ! Check low flux neighbours of low flux neighbours
                     addpair = .true.
                     tlft = lft%Get()
-                    do j = 1, size(tlft)
-                        tnb = tube%GetLowFluxNeig(tlft(j))
-                        if (size(GetCommonElements(tnb, tlft)) /= 0) then 
-                            addpair = .false.
-                            exit
-                        end if 
-                    end do 
+                    !do j = 1, size(tlft)
+                    !    tnb = tube%GetLowFluxNeig(tlft(j))
+                    !    if (size(GetCommonElements(tnb, tlft)) /= 0) then 
+                    !        addpair = .false.
+                    !        exit
+                    !    end if 
+                    !end do 
                     
                     ! Check if we can add the pair
                     if (addpair) then 
@@ -9909,9 +9894,121 @@ module ggmod_topology2D
             return 
         end if 
 
+        ! Remove pairs based on cycles
+        allocate(isactivetube(tube%ntot), keeptubepair(tpc))
+        keeptubepair = .true. 
+        do i = 1, tpc
+            ! Unpack
+            thft = tube1ida(i)%Get()
+            tlft = tube2ida(i)%Get()
+
+            ! Check if there are any tubes of a cycle in the pair
+            if (.not. any(isincycle([tlft, thft]))) then 
+                ! Keep this pair, skip
+                cycle
+            end if 
+
+            ! Check if there are any bounding tubes present
+            if (.not. any(isboundingtube([tlft, thft]))) then 
+                ! Keep this pair, skip
+                cycle
+            end if 
+
+            ! Bounding tubes are present, so we need to do thorough 
+            ! checks for each cycle
+            isactivetube = .false.
+            isactivetube([thft, tlft]) = .true. 
+            do j = 1, size(cycletubes)
+                ! Check if the tube pair was already deleted, if so, exit the loop
+                if (.not. keeptubepair(i)) then 
+                    exit
+                end if
+
+                ! Get the current active cycle tubes
+                tct = cycletubes(j)%Get()
+                tbtind = cycleboundingtubeind(j)%Get()
+
+                ! Check if any cycle tubes are in the current tube pair
+                if (.not. any(isactivetube(tct))) then 
+                    ! Skip
+                    cycle
+                end if 
+
+                ! Check if any active cycle tubes are bounding tubes
+                if (.not. any(isactivetube(tct(tbtind)))) then 
+                    ! Skip
+                    cycle
+                end if
+
+                ! If we got here, then we need to check the conditions 
+                ! in step 4) of the algorithm
+                allocate(iscycleboundingtube(tube%ntot))
+                iscycleboundingtube = .false.
+                iscycleboundingtube(tct(tbtind)) = .true.
+                
+                ! Get all high/low flux neighbours of non-bounding tubes 
+                ! of this cycle
+                allocate(thfnb(0), tlfnb(0), thfnba(0), tlfnba(0))
+                do k = 1, size(tct)
+                    ! Skip if it is a bounding tube - these don't have 
+                    ! to be checked
+                    if (iscycleboundingtube(tct(k))) then 
+                        cycle
+                    end if 
+                    thfnb = [thfnb, tube%GetHighFluxNeig(tct(k))]
+                    tlfnb = [tlfnb, tube%GetLowFluxNeig(tct(k))]
+                    if (isactivetube(tct(k))) then 
+                        thfnba = [thfnba, tube%GetHighFluxNeig(tct(k))]
+                        tlfnba = [tlfnba, tube%GetLowFluxNeig(tct(k))]
+                    end if 
+
+
+                    ! Sanity check
+                    if (size([thfnb, tlfnb]) < 1) then 
+                        ! Apparently cycle tube has no neighbours, this 
+                        ! should not be possible
+                        print *, 'tube vertices: ', tube%GetBndVert(tct(k), 1), tube%GetBndVert(tct(k), 2)
+                        call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
+                        call gdErrorHandler('GetMergeTubePairs: cycle tube ' // &
+                            'does not have any cycle neighbours, unexpected')
+                    end if 
+                end do 
+
+                ! Keep only neighbours that are part of the current 
+                ! cycle
+                thfnb = GetCommonElements(thfnb, tct)
+                tlfnb = GetCommonElements(tlfnb, tct)
+                tnb = [thfnb, tlfnb]
+                thfnba = GetCommonElements(thfnba, tct)
+                tlfnba = GetCommonElements(tlfnba, tct)
+                tnba = [thfnba, tlfnba]
+
+                ! Check second condition: all neighbours are tube neighbours
+                if (all(iscycleboundingtube(tnb)) .and. all(isactivetube(tct))) then 
+                    ! Keep pair
+                else
+                    ! first condition: all neighbours of active cycle 
+                    ! tubes should be considered
+                    do k = 1, size(tnba)
+                        if (iscycleboundingtube(tnba(k)) .and. .not. isactivetube(tnba(k))) then 
+                            keeptubepair(i) = .false.
+                            exit
+                        end if 
+                    end do 
+                end if 
+
+                ! Housekeeping
+                deallocate(iscycleboundingtube, thfnb, tlfnb, thfnba, tlfnba)
+            end do 
+        end do
+
         ! Set output
         hftubes = tube1ida(1:tpc)
         lftubes = tube2ida(1:tpc)
+        if (.not. all(keeptubepair)) then 
+            hftubes = pack(hftubes, keeptubepair)
+            lftubes = pack(lftubes, keeptubepair)
+        end if 
 
         ! Housekeeping
         end associate
@@ -9919,7 +10016,7 @@ module ggmod_topology2D
     end subroutine
 
     ! Tube cycle getter for merging
-    subroutine GetTopomeshTubeCycles(topomesh, tubes, boundingtubeind)
+    subroutine GetTopomeshTubeCyclesTA(tmadaptor, topomesh, tubes, boundingtubeind)
 
         ! Description
         !============
@@ -9948,27 +10045,32 @@ module ggmod_topology2D
         !==========
         ! 1)    Find all closed polygons formed by (aligned) boundary 
         !       polygons. Only tubes around these polygons can lead to 
-        !       cycles in the topomesh 
-        ! 2)    Take a closed polygon and continue to 3). If none are 
+        !       cycles in the topomesh
+        ! 2)    Determine the closed polygon nestedness level based
+        !       on data from the vessel. Only odd levels should be 
+        !       taken, as these have the tubes at the 'outside' and 
+        !       only these can lead to cycles in the graph. 
+        ! 3)    Take a closed polygon and continue to 4). If none are 
         !       left, exit
-        ! 3)    Find tubes that are adjacent to the faces and vertices
+        ! 4)    Find tubes that are adjacent to the faces and vertices
         !       of each closed polygon. 
-        ! 4)    If only two tubes are present, or if no bounding tubes 
-        !       exist, it is not a cycle. Go to 2). Otherwise, continue to 5)
-        ! 5)    Mark these tubes as bounding tubes and add data to output.
-        !       Go to 2) 
+        ! 5)    If only two tubes are present, or if no bounding tubes 
+        !       exist, it is not a cycle. Go to 3). Otherwise, continue to 6)
+        ! 6)    Mark these tubes as bounding tubes and add data to output.
+        !       Go to 3) 
 
         ! Declare variables
         !==================
         ! Arguments
-        class(TopomeshUDT), intent(in)              :: topomesh 
+        class(TopomeshAdaptorUDT)           :: tmadaptor
+        class(TopomeshUDT), intent(in)      :: topomesh
         type(IntegerDynamicArrayUDT), intent(out), allocatable  :: &
             boundingtubeind(:), tubes(:)
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:)      :: tf, sortind, tpf, &
-            tpfv, tubev, tubef
-        integer(I8), allocatable, dimension(:, :)   :: tfv
+            tpfv, tubev, tubef, polygonlevel
+        integer(I8), allocatable, dimension(:, :)   :: tfv, temp
         logical, allocatable, dimension(:)          :: isbranchingpolygon, &
             ispolygonstart
         type(IntegerDynamicArrayUDT)                :: thistubes, thisboundaryind
@@ -10030,6 +10132,8 @@ module ggmod_topology2D
                 if (ei == si) then 
                     ! Last polygon
                     ei = size(ispolygonstart)
+                else
+                    ei = ei - 1
                 end if 
             end if 
             tpf = tf(si:ei)
@@ -10041,6 +10145,22 @@ module ggmod_topology2D
                 ! Not a closed polygon  
                 cycle
             end if
+
+            ! Check if the polygon level is odd (just evaluate at vertex
+            ! locations)
+            call tmadaptor%vessel%exactplfvessel%EvaluateLabel(topomesh%vert%x(tpfv), &
+                topomesh%vert%y(tpfv), temp)
+            call Unique(temp(:, 4), polygonlevel)
+            if (size(polygonlevel) > 1) then 
+                call gdErrorHandler('GetTopomeshTubeCyclesTA: multiple polygon levels found, unexpected. ' // & 
+                    'Check if polygon levelset function for vessel was correctly constructed, or ' // & 
+                    'if vessel polygon parts are almost intersecting, which may cause this behavior.')
+            end if
+            if (mod(polygonlevel(1), 2) == 0) then 
+                ! Even polygon, skip
+                cycle
+            end if  
+
 
             ! If we got here, we can initialize the temporary arrays
             thistubes = ConstructIntegerDynamicArray()
