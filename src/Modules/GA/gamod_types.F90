@@ -899,7 +899,7 @@ module gamod_types
 
         ! Description
         !============
-        ! Select a face to merge the two cell of
+        ! Select a face to merge the two cell from
 
         ! Declare variables
         !==================
@@ -944,7 +944,7 @@ module gamod_types
         ! Criteria
         select case (options%merge_crit)
 
-        case ('tria_to_quad')
+        case (1) ! tria_to_quad
 
             ! NOT IN MATLAB
             ! Determine merge face (case for when a quad consists of two triangles)
@@ -998,7 +998,7 @@ module gamod_types
             end do
 
 
-        case ('min_area')
+        case (2) ! min_area
 
             ! Initialize criteria
             crit = sum(qm%cvS) / c%ntot
@@ -1059,12 +1059,12 @@ module gamod_types
 
             end if
             
-        case ('minimal_grid')
+        case (3) ! minimal grid
 
             call gdErrorHandler('SelectMergingFace: merge criterium minimal' // &
                 & 'grid not implemented. Better reside to the grid generator')
 
-        case ('h_pol')
+        case (4) ! h_pol
 
             ! Remove merge cells with too small h_pol
 
@@ -1146,7 +1146,7 @@ module gamod_types
             end if
 
 
-        case ('bias')
+        case (5) ! bias
 
             ! Merge the cells with strong bias
             ! Get non-aligned faces
@@ -1192,7 +1192,7 @@ module gamod_types
             !    qm%merge_fc = pol_faces(1)
             !end if
 
-        case ('pol_flux')
+        case (6) ! pol_flux
 
             ! Distance function fun_r
             ! Only use cells in SOL
@@ -1242,7 +1242,7 @@ module gamod_types
 
             end do
 
-        case ('h_rad')
+        case (7) ! h_rad
 
             ! Initialize
             ! Get all cells around the separatrices
@@ -1311,7 +1311,7 @@ module gamod_types
 
             end do
 
-        case ('h_rad_core')
+        case (8) ! h_rad_core
 
             ! Initialize
             call grid%GetCutsXpoints(cvLookUp, core_facesD)
@@ -1360,7 +1360,7 @@ module gamod_types
 
 
 
-        case ('bias_rad_farSOL')
+        case (9) ! bias_rad_farSOL
 
             ! Remove cells with strong bias in the radial direction in the farSOL region
             ! Get aligned faces in farSOL
@@ -1407,7 +1407,7 @@ module gamod_types
             bias_max = maxval(bias)
             if (bias_max .gt. options%merge_bias_limit) qm%merge_fc = rad_faces(indmax)
 
-        case ('bias_rad')
+        case (10) ! bias_rad
 
             ! Remove cells with strong bias in the radial direction
 
@@ -1454,7 +1454,7 @@ module gamod_types
             end if
 
 
-        case ('skew_tria')
+        case (11) ! skew_tria
 
             ! Get the highly inclined trianlge
             call grid%GetHighInclinedTrias(qm, options, ARtot, incl, cctria, cctraps, cctrapsP, nums, ncc)
@@ -1481,7 +1481,7 @@ module gamod_types
                 end if
             end do
 
-        case ('manual')
+        case (12) ! manual
 
             call gdErrorHandler('SelectMergingFace: manual merging via input not possible in precompile code')
         
