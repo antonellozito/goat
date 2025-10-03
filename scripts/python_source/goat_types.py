@@ -599,6 +599,139 @@ class GGGrid:
         self.cell = GGCell()
 
 #----------------------------------------------------------------------#
+#                         GRID ADAPTATION                              #
+#----------------------------------------------------------------------#
+# GAGrid vertices
+class GAVert:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+        nv = self.ntot
+
+        # coordinates
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(nv, dtype=int)
+
+        # Fieldline ID
+        self.fieldlineID = np.zeros(nv, dtype=int)
+
+    # Initializer
+    def Initialize(self, nv):
+        # Number
+        self.ntot = nv 
+
+        # Coordinates
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(nv, dtype=int)
+
+        # Fieldline ID
+        self.fieldlineID = np.zeros(nv, dtype=int)
+
+# GAGrid faces
+class GAFace:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0 
+
+        # Vertices
+        self.v1 = np.zeros(0, dtype=int)
+        self.v2 = np.zeros(0, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(0, dtype=int)
+
+        # Label
+        self.label = np.zeros(0, dtype=int)
+        self.region = np.zeros(0, dtype=int)
+        self.aligned = np.zeros(0, dtype=int)
+
+    # Initializer
+    def Initialize(self, nf):
+        # Number
+        self.ntot = nf
+
+        # Vertices
+        self.v1 = np.zeros(nf, dtype=int)
+        self.v2 = np.zeros(nf, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(nf, dtype=int)
+
+        # Label
+        self.label = np.zeros(nf, dtype=int)
+        self.region = np.zeros(nf, dtype=int)
+        self.aligned = np.zeros(nf, dtype=int)
+
+# GAGrid cells
+class GACell:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+        self.nvert = 0
+        nc = self.ntot 
+
+        # Vertex pointer
+        self.vp1 = np.zeros(nc, dtype=int)
+        self.vp2 = np.zeros(nc, dtype=int)
+        
+        # Vertices
+        self.vert = np.zeros(nc, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(nc, dtype=int)
+
+        # Region
+        self.region = np.zeros(nc, dtype=int)
+
+        # Coordinates
+        self.x  = np.zeros(nc, dtype=float)
+        self.y  = np.zeros(nc, dtype=float)
+
+    # Initializer
+    def Initialize(self, nc, ncv):
+        # Number
+        self.ntot = nc
+        self.nvert = ncv
+
+        # Vertex pointer
+        self.vp1 = np.zeros(nc, dtype=int)
+        self.vp2 = np.zeros(nc, dtype=int)
+        
+        # Vertices
+        self.vert = np.zeros(ncv, dtype=int)
+
+        # ID
+        self.ID =  np.zeros(nc, dtype=int)
+
+        # Region
+        self.region = np.zeros(nc, dtype=int)
+
+        # Coordinates
+        self.x  = np.zeros(nc, dtype=float)
+        self.y  = np.zeros(nc, dtype=float)        
+
+    # Vertex getter
+    def GetVert(self, i):
+        return self.vert[self.vp1[i]:self.vp1[i]+self.vp2[i]]
+
+class GAGrid:
+    # Init
+    def __init__(self):
+        # Fields
+        self.vert = GAVert()
+        self.face = GAFace()
+        self.cell = GACell()
+
+#----------------------------------------------------------------------#
 #                        SIMULATION GRID                               #
 #----------------------------------------------------------------------#
         

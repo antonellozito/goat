@@ -84,9 +84,14 @@ module goatmod_userinput
         ! interface
 
         ! - GGtoGDfacelabelmappingGG: idem above but for GG to GD 
-        ! - GGtoGDfacelabelmappingGA
+        ! - GGtoGDfacelabelmappingGD
         ! - GGtoGDfacelabelsubfrom
         ! - GGtoGDfacelabelsubto
+
+        ! - GGtoGAfacelabelmappingGG: idem above but for GG to GA
+        ! - GGtoGAfacelabelmappingGA
+        ! - GGtoGAfacelabelsubfrom
+        ! - GGtoGAfacelabelsubto
 
         ! Structure options
         ! - TP: structure numbers that are target plates
@@ -140,6 +145,11 @@ module goatmod_userinput
         integer(I8), allocatable    :: GGtoGDfacelabelsubfrom(:) 
         integer(I8), allocatable    :: GGtoGDfacelabelsubto(:) 
 
+        integer(I8), allocatable    :: GGtoGAfacelabelmappingGG(:)
+        integer(I8), allocatable    :: GGtoGAfacelabelmappingGA(:) 
+        integer(I8), allocatable    :: GGtoGAfacelabelsubfrom(:) 
+        integer(I8), allocatable    :: GGtoGAfacelabelsubto(:) 
+
         ! Structure options
         integer(I8), allocatable    :: TP(:)
         integer(I8), allocatable    :: TPind(:) 
@@ -158,6 +168,269 @@ module goatmod_userinput
 
     end type
 
+    !------------------------------------------------------------------!
+    !                          GRID ADAPTATION                         !
+    !------------------------------------------------------------------! 
+    type, extends(OptionsUDT) :: GAoptionsUDT   
+
+        ! Structure containing the options for the grid adaptation part 
+        ! of GOAT. The following fields are present: 
+
+        ! General adaptation options
+        ! - plt: enable general plotting
+        ! - plt_qm: enable plotting quality metrics
+        ! - meth: used method, can be 'simple' to adapt the grid based in 
+        !         on grid metric, or can be 'aposteriori' which is using
+        !         plasma state information
+
+        ! Facelabel mapping
+        ! - facelabelmappingGG: list of face labels of the grid generator
+        ! - facelabelmappingGA: mapping of grid generator label to labels
+        !                       needed for grid adaptation
+
+        ! Operation options    
+        ! - rem_small_trias: remove small triangles
+        ! - cut_off_pol: threshold for small triangles poloidal height 
+        !                   with respect to the poloidal neighbor
+        ! - cut_off_surf: threshold for small triangles on the surface
+        !                   area with respect to the surface area of its
+        !                   neighbors
+        ! - stacked_trias: apply transformation to stacked triangles
+        ! - stacked_trias_checkAR: switch on selecting triangles based on 
+        !                           its aspect ratio
+        ! - stacked_trias_maxAR: maximal aspect ratio of a triangle
+        !                        in the stacked triangle transformation
+        ! - merge_stacked_trias: switch to apply merging stacked triangles
+        !                        which are too skewed
+        ! - merge_stacked_trias_angle_threshold: threshold of stacked triangle
+        !                       too merge it (in degrees)
+        ! - merge_trap_into_stacked: switch to allow merging a trapezoid
+        !                            into a group of stacked triangles
+        ! - stacked_to_cutcell: apply transformation from stacked triangles
+        !                       to cutcell
+        ! - stacked_to_cutcell: switch to transform to cutcell based on face
+        !                       length of the aligned faces of the triangles
+        ! - split_shaved_off_tube: apply radial splitting a concavely shaved
+        !                           off fluxtube at the outer boundary
+        ! - splitting: apply splitting of cells
+        ! - merging: apply merging of cells
+        ! - pents_to_tria: transfrom all remaining pentagon into triangles
+        ! - h_rad_threshold: threshold of radial width of cell during merging,
+        !                    only smaller cells are considered
+        ! - h_rad_core_threshold: idem as above but only for cells in the core
+        ! - BLG: add a boundary layer at the main targets of a grid
+        ! - BLG_n_layers: determine the number of layers of the added 
+        !                   boundary layer
+        ! - BLG_rescaling_factor: size of the boundary layer wrt the 
+        !                           upstream cells  
+        ! - rem_stickout_trias: remove triangle that are only connected 
+        !                       with the grid via one face
+        ! - rem_trias_flux: remove flux tube with only two triangles and
+        !                   remove or merge flux tube with a both end a triangle
+        ! - rem_tube_outershell_threshold: threshold for select a flux tube
+        !                   to be merged with neighboring tube (h_rad of 
+        !                   neighboring tube / h_rad of boundary tube)
+        ! - outershell_handling: can be 'remove' or 'merge'
+        ! - rem_stickout_quad: remove quad which are only connected to the grid
+        !                       with one face
+        ! - split_noalignedquads: splitting quads without aligned faces
+        
+        ! Splitting options        
+        ! - no_pents: do not allow pentagons in the final grid
+        ! - QTtype: method on how to handle radial splitting at inclined boundaries
+        !           can be 'regular', i.e. just splitting a triangle radially, or
+        !           can be 'pol-rad', i.e. continue poloidal splitting after
+        !           the radial split an inclined boundary face
+        ! - split_out: option to not split pentagons 
+        ! - splittype: can be 'rad' for radial splitting, i.e. reducing radial 
+        !              width of cells, or 'pol' for poloidal splitting, i.e. 
+        !              reducing the poloidal length of cells
+        ! - n_split: number of allowed splitting operations      
+        ! - typeT: method to split a triangle, can be 'stacked', i.e. triangle 
+        !          is split into two trianlge, or 'cutcell', i.e. triangle is 
+        !           split in a quad and a triangle
+        ! - rad_type: criterium to apply radial splitting (see SelectSplitCell), can be:
+        !             'h_rad_psi': split cells with large psi width
+        !             'h_rad': split cells with large radial width
+        !             'pol_flux': split cells with large poloidal flux estimation based on 
+        !                           pol_flux_est distance function
+        !             'farSOL': split highly inclined triangles in the farSOL
+        !             'farSOL_refinements': split cells with large psi width in the farSOL
+        !             'farSOLrefinement_targets': split cells with large psi width and 
+        !                                         low boundary face inclination in the farSOL
+        ! - pol_type: criterium to aplly poloidal splitting (see SelectSplitCell) can be:
+        !                'trias_cvS': split triangles with largest surface area
+        !                'h_pol': split cells with largest poloidal length
+        !                'trias_farSOL': split triangles with largest surface area in the farSOL
+        !                'farSOLrefinement_hpol': split cells with largest poloidal length in the farSOL
+        !                'farSOLrefinement_targets': split cells in the farSOL with large
+        !                                   poloidal length and low inclination at the boundary face
+        ! - dist_function_threshold_split: threshold for the value the distance function 
+        !               for selecting a cell to split. The value should be lower than 
+        !               threshold.
+        ! - dist_function_threshold_split_wall: idem for the distance function wrt the wall
+        
+        ! Merging options
+        ! - no_hex: to not allow hexagonal cells in the final grid
+        ! - merge_crit: criterium to select a face from which the two cell need to be merged
+        !               can be (see SelectMergingFace) :
+        !               'tria_to_quad': merging two triangles to quadrilaterals
+        !               'min_area': merging cells which are smaller the mean surface area
+        !               'h_pol': merging cells with too small poloidal length
+        !               'bias': merging based on high bias between cells in poloidal direction
+        !               'pol_flux': merging cells with low poloidal flux estimation via 
+        !                           similarly named distance function
+        !               'h_rad': merging cells with psi width smaller than h_rad_threshold
+        !               'h_rad_core': merging cells in the core radial width smaller than
+        !                            h_rad_core_threshold
+        !               'bias_rad_farSOL': merging cells with large radial bias in farSOL
+        !               'bias_rad': merging cells with large radial bias
+        !               'skew_tria': merging triangles with low inclination and high aspect ratio
+        ! - merge_h_pol_factor: factor to losen merge criterium based on poloidal length
+        ! - n_merge: number of merging operations allowed
+        ! - merge_bias_limit: thershold on bias to merge the cells. Merge is done when
+        !                       real bias is larger than the threshold.
+        ! - dist_function_threshold_merge: threshold for the value the distance function 
+        !               for selecting a face to merge over. The value should be lower than 
+        !               threshold.
+
+        ! Pentagon options
+        ! - no_pents_area_merge: use an area constraint on where pentagons are allowed during merging
+        ! - no_pents_area_split: use an area constraint on where pentagons are allowed during splitting
+        ! - no_pents_area_type: method to defined area where no pentagons are allowed. 
+        !                       Can be 'coordinates' using no_pents_area_maxR etc. to define a box, 
+        !                       or can be 'dist_function' to use a distance function. The value of 
+        !                       the distance function should be lower the threshold (split or merge).
+        ! - no_pents_area_maxR: option to recreate a box where not pentagons are allowed, 
+        !                       idem for ..minR, ..maxZ, ..minZ
+        ! - base_func: the basic function for the construction of the distance function, 
+        !              can only be 'exp(-dist/d)'
+        ! - dist_function: switch to construct distance functions
+        ! - d_rescale: rescaling factor for characteristic length of distance function
+        ! - d_rescale: idem as above but for wall distance function
+        ! - dist_type: type of distance function can be 
+        !              'target_single_null': use targets as reference 
+        !              'target_to_vessel': use outer boundary of the mesh as reference
+        !              'pol_flux_est': use separatrix as reference
+        ! - dist_type_wall: type of distance function used for wall distance function, see above
+        ! - d_char_type: characteristic length used to construct distance function, can be:
+        !               'min_Xpoint_dist': minimal distance between targets and Xpoint
+        !               'max_Xpoint_dist': maximal distance between targets and Xpoint
+        ! The rest of the options are carried over from goatoptions or not changeable.
+
+        ! General adaptation options
+        logical                     :: plt
+        logical                     :: plt_qm
+        character(:), allocatable   :: meth
+
+
+        ! Facelabel mapping
+        integer(I8), allocatable    :: facelabelmappingGG(:)
+        integer(I8), allocatable    :: facelabelmappingGA(:)
+
+        ! Operation options
+        logical                     :: rem_small_trias
+        real(R8)                    :: cut_off_pol
+        real(R8)                    :: cut_off_surf
+
+        logical                     :: stacked_trias
+        logical                     :: stacked_trias_checkAR
+        real(R8)                    :: stacked_trias_maxAR
+        logical                     :: merge_stacked_trias
+        real(R8)                    :: merge_stacked_trias_angle_threshold
+        logical                     :: merge_trap_into_stacked
+
+        logical                     :: stacked_to_cutcell
+        logical                     :: stacked_to_cutcell_nonuniform
+
+        logical                     :: split_shaved_off_tube
+
+
+        logical                     :: splitting
+        logical                     :: merging
+        logical                     :: pents_to_tria
+        real(R8)                    :: h_rad_threshold
+        real(R8)                    :: h_rad_core_threshold
+
+        logical                     :: BLG
+        integer(I8)                 :: BLG_n_layers
+        real(R8)                    :: BLG_rescaling_factor
+
+        logical                     :: rem_stickout_trias
+        logical                     :: rem_trias_flux
+        real(R8)                    :: rem_tube_outershell_threshold
+        character(:), allocatable   :: outershell_handling
+        logical                     :: rem_stickout_quad
+        logical                     :: split_noalignedquads 
+        
+        ! Splitting options
+        logical                     :: no_pents
+        character(:), allocatable   :: QTtype
+        logical                     :: split_out
+        character(:), allocatable   :: splittype
+        integer(I8)                 :: n_split
+        character(:), allocatable   :: typeT
+        character(:), allocatable   :: rad_type
+        character(:), allocatable   :: pol_type
+        real(R8)                    :: dist_function_threshold_split
+        real(R8)                    :: dist_function_threshold_split_wall
+        
+        ! Merging options
+        logical                     :: no_hex
+        character(:), allocatable   :: merge_crit
+        real(R8)                    :: merge_h_pol_factor 
+        integer(I8)                 :: n_merge
+        real(R8)                    :: merge_bias_limit
+        real(R8)                    :: dist_function_threshold_merge    
+        
+        ! Pentagon options
+        logical                     :: no_pents_area_merge
+        logical                     :: no_pents_area_split
+        character(:), allocatable   :: no_pents_area_type
+
+        real(R8)                    :: no_pents_area_maxR
+        real(R8)                    :: no_pents_area_minR
+        real(R8)                    :: no_pents_area_maxZ
+        real(R8)                    :: no_pents_area_minZ 
+        
+        ! Distance function options
+        character(:), allocatable   :: base_func
+        logical                     :: dist_function
+        real(R8)                    :: d_rescale
+        real(R8)                    :: d_rescale_wall
+        character(:), allocatable   :: dist_type
+        character(:), allocatable   :: dist_type_wall
+        character(:), allocatable   :: d_char_type
+        logical                     :: plt_dist_func  
+        
+        
+        ! Caried over from goatoptions
+        ! Case identification
+        logical                     :: debug        
+        logical                     :: vesselmode
+        logical                     :: slab
+
+        ! fcRegmappingGA
+        integer(I8)                 :: fcRegmappingGA(1:7)
+
+        real(R8), allocatable       :: OMP_r(:)
+        real(R8), allocatable       :: OMP_z(:)
+        real(R8), allocatable       :: IMP_r(:)
+        real(R8), allocatable       :: IMP_z(:)
+
+        ! Splitting
+        logical                     :: XpointSplitting
+
+
+    contains
+
+        ! Routines to manipulate the options
+        procedure   :: Read             => ReadGAOptions 
+        procedure   :: SetDefaults      => SetDefaultGAoptions
+
+
+    end type
+   
     !------------------------------------------------------------------!
     !                          GRID DEFORMATION                        !
     !------------------------------------------------------------------!
@@ -231,7 +504,7 @@ module goatmod_userinput
         ! Mappings
         integer(I8), allocatable    :: facelabelsubfrom(:), &
             facelabelsubto(:), facelabelmappingGG(:), &
-            facelabelmappingGD(:)
+            facelabelmappingGD(:), facelabelmappingGA(:)
         
 
     contains 
@@ -760,7 +1033,11 @@ module goatmod_userinput
             options%GGtoGDfacelabelmappingGG(0), &
             options%GGtoGDfacelabelmappingGD(0), &
             options%GGtoGDfacelabelsubfrom(0), &
-            options%GGtoGDfacelabelsubto(0))
+            options%GGtoGDfacelabelsubto(0), &
+            options%GGtoGAfacelabelmappingGG(0), &
+            options%GGtoGAfacelabelmappingGA(0), &
+            options%GGtoGAfacelabelsubfrom(0), &
+            options%GGtoGAfacelabelsubto(0))
         
         ! Structure options
         allocate(options%TP(0), options%TPind(0), options%exclude(0))
@@ -774,6 +1051,99 @@ module goatmod_userinput
         options%IMP_z(:)   = 0
 
     end subroutine
+
+    ! Grid adaptations options routines
+    subroutine SetDefaultGAoptions(options)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAoptionsUDT)       :: options   
+        
+        ! General options
+        options%plt         = .true.
+        options%plt_qm      = .false.
+        options%meth        = 'simple'
+
+        ! Set fcReg mapping
+        options%fcRegmappingGA = [0, 0, 0, 1, 4, 5, 8]
+
+        ! Operation options
+        options%rem_small_trias                     = .false.
+        options%cut_off_pol                         = 0.3
+        options%cut_off_surf                        = 0.05
+    
+        options%stacked_trias                       = .false.
+        options%stacked_trias_checkAR               = .false.
+        options%stacked_trias_maxAR                 = 10
+        options%merge_stacked_trias                 = .false.
+        options%merge_stacked_trias_angle_threshold = 5
+        options%merge_trap_into_stacked             = .true.
+
+        options%stacked_to_cutcell                  = .false.
+        options%stacked_to_cutcell_nonuniform          = .true.
+
+        options%split_shaved_off_tube               = .false.
+
+        options%splitting                           = .false.
+        options%pents_to_tria                       = .false.
+        options%merging                             = .false.
+        options%h_rad_threshold                     = 0.01
+        options%h_rad_core_threshold                = 0.04
+
+        options%BLG                                 = .false.
+        options%BLG_n_layers                        = 0
+        options%BLG_rescaling_factor                = 2
+
+        options%rem_stickout_trias                  = .false.
+        options%rem_trias_flux                      = .false.
+        options%rem_tube_outershell_threshold       = 2
+        options%outershell_handling                 = 'merge' 
+        options%rem_stickout_quad                 = .false.
+        options%split_noalignedquads                = .true. 
+        
+        ! Splitting options
+        options%no_pents                            = .true.
+        options%QTtype                              = 'regular'
+        options%split_out                           = .false.
+        options%splittype                           = 'rad'
+        options%n_split                             = 20
+        options%typeT                               = 'cutcell'
+        options%rad_type                            = 'h_rad'
+        options%pol_type                            = 'trias'
+        options%dist_function_threshold_split       = 0.9
+        options%dist_function_threshold_split_wall  = 0.6  
+        
+        ! Merging options
+        options%no_hex                              = .true.
+        options%merge_crit                          = 'h_pol'
+        options%merge_h_pol_factor                  = 1
+        options%n_merge                             = 20
+        options%merge_bias_limit                    = 5
+        options%dist_function_threshold_merge       = 0.6   
+        
+        ! Pentagon options
+        options%no_pents_area_merge                 = .false.
+        options%no_pents_area_split                 = .true.
+        options%no_pents_area_type                  = 'dist_function'
+        
+        options%no_pents_area_maxR                  = 2.5
+        options%no_pents_area_minR                  = 1
+        options%no_pents_area_maxZ                  = -0.9
+        options%no_pents_area_minZ                  = -2
+        
+        ! Distance function options
+        options%base_func                           = 'exp(-dist/d)'
+        options%dist_function                       = .true.
+        options%d_rescale                           = 0.5
+        options%d_rescale_wall                      = 0.5
+        options%dist_type                           = 'target_single_null'
+        options%dist_type_wall                      = 'target_to_vessel'
+        options%d_char_type                         = 'min_Xpoint_dist'
+        options%plt_dist_func                       = .false.    
+
+    end subroutine
+
 
     ! Grid deformation options routines
     subroutine SetDefaultGDOptions(options)
@@ -819,9 +1189,11 @@ module goatmod_userinput
 
         ! Default mappings
         allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
-        allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8))
+        allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8), &
+        options%facelabelmappingGA(1:8))
         options%facelabelmappingGG = [-13, -34, -23, -24, -21, -42, -43, -44]
         options%facelabelmappingGD = [1, 2, 3,   3,   4,   5,   5,   5]
+        options%facelabelmappingGD = [4, 5, 3,   3,   2,   3,   3,   3]        
 
     
     end subroutine
@@ -1236,17 +1608,30 @@ module goatmod_userinput
         call ExtractOptionValueInteger1D(fid, field, &
             options%GGtoGDfacelabelsubto)
 
+        field = 'goat.GGtoGA.facelabelmappingGG'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelmappingGG)
+        field = 'goat.GGtoGA.facelabelmappingGA'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelmappingGA)
+        field = 'goat.GGtoGA.facelabelsubfrom'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelsubfrom)
+        field = 'goat.GGtoGA.facelabelsubto'
+        call ExtractOptionValueInteger1D(fid, field, &
+            options%GGtoGAfacelabelsubto)    
+
         ! OMP and IMP
-        field = 'goat.OMPr'
+        field = 'goat.OMP_r'
         call ExtractOptionValueReal1D(fid, field, &
             options%OMP_r)
-        field = 'goat.OMPz'
+        field = 'goat.OMP_z'
         call ExtractOptionValueReal1D(fid, field, &
             options%OMP_z)
-        field = 'goat.IMPr'
+        field = 'goat.IMP_r'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_r)
-        field = 'goat.IMPz'
+        field = 'goat.IMP_z'
         call ExtractOptionValueReal1D(fid, field, &
             options%IMP_z)
         
@@ -1285,11 +1670,219 @@ module goatmod_userinput
 
         end if 
 
+
+        ! Other checks
+        if (size(options%GGtoGAfacelabelmappingGG)/=size(options%GGtoGAfacelabelmappingGA)) then 
+            call gdErrorHandler('ReadGOAToptions: facelabelmapping has inconsistent lengths')
+        end if 
+
         ! Housekeeping
         !=============
         ! Close the file
         close(unit=fid)
 
+
+    end subroutine
+
+    ! Grid adaptation options reader
+    subroutine ReadGAOptions(options)
+
+        ! Description
+        !============
+        ! This routine reads in the ga options from a file of which 
+        ! the full path should be given in options%inputfilepath. The default
+        ! options should have already been set at this point, as this 
+        ! routine will only overwrite options that are present in the 
+        ! user-specified options file. If no options file is present, 
+        ! nothing is read in and a message will be shown.
+        
+        
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAoptionsUDT)            :: options  
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof, throwerror
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+        throwerror = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadGAOptions: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadGAOptions: file appears to be empty, ' &
+                // 'taking default options...'
+        end if  
+        
+        ! Read options
+        !=============
+        ! General
+        field = 'ga.plt'
+        call ExtractOptionValueLogical0D(fid, field, options%plt)
+        field = 'ga.plt_qm'
+        call ExtractOptionValueLogical0D(fid, field, options%plt_qm)              
+        field = 'ga.meth'
+        call ExtractOptionValueCharacter(fid, field, options%meth) 
+        
+        ! Operation options
+        !==================
+
+        ! Small triangles
+        field = 'ga.rem_small_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_small_trias)        
+        field = 'ga.cut_off_pol'
+        call ExtractOptionValueReal0D(fid, field, options%cut_off_pol) 
+        field = 'ga.cut_off_surf'
+        call ExtractOptionValueReal0D(fid, field, options%cut_off_surf)
+
+        ! Stacked triangles
+        field = 'ga.stacked_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_trias)          
+        field = 'ga.stacked_trias_checkAR'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_trias_checkAR)     
+        field = 'ga.stacked_trias_maxAR'
+        call ExtractOptionValueReal0D(fid, field, options%stacked_trias_maxAR)
+        field = 'ga.merge_stacked_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%merge_stacked_trias)
+        field = 'ga.merge_stacked_trias_angle_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%merge_stacked_trias_angle_threshold)
+        field = 'ga.merge_trap_into_stacked'
+        call ExtractOptionValueLogical0D(fid, field, options%merge_trap_into_stacked) 
+        
+        ! Stacked to cutcell
+        field = 'ga.stacked_to_cutcell'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_to_cutcell)
+        field = 'ga.stacked_to_cutcell_nonuniform'
+        call ExtractOptionValueLogical0D(fid, field, options%stacked_to_cutcell_nonuniform) 
+               
+        ! Splitting and merging
+        field = 'ga.splitting'
+        call ExtractOptionValueLogical0D(fid, field, options%splitting)    
+        field = 'ga.pents_to_tria' 
+        call ExtractOptionValueLogical0D(fid, field, options%pents_to_tria)
+        field = 'ga.merging'
+        call ExtractOptionValueLogical0D(fid, field, options%merging)
+        field = 'ga.h_rad_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%h_rad_threshold)                
+        field = 'ga.h_rad_core_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%h_rad_core_threshold)  
+
+        ! Boundary layer grid
+        field = 'ga.BLG'
+        call ExtractOptionValueLogical0D(fid, field, options%BLG)
+        field = 'ga.BLG_n_layers'
+        call ExtractOptionValueInteger0D(fid, field, options%BLG_n_layers)
+        field = 'ga.rescaling_factor'
+        call ExtractOptionValueReal0D(fid, field, options%BLG_rescaling_factor)
+
+        ! Special operations
+        field = 'ga.rem_stickout_trias'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_stickout_trias)        
+        field = 'ga.rem_trias_flux'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_trias_flux)        
+        field = 'ga.rem_tube_outershell_threshold'
+        call ExtractOptionValueReal0D(fid, field, options%rem_tube_outershell_threshold)  
+        field = 'ga.outershell_handling'
+        call ExtractOptionValueCharacter(fid, field, options%outershell_handling)
+        field = 'ga.rem_stickout_quad'        
+        call ExtractOptionValueLogical0D(fid, field, options%rem_stickout_quad)
+        field = 'ga.split_noalignedquads'
+        call ExtractOptionValueLogical0D(fid, field, options%split_noalignedquads) 
+
+        ! Splitting options
+        !==================
+        field = 'ga.no_pents'
+        call ExtractOptionValueLogical0D(fid, field, options%no_pents)         
+        field = 'ga.QTtype'
+        call ExtractOptionValueCharacter(fid, field, options%QTtype) 
+        field = 'ga.split_out'
+        call ExtractOptionValueLogical0D(fid, field, options%split_out)
+        field = 'ga.splittype'
+        call ExtractOptionValueCharacter(fid, field, options%splittype)
+        field = 'ga.n_split'
+        call ExtractOptionValueInteger0D(fid, field, options%n_split)
+        field = 'ga.typeT'
+        call ExtractOptionValueCharacter(fid, field, options%typeT)                                   
+        field = 'ga.rad_type'
+        call ExtractOptionValueCharacter(fid, field, options%rad_type)                                   
+        field = 'ga.pol_type'
+        call ExtractOptionValueCharacter(fid, field, options%pol_type)
+        field = 'ga.dist_function_threshold_split'
+        call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_split)                                    
+        field = 'ga.dist_function_threshold_split_wall'
+        call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_split_wall) 
+        
+        ! Merging options
+        !================
+        field = 'ga.no_hex'
+        call ExtractOptionValueLogical0D(fid, field, options%no_hex)
+        field = 'ga.merge_crit'
+        call ExtractOptionValueCharacter(fid, field, options%merge_crit) 
+        field = 'ga.merge_h_pol_factor'
+        call ExtractOptionValueReal0D(fid, field, options%merge_h_pol_factor)
+        field = 'ga.n_merge'
+        call ExtractOptionValueInteger0D(fid, field, options%n_merge)
+        field = 'ga.merge_bias_limit'
+        call ExtractOptionValueReal0D(fid, field, options%merge_bias_limit)        
+        field = 'ga.dist_function_threshold_merge'
+        call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_merge)  
+        
+        ! Pentagon options
+        !=================
+        field = 'ga.no_pents_area_merge'
+        call ExtractOptionValueLogical0D(fid, field, options%no_pents_area_merge)        
+        field = 'ga.no_pents_area_split'
+        call ExtractOptionValueLogical0D(fid, field, options%no_pents_area_split)        
+        field = 'ga.no_pents_area_type'
+        call ExtractOptionValueCharacter(fid, field, options%no_pents_area_type)     
+           
+        field = 'ga.no_pents_area_maxR'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_maxR)        
+        field = 'ga.no_pents_area_minR'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_minR)        
+        field = 'ga.no_pents_area_maxZ'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_maxZ)        
+        field = 'ga.no_pents_area_minZ'
+        call ExtractOptionValueReal0D(fid, field, options%no_pents_area_minZ)    
+        
+        ! Distance function options
+        !==========================
+        field = 'ga.dist_function'
+        call ExtractOptionValueLogical0D(fid, field, options%dist_function)
+        field = 'ga.base_func'
+        call ExtractOptionValueCharacter(fid, field, options%base_func)        
+        field = 'ga.d_rescale'     
+        call ExtractOptionValueReal0D(fid, field, options%d_rescale)                             
+        field = 'ga.d_rescale_wall'     
+        call ExtractOptionValueReal0D(fid, field, options%d_rescale_wall)
+        field = 'ga.dist_type'
+        call ExtractOptionValueCharacter(fid, field, options%dist_type)
+        field = 'ga.dist_type_wall'
+        call ExtractOptionValueCharacter(fid, field, options%dist_type_wall)
+        field = 'ga.d_char_type'
+        call ExtractOptionValueCharacter(fid, field, options%d_char_type)
+        field = 'ga.plt_dist_func'
+        call ExtractOptionValueLogical0D(fid, field, options%plt_dist_func)
+
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
 
     end subroutine
 

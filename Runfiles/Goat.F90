@@ -100,6 +100,11 @@ program Goat
     !===========
     select case (goatoptions%meth)
 
+    case ('GA')
+         
+        ! Grid adaptations only
+        call GADriver(goatoptions)
+
     case ('GD')
 
         ! Grid deformation only
