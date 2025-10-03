@@ -12,8 +12,8 @@ VERSION 1.00.00
 'goat.meth'                         'GG'
 
 # Input file locations 
-#'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
-#'goat.gridfilepath'                 'traduit.out.b2us_basegeom'
+#'goat.gridfilepath'                'traduit.out.b2us_smoothed2'
+#'goat.gridfilepath'                'traduit.out.b2us_basegeom'
 'goat.gridfilepath'                 'traduit.out.b2us'
 'goat.magneticfieldfilepath'        'rzpsi.dat'
 'goat.structurefilepath'            'structure.dat'
