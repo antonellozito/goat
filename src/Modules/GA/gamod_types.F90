@@ -7586,7 +7586,16 @@ module gamod_types
 
         ! Description
         !============
-        ! Determines merge case
+        ! Determines merge case. For regular case, the convention for caseID
+        ! based on type of the two cells of face fc, and the number of 
+        ! faces connected to the two vertices of the face. 
+        ! For example, a face with two quads and two vertices that have
+        ! each four faces connect will result in the caseID '4444'.
+        ! If more than four faces are connected to a vertex, the value in
+        ! caseID will still be four as it does not influence the merging routines.
+        ! There are also some very specific caseID codes, for very specific 
+        ! geometries, such '5T3', '5spec', '4443B1', etc, as can be found below. 
+        ! A caseID of '99' is provided when the geometry should not be merged.
 
         ! Declare variables
         !==================
@@ -7764,7 +7773,7 @@ module gamod_types
 
                 caseID = '334'
 
-            elseif (min(nfc1, nfc2) == 3 .and. starter) then
+            elseif (min(nfc1, nfc2) == 3 .and. .not.starter) then
 
                 caseID = '333'
 
