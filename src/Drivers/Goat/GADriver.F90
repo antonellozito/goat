@@ -48,7 +48,7 @@ subroutine GADriver(goatoptions)
 
     ! Run adaptations
     !================
-    call GridAdaptor(GAgrid,environment,magneticField,gaoptions)
+    call GridAdaptor(GAgrid,environment,magneticField,state,gaoptions)
 
     ! Translate GAGrid to Grid
     call TranslateGAGridTOGrid(grid,GAgrid,gaoptions)

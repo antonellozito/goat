@@ -197,28 +197,30 @@ module goatmod_userinput
         !           can be 'pol-rad', i.e. continue poloidal splitting after
         !           the radial split an inclined boundary face
         ! - split_out: option to not split pentagons 
-        ! - splittype: can be 'rad' for radial splitting, i.e. reducing radial 
-        !              width of cells, or 'pol' for poloidal splitting, i.e. 
+        ! - splittype: can be 1 for radial splitting, i.e. reducing radial 
+        !              width of cells, or 2 for poloidal splitting, i.e. 
         !              reducing the poloidal length of cells
         ! - n_split: number of allowed splitting operations      
         ! - typeT: method to split a triangle, can be 'stacked', i.e. triangle 
         !          is split into two trianlge, or 'cutcell', i.e. triangle is 
         !           split in a quad and a triangle
         ! - rad_type: criterium to apply radial splitting (see SelectSplitCell), can be:
-        !             'h_rad_psi': split cells with large psi width
-        !             'h_rad': split cells with large radial width
-        !             'pol_flux': split cells with large poloidal flux estimation based on 
+        !             1: 'h_rad_psi': split cells with large psi width
+        !             2: 'h_rad': split cells with large radial width
+        !             3: 'pol_flux': split cells with large poloidal flux estimation based on 
         !                           pol_flux_est distance function
-        !             'farSOL': split highly inclined triangles in the farSOL
-        !             'farSOL_refinements': split cells with large psi width in the farSOL
-        !             'farSOLrefinement_targets': split cells with large psi width and 
+        !             4: 'farSOL': split highly inclined triangles in the farSOL
+        !             5: 'farSOL_refinements': split cells with large psi width in the farSOL
+        !             6: 'farSOLrefinement_targets': split cells with large psi width and 
         !                                         low boundary face inclination in the farSOL
+        !             7: 'no_aligned_faces': split cells without aligned faces
+        !             8: 'shaved_off_tubes': split cells in tube which is concavely shaved off
         ! - pol_type: criterium to aplly poloidal splitting (see SelectSplitCell) can be:
-        !                'trias_cvS': split triangles with largest surface area
-        !                'h_pol': split cells with largest poloidal length
-        !                'trias_farSOL': split triangles with largest surface area in the farSOL
-        !                'farSOLrefinement_hpol': split cells with largest poloidal length in the farSOL
-        !                'farSOLrefinement_targets': split cells in the farSOL with large
+        !                1: 'trias_cvS': split triangles with largest surface area
+        !                2: 'h_pol': split cells with largest poloidal length
+        !                3: 'trias_farSOL': split triangles with largest surface area in the farSOL
+        !                4: 'farSOLrefinement_hpol': split cells with largest poloidal length in the farSOL
+        !                5: 'farSOLrefinement_targets': split cells in the farSOL with large
         !                                   poloidal length and low inclination at the boundary face
         ! - dist_function_threshold_split: threshold for the value the distance function 
         !               for selecting a cell to split. The value should be lower than 
@@ -229,18 +231,18 @@ module goatmod_userinput
         ! - no_hex: to not allow hexagonal cells in the final grid
         ! - merge_crit: criterium to select a face from which the two cell need to be merged
         !               can be (see SelectMergingFace) :
-        !               'tria_to_quad': merging two triangles to quadrilaterals
-        !               'min_area': merging cells which are smaller the mean surface area
-        !               'h_pol': merging cells with too small poloidal length
-        !               'bias': merging based on high bias between cells in poloidal direction
-        !               'pol_flux': merging cells with low poloidal flux estimation via 
+        !               1: 'tria_to_quad': merging two triangles to quadrilaterals
+        !               2: 'min_area': merging cells which are smaller the mean surface area
+        !               3: 'h_pol': merging cells with too small poloidal length
+        !               4: 'bias': merging based on high bias between cells in poloidal direction
+        !               5: 'pol_flux': merging cells with low poloidal flux estimation via 
         !                           similarly named distance function
-        !               'h_rad': merging cells with psi width smaller than h_rad_threshold
-        !               'h_rad_core': merging cells in the core radial width smaller than
+        !               6: 'h_rad': merging cells with psi width smaller than h_rad_threshold
+        !               7: 'h_rad_core': merging cells in the core radial width smaller than
         !                            h_rad_core_threshold
-        !               'bias_rad_farSOL': merging cells with large radial bias in farSOL
-        !               'bias_rad': merging cells with large radial bias
-        !               'skew_tria': merging triangles with low inclination and high aspect ratio
+        !               8: 'bias_rad_farSOL': merging cells with large radial bias in farSOL
+        !               9: 'bias_rad': merging cells with large radial bias
+        !               10: 'skew_tria': merging triangles with low inclination and high aspect ratio
         ! - merge_h_pol_factor: factor to losen merge criterium based on poloidal length
         ! - n_merge: number of merging operations allowed
         ! - merge_bias_limit: thershold on bias to merge the cells. Merge is done when
@@ -302,7 +304,9 @@ module goatmod_userinput
 
 
         logical                     :: splitting
+        integer(I8), allocatable    :: splitting_array(:)
         logical                     :: merging
+        integer(I8), allocatable    :: merging_array(:)
         logical                     :: pents_to_tria
         real(R8)                    :: h_rad_threshold
         real(R8)                    :: h_rad_core_threshold
@@ -323,19 +327,24 @@ module goatmod_userinput
         character(:), allocatable   :: QTtype
         logical                     :: split_out
         character(:), allocatable   :: splittype
+        integer(I8), allocatable    :: splittype_array(:)
         integer(I8)                 :: n_split
+        integer(I8), allocatable    :: n_split_array(:)
         character(:), allocatable   :: typeT
-        character(:), allocatable   :: rad_type
-        character(:), allocatable   :: pol_type
+        integer(I8)                 :: rad_type
+        integer(I8), allocatable    :: rad_type_array(:)
+        integer(I8)                 :: pol_type
+        integer(I8), allocatable    :: pol_type_array(:)
         real(R8)                    :: dist_function_threshold_split
         real(R8)                    :: dist_function_threshold_split_wall
         
         ! Merging options
         logical                     :: no_hex
         integer(I8)                 :: merge_crit
-        integer(I8), allocatable    :: merge_crit_array
+        integer(I8), allocatable    :: merge_crit_array(:)
         real(R8)                    :: merge_h_pol_factor 
         integer(I8)                 :: n_merge
+        integer(I8), allocatable    :: n_merge_array(:)
         real(R8)                    :: merge_bias_limit
         real(R8)                    :: dist_function_threshold_merge    
         
@@ -1043,8 +1052,10 @@ module goatmod_userinput
         options%split_shaved_off_tube               = .false.
 
         options%splitting                           = .false.
+        options%splitting_array                     = [0]
         options%pents_to_tria                       = .false.
         options%merging                             = .false.
+        options%merging_array                       = [0]
         options%h_rad_threshold                     = 0.01
         options%h_rad_core_threshold                = 0.04
 
@@ -1056,7 +1067,7 @@ module goatmod_userinput
         options%rem_trias_flux                      = .false.
         options%rem_tube_outershell_threshold       = 2
         options%outershell_handling                 = 'merge' 
-        options%rem_stickout_quad                 = .false.
+        options%rem_stickout_quad                   = .false.
         options%split_noalignedquads                = .true. 
         
         ! Splitting options
@@ -1065,9 +1076,10 @@ module goatmod_userinput
         options%split_out                           = .false.
         options%splittype                           = 'rad'
         options%n_split                             = 20
+        options%n_split_array                       = [20]
         options%typeT                               = 'cutcell'
-        options%rad_type                            = 'h_rad'
-        options%pol_type                            = 'trias'
+        options%rad_type                            = 1
+        options%pol_type                            = 1
         options%dist_function_threshold_split       = 0.9
         options%dist_function_threshold_split_wall  = 0.6  
         
@@ -1077,6 +1089,7 @@ module goatmod_userinput
         options%merge_crit_array                    = [4]
         options%merge_h_pol_factor                  = 1
         options%n_merge                             = 20
+        options%n_merge_array                       = [20]
         options%merge_bias_limit                    = 5
         options%dist_function_threshold_merge       = 0.6   
         
@@ -1725,11 +1738,11 @@ module goatmod_userinput
                
         ! Splitting and merging
         field = 'ga.splitting'
-        call ExtractOptionValueLogical0D(fid, field, options%splitting)    
+        call ExtractOptionValueInteger1D(fid, field, options%splitting_array)    
         field = 'ga.pents_to_tria' 
         call ExtractOptionValueLogical0D(fid, field, options%pents_to_tria)
         field = 'ga.merging'
-        call ExtractOptionValueLogical0D(fid, field, options%merging)
+        call ExtractOptionValueInteger1D(fid, field, options%merging_array)
         field = 'ga.h_rad_threshold'
         call ExtractOptionValueReal0D(fid, field, options%h_rad_threshold)                
         field = 'ga.h_rad_core_threshold'
@@ -1766,15 +1779,15 @@ module goatmod_userinput
         field = 'ga.split_out'
         call ExtractOptionValueLogical0D(fid, field, options%split_out)
         field = 'ga.splittype'
-        call ExtractOptionValueCharacter(fid, field, options%splittype)
+        call ExtractOptionValueInteger1D(fid, field, options%splittype_array)
         field = 'ga.n_split'
-        call ExtractOptionValueInteger0D(fid, field, options%n_split)
+        call ExtractOptionValueInteger1D(fid, field, options%n_split_array)
         field = 'ga.typeT'
         call ExtractOptionValueCharacter(fid, field, options%typeT)                                   
         field = 'ga.rad_type'
-        call ExtractOptionValueCharacter(fid, field, options%rad_type)                                   
+        call ExtractOptionValueInteger1D(fid, field, options%rad_type_array)                                   
         field = 'ga.pol_type'
-        call ExtractOptionValueCharacter(fid, field, options%pol_type)
+        call ExtractOptionValueInteger1D(fid, field, options%pol_type_array)
         field = 'ga.dist_function_threshold_split'
         call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_split)                                    
         field = 'ga.dist_function_threshold_split_wall'
@@ -1785,11 +1798,11 @@ module goatmod_userinput
         field = 'ga.no_hex'
         call ExtractOptionValueLogical0D(fid, field, options%no_hex)
         field = 'ga.merge_crit'
-        call ExtractOptionValueCharacter(fid, field, options%merge_crit) 
+        call ExtractOptionValueInteger1D(fid, field, options%merge_crit_array) 
         field = 'ga.merge_h_pol_factor'
         call ExtractOptionValueReal0D(fid, field, options%merge_h_pol_factor)
         field = 'ga.n_merge'
-        call ExtractOptionValueInteger0D(fid, field, options%n_merge)
+        call ExtractOptionValueInteger1D(fid, field, options%n_merge_array)
         field = 'ga.merge_bias_limit'
         call ExtractOptionValueReal0D(fid, field, options%merge_bias_limit)        
         field = 'ga.dist_function_threshold_merge'

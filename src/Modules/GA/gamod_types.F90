@@ -1059,12 +1059,9 @@ module gamod_types
 
             end if
             
-        case (3) ! minimal grid
 
-            call gdErrorHandler('SelectMergingFace: merge criterium minimal' // &
-                & 'grid not implemented. Better reside to the grid generator')
 
-        case (4) ! h_pol
+        case (3) ! h_pol
 
             ! Remove merge cells with too small h_pol
 
@@ -1146,7 +1143,7 @@ module gamod_types
             end if
 
 
-        case (5) ! bias
+        case (4) ! bias
 
             ! Merge the cells with strong bias
             ! Get non-aligned faces
@@ -1192,7 +1189,7 @@ module gamod_types
             !    qm%merge_fc = pol_faces(1)
             !end if
 
-        case (6) ! pol_flux
+        case (5) ! pol_flux
 
             ! Distance function fun_r
             ! Only use cells in SOL
@@ -1242,7 +1239,7 @@ module gamod_types
 
             end do
 
-        case (7) ! h_rad
+        case (6) ! h_rad
 
             ! Initialize
             ! Get all cells around the separatrices
@@ -1311,7 +1308,7 @@ module gamod_types
 
             end do
 
-        case (8) ! h_rad_core
+        case (7) ! h_rad_core
 
             ! Initialize
             call grid%GetCutsXpoints(cvLookUp, core_facesD)
@@ -1360,7 +1357,7 @@ module gamod_types
 
 
 
-        case (9) ! bias_rad_farSOL
+        case (8) ! bias_rad_farSOL
 
             ! Remove cells with strong bias in the radial direction in the farSOL region
             ! Get aligned faces in farSOL
@@ -1407,7 +1404,7 @@ module gamod_types
             bias_max = maxval(bias)
             if (bias_max .gt. options%merge_bias_limit) qm%merge_fc = rad_faces(indmax)
 
-        case (10) ! bias_rad
+        case (9) ! bias_rad
 
             ! Remove cells with strong bias in the radial direction
 
@@ -1454,7 +1451,7 @@ module gamod_types
             end if
 
 
-        case (11) ! skew_tria
+        case (10) ! skew_tria
 
             ! Get the highly inclined trianlge
             call grid%GetHighInclinedTrias(qm, options, ARtot, incl, cctria, cctraps, cctrapsP, nums, ncc)
@@ -1481,10 +1478,14 @@ module gamod_types
                 end if
             end do
 
-        case (12) ! manual
+        case (11) ! manual
 
             call gdErrorHandler('SelectMergingFace: manual merging via input not possible in precompile code')
-        
+
+        case (12) ! minimal grid
+
+            call gdErrorHandler('SelectMergingFace: merge criterium minimal' // &
+                & 'grid not implemented. Better reside to the grid generator')
         case default
 
             call gdErrorHandler('SelectMergingFace: merge criterium not implemented')
@@ -1560,7 +1561,7 @@ module gamod_types
             ! Select split criterium
             select case (options%rad_type)
 
-            case ('h_rad_psi')
+            case (1) ! h_rad_psi
 
                 ! Sort for decreasing h_rad_psi
                 h_rad_cells = qm%h_rad_psi(cells)
@@ -1580,7 +1581,7 @@ module gamod_types
 
                 end do
  
-            case ('h_rad')
+            case (2) ! h_rad
 
                 ! Sort for decreasing h_rad_psi
                 h_rad_cells = qm%h_rad(cells)
@@ -1600,7 +1601,7 @@ module gamod_types
 
                 end do
 
-            case ('pol_flux')
+            case (3) ! pol_flux
 
                 ! Distance function fun_r
                 allocate(cells2(count(c%reg%Get(cells) == 2)))
@@ -1638,7 +1639,7 @@ module gamod_types
 
 
 
-            case ('farSOL')
+            case (4) ! farSOL
 
                 ! Get the highly inclined trianlge
                 call grid%GetHighInclinedTrias(qm, options, ARtot, incl, cctria, cctraps, cctrapsP, nums, ncc)
@@ -1660,7 +1661,7 @@ module gamod_types
                     end if
                 end do
 
-            case ('farSOLrefinement')
+            case (5) ! farSOLrefinement
 
                 ! Apply distance function
                 if (options%dist_function) then
@@ -1698,7 +1699,7 @@ module gamod_types
                     end if
                 end do
 
-            case ('farSOLrefinement_targets')
+            case (6) ! farSOLrefinement_targets
 
                 ! Apply wall distance function
                 if (options%dist_function) then
@@ -1766,7 +1767,7 @@ module gamod_types
                     end if
                 end do
 
-            case ('no_aligned_faces')
+            case (7) ! no_aligned_faces
 
                 ! Loop over cells
                 do i = 1, c%ntot
@@ -1782,7 +1783,7 @@ module gamod_types
                 
                 end do
 
-            case ('shaved_off_tubes')
+            case (8) ! shaved_off_tubes
 
                 ! Automatic option, used before splitting and merging
                 ! Get boundary vertices
@@ -1914,7 +1915,7 @@ module gamod_types
                 end do
 
 
-            case ('manual')
+            case (9)
 
                 call gdErrorHandler('SelectSplitCell: manual selection method is not supported in pre-compiled framework')
 
@@ -1929,7 +1930,7 @@ module gamod_types
 
             select case (options%pol_type)
 
-            case ('trias_cvS')
+            case (1) ! trias_cvS
 
                 ! Get triangles with largest area
                 log = (c%faceP2%Get(indcv) == 3)
@@ -1941,7 +1942,7 @@ module gamod_types
                 ind = maxloc(qm%cvS(tria_cells),1)
                 qm%split_cv = tria_cells(ind)
 
-            case ('h_pol')
+            case (2) ! h_pol
                 
                 ! Restrict to area where pents are allowed
                 if (options%no_pents) then
@@ -1990,7 +1991,7 @@ module gamod_types
 
                 end do
 
-            case ('trias_farSOL')
+            case (3) ! trias_farSOL
 
                 ! Get triangular cells
                 log = (c%faceP2%Get() ==3)
@@ -2022,7 +2023,7 @@ module gamod_types
 
 
 
-            case ('farSOLrefinement_hpol')
+            case (4) ! farSOLrefinement_hpol
 
                 ! Apply distance function
                 if (options%dist_function) then
@@ -2086,7 +2087,7 @@ module gamod_types
 
 
 
-            case ('farSOLrefinement_targets')
+            case (5) ! farSOLrefinement_targets
 
                 ! Apply distance function
                 if (options%dist_function) then
@@ -2154,7 +2155,7 @@ module gamod_types
                     end if
                 end do                
 
-            case ('manual')
+            case (6)
 
                 call gdErrorHandler('SelectSplitCell: manual selection method is not supported in pre-compiled framework')
 
@@ -9622,14 +9623,47 @@ module gamod_types
         select case (options%splittype)
         case ('rad')
             t1 = 'radial'
-            t2 = options%rad_type
             t3 = 'Applied radial splitting'
             rad_splitting = .true.
+
+            select case (options%rad_type)
+                case (1)
+                    t2 = 'h_rad_psi'
+                case (2)
+                    t2 = 'h_rad'
+                case (3)
+                    t2 = 'pol_flux'
+                case (4)
+                    t2 = 'farSOL'
+                case (5)
+                    t2 = 'farSOL refinements'
+                case (6)
+                    t2 = 'farSOL refinements targets'
+                case (7)
+                    t2 = 'no_aligned_faces'
+                case (8)
+                    t2 = 'shaved_off_tubes'
+                case (9)
+                    t2 = 'manual'
+            end select
+
         case ('pol')
             t1 = 'poloidal'
-            t2 = options%pol_type
             t3 = 'Applied poloidal splitting'
             rad_splitting  = .false.
+
+            select case (options%pol_type)
+                case(1)
+                    t2 = 'trias_cvS'
+                case(2)
+                    t2 = 'h_pol'
+                case(3)
+                    t2 = 'trias_farSOL'
+                case(4)
+                    t2 = 'farSOLrefinement hpol'
+                case(5)
+                    t2 = 'farSOLrefinement targets'
+            end select
         end select
         print *,  'Splitting: ', t1, ' ', t2
         
@@ -10361,7 +10395,7 @@ module gamod_types
         case ('rad')
 
             ! Get the rfaces
-            if (options%rad_type == 'no_aligned_faces') then
+            if (options%rad_type == 7) then ! 'no_aligned_faces'
 
                 ! Check which faces are intersected
                 call grid%GetIntersectedPsiFaces(cv, fcs, int_faces)
@@ -10391,7 +10425,7 @@ module gamod_types
             ! Make caseID
             write (x1, '(I0)') neig1type
             write (x2, '(I0)') neig2type
-            if (options%rad_type == 'no_aligned_faces') then
+            if (options%rad_type == 7) then ! 'no_aligned_faces'
 
                 caseID = trim(x1) // '3' // trim(x2) // 'A'
 
@@ -10531,7 +10565,7 @@ module gamod_types
 
         ! Special case correction
         if (type == 'rad') then
-            if (options%rad_type == 'shaved-off_tubes') then
+            if (options%rad_type == 8) then ! 'shaved-off_tubes'
                 caseID = '4shaved'
             end if 
         end if

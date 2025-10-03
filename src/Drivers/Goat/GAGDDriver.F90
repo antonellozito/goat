@@ -55,7 +55,7 @@ subroutine GAGDDriver(goatoptions)
     call TranslateGridTOGAGrid(grid,GAgrid)
 
     ! Run adaptations
-    call GridAdaptor(GAgrid,environment,magneticField,gaoptions)
+    call GridAdaptor(GAgrid,environment,magneticField,state,gaoptions)
 
     ! Translate GAGrid to Grid
     call TranslateGAGridTOGrid(grid,GAgrid,gaoptions)
