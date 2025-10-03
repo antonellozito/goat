@@ -31,7 +31,7 @@ module gamod_driver
     
     contains
 
-    subroutine GridAdaptor(grid,environment,magneticField,options)
+    subroutine GridAdaptor(grid,environment,magneticField,state,options)
 
         ! Description
         !============
@@ -48,6 +48,7 @@ module gamod_driver
         type(GAGridUDT), intent(inout)              :: grid
         type(EnvironmentUDT), intent(in)            :: environment
         type(MagneticFieldUDT), intent(in)          :: magneticField     
+        type(StateUDT), intent(in)                  :: state
         type(GAoptionsUDT), intent(inout)           :: options
 
         ! Initialize grid adaptation
@@ -217,8 +218,11 @@ module gamod_driver
         type(MagneticFieldUDT), intent(in)   :: magneticField
 
         ! Auxiliary
+        integer(I8) :: i
         type(QualityMetricUDT) :: qm
         type(GAoptionsUDT) :: options1
+        type(GAoptionsUDT) :: options_merge
+        type(GAoptionsUDT) :: options_split
 
         ! Calculate quality metric
         call qm%Initialize(grid)
@@ -241,7 +245,7 @@ module gamod_driver
         if (options%split_noalignedquads) then
             options1 = options
             options1%splittype = 'rad'
-            options1%rad_type = 'no_aligned_faces'
+            options1%rad_type = 7 !'no_aligned_faces'
             options1%n_split = grid%cell%ntot
             call grid%DoSplitting(magneticField, qm, options1)
         end if
@@ -250,20 +254,36 @@ module gamod_driver
         if (options%split_shaved_off_tube) then
             options1 = options
             options1%splittype = 'rad'
-            options1%rad_type = 'shaved-off_tubes'
+            options1%rad_type = 8 !'shaved-off_tubes'
             options1%n_split = grid%cell%ntot
             call grid%DoSplitting(magneticField, qm, options1)
         end if
 
         ! Splitting  and merging
         ! Merging
-        if (options%merging) then
-            call grid%DoMerging(magneticField, qm, options)
-        end if
+        do i = 1, size(options%merge_crit_array)
+            if (options%merging_array(i)) then
+                options_merge = options
+                options_merge%merging = options%merging_array(i)
+                options_merge%n_merge = options%n_merge_array(i)
+                options_merge%merge_crit = options%merge_crit_array(i)
+                call grid%DoMerging(magneticField, qm, options_merge)
+            end if
 
-        if (options%splitting) then
-            call grid%DoSplitting(magneticField, qm, options)
-        end if
+            if (options%splitting_array(i)) then
+                options_split = options
+                options_split%splitting = options_split%splitting_array(i)
+                options_split%n_split = options%n_split_array(i)
+                options_split%rad_type = options%rad_type_array(i)
+                options_split%pol_type = options%pol_type_array(i)
+                if (options%splittype_array(i) == 1) then
+                    options_split%splittype = 'rad'
+                else if (options%splittype_array(i) == 2) then
+                    options_split%splittype = 'pol'
+                end if
+                call grid%DoSplitting(magneticField, qm, options_split)
+            end if
+        end do
 
         ! Stacked triangles
         if (options%stacked_trias) &
@@ -609,7 +629,7 @@ module gamod_driver
             options%rem_small_trias = .true.
         
         ! Pol flux
-        if (options%rad_type == 'pol_flux' &
+        if (options%rad_type == 3 &
             .and. options%splitting .and. .not.options%dist_function) then
             options%dist_function = .true.
             print *, 'Using pol_flux method for radial splitting while GAoptions.' // &
