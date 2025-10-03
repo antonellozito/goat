@@ -67,7 +67,7 @@ module gamod_driver
         case ('aposteriori')
 
             ! Grid adaptation based on simulation information
-            !call GAapostDriver(grid, options, environment, magneticField, state) 
+            call GAapostDriver(grid, options, environment, magneticField, state) 
 
         case default
 
@@ -231,7 +231,6 @@ module gamod_driver
         if (options%rem_small_trias) &
             call grid%RemoveSmallTriangle(magneticField, qm, options)
 
-
         ! Remove flux tubes with only two triangles
         if (options%rem_trias_flux) &
             call grid%RemTriasFlux(options)
@@ -288,6 +287,44 @@ module gamod_driver
         if (options%BLG) then
             call grid%BoundaryLayerGrid(qm, magneticField, options)
         end if
+
+
+    end subroutine
+
+    subroutine GAapostDriver(grid, options, environment, magneticField, state)
+
+        ! Description
+        !============
+        ! Internal driver of the grid adaptation for refinement where the computed
+        ! residuals or state gradients are high
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GAGridUDT), intent(inout)      :: grid
+        type(GAoptionsUDT), intent(in)      :: options
+        type(EnvironmentUDT), intent(in)    :: environment
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        type(StateUDT), intent(in)          :: state
+
+        ! Auxiliary
+
+        ! Pick aposteriori method - TODO
+
+        ! Interpolation - TODO
+
+        ! Convert stacked triangle back to cutcells
+        if (options%stacked_to_cutcell) &
+            call grid%StackedToCutcell(magneticField, options)
+        
+        ! Splitting
+        print *, 'Splitting: posteriori'
+
+        ! Select cell to split
+        
+
+
+
 
 
     end subroutine

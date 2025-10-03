@@ -595,11 +595,11 @@ module goatmod_types
 
         ! State 
         real(R8), allocatable               :: na(:,:), ne(:), ua(:,:), uadia(:,:,:), & 
-                                                te(:), ti(:), tn(:), po(:), kt(:)
+                                                te(:), ti(:), tn(:), po(:), kt(:), zt(:)
 
         ! Residual
         real(R8), allocatable               :: resco (:,:), reshe(:), reshi(:), reshn(:), &
-                                                resmo(:,:), resmt(:), respo(:), reskt(:)
+                                                resmo(:,:), resmt(:), respo(:), reskt(:), reszt(:)
 
     end type
 
@@ -4397,6 +4397,64 @@ module goatmod_types
 
     ! State
     !======
+    subroutine AllocateState(state, nc, nf, ns)
+
+        ! Description
+        !============
+        ! Allocate state field
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(StateUDT), intent(inout)   :: state
+        integer(I8), intent(in)         :: nc, nf, ns
+
+        if (.not.allocated(state%na)) then
+
+            ! State variables
+            allocate(state%na(nc, ns))
+            allocate(state%ne(nc))
+            allocate(state%ua(nc, ns))
+            allocate(state%uadia(nf, 2, ns))
+            allocate(state%te(nc))
+            allocate(state%ti(nc))
+            allocate(state%tn(nc))
+            allocate(state%po(nc))
+            allocate(state%kt(nc))
+            allocate(state%zt(nc))
+            state%na = 0.0_R8
+            state%ne = 0.0_R8
+            state%ua = 0.0_R8
+            state%uadia = 0.0_R8
+            state%te = 0.0_R8
+            state%ti = 0.0_R8
+            state%tn = 0.0_R8
+            state%po = 0.0_R8
+            state%kt = 0.0_R8
+            state%zt = 0.0_R8
+
+            ! Residuals
+            allocate(state%resco(nc, ns))
+            allocate(state%resmo(nc, ns))
+            allocate(state%resmt(nc))
+            allocate(state%reshe(nc))
+            allocate(state%reshi(nc))
+            allocate(state%reshn(nc))
+            allocate(state%respo(nc))
+            allocate(state%reskt(nc))
+            allocate(state%reszt(nc))
+            state%resco = 0.0_R8
+            state%resmo = 0.0_R8
+            state%resmt = 0.0_R8
+            state%reshe = 0.0_R8
+            state%reshi = 0.0_R8
+            state%reshn = 0.0_R8
+            state%respo = 0.0_R8
+            state%reskt = 0.0_R8
+            state%reszt = 0.0_R8
+
+        end if
+    end subroutine
     ! Main reader
     subroutine ReadState(state, options)
 
@@ -4456,8 +4514,7 @@ module goatmod_types
         character(:), allocatable       :: filepath    
 
         ! Auxiliary
-        integer(I8) :: nc, nf, ns, statedim(2), statedims(2), &
-            fluxdim(2), fluxdimp(2), fluxdims(3), filespec, idum(0:9)
+        integer(I8) :: nc, nf, ns, filespec, idum(0:9)
         character(:), allocatable   :: chardummy   ! dummy array
         logical :: reachedeof
 
@@ -4485,18 +4542,47 @@ module goatmod_types
             nf = idum(1)
             ns = idum(2)
 
-            statedim = [nc, 1]
-            statedims = [nc, ns]
-
-            fluxdim = [nf, 2]
-            fluxdimp = [nf, 2]
-            fluxdims = [nf, 2, ns]
-
         else
+
+            call gdErrorHandler('ReadState: structured format not supported')
 
         end if
 
-        ! TODO
+        ! Allocate state based on that information
+        call AllocateState(state, nc, nf, ns)
+
+        ! Read charges - not needed
+        !call cfrure(filespec, state%zamin)
+
+        ! Read state variables
+        !---------------------
+        call ReadUntilFound(filespec, 'na', reachedeof)
+        if (reachedeof) then
+            ! Not found, issue warning and rewind
+            print *, 'ReadState: could not find field "na", setting to zero'
+            rewind(filespec)
+        else 
+            ! Found, read state
+            backspace(filespec)
+            call cfrure(filespec, nc*ns,    state%na, 'na')
+            call cfrure(filespec, nc,       state%ne, 'ne')
+            call cfrure(filespec, nc*ns,    state%ua, 'ua')
+            call cfrure(filespec, nf*2*ns,  state%uadia, 'uadia')
+            call cfrure(filespec, nc,       state%te, 'te')
+            call cfrure(filespec, nc,       state%ti, 'ti')
+            call cfrure(filespec, nc,       state%tn, 'tn')
+            call cfrure(filespec, nc,       state%po, 'po')
+            call cfrure(filespec, nc,       state%kt, 'kt')
+            call cfrure(filespec, nc,       state%zt, 'zt')
+
+        end if
+
+        ! Read residuals
+        !---------------
+        print *, 'ReadState: reading from b2fstate file, so no residuals'
+
+        ! Housekeeping
+        close(filespec)
 
     end subroutine
 
@@ -4512,7 +4598,92 @@ module goatmod_types
         type(StateUDT), intent(inout) :: state
         character(:), allocatable       :: filepath 
 
-        ! TODO
+        ! Auxiliary
+        integer(I8) :: nc, nf, ns, filespec, idum(0:9)
+        character(:), allocatable   :: chardummy   ! dummy array
+        logical :: reachedeof
+
+        ! Data
+        data filespec /60/
+
+        ! Read grid dimensions & allocate
+        !================================
+        ! Open the file
+        print *, 'reading state from file: ' // filepath
+        open(unit = filespec, file = filepath)
+
+        ! First, read the header with the version
+        call ReadSingleLine(filespec, chardummy, reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadB2fstate: reached EOF prematurely')
+        end if  
+        
+        ! Check the version to determine what to read in
+        if (chardummy(8:17) >= '03.002.000') then
+
+            ! Primary array dimensions
+            call cfruin (filespec,3,idum,'nCv,nFc,ns')
+            nc = idum(0) ! note: only reading in actual cells, no guard cells
+            nf = idum(1)
+            ns = idum(2)
+
+        else
+
+            call gdErrorHandler('ReadState: structured format not supported')
+
+        end if
+
+        ! Allocate state based on that information
+        call AllocateState(state, nc, nf, ns)
+
+        ! Read state variables
+        !---------------------
+        call ReadUntilFound(filespec, 'na', reachedeof)
+        if (reachedeof) then
+            ! Not found, issue warning and rewind
+            print *, 'ReadState: could not find field "na", setting to zero'
+            rewind(filespec)
+        else 
+            ! Found, read state
+            backspace(filespec)
+            call cfrure(filespec, nc*ns,    state%na, 'na')
+            call cfrure(filespec, nc,       state%ne, 'ne')
+            call cfrure(filespec, nc*ns,    state%ua, 'ua')
+            call cfrure(filespec, nf*2*ns,  state%uadia, 'uadia')
+            call cfrure(filespec, nc,       state%te, 'te')
+            call cfrure(filespec, nc,       state%ti, 'ti')
+            call cfrure(filespec, nc,       state%tn, 'tn')
+            call cfrure(filespec, nc,       state%po, 'po')
+            call cfrure(filespec, nc,       state%kt, 'kt')
+            call cfrure(filespec, nc,       state%zt, 'zt')
+
+        end if   
+        
+        ! Read residuals
+        !---------------
+        call ReadUntilFound(filespec, 'resco', reachedeof)
+        if (reachedeof) then
+            ! Not found, issue warning and rewind
+            print *, 'ReadState: could not find field "resco", setting to zero'
+            rewind(filespec)
+        else
+
+            ! Found, read residuals
+            call cfrure(filespec, nc*ns,    state%resco, 'resco')
+            call cfrure(filespec, nc,       state%reshe, 'reshe')
+            call cfrure(filespec, nc,       state%reshi, 'reshi')
+            call cfrure(filespec, nc,       state%reshn, 'reshn')
+            call cfrure(filespec, nc*ns,    state%resmo, 'resmo')
+            call cfrure(filespec, nc,       state%resmt, 'resmt')
+            call cfrure(filespec, nc,       state%respo, 'respo')
+            call cfrure(filespec, nc,       state%reskt, 'reskt')
+            call cfrure(filespec, nc,       state%reszt, 'reszt')
+            
+        endif
+
+        ! Housekeeping
+        close(filespec)
+
     end subroutine
 
     !------------------------------------------------------------------!
