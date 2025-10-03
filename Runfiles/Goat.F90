@@ -114,6 +114,11 @@ program Goat
 
         ! Grid generation only 
         call GGDriver(goatoptions)
+    
+    case ('GAGD')
+
+        ! Grid adaptation and deformation
+        call GAGDDriver(goatoptions)
 
     case ('GGGD')
 
