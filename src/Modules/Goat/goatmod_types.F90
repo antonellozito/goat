@@ -4406,24 +4406,17 @@ module goatmod_types
 
         ! Declare variables
         !==================
-        integer                         :: filespecifier
         type(StateUDT)                  :: state
         type(GoatoptionsUDT)            :: options 
         
         ! Loop variables
     
-        ! Auxiliary variables 
-    
-        ! Data
-        data filespecifier /60/
+        ! Auxiliary variables
     
         ! Main program
         !=============
         ! Open the file
-        if (options%readstate) then
-
-            print *, 'reading state data from file: ' // options%statefilepath
-            open(unit = filespecifier, file = options%statefilepath)   
+        if (options%readstate) then 
             
             ! Check how to read the file
             select case (options%readstatemeth)
@@ -4431,12 +4424,12 @@ module goatmod_types
             case ('b2fstate')
 
                 ! Read b2fstate file - TODO
-                ! call ReadB2fstate
+                call ReadB2fstate(state, options%statefilepath)
 
             case ('b2fplasmf')
 
                 ! Read b2fplasmf file - TODO
-                ! call ReadB2fplasmf
+                call ReadB2fplasmf(state, options%statefilepath)
 
             case default
 
@@ -4445,12 +4438,81 @@ module goatmod_types
 
             end select
 
-            ! Housekeeping
-            !=============
-            close(filespecifier)
+        end if
+
+    end subroutine
+
+    ! Specific readers
+    subroutine ReadB2fstate(state, filepath)
+
+        ! Description
+        !============
+        ! Reading b2fstate file to extract state information
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(StateUDT), intent(inout)   :: state
+        character(:), allocatable       :: filepath    
+
+        ! Auxiliary
+        integer(I8) :: nc, nf, ns, statedim(2), statedims(2), &
+            fluxdim(2), fluxdimp(2), fluxdims(3), filespec, idum(0:9)
+        character(:), allocatable   :: chardummy   ! dummy array
+        logical :: reachedeof
+
+        ! Data
+        data filespec /60/
+
+        ! Read grid dimensions & allocate
+        !================================
+        ! Open the file
+        print *, 'reading state from file: ' // filepath
+        open(unit = filespec, file = filepath)
+
+        ! First, read the header with the version
+        call ReadSingleLine(filespec, chardummy, reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadB2fstate: reached EOF prematurely')
+        end if  
+        
+        ! Check the version to determine what to read in
+        if (chardummy(8:17) >= '03.002.000') then
+
+            ! Primary array dimensions
+            call cfruin (filespec,3,idum,'nCv,nFc,ns')
+            nc = idum(0) ! note: only reading in actual cells, no guard cells
+            nf = idum(1)
+            ns = idum(2)
+
+            statedim = [nc, 1]
+            statedims = [nc, ns]
+
+            fluxdim = [nf, 2]
+            fluxdimp = [nf, 2]
+            fluxdims = [nf, 2, ns]
+
+        else
 
         end if
 
+        ! TODO
+
+    end subroutine
+
+    subroutine ReadB2fplasmf(state, filepath)
+
+        ! Description
+        !============
+        ! Read b2fplasmf file to extract state information
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(StateUDT), intent(inout) :: state
+        character(:), allocatable       :: filepath 
+
+        ! TODO
     end subroutine
 
     !------------------------------------------------------------------!
