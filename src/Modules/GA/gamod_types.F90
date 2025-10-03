@@ -9841,7 +9841,7 @@ module gamod_types
 
             end select
 
-        case (4) ! triangles that where turned into quad
+        case (4) ! triangles that where turned into triangle with four faces
 
             call grid%DetermineT4caseID(cv, fcs, options%splittype, caseID, rface1, neig1, common_vert)
             if (options%debug) print *, caseID
@@ -10252,6 +10252,19 @@ module gamod_types
         !============
         ! Determine the splitting case for a (aligned) triangle. Because in plasma
         ! grid always field aligned, a triangle at least has one aligned face.
+        ! The convention on caseID is as follows. 
+        ! In the case of poloidal splitting in combination with the stacked triangle splitting 
+        ! method, the first number is the cell type 
+        ! (always three here), followed by the type of the neighbor across the 
+        ! radial faces of the triangle. If there is no neighbor present, (so the radial face
+        ! is a boundary face) a zero is used to indicate the absence of a neighbor.
+        ! In case of poloidal splitting in combination with cutcell triangle splitting
+        ! method, the middle number is the cell type 
+        ! (always three here), completed by the type of the neighbors in the radial direction
+        ! on both sides of the triangle. F.e. quad, triangle, boundary is '430'
+        ! In the case of radial splitting, the middle number is the cell type (always three here),
+        ! completed by the type of the neighbors in the poloidal direction
+        ! on both sides of the triangle (so across the poloidal, non-aligned faces).
 
         ! Declare variables
         !==================
@@ -10395,7 +10408,16 @@ module gamod_types
 
         ! Description
         !============
-        ! Determine splitting case for quadrilateral cell
+        ! Determine splitting case for quadrilateral cell. The convention on the caseID 
+        ! is as follows.
+        ! The middle number is always the cell type of the cell to split (here always four).
+        ! The first and third number are the cell type of the neighboring cells. 
+        ! For radial splitting, the considered neighboring cells are in the poloidal direction,
+        ! across the poloidal faces.
+        ! For polodial splitting, the considered neighboring cells are in the radial direction,
+        ! across the radial faces.
+        ! In the case where there is no neighbor, implying the splitcell is a boundary cell, 
+        ! the number in caseID is set to zero.
         
         ! Declare variables
         !==================
@@ -10521,7 +10543,21 @@ module gamod_types
 
         ! Description
         !============
-        ! Determine splitting case for pentagonal cells
+        ! Determine splitting case for pentagonal cells. The convention of caseID is as follows.
+        ! The first number is the cell type of the splitcell (always five here).
+        ! The following number(s) are used to indicate the method to split the pentagon. 
+        ! For poloidal splitting the neighboring cell type at the opposite side of the side where
+        ! hanging node is. If there is no neighboring, it is indicate by zero.
+        ! For radial splitting, a number a extra methods are introduced used for pentagon
+        ! which have a trapezoidal shape, where the slanted face is typically a boundary.
+        ! The method 56, split the pentagon in a triangle and a quad by directly connecting
+        ! hanging node and the correct vertex of the boundary face.
+        ! The method 57(X) and 580, use the psi value of the hanging node to split radially.
+        ! Depending the how this psi value intersects the pentagon, different geometries 
+        ! can arise. The method 580 is used when the boundary face is intersected.
+        ! The method 57(X) is used when the opposite face to the hanging node side is
+        ! intersected. The X contains the cell type of the cell on the opposite side
+        ! to the hanging node.
 
         ! Declare variables
         !==================
@@ -10679,7 +10715,11 @@ module gamod_types
         ! Description
         !============
         ! Determine the splitting case for a triangle with one face split in two
-        ! which is indicated with a cflags == 4
+        ! which is indicated with a cflags == 4. The convention of caseID, is as
+        ! follows. The first number is the cell type of the splitcell, (always three
+        ! here). The second number indicates the cell type of the neighboring cell
+        ! on the opposite of the hanging node. If there is no neighboring cell, the
+        ! cell type is set to zero.
         !
         ! cv: cellnumber
         ! fcs: faces of the cell
@@ -10687,7 +10727,8 @@ module gamod_types
 
         ! caseID: point to correct splitting routine
         ! rface1: that will be splitted by the splitting routine
-        !         for radial splitting this is the longest poloidal face opposite to the common vert
+        !         for radial splitting this is the longest poloidal face opposite
+        !         to the common vert
         !         for poloidal splitting this is the longest radial face opposite
         !         to the common vert
         ! neig: the cell number of a neigboring cell if any, 0 if none
