@@ -33,6 +33,7 @@ module ggmod_topology2D
     use Interpolant1D
     use mod_streamlinetracing2D
     use PolygonLevelsetFunction2D
+    use mod_sparseinterface
     implicit none
     private 
     public :: TopomeshUDT, ConstructTopologicalMesh, TraceExtrema2D, &
@@ -424,7 +425,7 @@ module ggmod_topology2D
             magneticField, options)
 
         ! Do temporary writing
-        call WriteTopologicalMesh(topomesh, 'topomesh_beforecells')
+        call WriteTopologicalMesh(topomesh, 'topomesh_afterextrema')
 
         ! Remove parts that do not lie inside the vessel
         newvessel = vessel
@@ -649,7 +650,12 @@ module ggmod_topology2D
         ! should be retained in the topological mesh. Only those that 
         ! do not intersect the boundary are retained. This means that
         ! only radial faces that start and end in an extremum without
-        ! intersecting the vessel boundary will be retained. 
+        ! intersecting the vessel boundary will be retained. If there
+        ! are multiple connections between two extrema, then only the 
+        ! connection with monotonously increasing field value is 
+        ! retained. This is required to have a conforming topomesh for 
+        ! grid generation later on (otherwise these radial lines would
+        ! intersect with contour lines of saddle points etc)
 
         ! Notes
         !======
@@ -673,6 +679,18 @@ module ggmod_topology2D
         ! topological mesh extremum (saddle, min, max) are added to the 
         ! topological mesh
 
+        ! Note 5: checking monotonically increasing field values can be
+        ! very tricky, since discretization effects and small discrepancies
+        ! between tracers (e.g. how saddle points are dealt with) may 
+        ! quickly lead to minor non-monotonous behavior (typically at 
+        ! start and end points but sometimes also somewhere along the
+        ! curve). Therefore, we first find all potential segments and 
+        ! rank them later on. If multiple connections are found, the one
+        ! that is 'most' monotonous is retained, the others removed. 
+        ! Alternatively, one can try to introduce streamlines in between
+        ! the different extrema (that would actually also be better for
+        ! grid generation). 
+
         ! Declare variables
         !==================
         ! Arguments
@@ -685,27 +703,29 @@ module ggmod_topology2D
         integer(I8)                             :: ngp, nfxc, nfyc, &
             nx, nvinit
         integer(I8), allocatable, dimension(:)  :: ts1, ts2, tt, typee, &
-            vf1, vf2, teid, tsid, sortind, temps1, temps2
-        real(R8)                                :: tempx, tempy
+            vf1, vf2, teid, tsid, sortind, temps1, temps2, v1, v2, tcIDs
+        real(R8)                                :: tempx, tempy, ltot
         real(R8), allocatable, dimension(:)     :: xg, yg, f, fx, fy, &
             tx, ty, thiseig, tf, tfxx, tfxy, tfyy, xe, ye, fe, tsr1, tsr2, &
-            tsrid, tempxint, tempyint
+            tsrid, tempxint, tempyint, tfval, dtfval, frac, dx, dy, dl
         logical                                 :: conv, donewton, addsegment
+        logical, allocatable, dimension(:)      :: keepind
+        integer, allocatable, dimension(:, :)   :: adjacencymatrix
         type(RealDynamicArrayUDT)               :: xc, yc, fc
         type(RealDynamicArrayUDT), allocatable  :: xfrda(:), yfrda(:), &
             fxpsrid(:), fypsrid(:) 
         type(IntegerDynamicArrayUDT), allocatable   :: fxpeid(:), &
-            fxpsid(:), fypeid(:), fypsid(:)
+            fxpsid(:), fypeid(:), fypsid(:), cIDs(:)
         type(IntegerDynamicArrayUDT)            :: tc
         type(ContourUDT)                        :: tempc
-        type(ContourUDT), allocatable           :: fxc(:), fyc(:)
+        type(ContourUDT), allocatable           :: fxc(:), fyc(:), allc(:)
         type(PolygonUDT)                        :: temppol
         type(PolygonUDT), allocatable           :: fxp(:), fyp(:)
         class(ContourTracerUDT), allocatable    :: fxtracer, fytracer
         type(PolygonSetUDT)                     :: tempps
 
         ! Loop
-        integer(I8)                             :: i, j, k, ec
+        integer(I8)                             :: i, j, k, ec, cc
 
         ! Initialize
         !===========
@@ -715,6 +735,7 @@ module ggmod_topology2D
             print *, 'TraceExtrema2DBox: not applying Newton solver, ' // & 
                 'locations of extrema may be slightly inaccurate'
         end if
+        allocate(allc(0))
 
         ! Extract grid coordinates
         call fieldtracer%GetCoordinates(xg, yg)
@@ -923,6 +944,9 @@ module ggmod_topology2D
 
         ! Reconstruct faces
         !==================
+        ! Initialize contour counter
+        cc = 0
+
         ! Loop over fxp
         do i = 1, nfxc 
             ! Unpack
@@ -950,6 +974,7 @@ module ggmod_topology2D
             tempc = fxc(i)
             do j = 1, size(xfrda)
                 ! Check
+                addsegment = .true. 
                 if ((vf1(j) == 0) .or. (vf2(j) == 0)) then 
                     ! Skip
                     cycle
@@ -957,7 +982,6 @@ module ggmod_topology2D
 
                 ! Check if we intersect a boundary face
                 call temppol%Construct(xfrda(j)%Get(), yfrda(j)%Get())
-                addsegment = .true. 
                 do k = 1, topomesh%face%ntot
                     if (topomesh%face%type(k) == TMfacebndID) then 
                         ! Check for intersections
@@ -971,14 +995,17 @@ module ggmod_topology2D
                     end if 
                 end do 
 
+                
+
                 ! Check if we add
                 if (addsegment) then 
                     tempc%x = xfrda(j)%Get()
                     tempc%y = yfrda(j)%Get()
                     tempc%startsaddle = vf1(j) + nvinit ! per definition non-zero, so this is fine
                     tempc%endsaddle = vf2(j) + nvinit
-                    call InsertTopologicalMeshContour(topomesh, magneticField, &
-                        tempc, TMfaceradID, 0)
+                    allc = [allc, tempc]
+                    !call InsertTopologicalMeshContour(topomesh, magneticField, &
+                    !    tempc, TMfaceradID, 0)
                 end if 
             end do 
 
@@ -1016,6 +1043,7 @@ module ggmod_topology2D
             tempc = fyc(i)
             do j = 1, size(xfrda)
                 ! Check
+                addsegment = .true.
                 if ((vf1(j) == 0) .or. (vf2(j) == 0)) then 
                     ! Skip
                     cycle
@@ -1023,7 +1051,6 @@ module ggmod_topology2D
 
                 ! Check if we intersect a boundary face
                 call temppol%Construct(xfrda(j)%Get(), yfrda(j)%Get())
-                addsegment = .true. 
                 do k = 1, topomesh%face%ntot
                     if (topomesh%face%type(k) == TMfacebndID) then 
                         ! Check for intersections
@@ -1043,13 +1070,91 @@ module ggmod_topology2D
                     tempc%y = yfrda(j)%Get()
                     tempc%startsaddle = vf1(j) + nvinit ! per definition non-zero, so this is fine
                     tempc%endsaddle = vf2(j) + nvinit
-                    call InsertTopologicalMeshContour(topomesh, magneticField, &
-                        tempc, TMfaceradID, 0)
+                    allc = [allc, tempc]
+                    !call InsertTopologicalMeshContour(topomesh, magneticField, &
+                    !    tempc, TMfaceradID, 0)
                 end if 
             end do 
 
+        end do
+        
+        ! Check which extrema are interconnected
+        v1 = [allc%startsaddle]
+        v2 = [allc%endsaddle]
+        allocate(adjacencymatrix(maxval([v1, v2]), maxval([v1, v2])))
+        adjacencymatrix = 0
+        cc = 0 ! connection counter
+        do i = 1, size(v1)
+            if (adjacencymatrix(v1(i), v2(i)) == 0 .and. adjacencymatrix(v2(i), v1(i)) == 0) then 
+                cc = cc + 1
+                adjacencymatrix(v1(i), v2(i)) = cc 
+                adjacencymatrix(v2(i), v1(i)) = cc 
+            end if 
         end do 
 
+        ! Determine which parts connect each pair of extrema
+        allocate(cIDs(cc), keepind(size(v1)))
+        keepind = .false. 
+        do i = 1, cc
+            cIDs(i) = ConstructIntegerDynamicArray()
+        end do
+        do i = 1, size(v1)
+            call cIDs(adjacencymatrix(v1(i), v2(i)))%Append(i)
+        end do 
+
+        ! For each pair, determine which segment to keep
+        do i = 1, size(cIDs)
+            ! Check
+            if (cIDs(i)%Size() > 1) then 
+                ! Get contour parts
+                tcIDs = cIDs(i)%Get()
+
+                ! Determine non-monotonous length fraction (smallest)
+                allocate(frac(size(tcIDs)))
+                frac = 0.0_R8
+                do j = 1, size(tcIDs)
+                    ! Get coordinates etc
+                    tx = allc(tcIDs(j))%x
+                    ty = allc(tcIDs(j))%y
+                    dx = tx(2:) - tx(1:size(tx)-1)
+                    dy = ty(2:) - ty(1:size(ty)-1)
+                    dl = sqrt(dx**2 + dy**2)
+                    ltot = sum(dl)
+                    tfval = fieldtracer%Evaluate(tx, ty)
+                    dtfval = tfval(2:) - tfval(1:size(tfval)-1)
+
+                    ! Determine length fraction that is non-monotonous
+                    if (tfval(1) > tfval(size(tfval))) then 
+                        ! Decreasing, set edge lengths to zero where they
+                        ! are aligned
+                        where (dtfval <= 0.0_R8) dl = 0.0_R8
+                    else
+                        ! Increasing, set edge lengths to zero where they
+                        ! are aligned
+                        where (dtfval >= 0.0_R8) dl = 0.0_R8
+                    end if 
+                    frac(j) = sum(dl)/ltot
+                    frac(j) = abs((maxval(tfval) - minval(tfval))/abs(tfval(1) - tfval(size(tfval))))
+                end do 
+
+                ! Keep the one where frac is minimal
+                keepind(tcIDs(minloc(frac))) = .true.
+
+                ! Housekeeping 
+                deallocate(frac)
+            else
+                ! Mark this contour to be kept
+                keepind(cIDs(i)%Get()) = .true. 
+            end if
+        end do
+
+        ! Introduce contours in topomesh
+        do i = 1, size(allc)
+            if (keepind(i)) then 
+                call InsertTopologicalMeshContour(topomesh, magneticField, &
+                    allc(i), TMfaceradID, 0)
+            end if 
+        end do
 
     end subroutine 
 
@@ -2419,6 +2524,7 @@ module ggmod_topology2D
         ! Trim the topological mesh
         call WriteTopologicalMesh(topomesh, 'topomesh_temp')
         call TrimTopologicalMesh(topomesh, magneticField, vessel)
+        call SimplifyTopologicalMeshFaces(topomesh)
 
         ! Split boundaries
         call WriteTopologicalMesh(topomesh, 'topomesh_temp')
@@ -4671,8 +4777,7 @@ module ggmod_topology2D
                     dfval = fval(2:) - fval(1:size(fval)-1)
                     isalphapos = dfval > 0.0_R8
                     alpha = abs(alphasigned)
-                    isedgealigned = (alpha < avpminangle) .or. ((pi_R8 - alpha) < avpminangle) 
-                    
+                    isedgealigned = (alpha < avpminangle) .or. ((pi_R8 - alpha) < avpminangle)                     
                     
 
                     ! Check if we should mark
@@ -4700,9 +4805,15 @@ module ggmod_topology2D
                                     ! Hit a removed tangency point 
                                     afendind(thisf) = findloc(isalphapos, &
                                         .not. isalphapos(1), 1, back=.false.)
+
+                                    
                                     if (.not. all(isedgealigned)) then 
+                                        ! Consider only edges til first non-aligned edge
+                                        isedgealigned(findloc(isedgealigned, .false., 1, back=.false.):) = .false.
                                         if (findloc(isedgealigned, .false., 1, back=.false.) > afendind(thisf)) then 
                                             ! Bounded by alpha -> override to case 2
+                                            afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(1)) .or. &
+                                                (isedgealigned), .true., 1, back=.true.) ! go as far as possible
                                             overridetubecase(thisf)     = .true.
                                             tubecase_override(thisf)    = 2 
                                         else
@@ -4711,6 +4822,8 @@ module ggmod_topology2D
                                         end if 
                                     else
                                         ! Bounded by alpha -> override to case 2
+                                        afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(1)) .or. &
+                                                (isedgealigned), .true., 1, back=.true.) ! go as far as possible
                                         overridetubecase(thisf)     = .true.
                                         tubecase_override(thisf)    = 2
                                     end if 
@@ -4738,8 +4851,12 @@ module ggmod_topology2D
                                     afstartind(thisf) = findloc(isalphapos, &
                                         .not. isalphapos(size(tx)-1), 1, back=.true.) + 1
                                     if (.not. all(isedgealigned)) then 
+                                        ! Consider only edges til first non-aligned edge
+                                        isedgealigned(:findloc(isedgealigned, .false., 1, back=.true.)) = .false.
                                         if (findloc(isedgealigned, .false., 1, back=.true.)+1 < afendind(thisf)) then 
                                             ! Bounded by alpha -> override to case 2
+                                            afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(size(tx)-1)) .or. &
+                                                (isedgealigned), .true., 1, back=.false.) ! go as far as possible
                                             overridetubecase(thisf)     = .true.
                                             tubecase_override(thisf)    = 2 
                                         else
@@ -4748,6 +4865,8 @@ module ggmod_topology2D
                                         end if 
                                     else
                                         ! Bounded by alpha -> override to case 2
+                                        afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(size(tx)-1)) .or. &
+                                                (isedgealigned), .true., 1, back=.false.) ! go as far as possible
                                         overridetubecase(thisf)     = .true.
                                         tubecase_override(thisf)    = 2
                                     end if 
@@ -5282,9 +5401,10 @@ module ggmod_topology2D
                         call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
                             [tscr(endind)], 'end', [-0*distfrac], .true., .false.)
                     else
-                        ! Also need to delete a first part
+                        ! Also need to delete a first part - and delete the first vertex
+                        allc(indtpc)%startsaddle = 0
                         call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
-                            [tscr(endind-1:endind)], 'both', [0*distfrac, -0*distfrac], .true., .false.)
+                            [tscr(endind-1:endind)], 'both', [0*distfrac, -0*distfrac], .false., .false.)
                     end if 
                     !call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
                     !    [tscr(endind)], 'end', [0.0_R8], .true., .false.)
@@ -5305,9 +5425,10 @@ module ggmod_topology2D
                         call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
                             [tscr(startind)], 'start', [-0*distfrac], .false., .true.)
                     else
-                        ! Also need to delete last part
+                        ! Also need to delete last part - and remove end vertex
+                        allc(i)%endsaddle = 0 ! doesn't end anymore in saddle point
                         call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(startind:startind+1)], 'both', [-0*distfrac, 0*distfrac], .false., .true.)
+                            [tscr(startind:startind+1)], 'both', [-0*distfrac, 0*distfrac], .false., .false.)
                     end if
                     !allc(i)%x = allc(i)%x([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
                     !allc(i)%y = allc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
@@ -5346,8 +5467,15 @@ module ggmod_topology2D
 
                     ! Keep only this part of the contour coordinates 
                     ! In this case, we don't keep the starting point
-                    call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                        [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .true., .false.)
+                    allc(i)%startsaddle = 0
+                    if (tscr(intersectind) == 0.0_R8) then 
+                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
+                            [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .true., .false.)
+                    else
+                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
+                            [tscr(intersectind:intersectind+1)], 'both', [-distfrac, -distfrac], .false., .false.)
+                    end if 
+
                 end if
                     !notdelind = [(k, k = 2, tsc(intersectind))]
                 !allc(i)%x = allc(i)%x(notdelind)
@@ -6387,10 +6515,12 @@ module ggmod_topology2D
         ! is likely to fail for these boundaries (as expected...). Boundary faces
         ! are expected to be of type 3. 
 
-        ! Note 3: separatrix segments (type 4) that do not have a 
-        ! saddle point at either end are removed as well, since they
-        ! are not strictly necessary in the topological mesh. Splitting
-        ! points are also allowed of course. 
+        ! Note 3: separatrix segments (type 4) that have both intersections
+        ! in boundary faces are removed as well, since they shouldn't be
+        ! critical for the topological mesh. 
+
+        ! Note 4: radial faces are only retained if they start or end in
+        ! a minimum or maximum (other radial faces should not be required)
 
         ! Declare variables
         !==================
@@ -6450,27 +6580,18 @@ module ggmod_topology2D
         rmface = (topomesh%face%vert(:, 1) == 0) .or. &
             (topomesh%face%vert(:, 2) == 0)
 
-        ! Also remove separatrix faces without saddle points or splitting points
+        ! Remove separatrix faces that have only intersections with
+        ! boundary faces
         do i = 1, topomesh%face%ntot
             if (topomesh%face%type(i) == TMfacesepID) then 
                 ! Set to true, will be set to false if saddle point present
                 rmface(i) = .true. 
-                if (topomesh%face%vert(i, 1) /= 0) then 
-                    if ((topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsaddleID) .or. &
-                        (topomesh%vert%type(topomesh%face%vert(i, 1)) == TMvertexsplitID)) then 
+                if ((topomesh%face%vert(i, 1) /= 0) .and. (topomesh%face%vert(i, 2) /= 0)) then 
+                    if ((topomesh%vert%type(topomesh%face%vert(i, 1)) /= TMvertexbndID) .or. &
+                        (topomesh%vert%type(topomesh%face%vert(i, 2)) /= TMvertexbndID)) then 
                         rmface(i) = .false. 
                     end if 
-                else 
-                    ! Make sure is removed because of zero vertex
-                    rmface(i) = .true.
-                    
-                end if 
-                if (topomesh%face%vert(i, 2) /= 0) then 
-                    if ((topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsaddleID) .or. &
-                        (topomesh%vert%type(topomesh%face%vert(i, 2)) == TMvertexsplitID)) then 
-                        rmface(i) = .false. 
-                    end if 
-                else 
+                else
                     ! Make sure is removed because of zero vertex
                     rmface(i) = .true.
                 end if 
@@ -10999,7 +11120,7 @@ module ggmod_topology2D
 
         ! Auxiliary
         logical                                 :: issinglenull, &
-            isdoublenull
+            isdoublenull, islinear
         integer(I8)                             :: nxp, nop, nwgc, nsp, &
             ncc
         integer(I8), allocatable, dimension(:)  :: xp, op, wgc, sp, cc
@@ -11032,6 +11153,14 @@ module ggmod_topology2D
         ! Initialize
         issinglenull = .true.
         isdoublenull = .true.
+        islinear     = .true. 
+
+        ! Linear case
+        !============
+        ! X-point and O-point checks
+        if (nxp /= 0 .or. nop /= 0) then 
+            islinear = .false. 
+        end if 
 
         ! Single null
         !============        
@@ -11046,16 +11175,16 @@ module ggmod_topology2D
         end if 
 
         ! Number of wide and narrow grid cells
-        if (nwgc > 0) then 
-            issinglenull = .false.
-        elseif (topomesh%cell%ntot /= 3) then
-            issinglenull = .false.
-        end if 
+        !if (nwgc > 0) then 
+        !    issinglenull = .false.
+        !elseif (topomesh%cell%ntot /= 3) then
+        !    issinglenull = .false.
+        !end if 
 
         ! Core cells
-        if (ncc /= 1) then 
-            issinglenull = .false.
-        end if 
+        !if (ncc /= 1) then 
+        !    issinglenull = .false.
+        !end if 
 
         ! Double null
         !============
@@ -11065,31 +11194,32 @@ module ggmod_topology2D
         end if 
 
         ! Strike point checks
-        if (nsp /= 4) then 
-            isdoublenull = .false. 
-        end if 
+        !if (nsp /= 4) then 
+        !    isdoublenull = .false. 
+        !end if 
 
         ! Number of wide and narrow grid cells
-        if (nwgc > 0) then 
-            isdoublenull = .false.
-        elseif (topomesh%cell%ntot /= 3) then
-            isdoublenull = .false.
-        end if 
+        !if (nwgc > 0) then 
+        !    isdoublenull = .false.
+        !elseif (topomesh%cell%ntot /= 3) then
+        !    isdoublenull = .false.
+        !end if 
 
         ! Core cells
-        if (ncc /= 2) then 
-            isdoublenull = .false.
-        end if 
+        !if (ncc /= 2) then 
+        !    isdoublenull = .false.
+        !end if 
 
         ! Determine flag
         !===============
         ! Sanity checks
-        if (count([issinglenull, isdoublenull]) > 1) then 
+        if (count([issinglenull, isdoublenull, islinear]) > 1) then 
             ! Probably we missed something in the definition then
             print *, 'IdentifyTopologicalMeshType: multiple topologies ' // & 
                 'appear valid, this is likely a bug. Setting flag to ' // & 
                 'general flag...'
-
+        elseif (islinear) then 
+            TMlabel = TMTopL
         elseif (issinglenull) then 
             TMlabel = TMTopSN
         elseif (isdoublenull) then 

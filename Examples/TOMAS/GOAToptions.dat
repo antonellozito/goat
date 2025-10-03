@@ -464,6 +464,7 @@ VERSION 1.00.00
 'gg.vertexconstructionmethod'           'orthogonal'
 'gg.cellconstructionmethod'             'quads_triangles'
 'gg.TMcellgriddingorder'                'sequential'
+'gg.dogriddiagnostics'                  '1'
 
 # Refinement options
 'gg.ref.meth'                           'lengthbased'

@@ -329,6 +329,30 @@ module goatmod_types
 
     end type
 
+    ! Goat grid generator data
+    type GoatGGDataUDT
+
+        ! Description
+        !============
+        ! Type that contains any useful grid generator data from goat
+        ! that does not fall in the scope of other GridDataUDT 
+        ! fields. For example this can contain topomesh data of grid 
+        ! faces/vertices (TMfacetype/TMverttype), which faces are 
+        ! boundary layer faces, etc. 
+
+        ! Current fields: 
+        ! - TMfacetype:     topological mesh face type (0 if not on topomesh face)
+        ! - TMfacevert:     same, but for vertices
+        ! - BLind:          boundary layer number (0 if not a boundary 
+        !                   layer face, otherwise 1, 2, ... where 1 is closest to vessel)    
+        ! - facelabelsGG, facelabelsGD:     mapping from GG to GD face labels
+
+        ! Fields
+        integer(I8), allocatable, dimension(:)  :: TMfacetype, TMverttype, &   
+            BLind, facelabelsGG, facelabelsGD
+
+    end type
+
     ! Grid data 
     type GridDataUDT
 
@@ -343,6 +367,8 @@ module goatmod_types
         !
         ! - fluxdata            : UDT with all flux data such as flux
         !                       flux tube data, flux surfaces, ... 
+        ! - goatggdata          : additional goat grid generator data
+        !                       (if available)
         ! - sglegacy            : data from legacy structured grids
         ! - OMPcell, OMPface    : cells and faces belonging to outer mid
         !                       plane
@@ -382,6 +408,10 @@ module goatmod_types
 
         ! Legacy data of structured grid
         type(StructuredGridDataUDT) :: sglegacy
+
+        ! Goat grid generator data
+        logical                     :: hasGoatGGData
+        type(GoatGGDataUDT)         :: goatggdata 
 
         ! Topological mesh type
         integer(I8)                             :: topoflag
@@ -1107,6 +1137,7 @@ module goatmod_types
         grid%face%label(flist)              = fdatai(:, 3)
         grid%face%reg(flist)                = fdatai(:, 4)
         grid%face%aligned                   = fdatai(:, 5) 
+        grid%face%TMfacelabel               = grid%face%label
     
         ! Flux tubes
         !-----------
@@ -1654,6 +1685,107 @@ module goatmod_types
     
     end subroutine
 
+    subroutine ReadGoatGGData(grid, filepath)
+
+        ! Description
+        !============
+        ! This routine reads in additional data provided by the goat
+        ! grid generator in goatggdata.dat, if it is available. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(inout)        :: grid 
+        character(*), intent(in)            :: filepath 
+
+        ! Auxiliary
+        integer                             :: fu 
+        logical                             :: fileExists, reachedeof 
+        character(:), allocatable           :: thisline
+        integer(I8)                         :: tmptype, tmpBLind, &
+            tfID, nfacelabelmappingGGtoGD
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Check existence in current directory
+        print *, 'ReadGoatGGData: looking for ' // filepath // ' in current folder'
+        inquire(file=filepath, exist=fileExists)
+        if (.not. fileExists) then 
+            ! Check existence in output directory
+            print *, 'ReadGoatGGData: looking for ' // filepath // ' in output folder'
+            inquire(file=plotdir // filesepchar // filepath, exist=fileExists)
+            if (fileExists) then 
+                ! Open file
+                open (action='read', file=plotdir // filesepchar // filepath, newunit=fu, &
+                    status='unknown')
+            end if 
+        else
+            ! Open file
+            open (action='read', file=filepath, newunit=fu, &
+                status='unknown')
+        end if 
+
+        ! Check if we can continue
+        if (.not. fileExists) then 
+            ! Set to false and exit
+            print *, 'ReadGoatGGData: could not find file, not reading data...'
+            grid%data%hasGoatGGData = .false. 
+            return 
+        else 
+            ! Set to true and continue
+            grid%data%hasGoatGGData = .true. 
+        end if 
+
+        ! Initialize arrays
+        if (allocated(grid%data%goatggdata%TMfacetype)) deallocate(grid%data%goatggdata%TMfacetype)
+        if (allocated(grid%data%goatggdata%TMverttype)) deallocate(grid%data%goatggdata%TMverttype)
+        if (allocated(grid%data%goatggdata%BLind)) deallocate(grid%data%goatggdata%BLind)
+        allocate(grid%data%goatggdata%TMfacetype(grid%face%ntot), &
+            grid%data%goatggdata%BLind(grid%face%ntot), grid%data%goatggdata%TMverttype(grid%vert%ntot))
+
+        ! Read
+        !=====
+        ! Skip header
+        call ReadSingleLine(fu, thisline, reachedeof)
+
+        ! Read face data
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, grid%face%ntot
+            read(fu, *) tfID, tmptype, tmpBLind
+            grid%data%goatggdata%TMfacetype(tfID)    = tmptype
+            grid%data%goatggdata%BLind(tfID)         = tmpBLind
+        end do 
+
+        ! Read vertex data
+        call ReadSingleLine(fu, thisline, reachedeof)
+        do i = 1, grid%vert%ntot
+            read(fu, *) tfID, tmptype
+            grid%data%goatggdata%TMverttype(tfID)    = tmptype
+        end do 
+
+        ! Read face label mappings
+        call ReadSingleLine(fu, thisline, reachedeof) ! header
+        read (fu, *) nfacelabelmappingGGtoGD 
+        allocate(grid%data%goatggdata%facelabelsGG(nfacelabelmappingGGtoGD))
+        grid%data%goatggdata%facelabelsGD = grid%data%goatggdata%facelabelsGG
+        call ReadSingleLine(fu, thisline, reachedeof) ! header
+        do i = 1, nfacelabelmappingGGtoGD
+            read(fu, *) grid%data%goatggdata%facelabelsGG(i)
+        end do 
+        call ReadSingleLine(fu, thisline, reachedeof) ! header
+        do i = 1, nfacelabelmappingGGtoGD
+            read(fu, *) grid%data%goatggdata%facelabelsGD(i)
+        end do 
+
+        ! Close file
+        close(fu)
+
+
+    end subroutine
+
     ! Writers
     subroutine WriteGOAT(goatoptions, grid, magneticField, environment)
 
@@ -1982,13 +2114,17 @@ module goatmod_types
         ! Close file
         close (fu)
     
+        ! Additional data output
+        !=======================
         ! Write vessel
-        !=============
         call environment%vessel%polygonset%WriteData(goatoptions%writefilepath // '_vesselpolygonset')
+
+        ! Write additional goat data
+        if (grid%data%hasGoatGGData) then 
+            call WriteGoatGGData(grid, 'goatggdata.dat')
+        end if 
     
         ! Write grid in .ogr format
-        !==========================
-        ! For divgeo
         open (action='write', file=goatoptions%writefilepath // '.ogr', newunit=fu, &
             status='unknown')
     
@@ -2004,6 +2140,90 @@ module goatmod_types
         end associate
     
     
+    end subroutine
+
+    subroutine WriteGoatGGData(grid, filepath)
+
+        ! Description
+        !============
+        ! This routine writes additional data provided by the goat
+        ! grid generator in goatggdata.dat, if it is available. 
+
+        ! Modules
+        !========
+        use mod_definitions, only: goatversion
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(in)           :: grid 
+        character(*), intent(in)            :: filepath 
+
+        ! Auxiliary
+        integer                             :: fu 
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Initialize
+        !===========
+        ! Check if it is available
+        if (.not. grid%data%hasGoatGGData) then 
+            print *, 'WriteGoatGGData: data not available, not writing file'
+            return 
+        end if 
+
+        ! Open file
+        open (action='write', file=plotdir // filesepchar // filepath, newunit=fu, &
+            status='unknown')
+
+        ! Unpack
+        associate(&
+            face            => grid%face,                   &
+            vert            => grid%vert,                   &
+            facelabelsGG    => grid%data%goatggdata%facelabelsGG,   &
+            facelabelsGD    => grid%data%goatggdata%facelabelsGD,   &
+            TMfacetype      => grid%data%goatggdata%TMfacetype,  &
+            TMverttype      => grid%data%goatggdata%TMverttype,  &
+            BLind           => grid%data%goatggdata%BLind        &
+            )
+
+        ! Write
+        !======
+        ! Write version
+        write (fu, *) goatversion 
+        
+        ! Write face data 
+        write (fu, *) 'faces: ID, TMfacetype, BLind'
+        do i = 1, face%ntot
+            write (fu, *) i, TMfacetype(i), BLind(i)
+        end do 
+
+        ! Write vertex data
+        write (fu, *) 'vertices: ID, TMverttype'
+        do i = 1, vert%ntot
+            write (fu, *) i, TMverttype(i)
+        end do 
+
+        ! Write face label mappings
+        write (fu, *) 'nfacelabelmappingGGtoGD'
+        write (fu, *) size(facelabelsGG)
+        write (fu, *) 'facelabelmappingGG'
+        do i = 1, size(facelabelsGG)
+            write(fu, *) facelabelsGG(i)
+        end do 
+        write (fu, *) 'facelabelmappingGD'
+        do i = 1, size(facelabelsGD)
+            write(fu, *) facelabelsGD(i)
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+        ! Close file
+        close(fu)
+
     end subroutine
 
     ! Data extraction
@@ -2032,9 +2252,9 @@ module goatmod_types
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT), intent(inout)    :: grid
-        type(GridOptionsUDT)            :: gridoptions
-        character(len=*), intent(in)    :: meth
+        type(GridUDT), intent(inout)        :: grid
+        type(GridOptionsUDT), intent(inout) :: gridoptions
+        character(len=*), intent(in)        :: meth
     
         ! Loop variables
         integer(I8)                 :: i, j, k, iFT, ib, il 
@@ -2046,7 +2266,8 @@ module goatmod_types
             nlabels 
         integer(I8), allocatable    :: tf(:), tfv(:,:)
         integer(I8), allocatable    :: &
-            sortindex(:), temparray(:,:), tempfaces(:), segstart(:)
+            sortindex(:), temparray(:,:), tempfaces(:), segstart(:), &
+            gglabels(:), gdlabels(:)
     
         logical, allocatable        :: mask(:), ispolygonstart(:), &
             isbranchingpolygon(:)
@@ -2062,10 +2283,6 @@ module goatmod_types
     
         ! Initialize
         !===========
-        ! Associate
-        associate(gglabels => gridoptions%facelabelmappingGG, &
-            gdlabels => gridoptions%facelabelmappingGD)
-        
         ! Initialize
         grid%vert%fieldlineID = 0
         grid%data%fluxdata%fluxsurfaceID = 0
@@ -2113,7 +2330,21 @@ module goatmod_types
     
             ! Extract boundaries
             !===================
-            ! Get the supported mapping between boundary labels 
+            ! Check if any goat grid generator data is available. If so, 
+            ! determine mapping automatically 
+            if (grid%data%hasGoatGGData) then 
+                ! Print a message that we're overriding the user defined mapping
+                print *, 'ExtractGridData: goat grid generator data found, '  // & 
+                    'overwriting face label mapping'
+                print *, 'facelabelmappingGG: ', grid%data%goatggdata%facelabelsGG
+                print *, 'facelabelmappingGD: ', grid%data%goatggdata%facelabelsGD
+
+                ! Overwrite
+                gridoptions%facelabelmappingGG = grid%data%goatggdata%facelabelsGG
+                gridoptions%facelabelmappingGD = grid%data%goatggdata%facelabelsGD
+            end if 
+
+            ! Get the mapping between boundary labels 
             gglabels = gridoptions%facelabelmappingGG
             gdlabels = gridoptions%facelabelmappingGD 
     
@@ -2255,9 +2486,7 @@ module goatmod_types
             call gdErrorHandler('ExtractGridData: unknown method')
     
         end select 
-    
-        end associate
-    
+        
     end subroutine
 
     ! Vertex substructure
@@ -3938,6 +4167,10 @@ module goatmod_types
     
         ! Visualize
         call magneticField%interp%Visualize('magneticfield_visualization')
+        call magneticField%interp%Visualize('magneticfield_dpsidx_visualization', &
+            xderivin=1, yderivin=0)
+        call magneticField%interp%Visualize('magneticfield_dpsidy_visualization', &
+            xderivin=0, yderivin=1)
     
     end subroutine
     
@@ -6848,6 +7081,7 @@ module goatmod_types
     
         ! Read additional data
         !=====================
+        call ReadGoatGGData(grid, 'goatggdata.dat')
         call ConstructGrid(grid, gridoptions)
         call ConstructMagneticField(magneticField, mfoptions) 
         call ConstructEnvironment(environment, environmentoptions) 
@@ -6858,7 +7092,6 @@ module goatmod_types
     
     end subroutine
     
-
     ! Vessel vertex pairs
     subroutine GetVesselVertexPairs(vessel, vpairs, structureIDs, vertIDs)
 
