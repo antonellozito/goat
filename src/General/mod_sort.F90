@@ -33,7 +33,7 @@ module mod_sort
     implicit none 
     private 
     public :: Sort, Unique, Setdiff, CountOccurrence, SearchSortedArray, &
-        GetBinIndexSortedArray, GetCommonElements
+        GetBinIndexSortedArray, isMember, Pack2, GetCommonElements
 
     !==================================================================!
     !                                                                  !
@@ -77,6 +77,11 @@ module mod_sort
     ! General bin indexing of a sorted array
     interface GetBinIndexSortedArray
         module procedure GetBinIndex_R8 
+    end interface
+
+    ! Pack for array with two elements
+    interface Pack2
+        module procedure Pack2_I8, Pack2_R8
     end interface
 
     ! Common element getter
@@ -1057,6 +1062,64 @@ module mod_sort
 
     end function 
 
+    ! isMember for integer arrays
+    function isMember(a, b) result(res) 
+
+        ! Description
+        !============
+        !   res = isMember(A,B) for arrays A and B returns an array of the same
+        !   size as A containing true where the elements of A are in B and false
+        !   otherwise.
+
+        ! Declare arguments
+        !==================
+        ! Arguments
+        integer(I8)             :: a(:), b(:)
+        logical, allocatable    :: res(:)
+
+        ! Auxiliary
+        integer(I8) :: i
+
+        allocate(res(size(a)))
+        res = .false.
+
+        do i = 1, size(a)
+            if (any(a(i) == b)) res(i) = .true.
+        end do 
+
+    end function
+
+    ! Pack for an array with 2 elements returning a scalar
+    function Pack2_I8(arr, mask) result(res)
+        integer(I8) :: arr(2), res
+        logical     :: mask(2)
+
+        if (count(mask) /= 1) then
+            call gdErrorHandler('Error Pack2: mask must select exactly one element')
+        end if
+
+        if (mask(1)) then
+            res = arr(1)
+        else if (mask(2)) then
+            res = arr(2)
+        end if
+    end function
+        
+    ! Pack for an array with 2 elements returning a scalar
+    function Pack2_R8(arr, mask) result(res)
+        real(R8)    :: arr(2), res
+        logical     :: mask(2)
+
+        if (count(mask) /= 1) then
+            call gdErrorHandler('Error Pack2: mask must select exactly one element')
+        end if
+
+        if (mask(1)) then
+            res = arr(1)
+        else if (mask(2)) then
+            res = arr(2)
+        end if
+    end function
     ! Check for common elements between (unsorted) arrays
     function GetCommonElements_I8(a1, a2) result(el)
 

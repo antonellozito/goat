@@ -201,13 +201,16 @@ $(BUILDDIR)/Modules_goat: $(MODULE_FILES_GOAT)
 $(BUILDDIR)/Modules_GD: $(MODULE_FILES_GD)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Modules_GD
+$(BUILDDIR)/Modules_GA: $(MODULE_FILES_GA)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
+	touch $(BUILDDIR)/Modules_GA	
 $(BUILDDIR)/Modules_GG: $(MODULE_FILES_GG)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Modules_GG
 $(BUILDDIR)/Modules_B25: $(MODULE_FILES_B25)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Modules_B25
-$(BUILDDIR)/Modules: $(BUILDDIR)/Modules_goat $(BUILDDIR)/Modules_GD \
+$(BUILDDIR)/Modules: $(BUILDDIR)/Modules_goat $(BUILDDIR)/Modules_GD $(BUILDDIR)/Modules_GA\
 	$(BUILDDIR)/Modules_GG $(BUILDDIR)/Modules_B25
 
 ## Auxiliary			: compile auxiliary routines

@@ -1168,6 +1168,277 @@ def ReadGGGridDataFile(filepath):
     # Return
     return grid
 
+def ReadGAIntegerArrayFile(filepath):
+    # Description
+    # -----------
+    # This routine read a file with an array as writting by WriteArray
+    # in gamod_types.F90.
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read array data
+    #----------------
+    i = 0
+    while i < len(alllines):
+        if "Elements" in alllines[i]:
+            break
+        else:
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of elements
+    values = alllines[i].split()
+    n_el = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    n_el = n_el[0]
+
+    # Read vertex data
+    while i < len(alllines):
+        if "ID val(ID)" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    ar = np.zeros(n_el, dtype=int)
+    for j in np.arange(0, n_el):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        el = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+        ar[ID-1] = el[0]
+
+    return ar
+
+def ReadGARealArrayFile(filepath):
+    # Description
+    # -----------
+    # This routine read a file with an array as writting by WriteArray
+    # in gamod_types.F90.
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read array data
+    #----------------
+    i = 0
+    while i < len(alllines):
+        if "Elements" in alllines[i]:
+            break
+        else:
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of elements
+    values = alllines[i].split()
+    n_el = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    n_el = n_el[0]
+
+    # Read vertex data
+    while i < len(alllines):
+        if "ID val(ID)" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    ar = np.zeros(n_el, dtype=float)
+    for j in np.arange(0, n_el):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        el = np.fromstring(values[1], dtype=float, count=1, sep =' ')
+        ar[ID-1] = el[0]
+
+    return ar
+
+def ReadGAGridDataFile(filepath):
+    # Description
+    #------------
+    # This routine reads in the grid data from an intermediate grid 
+    # adaptation grid object. This is not the same as the full grid
+    # that is used in the grid deformation module.
+
+    # Initialize
+    grid = gt.GAGrid()
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines()
+
+    # Read vertex data
+    #-----------------
+    i = 0
+    while i < len(alllines):
+        if "vertices" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of vertices
+    values = alllines[i].split()
+    nv = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nv = nv[0]
+
+    # Initialize vertex structure
+    grid.vert.Initialize(nv)
+
+    # Read vertex data
+    while i < len(alllines):
+        if "ID, x, y" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nv):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        x = np.fromstring(values[1], dtype=float, count=1, sep =' ')
+        y = np.fromstring(values[2], dtype=float, count=1, sep =' ')
+        grid.vert.ID[ID-1] = ID
+        grid.vert.x[ID-1] = x[0]
+        grid.vert.y[ID-1] = y[0] 
+
+    # Read in face data
+    #------------------
+    i = 0
+    while i < len(alllines):
+        if "faces" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of faces
+    values = alllines[i].split()
+    nf = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nf = nf[0]
+
+    # Initialize vertex structure
+    grid.face.Initialize(nf)
+
+    # Read vertex data
+    while i < len(alllines):
+        if "ID, v1, v2, label, aligned" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nf):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        v1 = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+        v2 = np.fromstring(values[2], dtype=int, count=1, sep =' ')
+        label = np.fromstring(values[3], dtype=int, count=1, sep =' ')
+        aligned = np.fromstring(values[4], dtype=int, count=1, sep =' ')
+        grid.face.ID[ID-1] = ID
+        grid.face.v1[ID-1] = v1[0]
+        grid.face.v2[ID-1] = v2[0]
+        grid.face.label[ID-1] = label[0] 
+        grid.face.aligned[ID-1] = aligned[0]
+
+    # Read in cell data
+    #------------------
+    i = 0
+    while i < len(alllines):
+        if "cells" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of cells and cell vertices
+    values = alllines[i].split()
+    nc = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    ncv = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+    nc = nc[0]
+    ncv = ncv[0]
+
+    # Initialize vertex structure
+    grid.cell.Initialize(nc, ncv)
+
+    # Read cell data
+    while i < len(alllines):
+        if "ID, vp1, vp2, region, x, y" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nc):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        v1 = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+        v2 = np.fromstring(values[2], dtype=int, count=1, sep =' ')
+        region = np.fromstring(values[3], dtype=int, count=1, sep =' ')
+        x = np.fromstring(values[4], dtype=float, count=1, sep =' ')
+        y = np.fromstring(values[5], dtype=float, count=1, sep =' ')
+        grid.cell.ID[ID-1] = ID
+        grid.cell.vp1[ID-1] = v1[0]-1 # Need to account for 0-based indexing
+        grid.cell.vp2[ID-1] = v2[0]
+        grid.cell.region[ID-1] = region[0]
+        grid.cell.x[ID-1] = x[0]
+        grid.cell.y[ID-1] = y[0]
+
+    # Read cell vertices
+    while i < len(alllines):
+        if "cell vertices" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read vertices
+    for j in np.arange(0, ncv):
+        values = alllines[i+j].split()
+        tv = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        tv = tv[0]
+        grid.cell.vert[j] = tv
+
+    # Return
+    return grid
+
 def ReadTraduitOutB2us(filepath):
     # Description
     #------------

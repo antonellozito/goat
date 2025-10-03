@@ -1304,7 +1304,66 @@ def PlotGridCells(grid, fignum):
 
      # Set axes
     SetAxesLimits2D(plt.gca(), xb, yb)
-    
+
+# Grid generation data plotting: cells and indicated aligned faces
+def PlotGridCellsAlignedFaces(grid, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)
+
+    # Plot vertexID
+    #for i in np.arange(0, grid.vert.ntot, 1):
+    #    PlotPoints2D(grid.vert.x[i], grid.vert.y[i], fignum, marker='.', color='r', label=str(grid.vert.ID[i]))
+
+
+    # Plot aligned faces
+    xf = 0.5*(grid.vert.x[grid.face.v1-1] + grid.vert.x[grid.face.v2-1])
+    yf = 0.5*(grid.vert.y[grid.face.v1-1] + grid.vert.y[grid.face.v2-1]) 
+    for i in np.arange(0, grid.face.ntot, 1): 
+        if (grid.face.aligned[i] == 1) :
+            PlotPoints2D(xf[i], yf[i], fignum, marker='.', color='b')
+
+# Grid generation data plotting: cells and indicated boundary faces
+def PlotGridCellsBoundaryFaces(grid, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)
+
+    # Plot vertexID
+    #for i in np.arange(0, grid.vert.ntot, 1):
+    #    PlotPoints2D(grid.vert.x[i], grid.vert.y[i], fignum, marker='.', color='r', label=str(grid.vert.ID[i]))
+
+
+    # Plot aligned faces
+    xf = 0.5*(grid.vert.x[grid.face.v1-1] + grid.vert.x[grid.face.v2-1])
+    yf = 0.5*(grid.vert.y[grid.face.v1-1] + grid.vert.y[grid.face.v2-1]) 
+    for i in np.arange(0, grid.face.ntot, 1):
+        if (not(grid.face.label[i] ==  0)) :
+            PlotPoints2D(xf[i], yf[i], fignum, marker='.', color='b')
+
+def PlotGridCellCutcells(grid,cctria,cctrapsP1,cctrapsP2,cctraps, fignum ):
+    # Plot cells only
+    PlotGridCells(grid, fignum)
+
+    # Plot cutcells
+    for i in np.arange(0,len(cctria), 1):
+        PlotPoints2D(grid.cell.x[cctria[i]-1], grid.cell.y[cctria[i]-1], fignum, marker='.', color='b')
+
+    for i in np.arange(0,len(cctrapsP1), 1):
+        s = cctrapsP1[i]-1
+        n = cctrapsP2[i]
+        if (n == 1) :
+            cells = cctraps[s]
+        else: 
+            cells = cctraps[s:s+n]
+        PlotPoints2D(grid.cell.x[cells-1], grid.cell.y[cells-1], fignum, marker='.', color='g')
+
+def PlotGridCellValue(grid, array, threshold, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)
+
+    for i in np.arange(0, grid.cell.ntot, 1):
+        if (array[i] >  threshold) :
+            PlotPoints2D(grid.cell.x[i], grid.cell.y[i], fignum, marker='.', color='b')
+
 # Grid topological data
 def PlotGridTopologicalData(grid, fignum):
     # Description
