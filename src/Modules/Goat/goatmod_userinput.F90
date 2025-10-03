@@ -248,7 +248,8 @@ module goatmod_userinput
         
         ! Merging options
         logical                     :: no_hex
-        character(:), allocatable   :: merge_crit
+        integer(I8)                 :: merge_crit
+        integer(I8), allocatable    :: merge_crit_array
         real(R8)                    :: merge_h_pol_factor 
         integer(I8)                 :: n_merge
         real(R8)                    :: merge_bias_limit
@@ -988,7 +989,8 @@ module goatmod_userinput
         
         ! Merging options
         options%no_hex                              = .true.
-        options%merge_crit                          = 'h_pol'
+        options%merge_crit                          = 4
+        options%merge_crit_array                    = [4]
         options%merge_h_pol_factor                  = 1
         options%n_merge                             = 20
         options%merge_bias_limit                    = 5
