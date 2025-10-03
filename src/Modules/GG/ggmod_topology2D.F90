@@ -262,7 +262,7 @@ module ggmod_topology2D
         procedure   :: MergeTMTubesCC       => MergeTMTubesCCTA ! closed-closed merge
         procedure   :: MergeTMTubesS        => MergeTMTubesSTA ! separatrix (or other branching polygon) merge
         procedure   :: SplitTMTubes         => SplitTMTubesTA ! tube splitter
-        procedure   :: GetMergeTubePairs    => GetMergeTubePairsTA ! merge tube pair getter
+        procedure   :: GetMergeTubePairs    => GetMergeTubePairsTA2 ! merge tube pair getter
         procedure   :: GetMergeTubeCycles   => GetTopomeshTubeCyclesTA ! merge cyclic tube getter
 
         ! Auxiliary routines for tube merging
@@ -3673,7 +3673,7 @@ module ggmod_topology2D
         ! over all vertices and check the following conditions:
         ! - does the vertex only appear in two separate boundaries?
         ! - are those two boundaries of the same type?
-        ! - is the vertex a regular or boundary vertex?
+        ! - is the vertex not a split vertex or extremum?
         ! If all these conditions are met, the neighbouring faces may
         ! be safely merged into a single face. Normally, this merging 
         ! shouldn't be necessary, unless e.g. separatrix parts are 
@@ -3728,13 +3728,20 @@ module ggmod_topology2D
             markv = .false. 
             markf = .false.
             do i = 1, topomesh%vert%ntot
-                ! Is it a regular or boundary vertex?
-                if ((.not. topomesh%vert%type(i) == TMvertexbndID) .and. &
-                    (.not. topomesh%vert%type(i) == 0)) then 
-                    cycle 
+                ! Is it a type 2 tangency point, regular vertex, or 
+                ! boundary vertex? 
+                if (.not. any(topomesh%vert%type(i) == [TMvertexbndID, &
+                    0, TMvertextp2ID])) then 
+                    cycle
                 end if 
 
-                ! If it is, does it only appear twice in face%vert?
+                ! Is it a regular or boundary vertex?
+                !if ((.not. topomesh%vert%type(i) == TMvertexbndID) .and. &
+                !    (.not. topomesh%vert%type(i) == 0)) then 
+                !    cycle 
+                !end if 
+
+                ! Does it only appear twice in face%vert?
                 appearstwice = ((topomesh%face%vert(:, 1) == i) .or. (topomesh%face%vert(:, 2) == i))
                 if (.not. (count(appearstwice) == 2)) then 
                     cycle 
@@ -5906,6 +5913,7 @@ module ggmod_topology2D
             call tmadaptor%MergeTMTubesComplex(topomesh, options, wasmerged, &
                 appliedsplitting)
             if (wasmerged .or. appliedsplitting) then 
+                call WriteTopologicalMesh(topomesh, 'topomesh_temp', .false.)
                 if (wasmerged) then 
                     if (options%writedebugoutput) then 
                         call WriteTopologicalMesh(topomesh, 'topomesh_temp')
@@ -6415,12 +6423,14 @@ module ggmod_topology2D
         tf = GetCommonElements(hfface1, hfface2)
         if (size(tf) > 0) then 
             ! Both tubes have high field faces in common, this is unexpected
+            call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
             call gdErrorHandler('MergeTMTubes: tubes have high field ' // & 
                 'faces in common, unexpected')
         end if 
         tf = GetCommonElements(lfface1, lfface2)
         if (size(tf) > 0) then 
             ! Both tubes have low field faces in common, this is unexpected
+            call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
             call gdErrorHandler('MergeTMTubes: tubes have low field ' // & 
                 'faces in common, unexpected')
         end if 
@@ -6443,8 +6453,10 @@ module ggmod_topology2D
             ! some boundary faces that are crucial for the merging operation
             ! will not be considered...
             call Unique([hfface1, lfface2], tf)
+            !tf = GetCommonElements(hfface1, lfface2)
         else 
             call Unique([hfface2, lfface1], tf)
+            !tf = GetCommonElements(hfface2, lfface1)
         end if 
 
         ! Sort faces by vertices
@@ -6904,7 +6916,7 @@ module ggmod_topology2D
             nonbndmergefaces, tempi, tfbv, mergevert, sortind, &
             polygonID, bndvert1, bndvert2, bndvert3, bndvert4, &
             tvf, tempf, avpfsID, tv, tvfsID, bndf1, bndf2, &
-            bndfv1, bndfv2
+            bndfv1, bndfv2, commonmergefaces
         integer(I8), allocatable, dimension(:, :)   :: tfv
         logical                                 :: noalignedfacev1tov2, &
             noalignedfacev2tov1
@@ -6912,7 +6924,7 @@ module ggmod_topology2D
             isbranchingpolygon, isavp, retypevert, isbndf1, isbndf2
         real(R8), allocatable, dimension(:)     :: mergepsival, tpsi, &
             dpsi, tvfval, psibnd1, psibnd2
-        type(IntegerDynamicArrayUDT)            :: tfbida
+        type(IntegerDynamicArrayUDT)            :: tfbida, tfida1, tfida2
 
         ! Loop
         integer(I8)                             :: i, k
@@ -6930,6 +6942,8 @@ module ggmod_topology2D
         !=========================
         ! For each tube, add bounding faces 
         tfbida = ConstructIntegerDynamicArray()
+        tfida1 = ConstructIntegerDynamicArray()
+        tfida2 = ConstructIntegerDynamicArray()
         do i = 1, size(tube1)
             ! Radial faces: only first and last
             tf = topomesh%tube%GetFace(tube1(i))
@@ -6938,8 +6952,10 @@ module ggmod_topology2D
             ! Boundary faces: currently all (non-boundary merge faces will be deleted afterwards)
             tf = topomesh%tube%GetBndFace(tube1(i), 1)
             call tfbida%Append(tf)
+            call tfida1%Append(tf)
             tf = topomesh%tube%GetBndFace(tube1(i), 2)
             call tfbida%Append(tf)
+            call tfida1%Append(tf)
         end do 
         do i = 1, size(tube2)
             ! Radial faces: only first and last
@@ -6949,15 +6965,22 @@ module ggmod_topology2D
             ! Boundary faces: currently all (non-boundary merge faces will be deleted afterwards)
             tf = topomesh%tube%GetBndFace(tube2(i), 1)
             call tfbida%Append(tf)
+            call tfida2%Append(tf)
             tf = topomesh%tube%GetBndFace(tube2(i), 2)
             call tfbida%Append(tf)
+            call tfida2%Append(tf)
         end do 
 
-        ! Remove non-boundary merge faces
+        ! Remove non-common merge faces
+        commonmergefaces = GetCommonElements(&
+            GetCommonElements(tfida1%Get(), mergefaces), &
+            GetCommonElements(tfida2%Get(), mergefaces))
+
         tempi = tfbida%Get()
-        allocate(nonbndmergefaces(count(.not. topomesh%face%BF(mergefaces))))
-        nonbndmergefaces = pack(mergefaces, .not. topomesh%face%BF(mergefaces))
-        call SetDiff(tempi, nonbndmergefaces, tfb)
+        !allocate(nonbndmergefaces(count(.not. topomesh%face%BF(mergefaces))))
+        !nonbndmergefaces = pack(mergefaces, .not. topomesh%face%BF(mergefaces))
+        !call SetDiff(tempi, nonbndmergefaces, tfb)
+        call SetDiff(tempi, commonmergefaces, tfb)
 
         ! Sort faces
         tfv = topomesh%face%vert(tfb, :)
@@ -6993,6 +7016,7 @@ module ggmod_topology2D
 
         ! Check if closed polygon
         if (tfbv(1) /= tfbv(size(tfbv))) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
             call gdErrorHandler('MergeTMTubesOOTA: tube polygon is not ' // & 
                 'closed, unexpected')
         end if 
@@ -7009,9 +7033,12 @@ module ggmod_topology2D
                 'form closed polygon, unexpected here')
         end if 
 
-        ! Determine outer vertices
+        ! Determine initial outer vertices
         v1 = mergevert(1)
         v2 = mergevert(size(mergevert))
+
+        ! Check if we need to move the vertices further along the merge
+        ! faces
 
         ! Determine aligned parts
         !========================
@@ -7316,13 +7343,19 @@ module ggmod_topology2D
 
                 ! Determine flux surface ID based on flux values of vertices
                 call SetDiff([topomesh%face%vert(tfb(si:ei), 1), topomesh%face%vert(tfb(si:ei), 2)], &
-                    [topomesh%face%vert(mergefaces, 1), topomesh%face%vert(mergefaces, 2)], tv)
+                    [topomesh%face%vert(commonmergefaces, 1), topomesh%face%vert(commonmergefaces, 2)], tv)
                 tvfsID = topomesh%vert%fsID(tv)
 
                 ! Keep only vertices with flux surface ID
                 tv = pack(tv, tvfsID /= 0)
                 tvfsID = pack(tvfsID, tvfsID /= 0)
                 tvfval = topomesh%fsfval%Get(tvfsID)
+
+                if (size(tvfval) == 0) then 
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
+                    print *, 'vertices: ', tv
+                end if 
+
                 
                 ! Compute minimal distance in terms of psi value w.r.t.
                 ! the merging faces & set flux surface ID
@@ -7412,8 +7445,9 @@ module ggmod_topology2D
 
         ! Mark faces for removal
         !=======================
-        ! Mark merge faces for removal that are not boundary faces
-        where (.not. topomesh%face%BF(mergefaces)) remf(mergefaces) = .true.
+        ! Mark merge faces for removal that are not boundary faces and 
+        ! that are common between both tubes
+        where (.not. topomesh%face%BF(commonmergefaces)) remf(commonmergefaces) = .true.
         
         ! Mark any non-boundary radial faces of tubes to be removed
         do i = 1, size(tube1)
@@ -10009,6 +10043,188 @@ module ggmod_topology2D
             hftubes = pack(hftubes, keeptubepair)
             lftubes = pack(lftubes, keeptubepair)
         end if 
+
+        ! Housekeeping
+        end associate
+
+    end subroutine
+
+    ! (hopefully improved) tube pair getter for merging
+    subroutine GetMergeTubePairsTA2(tmadaptor, topomesh, hftubes, lftubes, &
+        includetube)
+
+        ! Description
+        !============
+        ! This routine returns sets of tubes (resp. high and low flux
+        ! tubes) that are connected to each other on the low flux 
+        ! boundary of the high flux neighbours and vice versa. In this
+        ! routine, we check for each tube to be considered the high and 
+        ! low flux neighbours. Each tube pair formed that way then 
+        ! simply becomes a tube pair (so in principle, all hftubes and 
+        ! lftubes will always have one tube, but to be consistent with 
+        ! previous implementation we still return all as an array of 
+        ! integer dynamic arrays). We do exclude pairs that would consist
+        ! of only bounding tubes in a cycle to prevent merging away 
+        ! 'internal' vessel structures. This approach will likely lead
+        ! to more aligned vessel faces in the topomesh (which may 
+        ! actually be desired from the gridding point of view)
+        ! Note: optionally, the logical 'includetube' can be passed, 
+        ! which should be a 1-by-ntubes logical indicating which tubes
+        ! to consider. If not passed, all possible pairs are computed. 
+
+        ! Algorithm
+        !----------
+        ! 1)    Construct initial tube pairs based on the graph of the
+        !       topomesh - each graph edge is considered to be a pair
+        ! 2)    For each pair, hedge for cycles by checking if both 
+        !       pairs are bounding tubes in the same cycle. This kind of
+        !       merge should only be possible if the cycle only contains
+        !       bounding tubes (otherwise, the pair should be deleted)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshAdaptorUDT)           :: tmadaptor
+        class(TopomeshUDT), intent(in)      :: topomesh
+        type(IntegerDynamicArrayUDT), allocatable, intent(out)  :: &
+            hftubes(:), lftubes(:)
+        logical, dimension(:), intent(in), optional     :: includetube
+
+        ! Auxiliary
+        integer(I8)                             :: thft, tlft, tpc
+        integer(I8), allocatable, dimension(:)  :: ct, ctind, tct, &
+            tbtind, tube1, tube2
+        logical, allocatable, dimension(:)      :: ismarked, isincycle, &
+            isboundingtube, isactivetube, keeptubepair, iscurrentboundingtube
+        type(IntegerDynamicArrayUDT), allocatable   :: cycletubes(:), &
+            cycleboundingtubeind(:)
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Unpack for ease at this stage
+        associate(&
+            face    => topomesh%face,   &
+            tube    => topomesh%tube    &
+            )
+
+        ! Check optional arguments
+        if (present(includetube)) then 
+            ismarked = includetube
+        else
+            allocate(ismarked(tube%ntot))
+            ismarked = .true.
+        end if 
+
+        ! Determine cycles
+        !=================
+        ! Initialize
+        allocate(isincycle(tube%ntot), isboundingtube(tube%ntot))
+        isincycle = .false.
+        isboundingtube = .false. 
+
+        ! Call dedicated routine
+        call tmadaptor%GetMergeTubeCycles(topomesh, cycletubes, cycleboundingtubeind)
+
+        ! Process information for easier use later on
+        do i = 1, size(cycletubes)
+            ! Get the current tubes and indices
+            ct = cycletubes(i)%Get()
+            ctind = cycleboundingtubeind(i)%Get()
+
+            ! Set logicals
+            isincycle(ct) = .true.
+            isboundingtube(ct(ctind)) = .true. 
+        end do
+
+        ! Determine mergeable tube pairs
+        !===============================
+        tube1 = topomesh%tube%graph%v(topomesh%tube%graph%ev1)
+        tube2 = topomesh%tube%graph%v(topomesh%tube%graph%ev2)
+
+        ! Construct tube pairs
+        tpc = size(tube1) ! tube pair counter
+
+        ! If no pairs were found, exit
+        if (tpc == 0) then 
+            allocate(hftubes(0), lftubes(0))
+            return 
+        end if 
+
+        ! Remove pairs based on cycles
+        allocate(isactivetube(tube%ntot), keeptubepair(tpc), &
+            iscurrentboundingtube(tube%ntot))
+        keeptubepair = .true. 
+        do i = 1, tpc
+            ! Unpack
+            thft = tube1(i)
+            tlft = tube2(i)
+
+            ! Check if there are any tubes of a cycle in the pair
+            if (.not. any(isincycle([tlft, thft]))) then 
+                ! Keep this pair, skip
+                cycle
+            end if 
+
+            ! Check if there are any bounding tubes present
+            if (.not. any(isboundingtube([tlft, thft]))) then 
+                ! Keep this pair, skip
+                cycle
+            end if 
+
+            ! Bounding tubes are present, so we need to do thorough 
+            ! checks for each cycle
+            isactivetube = .false.
+            isactivetube([thft, tlft]) = .true. 
+            do j = 1, size(cycletubes)
+                ! Check if the tube pair was already deleted, if so, exit the loop
+                if (.not. keeptubepair(i)) then 
+                    exit
+                end if
+
+                ! Get the current active cycle tubes
+                tct = cycletubes(j)%Get()
+                tbtind = cycleboundingtubeind(j)%Get()
+
+                ! Check if any cycle tubes are in the current tube pair
+                if (.not. any(isactivetube(tct))) then 
+                    ! Skip
+                    cycle
+                end if 
+
+                ! Check if any active cycle tubes are bounding tubes
+                if (.not. any(isactivetube(tct(tbtind)))) then 
+                    ! Skip
+                    cycle
+                end if
+
+                ! Check if all active tubes are bounding tubes
+                iscurrentboundingtube = .false.
+                iscurrentboundingtube(tct(tbtind)) = .true.
+                if (.not. all(iscurrentboundingtube([thft, tlft]))) then 
+                    cycle
+                end if 
+
+                ! Bounding tubes are present, so can only include pair 
+                ! if all are bounding tubes in this cycle
+                if (.not. (size(tbtind )== size(tct))) then 
+                    ! Mark 
+                    keeptubepair(i) = .false. 
+                end if
+            end do 
+        end do
+
+        ! Set output
+        allocate(hftubes(count(keeptubepair)), lftubes(count(keeptubepair)))
+        j = 0
+        do i = 1, size(keeptubepair)
+            if (keeptubepair(i)) then
+                j = j + 1
+                hftubes(j) = ConstructIntegerDynamicArray([tube1(i)])
+                lftubes(j) = ConstructIntegerDynamicArray([tube2(i)])
+            end if 
+        end do 
 
         ! Housekeeping
         end associate
