@@ -242,9 +242,9 @@ module goatmod_userinput
         !           can be 'pol-rad', i.e. continue poloidal splitting after
         !           the radial split an inclined boundary face
         ! - split_out: option to not split pentagons 
-        ! - splittype: can be 1 for radial splitting, i.e. reducing radial 
-        !              width of cells, or 2 for poloidal splitting, i.e. 
-        !              reducing the poloidal length of cells
+        ! - splittype: can be:
+        !               1: for radial splitting, i.e. reducing radial width of cells
+        !               2: for poloidal splitting, i.e. reducing the poloidal length of cells
         ! - n_split: number of allowed splitting operations      
         ! - typeT: method to split a triangle, can be 'stacked', i.e. triangle 
         !          is split into two trianlge, or 'cutcell', i.e. triangle is 

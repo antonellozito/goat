@@ -623,6 +623,9 @@ module gamod_driver
         ! Arguments
         type(GAoptionsUDT), intent(inout) :: options
 
+        ! Auxiliary
+        integer(I8) :: nl
+
         ! BLG, first remove small triangles
         if (options%BLG) &
             options%rem_small_trias = .true.
@@ -635,6 +638,19 @@ module gamod_driver
                 & 'dist_function is off. Setting this to 1.'
             print *, 'options%dist_function: T'
         end if
+
+        ! Make sure split and merge arrays are the same size
+        nl = size(options%merging_array)
+        if ( nl /= size(options%splitting_array) &
+            .or. nl /= size(options%n_split_array) &
+            .or. nl /= size(options%rad_type_array) &
+            .or. nl /= size(options%pol_type_array) &
+            .or. nl /= size(options%merge_crit_array) &
+            .or. nl /= size(options%n_merge_array)) then
+                call gdErrorHandler('CheckGAoptions: make sure that ga.splitting, ' // &
+                & 'ga.merging, ga.n_split, ga.rad_type, ga.pol_type, ga.merge_crit, ga.n_merge')
+        end if
+
 
     end subroutine
 

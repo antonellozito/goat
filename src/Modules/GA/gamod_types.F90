@@ -244,6 +244,9 @@ module gamod_types
         ! X-point(s), separatrices
         integer(I8), allocatable, dimension(:)  :: xpointID, sepID
         integer(I8)                             :: nxp, nsep
+
+        ! logicals
+        logical(I8)                             :: hasGoatGGData
             
     contains
 
@@ -2428,6 +2431,7 @@ module gamod_types
         GAgrid%data%nxp         = grid%data%nxp
         GAgrid%data%sepID       = grid%data%sepID
         GAgrid%data%nsep        = grid%data%nsep
+        GAgrid%data%hasGoatGGData = grid%data%hasGoatGGData
         GAfd%fluxsurfacefacesP1 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacefacesP(:,1))
         GAfd%fluxsurfacefacesP2 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacefacesP(:,2))
         GAfd%fluxsurfacefaces   = ConstructIntegerDynamicArrayBuffered( &
@@ -2531,12 +2535,14 @@ module gamod_types
         grid%data%nxp               = GAgrid%data%nxp
         grid%data%sepID             = GAgrid%data%sepID
         grid%data%nsep              = GAgrid%data%nsep
+        grid%data%hasGoatGGData     = GAgrid%data%hasGoatGGData
         gfd%fluxsurfacefacesP(:,1)  = GAfd%fluxsurfacefacesP1%Get()
         gfd%fluxsurfacefacesP(:,2)  = GAfd%fluxsurfacefacesP2%Get()
         gfd%fluxsurfacefaces        = GAfd%fluxsurfacefaces%Get()
         gfd%fluxsurfacevertsP(:,1)  = GAfd%fluxsurfacevertsP1%Get()
         gfd%fluxsurfacevertsP(:,2)  = GAfd%fluxsurfacevertsP2%Get()
         gfd%fluxsurfaceverts        = GAfd%fluxsurfaceverts%Get()
+
 
         ! Problem need to compute some extra fields for grid 
         ! See what is needed for WriteGOAT: TODO

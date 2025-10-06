@@ -343,28 +343,26 @@ VERSION 1.00.00
 'ga.bunch_pent'      '0'
 'ga.BLG'             '0'
 'ga.BLG_n_layers'    '0'
-'ga.splitting'       '1'
-'ga.merging'         '0'
+'ga.splitting'       '[1]'
+'ga.merging'         '[0]'
 'ga.pents_to_tria'   '0'
-'ga.merging2'        '0'
 
 # Splitting options
 'ga.no_pents'         '1'
-'ga.splittype'        'rad'
-'ga.n_split'          '5'
+'ga.splittype'        '[1]'
+'ga.n_split'          '[5]'
 'ga.typeT'            'cutcell'
-'ga.rad_type'         'h_rad'
-'ga.pol_type'         'h_pol'
+'ga.rad_type'         '[2]'
+'ga.pol_type'         '[2]'
 'ga.dist_function_threshold_split' '0.9'
 
 # Merging options
 'ga.no_hex'           '1'
-'ga.merg_crit'        'h_pol'
+'ga.merg_crit'        '[3]'
 'ga.merge_h_pol_factor' '1.5'
-'ga.n_merge'           '20'
+'ga.n_merge'           '[20]'
 'ga.dist_function_threshold_merge' '0.8'
 'ga.merg_crit2'       'h_rad_core'
-'ga.n_merge2'          '20'
 
 # Pentagon allowance
 'ga.no_pents_area_merge' '0'
