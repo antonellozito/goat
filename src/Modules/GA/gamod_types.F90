@@ -2501,7 +2501,7 @@ module gamod_types
         gv%bx           = GAv%bx%Get()
         gv%by           = GAv%by%Get()
         gv%psi          = GAv%psi%Get()
-        gv%ffbz         = GAv%ffbz
+        gv%ffbz         = GAv%ffbz 
 
         ! Face information
         gf%vert(:,1)    = GAf%vert1%Get()
@@ -2538,120 +2538,122 @@ module gamod_types
 
         ! Flux surface ID
         gfd%fluxsurfaceID = 0
+        gv%fieldlineID = 0
         do i = 1, GAfd%nFs
             vxs = GetFluxSurfaceVxsGA(GAfd, i)
             gfd%fluxsurfaceID(vxs) = i
+            gv%fieldlineID(vxs) = i 
         end do
 
         ! Extract boundaries
         !===================
         ! Get the mapping between boundary labels 
-        gglabels = options%facelabelmappingGG
-        gdlabels = options%facelabelmappingGD 
+        !gglabels = options%facelabelmappingGG
+        !gdlabels = options%facelabelmappingGD 
 
         ! Substitute labels
-        do i = 1, size(options%facelabelsubfrom)
-            where (gf%label == options%facelabelsubfrom(i)) &
-                gf%label = options%facelabelsubto(i)
-        end do
+        !do i = 1, size(options%facelabelsubfrom)
+        !    where (gf%label == options%facelabelsubfrom(i)) &
+        !        gf%label = options%facelabelsubto(i)
+        !end do
 
         ! Loop over all face labels (not regions here!) to precompute
         ! number of grid boundaries (can be more/less)
-        allocate(mask(gf%ntot))
-        allocate(facevec(gf%ntot))
-        facevec(:) = (/(i, i=1,gf%ntot,1)/)
-        nlabels = size(gglabels) 
-        nbnd = 0 ! number of boundaries
-        do il = 1, nlabels 
-            ! Get the faces of this boundary
-            mask(:) = gf%label == gglabels(il);
-            nfpb = count(mask)
+        !allocate(mask(gf%ntot))
+        !allocate(facevec(gf%ntot))
+        !facevec(:) = (/(i, i=1,gf%ntot,1)/)
+        !nlabels = size(gglabels) 
+        !nbnd = 0 ! number of boundaries
+        !do il = 1, nlabels 
+        !    ! Get the faces of this boundary
+        !    mask(:) = gf%label == gglabels(il);
+        !    nfpb = count(mask)
 
             ! Check
-            if (nfpb == 0) then 
+        !    if (nfpb == 0) then 
                 ! this will not become a boundary, skip rest of loop
-                cycle
-            end if
+        !        cycle
+        !    end if
 
             ! Extract faces
-            allocate(tempfaces(nfpb))
-            tempfaces = pack(facevec, mask) 
+        !    allocate(tempfaces(nfpb))
+        !    tempfaces = pack(facevec, mask) 
 
             ! Determine number of boundaries by sorting
-            allocate(sortindex(nfpb))
-            allocate(ispolygonstart(nfpb), isbranchingpolygon(nfpb))
-            allocate(temparray(nfpb, 2))
-            temparray(:, :) = gf%vert(tempfaces, :)
-            call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart, &
-                isbranchingpolygon)
-            nbnd = nbnd + count(ispolygonstart)
+        !    allocate(sortindex(nfpb))
+        !    allocate(ispolygonstart(nfpb), isbranchingpolygon(nfpb))
+        !    allocate(temparray(nfpb, 2))
+        !    temparray(:, :) = gf%vert(tempfaces, :)
+        !    call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart, &
+        !        isbranchingpolygon)
+        !    nbnd = nbnd + count(ispolygonstart)
 
             ! Housekeeping
-            deallocate(tempfaces, sortindex, ispolygonstart, temparray, isbranchingpolygon)
+        !    deallocate(tempfaces, sortindex, ispolygonstart, temparray, isbranchingpolygon)
 
-        end do 
+        !end do 
 
         ! Extract boundaries
-        allocate(grid%bnd(nbnd))
-        ib = 0 ! boundary counter
-        do il = 1, nlabels
+        !allocate(grid%bnd(nbnd))
+        !ib = 0 ! boundary counter
+        !do il = 1, nlabels
             
 
             ! Get the faces of this boundary
-            mask(:) = gf%label == gglabels(il);
-            nfpb = count(mask)
+        !    mask(:) = gf%label == gglabels(il);
+        !    nfpb = count(mask)
 
             ! Check
-            if (nfpb == 0) then 
+        !    if (nfpb == 0) then 
                 ! Don't add as a boundary, skip rest of loop
-                cycle 
-            end if
+        !        cycle 
+        !    end if
 
             ! Sort the boundary faces
-            allocate(sortindex(nfpb), ispolygonstart(nfpb), &
-                tempfaces(nfpb), temparray(nfpb,2), isbranchingpolygon(nfpb))
+        !    allocate(sortindex(nfpb), ispolygonstart(nfpb), &
+        !        tempfaces(nfpb), temparray(nfpb,2), isbranchingpolygon(nfpb))
 
-            tempfaces = pack(facevec, mask)
-            temparray(:,:) = grid%face%vert(tempfaces, :)
-            call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart, &
-                isbranchingpolygon)
-            tempfaces = tempfaces(sortindex)
+        !    tempfaces = pack(facevec, mask)
+        !    temparray(:,:) = grid%face%vert(tempfaces, :)
+        !    call SortPolygonEdges(temparray, nfpb, sortindex, ispolygonstart, &
+        !        isbranchingpolygon)
+        !    tempfaces = tempfaces(sortindex)
             
             ! Loop over all found boundary segments
-            nseg = count(ispolygonstart)
-            allocate(segstart(nseg))
-            segstart = pack([(k, k = 1, nfpb)], ispolygonstart)
-            do j = 1, nseg
+        !    nseg = count(ispolygonstart)
+        !    allocate(segstart(nseg))
+         !   segstart = pack([(k, k = 1, nfpb)], ispolygonstart)
+         !   do j = 1, nseg
                 ! Update the boundary counter
-                ib = ib + 1
+        !        ib = ib + 1
                 
                 ! Compute end segment index
-                if (j < nseg) then 
-                    segend = segstart(j+1)-1
-                else
-                    segend = nfpb
-                end if 
+        !        if (j < nseg) then 
+        !            segend = segstart(j+1)-1
+        !        else
+        !            segend = nfpb
+        !        end if 
 
                 ! Add the boundary ID
-                grid%bnd(ib)%ID = gdlabels(il)
-                grid%bnd(ib)%nface = segend-segstart(j)+1
+        !        grid%bnd(ib)%ID = gdlabels(il)
+        !        grid%bnd(ib)%nface = segend-segstart(j)+1
 
                 ! Allocate this boundary
-                call AllocateBnd(grid%bnd(ib))
+        !        call AllocateBnd(grid%bnd(ib))
 
                 ! Add faces (already sorted before)
-                grid%bnd(ib)%face(:) = tempfaces(segstart(j):segend)
+        !        grid%bnd(ib)%face(:) = tempfaces(segstart(j):segend)
 
                 ! Extract vertices
-                call ExtractPolygonVertices( & 
-                    gf%vert(grid%bnd(ib)%face,:), &
-                    grid%bnd(ib)%nface, grid%bnd(ib)%vert)
-            end do 
+        !        call ExtractPolygonVertices( & 
+        !            gf%vert(grid%bnd(ib)%face,:), &
+         !           grid%bnd(ib)%nface, grid%bnd(ib)%vert)
+        !    end do 
 
             ! Deallocate
-            deallocate(sortindex, ispolygonstart, temparray, tempfaces, &
-                segstart, isbranchingpolygon)
-        end do
+        !    deallocate(sortindex, ispolygonstart, temparray, tempfaces, &
+        !        segstart, isbranchingpolygon)
+        !end do
 
 
         ! Problem need to compute some extra fields for grid 

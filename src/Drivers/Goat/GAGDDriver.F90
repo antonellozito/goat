@@ -66,7 +66,7 @@ subroutine GAGDDriver(goatoptions)
     call WriteGOAT(goatoptions, grid, magneticField, environment)
 
     ! Deallocate some grid properties
-    deallocate(grid%bnd)
+    if (allocated(grid%bnd)) deallocate(grid%bnd)
 
     ! Grid deformation
     !=================
