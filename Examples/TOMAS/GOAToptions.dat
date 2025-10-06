@@ -411,6 +411,7 @@ VERSION 1.00.00
 # Read exising file? 
 'gg.tm.readexistingTM'          '0'
 'gg.tm.readexistingtracers'     '0'
+'gg.tm.writedebugoutput'        '0'
 'gg.tm.TMfilepath'              './output/topomesh.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
@@ -438,10 +439,11 @@ VERSION 1.00.00
 'gg.tm.PFbnd.frac'              '0.1'
 'gg.tm.removecoreregions'       '1'
 'gg.tm.removewidegridregions'   '0'
-'gg.tm.mergetangencypointtubes' '0'
-'gg.tm.mergeavptubes'           '0'
-'gg.tm.dpsimintangencypointtubes'   '0.0'
-'gg.tm.lradmintangencypointtubes'   '1.0e-2'
+
+'gg.tm.mergetubes'              '1'
+'gg.tm.mergetubes.meth'         'extensive'
+'gg.tm.dpsimintubes'            '0.0'
+'gg.tm.lradmintubes'            '1.0e-2'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'

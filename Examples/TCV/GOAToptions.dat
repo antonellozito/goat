@@ -9,7 +9,7 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # General options
 'goat.debug'                        '0'
-'goat.meth'                         'GD'
+'goat.meth'                         'GG'
 
 # Input file locations 
 #'Doat.gridfilepath'                 'traduit.out.b2us_smoothed2'
@@ -20,7 +20,7 @@ VERSION 1.00.00
 'goat.GDinputfilepath'              'GOAToptions.dat'
 
 # Output file locations 
-'goat.writefilepath'                'traduit.out.b2us_gd'  
+'goat.writefilepath'                'traduit.out.b2us'  
 
 # Output options 
 'goat.write_final'                  '1'
@@ -470,6 +470,7 @@ VERSION 1.00.00
 # Read exising file? 
 'gg.tm.readexistingTM'          '0'
 'gg.tm.readexistingtracers'     '0'
+'gg.tm.writedebugoutput'        '0'
 'gg.tm.TMfilepath'              './output/topomesh_base.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
@@ -500,9 +501,11 @@ VERSION 1.00.00
 'gg.tm.PFbnd.frac'              '0.3'
 'gg.tm.removecoreregions'       '1'
 'gg.tm.removewidegridregions'   '0'
-'gg.tm.mergetangencypointtubes' '0'
-'gg.tm.dpsimintangencypointtubes'   '0.0'
-'gg.tm.lradmintangencypointtubes'   '0.5e-3'
+
+'gg.tm.mergetubes'              '1'
+'gg.tm.mergetubes.meth'         'extensive'
+'gg.tm.dpsimintubes'            '0.0'
+'gg.tm.lradmintubes'            '0.5e-3'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'
