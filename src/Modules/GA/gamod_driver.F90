@@ -31,7 +31,7 @@ module gamod_driver
     
     contains
 
-    subroutine GridAdaptor(grid,environment,magneticField,state,options)
+    subroutine GridAdaptor(grid,environment,magneticField,options)
 
         ! Description
         !============
@@ -48,7 +48,6 @@ module gamod_driver
         type(GAGridUDT), intent(inout)              :: grid
         type(EnvironmentUDT), intent(in)            :: environment
         type(MagneticFieldUDT), intent(in)          :: magneticField     
-        type(StateUDT), intent(in)                  :: state
         type(GAoptionsUDT), intent(inout)           :: options
 
         ! Initialize grid adaptation
@@ -262,17 +261,17 @@ module gamod_driver
         ! Splitting  and merging
         ! Merging
         do i = 1, size(options%merge_crit_array)
-            if (options%merging_array(i)) then
+            if (options%merging_array(i) == 1) then
                 options_merge = options
-                options_merge%merging = options%merging_array(i)
+                options_merge%merging = options%merging_array(i) == 1
                 options_merge%n_merge = options%n_merge_array(i)
                 options_merge%merge_crit = options%merge_crit_array(i)
                 call grid%DoMerging(magneticField, qm, options_merge)
             end if
 
-            if (options%splitting_array(i)) then
+            if (options%splitting_array(i) == 1) then
                 options_split = options
-                options_split%splitting = options_split%splitting_array(i)
+                options_split%splitting = options_split%splitting_array(i) == 1
                 options_split%n_split = options%n_split_array(i)
                 options_split%rad_type = options%rad_type_array(i)
                 options_split%pol_type = options%pol_type_array(i)
