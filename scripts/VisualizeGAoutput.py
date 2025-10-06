@@ -78,9 +78,9 @@ plotter.PlotGridCells(grid2,1)
 
 # Reading farSOL interpolation value
 #-----------------------------------
-filepath = datadir + '/' + 'farSOLint.dat'
-farSOLint = dh.ReadGARealArrayFile(filepath)
-plotter.PlotGridCellValue(grid1,farSOLint, 0.95, 2)
+#filepath = datadir + '/' + 'farSOLint.dat'
+#farSOLint = dh.ReadGARealArrayFile(filepath)
+#plotter.PlotGridCellValue(grid1,farSOLint, 0.95, 2)
 
 
 
