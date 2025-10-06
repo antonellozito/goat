@@ -605,6 +605,9 @@ module gamod_driver
         gaoptions%debug                 = goatoptions%debug 
         gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
         gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
+        gaoptions%facelabelmappingGD    = goatoptions%GGtoGDfacelabelmappingGD 
+        gaoptions%facelabelsubfrom      = goatoptions%GGtoGDfacelabelsubfrom
+        gaoptions%facelabelsubto        = goatoptions%GGtoGDfacelabelsubto
         gaoptions%OMP_r                 = goatoptions%OMP_r
         gaoptions%OMP_z                 = goatoptions%OMP_z
         gaoptions%IMP_r                 = goatoptions%IMP_r

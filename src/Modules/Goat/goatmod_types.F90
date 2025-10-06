@@ -2902,6 +2902,7 @@ module goatmod_types
         call DeallocateFaces(grid%face)
         call DeallocateCells(grid%cell)
         call DeallocateGridData(grid%data)
+        deallocate(grid%bnd)
 
     end subroutine
 

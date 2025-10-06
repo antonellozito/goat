@@ -186,7 +186,12 @@ module goatmod_userinput
         ! Facelabel mapping
         ! - facelabelmappingGG: list of face labels of the grid generator
         ! - facelabelmappingGA: mapping of grid generator label to labels
-        !                       needed for grid adaptation
+        !                       required for grid adaptation
+        ! - facelabelmappingGD: mapping of grid generator label to labels
+        !                       required for grid deformation
+        ! - facelabelsubfrom: face label of grid generator which should be 
+        !                       substituted
+        ! - facelabelsubto: substitution labels
 
         ! Operation options    
         ! - rem_small_trias: remove small triangles
@@ -329,6 +334,10 @@ module goatmod_userinput
         ! Facelabel mapping
         integer(I8), allocatable    :: facelabelmappingGG(:)
         integer(I8), allocatable    :: facelabelmappingGA(:)
+        integer(I8), allocatable    :: facelabelmappingGD(:)
+        integer(I8), allocatable    :: facelabelsubfrom(:)
+        integer(I8), allocatable    :: facelabelsubto(:)
+
 
         ! Operation options
         logical                     :: rem_small_trias
@@ -1203,8 +1212,10 @@ module goatmod_userinput
         options%filepath            = 'traduit.out.b2us'
 
         ! Default mappings
-        allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
-        allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8), &
+        if (.not.allocated(options%facelabelsubfrom)) &
+            allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
+        if (.not.allocated(options%facelabelmappingGG)) &
+            allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8), &
         options%facelabelmappingGA(1:8))
         options%facelabelmappingGG = [-13, -34, -23, -24, -21, -42, -43, -44]
         options%facelabelmappingGD = [1, 2, 3,   3,   4,   5,   5,   5]

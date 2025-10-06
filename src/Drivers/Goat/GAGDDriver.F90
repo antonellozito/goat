@@ -41,8 +41,8 @@ subroutine GAGDDriver(goatoptions)
     gaoptions%inputfilepath         = goatoptions%inputfilepath
     gdoptions%inputfilepath         = goatoptions%inputfilepath
     gridoptions%inputfilepath       = goatoptions%inputfilepath 
-    call gridoptions%Set()
     call gaoptions%Set()
+    call gdoptions%Set()
     call gridoptions%Set()
 
     ! Grid adaptations
@@ -64,6 +64,9 @@ subroutine GAGDDriver(goatoptions)
 
     ! Grid data
     call WriteGOAT(goatoptions, grid, magneticField, environment)
+
+    ! Deallocate some grid properties
+    deallocate(grid%bnd)
 
     ! Grid deformation
     !=================

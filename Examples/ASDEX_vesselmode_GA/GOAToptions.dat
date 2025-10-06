@@ -47,6 +47,9 @@ VERSION 1.00.00
 'goat.GGtoGA.facelabelsubto'         '[3, -21]'
 'goat.GGtoGA.facelabelmappingGG'     '[1, 2, -21, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]'
 'goat.GGtoGA.facelabelmappingGA'     '[4, 5,   2, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1, 3]'
+'goat.GGtoGD.facelabelsubfrom'       '[-99, -25]'
+'goat.GGtoGD.facelabelsubto'         '[3, -21]'
+'goat.GGtoGD.facelabelmappingGD'     '[1, 1,   2, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4, 3]'
 
 #-------------------------------------------------------------------------#
 #                          GRID OPTIONS                                   #
