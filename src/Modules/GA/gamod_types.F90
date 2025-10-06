@@ -665,7 +665,7 @@ module gamod_types
 
         ! Pre-process non aligned faces
         !==============================
-        not_aligned_f = (f%aligned%Get()) == 0
+        not_aligned_f = [f%aligned%Get()] == 0
 
         indCv = (/ (i, i = 1, c%ntot )/)
         comp_range = indCv .le. qm%nCv
@@ -1011,7 +1011,7 @@ module gamod_types
             cells = pack(indcv, log)
 
             ! Get small cells
-            log2 = ((qm%cvS(cells) < crit) .and. ((c%reg%Get(cells)) /= 3) .and. ((c%reg%Get(cells)) /= 4))
+            log2 = ((qm%cvS(cells) < crit) .and. ([c%reg%Get(cells)] /= 3) .and. ([c%reg%Get(cells)] /= 4))
             allocate(small_cells(count(log2)))
             small_cells = pack(cells, log2)
 
@@ -1094,7 +1094,7 @@ module gamod_types
             crit = h_pol_no_cells_crit * options%merge_h_pol_factor
 
             ! Give triangles artifical larger h_pol
-            trias_log = (c%vertP2%Get()) ==3
+            trias_log = [c%vertP2%Get()] ==3
             allocate(trias(count(trias_log)))
             trias = pack(indcv, trias_log)
             qm%h_pol(trias) = qm%h_pol(trias)*2
@@ -1151,7 +1151,7 @@ module gamod_types
             ! Merge the cells with strong bias
             ! Get non-aligned faces
             indfc = (/ (i, i = 1, f%ntot) /)
-            log = (f%aligned%Get()) == 0 .and. .not.isMember(indfc,forbidden_fcs)
+            log = [f%aligned%Get()] == 0 .and. .not.isMember(indfc,forbidden_fcs)
             allocate(pol_faces(count(log)))
             pol_faces = pack(indfc, log)
 
@@ -1196,7 +1196,7 @@ module gamod_types
 
             ! Distance function fun_r
             ! Only use cells in SOL
-            log = (c%reg%Get()) == 2
+            log = [c%reg%Get()] == 2
             allocate(cellsD(count(log)))
             cellsD = pack(indcv, log)
 
@@ -1266,7 +1266,7 @@ module gamod_types
             ! Find cells with smallest psi width
             ! First only pick the cells smaller than h_rad_threshold and from creg 1 or 2
             cellsD = (/(i, i = 1, c%ntot)/)
-            log = (qm%h_rad .lt. options%h_rad_threshold .and. (c%reg%Get()) .lt. 3)
+            log = (qm%h_rad .lt. options%h_rad_threshold .and. [c%reg%Get()] .lt. 3)
             allocate(cells(count(log)))
             cells = pack(cellsD, log)
 
@@ -1472,7 +1472,7 @@ module gamod_types
 
                     ! Get poloidal faces of triangle
                     fcs_cv = GetCellFaceGA(c, cctria(nums(i)))
-                    log = (.not.isBoundaryFaceGA(grid, fcs_cv) .and. (f%aligned%Get(fcs_cv)) == 0)
+                    log = (.not.isBoundaryFaceGA(grid, fcs_cv) .and. [f%aligned%Get(fcs_cv)] == 0)
                     allocate(fcs_m(count(log)))
                     fcs_m = pack(fcs_cv, log)
                     qm%merge_fc = fcs_m(1)
@@ -1726,7 +1726,7 @@ module gamod_types
                 cells = pack(cellsD2, log)
 
                 ! Compute incidence angle for every cell, compute sine
-                b_flag = (f%label%Get()) /= 0
+                b_flag = [f%label%Get()] /= 0
                 ncell = size(cells)
                 do i = 1, ncell
                     fcs = GetCellFaceGA(c, cells(i))
@@ -1932,7 +1932,7 @@ module gamod_types
             case ('trias_cvS')
 
                 ! Get triangles with largest area
-                log = ((c%faceP2%Get(indcv)) == 3)
+                log = ([c%faceP2%Get(indcv)] == 3)
                 allocate(tria_cells(count(log)))
                 tria_cells = pack(indcv, log)
 
@@ -1993,7 +1993,7 @@ module gamod_types
             case ('trias_farSOL')
 
                 ! Get triangular cells
-                log = (c%faceP2%Get()) == 3
+                log = [c%faceP2%Get()] == 3
                 allocate(tria_cells(count(log)))
                 tria_cells = pack(indcv, log)
                 
@@ -2114,7 +2114,7 @@ module gamod_types
                 cells = pack(cellsD2, log)   
                 
                 ! Compute incidence angle for every cell, compute sine
-                b_flag = (f%label%Get()) /= 0
+                b_flag = [f%label%Get()] /= 0
                 ncell = size(cells)
                 do i = 1, ncell
                     fcs = GetCellFaceGA(c, cells(i))
@@ -3731,7 +3731,7 @@ module gamod_types
 
         ! Get boundary faces
         indf = (/(i, i = 1, f%ntot)/)
-        log = (f%label%Get()) /= 0 .and. fcLbl_loc /= 0
+        log = [f%label%Get()] /= 0 .and. fcLbl_loc /= 0
         allocate(fcs(count(log)))
         fcs = pack(indf, log)
 
@@ -4970,12 +4970,12 @@ module gamod_types
         tf = GetCellFaceGA(c, ic)
 
         ! Find align face of the tria
-        is_aligned = (f%aligned%Get(tf)) == 1;
+        is_aligned = [f%aligned%Get(tf)] == 1
 
         if ((count(is_aligned)) /= 1) then
 
             ! Most aligned faces
-            dpsi_f = abs((v%psi%Get(f%vert1%Get(tf))) - (v%psi%Get(f%vert2%Get(tf))))
+            dpsi_f = abs(v%psi%Get(f%vert1%Get(tf)) - v%psi%Get(f%vert2%Get(tf)))
             indmin = minloc(dpsi_f,1)
             faceA = tf(indmin)
 
@@ -5555,8 +5555,8 @@ module gamod_types
             trap_cells = traps(1:counter)
 
             ! Get b_neig
-            log = ((c%cflags%Get(neigs)) == 3 &
-                .and. (c%faceP2%Get(neigs)) == 4 &
+            log = ([c%cflags%Get(neigs)] == 3 &
+                .and. [c%faceP2%Get(neigs)] == 4 &
                 .and. .not.isMember(neigs, trap_cells))
 
             allocate(b_neig(count(log)))
@@ -5965,7 +5965,7 @@ module gamod_types
             b_vert = GetCommonVert(f, common_face, b_facesQ(1))
 
             ! Replace the occurrence of bvert with con_vert in cell%vert
-            log = ((c%vert%Get()) == b_vert)
+            log = [c%vert%Get()] == b_vert
             allocate(indbvert(count(log)))
             indcv = (/ (j, j = 1, c%vertP1%Get(c%ntot)+c%vertP2%Get(c%ntot)-1) /)
             indbvert = pack(indcv,log)
@@ -6468,7 +6468,7 @@ module gamod_types
         cv_detectD = 0
 
         ! Get boundary face
-        b_flag = ((f%label%Get()) /= 0)
+        b_flag = [f%label%Get()] /= 0
 
         ! Pre-compute query for face
         cvLookUp = GetCvLookUpGA(c)
@@ -7036,7 +7036,7 @@ module gamod_types
 
                 ! Take new poloidal faces
                 fcsD = GetCellFaceGA(c, cv(1))
-                log = ((fcsD /= prev_face) .and. ((f%aligned%Get(fcsD)) == 0))
+                log = ((fcsD /= prev_face) .and. [f%aligned%Get(fcsD)] == 0)
                 allocate(fcsD2(count(log)))
                 fcsD2 = pack(fcsD, log)
                 fcs = fcsD2(1)
@@ -7057,7 +7057,7 @@ module gamod_types
                         fcs3 = GetCellFaceGA(c, cv(1))
                         
                         ! Do not continue if any non-aligned face is a boundary face
-                        fcs3_nal = pack(fcs3, f%aligned%Get(fcs3) == 0)
+                        fcs3_nal = pack(fcs3, [f%aligned%Get(fcs3)] == 0)
                         if (any(isBoundaryFaceGA(grid, fcs3_nal)))  nf = 0
 
                     end if
@@ -7215,12 +7215,12 @@ module gamod_types
         end if
 
         ! Determine cflags
-        b_flag = ((grid%face%label%Get()) /= 0)
+        b_flag = [grid%face%label%Get()] /= 0
         cells = (/ (i, i = 1, grid%cell%ntot )/)
         call grid%DetermineCflags(cells, b_flag)
 
         ! Remove empty flux surfaces
-        log = ((grid%data%fluxdata%fluxsurfacefacesP2%Get()) == 0)
+        log = [grid%data%fluxdata%fluxsurfacefacesP2%Get()] == 0
         allocate(empty_surf(count(log)))
         indfs = (/ (i, i= 1, grid%data%fluxdata%fluxsurfacefacesP2%Size() )/)
         empty_surf = pack(indfs, log)
@@ -9575,7 +9575,7 @@ module gamod_types
 
                 ! Get the pentagons
                 indcv = (/(i, i = 1, grid%cell%ntot)/)
-                log = (grid%cell%faceP2%Get()) == 5
+                log = [grid%cell%faceP2%Get()] == 5
                 allocate(cv5(count(log)))
                 cv5 = pack(indcv, log)
 
@@ -10076,7 +10076,7 @@ module gamod_types
                         indmax = maxloc(dpsi,1)
                         splitface = fcs(indmax)
 
-                        log = ((c%faceP2%Get(neigs)) == 5)
+                        log = [c%faceP2%Get(neigs)] == 5
                         allocate(neigs5(count(log)))
                         neigs5 = pack(neigs, log)
 
@@ -10923,10 +10923,10 @@ module gamod_types
         integer(I8) :: i
         integer(I8), allocatable :: pentsD(:), triangle4(:), indcv(:)
 
-        log = ((grid%cell%faceP2%Get(cells)) == 5)
+        log = [grid%cell%faceP2%Get(cells)] == 5
         allocate(pentsD(count(log)))
         pentsD = pack(cells, log)
-        log2 = ((grid%cell%cflags%Get()) == 4)
+        log2 = [grid%cell%cflags%Get()] == 4
         allocate(triangle4(count(log2)))
         indcv = (/ (i, i = 1, grid%cell%ntot)/)
         triangle4 = pack(indcv, log2)
@@ -15540,7 +15540,7 @@ module gamod_types
                 call grid%RemoveVertices(vert_remO)
 
                 ! Determine cflags
-                b_flag = ((f%label%Get()) /= 0)
+                b_flag = [f%label%Get()] /= 0
                 cells = (/(i, i = 1, c%ntot)/)
                 call grid%DetermineCflags(cells, b_flag)
 
@@ -15560,7 +15560,7 @@ module gamod_types
                 fcs = GetCellFaceGA(c, ic)
 
                 ! Get merge face
-                log_al = (f%aligned%Get(fcs)) == 1 .and. .not.isBoundaryFaceGA(grid, fcs)
+                log_al = [f%aligned%Get(fcs)] == 1 .and. .not.isBoundaryFaceGA(grid, fcs)
                 allocate(fcs_al(count(log_al)))
                 fcs_al = pack(fcs, log_al)
 
@@ -16183,11 +16183,11 @@ module gamod_types
         ! Initialize
         cvD = 0
         counter = 0
-        bf = (f%label%Get()) /= 0
+        bf = [f%label%Get()] /= 0
 
         ! Get boundary cells
         indcv = (/(i, i = 1, c%ntot)/)
-        log = isBoundaryCellGA(grid, indcv) .and. (c%faceP2%Get()) == 4
+        log = isBoundaryCellGA(grid, indcv) .and. [c%faceP2%Get()] == 4
         allocate(bcells(count(log)))
         bcells = pack(indcv, log)
 
@@ -16314,7 +16314,7 @@ module gamod_types
         counterf = 0
         counter1 = 0
         counter2 = 0
-        b_flag = ((grid%face%label%Get()) == 0)
+        b_flag = [grid%face%label%Get()] == 0
         in_flag1 = .false.
         in_flag2 = .false.
         fcs1 = 0
@@ -16465,7 +16465,7 @@ module gamod_types
         faces1 = 0
         counter = 0
         nv = size(verts)
-        b_flag = ((grid%face%label%Get()) /= 0)
+        b_flag = [grid%face%label%Get()] /= 0
         in_flag = .false.
 
         ! Loop over vertices
@@ -18475,7 +18475,7 @@ module gamod_types
             allocate(res(count(cell%face%Get().eq.i)))
             res = pack(cvLookUp,cell%face%Get().eq.i)
         else 
-            log = ((cell%face%Get()) == i)
+            log = [cell%face%Get()] == i
             allocate(ind(count(log)))
             indcf = (/ (j, j = 1, cell%face%Size()) /)
             ind = pack(indcf, log)
@@ -18526,7 +18526,7 @@ module gamod_types
         res = 0
 
         if (.not.present(fsvLookUp)) fsvLookUp = GetFsvLookUpGA(fd)
-        log = (fd%fluxsurfaceverts%Get()) == i
+        log = [fd%fluxsurfaceverts%Get()] == i
         allocate(res1(count(log)))
         res1 = pack(fsvLookUp,log)
         if (count(log) .lt. 1) return
@@ -18605,7 +18605,7 @@ module gamod_types
             counter = 0
 
             indc = (/( j, j = 1, cell%vertP1%Get(cell%ntot) + cell%vertP2%Get(cell%ntot)-1)/)
-            log = ((cell%vert%Get()) == i)
+            log = ([cell%vert%Get()] == i)
             allocate(ind(count(log)))
             ind = pack(indc, log)
 
@@ -18617,7 +18617,7 @@ module gamod_types
 
             res = covD(1:counter)
         else
-            log = ((cell%vert%Get()).eq.i)
+            log = [cell%vert%Get()] == i
             allocate(res(count(log)))
             res = pack(cvLookUp,log)
         end if
@@ -18753,7 +18753,7 @@ module gamod_types
 
         allocate(res(size(tf)))
         if (.not.present(meth)) then
-            res = ((g%face%label%Get(tf)) /= 0)
+            res = [g%face%label%Get(tf)] /= 0
         else if (meth == 1) then
             cf = g%cell%face%Get()
             res = .false.
@@ -18778,7 +18778,7 @@ module gamod_types
         logical :: res
 
         res = .false.
-        b_flag = ((grid%face%label%Get()) /= 0)
+        b_flag = [grid%face%label%Get()] /= 0
         fcs = GetCellFaceGA(grid%cell, cell)
         if (any(b_flag(fcs))) res = .true.
     
@@ -18794,7 +18794,7 @@ module gamod_types
 
         allocate(res(size(cell)))
         res = .false.
-        b_flag = ((grid%face%label%Get()) /= 0)
+        b_flag = [grid%face%label%Get()] /= 0
         do i = 1, size(cell)
             fcs = GetCellFaceGA(grid%cell, cell(i))
             if (any(b_flag(fcs))) res(i) = .true.
