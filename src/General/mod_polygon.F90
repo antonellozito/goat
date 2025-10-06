@@ -2756,6 +2756,11 @@ module mod_polygon
         ! has to be done 'manually' by checking for each branching polygon which
         ! vertices it has in common with another one. Support for this might be
         ! added in the future. 
+        ! Note: the current implementation to do this should have 
+        ! the same basic mechanics as finding the subgraphs of an 
+        ! undirected graph. Perhaps in the future, a graph-based 
+        ! implementation could be directly used here to increase 
+        ! readability and maintainability... 
     
         ! Arguments
         !==========
@@ -2842,14 +2847,14 @@ module mod_polygon
         logical                     :: allbranchingfound
         logical, allocatable        :: isedgesorted(:), isremedgesorted(:), &
             mask(:), isbranchingvertex(:, :), remisbranching(:, :), &
-            hasbv(:), sortedisbranchingvertex(:, :), pvb(:), &
-            isnonbranchingstartvertex(:, :)
+            hasbv(:), sortedisbranchingvertex(:, :), &
+            isnonbranchingstartvertex(:, :), isvertfound(:), tracevert(:)
     
         integer(I8)                 :: pID, ind 
         integer(I8), allocatable    :: remedges(:,:), edgeID(:), &
             remedgeID(:), temparray(:), allv(:), oc(:), el(:), sortind(:), &
             alloc(:), ps(:), tv(:), tvu(:), tvID(:), sortededges(:, :), &
-            pe(:), pse(:, :), pee(:, :), pv(:), sortind2(:)
+            pe(:), pse(:, :), pee(:, :), sortind2(:)
     
         ! Main program
         !=============
@@ -3146,62 +3151,77 @@ module mod_polygon
                 allocate(tvID(size(tvu)))
                 tvID = 0 
 
-                ! Start 'tracing' 
-                do i = 1, size(tvu)
-                    ! Check if ID was set
-                    if (tvID(i) == 0) then
-                        ! Set ID
-                        tvID(i) = pID 
+                ! Start 'tracing' - keep looping until all start vertices were
+                ! found 
+                allocate(isvertfound(size(tvu)), tracevert(size(tvu)))
+                isvertfound = .false. 
+                tracevert = .false. 
+                do while (.true.)
+                    ! Take a new vertex
+                    ind = findloc(isvertfound, .false., 1, back=.false.)
 
-                        ! Update counter
-                        pID = pID + 1
+                    ! Check exit condition
+                    if (ind == 0) then 
+                        ! All should be found, exit
+                        exit 
                     end if 
 
-                    ! Check which polygons have this vertex
-                    hasbv = pse(:, 1) == tvu(i) .or. pse(:, 2) == tvu(i) &
-                        .or. pee(:, 1) == tvu(i) .or. pee(:, 2) == tvu(i)
-                    
-                    ! Loop
-                    do j = 1, size(ps)
-                        if (hasbv(j)) then 
-                            ! Check 
-                            if (polygonID(ps(j)) == 0 .or. polygonID(ps(j)) == tvID(i)) then 
-                                ! Simply add
-                                polygonID(ps(j)) = tvID(i)
+                    ! Sanity check
+                    if (tvID(ind) /= 0) then 
+                        ! Starting at a vertex that was already 
+                        ! considered - this shouldn't happen
+                        call gdErrorHandler('SortPolygonEdges: starting at ' // &
+                            'a vertex that has already been added previously, ' // & 
+                            'this is a bug')
+                    end if 
 
-                                ! Check if other vertices are also 
-                                ! branching vertices to propagate IDs
-                                pvb = [sortedisbranchingvertex(ps(j), :), &
-                                    sortedisbranchingvertex(pe(j), :)]
-                                pv = [sortededges(ps(j), :), sortededges(pe(j), :)]
-                                do k = 1, size(pv)
-                                    if (pvb(k)) then 
-                                        ind = findloc(tvu, pv(k), 1)
-                                     
-                                        if (ind == 0) then 
-                                            call gdErrorHandler('unexpected error')
-                                        end if 
+                    ! Set ID
+                    tvID(ind) = pID 
 
-                                        ! Check if ID is non-zero - then throw error
-                                        if (tvID(ind) == 0 .or. tvID(ind) == tvID(i)) then
-                                            tvID(ind) = tvID(i)
-                                        else
-                                            ! Something weird going wrong here
-                                            call gdErrorHandler('SortPolygonEdges: ' // & 
-                                                'different branching polygons seem to ' // & 
-                                                'have common vertices, unexpected')
-                                        end if 
-                                    end if
-                                end do 
-                            else 
-                                ! Something weird going wrong here
-                                call gdErrorHandler('SortPolygonEdges: ' // & 
-                                'different branching polygons seem to ' // & 
-                                'have common vertices, unexpected')
-                            end if 
+                    ! Set vertex to be traced
+                    tracevert(ind) = .true. 
+
+                    ! Keep tracing until no more tracing vertices are found
+                    do while (.true.)
+                        ! Get the next vertex to trace
+                        ind = findloc(tracevert, .true., 1)
+                        if (ind == 0) then 
+                            exit 
                         end if 
+
+                        ! Check which polygons have this vertex
+                        hasbv = pse(:, 1) == tvu(ind) .or. pse(:, 2) == tvu(ind) &
+                            .or. pee(:, 1) == tvu(ind) .or. pee(:, 2) == tvu(ind)
+                        do j = 1, size(ps)
+                            if (hasbv(j)) then 
+                                ! Consistency check
+                                if (polygonID(ps(j)) == 0 .or. polygonID(ps(j)) == pID) then 
+                                    ! Add
+                                    polygonID(ps(j)) = pID
+
+                                    ! Check if any other vertices are 
+                                    ! polygon start vertices and should
+                                    ! be traced
+                                    tracevert = tracevert .or. &
+                                        (((pse(j, 1) == tvu) .or. (pse(j, 2) == tvu) .or. &
+                                        (pee(j, 1) == tvu) .or. (pee(j, 2) == tvu)) &
+                                        .and. .not. isvertfound)
+                                else
+                                    ! Something weird going wrong here
+                                    call gdErrorHandler('SortPolygonEdges: ' // & 
+                                        'different branching polygons seem to ' // & 
+                                        'have common vertices, unexpected')
+                                end if 
+                            end if 
+                        end do 
+
+                        ! Mark the current vertex as traced and found
+                        isvertfound(ind) = .true.
+                        tracevert(ind) = .false.
                     end do 
-                    
+
+                    ! Update branching polygon counter
+                    pID = pID + 1
                 end do 
 
                 ! Set polygon IDs for non-branching polygons
