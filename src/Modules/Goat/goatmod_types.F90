@@ -3998,7 +3998,7 @@ module goatmod_types
         type(EnvironmentUDT), intent(in)    :: environment
 
         ! Auxiliary
-        integer(I8), allocatable, dimension(:)  :: tv, tf, tfv 
+        integer(I8), allocatable, dimension(:)  :: tv
         real(R8), allocatable, dimension(:)     :: tpsi
         
         ! Loop
