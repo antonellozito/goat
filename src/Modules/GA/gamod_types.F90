@@ -11168,7 +11168,7 @@ module gamod_types
             )
 
         ! Split tface
-        call grid%SplitFace(magneticField, tface, v1n, f1n, f2n)
+        call grid%SplitFace(magneticField, tface, v1n, f1n, f2n, 'pol', 0.0_R8)
 
         ! Determine free vertex of the triangle by eliminate vertices of tface
         call grid%DetermineFreeVertTria(cv, tface, free_vert)
@@ -11240,7 +11240,7 @@ module gamod_types
             )
 
         ! Make new vertices
-        call grid%SplitFace(magneticField, tface, v1n, f1n, f2n)
+        call grid%SplitFace(magneticField, tface, v1n, f1n, f2n, 'pol', 0.0_R8)
 
         ! Determine free vertex of triangle
         call grid%DetermineFreeVertTria(cv, tface, free_vert)
@@ -11339,8 +11339,8 @@ module gamod_types
         call grid%DeterminePerpFaceTria(cv, Bface, Iface, perp_face)
 
         ! Make new vertices and faces - just geometric middle
-        call grid%SplitFace(magneticField, Bface, v1n, f11n, f12n)
-        call grid%SplitFace(magneticField, Iface, v2n, f21n, f22n)
+        call grid%SplitFace(magneticField, Bface, v1n, f11n, f12n, 'pol', 0.0_R8)
+        call grid%SplitFace(magneticField, Iface, v2n, f21n, f22n, 'pol', 0.0_R8)
 
         call grid%GetFaceNumber(v1n, v2n, 3, f3n)
         call grid%face%aligned%Set(f3n, grid%face%aligned%Get(perp_face))
@@ -11411,8 +11411,8 @@ module gamod_types
             call grid%DeterminePerpFaceTria(cv, Bface, Iface, perp_face)
 
             ! Split faces
-            call grid%SplitFace(magneticField, Bface, v1n, f11n, f12n)
-            call grid%SplitFace(magneticField, Iface, v2n, f21n, f22n)
+            call grid%SplitFace(magneticField, Bface, v1n, f11n, f12n, 'pol', 0.0_R8)
+            call grid%SplitFace(magneticField, Iface, v2n, f21n, f22n, 'pol', 0.0_R8)
 
             ! Make new face
             call grid%GetFaceNumber(v1n, v2n, 3, f3n)
@@ -11713,7 +11713,7 @@ module gamod_types
                     end if
                 else
 
-                    typeV = 'geometric'
+                    typeV = 'pol'
 
                 end if 
             else if (options%splittype == 'pol') then
@@ -11872,7 +11872,7 @@ module gamod_types
 
                     end if
                 else 
-                    typeV = 'geometric'
+                    typeV = 'pol'
                 end if
 
             case('pol')
@@ -12040,18 +12040,18 @@ module gamod_types
         select case (splitmeth)
         case ('regular')
 
-            if (type == 'pol') then
-                typeV = 'pol'
-            else if (type == 'rad') then
-                typeV = 'geometric'
-            end if
+            !if (type == 'pol') then
+            !    typeV = 'pol'
+            !else if (type == 'rad') then
+            !    typeV = 'pol'
+            !end if
 
             ! Determine free vertex of triangle
             call grid%DetermineFreeVertTria(Tneig, Tface, free_vert)
 
             ! Split face
-            call grid%SplitFace(magneticField, Tface, v1n, f11n, f12n, typeV, 0.0_R8)
-            call grid%SplitFace(magneticField, Bface, v1n, f21n, f22n, typeV, 0.0_R8)
+            call grid%SplitFace(magneticField, Tface, v1n, f11n, f12n, 'pol', 0.0_R8)
+            call grid%SplitFace(magneticField, Bface, v1n, f21n, f22n, 'pol', 0.0_R8)
 
             ! Make new face
             call grid%GetFaceNumber(v1n, v2n, 3, f3n)
@@ -12095,7 +12095,7 @@ module gamod_types
             ! and splitting should be in the radial direction
 
             ! Split face
-            call grid%SplitFace(magneticField, Bface, v1n, f1n, f2n)
+            call grid%SplitFace(magneticField, Bface, v1n, f1n, f2n, 'pol', 0.0_R8)
 
             ! Get faces and vertices
             fcsT = GetCellFaceGA(c, Tneig)
@@ -12163,6 +12163,14 @@ module gamod_types
             v => grid%vert &
             )
 
+        !psic = 0.0_R8
+        !if (type == 'pol') then
+        !    typeV = 'pol'
+        !else if (type == 'rad') then
+        !    typeV = 'psi'
+        !    psic = v%psi%Get(common_vert)
+        !end if
+
         ! Determine perpendicular faces
         call grid%DeterminePerpFaceQuad(cv, rface1, rface2, perp_faces)
 
@@ -12175,8 +12183,8 @@ module gamod_types
             call grid%DetermineFreeVertTria(cv, rface2, free_vert2)
 
             ! Split faces
-            call grid%SplitFace(magneticField, rface1, v1n, f11n, f12n)
-            call grid%SplitFace(magneticField, rface2, v2n, f21n, f22n)
+            call grid%SplitFace(magneticField, rface1, v1n, f11n, f12n, 'pol', 0.0_R8)
+            call grid%SplitFace(magneticField, rface2, v2n, f21n, f22n, 'pol', 0.0_R8)
 
             ! Make new face
             call grid%GetFaceNumber(v1n, v2n, 3, f3n)
@@ -12256,7 +12264,7 @@ module gamod_types
 
             ! Start splitting algo (ref. SplitQQT)
             ! Split face
-            call grid%SplitFace(magneticField, Qface, v1n, f1n, f2n)
+            call grid%SplitFace(magneticField, Qface, v1n, f1n, f2n, 'pol', 0.0_R8)
 
             ! Get faces and vertices
             fcsT = GetCellFaceGA(c, Tneig)
@@ -12380,15 +12388,6 @@ module gamod_types
         ! Determine cflags
         cells = [cv1, cv2]
         call grid%DetermineCflags(cells)
-
-
-
-
-
-
-
-        
-
 
         end associate
 
@@ -14979,7 +14978,7 @@ module gamod_types
 
                         ! Thickness smoothing
                         call grid%ThicknessSmoothing(verts(j), vecx, vecy, isx, isy, rescaling, &
-                            counter, verts_move_I8, verts_move_R8)
+                            counter, verts_move_I8, verts_move_R8, options)
 
                         ! Compute new location of vertex
                         new_locx = v%x%Get(verts(j)) + vecx
@@ -15415,7 +15414,7 @@ module gamod_types
     end subroutine 
 
     subroutine ThicknessSmoothing(grid, iv, vecx, vecy, isx, isy, rescaling_factor, &
-                        counter, verts_move_I8, verts_move_R8)
+                        counter, verts_move_I8, verts_move_R8, options)
 
         ! Description
         !============
@@ -15428,6 +15427,7 @@ module gamod_types
         integer(I8), intent(in) :: iv, counter, verts_move_I8(:,:)
         real(R8), intent(inout) :: vecx, vecy
         real(R8), intent(in) :: isx, isy, rescaling_factor, verts_move_R8(:,:)
+        type(GAoptionsUDT), intent(in) :: options
 
         ! Auxiliary
         integer(I8) :: common_vert
@@ -15469,13 +15469,13 @@ module gamod_types
             if (counter .gt. 1) then
                 d = Norm(vecx, vecy)
                 d_prev = Norm(verts_move_R8(counter-1,3),verts_move_R8(counter-1,4)) ! isx and isy
-                if (d_prev /= 0) then
+                if (d_prev .gt. 0.0_R8) then
 
-                    if (d .gt. d_prev*1.2_R8) then
+                    if (d .gt. d_prev*options%BLG_smoothing_factors(1)) then
 
                         ratio = d/d_prev
-                        if (ratio .gt. 1.5_R8) then
-                            ratio = 1.5_R8
+                        if (ratio .gt.options%BLG_smoothing_factors(2)) then
+                            ratio = options%BLG_smoothing_factors(2)
                         end if
                         vecx = vecx / ratio
                         vecy = vecy / ratio

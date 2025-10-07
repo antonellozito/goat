@@ -228,6 +228,9 @@ module goatmod_userinput
         !                   boundary layer
         ! - BLG_rescaling_factor: size of the boundary layer wrt the 
         !                           upstream cells  
+        ! - BLG_smoothing_factors: first number is the threshold ratio of 
+        !              subsequent vertex displacement at which a rescaling need 
+        !              to be done, the second number of the maximal ratio allowed (clip)
         ! - rem_stickout_trias: remove triangle that are only connected 
         !                       with the grid via one face
         ! - rem_trias_tube: remove flux tube with only two triangles
@@ -369,6 +372,7 @@ module goatmod_userinput
         logical                     :: BLG
         integer(I8)                 :: BLG_n_layers
         real(R8)                    :: BLG_rescaling_factor
+        real(R8), allocatable       :: BLG_smoothing_factors(:)
 
         logical                     :: rem_stickout_trias
         logical                     :: rem_trias_tube
@@ -1117,6 +1121,7 @@ module goatmod_userinput
         options%BLG                                 = .false.
         options%BLG_n_layers                        = 0
         options%BLG_rescaling_factor                = 2
+        options%BLG_smoothing_factors               = [1.2, 1.5]
 
         options%rem_stickout_trias                  = .false.
         options%rem_trias_tube                      = .false.
@@ -1816,8 +1821,10 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%BLG)
         field = 'ga.BLG_n_layers'
         call ExtractOptionValueInteger0D(fid, field, options%BLG_n_layers)
-        field = 'ga.rescaling_factor'
+        field = 'ga.BLG_rescaling_factor'
         call ExtractOptionValueReal0D(fid, field, options%BLG_rescaling_factor)
+        field = 'ga.BLG_smoothing_factors'
+        call ExtractOptionValueReal1D(fid, field, options%BLG_smoothing_factors)
 
         ! Special operations
         field = 'ga.rem_stickout_trias'

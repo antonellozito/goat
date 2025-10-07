@@ -123,6 +123,7 @@ alias pggoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGGOutput.py"
 alias pspp "python3 ${GOAT_VISUALIZATION}/SolpsPostProcess.py"
 alias pgaoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGAoutput.py"
 alias pgaerror "python3 ${GOAT_VISUALIZATION}/VisualizeGAerror.py"
+
 # Create environment cache for faster loading (setenv, unsetenv, and aliases)
 set setup_post = `mktemp`
 env | sed -ne "/^[ }]\|=()/b; s/\([^=]*\)=\(.*\)/setenv \1 '\2'/p" \
