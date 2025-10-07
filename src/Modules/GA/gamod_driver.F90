@@ -188,7 +188,7 @@ module gamod_driver
         if (options%vesselmode .and. maxval(options%facelabelmappingGA) .lt. 6) then
             call grid%IdentifyfarSOLcells(options)
         else if (maxval(options%facelabelmappingGA) .gt. 5) then
-            call gdErrorHandler('GAInit: no farSOL indentified as algorithm is not supporting double null cases yet!') ! TODO
+            print *, 'GAInit: no farSOL indentified as algorithm is not supporting double null cases yet!' ! TODO
         end if
 
         ! Check consistency of options
