@@ -17515,8 +17515,10 @@ module gamod_types
         real(R8) :: t0, v1x, v1y, v2x, v2y, fcX, fcY, d, &
             t1, vec_v1(2), vec_v2(2), X1(2), Y1(2), X2(2), Y2(2), &
             x_int, y_int, vcx, vcy, d_v1(2), d_v2(2), d2, dn, &
-            fcX_int, fcY_int, d1, vec_c(2)
-        real(R8), allocatable, dimension(:) :: v1_nx, v1_ny, v1_psi, v1_bx, v1_by
+            fcX_int, fcY_int, d1, vec_c(2), vec_f(2), cosf, mean_psi, ds, v1_psic, v2_psic
+        real(R8), allocatable, dimension(:) :: v1_nx, v1_ny, v1_psi, v1_bx, v1_by, &
+            v1x_dummy, v1y_dummy, v1_psi_dummy, &
+            fpsi, fbx, fby, fcXf, fcYf
 
 
         ! Associate
@@ -17526,7 +17528,9 @@ module gamod_types
             v => grid%vert &
             )
 
-        allocate(v1_nx(1), v1_ny(1), v1_psi(1), v1_bx(1), v1_by(1))
+        allocate(v1_nx(1), v1_ny(1), v1_psi(1), v1_bx(1), v1_by(1), &
+            v1x_dummy(1), v1y_dummy(1), v1_psi_dummy(1), &
+            fpsi(1), fbx(1), fby(1), fcXf(1), fcYf(1))
 
         if (.not.present(type)) then
 
@@ -17574,14 +17578,14 @@ module gamod_types
                     d = sqrt((v1x-v2x)**2 + (v1y-v2y)**2)
 
                     ! Normalized vector out of vert1
-                    d1 = sqrt(v%bx%Get(v1)**2 + v%by%Get(v1)**2)
+                    d1 = Norm(v%bx%Get(v1), v%by%Get(v1))
                     vec_v1(1) = -v%by%Get(v1)/d1
                     vec_v1(2) = v%bx%Get(v1)/d1
 
                     ! Face normal
                     t0 = v2y - v1y
                     t1 = -(v2x - v1x)
-                    dn = sqrt(t0**2 + t1**2)
+                    dn = Norm(t0, t1)
                     vec_v2(1) = t0/dn
                     vec_v2(2) = t1/dn
 
@@ -17600,8 +17604,8 @@ module gamod_types
                         v1_nx = 0.5_R8 *(x_int + 0.5_R8 * (v1x + v2x))
                         v1_ny = 0.5_R8 *(y_int + 0.5_R8 * (v1y + v2y))
                         call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
-                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
-                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)
 
                     else 
 
@@ -17611,12 +17615,60 @@ module gamod_types
 
                 else 
 
-                    ! Geometric splitting
-                    v1_nx = 0.5_R8 * (v%x%Get(v1) + v%x%Get(v2))
-                    v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
-                    call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
-                    call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
-                    call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)                   
+                    ! For non-algined faces
+                    ! Should be sufficient inclined
+                    v1x = v%x%Get(v1)
+                    v1y = v%y%Get(v1)
+                    v2x = v%x%Get(v2)
+                    v2y = v%y%Get(v2)
+
+                    ! Normalized vector out of vert1
+                    d1 = Norm(v%bx%Get(v1), v%by%Get(v1))
+                    vec_v1(1) = -v%by%Get(v1)/d1
+                    vec_v1(2) = v%bx%Get(v1)/d1
+                    
+                    ! Tangential along face
+                    d = sqrt((v1x-v2x)**2 + (v1y-v2y)**2)
+                    vec_f(1) = (v2x - v1x)/d
+                    vec_f(2) = (v2y - v1y)/d
+
+                    cosf = abs(vec_v1(1)*vec_f(1) + vec_v1(2)*vec_f(2))
+
+
+                    if (cosf .gt. 0.7_R8) then ! Angle is smaller then 45°
+
+                        ! Make new vertices on mean psi starting in fcX fcY
+                        fcXf = 0.5_R8 * (v1x + v2x)
+                        fcYf = 0.5_R8 * (v1y + v2y)
+                        call magneticField%interp%Evaluate(fcXf, fcYf, 0, 0, fpsi)
+                        call magneticField%interp%Evaluate(fcXf, fcYf, 1, 0, fbx)
+                        call magneticField%interp%Evaluate(fcXf, fcYf, 0, 1, fby)
+                        v1_psic = v%psi%Get(v1)
+                        v2_psic = v%psi%Get(v2)
+                        mean_psi = 0.5_R8*(v1_psic+v2_psic)
+                        d1 = Norm(fbx(1), fby(1))
+                        ds = (mean_psi - fpsi(1))/d1
+                        v1_nx = fcXf + fbx/d1*ds
+                        v1_ny = fcYf + fby/d1*ds
+
+                        ! Test get psi value
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+                        if (v1_psi(1) .lt. min(v1_psic, v2_psic) &
+                            .or. v1_psi(1) .gt. max(v1_psic, v2_psic)) &
+                            call gdErrorHandler('AddVert: new vertex placement not correct')
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)
+
+                    else 
+
+                        ! Geometric splitting => give problems when other cells 
+                        v1_nx = 0.5_R8 * (v%x%Get(v1) + v%x%Get(v2))
+                        v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
+                        call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)        
+
+                    end if
 
                 end if
 
@@ -17726,7 +17778,7 @@ module gamod_types
                 v1_ny = 0.5_R8 * (v%y%Get(v1) + v%y%Get(v2))
                 call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 0, v1_psi)
                 call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_bx)
-                call magneticField%interp%Evaluate(v1_nx, v1_ny, 1, 0, v1_by)  
+                call magneticField%interp%Evaluate(v1_nx, v1_ny, 0, 1, v1_by)  
 
             case default
 
