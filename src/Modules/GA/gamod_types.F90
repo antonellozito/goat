@@ -2899,6 +2899,8 @@ module gamod_types
                     print *, 'cx: ', c%x%Get(ic), ' cy: ', c%y%Get(ic)
                     print *, 'vx :', v%x%Get(tv)
                     print *, 'vy :', v%y%Get(tv)
+                    call grid%WriteData('grid_error')
+                    call gdErrorHandler('ReorderCellConn: probably overlap')
                 end if 
 
                 ! After the direction is fixed, implementation should be in a loop

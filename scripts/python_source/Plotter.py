@@ -1368,6 +1368,14 @@ def PlotGridCellValue(grid, array, threshold, fignum):
         if (array[i] >  threshold) :
             PlotPoints2D(grid.cell.x[i], grid.cell.y[i], fignum, marker='.', color='b')
 
+def PlotGridCellArray(grid, array, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)  
+
+    # Plot cutcells
+    for i in np.arange(0,len(array), 1):
+        PlotPoints2D(grid.cell.x[array[i]-1], grid.cell.y[array[i]-1], fignum, marker='.', color='b') 
+
 # Grid topological data
 def PlotGridTopologicalData(grid, fignum):
     # Description
