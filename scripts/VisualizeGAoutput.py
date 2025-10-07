@@ -63,9 +63,13 @@ grid_int = dh.ReadGAGridDataFile(filepath)
 plotter.PlotGridCells(grid_int,2)
 
 # outershell
-filepath = datadir + '/' + 'outershell.dat'
-tube_rem = dh.ReadGAIntegerArrayFile(filepath)
-plotter.PlotGridCellArray(grid_int, tube_rem, 2)
+try: 
+    filepath = datadir + '/' + 'outershell.dat'
+    tube_rem = dh.ReadGAIntegerArrayFile(filepath)
+    plotter.PlotGridCellArray(grid_int, tube_rem, 2)
+except:
+    print('No outershell data found')
+
 #filepath = datadir + '/' + 'grid_after_53.dat'
 #grid3 = dh.ReadGAGridDataFile(filepath)
 #plotter.PlotGridCells(grid3,2)
