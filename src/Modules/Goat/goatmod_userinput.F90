@@ -230,8 +230,9 @@ module goatmod_userinput
         !                           upstream cells  
         ! - rem_stickout_trias: remove triangle that are only connected 
         !                       with the grid via one face
-        ! - rem_trias_flux: remove flux tube with only two triangles and
-        !                   remove or merge flux tube with a both end a triangle
+        ! - rem_trias_tube: remove flux tube with only two triangles
+        ! - rem_outershell: remove or merge outer flux tubes with a triangle
+        !                   at both ends
         ! - rem_tube_outershell_threshold: threshold for select a flux tube
         !                   to be merged with neighboring tube (h_rad of 
         !                   neighboring tube / h_rad of boundary tube)
@@ -370,7 +371,8 @@ module goatmod_userinput
         real(R8)                    :: BLG_rescaling_factor
 
         logical                     :: rem_stickout_trias
-        logical                     :: rem_trias_flux
+        logical                     :: rem_trias_tube
+        logical                     :: rem_outershell
         real(R8)                    :: rem_tube_outershell_threshold
         character(:), allocatable   :: outershell_handling
         logical                     :: rem_stickout_quad
@@ -1117,7 +1119,8 @@ module goatmod_userinput
         options%BLG_rescaling_factor                = 2
 
         options%rem_stickout_trias                  = .false.
-        options%rem_trias_flux                      = .false.
+        options%rem_trias_tube                      = .false.
+        options%rem_outershell                      = .false.
         options%rem_tube_outershell_threshold       = 2
         options%outershell_handling                 = 'merge' 
         options%rem_stickout_quad                   = .false.
@@ -1819,8 +1822,10 @@ module goatmod_userinput
         ! Special operations
         field = 'ga.rem_stickout_trias'
         call ExtractOptionValueLogical0D(fid, field, options%rem_stickout_trias)        
-        field = 'ga.rem_trias_flux'
-        call ExtractOptionValueLogical0D(fid, field, options%rem_trias_flux)        
+        field = 'ga.rem_trias_tube'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_trias_tube)
+        field = 'ga.rem_outershell'   
+        call ExtractOptionValueLogical0D(fid, field, options%rem_outershell)
         field = 'ga.rem_tube_outershell_threshold'
         call ExtractOptionValueReal0D(fid, field, options%rem_tube_outershell_threshold)  
         field = 'ga.outershell_handling'

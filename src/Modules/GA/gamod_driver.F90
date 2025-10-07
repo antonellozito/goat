@@ -231,9 +231,11 @@ module gamod_driver
         if (options%rem_small_trias) &
             call grid%RemoveSmallTriangle(magneticField, qm, options)
 
+        ! Visualize starting grid
+        call grid%WriteData('grid_after_rem_trias')
 
         ! Remove flux tubes with only two triangles
-        if (options%rem_trias_flux) &
+        if (options%rem_trias_tube .or. options%rem_outershell) &
             call grid%RemTriasFlux(options)
 
         ! Stacked to cutcell
@@ -293,7 +295,7 @@ module gamod_driver
             call grid%RemoveStickOutTrias(options)
 
         ! Remove boundary flux tubes with only two triangles
-        if (options%rem_trias_flux) &
+        if (options%rem_trias_tube .or. options%rem_outershell) &
             call grid%RemTriasFlux(options)
 
         ! Remove stickout quad
