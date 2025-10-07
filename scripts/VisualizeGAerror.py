@@ -23,10 +23,14 @@ fullgridfile_in = 'grid_error.dat'
 filepath = datadir + '/' + fullgridfile_in
 grid_in = dh.ReadGAGridDataFile(filepath)
 
+# Read vertices of cell
+filepath = datadir + '/' + 'vertices_error.dat'
+verts = dh.ReadGAIntegerArrayFile(filepath)
+
 # Design
 #-------
 # Plot the grid
-plotter.PlotGridCells(grid_in,0)
+plotter.PlotGridCellVertArray(grid_in, verts, 0)
 plotter.PlotGridCellsAlignedFaces(grid_in,1)
 plotter.PlotGridCellsBoundaryFaces(grid_in,2)
 

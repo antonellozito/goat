@@ -1376,6 +1376,14 @@ def PlotGridCellArray(grid, array, fignum):
     for i in np.arange(0,len(array), 1):
         PlotPoints2D(grid.cell.x[array[i]-1], grid.cell.y[array[i]-1], fignum, marker='.', color='b') 
 
+def PlotGridCellVertArray(grid, array, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)  
+
+    # Plot cutcells
+    for i in np.arange(0,len(array), 1):
+        PlotPoints2D(grid.vert.x[array[i]-1], grid.vert.y[array[i]-1], fignum, marker='.', color='b') 
+
 # Grid topological data
 def PlotGridTopologicalData(grid, fignum):
     # Description

@@ -2900,6 +2900,7 @@ module gamod_types
                     print *, 'vx :', v%x%Get(tv)
                     print *, 'vy :', v%y%Get(tv)
                     call grid%WriteData('grid_error')
+                    call WriteArray(tv, 'vertices_error')
                     call gdErrorHandler('ReorderCellConn: probably overlap')
                 end if 
 
