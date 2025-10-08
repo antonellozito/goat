@@ -196,6 +196,7 @@ module gamod_driver
 
         ! Visualize starting grid
         call grid%WriteData('grid_before_GA')
+        call grid%WriteFluxSurfaceData()
 
         end associate        
 
@@ -325,12 +326,12 @@ module gamod_driver
 
         ! Auxiliary
         logical :: is_ordered(grid%cell%ntot), cells(grid%cell%ntot), &
-         use_nsep, use_sepID, start
+         use_nsep, use_sepID, start, err
         integer(I8), allocatable :: cvLookUp(:), fcs(:), f_ord(:,:), nf(:), &
-            lbls(:), lbls2(:), fsVx(:)
-        integer(I8) ::  i, iv, nl, nvi, lb, nind, fcReg(grid%face%ntot), &
+            lbls(:), lbls2(:), fsVx(:), verts(:), fcsv(:), ind(:)
+        integer(I8) ::  i, iv, nl, nvi, lb, fcReg(grid%face%ntot), &
             fcLbl_loc(grid%face%ntot), indFc(grid%face%ntot), &
-            ind(grid%face%ntot), nflbl
+            nflbl
         
 
         ! Check consistency
@@ -360,7 +361,7 @@ module gamod_driver
         if (options%stacked_trias .and. .not.options%vesselmode) then
 
             ! Get all vertices belonging to a flux surface
-            fsVx = grid%data%fluxdata%fluxsurfaceverts%GetAllElements()
+            fsVx = grid%data%fluxdata%fluxsurfaceverts%Get()
 
             do iv = 1, grid%vert%ntot
 
@@ -368,11 +369,33 @@ module gamod_driver
 
                 if (nvi /= 1) then
 
-                    ! Give error information
-                    print *, 'Vertex without flux surface: ', iv
-                    print *, grid%vert%x%Get(iv)
-                    print *, grid%vert%y%Get(iv)
-                    call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
+                    ! Only allowed when vertex is a boundary vertex and 
+                    ! its boundary faces are not aligned
+                    err = .false.
+
+                    if (.not.isBoundaryVertGA(grid, iv)) then
+
+                        err = .true.
+
+                    else 
+
+                        ! Get faces of vertices
+                        fcsv = GetVertFaceGA(grid%face, iv)
+                        if (count(grid%face%aligned%Get(fcsv) == 1) .gt. 0) err = .true.
+
+                    end if
+
+                    if (err) then
+
+                        ! Give error information
+                        print *, 'Vertex without flux surface: ', iv
+                        print *, grid%vert%x%Get(iv)
+                        print *, grid%vert%y%Get(iv)
+                        verts = [iv, iv]
+                        call grid%WriteErrorData(verts)
+                        call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
+
+                    end if
 
                 end if 
 
@@ -391,11 +414,12 @@ module gamod_driver
         fcLbL_loc = GetfcLblGA(grid%face,options)
 
         call Unique(fcLbl_loc, lbls)
+        allocate(lbls2(count(lbls /= 0)))
         lbls2 = pack(lbls,lbls /= 0)
         nl = size(lbls2)
 
         if (nl .gt. size(options%fcRegmappingGA)) then
-            call gdErrorHandler('PostProcesGA: fcReg mapping not compitable for GA labels,(more than 2 divertors)')
+            call gdErrorHandler('PostProcesGA: fcReg mapping not compitable for GA labels,(more than 4 taegets)')
         end if
 
         ! Reset fcReg to zero and apply at the right faces
@@ -403,9 +427,10 @@ module gamod_driver
         indFc = (/ (i, i=1,grid%face%ntot) /)
         do i = 1, nl
             lb = lbls2(i)
-            nind = count(fcLbl_loc == lb)
-            ind(1:nind) = pack(indFc,fcLbl_loc == lb )
-            fcReg(ind(1:nind)) = options%fcRegmappingGA(lb)
+            allocate(ind(count(fcLbl_loc == lb)))
+            ind = pack(indFc,fcLbl_loc == lb )
+            fcReg(ind) = options%fcRegmappingGA(lb)
+            deallocate(ind)
         end do
 
         ! Self-check if faces with fcReg label can be chained together

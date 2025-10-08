@@ -470,6 +470,10 @@ module goatmod_types
         ! Boundaries
         type(BndUDT), allocatable           :: bnd(:)
 
+    contains
+
+        procedure  :: WriteData         => WriteGridData
+
     end type
 
     !------------------------------------------------------------------!
@@ -2222,6 +2226,138 @@ module goatmod_types
         end associate
 
         ! Close file
+        close(fu)
+
+    end subroutine
+
+    subroutine WriteGridData(grid, filename)
+
+        ! Description
+        !============
+        ! Writing out the GridUDT to plot it.
+
+        ! 'vertices'
+        ! <vert%ntot>
+        ! 'ID, x, y'
+        ! <ID, x, y>
+        ! 'faces'
+        ! <face%ntot> 
+        ! 'ID, v1, v2, label'
+        ! <ID, v1, v2, label>
+        ! 'cells'
+        ! <cell%ntot, cell%nvert> 
+        ! 'ID, vp1, vp2, region>'
+        ! <ID, vp1, vp2, region>
+        ! 'cell vertices'
+        ! <cell%vert> 
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+
+
+        ! Arguments
+        class(GridUDT)                        :: grid
+        character(*), intent(in)                :: filename 
+
+        ! Auxiliary
+        integer                                 :: fu
+        real(R8), allocatable, dimension(:)     :: x, y, cx, cy
+        integer(I8), allocatable, dimension(:)  :: v1, v2, region, &   
+            label, vc, aligned
+        character(:), allocatable               :: dir
+
+        ! Loop
+        integer(I8)                             :: i
+
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            f       => grid%face,   &
+            c       => grid%cell,   &
+            v       => grid%vert    &
+        )
+
+        ! Construct writing directory
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Write header
+        write(fu, *) 'VERSION3.00.00'
+
+        ! Write vertex data
+        !==================
+        ! Unpack
+        x = v%x
+        y = v%y
+
+        ! Number of vertices
+        write (fu, *) 'vertices'
+        write (fu, *) v%ntot 
+
+        ! Vertex data
+        write (fu, *) 'ID, x, y'
+        do i = 1, v%ntot 
+            write (fu, *) i, x(i), y(i)
+        end do 
+
+        ! Write face data
+        !================
+        ! Unpack
+        v1 = f%vert(:,1)
+        v2 = f%vert(:,2)
+        label = f%label
+        aligned = f%aligned
+
+        ! Number of faces
+        write (fu, *) 'faces'
+        write (fu, *) f%ntot
+
+        ! Face data
+        write (fu, *) 'ID, v1, v2, label, aligned'
+        do i = 1, f%ntot
+            write (fu, *) i, v1(i), v2(i), label(i), aligned(i)
+        end do 
+
+        ! Write cell data
+        !================
+        ! Unpack
+        vc = c%vert
+        v1 = c%vertP(:,1)
+        v2 = c%vertP(:,2)
+        region = c%reg
+        cx = c%x
+        cy = c%y
+
+        ! Number of cells
+        write (fu, *) 'cells'
+        write (fu, *) c%ntot, size(vc)
+
+        ! Cell data
+        write (fu, *) 'ID, vp1, vp2, region, x, y'
+        do i = 1, c%ntot
+            write (fu, *) i, v1(i), v2(i), region(i), cx(i), cy(i)
+        end do 
+
+        ! Cell vertices
+        write (fu, *) 'cell vertices'
+        do i = 1, size(vc)
+            write (fu, *) vc(i)
+        end do 
+
+        ! Housekeeping
+        !=============
+        ! Deallocate again
+
+        ! Others
+        end associate
         close(fu)
 
     end subroutine

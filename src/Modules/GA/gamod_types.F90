@@ -500,8 +500,7 @@ module gamod_types
         !==============
         procedure :: WriteData => WriteGAGridData
         procedure :: WriteErrorData
-
-
+        procedure :: WriteFluxSurfaceData
 
     end type  
 
@@ -7837,27 +7836,18 @@ module gamod_types
                 if (count(v1) == 1) then
 
                     ! Get boundary vertex
-                    if (v1(1)) then
-                        vB = vc(1)
-                    else if (v1(2)) then
-                        vB = vc(2)
-                    end if
+                    vB = Pack2(vc, v1)
 
                     b1 = isBoundaryCellGA(grid, cvs)
                     if (count(b1) == 1) then
 
                         ! Get boundary cell
-                        if (b1(1)) then
-                            cvB = cvs(1)
-                        else if (v1(2)) then
-                            cvB = cvs(2)
-                        end if       
+                        cvB = Pack2(cvs, b1)   
                         tf = GetCellFaceGA(c, cvB)   
                         allocate(tfB(count( isBoundaryFaceGA(grid, tf)) ))
                         tfB = pack(tf, isBoundaryFaceGA(grid, tf))
 
-                        vs_fcB(1) = f%vert1%Get(tfB(1))
-                        vs_fcB(2) = f%vert2%Get(tfB(1))
+                        vs_fcB = [f%vert1%Get(tfB(1)), f%vert2%Get(tfB(1))]
 
                         if (any(vB == vs_fcB)) caseID = '4443B1'
 
@@ -18311,7 +18301,47 @@ module gamod_types
         call grid%WriteData('grid_error')
         call WriteArray(verts, 'vertices_error')
 
+        print *, 'Error occurs: use pgaerror to visualize'
+
     end subroutine
+
+    subroutine WriteFluxSurfaceData(grid)
+
+        ! Description
+        !============
+        ! Write data to visualize flux surfaces
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+
+        ! Auxiliary
+        logical, allocatable :: is_ordered(:)
+
+        ! Associate
+        associate(&
+            fd => grid%data%fluxdata &
+            )
+
+        ! Initialize
+        allocate(is_ordered(grid%cell%ntot))
+
+        ! Reorder connectivity 
+        call grid%ReorderCellConn(is_ordered)
+
+        ! Write grid data 
+        call grid%WriteData('grid_fluxsurface')
+
+        ! Write flux surface data
+        call WriteArray(fd%fluxsurfacefaces%Get(), 'fluxsurfacefaces')
+        call WriteArray(fd%fluxsurfacefacesP1%Get(), 'fluxsurfacefacesP1')
+        call WriteArray(fd%fluxsurfacefacesP2%Get(), 'fluxsurfacefacesP2')
+
+        end associate
+
+    end subroutine
+    
 
     !------------------------------------------------------------------!
     !                        GACEll ROUTINES                           !
@@ -19319,9 +19349,7 @@ module gamod_types
 
         res = .false.
         fcs = GetVertFaceGA(grid%face, iv)
-        if (any(isBoundaryFaceGA(grid,fcs))) then
-            res = .true.
-        end if
+        if (any(isBoundaryFaceGA(grid,fcs))) res = .true.
 
     end function
 
@@ -19335,9 +19363,7 @@ module gamod_types
         res = .false.
         do i = 1, size(verts)
             fcs = GetVertFaceGA(grid%face, verts(i))
-            if (any(isBoundaryFaceGA(grid, fcs))) then
-                res(i) = .true.
-            end if   
+            if (any(isBoundaryFaceGA(grid, fcs))) res(i) = .true.   
         end do
      
     end function

@@ -34,6 +34,22 @@ module gamod_utility
     !                               TYPES                              !
     !                                                                  !
     !==================================================================! 
+
+    !==================================================================!
+    !                                                                  !
+    !                          INTERFACES                              !
+    !                                                                  !
+    !==================================================================!
+    
+    ! General isBoundaryFace
+    interface isBoundaryFace
+        module procedure isBoundaryFace0D, isBoundaryFace1D
+    end interface
+
+    ! General isBoundaryVert
+    interface isBoundaryVert
+        module procedure isBoundaryVert0D, isBoundaryVert1D
+    end interface
     
     contains 
 
@@ -108,6 +124,11 @@ module gamod_utility
 
         end if
 
+        ! Visualize
+        !==========
+        if (options%debug) call WriteFluxeTubeData(grid, ftCv, ftCvP)
+        if (options%debug) call CheckUniquenessI8(ftCv)
+
         ! Build closed tubes
         !===================
         if (ft_open .and. ft_closed) then
@@ -128,6 +149,10 @@ module gamod_utility
             !call AddSeparatrixTube(grid, ftCv, ftCvP, ftFc, ftFcP, first_core_tube)            
 
         end if
+
+        ! Visualize
+        !==========
+        if (options%debug) call WriteFluxeTubeData(grid, ftCv, ftCvP)
 
         ! Build ftFc - poloidal faces which lay into the flux tube
         if (.not.ft_open_us) then
@@ -364,8 +389,10 @@ module gamod_utility
                             fcs_next = c%face(c%faceP(ic_next,1):c%faceP(ic_next,1)+nf-1);
 
                             indf = (/ (i, i=1,nf )/)
+                            allocate(ind_face11(count(fcs_next == fc1)))
                             ind_face11 = pack(indf, fcs_next == fc1)
                             ind_face1 = ind_face11(1)
+                            deallocate(ind_face11)
                             ind_opp_face = ind_face1 + 2
 
                             if (ind_opp_face .gt. nf) then
@@ -519,9 +546,9 @@ module gamod_utility
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT), intent(in) :: grid
-        type(GAoptionsUDT), intent(in) :: options
-        integer(I8), allocatable, intent(out) :: ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
+        type(GridUDT), intent(in)               :: grid
+        type(GAoptionsUDT), intent(in)          :: options
+        integer(I8), allocatable, intent(out)   :: ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
 
         ! Auxiliary
         integer(I8), allocatable, dimension(:) :: tube, tube_fc, fcs, & 
@@ -785,7 +812,7 @@ module gamod_utility
                                         else
                                                 ! Only keep the non-boundary ipface
                                                 !if (count(f%label(ipface_dummy) == 0) /= 1) then
-                                                test = isBoundaryFace1D(ipface_dummy,f)
+                                                test = isBoundaryFace(ipface_dummy,f)
                                                 nt = count(.not.test)
                                                 if (count(.not.test) /= 1) then 
                                                     call gdErrorHandler('BuildOpenTubeUS: not supported case')
@@ -810,8 +837,10 @@ module gamod_utility
                                 else if (nipface == 0) then
 
                                     print *, 'Warning: BuildOpenTubesUS: No ipface found, put boundary face in tube'
+                                    allocate(faceB(count(f%label(fcs) /= 0)))
                                     faceB = pack(fcs,f%label(fcs) /= 0)
                                     ipface = faceB(1)
+                                    deallocate(faceB)
 
                                 end if
 
@@ -863,9 +892,9 @@ module gamod_utility
         ! Declare variables
         !==================
         ! Arguments
-        type(GridUDT) :: grid
-        type(GAoptionsUDT) :: options
-        logical :: ft_open_us
+        type(GridUDT), intent(in)               :: grid
+        type(GAoptionsUDT), intent(in)          :: options
+        logical, intent(in)                     :: ft_open_us
         integer(I8), allocatable, intent(inout) :: ftCv(:), ftCvP(:,:), ftFc(:), ftFcP(:,:)
 
         ! Auxiliary
@@ -904,6 +933,7 @@ module gamod_utility
 
             ! Build the core tube
             indFc = (/ (i, i = 1, f%ntot)/)
+            allocate(bf_core(count(fcLbl_loc == 2)))
             bf_core = pack(indFc, fcLbl_loc == 2) ! Boundary faces of the core
             bv_core = GetVxsFromFcs(f, bf_core)
             nbv = size(bv_core)
@@ -930,11 +960,14 @@ module gamod_utility
 
             end do
 
+            ! House keeping
+            deallocate(bf_core)
+
 
         end if
 
         ! Trim
-        core_in_ftCv = any(bc_core(1) == ftCv)
+        core_in_ftCv = any(bc_core(1) == ftCv) 
 
         ! Save the tube
         if (tube_count == 0) then
@@ -967,6 +1000,10 @@ module gamod_utility
             ftFcP = 0
 
         end if
+
+        ! Visualize
+        !==========
+        if (options%debug) call WriteFluxeTubeData(grid, ftCv, ftCvP)
 
         ! First determine the start and end cells of the tubes
         ! INFORMATION SAVED SHOULD BE CORRECT BEFORE!!!! (in PostprocessGA)
@@ -1004,7 +1041,9 @@ module gamod_utility
 
                         ! Also add ftFc if ft_open_us through intersection of mean psi (should work for the core)
                         tube1 = tube(1:counter_tube)
-                        if (ft_open_us) call GiveFtFc(f, c, v, ftFc, ftFcP, tube1, tube_count)                     
+                        if (ft_open_us) call GiveFtFc(f, c, v, ftFc, ftFcP, tube1, tube_count)        
+                        
+                        if (options%debug) call CheckUniquenessI8(ftCv)
 
                     end if
 
@@ -1113,7 +1152,6 @@ module gamod_utility
         logical :: looped
         integer(I8), allocatable :: fcs(:), p_fcs(:), cvs(:)
         integer(I8) :: ic, opp_face
-        character(:), allocatable :: meth
 
         ! Associate
         associate(&
@@ -1127,25 +1165,25 @@ module gamod_utility
         tube = 0
         tube(1) = cv1
         counter = 1
-        in_tube = .false.
         in_tube(cv1) = .true.
         looped = .false.
 
         ! Find common face
         fcs = GetCellFace(c, cv1)
+        allocate(p_fcs(count(f%aligned(fcs) == 0)))
         p_fcs = pack(fcs, f%aligned(fcs) == 0)
         if (size(p_fcs) /= 2) call gdErrorHandler('TraceClosedFluxTube: Something went wrong, cell has no two poloidal faces')
 
         ! Initialize while loop
         ic = cv1
         opp_face = p_fcs(1)
+        deallocate(p_fcs)
 
         ! Start the while loop
         do while (.not.looped)
 
             ! Find the oppostive face to the common face
-            meth = 'pol'
-            opp_face = GetOppositeFace(opp_face,ic, grid, meth)
+            opp_face = GetOppositeFace(opp_face,ic, grid, 'pol')
 
             ! Add the second cell
             cvs = GetFaceCell(f, opp_face)
@@ -1620,6 +1658,35 @@ module gamod_utility
 
     end subroutine
 
+    subroutine WriteFluxeTubeData(grid, ftCv, ftCvP)
+
+        ! Description
+        !============
+        ! Writing out flux tube data for visualization
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(in) :: grid
+        integer(I8), intent(in) :: ftCv(:), ftCvP(:,:)
+
+        ! Auxiliary
+        integer(I8), allocatable :: ar(:)
+
+        ! Write grid
+        call grid%WriteData('grid_fluxtube')
+
+        ! Write flux tube data
+        call WriteArray(ftCv, 'fluxtubecells')
+        ar = ftCvP(:,1)
+        call WriteArray(ar, 'fluxtubecellsP1')
+        ar = ftCvP(:,2)
+        call WriteArray(ar, 'fluxtubecellsP2')
+
+        print *, 'Writing data of flux tubes, use pgaoutput'
+
+    end subroutine
+
     !==================================================================!
     !                                                                  !
     !                           FUNCTIONS                              !
@@ -1684,8 +1751,8 @@ module gamod_utility
         ! =================
         ! Arguments
         type(GridUDT) :: grid
-        integer(I8) :: ifc, ic, res
-        character(:), allocatable :: meth
+        integer(I8)   :: ifc, ic, res
+        character(*)  :: meth
 
         ! Auxiliary
         integer(I8), allocatable :: fcs(:), fcs1(:), fcs2(:), &
@@ -1724,11 +1791,13 @@ module gamod_utility
             nf = size(fcs)
             if (nf == 4) then
                 indf = (/ (i, i = 1, nf)/)
+                allocate(ind(count(fcs == ifc)))
                 ind = pack(indf, fcs == ifc)
                 ind_com_face = ind(1)
                 ind_opp_face = ind_com_face + 2
                 if (ind_opp_face .gt. nf) ind_opp_face = ind_opp_face - nf 
                 res = fcs(ind_opp_face)
+                deallocate(ind)
 
             end if
         case default
@@ -1768,6 +1837,33 @@ module gamod_utility
 
     end function
 
+    function isBoundaryVert0D(grid, iv) result(res)
+        type(GridUDT) :: grid
+        integer(I8) :: iv
+        logical :: res
+        integer(I8), allocatable :: fcs(:)
+
+        res = .false.
+        fcs = GetVertFace(grid%vert, iv)
+        if (any(isBoundaryFace(fcs, grid%face))) res = .true.
+
+    end function
+
+    function isBoundaryVert1D(grid, verts) result(res)
+        type(GridUDT) :: grid
+        integer(I8) :: i, verts(:)
+        logical, allocatable :: res(:)
+        integer(I8), allocatable :: fcs(:) 
+
+        allocate(res(size(verts)))
+        res = .false.
+        do i = 1, size(verts)
+            fcs = GetVertFace(grid%vert, verts(i))
+            if (any(isBoundaryFace(fcs, grid%face))) res(i) = .true.   
+        end do
+     
+    end function
+
     function GetFluxTubeFromCellIndex(fd, indc) result(res)
         type(FluxDataUDT) :: fd
         integer(I8) :: i, indc, n_el, res
@@ -1779,5 +1875,30 @@ module gamod_utility
         b = pack(ind, fd%fluxtubecellsP(:,1).le.indc)
         res = b(n_el)
     end function
+
+    subroutine CheckUniquenessI8(a)
+        integer(I8) :: a(:)
+        integer(I8) :: i, n
+        integer(I8), allocatable :: ida0(:), ida0U(:)
+
+        allocate(ida0(count(a /= 0)))
+        ida0 = pack(a,a /= 0)
+        call Unique(ida0,ida0U)
+        if (size(ida0) /= size(ida0U)) then
+
+            ! Find what the problem is
+            do i = 1, size(ida0)
+                if (count(ida0 == ida0(i)) .gt. 1) then
+                    n = count(ida0 == ida0(i))
+                    print *, 'Element: ', i
+                    print *, 'Value: ', ida0(i)
+                    print *, 'Occuring ', n, 'times'
+                end if
+            end do
+
+            call gdErrorHandler('CheckUniqueness: integer array not unique')
+
+        end if
+    end subroutine
 
 end module 
