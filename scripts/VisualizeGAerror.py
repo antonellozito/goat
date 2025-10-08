@@ -37,7 +37,7 @@ verts = dh.ReadGAIntegerArrayFile(filepath)
 # Plot the grid
 plotter.PlotGridCells(grid_input, 0)
 plotter.PlotGridCellVertArray(grid_in, verts, 1)
-#plotter.PlotGridCellsAlignedFaces(grid_in,2)
+plotter.PlotGridCellsAlignedFaces(grid_in,2)
 #plotter.PlotGridCellsBoundaryFaces(grid_in,3)
 
 # Legend
