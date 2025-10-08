@@ -116,8 +116,8 @@ module gamod_driver
             tv = GetCellVertGA(c, i)
 
             ! Compute coordinates
-            call c%x%SetSingleElement(i,sum(v%x%GetMultipleElements(tv))/real(size(tv), kind=R8)) 
-            call c%y%SetSingleElement(i,sum(v%y%GetMultipleElements(tv))/real(size(tv), kind=R8)) 
+            call c%x%SetSingleElement(i,sum(v%x%Get(tv))/real(size(tv), kind=R8)) 
+            call c%y%SetSingleElement(i,sum(v%y%Get(tv))/real(size(tv), kind=R8)) 
 
         end do
 

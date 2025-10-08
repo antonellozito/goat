@@ -384,6 +384,7 @@ module gamod_types
         procedure :: MakeNewThreeFace
         procedure :: AdaptNeigThreeVert
         procedure :: TransPentsToTrias
+        procedure :: GetMergeFace
 
         ! Splitting 
         procedure :: DoSplitting
@@ -442,6 +443,7 @@ module gamod_types
         procedure :: DetermineFreeVertTria
         procedure :: DetermineHangingNodePent
         procedure :: DetermineHangingNodeTria4
+        procedure :: DetermineHangingNodeHex
 
         ! Boundary layer grid
         procedure :: BoundaryLayerGrid
@@ -497,6 +499,7 @@ module gamod_types
         ! Visualization
         !==============
         procedure :: WriteData => WriteGAGridData
+        procedure :: WriteErrorData
 
 
 
@@ -518,9 +521,14 @@ module gamod_types
         module procedure isBoundaryFace0DGA, isBoundaryFace1DGA
     end interface
 
-    ! General isBoundaryCell
+    ! General isBoundaryVert
     interface isBoundaryVertGA
         module procedure isBoundaryVert0DGA, isBoundaryVert1DGA
+    end interface
+
+    ! General isCoreCell
+    interface isCoreCell
+        module procedure isCoreCell0D, isCoreCell1D
     end interface
 
     ! Get vxs from fcs
@@ -2772,12 +2780,13 @@ module gamod_types
                 elseif (sin2 .gt. 0.0_R8) then
                     ntf(1) = fcs(2)
                 else
-                    print *, 'Error on cell: ', ic, ' ', c%cflags%Get(ic), ' ', c%faceP2%Get(ic)
+                    print *, 'Error on cell: ', ic
+                    print *, 'Cflag: ', c%cflags%Get(ic)
+                    print *, 'Ctype: ', c%faceP2%Get(ic)
                     print *, 'cx: ', c%x%Get(ic), ' cy: ', c%y%Get(ic)
                     print *, 'vx :', v%x%Get(tv)
                     print *, 'vy :', v%y%Get(tv)
-                    call grid%WriteData('grid_error')
-                    call WriteArray(tv, 'vertices_error')
+                    call grid%WriteErrorData(tv)
                     call gdErrorHandler('ReorderCellConn: probably overlap')
                 end if 
 
@@ -2910,12 +2919,10 @@ module gamod_types
             regions(:), creg(:)
         logical :: use_sepID, start, use_nsep
         
-
         ! Initialize
         counter = 0
         xpoints = 0
         
-
         ! Associate
         associate(&
             c   => grid%cell, &
@@ -3000,6 +3007,10 @@ module gamod_types
             end if
 
             if (grid%data%nxp == 0) then
+                if (allocated(fd%fluxsurfaceverts)) then
+                    call grid%WriteErrorData(vxs)  
+                    call gdErrorHandler('GiveXpoints: no found') 
+                end if
                 print *, 'GiveXpoints: Warning: no Xpoint found!'
             endif 
 
@@ -3243,7 +3254,7 @@ module gamod_types
                             ifc = fcs(i)
                             cvs = GetFaceCellGA(c,ifc,cvLookUp)
                             if (size(cvs).eq.2) then
-                                if (creg(cvs(1)) /= creg(cvs(2))) then
+                                if (creg(cvs(1)) /= creg(cvs(2)) .and. count(isCoreCell(c, cvs)) == 1) then
                                     ! Noting has changed and should not be possible to created new separatrices with grid adaptations
                                     return
                                 end if
@@ -3264,7 +3275,7 @@ module gamod_types
                             ifc = fcs(i)
                             cvs = GetFaceCellGA(c,ifc,cvLookUp)
                             if (size(cvs).eq.2) then
-                                if (creg(cvs(1)) /= creg(cvs(2))) then
+                                if (creg(cvs(1)) /= creg(cvs(2)) .and. count(isCoreCell(c, cvs)) == 1) then
                                     sepIDloc(1) = ifs
                                     exit
                                 end if 
@@ -3375,7 +3386,7 @@ module gamod_types
                                 ifc = fcs(i)
                                 cvs = GetFaceCellGA(c,ifc,cvLookUp)
                                 if (size(cvs).eq.2) then
-                                    if (creg(cvs(1))/=creg(cvs(2))) then
+                                    if (creg(cvs(1))/=creg(cvs(2)) .and. count(isCoreCell(c, cvs)) == 1) then
                                         return ! Separatrix is the same
                                     end if
                                 else
@@ -3396,7 +3407,7 @@ module gamod_types
                             ifc = fcs(i)
                             cvs = GetFaceCellGA(c, ifc, cvLookUp)
                             if (size(cvs).eq.2) then 
-                                if (creg(cvs(1))/=creg(cvs(2))) then
+                                if (creg(cvs(1))/=creg(cvs(2)) .and. count(isCoreCell(c, cvs)) == 1) then
                                     counter = counter + 1
                                     sepIDloc(counter) = ifs
                                     exit
@@ -3405,8 +3416,10 @@ module gamod_types
                                 exit                               
                             end if  
                         end do
-                        if (sepIDloc(counter).eq.ifs) then
-                            exit
+                        if (counter /= 0) then
+                            if (sepIDloc(counter).eq.ifs) then
+                                exit
+                            end if
                         end if
                     end do 
 
@@ -7381,10 +7394,10 @@ module gamod_types
 
         ! Auxiliary
         logical :: pent_to_tria, special_case 
-        integer(I8) :: i, j, k, lim, fc, qface, common_vert, n_al
+        integer(I8) :: i, j, k, lim, fc, qface, common_vert, n_al, ctype, nfcs
         integer(I8), allocatable, dimension(:) :: cellsD2, cellsD, cells, indCv, &
-            verts, cvs, fcs, bfcs, cvP, cvs_b, vs1, vs2, cvLookUp, rfaces, cvsT, cvsQ
-        logical, allocatable :: is_ordered(:)
+            verts, cvs, fcs, bfcs, cvP, cvs_b, vs1, vs2, cvLookUp, rfaces, cvsT, cvsQ, &
+            cvs2, cvsT4
         character(:), allocatable :: type
 
         ! Associate
@@ -7435,8 +7448,10 @@ module gamod_types
                 fc = 0
 
                 ! Determine hanging node
-                if (c%faceP2%Get(cells(k)) == 5) then
-                    fcs = GetCellFaceGA(c, cells(k))
+                fcs = GetCellFaceGA(c, cells(k))
+                ctype = c%faceP2%Get(cells(k))       
+                if (ctype == 5) then
+
                     n_al = count(f%aligned%Get(fcs) == 1)
                     if (n_al == 2) then
                         type = 'rad'
@@ -7445,54 +7460,29 @@ module gamod_types
                     end if
                     call grid%DetermineHangingNodePent(cells(k), fcs, type, common_vert, qface, rfaces)
 
-                    ! Check faces of vertices
-                    fcs = GetVertFaceGA(f, common_vert)
-
-                    ! Hanging nodes inside the mesh have three faces or less
-                    if ((size(fcs) .le. 3) .and. .not.isBoundaryVertGA(grid, common_vert)) then
-
-                            ! Get the correct merge face
-                            do j = 1, size(fcs)
-
-                                cvs = GetFaceCellGA(c, fcs(j),cvLookUp)
-                                if (.not.any(cells(k) == cvs)) then
-
-                                    fc = fcs(j)
-                                    exit
-
-                                end if
-
-                            end do
-
-                    end if
-
-                else 
+                else if (ctype == 4) then
 
                     ! Triangle4
-                    verts = GetCellVertGA(c, cells(k))
-                    do i = 1, size(verts)
+                    call grid%DetermineHangingNodeTria4(cells(k), fcs, common_vert)
+                    
+                else if (ctype == 6) then
 
-                        ! Check faces of vertices
-                        fcs = GetVertFaceGA(f, verts(i))
+                    ! Hexagon
+                    call grid%DetermineHangingNodeHex(cells(k), fcs, common_vert)
+                
+                else 
+                    call gdErrorHandler('MergeRec: cell type not considered')
+                end if
 
-                        ! Hanging nodes inside the mesh have three faces or less
-                        if ((size(fcs) .le. 3) .and. .not.isBoundaryVertGA(grid, verts(i))) then
+                ! Check number of faces of vertices
+                nfcs = count(f%vert1%Get() == common_vert) + count(f%vert2%Get() == common_vert)
 
-                            ! Get the correct merge face
-                            do j = 1, size(fcs)
+                ! Hanging nodes inside the mesh have three faces or less
+                if ((nfcs .le. 3) .and. .not.isBoundaryVertGA(grid, common_vert)) then
 
-                                cvs = GetFaceCellGA(c, fcs(j),cvLookUp)
-                                if (.not.any(cells(k) == cvs)) then
-
-                                    fc = fcs(j)
-                                    exit
-
-                                end if
-
-                            end do
-
-                        end if
-                    end do
+                    ! Get the correct merge face
+                    call grid%GetMergeFace(cells(k), common_vert, cvLookUp, fc)                        
+                    
                 end if
 
                 ! If no merge face was found yet
@@ -7500,8 +7490,8 @@ module gamod_types
                 ! pentagon lays on the boundary  
                 if (fc == 0) then
 
-                    fcs = GetCellFaceGA(c, cells(k))
-                    if (size(fcs) == 5 .and. count(isBoundaryFaceGA(grid, fcs)) == 2) then
+                    ! Pentagon
+                    if (ctype == 5 .and. count(isBoundaryFaceGA(grid, fcs)) == 2) then
 
                         pent_to_tria = .true.
                         allocate(bfcs(2))
@@ -7516,12 +7506,11 @@ module gamod_types
                         do i = 1, size(verts)
 
                             fcs = GetVertFaceGA(f, verts(i))
-
                             if (size(fcs) .le. 3) then
 
                                 do j = 1, size(fcs)
 
-                                    cvs = GetFaceCellGA(c, fcs(j))
+                                    cvs = GetFaceCellGA(c, fcs(j), cvLookUp)
                                     if (size(cvs) == 2) then
 
                                         cvP = c%faceP2%Get(cvs)
@@ -7555,7 +7544,7 @@ module gamod_types
                 end if
 
                 ! Special case where two following cells to merge only have one
-                ! vertex in common  
+                ! vertex in common or internal triangles
                 if (fc == 0) then
 
                     cvs = GetCellNeigsGA(grid, cells(k), cvLookUp)
@@ -7577,76 +7566,75 @@ module gamod_types
                             fc = GetCommonFace(c,cells(k), cvs_b(1))
 
                         end if
-                    else
+
+                    else 
 
                         ! Just internal - specific case where the hanging node
                         ! is connected to two triangles and a quad or other combinations 
-                        if (size(verts) == 5 .or. size(verts) == 4) then
 
-                            ! Determine hanging node
-                            fcs = GetCellFaceGA(c, cells(k))                            
-                            if (size(verts) == 5) then
+                        ! Get cells of hanging node
+                        cvs = GetVertCellGA(c, common_vert)
 
-                                n_al = count(f%aligned%Get(fcs) == 1)
-                                if (n_al == 2) then
-                                    type = 'rad'
-                                else if (n_al == 3) then
-                                    type = 'pol'
-                                end if
-                                call grid%DetermineHangingNodePent(cells(k), fcs, type, common_vert, qface, rfaces)
-                            else if (size(verts) == 4) then
+                        ! Get triangle neighbors
+                        allocate(cvsT(count(c%faceP2%Get(cvs) == 3)))
+                        cvsT = pack(cvs, c%faceP2%Get(cvs) == 3)
 
-                                call grid%DetermineHangingNodeTria4(cells(k), fcs, common_vert)
+                        ! Select the face
+                        if (size(cvsT) == 0) then
+                            ! Check for triangle4 cells
+                            allocate(cvs2(count(cvs /= cells(k))))
+                            cvs2 = pack(cvs, cvs /= cells(k))
+                            if (any(c%cflags%Get(cvs2) == 4)) then
+                                ! Get triangle4
+                                allocate(cvsT4(count(c%cflags%Get(cvs2) == 4)))
+                                cvsT4 = pack(cvs2, c%cflags%Get(cvs2) == 4)
+                                fcs = GetCellFaceGA(c, cvsT4(1))
+                                call grid%DetermineHangingNodeTria4(cvsT4(1), fcs, common_vert) 
 
+                                ! Get the correct merge face
+                                call grid%GetMergeFace(cvsT4(1), common_vert, cvLookUp, fc)                            
+                                
+                            else
+                                print *, 'MergeRec: size(cvsT) == 0, not implemented yet'
                             end if
+                        else if (size(cvsT) == 1) then
 
+                            ! Get face
+                            allocate(cvsQ(count(c%faceP2%Get(cvs) == 4)))
+                            cvsQ = pack(cvs, c%faceP2%Get(cvs) == 4)
 
-                            ! Get cells of hanging node
-                            cvs = GetVertCellGA(c, common_vert)
-
-                            ! Get triangle neighbors
-                            allocate(cvsT(count(c%faceP2%Get(cvs) == 3)))
-                            cvsT = pack(cvs, c%faceP2%Get(cvs) == 3)
-
-                            ! Select the face
-                            if (size(cvsT) == 1) then
-
-                                ! Get face
-                                allocate(cvsQ(count(c%faceP2%Get(cvs) == 4)))
-                                cvsQ = pack(cvs, c%faceP2%Get(cvs) == 4)
-
-                                if (size(cvsQ) == 2) then
-                                    if (HaveCommonFace(c, cvsQ(1), cvsT(1))) then
-                                        fc = GetCommonFace(c, cvsQ(1), cvsT(1))
-                                    end if
-                                else 
-                                    print *, 'MergeRec: not yet implemented'
+                            if (size(cvsQ) == 2) then
+                                if (HaveCommonFace(c, cvsQ(1), cvsT(1))) then
+                                    fc = GetCommonFace(c, cvsQ(1), cvsT(1))
                                 end if
-
-
-                            else if (size(cvsT) == 2) then
-                                ! Merge two triangle together if possible
-                                if (HaveCommonFace(c, cvsT(1), cvsT(2))) then
-                                    fc = GetCommonFace(c, cvsT(1), cvsT(2))
-                                else
-                                    call gdErrorHandler('MergeRec: no common face between two triangles')
-                                end if
-                            else if (size(cvsT) == 4) then
-
-                                print *, 'MergeRec: not yet implemented'
                             else 
                                 print *, 'MergeRec: not yet implemented'
                             end if
 
+
+                        else if (size(cvsT) == 2) then
+                            ! Merge two triangle together if possible
+                            if (HaveCommonFace(c, cvsT(1), cvsT(2))) then
+                                fc = GetCommonFace(c, cvsT(1), cvsT(2))
+                            else
+                                call gdErrorHandler('MergeRec: no common face between two triangles')
+                            end if
+                        else if (size(cvsT) == 4) then
+
+                            print *, 'MergeRec: not yet implemented'
+                        else 
+                            print *, 'MergeRec: not yet implemented'
                         end if
 
+                        ! Error if merge face is not found
                         if (fc == 0) then
-                            allocate(is_ordered(c%ntot))
-                            call grid%ReorderCellConn(is_ordered)
-                            call grid%WriteData('grid_error')
-                            call WriteArray(verts, 'vertices_error')
-                            call gdErrorHandler('MergeRec: case not yet implemented')
+
+                            call grid%WriteErrorData(verts)
+                            call gdErrorHandler('MergeRec: case not yet implemented (line 7622)')
                         end if
+
+                        ! House keeping
+                        deallocate(cvsT)
 
                     end if
 
@@ -7955,6 +7943,9 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: vx1, vx2, fc1, fc2, new_verts, new_facesD, &
             new_faces, fc_rem, cv_rem, vertsD, facesD
 
+        ! Initialize
+        allocate(fc_rem(1))
+
         ! Make hexagon
         vx1 = GetCellVertGA(grid%cell, cvs(1))
         vx2 = GetCellVertGA(grid%cell, cvs(2))
@@ -7975,7 +7966,6 @@ module gamod_types
         call grid%AddCell(new_faces, new_verts, grid%cell%reg%Get(cvs(1)), ic)
 
         ! Remove face
-        allocate(fc_rem(1))
         fc_rem = fc
         call grid%RemoveFaces(fc_rem)
 
@@ -8010,6 +8000,7 @@ module gamod_types
             f => grid%face)
 
         ! Initialize
+        allocate(verts_rem(1))
         vxF = [f%vert1%Get(fc),  f%vert2%Get(fc)]
 
         ! Three vert
@@ -8053,7 +8044,6 @@ module gamod_types
         call grid%DetermineCflagTria4(ic)
 
         ! Remove vertex
-        allocate(verts_rem(1))
         verts_rem = three_vert
         call grid%RemoveVertices(verts_rem)
 
@@ -8210,8 +8200,10 @@ module gamod_types
             f => grid%face &
             )
             
-        ! Verts
+        ! Initialize
+        allocate(verts_rem(1))
         vxF = [f%vert1%Get(fc), f%vert2%Get(fc)]
+
         ! Three vert
         v1cvs = GetVertFaceGA(f, vxF(1))
         v2cvs = GetVertFaceGA(f, vxF(2))
@@ -8239,7 +8231,6 @@ module gamod_types
         call grid%RemoveCells(cells_rem)
         
         ! Remove vertex
-        allocate(verts_rem(1))
         verts_rem = three_vert
         call grid%RemoveVertices(verts_rem)
 
@@ -8371,6 +8362,9 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: vx1, vx2, fc1, fc2, vertsD, new_verts, facesD, &
             new_faces, fc_rem, cell_rem, fcs_al
 
+        ! Initialize
+        allocate(fc_rem(1))
+
         ! Make merge cell
         vx1 = GetCellVertGA(grid%cell, cvs(1))
         vx2 = GetCellVertGA(grid%cell, cvs(2))
@@ -8402,7 +8396,6 @@ module gamod_types
         end if
 
         ! Remove fc
-        allocate(fc_rem(1))
         fc_rem = fc
         call grid%RemoveFaces(fc_rem)
 
@@ -8438,6 +8431,7 @@ module gamod_types
             )
 
         ! Initialize
+        allocate(verts_rem(1))
         vxF = [f%vert1%Get(fc),  f%vert2%Get(fc)]
 
         ! Three vert
@@ -8448,15 +8442,15 @@ module gamod_types
 
         ! Determine three vert
         if (starter) then
-            if (nv1cvs .lt. 3) then
+            if (nv1cvs == 3) then
                 three_vert = vxF(1)
-            else if (nv2cvs .lt. 3) then
+            else if (nv2cvs == 3) then
                 three_vert = vxF(2)
             end if
         else
-            if ((nv1cvs .lt. 3) .and. .not.isBoundaryVertGA(grid, vxF(1))) then
+            if ((nv1cvs == 3) .and. .not.isBoundaryVertGA(grid, vxF(1))) then
                 three_vert = vxF(1)
-            else if ((nv2cvs .lt. 3) .and. .not.isBoundaryVertGA(grid, vxF(2))) then
+            else if ((nv2cvs == 3) .and. .not.isBoundaryVertGA(grid, vxF(2))) then
                 three_vert = vxF(2)
             end if
         end if
@@ -8533,6 +8527,9 @@ module gamod_types
             v => grid%vert, &
             fd => grid%data%fluxdata &
             )
+
+        ! Initialize
+        allocate(cell_rem(1))
         
         ! Determine pent and tria
         if (c%faceP2%Get(cvs(1)) == 5) then
@@ -8680,7 +8677,6 @@ module gamod_types
         call grid%RemoveVertices(verts_rem)
 
         ! Remove triangle
-        allocate(cell_rem(1))
         cell_rem = cv2
         call grid%RemoveCells(cell_rem)
 
@@ -8715,6 +8711,9 @@ module gamod_types
             c => grid%cell, &
             f => grid%face &
             )
+        
+        ! Initialize
+        allocate(cells(1))
 
         ! Determine cells
         if (c%faceP2%Get(cvs(1)) == 5) then
@@ -8775,7 +8774,6 @@ module gamod_types
         call grid%RemoveVertices(verts_rem)
 
         ! Remove triangle
-        allocate(cells(1))
         cells = cv2
         call grid%RemoveCells(cells)
 
@@ -8820,6 +8818,9 @@ module gamod_types
         ! - boundary cells
         ! - internal cells
     
+        ! Initialize
+        allocate(verts_rem(1))
+
         ! Cells
         cv1 = cvs(1)
         cv2 = cvs(2)
@@ -8857,7 +8858,6 @@ module gamod_types
         call grid%RemoveCells(cells_rem)
 
         ! Remove vertex
-        allocate(verts_rem(1))
         verts_rem = three_vert
         call grid%RemoveVertices(verts_rem)
 
@@ -9030,6 +9030,9 @@ module gamod_types
             f => grid%face &
             )
 
+        ! Initialize
+        allocate(cell_rem(1))
+
         ! Indeficiation of pentagon faces
         faces_cv = GetCellFaceGA(c, cvs)
 
@@ -9139,7 +9142,6 @@ module gamod_types
         call grid%DetermineCflags(cells)
 
         ! Remove pentagon
-        allocate(cell_rem(1))
         cell_rem = cvs
         call grid%RemoveCells(cell_rem)
 
@@ -9729,6 +9731,36 @@ module gamod_types
                 if (size(cv5) /= 0) call grid%Merge5T3(cv5(1))
 
         end do
+
+    end subroutine
+
+    subroutine GetMergeFace(grid, cv, common_vert, cvlookup, fc)
+
+        ! Description
+        !============
+        ! Get merge face from a hanging node
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), intent(in)      :: cv, common_vert, cvlookup(:)
+        integer(I8), intent(out)     :: fc
+
+        ! Auxiliary 
+        integer(I8) :: i
+        integer(I8), allocatable :: fcs(:), cvs(:)
+
+        ! Get merge face from hanging node
+        fc = 0
+        fcs = GetVertFaceGA(grid%face, common_vert)
+        do i = 1, size(fcs)
+            cvs = GetFaceCellGA(grid%cell, fcs(i), cvlookup)
+            if (.not.any(cv == cvs)) then
+                fc = fcs(i)
+                exit
+            end if
+        end do 
 
     end subroutine
 
@@ -14871,10 +14903,70 @@ module gamod_types
             call gdErrorHandler('DetermineHangingNodeTria4: case not considered')
         end if
 
+        end associate
 
+    end subroutine
 
+    subroutine DetermineHangingNodeHex(grid, cv, faces, common_vert)
 
+        ! Description
+        !============
+        ! Determine the hanging node of a triangle4
 
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        integer(I8), intent(in)      :: cv, faces(:)
+        integer(I8), intent(out)     :: common_vert
+
+        ! Auxiliary
+        integer(I8) :: i, j
+        integer(I8), allocatable :: fcs_al(:), fcs_nal(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        common_vert = 0
+        allocate(fcs_al(count(f%aligned%Get(faces) == 1)))    
+        fcs_al = pack(faces, f%aligned%Get(faces) == 1)
+
+        allocate(fcs_nal(count(f%aligned%Get(faces) == 0)))    
+        fcs_nal = pack(faces, f%aligned%Get(faces) == 0)  
+        
+        if (size(fcs_al) == 4) then
+
+            ! Find common vertex
+            do i = 1, 4
+                do j = 1, 4
+                    if (i /= j) then
+                        if (HaveCommonVert(f, fcs_al(i), fcs_al(j))) &
+                            common_vert = GetCommonVert(f, fcs_al(i), fcs_al(j))
+                    end if
+                end do
+                if (common_vert /= 0) exit
+            end do 
+
+        else if (size(fcs_nal) == 4) then
+
+            ! Find common vertex
+            do i = 1, 4
+                do j = 1, 4
+                    if (i /= j) then
+                        if (HaveCommonVert(f, fcs_al(i), fcs_al(j))) &
+                            common_vert = GetCommonVert(f, fcs_al(i), fcs_al(j))
+                    end if
+                end do
+                if (common_vert /= 0) exit
+            end do 
+
+        else
+            call gdErrorHandler('DetermineHangingNodeHex: case not considered')
+        end if
 
         end associate
 
@@ -16604,6 +16696,7 @@ module gamod_types
 
 
         ! Initialize
+        call grid%GiveSeparatrices(.true., .true., .false., cvLookUp)
         call grid%GiveXpoints(.true.,cvLookUp)
         fcsD = 0
         counterf = 0
@@ -17540,6 +17633,8 @@ module gamod_types
 
         ! Check
         if (size(faces) /= size(verts)) then
+
+            call grid%WriteErrorData(verts)
             call gdErrorHandler('AddCell: size faces and size verts is not the same')
         end if
 
@@ -18188,6 +18283,33 @@ module gamod_types
         ! Others
         end associate
         close(fu)
+
+    end subroutine
+
+    subroutine WriteErrorData(grid, verts)
+
+        ! Description
+        !============
+        ! Write data for an error plot
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: verts(:)
+
+        ! Auxiliary
+        logical, allocatable :: is_ordered(:)
+
+        ! Initialize
+        allocate(is_ordered(grid%cell%ntot))
+
+        ! Reorder connectivity 
+        call grid%ReorderCellConn(is_ordered)
+
+        ! Write grid and array for vertices to indicate problematic area
+        call grid%WriteData('grid_error')
+        call WriteArray(verts, 'vertices_error')
 
     end subroutine
 
@@ -19100,12 +19222,12 @@ module gamod_types
 
         do i = 1, nf, step
             ifc = faces(i)
-            cvs = GetFaceCellGA(cell,ifc, cvLookUp)
+            cvs = GetFaceCellGA(cell, ifc, cvLookUp)
             if (size(cvs).eq.2) then
                 reg1 = creg(cvs(1))
                 reg2 = creg(cvs(2))
                 if (reg1 /= reg2) then
-                    if ((mod(reg1,4).eq.1) .or. (mod(reg2,4).eq.1)) then 
+                    if (count(isCoreCell(cell, cvs)) == 1) then 
                         counter = counter + 1
                         res(counter) = ifs
                         exit
@@ -19114,8 +19236,6 @@ module gamod_types
             end if
         end do
 
-
-        
     end function
 
     function isBoundaryFace0DGA(g, ifc, meth) result(res)
@@ -19220,6 +19340,24 @@ module gamod_types
             end if   
         end do
      
+    end function
+
+    function isCoreCell0D(c, ic) result(res)
+        type(GAcellUDT) :: c
+        integer(I8) :: ic
+        logical :: res
+
+        res = (mod(c%reg%Get(ic), 4) == 1)
+
+    end function
+
+    function isCoreCell1D(c, ic) result(res)
+        type(GAcellUDT) :: c
+        integer(I8) :: ic(:)
+        logical :: res(size(ic))
+
+        res = (mod(c%reg%Get(ic), 4) == 1)
+
     end function
 
     function isPoloidal(grid, fcs, cvLookUp) result(res)
@@ -19667,7 +19805,7 @@ module gamod_types
         use mod_specialchars, only : filesepchar
 
         ! Arguments
-        integer(I8), allocatable :: a(:)
+        integer(I8), intent(in)  :: a(:)
         character(*), intent(in) :: filename 
 
         ! Auxiliary
