@@ -97,7 +97,19 @@ except:
 #farSOLint = dh.ReadGARealArrayFile(filepath)
 #plotter.PlotGridCellValue(grid1,farSOLint, 0.95, 2)
 
+# Reading flux tube cells
+#------------------------
+filepath = datadir + '/' + 'grid_fluxtube.dat'
+grid_ft = dh.ReadGAGridDataFile(filepath)
+filepath_ftcv = datadir + '/' + 'fluxtubecells.dat'
+filepath_ftcv1 = datadir + '/' + 'fluxtubecellsP1.dat'
+filepath_ftcvP2 = datadir + '/' + 'fluxtubecellsP2.dat'
+ftcv = dh.ReadGAIntegerArrayFile(filepath_ftcv)
+ftcvP1 = dh.ReadGAIntegerArrayFile(filepath_ftcv1)
+ftcvP2 = dh.ReadGAIntegerArrayFile(filepath_ftcvP2)
 
+# Plot the grid
+plotter.PlotGridCellsFtCv(grid_ft, ftcv, ftcvP1, ftcvP2, 3)
 
 # Show figures
 #-------------

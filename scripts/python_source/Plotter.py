@@ -1376,6 +1376,22 @@ def PlotGridCellsFsFc(grid, fsFc, fsFcP1, fsFcP2, fignum):
             faces = fsFc[s:s+n]
         PlotPoints2D(xf[faces-1], yf[faces-1], fignum, marker='.', color='g')    
 
+def PlotGridCellsFtCv(grid, ftcv, ftcvP1, ftcvP2, fignum):
+    # Plot cells only
+    PlotGridFaces(grid, fignum)
+
+    # Plot cutcells 
+    color_array = ['g', 'b', 'r', 'b']
+    for i in np.arange(0,len(ftcvP1), 1):
+        t = i % 4
+        s = ftcvP1[i]-1
+        n = ftcvP2[i]
+        if (n == 1) :
+            cells = ftcv[s]
+        else: 
+            cells = ftcv[s:s+n]
+        PlotPoints2D(grid.cell.x[cells-1], grid.cell.y[cells-1], fignum, marker='.', color=color_array[t])
+
 def PlotGridCellValue(grid, array, threshold, fignum):
     # Plot cells only
     PlotGridCells(grid, fignum)
