@@ -16949,16 +16949,17 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: TMTop, tubeID, &
             tubeface1, tubeface2, ngridface1, ngridface2, ne, &
-            fcRegID, thisxp, thisxp2
+            fcRegID, thisxp, thisxp2, sepfsID
         integer(I8), allocatable, dimension(:)  :: gridface1, &
             gridface2, tubeface, resfcReg, allfID, &
             tfID, sortindex, psind, ind, remfcReg, targetID, xpID, &
-            pxpID, spxpID, spID
+            pxpID, spxpID, spID, tempf, tempv
         integer(I8), allocatable, dimension(:, :)   :: edges
 
         logical                                 :: isxpfound
         logical, allocatable, dimension(:)      :: ispolygonstart, &
-            isbranchingpolygon 
+            isbranchingpolygon
+        logical, allocatable, dimension(:, :)   :: hasfcreg
 
         ! Loop
         integer(I8)                             :: i, j, k 
@@ -17151,6 +17152,41 @@ module ggmod_gridgeneration2D
                 end do 
                 deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
             end do 
+
+            ! Search for a flux surface that has both fcReg1 and fcReg2 
+            ! as end points, but only these
+            allocate(hasfcreg(maxval(simgrid%vert%fieldlineID), maxval(simgrid%face%reg)))
+            hasfcreg = .false.
+            sepfsID = 0 
+            do i = 1, maxval(simgrid%face%reg)
+                ! Get faces
+                allocate(tempf(count(simgrid%face%reg == i)))
+                tempf = pack([(k, k = 1, simgrid%face%ntot)], simgrid%face%reg == i)
+
+                ! Get vertices of these faces
+                tempv = [simgrid%face%vert(tempf, 1), simgrid%face%vert(tempf, 2)]
+                
+                ! Set fcreg to true for flux surfaces of these vertices, 
+                ! if they are non-zero
+                where (simgrid%vert%fieldlineID(tempv) /= 0) 
+                    hasfcreg(simgrid%vert%fieldlineID(tempv), i) = .true.
+                end where 
+
+                ! Housekeeping
+                deallocate(tempf)
+            end do 
+            do i = 1, maxval(simgrid%vert%fieldlineID)
+                if (hasfcreg(i, 1) .and. hasfcreg(i, 2) .and. .not. any(hasfcreg(i, 3:))) then 
+                    sepfsID = i
+                end if 
+            end do 
+
+            ! Print out the separatrix flux surface ID
+            if (sepfsID /= 0) then 
+                print *, 'Identified possible separatrix flux surface ID: ', sepfsID
+            else
+                print *, 'Could not identify possible separatrix flux surface ID...'
+            end if 
 
         case (TMTopSN)
 
