@@ -7154,10 +7154,10 @@ module ggmod_topology2D
             ! Add vertex
             bndvert3 = [bndvert3, tfbv(k)]
 
-            ! Check if we encountered v2
-            if (tfbv(k) == v2) then 
+            ! Check if we encountered v1
+            if (tfbv(k) == v1) then 
                 ! No aligned face found between v1 and v2 
-                noalignedfacev1tov2 = .true.
+                noalignedfacev2tov1 = .true.
                 exit
             end if 
         end do 
@@ -7187,10 +7187,10 @@ module ggmod_topology2D
             ! Add vertex
             bndvert4 = [bndvert4, tfbv(k)]
 
-            ! Check if we encountered v2
-            if (tfbv(k) == v2) then 
+            ! Check if we encountered v1
+            if (tfbv(k) == v1) then 
                 ! No aligned face found between v1 and v2 
-                noalignedfacev2tov1 = .true.
+                noalignedfacev1tov2 = .true.
                 exit
             end if 
         end do 
@@ -7202,109 +7202,7 @@ module ggmod_topology2D
             ! routine but it is for grid generation later on)
             call gdErrorHandler('MergeTMTubesOOTA: tube merging would result ' // & 
                 'in tube with no aligned faces, not yet supported')
-        end if 
-
-        ! Check if resulting tube would lead to overlapping psi values. 
-        ! If so, abort the merge
-        if (noalignedfacev1tov2) then 
-            ! Normally no faces present, but check
-            if (any(isbndf1)) then 
-                call gdErrorHandler('MergeTMTubesOOTA: aligned faces found ' // & 
-                    'for boundary 1 though there should not be any')
-            end if 
-
-            ! Get the tangency point
-            ! Sanity check
-            if (all(topomesh%vert%type(bndvert1) /= TMvertextp1ID)) then 
-                call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                print *, 'vertices: ', bndvert1
-                call gdErrorHandler('MergeTMTubesOOTA: expected to have ' // & 
-                    'at least one tangency point type 1 in boundary but ' // & 
-                    'found none')
-            end if 
-
-            ! Determine tangency point type 1 vertex with maximal distance
-            ! to merge boundary
-            tpsi = topomesh%vert%fval(bndvert1)
-            dpsi = abs(maxval(mergepsival) - tpsi)
-            where (topomesh%vert%type(bndvert1) /= TMvertextp1ID) dpsi = -posinfval_R8()
-            psibnd1 = [tpsi(maxloc(dpsi))]
-            
-        else
-            ! Sanity check
-            if (.not. any (isbndf1 .and. (topomesh%face%type(tfb) /= TMfacealbndID))) then 
-                call gdErrorHandler('MergeTMTubesOOTA: expected to have ' // & 
-                    'at least one non-vessel aligned boundary face on side 1 but found ' // &
-                    'none')
-            end if 
-
-            ! Get boundary faces
-            allocate(bndf1(count(isbndf1)))
-            bndf1 = pack(tfb, isbndf1)
-            bndf1 = pack(bndf1, topomesh%face%type(bndf1) /= TMfacealbndID) ! remove aligned boundaries
-            bndfv1 = [topomesh%face%vert(bndf1, 1), topomesh%face%vert(bndf1, 2)]
-            psibnd1 = topomesh%vert%fval(bndfv1)
-
-            ! Housekeeping
-            deallocate(bndf1)
-        end if 
-        if (noalignedfacev2tov1) then 
-            ! Normally no faces present, but check
-            if (any(isbndf2)) then 
-                call gdErrorHandler('MergeTMTubesOOTA: aligned faces found ' // & 
-                    'for boundary 2 though there should not be any')
-            end if 
-
-            ! Get the tangency point
-            ! Sanity check
-            if (all(topomesh%vert%type(bndvert2) /= TMvertextp1ID)) then 
-                call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                print *, 'vertices: ', bndvert2
-                call gdErrorHandler('MergeTMTubesOOTA: expected to have ' // & 
-                    'at least one tangency point type 1 in boundary but ' // & 
-                    'found none')
-            end if 
-
-            ! Determine tangency point type 1 vertex with maximal distance
-            ! to merge boundary
-            tpsi = topomesh%vert%fval(bndvert2)
-            dpsi = abs(maxval(mergepsival) - tpsi)
-            where (topomesh%vert%type(bndvert1) /= TMvertextp1ID) dpsi = -posinfval_R8()
-            psibnd2 = [tpsi(maxloc(dpsi))]
-            
-        else
-            ! Sanity check
-            if (.not. any (isbndf2 .and. (topomesh%face%type(tfb) /= TMfacealbndID))) then 
-                call gdErrorHandler('MergeTMTubesOOTA: expected to have ' // & 
-                    'at least one non-vessel aligned boundary face on side 2 but found ' // &
-                    'none')
-            end if 
-
-            ! Get boundary faces
-            allocate(bndf2(count(isbndf2)))
-            bndf2 = pack(tfb, isbndf2)
-            bndf2 = pack(bndf2, topomesh%face%type(bndf2) /= TMfacealbndID) ! remove aligned boundaries
-            bndfv2 = [topomesh%face%vert(bndf2, 1), topomesh%face%vert(bndf2, 2)]
-            psibnd2 = topomesh%vert%fval(bndfv2)
-
-            ! Housekeeping
-            deallocate(bndf2)
-        end if
-        if (.false.) then 
-            if (all(minval(psibnd1) > psibnd2)) then 
-                ! All good, boundary 1 is high flux boundary
-            elseif (all(minval(psibnd2) > psibnd1)) then 
-                ! All good, boundary 2 is high flux boundary
-            else
-                ! Overlapping psi values, print message, add flux surface IDs
-                ! of non-boundary faces to illegal ones and exit
-                print *, 'MergeTMTubesOOTA: merging of tubes would lead to ' // & 
-                    'tube with overlapping psi values, not merging...'
-                tmadaptor%illegalfsIDs = [tmadaptor%illegalfsIDs, topomesh%face%fsID(nonbndmergefaces)]
-                wasmerged = .false.     
-                return 
-            end if   
-        end if     
+        end if  
 
         ! Retype faces
         !=============
@@ -8445,17 +8343,18 @@ module ggmod_topology2D
             isalphapos, overridetubecase
         integer(I8)                             :: thisf, tubecase, nfs, &
             ntpc, nint, nstc, startind, endind, indtpc, intersectind, &
-            insertloc
+            insertloc, tfmarktraceind(1:2)
         integer(I8), allocatable, dimension(:)  :: tf, tfbnd, afstartind, &
             afendind, tfmark, facevert, tfnb1, tfnb2, newfsIDs,  &
             markedtpIDs, sortind, vindI, vindJ, tsc, tfaceind, &
-            vertexmarkIDs, tfnbv1, tfnbv2, tubecase_override, tvf
+            vertexmarkIDs, tfnbv1, tfnbv2, tubecase_override, tvf, &
+            tvmark
         real(R8)                                :: avpminangle, highpsi, &
             lowpsi, tdl
         real(R8), allocatable, dimension(:)     :: tx, ty, xf, yf, dx, &
             dy, dn, bxf, byf, bnf, alpha, tpsinb1, tpsinb2, tpsitp, &
             xout, yout, iout, jout, tscr, dl, dlsum, thisx, thisy, &
-            cosalpha, sinalpha, alphasigned, fval, dfval
+            cosalpha, sinalpha, alphasigned, fval, dfval, tpsinew
 
         type(ContourUDT), allocatable           :: tempc(:), allc(:)
         type(IntegerDynamicArrayUDT)            :: fsIDs, curvetypes, &
@@ -8744,6 +8643,10 @@ module ggmod_topology2D
                 end if 
             end if 
 
+            ! Get vertices
+            tvmark = [topomesh%face%vert(tfmark, 1), topomesh%face%vert(tfmark, 2)]
+            tvmark = pack(tvmark, vertexmark(tvmark))
+
             ! Override 
             if (any(overridetubecase(tfmark))) then 
                 ! Just take one...
@@ -8843,91 +8746,91 @@ module ggmod_topology2D
 
                 ! Two faces that are partially aligned, need to check further
 
+                ! Sanity check: should have two marked vertices
+                if (size(tvmark) /= 2) then 
+                    print *, 'found marked vertices: ', tvmark
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.) 
+                    call gdErrorHandler('InsertAlignedVesselParts: could ' // &
+                        'not find exactly two marked vertices, unexpected')
+                end if 
+
                 ! Get tube and tangency points psi values
-                tfnb1 = GetTMTubeBndFace(tube, i, 1)
-                tfnb2 = GetTMTubeBndFace(tube, i, 2)
+                tfnb1 = GetTMTubeHighFluxBndFace(topomesh%tube, i)
+                tfnb2 = GetTMTubeLowFluxBndFace(topomesh%tube, i)
                 tpsinb1 = topomesh%fsfval%Get(face%fsID(tfnb1))
                 tpsinb2 = topomesh%fsfval%Get(face%fsID(tfnb2))
-                tpsitp = topomesh%fsfval%Get(face%fsID(tfmark))
+                tpsitp = topomesh%fsfval%Get(tvmark)
 
-                ! Determine if points are on high or low psi boundary
-                if (minval(tpsinb1) > maxval(tpsinb2)) then 
-                    ! Determine tube psi bounds
-                    highpsi = minval(tpsinb1)
-                    lowpsi = maxval(tpsinb2)
+                ! Compute psi values of potential new contours and their
+                ! tracing index
+                if (vertexmark(face%vert(tfmark(1), 1))) then 
+                    ! First vertex is tangency point, so need to look at 
+                    ! end index
+                    tfmarktraceind(1) = afendind(tfmark(1))
+                    
+                elseif (vertexmark(face%vert(tfmark(1), 2))) then 
+                    ! Second vertex is tangency point, so need to look 
+                    ! at start index
+                    tfmarktraceind(1) = afstartind(tfmark(1))
 
-                    ! Determine if first tp is high/low field tp
-                    if (any(face%fsID(tfnb1) == face%fsID(tfmark(1)))) then 
-                        ishftp(1) = .true. 
-                    elseif (any(face%fsID(tfnb2) == face%fsID(tfmark(1)))) then 
-                        ishftp(2) = .false. 
-                    else
-                        ! Shouldn't happen
-                        print *, 'tube: ', i, 'vertex: ', facevert(tfmark(1))
-                        call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                        call gdErrorHandler('InsertAlignedVesselParts: ' // &
-                            'tangency point not found in any tube aligned boundary')
-                    end if 
-
-                    ! Determine if second tp is high/low field tp
-                    if (any(face%fsID(tfnb1) == face%fsID(tfmark(2)))) then 
-                        ishftp(1) = .true. 
-                    elseif (any(face%fsID(tfnb2) == face%fsID(tfmark(2)))) then 
-                        ishftp(2) = .false. 
-                    else
-                        ! Shouldn't happen
-                        print *, 'tube: ', i, 'vertex: ', facevert(tfmark(2))
-                        call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                        call gdErrorHandler('InsertAlignedVesselParts: ' // &
-                            'tangency point not found in any tube aligned boundary')
-                    end if 
-
-                    ! Determine
-                elseif (minval(tpsinb1) > maxval(tpsinb2)) then 
-                    ! Determine tube psi bouds
-                    highpsi = minval(tpsinb2)
-                    lowpsi = maxval(tpsinb1)
-
-                    ! Determine if first tp is high/low field tp
-                    if (any(face%fsID(tfnb1) == face%fsID(tfmark(1)))) then 
-                        ishftp(1) = .false. 
-                    elseif (any(face%fsID(tfnb2) == face%fsID(tfmark(1)))) then 
-                        ishftp(2) = .true. 
-                    else
-                        ! Shouldn't happen
-                        print *, 'tube: ', i, 'vertex: ', facevert(tfmark(1))
-                        call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                        call gdErrorHandler('InsertAlignedVesselParts: ' // &
-                            'tangency point not found in any tube aligned boundary')
-                    end if 
-
-                    ! Determine if second tp is high/low field tp
-                    if (any(face%fsID(tfnb1) == face%fsID(tfmark(2)))) then 
-                        ishftp(1) = .false. 
-                    elseif (any(face%fsID(tfnb2) == face%fsID(tfmark(2)))) then 
-                        ishftp(2) = .true. 
-                    else
-                        ! Shouldn't happen
-                        print *, 'tube: ', i, 'vertex: ', facevert(tfmark(2))
-                        call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                        call gdErrorHandler('InsertAlignedVesselParts: ' // &
-                            'tangency point not found in any tube aligned boundary')
-                    end if 
                 else
-                    print *, 'tube: ', i
-                    call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                    call gdErrorHandler('InsertAlignedVesselParts: ' // & 
-                        'tube psi values of aligned boundaries are overlapping, ' // & 
-                        'unexpected.')
-                end if  
+                    ! No vertices are tangency points - unexpected
+                    call gdErrorHandler('InsertAlignedVesselParts: no ' // & 
+                        'marked tangency points found in marked face')
+                end if 
+                if (vertexmark(face%vert(tfmark(2), 1))) then 
+                    ! First vertex is tangency point, so need to look at 
+                    ! end index
+                    tfmarktraceind(2) = afendind(tfmark(2))
+                    
+                elseif (vertexmark(face%vert(tfmark(2), 2))) then 
+                    ! Second vertex is tangency point, so need to look 
+                    ! at start index
+                    tfmarktraceind(2) = afstartind(tfmark(2))
 
+                else
+                    ! No vertices are tangency points - unexpected
+                    call gdErrorHandler('InsertAlignedVesselParts: no ' // & 
+                        'marked tangency points found in marked face')
+                end if 
+                tpsinew = [fieldtracer%Evaluate([face%x(tfmark(1))%Get(tfmarktraceind(1))], &
+                    [face%y(tfmark(1))%Get(tfmarktraceind(1))]), &
+                fieldtracer%Evaluate([face%x(tfmark(2))%Get(tfmarktraceind(2))], &
+                    [face%y(tfmark(2))%Get(tfmarktraceind(2))])]
+
+                ! Determine if first tp is high/low field tp
+                if (any([face%vert(tfnb1, 1), face%vert(tfnb1, 2)] == tvmark(1))) then 
+                    ishftp(1) = .true. 
+                elseif (any([face%vert(tfnb2, 1), face%vert(tfnb2, 2)] == tvmark(1))) then 
+                    ishftp(1) = .false. 
+                else
+                    ! Shouldn't happen
+                    print *, 'tube: ', i, 'vertex: ', facevert(tfmark(1))
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                    call gdErrorHandler('InsertAlignedVesselParts: ' // &
+                        'tangency point not found in any tube aligned boundary')
+                end if 
+
+                ! Determine if second tp is high/low field tp
+                if (any([face%vert(tfnb1, 1), face%vert(tfnb1, 2)] == tvmark(2))) then 
+                    ishftp(2) = .true. 
+                elseif (any([face%vert(tfnb2, 1), face%vert(tfnb2, 2)] == tvmark(2))) then 
+                    ishftp(2) = .false. 
+                else
+                    ! Shouldn't happen
+                    print *, 'tube: ', i, 'vertex: ', facevert(tfmark(2))
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                    call gdErrorHandler('InsertAlignedVesselParts: ' // &
+                        'tangency point not found in any tube aligned boundary')
+                end if 
+                
                 ! Check which contours to trace
                 if (all(ishftp)) then 
                     ! Take lowest psi value
                     if (tpsitp(1) < tpsitp(2)) then 
                         tempc = fieldtracer%TraceContours(&
-                            [face%x(tfmark(1))%Get(afendind(tfmark(1)))], &
-                            [face%y(tfmark(1))%Get(afendind(tfmark(1)))])
+                            [face%x(tfmark(1))%Get(tfmarktraceind(1))], &
+                            [face%y(tfmark(1))%Get(tfmarktraceind(1))])
                         allc = [allc, tempc]
                         nfs = nfs + 1
                         call fsIDs%Append(spread(nfs, 1, size(tempc)))
@@ -8935,8 +8838,8 @@ module ggmod_topology2D
                         call cface%Append(spread(tfmark(1), 1, size(tempc)))
                     else
                         tempc = fieldtracer%TraceContours(&
-                            [face%x(tfmark(2))%Get(afendind(tfmark(2)))], &
-                            [face%y(tfmark(2))%Get(afendind(tfmark(2)))])
+                            [face%x(tfmark(2))%Get(tfmarktraceind(2))], &
+                            [face%y(tfmark(2))%Get(tfmarktraceind(2))])
                         allc = [allc, tempc]
                         nfs = nfs + 1
                         call fsIDs%Append(spread(nfs, 1, size(tempc)))
@@ -8947,8 +8850,8 @@ module ggmod_topology2D
                     ! Take highest psi value
                     if (tpsitp(1) > tpsitp(2)) then 
                         tempc = fieldtracer%TraceContours(&
-                            [face%x(tfmark(1))%Get(afendind(tfmark(1)))], &
-                            [face%y(tfmark(1))%Get(afendind(tfmark(1)))])
+                            [face%x(tfmark(1))%Get(tfmarktraceind(1))], &
+                            [face%y(tfmark(1))%Get(tfmarktraceind(1))])
                         allc = [allc, tempc]
                         nfs = nfs + 1
                         call fsIDs%Append(spread(nfs, 1, size(tempc)))
@@ -8956,8 +8859,8 @@ module ggmod_topology2D
                         call cface%Append(spread(tfmark(1), 1, size(tempc)))
                     else
                         tempc = fieldtracer%TraceContours(&
-                            [face%x(tfmark(2))%Get(afendind(tfmark(2)))], &
-                            [face%y(tfmark(2))%Get(afendind(tfmark(2)))])
+                            [face%x(tfmark(2))%Get(tfmarktraceind(2))], &
+                            [face%y(tfmark(2))%Get(tfmarktraceind(2))])
                         allc = [allc, tempc]
                         nfs = nfs + 1
                         call fsIDs%Append(spread(nfs, 1, size(tempc)))
@@ -8968,9 +8871,9 @@ module ggmod_topology2D
                     ! Lowest and highest, need to check overlap
                     if (ishftp(1)) then 
                         ! First is highest, second is lowest. 
-                        if (tpsitp(1) < tpsitp(2)) then 
-                            ! Overlap -> take one with lowest delta Psi
-                            if (abs(tpsitp(1) - highpsi) < abs(tpsitp(2) - lowpsi)) then 
+                        if (tpsinew(1) < tpsinew(2)) then 
+                            ! Overlap -> just take first one
+                            !if (abs(tpsitp(1) - highpsi) < abs(tpsitp(2) - lowpsi)) then 
                                 tempc = fieldtracer%TraceContours(&
                                     [face%x(tfmark(1))%Get(afendind(tfmark(1)))], &
                                     [face%y(tfmark(1))%Get(afendind(tfmark(1)))])
@@ -8979,29 +8882,29 @@ module ggmod_topology2D
                                 call fsIDs%Append(spread(nfs, 1, size(tempc)))
                                 call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                                 call cface%Append(spread(tfmark(1), 1, size(tempc)))
-                            else
-                                tempc = fieldtracer%TraceContours(&
-                                    [face%x(tfmark(2))%Get(afendind(tfmark(2)))], &
-                                    [face%y(tfmark(2))%Get(afendind(tfmark(2)))])
-                                allc = [allc, tempc]
-                                nfs = nfs + 1
-                                call fsIDs%Append(spread(nfs, 1, size(tempc)))
-                                call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
-                                call cface%Append(spread(tfmark(2), 1, size(tempc)))
-                            end if 
+                            !else
+                            !    tempc = fieldtracer%TraceContours(&
+                            !        [face%x(tfmark(2))%Get(afendind(tfmark(2)))], &
+                            !        [face%y(tfmark(2))%Get(afendind(tfmark(2)))])
+                            !    allc = [allc, tempc]
+                            !    nfs = nfs + 1
+                            !    call fsIDs%Append(spread(nfs, 1, size(tempc)))
+                            !    call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
+                            !    call cface%Append(spread(tfmark(2), 1, size(tempc)))
+                            !end if 
                         else 
                             ! No overlap -> trace both contours
                             tempc = fieldtracer%TraceContours(&
-                                [face%x(tfmark(1))%Get(afendind(tfmark(1)))], &
-                                [face%y(tfmark(1))%Get(afendind(tfmark(1)))])
+                                [face%x(tfmark(1))%Get(tfmarktraceind(1))], &
+                                [face%y(tfmark(1))%Get(tfmarktraceind(1))])
                             allc = [allc, tempc]
                             nfs = nfs + 1
                             call fsIDs%Append(spread(nfs, 1, size(tempc)))
                             call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                             call cface%Append(spread(tfmark(1), 1, size(tempc)))
                             tempc = fieldtracer%TraceContours(&
-                                [face%x(tfmark(2))%Get(afendind(tfmark(2)))], &
-                                [face%y(tfmark(2))%Get(afendind(tfmark(2)))])
+                                [face%x(tfmark(2))%Get(tfmarktraceind(2))], &
+                                [face%y(tfmark(2))%Get(tfmarktraceind(2))])
                             allc = [allc, tempc]
                             nfs = nfs + 1
                             call fsIDs%Append(spread(nfs, 1, size(tempc)))
@@ -9012,38 +8915,38 @@ module ggmod_topology2D
                         ! Second is highest
                         if (tpsitp(1) > tpsitp(2)) then 
                             ! Overlap -> take one with lowest delta Psi
-                            if (abs(tpsitp(1) - lowpsi) < abs(tpsitp(2) - highpsi)) then 
+                            !if (abs(tpsitp(1) - lowpsi) < abs(tpsitp(2) - highpsi)) then 
                                 tempc = fieldtracer%TraceContours(&
-                                    [face%x(tfmark(1))%Get(afendind(tfmark(1)))], &
-                                    [face%y(tfmark(1))%Get(afendind(tfmark(1)))])
+                                    [face%x(tfmark(1))%Get(tfmarktraceind(1))], &
+                                    [face%y(tfmark(1))%Get(tfmarktraceind(1))])
                                 allc = [allc, tempc]
                                 nfs = nfs + 1
                                 call fsIDs%Append(spread(nfs, 1, size(tempc)))
                                 call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                                 call cface%Append(spread(tfmark(1), 1, size(tempc)))
-                            else
-                                tempc = fieldtracer%TraceContours(&
-                                    [face%x(tfmark(2))%Get(afendind(tfmark(2)))], &
-                                    [face%y(tfmark(2))%Get(afendind(tfmark(2)))])
-                                allc = [allc, tempc]
-                                nfs = nfs + 1
-                                call fsIDs%Append(spread(nfs, 1, size(tempc)))
-                                call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
-                                call cface%Append(spread(tfmark(2), 1, size(tempc)))
-                            end if 
+                            !else
+                            !    tempc = fieldtracer%TraceContours(&
+                            !        [face%x(tfmark(2))%Get(afendind(tfmark(2)))], &
+                            !        [face%y(tfmark(2))%Get(afendind(tfmark(2)))])
+                            !    allc = [allc, tempc]
+                            !    nfs = nfs + 1
+                            !    call fsIDs%Append(spread(nfs, 1, size(tempc)))
+                            !    call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
+                            !    call cface%Append(spread(tfmark(2), 1, size(tempc)))
+                            !end if 
                         else 
                             ! No overlap -> trace both contours
                             tempc = fieldtracer%TraceContours(&
-                                [face%x(tfmark(1))%Get(afendind(tfmark(1)))], &
-                                [face%y(tfmark(1))%Get(afendind(tfmark(1)))])
+                                [face%x(tfmark(1))%Get(tfmarktraceind(1))], &
+                                [face%y(tfmark(1))%Get(tfmarktraceind(1))])
                             allc = [allc, tempc]
                             nfs = nfs + 1
                             call fsIDs%Append(spread(nfs, 1, size(tempc)))
                             call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                             call cface%Append(spread(tfmark(1), 1, size(tempc)))
                             tempc = fieldtracer%TraceContours(&
-                                [face%x(tfmark(2))%Get(afendind(tfmark(2)))], &
-                                [face%y(tfmark(2))%Get(afendind(tfmark(2)))])
+                                [face%x(tfmark(2))%Get(tfmarktraceind(2))], &
+                                [face%y(tfmark(2))%Get(tfmarktraceind(2))])
                             allc = [allc, tempc]
                             nfs = nfs + 1
                             call fsIDs%Append(spread(nfs, 1, size(tempc)))
@@ -14932,6 +14835,28 @@ module ggmod_topology2D
                 vert%type(tv1) == TMvertexminID .or. vert%type(tv1) == TMvertexmaxID) !only keep type 1 TPs, max and min
             tv2 = pack(tv2, vert%type(tv2) == TMvertextp1ID .or. &
                 vert%type(tv2) == TMvertexminID .or. vert%type(tv2) == TMvertexmaxID)
+
+            ! If there are sides with only aligned boundaries, take these and
+            ! issue warning
+            if ((size(tf1) + size(tv1)) == 0) then 
+                ! May happen in some cases
+                print *, ('warning: GetTMTubePsiLimits: tube has only aligned ' // &
+                    'boundary faces as neighbour at side 1, including these to determine ')
+                tf1 = tube%GetBndFace(tubeID, 1)
+                tv1 = tube%GetBndVert(tubeID, 1)
+                tf1 = pack(tf1, (face%fsID(tf1) /= 0))
+                tv1 = pack(tv1, vert%fsID(tv1) /= 0)
+            end if 
+            if ((size(tf2) + size(tv2)) == 0) then 
+                ! Should not happen
+                call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                call gdErrorHandler('GetTMTubePsiLimits: tube has only aligned ' // &
+                    'boundary faces as neighbour at side 2, unexpected')
+                tf2 = tube%GetBndFace(tubeID, 2)
+                tv2 = tube%GetBndVert(tubeID, 2)
+                tf2 = pack(tf2, (face%fsID(tf2) /= 0))
+                tv2 = pack(tv2, vert%fsID(tv2) /= 0)
+            end if 
         end if 
 
         ! Check
