@@ -16926,7 +16926,9 @@ module ggmod_gridgeneration2D
         ! The following is done: 
         !
         ! Linear:
-        ! - fcReg: 1, 2 for targets, random (non-target) values elsewhere (0 in domain)
+        ! - fcReg: 1, 2 for targets (non-adjacent), 3, 4 for aligned 
+        !   boundaries next to them, (non-target) values elsewhere (0 in domain)
+        ! - Assumed only one vessel polygon 
         ! - cvReg: everywhere equal to 1
 
         ! Single x: 
@@ -17051,11 +17053,22 @@ module ggmod_gridgeneration2D
             tubeID = 1
             do while (tubeID <= topomesh%tube%ntot)
                 ! Checks
+
+                ! Open tube?
                 if (topomesh%tube%isclosed(tubeID)) then 
                     tubeID = tubeID + 1
-                else 
-                    exit 
+                    cycle
                 end if 
+
+                ! Both high and low field faces? 
+                if ((topomesh%tube%bndf1P(tubeID, 1) == 0) .or. &
+                    (topomesh%tube%bndf2P(tubeID, 1) == 0)) then 
+                    tubeID = tubeID + 1
+                    cycle
+                end if 
+
+                ! If we got here, all criteria were met for this tube, exit
+                exit
             end do 
 
             ! Check if the ID was found, if not: exit
