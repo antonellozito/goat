@@ -5198,6 +5198,10 @@ module ggmod_gridgeneration2D
             ! Loop
             nflmax = size(facedata(tf(1))%line%xv)
             tfmax = tf(1)
+            if (any(topomesh%face%type(tf) == TMfacebndID)) then 
+                ! Keep only boundary faces for distribution
+                tf = pack(tf, topomesh%face%type(tf)  == TMFacebndID)
+            end if 
             do j = 1, size(tf)
                 ! Determine number of field lines
                 nfl = size(facedata(tf(j))%line%xv)
