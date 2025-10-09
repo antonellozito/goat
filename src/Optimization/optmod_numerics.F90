@@ -118,10 +118,11 @@ module optmod_numerics
         real(R8), allocatable   :: FDsteps(:)
         logical             :: useproblemrelaxation, checkcfvgradient, &
             checkcfvhessian, checkeqcongradient, checkeqconhessian, &
-            checkineqcongradient, checkineqconhessian
+            checkineqcongradient, checkineqconhessian, checklaggradient, &
+            checklaghessian
         integer(I8), allocatable, dimension(:)  :: checkcfvvars, &
             checkeqconvars, checkeqconeqs, checkineqconvars, &
-            checkineqconeqs
+            checkineqconeqs, checklagvars
         character(:), allocatable       :: checkoutputfile
 
     contains 
@@ -378,6 +379,8 @@ module optmod_numerics
         num%checkeqconhessian       = .false. 
         num%checkineqcongradient    = .false.
         num%checkineqconhessian     = .false.
+        num%checklaggradient        = .false. 
+        num%checklaghessian         = .false. 
 
         if (allocated(num%FDsteps)) then 
             deallocate(num%FDsteps)
@@ -397,10 +400,13 @@ module optmod_numerics
         if (allocated(num%checkineqconeqs)) then 
             deallocate(num%checkineqconeqs)
         end if 
+        if (allocated(num%checklagvars)) then 
+            deallocate(num%checklagvars)
+        end if 
 
         allocate(num%checkcfvvars(0), num%checkeqconvars(0), &
             num%checkineqconvars(0), num%checkeqconeqs(0), &
-            num%checkineqconeqs(0), num%FDsteps(0))
+            num%checkineqconeqs(0), num%FDsteps(0), num%checklagvars(0))
 
         
     end subroutine
@@ -501,6 +507,8 @@ module optmod_numerics
         call ExtractOptionValueLogical0D(fid, field, num%checkeqcongradient)
         field = num%fieldprefix // 'opt.num.checkineqcongradient'
         call ExtractOptionValueLogical0D(fid, field, num%checkineqcongradient)
+        field = num%fieldprefix // 'opt.num.checklaggradient'
+        call ExtractOptionValueLogical0D(fid, field, num%checklaggradient)
 
         field = num%fieldprefix // 'opt.num.checkcfvhessian'
         call ExtractOptionValueLogical0D(fid, field, num%checkcfvhessian)
@@ -508,6 +516,8 @@ module optmod_numerics
         call ExtractOptionValueLogical0D(fid, field, num%checkeqconhessian)
         field = num%fieldprefix // 'opt.num.checkineqconhessian'
         call ExtractOptionValueLogical0D(fid, field, num%checkineqconhessian)
+        field = num%fieldprefix // 'opt.num.checklaghessian'
+        call ExtractOptionValueLogical0D(fid, field, num%checklaghessian)
 
         field = num%fieldprefix // 'opt.num.checkcfvvars'
         call ExtractOptionValueInteger1D(fid, field, num%checkcfvvars)
@@ -519,6 +529,8 @@ module optmod_numerics
         call ExtractOptionValueInteger1D(fid, field, num%checkeqconeqs)
         field = num%fieldprefix // 'opt.num.checkineqconeqs'
         call ExtractOptionValueInteger1D(fid, field, num%checkineqconeqs)
+        field = num%fieldprefix // 'opt.num.checklagvars'
+        call ExtractOptionValueInteger1D(fid, field, num%checklagvars)
 
         field = num%fieldprefix // 'opt.num.FDsteps'
         call ExtractOptionValueReal1D(fid, field, num%FDsteps)
