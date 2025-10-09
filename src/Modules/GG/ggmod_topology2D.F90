@@ -6899,17 +6899,16 @@ module ggmod_topology2D
         integer(I8)                             :: ne, ind1, ind2, &
             thisf, v1, v2, si, ei
         integer(I8), allocatable, dimension(:)  :: tf, tfb, &
-            nonbndmergefaces, tempi, tfbv, mergevert, sortind, &
+            tempi, tfbv, mergevert, sortind, &
             polygonID, bndvert1, bndvert2, bndvert3, bndvert4, &
-            tvf, tempf, avpfsID, tv, tvfsID, bndf1, bndf2, &
-            bndfv1, bndfv2, commonmergefaces
+            tvf, tempf, avpfsID, tv, tvfsID, commonmergefaces
         integer(I8), allocatable, dimension(:, :)   :: tfv
         logical                                 :: noalignedfacev1tov2, &
             noalignedfacev2tov1
         logical, allocatable, dimension(:)      :: ispolygonstart, &
             isbranchingpolygon, isavp, retypevert, isbndf1, isbndf2
         real(R8), allocatable, dimension(:)     :: mergepsival, tpsi, &
-            dpsi, tvfval, psibnd1, psibnd2
+            dpsi, tvfval
         type(IntegerDynamicArrayUDT)            :: tfbida, tfida1, tfida2
 
         ! Loop
@@ -8349,8 +8348,7 @@ module ggmod_topology2D
             markedtpIDs, sortind, vindI, vindJ, tsc, tfaceind, &
             vertexmarkIDs, tfnbv1, tfnbv2, tubecase_override, tvf, &
             tvmark
-        real(R8)                                :: avpminangle, highpsi, &
-            lowpsi, tdl
+        real(R8)                                :: avpminangle, tdl
         real(R8), allocatable, dimension(:)     :: tx, ty, xf, yf, dx, &
             dy, dn, bxf, byf, bnf, alpha, tpsinb1, tpsinb2, tpsitp, &
             xout, yout, iout, jout, tscr, dl, dlsum, thisx, thisy, &
