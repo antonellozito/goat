@@ -185,10 +185,15 @@ module gamod_driver
         ! Detect cells at cut for artificial slabs - TODO
 
         ! Identify farSOL cells
-        if (options%vesselmode .and. maxval(options%facelabelmappingGA) .lt. 6) then
-            call grid%IdentifyfarSOLcells(options)
-        else if (maxval(options%facelabelmappingGA) .gt. 5) then
-            print *, 'GAInit: no farSOL indentified as algorithm is not supporting double null cases yet!' ! TODO
+        if (options%vesselmode) then
+            if (grid%data%nxp .ge. 1 .and.  grid%data%nsep .ge. 1 &
+                   .and. grid%data%nxp == grid%data%nsep) then
+                ! Single null, disconnected double null
+                call grid%IdentifyfarSOLcells(options)
+            end if
+        else if (grid%data%nxp == 2 .and. grid%data%nsep == 1) then
+            print *, 'GAInit: no farSOL indentified as algorithm is not supporting connected' // &
+            & 'double null cases yet!' ! TODO
         end if
 
         ! Check consistency of options
@@ -392,7 +397,7 @@ module gamod_driver
                         print *, grid%vert%x%Get(iv)
                         print *, grid%vert%y%Get(iv)
                         verts = [iv, iv]
-                        call grid%WriteErrorData(verts)
+                        call grid%WriteErrorData(verts, 1)
                         call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
 
                     end if

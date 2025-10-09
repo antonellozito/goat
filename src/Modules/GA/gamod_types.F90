@@ -329,6 +329,7 @@ module gamod_types
         procedure :: IdentifyAlignedFaces
         procedure :: CheckFcLbl
         procedure :: IdentifyfarSOLcells
+        procedure :: IdentifyMainSeparatrix
         procedure :: ChainFacesOfSepToTargets
         procedure :: FarSOLGetChainVerts
         procedure :: CheckUnstructuredGrid
@@ -1235,7 +1236,7 @@ module gamod_types
                         if (any(neigs(j) == cells)) then
                             ind = findloc(cells, neigs(j), 1)
                             if (pol_fluxdens_est(ind) .lt. bench) then
-                                common_face = GetCommonFace(c, cells(i), neigs(j))
+                                common_face = GetCommonFace(grid, cells(i), neigs(j))
                                 if ((f%aligned%Get(common_face) == 1) .and.(f%label%Get(common_face) == 0)) then
                                     qm%merge_fc = common_face
                                     bench = pol_fluxdens_est(ind)
@@ -1300,7 +1301,7 @@ module gamod_types
 
                                 if (qm%h_rad_psi(neigs(j)) .lt. bench) then
 
-                                    common_face = GetCommonFace(c, cells(i), neigs(j))
+                                    common_face = GetCommonFace(grid, cells(i), neigs(j))
                                     if ((f%aligned%Get(common_face) == 1) .and. (f%label%Get(common_face) == 0)) then
 
                                         qm%merge_fc = common_face
@@ -1350,7 +1351,7 @@ module gamod_types
                         if (any(neigs(j) == cells) .and. (.not.any(neigs(j) == Xcells)) &
                             .and. (qm%h_rad(neigs(j)) .lt. options%h_rad_core_threshold)) then
                             if (qm%h_rad(neigs(j)) .lt. bench) then
-                                common_face = GetCommonFace(c, cells(i), neigs(j))
+                                common_face = GetCommonFace(grid, cells(i), neigs(j))
                                 if (f%aligned%Get(common_face) == 1 .and. f%label%Get(common_face)== 0) then
                                     qm%merge_fc = common_face
                                     bench = qm%h_rad(neigs(j))
@@ -1522,11 +1523,11 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: i, k, ind, nal1, nal2, fcs1_al, fcs2_al, indmin, &
-            splitfaces(2), n_sub, ncc, trap, vxs(2), ncell
+            splitfaces(2), n_sub, ncc, trap, vxs(2), ncell, indmax
         integer(I8), allocatable, dimension(:) :: indcv, cells,  &
             cellsD, indsort, cells2, fcs, fcs_sep, indf, b_faces, b_verts, &
             cvLookUp, cvs, cvsD, fcs1, fcs2, tria_cells, subset_tria, &
-            nums, cctria, cctraps, cellsD2, bfcs
+            nums, cctria, cctraps, cellsD2, bfcs, verts
         integer(I8), allocatable :: cctrapsP(:,:)
         real(R8) :: mean_tot_flux, threshold, dfunv(grid%cell%ntot), nx, ny, &
             fbx, fby
@@ -1595,22 +1596,29 @@ module gamod_types
             case (2) ! h_rad
 
                 ! Sort for decreasing h_rad_psi
-                h_rad_cells = qm%h_rad(cells)
-                allocate(indsort(size(cells)))
-                call Sort(h_rad_cells, indsort, .false.)
-                cells = cells(indsort)
+                log = [c%reg%Get(cells)] /= 1 .and. [c%cflags%Get(cells)] /= 3
+                allocate(cellsD2(count(log)))
+                cellsD2 = pack(cells, log)
+
+                ! Maximal h_rad
+                h_rad_cells = qm%h_rad(cellsD2)
+                indmax = maxloc(h_rad_cells, 1)
+                qm%split_cv = cellsD2(indmax)
+                !allocate(indsort(size(cells)))
+                !call Sort(h_rad_cells, indsort, .false.)
+                !cells = cells(indsort)
 
                 ! Find split cell
-                i = 1
-                do while (qm%split_cv == 0)
+                !i = 1
+                !do while (qm%split_cv == 0)
 
-                    if (c%reg%Get(cells(i)) /= 1 .and. c%cflags%Get(cells(i)) /= 3) then
-                        qm%split_cv = cells(i)
-                    else 
-                        i = i + 1
-                    end if
+                !    if (c%reg%Get(cells(i)) /= 1 .and. c%cflags%Get(cells(i)) /= 3) then
+                !        qm%split_cv = cells(i)
+                !    else 
+                !        i = i + 1
+                !    end if
 
-                end do
+                !end do
 
             case (3) ! pol_flux
 
@@ -1748,7 +1756,7 @@ module gamod_types
                         bfcs = pack(fcs, b_flagfcs)
 
                         ! Interpolate magnetic field vector
-                        vxs = [f%vert1%Get(bfcs), f%vert2%Get(bfcs)]
+                        vxs = GetFaceVertGA(f, bfcs(1))
                         fbx = 0.5_R8*sum(-v%by%Get(vxs))
                         fby = 0.5_R8*sum(v%bx%Get(vxs))
 
@@ -1786,7 +1794,10 @@ module gamod_types
                     fcs = GetCellFaceGA(c, i)
 
                     if (.not.any(f%aligned%Get(fcs) == 1) .and. size(fcs) == 4) then
-
+                        if (options%debug) then
+                            verts = GetCellVertGA(c, i)
+                            call grid%WriteErrorData(verts, 0)
+                        end if
                         qm%split_cv = i
                         exit
 
@@ -2136,7 +2147,7 @@ module gamod_types
                         bfcs = pack(fcs, b_flagfcs)
 
                         ! Interpolate magnetic field vector
-                        vxs = [f%vert1%Get(bfcs), f%vert2%Get(bfcs)]
+                        vxs = GetFaceVertGA(f, bfcs(1))
                         fbx = 0.5_R8*sum(-v%by%Get(vxs))
                         fby = 0.5_R8*sum(v%bx%Get(vxs))
 
@@ -2785,7 +2796,7 @@ module gamod_types
                     print *, 'cx: ', c%x%Get(ic), ' cy: ', c%y%Get(ic)
                     print *, 'vx :', v%x%Get(tv)
                     print *, 'vy :', v%y%Get(tv)
-                    call grid%WriteErrorData(tv)
+                    call grid%WriteErrorData(tv, 1)
                     call gdErrorHandler('ReorderCellConn: probably overlap')
                 end if 
 
@@ -3007,7 +3018,7 @@ module gamod_types
 
             if (grid%data%nxp == 0) then
                 if (allocated(fd%fluxsurfaceverts)) then
-                    call grid%WriteErrorData(vxs)  
+                    call grid%WriteErrorData(vxs, 1)  
                     call gdErrorHandler('GiveXpoints: no found') 
                 end if
                 print *, 'GiveXpoints: Warning: no Xpoint found!'
@@ -3503,7 +3514,7 @@ module gamod_types
             dpsi_r, cos2, dpsi3(1:3), dpsi2(1:2)
         real(R8), allocatable, dimension(:) :: fcX, fcY, &
             dpsidx, dpsidy, Bx, By, Btot, abs_cos, &
-            t1x, t2x, t1y, t2y, Bnorm, cosB, vpsi
+            t1x, t2x, t1y, t2y, Bnorm, cosB, vpsi, dpsi
 
         ! Associate
         associate( &
@@ -3667,9 +3678,20 @@ module gamod_types
                 ! Find triangle with more than one aligned face 
                 ! Kick out the least aligned face via psi values
                 fcs_al3 = tf(pack(ind4,facealigned(tf).eq.1));
-                dpsi3 = abs(vpsi(v1n(fcs_al3))  - vpsi(v2n(fcs_al3)));
+                dpsi3 = abs(vpsi(v1n(fcs_al3))  - vpsi(v2n(fcs_al3)))
                 indmax = maxloc(dpsi3,1);
                 facealigned(fcs_al3(indmax)) = 0;
+
+            else if ((nf.eq.4).and.(n_al /= 2).and. isCoreCell(c, ic)) then
+
+                ! Find core cells with no two aligned faces
+                facealigned(tf) = 0
+                dpsi = abs(vpsi(v1n(tf))  - vpsi(v2n(tf)))
+                indmin = minloc(dpsi, 1)
+                facealigned(tf(indmin)) = 1
+                dpsi(indmin) = 1e99_R8
+                indmin = minloc(dpsi, 1)
+                facealigned(tf(indmin)) = 1
 
             elseif ((nf.eq.3) .and. (n_al.eq.2)) then
                 if (ccflags(ic).eq.3) then
@@ -3801,7 +3823,7 @@ module gamod_types
         ! Auxiliary
         integer(I8) :: i, j, k, s, nt, nf_max, nv_max, nf, iFs_sep, &
             ind_sep, ind, na, ind_first, ind_last, first_fs, last_fs, fs_1, &
-            nx, ny
+            nx, ny, main_sep
         integer(I8), allocatable, dimension(:) :: fcLbl_loc, fcs, fcsD, f_ord, vxs,  &
             vxsU, indf, vxs_ordered, nfD, fs_target, fsvLookUp, a, verts, vx_t1, fcs2, &
             vx_t2, fs_vx_t2, vx_t2D, vx_fs1, fcs2D, vx_final, vx_fs2, vx_merge1, vx_merge2, indout, indxy, farSOL
@@ -3908,11 +3930,13 @@ module gamod_types
 
         ! Loop over 'a' to identify groups
         ! Get the separatrix of lower null   
-        if (grid%data%nsep .gt. 1) then
+        call grid%IdentifyMainSeparatrix(options, main_sep)
+        !if (grid%data%nsep .gt. 1 .and. grid%data%nxp .gt. 1) then
+            
             print *, 'Warning: IdentifyfarSOLcells: no proper identification of ' // &
                 & 'inner separatix, first separatrix should be inner one'
-        end if
-        iFs_sep = grid%data%sepID(1)
+        ! end if
+        iFs_sep = grid%data%sepID(main_sep)
         first_fs = 0
         last_fs = 0
 
@@ -4038,6 +4062,96 @@ module gamod_types
         !allocate(int(c%ntot))
         !call c%farSOL_interpolant%Evaluate(c%x%Get(), c%y%Get(), 0, 0, int)
         !call WriteArray(int, 'farSOLint')
+
+        end associate
+
+    end subroutine
+
+    subroutine IdentifyMainSeparatrix(grid, options, main_sep)
+
+        ! Description
+        !============
+        ! Identify main separatrices by checking intersection with the targets
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        type(GAoptionsUDT), intent(in)  :: options
+        integer(I8), intent(out)        :: main_sep
+
+        ! Auxiliary
+        integer(I8) :: i, nt
+        integer(I8), allocatable, dimension(:) :: vxs_sep, &
+            vxst1, vxst2, vxst3, vxst4, main, indfc, fcLbl_loc, vxs_wall
+
+        ! First check
+        if (grid%data%nsep == 1) then
+            main_sep = 1
+            return
+        end if
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert, &
+            fd => grid%data%fluxdata &
+            )
+        
+        ! Take the target vertices
+        fcLbl_loc = GetfcLblGA(f, options)
+        nt = maxval(fcLbl_loc) - 3
+        indfc = (/(i, i = 1, f%ntot)/)
+
+        if (nt == 2) then
+            vxst1 = GetVxsFromFcsGA(f, pack(indfc, fcLbL_loc == 4))
+            vxst2 = GetVxsFromFcsGA(f, pack(indfc, fcLbL_loc == 5) )
+        else if (nt == 4) then 
+            vxst1 = GetVxsFromFcsGA(f, pack(indfc, fcLbL_loc == 4))
+            vxst2 = GetVxsFromFcsGA(f, pack(indfc, fcLbL_loc == 5))            
+            vxst3 = GetVxsFromFcsGA(f, pack(indfc, fcLbL_loc == 6))            
+            vxst4 = GetVxsFromFcsGA(f, pack(indfc, fcLbL_loc == 7))            
+        else
+            call gdErrorHandler('IdentifyMainSeparatrix: only 2 and 4 targets considered')
+        end if
+
+        ! Get wall vertices
+        vxs_wall = GetVxsFromFcsGA(f, pack(indfc, f%label%Get() /= 0))
+
+        
+        ! Loop over separatrices
+        allocate(main(grid%data%nsep))
+        main = 0
+        do i = 1, grid%data%nsep
+
+            ! Get vertices of separatrix
+            vxs_sep = GetFluxSurfaceVxsGA(fd, grid%data%sepID(i))
+
+            ! Change intersection
+            if (nt == 2) then
+                if (any(isMember(vxst1, vxs_sep)) .and. any(isMember(vxst2, vxs_sep)) &
+                    .and. .not.any(isMember(vxs_wall, vxs_sep))) then
+                    main(i) = 1
+                end if
+            else if (nt == 4) then
+                if (any(isMember(vxst1, vxs_sep)) .and. any(isMember(vxst2, vxs_sep)) &
+                    .and. .not.any(isMember(vxs_wall, vxs_sep)) &
+                    .and. .not.any(isMember(vxst3, vxs_sep)) &
+                    .and. .not.any(isMember(vxst4, vxs_sep))) then
+                    main(i) = 1    
+                end if
+            end if
+        
+        end do
+
+        if (count(main == 1) /= 1) then
+            call gdErrorHandler('IdentifyMainSeparatrix: can not identify main separatrix based on implemetation')
+        else
+            main_sep = findloc(main, 1, 1)
+        end if 
+    
+
 
         end associate
 
@@ -4195,7 +4309,7 @@ module gamod_types
         do j = 1, 2
             do i = 2, size(f_list)
 
-                com_vert = [f%vert1%Get(f_ord2(i-1, j)), f%vert2%Get(f_ord2(i-1, j))]
+                com_vert = GetFaceVertGA(f, f_ord2(i-1, j))
 
                 do k = 1, 2
                     
@@ -5080,8 +5194,8 @@ module gamod_types
         
 
         ! Find vertex which is both in faceA and faceB
-        vertsA = [f%vert1%Get(faceA), f%vert2%Get(faceA)]
-        vertsB = [f%vert1%Get(faceB), f%vert2%Get(faceB)]
+        vertsA = GetFaceVertGA(f, faceA)
+        vertsB = GetFaceVertGA(f, faceB)
 
         allocate(vx_rem(2))
         vx_rem = 0
@@ -5467,7 +5581,7 @@ module gamod_types
             ! No triangles
             if (c%vertP2%Get(b_neig(j)) .gt. 3) then
 
-                common_face = GetCommonFace(c, b_neig(j), ic)
+                common_face = GetCommonFace(grid, b_neig(j), ic)
                 fcs_neig = GetCellFaceGA(c, b_neig(j))
                 allocate(b_face_neig(count(isBoundaryFaceGA(grid, fcs_neig))))
                 b_face_neig = pack(fcs_neig, isBoundaryFaceGA(grid, fcs_neig))
@@ -5972,9 +6086,13 @@ module gamod_types
             end if
 
             ! Get common face with next trap
-            common_face = GetCommonFace(c, ic, trapsC(size(trapsC)-i))
+            common_face = GetCommonFace(grid, ic, trapsC(size(trapsC)-i))
 
-            b_vert = GetCommonVert(f, common_face, b_facesQ(1))
+            if (HaveCommonVert(f, common_face, b_facesQ(1))) then
+                b_vert = GetCommonVert(grid, common_face, b_facesQ(1))
+            else
+                call gdErrorHandler('StackAdaptation: common_face and b_facesQ(1) do not have a common vertex')
+            end if
 
             ! Replace the occurrence of bvert with con_vert in cell%vert
             log = [c%vert%Get()] == b_vert
@@ -6824,9 +6942,9 @@ module gamod_types
             do i = 1, nv
 
                 ! Get common face
-                c_fcs = GetCommonFace(c, cvs(i), cvs(i+1))
+                c_fcs = GetCommonFace(grid, cvs(i), cvs(i+1))
 
-                vxs = [f%vert1%Get(c_fcs), f%vert2%Get(c_fcs)]
+                vxs = GetFaceVertGA(f, c_fcs)
 
                 i_verts(i) = Pack2(vxs, vxs /= end_vertex)
 
@@ -6947,7 +7065,7 @@ module gamod_types
             allocate(rem_faces(nc))
             rem_faces(1) = bfcs
             do i = 2, nc
-                rem_faces(i) = GetCommonFace(c, cvs(i-1), cvs(i))
+                rem_faces(i) = GetCommonFace(grid, cvs(i-1), cvs(i))
             end do
 
             rem_cells = cvs
@@ -7397,7 +7515,7 @@ module gamod_types
         integer(I8), allocatable, dimension(:) :: cellsD2, cellsD, cells, indCv, &
             verts, cvs, fcs, bfcs, cvP, cvs_b, vs1, vs2, cvLookUp, rfaces, cvsT, cvsQ, &
             cvs2, cvsT4
-        character(:), allocatable :: type
+        character(:), allocatable :: type, type_dummy
 
         ! Associate
         associate(&
@@ -7462,7 +7580,7 @@ module gamod_types
                 else if (ctype == 4) then
 
                     ! Triangle4
-                    call grid%DetermineHangingNodeTria4(cells(k), fcs, common_vert)
+                    call grid%DetermineHangingNodeTria4(cells(k), fcs, common_vert, type_dummy)
                     
                 else if (ctype == 6) then
 
@@ -7562,7 +7680,7 @@ module gamod_types
                             special_case = .true.
 
                             ! Get common face
-                            fc = GetCommonFace(c,cells(k), cvs_b(1))
+                            fc = GetCommonFace(grid,cells(k), cvs_b(1))
 
                         end if
 
@@ -7588,7 +7706,7 @@ module gamod_types
                                 allocate(cvsT4(count(c%cflags%Get(cvs2) == 4)))
                                 cvsT4 = pack(cvs2, c%cflags%Get(cvs2) == 4)
                                 fcs = GetCellFaceGA(c, cvsT4(1))
-                                call grid%DetermineHangingNodeTria4(cvsT4(1), fcs, common_vert) 
+                                call grid%DetermineHangingNodeTria4(cvsT4(1), fcs, common_vert, type_dummy) 
 
                                 ! Get the correct merge face
                                 call grid%GetMergeFace(cvsT4(1), common_vert, cvLookUp, fc)                            
@@ -7604,7 +7722,7 @@ module gamod_types
 
                             if (size(cvsQ) == 2) then
                                 if (HaveCommonFace(c, cvsQ(1), cvsT(1))) then
-                                    fc = GetCommonFace(c, cvsQ(1), cvsT(1))
+                                    fc = GetCommonFace(grid, cvsQ(1), cvsT(1))
                                 end if
                             else 
                                 print *, 'MergeRec: not yet implemented'
@@ -7614,7 +7732,7 @@ module gamod_types
                         else if (size(cvsT) == 2) then
                             ! Merge two triangle together if possible
                             if (HaveCommonFace(c, cvsT(1), cvsT(2))) then
-                                fc = GetCommonFace(c, cvsT(1), cvsT(2))
+                                fc = GetCommonFace(grid, cvsT(1), cvsT(2))
                             else
                                 call gdErrorHandler('MergeRec: no common face between two triangles')
                             end if
@@ -7628,7 +7746,7 @@ module gamod_types
                         ! Error if merge face is not found
                         if (fc == 0) then
 
-                            call grid%WriteErrorData(verts)
+                            call grid%WriteErrorData(verts, 1)
                             call gdErrorHandler('MergeRec: case not yet implemented (line 7622)')
                         end if
 
@@ -7847,7 +7965,7 @@ module gamod_types
                         allocate(tfB(count( isBoundaryFaceGA(grid, tf)) ))
                         tfB = pack(tf, isBoundaryFaceGA(grid, tf))
 
-                        vs_fcB = [f%vert1%Get(tfB(1)), f%vert2%Get(tfB(1))]
+                        vs_fcB = GetFaceVertGA(f, tfB(1))
 
                         if (any(vB == vs_fcB)) caseID = '4443B1'
 
@@ -7991,7 +8109,7 @@ module gamod_types
 
         ! Initialize
         allocate(verts_rem(1))
-        vxF = [f%vert1%Get(fc),  f%vert2%Get(fc)]
+        vxF = GetFaceVertGA(f, fc)
 
         ! Three vert
         v1cvs = GetVertCellGA(c, vxF(1))
@@ -8069,7 +8187,7 @@ module gamod_types
             )
 
         ! Initialize
-        vxF = [f%vert1%Get(fc),  f%vert2%Get(fc)]
+        vxF = GetFaceVertGA(f, fc)
 
         ! Three vert
         v1cvs = GetVertCellGA(c, vxF(1))
@@ -8192,7 +8310,7 @@ module gamod_types
             
         ! Initialize
         allocate(verts_rem(1))
-        vxF = [f%vert1%Get(fc), f%vert2%Get(fc)]
+        vxF = GetFaceVertGA(f, fc)
 
         ! Three vert
         v1cvs = GetVertFaceGA(f, vxF(1))
@@ -8253,7 +8371,7 @@ module gamod_types
             )
             
         ! Verts
-        vxF = [f%vert1%Get(fc), f%vert2%Get(fc)]
+        vxF = GetFaceVertGA(f, fc)
 
         ! Three vert
         v1cvs = GetVertCellGA(c, vxF(1))
@@ -8422,7 +8540,7 @@ module gamod_types
 
         ! Initialize
         allocate(verts_rem(1))
-        vxF = [f%vert1%Get(fc),  f%vert2%Get(fc)]
+        vxF = GetFaceVertGA(f, fc)
 
         ! Three vert
         v1cvs = GetVertCellGA(c, vxF(1))
@@ -8531,7 +8649,7 @@ module gamod_types
         end if
 
         ! Determine vertices to shift
-        vxF = [f%vert1%Get(fc), f%vert2%Get(fc)]
+        vxF = GetFaceVertGA(f, fc)
         if (c%cflags%Get(cv2) == 3) then ! Boundary cell
 
             ! Get verts and faces
@@ -8579,7 +8697,7 @@ module gamod_types
 
 
             do i = 1, 2
-                vxfc = [f%vert1%Get(faces(i)), f%vert2%Get(faces(i))]
+                vxfc = GetFaceVertGA(f, faces(i))
                 if (any(rem_vert == vxfc)) rem_face = faces(i)
             end do
             allocate(shift_faceD(count(faces /= rem_face)))
@@ -8627,7 +8745,7 @@ module gamod_types
             fcs2 = pack(fcsD, fcsD /= rem_face .and. fcsD /= shift_face)
             fcs = fcs2(1)
 
-            v1fcs = [f%vert1%Get(fcs), f%vert2%Get(fcs)]
+            v1fcs = GetFaceVertGA(f, fcs)
             v1 = Pack2(v1fcs, v1fcs /= free_vert)
 
             call grid%GetFaceNumber(v1, shift_vert, 3, f1n)
@@ -8816,7 +8934,7 @@ module gamod_types
         cv2 = cvs(2)
 
         ! Verts
-        vxF = [f%vert1%Get(fc), f%vert2%Get(fc)]
+        vxF = GetFaceVertGA(f, fc)
 
         ! Three vert
         v1cvs = GetVertFaceGA(f, vxF(1))
@@ -8879,7 +8997,7 @@ module gamod_types
                 if (size(faceB) == 0) then
                     err = .true.
                 else 
-                    vB = [f%vert1%Get(faceB(1)), f%vert2%Get(faceB(1))]
+                    vB = GetFaceVertGA(f, faceB(1))
                     allocate(v_end(count(vB /= v_change(1))))
                     v_end = pack(vB, vB /= v_change(1))
 
@@ -8897,7 +9015,7 @@ module gamod_types
             if (size(b_face) == 1) then
                 if (f%aligned%Get(b_face(1)) == 0) then
 
-                    vxs = [f%vert1%Get(b_face(1)), f%vert2%Get(b_face(1))]        
+                    vxs = GetFaceVertGA(f, b_face(1))        
                     ! v_change should not be connected to a aligned face of the
                     ! pentagon if the boundary face is non-aligned! 
 
@@ -9049,11 +9167,11 @@ module gamod_types
 
         ! Get the common vert based on the rfaces
         if (HaveCommonVert(f, rfaces(1), rfaces(2))) then
-            common_vert = GetCommonVert(f, rfaces(1), rfaces(2))
+            common_vert = GetCommonVert(grid, rfaces(1), rfaces(2))
         elseif (HaveCommonVert(f,rfaces(1),rfaces(3))) then
-            common_vert = GetCommonVert(f, rfaces(1),rfaces(3))
+            common_vert = GetCommonVert(grid, rfaces(1),rfaces(3))
         else
-            common_vert = GetCommonVert(f, rfaces(2),rfaces(3))
+            common_vert = GetCommonVert(grid, rfaces(2),rfaces(3))
         end if
 
         ! Get first triangle
@@ -9067,7 +9185,7 @@ module gamod_types
 
         ! Choose first sides
         f1 = faces_cv(ind(1))
-        verts1 = [f%vert1%Get(f1), f%vert2%Get(f1)]
+        verts1 = GetFaceVertGA(f, f1)
         vert1 = Pack2(verts1, verts1 /= common_vert)
 
         ! Find last vertex of first triangle
@@ -9077,7 +9195,7 @@ module gamod_types
         ind_f2 = pack(ind2, ind2 /= ind(1))
         f2 = faces_cv(ind_f2(1))
 
-        verts2 = [f%vert1%Get(f2), f%vert2%Get(f2)]
+        verts2 = GetFaceVertGA(f, f2)
         vert2 = Pack2(verts2, verts2 /= vert1)
 
         ! Make the new face of the first triangle
@@ -9097,7 +9215,7 @@ module gamod_types
         ind_f4 = pack(ind3, ind3 /= ind_f2)
         f4 = faces_cv(ind_f4(1))
 
-        verts4 = [f%vert1%Get(f4), f%vert2%Get(f4)]
+        verts4 = GetFaceVertGA(f, f4)
         vert4 = Pack2(verts4, verts4 /= vert2)
 
         ! Make new face for second triangle
@@ -9116,7 +9234,7 @@ module gamod_types
         ind_f6 = pack(ind4, ind4 /= ind_f4)
         f6 = faces_cv(ind_f6(1))
 
-        verts5 = [f%vert1%Get(f6), f%vert2%Get(f6)]
+        verts5 = GetFaceVertGA(f, f6)
         vert5 = Pack2(verts5, verts5 /= vert4)
 
         f7 = faces_cv(ind5)
@@ -9191,13 +9309,13 @@ module gamod_types
 
             ! Get common faces
             c1 = neigs_b(1)
-            fc1 = GetCommonFace(c, pent, c1)
+            fc1 = GetCommonFace(grid, pent, c1)
             c2 = neigs_b(2)
-            fc2 = GetCommonFace(c, pent, c2)
+            fc2 = GetCommonFace(grid, pent, c2)
 
             ! Get common vert
-            vs1 = [f%vert1%Get(fc1), f%vert2%Get(fc1)]
-            vs2 = [f%vert1%Get(fc2), f%vert2%Get(fc2)]
+            vs1 = GetFaceVertGA(f, fc1)
+            vs2 = GetFaceVertGA(f, fc2)
             common_vert = Pack2(vs1, isMember(vs1, vs2))
 
             v1 = Pack2(vs1, vs1 /= common_vert)
@@ -9226,8 +9344,8 @@ module gamod_types
             fcs2 = fc_neig2(ind2)
             fc_side2 = Pack2(fcs2, fcs2 /= fc2)
 
-            vs_side1 = [f%vert1%Get(fc_side1), f%vert2%Get(fc_side1)]
-            vs_side2 = [f%vert1%Get(fc_side2), f%vert2%Get(fc_side2)]
+            vs_side1 = GetFaceVertGA(f, fc_side1)
+            vs_side2 = GetFaceVertGA(f, fc_side2)
             v_side1 = Pack2(vs_side1, vs_side1 /= v1)
             v_side2 = Pack2(vs_side2, vs_side2 /= v2)  
             
@@ -9250,7 +9368,7 @@ module gamod_types
                     indvQ = pack(query_faces1, vsn1 == v_side1)
                     fcsQ = fc_neig1(indvQ)
                     fcsB = Pack2(fcsQ, fcsQ /= fc_side1)
-                    vxsB = [f%vert1%Get(fcsB), f%vert2%Get(fcsB)]
+                    vxsB = GetFaceVertGA(f, fcsB)
                     v_insideQ = Pack2(vxsB, vxsB /= v_side1)
                     v_sideQ = v_side1
                     v_sideT = v_side2
@@ -9271,7 +9389,7 @@ module gamod_types
                     indvQ = pack(query_faces2, vsn2 == v_side2)
                     fcsQ = fc_neig2(indvQ)
                     fcsB = Pack2(fcsQ, fcsQ /= fc_side2)
-                    vxsB = [f%vert1%Get(fcsB), f%vert2%Get(fcsB)]
+                    vxsB = GetFaceVertGA(f, fcsB)
                     v_insideQ = Pack2(vxsB, vxsB /= v_side2)
                     v_sideQ = v_side2
                     v_sideT = v_side1
@@ -9485,7 +9603,7 @@ module gamod_types
                 do j = 1, size(fcs)
 
                     ! Vertices
-                    vx = [f%vert1%Get(fcs(j)), f%vert2%Get(fcs(j))]
+                    vx = GetFaceVertGA(f, fcs(j))
                 
                     ! Define segment 2
                     p2 = [v%x%Get(vx(1)), v%y%Get(vx(1)) ]
@@ -9929,8 +10047,8 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: rface1, rface2, neig1, neig2, Qface, neig, common_vert
-        integer(I8), allocatable :: fcs(:), Xcells(:)
-        character(:), allocatable :: caseID, type
+        integer(I8), allocatable :: fcs(:), Xcells(:), verts(:)
+        character(:), allocatable :: caseID, type, typeT
         !logical, allocatable :: is_ordered(:), cells(:)
 
         ! Get faces
@@ -9955,7 +10073,10 @@ module gamod_types
 
                 call grid%DetermineTcaseID(cv, fcs, type, options%typeT, options, caseID, rface1, rface2, neig1, neig2)
                 if (options%debug) print *, caseID
-
+                if (options%plt) then
+                    verts = GetCellVertGA(grid%cell, cv)
+                    call grid%WriteErrorData(verts, 0)
+                end if
                 select case (caseID)
 
                 case ('34', '30')
@@ -9981,7 +10102,10 @@ module gamod_types
 
                 call grid%DetermineQcaseID(cv, fcs, type, options, caseID, rface1, rface2, neig1, neig2)
                 if (options%debug) print *, caseID
-
+                if (options%plt) then
+                    verts = GetCellVertGA(grid%cell, cv)
+                    call grid%WriteErrorData(verts, 0)
+                end if
                 select case (caseID)
 
                 case ('444', '440', '044')
@@ -10007,7 +10131,10 @@ module gamod_types
 
                 call grid%DeterminePcaseID(cv, fcs, type, caseID, Qface, neig, common_vert)
                 if (options%debug) print *, caseID
-
+                if (options%plt) then
+                    verts = GetCellVertGA(grid%cell, cv)
+                    call grid%WriteErrorData(verts, 0)
+                end if
                 select case (caseID)
 
                 case ('55')
@@ -10035,12 +10162,16 @@ module gamod_types
 
         case (4) ! triangles that where turned into triangle with four faces
 
-            call grid%DetermineT4caseID(cv, fcs, options%splittype, caseID, rface1, neig1, common_vert)
+            call grid%DetermineT4caseID(cv, fcs, options%splittype, caseID, rface1, neig1, common_vert, typeT,options)
             if (options%debug) print *, caseID
+            if (options%plt) then
+                verts = GetCellVertGA(grid%cell, cv)
+                call grid%WriteErrorData(verts, 0)
+            end if
 
             select case (caseID)
             case ('30')
-                call grid%SplitT4B(magneticField, cv, rface1,common_vert, type, options)
+                call grid%SplitT4B(magneticField, cv, rface1,common_vert, type, typeT, options)
             case ('31')
                 call grid%SplitT4BV(magneticField, cv, common_vert)
             case ('34')
@@ -10090,7 +10221,7 @@ module gamod_types
         
         ! Auxiliary
         integer(I8) :: i
-        integer(I8), allocatable :: cells(:), pents(:)
+        integer(I8), allocatable :: cells(:), pents(:), verts(:)
 
         ! Select the cell to split
         ! Area constraints
@@ -10146,7 +10277,11 @@ module gamod_types
             if (cv /= 0) then
 
                 call grid%SplitPentsRec(magneticField, options, cv)
-
+            
+            else if (options%QTtype /= 'pol-rad' .and. .not.options%no_pents_area_split) then
+                verts = GetCellVertGA(grid%cell, pents(1))
+                call grid%WriteErrorData(verts, 0)
+                call gdErrorHandler('SplitPentsRec: left over pentagons')
             end if
 
         end if
@@ -10190,14 +10325,15 @@ module gamod_types
         do i = 1, size(pents)
 
             ! Get common face
-            fcs_common = GetCommonFace(c, pents(i), c%ntot)
-            
-            ! Get common face
-            if (fcs_common /= 0) then
+            if (HaveCommonFace(c, pents(i), c%ntot)) then
+
+                ! Get common face
+                fcs_common = GetCommonFace(grid, pents(i), c%ntot)
                 if (f%aligned%Get(fcs_common) == 1) then ! common face needs to aligned to propagate in poloidal direction 
                     next_pent = pents(i)
                     exit
                 end if
+
             end if
 
         end do
@@ -10241,10 +10377,11 @@ module gamod_types
         integer(I8), intent(inout)      :: cv
  
         ! Auxiliary
-        integer(I8) :: i, j, ic, indmax, splitface, counter, splitface_n
-        integer(I8), allocatable :: fcs(:), neigs5(:), fcs_n(:), neigs(:)
+        integer(I8) :: i, j, ic, indmax, splitface, counter, splitface_n, v_dummy
+        integer(I8), allocatable :: fcs(:), neigs5(:), fcs_n(:), neigs(:), pentsD2(:), pentsf(:)
         real(R8), allocatable :: dpsi(:)
-        logical, allocatable :: log(:)
+        logical, allocatable :: log(:), mask(:)
+        character(:), allocatable :: type
 
 
         ! Associate
@@ -10257,16 +10394,42 @@ module gamod_types
         cv = 0
         if (options%split_out) return
 
-        do i = 1, size(pents)
+        ! Eliminate pents with hanging node in the wrong place
+        if (options%QTtype == 'pol-rad') then ! type is pol
+            allocate(mask(size(pents)))
+            mask = .true.
+            do i = 1, size(pents)
+                fcs = GetCellFaceGA(grid%cell, pents(i))
+                if (grid%cell%faceP2%Get(pents(i)) == 5) then
+                    ! Should have 3 aligned faces for poloidal splitting
+                    if (count(grid%face%aligned%Get(fcs) == 1) /= 3) mask(i) = .false.
+                else if (grid%cell%faceP2%Get(pents(i)) == 4) then
+                    call grid%DetermineHangingNodeTria4(pents(i), fcs, v_dummy, type)
+                    if (type /= 'pol') mask(i) = .false.
+                end if
+            enddo 
 
-            ic = pents(i)
+            ! Pick pents with mask == true
+            pentsD2 = pents
+            allocate(pentsf(count(mask)))
+            pentsf = pack(pentsD2, mask)
+
+        else 
+
+            pentsf = pents
+
+        end if 
+
+        do i = 1, size(pentsf)
+
+            ic = pentsf(i)
             if (c%faceP2%Get(ic) == 5) then
 
                 select case (options%splittype)
 
                 case ('rad')
 
-                    ! If the poloidal faces that should be split is also in an
+                    ! If the poloidal face that should be split is also in an
                     ! existing pentagon, the splitting is not possible
                     neigs = GetCellNeigsGA(grid, ic)
 
@@ -10902,7 +11065,7 @@ module gamod_types
 
     end subroutine
 
-    subroutine DetermineT4caseID(grid, cv, fcs, type, caseID, rface1, neig, common_vert)
+    subroutine DetermineT4caseID(grid, cv, fcs, type, caseID, rface1, neig, common_vert, typeT, options)
 
         ! Description
         !============
@@ -10934,7 +11097,9 @@ module gamod_types
         character(:), allocatable, intent(in)   :: type
         character(:), allocatable, intent(out)  :: caseID
         integer(I8), intent(out)                :: rface1, neig, common_vert
-        
+        character(:), allocatable, intent(out)  :: typeT
+        type(GAoptionsUDT), intent(in)          :: options    
+
         ! Auxiliary     
         integer(I8) :: ind, pface1, pface2, neigtype, vp1(2), vp2(2)
         integer(I8), allocatable, dimension(:) :: split_faces, facesD, pfaces, cvs, vxs
@@ -10947,6 +11112,9 @@ module gamod_types
             f => grid%face, &
             v => grid%vert &
             )
+        
+        ! Initialze
+        typeT = options%typeT
  
         ! rface1
         dpsi_f = abs(v%psi%Get(f%vert1%Get(fcs)) - v%psi%Get(f%vert2%Get(fcs)))
@@ -10954,6 +11122,8 @@ module gamod_types
 
         select case (type)
         case ('pol')
+
+            ! Hanging node is on aligned part of the cell
 
             ! rface1 => should be the longest face of the poloidal faces
             pface1 = fcs(ind) !poloidal face1
@@ -10963,8 +11133,8 @@ module gamod_types
             pface2 = fcs(ind) !poloidal face1
 
             ! Take the longest of the two faces
-            vp1 = [f%vert1%Get(pface1), f%vert2%Get(pface1)]
-            vp2 = [f%vert1%Get(pface2), f%vert2%Get(pface2)]
+            vp1 = GetFaceVertGA(f, pface1)
+            vp2 = GetFaceVertGA(f, pface2)
             fcS1 = sqrt( (v%x%Get(vp1(2)) - v%x%Get(vp1(1)))**2 + (v%y%Get(vp1(2)) - v%y%Get(vp1(1)))**2)
             fcS2 = sqrt( (v%x%Get(vp2(2)) - v%x%Get(vp2(1)))**2 + (v%y%Get(vp2(2)) - v%y%Get(vp2(1)))**2)
 
@@ -10980,11 +11150,17 @@ module gamod_types
             ! Common vert
             allocate(split_faces(count(fcs /= pface1 .and. fcs /= pface2)))
             split_faces = pack(fcs, fcs /= pface1 .and. fcs /= pface2)
-            common_vert = GetCommonVert(f, split_faces(1), split_faces(2))
+            if (HaveCommonVert(f, split_faces(1), split_faces(2))) then
+                common_vert = GetCommonVert(grid, split_faces(1), split_faces(2))
+            else 
+                call gdErrorHandler('DetermineT4caseID: splitfaces have no common vertex')
+            end if
+
 
             ! Determine CaseID
             vxs = GetCellVertGA(c, cv)
 
+            
             if (isBoundaryFaceGA(grid, rface1)) then
                 neig = 0
                 neigtype = 0
@@ -10993,9 +11169,13 @@ module gamod_types
                 neig = 0
                 neigtype = 1
             else
-                cvs = GetFaceCellGA(c, rface1)
-                neig = Pack2(cvs, cvs /= cv)
-                neigtype = c%faceP2%Get(neig)
+                ! Internal poloidal splitting => stacked => splitT4B
+                !cvs = GetFaceCellGA(c, rface1)
+                !neig = Pack2(cvs, cvs /= cv)
+                !neigtype = c%faceP2%Get(neig)
+                neig = 0
+                neigtype = 0
+                typeT = 'stacked'
             end if
 
         case ('rad')
@@ -11021,7 +11201,7 @@ module gamod_types
 
             ! Common vert
             if (HaveCommonVert(f, pface1, pface2)) then
-                common_vert = GetCommonVert(f, pface1, pface2)
+                common_vert = GetCommonVert(grid, pface1, pface2)
             else
                 call gdErrorHandler('DetermineT4caseID: No common vertex: probably the triangle a no aligned face.')
             end if
@@ -11731,9 +11911,9 @@ module gamod_types
                     psic = 0.5_R8 * (maxval(v%psi%Get(verts)) + minval(v%psi%Get(verts)))
 
                     ! Check intersect of rface1 and rface2 by psic
-                    vxs1r = [f%vert1%Get(rface1), f%vert2%Get(rface1)]
+                    vxs1r = GetFaceVertGA(f, rface1)
                     vp1 = v%psi%Get(vxs1r)
-                    vxs2r = [f%vert1%Get(rface2), f%vert2%Get(rface2)]
+                    vxs2r = GetFaceVertGA(f, rface2)
                     vp2 = v%psi%Get(vxs2r)
                     if (.not.( (psic > min(vp1(1),vp1(2))) .and. (psic < max(vp1(1),vp1(2)))) &
                         .or. .not.((psic > min(vp2(1),vp2(2))) .and. (psic < max(vp2(1),vp2(2))))) then
@@ -11891,9 +12071,9 @@ module gamod_types
                     psic = 0.5_R8 * (maxval(v%psi%Get(verts)) + minval(v%psi%Get(verts)))
 
                     ! Check intersect of rface1 and rface2 by psic
-                    vxs1r = [f%vert1%Get(rface1), f%vert2%Get(rface1)]
+                    vxs1r = GetFaceVertGA(f, rface1)
                     vp1 = v%psi%Get(vxs1r)
-                    vxs2r = [f%vert1%Get(rface2), f%vert2%Get(rface2)]
+                    vxs2r = GetFaceVertGA(f, rface2)
                     vp2 = v%psi%Get(vxs2r)
                     if (.not.( (psic > min(vp1(1),vp1(2))) .and. (psic < max(vp1(1),vp1(2)))) &
                         .or. .not.((psic > min(vp2(1),vp2(2))) .and. (psic < max(vp2(1),vp2(2))))) then
@@ -11985,7 +12165,7 @@ module gamod_types
         case ('pol-rad')
 
             ! Specific splitting method for when radial splitting was performed
-            ! and splitting should be in the radial direction
+            ! and splitting should be in the poloidal direction
 
             ! Split face
             call grid%SplitFace(magneticField, Qface, v1n, f1n, f2n, 'pol', 0.0_R8)
@@ -11994,7 +12174,7 @@ module gamod_types
             fcsT = GetCellFaceGA(c, Tneig)
             allocate(fcsT_a(count(f%aligned%Get(fcsT) == 1)))
             fcsT_a = pack(fcsT, f%aligned%Get(fcsT) == 1)
-            vxsT_a = [f%vert1%Get(fcsT_a), f%vert2%Get(fcsT_a)]
+            vxsT_a = GetFaceVertGA(f, fcsT_a(1))
             vxsT_b = Pack2(vxsT_a, isBoundaryVertGA(grid, vxsT_a))
 
             ! Make new face
@@ -12136,7 +12316,7 @@ module gamod_types
             fcsT = GetCellFaceGA(c, Tneig)
             allocate(fcsT_a(count(f%aligned%Get(fcsT) == 1)))
             fcsT_a = pack(fcsT, f%aligned%Get(fcsT) == 1)
-            vxsT_a = [f%vert1%Get(fcsT_a), f%vert2%Get(fcsT_a)]
+            vxsT_a = GetFaceVertGA(f, fcsT_a(1))
             vxsT_b = Pack2(vxsT_a, isBoundaryVertGA(grid, vxsT_a))
 
             ! Make new face
@@ -12278,10 +12458,10 @@ module gamod_types
             ! connect to
             ! Now determined based on length .... no closed!!
 
-            vxs11 = [f%vert1%Get(rface1), f%vert2%Get(rface1)]
+            vxs11 = GetFaceVertGA(f, rface1)
             fcS11 = sqrt( (v%x%Get(vxs11(1)) - v%x%Get(vxs11(2)))**2 &
                         + (v%y%Get(vxs11(1)) - v%y%Get(vxs11(2)))**2 )
-            vxs22 = [f%vert1%Get(rface2), f%vert2%Get(rface2)]
+            vxs22 = GetFaceVertGA(f, rface2)
             fcS22 = sqrt( (v%x%Get(vxs22(1)) - v%x%Get(vxs22(2)))**2 &
                         + (v%y%Get(vxs22(1)) - v%y%Get(vxs22(2)))**2 )
 
@@ -12305,7 +12485,7 @@ module gamod_types
             fcsT = GetCellFaceGA(c, Tneig)
             allocate(fcsT_a(count(f%aligned%Get(fcsT) == 1)))
             fcsT_a = pack(fcsT, f%aligned%Get(fcsT) == 1)
-            vxsT_a = [f%vert1%Get(fcsT_a), f%vert2%Get(fcsT_a)]
+            vxsT_a = GetFaceVertGA(f, fcsT_a(1))
             vxsT_b = Pack2(vxsT_a, isBoundaryVertGA(grid, vxsT_a))
 
             ! Make new face
@@ -12373,7 +12553,7 @@ module gamod_types
         faces = GetCellFaceGA(c, cv)
 
         fc_al = pack(faces, f%aligned%Get(faces) == 1)
-        vx_al = [f%vert1%Get(fc_al(1)), f%vert2%Get(fc_al(1))]
+        vx_al = GetFaceVertGA(f, fc_al(1))
         allocate(vx_nal(count(verts /= vx_al(1) .and. verts /= vx_al(2))))
         vx_nal = pack(verts, verts /= vx_al(1) .and. verts /= vx_al(2))
 
@@ -12382,8 +12562,8 @@ module gamod_types
 
         vx_start = vx_nal(ind)
         psic = v%psi%Get(vx_start)
-        rface1_vx = [f%vert1%Get(rface1), f%vert2%Get(rface1)]
-        rface2_vx = [f%vert1%Get(rface2), f%vert2%Get(rface2)]
+        rface1_vx = GetFaceVertGA(f, rface1)
+        rface2_vx = GetFaceVertGA(f, rface2)
 
         if (any(vx_start == rface1_vx)) then
             neig_change = neig2
@@ -12489,10 +12669,14 @@ module gamod_types
         call grid%SplitFace(magneticField, Qface1, v1n, f1n, f2n, typeV, psic)
         call grid%SplitFace(magneticField, Qface2, v2n, f3n, f4n, typeV, psic)
 
-        vxsT = GetCommonVert(f, Qface1, Qface2)
-        vxs_Qface1 = [f%vert1%Get(Qface1), f%vert2%Get(Qface1)]
+        if (HaveCommonVert(f, Qface1, Qface2)) then
+            vxsT = GetCommonVert(grid, Qface1, Qface2)
+        else
+            call gdErrorHandler('SplitNonRegularQ: Qface1 and Qface2 do not have a common vertex')
+        end if
+        vxs_Qface1 = GetFaceVertGA(f, Qface1)
         vxsQ1 = Pack2(vxs_Qface1, vxs_Qface1 /= vxsT)
-        vxs_Qface2 = [f%vert1%Get(Qface2), f%vert2%Get(Qface2)] 
+        vxs_Qface2 = GetFaceVertGA(f, Qface2) 
         vxsQ2 = Pack2(vxs_Qface2, vxs_Qface2 /= vxsT)           
 
         ! Make new face
@@ -12631,11 +12815,10 @@ module gamod_types
         
         ! Auxiliary
         integer(I8) :: v1n, f1n, f2n, f3n, f4n, free_vert, face_old, &
-            cv1, cv2, neig1, neig2, indmax
+            cv1, cv2, neig1, neig2, qface_d
         integer(I8), allocatable, dimension(:) :: verts_neig, perp_faces_cv, &
-            perp_faces_neig, a, vxs1, fcs1, face_rem, cells
+            perp_faces_neig, vxs1, fcs1, face_rem, cells, fcs_neig, rfaces_d
         real(R8) :: psic
-        real(R8), allocatable :: dist(:)
         character(:), allocatable :: typeV
 
         ! Associate
@@ -12654,30 +12837,34 @@ module gamod_types
         end if
 
         ! Get faces and verts
+        fcs_neig = GetCellFaceGA(c, neig)
         verts_neig = GetCellVertGA(c, neig)
         call grid%DeterminePerpFacePent(cv, Pface, perp_faces_cv)
         call grid%DeterminePerpFacePent(neig, Pface, perp_faces_neig)
 
         ! Determine common vert of the neighboring pentagonal cells
-        allocate(a(count(verts_neig /= f%vert1%Get(Pface) .and. verts_neig /= f%vert2%Get(Pface))))
-        a = pack(verts_neig, verts_neig /= f%vert1%Get(Pface) .and. verts_neig /= f%vert2%Get(Pface))
+        call grid%DetermineHangingNodePent(neig, fcs_neig, type, free_vert, qface_d, rfaces_d)
+        !allocate(a(count(verts_neig /= f%vert1%Get(Pface) .and. verts_neig /= f%vert2%Get!(Pface))))
+        !a = pack(verts_neig, verts_neig /= f%vert1%Get(Pface) .and. verts_neig /= f%vert2%Get(Pface))
 
         ! Get vertex with the middle distance to origin
-        dist = sqrt( v%x%Get(a)**2 + v%y%Get(a)**2)
-        indmax = maxloc(dist,1)
-        a(indmax) = 0 ! eliminate vert with max distance to origin
-        indmax = maxloc(dist,1)
-        free_vert = a(indmax) 
+        !dist = sqrt( v%x%Get(a)**2 + v%y%Get(a)**2)
+        !indmax = maxloc(dist,1)
+        !a(indmax) = 0 ! eliminate vert with max distance to origin
+        !indmax = maxloc(dist,1)
+        !free_vert = a(indmax) 
 
         ! Split faces
         call grid%SplitFace(magneticField, Pface, v1n, f1n, f2n, typeV, psic)
 
         ! Make new face
         call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
-        if (all(f%aligned%Get(perp_faces_cv) == 1)) call f%aligned%Set(f3n, 1)
+        if (all(f%aligned%Get(perp_faces_cv) == 1) .or. type == 'rad') &
+            call f%aligned%Set(f3n, 1) 
 
         call grid%GetFaceNumber(v1n, free_vert, 3, f4n)        
-        if (all(f%aligned%Get(perp_faces_neig) == 1)) call f%aligned%Set(f4n, 1)
+        if (all(f%aligned%Get(perp_faces_neig) == 1) .or. type == 'rad') &
+            call f%aligned%Set(f4n, 1)
 
         ! Add vert to flux surface
         if (type == 'pol') then
@@ -12686,7 +12873,7 @@ module gamod_types
             fcs1 = [f1n, f2n]
             face_old = Pface
         else if (type == 'rad') then
-            vxs1 = [v1n, free_vert]
+            vxs1 = [v1n, free_vert, common_vert]
             fcs1 = [f3n, f4n]
             face_old = 0
         end if
@@ -13029,11 +13216,11 @@ module gamod_types
         rfaceT = pack(faces, faces /= pfaces)
 
         if (HaveCommonVert(f, pface2, pface3)) then
-            common_vertT = GetCommonVert(f, pface2, pface3)
+            common_vertT = GetCommonVert(grid, pface2, pface3)
         else if (HaveCommonVert(f, pface1, pface3)) then
-            common_vertT = GetCommonVert(f, pface1, pface3)
+            common_vertT = GetCommonVert(grid, pface1, pface3)
         else if (HaveCommonVert(f, pface1, pface2)) then
-            common_vertT = GetCommonVert(f, pface1, pface2)
+            common_vertT = GetCommonVert(grid, pface1, pface2)
         else 
             call gdErrorHandler('SplitPT4: no common_vertT')
         end if
@@ -13111,7 +13298,7 @@ module gamod_types
         faces_cv = GetCellFaceGA(c, cv)
         allocate(aligned_face(count(f%aligned%Get(faces_cv) == 1)))
         aligned_face = pack(faces_cv, f%aligned%Get(faces_cv) == 1)
-        verts_a_face = [f%vert1%Get(aligned_face(1)), f%vert1%Get(aligned_face(2))]
+        verts_a_face = GetFaceVertGA(f, aligned_face(1))
 
         ! Get poloidal faces of verts_a_face(1) and (2)
         vxs_fcs = [f%vert1%Get(faces_cv), f%vert2%Get(faces_cv)]
@@ -13124,7 +13311,7 @@ module gamod_types
             deallocate(a)
 
             ! Get the other vert of the poloidal face
-            verts_p_face = [f%vert1%Get(pface), f%vert2%Get(pface)]
+            verts_p_face = GetFaceVertGA(f, pface)
             common_vert(i) = Pack2(verts_p_face, verts_p_face /= verts_a_face(i))
         end do
 
@@ -13133,12 +13320,13 @@ module gamod_types
         call f%aligned%Set(f1n, f%aligned%Get(aligned_face(1)))
 
         ! Add new vert to fsVx
+        allocate(fcs1(1))
         vxs1 = common_vert
         fcs1 = f1n
         call grid%AddVertToFsVx(vxs1, fcs1, 0, type)
 
         ! Build new cells
-        call grid%SplitTrap2(cv, common_vert(1), common_vert(2), aligned_face(1))
+        call grid%SplitTrap2(cv, common_vert(1), common_vert(2), aligned_face(1), cv1, cv2)
 
         ! Determine cflags
         cells = [cv1, cv2]
@@ -13168,9 +13356,9 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: s, v1n, f1n, f2n, f3n, fT1, fP1, fT2, vxT, fT3, &
-            cv1, cv2, neig
+            cv1, cv2, neig, vxs_fcs_com1(2), vxs_fcs_com2(2)
         integer(I8), allocatable, dimension(:) :: fcs, fcs_al, fcs_com, vxs_cv, &
-            vxs_fcs, vxs_fcs_com1, vxs_fcs_com2, query_faces, vxs_newpD, &
+            vxs_fcs, query_faces, vxs_newpD, &
             vxs_newp, fcs_newpD, fcs_newp, face_rem, cvs, cells, vertsT, facesT, &
             vxs1, fcs1
         real(R8) :: psic
@@ -13215,8 +13403,8 @@ module gamod_types
         call grid%AddVertToFsVx(vxs1, fcs1, 0, type)
 
         ! Find other vertex for the triangle
-        vxs_fcs_com1 = [f%vert1%Get(fcs_com(1)), f%vert2%Get(fcs_com(1))]
-        vxs_fcs_com2 = [f%vert1%Get(fcs_com(2)), f%vert2%Get(fcs_com(2))]
+        vxs_fcs_com1 = GetFaceVertGA(f, fcs_com(1))
+        vxs_fcs_com2 = GetFaceVertGA(f, fcs_com(2))
 
         if (any(vxs_fcs_com1 == f%vert1%Get(Qface))) then
             fT1 = fcs_com(1)
@@ -13296,7 +13484,7 @@ module gamod_types
 
     end subroutine 
     
-    subroutine SplitT4B(grid, magneticField, cv, rface1, common_vert, type, options)
+    subroutine SplitT4B(grid, magneticField, cv, rface1, common_vert, type, typeT, options)
 
         ! Description
         !============
@@ -13308,8 +13496,8 @@ module gamod_types
         class(GAGridUDT), intent(inout)         :: grid
         type(MagneticFieldUDT), intent(in)      :: magneticField
         integer(I8), intent(in)                 :: cv, rface1, common_vert
-        character(:), allocatable               :: type
-        type(GAoptionsUDT), intent(in)          :: options
+        character(:), allocatable, intent(in)   :: type, typeT
+        type(GAoptionsUDT), intent(inout)       :: options
 
         ! Auxiliary
         integer(I8) :: v1n, f1n, f2n, cv1, cv2, f3n, face_old, b_fcs, free_vert
@@ -13360,6 +13548,12 @@ module gamod_types
             cells = [cv1, cv2]
             call grid%DetermineCflags(cells)
 
+            ! First clear out other pentagons for radial splitting
+            !if (options%no_pents) then
+            !    cv_dummy = 0
+            !    call grid%SplitPentsRec(magneticField, options, cv_dummy)
+            !end if
+
             ! Do a poloidal split
             options2 = options
             options2%splittype = 'pol'
@@ -13377,11 +13571,15 @@ module gamod_types
 
             if (size(fcs_perp) /= 2) call gdErrorHandler('SplitT4B: something wrong')
 
-            select case (options%typeT)
+            select case (typeT)
             case ('stacked')
 
                 ! Get free vert
-                free_vert = GetCommonVert(f, fcs_perp(1), fcs_perp(2))
+                if (HaveCommonVert(f, fcs_perp(1), fcs_perp(2))) then
+                    free_vert = GetCommonVert(grid, fcs_perp(1), fcs_perp(2))
+                else 
+                    call gdErrorHandler('SplitT4B: fcs_perp do not have a common vertex')
+                end if
 
                 ! Make new face
                 call grid%GetFaceNumber(free_vert, common_vert, 3, f1n)
@@ -13623,11 +13821,11 @@ module gamod_types
 
         ! Get commonvertP
         if (HaveCommonVert(f, pface2, pface3)) then
-            common_vertP = GetCommonVert(f, pface2, pface3)
+            common_vertP = GetCommonVert(grid, pface2, pface3)
         else if (HaveCommonVert(f, pface1, pface3)) then
-            common_vertP = GetCommonVert(f, pface1, pface3)
+            common_vertP = GetCommonVert(grid, pface1, pface3)
         else if (HaveCommonVert(f, pface1, pface2)) then
-            common_vertP = GetCommonVert(f, pface1, pface2)
+            common_vertP = GetCommonVert(grid, pface1, pface2)
         else
             call gdErrorHandler('SplitT4P: no common_vertP')
         end if 
@@ -13973,7 +14171,7 @@ module gamod_types
         fcs_a = pack(query_faces, verts_cv == v1)
 
         pface = Pack2(fcs_a, fcs_a /= face)
-        vpface = [f%vert1%Get(pface), f%vert2%Get(pface)]
+        vpface = GetFaceVertGA(f, pface)
         vertp = Pack2(vpface, vpface /= v1)
         
         verts_cv1 = [v2n, v1n, v1, vertp]
@@ -13999,7 +14197,7 @@ module gamod_types
         fcs_b = pack(query_faces, verts_cv == v2)
 
         pface = Pack2(fcs_b, fcs_b /= face)
-        vpface = [f%vert1%Get(pface), f%vert2%Get(pface)]
+        vpface = GetFaceVertGA(f, pface)
         vertp = Pack2(vpface, vpface /= v2)
 
         verts_cv2 = [v2n, v1n, v2, vertp]
@@ -14103,8 +14301,8 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: f1, tria_vert, vert1, vert2, f1_cv1, f2_cv1, f3_cv1, &
-            f2_cv2, f3_cv2, f4_cv2
-        integer(I8), allocatable, dimension(:) :: verts_cv, test_verts, &
+            f2_cv2, f3_cv2, f4_cv2, test_verts(2)
+        integer(I8), allocatable, dimension(:) :: verts_cv,  &
             verts_cv2_rest, faces_cv2, verts_cv2, faces_cv1, verts_cv1
 
         associate(&
@@ -14120,7 +14318,7 @@ module gamod_types
 
         ! verts of triangle are v1_n, common_vert, ... and the vertex which is in
         !face and also has already a face together with the common vert 
-        test_verts = [f%vert1%Get(face), f%vert2%Get(face)]
+        test_verts = GetFaceVertGA(f, face)
         call f%CheckFace(common_vert, test_verts(1), f1)
 
         if (f1 /= 0) then
@@ -14227,7 +14425,7 @@ module gamod_types
 
     end subroutine
 
-    subroutine SplitTrap2(grid, cv, common_vert1, common_vert2, aligned_face)
+    subroutine SplitTrap2(grid, cv, common_vert1, common_vert2, aligned_face, cv1, cv2)
 
         ! Description
         !============
@@ -14238,10 +14436,14 @@ module gamod_types
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
         integer(I8), intent(in)         :: cv, common_vert1, common_vert2, aligned_face
+        integer(I8), intent(out)        :: cv1, cv2
 
         ! Auxiliary
-        integer(I8) :: verts_aligned_face(2), cv1, f1_cv1, f2_cv1, f3_cv1, f4_cv1
-        integer(I8), allocatable, dimension(:) :: verts_cv, verts_cv1, faces_cv1
+        integer(I8) :: verts_aligned_face(2), f1_cv1, f2_cv1, f3_cv1, f4_cv1, &
+            f2_cv2, f3_cv2
+        integer(I8), allocatable, dimension(:) :: verts_cv, verts_cv1, faces_cv1, &
+            vertTria, faces_cv2, verts_cv2
+        logical, allocatable :: log(:)
 
         ! Associate
         associate(&
@@ -14252,7 +14454,7 @@ module gamod_types
         ! cv1 => pent becomes quad
         cv1 = cv
         verts_cv = GetCellVertGA(c, cv)
-        verts_aligned_face = [f%vert1%Get(aligned_face), f%vert2%Get(aligned_face)]
+        verts_aligned_face = GetFaceVertGA(f, aligned_face)
         verts_cv1 = [common_vert1, verts_aligned_face(1), verts_aligned_face(2), common_vert2]
 
         call c%ReplaceVerts(cv1, verts_cv1)
@@ -14267,6 +14469,21 @@ module gamod_types
         call c%ReplaceFaces(cv1, faces_cv1)
 
         call grid%CalcCentroidGA(cv1)
+
+        ! cv2 => new triangle
+        log = .not.isMember(verts_cv, verts_cv1)
+        allocate(vertTria(count(log)))
+        vertTria = pack(verts_cv, log)
+
+        verts_cv2 = [common_vert1, common_vert2, vertTria(1)]
+
+        call grid%GetFaceNumber(common_vert2, vertTria(1), 1, f2_cv2)
+        call grid%GetFaceNumber(vertTria(1), common_vert1, 1, f3_cv2)
+
+        faces_cv2 = [f4_cv1, f2_cv2, f3_cv2]
+
+        ! Add new cell cv2
+        call grid%AddCell(faces_cv2, verts_cv2, c%reg%Get(cv1), cv2)
 
         end associate
 
@@ -14304,8 +14521,8 @@ module gamod_types
 
         ! cv1 = quad
         cv1 = cv
-        vx_al = [f%vert1%Get(face_al), f%vert2%Get(face_al)]
-        vx_f = [f%vert1%Get(face), f%vert2%Get(face)]
+        vx_al = GetFaceVertGA(f, face_al)
+        vx_f = GetFaceVertGA(f, face)
 
         verts_cv1 = [vx_start, vx_new, vx_al ]
         log = isMember(vx_al, vx_f)
@@ -14462,9 +14679,9 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: i, v1, v2, f1_cv1, f2_cv1, f3_cv1, f4_cv1, &
-            f1_cv2, f2_cv2, f3_cv2, f4_cv2, vertp
+            f1_cv2, f2_cv2, f3_cv2, f4_cv2, vertp, verts_pface(2)
         integer(I8), allocatable, dimension(:) :: verts_faces_cv, query_faces, &
-            ind, pface, verts_pface, faces_cv, verts_cv1, query5, &
+            ind, pface, faces_cv, verts_cv1, query5, &
             faces_cv1, ind1, ind2, ind3, faces_cv2, verts_cv2
         logical, allocatable, dimension(:) :: log, log1, log2, log3, log4, log5, log6
 
@@ -14491,7 +14708,7 @@ module gamod_types
 
         allocate(pface(count(ind /= face)))
         pface = pack(ind, ind /= face)
-        verts_pface = [f%vert1%Get(pface(1)), f%vert2%Get(pface(1))]
+        verts_pface = GetFaceVertGA(f, pface(1))
         deallocate(pface)
         vertp = Pack2(verts_pface, verts_pface /= v1)
         verts_cv1(4) = vertp
@@ -14543,7 +14760,7 @@ module gamod_types
 
         allocate(pface(count(ind3 /= face)))
         pface = pack(ind3, ind3 /= face)
-        verts_pface = [f%vert1%Get(pface(1)), f%vert2%Get(pface(1))]
+        verts_pface = GetFaceVertGA(f, pface(1))
         vertp = Pack2(verts_pface, verts_pface /= v2)
         verts_cv2(4) = vertp
         
@@ -14794,7 +15011,11 @@ module gamod_types
         ! Radial faces with common vertex are faces on the side of the two quads
         if (nr == 2) then
 
-            common_vert = GetCommonVert(f, rface1, rface2)
+            if (HaveCommonVert(f, rface1, rface2)) then
+                common_vert = GetCommonVert(grid, rface1, rface2)
+            else
+                call gdErrorHandler('DetermineHangingNodePent: rface1 and rface2 do not have a common vertex')
+            end if
 
             ! Determine Qface = face without common vert
             pfaces = 0
@@ -14817,17 +15038,17 @@ module gamod_types
             if (HaveCommonVert(f, rface1, rface2)) then
 
                 qface = rface3
-                common_vert = GetCommonVert(f, rface1, rface2)
+                common_vert = GetCommonVert(grid, rface1, rface2)
 
             else if (HaveCommonVert(f, rface1, rface3)) then
 
                 qface = rface2
-                common_vert = GetCommonVert(f, rface1, rface3)
+                common_vert = GetCommonVert(grid, rface1, rface3)
 
             else 
 
                 qface = rface1
-                common_vert = GetCommonVert(f, rface2, rface3)
+                common_vert = GetCommonVert(grid, rface2, rface3)
 
             end if
         end if
@@ -14836,7 +15057,7 @@ module gamod_types
 
     end subroutine
 
-    subroutine DetermineHangingNodeTria4(grid, cv, faces, common_vert)
+    subroutine DetermineHangingNodeTria4(grid, cv, faces, common_vert, type)
 
         ! Description
         !============
@@ -14845,9 +15066,10 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        integer(I8), intent(in)      :: cv, faces(:)
-        integer(I8), intent(out)     :: common_vert
+        class(GAGridUDT), intent(in)            :: grid
+        integer(I8), intent(in)                 :: cv, faces(:)
+        integer(I8), intent(out)                :: common_vert
+        character(:), allocatable, intent(out)  :: type   
 
         ! Auxiliary
         integer(I8) :: indmax
@@ -14869,9 +15091,11 @@ module gamod_types
 
         if (size(fcs_al) == 2 .and. size(fcs_nal) == 2) then
             if (HaveCommonVert(f, fcs_al(1), fcs_al(2))) then
-                common_vert = GetCommonVert(f, fcs_al(1), fcs_al(2))
+                common_vert = GetCommonVert(grid, fcs_al(1), fcs_al(2))
+                type = 'pol'
             else if (HaveCommonVert(f, fcs_nal(1), fcs_nal(2))) then
-                common_vert = GetCommonVert(f, fcs_nal(1), fcs_nal(2))                
+                common_vert = GetCommonVert(grid, fcs_nal(1), fcs_nal(2))  
+                type = 'rad'              
             else
                 call gdErrorHandler('DetermineHangingNodeTria4: no common_vert find')
             end if
@@ -14885,7 +15109,8 @@ module gamod_types
 
             ! Get hanging node
             if (HaveCommonVert(f, fcs_c(1), fcs_c(2))) then
-                common_vert = GetCommonVert(f, fcs_c(1), fcs_c(2))
+                common_vert = GetCommonVert(grid, fcs_c(1), fcs_c(2))
+                type = 'rad'
             else
                 call gdErrorHandler('DetermineHangingNodeTria4: something wrong')
             end if
@@ -14935,7 +15160,7 @@ module gamod_types
                 do j = 1, 4
                     if (i /= j) then
                         if (HaveCommonVert(f, fcs_al(i), fcs_al(j))) &
-                            common_vert = GetCommonVert(f, fcs_al(i), fcs_al(j))
+                            common_vert = GetCommonVert(grid, fcs_al(i), fcs_al(j))
                     end if
                 end do
                 if (common_vert /= 0) exit
@@ -14948,7 +15173,7 @@ module gamod_types
                 do j = 1, 4
                     if (i /= j) then
                         if (HaveCommonVert(f, fcs_al(i), fcs_al(j))) &
-                            common_vert = GetCommonVert(f, fcs_al(i), fcs_al(j))
+                            common_vert = GetCommonVert(grid, fcs_al(i), fcs_al(j))
                     end if
                 end do
                 if (common_vert /= 0) exit
@@ -14957,6 +15182,9 @@ module gamod_types
         else
             call gdErrorHandler('DetermineHangingNodeHex: case not considered')
         end if
+
+        if (common_vert == 0) &
+            call gdErrorHandler('DetermineHangingNodeHex: no hanging node found')
 
         end associate
 
@@ -15065,7 +15293,7 @@ module gamod_types
             do i = 1, size(target_fcs)
 
                 ! Get vertices
-                verts = [f%vert1%Get(target_fcs(i)), f%vert2%Get(target_fcs(i))]
+                verts = GetFaceVertGA(f, target_fcs(i))
 
                 ! Loop over verts
                 do j = 1, 2
@@ -15121,7 +15349,7 @@ module gamod_types
                             else
 
                                 ! Get intersection based on rface
-                                rface_verts = [f%vert1%Get(rface), f%vert2%Get(rface)]
+                                rface_verts = GetFaceVertGA(f, rface)
                                 point_vert = Pack2(rface_verts, rface_verts /= verts(j))
 
                                 isx = v%x%Get(point_vert)
@@ -15221,7 +15449,7 @@ module gamod_types
                 bc = GetFaceCellGA(c, ifc)
                 if (size(bc) /= 1) call gdErrorHandler('BoundaryLayerGrid: multiple or no boundary cell')
 
-                vs = [f%vert1%Get(ifc), f%vert2%Get(ifc)]
+                vs = GetFaceVertGA(f, ifc)
                 ind1 = findloc(verts_move_I8(:,1), vs(1), 1)
                 ind2 = findloc(verts_move_I8(:,1), vs(2), 1)
                 new_vert1 = verts_move_I8(ind1, 2)
@@ -15517,8 +15745,8 @@ module gamod_types
         logical, intent(out)            :: found
 
         ! Auxiliary
-        integer(I8) :: i, j, counter
-        integer(I8), allocatable :: cells(:), faces(:), verts(:)
+        integer(I8) :: i, j, counter, verts(2)
+        integer(I8), allocatable :: cells(:), faces(:)
         real(R8) :: psic, safety_factor, t0, diff_psi
 
         ! Associate
@@ -15544,7 +15772,7 @@ module gamod_types
 
             faces = GetCellFaceGA(c, cells(i))
             do j = 1, size(faces)
-                verts = [f%vert1%Get(faces(j)), f%vert2%Get(faces(j))]
+                verts = GetFaceVertGA(f, faces(j))
                 diff_psi = abs(v%psi%Get(verts(2)) - v%psi%Get(verts(1)))
                 if ((psic .gt. (minval(v%psi%Get(verts)) + safety_factor*diff_psi)) &
                     .and. (psic .lt. (maxval(v%psi%Get(verts)) - safety_factor*diff_psi))) then
@@ -15618,7 +15846,11 @@ module gamod_types
                 faces = GetCellFaceGA(c, t_cvs(1))
                 allocate(n_aligned_f(count(f%aligned%Get(faces) == 0)))
                 n_aligned_f = pack(faces, f%aligned%Get(faces) == 0)
-                common_vert = GetCommonVert(f, n_aligned_f(1),n_aligned_f(2))
+                if (HaveCommonVert(f, n_aligned_f(1),n_aligned_f(2))) then
+                    common_vert = GetCommonVert(grid, n_aligned_f(1),n_aligned_f(2))
+                else
+                    call gdErrorHandler('ThicknessSmoothing: n_aligned_f do not have a common vertex')
+                end if
                 
                 if (common_vert == iv) then
                     vecx = (isx - v%x%Get(iv)) / (2.0_R8*rescaling_factor)
@@ -15783,8 +16015,8 @@ module gamod_types
                 rem_faces(3) = common_face
 
                 ! Get rem vertices (common vertex of boundary faces)
-                vxs1 = [f%vert1%Get(rem_faces(1)), f%vert2%Get(rem_faces(1))]
-                vxs2 = [f%vert1%Get(rem_faces(2)), f%vert2%Get(rem_faces(2))]
+                vxs1 = GetFaceVertGA(f, rem_faces(1))
+                vxs2 = GetFaceVertGA(f, rem_faces(2))
                 rem_vert = Pack2(vxs1, isMember(vxs1, vxs2))
 
                 ! Get neighbors and make it boundary cells
@@ -15900,7 +16132,7 @@ module gamod_types
 
                         ! Add vertices to remove
                         if (size(fcs) == 4) then
-                            vxs = [f%vert1%Get(fcs_b(1)), f%vert2%Get(fcs_b(1))]
+                            vxs = GetFaceVertGA(f, fcs_b(1))
                             rem_vertO(counterv+1:counterv+2) = vxs
                             counterv = counterv + 2
                         end if
@@ -16516,7 +16748,7 @@ module gamod_types
             bfaces = pack(faces, faces /= iface)
             call f%label%Set(iface, maxval(f%label%Get(bfaces)))
 
-            iverts = [f%vert1%Get(iface), f%vert2%Get(iface)]
+            iverts = GetFaceVertGA(f, iface)
             allocate(rem_verts(count(verts /= iverts(1) .and. verts /= iverts(2))))
             rem_verts = pack(verts, verts /= iverts(1) .and. verts /= iverts(2))
 
@@ -17624,7 +17856,7 @@ module gamod_types
         ! Check
         if (size(faces) /= size(verts)) then
 
-            call grid%WriteErrorData(verts)
+            call grid%WriteErrorData(verts, 1)
             call gdErrorHandler('AddCell: size faces and size verts is not the same')
         end if
 
@@ -17983,6 +18215,8 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: i, ind, ifs, ind_good
+        integer(I8), allocatable :: ind_loc(:), ind_locU(:), ind_locD(:), ifs_loc(:)
+        logical :: merge
 
         ! Associate
         associate(&
@@ -17991,6 +18225,9 @@ module gamod_types
             v => grid%vert, &
             fd => grid%data%fluxdata &
             )
+
+        ! Initialize
+        merge = .false.
 
         select case (type)
 
@@ -18024,28 +18261,49 @@ module gamod_types
         case ('rad')
 
             ! Find ifs of the given vertex
+            allocate(ind_loc(size(new_v)))
+            allocate(ifs_loc(size(new_v)))
             ind_good = 0
+            ifs_loc = 0
             do i = 1, size(new_v)
-                ind = findloc(fd%fluxsurfaceverts%Get(), new_v(i), 1)
-                if (ind /= 0) then
-                    ind_good = ind
-                    exit
+                ind_loc(i) = findloc(fd%fluxsurfaceverts%Get(), new_v(i), 1)
+                if (ind_loc(i) /= 0) then
+                   ifs_loc(i) = GetFsVxFromVertInd(fd, ind_loc(i))
                 end if
             end do
+            ind_locD = pack(ifs_loc, ifs_loc /= 0)
+            call Unique(ind_locD, ind_locU)
+            if (size(ind_locU) == 1) then
+                ifs = ind_locU(1)
+            else if (size(ind_locU) == 0) then
+                ifs = 0
+            else if (size(ind_locU) == 2) then
+                ! Pick one and mergeFS
+                ifs = ind_locU(1)
+                merge = .true.
+            else
+                call grid%WriteErrorData(new_v, 1)
+                call gdErrorHandler('AddVertToFsVx: new_v in different flux surfaces')
+            end if
 
-            if (ind_good == 0) then
+            if (ifs == 0) then
 
                 call grid%AddFluxSurface(new_v, new_f)
 
             else
 
-                ifs = GetFsVxFromVertInd(fd, ind_good)
+                !ifs = GetFsVxFromVertInd(fd, ind_good)
                 call grid%AddIntoExistingSurface(ifs, new_v, new_f)
 
             end if
 
 
         end select
+
+        if (merge) call grid%MergeFS()
+
+        call CheckUniqueness(fd%fluxsurfaceverts)
+        call CheckUniqueness(fd%fluxsurfacefaces)
 
         end associate
 
@@ -18082,7 +18340,7 @@ module gamod_types
         call fd%fluxsurfaceverts%Set(range, vxs)
 
         ! Faces
-        p1 = fd%fluxsurfacevertsP1%Get(fd%nFs-1) + fd%fluxsurfacevertsP2%Get(fd%nFs-1)
+        p1 = fd%fluxsurfacefacesP1%Get(fd%nFs-1) + fd%fluxsurfacefacesP2%Get(fd%nFs-1)
         call fd%fluxsurfacefacesP1%Append(p1)
         call fd%fluxsurfacefacesP2%Append(size(fcs))
         if (size(fcs) /= 1) then
@@ -18276,7 +18534,7 @@ module gamod_types
 
     end subroutine
 
-    subroutine WriteErrorData(grid, verts)
+    subroutine WriteErrorData(grid, verts, flag)
 
         ! Description
         !============
@@ -18286,7 +18544,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8), intent(in)         :: verts(:)
+        integer(I8), intent(in)         :: verts(:), flag
 
         ! Auxiliary
         logical, allocatable :: is_ordered(:)
@@ -18301,7 +18559,7 @@ module gamod_types
         call grid%WriteData('grid_error')
         call WriteArray(verts, 'vertices_error')
 
-        print *, 'Error occurs: use pgaerror to visualize'
+        if (flag == 1) print *, 'Error occurs: use pgaerror to visualize'
 
     end subroutine
 
@@ -19030,6 +19288,15 @@ module gamod_types
 
     end function
 
+    ! Get verts of a face
+    function GetFaceVertGA(f, i) result(res)
+        type(GAFaceUDT) :: f
+        integer(I8) :: i, res(2)
+        
+        res = [f%vert1%Get(i), f%vert2%Get(i)]
+
+    end function
+
     ! Get faces of a vertex with dynamic arrays
     function GetVertFaceGA(face, i) result(res)
         type(GAFaceUDT) :: face
@@ -19431,15 +19698,15 @@ module gamod_types
 
     end function
     
-    function GetCommonFace(cell, ic1, ic2) result(res)
-        type(GACellUDT) :: cell
+    function GetCommonFace(grid, ic1, ic2) result(res)
+        type(GAGridUDT) :: grid
         integer(I8) :: ic1, ic2, res, i
-        integer(I8), allocatable :: fcs1(:), fcs2(:)
+        integer(I8), allocatable :: fcs1(:), fcs2(:), verts(:)
 
         res = 0
 
-        fcs1 = GetCellFaceGA(cell, ic1)
-        fcs2 = GetCellFaceGA(cell, ic2)
+        fcs1 = GetCellFaceGA(grid%cell, ic1)
+        fcs2 = GetCellFaceGA(grid%cell, ic2)
 
         do i = 1, size(fcs1)
             if (any(fcs1(i) == fcs2)) then
@@ -19448,7 +19715,11 @@ module gamod_types
             end if
         end do
 
-        if (res == 0) call gdErrorHandler('GetCommonFace: cells have no common face')
+        if (res == 0) then
+            verts = [GetCellVertGA(grid%cell, ic1), GetCellVertGA(grid%cell, ic2)]
+            call grid%WriteErrorData(verts, 1)
+            call gdErrorHandler('GetCommonFace: cells have no common face')
+        endif 
 
     end function
 
@@ -19472,17 +19743,15 @@ module gamod_types
 
     end function
 
-    function GetCommonVert(f, f1, f2) result(res)
-        type(GAFaceUDT) :: f
-        integer(I8) :: i, f1, f2, res, vx1(2), vx2(2)
+    function GetCommonVert(g, f1, f2) result(res)
+        type(GAGridUDT) :: g
+        integer(I8) :: i, f1, f2, res, vx1(2), vx2(2), verts(4)
 
         res = 0
+        vx1 = [g%face%vert1%Get(f1), g%face%vert2%Get(f1)] 
+        vx2 = [g%face%vert1%Get(f2), g%face%vert2%Get(f2)]  
 
-        if (HaveCommonVert(f,f1,f2)) then
-            vx1(1) = f%vert1%Get(f1) 
-            vx1(2) = f%vert2%Get(f1) 
-            vx2(1) = f%vert1%Get(f2) 
-            vx2(2) = f%vert2%Get(f2) 
+        if (HaveCommonVert(g%face,f1,f2)) then
 
             do i = 1, 2
                 if (vx1(i) == vx2(1)) then
@@ -19492,7 +19761,8 @@ module gamod_types
                 end if
             end do
         else
-
+            verts = [vx1, vx2]
+            call g%WriteErrorData(verts, 1)
             call gdErrorHandler('GetCommonVert: face1 and face2 have no common vertex')
         end if
 
@@ -19505,10 +19775,8 @@ module gamod_types
         res = .false.
         if ((f1 == 0) .or. (f2 == 0)) return
 
-        vx1(1) = f%vert1%Get(f1) 
-        vx1(2) = f%vert2%Get(f1) 
-        vx2(1) = f%vert1%Get(f2) 
-        vx2(2) = f%vert2%Get(f2) 
+        vx1 = GetFaceVertGA(f, f1) 
+        vx2 = GetFaceVertGA(f, f2)
 
         do i = 1, 2
             if (any(vx1(i) == vx2)) res = .true.

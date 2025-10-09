@@ -1086,7 +1086,7 @@ module goatmod_userinput
         class(GAoptionsUDT)       :: options   
         
         ! General options
-        options%plt         = .true.
+        options%plt         = .false.
         options%plt_qm      = .false.
         options%meth        = 'simple'
 
@@ -1156,7 +1156,7 @@ module goatmod_userinput
         
         ! Pentagon options
         options%no_pents_area_merge                 = .false.
-        options%no_pents_area_split                 = .true.
+        options%no_pents_area_split                 = .false.
         options%no_pents_area_type                  = 'dist_function'
         
         options%no_pents_area_maxR                  = 2.5

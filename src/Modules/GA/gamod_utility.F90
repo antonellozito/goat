@@ -126,7 +126,7 @@ module gamod_utility
 
         ! Visualize
         !==========
-        if (options%debug) call WriteFluxeTubeData(grid, ftCv, ftCvP)
+        if (options%debug) call WriteFluxTubeData(grid, ftCv, ftCvP)
         if (options%debug) call CheckUniquenessI8(ftCv)
 
         ! Build closed tubes
@@ -152,7 +152,7 @@ module gamod_utility
 
         ! Visualize
         !==========
-        if (options%debug) call WriteFluxeTubeData(grid, ftCv, ftCvP)
+        if (options%debug) call WriteFluxTubeData(grid, ftCv, ftCvP)
 
         ! Build ftFc - poloidal faces which lay into the flux tube
         if (.not.ft_open_us) then
@@ -1003,7 +1003,7 @@ module gamod_utility
 
         ! Visualize
         !==========
-        if (options%debug) call WriteFluxeTubeData(grid, ftCv, ftCvP)
+        if (options%debug) call WriteFluxTubeData(grid, ftCv, ftCvP)
 
         ! First determine the start and end cells of the tubes
         ! INFORMATION SAVED SHOULD BE CORRECT BEFORE!!!! (in PostprocessGA)
@@ -1150,7 +1150,7 @@ module gamod_utility
 
         ! Auxiliary
         logical :: looped
-        integer(I8), allocatable :: fcs(:), p_fcs(:), cvs(:)
+        integer(I8), allocatable :: fcs(:), p_fcs(:), cvs(:), verts(:)
         integer(I8) :: ic, opp_face
 
         ! Associate
@@ -1172,7 +1172,11 @@ module gamod_utility
         fcs = GetCellFace(c, cv1)
         allocate(p_fcs(count(f%aligned(fcs) == 0)))
         p_fcs = pack(fcs, f%aligned(fcs) == 0)
-        if (size(p_fcs) /= 2) call gdErrorHandler('TraceClosedFluxTube: Something went wrong, cell has no two poloidal faces')
+        if (size(p_fcs) /= 2) then
+            verts = GetCellVert(c, cv1)
+            call WriteGridErrorData(grid, verts, 1)
+            call gdErrorHandler('TraceClosedFluxTube: Something went wrong, cell has no two poloidal faces')
+        end if
 
         ! Initialize while loop
         ic = cv1
@@ -1188,7 +1192,11 @@ module gamod_utility
             ! Add the second cell
             cvs = GetFaceCell(f, opp_face)
 
-            if (size(cvs) /= 2) call gdErrorHandler('TraceClosedFluxTube: poloidal face in the core has no two cells')
+            if (size(cvs) /= 2) then
+                verts = [f%vert(opp_face,:)]
+                call WriteGridErrorData(grid, verts, 1)
+                call gdErrorHandler('TraceClosedFluxTube: poloidal face in the core has no two cells')
+            end if
 
             if ((cvs(1) /= cv1) .and. (.not.in_tube(cvs(1)))) then
 
@@ -1658,7 +1666,7 @@ module gamod_utility
 
     end subroutine
 
-    subroutine WriteFluxeTubeData(grid, ftCv, ftCvP)
+    subroutine WriteFluxTubeData(grid, ftCv, ftCvP)
 
         ! Description
         !============
@@ -1684,6 +1692,26 @@ module gamod_utility
         call WriteArray(ar, 'fluxtubecellsP2')
 
         print *, 'Writing data of flux tubes, use pgaoutput'
+
+    end subroutine
+
+    subroutine WriteGridErrorData(grid, verts, flag)
+
+        ! Description
+        !============
+        ! Write data for an error plot
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(in) :: grid
+        integer(I8), intent(in)    :: verts(:), flag
+
+        ! Write grid and array for vertices to indicate problematic area
+        call grid%WriteData('grid_error')
+        call WriteArray(verts, 'vertices_error')
+
+        if (flag == 1) print *, 'Error occurs: use pgaerror to visualize'
 
     end subroutine
 
