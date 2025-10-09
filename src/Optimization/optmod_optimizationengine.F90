@@ -967,7 +967,7 @@ module optmod_optimizationengine
 
         ! Timing
         real(R8)                    :: t_it_s, t_it_e, &
-            t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e, tstart, tend
+            t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e
 
         ! Data
 

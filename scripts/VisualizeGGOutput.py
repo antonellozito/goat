@@ -183,6 +183,7 @@ try:
 except:
     print("Could not load intersection data")
 try: 
+    plotter.PlotTopologicalMesh(topomesh, 10)
     plotter.PlotGridCells(simgrid, 10)
     plotter.PlotPoints2D(coord[:, 0], coord[:, 1], 10, color='r', marker='o')
 except:

@@ -33,7 +33,7 @@ module mod_sort
     implicit none 
     private 
     public :: Sort, Unique, Setdiff, CountOccurrence, SearchSortedArray, &
-        GetBinIndexSortedArray, isMember, Pack2
+        GetBinIndexSortedArray, isMember, Pack2, GetCommonElements
 
     !==================================================================!
     !                                                                  !
@@ -82,6 +82,11 @@ module mod_sort
     ! Pack for array with two elements
     interface Pack2
         module procedure Pack2_I8, Pack2_R8
+    end interface
+
+    ! Common element getter
+    interface GetCommonElements
+        module procedure GetCommonElements_I8
     end interface
 
     contains 
@@ -1115,6 +1120,87 @@ module mod_sort
             res = arr(2)
         end if
     end function
+    ! Check for common elements between (unsorted) arrays
+    function GetCommonElements_I8(a1, a2) result(el)
+
+        ! Description
+        !============
+        ! This routine checks for elements that are common between array
+        ! a1 and array a2 and returns these. If no elements are common, 
+        ! the resulting array is empty. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), dimension(:), intent(in)       :: a1, a2 
+        integer(I8), dimension(:), allocatable      :: el 
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)      :: sortind, a, a1u, &
+            a2u, d
+        logical, allocatable, dimension(:)          :: isa1, iscommon
+
+        ! Loop
+        integer(I8)                                 :: i 
+
+        ! Initialize
+        !===========
+        ! Check for trivial cases
+        if (size(a1) == 0 .or. size(a2) == 0) then 
+            allocate(el(0))
+            return 
+        end if 
+        if (size(a1) == 1) then 
+            if (any(a1(1) == a2)) then 
+                el = a1 
+            else
+                allocate(el(0))
+            end if 
+            return 
+        end if 
+        if (size(a2) == 1) then 
+            if (any(a2(1) == a1)) then 
+                el = a2 
+            else
+                allocate(el(0))
+            end if 
+            return 
+        end if 
+
+        ! General case
+        !=============
+        ! Probably not optimal for rather small arrays, but scale better
+        ! for larger arrays (O(N log(N)) expected)
+        ! Concatenate and sort
+        call Unique(a1, a1u)
+        call Unique(a2, a2u)
+        a = [a1u, a2u]
+        isa1 = [spread(.true., 1, size(a1u)), spread(.false., 1, size(a2u))]
+        allocate(sortind(size(a)))
+        call Sort(a, ind=sortind)
+        isa1 = isa1(sortind)
+        deallocate(sortind)
+
+        ! Check for doubles appearing in both arrays
+        d = a(2:) - a(1:size(a)-1)
+        allocate(iscommon(size(a)))
+        iscommon = .false. 
+        do i = 1, size(a)-1
+            if (d(i) == 0) then 
+                if ((isa1(i) .and. .not. isa1(i+1)) .or. &
+                    (isa1(i+1) .and. .not. isa1(i))) then 
+                    iscommon(i) = .true. 
+                end if 
+            end if 
+        end do 
+
+        ! Allocate and pack
+        allocate(el(count(iscommon)))
+        el = pack(a, iscommon)
+
+    end function
+    
+
 
 
 end module

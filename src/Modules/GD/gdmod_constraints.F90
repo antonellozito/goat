@@ -1026,7 +1026,7 @@ module gdmod_constraints
         real(R8), allocatable           :: G_ffv(:), lambda_ffv(:)
         type(MySparseUDT)               :: gradG_ffv, hessG_ffv, &
             dG_ffvdvar, dgradG_ffvdvar
-        real(R8)                        :: tstart, tend
+
         ! Initialize
         !===========
         ! Check inputs

@@ -916,7 +916,8 @@ module goatmod_types
     
             ! Allocate
             allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
-                grid%data%spointID(idum(2)), grid%data%isprimaryxp(idum(0)), &
+                grid%data%spointID(idum(2)), grid%data%tpointID(idum(3)), &
+                grid%data%isprimaryxp(idum(0)), &
                 grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
                 grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
                 grid%data%spointxpID(grid%data%nsp), grid%data%sepID(grid%data%nsep))
@@ -3997,7 +3998,7 @@ module goatmod_types
         type(EnvironmentUDT), intent(in)    :: environment
 
         ! Auxiliary
-        integer(I8), allocatable, dimension(:)  :: tv, tf, tfv 
+        integer(I8), allocatable, dimension(:)  :: tv
         real(R8), allocatable, dimension(:)     :: tpsi
         
         ! Loop
@@ -4037,18 +4038,13 @@ module goatmod_types
 
         ! Flux surface psi values
         do i = 1, nfs 
-
-            ! Get flux surface faces
-            tf = GetFSFace(grid%data%fluxdata, i)
-
-            ! Get vertices
-            tfv = reshape(grid%face%vert(tf, :), [size(tf)*2])
-
             ! Get psi values
-            tpsi = grid%vert%psi(tfv)
+            allocate(tpsi(count(grid%vert%fieldlineID == i)))
+            tpsi = pack(grid%vert%psi, grid%vert%fieldlineID == i)
 
             ! Average and add
-            grid%data%fluxdata%fluxsurfacepsi = sum(tpsi)/size(tpsi)
+            grid%data%fluxdata%fluxsurfacepsi(i) = sum(tpsi)/size(tpsi)
+            deallocate(tpsi)
 
         end do
 
@@ -4917,6 +4913,10 @@ module goatmod_types
         ! ID(s) of the vertex (max. 2 allowed per vertex), label(:, 3)  is 
         ! the unique vertex ID (may, after intersections, not go from 1 to 
         ! number of vertices due to exclusion of vertices)
+
+        ! Note 3: (1/10/2025) Added additional polygon 'level' label in 
+        ! labels(:, 4), which indicates the nestedness level of the 
+        ! polygon. 
     
         ! Initialize
         !===========
@@ -4983,7 +4983,7 @@ module goatmod_types
         ! Allocate (account for NaNs)
         allocate(vesselIDmap(nvs - nexcl))
         allocate(tempx(nvp+nvs-1-nexcl), tempy(nvp+nvs-1-nexcl))
-        allocate(templabels(size(tempx), 3))
+        allocate(templabels(size(tempx), 4))
         templabels = 0
         
         ! Set vertices
@@ -5345,7 +5345,7 @@ module goatmod_types
     end subroutine
 
     ! Vessel polygon construction
-    subroutine ConstructVesselPolygonSet(vessel, ps)
+    subroutine ConstructVesselPolygonSet(vessel, ps, compress)
 
         ! Description
         !============
@@ -5399,6 +5399,12 @@ module goatmod_types
         ! the polygon and the 'dangling' nodes are removed. It is assumed 
         ! that this information is already available through the polygon
         ! labels field, which should be setup in ExtractVesselData.F90. 
+
+        ! Note 5: sometimes it may be desireable to 'compress' the 
+        ! initial polygon set, i.e. remove any redundant straight edges
+        ! that do not influence the actual form of the polygon. In that
+        ! case, the optional argument 'compress' should be parsed and 
+        ! set to true. Machine precision effects may arise though. 
     
         ! Modules
         !========
@@ -5409,11 +5415,12 @@ module goatmod_types
         ! Arguments
         type(VesselUDT)             :: vessel
         type(PolygonSetUDT)         :: ps 
+        logical, intent(in), optional   :: compress
     
         ! Auxiliary
         integer(I8)                 :: ni, nfinpol, thisp, firstpolygon, &
             c1, c2, nvest, nvv, tempnv, nextp, sv, ev, flag, vID, indis, indie
-        logical                     :: polygonnotfound, doflip  
+        logical                     :: polygonnotfound, doflip, docompression
         real(R8)                    :: nan, xs, ys, xe, ye 
     
         real(R8), allocatable       :: xi(:), yi(:), tempx(:), tempy(:), &
@@ -5422,7 +5429,7 @@ module goatmod_types
         integer(I8), allocatable    :: p1(:), p2(:), s1(:), s2(:), &
             polcat(:, :), npol(:), remp(:), tempp(:), indi(:, :), &
             si(:, :), pi(:, :), ci(:), templabels(:, :), &
-            labelsv(:, :)
+            labelsv(:, :), polygonlevels(:)
         logical, allocatable        :: notfound(:)
     
         character(:), allocatable   :: vesselpath
@@ -5432,14 +5439,17 @@ module goatmod_types
     
         ! Initialize
         !===========
-        ! Checks - seem unnecessary?
-        !if (size(vesseloptions%TPind) == 0 ) then 
-        !    call gdErrorHandler('ConstructVesselPolygon: no target plates are specified, check input')
-        !elseif (size(vesseloptions%TPind) .ne. size(vesseloptions%TP)) then 
-        !    call gdErrorHandler('ConstructVesselPolygon: number of ' &
-        !        // 'elements in vesseloptions%TPind does not correspond' &
-        !        // ' to number of structures in vesseloptions%TP')
-        !end if 
+        ! Checks 
+        if (present(compress)) then
+            docompression = compress
+        else
+            docompression = .false.
+        end if 
+        
+        ! If desired, compress the given polygon set 
+        if (docompression) then 
+            call ps%Compress()
+        end if 
     
         ! Set NaN
         nan = IEEE_VALUE(nan, IEEE_QUIET_NAN)
@@ -5457,7 +5467,7 @@ module goatmod_types
                 'based on polygons'
             do i = 1, ps%np
                 deallocate(ps%polygons(i)%labels)
-                allocate(ps%polygons(i)%labels(ps%polygons(i)%nv, 3))
+                allocate(ps%polygons(i)%labels(ps%polygons(i)%nv, 4))
                 ps%polygons(i)%labels(:, 1) = i 
                 ps%polygons(i)%labels(:, 2) = 0
                 ps%polygons(i)%labels(:, 3) = [(k, k = vID+1, vID+ps%polygons(i)%nv)]
@@ -5704,7 +5714,7 @@ module goatmod_types
         nvest = nvest*2 ! factor 2 just to be sure 
     
         ! Allocate
-        allocate(tempx(nvest), tempy(nvest), templabels(nvest, 3))
+        allocate(tempx(nvest), tempy(nvest), templabels(nvest, 4))
     
         ! Loop 
         nvv = 0 ! vessel vertex counter
@@ -6064,7 +6074,7 @@ module goatmod_types
         call vessel%polygonset%Construct(xv, yv, labelsv)
     
         ! Test orientation
-        call vessel%polygonset%OrientNestedClosedPolygons(flag)
+        call vessel%polygonset%OrientNestedClosedPolygons(flag, polygonlevels)
     
         ! Check
         if (flag .ne. 0) then  
@@ -6074,6 +6084,11 @@ module goatmod_types
                 'orient polygons, OrientNestedClosedPolygons exited with ' // &
                 'flag above')
         end if 
+
+        ! Add polygonlevels to polygons
+        do i = 1, vessel%polygonset%np
+            vessel%polygonset%polygons(i)%labels(:, 4) = polygonlevels(i)
+        end do 
     
         ! Write data
         vesselpath = 'vesselpolygon'

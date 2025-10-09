@@ -564,7 +564,8 @@ module mod_contour2D
  
         ! Main loop
         !==========
-        !$omp parallel default(none) if(.not. omp_in_parallel()) &
+        !$omp parallel default(none) if(.not. omp_in_parallel() .and. &
+        !$omp (size(tracevalues) >= omp_get_num_threads())) &
         !$omp shared(tracevalues, V, X, Y, superquadflags, &
         !$omp superquadfacexflags, superquadfaceyflags, nx, ny, &
         !$omp contours) &
@@ -758,7 +759,8 @@ module mod_contour2D
 
         ! Main loop
         !==========
-        !$omp parallel do default(none) if(.not. omp_in_parallel()) schedule(dynamic) & 
+        !$omp parallel do default(none) if(.not. omp_in_parallel() .and. (nt >= omp_get_num_threads())) &
+        !$omp schedule(dynamic) & 
         !$omp shared(xt, yt, nt, V, X, Y, superquadflags, &
         !$omp superquadfacexflags, superquadfaceyflags, nx, ny, contours) &
         !$omp private(txt, tyt, i, j, tempcontours) & 
@@ -1045,9 +1047,13 @@ module mod_contour2D
         cc = 0
 
         ! Check nodal values
+        !$omp parallel if(.not. omp_in_parallel())
+        !$omp workshare
         Vtrace = V
         hasvv = Vtrace > tv 
         isexactv = Vtrace == tv 
+        !$omp end workshare
+        !$omp end parallel
 
         ! Check if any values found, if not: add empty contour and 
         ! continue to next value
@@ -1651,22 +1657,6 @@ module mod_contour2D
         ! Contour counter
         cc = 0
 
-        ! Hedge for starting indices that lie exactly on a node 
-        isstartperturbed = .false.
-        x0p = x0 
-        y0p = y0
-        xloc = findloc(X, x0, 1) 
-        yloc = findloc(Y, y0, 1)
-        if ( (xloc /= 0) .and. ( yloc /= 0)) then 
-            ! Only perturb to compute initial value, then set equal 
-            ! again to original starting point
-            isstartperturbed = .true.
-
-            ! Compute perturbation 
-            x0p = x0 + pert
-            y0p = y0 + pert  
-        end if 
-
         ! Find the starting quad indices
         iisq = findloc(x0 >= X, .true., 1, back=.true.)
         jjsq = findloc(y0 >= Y, .true., 1, back=.true.)
@@ -1685,9 +1675,31 @@ module mod_contour2D
         ! Check if we start in a saddle point
         if ((superquadflags(iisq, jjsq) /= 0)) then 
             ! Call dedicated evaluator
-            tv = EvaluateFromSaddlePoint(x0p, y0p, &
+            x0p = x0
+            y0p = y0
+            tv = EvaluateFromSaddlePoint(x0, y0, &
                 spstruct(superquadflags(iisq, jjsq)), X, Y)
         else
+            ! Hedge for starting indices that lie exactly on a node 
+            isstartperturbed = .false.
+            x0p = x0 
+            y0p = y0
+            xloc = findloc(X, x0, 1) 
+            yloc = findloc(Y, y0, 1)
+            if ( (xloc /= 0) .and. ( yloc /= 0)) then 
+                ! Only perturb to compute initial value, then set equal 
+                ! again to original starting point
+                isstartperturbed = .true.
+
+                ! Compute perturbation 
+                x0p = x0 + pert
+                y0p = y0 + pert  
+            end if 
+
+            ! Find the starting quad indices
+            iisq = findloc(x0p >= X, .true., 1, back=.true.)
+            jjsq = findloc(y0p >= Y, .true., 1, back=.true.)
+
             ! Compute value at starting quad by bilinear interpolation
             tv1 = (V(iisq+1, jjsq) - V(iisq, jjsq))/(X(iisq+1) - X(iisq))*(x0p - X(iisq)) + V(iisq, jjsq)
             tv2 = (V(iisq+1, jjsq+1) - V(iisq, jjsq+1))/(X(iisq+1) - X(iisq))*(x0p - X(iisq)) + V(iisq, jjsq+1)
@@ -1713,6 +1725,7 @@ module mod_contour2D
         Vtrace = V
         hasvv = Vtrace > tv 
         isexactv = Vtrace == tv 
+
 
         ! Values found, check if we need to perturb some locations
         if (any(isexactv)) then 
@@ -2765,6 +2778,7 @@ module mod_contour2D
         end if
 
         ! Traverse 'backwards'
+        ctri = thissp%starttri
         do while (.true.)
             if (hasftri(ctri, 1)) then 
                 ! Go to previous triangle
@@ -2786,6 +2800,7 @@ module mod_contour2D
         end do 
 
         ! Traverse 'forwards'
+        ctri = thissp%starttri
         do while (.true.)
             if (hasftri(ctri, 3)) then 
                 ! Go to previous triangle

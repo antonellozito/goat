@@ -9,7 +9,7 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # General options
 'goat.debug'                        '0'
-'goat.meth'                         'GD'
+'goat.meth'                         'GG'
 
 # Input file locations 
 #'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
@@ -438,8 +438,9 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 
 # Read exising file? 
-'gg.tm.readexistingTM'          '1'
-'gg.tm.readexistingtracers'     '1'
+'gg.tm.readexistingTM'          '0'
+'gg.tm.readexistingtracers'     '0'
+'gg.tm.writedebugoutput'        '0'
 'gg.tm.TMfilepath'              './output/topomesh.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
@@ -463,17 +464,18 @@ VERSION 1.00.00
 'gg.tm.contour.dl'              '0.02'
 
 # Topomesh adaptations
-'gg.tm.doadaptations'           '0'
+'gg.tm.doadaptations'           '1'
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '0'
 'gg.tm.cbnd.frac'               '0.1'
 'gg.tm.PFbnd.frac'              '0.1'
 'gg.tm.removecoreregions'       '1'
 'gg.tm.removewidegridregions'   '0'
-'gg.tm.mergetangencypointtubes' '1'
-'gg.tm.mergeavptubes'           '1'
-'gg.tm.dpsimintangencypointtubes'   '0.0'
-'gg.tm.lradmintangencypointtubes'   '1.0e-2'
+
+'gg.tm.mergetubes'              '1'
+'gg.tm.mergetubes.meth'         'extensive'
+'gg.tm.dpsimintubes'            '0.0'
+'gg.tm.lradmintubes'            '1.0e-2'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'

@@ -195,7 +195,7 @@ module ggmod_gridgeneration2D
             dll, dllc, dlcv
         integer(I8), allocatable, dimension(:)      :: vert
         integer(I8)                                 :: nv, nl, sv, ev, &
-            fsID, TMfaceID
+            fsID, TMfaceID, TMfacetype
         logical                                     :: isvertex, isclosed
         type(GGTMFieldlineRefinementOptionsUDT)     :: refoptions
 
@@ -2911,6 +2911,17 @@ module ggmod_gridgeneration2D
         end do 
         !$omp end single
         !$omp end parallel 
+
+        do i = 1, cell%ntot 
+            do j = 1, size(celldata(i)%tubes)
+                if ((celldata(i)%tubes(j)%hfline%vert(1) == &
+                    celldata(i)%tubes(j)%hfline%vert(celldata(i)%tubes(j)%hfline%nv)) .and. &
+                    (celldata(i)%tubes(j)%lfline%vert(1) == &
+                        celldata(i)%tubes(j)%lfline%vert(celldata(i)%tubes(j)%lfline%nv))) then 
+                    call celldata(i)%tubes(j)%VisualizeGraph('lpgraph')
+                end if 
+            end do 
+        end do 
         
         ! Housekeeping
         !=============
@@ -4858,7 +4869,7 @@ module ggmod_gridgeneration2D
 
             ! Initialize segment
             call ggtmdata%seg(nseg)%Initialize([vert%x(i), vert%x(i)], &
-                [vert%y(i), vert%y(i)], vert%fsID(i), i, i, i)
+                [vert%y(i), vert%y(i)], vert%fsID(i), i, i, i, vert%type(i))
 
             ! Initialize line
             call vertdata(i)%line%Initialize(ggtmdata, [nseg])
@@ -4871,7 +4882,8 @@ module ggmod_gridgeneration2D
 
             ! Initialize segment
             call ggtmdata%seg(nseg)%Initialize(face%x(i)%Get(), &
-                face%y(i)%Get(), face%fsID(i), i, face%vert(i, 1), face%vert(i, 2))
+                face%y(i)%Get(), face%fsID(i), i, face%vert(i, 1), face%vert(i, 2), &
+                face%type(i))
 
             ! Initialize line
             call facedata(i)%line%Initialize(ggtmdata, [nseg])
@@ -5186,6 +5198,10 @@ module ggmod_gridgeneration2D
             ! Loop
             nflmax = size(facedata(tf(1))%line%xv)
             tfmax = tf(1)
+            if (any(topomesh%face%type(tf) == TMfacebndID)) then 
+                ! Keep only boundary faces for distribution
+                tf = pack(tf, topomesh%face%type(tf)  == TMFacebndID)
+            end if 
             do j = 1, size(tf)
                 ! Determine number of field lines
                 nfl = size(facedata(tf(j))%line%xv)
@@ -5263,13 +5279,11 @@ module ggmod_gridgeneration2D
             indsrf, minind, maxind, minindloc
         integer(I8), allocatable, dimension(:)  :: tubec, tubef, tcf, &
             tcv, tcfv1, tcfv2, hffaces, lffaces, hfvert, lfvert, &
-            tf1, tf2, tubebndf1, tubebndf2, tubebndv1, tubebndv2, &
-            tubehfvert, tubelfvert
+            tf1, tf2, tubehfvert, tubelfvert
         real(R8)                                :: hfval, lfval
         real(R8), allocatable, dimension(:)     :: tcvfval, tcfv1val, &
-            tcfv2val, tubelfval, tubehfval, tubebndval1, tubebndval2
-        logical, allocatable, dimension(:)      :: ishfface, islfface, &
-            ishfvert
+            tcfv2val
+        logical, allocatable, dimension(:)      :: ishfface, islfface
 
         ! Diagnostics
 
@@ -5298,30 +5312,10 @@ module ggmod_gridgeneration2D
             tubec = tube%GetCell(i)
             tubef = tube%GetFace(i)
 
-            ! Get the tube boundary vertices and faces
-            tubebndf1 = tube%GetBndFace(i, 1)
-            tubebndf2 = tube%GetBndFace(i, 2)
-            tubebndv1 = tube%GetBndVert(i, 1)
-            tubebndv2 = tube%GetBndVert(i, 2)
-
-            ! Determine psi values at both sides
-            tubebndval1 = topomesh%fsfval%Get([face%fsID(tubebndf1), vert%fsID(tubebndv1)])
-            tubebndval2 = topomesh%fsfval%Get([face%fsID(tubebndf2), vert%fsID(tubebndv2)])
-            if (minval(tubebndval1) > maxval(tubebndval2)) then 
-                tubehfval = tubebndval1
-                tubelfval = tubebndval2
-                tubehfvert = tubebndv1 
-                tubelfvert = tubebndv2
-            elseif (minval(tubebndval2) > maxval(tubebndval1)) then 
-                tubehfval = tubebndval2
-                tubelfval = tubebndval1
-                tubehfvert = tubebndv2 
-                tubelfvert = tubebndv1
-            else
-                call gdErrorHandler('AddTopologicalMeshGriddingData: ' // & 
-                    'tube psi values seem to overlap, could not determine ' // &
-                    'high and low field value. ')
-            end if 
+            ! Get the tube boundary vertices and faces at high and 
+            ! low field side (according to tube data)
+            tubehfvert = tube%GetHighFluxBndVert(i)
+            tubelfvert = tube%GetLowFluxBndVert(i)
 
             ! Loop over all tube cells
             do j = 1, size(tubec)
@@ -5402,24 +5396,6 @@ module ggmod_gridgeneration2D
                                 'aligned face vertices do not appear only in  ' // & 
                                 'high or low field vertices of tube. Unexpected')
                         end if 
-
-                        !dhf1 = abs(tcfv1val(k) - hfval)
-                        !dhf2 = abs(tcfv2val(k) - hfval)
-                        !dlf1 = abs(tcfv1val(k) - lfval)
-                        !dlf2 = abs(tcfv2val(k) - lfval)
-                        !if ((dhf1 < dlf1) .and. (dhf2 < dlf2)) then 
-                        !    ! High field face
-                        !    ishfface(k) = .true. 
-                        !elseif ((dhf1 > dlf1) .and. (dhf1 > dlf1)) then 
-                        !    ! Low field face
-                        !    islfface(k) = .true. 
-                        !else 
-                        !    ! Undetermined - throw error (should actually
-                        !    ! not happen)
-                        !    call gdErrorHandler('AddTopologicalMeshCellGriddingData: ' // & 
-                        !        'could not determine based on field value ' // & 
-                        !        'if poloidal face is high or low field.')
-                        !end if 
                     end if 
                 end do 
 
@@ -5467,15 +5443,10 @@ module ggmod_gridgeneration2D
 
 
                 ! Determine high field and low field vertices (unsorted)
-                ishfvert = abs(tcvfval - hfval) < abs(tcvfval - lfval)
-
-                ! Extract
-                allocate(hffaces(count(ishfface)), lffaces(count(islfface)), &
-                    hfvert(count(ishfvert)), lfvert(count(.not.ishfvert)))
-                hffaces = pack(tcf, ishfface)
-                lffaces = pack(tcf, islfface)
-                hfvert = pack(tcv, ishfvert)
-                lfvert = pack(tcv, .not. ishfvert)
+                hfvert = GetCommonElements(tcv, tubehfvert)
+                lfvert = GetCommonElements(tcv, tubelfvert)
+                allocate(hffaces(0), lffaces(0))
+                ! ishfvert = abs(tcvfval - hfval) < abs(tcvfval - lfval)
 
                 ! Overwrite to sort 
                 if (size(tf1) > 0) then 
@@ -5501,8 +5472,7 @@ module ggmod_gridgeneration2D
 
 
                 ! Housekeeping
-                deallocate(hffaces, lffaces, ishfface, islfface, hfvert, &
-                    lfvert)
+                deallocate(ishfface, islfface, hffaces, lffaces)
             end do 
         end do 
 
@@ -5660,9 +5630,28 @@ module ggmod_gridgeneration2D
             elseif (all(maxval(tubelfval) < tubehfval) .and. all(minval(tubehfval) > tubelfval)) then 
                 ! All good
             else
-                call gdErrorHandler('TraceTopologicalMeshTubeContours: ' // & 
-                    'could not determine high and low flux value of tube, ' // &
-                    'values between hf and lf side seem to overlap')
+                ! Tube values overlap, no point in tracing contours. 
+                ! Just initialize cell data and continue to next tube
+                do k = 1, size(tubec)
+                    ! Check allocation status
+                    if (allocated(celldata(tubec(k))%lines)) deallocate(celldata(tubec(k))%lines)
+                    if (allocated(celldata(tubec(k))%srfvert)) deallocate(celldata(tubec(k))%srfvert)
+                    if (allocated(celldata(tubec(k))%erfvert)) deallocate(celldata(tubec(k))%erfvert)
+
+                    ! Allocate to zero size
+                    allocate(celldata(tubec(k))%lines(0), &
+                        celldata(tubec(k))%srfvert(0), celldata(tubec(k))%erfvert(0))
+
+                    ! Add labels of radial faces
+                    celldata(tubec(k))%srflabel = face%label(tubef(k))
+                    celldata(tubec(k))%erflabel = face%label(tubef(k+1))
+                end do 
+
+                ! Continue to next tube
+                cycle
+                !call gdErrorHandler('TraceTopologicalMeshTubeContours: ' // & 
+                !    'could not determine high and low flux value of tube, ' // &
+                !    'values between hf and lf side seem to overlap')
             end if 
 
             ! Get cell belonging to this face
@@ -6084,8 +6073,15 @@ module ggmod_gridgeneration2D
                                 call gdErrorHandler('AddTopologicalMeshCellGriddingData :' // & 
                                     'expected two open contours, but found less')
                             elseif (count(c1%ID == allIDS) > 2) then 
-                                call gdErrorHandler('AddTopologicalMeshCellGriddingData :' // & 
-                                    'expected two open contours, but found more')
+                                ! Probably crossed a pre-existing saddle 
+                                ! point, remove this contour
+                                print *, 'AddTopologicalMeshCellGriddingData: ' // & 
+                                    'found more than two open contours, ' // & 
+                                    'probably crossed pseudo saddle point that was ' // & 
+                                    'not included in the final topomesh. Removing this contour...'
+                                where (allIDS == c1%ID) keepind = .false. 
+                                iscontourfound(c1%ID) = .true.
+                                cycle
                             end if 
 
                             ! If we got here, only two contours left. 
@@ -6608,7 +6604,7 @@ module ggmod_gridgeneration2D
                         yl(size(yl)) = yl(1)
                     end if 
                     call ggtmdata%seg(nseg)%Initialize(xl, yl, fsID(j), &
-                        0_I8, vertexID(j, k), vertexID(j, k+1))
+                        0_I8, vertexID(j, k), vertexID(j, k+1), 0_I8)
 
                     ! Add 
                     call celldata(tubec(k))%lines(j)%Initialize(ggtmdata, [nseg])
@@ -7424,13 +7420,13 @@ module ggmod_gridgeneration2D
 
                 ! Check if any are strike point IDs
                 do j = 1, size(tv1)
-                    if (any(tv1(j) == strikepointIDs) .or. vert%type(tv1(j)) == TMvertexsaddleID) then 
+                    if (any(tv1(j) == strikepointIDs)) then 
                         ! Do boundary layer at start
                         tubedata(i)%linerefoptions%doBLstart = .true. 
                     end if 
                 end do 
                 do j = 1, size(tv2)
-                    if (any(tv2(j) == strikepointIDs) .or. vert%type(tv2(j)) == TMvertexsaddleID) then 
+                    if (any(tv2(j) == strikepointIDs)) then 
                         ! Do boundary layer at start
                         tubedata(i)%linerefoptions%doBLend = .true. 
                     end if 
@@ -9595,7 +9591,7 @@ module ggmod_gridgeneration2D
 
     ! Initialization
     subroutine InitializeGGTMSegment(segment, xl, yl, fsID, TMfaceID, &
-        sv, ev)
+        sv, ev, TMfacetype)
 
         ! Description
         !============
@@ -9618,7 +9614,7 @@ module ggmod_gridgeneration2D
         class(GGTMSegmentUDT)                       :: segment 
         real(R8), intent(in), dimension(:)          :: xl, yl 
         integer(I8), intent(in)                     :: fsID, TMfaceID, &
-            sv, ev 
+            sv, ev, TMfacetype
 
         ! Auxiliary
         
@@ -9632,6 +9628,7 @@ module ggmod_gridgeneration2D
         segment%yl = yl 
         segment%fsID = fsID 
         segment%TMfaceID = TMfaceID 
+        segment%TMfacetype = TMfacetype
         segment%sv = sv 
         segment%ev = ev 
         segment%nl = size(xl)
@@ -10520,7 +10517,8 @@ module ggmod_gridgeneration2D
 
         ! Get segment data and initialize
         call ggtmdata%seg(ggtmdata%nseg-1)%Initialize(txl, tyl, &
-            tseg%fsID, tseg%TMfaceID, line%vert(segvind(1)), line%vert(vind))
+            tseg%fsID, tseg%TMfaceID, line%vert(segvind(1)), line%vert(vind), &
+            tseg%TMfacetype)
 
         ! Initialize vertices
         tdlcv = line%dlcv(segvind(1)+1:vind-1) - line%dlcv(segvind(1)) ! exclude end vertices
@@ -10540,7 +10538,8 @@ module ggmod_gridgeneration2D
 
         ! Get segment data and initialize
         call ggtmdata%seg(ggtmdata%nseg)%Initialize(txl, tyl, &
-            tseg%fsID, tseg%TMfaceID, line%vert(vind), line%vert(segvind(2)))
+            tseg%fsID, tseg%TMfaceID, line%vert(vind), line%vert(segvind(2)), &
+            tseg%TMfacetype)
 
         ! Initialize vertices
         tdlcv = line%dlcv(vind+1:segvind(2)-1) - line%dlcv(vind) ! exclude end vertices
@@ -10804,7 +10803,8 @@ module ggmod_gridgeneration2D
                 ! Initialize segment coordinates
                 segID = segID + 1
                 call ggtmdata%seg(segID)%Initialize(txl, tyl, &
-                    tseg%fsID, tseg%TMfaceID, segvID(j), segvID(j+1))
+                    tseg%fsID, tseg%TMfaceID, segvID(j), segvID(j+1), &
+                    tseg%TMfacetype)
 
                 ! Initialize segment vertices
                 tdlcv = line%dlcv(linevind(j)+1:linevind(j+1)-1) - line%dlcv(linevind(j))
@@ -11727,13 +11727,13 @@ module ggmod_gridgeneration2D
         if (evhf > 1) then 
             if (hflinevert(1) == hflinevert(evhf)) then 
                 ! Skip the last vertex, is the same as the first one
-                evhf = evhf-1
+            !    evhf = evhf-1
             end if 
         end if 
         if (evlf > 1) then 
             if (lflinevert(1) == lflinevert(evlf)) then 
                 ! Skip the last vertex, is the same as the first one
-                svlf = svlf+1 ! appears first because of flipping of lfline
+            !    svlf = svlf+1 ! appears first because of flipping of lfline
             end if 
         end if 
 
@@ -11792,6 +11792,14 @@ module ggmod_gridgeneration2D
             end associate
         end do
 
+        ! Hedge for closed tubes
+        if ((hfline%vert(1) == hfline%vert(hfline%nv)) .and. &
+            (lfline%vert(1) == lfline%vert(lfline%nv))) then 
+                ev1 = [ev1, hflinevert(1)]
+                ev2 = [ev2, lflinevert(1)]
+        end if 
+
+
         ! Construct graph
         !================
         ! Construct
@@ -11834,8 +11842,7 @@ module ggmod_gridgeneration2D
         character(*), intent(in)                :: filename
 
         ! Auxiliary
-        integer(I8), allocatable, dimension(:, :)   :: edges
-        type(PolygonSetUDT)     :: tps 
+        real(R8), allocatable, dimension(:)         :: x, y
 
         ! Loop 
         integer(I8)                             :: i 
@@ -11846,19 +11853,20 @@ module ggmod_gridgeneration2D
         associate(graph => linepair%graph)
 
         ! Construct edges
-        allocate(edges(graph%ne, 2))
+        allocate(x(graph%ne*3), y(graph%ne*3))
         do i = 1, graph%ne
-            edges(i, 1) = graph%ev1(i)
-            edges(i, 2) = graph%ev2(i)
+            x(3*i-2) = linepair%graphxv(graph%ev1(i))
+            x(3*i-1) = linepair%graphxv(graph%ev2(i))
+            x(3*i) = nanval_R8()
+            y(3*i-2) = linepair%graphyv(graph%ev1(i))
+            y(3*i-1) = linepair%graphyv(graph%ev2(i))
+            y(3*i) = nanval_R8()
         end do 
-
-        ! Construct polygonset
-        call tps%Construct(edges, linepair%graphxv, linepair%graphyv)
 
         ! Visualize
         !==========
         ! Print edges
-        call tps%WriteData(filename // '_edges')
+        call Write2DPolygonData(x, y, filename // '_edges')
 
         ! Print vertex coordinates
         call Write2DCoordinateData(linepair%graphxv, linepair%graphyv, filename // '_vert')
@@ -12447,7 +12455,7 @@ module ggmod_gridgeneration2D
                 ! Adjust the segment and update the line
                 call tseg%Initialize(tseg%xl([1, tseg%nl]), &
                     tseg%yl([1, tseg%nl]), tseg%fsID, tseg%TMfaceID, &
-                    tseg%sv, tseg%ev)
+                    tseg%sv, tseg%ev, tseg%TMfacetype)
                 call srfline%UpdateLineData(ggtmdata)
 
                 ! Recompute the magnetic field
@@ -12645,7 +12653,7 @@ module ggmod_gridgeneration2D
                 ! Adjust the segment and update the line
                 call tseg%Initialize(tseg%xl([1, tseg%nl]), &
                     tseg%yl([1, tseg%nl]), tseg%fsID, tseg%TMfaceID, &
-                    tseg%sv, tseg%ev)
+                    tseg%sv, tseg%ev, tseg%TMfacetype)
                 call erfline%UpdateLineData(ggtmdata)
 
                 ! Recompute the dot product
@@ -12999,6 +13007,7 @@ module ggmod_gridgeneration2D
                 if (options%radrefLBdosp) then 
                     ! Add all strike and x-points
                     tv = [topomesh%GetStrikePointIDs(), topomesh%GetXPointIDs()]
+                    tv = topomesh%GetStrikePointIDs()
                     xp = [xp, topomesh%vert%x(tv)]
                     yp = [yp, topomesh%vert%y(tv)]
                     valpLmin = [valpLmin, spread(options%radrefLBLminsp, 1, size(tv))]
@@ -14702,6 +14711,65 @@ module ggmod_gridgeneration2D
             end do 
             refiner%linedllc = dllc
 
+        case ('poloidal_mono')
+
+            ! Length along poloidal direction, monotonized. Note that
+            ! we only monotonize if 
+            ! - the segment has TMfacetype /= 0 (0 is reserved for non TM faces that are aligned)
+            ! - the segment has TMfacetype that is a wall or aligned wall
+            ! Otherwise we just use the euler length, as that should
+            ! correspond with the poloidal_mono distribution
+
+            ! Check
+            if (any(seg%TMfacetype == [TMfacebndID, TMfacealbndID, TMfaceradID])) then 
+                ! Initialize
+                allocate(psi(seg%nl))
+                call refiner%field%interp%Evaluate(seg%xl, seg%yl, 0, 0, psi)
+                dx = seg%xl(2:seg%nl) - seg%xl(1:seg%nl-1)
+                dy = seg%yl(2:seg%nl) - seg%yl(1:seg%nl-1) 
+                xf = 0.5*(seg%xl(2:seg%nl) + seg%xl(1:seg%nl-1))
+                yf = 0.5*(seg%yl(2:seg%nl) + seg%yl(1:seg%nl-1)) 
+                allocate(bx(seg%nl-1), by(seg%nl-1))
+                call refiner%field%interp%Evaluate(xf, yf, 0, 1, bx)
+                call refiner%field%interp%Evaluate(xf, yf, 1, 0, by)
+                bn = sqrt(bx**2 + by**2)
+                bx = -bx/bn 
+                by = by/bn 
+
+                ! Project and take absolute value
+                dll = abs(dx*bx + dy*by)
+                
+                ! Compute accumulative length
+                allocate(dllc(seg%nl))
+                dllc = 0.0_R8
+                if (psi(seg%nl) > psi(1)) then 
+                    ! increasing psi values
+                    do i = 2, seg%nl
+                        if (psi(i) >= psi(i-1)) then  
+                            dllc(i) = dllc(i-1) + dll(i-1)
+                        else
+                            ! don't add to length
+                            dllc(i) = dllc(i-1)
+                        end if 
+                    end do 
+                else
+                    ! decreasing psi values
+                    do i = 2, seg%nl
+                        if (psi(i) <= psi(i-1)) then  
+                            dllc(i) = dllc(i-1) + dll(i-1)
+                        else
+                            ! don't add to length
+                            dllc(i) = dllc(i-1)
+                        end if 
+                    end do 
+                end if 
+                refiner%linedllc = dllc
+
+            else
+                ! Simple euler
+                refiner%linedllc = seg%dllc
+            end if 
+            
         case ('psi')
 
             ! Evaluate psi values on seg
@@ -14876,7 +14944,7 @@ module ggmod_gridgeneration2D
             ! Simply return line%dlcv
             dlcv = seg%dlcv
 
-        case ('radial', 'psi')
+        case ('radial', 'psi', 'poloidal_mono')
 
             ! Need to interpolate 
             call Interpolate1D(seg%dlcv, dlcv, seg%dllc, refiner%linedllc)
@@ -14916,7 +14984,7 @@ module ggmod_gridgeneration2D
             ! Simply return line%dlcv
             dlcv = line%dlcv
 
-        case ('radial', 'psi')
+        case ('radial', 'psi', 'poloidal_mono')
 
             ! Need to interpolate 
             call Interpolate1D(line%dlcv, dlcv, line%dllc, refiner%linedllc)
@@ -14959,7 +15027,7 @@ module ggmod_gridgeneration2D
             ! Simply call line method
             call seg%AddVertexCoordinates(dlcv)
 
-        case ('radial', 'psi')
+        case ('radial', 'psi', 'poloidal_mono')
 
             ! Need to interpolate first
             call Interpolate1D(dlcv, newdlcv, refiner%linedllc, seg%dllc)
@@ -15008,7 +15076,7 @@ module ggmod_gridgeneration2D
             ! Simply call line method
             call line%AddVertexCoordinates(dlcv)
 
-        case ('radial', 'psi')
+        case ('radial', 'psi', 'poloidal_mono')
 
             ! Need to interpolate first
             call Interpolate1D(dlcv, newdlcv, refiner%linedllc, line%dllc)
@@ -15377,15 +15445,16 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: nfsf, nfsftot, &
-            nftftot, nftc, si, ei, np
+            nftftot, nftc, si, ei, np, nFs_orig
         integer(I8), allocatable, dimension(:)  :: ffsID, fID, vID, &
             sortind, polind, tfind, ftf, ftc, tcf, IDs, allcellreg, ind, &
-            nfsneig, tcv
-        integer(I8), allocatable, dimension(:, :)   :: tfnb
+            nfsneig, tcv, fsIDmap
+        integer(I8), allocatable, dimension(:, :)   :: tfnb, tempf
         real(R8), allocatable, dimension(:)     :: vpsi, xf, yf, xc, yc, &
             ccx, ccy, bfx, bfy, dp
         logical, allocatable, dimension(:)      :: temp, tf, &
-            ispolygonstart, tc, isbranchingpolygon, hasbndf1, hasbndf2
+            ispolygonstart, tc, isbranchingpolygon, hasbndf1, hasbndf2, &
+            keepind
 
         ! Loop
         integer(I8)                             :: i, j, k, cc, ncell, &
@@ -15403,6 +15472,11 @@ module ggmod_gridgeneration2D
         !==============
         ! Set initial number of flux surfaces 
         fd%nFs      = maxval(v%fieldlineID)
+
+        ! Initialize logical array to determine which flux surfaces to keep
+        allocate(keepind(fd%nFs), fsIDmap(fd%nFs))
+        keepind = .true.
+        fsIDmap = 0_I8
         
         ! Initialize other fields
         if (allocated(fd%fluxsurfacefacesP)) then 
@@ -15453,13 +15527,50 @@ module ggmod_gridgeneration2D
             ! Set ID
             fd%fluxsurfaceID(i) = i
 
-            ! Compute psi value as mean of vertex psi value (assumed computed)
+            ! Get flux surface vertices
             allocate(vpsi(count(v%fieldlineID == i)))
             vpsi = pack(v%psi, v%fieldlineID == i)
-            fd%fluxsurfacepsi(i) = sum(vpsi)/real(size(vpsi), kind=R8)
+
+            ! Mark surface for deletion if necessary
+            if (size(vpsi) == 0) then 
+                keepind(i) = .false. 
+                fd%fluxsurfacepsi(i) = nanval_R8()
+            else
+                 ! Compute psi value as mean of vertex psi value (assumed computed)
+                fd%fluxsurfacepsi(i) = sum(vpsi)/real(size(vpsi), kind=R8)
+            end if
+
+            ! Housekeeping
             deallocate(vpsi)
 
         end do 
+
+        ! Remove empty flux surfaces
+        !===========================
+        ! Initialize
+        nFs_orig = fd%nFs 
+
+        ! Construct the mapping
+        k = 0
+        do i = 1, nFs_orig
+            if (keepind(i)) then 
+                k = k + 1
+                fsIDmap(i) = k
+            else
+                fsIDmap(i) = 0
+            end if 
+        end do 
+
+        ! Remap vert%fieldlineID
+        where (v%fieldlineID /= 0) v%fieldlineID = fsIDmap(v%fieldlineID)
+
+        ! Remove pointer entries (since deletd flux surfaces have no faces, we can simply remove those pointer entries)
+        fd%nFs = maxval(fsIDmap)
+        tempf = fd%fluxsurfacefacesP
+        deallocate(fd%fluxsurfacefacesP)
+        allocate(fd%fluxsurfacefacesP(fd%nFs, 2))
+        fd%fluxsurfacefacesP(:, 1) = pack(tempf(:, 1), keepind)
+        fd%fluxsurfacefacesP(:, 2) = pack(tempf(:, 2), keepind)
 
         ! Flux tubes
         !===========
@@ -16366,7 +16477,7 @@ module ggmod_gridgeneration2D
             cellregionmapping, veslabels, WGlabels, OFlabels, tfc, &
             allsepIDs, tfv, tfsepv, allTPlabels, uvesstructlabels, &
             reslabels, facelabelsGG, facelabelsGD, allstructurelabels, &
-            uallstructurelabels
+            uallstructurelabels, vesselfID
         integer(I8), allocatable                    :: edges(:, :), &
             vesstructlabels(:, :), flabels(:, :)
         real(R8), allocatable, dimension(:)         :: xf, yf
@@ -16635,17 +16746,20 @@ module ggmod_gridgeneration2D
                 fv      => simgrid%face%vert  &
                 )
             
-            ! Compute face coordinates
+            ! Compute face coordinates of boundary faces (other labels are
+            ! zero)
             xf = 0.5*(xv(fv(:, 1)) + xv(fv(:, 2)))
             yf = 0.5*(yv(fv(:, 1)) + yv(fv(:, 2)))
 
             ! Interpolate
-            call vessel%exactplfvessel%EvaluateLabel(xf, yf, flabels)
+            call vessel%exactplfvessel%EvaluateLabel(pack(xf, isvesselface), pack(yf, isvesselface), flabels)
 
             ! Extract
-            allocate(allstructurelabels(count(isvesselface)))
-            where (isvesselface) simgrid%face%label = abs(flabels(:, 1))
-            allstructurelabels = pack(abs(flabels(:, 1)), isvesselface)
+            allocate(vesselfID(count(isvesselface)))
+            vesselfID = pack([(k, k = 1, simgrid%face%ntot)], isvesselface)
+            simgrid%face%label(vesselfID) = abs(flabels(:, 1))
+            where (.not. simgrid%face%BF) simgrid%face%label = 0
+            allstructurelabels = flabels(:, 1)
             call Unique(allstructurelabels, uallstructurelabels)
 
             ! Remap GG to GD labels
@@ -16812,7 +16926,9 @@ module ggmod_gridgeneration2D
         ! The following is done: 
         !
         ! Linear:
-        ! - fcReg: 1, 2 for targets, random (non-target) values elsewhere (0 in domain)
+        ! - fcReg: 1, 2 for targets (non-adjacent), 3, 4 for aligned 
+        !   boundaries next to them, (non-target) values elsewhere (0 in domain)
+        ! - Assumed only one vessel polygon 
         ! - cvReg: everywhere equal to 1
 
         ! Single x: 
@@ -16937,11 +17053,22 @@ module ggmod_gridgeneration2D
             tubeID = 1
             do while (tubeID <= topomesh%tube%ntot)
                 ! Checks
+
+                ! Open tube?
                 if (topomesh%tube%isclosed(tubeID)) then 
                     tubeID = tubeID + 1
-                else 
-                    exit 
+                    cycle
                 end if 
+
+                ! Both high and low field faces? 
+                if ((topomesh%tube%bndf1P(tubeID, 1) == 0) .or. &
+                    (topomesh%tube%bndf2P(tubeID, 1) == 0)) then 
+                    tubeID = tubeID + 1
+                    cycle
+                end if 
+
+                ! If we got here, all criteria were met for this tube, exit
+                exit
             end do 
 
             ! Check if the ID was found, if not: exit
