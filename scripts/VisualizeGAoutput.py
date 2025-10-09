@@ -66,7 +66,7 @@ plotter.PlotGridCells(grid_int,2)
 try: 
     filepath = datadir + '/' + 'outershell.dat'
     tube_rem = dh.ReadGAIntegerArrayFile(filepath)
-    plotter.PlotGridCellArray(grid_int, tube_rem, 2)
+    plotter.PlotGridCellArray(grid_int, tube_rem, 3)
 except:
     print('No outershell data found')
 
@@ -110,6 +110,13 @@ ftcvP2 = dh.ReadGAIntegerArrayFile(filepath_ftcvP2)
 
 # Plot the grid
 plotter.PlotGridCellsFtCv(grid_ft, ftcv, ftcvP1, ftcvP2, 3)
+
+# Legend
+#-------
+print('Figure 0: grid at input')
+print('Figure 1: grid at outpu')
+print('Figure 2: grid after rem small trias')
+print('Figure 3: flux tubes')
 
 # Show figures
 #-------------

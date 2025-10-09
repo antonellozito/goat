@@ -1326,6 +1326,18 @@ def PlotGridCellsAlignedFaces(grid, fignum):
         if (grid.face.aligned[i] == 1) :
             PlotPoints2D(xf[i], yf[i], fignum, marker='.', color='b')
 
+    # Plot cells without aligned faces
+    #for i in np.arange(0, grid.cell.ntot, 1):
+    #    s = grid.cell.faceP1[i]-1
+    #    n = grid.cell.faceP2[i]
+    #    if (n == 1) :
+    #        cells = grid.cell.face[s]
+    #    else: 
+    #        cells = grid.cell.face[s:s+n]
+    #    if all(j == 0 for j in grid.face.aligned[fcs]):
+    #       PlotPoints2D(grid.cell.x[i], grid.cell.y[i], fignum, marker='.', color='g') 
+
+
 # Grid generation data plotting: cells and indicated boundary faces
 def PlotGridCellsBoundaryFaces(grid, fignum):
     # Plot faces only

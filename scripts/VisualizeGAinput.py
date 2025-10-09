@@ -51,8 +51,8 @@ fsfcP2 = dh.ReadGAIntegerArrayFile(filepath_fsfcP2)
 # Plot the grid
 plotter.PlotGridCellsFsFc(grid_fs, fsfc, fsfcP1, fsfcP2, 1)
 
-#plotter.PlotGridCellsAlignedFaces(grid_int,3)
-#plotter.PlotGridCellsBoundaryFaces(grid,2)
+plotter.PlotGridCellsAlignedFaces(grid_in,2)
+#plotter.PlotGridCellsBoundaryFaces(grid,3)
 
 # Reading cutcell arrays
 #-----------------------
@@ -78,7 +78,7 @@ plotter.PlotGridCellsFsFc(grid_fs, fsfc, fsfcP1, fsfcP2, 1)
 #-------
 print('Figure 0: grid at input')
 print('Figure 1: flux surfaces')
-#print('Figure 2: aligned faces')
+print('Figure 2: aligned faces')
 #print('Figure 3: boundary faces')
 
 # Show figures

@@ -32,7 +32,7 @@ echo '  / / / /_/ / /_/ / / /_/ / /_/ />  <                                     
 echo ' /_/  \____/\____/_/_.___/\____/_/|_|                                     '
 echo ' '
 echo 'Documentation: currently none!'
-echo 'Current implementation: grid optimization and grid generation'
+echo 'Current implementation: grid adaptation, grid optimization and grid generation'
 
 # Set goat top directory
 setenv LAST_COMMAND `echo $_`
