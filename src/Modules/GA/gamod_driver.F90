@@ -635,11 +635,11 @@ module gamod_driver
         gaoptions%vesselmode            = goatoptions%vesselmode 
         gaoptions%slab                  = goatoptions%slab
         gaoptions%debug                 = goatoptions%debug 
-        gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
-        gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
-        gaoptions%facelabelmappingGD    = goatoptions%GGtoGDfacelabelmappingGD 
-        gaoptions%facelabelsubfrom      = goatoptions%GGtoGDfacelabelsubfrom
-        gaoptions%facelabelsubto        = goatoptions%GGtoGDfacelabelsubto
+        gaoptions%facelabelmappingGG    = goatoptions%facelabelmappingGG
+        gaoptions%facelabelmappingGA    = goatoptions%facelabelmappingGA
+        gaoptions%facelabelmappingGD    = goatoptions%facelabelmappingGD 
+        gaoptions%facelabelsubfrom      = goatoptions%facelabelsubfrom
+        gaoptions%facelabelsubto        = goatoptions%facelabelsubto
         gaoptions%OMP_r                 = goatoptions%OMP_r
         gaoptions%OMP_z                 = goatoptions%OMP_z
         gaoptions%IMP_r                 = goatoptions%IMP_r
@@ -685,6 +685,9 @@ module gamod_driver
                 call gdErrorHandler('CheckGAoptions: make sure that ga.splitting, ' // &
                 & 'ga.merging, ga.n_split, ga.rad_type, ga.pol_type, ga.merge_crit, ga.n_merge')
         end if
+
+        ! Vesselmode
+
 
 
     end subroutine

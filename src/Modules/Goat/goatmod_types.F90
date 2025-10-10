@@ -7184,10 +7184,10 @@ module goatmod_types
         call mfoptions%Set()
     
         ! Reset label mappings for grid options
-        gridoptions%facelabelmappingGD      = options%GGtoGDfacelabelmappingGD
-        gridoptions%facelabelmappingGG      = options%GGtoGDfacelabelmappingGG
-        gridoptions%facelabelsubfrom        = options%GGtoGDfacelabelsubfrom
-        gridoptions%facelabelsubto          = options%GGtoGDfacelabelsubto
+        gridoptions%facelabelmappingGD      = options%facelabelmappingGD
+        gridoptions%facelabelmappingGG      = options%facelabelmappingGG
+        gridoptions%facelabelsubfrom        = options%facelabelsubfrom
+        gridoptions%facelabelsubto          = options%facelabelsubto
     
         ! Reset vessel reading 
         environmentoptions%vesselfilepath = options%structurefilepath

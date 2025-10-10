@@ -37,19 +37,11 @@ VERSION 1.00.00
 # Face label mappings between GG (grid generator) and GD (grid deformation)
 # See SetGOAToptions.m or InterfaceGAtoGD.m for a description of the GD 
 # face label mappings. 
-'goat.GDtoGA.facelabelsubfrom'       '[-99, -25,  4, 5, 6, 7, 8, 9, 10, 11, 12]'
-'goat.GDtoGA.facelabelsubto'         '[1, -21, 3, 3, 3, 3, 3, 3, 3, 3, 3]'
-'goat.GDtoGA.facelabelmappingGG'     '[1, 2, -21, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]'
-'goat.GDtoGA.facelabelmappingGD'     '[1, 1,   2, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4, 3]'
-
-# Face label mappings between GG and GA (grid adaptation)
-'goat.GGtoGA.facelabelsubfrom'       '[-99]'
-'goat.GGtoGA.facelabelsubto'         '[3]'
-'goat.GGtoGA.facelabelmappingGG'     '[1, 2, -21, -25, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]'
-'goat.GGtoGA.facelabelmappingGA'     '[4, 5,   2,   2, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1]'
-'goat.GGtoGD.facelabelsubfrom'       '[-99]'
-'goat.GGtoGD.facelabelsubto'         '[3]'
-'goat.GGtoGD.facelabelmappingGD'     '[1, 1,   2,   2, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4]'
+'goat.facelabelsubfrom'       '[]'
+'goat.facelabelsubto'         '[]'
+'goat.facelabelmappingGG'     '[1, 2, -21, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]'
+'goat.facelabelmappingGD'     '[1, 1,   2, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4, 3]'
+'goat.facelabelmappingGA'     '[4, 5,   2,   2, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1]'
 
 #-------------------------------------------------------------------------#
 #                          GRID OPTIONS                                   #
