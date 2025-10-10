@@ -133,6 +133,9 @@ module gamod_driver
 
         end if 
 
+        ! Check fsFc
+        call grid%CheckFsFc()
+
         ! Get fsVx from fsFc
         call grid%GetFsVxFromFsFc(options)
 
@@ -185,16 +188,7 @@ module gamod_driver
         ! Detect cells at cut for artificial slabs - TODO
 
         ! Identify farSOL cells
-        if (options%vesselmode) then
-            if (grid%data%nxp .ge. 1 .and.  grid%data%nsep .ge. 1 &
-                   .and. grid%data%nxp == grid%data%nsep) then
-                ! Single null, disconnected double null
-                call grid%IdentifyfarSOLcells(options)
-            end if
-        else if (grid%data%nxp == 2 .and. grid%data%nsep == 1) then
-            print *, 'GAInit: no farSOL indentified as algorithm is not supporting connected' // &
-            & 'double null cases yet!' ! TODO
-        end if
+        call grid%IdentifyfarSOLcells(options)
 
         ! Check consistency of options
         call CheckGAoptions(options)
