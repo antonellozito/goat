@@ -50,6 +50,11 @@ module gamod_utility
     interface isBoundaryVert
         module procedure isBoundaryVert0D, isBoundaryVert1D
     end interface
+
+    ! IsCoreCell
+    interface isCoreCell
+        module procedure isCoreCell0D, isCoreCell1D
+    end interface
     
     contains 
 
@@ -1028,7 +1033,7 @@ module gamod_utility
                 do j = 1, size(cvs)
                     cv1 = cvs(j)
 
-                    if (.not.in_tube(cv1)) then
+                    if (.not.in_tube(cv1) .and. isCoreCell(c, cv1)) then
 
                         ! Start a new tube
                         call TraceCloseFluxTube(grid, in_tube, cv1, tube, counter_tube)
@@ -1928,5 +1933,23 @@ module gamod_utility
 
         end if
     end subroutine
+
+    function isCoreCell0D(c, ic) result(res)
+        type(CellUDT) :: c
+        integer(I8) :: ic
+        logical :: res
+
+        res = (mod(c%reg(ic), 4) == 1)
+
+    end function
+
+    function isCoreCell1D(c, ic) result(res)
+        type(CellUDT) :: c
+        integer(I8) :: ic(:)
+        logical :: res(size(ic))
+
+        res = (mod(c%reg(ic), 4) == 1)
+
+    end function
 
 end module 

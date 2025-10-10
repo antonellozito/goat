@@ -527,8 +527,8 @@ module gamod_types
     end interface
 
     ! General isCoreCell
-    interface isCoreCell
-        module procedure isCoreCell0D, isCoreCell1D
+    interface isCoreCellGA
+        module procedure isCoreCell0DGA, isCoreCell1DGA
     end interface
 
     ! Get vxs from fcs
@@ -3264,7 +3264,7 @@ module gamod_types
                             ifc = fcs(i)
                             cvs = GetFaceCellGA(c,ifc,cvLookUp)
                             if (size(cvs).eq.2) then
-                                if (creg(cvs(1)) /= creg(cvs(2)) .and. count(isCoreCell(c, cvs)) == 1) then
+                                if (creg(cvs(1)) /= creg(cvs(2)) .and. count(isCoreCellGA(c, cvs)) == 1) then
                                     ! Noting has changed and should not be possible to created new separatrices with grid adaptations
                                     return
                                 end if
@@ -3285,7 +3285,7 @@ module gamod_types
                             ifc = fcs(i)
                             cvs = GetFaceCellGA(c,ifc,cvLookUp)
                             if (size(cvs).eq.2) then
-                                if (creg(cvs(1)) /= creg(cvs(2)) .and. count(isCoreCell(c, cvs)) == 1) then
+                                if (creg(cvs(1)) /= creg(cvs(2)) .and. count(isCoreCellGA(c, cvs)) == 1) then
                                     sepIDloc(1) = ifs
                                     exit
                                 end if 
@@ -3396,7 +3396,7 @@ module gamod_types
                                 ifc = fcs(i)
                                 cvs = GetFaceCellGA(c,ifc,cvLookUp)
                                 if (size(cvs).eq.2) then
-                                    if (creg(cvs(1))/=creg(cvs(2)) .and. count(isCoreCell(c, cvs)) == 1) then
+                                    if (creg(cvs(1))/=creg(cvs(2)) .and. count(isCoreCellGA(c, cvs)) == 1) then
                                         return ! Separatrix is the same
                                     end if
                                 else
@@ -3417,7 +3417,7 @@ module gamod_types
                             ifc = fcs(i)
                             cvs = GetFaceCellGA(c, ifc, cvLookUp)
                             if (size(cvs).eq.2) then 
-                                if (creg(cvs(1))/=creg(cvs(2)) .and. count(isCoreCell(c, cvs)) == 1) then
+                                if (creg(cvs(1))/=creg(cvs(2)) .and. count(isCoreCellGA(c, cvs)) == 1) then
                                     counter = counter + 1
                                     sepIDloc(counter) = ifs
                                     exit
@@ -3682,7 +3682,7 @@ module gamod_types
                 indmax = maxloc(dpsi3,1);
                 facealigned(fcs_al3(indmax)) = 0;
 
-            else if ((nf.eq.4).and.(n_al /= 2).and. isCoreCell(c, ic)) then
+            else if ((nf.eq.4).and.(n_al /= 2).and. isCoreCellGA(c, ic)) then
 
                 ! Find core cells with no two aligned faces
                 facealigned(tf) = 0
@@ -19524,7 +19524,7 @@ module gamod_types
                 reg1 = creg(cvs(1))
                 reg2 = creg(cvs(2))
                 if (reg1 /= reg2) then
-                    if (count(isCoreCell(cell, cvs)) == 1) then 
+                    if (count(isCoreCellGA(cell, cvs)) == 1) then 
                         counter = counter + 1
                         res(counter) = ifs
                         exit
@@ -19635,7 +19635,7 @@ module gamod_types
      
     end function
 
-    function isCoreCell0D(c, ic) result(res)
+    function isCoreCell0DGA(c, ic) result(res)
         type(GAcellUDT) :: c
         integer(I8) :: ic
         logical :: res
@@ -19644,7 +19644,7 @@ module gamod_types
 
     end function
 
-    function isCoreCell1D(c, ic) result(res)
+    function isCoreCell1DGA(c, ic) result(res)
         type(GAcellUDT) :: c
         integer(I8) :: ic(:)
         logical :: res(size(ic))
