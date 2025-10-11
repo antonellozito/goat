@@ -337,6 +337,7 @@ module gamod_types
         procedure :: IsConnectedtoTargets
         procedure :: ChainFacesOfSepToTargets
         procedure :: FarSOLGetChainVerts
+        procedure :: ConstructFarSOLinterpolant
         procedure :: CheckUnstructuredGrid
         procedure :: RecalcMagn
         procedure :: MergeFS
@@ -3874,7 +3875,7 @@ module gamod_types
             ! Connected Double null case
             call grid%IdentifyfarSOLcellsCDN(options)
         else
-            call gdErrorHandler('IdentifyfarSOL: grid topological not supported')
+            print *, 'IdentifyfarSOL: grid topological not supported. Avoid farSOL merge or split criteria!'
         end if
 
     end subroutine
@@ -3894,16 +3895,12 @@ module gamod_types
         ! Auxiliary
         integer(I8) :: i, j, k, s, nt, nf, iFs_sep, &
             ind_sep, ind, na, ind_first, ind_last, first_fs, last_fs, fs_1, &
-            nx, ny, main_sep
+            main_sep
         integer(I8), allocatable, dimension(:) :: fcLbl_loc, fcs, fcsD,  &
             vxs_ordered, fs_target, fsvLookUp, a, verts, vx_t1, fcs2, &
-            vx_t2, fs_vx_t2, vx_t2D, vx_fs1, fcs2D, vx_final, vx_fs2, vx_merge1, vx_merge2, indout, indxy, farSOL
+            vx_t2, fs_vx_t2, vx_t2D, vx_fs1, fcs2D, vx_final, vx_fs2, vx_merge1, vx_merge2
         integer(I8), allocatable, dimension(:,:) :: fcs_targetsC, vxs_targetsC, inters
-        real(R8) :: xbmin, xbmax, ybmin, ybmax, stepx, stepy
-        real(R8), allocatable :: xv(:), yv(:), xg(:), yg(:), farSOLv(:,:)
-        logical, allocatable :: in(:)
-        type(PolygonUDT) :: polygon
-        character(:), allocatable :: meth
+
 
         ! Associate
         associate(&
@@ -4041,60 +4038,8 @@ module gamod_types
         call MergeVertexChains(vx_merge1, vx_fs2, vx_merge2)
         call MergeVertexChains(vx_merge2, vx_t2, vx_final)
 
-        ! Construct a polygon
-        call polygon%Construct(v%x%Get(vx_final), v%y%Get(vx_final))
-
-        ! Construct a 2D structured grid
-        ! Determine resolution => minimal h_rad in the grid
-        !indc = (/(i, i = 1, c%ntot)/)
-        !call grid%CalcHrad(indc, h_rad)
-        !step = minval(h_rad)*10
-        
-        ! Bounds
-        xbmin = minval(v%x%Get())
-        xbmax = maxval(v%x%Get())
-        ybmin = minval(v%y%Get())
-        ybmax = maxval(v%y%Get()) 
-
-        ! Make x and y array
-        nx = 200
-        ny = 200
-        stepx = (xbmax - xbmin) / (nx - 1)
-        stepy = (ybmax - ybmin) / (ny - 1)
-        allocate(xv(nx), yv(ny))
-        do i = 1, nx
-            xv(i) = xbmin + (i - 1)*stepx
-        end do
-        do i = 1, ny
-            yv(i) = ybmin + (i - 1)*stepy
-        end do
-
-        ! Construct the 2D grid
-        allocate(xg(nx*ny), yg(nx*ny))
-        call Construct2DStructuredGrid(xv, yv, nx, ny, xg, yg)
-
-        ! Define area outside the polygon
-        call polygon%Inpolygon(xg, yg, in)
-        allocate(farSOL(nx*ny))
-        farSOL = 0.0_R8
-        indxy = (/(i, i = 1, nx*ny)/)
-        allocate(indout(count(.not.in)))
-        indout = pack(indxy, .not.in)
-        farSOL(indout) = 1.0_R8
-        allocate(farSOLv(nx,ny))
-        do i = 1, ny
-            farSOLv(1:nx,i) = farSOL(nx*(i-1) + 1:nx*i)
-        end do
-
-        ! Make interpolant
-        meth = 'uniformgrid'
-        call c%farSOL_interpolant%SetParameters(meth, 3, 6)
-        call c%farSOL_interpolant%ConstructStructured(xv, yv, farSOLv)
-
-        ! Test
-        !allocate(int(c%ntot))
-        !call c%farSOL_interpolant%Evaluate(c%x%Get(), c%y%Get(), 0, 0, int)
-        !call WriteArray(int, 'farSOLint')
+        ! Construct farSOL interpolant - separate function TODO
+        call grid%ConstructFarSOLinterpolant(vx_final)
 
         end associate
 
@@ -4290,85 +4235,20 @@ module gamod_types
                 vx_finalD(counterv) = vx_new
             end if 
 
-            if (switch_counter == 4) then
+            if (switch_counter == 8) then
                 call gdErrorHandler('test')
             end if
 
             ! Housekeeping
             deallocate(fcs_next, fcs_nextD)
 
-            ! Check if vx_newD is correct according to connectivity
-            !if (on_target) then
- 
-                ! Check if this new vertex has a connection via a flux surface to another target
-                ! Get flux surface id of the vertex
-            !    fs_1 = GetVertFsvGA(fd, vx_newD, fsvLookUp)
-            !    if (fs_1 /= 0) then
-
-                    ! Get vertices of flux surface
-            !        verts = GetFluxSurfaceVxsGA(fd, fs_1)
-
-                    ! Check whether it is connected to a target
-            !        connected = .false.
-            !        do j = 1, nt
-            !            if (j /= current_target) then
-            !                if (any(isMember(verts, vxs_targetsC(:,j)))) then
-            !                    vx_new = vx_newD
-            !                    counterv = counterv + 1
-            !                    vx_finalD(counterv) = vx_new  
-            !                    connected = .true.
-            !                    exit                              
-            !                end if
-            !            end if
-            !        end do
-
-            !        if (.not.connected) then 
-            !            ! Switch to flux surface marching
-            !            on_fs = .true.
-            !            on_target = .false.
-            !        end if
-
-            !    else 
-
-            !        ! Check if the vertex has an aligned faces connected
-            !        n_al = count(f%aligned%Get(fcs) == 1)
-            !        n_cvs = count(c%vert%Get() == vx_newD)
-            !        if (n_al == 0 .and. n_cvs .ge. 2) then ! Probably cutcell
-
-            !            vx_new = vx_newD
-            !            counterv = counterv + 1
-            !            vx_finalD(counterv) = vx_new
-            !        else
-            !            call gdErrorHandler('IdentifyfarSOLcellCDN: something wrong5')
-            !        end if!
-
-            !    end if
-
-            !else if (on_fs) then
-
-                ! Just continue on flux surface, only change to 
-                ! target marching if vx_newD is a boundary face
-            !    vx_new = = vx_newD
-             !   counterv = counterv + 1
-            !    vx_finalD(counterv) = vx_new
-
-            !    if (isBoundaryVertGA(grid, vx_new)) then
-            !        ! Switch to target marching
-            !        on_fs = .false.
-            !        on_target = .true.
-            !    end if
-
-            !end if
-
-
-
-
         end do
 
         ! Trim 
         vx_final = vx_finalD(1:counterv)
 
-
+        !  Construct farSOL interpolant
+        call grid%ConstructFarSOLinterpolant(vx_final)
 
 
         end associate
@@ -4389,7 +4269,7 @@ module gamod_types
         logical, intent(out)            :: v_connected(grid%vert%ntot)
 
         ! Auxiliary
-        integer(I8) :: i, ifs, counter
+        integer(I8) :: i, j, ifs, counter
         integer(I8), allocatable :: verts(:), vxsB(:), indv(:), verts_er(:)
         logical, allocatable :: log(:)
 
@@ -4418,9 +4298,11 @@ module gamod_types
             if (size(vxsB) .ge. 2) then
                 ! Loop over targets
                 do i = 1, size(vxs_targetsC,2)
-                    if (any(vxsB(1) == vxs_targetsC(:,i)) .or. any(vxsB(2) == vxs_targetsC(:,i))) then
-                        counter = counter + 1
-                    end if
+                    do j = 1, size(vxsB)
+                        if (any(vxsB(j) == vxs_targetsC(:,i))) then
+                            counter = counter + 1
+                        end if
+                    end do
                 end do
             end if 
 
@@ -4435,8 +4317,8 @@ module gamod_types
         indv = (/(i, i = 1, v%ntot)/)
         allocate(verts_er(count(v_connected)))
         verts_er = pack(indv,v_connected)
-        call grid%WriteErrorData(verts_er, 1)
-        call gdErrorHandler('IsconnectedtoTarget')
+        call grid%WriteErrorData(verts_er, 0)
+        !call gdErrorHandler('test')
 
         end associate
 
@@ -4857,6 +4739,87 @@ module gamod_types
         else
             call gdErrorHandler('MergeVertexChains: non matching vertex segment')
         end if
+
+    end subroutine
+
+    subroutine ConstructFarSOLinterpolant(grid, vx_final)
+
+        ! Description
+        !============
+        ! Constructs the farSOL interpolant based on closed vertex chain
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: vx_final(:)
+
+        ! Auxiliary
+        integer(I8) :: i, nx, ny
+        integer(I8), allocatable :: farSOL(:), indxy(:), indout(:)
+        real(R8) :: xbmin, xbmax, ybmin, ybmax, stepx, stepy
+        real(R8), allocatable :: xv(:), yv(:), xg(:), yg(:), farSOLv(:,:)
+        logical, allocatable :: in(:)
+        type(PolygonUDT) :: polygon
+        character(:), allocatable :: meth
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Construct a polygon
+        call polygon%Construct(v%x%Get(vx_final), v%y%Get(vx_final))
+   
+        ! Bounds
+        xbmin = minval(v%x%Get())
+        xbmax = maxval(v%x%Get())
+        ybmin = minval(v%y%Get())
+        ybmax = maxval(v%y%Get()) 
+
+        ! Make x and y array
+        nx = 200
+        ny = 200
+        stepx = (xbmax - xbmin) / (nx - 1)
+        stepy = (ybmax - ybmin) / (ny - 1)
+        allocate(xv(nx), yv(ny))
+        do i = 1, nx
+            xv(i) = xbmin + (i - 1)*stepx
+        end do
+        do i = 1, ny
+            yv(i) = ybmin + (i - 1)*stepy
+        end do
+
+        ! Construct the 2D grid
+        allocate(xg(nx*ny), yg(nx*ny))
+        call Construct2DStructuredGrid(xv, yv, nx, ny, xg, yg)
+
+        ! Define area outside the polygon
+        call polygon%Inpolygon(xg, yg, in)
+        allocate(farSOL(nx*ny))
+        farSOL = 0.0_R8
+        indxy = (/(i, i = 1, nx*ny)/)
+        allocate(indout(count(.not.in)))
+        indout = pack(indxy, .not.in)
+        farSOL(indout) = 1.0_R8
+        allocate(farSOLv(nx,ny))
+        do i = 1, ny
+            farSOLv(1:nx,i) = farSOL(nx*(i-1) + 1:nx*i)
+        end do
+
+        ! Make interpolant
+        meth = 'uniformgrid'
+        call c%farSOL_interpolant%SetParameters(meth, 3, 6)
+        call c%farSOL_interpolant%ConstructStructured(xv, yv, farSOLv)
+
+        ! Test
+        !allocate(int(c%ntot))
+        !call c%farSOL_interpolant%Evaluate(c%x%Get(), c%y%Get(), 0, 0, int)
+        !call WriteArray(int, 'farSOLint')
+
+        end associate
 
     end subroutine
     
