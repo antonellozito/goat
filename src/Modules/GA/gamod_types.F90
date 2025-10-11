@@ -4269,9 +4269,9 @@ module gamod_types
         logical, intent(out)            :: v_connected(grid%vert%ntot)
 
         ! Auxiliary
-        integer(I8) :: i, j, ifs, counter
-        integer(I8), allocatable :: verts(:), vxsB(:), indv(:), verts_er(:)
-        logical, allocatable :: log(:)
+        integer(I8) :: i, j, ifs, counter, nv, vert
+        integer(I8), allocatable :: verts(:), vxsB(:), indv(:), verts_er(:), fcs(:)
+        logical, allocatable :: log(:), vx_connected_targets(:,:)
 
         ! Associate
         associate(&
@@ -4312,6 +4312,37 @@ module gamod_types
             deallocate(vxsB)
             
         end do 
+
+        ! Hedge for cutcells at targets
+        allocate(vx_connected_targets(size(vxs_targetsC,1),size(vxs_targetsC,2)))
+        vx_connected_targets = .false.
+        do i = 1, size(vxs_targetsC,2)
+            do j = 1, size(vxs_targetsC,1)
+                if (vxs_targetsC(j,i) /= 0) then
+                    vx_connected_targets(j,i) = v_connected(vxs_targetsC(j,i)) 
+                end if
+            end do
+        end do
+
+        ! Loop over target vertices
+        do i = 1, size(vxs_targetsC,2)
+            nv = size(vxs_targetsC,1)
+            do j = 1, nv
+                vert = vxs_targetsC(j,i)
+                if (vert /= 0) then
+
+                    fcs = GetVertFaceGA(f, vert)
+                    if (count(f%aligned%Get(fcs)==1) == 0) then
+                        if (any(vx_connected_targets(j+1:nv,i)) &
+                            .and. any(vx_connected_targets(1:j-1,i))) then
+                                v_connected(vert) = .true.
+                        end if
+                    end if
+
+                end if
+
+            end do
+        end do
 
         ! test
         indv = (/(i, i = 1, v%ntot)/)
