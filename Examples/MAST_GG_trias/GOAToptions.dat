@@ -379,11 +379,11 @@ VERSION 1.00.00
 
 # Splitting options
 'ga.no_pents'         '1'
-'ga.splittype'        '[1]'
-'ga.n_split'          '[20]'
+'ga.splittype'        '[2]'
+'ga.n_split'          '[50]'
 'ga.typeT'            'cutcell'
 'ga.rad_type'         '[2]'
-'ga.pol_type'         '[1]'
+'ga.pol_type'         '[2]'
 'ga.dist_function_threshold_split' '0.9'
 
 # Merging options
