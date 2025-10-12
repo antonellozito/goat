@@ -40,14 +40,14 @@ VERSION 1.00.00
 # Face label mappings between GG (grid generator) and GD (grid deformation)
 # See Setgoat.m or InterfaceGAtoGD.m for a description of the GD 
 # face label mappings. 
-'goat.GDtoGA.facelabelsubfrom'     '[-99, -25]'
-'goat.GDtoGA.facelabelsubto'       '[1, -21]'
-'goat.GDtoGA.facelabelmappingGG'   '[1, 2, -43, -42, -44, -23, -24, -21]'
-'goat.GDtoGA.facelabelmappingGD'   '[1, 1, 3, 3, 3, 3, 3, 2]'
-#'goat.GDtoGA.facelabelmappingGG'  '[1:23, 36:38, 25:27, 24, 28:35, 39:67, 68:70]'
-#'goat.GDtoGA.facelabelmappingGD'  '[5*23, 1*3, 1*3, 4*38, 5*3]'
-# 'goat.GDtoGA.facelabelmappingGG' '[1, 2, 36:38, 47:49, 36:103, 104:106]'
-# 'goat.GDtoGA.facelabelmappingGD' '[5, 5, 1*3, 1*3, 4*68, 5*3]'
+'goat.facelabelsubfrom'     '[-99, -25]'
+'goat.facelabelsubto'       '[1, -21]'
+'goat.facelabelmappingGG'   '[1, 2, -43, -42, -44, -23, -24, -21]'
+'goat.facelabelmappingGD'   '[1, 1, 3, 3, 3, 3, 3, 2]'
+#'goat.facelabelmappingGG'  '[1:23, 36:38, 25:27, 24, 28:35, 39:67, 68:70]'
+#'goat.facelabelmappingGD'  '[5*23, 1*3, 1*3, 4*38, 5*3]'
+# 'goat.facelabelmappingGG' '[1, 2, 36:38, 47:49, 36:103, 104:106]'
+# 'goat.facelabelmappingGD' '[5, 5, 1*3, 1*3, 4*68, 5*3]'
 
 
 # Face label mappings between GG and GA (grid adaptation)
@@ -85,7 +85,7 @@ VERSION 1.00.00
 
 # Refinement options for vessel
 'goat.vessel.refinevessel'          '1'
-'goat.vessel.maxvesseldist'         '5e-3'
+'goat.vessel.maxvesseldist'         '1e-3'
 'goat.vessel.minreffac'             '2'
 
 # Target plate definition
@@ -401,7 +401,7 @@ VERSION 1.00.00
 'gg.cellconstructionmethod'             'quads_triangles'
 'gg.ref.readexistingrefdata'            '0'
 'gg.labels.structurebased'              '1'
-'gg.dogriddiagnostics'                  '0'
+'gg.dogriddiagnostics'                  '1'
 
 #-------------------------------------------------------------------------#
 #                         TOPOLOGICAL MESH OPTIONS                        #
@@ -410,7 +410,7 @@ VERSION 1.00.00
 # Read exising file? 
 'gg.tm.readexistingTM'          '0'
 'gg.tm.readexistingtracers'     '0'
-'gg.tm.TMfilepath'              './output/topomesh.dat'
+'gg.tm.TMfilepath'              './output/topomesh_base.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
 
@@ -443,7 +443,7 @@ VERSION 1.00.00
 'gg.tm.mergetangencypointtubes' '1'
 'gg.tm.mergeavptubes'           '1'
 'gg.tm.dpsimintangencypointtubes'   '0.0'
-'gg.tm.lradmintangencypointtubes'   '2.0e-3'
+'gg.tm.lradmintangencypointtubes'   '2.0e-2'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'
@@ -452,7 +452,7 @@ VERSION 1.00.00
 'gg.tm.rvrcascadedir'           'up'
 'gg.tm.rvrfullycovered'         '1'
 
-'gg.tm.alignvesselparts'        '0'
+'gg.tm.alignvesselparts'        '1'
 'gg.tm.avpminangle'             '5.0'
 'gg.tm.avprefinevessel'         '0'
 'gg.tm.avpmaxvesseldist'        '2e-3'

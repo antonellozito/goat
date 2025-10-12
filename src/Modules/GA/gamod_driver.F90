@@ -117,8 +117,8 @@ module gamod_driver
             tv = GetCellVertGA(c, i)
 
             ! Compute coordinates
-            call c%x%SetSingleElement(i,sum(v%x%GetMultipleElements(tv))/real(size(tv), kind=R8)) 
-            call c%y%SetSingleElement(i,sum(v%y%GetMultipleElements(tv))/real(size(tv), kind=R8)) 
+            call c%x%SetSingleElement(i,sum(v%x%Get(tv))/real(size(tv), kind=R8)) 
+            call c%y%SetSingleElement(i,sum(v%y%Get(tv))/real(size(tv), kind=R8)) 
 
         end do
 
@@ -133,6 +133,9 @@ module gamod_driver
             call grid%ReorderCellConn(is_ordered)
 
         end if 
+
+        ! Check fsFc
+        call grid%CheckFsFc()
 
         ! Get fsVx from fsFc
         call grid%GetFsVxFromFsFc(options)
@@ -189,17 +192,14 @@ module gamod_driver
 
 
         ! Identify farSOL cells
-        if (options%vesselmode .and. maxval(options%facelabelmappingGA) .lt. 6) then
-            call grid%IdentifyfarSOLcells(options)
-        else if (maxval(options%facelabelmappingGA) .gt. 5) then
-            call gdErrorHandler('GAInit: no farSOL indentified as algorithm is not supporting double null cases yet!') ! TODO
-        end if
+        call grid%IdentifyfarSOLcells(options)
 
         ! Check consistency of options
         call CheckGAoptions(options)
 
         ! Visualize starting grid
         call grid%WriteData('grid_before_GA')
+        call grid%WriteFluxSurfaceData()
 
         end associate        
 
@@ -235,8 +235,11 @@ module gamod_driver
         if (options%rem_small_trias) &
             call grid%RemoveSmallTriangle(magneticField, qm, options)
 
+        ! Visualize starting grid
+        call grid%WriteData('grid_after_rem_trias')
+
         ! Remove flux tubes with only two triangles
-        if (options%rem_trias_flux) &
+        if (options%rem_trias_tube .or. options%rem_outershell) &
             call grid%RemTriasFlux(options)
 
         ! Stacked to cutcell
@@ -296,7 +299,7 @@ module gamod_driver
             call grid%RemoveStickOutTrias(options)
 
         ! Remove boundary flux tubes with only two triangles
-        if (options%rem_trias_flux) &
+        if (options%rem_trias_tube .or. options%rem_outershell) &
             call grid%RemTriasFlux(options)
 
         ! Remove stickout quad
@@ -364,12 +367,12 @@ module gamod_driver
 
         ! Auxiliary
         logical :: is_ordered(grid%cell%ntot), cells(grid%cell%ntot), &
-         use_nsep, use_sepID, start
+         use_nsep, use_sepID, start, err
         integer(I8), allocatable :: cvLookUp(:), fcs(:), f_ord(:,:), nf(:), &
-            lbls(:), lbls2(:), fsVx(:)
-        integer(I8) ::  i, iv, nl, nvi, lb, nind, fcReg(grid%face%ntot), &
+            lbls(:), lbls2(:), fsVx(:), verts(:), fcsv(:), ind(:)
+        integer(I8) ::  i, iv, nl, nvi, lb, fcReg(grid%face%ntot), &
             fcLbl_loc(grid%face%ntot), indFc(grid%face%ntot), &
-            ind(grid%face%ntot), nflbl
+            nflbl
         
 
         ! Check consistency
@@ -399,7 +402,7 @@ module gamod_driver
         if (options%stacked_trias .and. .not.options%vesselmode) then
 
             ! Get all vertices belonging to a flux surface
-            fsVx = grid%data%fluxdata%fluxsurfaceverts%GetAllElements()
+            fsVx = grid%data%fluxdata%fluxsurfaceverts%Get()
 
             do iv = 1, grid%vert%ntot
 
@@ -407,11 +410,33 @@ module gamod_driver
 
                 if (nvi /= 1) then
 
-                    ! Give error information
-                    print *, 'Vertex without flux surface: ', iv
-                    print *, grid%vert%x%Get(iv)
-                    print *, grid%vert%y%Get(iv)
-                    call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
+                    ! Only allowed when vertex is a boundary vertex and 
+                    ! its boundary faces are not aligned
+                    err = .false.
+
+                    if (.not.isBoundaryVertGA(grid, iv)) then
+
+                        err = .true.
+
+                    else 
+
+                        ! Get faces of vertices
+                        fcsv = GetVertFaceGA(grid%face, iv)
+                        if (count(grid%face%aligned%Get(fcsv) == 1) .gt. 0) err = .true.
+
+                    end if
+
+                    if (err) then
+
+                        ! Give error information
+                        print *, 'Vertex without flux surface: ', iv
+                        print *, grid%vert%x%Get(iv)
+                        print *, grid%vert%y%Get(iv)
+                        verts = [iv, iv]
+                        call grid%WriteErrorData(verts, 1)
+                        call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
+
+                    end if
 
                 end if 
 
@@ -430,11 +455,12 @@ module gamod_driver
         fcLbL_loc = GetfcLblGA(grid%face,options)
 
         call Unique(fcLbl_loc, lbls)
+        allocate(lbls2(count(lbls /= 0)))
         lbls2 = pack(lbls,lbls /= 0)
         nl = size(lbls2)
 
         if (nl .gt. size(options%fcRegmappingGA)) then
-            call gdErrorHandler('PostProcesGA: fcReg mapping not compitable for GA labels,(more than 2 divertors)')
+            call gdErrorHandler('PostProcesGA: fcReg mapping not compitable for GA labels,(more than 4 taegets)')
         end if
 
         ! Reset fcReg to zero and apply at the right faces
@@ -442,9 +468,10 @@ module gamod_driver
         indFc = (/ (i, i=1,grid%face%ntot) /)
         do i = 1, nl
             lb = lbls2(i)
-            nind = count(fcLbl_loc == lb)
-            ind(1:nind) = pack(indFc,fcLbl_loc == lb )
-            fcReg(ind(1:nind)) = options%fcRegmappingGA(lb)
+            allocate(ind(count(fcLbl_loc == lb)))
+            ind = pack(indFc,fcLbl_loc == lb )
+            fcReg(ind) = options%fcRegmappingGA(lb)
+            deallocate(ind)
         end do
 
         ! Self-check if faces with fcReg label can be chained together
@@ -644,8 +671,11 @@ module gamod_driver
         gaoptions%vesselmode            = goatoptions%vesselmode 
         gaoptions%slab                  = goatoptions%slab
         gaoptions%debug                 = goatoptions%debug 
-        gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
-        gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
+        gaoptions%facelabelmappingGG    = goatoptions%facelabelmappingGG
+        gaoptions%facelabelmappingGA    = goatoptions%facelabelmappingGA
+        gaoptions%facelabelmappingGD    = goatoptions%facelabelmappingGD 
+        gaoptions%facelabelsubfrom      = goatoptions%facelabelsubfrom
+        gaoptions%facelabelsubto        = goatoptions%facelabelsubto
         gaoptions%OMP_r                 = goatoptions%OMP_r
         gaoptions%OMP_z                 = goatoptions%OMP_z
         gaoptions%IMP_r                 = goatoptions%IMP_r
@@ -664,6 +694,9 @@ module gamod_driver
         ! Arguments
         type(GAoptionsUDT), intent(inout) :: options
 
+        ! Auxiliary
+        integer(I8) :: nl
+
         ! BLG, first remove small triangles
         if (options%BLG) &
             options%rem_small_trias = .true.
@@ -676,6 +709,22 @@ module gamod_driver
                 & 'dist_function is off. Setting this to 1.'
             print *, 'options%dist_function: T'
         end if
+
+        ! Make sure split and merge arrays are the same size
+        nl = size(options%merging_array)
+        if ( nl /= size(options%splitting_array) &
+            .or. nl /= size(options%n_split_array) &
+            .or. nl /= size(options%rad_type_array) &
+            .or. nl /= size(options%pol_type_array) &
+            .or. nl /= size(options%merge_crit_array) &
+            .or. nl /= size(options%n_merge_array)) then
+                call gdErrorHandler('CheckGAoptions: make sure that ga.splitting, ' // &
+                & 'ga.merging, ga.n_split, ga.rad_type, ga.pol_type, ga.merge_crit, ga.n_merge')
+        end if
+
+        ! Vesselmode
+
+
 
     end subroutine
 

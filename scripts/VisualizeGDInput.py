@@ -19,7 +19,6 @@ maxfignum = 14 # total number of figures to be plotted
 #---------------
 # Check if solps is present
 datadir = dh.GetDataDirectory()
-datadir = '/mnt/c/Users/u0110555/Desktop/code_werk/goatf/goatf/Runs/DEMO_P2/output'
 inputdir = datadir + '/..'
 
 # Print

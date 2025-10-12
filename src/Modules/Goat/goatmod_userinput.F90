@@ -75,23 +75,15 @@ module goatmod_userinput
         ! - artificial_slab: true if artificial slab
 
         ! Face label mappings
-        ! - GAtoGDfacelabelmappingGG: labels as defined in grid
-        ! generator for interfacing between GA and GD
-        ! - GAtoGDfacelabelmappingGD: corresponding labels for GD (so 
+        ! - facelabelmappingGG: labels as defined in grid
+        ! generator 
+        ! - facelabelmappingGD: corresponding labels for GD (so 
         ! first GG label is mapped to first GD label here)
-        ! - GAtoGDfacelabelsubfrom: substitution of this face label ... 
-        ! - GAtoGDfacelabelsubto: ... to this face label in GA to GD 
+        ! - facelabelmappingGA: corresponding labels for GA (so 
+        ! first GG label is mapped to first GA label here)
+        ! - facelabelsubfrom: substitution of this face label ... 
+        ! - facelabelsubto: ... to this face label in GA to GD 
         ! interface
-
-        ! - GGtoGDfacelabelmappingGG: idem above but for GG to GD 
-        ! - GGtoGDfacelabelmappingGD
-        ! - GGtoGDfacelabelsubfrom
-        ! - GGtoGDfacelabelsubto
-
-        ! - GGtoGAfacelabelmappingGG: idem above but for GG to GA
-        ! - GGtoGAfacelabelmappingGA
-        ! - GGtoGAfacelabelsubfrom
-        ! - GGtoGAfacelabelsubto
 
         ! Structure options
         ! - TP: structure numbers that are target plates
@@ -139,20 +131,12 @@ module goatmod_userinput
         logical                     :: artificial_slab
 
         ! Face label mappings
-        integer(I8), allocatable    :: GDtoGAfacelabelmappingGG(:)
-        integer(I8), allocatable    :: GDtoGAfacelabelmappingGD(:) 
-        integer(I8), allocatable    :: GDtoGAfacelabelsubfrom(:) 
-        integer(I8), allocatable    :: GDtoGAfacelabelsubto(:) 
-
-        integer(I8), allocatable    :: GGtoGDfacelabelmappingGG(:)
-        integer(I8), allocatable    :: GGtoGDfacelabelmappingGD(:) 
-        integer(I8), allocatable    :: GGtoGDfacelabelsubfrom(:) 
-        integer(I8), allocatable    :: GGtoGDfacelabelsubto(:) 
-
-        integer(I8), allocatable    :: GGtoGAfacelabelmappingGG(:)
-        integer(I8), allocatable    :: GGtoGAfacelabelmappingGA(:) 
-        integer(I8), allocatable    :: GGtoGAfacelabelsubfrom(:) 
-        integer(I8), allocatable    :: GGtoGAfacelabelsubto(:) 
+        integer(I8), allocatable    :: facelabelmappingGG(:)
+        integer(I8), allocatable    :: facelabelmappingGD(:) 
+        integer(I8), allocatable    :: facelabelmappingGA(:)        
+        integer(I8), allocatable    :: facelabelsubfrom(:) 
+        integer(I8), allocatable    :: facelabelsubto(:) 
+ 
 
         ! Structure options
         integer(I8), allocatable    :: TP(:)
@@ -186,9 +170,67 @@ module goatmod_userinput
         ! - meth: used method, can be 'simple' to adapt the grid based in 
         !         on grid metric, or can be 'aposteriori' which is using
         !         plasma state information
+
+        ! Facelabel mapping
         ! - facelabelmappingGG: list of face labels of the grid generator
         ! - facelabelmappingGA: mapping of grid generator label to labels
-        !                       needed for grid adaptation
+        !                       required for grid adaptation
+        ! - facelabelmappingGD: mapping of grid generator label to labels
+        !                       required for grid deformation
+        ! - facelabelsubfrom: face label of grid generator which should be 
+        !                       substituted
+        ! - facelabelsubto: substitution labels
+
+        ! Operation options    
+        ! - rem_small_trias: remove small triangles
+        ! - cut_off_pol: threshold for small triangles poloidal height 
+        !                   with respect to the poloidal neighbor
+        ! - cut_off_surf: threshold for small triangles on the surface
+        !                   area with respect to the surface area of its
+        !                   neighbors
+        ! - stacked_trias: apply transformation to stacked triangles
+        ! - stacked_trias_checkAR: switch on selecting triangles based on 
+        !                           its aspect ratio
+        ! - stacked_trias_maxAR: maximal aspect ratio of a triangle
+        !                        in the stacked triangle transformation
+        ! - merge_stacked_trias: switch to apply merging stacked triangles
+        !                        which are too skewed
+        ! - merge_stacked_trias_angle_threshold: threshold of stacked triangle
+        !                       too merge it (in degrees)
+        ! - merge_trap_into_stacked: switch to allow merging a trapezoid
+        !                            into a group of stacked triangles
+        ! - stacked_to_cutcell: apply transformation from stacked triangles
+        !                       to cutcell
+        ! - stacked_to_cutcell: switch to transform to cutcell based on face
+        !                       length of the aligned faces of the triangles
+        ! - split_shaved_off_tube: apply radial splitting a concavely shaved
+        !                           off fluxtube at the outer boundary
+        ! - splitting: apply splitting of cells
+        ! - merging: apply merging of cells
+        ! - pents_to_tria: transfrom all remaining pentagon into triangles
+        ! - h_rad_threshold: threshold of radial width of cell during merging,
+        !                    only smaller cells are considered
+        ! - h_rad_core_threshold: idem as above but only for cells in the core
+        ! - BLG: add a boundary layer at the main targets of a grid
+        ! - BLG_n_layers: determine the number of layers of the added 
+        !                   boundary layer
+        ! - BLG_rescaling_factor: size of the boundary layer wrt the 
+        !                           upstream cells  
+        ! - BLG_smoothing_factors: first number is the threshold ratio of 
+        !              subsequent vertex displacement at which a rescaling need 
+        !              to be done, the second number of the maximal ratio allowed (clip)
+        ! - rem_stickout_trias: remove triangle that are only connected 
+        !                       with the grid via one face
+        ! - rem_trias_tube: remove flux tube with only two triangles
+        ! - rem_outershell: remove or merge outer flux tubes with a triangle
+        !                   at both ends
+        ! - rem_tube_outershell_threshold: threshold for select a flux tube
+        !                   to be merged with neighboring tube (h_rad of 
+        !                   neighboring tube / h_rad of boundary tube)
+        ! - outershell_handling: can be 'remove' or 'merge'
+        ! - rem_stickout_quad: remove quad which are only connected to the grid
+        !                       with one face
+        ! - split_noalignedquads: splitting quads without aligned faces
         
         ! Splitting options        
         ! - no_pents: do not allow pentagons in the final grid
@@ -197,9 +239,9 @@ module goatmod_userinput
         !           can be 'pol-rad', i.e. continue poloidal splitting after
         !           the radial split an inclined boundary face
         ! - split_out: option to not split pentagons 
-        ! - splittype: can be 1 for radial splitting, i.e. reducing radial 
-        !              width of cells, or 2 for poloidal splitting, i.e. 
-        !              reducing the poloidal length of cells
+        ! - splittype: can be:
+        !               1: for radial splitting, i.e. reducing radial width of cells
+        !               2: for poloidal splitting, i.e. reducing the poloidal length of cells
         ! - n_split: number of allowed splitting operations      
         ! - typeT: method to split a triangle, can be 'stacked', i.e. triangle 
         !          is split into two trianlge, or 'cutcell', i.e. triangle is 
@@ -284,6 +326,10 @@ module goatmod_userinput
         ! Facelabel mapping
         integer(I8), allocatable    :: facelabelmappingGG(:)
         integer(I8), allocatable    :: facelabelmappingGA(:)
+        integer(I8), allocatable    :: facelabelmappingGD(:)
+        integer(I8), allocatable    :: facelabelsubfrom(:)
+        integer(I8), allocatable    :: facelabelsubto(:)
+
 
         ! Operation options
         logical                     :: rem_small_trias
@@ -314,9 +360,11 @@ module goatmod_userinput
         logical                     :: BLG
         integer(I8)                 :: BLG_n_layers
         real(R8)                    :: BLG_rescaling_factor
+        real(R8), allocatable       :: BLG_smoothing_factors(:)
 
         logical                     :: rem_stickout_trias
-        logical                     :: rem_trias_flux
+        logical                     :: rem_trias_tube
+        logical                     :: rem_outershell
         real(R8)                    :: rem_tube_outershell_threshold
         character(:), allocatable   :: outershell_handling
         logical                     :: rem_stickout_quad
@@ -879,6 +927,8 @@ module goatmod_userinput
 
         ! Label translation options:
         !   - structurebasedlabels:     base labels on structure IDs 
+        !   - forceSOLPStopology:       force certain topology for region translation etc
+        !   - SOLPStopology:            desired topology ('linear','single_null', 'double_null')
 
         ! Diagnostics
         ! - dogriddiagnostics   run grid diagnostics. Will be time consuming!
@@ -890,7 +940,8 @@ module goatmod_userinput
             refBLdovessel, readexistingrefdata, radrefBLdosp, radrefLBdosp, &
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
             radrefdlBLlengthbased, vdrdoxp, structurebasedlabels, &
-            dogriddiagnostics, evtnoBL, refBLdostructure
+            dogriddiagnostics, evtnoBL, refBLdostructure, &
+            forceSOLPStopology
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp, refBLncstructure
@@ -914,7 +965,7 @@ module goatmod_userinput
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
             cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
             refdatafile, radrefmeth, reflengthtype, radreflengthtype, &
-            legalcellstyle 
+            legalcellstyle, SOLPStopology
     contains 
 
         procedure :: Read           => ReadGGOptions
@@ -992,18 +1043,11 @@ module goatmod_userinput
         options%artificial_slab     = .false.
         
         ! Face label mappings
-        allocate(options%GDtoGAfacelabelmappingGG(0), &
-            options%GDtoGAfacelabelmappingGD(0), &
-            options%GDtoGAfacelabelsubfrom(0), &
-            options%GDtoGAfacelabelsubto(0), &
-            options%GGtoGDfacelabelmappingGG(0), &
-            options%GGtoGDfacelabelmappingGD(0), &
-            options%GGtoGDfacelabelsubfrom(0), &
-            options%GGtoGDfacelabelsubto(0), &
-            options%GGtoGAfacelabelmappingGG(0), &
-            options%GGtoGAfacelabelmappingGA(0), &
-            options%GGtoGAfacelabelsubfrom(0), &
-            options%GGtoGAfacelabelsubto(0))
+        allocate(options%facelabelmappingGG(0), &
+            options%facelabelmappingGD(0), &
+            options%facelabelmappingGA(0), &
+            options%facelabelsubfrom(0), &
+            options%facelabelsubto(0))
         
         ! Structure options
         allocate(options%TP(0), options%TPind(0), options%exclude(0))
@@ -1027,7 +1071,7 @@ module goatmod_userinput
         class(GAoptionsUDT)       :: options   
         
         ! General options
-        options%plt         = .true.
+        options%plt         = .false.
         options%plt_qm      = .false.
         options%meth        = 'simple'
 
@@ -1062,9 +1106,11 @@ module goatmod_userinput
         options%BLG                                 = .false.
         options%BLG_n_layers                        = 0
         options%BLG_rescaling_factor                = 2
+        options%BLG_smoothing_factors               = [1.2, 1.5]
 
         options%rem_stickout_trias                  = .false.
-        options%rem_trias_flux                      = .false.
+        options%rem_trias_tube                      = .false.
+        options%rem_outershell                      = .false.
         options%rem_tube_outershell_threshold       = 2
         options%outershell_handling                 = 'merge' 
         options%rem_stickout_quad                   = .false.
@@ -1095,7 +1141,7 @@ module goatmod_userinput
         
         ! Pentagon options
         options%no_pents_area_merge                 = .false.
-        options%no_pents_area_split                 = .true.
+        options%no_pents_area_split                 = .false.
         options%no_pents_area_type                  = 'dist_function'
         
         options%no_pents_area_maxR                  = 2.5
@@ -1159,12 +1205,14 @@ module goatmod_userinput
         options%filepath            = 'traduit.out.b2us'
 
         ! Default mappings
-        allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
-        allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8), &
+        if (.not.allocated(options%facelabelsubfrom)) &
+            allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
+        if (.not.allocated(options%facelabelmappingGG)) &
+            allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8), &
         options%facelabelmappingGA(1:8))
         options%facelabelmappingGG = [-13, -34, -23, -24, -21, -42, -43, -44]
         options%facelabelmappingGD = [1, 2, 3,   3,   4,   5,   5,   5]
-        options%facelabelmappingGD = [4, 5, 3,   3,   2,   3,   3,   3]        
+        options%facelabelmappingGA = [4, 5, 3,   3,   2,   3,   3,   3]        
 
     
     end subroutine
@@ -1347,7 +1395,6 @@ module goatmod_userinput
         options%gcresx = 100 
         options%gcresy = 100
         options%coarsencontours = .false.
-        options%structurebasedlabels = .false.
 
         ! Options for poloidal vertex distribution
         options%vdptype             = 'densitybased'
@@ -1455,6 +1502,12 @@ module goatmod_userinput
         ! Diagnostics
         options%dogriddiagnostics = .true. ! default true 
 
+        ! Label translation
+        options%structurebasedlabels    = .false.
+        options%forceSOLPStopology      = .false.
+        options%SOLPStopology           = ''
+
+
     end subroutine 
 
     !------------------------------------------------------------------!
@@ -1548,44 +1601,21 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%artificial_slab)
 
         ! Face label mappings
-        field = 'goat.GDtoGA.facelabelmappingGG'
+        field = 'goat.facelabelmappingGG'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GDtoGAfacelabelmappingGG)
-        field = 'goat.GDtoGA.facelabelmappingGD'
+            options%facelabelmappingGG)
+        field = 'goat.facelabelmappingGD'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GDtoGAfacelabelmappingGD) 
-        field = 'goat.GDtoGA.facelabelsubfrom'
+            options%facelabelmappingGD) 
+        field = 'goat.facelabelmappingGA'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GDtoGAfacelabelsubfrom)
-        field = 'goat.GDtoGA.facelabelsubto'
+            options%facelabelmappingGA) 
+        field = 'goat.facelabelsubfrom'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GDtoGAfacelabelsubto)
-
-        field = 'goat.GGtoGD.facelabelmappingGG'
+            options%facelabelsubfrom)
+        field = 'goat.facelabelsubto'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGDfacelabelmappingGG)
-        field = 'goat.GGtoGD.facelabelmappingGD'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGDfacelabelmappingGD)
-        field = 'goat.GGtoGD.facelabelsubfrom'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGDfacelabelsubfrom)
-        field = 'goat.GGtoGD.facelabelsubto'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGDfacelabelsubto)
-
-        field = 'goat.GGtoGA.facelabelmappingGG'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelmappingGG)
-        field = 'goat.GGtoGA.facelabelmappingGA'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelmappingGA)
-        field = 'goat.GGtoGA.facelabelsubfrom'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelsubfrom)
-        field = 'goat.GGtoGA.facelabelsubto'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelsubto)    
+            options%facelabelsubto)
 
         ! OMP and IMP
         field = 'goat.OMP_r'
@@ -1636,9 +1666,8 @@ module goatmod_userinput
 
         end if 
 
-
         ! Other checks
-        if (size(options%GGtoGAfacelabelmappingGG)/=size(options%GGtoGAfacelabelmappingGA)) then 
+        if (size(options%facelabelmappingGG)/=size(options%facelabelmappingGA)) then 
             call gdErrorHandler('ReadGOAToptions: facelabelmapping has inconsistent lengths')
         end if 
 
@@ -1753,14 +1782,18 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%BLG)
         field = 'ga.BLG_n_layers'
         call ExtractOptionValueInteger0D(fid, field, options%BLG_n_layers)
-        field = 'ga.rescaling_factor'
+        field = 'ga.BLG_rescaling_factor'
         call ExtractOptionValueReal0D(fid, field, options%BLG_rescaling_factor)
+        field = 'ga.BLG_smoothing_factors'
+        call ExtractOptionValueReal1D(fid, field, options%BLG_smoothing_factors)
 
         ! Special operations
         field = 'ga.rem_stickout_trias'
         call ExtractOptionValueLogical0D(fid, field, options%rem_stickout_trias)        
-        field = 'ga.rem_trias_flux'
-        call ExtractOptionValueLogical0D(fid, field, options%rem_trias_flux)        
+        field = 'ga.rem_trias_tube'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_trias_tube)
+        field = 'ga.rem_outershell'   
+        call ExtractOptionValueLogical0D(fid, field, options%rem_outershell)
         field = 'ga.rem_tube_outershell_threshold'
         call ExtractOptionValueReal0D(fid, field, options%rem_tube_outershell_threshold)  
         field = 'ga.outershell_handling'
@@ -2384,6 +2417,10 @@ module goatmod_userinput
         ! Label translation
         field = 'gg.labels.structurebased'
         call ExtractOptionValueLogical0D(fid, field, options%structurebasedlabels)
+        field = 'gg.labels.forceSOLPStopology'
+        call ExtractOptionValueLogical0D(fid, field, options%forceSOLPStopology)
+        field = 'gg.labels.SOLPStopology'
+        call ExtractOptionValueCharacter(fid, field, options%SOLPStopology)
 
         ! Refinement options (general)
         field = 'gg.ref.meth'

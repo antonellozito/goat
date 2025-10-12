@@ -32,7 +32,7 @@ echo '  / / / /_/ / /_/ / / /_/ / /_/ />  <                                     
 echo ' /_/  \____/\____/_/_.___/\____/_/|_|                                     '
 echo ' '
 echo 'Documentation: currently none!'
-echo 'Current implementation: grid optimization and grid generation'
+echo 'Current implementation: grid adaptation, grid optimization and grid generation'
 
 # Set goat top directory
 setenv LAST_COMMAND `echo $_`
@@ -121,7 +121,9 @@ alias mgv "python3 ${GOAT_VISUALIZATION}/MonitorGridAndVessel.py"
 alias pgginput "python3 ${GOAT_VISUALIZATION}/VisualizeGGInput.py"
 alias pggoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGGOutput.py"
 alias pspp "python3 ${GOAT_VISUALIZATION}/SolpsPostProcess.py"
+alias pgainput "python3 ${GOAT_VISUALIZATION}/VisualizeGAinput.py"
 alias pgaoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGAoutput.py"
+alias pgaerror "python3 ${GOAT_VISUALIZATION}/VisualizeGAerror.py"
 
 # Create environment cache for faster loading (setenv, unsetenv, and aliases)
 set setup_post = `mktemp`

@@ -32,6 +32,7 @@ module gdmod_constraints
     !============
     ! Load modules
     use mod_precision
+    use mod_utility
     use mod_sparseinterface
     use optmod_constraints
     use gdmod_types
@@ -1025,7 +1026,7 @@ module gdmod_constraints
         real(R8), allocatable           :: G_ffv(:), lambda_ffv(:)
         type(MySparseUDT)               :: gradG_ffv, hessG_ffv, &
             dG_ffvdvar, dgradG_ffvdvar
-
+        real(R8)                        :: tstart, tend
         ! Initialize
         !===========
         ! Check inputs
@@ -1113,6 +1114,7 @@ module gdmod_constraints
             ic = ic + constraints%boundaryfunction%ncon
 
         end if
+        
 
         ! Flux function constraints
         !--------------------------
@@ -2401,7 +2403,7 @@ module gdmod_constraints
         end do
 
         ! write to file
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_ff_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_ff_val_vertices')
 
         ! Derivatives
         !============
@@ -4654,23 +4656,24 @@ module gdmod_constraints
         ! Auxiliary
         real(R8)                    :: edgedistvessel, edgedistxpoint
 
-        real(R8), allocatable       :: dvesseledges(:), dxpointedges(:)
+        real(R8), allocatable       :: dvesseledges(:), dxpointedges(:), &
+            dgoatedges(:), dx(:), dy(:)
 
         integer(I8)                 :: nvesseledges, nxpointedges, cc, &
-            ev(1:2)
+            ev(1:2), ngoatedges
 
         integer(I8), allocatable    :: vesseledges(:, :), &
             xpointedges(:, :), tempvesseledges(:, :), &
-            tempxpointedges(:, :)
+            tempxpointedges(:, :), goatedges(:, :), goatedgeind(:)
 
         logical                     :: dovesseledges, doxpointedges, &
             doTP, doWG
         
         logical, allocatable        :: dovesseledgecon(:), &
-            doxpointedgecon(:)
+            doxpointedgecon(:), dogoatedgecon(:)
         
         ! Loop
-        integer(I8)                 :: i, j
+        integer(I8)                 :: i, j, k
 
         ! Data
 
@@ -4687,9 +4690,16 @@ module gdmod_constraints
         ! Associate
         associate(&
             vert        => grid%vert,           &
+            face        => grid%face,           &
             vcc         => monitor%eqvcc,       &
             maxvcc      => monitor%maxeqvcc,    &
             opt         => options%eloptions)
+
+        ! Check if goat data is available
+        if (opt%usegoatdata .and. .not. grid%data%hasGoatGGData) then 
+            print *, 'InitializeEdgeLengthsConstraints: goat data not available, ' // & 
+                'using user-specified data'
+        end if 
 
         ! Do vessel edge lengths?
         dovesseledges   = (opt%dovesseledges == 1)
@@ -4760,11 +4770,56 @@ module gdmod_constraints
             dxpointedges(:) = edgedistxpoint
         end if
 
+        ! Goat edges
+        !-----------
+        ngoatedges = 0
+        if (grid%data%hasGoatGGData .and. opt%usegoatdata) then
+            ! Check for these edges whether they can be constrained
+            allocate(dogoatedgecon(face%ntot))
+            dogoatedgecon = .false.
+            where (grid%data%goatggdata%BLind > 0) dogoatedgecon = .true. 
+
+            ! Check if we apply current length or user-specified lengths. 
+            ! For the latter case, we need to check which faces are 
+            ! not considered
+            if (.not. opt%useoriginallength) then
+                where (grid%data%goatggdata%BLind > size(opt%edgedistgoat)) dogoatedgecon = .false. 
+            end if  
+            
+            ! Don't consider edges that are already fully constrained
+            where ( (vcc(face%vert(:, 1)) >= maxvcc(face%vert(:, 1))) .and. &
+                (vcc(face%vert(:, 2)) >= maxvcc(face%vert(:, 2)))) &
+                dogoatedgecon = .false.
+
+            ! Recompute edges
+            ngoatedges = count(dogoatedgecon)
+            allocate(goatedges(ngoatedges, 2), goatedgeind(ngoatedges))
+            goatedges(:, 1) = pack(face%vert(:, 1), &
+                dogoatedgecon)
+            goatedges(:, 2) = pack(face%vert(:, 2), &
+                dogoatedgecon)
+            goatedgeind = pack([(k, k = 1, face%ntot)], dogoatedgecon)
+
+            ! Set lengths
+            allocate(dgoatedges(ngoatedges))
+            if (opt%useoriginallength) then 
+                dx = vert%x(goatedges(:, 2)) - vert%x(goatedges(:, 1))
+                dy = vert%y(goatedges(:, 2)) - vert%y(goatedges(:, 1))
+                dgoatedges = sqrt(dx**2 + dy**2)
+            else
+                do i = 1, size(opt%edgedistgoat)
+                    where (grid%data%goatggdata%BLind(goatedgeind) == i) 
+                        dgoatedges = opt%edgedistgoat(i)
+                    end where
+                end do 
+            end if 
+        end if
+
         ! Update constraint quantities
         !=============================
         ! Constraints
-        constraints%ncon = nvesseledges + nxpointedges
-        constraints%nedges = nvesseledges + nxpointedges 
+        constraints%ncon = nvesseledges + nxpointedges + ngoatedges
+        constraints%nedges = nvesseledges + nxpointedges + ngoatedges
         allocate(constraints%edgevert(constraints%nedges, 2))
         allocate(constraints%d(constraints%nedges))
 
@@ -4787,6 +4842,15 @@ module gdmod_constraints
                 dxpointedges
             cc = cc + nxpointedges
         end if
+        if (grid%data%hasGoatGGData .and. opt%usegoatdata) then 
+            do j = 1, 2
+                constraints%edgevert(cc+1:cc+ngoatedges, j) = &
+                    goatedges(:, j)
+            end do
+            constraints%d(cc+1:cc+ngoatedges) = &
+                dgoatedges
+            cc = cc + ngoatedges
+        end if 
 
         ! Monitor
         do i = 1, constraints%nedges 
@@ -5960,7 +6024,7 @@ module gdmod_constraints
         end do
 
         ! Write
-        call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_orth_val_vertices')
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Gv, 'con_orth_val_vertices')
 
         ! Constraint gradient
         !====================
@@ -6270,7 +6334,7 @@ module gdmod_constraints
             tvID(:), tfsIDs(:), allvertIDs(:), tvn(:), tv(:), tpind(:), &
             tptype(:), tvnID(:), uniqueID(:)
 
-        logical                         :: dowarning, dolonelyfluxsurfaces, &
+        logical                         :: dowarning, &
             islonely
         logical, allocatable            :: doesIDoccur(:), &
             hasbeenfound(:), isvesselvertex(:), isvesselface(:), &
@@ -6283,7 +6347,6 @@ module gdmod_constraints
 
         ! Checks
         !=======
-        dolonelyfluxsurfaces = .false.
         ! Allocation status
         if (allocated(constraints%psiind)) then 
             deallocate(constraints%psiind)
@@ -6313,6 +6376,7 @@ module gdmod_constraints
             y               => grid%vert%y,             &
             fieldlineID     => grid%vert%fieldlineID,   &
             docoreflux      => options%ffvoptions%fixcoreflux,  &
+            dotpflux        => options%ffvoptions%fixtpflux,    &
             doouterflux     => options%ffvoptions%fixouterflux  & 
             )
 
@@ -6528,7 +6592,7 @@ module gdmod_constraints
         ! Lonely flux surfaces
         !=====================
         ! Basically flux surfaces with only one non-zero neighbour
-        if (dolonelyfluxsurfaces) then 
+        if (dotpflux) then 
             ! Loop over all flux surfaces
             do i = 1, nfs
                 ! Initialize

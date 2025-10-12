@@ -615,7 +615,7 @@ module optmod_optimizationengine
 
     ! Merit function wrapper
     recursive subroutine EvaluateMeritFunction(problem, f, DJf, dx, lambda, mu, &
-        doderiv, meritfunction, num)
+        doderiv, meritfunction, num, Jout, Gout, Hout)
 
         ! Description
         !============
@@ -635,13 +635,21 @@ module optmod_optimizationengine
         character(*), intent(in)        :: meritfunction 
         type(numLSUDT)                  :: num
 
+        ! Optional output arguments
+        real(R8), optional                            :: Jout
+        real(R8), allocatable, dimension(:), optional :: Gout, Hout
+
+        ! Auxiliary
+        real(R8)                            :: J
+        real(R8), allocatable, dimension(:) :: G, H
+
         ! Check which merit function to evaluate
         select case (meritfunction) 
 
         case ('l1')
 
             call problem%EvaluateMeritFunctionL1(f, DJf, dx, lambda, &
-                mu, doderiv, num)
+                mu, doderiv, num, J, G, H)
 
         case default 
 
@@ -655,11 +663,23 @@ module optmod_optimizationengine
             f = posinfval_R8()
         end if 
 
+        ! Optional output arguments
+        !==========================
+        if (present(Jout)) then 
+            Jout = J 
+        end if 
+        if (present(Gout)) then 
+            Gout = G 
+        end if 
+        if (present(Jout)) then 
+            Hout = H 
+        end if 
+
     end subroutine
 
     ! L1 merit function
     recursive subroutine EvaluateMeritFunctionL1(problem, f, DJf, dx, lambda, mu, &
-        doderiv, num)
+        doderiv, num, Jout, Gout, Hout)
 
         ! Description
         !============
@@ -677,6 +697,10 @@ module optmod_optimizationengine
         real(R8), allocatable           :: lambda(:), mu(:), dl(:), dm(:)
         logical                         :: doderiv 
         type(numLSUDT)                  :: num
+
+        ! Optional output arguments
+        real(R8), optional                            :: Jout 
+        real(R8), allocatable, dimension(:), optional :: Gout, Hout    
 
         ! Auxiliary
         logical                         :: dogradient, dohessian 
@@ -820,6 +844,16 @@ module optmod_optimizationengine
         
         ! Housekeeping
         !=============
+        if (present(Jout)) then 
+            Jout = J 
+        end if 
+        if (present(Gout)) then 
+            Gout = G 
+        end if 
+        if (present(Jout)) then 
+            Hout = H 
+        end if 
+
 
     end subroutine
     
@@ -933,7 +967,7 @@ module optmod_optimizationengine
 
         ! Timing
         real(R8)                    :: t_it_s, t_it_e, &
-            t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e
+            t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e, tstart, tend
 
         ! Data
 
@@ -1218,6 +1252,21 @@ module optmod_optimizationengine
                                 rxfdec = 0.9
                             end if 
                         end if 
+                    elseif (flagls == 2) then 
+                        if (alphals < 1) then 
+                            ! Set step to zero
+                            dx(:) = 0
+
+                            ! Message
+                            print *, 'line search did not converge, skipping update ' // &
+                                    'and reattempt with damped Hessian since step length is small'
+
+                            ! Increase rxf
+                            rxf = rxf*2.0_R8/rxfdec
+                        else
+                            ! Probably large alpha due to wolfe or something, 
+                            ! just continue as is
+                        end if 
                     end if 
 
                     ! Update lagrange multipliers using least-squares approach
@@ -1320,7 +1369,14 @@ module optmod_optimizationengine
             itopt = itopt+1
 
             ! Update the hessian relaxation factor
-            rxf = rxf*rxfdec
+            if ((flagls == 0) .or. (flagls == 2)) then 
+                if (itopt > 1) then 
+                    if (problem%monitor%L(itopt-1) < L) then 
+                        rxf = rxf*2.0_R8/rxfdec  
+                    end if 
+                end if 
+                rxf = rxf*rxfdec
+            end if
             rxf = max(rxf, rxfmin)
 
         end do
@@ -1799,11 +1855,13 @@ module optmod_optimizationengine
         real(R8)                            :: f0, DJf0, fk, DJfk, &
             alpha_bot, alpha_top
 
-        real(R8), allocatable               :: x0(:), x(:)
-        real                                :: inf 
+        real(R8), allocatable               :: x0(:), x(:), Gref(:), Href(:), &
+            Git(:), Hit(:)
+        real                                :: inf
+        real(R8)                            :: Jref, Jit
 
         ! Loop
-        integer(I8)                         :: itls
+        integer(I8)                         :: itls, itsoc, maxitsoc
 
         ! Variables for second order correction
         real(R8), allocatable               :: G(:), H(:), ck(:), &
@@ -1864,7 +1922,7 @@ module optmod_optimizationengine
         ! Evaluate merit function and directional derivative
         doderiv = .true. 
         call problem%EvaluateMeritFunction(f0, DJf0, dx, lambda, mu, &
-            doderiv, meritfunction, numLS)
+            doderiv, meritfunction, numLS, Jout=Jref, Gout=Gref, Hout=Href)
 
         ! If no descent, exit with flag 1
         if (DJf0 >= 0) then 
@@ -1934,6 +1992,7 @@ module optmod_optimizationengine
             ! Checks
             if (itls-1 == maxit) then 
                 ! Print message, set flag
+                flag = 2
                 if (numLS%verbosity > 0) then 
                     print *, 'linesearch did not converge'
                 end if 
@@ -2017,6 +2076,7 @@ module optmod_optimizationengine
             ! Checks
             if (itls-1 == maxit) then 
                 ! Print message, set flag
+                flag = 2
                 if (numLS%verbosity > 0) then 
                     print *, 'linesearch did not converge'
                 end if 
@@ -2053,7 +2113,7 @@ module optmod_optimizationengine
                 else
                     ! Calculate new cost function value
                     call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
-                        mu, doderiv, meritfunction, numLS)
+                        mu, doderiv, meritfunction, numLS, Jout=Jit, Gout=Git, Hout=Hit)
                 end if
                 
                 ! Check Armijo condition
@@ -2061,6 +2121,11 @@ module optmod_optimizationengine
                     
                     ! Sufficient decrease, terminate
                     conv = .true.
+                    !if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
+                    !    print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                    !    print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                    !        maxval(Href), maxval(Hit)
+                    !end if
                     
                 elseif (errstat > 0) then 
 
@@ -2118,7 +2183,7 @@ module optmod_optimizationengine
                         call problem%UpdateDesign(wk)
                         call problem%UpdateProblem()
                         call problem%EvaluateMeritFunction(fk, DJfk, dx, &
-                            lambda, mu, doderiv, meritfunction, numLS)
+                            lambda, mu, doderiv, meritfunction, numLS, Jout=Jit, Gout=Git, Hout=Hit)
                     end if 
 
                     ! Housekeeping
@@ -2129,6 +2194,11 @@ module optmod_optimizationengine
 
                         ! Sufficient decrease, terminate
                         conv = .true.
+                        !if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
+                        !    print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                        !    print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                        !       maxval(Href), maxval(Hit)
+                        !end if
 
                     else
 
@@ -2150,10 +2220,163 @@ module optmod_optimizationengine
             ! Checks
             if (itls-1 == maxit) then 
                 ! Print message, set flag
+                flag = 2
                 if (numLS%verbosity > 0) then 
                     print *, 'linesearch did not converge'
                 end if 
             end if 
+
+        case ('backtracking_soc_it')
+
+            ! Don't compute any derivatives
+            doderiv = .false.
+            itsoc = 0
+            maxitsoc = 5 ! To be moved to options
+
+            ! Loop
+            do while ( (.not. conv) .and. (itls <= maxit) )
+            
+                ! Update current iterate
+                x = x0 + alpha*dphi
+
+                ! Start tracking for possible problems
+                call ErrorStack%StartTrack()
+
+                ! Update the design
+                call problem%UpdateDesign(alpha*dphi)
+
+                ! Update the problem
+                call problem%UpdateProblem()
+
+                ! Check error status
+                errstat = ErrorStack%ErrorState()
+                call ErrorStack%EndTrack()
+                if (errstat > 0) then 
+                    ! Error encountered, set value to infinity - don't
+                    ! bother trying to compute the merit function
+                    fk = inf
+                else
+                    ! Calculate new cost function value
+                    call problem%EvaluateMeritFunction(fk, DJfk, dx, lambda, &
+                        mu, doderiv, meritfunction, numLS, Jout=Jit, Gout=Git, Hout=Hit)
+                end if
+                
+                ! Check Armijo condition
+                if (fk < f0 + c1*alpha*DJf0) then 
+                    
+                    ! Sufficient decrease, terminate
+                    conv = .true.
+                    !if ((Jref < Jit) .and. (maxval(abs(Gref)) < maxval(abs(Git)))) then 
+                    !    print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                    !    print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                    !        maxval(Href), maxval(Hit)
+                    !end if
+                    
+                elseif (errstat > 0) then 
+
+                    ! Error when updating problem, don't even bother 
+                    ! trying a second order correction
+
+                    ! Decrease alpha
+                    alpha = dec*alpha
+
+                else
+                    
+                    ! Try if we can get there by applying a second order
+                    ! correction. Here, we keep computing corrections 
+                    ! until either the maximum amount of iterations is 
+                    ! reached, or until the Armijo condition is satisfied
+
+                    ! Note: in Nocedal, this is only done if alpha = 1, but
+                    ! this seems to work better if we do it at each attempt. 
+                    do while ((itsoc < maxitsoc) .and. (.not. conv))
+                        ! Compute constraints & linearization
+                        call problem%EvaluateEqualityConstraints(G, gradG, &
+                            hessG, dogradient, dohessian, lambda)
+                        call problem%EvaluateInequalityConstraints(H, gradH, &
+                            hessH, dogradient, dohessian, mu)
+
+                        ! Compute active set
+                        A = H > 0
+                        na = count(A)
+
+                        ! Construct problem 
+                        allocate(ck(neq + na))
+                        ck = [G, pack(H, A)]
+                        Ak = gradG%Concatenate(gradH%DeleteColumns(.not. A), 2)
+                        LSA = Ak%Transpose()*Ak
+
+                        ! Check if constraints are bounded, otherwise skip
+                        if (all(ieee_is_finite(ck))) then
+                            ! Compute correction step
+                            if (present(linearsolver)) then 
+                                call linearsolver%SolveSparseLinearSystem(LSA, ck, wkt, flag2)
+                            else
+                                call SolveSparseLinearSystemDI(LSA, ck, wkt, flag2)
+                            end if 
+
+                            ! Check if it converged, otherwise skip update
+                            if (flag2 /= 0) then 
+                                print *, 'linesearch backtracking_soc: could not converge problem, skipping soc update'
+                                wkt(:) = 0
+                            end if 
+
+                            ! Compute correction
+                            wk = MatrixVectorProduct(Ak, -wkt)
+
+                            ! Recompute cost function at step x0 + alpha*d + wk
+                            ! Note: the problem is already updated to x + alpha*d!
+                            x = x + wk ! update x to ensure proper downdate later
+                            call problem%UpdateDesign(wk)
+                            call problem%UpdateProblem()
+                            call problem%EvaluateMeritFunction(fk, DJfk, dx, &
+                                lambda, mu, doderiv, meritfunction, numLS, Jout=Jit, Gout=Git, Hout=Hit)
+                            print *, 'f0, fk, Jref Jit maxGref maxGit maxHref maxHit'
+                            print *, f0, fk, Jref, Jit, maxval(abs(Gref)), maxval(abs(Git)), &
+                                maxval(Href), maxval(Hit)
+                        end if 
+
+                        ! Housekeeping
+                        deallocate(ck)
+
+                        ! Check the Armijo condition again
+                        if (fk < f0 + c1*alpha*DJf0) then 
+
+                            ! Sufficient decrease, terminate
+                            conv = .true.
+
+                        else
+
+                            ! Decrease alpha
+                            ! alpha = dec*alpha
+
+                        end if 
+                    end do 
+
+                    if (.not. conv) then 
+                        ! Decrease alpha
+                        alpha = dec*alpha
+                    end if 
+                    
+                end if 
+                
+                ! Update counter
+                itls = itls + 1
+
+                ! De-update the design
+                call problem%UpdateDesign(x0-x)
+
+            end do
+            
+            ! Checks
+            if (itls-1 == maxit) then 
+                ! Print message, set flag
+                flag = 2
+                if (numLS%verbosity > 0) then 
+                    print *, 'linesearch did not converge'
+                end if 
+            end if 
+
 
         case default
 
@@ -2164,7 +2387,7 @@ module optmod_optimizationengine
         end select 
 
         ! Apply step length to dphi
-        dx(1:nphi) = dx(1:nphi)*alpha
+        dx(1:nphi) = x - x0 ! dx(1:nphi)*alpha
 
         ! Housekeeping
         !=============

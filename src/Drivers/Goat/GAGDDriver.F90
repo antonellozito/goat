@@ -42,8 +42,8 @@ subroutine GAGDDriver(goatoptions)
     gaoptions%inputfilepath         = goatoptions%inputfilepath
     gdoptions%inputfilepath         = goatoptions%inputfilepath
     gridoptions%inputfilepath       = goatoptions%inputfilepath 
-    call gridoptions%Set()
     call gaoptions%Set()
+    call gdoptions%Set()
     call gridoptions%Set()
 
     ! Grid adaptations
