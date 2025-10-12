@@ -4038,7 +4038,7 @@ module gamod_types
         call MergeVertexChains(vx_merge1, vx_fs2, vx_merge2)
         call MergeVertexChains(vx_merge2, vx_t2, vx_final)
 
-        ! Construct farSOL interpolant - separate function TODO
+        ! Construct farSOL interpolant
         call grid%ConstructFarSOLinterpolant(vx_final)
 
         end associate
@@ -4235,10 +4235,6 @@ module gamod_types
                 vx_finalD(counterv) = vx_new
             end if 
 
-            if (switch_counter == 8) then
-                call gdErrorHandler('test')
-            end if
-
             ! Housekeeping
             deallocate(fcs_next, fcs_nextD)
 
@@ -4246,6 +4242,9 @@ module gamod_types
 
         ! Trim 
         vx_final = vx_finalD(1:counterv)
+
+        ! Test
+        if (options%debug) call grid%WriteErrorData(vx_final, 0)
 
         !  Construct farSOL interpolant
         call grid%ConstructFarSOLinterpolant(vx_final)
@@ -12501,9 +12500,9 @@ module gamod_types
 
             ! Make new face
             call grid%GetFaceNumber(v1n, v2n, 3, f3n)
-            if (grid%face%aligned%Get(perp_faces(1)) == 1 .or. grid%face%aligned%Get(perp_faces(1)) == 1) &
+            if (all(f%aligned%Get(perp_faces) == 1)) then
                 call grid%face%aligned%Set(f3n, 1)
-            if (type == 'pol') then
+            else if (type == 'pol') then
                 call grid%face%aligned%Set(f3n, 0)
             end if
 
@@ -13504,7 +13503,9 @@ module gamod_types
         ! Make new face
         call grid%GetFaceNumber(v1n, common_vert, 3, f3n)
 
-        if (all(f%aligned%Get(perp_faces) == 1)) call f%aligned%Set(f3n, 1)
+        if (all(f%aligned%Get(perp_faces) == 1)) then
+            call f%aligned%Set(f3n, 1)
+        end if
 
         ! Add new vert to flux surface
         select case (type)
@@ -15408,14 +15409,23 @@ module gamod_types
 
         ! Auxiliary
         integer(I8) :: n
-        integer(I8), allocatable :: fcs(:)
+        integer(I8), allocatable :: fcs(:), fcsD(:)
 
         ! Get perpendicular faces
         fcs = GetCellFaceGA(grid%cell, cv)
         n = 1
-        if (grid%face%aligned%Get(Qface) == 1)  n = 0
-        allocate(perp_faces(count(grid%face%aligned%Get(fcs) == n)))
-        perp_faces = pack(fcs, grid%face%aligned%Get(fcs) == n)
+        if (grid%face%aligned%Get(Qface) == 1) then
+            n = 0
+            fcsD = fcs
+        else if (grid%face%aligned%Get(Qface) == 0 .and. isBoundaryFaceGA(grid, Qface)) then
+            n = 0
+            allocate(fcsD(count(.not.isBoundaryFaceGA(grid, fcs))))
+            fcsD = pack(fcs, .not.isBoundaryFaceGA(grid, fcs))
+        else 
+            fcsD = fcs
+        end if
+        allocate(perp_faces(count(grid%face%aligned%Get(fcsD) == n)))
+        perp_faces = pack(fcsD, grid%face%aligned%Get(fcsD) == n)
 
     end subroutine
 
