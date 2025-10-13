@@ -332,6 +332,7 @@ module gamod_driver
 
         ! Auxiliary
         type(TriangulationUDT)              :: triangulation
+        type(StateUDT)                      :: state_v
 
         ! Pick aposteriori method - TODO
 
@@ -341,6 +342,7 @@ module gamod_driver
         call grid%TriangulateGAGrid(triangulation)
 
         ! Interpolate state to vertex positions
+        call grid%InterpolateCvToVx(options, state, state_v)
 
         ! Construct interpolant
 
@@ -352,11 +354,6 @@ module gamod_driver
         print *, 'Splitting: posteriori'
 
         ! Select cell to split
-
-
-
-
-
 
     end subroutine
  

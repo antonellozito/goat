@@ -499,6 +499,10 @@ module gamod_types
         procedure :: TransQuadsToTria
         procedure :: TransPentsToTrias
 
+        ! Interpolation
+        !==============
+        procedure :: InterpolateCvToVx
+
         ! Computing
         !===========
         procedure :: CalcHpol0D
@@ -19133,7 +19137,168 @@ module gamod_types
 
         end do
 
-    end subroutine    
+    end subroutine
+    
+    !------------------------------------------------------------------!
+    !                         INTERPOLATION                            !
+    !------------------------------------------------------------------!   
+    subroutine InterpolateCvToVx(grid, options, state, state_v)
+
+        ! Description
+        !============
+        ! Interpolate the state information saved in the cell centers
+        ! to the vertices using low order interpolation similar
+        ! to vxVol computation in SOLPS-ITER
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        type(GAoptionsUDT), intent(in)  :: options
+        type(StateUDT), intent(in)      :: state
+        type(StateUDT), intent(out)     :: state_v
+
+        ! Auxiliary
+        integer(I8) :: i, iv, vncell, count_down, count_up, count_eq, ic, incv, &
+            ind, is
+        integer(I8), allocatable :: cvLookUp(:), vcellP(:,:), vcell(:), tv(:), cvs(:)
+        real(R8), allocatable :: vxVol(:)
+        real(R8) :: vpsi, vxvol_ic, volsum
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Construct vert%cell
+            cvLookUp = GetCvLookUpGA(c)
+        allocate(vcellP(v%ntot, 2))
+        vcellP = 0
+        do i = 1, c%ntot
+            tv = GetCellVertGA(c, i)
+            vcellP(tv,2) = vcellP(tv,2) + 1
+        end do
+
+        vncell = sum(vcellP(:,2))
+        allocate(vcell(vncell))
+
+        ! Construct the pointer
+        vcellP(1, 1) = 1
+        do i = 1, v%ntot
+            cvs = GetVertCellGA(c, i, cvLookUp)
+            vcellP(i, 2) = size(cvs)
+            if (i /= 1) then
+                vcellP(i, 1) = vcellP(i-1, 1) + vcellP(i-1, 2)
+            end if
+            vcell(vcellP(i, 1):vcellP(i, 1)+vcellP(i,2)-1) = cvs
+        end do
+
+        ! Compute interpolation weights vxVol
+        allocate(vxVol(vncell))
+        select case (options%vxVol_style)
+        case(2)
+
+            ! Loop over vertices
+            do iv = 1, v%ntot
+                count_down = 0
+                count_up = 0
+                count_eq = 0
+                vpsi = v%psi%Get(iv)
+                ! Loop over cells to compute counters
+                do incv = 1, vcellP(iv, 2)
+                    ic = vcell(vcellP(iv,1) + incv - 1)
+                    if (c%psi%Get(ic) .gt. vpsi) then
+                        count_up = count_up + 1
+                    else if (c%psi%Get(ic) .lt. vpsi) then
+                        count_down = count_down + 1
+                    else
+                        count_eq = count_eq + 1
+                    end if
+                end do
+
+                ! Loop over cells to compute weights
+                do incv = 1, vcellP(iv, 2)
+                    ic = vcell(vcellP(iv,1) + incv - 1)
+                    if (c%psi%Get(ic) .gt. vpsi) then
+                        vxVol(vcellP(iv, 1) + incv - 1) = 2.0_R8*count_up
+                    elseif (c%psi%Get(ic) .lt. vpsi) then
+                        vxVol(vcellP(iv, 1) + incv - 1) = 2.0_R8*count_down
+                    else 
+                        vxVol(vcellP(iv, 1) + incv - 1) = count_eq
+                    end if
+                end do
+
+            end do
+
+        case default
+            call gdErrorHandler('InterpolateCvToVx: vxVol_style not implemented')
+        end select
+
+        ! Allocate state_v
+        call AllocateState(state_v, v%ntot, 0, state%ns)
+
+        ! Interpolate to vertex (intvertex routine in solps)
+        do iv = 1, v%ntot
+            volsum = 0.0_R8
+            do incv = 1, vcellP(iv, 2)
+                ind = vcellP(iv, 1) + incv - 1
+                vxvol_ic = vxVol(ind)
+                ic = vcell(ind)
+                volsum = volsum + 1.0_R8/vxvol_ic
+
+                ! State
+                do is = 1, state%ns
+                    state_v%na(iv,is) = state_v%na(iv,is) + state%na(ic,is) / vxvol_ic
+                    state_v%ua(iv,is) = state_v%ua(iv,is) + state%ua(ic,is) / vxvol_ic
+                    state_v%resco(iv,is) = state_v%resco(iv,is) + state%resco(ic,is) / vxvol_ic
+                    state_v%resmo(iv,is) = state_v%resmo(iv,is) + state%resmo(ic,is) / vxvol_ic
+                end do
+                state_v%ne(iv) = state_v%ne(iv) + state%ne(ic) / vxvol_ic
+                state_v%te(iv) = state_v%te(iv) + state%te(ic) / vxvol_ic
+                state_v%ti(iv) = state_v%ti(iv) + state%ti(ic) / vxvol_ic
+                state_v%tn(iv) = state_v%tn(iv) + state%tn(ic) / vxvol_ic
+                state_v%po(iv) = state_v%po(iv) + state%po(ic) / vxvol_ic
+                state_v%kt(iv) = state_v%kt(iv) + state%kt(ic) / vxvol_ic
+                state_v%zt(iv) = state_v%zt(iv) + state%zt(ic) / vxvol_ic
+
+                ! Residuals
+                state_v%resmt(iv) = state_v%resmt(iv) + state%resmt(ic) / vxvol_ic
+                state_v%reshe(iv) = state_v%reshe(iv) + state%reshe(ic) / vxvol_ic
+                state_v%reshi(iv) = state_v%reshi(iv) + state%reshi(ic) / vxvol_ic
+                state_v%respo(iv) = state_v%respo(iv) + state%respo(ic) / vxvol_ic
+                state_v%reskt(iv) = state_v%reskt(iv) + state%reskt(ic) / vxvol_ic
+                state_v%reszt(iv) = state_v%reszt(iv) + state%reszt(ic) / vxvol_ic
+            end do
+            
+            do is = 1, state%ns
+                state_v%na(iv,is) = state_v%na(iv,is)/volsum
+                state_v%ua(iv,is) = state_v%ua(iv,is)/volsum
+                state_v%resco(iv,is) = state_v%resco(iv,is)/volsum
+                state_v%resmo(iv,is) = state_v%resmo(iv,is)/volsum
+            end do
+            state_v%ne(iv) = state_v%ne(iv)/volsum
+            state_v%te(iv) = state_v%te(iv)/volsum
+            state_v%ti(iv) = state_v%ti(iv)/volsum
+            state_v%tn(iv) = state_v%tn(iv)/volsum
+            state_v%po(iv) = state_v%po(iv)/volsum
+            state_v%kt(iv) = state_v%kt(iv)/volsum
+            state_v%zt(iv) = state_v%zt(iv)/volsum 
+            
+            state_v%resmt(iv) = state_v%resmt(iv)/volsum 
+            state_v%reshe(iv) = state_v%reshe(iv)/volsum 
+            state_v%reshi(iv) = state_v%reshi(iv)/volsum 
+            state_v%respo(iv) = state_v%respo(iv)/volsum 
+            state_v%reskt(iv) = state_v%reskt(iv)/volsum 
+            state_v%reszt(iv) = state_v%reszt(iv)/volsum 
+        end do
+
+
+
+        end associate
+
+    end subroutine
 
 
     !------------------------------------------------------------------!

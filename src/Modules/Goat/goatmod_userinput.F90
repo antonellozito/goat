@@ -315,6 +315,9 @@ module goatmod_userinput
         ! - d_char_type: characteristic length used to construct distance function, can be:
         !               'min_Xpoint_dist': minimal distance between targets and Xpoint
         !               'max_Xpoint_dist': maximal distance between targets and Xpoint
+
+        ! Aposteriori adaptations
+        ! - vxVol_style: style to interpolate from cell centers to vertices
         ! The rest of the options are carried over from goatoptions or not changeable.
 
         ! General adaptation options
@@ -415,6 +418,9 @@ module goatmod_userinput
         character(:), allocatable   :: dist_type_wall
         character(:), allocatable   :: d_char_type
         logical                     :: plt_dist_func  
+
+        ! Aposteriori
+        integer(I8)                 :: vxVol_style
         
         
         ! Caried over from goatoptions
@@ -1159,6 +1165,9 @@ module goatmod_userinput
         options%d_char_type                         = 'min_Xpoint_dist'
         options%plt_dist_func                       = .false.    
 
+        ! Aposteriori
+        options%vxVol_style                         = 2
+
     end subroutine
 
 
@@ -1877,6 +1886,11 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%d_char_type)
         field = 'ga.plt_dist_func'
         call ExtractOptionValueLogical0D(fid, field, options%plt_dist_func)
+
+        ! Aposteriori
+        !============
+        field = 'ga.vxvol_style'
+        call ExtractOptionValueInteger0D(fid, field, options%vxVol_style)
 
         ! Housekeeping
         !=============

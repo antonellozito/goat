@@ -628,6 +628,7 @@ module goatmod_types
         ! - reskt:  ??
 
         ! State 
+        integer(I8)                         :: nc, nf, ns
         real(R8), allocatable               :: na(:,:), ne(:), ua(:,:), uadia(:,:,:), & 
                                                 te(:), ti(:), tn(:), po(:), kt(:), zt(:)
 
@@ -4782,6 +4783,9 @@ module goatmod_types
         if (.not.allocated(state%na)) then
 
             ! State variables
+            state%nc = nc
+            state%nf = 0
+            state%ns = ns
             allocate(state%na(nc, ns))
             allocate(state%ne(nc))
             allocate(state%ua(nc, ns))
