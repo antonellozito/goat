@@ -14552,7 +14552,7 @@ module gamod_types
         verts_new2 = pack(verts_cv, verts_cv /= vert2)
 
         ! Add cell
-        call grid%AddCell(faces_new1, faces_new2, c%reg%Get(cv), cv1)
+        call grid%AddCell(faces_new2, verts_new2, c%reg%Get(cv), cv1)
 
         ! Post
         cells = [cv, cv1]
@@ -19055,6 +19055,10 @@ module gamod_types
         vertP1 = grid2%cell%vertP1%Get()
         vertP2 = grid2%cell%vertP2%Get()
         call triangulation%Construct(xv, yv, vertlist, vertP1, vertP2)
+
+        ! Visualize
+        call triangulation%Visualize('tria')
+        call gdErrorHandler('test')
     
 
     end subroutine
@@ -19073,17 +19077,12 @@ module gamod_types
         ! Auxiliary 
         integer(I8) :: i
         integer(I8), allocatable :: cvQ(:), indcv(:)
-        logical :: is_ordered(grid%cell%ntot), cells(grid%cell%ntot)
+        logical, allocatable :: is_ordered(:), cells(:)
 
         ! Loop over the quad
         indcv = (/(i, i = 1, grid%cell%ntot)/)
         allocate(cvQ(count(grid%cell%vertP2%Get() == 4)))
         cvQ = pack(indcv, grid%cell%vertP2%Get() == 4)
-
-        ! Reorder
-        cells = .true.
-        call grid%CheckVertOrder(is_ordered, cells)
-        call grid%ReorderCellConn(is_ordered)
 
         ! Loop over the quads
         do i = 1, size(cvQ)
@@ -19091,6 +19090,7 @@ module gamod_types
         end do
 
         ! Reordercell connectivity
+        allocate(is_ordered(grid%cell%ntot), cells(grid%cell%ntot))
         cells = .true.
         call grid%CheckVertOrder(is_ordered, cells)
         call grid%ReorderCellConn(is_ordered)

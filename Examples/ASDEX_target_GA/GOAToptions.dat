@@ -328,7 +328,7 @@ VERSION 1.00.00
 'ga.plt'    '1'
 'ga.plt_qm' '0'
 'ga.timing' '0'
-'ga.meth'   'simple'
+'ga.meth'   'aposteriori'
 
 # GA operation options
 'ga.rem_small_trias' '1'

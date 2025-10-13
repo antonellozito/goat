@@ -1479,7 +1479,7 @@ def PlotTriaCells(tria, fignum):
 
     counter = 0
     for i in np.arange(0, tria.cell.ntot): 
-        tv = tria.cell.vert(i,:)
+        tv = tria.cell.vert[i,:]-1
         xc[counter:counter+3] = tria.vert.x[tv]
         xc[counter+3] = tria.vert.x[tv[0]]
         xc[counter+4] = np.NaN
@@ -1487,7 +1487,7 @@ def PlotTriaCells(tria, fignum):
         yc[counter+3] = tria.vert.y[tv[0]]
         yc[counter+4] = np.NaN
 
-        counter = counter + nvc + 2
+        counter = counter + 5
     
     # Plot
     PlotPolygons2D(xc, yc, fignum, color='k', marker='', linewidth=0.25)

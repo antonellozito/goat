@@ -24,51 +24,64 @@ gridfile_inter = 'grid_after_rem_trias.dat'
 # Grid after GA
 fullgridfile_out = 'grid_after_GA.dat'
 
+# Triangulated grid
+trianglefile = 'tria.dat'
+
 # Reading input grid
 #-------------------
-filepath = datadir + '/' + fullgridfile_in
-grid_in = dh.ReadGAGridDataFile(filepath)
+try :
+    filepath = datadir + '/' + 'grid_before_GA.dat'
+    grid_in = dh.ReadGAGridDataFile(filepath)
 
-print('Before GA')
-print('---------')
-print('Total number of cells : ' + str(grid_in.cell.ntot))
-print('Total number of faces: ' + str(grid_in.face.ntot))
-print('Total number of vertices: ' + str(grid_in.vert.ntot))
+    print('Before GA')
+    print('---------')
+    print('Total number of cells : ' + str(grid_in.cell.ntot))
+    print('Total number of faces: ' + str(grid_in.face.ntot))
+    print('Total number of vertices: ' + str(grid_in.vert.ntot))
 
-# Design
-#-------
-# Plot the grid
-plotter.PlotGridCells(grid_in,0)
+    # Design
+    #-------
+    # Plot the grid
+    plotter.PlotGridCells(grid_in,0)
+except :
+    print('No input grid found')
 
 # Reading output grid
 #--------------------
-filepath = datadir + '/' + fullgridfile_out
-grid_out = dh.ReadGAGridDataFile(filepath)
-print('\n')
-print('After GA')
-print('---------')
-print('Total number of cells: ' + str(grid_out.cell.ntot))
-print('Total number of faces: ' + str(grid_out.face.ntot))
-print('Total number of vertices: ' + str(grid_out.vert.ntot))
+try : 
+    filepath = datadir + '/' + fullgridfile_out
+    grid_out = dh.ReadGAGridDataFile(filepath)
+    print('\n')
+    print('After GA')
+    print('---------')
+    print('Total number of cells: ' + str(grid_out.cell.ntot))
+    print('Total number of faces: ' + str(grid_out.face.ntot))
+    print('Total number of vertices: ' + str(grid_out.vert.ntot))
 
-# Design
-#-------
-# Plot the grid
-plotter.PlotGridCells(grid_out,1)
+    # Design
+    #-------
+    # Plot the grid
+    plotter.PlotGridCells(grid_out,1)
+except:
+    print('No output grid found')
 
 # Intermediate
 #--------------
-filepath = datadir + '/' + gridfile_inter
-grid_int = dh.ReadGAGridDataFile(filepath)
-plotter.PlotGridCells(grid_int,2)
+try :
+    filepath = datadir + '/' + gridfile_inter
+    grid_int = dh.ReadGAGridDataFile(filepath)
+    plotter.PlotGridCells(grid_int,2)
 
-# outershell
-try: 
-    filepath = datadir + '/' + 'outershell.dat'
-    tube_rem = dh.ReadGAIntegerArrayFile(filepath)
-    plotter.PlotGridCellArray(grid_int, tube_rem, 3)
-except:
-    print('No outershell data found')
+    # outershell
+    try: 
+        filepath = datadir + '/' + 'outershell.dat'
+        tube_rem = dh.ReadGAIntegerArrayFile(filepath)
+        plotter.PlotGridCellArray(grid_int, tube_rem, 3)
+    except:
+        print('No outershell data found')
+except : 
+    print('No intermediate grid found')
+
 
 #filepath = datadir + '/' + 'grid_after_53.dat'
 #grid3 = dh.ReadGAGridDataFile(filepath)
@@ -99,17 +112,41 @@ except:
 
 # Reading flux tube cells
 #------------------------
-filepath = datadir + '/' + 'grid_fluxtube.dat'
-grid_ft = dh.ReadGAGridDataFile(filepath)
-filepath_ftcv = datadir + '/' + 'fluxtubecells.dat'
-filepath_ftcv1 = datadir + '/' + 'fluxtubecellsP1.dat'
-filepath_ftcvP2 = datadir + '/' + 'fluxtubecellsP2.dat'
-ftcv = dh.ReadGAIntegerArrayFile(filepath_ftcv)
-ftcvP1 = dh.ReadGAIntegerArrayFile(filepath_ftcv1)
-ftcvP2 = dh.ReadGAIntegerArrayFile(filepath_ftcvP2)
+try :
+    filepath = datadir + '/' + 'grid_fluxtube.dat'
+    grid_ft = dh.ReadGAGridDataFile(filepath)
+    filepath_ftcv = datadir + '/' + 'fluxtubecells.dat'
+    filepath_ftcv1 = datadir + '/' + 'fluxtubecellsP1.dat'
+    filepath_ftcvP2 = datadir + '/' + 'fluxtubecellsP2.dat'
+    ftcv = dh.ReadGAIntegerArrayFile(filepath_ftcv)
+    ftcvP1 = dh.ReadGAIntegerArrayFile(filepath_ftcv1)
+    ftcvP2 = dh.ReadGAIntegerArrayFile(filepath_ftcvP2)
 
+    # Plot the grid
+    plotter.PlotGridCellsFtCv(grid_ft, ftcv, ftcvP1, ftcvP2, 3)
+except :
+    print('No fluxtube grid found')
+
+# Reading triangulated grid
+#--------------------------
+#try :
+filepath = datadir + '/' + trianglefile
+tria_in = dh.ReadTriaGrid(filepath)
+
+print((min(tria_in.vert.x)))
+print((min(tria_in.vert.y)))
+
+print('Before GA')
+print('---------')
+print('Total number of cells : ' + str(tria_in.cell.ntot))
+print('Total number of vertices: ' + str(tria_in.vert.ntot))
+
+# Design
+#-------
 # Plot the grid
-plotter.PlotGridCellsFtCv(grid_ft, ftcv, ftcvP1, ftcvP2, 3)
+plotter.PlotTriaCells(tria_in,4)
+#except :
+#    print('No triangle grid found')
 
 # Legend
 #-------

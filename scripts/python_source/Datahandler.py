@@ -2320,8 +2320,11 @@ def ReadTriaGrid(filepath):
         if "ID, x, y" in alllines[i]:
             break 
         else: 
-            i = i + 1   
-                
+            i = i + 1  
+
+    # Skip header
+    i = i + 1
+
     # Start reading
     for j in np.arange(0, nv):
         values = alllines[i+j].split()
@@ -2332,6 +2335,9 @@ def ReadTriaGrid(filepath):
         tria.vert.ID[ID-1] = ID
         tria.vert.x[ID-1] = x[0]
         tria.vert.y[ID-1] = y[0] 
+        if x[0] == -1:
+            print('value of -1 found at')
+            print(ID)
 
     # Read in cell data
     #------------------
@@ -2376,6 +2382,9 @@ def ReadTriaGrid(filepath):
         tria.cell.vert[ID-1, 0] = v1[0] # Need to account for 0-based indexing
         tria.cell.vert[ID-1, 1] = v2[0]
         tria.cell.vert[ID-1, 2] = v3[0]
+
+    # Return
+    return tria
 
 
 #--------------------------------------------------------------------------#
