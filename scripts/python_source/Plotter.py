@@ -1464,6 +1464,37 @@ def PlotGridTopologicalData(grid, fignum):
         for i in np.arange(0, grid.topodata.ndiv, 1):
             tdivfaces = grid.topodata.GetDivFace(i)
             PlotPolygons2D(xf[tdivfaces-1], yf[tdivfaces-1], fignum, label='divertor target ' + str(i))
+
+# Grid generation data plotting: cells
+def PlotTriaCells(tria, fignum):
+    # Plot cells only
+
+    # Initialize plotting bounds
+    xb = [min(tria.vert.x), max(tria.vert.x)]
+    yb = [min(tria.vert.y), max(tria.vert.y)]
+
+    # Construct cell coordinates
+    xc = np.zeros(tria.cell.nvert + 2*tria.cell.ntot, dtype=float)
+    yc = np.zeros(tria.cell.nvert + 2*tria.cell.ntot, dtype=float)
+
+    counter = 0
+    for i in np.arange(0, tria.cell.ntot): 
+        tv = tria.cell.vert(i,:)
+        xc[counter:counter+3] = tria.vert.x[tv]
+        xc[counter+3] = tria.vert.x[tv[0]]
+        xc[counter+4] = np.NaN
+        yc[counter:counter+3] = tria.vert.y[tv]
+        yc[counter+3] = tria.vert.y[tv[0]]
+        yc[counter+4] = np.NaN
+
+        counter = counter + nvc + 2
+    
+    # Plot
+    PlotPolygons2D(xc, yc, fignum, color='k', marker='', linewidth=0.25)
+
+     # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+
 #--------------------------------------------------------------------------#
 #                             Shape Optimization                           #
 #--------------------------------------------------------------------------#
