@@ -331,10 +331,18 @@ module gamod_driver
         type(StateUDT), intent(in)          :: state
 
         ! Auxiliary
+        type(TriangulationUDT)              :: triangulation
 
         ! Pick aposteriori method - TODO
 
-        ! Interpolation - TODO
+        ! Interpolation
+        !==============
+        ! Triangulate
+        call grid%TriangulateGAGrid(triangulation)
+
+        ! Interpolate state to vertex positions
+
+        ! Construct interpolant
 
         ! Convert stacked triangle back to cutcells
         if (options%stacked_to_cutcell) &

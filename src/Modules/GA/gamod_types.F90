@@ -18,7 +18,8 @@ module gamod_types
     use mod_precision
     use mod_polygon
     use mod_dynamicarrays 
-    use mod_structured2Dgridding   
+    use mod_structured2Dgridding 
+    use mod_triangulation  
     use goatmod_types 
     use DistributionFunction
     use gamod_math
@@ -390,7 +391,6 @@ module gamod_types
         procedure :: MakeMergePent
         procedure :: MakeNewThreeFace
         procedure :: AdaptNeigThreeVert
-        procedure :: TransPentsToTrias
         procedure :: GetMergeFace
 
         ! Splitting 
@@ -432,6 +432,7 @@ module gamod_types
         procedure :: SplitT4BV
         procedure :: SplitT4P
         procedure :: SplitT4T
+        procedure :: SplitQT2
         procedure :: SplitFace
         procedure :: SplitTriaStacked
         procedure :: SplitCenterTria
@@ -491,6 +492,12 @@ module gamod_types
         procedure :: AddVert
         procedure :: AddFluxSurface
         procedure :: AddIntoExistingSurface
+
+        ! Triangulation
+        !==============
+        procedure :: TriangulateGAGrid
+        procedure :: TransQuadsToTria
+        procedure :: TransPentsToTrias
 
         ! Computing
         !===========
@@ -10265,39 +10272,6 @@ module gamod_types
 
     end subroutine
 
-    subroutine TransPentsToTrias(grid)
-
-        ! Description
-        !============
-        ! Transforms al remaining pentagonal cells into triangles
-
-        ! Declare variables
-        !==================
-        ! Argument
-        class(GAGridUDT), intent(inout) :: grid
-
-        ! Auxiliary
-        integer(I8) :: i
-        integer(I8), allocatable :: cv5(:), indcv(:)
-        logical, allocatable :: log(:)
-    
-      
-        ! Loop over the pentagons
-        do i = 1, count(grid%cell%faceP2%Get() == 5)
-
-                ! Get the pentagons
-                indcv = (/(i, i = 1, grid%cell%ntot)/)
-                log = [grid%cell%faceP2%Get()] == 5
-                allocate(cv5(count(log)))
-                cv5 = pack(indcv, log)
-
-                ! Do the transformation
-                if (size(cv5) /= 0) call grid%Merge5T3(cv5(1))
-
-        end do
-
-    end subroutine
-
     subroutine GetMergeFace(grid, cv, common_vert, cvlookup, fc)
 
         ! Description
@@ -14504,6 +14478,84 @@ module gamod_types
 
         ! Determine cflags
         cells = [cv1, cv2]
+        call grid%DetermineCflags(cells)
+
+        end associate
+
+    end subroutine
+
+    subroutine SplitQT2(grid, cv)
+
+        ! Description
+        !============
+        ! Transforming a quad into two triangles
+
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(inout) :: grid
+        integer(I8), intent(in)         :: cv
+
+        ! Auxiliary
+        integer(I8) :: i, f1, f2, vx1(2), vert1, vert2, vert3, verts2(2), f1n, cv1
+        integer(I8), allocatable, dimension(:) :: faces_cv, verts_cv, &
+            verts_cvF, query_faces, ind, ind_f2, verts_new1, verts_new2, faces_new1, faces_new2, f34, cells
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face &
+            )
+
+        ! Get faces and vertices
+        faces_cv = GetCellFaceGA(c, cv)
+        verts_cv = GetCellVertGA(c, cv)
+        if (size(faces_cv) /= 4) call gdErrorHandler('SplitQT2: something wrong')
+        verts_cvF = [f%vert1%Get(faces_cv), f%vert2%Get(faces_cv)]
+        query_faces = [(/ (i, i = 1, size(faces_cv))/), (/ (i, i = 1, size(faces_cv))/)]
+
+        ! Make first triangle
+        !--------------------
+        f1 = faces_cv(1)
+        vx1 = GetFaceVertGA(f, f1)
+        vert1 = vx1(1)
+        vert2 = vx1(2)
+        
+        ! Find next vertex
+        allocate(ind(count(verts_cvF == vert2)))
+        ind = pack(query_faces, verts_cvF == vert2)
+        allocate(ind_f2(count(ind /= 1)))
+        ind_f2 = pack(ind, ind /= 1)
+        f2 = faces_cv(ind_f2(1))
+
+        verts2 = GetFaceVertGA(f, f2)
+        vert3 = Pack2(verts2, verts2 /= vert2)
+
+        ! Make the new face of the first triangle
+        call grid%GetFaceNumber(vert1, vert3, 3, f1n)
+
+        ! Replace quad with this triangle
+        verts_new1 = [vert1, vert2, vert3]
+        faces_new1 = [f1, f2, f1n]
+
+        call c%ReplaceVerts(cv, verts_new1)
+        call c%ReplaceFaces(cv, faces_new1)
+
+        ! Make second triangle
+        !---------------------
+        allocate(f34(count(faces_cv /= f1 .and. faces_cv /= f2)))
+        f34 = pack(faces_cv, faces_cv /= f1 .and. faces_cv /= f2)
+        faces_new2 = [f34(1), f34(2), f1n]    
+        
+        allocate(verts_new2(count(verts_cv /= vert2)))
+        verts_new2 = pack(verts_cv, verts_cv /= vert2)
+
+        ! Add cell
+        call grid%AddCell(faces_new1, faces_new2, c%reg%Get(cv), cv1)
+
+        ! Post
+        cells = [cv, cv1]
         call grid%DetermineCflags(cells)
 
         end associate
@@ -18963,6 +19015,126 @@ module gamod_types
         end associate
 
     end subroutine
+
+    !------------------------------------------------------------------!
+    !                         TRIANGULATION                            !
+    !------------------------------------------------------------------! 
+
+    subroutine TriangulateGAGrid(grid, triangulation)
+
+        ! Description
+        !============
+        ! Triangulates a GAGrid by splitting all the quadrilateral
+        ! (and pentagon) in triangles.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)        :: grid
+        type(TriangulationUDT), intent(out) :: triangulation
+
+        ! Auxiliary
+        type(GAGridUDT) :: grid2
+        real(R8), allocatable :: xv(:), yv(:)
+        integer(I8), allocatable :: vertlist(:), vertP1(:), vertP2(:)
+
+        ! Copy over grid and options
+        grid2 = grid
+
+        ! Split in triangles
+        ! Pentagons
+        call grid2%TransPentsToTrias()
+
+        ! Quads
+        call grid2%TransQuadsToTria()
+
+        ! Triangulation
+        xv = grid2%vert%x%Get()
+        yv = grid2%vert%y%Get()
+        vertlist = grid2%cell%vert%Get()
+        vertP1 = grid2%cell%vertP1%Get()
+        vertP2 = grid2%cell%vertP2%Get()
+        call triangulation%Construct(xv, yv, vertlist, vertP1, vertP2)
+    
+
+    end subroutine
+
+    subroutine TransQuadsToTria(grid)
+
+        ! Description
+        !============
+        ! Transform all remaining quadrilateral into triangles
+
+        ! Declare variables
+        !==================
+        ! Argument
+        class(GAGridUDT), intent(inout) :: grid
+
+        ! Auxiliary 
+        integer(I8) :: i
+        integer(I8), allocatable :: cvQ(:), indcv(:)
+        logical :: is_ordered(grid%cell%ntot), cells(grid%cell%ntot)
+
+        ! Loop over the quad
+        indcv = (/(i, i = 1, grid%cell%ntot)/)
+        allocate(cvQ(count(grid%cell%vertP2%Get() == 4)))
+        cvQ = pack(indcv, grid%cell%vertP2%Get() == 4)
+
+        ! Reorder
+        cells = .true.
+        call grid%CheckVertOrder(is_ordered, cells)
+        call grid%ReorderCellConn(is_ordered)
+
+        ! Loop over the quads
+        do i = 1, size(cvQ)
+            call grid%SplitQT2(cvQ(i))
+        end do
+
+        ! Reordercell connectivity
+        cells = .true.
+        call grid%CheckVertOrder(is_ordered, cells)
+        call grid%ReorderCellConn(is_ordered)
+
+        ! Check
+        if (count(grid%cell%vertP2%Get() == 4) /= 0) call gdErrorHandler('TransQuadsToTria: Something wrong')
+        
+
+
+    end subroutine
+
+    subroutine TransPentsToTrias(grid)
+
+        ! Description
+        !============
+        ! Transforms al remaining pentagonal cells into triangles
+
+        ! Declare variables
+        !==================
+        ! Argument
+        class(GAGridUDT), intent(inout) :: grid
+
+        ! Auxiliary
+        integer(I8) :: i
+        integer(I8), allocatable :: cv5(:), indcv(:)
+        logical, allocatable :: log(:)
+    
+      
+        ! Loop over the pentagons
+        do i = 1, count(grid%cell%faceP2%Get() == 5)
+
+                ! Get the pentagons
+                indcv = (/(i, i = 1, grid%cell%ntot)/)
+                log = [grid%cell%faceP2%Get()] == 5
+                allocate(cv5(count(log)))
+                cv5 = pack(indcv, log)
+
+                ! Do the transformation
+                if (size(cv5) /= 0) call grid%Merge5T3(cv5(1))
+
+        end do
+
+    end subroutine    
+
 
     !------------------------------------------------------------------!
     !                         VISUALIZATION                            !
