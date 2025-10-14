@@ -92,7 +92,7 @@ module StructuredInterpolant2D
         ! - cellindex: nx-1 by ny-1 array containing the cell indices
         ! - n: number of terms in the interpolant
         ! - precomputedfac: the required factorials precomputed to save
-        ! - some time during evaluation
+        ! some time during evaluation
 
         character(:), allocatable       :: meth 
         integer(I8)                     :: C, M, n
