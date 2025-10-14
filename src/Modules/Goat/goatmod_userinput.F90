@@ -53,11 +53,14 @@ module goatmod_userinput
         ! - filepath: path towards the file where options are defined
         ! - gdfilepath: path towards the file where options for grid 
         ! deformation are defined
+        ! - readstate: logical to read state
+        ! - readstatemeth: method to read state, can be 'b2fstate' or 'b2fplasmf'
 
         ! Input filenames:
         ! - gridfilepath: file path to file with grid data (e.g. traduit.out.b2us file)
         ! - structurefilepath: structure.dat file to read
         ! - magneticfieldfilepath: magnetic field file to read
+        ! - statefilepath: state file to read
         ! - writefilepath: path where to write output traduit file
 
         ! Output options
@@ -428,6 +431,7 @@ module goatmod_userinput
         logical                     :: debug        
         logical                     :: vesselmode
         logical                     :: slab
+        logical                     :: readstate
 
         ! fcRegmappingGA
         integer(I8)                 :: fcRegmappingGA(1:7)
@@ -439,6 +443,8 @@ module goatmod_userinput
 
         ! Splitting
         logical                     :: XpointSplitting
+
+
 
 
     contains
@@ -1013,6 +1019,7 @@ module goatmod_userinput
         options%meth            = 'GD'
         options%gdinputfilepath = './GOAToptions.dat'
         options%readstate       = .false.
+        options%readstatemeth   = 'b2fplasmf'
 
         ! Specify input filenames
         if (solps) then 
@@ -1582,8 +1589,14 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%structurefilepath)
         field = 'goat.magneticfieldfilepath'
         call ExtractOptionValueCharacter(fid, field, options%magneticfieldfilepath)
+        field = 'goat.statefilepath'
+        call ExtractOptionValueCharacter(fid, field, options%statefilepath)
         field = 'goat.GDinputfilepath'
         call ExtractOptionValueCharacter(fid, field, options%gdinputfilepath)
+        field = 'goat.readstate'
+        call ExtractOptionValueLogical0D(fid, field, options%readstate)
+        field = 'goat.readstatemeth'
+        call ExtractOptionValueCharacter(fid, field, options%readstatemeth)
 
         ! Output options
         field = 'goat.writefilepath'

@@ -1321,8 +1321,13 @@ module goatmod_types
         real(R8), allocatable       :: fsdummyr(:) ! dummy array
         real(R8), allocatable       :: facedummy(:) ! dummy array
         integer(I8), allocatable       :: n2dummy(:) ! dummy array
-        integer(I8), allocatable       :: nxdummy(:) ! dummy array
-    
+        integer(I8), allocatable       :: nxdummy(:) ! dummy array        
+        real(R8), allocatable       :: vx(:), vy(:), vxbx(:), vxby(:), &
+            vffbz(:), vpsi(:)
+        integer(I8), allocatable    :: vfieldlineID(:), vface(:), &
+            vcell(:), vcell1(:), cellft(:), cellreg(:), &
+            ftcells(:), cellv(:), cellf(:)
+        logical, allocatable        :: vBV(:)
         integer(I8)                 :: n2,nx  ! legacy structured data
     
         integer(I8)                                 :: ngv, ngc 
@@ -1338,6 +1343,9 @@ module goatmod_types
         ! Loop
         integer(I8)                 :: i, j, k
         
+        ! Data
+        data filespec /60/
+        
         ! Read (inlucding guard cells)
         !=============================
         ! Open the file
@@ -1347,7 +1355,7 @@ module goatmod_types
         ! First, read the header with the version - just skip it...
         call ReadSingleLine(filespec, chardummy2, reachedeof)
         if (reachedeof) then 
-            call gdErrorHandler('ReadTraduitUS: reached EOF prematurely')
+            call gdErrorHandler('ReadB2fgmtryUS: reached EOF prematurely')
         end if 
     
         ! Primary array dimensions
@@ -1375,7 +1383,14 @@ module goatmod_types
     
         ! Allocate grid
         call AllocateGrid(grid)
-    
+
+        ! Allocate
+        allocate(grid%data%xpointID(0), grid%data%opointID(0), &
+                grid%data%spointID(0), grid%data%isprimaryxp(0), &
+                grid%data%divFcP(0, 2), grid%data%divFc(0), &
+                grid%data%spointdivID(0), grid%data%tpointdivID(0), &
+                grid%data%sepID(0))
+
         ! Check
         if (.not. allocated(grid%vert%face)) then 
             allocate(grid%vert%face(grid%vert%nface))
@@ -1531,14 +1546,29 @@ module goatmod_types
     
         ! Rebuild vertex fields
         grid%vert%ntot = grid%vert%ntot - ngv
-        grid%vert%x = pack(grid%vert%x, isnoghostvert)
-        grid%vert%y = pack(grid%vert%y, isnoghostvert)
-        grid%vert%fieldlineID = pack(grid%vert%fieldlineID, isnoghostvert)
-        grid%vert%bx = pack(grid%vert%bx, isnoghostvert)
-        grid%vert%by = pack(grid%vert%by, isnoghostvert)
-        grid%vert%BV = pack(grid%vert%BV, isnoghostvert)
-        grid%vert%ffbz = pack(grid%vert%ffbz, isnoghostvert)
-        grid%vert%psi = pack(grid%vert%psi, isnoghostvert)
+        vx = grid%vert%x
+        vy = grid%vert%y
+        vfieldlineID = grid%vert%fieldlineID
+        vxbx = grid%vert%bx
+        vxby = grid%vert%by
+        vBV = grid%vert%BV
+        vffbz = grid%vert%ffbz
+        vpsi = grid%vert%psi
+        deallocate(grid%vert%x, grid%vert%y, grid%vert%fieldlineID, grid%vert%bx, &
+        grid%vert%by, grid%vert%BV, grid%vert%ffbz, grid%vert%psi)
+        allocate(grid%vert%x(grid%vert%ntot), grid%vert%y(grid%vert%ntot), &
+        grid%vert%fieldlineID(grid%vert%ntot), grid%vert%bx(grid%vert%ntot), &
+        grid%vert%by(grid%vert%ntot), grid%vert%BV(grid%vert%ntot), &
+        grid%vert%ffbz(grid%vert%ntot), grid%vert%psi(grid%vert%ntot))
+
+        grid%vert%x = pack(vx, isnoghostvert)
+        grid%vert%y = pack(vy, isnoghostvert)
+        grid%vert%fieldlineID = pack(vfieldlineID, isnoghostvert)
+        grid%vert%bx = pack(vxbx, isnoghostvert)
+        grid%vert%by = pack(vxby, isnoghostvert)
+        grid%vert%BV = pack(vBV, isnoghostvert)
+        grid%vert%ffbz = pack(vffbz, isnoghostvert)
+        grid%vert%psi = pack(vpsi, isnoghostvert)
         if (allocated(grid%vert%neigP)) then 
             deallocate(grid%vert%neigP)
             allocate(grid%vert%neigP(grid%vert%ntot, 2))
@@ -1589,8 +1619,12 @@ module goatmod_types
             grid%vert%faceP(i, 1) = grid%vert%faceP(i-1, 1) + grid%vert%faceP(i-1, 2)
             grid%vert%cellP(i, 1) = grid%vert%cellP(i-1, 1) + grid%vert%cellP(i-1, 2)
         end do 
-        grid%vert%face = pack(grid%vert%face, keepvertface)
-        grid%vert%cell = pack(grid%vert%cell, keepvertcell)
+        vface = grid%vert%face
+        vcell = grid%vert%cell
+        deallocate(grid%vert%face, grid%vert%cell)
+        allocate(grid%vert%face(count(keepvertface)), grid%vert%cell(count(keepvertcell)))
+        grid%vert%face = pack(vface, keepvertface)
+        grid%vert%cell = pack(vcell, keepvertcell)
         grid%vert%nface = size(grid%vert%face)
         grid%vert%ncell = size(grid%vert%cell)
     
@@ -1618,24 +1652,33 @@ module goatmod_types
         end do
     
         ! Rebuild vertex fields
-        grid%vert%cell = pack(grid%vert%cell, isnoguardcell(grid%vert%cell))
+        vcell1 = grid%vert%cell
+        deallocate(grid%vert%cell)
+        allocate(grid%vert%cell(count(isnoguardcell(vcell1))))
+        grid%vert%cell = pack(vcell1, isnoguardcell(vcell1))
         grid%vert%cell = cellmap(grid%vert%cell)
     
         ! Rebuild face fields (nothing to be done)
     
         ! Rebuild cell fields
         grid%cell%ntot = grid%cell%ntot - ngc 
-        grid%cell%ft = pack(grid%cell%ft, isnoguardcell)
-        grid%cell%reg = pack(grid%cell%reg, isnoguardcell)
+        cellft = grid%cell%ft
+        cellreg = grid%cell%reg
+        deallocate(grid%cell%ft, grid%cell%reg)
+        allocate(grid%cell%ft(count(isnoguardcell)), grid%cell%reg(count(isnoguardcell)))
+        grid%cell%ft = pack(cellft, isnoguardcell)
+        grid%cell%reg = pack(cellreg, isnoguardcell)
         
         ! Rebuild flux tube data
+        ftcells = grid%data%fluxdata%fluxtubecells
+        deallocate(grid%data%fluxdata%fluxtubecells)
+        allocate(grid%data%fluxdata%fluxtubecells(count(ftcells /= 0)))
+        grid%data%fluxdata%fluxtubecells = pack(ftcells, ftcells /= 0)        
         grid%data%fluxdata%fluxtubecells = cellmap(grid%data%fluxdata%fluxtubecells)
         do i = 1, grid%data%fluxdata%nft 
             tftc = GetFTCell(grid%data%fluxdata, i)
             grid%data%fluxdata%fluxtubecellsP(i, 2) = grid%data%fluxdata%fluxtubecellsP(i, 2) - count(tftc == 0)
         end do 
-        grid%data%fluxdata%fluxtubecells = &
-            pack(grid%data%fluxdata%fluxtubecells, grid%data%fluxdata%fluxtubecells /= 0)
         grid%data%fluxdata%fluxtubecellsP(1, 1) = 1
         grid%data%fluxdata%fluxtubefacesP(1, 1) = 1 ! hedge for junk here from input
         do i = 2, grid%data%fluxdata%nft 
@@ -1672,8 +1715,12 @@ module goatmod_types
             grid%cell%faceP(i, 1) = grid%cell%faceP(i-1, 1) + grid%cell%faceP(i-1, 2)
             grid%cell%vertP(i, 1) = grid%cell%vertP(i-1, 1) + grid%cell%vertP(i-1, 2)
         end do 
-        grid%cell%face = pack(grid%cell%face, keepcellface)
-        grid%cell%vert = pack(grid%cell%vert, keepcellvert)
+        cellf = grid%cell%face
+        cellv = grid%cell%vert
+        deallocate(grid%cell%face, grid%cell%vert)
+        allocate(grid%cell%face(count(keepcellface)), grid%cell%vert(count(keepcellvert)))
+        grid%cell%face = pack(cellf, keepcellface)
+        grid%cell%vert = pack(cellv, keepcellvert)
         grid%cell%nface = size(grid%cell%face)
         grid%cell%nvert = size(grid%cell%vert)
     
@@ -4784,7 +4831,7 @@ module goatmod_types
 
             ! State variables
             state%nc = nc
-            state%nf = 0
+            state%nf = nf
             state%ns = ns
             allocate(state%na(nc, ns))
             allocate(state%ne(nc))
@@ -4830,7 +4877,7 @@ module goatmod_types
         end if
     end subroutine
     ! Main reader
-    subroutine ReadState(state, options)
+    subroutine ReadState(state, options, nc)
 
         ! Description
         !============
@@ -4840,6 +4887,7 @@ module goatmod_types
         !==================
         type(StateUDT)                  :: state
         type(GoatoptionsUDT)            :: options 
+        integer(I8)                     :: nc
         
         ! Loop variables
     
@@ -4855,13 +4903,13 @@ module goatmod_types
 
             case ('b2fstate')
 
-                ! Read b2fstate file - TODO
-                call ReadB2fstate(state, options%statefilepath)
+                ! Read b2fstate file
+                call ReadB2fstate(state, options%statefilepath, nc)
 
             case ('b2fplasmf')
 
-                ! Read b2fplasmf file - TODO
-                call ReadB2fplasmf(state, options%statefilepath)
+                ! Read b2fplasmf file
+                call ReadB2fplasmf(state, options%statefilepath, nc)
 
             case default
 
@@ -4870,12 +4918,14 @@ module goatmod_types
 
             end select
 
+
+
         end if
 
     end subroutine
 
     ! Specific readers
-    subroutine ReadB2fstate(state, filepath)
+    subroutine ReadB2fstate(state, filepath, nctot)
 
         ! Description
         !============
@@ -4886,6 +4936,7 @@ module goatmod_types
         ! Arguments
         type(StateUDT), intent(inout)   :: state
         character(:), allocatable       :: filepath    
+        integer(I8)                     :: nctot
 
         ! Auxiliary
         integer(I8) :: nc, nf, ns, filespec, idum(0:9)
@@ -4960,7 +5011,7 @@ module goatmod_types
 
     end subroutine
 
-    subroutine ReadB2fplasmf(state, filepath)
+    subroutine ReadB2fplasmf(state, filepath, nctot)
 
         ! Description
         !============
@@ -4969,8 +5020,9 @@ module goatmod_types
         ! Declare variables
         !==================
         ! Arguments
-        type(StateUDT), intent(inout) :: state
+        type(StateUDT), intent(inout)   :: state
         character(:), allocatable       :: filepath 
+        integer(I8)                     :: nctot
 
         ! Auxiliary
         integer(I8) :: nc, nf, ns, filespec, idum(0:9)
@@ -5031,6 +5083,8 @@ module goatmod_types
             call cfrure(filespec, nc,       state%kt, 'kt')
             call cfrure(filespec, nc,       state%zt, 'zt')
 
+            ! Remove guard cells data, convention at the end of array - TODO
+
         end if   
         
         ! Read residuals
@@ -5043,6 +5097,7 @@ module goatmod_types
         else
 
             ! Found, read residuals
+            backspace(filespec)            
             call cfrure(filespec, nc*ns,    state%resco, 'resco')
             call cfrure(filespec, nc,       state%reshe, 'reshe')
             call cfrure(filespec, nc,       state%reshi, 'reshi')
@@ -5052,7 +5107,9 @@ module goatmod_types
             call cfrure(filespec, nc,       state%respo, 'respo')
             call cfrure(filespec, nc,       state%reskt, 'reskt')
             call cfrure(filespec, nc,       state%reszt, 'reszt')
-            
+
+            ! Remove guard cells data, convention at the end of array - TODO
+                        
         endif
 
         ! Housekeeping
@@ -7554,7 +7611,7 @@ module goatmod_types
         call ReadMagneticField(magneticField, mfoptions, options%magneticfieldfilepath)
 
         ! Read state
-        call ReadState(state, options)
+        call ReadState(state, options, grid%cell%ntot)
     
         ! Read additional data
         !=====================

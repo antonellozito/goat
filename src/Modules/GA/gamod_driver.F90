@@ -346,6 +346,7 @@ module gamod_driver
 
         ! Construct interpolant
 
+
         ! Convert stacked triangle back to cutcells
         if (options%stacked_to_cutcell) &
             call grid%StackedToCutcell(magneticField, options)
@@ -685,6 +686,7 @@ module gamod_driver
         gaoptions%OMP_z                 = goatoptions%OMP_z
         gaoptions%IMP_r                 = goatoptions%IMP_r
         gaoptions%IMP_z                 = goatoptions%IMP_z
+        gaoptions%readstate             = goatoptions%readstate
 
     end subroutine
 
@@ -727,8 +729,10 @@ module gamod_driver
                 & 'ga.merging, ga.n_split, ga.rad_type, ga.pol_type, ga.merge_crit, ga.n_merge')
         end if
 
-        ! Vesselmode
-
+        ! Aposteriori
+        if (options%meth == 'aposteriori' .and. .not.options%readstate) then
+            call gdErrorHandler('CheckGAoptions: to do aposteriori GA, a state need to read in')
+        end if
 
 
     end subroutine
