@@ -5000,6 +5000,8 @@ module goatmod_types
             call cfrure(filespec, nc,       state%kt, 'kt')
             call cfrure(filespec, nc,       state%zt, 'zt')
 
+            ! Remove guard cells data, convention at the end of array - TODO
+            
         end if
 
         ! Read residuals
@@ -5083,8 +5085,6 @@ module goatmod_types
             call cfrure(filespec, nc,       state%kt, 'kt')
             call cfrure(filespec, nc,       state%zt, 'zt')
 
-            ! Remove guard cells data, convention at the end of array - TODO
-
         end if   
         
         ! Read residuals
@@ -5108,8 +5108,6 @@ module goatmod_types
             call cfrure(filespec, nc,       state%reskt, 'reskt')
             call cfrure(filespec, nc,       state%reszt, 'reszt')
 
-            ! Remove guard cells data, convention at the end of array - TODO
-                        
         endif
 
         ! Housekeeping
