@@ -4852,6 +4852,13 @@ module gdmod_constraints
             cc = cc + ngoatedges
         end if 
 
+        ! If we use the original length, overwrite
+        if (opt%useoriginallength) then 
+            dx = vert%x(constraints%edgevert(:, 2)) - vert%x(constraints%edgevert(:, 1))
+            dy = vert%y(constraints%edgevert(:, 2)) - vert%y(constraints%edgevert(:, 1))
+            constraints%d = sqrt(dx**2 + dy**2)
+        end if 
+
         ! Monitor
         do i = 1, constraints%nedges 
             ! Unpack for ease
