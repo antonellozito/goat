@@ -13,6 +13,8 @@ module gamod_driver
     ! Initialize
     !============
     ! Load modules
+    use mod_triangulation
+    use UnstructuredInterpolant2D
     use goatmod_types
     use goatmod_userinput
     use gamod_utility
@@ -98,9 +100,9 @@ module gamod_driver
 
         ! Variables
         integer(I8) :: i
-        integer(I8), allocatable, dimension(:) :: tv, cvLookUp
+        integer(I8), allocatable, dimension(:) :: tv, cvLookUp, indcv
         logical :: cells(grid%cell%ntot), is_ordered(grid%cell%ntot), &
-            use_nsep, use_sepID, start
+            use_nsep, use_sepID, start, b_flag(grid%face%ntot)
         character(:), allocatable :: base_func
 
 
@@ -111,6 +113,7 @@ module gamod_driver
             c  => grid%cell, &
             v  => grid%vert &
             )
+
         ! Recompute cell centers
         do i = 1, c%ntot
             ! Get cell vertices
@@ -121,6 +124,11 @@ module gamod_driver
             call c%y%SetSingleElement(i,sum(v%y%Get(tv))/real(size(tv), kind=R8)) 
 
         end do
+
+        ! Determine cflags
+        b_flag = [grid%face%label%Get() /= 0]
+        indcv = (/(i, i = 1, c%ntot)/)
+        call grid%DetermineCflags(indcv, b_flag)
 
 
         ! Check order of vertices  (see GetGeo_usCouples.m)
@@ -325,14 +333,18 @@ module gamod_driver
         !==================
         ! Arguments
         type(GAGridUDT), intent(inout)      :: grid
-        type(GAoptionsUDT), intent(in)      :: options
+        type(GAoptionsUDT), intent(inout)   :: options
         type(EnvironmentUDT), intent(in)    :: environment
         type(MagneticFieldUDT), intent(in)  :: magneticField
         type(StateUDT), intent(in)          :: state
 
         ! Auxiliary
+        integer(I8) :: j, split_cv
         type(TriangulationUDT)              :: triangulation
         type(StateUDT)                      :: state_v
+        type(StateUDT)                      :: state_int
+        type(UnstructuredInterpolant2DUDT)  :: interp
+        type(QualityMetricUDT)              :: qm
 
         ! Pick aposteriori method - TODO
 
@@ -345,16 +357,73 @@ module gamod_driver
         call grid%InterpolateCvToVx(options, state, state_v)
 
         ! Construct interpolant
-
+        call interp%SetParametersUS(options%apost_interpolation_meth, 0, 1, triangulation)
 
         ! Convert stacked triangle back to cutcells
         if (options%stacked_to_cutcell) &
             call grid%StackedToCutcell(magneticField, options)
         
         ! Splitting
-        print *, 'Splitting: posteriori'
+        print *, 'Starting aposteriori splitting'
 
         ! Select cell to split
+        call grid%SelectSplitCellAposteriori(magneticField, options, interp, state, split_cv)
+
+        ! While a splitting cell is found
+        j = 0
+        do while (split_cv /= 0 .and. j .lt. options%n_split)
+
+            if (options%debug) print *, 'Cell: ', split_cv
+
+            call grid%Splitting(split_cv, options, magneticField)
+
+            if (.not.options%slab) call grid%RecalcMagn(magneticField)
+
+            ! Update counter
+            j = j + 1
+
+            ! Printing 
+            print *, 'Aposteriori splitting: ', j
+
+            ! Check grid
+            if (options%debug) call grid%CheckUnstructuredGrid()
+
+            if (options%splittype == 'rad') then
+
+                ! Remove small triangle which were possibly created
+                ! Calculate quality metric
+                call qm%CalculateQualityMetrics(grid, options, magneticField, .false., .false.)
+
+                ! Remove Small triangles
+                if (options%rem_small_trias) then
+
+                    print *, 'Removing small triangles'
+                    call grid%RemoveSmallTriangle(magneticField, qm, options)
+                    print *, 'Ended removing small triangles'
+
+                    if (options%debug) call grid%CheckUnstructuredGrid()
+
+                end if
+
+            end if
+
+            ! Interpolant state on new grid (state = state_int)
+            call grid%InterpolateState(interp, state_v, options, state_int)
+
+            ! Select cell to split
+            call grid%SelectSplitCellAposteriori(magneticField, options, interp, state_int, split_cv)
+
+            
+        end do
+
+        ! Transform remaining pentagons into triangles
+        if (options%pents_to_tria) call grid%TransPentsToTrias()
+
+        ! Ordening not necessary probably
+
+        ! Display progress
+        print *, 'Ended aposteriori splitting'
+
 
     end subroutine
  
@@ -687,6 +756,7 @@ module gamod_driver
         gaoptions%IMP_r                 = goatoptions%IMP_r
         gaoptions%IMP_z                 = goatoptions%IMP_z
         gaoptions%readstate             = goatoptions%readstate
+        gaoptions%readstatemeth         = goatoptions%readstatemeth
 
     end subroutine
 
