@@ -617,6 +617,7 @@ module goatmod_types
         ! - tn:     neutral temperature
         ! - po:     potential
         ! - kt:     ??
+        ! - zt:     ??
 
         ! - resco:  residual of continuity equation
         ! - reshe:  residual of electron temperature equation
@@ -626,6 +627,7 @@ module goatmod_types
         ! - resmt:  residual of total momentum equation
         ! - respo:  residual of potential equation
         ! - reskt:  ??
+        ! - reszt:  ??
 
         ! State 
         integer(I8)                         :: nc, nf, ns
@@ -1498,8 +1500,7 @@ module goatmod_types
         elsewhere
             grid%face%aligned = 0
         end where
-    
-    
+
         ! vertex quantities - only keep coordinates (and ffbz)
         call cfrure (filespec, nv*4, vdummyr(:,1:4),   'vxBb')
         call cfrure (filespec, nv,   grid%vert%x,    'vxX')
@@ -1664,10 +1665,20 @@ module goatmod_types
         grid%cell%ntot = grid%cell%ntot - ngc 
         cellft = grid%cell%ft
         cellreg = grid%cell%reg
-        deallocate(grid%cell%ft, grid%cell%reg)
-        allocate(grid%cell%ft(count(isnoguardcell)), grid%cell%reg(count(isnoguardcell)))
+        deallocate(grid%cell%ft, grid%cell%reg, grid%cell%psi, grid%cell%bp, &
+            grid%cell%bt, grid%cell%x, grid%cell%y, grid%cell%cflags)
+        allocate(grid%cell%ft(count(isnoguardcell)), grid%cell%reg(count(isnoguardcell)), grid%cell%psi(grid%cell%ntot), &
+            grid%cell%bp(grid%cell%ntot), grid%cell%bt(grid%cell%ntot), grid%cell%x(grid%cell%ntot), grid%cell%y(grid%cell%ntot), &
+            grid%cell%cflags(grid%cell%ntot))
         grid%cell%ft = pack(cellft, isnoguardcell)
         grid%cell%reg = pack(cellreg, isnoguardcell)
+        grid%cell%psi = 0
+        grid%cell%bp = 0
+        grid%cell%bt = 0
+        grid%cell%x = 0
+        grid%cell%y = 0 
+        grid%cell%cflags = 0
+        
         
         ! Rebuild flux tube data
         ftcells = grid%data%fluxdata%fluxtubecells
