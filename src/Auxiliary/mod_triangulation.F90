@@ -13,6 +13,7 @@ module mod_triangulation
     ! Load modules
     use mod_precision
     use mod_errorhandler
+    use mod_gradient
 
     implicit none
 
@@ -27,9 +28,7 @@ module mod_triangulation
 
         ! Description
         !============
-        ! 
-
-        ! The triangulation type contains the following data
+        ! The triangulation type contains the following data describing a triangle mesh.
         ! - x, y    coordinates of the vertices (simple array)
         ! - cvert   connectivity of vertices to cells. The array has size
         !           (number of cells, 3). 
@@ -45,6 +44,25 @@ module mod_triangulation
 
         ! Visualization
         procedure :: Visualize          =>  VisualizeTriangulation
+
+    end type
+
+    type, extends(GradientReconstructionUDT) :: GradientReconstructionTriaUDT
+
+        ! Description
+        !============
+        ! Gradient reconstrunction implementation for triangulated grid
+
+    contains
+
+        ! Set parameters
+        procedure :: SetParameters      => SetParametersGRTria
+
+        ! Constructor
+        procedure :: Construct          => ConstructGRTria
+
+        ! Evaluate
+        procedure :: Evaluate           => EvaluateGRTria
 
     end type
 
@@ -170,6 +188,59 @@ module mod_triangulation
 
         ! Housekeeping
         close(fu)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                     GRADIENT RECONSTRUCTION                      !
+    !------------------------------------------------------------------!    
+
+        subroutine SetParametersGRTria(GR, type1, type2, meth)
+
+        ! Description
+        !============
+        ! Set parameters for gradient reconstruction
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GradientReconstructionTriaUDT)  :: GR
+        character(:), allocatable           :: type1, type2, meth
+
+        GR%type1 = type1
+        GR%type2 = type2
+        GR%meth = meth
+
+    end subroutine
+
+    subroutine ConstructGRTria(GR)
+
+        ! Description
+        !============
+        ! Constructor 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GradientReconstructionTriaUDT) :: GR
+
+        call gdErrorHandler('ConstructGRTria: not implemented yet')
+
+    end subroutine
+
+    subroutine EvaluateGRTria(GR, v)
+
+        ! Description
+        !============
+        ! Evaluator
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GradientReconstructionTriaUDT) :: GR
+        real(R8), intent(in)               :: v(:)
+
+        call gdErrorHandler('EvaluateGRTria: not implemented yet')
 
     end subroutine
 
