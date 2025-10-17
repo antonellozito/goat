@@ -58,7 +58,7 @@ module UnstructuredInterpolant2D
     contains
 
         ! Parameter setter routine
-        procedure :: SetParameters 
+        procedure :: SetParametersUS 
 
         ! Construct based on structured data
         procedure :: ConstructStructured => ConstructUSI2DS
@@ -67,18 +67,22 @@ module UnstructuredInterpolant2D
         procedure :: ConstructUnstructured => ConstructUSI2DUS
 
         ! Evaluator
-        procedure :: Evaluate   => EvaluateUnstructuredInterpolant2D           
+        procedure :: Evaluate   => EvaluateUnstructuredInterpolant2D  
+        procedure :: EvaluateWrapper         
 
     end type
 
     contains
 
     ! Set parameters
-    subroutine SetParameters(interp, meth, C, M, triangulation)
+    subroutine SetParametersUS(interp, meth, C, M, triangulation)
 
         ! Description
         !============
         ! Set the parameters of the interpolation routine
+        ! - C:    desired continuity of the interpolant 
+        ! - M:    order of the interpolant describing the values 
+        !               at the grid nodes
 
         ! Declare variables
         !==================
@@ -105,7 +109,7 @@ module UnstructuredInterpolant2D
         !==================
         ! Arguments
         class(UnstructuredInterpolant2DUDT)       :: interp
-        real(R8), allocatable                   :: xg(:), yg(:), v(:, :)
+        real(R8), allocatable                     :: xg(:), yg(:), v(:, :)
 
         ! Currently, no implementation yet
         call gdErrorHandler('Structured initialization of 2D unstructured interpolant not implemented')
@@ -151,9 +155,8 @@ module UnstructuredInterpolant2D
 
         ! Description
         !============
-        ! We build the interpolant based on the unstructured data by doing
-        ! the following steps:
-        !
+        ! We build the interpolant based. For the Barycentric it is
+        ! just saving the field information in the vertices.
 
         ! Declare variables
         !==================
@@ -163,6 +166,9 @@ module UnstructuredInterpolant2D
         real(R8), intent(out)                   :: v(:)
 
         ! Checks
+        if (interp%C /= 0) &
+            call gdErrorHandler('ConstructUSI2DUSBarycentric:')
+
         if (size(xg, 1) /= size(yg, 1)) &
             call gdErrorHandler('ConstructUSI2DUSBarycentric: size of xg and yg incompatible')
         if (size(xg) /= size(v)) &
@@ -218,6 +224,10 @@ module UnstructuredInterpolant2D
 
             ! TODO
 
+        case default
+
+            call gdErrorHandler('EvaluateStructuredInterpolant2D: methode not implemented')
+            
         end select
 
 
@@ -281,7 +291,7 @@ module UnstructuredInterpolant2D
 
             else if (interp%allowextrapolation) then
 
-                ! Not triangle found, some extrapolation needed
+                ! No triangle found, some extrapolation needed
                 ! Find nearest value point
                 dist = sqrt((vx - xq(i))**2 + (vy - yq(i))**2)
                 ind = minloc(dist, 1)
@@ -298,12 +308,38 @@ module UnstructuredInterpolant2D
         end do      
         
     end subroutine
+
+    subroutine EvaluateWrapper(interp, v, xq, yq, derivx, derivy, vq)
+
+        ! Description
+        !============
+        ! Wrapper for Construction and Evaluation
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(UnstructuredInterpolant2DUDT)     :: interp 
+        real(R8), intent(in)                    :: v(:)
+        real(R8), intent(in)                    :: xq(:), yq(:)
+        integer(I8), intent(in)                 :: derivx, derivy
+        real(R8), intent(out)                   :: vq(:)
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:) :: vg, xg, yg
+
+        vg = v
+        xg = interp%triangulation%x
+        yg = interp%triangulation%y
+        call interp%ConstructUnstructured(xg, yg, vg)
+        call interp%Evaluate(xq, yq, derivx, derivy, vq)
+
+    end subroutine
         
     subroutine DeallocateUnstructuredInterpolant2D(interp)
 
         ! Description
         !============
-        ! Deallocate a fully unstructured interpolatino
+        ! Deallocate a fully unstructured interpolation
         class(UnstructuredInterpolant2DUDT) :: interp
 
         ! TODO
