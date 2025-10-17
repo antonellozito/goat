@@ -25,6 +25,7 @@ module goatmod_types
     use mod_inputfileparser
     use mod_plotter
     use mod_dynamicarrays
+    use mod_sort, only: Unique
     use Interpolant
     use PolygonShapeFunction
     use PolygonLevelsetFunction2D
@@ -4942,7 +4943,7 @@ module goatmod_types
         integer(I8)                         :: nvp, cc, nexcl, nTP, tne, &
             vID, tl, flag
         integer(I8), allocatable            :: tv(:), templabels(:, :), &
-            vesselIDmap(:)
+            vesselIDmap(:), uniquelabels(:)
         real(R8), allocatable               :: tempx(:), &
             tempy(:), tx(:), ty(:), xp(:), yp(:), tvx(:), tvy(:), tnxp(:), &
             tnyp(:), tnnp(:), tnx(:), tny(:), tnn(:)
@@ -5145,10 +5146,28 @@ module goatmod_types
     
                     ! Assign labels
                     tp%labels(tv(ks+1:ke-1), 1) = tl 
-    
+
                     ! Housekeeping
                     end associate
                 end do 
+
+                ! Check level - should be the same everywhere (if any value
+                ! is a non-zero value, )
+                if (any(tp%labels(:, 4) /= 0)) then 
+                    ! Get all unique labels
+                    call Unique(tp%labels(:, 4), uniquelabels)
+
+                    ! Sanity check: only one non-zero value should be found
+                    if (count(uniquelabels /= 0) > 1) then
+                        call gdErrorHandler('ExtractVesselData: polygon ' // & 
+                            'has multiple levels assigned after refinement, ' // & 
+                            'this should not happen.')
+                    end if 
+
+                    ! Get that value and assign label to all vertices
+                    uniquelabels = pack(uniquelabels, uniquelabels /= 0)
+                    tp%labels(:, 4) = uniquelabels(1)
+                end if 
             
                 ! Housekeeping
                 end associate
@@ -5190,6 +5209,8 @@ module goatmod_types
             ! Housekeeping
             end associate 
         end do
+
+        
     
     
         ! Target polygon representation
@@ -5339,6 +5360,11 @@ module goatmod_types
         call InitializePolygonLevelsetFunction2D(vessel%plfvessel, vessel%polygonset, plfoptions)
         call InitializePolygonLevelsetFunction2D(vessel%plftarget, vessel%targetps, plfoptions)
         call vessel%exactplfvessel%Initialize(vessel%polygonset)
+
+        ! Write
+        call vessel%exactplfvessel%VisualizeLabel('levelset_label_1', labelindin=1)
+        call vessel%exactplfvessel%VisualizeLabel('levelset_label_3', labelindin=3)
+        call vessel%exactplfvessel%VisualizeLabel('levelset_label_4', labelindin=4)
     
         end associate 
     
