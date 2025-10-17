@@ -17,11 +17,13 @@ module gamod_types
     use mod_sort   
     use mod_precision
     use mod_polygon
-    use mod_dynamicarrays 
+    use mod_dynamicarrays
+    use mod_gradient 
     use mod_structured2Dgridding 
     use mod_triangulation  
     use goatmod_types 
     use DistributionFunction
+    use UnstructuredInterpolant2D
     use gamod_math
 
 
@@ -62,6 +64,25 @@ module gamod_types
         procedure :: SelectSplitCell
 
     end type 
+
+    type, extends(GradientReconstructionUDT) :: GradientReconstructionGAUDT
+
+        ! Description
+        !============
+        ! Gradient reconstrunction implementation for GAgrid
+
+    contains
+
+        ! Set parameters
+        procedure :: SetParameters      => SetParametersGRGA
+
+        ! Constructor
+        procedure :: Construct          => ConstructGRGA
+
+        ! Evaluate
+        procedure :: Evaluate           => EvaluateGRGA
+
+    end type
     
     ! Vertex structure
     type GAVertexUDT
@@ -503,10 +524,15 @@ module gamod_types
         !==============
         procedure :: InterpolateCvToVx
 
+        ! Aposteriori
+        procedure :: SelectSplitCellAposteriori
+        procedure :: InterpolateState
+
         ! Computing
         !===========
         procedure :: CalcHpol0D
-        generic   :: CalcHpol => CalcHpol0D  
+        procedure :: CalcHpol1D
+        generic   :: CalcHpol => CalcHpol0D, CalcHpol1D  
         procedure :: CalcHrad0D
         procedure :: CalcHrad1D
         generic   :: CalcHrad => CalcHrad0D, CalcHrad1D         
@@ -2257,6 +2283,58 @@ module gamod_types
         
     end function
 
+    !------------------------------------------------------------------!
+    !                     GRADIENT RECONSTRUCTION                      !
+    !------------------------------------------------------------------! 
+
+    subroutine SetParametersGRGA(GR, type1, type2, meth)
+
+        ! Description
+        !============
+        ! Set parameters for gradient reconstruction
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GradientReconstructionGAUDT)  :: GR
+        character(:), allocatable           :: type1, type2, meth
+
+        GR%type1 = type1
+        GR%type2 = type2
+        GR%meth = meth
+
+    end subroutine
+
+    subroutine ConstructGRGA(GR)
+
+        ! Description
+        !============
+        ! Constructor 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GradientReconstructionGAUDT) :: GR
+
+        call gdErrorHandler('ConstructGRGA: not implemented yet')
+
+    end subroutine
+
+    subroutine EvaluateGRGA(GR, v)
+
+        ! Description
+        !============
+        ! Evaluator
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GradientReconstructionGAUDT) :: GR
+        real(R8), intent(in)               :: v(:)
+
+        call gdErrorHandler('EvaluateGRGA: not implemented yet')
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                        GAGRID ROUTINES                           !
@@ -2436,6 +2514,13 @@ module gamod_types
         GAv%ffbz        = gv%ffbz(1)
         GAv%ntot        = gv%ntot
 
+        ! Check sizes
+        if (GAv%x%Size() /= GAv%ntot .or. GAv%y%Size() /= GAv%ntot &
+            .or. GAv%bx%Size() /= GAv%ntot .or. GAv%by%Size() /= GAv%ntot &
+            .or. GAv%psi%Size() /= GAv%ntot) then
+                call gdErrorHandler('TranslateGridToGAgrid: length of vertex information array not correct')
+        end if 
+
         ! Face information
         GAf%vert1   = ConstructIntegerDynamicArrayBuffered(gf%vert(:,1))
         GAf%vert2   = ConstructIntegerDynamicArrayBuffered(gf%vert(:,2))
@@ -2443,6 +2528,14 @@ module gamod_types
         GAf%reg     = ConstructIntegerDynamicArrayBuffered(gf%reg)
         GAf%aligned = ConstructIntegerDynamicArrayBuffered(gf%aligned)
         GAf%ntot    = gf%ntot
+
+        ! Check sizes
+        if (GAf%vert1%Size() /= GAf%ntot .or. GAf%vert2%Size() /= GAf%ntot &
+            .or. GAf%label%Size() /= GAf%ntot .or. GAf%reg%Size() /= GAf%ntot &
+            .or. GAf%aligned%Size() /= GAf%ntot) then
+                call gdErrorHandler('TranslateGridToGAgrid: length of face information array not correct')
+        end if
+
 
         ! Cell information
         GAc%vertP1  = ConstructIntegerDynamicArrayBuffered(gc%vertP(:,1))
@@ -2460,6 +2553,16 @@ module gamod_types
         GAc%ngc     = gc%ngc
         GAc%nvert   = gc%nvert
         GAc%nface   = gc%nface
+
+        ! Check sizes
+        if (GAc%vertP1%Size() /= GAc%ntot .or. GAc%vertP2%Size() /= GAc%ntot &
+            .or. GAc%faceP1%Size() /= GAc%ntot .or. GAc%faceP2%Size() /= GAc%ntot &
+            .or. GAc%cflags%Size() /= GAc%ntot .or. GAc%reg%Size() /= GAc%ntot &
+            .or. GAc%psi%Size() /= GAc%ntot .or. GAc%x%Size() /= GAc%ntot &
+            .or. GAc%y%Size() /= GAc%ntot .or. GAc%vert%Size() /= GAc%nvert &
+            .or. GAc%face%Size() /= GAc%nface) then
+                call gdErrorHandler('TranslateGridToGAgrid: length of cell information array not correct')
+        end if
         
 
         ! Grid data - flux surface data
@@ -2476,7 +2579,16 @@ module gamod_types
         GAfd%fluxsurfacevertsP2 = ConstructIntegerDynamicArrayBuffered(gfd%fluxsurfacevertsP(:,2))
         GAfd%fluxsurfaceverts   = ConstructIntegerDynamicArrayBuffered()
         GAfd%nFs                = gfd%nFs
-        GAfd%nFt                = gfd%nFt            
+        GAfd%nFt                = gfd%nFt      
+        
+        ! Check sizes
+        if (size(GAgrid%data%xpointID) /= GAgrid%data%nxp .or. size(GAgrid%data%sepID) /=     GAgrid%data%nsep &
+            .or. GAfd%fluxsurfacefacesP1%Size() /= GAfd%nFs &
+            .or. GAfd%fluxsurfacefacesP2%Size() /= GAfd%nFs &
+             .or. GAfd%fluxsurfacevertsP1%Size() /= GAfd%nFs &
+            .or. GAfd%fluxsurfacevertsP2%Size() /= GAfd%nFs) then
+                call gdErrorHandler('TranslateGridToGAgrid: length of fluxsurface data incorrect')
+        end if 
 
 
         end associate
@@ -14545,6 +14657,7 @@ module gamod_types
 
         call c%ReplaceVerts(cv, verts_new1)
         call c%ReplaceFaces(cv, faces_new1)
+        call grid%CalcCentroidGA(cv)
 
         ! Make second triangle
         !---------------------
@@ -19062,9 +19175,7 @@ module gamod_types
 
         ! Visualize
         call triangulation%Visualize('tria')
-        call gdErrorHandler('test')
     
-
     end subroutine
 
     subroutine TransQuadsToTria(grid)
@@ -19297,6 +19408,206 @@ module gamod_types
 
 
         end associate
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                          APOSTERIORI                             !
+    !------------------------------------------------------------------!
+
+    subroutine SelectSplitCellAposteriori(grid, magneticField, options, interp, state_int, split_cv)
+
+        ! Description
+        !============
+        ! Select a cell to split based on simulation information, like states or residuals
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)                    :: grid
+        type(MagneticFieldUDT), intent(in)              :: magneticField
+        type(GAoptionsUDT), intent(inout)               :: options
+        type(UnstructuredInterpolant2DUDT), intent(in)  :: interp    
+        type(StateUDT), intent(in)                      :: state_int
+        integer(I8), intent(out)                        :: split_cv
+
+        ! Auxiliary
+        integer(I8) :: i
+        integer(I8), allocatable, dimension(:) :: indcv
+        real(R8), allocatable, dimension(:) :: h_pol, h_rad
+        
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        allocate(h_pol(c%ntot), h_rad(c%ntot))
+        indcv = (/(i, i = 1,c%ntot)/)
+
+        select case (options%apost_meth)
+        case ('grad')
+
+            ! Gradient based
+            ! Compute poloidal and radial length of all cells
+            call grid%CalcHpol(indcv, h_pol)
+            call grid%CalcHrad(indcv, h_rad)
+
+            ! Compute gradients
+            
+            !call gdErrorHandler('SelectSplitCellAposteriori: TODO')
+
+            ! Set splittype!!!
+            options%splittype = 'pol'
+            split_cv = 1
+
+
+
+        case default
+            call gdErrorHandler('SelectSplitCellAposteriori: options%apost_meth not implemented')
+        end select
+
+        end associate
+
+    end subroutine
+
+    subroutine InterpolateState(grid, interp, state_v, options, state_int)
+
+        ! Description
+        !============
+        ! Interpolate state to new grid
+        ! The inputs are:
+        ! - grid: newly made grid after certain operations
+        ! - interp: interpolant 
+        ! - state: state information on that interpolant (should be state information on vertices)
+        ! - state_int: interpolated state information on new grid
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)                    :: grid
+        type(UnstructuredInterpolant2DUDT), intent(in)  :: interp
+        type(StateUDT), intent(in)                      :: state_v
+        type(GAoptionsUDT), intent(in)                  :: options
+        type(StateUDT), intent(out)                     :: state_int
+
+        ! Auxiliary
+        integer(I8) :: is
+        real(R8), allocatable, dimension(:) :: statef, xq, yq
+        type(UnstructuredInterpolant2DUDT) :: interp2
+
+        ! Allocate state_int
+        call AllocateState(state_int, grid%cell%ntot, grid%face%ntot, state_v%ns)
+
+        ! Construct interpolants for every field
+        interp2 = interp
+        xq = grid%cell%x%Get()
+        yq = grid%cell%y%Get()
+
+        do is = 1, state_v%ns
+            if (options%apost_use_na) then
+                statef = state_v%na(:,is)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%na(:,is))
+            end if
+
+            if (options%apost_use_ua) then
+                statef = state_v%ua(:,is)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%ua(:,is))
+            end if
+        end do
+
+        if (options%apost_use_te) then
+            statef = state_v%te
+            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%te)
+        end if
+        if (options%apost_use_ti) then
+            statef = state_v%ti
+            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%ti)
+        end if
+        if (options%apost_use_tn) then
+            statef = state_v%tn
+            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%tn)
+        end if
+        if (options%apost_use_po) then
+            statef = state_v%po
+            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%po)
+        end if
+        if (options%apost_use_kt) then
+            statef = state_v%kt
+            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%kt)
+        end if
+        if (options%apost_use_zt) then
+            statef = state_v%zt
+            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%zt)
+        end if
+
+        ! Residuals if required
+        if (options%readstatemeth == 'b2fplasmf') then
+
+            do is = 1, state_v%ns
+                if (options%apost_use_resco) then
+                    statef = state_v%resco(:,is)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resco(:,is))
+                end if
+
+                if (options%apost_use_resmo) then
+                    statef = state_v%resmo(:,is)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resmo(:,is))
+                end if
+            end do
+
+            if (options%apost_use_resmt) then
+                statef = state_v%resmt
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%resmt)
+            end if
+            if (options%apost_use_reshe) then
+                statef = state_v%reshe
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshe)
+            end if
+            if (options%apost_use_reshi) then
+                statef = state_v%reshi
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshi)
+            end if
+            if (options%apost_use_reshn) then
+                statef = state_v%reshn
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshn)
+            end if
+            if (options%apost_use_respo) then
+                statef = state_v%respo
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%respo)
+            end if
+            if (options%apost_use_reskt) then
+                statef = state_v%reskt
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reskt)
+            end if
+            if (options%apost_use_reszt) then
+                statef = state_v%reszt
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reszt)
+            end if            
+        end if
+
+        ! Evaluate interpolant
+        
+
+
+    end subroutine
+
+    subroutine ConstructGradRecon(grid, magneticField)
+
+        ! Description
+        !============
+        ! Construct the stencil and extra information for gradient reconstruction
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in) :: grid
+        type(MagneticFieldUDT), intent(in) :: magneticField
+
+        ! Auxiliary
+
 
     end subroutine
 
@@ -20795,6 +21106,73 @@ module gamod_types
         end do
 
         h_pol = sqrt( (isx(2) - isx(1))**2 + (isy(2) - isy(1))**2)
+
+        end associate
+
+    end subroutine
+
+    subroutine CalcHpol1D(grid, ic, h_pol)
+
+        ! Description
+        !============
+        ! Calculate poloidal length of a cell. 
+        ! The poloidal length is defined as the distance between the two intersection
+        ! point of the mean psi line of the cell
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAGridUDT), intent(in)    :: grid
+        integer(I8), intent(in)         :: ic(:)
+        real(R8), intent(out)           :: h_pol(size(ic))
+
+        ! Auxiliary
+        integer(I8) :: ii, v1, v2, i, j
+        integer(I8), allocatable, dimension(:) :: vxs, fcs
+        real(R8) :: psic, v1p, v2p, isx(4), isy(4), t0
+
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize    
+        h_pol = 0
+        
+        ! Loop over cells
+        do j = 1, size(ic)
+
+            ! Get vertices
+            vxs = GetCellVertGA(c, ic(j))
+
+            ! mean psi
+            psic = 0.5_R8 * ( maxval(v%psi%Get(vxs)) + minval(v%psi%Get(vxs)))
+
+            ! Search faces intersections with psic
+            fcs = GetCellFaceGA(c, ic(j))
+            isx = 0
+            isy = 0
+            ii = 1
+            do i = 1, size(vxs)
+                v1 = f%vert1%Get(fcs(i))
+                v2 = f%vert2%Get(fcs(i))
+                v1p = v%psi%Get(v1)
+                v2p = v%psi%Get(v2)
+                if (psic .gt. min(v1p, v2p) &
+                    .and. psic .lt. max(v1p, v2p)) then
+                        t0 = (psic - v1p) / (v2p - v1p)
+                        isx(ii) = v%x%Get(v1) + t0 * (v%x%Get(v2) - v%x%Get(v1))
+                        isy(ii) = v%y%Get(v1) + t0 * (v%y%Get(v2) - v%y%Get(v1))
+                        ii = ii + 1 
+                end if
+            end do
+
+            h_pol(j) = sqrt( (isx(2) - isx(1))**2 + (isy(2) - isy(1))**2)
+
+        end do
 
         end associate
 
