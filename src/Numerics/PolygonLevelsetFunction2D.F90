@@ -247,6 +247,9 @@ module PolygonLevelsetFunction2D
         ! Evaluate
         procedure :: Evaluate       => EvaluatePLF2DClosedExact
         procedure :: EvaluateLabel  => EvaluatePLF2DClosedExactLabel
+        
+        ! Visualization of label 
+        procedure :: VisualizeLabel     => VisualizePolygonLevelsetFunctionLabelClosedExact
 
     end type
 
@@ -1927,6 +1930,92 @@ module PolygonLevelsetFunction2D
         end associate
 
     end subroutine
+
+    ! Visualization
+    subroutine VisualizePolygonLevelsetFunctionLabelClosedExact(plf, savefilepath, &
+        nxin, nyin, labelindin)
+
+    ! Description
+    !============
+    ! This routine provides a crude way of visualizing the 
+    ! levelset function by making a 2D patchplot on a structured 
+    ! grid. The extent is equal to the coordinate boundaries 
+    ! of the polygon set vertices, and the resolution in both 
+    ! directions is fixed and constant. 
+
+    ! Declare variables
+    !==================
+    ! Arguments
+    class(PolygonLevelsetFunction2DClosedExactUDT)      :: plf 
+    character(*), intent(in)                 :: savefilepath
+    integer(I8), intent(in), optional        :: nxin, nyin, labelindin
+    
+    ! Auxiliary
+    integer(I8)                         :: nx, ny, labelind
+    integer(I8), allocatable            :: vg(:, :)
+    real(R8), allocatable               :: xgv(:), ygv(:), xg(:), &
+        yg(:), xe(:, :), ye(:, :), vgr(:, :)
+    real(R8)                            :: xmin, ymin, xmax, ymax, &
+        offsetx, offsety, dx, dy, dxgv, dygv
+
+    ! Loop
+    integer(I8)                         :: k
+
+    ! Construct a 2D grid
+    !====================
+    ! Set mesh size
+    if (present(nxin)) then 
+        nx = nxin 
+    else 
+        nx = 200
+    end if 
+    if (present(nyin)) then 
+        ny = nyin 
+    else
+        ny = 200
+    end if 
+    if (present(labelindin)) then 
+        labelind = labelindin
+    else
+        labelind = 1
+    end if 
+
+    ! Allocate
+    allocate(xgv(nx), ygv(ny), xg(nx*ny), yg(nx*ny))
+
+    ! Set the gridding vectors
+    call plf%ps%GetEdges(xe, ye)
+    xmin = minval(xe)
+    xmax = maxval(xe)
+    ymin = minval(ye)
+    ymax = maxval(ye)
+
+    dx = (xmax - xmin) 
+    dy = (ymax - ymin)
+    
+    offsetx = 0.0*dx 
+    offsety = 0.0*dy 
+
+    dxgv = (dx + 2*offsetx)/nx 
+    dygv = (dy + 2*offsety)/ny 
+
+    xgv(:) = dxgv*[(k, k = 0, nx-1)] - offsetx + xmin
+    ygv(:) = dygv*[(k, k = 0, ny-1)] - offsety + ymin
+    
+    ! Construct
+    call Construct2DStructuredGrid(xgv, ygv, nx, ny, xg, yg)
+
+    ! Evaluate
+    !=========
+    ! Call evaluator
+    call plf%EvaluateLabel(xg, yg, vg)
+
+    ! Write data
+    !===========
+    vgr = vg*1.0_R8
+    call Write3DCoordinateData(xg, yg, vgr(:, labelind), savefilepath)
+
+end subroutine
 
 
     !------------------------------------------------------------------!
