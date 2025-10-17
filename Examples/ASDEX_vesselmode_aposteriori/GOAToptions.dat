@@ -344,7 +344,9 @@ VERSION 1.00.00
 'ga.plt_qm' '0'
 'ga.timing' '0'
 'ga.meth'   'aposteriori'
-'ga.meth_post' 'grad_po'
+'ga.apost_interpolation_meth' 'barycentric'
+'ga.apost_meth' 'grad'
+'ga.apost_use_na' '1'
 
 # GA operation options
 'ga.rem_small_trias' '1'
@@ -352,7 +354,7 @@ VERSION 1.00.00
 'ga.rem_tube_outershell_threshold' '1.5' 
 'ga.rem_stickout_trias' '1'
 'ga.rem_stickout_quad' '1'
-'ga.stacked_to_cutcell' '0'
+'ga.stacked_to_cutcell' '1'
 'ga.stacked_trias'   '1'
 'ga.merge_stacked_trias' '0'
 'ga.merge_trap_into_stacked' '0'
