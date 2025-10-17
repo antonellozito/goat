@@ -321,7 +321,10 @@ module goatmod_userinput
 
         ! Aposteriori adaptations
         ! - vxVol_style: style to interpolate from cell centers to vertices
-        ! The rest of the options are carried over from goatoptions or not changeable.
+        ! - apost_interpolation_meth: determines the interpolation method for interpolation, can be 'barycentric' or 'finite_element'
+        ! - apost_meth: method to chose a cell to refine, can be 'grad'
+        !   from read state and residual information to a newly adapted grid
+        ! The rest of the options are carried over from goatoptions or are not changeable.
 
         ! General adaptation options
         logical                     :: plt
@@ -424,6 +427,26 @@ module goatmod_userinput
 
         ! Aposteriori
         integer(I8)                 :: vxVol_style
+        character(:), allocatable   :: apost_interpolation_meth
+        character(:), allocatable   :: apost_meth
+        logical                     :: apost_use_na
+        logical                     :: apost_use_ua
+        logical                     :: apost_use_te
+        logical                     :: apost_use_ti
+        logical                     :: apost_use_tn
+        logical                     :: apost_use_po
+        logical                     :: apost_use_kt
+        logical                     :: apost_use_zt
+        logical                     :: apost_use_resco
+        logical                     :: apost_use_resmo
+        logical                     :: apost_use_resmt
+        logical                     :: apost_use_reshe
+        logical                     :: apost_use_reshi
+        logical                     :: apost_use_reshn
+        logical                     :: apost_use_respo
+        logical                     :: apost_use_reszt
+        logical                     :: apost_use_reskt
+
         
         
         ! Caried over from goatoptions
@@ -432,6 +455,7 @@ module goatmod_userinput
         logical                     :: vesselmode
         logical                     :: slab
         logical                     :: readstate
+        character(:), allocatable   :: readstatemeth    
 
         ! fcRegmappingGA
         integer(I8)                 :: fcRegmappingGA(1:7)
@@ -1174,6 +1198,25 @@ module goatmod_userinput
 
         ! Aposteriori
         options%vxVol_style                         = 2
+        options%apost_interpolation_meth            = 'barycentric'
+        options%apost_meth                          = 'grad'
+        options%apost_use_na                        = .false.
+        options%apost_use_ua                        = .false.
+        options%apost_use_te                        = .false.
+        options%apost_use_ti                        = .false.
+        options%apost_use_tn                        = .false.
+        options%apost_use_po                        = .false.
+        options%apost_use_kt                        = .false.
+        options%apost_use_zt                        = .false.
+        options%apost_use_resco                     = .false.
+        options%apost_use_resmo                     = .false.
+        options%apost_use_resmt                     = .false.
+        options%apost_use_reshe                     = .false.
+        options%apost_use_reshi                     = .false.
+        options%apost_use_reshn                     = .false.
+        options%apost_use_respo                     = .false.
+        options%apost_use_reszt                     = .false.
+        options%apost_use_reskt                     = .false.
 
     end subroutine
 
@@ -1904,6 +1947,44 @@ module goatmod_userinput
         !============
         field = 'ga.vxvol_style'
         call ExtractOptionValueInteger0D(fid, field, options%vxVol_style)
+        field = 'ga.apost_interpolation_meth'
+        call ExtractOptionValueCharacter(fid, field, options%apost_interpolation_meth)
+        field = 'ga.apost_meth'
+        call ExtractOptionValueCharacter(fid, field, options%apost_meth)
+        field = 'ga.apost_use_na'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_na)
+        field = 'ga.apost_use_ua'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_ua)
+        field = 'ga.apost_use_te'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_te)
+        field = 'ga.apost_use_ti'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_ti)
+        field = 'ga.apost_use_tn'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_tn)
+        field = 'ga.apost_use_po'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_po)
+        field = 'ga.apost_use_kt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_kt)
+        field = 'ga.apost_use_zt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_zt)
+        field = 'ga.apost_use_resco'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_resco)
+        field = 'ga.apost_use_resmo'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_resmo)
+        field = 'ga.apost_use_resmt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_resmt)
+        field = 'ga.apost_use_reshe'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reshe)
+        field = 'ga.apost_use_reshi'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reshi)
+        field = 'ga.apost_use_reshn'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reshn)
+        field = 'ga.apost_use_respo'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_respo)
+        field = 'ga.apost_use_reskt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reskt)
+        field = 'ga.apost_use_reszt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reszt)
 
         ! Housekeeping
         !=============
