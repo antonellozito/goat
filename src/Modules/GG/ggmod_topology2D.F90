@@ -10312,6 +10312,9 @@ module ggmod_topology2D
                 topomesh%vert%y(tpfv), temp)
             call Unique(temp(:, 4), polygonlevel)
             if (size(polygonlevel) > 1) then 
+                call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
+                call tmadaptor%vessel%exactplfvessel%VisualizeLabel('levelset_label_error_1', labelindin=1)
+                call tmadaptor%vessel%exactplfvessel%VisualizeLabel('levelset_label_error_1', labelindin=4)
                 call gdErrorHandler('GetTopomeshTubeCyclesTA: multiple polygon levels found, unexpected. ' // & 
                     'Check if polygon levelset function for vessel was correctly constructed, or ' // & 
                     'if vessel polygon parts are almost intersecting, which may cause this behavior.')
@@ -14846,10 +14849,9 @@ module ggmod_topology2D
                 tv1 = pack(tv1, vert%fsID(tv1) /= 0)
             end if 
             if ((size(tf2) + size(tv2)) == 0) then 
-                ! Should not happen
-                call WriteTopologicalMesh(topomesh, 'topomesh_error')
-                call gdErrorHandler('GetTMTubePsiLimits: tube has only aligned ' // &
-                    'boundary faces as neighbour at side 2, unexpected')
+                ! May happen in some cases
+                print *, ('warning: GetTMTubePsiLimits: tube has only aligned ' // &
+                'boundary faces as neighbour at side 2, including these to determine ')
                 tf2 = tube%GetBndFace(tubeID, 2)
                 tv2 = tube%GetBndVert(tubeID, 2)
                 tf2 = pack(tf2, (face%fsID(tf2) /= 0))
