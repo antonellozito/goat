@@ -2442,12 +2442,8 @@ module gamod_types
         GR%cNvP = cNvP   
         GR%invA = ATA(1:counter,:)
         
-        
-
         end associate
         
-        call gdErrorHandler('ConstructGRGA: not implemented yet')
-
     end subroutine
 
     subroutine EvaluateGRGA(GR, v)

@@ -14,6 +14,7 @@ module mod_triangulation
     use mod_precision
     use mod_errorhandler
     use mod_gradient
+    use mod_sort
 
     implicit none
 
@@ -195,7 +196,7 @@ module mod_triangulation
     !                     GRADIENT RECONSTRUCTION                      !
     !------------------------------------------------------------------!    
 
-        subroutine SetParametersGRTria(GR, type1, type2, meth)
+    subroutine SetParametersGRTria(GR, type1, type2, meth)
 
         ! Description
         !============
@@ -213,7 +214,7 @@ module mod_triangulation
 
     end subroutine
 
-    subroutine ConstructGRTria(GR)
+    subroutine ConstructGRTria(GR, tria)
 
         ! Description
         !============
@@ -222,9 +223,78 @@ module mod_triangulation
         ! Declare variables
         !==================
         ! Arguments
-        class(GradientReconstructionTriaUDT) :: GR
+        class(GradientReconstructionTriaUDT)    :: GR
+        type(TriangulationUDT), intent(in)      :: tria
 
-        call gdErrorHandler('ConstructGRTria: not implemented yet')
+        ! Auxiliary
+        integer(I8) :: iv, j, k, cNv(size(tria%x*20)), cNvP(size(tria%x),2), &
+        vxs(100), counterv, counter, tv(3)
+        integer(I8), allocatable :: cvs(:)
+        real(R8) :: ATA(size(tria%x)*20,2)
+        real(R8), allocatable :: ATA_loc(:,:), distx(:), disty(:)
+
+        ! Initialize
+        counter = 0
+        cNv = 0
+        cNvP = 0
+        select case (GR%type1)
+        case ('vert')
+
+            select case (GR%type2)
+            case ('vert')
+
+                    ! Loop over vertices
+                    do iv = 1, size(tria%x)
+
+                        vxs = 0
+                        counterv = 0
+
+                        ! Get cells
+                        cvs = GetVertCellTria(tria, iv)
+
+                        do j = 1, size(cvs)
+                            tv = tria%cvert(cvs(j),:)
+                            do k = 1, 3
+                                if (.not. any(tv(k) == vxs(1:counterv))) then
+                                    counterv = counterv + 1
+                                    vxs(counterv) = tv(k)
+                                end if
+                            end do
+
+                            ! Add to cNv
+                            cNvP(iv, 1) = counter + 1
+                            cNvP(iv, 2) = counterv
+                            cNv(counter+1:counter+counterv) = vxs(1:counterv)
+                            counter = counter + counterv
+
+                            ! Compute coefficients
+                            distx = tria%x(vxs(1:counterv)) - tria%x(iv)
+                            disty = tria%y(vxs(1:counterv)) - tria%y(iv)
+
+                            call ComputeATA2(distx, disty, ATA_loc)
+                            ATA(counter+1:counter+counterv,:) = ATA_loc
+                        end do 
+
+                    end do
+
+
+            case default
+
+                    call gdErrorHandler('ConstructGRTria: type1 == vert, type2 not implemented')
+
+            end select
+        
+        case default
+
+            call gdErrorHandler('ConstructGRTria: type1 not implemented')
+
+        end select
+
+        ! Save in GR type
+        GR%cNv = cNv(1:counter)
+        GR%cNvP = cNvP   
+        GR%invA = ATA(1:counter,:)
+
 
     end subroutine
 
@@ -243,5 +313,41 @@ module mod_triangulation
         call gdErrorHandler('EvaluateGRTria: not implemented yet')
 
     end subroutine
+
+    !==================================================================!
+    !                                                                  !
+    !                           FUNCTIONS                              !
+    !                                                                  !
+    !==================================================================!  
+    
+    ! Get cells of vertex
+    function GetVertCellTria(tria, iv) result(res)
+        type(TriangulationUDT) :: tria
+        integer(I8) :: iv, j, n1, n2, n3
+        integer(I8), allocatable :: indc(:), res(:), &
+            res1(:), res2(:), res3(:), res4(:), cv1(:), &
+            cv2(:), cv3(:)
+
+        cv1 = tria%cvert(:,1)
+        cv2 = tria%cvert(:,2)
+        cv3 = tria%cvert(:,3)
+
+        allocate(res1(count(cv1 == iv)))
+        allocate(res2(count(cv2 == iv)))
+        allocate(res3(count(cv3 == iv)))
+        indc = (/ (j, j = 1, size(cv1))/)
+        res1 = pack(indc,cv1 == iv)
+        res2 = pack(indc,cv2 == iv)
+        res3 = pack(indc,cv3 == iv)
+        n1 = size(res1)
+        n2 = size(res2)
+        n3 = size(res3)
+        allocate(res4(n1+n2+n3))
+        res4(1:n1) = res1 
+        res4(n1+1:n1+n2) = res2 
+        res4(n1+n2+1:n1+n2+n3) = res3 
+
+        call Unique(res4, res)
+    end function
 
 end module
