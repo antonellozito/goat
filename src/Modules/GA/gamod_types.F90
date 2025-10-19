@@ -2305,17 +2305,147 @@ module gamod_types
 
     end subroutine
 
-    subroutine ConstructGRGA(GR)
+    subroutine ConstructGRGA(GR, grid)
 
         ! Description
         !============
-        ! Constructor 
+        ! Construct information for gradient reconstruction such as the 
+        ! stencil and the coefficients.
 
         ! Declare variables
         !==================
         ! Arguments
-        class(GradientReconstructionGAUDT) :: GR
+        class(GradientReconstructionGAUDT)  :: GR
+        type(GAGridUDT), intent(in)         :: grid
 
+        ! Auxiliary
+        integer(I8) :: ic, j, k, counterc, cvs(100), counter, cNv(grid%cell%ntot*20), &
+        cNvP(grid%cell%ntot,2), vs(grid%face%ntot,2), ifc
+        integer(I8), allocatable, dimension(:) :: tv, cvLookup, cv
+        real(R8) :: ATA(grid%cell%ntot*20, 2)
+        real(R8), allocatable :: distx(:), disty(:), ATA_loc(:,:), fcX(:), fcY(:)
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+        ! Initialize
+        counter = 0
+        cNv = 0
+        cNvP = 0
+        cvLookup = GetcvLookUpGA(c)
+
+        select case (GR%type1)
+        case ('cell')
+            
+            select case (GR%type2)
+            case ('cell')
+
+                do ic = 1, c%ntot
+                    cvs = 0
+                    counterc = 0
+                    tv = GetCellVertGA(c, ic)
+                    do j = 1, size(tv)
+                        cv = GetVertCellGA(c, tv(j), cvLookUp)
+                        do k = 1, size(cv)
+                            if (.not.any(cv(k) == cvs(1:counterc))) then
+                                counterc = counterc + 1
+                                cvs(counterc) = cv(k)
+                            end if
+                        end do
+                    end do
+
+                    ! Add to cNv
+                    cNvP(ic, 1) = counter + 1
+                    cNvP(ic, 2) = counterc
+                    cNv(counter+1:counter+counterc) = cvs(1:counterc)
+                    counter = counter + counterc
+
+                    ! Compute coefficients
+                    distx = c%x%Get(cvs(1:counterc)) - c%x%Get(ic)
+                    disty = c%y%Get(cvs(1:counterc)) - c%y%Get(ic)
+
+                    call ComputeATA2(distx, disty, ATA_loc)
+                    ATA(counter+1:counter+counterc,:) = ATA_loc
+                
+                end do 
+
+
+
+            case ('vert')
+
+                call gdErrorHandler('ConstructGRGA: type1 == cell, type2 == vert not implemented')
+
+            case default
+
+                call gdErrorHandler('ConstructGRGA: type1 == cell, type2 not implemented')
+
+            end select
+           
+        case ('face')
+
+            select case (GR%type2)
+            case ('cell')
+
+                ! Initialize
+                vs(:,1) = f%vert1%Get()
+                vs(:,2) = f%vert2%Get()
+                fcX = 0.5_R8*(v%x%Get(vs(:,1))+v%x%Get(vs(:,1)))
+                fcY = 0.5_R8*(v%y%Get(vs(:,1))+v%y%Get(vs(:,2)))
+
+                do ifc = 1, f%ntot
+                    cvs = 0
+                    counterc = 0                    
+                    do j = 1, 2
+                        cv = GetVertCellGA(c, vs(ifc, j), cvLookup)
+                        do k = 1, size(cv)
+                            if (.not.any(cv(k) == cvs(1:counterc))) then
+                                counterc = counterc + 1
+                                cvs(counterc) = cv(k)
+                            end if
+                        end do
+                    end do
+
+                    ! Add to cNv
+                    cNvP(ifc, 1) = counter + 1
+                    cNvP(ifc, 2) = counterc
+                    cNv(counter+1:counter+counterc) = cvs(1:counterc)
+                    counter = counter + counterc
+
+                    ! Compute coefficients
+                    distx = c%x%Get(cvs(1:counterc)) - fcX(ifc)
+                    disty = c%y%Get(cvs(1:counterc)) - fcY(ifc)
+
+                    call ComputeATA3(distx, disty, ATA_loc)
+                    ATA(counter+1:counter+counterc,:) = ATA_loc
+
+                end do
+
+            case default
+
+                call gdErrorHandler('ConstructGRGA: type not implemented')
+
+            end select
+
+
+        case default
+
+                call gdErrorHandler('ConstructGRGA: type1 not implemented')
+
+        end select
+
+        ! Save in GR type
+        GR%cNv = cNv(1:counter)
+        GR%cNvP = cNvP   
+        GR%invA = ATA(1:counter,:)
+        
+        
+
+        end associate
+        
         call gdErrorHandler('ConstructGRGA: not implemented yet')
 
     end subroutine
@@ -2324,7 +2454,7 @@ module gamod_types
 
         ! Description
         !============
-        ! Evaluator
+        ! Evaluator: multiplying the coefficients with the field information.
 
         ! Declare variables
         !==================
