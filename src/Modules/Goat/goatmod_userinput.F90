@@ -323,7 +323,12 @@ module goatmod_userinput
         ! - vxVol_style: style to interpolate from cell centers to vertices
         ! - apost_interpolation_meth: determines the interpolation method for interpolation, can be 'barycentric' or 'finite_element'
         ! - apost_meth: method to chose a cell to refine, can be 'grad'
-        !   from read state and residual information to a newly adapted grid
+        !   from read state and residual information to a newly adapted grid, or 
+        !   can be 'res' to base the adaptation on residual information
+        ! - apost_use_XX: flag to indicate to use a certain state field to decide
+        !   which cells to split
+        ! - apost_lambda_threshold: threshold for length scale per cell width, if length scale 
+        !   per cell width is lower than the threshold, the cell is considered for refinement
         ! The rest of the options are carried over from goatoptions or are not changeable.
 
         ! General adaptation options
@@ -429,6 +434,7 @@ module goatmod_userinput
         integer(I8)                 :: vxVol_style
         character(:), allocatable   :: apost_interpolation_meth
         character(:), allocatable   :: apost_meth
+        real(R8)                    :: apost_lambda_threshold
         logical                     :: apost_use_na
         logical                     :: apost_use_ua
         logical                     :: apost_use_te
@@ -1200,6 +1206,7 @@ module goatmod_userinput
         options%vxVol_style                         = 2
         options%apost_interpolation_meth            = 'barycentric'
         options%apost_meth                          = 'grad'
+        options%apost_lambda_threshold              = 3
         options%apost_use_na                        = .false.
         options%apost_use_ua                        = .false.
         options%apost_use_te                        = .false.

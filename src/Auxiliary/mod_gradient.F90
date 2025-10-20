@@ -34,9 +34,7 @@ module mod_gradient
         !           connectivity type to compute gradients
         ! - type2: can be 'cell', 'face', 'vert' and indicates for which
         !           connectivity type to draw information for computation
-        ! - meth: can be TODO
-        ! - gradx, grady: the computed gradient in x- and y-direction 
-        ! - intv: interpolate field value 
+        ! - meth: can be TODO 
 
         character(:), allocatable   :: type1
         character(:), allocatable   :: type2
@@ -44,7 +42,6 @@ module mod_gradient
         integer(I8), allocatable    :: cNv(:), cNvP(:,:)
 
         real(R8), allocatable       :: invA(:,:)
-        real(R8), allocatable       :: gradx(:), grady(:), intv(:)
 
     contains
 
@@ -74,10 +71,11 @@ module mod_gradient
         !end subroutine
 
         ! Evaluate
-        subroutine EvaluateINT(GR, v)
+        subroutine EvaluateINT(GR, v, gradx, grady, intv)
             import :: GradientReconstructionUDT, R8
             class(GradientReconstructionUDT) :: GR
             real(R8), intent(in) :: v(:)
+            real(R8), allocatable, intent(out) :: gradx(:), grady(:), intv(:)
         end subroutine
 
     

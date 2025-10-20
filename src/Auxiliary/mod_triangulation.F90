@@ -300,7 +300,7 @@ module mod_triangulation
 
     end subroutine
 
-    subroutine EvaluateGRTria(GR, v)
+    subroutine EvaluateGRTria(GR, v, gradx, grady, intv)
 
         ! Description
         !============
@@ -311,11 +311,13 @@ module mod_triangulation
         ! Arguments
         class(GradientReconstructionTriaUDT) :: GR
         real(R8), intent(in)               :: v(:)
+        real(R8), intent(out), allocatable :: gradx(:), grady(:), intv(:)
 
         ! Auxiliary
         integer(I8) :: nv, iv, s, n
         integer(I8), allocatable :: vxs(:)
         real(R8), allocatable :: b(:), c(:), coef(:,:)
+        
 
         select case (GR%type1)
         case ('vert')
@@ -324,10 +326,11 @@ module mod_triangulation
             case ('vert')
 
                 nv = size(GR%cNvP,1)
-                allocate(GR%gradx(nv), GR%grady(nv), c(size(GR%invA,2)))
-                GR%gradx = 0
-                GR%grady = 0
                 if (size(v) /= nv) call gdErrorHandler('EvaluateGRGA: incompatible v')
+                allocate(gradx(nv), grady(nv), intv(nv), c(size(GR%invA,2)))
+                gradx = 0
+                grady = 0
+                intv = v
                 do iv = 1, nv
                     s = GR%cNvP(iv,1)
                     n = GR%cNvP(iv,2)
@@ -335,8 +338,8 @@ module mod_triangulation
                     coef = GR%invA(s:s+n-1,:)
                     b = v(vxs) - v(iv)
                     c = matmul(transpose(coef), b)
-                    GR%gradx(iv) = c(1)
-                    GR%grady(iv) = c(2)
+                    gradx(iv) = c(1)
+                    grady(iv) = c(2)
 
                 end do
             case default

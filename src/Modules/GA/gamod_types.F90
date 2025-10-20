@@ -525,8 +525,11 @@ module gamod_types
         procedure :: InterpolateCvToVx
 
         ! Aposteriori
+        !============
         procedure :: SelectSplitCellAposteriori
         procedure :: InterpolateState
+        procedure :: ComputeCvQeps
+        procedure :: ComputeLengthScale
 
         ! Computing
         !===========
@@ -2447,7 +2450,7 @@ module gamod_types
         
     end subroutine
 
-    subroutine EvaluateGRGA(GR, v)
+    subroutine EvaluateGRGA(GR, v, gradx, grady, intv)
 
         ! Description
         !============
@@ -2458,6 +2461,7 @@ module gamod_types
         ! Arguments
         class(GradientReconstructionGAUDT) :: GR
         real(R8), intent(in)               :: v(:)
+        real(R8), intent(out), allocatable :: gradx(:), grady(:), intv(:)
 
         ! Auxiliary
         integer(I8) :: ic, s, n, nc
@@ -2472,10 +2476,11 @@ module gamod_types
             case ('cell')
 
                 nc = size(GR%cNvP,1)
-                allocate(GR%gradx(nc), GR%grady(nc), c(size(GR%invA,2)))
-                GR%gradx = 0
-                GR%grady = 0
                 if (size(v) /= nc) call gdErrorHandler('EvaluateGRGA: incompatible v')
+                allocate(gradx(nc), grady(nc), intv(nc), c(size(GR%invA,2)))
+                gradx = 0
+                grady = 0
+                intv = v
                 do ic = 1, nc
                     s = GR%cNvP(ic,1)
                     n = GR%cNvP(ic,2)
@@ -2483,8 +2488,8 @@ module gamod_types
                     coef = GR%invA(s:s+n-1,:)
                     b = v(cvs) - v(ic)
                     c = matmul(transpose(coef), b)
-                    GR%gradx(ic) = c(1)
-                    GR%grady(ic) = c(2)
+                    gradx(ic) = c(1)
+                    grady(ic) = c(2)
 
                 end do
 
@@ -2504,11 +2509,11 @@ module gamod_types
                 
                 ! Loop over faces
                 nc = size(GR%cNvP,1)
-                allocate(GR%gradx(nc), GR%grady(nc), c(size(GR%invA,2)), &
-                    GR%intv(nc))
-                GR%gradx = 0
-                GR%grady = 0
-                GR%intv = 0
+                allocate(gradx(nc), grady(nc), c(size(GR%invA,2)), &
+                    intv(nc))
+                gradx = 0
+                grady = 0
+                intv = 0
                 if (size(v) /= nc) call gdErrorHandler('EvaluateGRGA: incompatible v')
                 do ic = 1, nc
                     s = GR%cNvP(ic,1)
@@ -2517,9 +2522,9 @@ module gamod_types
                     coef = GR%invA(s:s+n-1,:)
                     b = v(cvs) - v(ic)
                     c = matmul(transpose(coef), b)
-                    GR%gradx(ic) = c(1)
-                    GR%grady(ic) = c(2)
-                    GR%intv(ic) = c(3)
+                    gradx(ic) = c(1)
+                    grady(ic) = c(2)
+                    intv(ic) = c(3)
 
                 end do
                 
@@ -4194,6 +4199,8 @@ module gamod_types
             ! Connected Double null case
             call grid%IdentifyfarSOLcellsCDN(options)
         else
+            ! Trying double null case method for general cases 
+            call grid%IdentifyfarSOLcellsCDN(options)
             print *, 'IdentifyfarSOL: grid topological not supported. Avoid farSOL merge or split criteria!'
         end if
 
@@ -4380,7 +4387,7 @@ module gamod_types
         integer(I8) :: i, nt, iFs_sep, vx_newD, &
             vx_new, current_target, current_fs, vx1(2), &
             vx2(2), vx_new1, vx_new2, counterv, vx_current, &
-            vx_test(2), v_prev, vx(2), switch_counter, indv, ifs
+            vx_test(2), v_prev, vx(2), switch_counter, indv, ifs, main_sep
         integer(I8), allocatable, dimension(:) :: fcLbl_loc, fcs, &
             vx_final, vx_finalD, fcs_nextD, &
             fsvLookUp, fcs_next, vx_start, vxs_sep, fcs_fs
@@ -4409,7 +4416,8 @@ module gamod_types
 
         ! Marche over points of targets
         ! Get list of ordered vertices of first target
-        iFs_sep = grid%data%sepID(1)
+        call grid%IdentifyMainSeparatrix(options, main_sep)
+        iFs_sep = grid%data%sepID(main_sep)
         vxs_sep = GetFluxSurfaceVxsGA(fd, iFs_sep)
                 
         ! Find strike point on first target
@@ -19630,7 +19638,10 @@ module gamod_types
         ! Auxiliary
         integer(I8) :: i
         integer(I8), allocatable, dimension(:) :: indcv
-        real(R8), allocatable, dimension(:) :: h_pol, h_rad, dummy
+        real(R8) :: min_p, min_r
+        real(R8), allocatable, dimension(:) :: h_pol, h_rad, &
+            crit_p, crit_r, field
+        real(R8), allocatable :: cvQeps(:,:)
         type(GradientReconstructionGAUDT) :: GR
         
         ! Associate
@@ -19643,27 +19654,83 @@ module gamod_types
         ! Initialize
         allocate(h_pol(c%ntot), h_rad(c%ntot))
         indcv = (/(i, i = 1,c%ntot)/)
+        split_cv = 0
 
         select case (options%apost_meth)
+        case ('res')
+
+            ! Note: no absolute criterium using residuals
+            if (options%readstatemeth /= 'b2fplasmf') call gdErrorHandler('SelectSplitCellAposteriori: no residuals read')
+            ! Pick residual field
+            if (options%apost_use_resco) then
+                field = state_int%resco(:,2)
+            else if (options%apost_use_resmo) then
+                field = state_int%resmo(:,2)
+            else if (options%apost_use_reshe) then
+                field = state_int%reshe
+            else if (options%apost_use_reshi) then
+                field = state_int%reshi
+            else if (options%apost_use_reshn) then
+                field = state_int%reshn
+            else if (options%apost_use_respo) then
+                field = state_int%respo
+            else
+                call gdErrorHandler('SelectSplitCellAposteriori: no state field selected')
+            end if
+
+
+            ! Maximal residual
+            split_cv = maxloc(field(1:c%ntot), 1)
+
+            ! Determine split type
+            options%splittype = 'pol'
+
         case ('grad')
+
+            ! Pick state field
+            if (options%apost_use_na) then
+                field = state_int%na(:,2)
+            else if (options%apost_use_ua) then
+                field = state_int%ua(:,2)
+            else if (options%apost_use_te) then
+                field = state_int%te
+            else if (options%apost_use_ti) then
+                field = state_int%ti
+            else if (options%apost_use_tn) then
+                field = state_int%tn
+            else if (options%apost_use_po) then
+                field = state_int%po
+            else
+                call gdErrorHandler('SelectSplitCellAposteriori: no state field selected')
+            end if
 
             ! Gradient based
             ! Compute poloidal and radial length of all cells
             call grid%CalcHpol(indcv, h_pol)
             call grid%CalcHrad(indcv, h_rad)
 
-            ! Compute gradients
+            ! Construct information for poloidal and radial gradients
             call GR%SetParameters('cell', 'cell', 'global')
             call GR%Construct(grid)
-            call GR%Evaluate(dummy(1:c%ntot))
-            
-            !call gdErrorHandler('SelectSplitCellAposteriori: TODO')
+            call grid%ComputeCvQeps(magneticField, cvQeps)
 
-            ! Set splittype!!!
-            options%splittype = 'pol'
-            split_cv = 1
+            ! Compute length scales/cell width for ion density
+            call grid%ComputeLengthScale(GR, field, h_pol, h_rad, cvQeps, crit_p, crit_r)
 
-
+            ! Find cell if number of cell width in the length scal is lower than the threshold
+            min_p = minval(crit_p)
+            min_r = minval(crit_r)
+            if (min_p .le. min_r) then
+                if (min_p .lt. options%apost_lambda_threshold) then
+                    split_cv = minloc(crit_p, 1)
+                    options%splittype = 'pol'
+                end if
+            else if (min_r .lt. min_p) then
+                if (min_r .lt. options%apost_lambda_threshold) then
+                    split_cv = minloc(crit_r, 1)
+                    options%splittype = 'rad'
+                end if                
+            end if
 
         case default
             call gdErrorHandler('SelectSplitCellAposteriori: options%apost_meth not implemented')
@@ -19794,23 +19861,100 @@ module gamod_types
 
     end subroutine
 
-    subroutine ConstructGradRecon(grid, magneticField)
+    subroutine ComputeLengthScale(grid, GR, v, h_pol, h_rad, cvQeps, crit_p, crit_r)
 
         ! Description
         !============
-        ! Construct the stencil and extra information for gradient reconstruction
+        ! Compute poloidal and radial length scale divided by the cell width of information field v.
+        ! lambda = abs(phi / grad_phi) 
+        ! crit = lambda / h
 
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in) :: grid
-        type(MagneticFieldUDT), intent(in) :: magneticField
+        class(GAGridUDT), intent(in)                    :: grid
+        type(GradientReconstructionGAUDT), intent(in)   :: GR
+        real(R8), intent(in)                            :: v(:), cvQeps(:,:), h_pol(:), h_rad(:)
+        real(R8), allocatable, intent(out)              :: crit_p(:), crit_r(:)
 
         ! Auxiliary
+        real(R8), allocatable, dimension(:) :: gradx, grady, intv, gradp, gradr, lambda_p, lambda_r
 
+
+        ! Compute gradient
+        call GR%Evaluate(v(1:grid%cell%ntot), gradx, grady, intv)
+        
+        ! Transform to poloidal radial gradients
+        call TransFormxyTopr(cvQeps, gradx, grady, gradp, gradr)
+
+        ! Length scales
+        lambda_p = abs(v(1:grid%cell%ntot))/gradp
+        lambda_r = abs(v(1:grid%cell%ntot))/gradr
+
+        ! Divide by cell widths
+        crit_p = lambda_p/h_pol
+        crit_r = lambda_r/h_rad
 
     end subroutine
 
+    subroutine ComputeCvQeps(grid, magneticField, cvQeps)
+
+        ! Description
+        !============
+        ! Compute the local angle between the global x-y coordinate
+        ! system and the theta-r coordinate system
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GAgridUDT), intent(in)        :: grid
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+        real(R8), allocatable, intent(out)  :: cvQeps(:,:)
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:) :: cvBx, cvBy, dB, cvEbx, cvEby, &
+            xdir, ydir
+
+        ! Associate
+        associate(&
+            c => grid%cell, &
+            f => grid%face, &
+            v => grid%vert &
+            )
+
+
+        ! Compute magnetic unit vectors
+        allocate(cvBx(c%ntot), cvBy(c%ntot), cvQeps(c%ntot,2), xdir(c%ntot), ydir(c%ntot))
+        call magneticField%interp%Evaluate(c%x%Get(), c%y%Get(), 1, 0, cvBx)
+        call magneticField%interp%Evaluate(c%x%Get(), c%y%Get(), 0, 1, cvBy)
+        dB = Norm(cvBx, cvBy)
+        cvEbx = - cvBy/dB
+        cvEby = - cvBx/dB
+
+        xdir = 1
+        ydir = 0
+        cvQeps(:,1) = Cosin(cvEbx, cvEby, xdir, ydir) 
+        cvQeps(:,1) = Sinin(cvEbx, cvEby, xdir, ydir) 
+        
+        end associate
+
+    end subroutine
+
+    subroutine TransFormxyTopr(cvQeps, gradx, grady, gradp, gradr)
+
+        ! Description
+        !============
+        ! Transform gradx and grady to gradp and gradr
+
+        ! Declare variables
+        !==================
+        real(R8), intent(in) :: cvQeps(:,:), gradx(:), grady(:)
+        real(R8), intent(out), allocatable :: gradp(:), gradr(:)
+
+        gradp = cvQeps(:,1) * gradx - cvQeps(:,2) * grady
+        gradr = cvQeps(:,2) * gradx + cvQeps(:,1) * grady
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                         VISUALIZATION                            !
