@@ -237,6 +237,7 @@ module mod_triangulation
         counter = 0
         cNv = 0
         cNvP = 0
+        ATA = 0
         select case (GR%type1)
         case ('vert')
 
@@ -265,14 +266,15 @@ module mod_triangulation
                             cNvP(iv, 1) = counter + 1
                             cNvP(iv, 2) = counterv
                             cNv(counter+1:counter+counterv) = vxs(1:counterv)
-                            counter = counter + counterv
-
+                            
                             ! Compute coefficients
                             distx = tria%x(vxs(1:counterv)) - tria%x(iv)
                             disty = tria%y(vxs(1:counterv)) - tria%y(iv)
 
                             call ComputeATA2(distx, disty, ATA_loc)
                             ATA(counter+1:counter+counterv,:) = ATA_loc
+                            counter = counter + counterv
+                            
                         end do 
 
                     end do
@@ -310,7 +312,44 @@ module mod_triangulation
         class(GradientReconstructionTriaUDT) :: GR
         real(R8), intent(in)               :: v(:)
 
-        call gdErrorHandler('EvaluateGRTria: not implemented yet')
+        ! Auxiliary
+        integer(I8) :: nv, iv, s, n
+        integer(I8), allocatable :: vxs(:)
+        real(R8), allocatable :: b(:), c(:), coef(:,:)
+
+        select case (GR%type1)
+        case ('vert')
+
+            select case (GR%type2)
+            case ('vert')
+
+                nv = size(GR%cNvP,1)
+                allocate(GR%gradx(nv), GR%grady(nv), c(size(GR%invA,2)))
+                GR%gradx = 0
+                GR%grady = 0
+                if (size(v) /= nv) call gdErrorHandler('EvaluateGRGA: incompatible v')
+                do iv = 1, nv
+                    s = GR%cNvP(iv,1)
+                    n = GR%cNvP(iv,2)
+                    vxs = GR%cNv(s:s+n-1)
+                    coef = GR%invA(s:s+n-1,:)
+                    b = v(vxs) - v(iv)
+                    c = matmul(transpose(coef), b)
+                    GR%gradx(iv) = c(1)
+                    GR%grady(iv) = c(2)
+
+                end do
+            case default
+
+                call gdErrorHandler('ConstructGRTria: type1 == vert, type2 not implemented')
+
+            end select
+
+        case default
+
+            call gdErrorHandler('EvaluateGRTria: type1 not implemented')
+
+        end select
 
     end subroutine
 

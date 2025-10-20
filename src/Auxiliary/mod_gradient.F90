@@ -34,14 +34,17 @@ module mod_gradient
         !           connectivity type to compute gradients
         ! - type2: can be 'cell', 'face', 'vert' and indicates for which
         !           connectivity type to draw information for computation
-        ! - meth: can be 
+        ! - meth: can be TODO
+        ! - gradx, grady: the computed gradient in x- and y-direction 
+        ! - intv: interpolate field value 
 
-        character(:), allocatable :: type1
-        character(:), allocatable :: type2
-        character(:), allocatable :: meth
-        integer(I8), allocatable :: cNv(:), cNvP(:,:)
+        character(:), allocatable   :: type1
+        character(:), allocatable   :: type2
+        character(:), allocatable   :: meth
+        integer(I8), allocatable    :: cNv(:), cNvP(:,:)
 
-        real(R8), allocatable    :: invA(:,:)
+        real(R8), allocatable       :: invA(:,:)
+        real(R8), allocatable       :: gradx(:), grady(:), intv(:)
 
     contains
 
@@ -102,13 +105,13 @@ module mod_gradient
 
         ! Auxiliary
         real(R8) :: c11, c12, c22, E(2,2), det
-        real(R8), allocatable :: AT(:,:)
+        real(R8), allocatable :: AT(:,:), ATA_dummy(:,:)
 
         ! A transpose
-        allocate(AT(2,size(dx)))
+        allocate(AT(2, size(dx)))
         AT(1,:) = dx
         AT(2,:) = dy
-            
+
         ! Construct C matrix
         c11 = sum(dx**2)
         c12 = sum(dx*dy)
@@ -123,7 +126,12 @@ module mod_gradient
         E = E/det       
 
         ! Multiply with transpose A
-        ATA = E*AT
+        allocate(ATA_dummy(2, size(dx)))
+        ATA_dummy = matmul(E, AT)
+
+        ! Do transpose for better memory
+        ATA = transpose(ATA_dummy)
+     
 
     end subroutine
 
@@ -141,14 +149,15 @@ module mod_gradient
 
         ! Auxiliary
         real(R8) :: c11, c12, c13, c22, c23, c33, E(3,3), det1, det2, det3, det
-        real(R8), allocatable :: AT(:,:)
+        real(R8), allocatable :: AT(:,:), ATA_dummy(:,:)
 
+        ! Transpose A
         allocate(AT(3, size(dx)))
-
         AT(1,:) = dx
         AT(2,:) = dy
         AT(3,:) = 1
 
+        ! Construct C matrix sparse
         c11 = sum(dx**2)
         c12 = sum(dx*dy)
         c13 = sum(dx)
@@ -156,6 +165,7 @@ module mod_gradient
         c23 = sum(dy)
         c33 = size(dx)
 
+        ! Compute inverse of C
         det1 = c33*c22 - c23**2
         det2 = c33*c12 - c23*c13
         det3 = c23*c12 - c22*c13
@@ -172,7 +182,12 @@ module mod_gradient
         E(3,3) = c22*c11-c12*c12
         E = E/det
 
-        ATA = E*AT
+        ! Multiply with transpose A
+        allocate(ATA_dummy(3, size(dx)))
+        ATA_dummy = matmul(E,AT)
+
+        ! Return transpose for better memory
+        ATA = transpose(ATA_dummy)
 
     end subroutine
 

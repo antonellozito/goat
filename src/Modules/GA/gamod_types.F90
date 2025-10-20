@@ -2297,7 +2297,7 @@ module gamod_types
         !==================
         ! Arguments
         class(GradientReconstructionGAUDT)  :: GR
-        character(:), allocatable           :: type1, type2, meth
+        character(*), intent(in)            :: type1, type2, meth
 
         GR%type1 = type1
         GR%type2 = type2
@@ -2323,7 +2323,8 @@ module gamod_types
         cNvP(grid%cell%ntot,2), vs(grid%face%ntot,2), ifc
         integer(I8), allocatable, dimension(:) :: tv, cvLookup, cv
         real(R8) :: ATA(grid%cell%ntot*20, 2)
-        real(R8), allocatable :: distx(:), disty(:), ATA_loc(:,:), fcX(:), fcY(:)
+        real(R8), allocatable :: distx(:), disty(:), ATA_loc(:,:), &
+            fcX(:), fcY(:)
 
         ! Associate
         associate(&
@@ -2337,7 +2338,7 @@ module gamod_types
         cNv = 0
         cNvP = 0
         cvLookup = GetcvLookUpGA(c)
-
+        ATA = 0
         select case (GR%type1)
         case ('cell')
             
@@ -2362,14 +2363,14 @@ module gamod_types
                     cNvP(ic, 1) = counter + 1
                     cNvP(ic, 2) = counterc
                     cNv(counter+1:counter+counterc) = cvs(1:counterc)
-                    counter = counter + counterc
-
+                    
                     ! Compute coefficients
                     distx = c%x%Get(cvs(1:counterc)) - c%x%Get(ic)
                     disty = c%y%Get(cvs(1:counterc)) - c%y%Get(ic)
 
                     call ComputeATA2(distx, disty, ATA_loc)
                     ATA(counter+1:counter+counterc,:) = ATA_loc
+                    counter = counter + counterc
                 
                 end do 
 
@@ -2458,7 +2459,76 @@ module gamod_types
         class(GradientReconstructionGAUDT) :: GR
         real(R8), intent(in)               :: v(:)
 
-        call gdErrorHandler('EvaluateGRGA: not implemented yet')
+        ! Auxiliary
+        integer(I8) :: ic, s, n, nc
+        integer(I8), allocatable :: cvs(:)
+        real(R8), allocatable :: b(:), c(:), coef(:,:)
+
+        ! Get coefficients
+        select case (GR%type1)
+        case ('cell')
+
+            select case (GR%type2)
+            case ('cell')
+
+                nc = size(GR%cNvP,1)
+                allocate(GR%gradx(nc), GR%grady(nc), c(size(GR%invA,2)))
+                GR%gradx = 0
+                GR%grady = 0
+                if (size(v) /= nc) call gdErrorHandler('EvaluateGRGA: incompatible v')
+                do ic = 1, nc
+                    s = GR%cNvP(ic,1)
+                    n = GR%cNvP(ic,2)
+                    cvs = GR%cNv(s:s+n-1)
+                    coef = GR%invA(s:s+n-1,:)
+                    b = v(cvs) - v(ic)
+                    c = matmul(transpose(coef), b)
+                    GR%gradx(ic) = c(1)
+                    GR%grady(ic) = c(2)
+
+                end do
+
+            case ('vert')
+
+                call gdErrorHandler('EvaluateGRGA: type1 == cell, type2 == vert not implemented')
+
+            case default
+
+                call gdErrorHandler('EvaluateGRGA: type1 == cell, type2 not implemented')
+
+            end select
+        case ('face')
+
+            select case (GR%type2)
+            case ('cell')
+                
+                ! Loop over faces
+                nc = size(GR%cNvP,1)
+                allocate(GR%gradx(nc), GR%grady(nc), c(size(GR%invA,2)), &
+                    GR%intv(nc))
+                GR%gradx = 0
+                GR%grady = 0
+                GR%intv = 0
+                if (size(v) /= nc) call gdErrorHandler('EvaluateGRGA: incompatible v')
+                do ic = 1, nc
+                    s = GR%cNvP(ic,1)
+                    n = GR%cNvP(ic,2)
+                    cvs = GR%cNv(s:s+n-1)
+                    coef = GR%invA(s:s+n-1,:)
+                    b = v(cvs) - v(ic)
+                    c = matmul(transpose(coef), b)
+                    GR%gradx(ic) = c(1)
+                    GR%grady(ic) = c(2)
+                    GR%intv(ic) = c(3)
+
+                end do
+                
+            case default
+
+                call gdErrorHandler('EvaluateGRGA: type not implemented')
+
+            end select
+        end select
 
     end subroutine
 
@@ -19560,7 +19630,8 @@ module gamod_types
         ! Auxiliary
         integer(I8) :: i
         integer(I8), allocatable, dimension(:) :: indcv
-        real(R8), allocatable, dimension(:) :: h_pol, h_rad
+        real(R8), allocatable, dimension(:) :: h_pol, h_rad, dummy
+        type(GradientReconstructionGAUDT) :: GR
         
         ! Associate
         associate(&
@@ -19582,6 +19653,9 @@ module gamod_types
             call grid%CalcHrad(indcv, h_rad)
 
             ! Compute gradients
+            call GR%SetParameters('cell', 'cell', 'global')
+            call GR%Construct(grid)
+            call GR%Evaluate(dummy(1:c%ntot))
             
             !call gdErrorHandler('SelectSplitCellAposteriori: TODO')
 
