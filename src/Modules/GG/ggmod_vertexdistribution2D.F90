@@ -14,6 +14,7 @@ module ggmod_vertexdistribution2D
     ! Load modules
     use mod_precision
     use mod_errorhandler
+    use goatmod_types, only: MagneticFieldUDT
     use Interpolant1D
     use StructuredInterpolant2D
     use mod_lagrangefunctions
@@ -69,9 +70,14 @@ module ggmod_vertexdistribution2D
         ! field values separated by a distance 'fd' in the case of a
         ! field based distribution. These distances can only be 
         ! approximated, since the start and end points are always taken
-        ! to be on the given 
+        ! to be on the given curve. The length type describes how to 
+        ! compute the length, which is either simply Eulerian ('euler') or 
+        ! radial ('radial'). For the latter, the radial direction is 
+        ! defined based on the magnetic field given in 'field'.  
 
         real(R8)                        :: d, fd
+        character(:), allocatable       :: lengthtype 
+        type(MagneticFieldUDT)          :: field 
 
     contains 
 
@@ -149,6 +155,8 @@ module ggmod_vertexdistribution2D
         class(DistributionFunctionUDT), allocatable     :: densityfunction
         real(R8), allocatable, dimension(:)             :: xi
         real(R8), allocatable, dimension(:, :)          :: lagcoef, intlagcoef
+        character(:), allocatable                       :: lengthtype 
+        type(MagneticFieldUDT)                          :: field 
 
         real(R8)                        :: d, fd
 
@@ -269,7 +277,7 @@ module ggmod_vertexdistribution2D
     !------------------------------------------------------------------!
     
     ! Uniform vertex distributor
-    function ConstructUniformVertexDistributor(d, fd) result(vd)
+    function ConstructUniformVertexDistributor(d, fd, lengthtype, field) result(vd)
 
         ! Description
         !============
@@ -279,33 +287,34 @@ module ggmod_vertexdistribution2D
         ! distribution function
         ! - fd: desired distance measured in the field width that is 
         ! given using the field based distribution function
+        ! - lengthtype: type of length in which the distance is given 
+        ! and which the distributor should consider. There are currently
+        ! two choices: 'euler' for the classic Eulerian length and 'radial'
+        ! for the length perpendicular to the magnetic field
+        ! - field: aforementioned magnetic field
 
         ! Declare variables
         !==================
         ! Arguments
         type(UniformVertexDistributor2DUDT) :: vd 
-        real(R8), intent(in)                    :: d, fd
+        real(R8), intent(in)                :: d, fd
+        character(*), intent(in)            :: lengthtype 
+        type(MagneticFieldUDT), intent(in)  :: field 
+
 
         ! Initialize
         !===========
-        ! Allocate
-        !allocate(UniformVertexDistributor2DUDT::vd)
-
-        ! Set the fields
-        !select type (vd)
-
-        !type is (UniformVertexDistributor2DUDT)
-
-            ! Set parameters
-            vd%d = d ! distance 
-            vd%fd = fd ! field distance
-
-        !end select 
+        ! Set parameters
+        vd%d = d ! distance 
+        vd%fd = fd ! field distance
+        vd%lengthtype = lengthtype
+        vd%field = field 
 
     end function 
 
     ! Density-based vertex distributor
-    function ConstructDensityBasedVertexDistributor(distribution, order) result(vd)
+    function ConstructDensityBasedVertexDistributor(distribution, order, &
+        lengthtype, field) result(vd)
 
         ! Description
         !============
@@ -322,6 +331,8 @@ module ggmod_vertexdistribution2D
         type(DensityBasedVertexDistributor2DUDT)  :: vd 
         class(DistributionFunctionUDT), intent(in)  :: distribution
         integer(I8), intent(in)                     :: order
+        character(*), intent(in)                    :: lengthtype 
+        type(MagneticFieldUDT), intent(in)          :: field 
 
         
         ! Loop
@@ -329,24 +340,16 @@ module ggmod_vertexdistribution2D
 
         ! Initialize
         !===========
-        ! Allocate
-        !allocate(DensityBasedVertexDistributor2DUDT::vd)
+        ! Set some fields
+        vd%order = order
+        vd%densityfunction = distribution
+        vd%lengthtype = lengthtype 
+        vd%field = field 
 
-        ! Initialize
-        !select type(vd)
-
-        !type is (DensityBasedVertexDistributor2DUDT)
-
-            ! Set some fields
-            vd%order = order
-            vd%densityfunction = distribution
-
-            ! Construct the lagrangian basis functions
-            vd%xi = real([(k, k = 0, vd%order)], kind=R8)/(real(vd%order, kind=R8))
-            call ConstructLagrangianBasisFunctions(vd%order, vd%xi, &
-                vd%lagcoef, vd%intlagcoef)
-
-        !end select
+        ! Construct the lagrangian basis functions
+        vd%xi = real([(k, k = 0, vd%order)], kind=R8)/(real(vd%order, kind=R8))
+        call ConstructLagrangianBasisFunctions(vd%order, vd%xi, &
+            vd%lagcoef, vd%intlagcoef)
 
     end function
 
@@ -410,7 +413,8 @@ module ggmod_vertexdistribution2D
 
         ! Auxiliary
         real(R8)                            :: l 
-        real(R8), allocatable, dimension(:) :: dx, dy, dl, distr
+        real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, xf, &
+            yf, bx, by, bn, dll, dllc, dlc 
 
         ! Loop
         integer(I8)                         :: k 
@@ -437,10 +441,49 @@ module ggmod_vertexdistribution2D
         ! Precompute
         !===========
         ! Compute curve quantities
-        dx = xc(2:) - xc(1:size(xc)-1)
-        dy = yc(2:) - yc(1:size(yc)-1)  
-        dl = sqrt(dx**2 + dy**2)
-        l = sum(dl)
+        select case (vd%lengthtype)
+
+        case ('euler')
+
+            ! Simple Eulerian length
+            dx = xc(2:) - xc(1:size(xc)-1)
+            dy = yc(2:) - yc(1:size(yc)-1)  
+            dl = sqrt(dx**2 + dy**2)
+            l = sum(dl)
+
+        case ('radial')
+
+            ! Length projected on radial direction of magnetic field
+            dx = xc(2:) - xc(1:size(xc)-1)
+            dy = yc(2:) - yc(1:size(yc)-1)  
+
+            xf = 0.5*(xc(2:size(xc)) + xc(1:size(xc)-1))
+            yf = 0.5*(yc(2:size(xc)) + yc(1:size(xc)-1)) 
+            allocate(bx(size(xc)-1), by(size(xc)-1))
+            call vd%field%interp%Evaluate(xf, yf, 1, 0, bx)
+            call vd%field%interp%Evaluate(xf, yf, 0, 1, by)
+            bn = sqrt(bx**2 + by**2)
+            bx = bx/bn 
+            by = by/bn 
+
+            ! Project and take absolute value
+            dl = dx*bx + dy*by
+            if (sum(dl)/size(dl) < 0) then 
+                where(dl > 0) dl = 0
+            else
+                where(dl < 0) dl = 0
+            end if 
+            dl = abs(dl) 
+            l = sum(dl)
+
+        case default 
+
+            ! Not implemented
+            print *, 'length type: ' // vd%lengthtype 
+            call gdErrorHandler('DistributeVerticesUniformOverCurve: ' // & 
+                'length type not implemented')
+
+        end select 
 
         ! Compute number of vertices
         nv = ceiling(l/vd%d)+1
@@ -458,8 +501,22 @@ module ggmod_vertexdistribution2D
         if (present(ldistr)) then 
             ldistr = distr 
         end if 
+        if (present(ldistr)) then 
+            ! This has to be the euler length distribution!
+            dll = sqrt(dx**2 + dy**2)
+            dllc = spread(0, 1, size(xc))
+            dlc = spread(0, 1, size(xc))
+            do k = 1, size(xc)-1
+                dllc(k+1) = dllc(k) + dll(k)
+            end do 
+            do k = 1, size(xc)-1
+                dlc(k+1) = dlc(k) + dl(k)
+            end do 
+            ldistr = distr 
+            call Interpolate1D(distr, ldistr, dlc, dllc)
+        end if 
 
-    end subroutine
+    end subroutine  
 
     ! Field based distributor
     subroutine DistributeVerticesUniformOverField(vd, xc, yc, field, nv, &
@@ -571,7 +628,7 @@ module ggmod_vertexdistribution2D
         ! Auxiliary
         real(R8)                            :: l, Mtot
         real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, temp, &
-            Mi, Mdistr, dll, dllc, dlc
+            Mi, Mdistr, dll, dllc, dlc, bx, by, bn, xf, yf
         real(R8), allocatable, dimension(:, :)  :: xi, yi, rhoi 
         integer(I8), allocatable, dimension(:)  :: pxi
 
@@ -626,6 +683,52 @@ module ggmod_vertexdistribution2D
 
         ! Compute number of vertices
         !===========================
+        ! First, compute the weighing factor for the integration based on 
+        ! the desired length type
+        select case (vd%lengthtype)
+
+        case ('euler')
+
+            ! Simple Eulerian length
+            dx = xc(2:) - xc(1:size(xc)-1)
+            dy = yc(2:) - yc(1:size(yc)-1)  
+            dl = sqrt(dx**2 + dy**2)
+            l = sum(dl)
+
+        case ('radial')
+
+            ! Length projected on radial direction of magnetic field
+            dx = xc(2:) - xc(1:size(xc)-1)
+            dy = yc(2:) - yc(1:size(yc)-1)  
+
+            xf = 0.5*(xc(2:size(xc)) + xc(1:size(xc)-1))
+            yf = 0.5*(yc(2:size(xc)) + yc(1:size(xc)-1)) 
+            allocate(bx(size(xc)-1), by(size(xc)-1))
+            call vd%field%interp%Evaluate(xf, yf, 1, 0, bx)
+            call vd%field%interp%Evaluate(xf, yf, 0, 1, by)
+            bn = sqrt(bx**2 + by**2)
+            bx = bx/bn 
+            by = by/bn 
+
+            ! Project and take absolute value
+            dl = dx*bx + dy*by
+            if (sum(dl)/size(dl) < 0) then 
+                where(dl > 0) dl = 0
+            else
+                where(dl < 0) dl = 0
+            end if 
+            dl = abs(dl) 
+            l = sum(dl)
+
+        case default 
+
+            ! Not implemented
+            print *, 'length type: ' // vd%lengthtype 
+            call gdErrorHandler('DistributeVerticesDensityBasedOverCurve: ' // & 
+                'length type not implemented')
+
+        end select 
+
         ! Compute mass of each segment
         allocate(Mi(size(dx)))
         do i = 1, size(dx)
