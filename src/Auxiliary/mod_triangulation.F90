@@ -54,6 +54,8 @@ module mod_triangulation
         !============
         ! Gradient reconstrunction implementation for triangulated grid
 
+        ! - deriv: indicate order of derivative required
+
     contains
 
         ! Set parameters
@@ -196,7 +198,7 @@ module mod_triangulation
     !                     GRADIENT RECONSTRUCTION                      !
     !------------------------------------------------------------------!    
 
-    subroutine SetParametersGRTria(GR, type1, type2, meth)
+    subroutine SetParametersGRTria(GR, type1, type2, meth, deriv)
 
         ! Description
         !============
@@ -207,10 +209,12 @@ module mod_triangulation
         ! Arguments
         class(GradientReconstructionTriaUDT)  :: GR
         character(:), allocatable           :: type1, type2, meth
+        integer(I8)                         :: deriv
 
         GR%type1 = type1
         GR%type2 = type2
         GR%meth = meth
+        GR%deriv = deriv
 
     end subroutine
 
@@ -227,80 +231,135 @@ module mod_triangulation
         type(TriangulationUDT), intent(in)      :: tria
 
         ! Auxiliary
-        integer(I8) :: iv, j, k, cNv(size(tria%x*20)), cNvP(size(tria%x),2), &
-        vxs(100), counterv, counter, tv(3)
-        integer(I8), allocatable :: cvs(:)
-        real(R8) :: ATA(size(tria%x)*20,2)
-        real(R8), allocatable :: ATA_loc(:,:), distx(:), disty(:)
+        integer(I8) :: iv, j, k, l, m, cNvP(size(tria%x),2), &
+        vxs(100), counterv, counter, tv(3), tv2(3), stencil_est, min_stencil
+        integer(I8), allocatable :: cvs(:), cvs2(:), cNv(:), ar(:)
+        real(R8), allocatable :: ATA_loc(:,:), distx(:), disty(:), ATA(:,:), w(:), weight(:)
 
+
+        ! Set parameters depending on deriv
+        ! Compute number of derivatives
+        if (GR%deriv .gt. 6) call gdErrorHandler('ConstructGRTria: deriv > 6 not yet implement')
+        ar = (/(j, j = 2, 7)/)
+        min_stencil = sum(ar(1:GR%deriv)) + 1
+        if (GR%deriv == 1) then
+            stencil_est = 20
+        else if (GR%deriv == 2) then
+            stencil_est = 30
+        else if (GR%deriv == 3) then
+            stencil_est = 50
+        else if (GR%deriv == 4) then
+            stencil_est = 60
+        else if (GR%deriv == 5) then
+            stencil_est = 60
+        else if (GR%deriv == 6) then
+            stencil_est = 60
+        else
+            call gdErrorHandler('ConstructGRTria: deriv > 6 not yet implement')
+        end if
+            
         ! Initialize
+        allocate(cNv(size(tria%x)*stencil_est), ATA(size(tria%x)*30,2), w(size(tria%x)*stencil_est))
         counter = 0
         cNv = 0
         cNvP = 0
         ATA = 0
+        w = 0  
         select case (GR%type1)
         case ('vert')
 
             select case (GR%type2)
             case ('vert')
 
-                    ! Loop over vertices
-                    do iv = 1, size(tria%x)
+                ! Loop over vertices
+                do iv = 1, size(tria%x)
 
-                        vxs = 0
-                        counterv = 0
+                    vxs = 0
+                    counterv = 0
 
-                        ! Get cells
-                        cvs = GetVertCellTria(tria, iv)
-
-                        do j = 1, size(cvs)
+                    ! Get cells
+                    cvs = GetVertCellTria(tria, iv)
+                    do j = 1, size(cvs)
                             tv = tria%cvert(cvs(j),:)
                             do k = 1, 3
                                 if (.not. any(tv(k) == vxs(1:counterv))) then
                                     counterv = counterv + 1
                                     vxs(counterv) = tv(k)
                                 end if
+
                             end do
 
-                            ! Add to cNv
-                            cNvP(iv, 1) = counter + 1
-                            cNvP(iv, 2) = counterv
-                            cNv(counter+1:counter+counterv) = vxs(1:counterv)
-                            
-                            ! Compute coefficients
-                            distx = tria%x(vxs(1:counterv)) - tria%x(iv)
-                            disty = tria%y(vxs(1:counterv)) - tria%y(iv)
+                    end do 
+                    
+                    ! Need at least 6 data points for second order
+                    if (counterv .lt. min_stencil) then
+                        do j = 1, size(cvs)
+                            tv = tria%cvert(cvs(j),:)
+                            do k = 1, 3
+                                cvs2 = GetVertCellTria(tria, tv(k))
+                                do l = 1, size(cvs2)
+                                    tv2 = tria%cvert(cvs2(l),:)
+                                    do m = 1, 3
+                                        if (.not. any(tv2(m) == vxs(1:counterv))) then
+                                            counterv = counterv + 1
+                                            vxs(counterv) = tv(k)
+                                        end if
+                                    end do                                        
+                                end do
+                            end do
+                        end do
+                    end if
 
-                            call ComputeATA2(distx, disty, ATA_loc)
-                            ATA(counter+1:counter+counterv,:) = ATA_loc
-                            counter = counter + counterv
-                            
-                        end do 
+                    if (counterv .lt. min_stencil) &
+                        call gdErrorHandler('ConstructGRTria: stencil insufficient, implement this!')
 
-                    end do
+                    ! Add to cNv
+                    cNvP(iv, 1) = counter + 1
+                    cNvP(iv, 2) = counterv
+                    cNv(counter+1:counter+counterv) = vxs(1:counterv)    
 
+                    ! Compute coefficients
+                    distx = tria%x(vxs(1:counterv)) - tria%x(iv)
+                    disty = tria%y(vxs(1:counterv)) - tria%y(iv)
+
+                    ! Compute weight is necessary
+                    if (GR%deriv .gt. 1) then
+                        weight = 1/(distx**2 + disty**2)
+                    else 
+                        allocate(weight(size(distx)))
+                        weight = 1
+                    end if
+                    w(counter+1:counter+counterv) = weight  
+
+                    call ComputeATA(distx, disty, GR%deriv, .false., ATA_loc)
+                    ATA(counter+1:counter+counterv,:) = ATA_loc
+                    counter = counter + counterv
+
+                end do
 
             case default
 
                     call gdErrorHandler('ConstructGRTria: type1 == vert, type2 not implemented')
 
             end select
-        
+
         case default
 
             call gdErrorHandler('ConstructGRTria: type1 not implemented')
 
-        end select
+        end select        
+
 
         ! Save in GR type
         GR%cNv = cNv(1:counter)
         GR%cNvP = cNvP   
         GR%invA = ATA(1:counter,:)
+        GR%w = w(1:counter)
 
 
     end subroutine
 
-    subroutine EvaluateGRTria(GR, v, gradx, grady, intv)
+    subroutine EvaluateGRTria(GR, v, deriv_vals)
 
         ! Description
         !============
@@ -311,13 +370,15 @@ module mod_triangulation
         ! Arguments
         class(GradientReconstructionTriaUDT) :: GR
         real(R8), intent(in)               :: v(:)
-        real(R8), intent(out), allocatable :: gradx(:), grady(:), intv(:)
-
+        real(R8), intent(out), allocatable :: deriv_vals(:,:)
         ! Auxiliary
         integer(I8) :: nv, iv, s, n
         integer(I8), allocatable :: vxs(:)
         real(R8), allocatable :: b(:), c(:), coef(:,:)
         
+        if (GR%deriv .gt. 6) call gdErrorHandler('ConstructGRTria: deriv > 6 not yet implement')
+        ar = (/(j, j = 2, 7)/)
+        n = sum(ar(1:GR%deriv)) + 1
 
         select case (GR%type1)
         case ('vert')
@@ -327,19 +388,20 @@ module mod_triangulation
 
                 nv = size(GR%cNvP,1)
                 if (size(v) /= nv) call gdErrorHandler('EvaluateGRGA: incompatible v')
-                allocate(gradx(nv), grady(nv), intv(nv), c(size(GR%invA,2)))
-                gradx = 0
-                grady = 0
-                intv = v
+                allocate(deriv_vals(nv,n), c(size(GR%invA,2)))
+                deriv_vals = 0
+                deriv_vals(:,1) = v
                 do iv = 1, nv
                     s = GR%cNvP(iv,1)
                     n = GR%cNvP(iv,2)
                     vxs = GR%cNv(s:s+n-1)
                     coef = GR%invA(s:s+n-1,:)
                     b = v(vxs) - v(iv)
+
                     c = matmul(transpose(coef), b)
-                    gradx(iv) = c(1)
-                    grady(iv) = c(2)
+                    deriv_vals(iv,2:n) = c
+                    !deriv_vals(iv,2) = c(1)
+                    !deriv_vals(iv,3) = c(2)
 
                 end do
             case default
@@ -353,6 +415,48 @@ module mod_triangulation
             call gdErrorHandler('EvaluateGRTria: type1 not implemented')
 
         end select
+
+        !else if (GR%deriv == 2) then
+
+        !    select case (GR%type1)
+        !    case ('vert')
+
+        !       select case (GR%type2)
+        !        case ('vert')
+
+        !            nv = size(GR%cNvP,1)
+        !            if (size(v) /= nv) call gdErrorHandler('EvaluateGRGA: incompatible v')
+        !            allocate(deriv_vals(nv,6), c(size(GR%invA,2)))
+        !            deriv_vals = 0
+        !            deriv_vals(:,1) = v
+        !            do iv = 1, nv
+        !                s = GR%cNvP(iv,1)
+        !                n = GR%cNvP(iv,2)
+        !                vxs = GR%cNv(s:s+n-1)
+        !                coef = GR%invA(s:s+n-1,:)
+        !                b = GR%w(s:s+n+1) *(v(vxs) - v(iv))
+        !                c = matmul(transpose(coef), b)
+        !                deriv_vals(iv,2) = c(1) ! gradx
+        !                deriv_vals(iv,3) = c(2) ! grady
+        !                deriv_vals(iv,4) = c(3) ! gradx2
+        !                deriv_vals(iv,5) = c(4) ! grady2
+        !                deriv_vals(iv,6) = c(5) ! gradxy
+        !            end do
+        !        case default
+
+         !           call gdErrorHandler('ConstructGRTria: type1 == vert, type2 not implemented')
+
+        !        end select
+
+        !    case default
+
+        !        call gdErrorHandler('EvaluateGRTria: type1 not implemented')
+
+        !    end select
+
+        !else 
+        !    call gdErrorHandler('EvaluateGRTria: deriv > 2 not implemented')
+        !end if
 
     end subroutine
 

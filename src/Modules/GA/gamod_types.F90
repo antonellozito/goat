@@ -2290,7 +2290,7 @@ module gamod_types
     !                     GRADIENT RECONSTRUCTION                      !
     !------------------------------------------------------------------! 
 
-    subroutine SetParametersGRGA(GR, type1, type2, meth)
+    subroutine SetParametersGRGA(GR, type1, type2, meth, deriv)
 
         ! Description
         !============
@@ -2301,10 +2301,12 @@ module gamod_types
         ! Arguments
         class(GradientReconstructionGAUDT)  :: GR
         character(*), intent(in)            :: type1, type2, meth
+        integer(I8), intent(in)             :: deriv    
 
         GR%type1 = type1
         GR%type2 = type2
         GR%meth = meth
+        GR%deriv = deriv
 
     end subroutine
 
@@ -2336,6 +2338,9 @@ module gamod_types
             v => grid%vert &
             )
 
+        ! Check
+        if (GR%deriv .gt. 1) call gdErrorHandler('EvaluateGRGA: no implemention for deriv > 1')
+
         ! Initialize
         counter = 0
         cNv = 0
@@ -2362,6 +2367,8 @@ module gamod_types
                         end do
                     end do
 
+                    if (counterc .lt. 3) call gdErrorHandler('ConstructGRGA: insufficient data points')
+
                     ! Add to cNv
                     cNvP(ic, 1) = counter + 1
                     cNvP(ic, 2) = counterc
@@ -2371,7 +2378,7 @@ module gamod_types
                     distx = c%x%Get(cvs(1:counterc)) - c%x%Get(ic)
                     disty = c%y%Get(cvs(1:counterc)) - c%y%Get(ic)
 
-                    call ComputeATA2(distx, disty, ATA_loc)
+                    call ComputeATA(distx, disty, GR%deriv, .false., ATA_loc)
                     ATA(counter+1:counter+counterc,:) = ATA_loc
                     counter = counter + counterc
                 
@@ -2413,6 +2420,8 @@ module gamod_types
                         end do
                     end do
 
+                    if (counterc .lt. 4) call gdErrorHandler('ConstructGRGA: insufficient data points')
+
                     ! Add to cNv
                     cNvP(ifc, 1) = counter + 1
                     cNvP(ifc, 2) = counterc
@@ -2423,7 +2432,7 @@ module gamod_types
                     distx = c%x%Get(cvs(1:counterc)) - fcX(ifc)
                     disty = c%y%Get(cvs(1:counterc)) - fcY(ifc)
 
-                    call ComputeATA3(distx, disty, ATA_loc)
+                    call ComputeATA(distx, disty, GR%deriv, .true., ATA_loc)
                     ATA(counter+1:counter+counterc,:) = ATA_loc
 
                 end do
@@ -2450,23 +2459,27 @@ module gamod_types
         
     end subroutine
 
-    subroutine EvaluateGRGA(GR, v, gradx, grady, intv)
+    subroutine EvaluateGRGA(GR, v, deriv_vals)
 
         ! Description
         !============
         ! Evaluator: multiplying the coefficients with the field information.
+        ! The size of deriv_vals depend on the order of derivatives (GR%deriv).
 
         ! Declare variables
         !==================
         ! Arguments
         class(GradientReconstructionGAUDT) :: GR
         real(R8), intent(in)               :: v(:)
-        real(R8), intent(out), allocatable :: gradx(:), grady(:), intv(:)
+        real(R8), intent(out), allocatable :: deriv_vals(:,:)
 
         ! Auxiliary
         integer(I8) :: ic, s, n, nc
         integer(I8), allocatable :: cvs(:)
         real(R8), allocatable :: b(:), c(:), coef(:,:)
+
+        ! Check
+        if (GR%deriv .gt. 1) call gdErrorHandler('EvaluateGRGA: no implemention for deriv > 1')
 
         ! Get coefficients
         select case (GR%type1)
@@ -2477,10 +2490,8 @@ module gamod_types
 
                 nc = size(GR%cNvP,1)
                 if (size(v) /= nc) call gdErrorHandler('EvaluateGRGA: incompatible v')
-                allocate(gradx(nc), grady(nc), intv(nc), c(size(GR%invA,2)))
-                gradx = 0
-                grady = 0
-                intv = v
+                allocate(deriv_vals(nc, 3), c(size(GR%invA,2)))
+                deriv_vals = 0
                 do ic = 1, nc
                     s = GR%cNvP(ic,1)
                     n = GR%cNvP(ic,2)
@@ -2488,8 +2499,8 @@ module gamod_types
                     coef = GR%invA(s:s+n-1,:)
                     b = v(cvs) - v(ic)
                     c = matmul(transpose(coef), b)
-                    gradx(ic) = c(1)
-                    grady(ic) = c(2)
+                    deriv_vals(ic, 2) = c(1) ! gradx
+                    deriv_vals(ic, 3) = c(2) ! grady
 
                 end do
 
@@ -2509,11 +2520,8 @@ module gamod_types
                 
                 ! Loop over faces
                 nc = size(GR%cNvP,1)
-                allocate(gradx(nc), grady(nc), c(size(GR%invA,2)), &
-                    intv(nc))
-                gradx = 0
-                grady = 0
-                intv = 0
+                allocate(deriv_vals(nc,3), c(size(GR%invA,2)))
+                deriv_vals = 0
                 if (size(v) /= nc) call gdErrorHandler('EvaluateGRGA: incompatible v')
                 do ic = 1, nc
                     s = GR%cNvP(ic,1)
@@ -2522,9 +2530,9 @@ module gamod_types
                     coef = GR%invA(s:s+n-1,:)
                     b = v(cvs) - v(ic)
                     c = matmul(transpose(coef), b)
-                    gradx(ic) = c(1)
-                    grady(ic) = c(2)
-                    intv(ic) = c(3)
+                    deriv_vals(ic, 1) = c(3) ! interpolated
+                    deriv_vals(ic,2) = c(1)  ! gradx
+                    deriv_vals(ic,3) = c(2)  ! grady
 
                 end do
                 
@@ -19710,7 +19718,7 @@ module gamod_types
             call grid%CalcHrad(indcv, h_rad)
 
             ! Construct information for poloidal and radial gradients
-            call GR%SetParameters('cell', 'cell', 'global')
+            call GR%SetParameters('cell', 'cell', 'global', 1)
             call GR%Construct(grid)
             call grid%ComputeCvQeps(magneticField, cvQeps)
 
@@ -19878,11 +19886,14 @@ module gamod_types
         real(R8), allocatable, intent(out)              :: crit_p(:), crit_r(:)
 
         ! Auxiliary
-        real(R8), allocatable, dimension(:) :: gradx, grady, intv, gradp, gradr, lambda_p, lambda_r
+        real(R8), allocatable, dimension(:) :: gradx, grady, gradp, gradr, lambda_p, lambda_r
+        real(R8), allocatable :: deriv_vals(:,:)
 
 
         ! Compute gradient
-        call GR%Evaluate(v(1:grid%cell%ntot), gradx, grady, intv)
+        call GR%Evaluate(v(1:grid%cell%ntot), deriv_vals)
+        gradx = deriv_vals(:,2)
+        grady = deriv_vals(:,3)
         
         ! Transform to poloidal radial gradients
         call TransFormxyTopr(cvQeps, gradx, grady, gradp, gradr)
