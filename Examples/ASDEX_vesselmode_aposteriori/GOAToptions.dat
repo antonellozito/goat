@@ -344,7 +344,9 @@ VERSION 1.00.00
 'ga.plt_qm' '0'
 'ga.timing' '0'
 'ga.meth'   'aposteriori'
-'ga.apost_interpolation_meth' 'barycentric'
+'ga.apost_interpolation_meth' 'finite_element'
+'ga.apost_interpolationC' '3'
+'ga.apost_interpolationM' '6'
 'ga.apost_meth' 'grad'
 'ga.apost_use_na' '1'
 
