@@ -340,8 +340,7 @@ module gamod_driver
         type(StateUDT)                      :: state_int
         type(UnstructuredInterpolant2DUDT)  :: interp
         type(QualityMetricUDT)              :: qm
-
-        ! Pick aposteriori method - TODO
+        real(R8), allocatable               :: field(:)
 
         ! Interpolation
         !==============
@@ -352,7 +351,21 @@ module gamod_driver
         call grid%InterpolateCvToVx(options, state, state_v)
 
         ! Construct interpolant
-        call interp%SetParametersUS(options%apost_interpolation_meth, 0, 1, triangulation)
+        select case (options%apost_interpolation_meth)
+        case ('barycentric')
+
+            call interp%SetParametersUS(options%apost_interpolation_meth, 0, 1, triangulation)
+
+        case ('finite_element')
+
+            call interp%SetParametersUS(options%apost_interpolation_meth, &
+                options%apost_interpolationC, options%apost_interpolationM, triangulation)
+            field = (triangulation%y)**(options%apost_interpolationM)
+            call interp%ConstructUnstructured(interp%triangulation%x, interp%triangulation%y, field)
+
+        end select
+
+
 
         ! Convert stacked triangle back to cutcells
         if (options%stacked_to_cutcell) &

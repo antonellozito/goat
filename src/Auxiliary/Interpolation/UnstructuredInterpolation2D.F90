@@ -141,7 +141,7 @@ module UnstructuredInterpolant2D
 
         case ('finite_element')
 
-            ! TODO
+            call ConstructUSI2DUSFinEelem(interp, xg, yg, v)
 
         case default
 
@@ -155,7 +155,7 @@ module UnstructuredInterpolant2D
 
         ! Description
         !============
-        ! We build the interpolant based. For the Barycentric it is
+        ! We build the interpolant. For the Barycentric it is
         ! just saving the field information in the vertices.
 
         ! Declare variables
@@ -167,8 +167,11 @@ module UnstructuredInterpolant2D
 
         ! Checks
         if (interp%C /= 0) &
-            call gdErrorHandler('ConstructUSI2DUSBarycentric:')
-
+            call gdErrorHandler('ConstructUSI2DUSBarycentric: not higher than C0 continuity with ' // &
+                'Barycentric interpolation possible')
+        if (interp%M .gt. 1) &
+            call gdErrorHandler('ConstructUSI2DUSBarycentric: not higher than linear ' // &
+                'interpolation possible with Barycentric interpolation')
         if (size(xg, 1) /= size(yg, 1)) &
             call gdErrorHandler('ConstructUSI2DUSBarycentric: size of xg and yg incompatible')
         if (size(xg) /= size(v)) &
@@ -182,6 +185,45 @@ module UnstructuredInterpolant2D
         interp%v = v
 
     
+    end subroutine
+
+    subroutine ConstructUSI2DUSFinEelem(interp, xg, yg, v)
+
+        ! Description
+        !============
+        ! We build the interpolant. The following steps are taken:
+        ! 0) Compute the required derivatives on the vertex nodes.
+        ! TODO
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(UnstructuredInterpolant2DUDT)     :: interp 
+        real(R8), intent(in)                    :: xg(:), yg(:)
+        real(R8), intent(out)                   :: v(:)
+
+        ! Auxiliary
+        real(R8), allocatable :: deriv_vals(:,:)
+        type(GradientReconstructionTriaUDT) :: GR
+
+
+        ! Checks
+        if (size(xg, 1) /= size(yg, 1)) &
+            call gdErrorHandler('ConstructUSI2DUSFinElem: size of xg and yg incompatible')
+        if (size(xg) /= size(v)) &
+            call gdErrorHandler('ConstructUSI2DUSFinElem: size of xg and v incompatible')
+        if (size(interp%triangulation%x) /= size(xg)) &
+            call gdErrorHandler('ConstructUSI2DUSFinElem: size of xg and triangulation incompatible')
+
+        ! Save field information
+        interp%v = v
+
+        ! Test GR results
+        call GR%SetParameters('vert', 'vert', 'global', interp%M)
+        call GR%Construct(interp%triangulation)
+        call GR%Evaluate(v, deriv_vals)
+
+
     end subroutine
 
     subroutine EvaluateUnstructuredInterpolant2D(interp, xq, yq, derivx, derivy, vq)
@@ -343,6 +385,7 @@ module UnstructuredInterpolant2D
         class(UnstructuredInterpolant2DUDT) :: interp
 
         ! TODO
+        call gdErrorHandler('DeallocateUnstructuredInterpolant2D: not implemented')
 
     end subroutine
 

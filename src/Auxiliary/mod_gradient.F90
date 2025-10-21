@@ -35,7 +35,7 @@ module mod_gradient
         !           connectivity type to compute gradients
         ! - type2: can be 'cell', 'face', 'vert' and indicates for which
         !           connectivity type to draw information for computation
-        ! - meth: can be TODO 
+        ! - meth: can be 'global' to just use the global x-y coordinates system 
 
         character(:), allocatable   :: type1
         character(:), allocatable   :: type2
@@ -333,6 +333,9 @@ module mod_gradient
             ! Compute weigths (w_ij = 1/(dx**2 + dy**2))
             w = 1/(dx**2 + dy**2)
 
+            ! Set weight of first vertex (dx=0, dy=0) to double the max of the array
+            w(1) = maxval(w(2:size(dx)))*2
+
             if (deriv == 2) then
 
                 ! Number of arrays
@@ -340,6 +343,7 @@ module mod_gradient
 
                 ! A matrix
                 allocate(A(size(dx), n))
+                A = 0
                 A(:, 1) = w*dx
                 A(:, 2) = w*dy
                 A(:, 3) = 0.5_R8*w*dx**2
@@ -353,6 +357,7 @@ module mod_gradient
 
                 ! A matrix
                 allocate(A(size(dx), n))
+                A = 0
                 A(:,1) = w*dx ! dphidx
                 A(:, 2) = w*dy ! dphidy
                 A(:, 3) = 0.5_R8*w*dx**2 ! dphidx2
@@ -370,6 +375,7 @@ module mod_gradient
 
                 ! A matrix 
                 allocate(A(size(dx),n))
+                A = 0
                 A(:,1) = w*dx ! dphidx
                 A(:, 2) = w*dy ! dphidy
                 A(:, 3) = 0.5_R8*w*dx**2 ! dphidx2
@@ -392,6 +398,7 @@ module mod_gradient
 
                 ! A matrix 
                 allocate(A(size(dx),n))
+                A = 0
                 A(:,1) = w*dx ! dphidx
                 A(:, 2) = w*dy ! dphidy
                 A(:, 3) = 0.5_R8*w*dx**2 ! dphidx2
@@ -420,6 +427,7 @@ module mod_gradient
 
                 ! A matrix 
                 allocate(A(size(dx),n))
+                A = 0
                 A(:,1) = w*dx ! dphidx
                 A(:, 2) = w*dy ! dphidy
                 A(:, 3) = 0.5_R8*w*dx**2 ! dphidx2
@@ -458,7 +466,7 @@ module mod_gradient
             C = matmul(AT, A)
 
             ! Compute inverse of C (symmetric)
-            allocate(temp(size(dx)))
+            allocate(temp(n))
             temp = 0
             sol = temp
             call SolveDenseLinearSystemDI(C, temp, sol, info, invC)
@@ -475,7 +483,7 @@ module mod_gradient
 
         ! Do transpose for better memory
         ATA = transpose(ATA_dummy)
-    end 
+    end subroutine
 
 
 end module

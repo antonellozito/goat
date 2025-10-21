@@ -16,6 +16,7 @@ module gamod_types
     ! Load modules
     use mod_sort   
     use mod_precision
+    use mod_readwrite
     use mod_polygon
     use mod_dynamicarrays
     use mod_gradient 
@@ -580,11 +581,6 @@ module gamod_types
     ! Get vxs from fcs
     interface GetVxsFromFcsGA
         module procedure GetVxsFromFcsGA0D, GetVxsFromFcsGA1D
-    end interface
-
-    ! Write array
-    interface WriteArray
-        module procedure WriteArrayI8, WriteArrayR8
     end interface
 
     contains 
@@ -2339,7 +2335,8 @@ module gamod_types
             )
 
         ! Check
-        if (GR%deriv .gt. 1) call gdErrorHandler('EvaluateGRGA: no implemention for deriv > 1')
+        if (GR%meth /= 'global') call gdErrorHandler('ConstructGRGA: no other meth than "global" implemented')
+        if (GR%deriv .gt. 1) call gdErrorHandler('ConstructGRGA: no implemention for deriv > 1')
 
         ! Initialize
         counter = 0
@@ -4624,7 +4621,7 @@ module gamod_types
             ! Get vertices
             verts = GetFluxSurfaceVxsGA(fd, ifs)
 
-            ! Check whether the flux surface is connected to two different targets - TODO
+            ! Check whether the flux surface is connected to two different targets
             log = isBoundaryVertGA(grid, verts)
             allocate(vxsB(count(log)))
             vxsB = pack(verts, log)
@@ -19777,94 +19774,99 @@ module gamod_types
         call AllocateState(state_int, grid%cell%ntot, grid%face%ntot, state_v%ns)
 
         ! Construct interpolants for every field
-        interp2 = interp
-        xq = grid%cell%x%Get()
-        yq = grid%cell%y%Get()
-
-        do is = 1, state_v%ns
-            if (options%apost_use_na) then
-                statef = state_v%na(:,is)
-                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%na(:,is))
-            end if
-
-            if (options%apost_use_ua) then
-                statef = state_v%ua(:,is)
-                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%ua(:,is))
-            end if
-        end do
-
-        if (options%apost_use_te) then
-            statef = state_v%te
-            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%te)
-        end if
-        if (options%apost_use_ti) then
-            statef = state_v%ti
-            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%ti)
-        end if
-        if (options%apost_use_tn) then
-            statef = state_v%tn
-            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%tn)
-        end if
-        if (options%apost_use_po) then
-            statef = state_v%po
-            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%po)
-        end if
-        if (options%apost_use_kt) then
-            statef = state_v%kt
-            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%kt)
-        end if
-        if (options%apost_use_zt) then
-            statef = state_v%zt
-            call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%zt)
-        end if
-
-        ! Residuals if required
-        if (options%readstatemeth == 'b2fplasmf') then
+        select case (options%apost_interpolation_meth)
+        case ('barycentric')
+            interp2 = interp
+            xq = grid%cell%x%Get()
+            yq = grid%cell%y%Get()
 
             do is = 1, state_v%ns
-                if (options%apost_use_resco) then
-                    statef = state_v%resco(:,is)
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resco(:,is))
+                if (options%apost_use_na) then
+                    statef = state_v%na(:,is)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%na(:,is))
                 end if
 
-                if (options%apost_use_resmo) then
-                    statef = state_v%resmo(:,is)
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resmo(:,is))
+                if (options%apost_use_ua) then
+                    statef = state_v%ua(:,is)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%ua(:,is))
                 end if
             end do
 
-            if (options%apost_use_resmt) then
-                statef = state_v%resmt
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%resmt)
+            if (options%apost_use_te) then
+                statef = state_v%te
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%te)
             end if
-            if (options%apost_use_reshe) then
-                statef = state_v%reshe
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshe)
+            if (options%apost_use_ti) then
+                statef = state_v%ti
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%ti)
             end if
-            if (options%apost_use_reshi) then
-                statef = state_v%reshi
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshi)
+            if (options%apost_use_tn) then
+                statef = state_v%tn
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%tn)
             end if
-            if (options%apost_use_reshn) then
-                statef = state_v%reshn
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshn)
+            if (options%apost_use_po) then
+                statef = state_v%po
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%po)
             end if
-            if (options%apost_use_respo) then
-                statef = state_v%respo
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%respo)
+            if (options%apost_use_kt) then
+                statef = state_v%kt
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%kt)
             end if
-            if (options%apost_use_reskt) then
-                statef = state_v%reskt
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reskt)
+            if (options%apost_use_zt) then
+                statef = state_v%zt
+                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%zt)
             end if
-            if (options%apost_use_reszt) then
-                statef = state_v%reszt
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reszt)
-            end if            
-        end if
 
-        ! Evaluate interpolant
-        
+            ! Residuals if required
+            if (options%readstatemeth == 'b2fplasmf') then
+
+                do is = 1, state_v%ns
+                    if (options%apost_use_resco) then
+                        statef = state_v%resco(:,is)
+                        call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resco(:,is))
+                    end if
+
+                    if (options%apost_use_resmo) then
+                        statef = state_v%resmo(:,is)
+                        call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resmo(:,is))
+                    end if
+                end do
+
+                if (options%apost_use_resmt) then
+                    statef = state_v%resmt
+                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%resmt)
+                end if
+                if (options%apost_use_reshe) then
+                    statef = state_v%reshe
+                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshe)
+                end if
+                if (options%apost_use_reshi) then
+                    statef = state_v%reshi
+                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshi)
+                end if
+                if (options%apost_use_reshn) then
+                    statef = state_v%reshn
+                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshn)
+                end if
+                if (options%apost_use_respo) then
+                    statef = state_v%respo
+                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%respo)
+                end if
+                if (options%apost_use_reskt) then
+                    statef = state_v%reskt
+                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reskt)
+                end if
+                if (options%apost_use_reszt) then
+                    statef = state_v%reszt
+                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reszt)
+                end if            
+            end if
+
+        case default
+
+            call gdErrorHandler('InterpolateState: aposteriori interpolation method no implemented')
+
+        end select 
 
 
     end subroutine
@@ -21722,88 +21724,5 @@ module gamod_types
 
     end subroutine
 
-    subroutine WriteArrayI8(a, filename)
-
-        ! Description
-        !============
-        ! Write an integer array in a file
-
-        ! Declare variables
-        !==================
-        ! Modules 
-        use mod_plotter 
-        use mod_specialchars, only : filesepchar
-
-        ! Arguments
-        integer(I8), intent(in)  :: a(:)
-        character(*), intent(in) :: filename 
-
-        ! Auxiliary
-        integer :: fu     
-        integer(I8) :: i
-        character(:), allocatable :: dir
-
-        ! Construct writing directory
-        dir = plotdir // filesepchar // filename // '.dat'
-
-        ! Open file
-        open (action='write', file=trim(dir), newunit=fu, &
-             status='unknown')
-
-        ! Size data
-        write (fu, *) 'Elements'
-        write (fu, *) size(a)
-
-        ! Array
-        write (fu, *) 'ID val(ID)'
-        do i = 1, size(a)
-            write(fu, *) i, a(i)
-        end do
-
-        close(fu)
-
-    end subroutine
-
-    subroutine WriteArrayR8(a, filename)
-
-        ! Description
-        !============
-        ! Write an integer array in a file
-
-        ! Declare variables
-        !==================
-        ! Modules 
-        use mod_plotter 
-        use mod_specialchars, only : filesepchar
-
-        ! Arguments
-        real(R8), allocatable :: a(:)
-        character(*), intent(in) :: filename 
-
-        ! Auxiliary
-        integer :: fu     
-        integer(I8) :: i
-        character(:), allocatable :: dir
-
-        ! Construct writing directory
-        dir = plotdir // filesepchar // filename // '.dat'
-
-        ! Open file
-        open (action='write', file=trim(dir), newunit=fu, &
-             status='unknown')
-
-        ! Size data
-        write (fu, *) 'Elements'
-        write (fu, *) size(a)
-
-        ! Array
-        write (fu, *) 'ID val(ID)'
-        do i = 1, size(a)
-            write(fu, *) i, a(i)
-        end do
-
-        close(fu)
-
-    end subroutine
 
 end module 

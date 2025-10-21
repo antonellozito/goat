@@ -5010,8 +5010,6 @@ module goatmod_types
             call cfrure(filespec, nc,       state%po, 'po')
             call cfrure(filespec, nc,       state%kt, 'kt')
             call cfrure(filespec, nc,       state%zt, 'zt')
-
-            ! Remove guard cells data, convention at the end of array - TODO
             
         end if
 

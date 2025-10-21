@@ -322,6 +322,8 @@ module goatmod_userinput
         ! Aposteriori adaptations
         ! - vxVol_style: style to interpolate from cell centers to vertices
         ! - apost_interpolation_meth: determines the interpolation method for interpolation, can be 'barycentric' or 'finite_element'
+        ! - apost_interpolationC: level of continuity of interpolant
+        ! - apost_interpolationM: order of interpolant
         ! - apost_meth: method to chose a cell to refine, can be 'grad'
         !   from read state and residual information to a newly adapted grid, or 
         !   can be 'res' to base the adaptation on residual information
@@ -433,6 +435,8 @@ module goatmod_userinput
         ! Aposteriori
         integer(I8)                 :: vxVol_style
         character(:), allocatable   :: apost_interpolation_meth
+        integer(I8)                 :: apost_interpolationC
+        integer(I8)                 :: apost_interpolationM
         character(:), allocatable   :: apost_meth
         real(R8)                    :: apost_lambda_threshold
         logical                     :: apost_use_na
@@ -1205,6 +1209,8 @@ module goatmod_userinput
         ! Aposteriori
         options%vxVol_style                         = 2
         options%apost_interpolation_meth            = 'barycentric'
+        options%apost_interpolationC                = 0
+        options%apost_interpolationM                = 1
         options%apost_meth                          = 'grad'
         options%apost_lambda_threshold              = 3
         options%apost_use_na                        = .false.
@@ -1956,6 +1962,10 @@ module goatmod_userinput
         call ExtractOptionValueInteger0D(fid, field, options%vxVol_style)
         field = 'ga.apost_interpolation_meth'
         call ExtractOptionValueCharacter(fid, field, options%apost_interpolation_meth)
+        field = 'ga.apost_interpolationC'
+        call ExtractOptionValueInteger0D(fid, field, options%apost_interpolationC)        
+        field = 'ga.apost_interpolationM'
+        call ExtractOptionValueInteger0D(fid, field, options%apost_interpolationM)                
         field = 'ga.apost_meth'
         call ExtractOptionValueCharacter(fid, field, options%apost_meth)
         field = 'ga.apost_use_na'
