@@ -1424,7 +1424,7 @@ def PlotGridCellVertArray(grid, array, fignum):
     # Plot cells only
     PlotGridCells(grid, fignum)  
 
-    # Plot cutcells
+    # Plot verts
     for i in np.arange(0,len(array), 1):
         PlotPoints2D(grid.vert.x[array[i]-1], grid.vert.y[array[i]-1], fignum, marker='.', color='b') 
 
@@ -1494,6 +1494,14 @@ def PlotTriaCells(tria, fignum):
 
      # Set axes
     SetAxesLimits2D(plt.gca(), xb, yb)
+
+def PlotTriaCellVertArray(tria, array, fignum):
+    # Plot cells only
+    PlotTriaCells(tria, fignum)
+
+    # Plot verts
+    for i in np.arange(0,len(array), 1):
+        PlotPoints2D(tria.vert.x[array[i]-1], tria.vert.y[array[i]-1], fignum, marker='.', color='b')     
 
 #--------------------------------------------------------------------------#
 #                             Shape Optimization                           #
