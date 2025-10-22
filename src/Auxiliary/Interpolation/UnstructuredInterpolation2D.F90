@@ -30,17 +30,20 @@ module UnstructuredInterpolant2D
         ! Apart from the fields of the generic interpolant, several 
         ! other fields are defined as well:
         ! - meth: methodology to construct interpolant
-        ! - C, M: order of the interpolant and order of the approximation 
-        ! method to compute derivatives for the interpolant construction
+        ! - C, M: order of the interpolant and order of the approximation
+        ! method to compute derivatives for the interpolant construction     
+        ! - n: number of terms in the interpolant    
         ! - allowextrapolation: logical to check if we can extrapolate
         ! - triangulation: triangulated mesh to use for interpolation
+        ! - base_func: type of used base function, for now only 'polynomial'
+
         ! - v: the values at the vertex points
         ! - xgv, ygv: grid vectors
         ! - A: interpolation coefficients
         ! - refx, refy, refdx, refdy: reference values used to compute
         ! derivatives etc 
         ! - cellindex: nx-1 by ny-1 array containing the cell indices
-        ! - n: number of terms in the interpolant
+
         ! - precomputedfac: the required factorials precomputed to save
         ! some time during evaluation 
 
@@ -48,6 +51,9 @@ module UnstructuredInterpolant2D
         integer(I8)                     :: C, M, n
         logical                         :: allowextrapolation
         type(TriangulationUDT)          :: triangulation
+        character(:), allocatable       :: base_func
+
+        type(GradientReconstructionTriaUDT) :: GR
 
         real(R8), allocatable           :: xgv(:), ygv(:), A(:, :), &
             refx(:), refy(:), refdx(:), refdy(:)
@@ -75,7 +81,7 @@ module UnstructuredInterpolant2D
     contains
 
     ! Set parameters
-    subroutine SetParametersUS(interp, meth, C, M, triangulation)
+    subroutine SetParametersUS(interp, meth, C, M, triangulation, base_func)
 
         ! Description
         !============
@@ -90,6 +96,7 @@ module UnstructuredInterpolant2D
         class(UnstructuredInterpolant2DUDT)     :: interp
         character(:), allocatable, intent(in)   :: meth
         integer(I8), intent(in)                 :: C, M 
+        character(*)                            :: base_func
         type(TriangulationUDT), intent(in)      :: triangulation
 
         ! Set
@@ -99,6 +106,7 @@ module UnstructuredInterpolant2D
         interp%M    = M
         interp%allowextrapolation = .true.
         interp%triangulation = triangulation
+        interp%base_func = base_func
         
     end subroutine
 
@@ -176,7 +184,7 @@ module UnstructuredInterpolant2D
             call gdErrorHandler('ConstructUSI2DUSBarycentric: size of xg and yg incompatible')
         if (size(xg) /= size(v)) &
             call gdErrorHandler('ConstructUSI2DUSBarycentric: size of xg and v incompatible')
-        if (size(interp%triangulation%x) /= size(xg)) &
+        if (interp%triangulation%nv /= size(xg)) &
             call gdErrorHandler('ConstructUSI2DUSBarycentric: size of xg and triangulation incompatible')
 
         ! (xg, yg) are the coordinates where the values are known
@@ -192,8 +200,11 @@ module UnstructuredInterpolant2D
         ! Description
         !============
         ! We build the interpolant. The following steps are taken:
-        ! 0) Compute the required derivatives on the vertex nodes.
-        ! TODO
+        ! 0) Compute the required derivatives on the vertex nodes using gradient reconstruction
+        ! 1) Determine required order of the interpolant depended on the wanted continuity
+        !   The interpolant is of type phi(x,y) = sum_i^N sum_j^N a_ij x^i y^j
+        ! 2) Compute the coefficients of the gradient reconstruction of the correct order
+
 
         ! Declare variables
         !==================
@@ -203,8 +214,11 @@ module UnstructuredInterpolant2D
         real(R8), intent(out)                   :: v(:)
 
         ! Auxiliary
-        real(R8), allocatable :: deriv_vals(:,:)
-        type(GradientReconstructionTriaUDT) :: GR
+        integer(I8) :: i, ic, order, min_number_of_terms, number_of_terms
+        integer(I8), allocatable, dimension(:) :: ar, n_ar, tv
+        real(R8), allocatable :: deriv_vals(:,:), A(:,:), xv(:), yv(:), Amask(:,:)
+        logical, allocatable :: log(:)
+        !type(GradientReconstructionTriaUDT) :: GR
 
 
         ! Checks
@@ -212,17 +226,79 @@ module UnstructuredInterpolant2D
             call gdErrorHandler('ConstructUSI2DUSFinElem: size of xg and yg incompatible')
         if (size(xg) /= size(v)) &
             call gdErrorHandler('ConstructUSI2DUSFinElem: size of xg and v incompatible')
-        if (size(interp%triangulation%x) /= size(xg)) &
+        if (interp%triangulation%nv /= size(xg)) &
             call gdErrorHandler('ConstructUSI2DUSFinElem: size of xg and triangulation incompatible')
+        if (interp%C .gt. 3) &
+            call gdErrorHandler('ConstructUSI2DUSFinEelem: higher than 3th order continuity not implemented')
 
         ! Save field information
         interp%v = v
 
-        ! Test GR results
-        call GR%SetParameters('vert', 'vert', 'global', interp%M)
-        call GR%Construct(interp%triangulation)
-        call GR%Evaluate(v, deriv_vals)
+        ! Determine needed order of derivatives
+        ! This depends on the required continuity
+        ! F.e. C = 3 => for triangles required 3 * 10 equations
+        ! This would correspond with a 5th order interpolant because this has 36 terms
+        ! while 4th order only has 25 terms and insufficient.
+        print *, 'Constructing unstructured interpolation with C',interp%C, 'continuity on triangulated mesh'
 
+        ! Compute number of terms
+        ar = (/(i, i = 1, 10)/)
+        n_ar = (ar + 1)**2
+        min_number_of_terms = sum(ar(1:interp%C+1)) * 3 ! number of equation
+
+        ! Determine neccesary order of interpolant
+        ! (number of term = (N + 1)**2) for interpolant phi = sum_i^N sum_j^N a_ij x^i y^j
+        log = [min_number_of_terms .lt. n_ar]
+        order = findloc(log, .true., 1)
+        number_of_terms = (order + 1)**2
+        interp%n = number_of_terms
+
+        ! Continue computation if not yet done before for other field on the same grid
+        if (.not. allocated(interp%A)) then
+
+            ! Build b matrix
+            ! Compute GR coefficients
+            call interp%GR%SetParameters('vert', 'vert', 'global', order)
+            call interp%GR%Construct(interp%triangulation)
+            call interp%GR%Evaluate(v, deriv_vals)
+
+            ! Build A matrix
+            allocate(interp%A(interp%n, interp%n))
+
+            select case (interp%base_func)
+            case ('polynomial')
+
+                ! Construct Amask
+                call ConstructAmask(order, Amask)
+
+                ! Loop over the cell
+                do ic = 1, interp%triangulation%nc
+
+                    ! Get vertices
+                    tv = interp%triangulation%cvert(ic, :)
+
+                    ! Get coordinates
+                    xv  = interp%triangulation%x(tv)
+                    yv  = interp%triangulation%x(tv)
+
+                    xv = [2, 2, 2]
+                    yv = [2, 2, 2]
+                    
+                    ! Construct Afull up to highest supported order
+                    allocate(A(interp%n,interp%n))
+                    call ConstructA(order, interp%n, xv, yv, Amask, A)
+
+                end do
+
+
+
+
+            case default
+                call gdErrorHandler('ConstructUSI2DUSFinEelem: type of base_func not implemented')
+            end select
+
+
+        end if
 
     end subroutine
 
@@ -387,6 +463,173 @@ module UnstructuredInterpolant2D
         ! TODO
         call gdErrorHandler('DeallocateUnstructuredInterpolant2D: not implemented')
 
+    end subroutine
+
+    subroutine ConstructAmask(order, A)
+
+        ! Description
+        !============
+        ! Construct Amask matrix to avoid incorrect terms in A matrix
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in) :: order
+        integer(I8), intent(out) :: A(36, (order+1)**2)
+
+        ! Auxiliary
+        integer(I8) :: i, j, M, k
+
+
+        ! Initialize
+        A = 1
+
+        ! Loop 
+        M = order+1
+        do j = 1, M
+            do i = 1, M
+                ! Column index
+                k = (j-1)*M + i 
+                
+                if (j .le. 3) then
+                    ! For fourth derivatives of y onward not automatically 0
+                    (34:36, k) = 0  ! d4phidy4
+                    if (j .le. 2) then
+                        ! For third derivatives of y onward not automatically 0
+                        A(22:24, k) = 0  ! d3phidy3
+                        if (j .le. 1) then
+                            ! From second derivatives of y onwards not automatically 0
+                            A(13:15, k) = 0  ! d2phidy2
+                            A(28:30, k) = 0  ! d3dphidxdy2
+                        end if
+                    end if
+                end if
+
+                if (i .le. 3) then
+                    ! For fourth derivatives of y onward not automatically 0
+                    A(31:33, k) = 0  ! d4phidx4
+                    if (i .le. 2) then
+                        ! For third derivatives of x onward not automatically 0
+                        A(19:21, k) = 0  ! d3phidx3
+                        if (i .le. 1) then
+                            ! From second derivatives of x onwards not automatically 0
+                            A(10:12, k) = 0  ! d2phidx2
+                            A(25:27, k) = 0  ! d3dphidx2dy
+                        end if
+                    end if
+                end if
+
+                !if (j == 1) then
+                !    ! From second derivatives of y onwards not automatically 0
+                !    A(13:15, k) = 0  ! d2phidy2
+                !    A(22:24, k) = 0  ! d3phidy3
+                !    A(28:30, k) = 0  ! d3dphidxdy2
+                !    A(34:36, k) = 0  ! d4phidy4
+                !else if (j == 2) then
+                !    ! For third derivatives of y onward not automatically 0
+                !    A(22:24, k) = 0  ! d3phidy3
+                !    A(34:36, k) = 0  ! d4phidy4
+                !else if (j == 3) then
+                !    ! For fourth derivatives of y onward not automatically 0
+                !    A(34:36, k) = 0  ! d4phidy4  
+                !end if
+
+                !if (i == 1) then
+                !    ! From second derivatives of x onwards not automatically 0
+                !    A(10:12, k) = 0  ! d2phidx2
+                !    A(19:21, k) = 0  ! d3phidx3
+                !    A(25:27, k) = 0  ! d3dphidx2dy
+                !    A(31:33, k) = 0  ! d4phidx4  
+                !else if (i == 2) then
+                !    ! For third derivatives of x onward not automatically 0
+                !    A(19:21, k) = 0  ! d3phidx3
+                !    A(31:33, k) = 0  ! d4phidx4 
+                !else if (i == 3) then
+                !    ! For fourth derivatives of y onward not automatically 0
+                !    A(31:33, k) = 0  ! d4phidx4
+                !end if
+                
+            end do
+        end do
+
+    end subroutine
+
+    subroutine ConstructA(order, n, xv, yv, Amask, A)
+
+        ! Description
+        !============
+        ! Construct the whole A matrix up to 5th order
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in) :: order, n
+        real(R8), intent(in)    :: xv(3), yv(3)
+        integer, intent(in)     :: Amask(36, (order+1)**2)
+        real(R8), intent(out)   :: A(n, n) 
+
+        ! Auxiliary
+        integer(I8) :: i, j, M, k
+        real(R8) :: Afull(36, (order+1)**2)
+
+        ! Initialize
+        Afull = 0
+
+        ! Equation phi is constant
+        M = order+1
+        do j = 1, M
+            do i = 1, M
+
+                ! Column index
+                k = (j-1)*M + i
+
+                ! Equation phi
+                Afull(1:3, k) = Amask(1:3, k)*xv**(i-1) * yv**(j-1)
+
+                ! Equation dphidx 
+                Afull(4:6, k) = Amask(4:6, k)*(i-1)*xv**(i-2) * yv**(j-1)
+
+                ! Equation dphidy
+                Afull(7:9, k) = Amask(7:9, k)*xv**(i-1) * (j-1)*yv**(j-2)
+
+                ! Equation d2phidx2
+                Afull(10:12, k) = Amask(10:12, k)*(i-2)*xv**(i-3) * yv**(j-1)
+
+                ! Equation d2phidy2
+                Afull(13:15, k) = Amask(13:15, k)*xv**(i-1) * (j-2)*yv**(j-3)
+
+                ! Equation d2phidxdy
+                Afull(16:18, k) = Amask(16:18, k)*(i-1)*xv**(i-2) * (j-1)*yv**(j-2)
+
+                ! Equation d3phidx3
+                Afull(19:21, k) = Amask(19:21, k)*(i-3)*xv**(i-4) * yv**(j-1)
+
+                ! Equation d3phidy3
+                Afull(22:24, k) = Amask(22:24, k)*xv**(i-1) * (j-3)*yv**(j-4)
+
+                ! Equation d3dphidx2dy
+                Afull(25:27, k) = Amask(25:27, k)*(i-2)*xv**(i-3) * (j-1)*yv**(j-2)
+
+                ! Equation d3dphidxdy2
+                Afull(28:30, k) = Amask(28:30, k)*(i-1)*xv**(i-2) * (j-2)*yv**(j-3)
+
+                ! Equation d4phidx4
+                Afull(31:33, k) = Amask(31:33, k)*(i-4)*xv**(i-5) * yv**(j-1)
+
+                ! Equation d4phidy4
+                Afull(34:36, k) = Amask(34:36, k)*xv**(i-1) * (j-4)*yv**(j-5)
+
+                ! Multiply with mask
+                Afull(:,k) = Afull(:,k)*Amask(:,k)
+
+            end do
+        end do
+
+        call gdErrorHandler('ConstructA: problem with ')
+
+        ! Take the correct slice
+        A = Afull(1:n, 1:n)        
+ 
     end subroutine
 
 

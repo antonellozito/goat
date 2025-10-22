@@ -16,6 +16,7 @@ module mod_triangulation
     use mod_readwrite
     use mod_gradient
     use mod_sort
+    use mod_utility
 
     implicit none
 
@@ -34,9 +35,15 @@ module mod_triangulation
         ! - x, y    coordinates of the vertices (simple array)
         ! - cvert   connectivity of vertices to cells. The array has size
         !           (number of cells, 3). 
+        ! - nv      number of vertices
+        ! - nc      number of cells
+        ! - vcell   cells of vertices
+        ! - vcellP  pointer array for vcell
 
         real(R8), allocatable       :: x(:), y(:)
         integer(I8), allocatable    :: cvert(:,:)
+        integer(I8)                 :: nv, nc
+        integer(I8), allocatable    :: vcellP(:,:), vcell(:)
 
     contains
 
@@ -45,7 +52,7 @@ module mod_triangulation
         generic :: Construct => ConstructTriaFromUnstructuredData
 
         ! Stencil construction
-        procedure :: AddVxsToStencil
+        procedure :: ConstructStencil
 
         ! Visualization
         procedure :: Visualize          =>  VisualizeTriangulation
@@ -100,7 +107,8 @@ module mod_triangulation
 
 
         ! Auxiliary
-        integer(I8) :: i
+        integer(I8) :: i, iv, counter, n
+        integer(I8), allocatable :: query(:,:), vcellP(:,:), vcell(:), cvs(:)
 
         ! Checks
         if (size(vertP1) /= size(vertP2)) &
@@ -119,6 +127,28 @@ module mod_triangulation
         do i = 1, size(vertP1)
             triangulation%cvert(i,:) = vertlist(vertP1(i) : vertP1(i) + vertP2(i) - 1)
         end do
+
+        ! Save number of vertices and cells
+        triangulation%nv = size(triangulation%x)
+        triangulation%nc = size(vertP1)
+
+        ! Construct inverse of cvert
+        allocate(query(triangulation%nc,3), vcellP(triangulation%nv,2), vcell(triangulation%nv*20))
+        query = spread((/ (i, i = 1, triangulation%nc)/), 2, 3)
+        counter = 0
+        do iv = 1, triangulation%nv
+            cvs = GetVertCellTriaQ(triangulation, iv, query)
+            n = size(cvs)
+            vcellP(iv,1) = counter + 1
+            vcellP(iv,2) = n
+            vcell(counter+1:counter+n) = cvs
+            counter = counter + n
+
+        end do
+        triangulation%vcellP = vcellP
+        triangulation%vcell = vcell(1:counter)
+
+
 
     end subroutine
 
@@ -255,35 +285,27 @@ module mod_triangulation
         type(TriangulationUDT), intent(in)      :: tria
 
         ! Auxiliary
-        integer(I8) :: iv, j, k, l, m, n, cNvP(size(tria%x),2), &
-            vxs(200), counterv, counter, tv(3), tv2(3), stencil_est, min_stencil
-        integer(I8), allocatable :: cvs(:), cvs2(:), cNv(:), ar(:)
+        integer(I8) :: iv, j, n, cNvP(size(tria%x),2), &
+            vxs(200), counterv, counter, stencil_est, min_stencil
+        integer(I8), allocatable :: cNv(:), ar(:)
         real(R8), allocatable :: ATA_loc(:,:), distx(:), disty(:), ATA(:,:), w(:), weight(:)
+        real(R8) :: t_start, t_end, delta_t1, t_start1, t_end1, t_start2, t_end2, delta_t2
 
 
         ! Set parameters depending on deriv
         ! Compute number of derivatives
         if (GR%meth /= 'global') call gdErrorHandler('ConstructGRTria: no other meth than "global" implemented')
         if (GR%deriv .gt. 6) call gdErrorHandler('ConstructGRTria: deriv > 6 not yet implement')
+        print *, 'Constructing gradient reconstruction of ', GR%deriv,'th order on triangulated grid'
         ar = (/(j, j = 2, 7)/)
         n = sum(ar(1:GR%deriv))
         min_stencil = n + 1
         stencil_est = min_stencil + 10
-        !if (GR%deriv == 1) then
-        !    stencil_est = 15
-        !else if (GR%deriv == 2) then
-        !    stencil_est = 20
-        !else if (GR%deriv == 3) then
-        !    stencil_est = 25
-        !else if (GR%deriv == 4) then
-        !    stencil_est = 30
-        !else if (GR%deriv == 5) then
-        !    stencil_est = 40
-        !else if (GR%deriv == 6) then
-        !    stencil_est = 50
-        !end if
 
-           
+        ! Timing
+        call wall_time(t_start) 
+        delta_t1 = 0   
+        delta_t2 = 0       
             
         ! Initialize
         allocate(cNv(size(tria%x)*stencil_est), ATA(size(tria%x)*stencil_est,n), w(size(tria%x)*stencil_est))
@@ -301,55 +323,18 @@ module mod_triangulation
                 ! Loop over vertices
                 do iv = 1, size(tria%x)
 
-                    ! Reset
-                    vxs = 0
+                    ! Timing
+                    call wall_time(t_start1)
 
-                    ! Get cells
-                    vxs(1) = iv
-                    counterv = 1
-                    cvs = GetVertCellTria(tria, iv)
-                    do j = 1, size(cvs)
-                            tv = tria%cvert(cvs(j),:)
-                            do k = 1, 3
-                                if (.not. any(tv(k) == vxs(1:counterv))) then
-                                    counterv = counterv + 1
-                                    vxs(counterv) = tv(k)
-                                end if
-
-                            end do
-
-                    end do 
+                    ! ConstructStencil
+                    call tria%ConstructStencil(iv, min_stencil, vxs, counterv)
                     
-                    ! Need at least min_stencil data points for second order
-                    if (counterv .lt. min_stencil) then
-                        do j = 1, size(cvs)
-                            tv = tria%cvert(cvs(j),:)
-                            do k = 1, 3
-                                cvs2 = GetVertCellTria(tria, tv(k))
-                                do l = 1, size(cvs2)
-                                    tv2 = tria%cvert(cvs2(l),:)
-                                    do m = 1, 3
-                                        if (.not. any(tv2(m) == vxs(1:counterv))) then
-                                            counterv = counterv + 1
-                                            vxs(counterv) = tv2(m)
-                                            if (counterv .gt. min_stencil) exit
-                                        end if
-                                    end do 
-                                    if (counterv .gt. min_stencil + 5) exit                                       
-                                end do
-                            end do
-                        end do
-                    end if
+                    ! Timing
+                    call wall_time(t_end1)
+                    delta_t1 = max(t_end1-t_start1, delta_t1)
 
-                    call tria%AddVxsToStencil(min_stencil, vxs, counterv)
-
-                    if (counterv .lt. min_stencil) then
-                        call tria%WriteErrorData(vxs(1:counterv), 1)
-                        print *, 'Number of vertices: ', counterv
-                        print *, 'Minimum stencil: ', min_stencil
-                        print *, 'Vertex (iv): ', iv
-                        call gdErrorHandler('ConstructGRTria: stencil insufficient, implement this!')
-                    end if
+                    ! Timing
+                    call wall_time(t_start2)
 
                     ! Add to cNv
                     cNvP(iv, 1) = counter + 1
@@ -375,6 +360,10 @@ module mod_triangulation
                     ATA(counter+1:counter+counterv,:) = ATA_loc
                     counter = counter + counterv
 
+                    ! Timing
+                    call wall_time(t_end2)
+                    delta_t2 = max(t_end2-t_start2, delta_t2)
+
                 end do
 
             case default
@@ -396,6 +385,13 @@ module mod_triangulation
         GR%invA = ATA(1:counter,:)
         GR%w = w(1:counter)
 
+        ! Timing
+        call wall_time(t_end)
+
+        ! Display
+        print *, 'Time to construct GR coefficients: ', t_end - t_start, ' seconds'
+        print *, 'Time to construct GR stencil per vertex: ', delta_t1, ' seconds'
+        print *, 'Time to construct GR compute coef per vertex: ', delta_t2, ' seconds'
 
     end subroutine
 
@@ -488,7 +484,7 @@ module mod_triangulation
 
     end subroutine
 
-    subroutine AddVxsToStencil(tria, min_stencil, vxs, counterv)
+    subroutine ConstructStencil(tria, iv, min_stencil, vxs, counterv)
 
         ! Description
         !============
@@ -498,12 +494,60 @@ module mod_triangulation
         !==================
         ! Arguments
         class(TriangulationUDT), intent(in) :: tria
-        integer(I8), intent(in)             :: min_stencil
+        integer(I8), intent(in)             :: iv, min_stencil
         integer(I8), intent(inout)          :: counterv, vxs(:)
 
         ! Auxiliary
-        integer(I8) :: j, l, m, counter_loc
-        integer(I8), allocatable :: cvs(:), tv(:)
+        integer(I8) :: j, k, l, m, counter_loc
+        integer(I8), allocatable, dimension(:) :: cvs, cvs2, tv, tv2
+        logical, allocatable :: cvs_done(:)
+
+        ! Construct query
+        allocate(cvs_done(tria%nc))
+        cvs_done = .false.
+
+        ! Get loop over cells of vertex
+        vxs = 0
+        vxs(1) = iv
+        counterv = 1
+        cvs = GetVertCellTria(tria, vxs(1))
+        do j = 1, size(cvs)
+
+                ! Get vertices of cell
+                tv = tria%cvert(cvs(j),:)
+                do k = 1, 3
+                    if (.not. any(tv(k) == vxs(1:counterv))) then
+                        counterv = counterv + 1
+                        vxs(counterv) = tv(k)
+                    end if
+                end do
+        end do 
+        cvs_done(cvs) = .true.
+                    
+        ! Need at least min_stencil data points for second order
+        if (counterv .lt. min_stencil) then
+            do j = 1, size(cvs)
+                tv = tria%cvert(cvs(j),:)
+                do k = 1, 3
+                    cvs2 = GetVertCellTria(tria, tv(k))
+                    do l = 1, size(cvs2)
+                        if (.not.cvs_done(cvs2(l))) then
+                            tv2 = tria%cvert(cvs2(l),:)
+                            do m = 1, 3
+                                if (.not. any(tv2(m) == vxs(1:counterv))) then
+                                    counterv = counterv + 1
+                                    vxs(counterv) = tv2(m)
+                                    if (counterv .gt. min_stencil) exit
+                                end if
+                            end do 
+                            cvs_done(cvs2(l)) = .true.
+                        end if
+                        if (counterv .gt. min_stencil + 5) exit
+                    end do
+                end do
+            end do
+        end if
+
 
         counter_loc = counterv
         do while (counter_loc .lt. min_stencil)
@@ -512,6 +556,7 @@ module mod_triangulation
             do j = 2, counter_loc
                 cvs = GetVertCellTria(tria, vxs(j))
                 do l = 1, size(cvs)
+                    if (.not.cvs_done(cvs(l))) then
                         tv = tria%cvert(cvs(l),:)
                         do m = 1, 3
                             if (.not. any(tv(m) == vxs(1:counterv))) then
@@ -520,7 +565,9 @@ module mod_triangulation
                                 if (counterv .gt. min_stencil) exit
                             end if
                         end do 
-                        if (counterv .gt. min_stencil + 5) exit                                       
+                        cvs_done(cvs(l)) = .true.     
+                    end if
+                    if (counterv .gt. min_stencil + 5) exit
                 end do
             end do
 
@@ -528,6 +575,14 @@ module mod_triangulation
             counter_loc = counterv
 
         end do
+
+        if (counterv .lt. min_stencil) then
+            call tria%WriteErrorData(vxs(1:counterv), 1)
+            print *, 'Number of vertices: ', counterv
+            print *, 'Minimum stencil: ', min_stencil
+            print *, 'Vertex (iv): ', iv
+            call gdErrorHandler('ConstructGRTria: stencil insufficient, implement this!')
+        end if        
 
     end subroutine
 
@@ -537,34 +592,35 @@ module mod_triangulation
     !                                                                  !
     !==================================================================!  
     
-    ! Get cells of vertex
+    ! Get cells of vertex not using inverse connectivity
+    function GetVertCellTriaQ(tria, iv, query) result(res)
+        type(TriangulationUDT) :: tria
+        integer(I8) :: iv, j
+        integer(I8), allocatable :: res(:)
+        integer(I8), allocatable, optional :: query(:,:)
+        logical, allocatable :: log(:,:)
+
+        if (.not.present(query)) then
+
+            allocate(query(tria%nc,3))
+            query = spread((/ (j, j = 1, tria%nc)/), 2, 3)
+
+        end if
+
+        ! Get 
+        log = tria%cvert == iv
+        allocate(res(count(log)))
+        res = pack(query, log)        
+
+    end function
+
     function GetVertCellTria(tria, iv) result(res)
         type(TriangulationUDT) :: tria
-        integer(I8) :: iv, j, n1, n2, n3
-        integer(I8), allocatable :: indc(:), res(:), &
-            res1(:), res2(:), res3(:), res4(:), cv1(:), &
-            cv2(:), cv3(:)
-
-        cv1 = tria%cvert(:,1)
-        cv2 = tria%cvert(:,2)
-        cv3 = tria%cvert(:,3)
-
-        allocate(res1(count(cv1 == iv)))
-        allocate(res2(count(cv2 == iv)))
-        allocate(res3(count(cv3 == iv)))
-        indc = (/ (j, j = 1, size(cv1))/)
-        res1 = pack(indc,cv1 == iv)
-        res2 = pack(indc,cv2 == iv)
-        res3 = pack(indc,cv3 == iv)
-        n1 = size(res1)
-        n2 = size(res2)
-        n3 = size(res3)
-        allocate(res4(n1+n2+n3))
-        res4(1:n1) = res1 
-        res4(n1+1:n1+n2) = res2 
-        res4(n1+n2+1:n1+n2+n3) = res3 
-
-        call Unique(res4, res)
+        integer(I8) :: iv, s
+        integer(I8), allocatable :: res(:)
+        
+        s = tria%vcellP(iv,1)
+        res = tria%vcell(s:s+tria%vcellP(iv,2)-1)
     end function
 
 end module

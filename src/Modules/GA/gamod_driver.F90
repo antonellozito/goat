@@ -354,12 +354,12 @@ module gamod_driver
         select case (options%apost_interpolation_meth)
         case ('barycentric')
 
-            call interp%SetParametersUS(options%apost_interpolation_meth, 0, 1, triangulation)
+            call interp%SetParametersUS(options%apost_interpolation_meth, 0, 1, triangulation, 'polynomial')
 
         case ('finite_element')
 
             call interp%SetParametersUS(options%apost_interpolation_meth, &
-                options%apost_interpolationC, options%apost_interpolationM, triangulation)
+                options%apost_interpolationC, options%apost_interpolationM, triangulation, 'polynomial')
             field = (triangulation%y)**(options%apost_interpolationM)
             call interp%ConstructUnstructured(interp%triangulation%x, interp%triangulation%y, field)
 
