@@ -529,16 +529,21 @@ VERSION 1.00.00
 
 
 # Distribution of flux surfaces (radial)
-'gg.vd.rd.type'                         'densitybased' # this has to be densitybased in order to use what is below
-# Options for density based distribution, radial
+'gg.vd.rd.type'                         'densitybased'
+'gg.vd.rd.distribution.dosp'            '1'
+'gg.vd.rd.distribution.decaylengthsp'   '0.1'
+'gg.vd.rd.distribution.densityatsp'     '500'
+'gg.vd.rd.distribution.densityatinf'    '80'
+#'gg.vd.rd.distribution.points.x'        '[4.7]' 
+#'gg.vd.rd.distribution.points.y'        '[4.55]' 
+#'gg.vd.rd.distribution.points.d'        '[1.0]' 
+#'gg.vd.rd.distribution.points.val'      '[2]'
+
 'gg.vd.rd.distribution.doxp'            '1'
-'gg.vd.rd.distribution.decaylengthxp'   '0.25';
-'gg.vd.rd.distribution.densityatxp'     '200';
-'gg.vd.rd.distribution.densityatinf'    '20';
-'gg.vd.rd.distribution.points.x'        '[0.79, 0.79, 0.52, 1.04]'
-'gg.vd.rd.distribution.points.y'        '[-0.3, 0.3, 0.0, 0.0]'
-'gg.vd.rd.distribution.points.val'      '[1000, 1000, 500, 500]'
-'gg.vd.rd.distribution.points.d'        '[0.05, 0.05, 0.05, 0.05]'
+'gg.vd.rd.distribution.decaylengthxp'   '0.1'
+'gg.vd.rd.distribution.densityatxp'     '40'
+
+'gg.vd.rd.distribution.facelength'      '0.1';
 
 # Distribution of vertices on flux surfaces (poloidal)
 'gg.vd.pd.type'                         'densitybased'
@@ -547,19 +552,9 @@ VERSION 1.00.00
 # Options for uniform distribution
 'gg.vd.pd.distribution.facelength'      '4e-2';
 
-'gg.vd.rd.distribution.fieldwidth'      '2e-6';
-
 # Options for density based distribution
 'gg.vd.pd.distribution.plftype'            'target';
 'gg.vd.pd.distribution.decaylengthplf'     '0.25';
 'gg.vd.pd.distribution.densityatvessel' '250';
 'gg.vd.pd.distribution.densityatinf'    '10';
 
-# Options for remove flux surfaces
-'gg.vd.rfs.mark.psitol'                 '0'
-'gg.vd.rfs.mark.psirattol'              '1e-1'
-'gg.vd.rfs.debugplots'                  '0'
-
-# Options for remove narrow boundary triangles
-'gg.vd.rnbt.mark.criterion'             'angle'
-'gg.vd.rnbt.mark.minangle'              '15'
