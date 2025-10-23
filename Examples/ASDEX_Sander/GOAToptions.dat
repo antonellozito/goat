@@ -531,8 +531,6 @@ VERSION 1.00.00
 'gg.vd.orthlinetracing.step'    '1' # relative step size (larger = less accurate but faster)
 'gg.vd.orthlinetracing.nsteps'  '500' # maximal number of steps to take 
 
-# Distribution of flux surfaces (radial)
-'gg.vd.rd.type'                         'densitybased'
 
 # Distribution of vertices on flux surfaces (poloidal)
 'gg.vd.pd.type'                         'densitybased'
@@ -552,20 +550,23 @@ VERSION 1.00.00
 #'gg.vd.pd.distribution.points.d'        '[0.1, 0.1]'
 #'gg.vd.pd.distribution.points.val'      '[25, 25]'
 
-# Options for density based distribution, radial
+
+# Distribution of flux surfaces (radial)
+'gg.vd.rd.type'                         'densitybased'
+'gg.vd.rd.distribution.dosp'            '1'
+'gg.vd.rd.distribution.decaylengthsp'   '0.1'
+'gg.vd.rd.distribution.densityatsp'     '500'
+'gg.vd.rd.distribution.densityatinf'    '20'
+#'gg.vd.rd.distribution.points.x'        '[4.7]' 
+#'gg.vd.rd.distribution.points.y'        '[4.55]' 
+#'gg.vd.rd.distribution.points.d'        '[1.0]' 
+#'gg.vd.rd.distribution.points.val'      '[2]'
+
 'gg.vd.rd.distribution.doxp'            '1'
-'gg.vd.rd.distribution.decaylengthxp'   '0.1';
-'gg.vd.rd.distribution.densityatxp'     '100';
-'gg.vd.rd.distribution.densityatinf'    '10';
+'gg.vd.rd.distribution.decaylengthxp'   '0.1'
+'gg.vd.rd.distribution.densityatxp'     '40'
 
-# Options for remove flux surfaces
-'gg.vd.rfs.mark.psitol'                 '0'
-'gg.vd.rfs.mark.psirattol'              '1e-1'
-'gg.vd.rfs.debugplots'                  '0'
-
-# Options for remove narrow boundary triangles
-'gg.vd.rnbt.mark.criterion'             'angle'
-'gg.vd.rnbt.mark.minangle'              '15'
+'gg.vd.rd.distribution.facelength'      '0.1';
 
 
 
