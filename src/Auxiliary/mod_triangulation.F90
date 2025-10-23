@@ -382,7 +382,7 @@ module mod_triangulation
         ! Save in GR type
         GR%cNv = cNv(1:counter)
         GR%cNvP = cNvP   
-        GR%invA = ATA(1:counter,:)
+        GR%coef = ATA(1:counter,:)
         GR%w = w(1:counter)
 
         ! Timing
@@ -454,14 +454,14 @@ module mod_triangulation
 
                 nv = size(GR%cNvP,1)
                 if (size(v) /= nv) call gdErrorHandler('EvaluateGRGA: incompatible v')
-                allocate(deriv_vals(nv,ne), c(size(GR%invA,2)))
+                allocate(deriv_vals(nv,ne), c(size(GR%coef,2)))
                 deriv_vals = 0
                 deriv_vals(:,1) = v
                 do iv = 1, nv
                     s = GR%cNvP(iv,1)
                     n = GR%cNvP(iv,2)
                     vxs = GR%cNv(s:s+n-1)
-                    coef = GR%invA(s:s+n-1,:)
+                    coef = GR%coef(s:s+n-1,:)
                     b = GR%w(s:s+n-1) *(v(vxs) - v(iv))
 
                     c = matmul(transpose(coef), b)

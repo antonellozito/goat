@@ -36,6 +36,14 @@ module UnstructuredInterpolant2D
         ! - allowextrapolation: logical to check if we can extrapolate
         ! - triangulation: triangulated mesh to use for interpolation
         ! - base_func: type of used base function, for now only 'polynomial'
+        ! - GR: gradient reconstruction on a triangulated grid to construct
+        !       the interpolant
+        ! - cNv: array of cell stencil to evaluate interpolant
+        ! - cNvP: point for unstructured cNv-array
+        ! - invABT: the transpose of the invAB matrix which is needed to
+        !           compute the aij array. This matrix is stored to cheaply
+        !           construct interpolants for new fields.
+        ! - aij: the coefficients of the interpolant
 
         ! - v: the values at the vertex points
         ! - xgv, ygv: grid vectors
@@ -54,11 +62,14 @@ module UnstructuredInterpolant2D
         character(:), allocatable       :: base_func
 
         type(GradientReconstructionTriaUDT) :: GR
+        integer(I8), allocatable            :: cNv(:), cNvP(:,:)        
+        real(R8), allocatable               :: invABT(:,:), aij(:)
 
-        real(R8), allocatable           :: xgv(:), ygv(:), A(:, :), &
-            refx(:), refy(:), refdx(:), refdy(:)
-        integer(I8), allocatable        :: cellindex(:, :)
-        integer(I16), allocatable       :: precomputedfac(:)  
+
+        !real(R8), allocatable           :: xgv(:), ygv(:), A(:, :), &
+        !    refx(:), refy(:), refdx(:), refdy(:)
+        !integer(I8), allocatable        :: cellindex(:, :)
+        !integer(I16), allocatable       :: precomputedfac(:)  
          
     
     contains
@@ -204,6 +215,12 @@ module UnstructuredInterpolant2D
         ! 1) Determine required order of the interpolant depended on the wanted continuity
         !   The interpolant is of type phi(x,y) = sum_i^N sum_j^N a_ij x^i y^j
         ! 2) Compute the coefficients of the gradient reconstruction of the correct order
+        ! 3) Build the system A*aij = B*v where A contains the interpolant and B
+        !    contains the coefficient of the gradient reconstruction for the three 
+        !    vertex stencils. The matrix multiplication invA*B is saved to easily 
+        !    construct new interpolant for other field.
+        ! 4) The aij vector for every cell by multiplying invAV with the field v. This aij
+        !    is saved and used to evaluate the interpolant.
 
 
         ! Declare variables
@@ -214,12 +231,14 @@ module UnstructuredInterpolant2D
         real(R8), intent(out)                   :: v(:)
 
         ! Auxiliary
-        integer(I8) :: i, ic, order, min_number_of_terms, number_of_terms
-        integer(I8), allocatable, dimension(:) :: ar, n_ar, tv
-        real(R8), allocatable :: deriv_vals(:,:), A(:,:), xv(:), yv(:), Amask(:,:)
+        integer(I8) :: i, ic, order, min_number_of_terms, &
+            info, nv, stencil_est, nc, counter
+        integer(I8), allocatable, dimension(:) :: ar, n_ar, tv, vxsU
+        integer(I8), allocatable :: Amask(:,:), cNv(:), cNvP(:,:)
+        real(R8), allocatable, dimension(:) :: xv, yv, temp, sol
+        real(R8), allocatable, dimension(:,:) :: deriv_vals, A, invA, &
+            invABT_array, B, invAB, invABT
         logical, allocatable :: log(:)
-        !type(GradientReconstructionTriaUDT) :: GR
-
 
         ! Checks
         if (size(xg, 1) /= size(yg, 1)) &
@@ -229,7 +248,8 @@ module UnstructuredInterpolant2D
         if (interp%triangulation%nv /= size(xg)) &
             call gdErrorHandler('ConstructUSI2DUSFinElem: size of xg and triangulation incompatible')
         if (interp%C .gt. 3) &
-            call gdErrorHandler('ConstructUSI2DUSFinEelem: higher than 3th order continuity not implemented')
+            call gdErrorHandler('ConstructUSI2DUSFinEelem: higher than 3th order continuity not' // & 
+              'implemented, and expansion to 4th order can be easily implemented')
 
         ! Save field information
         interp%v = v
@@ -242,19 +262,18 @@ module UnstructuredInterpolant2D
         print *, 'Constructing unstructured interpolation with C',interp%C, 'continuity on triangulated mesh'
 
         ! Compute number of terms
-        ar = (/(i, i = 1, 10)/)
+        ar = (/(i, i = 1, 20)/) ! Not general but rather save
         n_ar = (ar + 1)**2
-        min_number_of_terms = sum(ar(1:interp%C+1)) * 3 ! number of equation
+        min_number_of_terms = sum((/(i, i = 1, interp%C+1)/)) * 3 ! number of equation
 
         ! Determine neccesary order of interpolant
         ! (number of term = (N + 1)**2) for interpolant phi = sum_i^N sum_j^N a_ij x^i y^j
         log = [min_number_of_terms .lt. n_ar]
         order = findloc(log, .true., 1)
-        number_of_terms = (order + 1)**2
-        interp%n = number_of_terms
+        interp%n = (order + 1)**2 ! number of terms in interpolant
 
         ! Continue computation if not yet done before for other field on the same grid
-        if (.not. allocated(interp%A)) then
+        if (.not. allocated(interp%invABT)) then
 
             ! Build b matrix
             ! Compute GR coefficients
@@ -262,17 +281,29 @@ module UnstructuredInterpolant2D
             call interp%GR%Construct(interp%triangulation)
             call interp%GR%Evaluate(v, deriv_vals)
 
-            ! Build A matrix
-            allocate(interp%A(interp%n, interp%n))
+            ! Stencil estimate
+            stencil_est = sum((/(i, i = 2, order + 1)/)) + 11
 
+            ! Show base function - Note: only the construction of A depends on base function type
             select case (interp%base_func)
             case ('polynomial')
 
                 ! Construct Amask
+                allocate(Amask(36, (order+1)**2))
                 call ConstructAmask(order, Amask)
 
+                ! Initialize
+                nc = interp%triangulation%nc
+                allocate(A(interp%n,interp%n), invA(interp%n, interp%n))
+                allocate(temp(interp%n))
+                allocate(invABT_array(nc*stencil_est, interp%n))
+                allocate(cNv(nc*stencil_est), cNvP(nc,2))
+                temp = 0
+                sol = temp     
+                counter = 0       
+
                 ! Loop over the cell
-                do ic = 1, interp%triangulation%nc
+                do ic = 1, nc
 
                     ! Get vertices
                     tv = interp%triangulation%cvert(ic, :)
@@ -281,15 +312,32 @@ module UnstructuredInterpolant2D
                     xv  = interp%triangulation%x(tv)
                     yv  = interp%triangulation%x(tv)
 
-                    xv = [2, 2, 2]
-                    yv = [2, 2, 2]
+                    xv = [1, 2, 2]
+                    yv = [1, 1, 2]
                     
-                    ! Construct Afull up to highest supported order
-                    allocate(A(interp%n,interp%n))
+                    ! Build A matrix
                     call ConstructA(order, interp%n, xv, yv, Amask, A)
 
-                end do
+                    ! Compute inverse A
+                    call SolveDenseLinearSystemDI(A, temp, sol, info, invA)
 
+                    ! Build B matrix - size depends on cell stencil
+                    call ConstructB(interp, tv, B, vxsU)
+
+                    ! Matrix multiplication
+                    invAB = matmul(invA, B)
+                    invABT = transpose(invAB)
+
+                    ! Save 
+                    nv = size(vxsU)
+                    invABT_array(counter+1:counter+nv,:) = invABT
+                    cNvP(ic, 1) = counter + 1
+                    cNvP(ic, 2) = nv
+                    cNv(counter+1:counter+nv) = vxsU
+                    counter = counter + nv
+
+
+                end do
 
 
 
@@ -297,8 +345,15 @@ module UnstructuredInterpolant2D
                 call gdErrorHandler('ConstructUSI2DUSFinEelem: type of base_func not implemented')
             end select
 
+            ! Save
+            interp%invABT = invABT_array(1:counter,:)
+            interp%cNv = cNv(1:counter)
+            interp%cNvP = cNvP
 
         end if
+
+        ! Compute aij
+        
 
     end subroutine
 
@@ -493,7 +548,7 @@ module UnstructuredInterpolant2D
                 
                 if (j .le. 3) then
                     ! For fourth derivatives of y onward not automatically 0
-                    (34:36, k) = 0  ! d4phidy4
+                    A(34:36, k) = 0  ! d4phidy4
                     if (j .le. 2) then
                         ! For third derivatives of y onward not automatically 0
                         A(22:24, k) = 0  ! d3phidy3
@@ -558,7 +613,7 @@ module UnstructuredInterpolant2D
 
         ! Description
         !============
-        ! Construct the whole A matrix up to 5th order
+        ! Construct the whole A matrix up to 5th order for C3-continuity
 
         ! Declare variables
         !==================
@@ -625,11 +680,80 @@ module UnstructuredInterpolant2D
             end do
         end do
 
-        call gdErrorHandler('ConstructA: problem with ')
-
         ! Take the correct slice
         A = Afull(1:n, 1:n)        
  
+    end subroutine
+
+    subroutine ConstructB(interp, tv, B, vxsU)
+
+        ! Description
+        !============
+        ! Constructing the B matrix containing the coefficient of 
+        ! the gradient reconstruction of the three vertices of the cell.
+        ! The vertex stencils are merged into one cell stencil to
+        ! reduce memory usage. The cell stencil is saved in cNv.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(UnstructuredInterpolant2DUDT), intent(inout)   :: interp
+        integer(I8), intent(in)                             :: tv(3)
+        real(R8), allocatable, intent(out)                  :: B(:,:)
+        integer(I8), allocatable, intent(out)               :: vxsU(:)    
+
+        ! Auxiliary
+        integer(I8) :: i, ind, s(3), n(3)
+        integer(I8), allocatable, dimension(:) :: vxs, vxs1, vxs2, vxs3
+        real(R8), allocatable, dimension(:,:) :: Bfull, coef1, coef2, coef3
+
+        ! Get the stencil and reduce to minimal cell stencil
+        s = interp%GR%cNvP(tv, 1)
+        n = interp%GR%cNvP(tv, 2)
+        vxs1 = interp%GR%cNv(s(1):s(1)+n(1))
+        vxs2 = interp%GR%cNv(s(2):s(2)+n(2))
+        vxs3 = interp%GR%cNv(s(3):s(3)+n(3))
+        vxs = [vxs1, vxs2, vxs3]
+        call Unique(vxs, vxsU)
+
+        ! Populate B
+        allocate(Bfull(36, size(vxsU)))
+
+        coef1 = interp%GR%coef(s(1):s(1)+n(1),:)
+        coef2 = interp%GR%coef(s(2):s(2)+n(2),:)
+        coef3 = interp%GR%coef(s(3):s(3)+n(3),:)
+
+        ! Populate 
+        Bfull = 0
+
+        ! Phi
+        do i = 1, 3
+            ind = findloc(vxsU, tv(i), 1)
+            Bfull(i, ind) = 1
+        end do
+
+        ! First vertex
+        do i = 1, size(vxs1)
+
+            ! Find column in B
+            ind = findloc(vxsU, vxs1(i), 1)
+
+            ! Phi
+            Bfull(4, ind) = coef1(i, 1)
+
+        end do
+
+
+        ! Trim
+        B = Bfull(1:interp%n,:)
+    
+
+
+
+
+
+
+
     end subroutine
 
 

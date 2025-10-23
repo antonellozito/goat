@@ -2450,7 +2450,7 @@ module gamod_types
         ! Save in GR type
         GR%cNv = cNv(1:counter)
         GR%cNvP = cNvP   
-        GR%invA = ATA(1:counter,:)
+        GR%coef = ATA(1:counter,:)
         
         end associate
         
@@ -2487,13 +2487,14 @@ module gamod_types
 
                 nc = size(GR%cNvP,1)
                 if (size(v) /= nc) call gdErrorHandler('EvaluateGRGA: incompatible v')
-                allocate(deriv_vals(nc, 3), c(size(GR%invA,2)))
+                allocate(deriv_vals(nc, 3), c(size(GR%coef,2)))
                 deriv_vals = 0
+                deriv_vals(:, 1) = v
                 do ic = 1, nc
                     s = GR%cNvP(ic,1)
                     n = GR%cNvP(ic,2)
                     cvs = GR%cNv(s:s+n-1)
-                    coef = GR%invA(s:s+n-1,:)
+                    coef = GR%coef(s:s+n-1,:)
                     b = v(cvs) - v(ic)
                     c = matmul(transpose(coef), b)
                     deriv_vals(ic, 2) = c(1) ! gradx
@@ -2517,14 +2518,14 @@ module gamod_types
                 
                 ! Loop over faces
                 nc = size(GR%cNvP,1)
-                allocate(deriv_vals(nc,3), c(size(GR%invA,2)))
+                allocate(deriv_vals(nc,3), c(size(GR%coef,2)))
                 deriv_vals = 0
                 if (size(v) /= nc) call gdErrorHandler('EvaluateGRGA: incompatible v')
                 do ic = 1, nc
                     s = GR%cNvP(ic,1)
                     n = GR%cNvP(ic,2)
                     cvs = GR%cNv(s:s+n-1)
-                    coef = GR%invA(s:s+n-1,:)
+                    coef = GR%coef(s:s+n-1,:)
                     b = v(cvs) - v(ic)
                     c = matmul(transpose(coef), b)
                     deriv_vals(ic, 1) = c(3) ! interpolated
