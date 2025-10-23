@@ -406,30 +406,30 @@ module mod_triangulation
         ! 2) dphidx
         ! 3) dphidy
         ! 4) d2phidx2
-        ! 5) d2phidy2
-        ! 6) d2phidxdy
+        ! 5) d2phidxdy
+        ! 6) d2phidy2
         ! 7) d3phidx3
-        ! 8) d3phidy3
-        ! 9) d3phidx2dy
-        ! 10) d3phidxdy2
+        ! 8) d3phidx2dy
+        ! 9) d3phidxdy2
+        ! 10) d3phidy3
         ! 11) d4phidx4
-        ! 12) d4phidy4
-        ! 13) d4phidx3dy
-        ! 14) d4phidx2dy2
-        ! 15) d4phidxdy3
+        ! 12) d4phidx3dy
+        ! 13) d4phidx2dy2
+        ! 14) d4phidxdy3
+        ! 15) d4phidy4
         ! 16) d5phidx5
-        ! 17) d5phidy5
-        ! 18) d5phidx4dy
-        ! 19) d5phidx3dy2
-        ! 20) d5phidx2dy3
-        ! 21) d5phidxdy4
+        ! 17) d5phidx4dy
+        ! 18) d5phidx3dy2
+        ! 19) d5phidx2dy3
+        ! 20) d5phidxdy4
+        ! 21) d5phidy5
         ! 22) d6phidx6
-        ! 23) d6phidy6
-        ! 24) d6phidx5dy
-        ! 25) d6phidx4dy2
-        ! 26) d6phidx3dy3
-        ! 27) d6phidx2dy4
-        ! 28) d6phidxdy5
+        ! 23) d6phidx5dy
+        ! 24) d6phidx4dy2
+        ! 25) d6phidx3dy3
+        ! 26) d6phidx2dy4
+        ! 27) d6phidxdy5
+        ! 28) d6phidy6
 
         ! Declare variables
         !==================

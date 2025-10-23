@@ -2476,7 +2476,7 @@ module gamod_types
         real(R8), allocatable :: b(:), c(:), coef(:,:)
 
         ! Check
-        if (GR%deriv .gt. 1) call gdErrorHandler('EvaluateGRGA: no implemention for deriv > 1')
+        if (GR%deriv .gt. 1) call gdErrorHandler('EvaluateGRGA: no implementation for deriv > 1')
 
         ! Get coefficients
         select case (GR%type1)

@@ -263,7 +263,7 @@ module mod_gradient
         integer(I8) :: i, j, k, n, m, info
         real(R8) :: det, det1, det2, det3
         real(R8), allocatable :: A(:,:), AT(:,:), ATA_dummy(:,:), w(:), &
-            temp(:), sol(:), C(:,:), invC(:,:), A_test(:,:)
+            temp(:), sol(:), C(:,:), invC(:,:)
         real(R8), allocatable :: prefact(:)
 
         ! Initialize
@@ -347,118 +347,14 @@ module mod_gradient
             ! Allocate A matrix
             allocate(A(size(dx), n))       
             A = 0
-            A_test = A
-
-            if (deriv == 2) then
-
-                ! A matrix
-                A(:, 1) = w*dx ! dphidx
-                A(:, 2) = w*dy ! dphidy
-                A(:, 3) = prefact(2)*w*dx**2 ! dphidx2
-                A(:, 4) = w*dx*dy ! dphidxdy
-                A(:, 5) = prefact(2)*w*dy**2 ! dphidy2
-
-
-            else if (deriv == 3) then
-
-                ! A matrix
-                A(:, 1) = w*dx ! dphidx
-                A(:, 2) = w*dy ! dphidy
-                A(:, 3) = prefact(2)*w*dx**2 ! dphidx2
-                A(:, 4) = w*dx*dy   ! dphidxdy
-                A(:, 5) = prefact(2)*w*dy**2 ! dphidy2
-                A(:, 6) = prefact(3)*w*dx**3 ! dphidx3
-                A(:, 7) = prefact(2)*w*dx**2*dy ! dphidx2dy
-                A(:, 8) = prefact(2)*w*dx*dy**2 ! dphidxdy2
-                A(:, 9) = prefact(3)*w*dy**3 ! dphidy3
-
-            else if (deriv == 4) then
-                
-                ! A matrix 
-                A(:, 1) = w*dx ! dphidx
-                A(:, 2) = w*dy ! dphidy
-                A(:, 3) = prefact(2)*w*dx**2 ! dphidx2
-                A(:, 4) = w*dx*dy   ! dphidxdy
-                A(:, 5) = prefact(2)*w*dy**2 ! dphidy2
-                A(:, 6) = prefact(3)*w*dx**3 ! dphidx3
-                A(:, 7) = prefact(2)*w*dx**2*dy ! dphidx2dy
-                A(:, 8) = prefact(2)*w*dx*dy**2 ! dphidxdy2
-                A(:, 9) = prefact(3)*w*dy**3 ! dphidy3
-                A(:,10) = prefact(4)*w*dx**4  ! dphidx4          
-                A(:,11) = prefact(3)* w*dx**3*dy ! dphidx3dy 
-                A(:,12) = prefact(2)*prefact(2)* w*dx**2*dy**2 ! dphidx2dy2           
-                A(:,13) = prefact(3)*w*dx*dy**3 ! dphidxdy3           
-                A(:,14) = prefact(4)*w*dy**4  ! dphidy4        
-
-            else if (deriv == 5) then
-
-                ! A matrix 
-                A(:, 1) = w*dx ! dphidx
-                A(:, 2) = w*dy ! dphidy
-                A(:, 3) = prefact(2)*w*dx**2 ! dphidx2
-                A(:, 4) = w*dx*dy   ! dphidxdy
-                A(:, 5) = prefact(2)*w*dy**2 ! dphidy2
-                A(:, 6) = prefact(3)*w*dx**3 ! dphidx3
-                A(:, 7) = prefact(2)*w*dx**2*dy ! dphidx2dy
-                A(:, 8) = prefact(2)*w*dx*dy**2 ! dphidxdy2
-                A(:, 9) = prefact(3)*w*dy**3 ! dphidy3
-                A(:,10) = prefact(4)*w*dx**4  ! dphidx4          
-                A(:,11) = prefact(3)* w*dx**3*dy ! dphidx3dy 
-                A(:,12) = prefact(2)*prefact(2)* w*dx**2*dy**2 ! dphidx2dy2           
-                A(:,13) = prefact(3)*w*dx*dy**3 ! dphidxdy3           
-                A(:,14) = prefact(4)*w*dy**4  ! dphidy4   
-                A(:,15) = prefact(5)* w*dx**5  ! dphidx5          
-                A(:,16) = prefact(4)* w*dx**4*dy  ! dphidx4dy
-                A(:,17) = prefact(3)*prefact(2)* w*dx**3*dy**2  ! dphidx3dy2
-                A(:,18) = prefact(2)*prefact(3)* w*dx**2*dy**3  ! dphidx2dy3
-                A(:,19) = prefact(4)* w*dx*dy**4  ! dphidxdy4
-                A(:,20) = prefact(5)* w*dy**5  ! dphidy5
-                
-            else if (deriv == 6) then
-
-                ! A matrix 
-                A(:, 1) = w*dx ! dphidx
-                A(:, 2) = w*dy ! dphidy
-                A(:, 3) = prefact(2)*w*dx**2 ! dphidx2
-                A(:, 4) = w*dx*dy   ! dphidxdy
-                A(:, 5) = prefact(2)*w*dy**2 ! dphidy2
-                A(:, 6) = prefact(3)*w*dx**3 ! dphidx3
-                A(:, 7) = prefact(2)*w*dx**2*dy ! dphidx2dy
-                A(:, 8) = prefact(2)*w*dx*dy**2 ! dphidxdy2
-                A(:, 9) = prefact(3)*w*dy**3 ! dphidy3
-                A(:,10) = prefact(4)*w*dx**4  ! dphidx4          
-                A(:,11) = prefact(3)* w*dx**3*dy ! dphidx3dy 
-                A(:,12) = prefact(2)*prefact(2)* w*dx**2*dy**2 ! dphidx2dy2           
-                A(:,13) = prefact(3)*w*dx*dy**3 ! dphidxdy3           
-                A(:,14) = prefact(4)*w*dy**4  ! dphidy4   
-                A(:,15) = prefact(5)* w*dx**5  ! dphidx5          
-                A(:,16) = prefact(4)* w*dx**4*dy  ! dphidx4dy
-                A(:,17) = prefact(3)*prefact(2)* w*dx**3*dy**2  ! dphidx3dy2
-                A(:,18) = prefact(2)*prefact(3)* w*dx**2*dy**3  ! dphidx2dy3
-                A(:,19) = prefact(4)* w*dx*dy**4  ! dphidxdy4
-                A(:,20) = prefact(5)* w*dy**5  ! dphidy5
-                A(:,21) = prefact(6)* w*dx**6  ! dphidx6
-                A(:,22) = prefact(5)* w*dx**5*dy  ! dphidx5dy
-                A(:,23) = prefact(4)*prefact(2)* w*dx**4*dy**2  ! dphidx4dy2
-                A(:,24) = prefact(3)*prefact(3)* w*dx**3*dy**3  ! dphidx3dy3
-                A(:,25) = prefact(2)*prefact(4)* w*dx**2*dy**4  ! dphidx2dy4
-                A(:,26) = prefact(5)* w*dx*dy**5  ! dphidxdy5
-                A(:,27) = prefact(6)* w*dy**6  ! dphidy6
-
-            else     
-                call gdErrorHandler('ComputeATA: not implemented')
-            end if 
-
             k = 0
             do m = 1, deriv
                 do j = 0, m
                     i = m - j
                     k = k + 1
-                    A_test(:,k) = prefact(i)*prefact(j)*w*dx**i*dy**j
+                    A(:,k) = prefact(i)*prefact(j)*w*dx**i*dy**j
                 end do
             end do
-
-            if (.not. all(A_test == A)) call gdErrorHandler('Mistake')
 
             ! Construct C matrix (transpose(A)*A)
             allocate(C(n,n), invC(n,n))
@@ -483,6 +379,7 @@ module mod_gradient
 
         ! Do transpose for better memory
         ATA = transpose(ATA_dummy)
+        
     end subroutine
 
        ! Factorial computation
