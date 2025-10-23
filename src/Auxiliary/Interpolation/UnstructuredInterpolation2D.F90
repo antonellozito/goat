@@ -630,7 +630,7 @@ module UnstructuredInterpolant2D
         ! Initialize
         Afull = 0
 
-        ! Equation phi is constant
+        ! Construct - TODO - try to generalized this
         M = order+1
         do j = 1, M
             do i = 1, M
@@ -650,23 +650,23 @@ module UnstructuredInterpolant2D
                 ! Equation d2phidx2
                 Afull(10:12, k) = (i-2)*xv**(i-3) * yv**(j-1)
 
-                ! Equation d2phidy2
-                Afull(13:15, k) = xv**(i-1) * (j-2)*yv**(j-3)
-
                 ! Equation d2phidxdy
-                Afull(16:18, k) = (i-1)*xv**(i-2) * (j-1)*yv**(j-2)
+                Afull(13:15, k) = (i-1)*xv**(i-2) * (j-1)*yv**(j-2)
+
+                ! Equation d2phidy2
+                Afull(16:18, k) = xv**(i-1) * (j-2)*yv**(j-3)
 
                 ! Equation d3phidx3
                 Afull(19:21, k) = (i-3)*xv**(i-4) * yv**(j-1)
 
-                ! Equation d3phidy3
-                Afull(22:24, k) = xv**(i-1) * (j-3)*yv**(j-4)
-
                 ! Equation d3dphidx2dy
-                Afull(25:27, k) = (i-2)*xv**(i-3) * (j-1)*yv**(j-2)
+                Afull(22:24, k) = (i-2)*xv**(i-3) * (j-1)*yv**(j-2)
 
                 ! Equation d3dphidxdy2
-                Afull(28:30, k) = (i-1)*xv**(i-2) * (j-2)*yv**(j-3)
+                Afull(25:27, k) = (i-1)*xv**(i-2) * (j-2)*yv**(j-3)
+
+                ! Equation d3phidy3
+                Afull(28:30, k) = xv**(i-1) * (j-3)*yv**(j-4)
 
                 ! Equation d4phidx4
                 Afull(31:33, k) = (i-4)*xv**(i-5) * yv**(j-1)

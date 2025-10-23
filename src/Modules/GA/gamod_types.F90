@@ -2528,9 +2528,7 @@ module gamod_types
                     coef = GR%coef(s:s+n-1,:)
                     b = v(cvs) - v(ic)
                     c = matmul(transpose(coef), b)
-                    deriv_vals(ic, 1) = c(3) ! interpolated
-                    deriv_vals(ic,2) = c(1)  ! gradx
-                    deriv_vals(ic,3) = c(2)  ! grady
+                    deriv_vals(ic, 1:3) = c
 
                 end do
                 

@@ -285,11 +285,12 @@ module mod_triangulation
         type(TriangulationUDT), intent(in)      :: tria
 
         ! Auxiliary
-        integer(I8) :: iv, j, n, cNvP(size(tria%x),2), &
+        integer(I8) :: iv, j, n, n1, cNvP(size(tria%x),2), &
             vxs(200), counterv, counter, stencil_est, min_stencil
-        integer(I8), allocatable :: cNv(:), ar(:)
+        integer(I8), allocatable :: cNv(:)
         real(R8), allocatable :: ATA_loc(:,:), distx(:), disty(:), ATA(:,:), w(:), weight(:)
         real(R8) :: t_start, t_end, delta_t1, t_start1, t_end1, t_start2, t_end2, delta_t2
+        logical :: int
 
 
         ! Set parameters depending on deriv
@@ -297,10 +298,10 @@ module mod_triangulation
         if (GR%meth /= 'global') call gdErrorHandler('ConstructGRTria: no other meth than "global" implemented')
         if (GR%deriv .gt. 6) call gdErrorHandler('ConstructGRTria: deriv > 6 not yet implement')
         print *, 'Constructing gradient reconstruction of ', GR%deriv,'th order on triangulated grid'
-        ar = (/(j, j = 2, 7)/)
-        n = sum(ar(1:GR%deriv))
+        n = sum((/(j, j = 2, GR%deriv + 1)/))
         min_stencil = n + 1
         stencil_est = min_stencil + 10
+        int = .false.
 
         ! Timing
         call wall_time(t_start) 
@@ -308,7 +309,13 @@ module mod_triangulation
         delta_t2 = 0       
             
         ! Initialize
-        allocate(cNv(size(tria%x)*stencil_est), ATA(size(tria%x)*stencil_est,n), w(size(tria%x)*stencil_est))
+        if (int) then
+            n1 = n + 1
+        else 
+            n1 = n 
+        end if
+        allocate(cNv(tria%nv*stencil_est), ATA(tria%nv*stencil_est,n1), &
+            w(tria%nv*stencil_est))
         counter = 0
         cNv = 0
         cNvP = 0
@@ -321,7 +328,7 @@ module mod_triangulation
             case ('vert')
 
                 ! Loop over vertices
-                do iv = 1, size(tria%x)
+                do iv = 1, tria%nv
 
                     ! Timing
                     call wall_time(t_start1)
@@ -356,7 +363,7 @@ module mod_triangulation
                     w(counter+1:counter+counterv) = weight 
                     if (allocated(weight)) deallocate(weight) 
 
-                    call ComputeATA(distx, disty, GR%deriv, .false., ATA_loc)
+                    call ComputeATA(distx, disty, GR%deriv, int, ATA_loc)
                     ATA(counter+1:counter+counterv,:) = ATA_loc
                     counter = counter + counterv
 
@@ -377,7 +384,6 @@ module mod_triangulation
             call gdErrorHandler('ConstructGRTria: type1 not implemented')
 
         end select        
-
 
         ! Save in GR type
         GR%cNv = cNv(1:counter)
@@ -466,8 +472,6 @@ module mod_triangulation
 
                     c = matmul(transpose(coef), b)
                     deriv_vals(iv,2:ne) = c
-                    !deriv_vals(iv,2) = c(1)
-                    !deriv_vals(iv,3) = c(2)
 
                 end do
             case default
