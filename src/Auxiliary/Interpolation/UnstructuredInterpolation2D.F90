@@ -284,66 +284,58 @@ module UnstructuredInterpolant2D
             ! Stencil estimate
             stencil_est = sum((/(i, i = 2, order + 1)/)) + 11
 
-            ! Show base function - Note: only the construction of A depends on base function type
-            select case (interp%base_func)
-            case ('polynomial')
+            ! Construct Amask
+            !allocate(Amask(36, (order+1)**2))
+            !call ConstructAmask(order, Amask)
 
-                ! Construct Amask
-                allocate(Amask(36, (order+1)**2))
-                call ConstructAmask(order, Amask)
+            ! Initialize
+            nc = interp%triangulation%nc
+            allocate(A(interp%n,interp%n), invA(interp%n, interp%n))
+            allocate(temp(interp%n))
+            allocate(invABT_array(nc*stencil_est, interp%n))
+            allocate(cNv(nc*stencil_est), cNvP(nc,2))
+            temp = 0
+            sol = temp     
+            counter = 0       
 
-                ! Initialize
-                nc = interp%triangulation%nc
-                allocate(A(interp%n,interp%n), invA(interp%n, interp%n))
-                allocate(temp(interp%n))
-                allocate(invABT_array(nc*stencil_est, interp%n))
-                allocate(cNv(nc*stencil_est), cNvP(nc,2))
-                temp = 0
-                sol = temp     
-                counter = 0       
+            ! Loop over the cell
+            do ic = 1, nc
 
-                ! Loop over the cell
-                do ic = 1, nc
+                ! Get vertices
+                tv = interp%triangulation%cvert(ic, :)
 
-                    ! Get vertices
-                    tv = interp%triangulation%cvert(ic, :)
+                ! Get coordinates
+                xv  = interp%triangulation%x(tv)
+                yv  = interp%triangulation%x(tv)
 
-                    ! Get coordinates
-                    xv  = interp%triangulation%x(tv)
-                    yv  = interp%triangulation%x(tv)
+                ! TEST
+                xv = [1, 2, 2]
+                yv = [1, 1, 2]
+                
+                ! Build A matrix
+                call ConstructA(order, interp%n, xv, yv, interp%base_func, A)
 
-                    xv = [1, 2, 2]
-                    yv = [1, 1, 2]
-                    
-                    ! Build A matrix
-                    call ConstructA(order, interp%n, xv, yv, Amask, A)
+                ! Compute inverse A
+                call SolveDenseLinearSystemDI(A, temp, sol, info, invA)
 
-                    ! Compute inverse A
-                    call SolveDenseLinearSystemDI(A, temp, sol, info, invA)
+                ! Build B matrix - size depends on cell stencil
+                call ConstructB(interp, tv, B, vxsU)
 
-                    ! Build B matrix - size depends on cell stencil
-                    call ConstructB(interp, tv, B, vxsU)
+                ! Matrix multiplication
+                invAB = matmul(invA, B)
+                invABT = transpose(invAB)
 
-                    ! Matrix multiplication
-                    invAB = matmul(invA, B)
-                    invABT = transpose(invAB)
-
-                    ! Save 
-                    nv = size(vxsU)
-                    invABT_array(counter+1:counter+nv,:) = invABT
-                    cNvP(ic, 1) = counter + 1
-                    cNvP(ic, 2) = nv
-                    cNv(counter+1:counter+nv) = vxsU
-                    counter = counter + nv
+                ! Save 
+                nv = size(vxsU)
+                invABT_array(counter+1:counter+nv,:) = invABT
+                cNvP(ic, 1) = counter + 1
+                cNvP(ic, 2) = nv
+                cNv(counter+1:counter+nv) = vxsU
+                counter = counter + nv
 
 
-                end do
+            end do
 
-
-
-            case default
-                call gdErrorHandler('ConstructUSI2DUSFinEelem: type of base_func not implemented')
-            end select
 
             ! Save
             interp%invABT = invABT_array(1:counter,:)
@@ -533,83 +525,52 @@ module UnstructuredInterpolant2D
         integer(I8), intent(out) :: A(36, (order+1)**2)
 
         ! Auxiliary
-        integer(I8) :: i, j, M, k
+        integer(I8) :: i, j, k
 
 
         ! Initialize
         A = 1
 
         ! Loop 
-        M = order+1
-        do j = 1, M
-            do i = 1, M
+        do j = 0, order
+            do i = 0, order
                 ! Column index
-                k = (j-1)*M + i 
+                k = j*(order+1) + (i+1) 
                 
-                if (j .le. 3) then
+                if (j .le. 2) then
                     ! For fourth derivatives of y onward not automatically 0
                     A(34:36, k) = 0  ! d4phidy4
-                    if (j .le. 2) then
+                    if (j .le. 1) then
                         ! For third derivatives of y onward not automatically 0
-                        A(22:24, k) = 0  ! d3phidy3
-                        if (j .le. 1) then
+                        A(28:30, k) = 0  ! d3phidy3
+                        if (j .le. 0) then
                             ! From second derivatives of y onwards not automatically 0
-                            A(13:15, k) = 0  ! d2phidy2
-                            A(28:30, k) = 0  ! d3dphidxdy2
+                            A(16:18, k) = 0  ! d2phidy2
+                            A(25:27, k) = 0  ! d3dphidxdy2
                         end if
                     end if
                 end if
 
-                if (i .le. 3) then
+                if (i .le. 2) then
                     ! For fourth derivatives of y onward not automatically 0
                     A(31:33, k) = 0  ! d4phidx4
-                    if (i .le. 2) then
+                    if (i .le. 1) then
                         ! For third derivatives of x onward not automatically 0
                         A(19:21, k) = 0  ! d3phidx3
-                        if (i .le. 1) then
+                        if (i .le. 0) then
                             ! From second derivatives of x onwards not automatically 0
                             A(10:12, k) = 0  ! d2phidx2
-                            A(25:27, k) = 0  ! d3dphidx2dy
+                            A(22:24, k) = 0  ! d3dphidx2dy
                         end if
                     end if
                 end if
-
-                !if (j == 1) then
-                !    ! From second derivatives of y onwards not automatically 0
-                !    A(13:15, k) = 0  ! d2phidy2
-                !    A(22:24, k) = 0  ! d3phidy3
-                !    A(28:30, k) = 0  ! d3dphidxdy2
-                !    A(34:36, k) = 0  ! d4phidy4
-                !else if (j == 2) then
-                !    ! For third derivatives of y onward not automatically 0
-                !    A(22:24, k) = 0  ! d3phidy3
-                !    A(34:36, k) = 0  ! d4phidy4
-                !else if (j == 3) then
-                !    ! For fourth derivatives of y onward not automatically 0
-                !    A(34:36, k) = 0  ! d4phidy4  
-                !end if
-
-                !if (i == 1) then
-                !    ! From second derivatives of x onwards not automatically 0
-                !    A(10:12, k) = 0  ! d2phidx2
-                !    A(19:21, k) = 0  ! d3phidx3
-                !    A(25:27, k) = 0  ! d3dphidx2dy
-                !    A(31:33, k) = 0  ! d4phidx4  
-                !else if (i == 2) then
-                !    ! For third derivatives of x onward not automatically 0
-                !    A(19:21, k) = 0  ! d3phidx3
-                !    A(31:33, k) = 0  ! d4phidx4 
-                !else if (i == 3) then
-                !    ! For fourth derivatives of y onward not automatically 0
-                !    A(31:33, k) = 0  ! d4phidx4
-                !end if
                 
             end do
         end do
 
     end subroutine
 
-    subroutine ConstructA(order, n, xv, yv, Amask, A)
+    subroutine ConstructA(order, n, xv, yv, base_func, A)
 
         ! Description
         !============
@@ -618,67 +579,74 @@ module UnstructuredInterpolant2D
         ! Declare variables
         !==================
         ! Arguments
-        integer(I8), intent(in) :: order, n
-        real(R8), intent(in)    :: xv(3), yv(3)
-        integer, intent(in)     :: Amask(36, (order+1)**2)
-        real(R8), intent(out)   :: A(n, n) 
+        integer(I8), intent(in)                 :: order, n
+        real(R8), intent(in)                    :: xv(3), yv(3)
+        character(:), allocatable, intent(in)   :: base_func
+        real(R8), intent(out)                   :: A(n, n) 
+        character(:)
 
         ! Auxiliary
-        integer(I8) :: i, j, M, k
+        integer(I8) :: i, j, k
         real(R8) :: Afull(36, (order+1)**2)
 
         ! Initialize
         Afull = 0
 
-        ! Construct - TODO - try to generalized this
-        M = order+1
-        do j = 1, M
-            do i = 1, M
+        ! Populate depending on base function
+        select case (base_func)
+        case ('polynomail')
 
-                ! Column index
-                k = (j-1)*M + i
+            ! Construct - TODO - try to generalized this - use continuity interp%C!!
+            do j = 0, order
+                do i = 0, order
 
-                ! Equation phi
-                Afull(1:3, k) = xv**(i-1) * yv**(j-1)
+                    ! Column index
+                    k = j*(order+1) + (i+1)
 
-                ! Equation dphidx 
-                Afull(4:6, k) = (i-1)*xv**(i-2) * yv**(j-1)
+                    ! Equation phi
+                    Afull(1:3, k) = xv**i * yv**j
 
-                ! Equation dphidy
-                Afull(7:9, k) = xv**(i-1) * (j-1)*yv**(j-2)
+                    ! Equation dphidx 
+                    Afull(4:6, k) = i*xv**(i-1) * yv**j
 
-                ! Equation d2phidx2
-                Afull(10:12, k) = (i-2)*xv**(i-3) * yv**(j-1)
+                    ! Equation dphidy
+                    Afull(7:9, k) = xv**i * j*yv**(j-1)
 
-                ! Equation d2phidxdy
-                Afull(13:15, k) = (i-1)*xv**(i-2) * (j-1)*yv**(j-2)
+                    ! Equation d2phidx2
+                    Afull(10:12, k) = i*(i-1)*xv**(i-2) * yv**j
 
-                ! Equation d2phidy2
-                Afull(16:18, k) = xv**(i-1) * (j-2)*yv**(j-3)
+                    ! Equation d2phidxdy
+                    Afull(13:15, k) = i*xv**(i-1) * j*yv**(j-1)
 
-                ! Equation d3phidx3
-                Afull(19:21, k) = (i-3)*xv**(i-4) * yv**(j-1)
+                    ! Equation d2phidy2
+                    Afull(16:18, k) = xv**i * j*(j-1)*yv**(j-2)
 
-                ! Equation d3dphidx2dy
-                Afull(22:24, k) = (i-2)*xv**(i-3) * (j-1)*yv**(j-2)
+                    ! Equation d3phidx3
+                    Afull(19:21, k) = i*(i-1)*(i-2)*xv**(i-3) * yv**j
 
-                ! Equation d3dphidxdy2
-                Afull(25:27, k) = (i-1)*xv**(i-2) * (j-2)*yv**(j-3)
+                    ! Equation d3dphidx2dy
+                    Afull(22:24, k) = i*(i-1)*xv**(i-2) * j*yv**(j-1)
 
-                ! Equation d3phidy3
-                Afull(28:30, k) = xv**(i-1) * (j-3)*yv**(j-4)
+                    ! Equation d3dphidxdy2
+                    Afull(25:27, k) = i*xv**(i-1) * j*(j-1)*yv**(j-2)
 
-                ! Equation d4phidx4
-                Afull(31:33, k) = (i-4)*xv**(i-5) * yv**(j-1)
+                    ! Equation d3phidy3
+                    Afull(28:30, k) = xv**i * j*(j-1)*(j-2)*yv**(j-3)
 
-                ! Equation d4phidy4
-                Afull(34:36, k) = xv**(i-1) * (j-4)*yv**(j-5)
+                    ! Equation d4phidx4
+                    Afull(31:33, k) = i*(i-1)*(i-2)*(i-3)*xv**(i-4) * yv**j
 
-                ! Multiply with mask
-                Afull(:,k) = Afull(:,k)*Amask(:,k)
+                    ! Equation d4phidy4
+                    Afull(34:36, k) = xv**i * j*(j-1)*(j-2)*(j-3)*yv**(j-4)
 
+                end do
             end do
-        end do
+
+        case default
+
+            call gdErrorHandler('ConstructA: base function not implemented')
+
+        end select
 
         ! Take the correct slice
         A = Afull(1:n, 1:n)        
