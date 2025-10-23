@@ -232,9 +232,9 @@ module UnstructuredInterpolant2D
 
         ! Auxiliary
         integer(I8) :: i, ic, order, min_number_of_terms, &
-            info, nv, stencil_est, nc, counter
-        integer(I8), allocatable, dimension(:) :: ar, n_ar, tv, vxsU
-        integer(I8), allocatable :: Amask(:,:), cNv(:), cNvP(:,:)
+            info, nv, stencil_est, nc, counter, order_GR, n_el, nvpc
+        integer(I8), allocatable, dimension(:) :: ar, n_ar, tv, cNv, vxs
+        integer(I8), allocatable :: cNvP(:,:)
         real(R8), allocatable, dimension(:) :: xv, yv, temp, sol
         real(R8), allocatable, dimension(:,:) :: deriv_vals, A, invA, &
             invABT_array, B, invAB, invABT
@@ -262,22 +262,31 @@ module UnstructuredInterpolant2D
         print *, 'Constructing unstructured interpolation with C',interp%C, 'continuity on triangulated mesh'
 
         ! Compute number of terms
+        nvpc = 3 ! number of vertices per cell
         ar = (/(i, i = 1, 20)/) ! Not general but rather save
         n_ar = (ar + 1)**2
-        min_number_of_terms = sum((/(i, i = 1, interp%C+1)/)) * 3 ! number of equation
+        min_number_of_terms = sum((/(i, i = 1, interp%C+1)/)) * nvpc ! number of equation
 
         ! Determine neccesary order of interpolant
         ! (number of term = (N + 1)**2) for interpolant phi = sum_i^N sum_j^N a_ij x^i y^j
-        log = [min_number_of_terms .lt. n_ar]
+        log = [min_number_of_terms .le. n_ar]
         order = findloc(log, .true., 1)
         interp%n = (order + 1)**2 ! number of terms in interpolant
+
+        ! Determine necessary order of gradient reconstruction
+        ! Propose interp%C+1 and check ( so one order higher than the continuity requirement)
+        order_GR = 1
+        n_el = sum((/(i, i = 1, order_GR+1)/)) * nvpc
+        do while (n_el .lt. interp%n)
+            order_GR = order_GR + 1
+            n_el = sum((/(i, i = 1, order_GR+1)/)) * nvpc
+        end do
 
         ! Continue computation if not yet done before for other field on the same grid
         if (.not. allocated(interp%invABT)) then
 
-            ! Build b matrix
             ! Compute GR coefficients
-            call interp%GR%SetParameters('vert', 'vert', 'global', order)
+            call interp%GR%SetParameters('vert', 'vert', 'global', order_GR)
             call interp%GR%Construct(interp%triangulation)
             call interp%GR%Evaluate(v, deriv_vals)
 
@@ -313,24 +322,24 @@ module UnstructuredInterpolant2D
                 yv = [1, 1, 2]
                 
                 ! Build A matrix
-                call ConstructA(order, interp%n, xv, yv, interp%base_func, A)
+                call ConstructA(interp, order, xv, yv, A)
 
                 ! Compute inverse A
                 call SolveDenseLinearSystemDI(A, temp, sol, info, invA)
 
                 ! Build B matrix - size depends on cell stencil
-                call ConstructB(interp, tv, B, vxsU)
+                call ConstructB(interp, tv, B, vxs)
 
                 ! Matrix multiplication
                 invAB = matmul(invA, B)
                 invABT = transpose(invAB)
 
                 ! Save 
-                nv = size(vxsU)
+                nv = size(vxs)
                 invABT_array(counter+1:counter+nv,:) = invABT
                 cNvP(ic, 1) = counter + 1
                 cNvP(ic, 2) = nv
-                cNv(counter+1:counter+nv) = vxsU
+                cNv(counter+1:counter+nv) = vxs
                 counter = counter + nv
 
 
@@ -345,6 +354,8 @@ module UnstructuredInterpolant2D
         end if
 
         ! Compute aij
+        allocate(interp%aij(size(interp%cNv)))
+        !aij = matmul(invAB, v(vxs))
         
 
     end subroutine
@@ -570,7 +581,7 @@ module UnstructuredInterpolant2D
 
     end subroutine
 
-    subroutine ConstructA(order, n, xv, yv, base_func, A)
+    subroutine ConstructA(interp, order, xv, yv, A)
 
         ! Description
         !============
@@ -579,22 +590,24 @@ module UnstructuredInterpolant2D
         ! Declare variables
         !==================
         ! Arguments
-        integer(I8), intent(in)                 :: order, n
-        real(R8), intent(in)                    :: xv(3), yv(3)
-        character(:), allocatable, intent(in)   :: base_func
-        real(R8), intent(out)                   :: A(n, n) 
-        character(:)
+        type(UnstructuredInterpolant2DUDT), intent(in)  :: interp
+        integer(I8), intent(in)                         :: order
+        real(R8), intent(in)                            :: xv(:), yv(:)
+        real(R8), intent(out)                           :: A(interp%n, interp%n) 
 
         ! Auxiliary
-        integer(I8) :: i, j, k
-        real(R8) :: Afull(36, (order+1)**2)
+        integer(I8) :: i, j, k, n, m, l, p, n_el, nv
+        real(R8), allocatable :: Afull(:,:), Atest(:,:)
 
         ! Initialize
+        nv = size(xv)
+        n_el = sum((/(i, i = 1, interp%GR%deriv+1)/)) * nv
+        allocate(Afull(n_el,(order+1)**2), Atest(n_el,(order+1)**2))
         Afull = 0
 
         ! Populate depending on base function
-        select case (base_func)
-        case ('polynomail')
+        select case (interp%base_func)
+        case ('polynomial')
 
             ! Construct - TODO - try to generalized this - use continuity interp%C!!
             do j = 0, order
@@ -603,45 +616,77 @@ module UnstructuredInterpolant2D
                     ! Column index
                     k = j*(order+1) + (i+1)
 
+                    n = 0
+                    do m = 0, interp%GR%deriv
+                        do l = 0, m
+                            p = m-l
+                            Afull(n*nv+1:n*nv+3, k) = preprod(i,p)*xv**(i-p) * preprod(j,l)*yv**(j-l)
+                            n = n + 1
+                        end do
+                    end do
+
                     ! Equation phi
-                    Afull(1:3, k) = xv**i * yv**j
+                    !Afull(1:3, k) = xv**i * yv**j
 
                     ! Equation dphidx 
-                    Afull(4:6, k) = i*xv**(i-1) * yv**j
+                    !Afull(4:6, k) = i*xv**(i-1) * yv**j
 
                     ! Equation dphidy
-                    Afull(7:9, k) = xv**i * j*yv**(j-1)
+                    !Afull(7:9, k) = xv**i * j*yv**(j-1)
 
-                    ! Equation d2phidx2
-                    Afull(10:12, k) = i*(i-1)*xv**(i-2) * yv**j
+                    !if (interp%GR%deriv .ge. 2) then
 
-                    ! Equation d2phidxdy
-                    Afull(13:15, k) = i*xv**(i-1) * j*yv**(j-1)
+                        ! Equation d2phidx2
+                    !    Afull(10:12, k) = i*(i-1)*xv**(i-2) * yv**j
 
-                    ! Equation d2phidy2
-                    Afull(16:18, k) = xv**i * j*(j-1)*yv**(j-2)
+                        ! Equation d2phidxdy
+                    !    Afull(13:15, k) = i*xv**(i-1) * j*yv**(j-1)
 
-                    ! Equation d3phidx3
-                    Afull(19:21, k) = i*(i-1)*(i-2)*xv**(i-3) * yv**j
+                        ! Equation d2phidy2
+                    !    Afull(16:18, k) = xv**i * j*(j-1)*yv**(j-2)
+                    !end if
 
-                    ! Equation d3dphidx2dy
-                    Afull(22:24, k) = i*(i-1)*xv**(i-2) * j*yv**(j-1)
+                    !if (interp%GR%deriv .ge. 3) then
 
-                    ! Equation d3dphidxdy2
-                    Afull(25:27, k) = i*xv**(i-1) * j*(j-1)*yv**(j-2)
+                        ! Equation d3phidx3
+                    !    Afull(19:21, k) = i*(i-1)*(i-2)*xv**(i-3) * yv**j
 
-                    ! Equation d3phidy3
-                    Afull(28:30, k) = xv**i * j*(j-1)*(j-2)*yv**(j-3)
+                        ! Equation d3dphidx2dy
+                    !    Afull(22:24, k) = i*(i-1)*xv**(i-2) * j*yv**(j-1)
 
-                    ! Equation d4phidx4
-                    Afull(31:33, k) = i*(i-1)*(i-2)*(i-3)*xv**(i-4) * yv**j
+                        ! Equation d3dphidxdy2
+                    !    Afull(25:27, k) = i*xv**(i-1) * j*(j-1)*yv**(j-2)
 
-                    ! Equation d4phidy4
-                    Afull(34:36, k) = xv**i * j*(j-1)*(j-2)*(j-3)*yv**(j-4)
+                        ! Equation d3phidy3
+                    !    Afull(28:30, k) = xv**i * j*(j-1)*(j-2)*yv**(j-3)
+                    !end if
+
+                    !if (interp%GR%deriv .ge. 4) then
+
+                        ! Equation d4phidx4
+                    !    Afull(31:33, k) = i*(i-1)*(i-2)*(i-3)*xv**(i-4) * yv**j
+
+                        ! Equation d4phidx3dy
+                    !    Afull(34:36, k) = i*(i-1)*(i-2)*xv**(i-3) * j*yv**(j-1)
+
+                        ! Equation d4phidx2dy2
+                    !    Afull(37:39, k) = i*(i-1)*xv**(i-2) * j*(j-1)*yv**(j-2)
+
+                        ! Equation d4phidxdy3
+                    !    Afull(40:42, k) = i*xv**(i-1) * j*(j-1)*(j-2)*yv**(j-3)                        
+
+                        ! Equation d4phidy4
+                    !    Afull(43:45, k) = xv**i * j*(j-1)*(j-2)*(j-3)*yv**(j-4)
+
+                    !end if
+
+
 
                 end do
             end do
 
+            if (.not. all(Atest == Afull)) call gdErrorHandler('Mistake')
+ 
         case default
 
             call gdErrorHandler('ConstructA: base function not implemented')
@@ -649,7 +694,7 @@ module UnstructuredInterpolant2D
         end select
 
         ! Take the correct slice
-        A = Afull(1:n, 1:n)        
+        A = Afull(1:interp%n, 1:interp%n)        
  
     end subroutine
 
@@ -666,63 +711,78 @@ module UnstructuredInterpolant2D
         !==================
         ! Arguments
         type(UnstructuredInterpolant2DUDT), intent(inout)   :: interp
-        integer(I8), intent(in)                             :: tv(3)
+        integer(I8), intent(in)                             :: tv(:)
         real(R8), allocatable, intent(out)                  :: B(:,:)
         integer(I8), allocatable, intent(out)               :: vxsU(:)    
 
         ! Auxiliary
-        integer(I8) :: i, ind, s(3), n(3)
-        integer(I8), allocatable, dimension(:) :: vxs, vxs1, vxs2, vxs3
-        real(R8), allocatable, dimension(:,:) :: Bfull, coef1, coef2, coef3
+        integer(I8) :: i, j, k, ind, nv, n_dev, n_el, n_GR
+        integer(I8), allocatable, dimension(:) :: vxs, vxs_loc, s(:), n(:)
+        real(R8), allocatable, dimension(:,:) :: Bfull, coef_loc
 
         ! Get the stencil and reduce to minimal cell stencil
+        nv = size(tv)
         s = interp%GR%cNvP(tv, 1)
         n = interp%GR%cNvP(tv, 2)
-        vxs1 = interp%GR%cNv(s(1):s(1)+n(1))
-        vxs2 = interp%GR%cNv(s(2):s(2)+n(2))
-        vxs3 = interp%GR%cNv(s(3):s(3)+n(3))
-        vxs = [vxs1, vxs2, vxs3]
+        vxs = (/(interp%GR%cNv(s(i):s(i)+n(i)), i = 1, nv)/)
         call Unique(vxs, vxsU)
 
-        ! Populate B
-        allocate(Bfull(36, size(vxsU)))
+        ! Determine number of gradients required for correct continuity
+        n_GR = sum((/(i, i = 1, interp%GR%deriv+1)/))
+        n_dev = n_GR - 1 ! minus 1 because constant term is not given by GR
+        n_el = n_GR * nv
 
-        coef1 = interp%GR%coef(s(1):s(1)+n(1),:)
-        coef2 = interp%GR%coef(s(2):s(2)+n(2),:)
-        coef3 = interp%GR%coef(s(3):s(3)+n(3),:)
-
-        ! Populate 
+        ! Initialize B
+        allocate(Bfull(n_el, size(vxsU))) 
         Bfull = 0
 
-        ! Phi
-        do i = 1, 3
+        ! Loop over vertices
+        do i = 1, nv
+
+            ! Get in
             ind = findloc(vxsU, tv(i), 1)
-            Bfull(i, ind) = 1
-        end do
-
-        ! First vertex
-        do i = 1, size(vxs1)
-
-            ! Find column in B
-            ind = findloc(vxsU, vxs1(i), 1)
 
             ! Phi
-            Bfull(4, ind) = coef1(i, 1)
+            Bfull(i, ind) = 1
 
+            ! Get stencil vertices and coefficients from gradient reconstruction
+            vxs_loc = interp%GR%cNv(s(i):s(i)+n(i))
+            coef_loc = interp%GR%coef(s(i):s(i)+n(i),:)
+
+            ! Loop over stencil and put corresponding coefficient on correct location
+            do j = 1, size(vxs_loc)
+
+                ! Find column in B
+                ind = findloc(vxsU, vxs_loc(j), 1)
+
+                ! Loop over derivatives for correct continuity
+                do k = 1, n_dev 
+                    print *, k
+                    Bfull(k*nv+i, ind) = coef_loc(j, k)
+
+                end do
+
+            end do
         end do
-
 
         ! Trim
         B = Bfull(1:interp%n,:)
     
 
 
-
-
-
-
-
     end subroutine
+
+    function preprod(i,n) result(res)
+        integer(I8) :: i, n, k, res
+        if (n == 0) then
+            res = 1
+        else
+            res = i
+            do k = 1, n-1
+                res = res*(i-k)
+            end do
+        end if
+    end function 
 
 
 end module

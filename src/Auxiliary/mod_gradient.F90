@@ -98,7 +98,7 @@ module mod_gradient
         ! Description
         !============
         ! Compute coefficient for second order gradient reconstruction.
-        ! The arrangment is: dphidx, dphidy, d2phidx2, d2phidy2, d2phidxdy, ...
+        ! The arrangment is: dphidx, dphidy, d2phidx2, d2phidxdy, d2phidy2,...
         ! Deriv is GR%deriv
         ! Int is a logical to indicate also to give the interpolated value
 

@@ -445,12 +445,11 @@ module mod_triangulation
         real(R8), intent(out), allocatable :: deriv_vals(:,:)
         ! Auxiliary
         integer(I8) :: j, nv, iv, s, n, ne
-        integer(I8), allocatable :: vxs(:), ar(:)
+        integer(I8), allocatable :: vxs(:)
         real(R8), allocatable :: b(:), c(:), coef(:,:)
         
         if (GR%deriv .gt. 6) call gdErrorHandler('ConstructGRTria: deriv > 6 not yet implement')
-        ar = (/(j, j = 2, 7)/)
-        ne = sum(ar(1:GR%deriv)) + 1
+        ne = sum((/(j, j = 2, GR%deriv+1)/)) + 1
 
         select case (GR%type1)
         case ('vert')
