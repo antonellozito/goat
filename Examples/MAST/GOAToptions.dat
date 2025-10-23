@@ -503,7 +503,7 @@ VERSION 1.00.00
 #'gg.ref.meth'                           'no'
 'gg.ref.LB.lengthtype'                  'euler'
 'gg.ref.LB.doxp'                        '0'
-'gg.ref.LB.dovessel'                    '0'
+'gg.ref.LB.dovessel'                    '1'
 'gg.ref.LB.Lmininf'                     '0.02'
 'gg.ref.LB.Lmaxinf'                     '0.08'
 'gg.ref.LB.structureIDs'                '[1, 2, 3, 13]'
@@ -559,9 +559,6 @@ VERSION 1.00.00
 'gg.vd.orthlinetracing.step'    '5' # relative step size (larger = less accurate but faster)
 'gg.vd.orthlinetracing.nsteps'  '500' # maximal number of steps to take 
 
-# Distribution of flux surfaces (radial)
-'gg.vd.rd.type'                         'densitybased'
-
 # Distribution of vertices on flux surfaces (poloidal)
 'gg.vd.pd.type'                         'uniform'
 
@@ -576,21 +573,22 @@ VERSION 1.00.00
 'gg.vd.pd.distribution.densityatvessel' '100'
 'gg.vd.pd.distribution.densityatinf'    '10'
 
-# Options for density based distribution, radial
+# Distribution of flux surfaces (radial)
+'gg.vd.rd.type'                         'densitybased'
+'gg.vd.rd.distribution.dosp'            '1'
+'gg.vd.rd.distribution.decaylengthsp'   '0.1'
+'gg.vd.rd.distribution.densityatsp'     '500'
+'gg.vd.rd.distribution.densityatinf'    '20'
+#'gg.vd.rd.distribution.points.x'        '[4.7]' 
+#'gg.vd.rd.distribution.points.y'        '[4.55]' 
+#'gg.vd.rd.distribution.points.d'        '[1.0]' 
+#'gg.vd.rd.distribution.points.val'      '[2]'
+
 'gg.vd.rd.distribution.doxp'            '1'
-'gg.vd.rd.distribution.decaylengthxp'   '0.1';
-'gg.vd.rd.distribution.densityatxp'     '100';
-'gg.vd.rd.distribution.densityatinf'    '20';
+'gg.vd.rd.distribution.decaylengthxp'   '0.1'
+'gg.vd.rd.distribution.densityatxp'     '80'
 
-# Options for remove flux surfaces
-'gg.vd.rfs.mark.psitol'                 '0'
-'gg.vd.rfs.mark.psirattol'              '1e-1'
-'gg.vd.rfs.debugplots'                  '0'
-
-# Options for remove narrow boundary triangles
-'gg.vd.rnbt.mark.criterion'             'angle'
-'gg.vd.rnbt.mark.minangle'              '15'
-
+'gg.vd.rd.distribution.facelength'      '0.1';
 
 
 

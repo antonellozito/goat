@@ -843,7 +843,7 @@ module ggmod_gridgeneration2D
 
             ! Construct uniform distributor with facelength 'options%vdpdfacelength'
             poloidalvertexdistributor = ConstructUniformVertexDistributor(&
-                options%vdpdfacelength, options%vdrdfieldwidth)
+                options%vdpdfacelength, options%vdrdfieldwidth, 'euler', magneticField)
 
         case ('densitybased')
 
@@ -911,7 +911,7 @@ module ggmod_gridgeneration2D
                 'gg_vd_poloidaldensityfunction')
 
             ! Construct density based distribution function
-            poloidalvertexdistributor = ConstructDensityBasedVertexDistributor(vdpdensityfunction, 1_I8)
+            poloidalvertexdistributor = ConstructDensityBasedVertexDistributor(vdpdensityfunction, 1_I8, 'euler', magneticField)
 
             ! Housekeeping
             !=============
@@ -935,7 +935,8 @@ module ggmod_gridgeneration2D
 
             ! Construct uniform distributor 
             radialvertexdistributor = ConstructUniformVertexDistributor(&
-                options%vdpdfacelength, options%vdrdfieldwidth)
+                options%vdrdfacelength, options%vdrdfieldwidth, 'radial', &
+                magneticField)
 
         case ('densitybased')
 
@@ -945,6 +946,8 @@ module ggmod_gridgeneration2D
             associate(&
                 decaylengthxp   => options%vdrddecaylengthxp,    &
                 valxp           => options%vdrddensityatxp,      &
+                decaylengthsp   => options%vdrddecaylengthsp,    &
+                valsp           => options%vdrddensityatsp,      &
                 valinf          => options%vdrddensityatinf      &
                 )
 
@@ -959,28 +962,20 @@ module ggmod_gridgeneration2D
 
             ! Check which points to use
             if (options%vdrdoxp) then 
-                ! Include refinement near x-points (and their separatrices)
-                do i = 1, topomesh%face%ntot
-                    ! Add separatrix points
-                    if (topomesh%face%type(i) == TMfacesepID) then 
-                        ! Add all points except the end points (added 
-                        ! later to avoid duplication)
-                        associate(tpol => topomesh%face%pol(i))
-                        xp = [xp, tpol%x(tpol%vert(2:size(tpol%vert)-1))]
-                        yp = [yp, tpol%y(tpol%vert(2:size(tpol%vert)-1))]
-                        valp = [valp, spread(valxp, 1, tpol%ne-1)]
-                        dp = [dp, spread(decaylengthxp, 1, tpol%ne-1)]
-                        end associate
-                    end if
-
-                    ! Add x- and o-points
-                    xpind = topomesh%GetXPointIDs()
-                    spind = topomesh%GetStrikePointIDs()
-                    xp = [xp, topomesh%vert%x([xpind, spind])]
-                    yp = [yp, topomesh%vert%y([xpind, spind])]
-                    valp = [valp, spread(valxp, 1, size([xpind, spind]))]
-                    dp = [dp, spread(decaylengthxp, 1, size([xpind, spind]))]
-                end do  
+                ! Include refinement near x-points
+                xpind = topomesh%GetXPointIDs()
+                xp = [xp, topomesh%vert%x(xpind)]
+                yp = [yp, topomesh%vert%y(xpind)]
+                valp = [valp, spread(valxp, 1, size(xpind))]
+                dp = [dp, spread(decaylengthxp, 1, size(xpind))]
+            end if 
+            if (options%vdrdosp) then 
+                ! Include refinement near strike points
+                spind = topomesh%GetStrikePointIDs()
+                xp = [xp, topomesh%vert%x(spind)]
+                yp = [yp, topomesh%vert%y(spind)]
+                valp = [valp, spread(valsp, 1, size(spind))]
+                dp = [dp, spread(decaylengthsp, 1, size(spind))]
             end if 
 
             ! Construct density function 
@@ -992,7 +987,8 @@ module ggmod_gridgeneration2D
                 'gg_vd_radialdensityfunction')
 
             ! Construct density based distribution function
-            radialvertexdistributor = ConstructDensityBasedVertexDistributor(vdrdensityfunction, 1_I8)
+            radialvertexdistributor = ConstructDensityBasedVertexDistributor(&
+                vdrdensityfunction, 1_I8, 'radial', magneticField)
 
             ! Housekeeping
             end associate
@@ -5166,8 +5162,8 @@ module ggmod_gridgeneration2D
                 yc = face%y(j)%Get()
 
                 ! Distribute
-                !call vd%DistributeOverCurve(xc, yc, nv, ldistr=dlcv)
-                call vd%DistributeOverField(xc, yc, field, nv,  ldistr=dlcv)
+                call vd%DistributeOverCurve(xc, yc, nv, ldistr=dlcv)
+                ! call vd%DistributeOverField(xc, yc, field, nv,  ldistr=dlcv)
                 dlcv(1) = 0
                 dlcv(size(dlcv)) = facedata(j)%line%dllc(size(facedata(j)%line%dllc))
 

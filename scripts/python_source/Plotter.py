@@ -273,6 +273,10 @@ def PlotGridCellArea(grid, fignum, doinverse=False):
         thisaxes.set_xlabel('x [m]')
         thisaxes.set_ylabel('y [m]')
 
+    # Plot minimal location
+    loc = np.argmin(abs(surfA))
+    PlotPoints2D(grid.cell.x[loc], grid.cell.y[loc], fignum, color='r', marker='o')
+
 #--------------------------------------------------------------------------#
 #                              Grid Optimization                           #
 #--------------------------------------------------------------------------#
