@@ -241,9 +241,9 @@ module UnstructuredInterpolant2D
         integer(I8), allocatable, dimension(:) :: ar, n_ar, tv, cNv, vxs
         integer(I8), allocatable :: cNvP(:,:)
         real(R8) :: t_start, t_end
-        real(R8), allocatable, dimension(:) :: xv, yv, temp, sol
+        real(R8), allocatable, dimension(:) :: temp, sol
         real(R8), allocatable, dimension(:,:) :: deriv_vals, A, invA, &
-            invABT_array, B, invAB, invABT
+            invABT_array, B
         logical, allocatable :: log(:)
 
         ! Checks
@@ -259,6 +259,10 @@ module UnstructuredInterpolant2D
 
         ! Save field information
         interp%v = v
+
+        associate(&
+            tria => interp%triangulation &
+            )
 
         ! Determine needed order of derivatives
         ! This depends on the required continuity
@@ -320,14 +324,10 @@ module UnstructuredInterpolant2D
             do ic = 1, nc
 
                 ! Get vertices
-                tv = interp%triangulation%cvert(ic, :)
-
-                ! Get coordinates
-                xv  = interp%triangulation%x(tv)
-                yv  = interp%triangulation%y(tv)
+                tv = tria%cvert(ic, :)
 
                 ! Build A matrix
-                call ConstructA(interp, xv, yv, A)
+                call ConstructA(interp, tria%x(tv), tria%y(tv), A)
 
                 ! Compute inverse A
                 info = 0
@@ -335,7 +335,7 @@ module UnstructuredInterpolant2D
 
                 if (info /= 0) then
                     print *, 'Could not invert A matrix for cell: ', ic
-                    call interp%triangulation%WriteErrorData(tv, 0)
+                    call tria%WriteErrorData(tv, 0)
                     !call gdErrorHandler('ConstructUSI2DUSFinEelem: could not invert A matrix')
                 end if
 
@@ -343,12 +343,12 @@ module UnstructuredInterpolant2D
                 call ConstructB(interp, tv, B, vxs)
 
                 ! Matrix multiplication
-                invAB = matmul(invA, B)
-                invABT = transpose(invAB)
+                !invAB = matmul(invA, B)
+                !invABT = transpose(invAB)
 
                 ! Save 
                 nv = size(vxs)
-                invABT_array(counter+1:counter+nv,:) = invABT
+                invABT_array(counter+1:counter+nv,:) = transpose(matmul(invA, B))
                 cNvP(ic, 1) = counter + 1
                 cNvP(ic, 2) = nv
                 cNv(counter+1:counter+nv) = vxs
@@ -379,17 +379,22 @@ module UnstructuredInterpolant2D
         do ic = 1, nc
             s = interp%cNvP(ic, 1)
             n = interp%cNvP(ic, 2)
-            invABT = interp%invABT(s:s+n-1,:)
+            !invABT = interp%invABT(s:s+n-1,:)
             vxs = interp%cNv(s:s+n-1)
-            invAB = transpose(invABT)
-            interp%aij(interp%n*(ic-1)+1:interp%n*ic) = matmul(invAB, v(vxs))
+            !invAB = transpose(invABT)
+            interp%aij(interp%n*(ic-1)+1:interp%n*ic) = &
+                matmul(transpose(interp%invABT(s:s+n-1,:)), v(vxs))
         end do
+
+
        
         ! Time 
         call wall_time(t_end)
 
         ! Display
-        print *, 'Time to construct interpolant aij coefficients: ', t_end - t_start, 'seconds'  
+        print *, 'Time to construct interpolant aij coefficients: ', t_end - t_start, 'seconds'
+
+        end associate
 
     end subroutine
 
@@ -599,7 +604,7 @@ module UnstructuredInterpolant2D
                             !A(k) = preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l)
                             !vq_test(i) = vq_test(i) + preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l) * aij(k)                           
                             A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
-                            vq_test(i) = vq_test(i) + preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l) * aij(k)
+                            !vq(i) = vq_test(i) + preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l) * aij(k)
 
                         end do
                     end do
