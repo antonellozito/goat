@@ -323,13 +323,20 @@ module UnstructuredInterpolant2D
 
                 ! Get coordinates
                 xv  = interp%triangulation%x(tv)
-                yv  = interp%triangulation%x(tv)
+                yv  = interp%triangulation%y(tv)
                 
                 ! Build A matrix
                 call ConstructA(interp, xv, yv, A)
 
                 ! Compute inverse A
+                info = 0
                 call SolveDenseLinearSystemDI(A, temp, sol, info, invA)
+
+                if (info /= 0) then
+                    print *, 'Could not invert A matrix for cell: ', ic
+                    call interp%triangulation%WriteErrorData(tv, 0)
+                    !call gdErrorHandler('ConstructUSI2DUSFinEelem: could not invert A matrix')
+                end if
 
                 ! Build B matrix - size depends on cell stencil
                 call ConstructB(interp, tv, B, vxs)
