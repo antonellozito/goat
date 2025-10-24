@@ -369,6 +369,8 @@ module gamod_driver
             field_int = (grid%cell%y%Get())**(options%apost_interpolationM)
             err_int = vq_test - field_int
 
+            call gdErrorHandler('TESTING INTERPOLANT: stop here')
+
         end select
 
 

@@ -324,7 +324,7 @@ module UnstructuredInterpolant2D
                 ! Get coordinates
                 xv  = interp%triangulation%x(tv)
                 yv  = interp%triangulation%y(tv)
-                
+
                 ! Build A matrix
                 call ConstructA(interp, xv, yv, A)
 
@@ -365,7 +365,7 @@ module UnstructuredInterpolant2D
             call wall_time(t_end)
 
             ! Display
-            print *, 'Tim to construct interpolant invAB matrix: ', t_end - t_start, 'seconds'
+            print *, 'Time to construct interpolant invAB matrix: ', t_end - t_start, 'seconds'
 
         end if
 
@@ -388,7 +388,7 @@ module UnstructuredInterpolant2D
         call wall_time(t_end)
 
         ! Display
-        print *, 'Tim to construct interpolant aij coefficients: ', t_end - t_start, 'seconds'  
+        print *, 'Time to construct interpolant aij coefficients: ', t_end - t_start, 'seconds'  
 
     end subroutine
 
@@ -543,13 +543,20 @@ module UnstructuredInterpolant2D
         integer(I8), allocatable, dimension(:)  :: vt1, vt2, vt3   
         real(R8), allocatable, dimension(:)     :: vx, vy, v, dist, aij, A, vq_test(:)             
         logical, allocatable, dimension(:)      :: in, on
-        real(R8)                                :: xq_test, yq_test
+        real(R8)                                :: xq_test, yq_test, t_start, t_end
+
+        ! Timing
+        call wall_time(t_start)
 
         ! Initialize
         allocate(A(interp%n))
         allocate(vq_test(size(xq, 1)))
         A = 0
         vq_test = 0
+        
+        ! Pick correct row depending on derivatives
+        p = derivx
+        l = derivy
 
         ! Loop over query points
         vt1 = interp%triangulation%cvert(:,1)
@@ -576,9 +583,10 @@ module UnstructuredInterpolant2D
                     ! Get aij coefficients
                     aij = interp%aij(interp%n*(ctri-1)+1:interp%n*ctri) 
 
-                    xq_test = 2
-                    yq_test = 2
- 
+                    !xq_test = 2
+                    !yq_test = 2
+                    !print *, 'Test values used!!'
+
                     ! Same as a row in A matrix
                     do j = 0, interp%order
                         do m = 0, interp%order
@@ -586,13 +594,11 @@ module UnstructuredInterpolant2D
                             ! Column index
                             k = j*(interp%order+1) + (m+1)
 
-                            ! Pick correct row depending on derivatives
-                            p = derivx
-                            l = derivy
-                            A(k) = preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l)
-                            vq_test(i) = vq_test(i) + preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l) * aij(k)                           
-                            !A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
-                            !vq_test(i) = vq_test(i) + preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l) * aij(k)
+
+                            !A(k) = preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l)
+                            !vq_test(i) = vq_test(i) + preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l) * aij(k)                           
+                            A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
+                            vq_test(i) = vq_test(i) + preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l) * aij(k)
 
                         end do
                     end do
@@ -619,7 +625,12 @@ module UnstructuredInterpolant2D
             endif
         end do
 
-        ! Timin
+        ! Timing
+        call wall_time(t_end)
+
+        ! Display
+        print *, 'Time to evaluate interpolant: ', t_end - t_start, 'seconds'
+
     end subroutine
 
     subroutine EvaluateWrapper(interp, v, xq, yq, derivx, derivy, vq)
@@ -729,7 +740,7 @@ module UnstructuredInterpolant2D
         ! Arguments
         type(UnstructuredInterpolant2DUDT), intent(in)  :: interp
         real(R8), intent(in)                            :: xv(:), yv(:)
-        real(R8), intent(out)                           :: A(interp%n, interp%n) 
+        real(R8), intent(out)                           :: A(interp%n, interp%n)
 
         ! Auxiliary
         integer(I8) :: i, j, k, n, m, l, p, n_el, nv
@@ -851,8 +862,9 @@ module UnstructuredInterpolant2D
 
         ! Auxiliary
         integer(I8) :: i, j, k, ind, nv, n_dev, n_el, n_GR
-        integer(I8), allocatable, dimension(:) :: vxs, vxs_loc, s(:), n(:)
+        integer(I8), allocatable, dimension(:) :: vxs, vxs_loc, s, n
         real(R8), allocatable, dimension(:,:) :: Bfull, coef_loc
+        real(R8), allocatable, dimension(:) :: w_loc
 
         ! Get the GR stencil and reduce to minimal cell stencil
         nv = size(tv)
@@ -882,6 +894,7 @@ module UnstructuredInterpolant2D
             ! Get stencil vertices and coefficients from gradient reconstruction
             vxs_loc = interp%GR%cNv(s(i):s(i)+n(i)-1)
             coef_loc = interp%GR%coef(s(i):s(i)+n(i)-1,:)
+            w_loc = interp%GR%w(s(i):s(i)+n(i)-1)
 
             ! Loop over stencil and put corresponding coefficient on correct location
             do j = 1, size(vxs_loc)
@@ -896,7 +909,7 @@ module UnstructuredInterpolant2D
                 ! Loop over derivatives for correct continuity
                 do k = 1, n_dev 
                     
-                    Bfull(k*nv+i, ind) = coef_loc(j, k)
+                    Bfull(k*nv+i, ind) = coef_loc(j, k)*w_loc(j)
 
                 end do
 
