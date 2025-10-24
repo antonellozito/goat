@@ -14,6 +14,7 @@ module UnstructuredInterpolant2D
     !===========
     ! Load modules
     use mod_triangulation  
+    use mod_utility
     use Interpolant2D
     use Interpolant2D_auxiliaries
 
@@ -32,7 +33,9 @@ module UnstructuredInterpolant2D
         ! - meth: methodology to construct interpolant
         ! - C, M: order of the interpolant and order of the approximation
         ! method to compute derivatives for the interpolant construction     
-        ! - n: number of terms in the interpolant    
+        ! - n: number of terms in the interpolant 
+        ! - order: the order of the interpolant to comply with the 
+        !   continuity requirement    
         ! - allowextrapolation: logical to check if we can extrapolate
         ! - triangulation: triangulated mesh to use for interpolation
         ! - base_func: type of used base function, for now only 'polynomial'
@@ -56,7 +59,7 @@ module UnstructuredInterpolant2D
         ! some time during evaluation 
 
         character(:), allocatable       :: meth 
-        integer(I8)                     :: C, M, n
+        integer(I8)                     :: C, M, n, order
         logical                         :: allowextrapolation
         type(TriangulationUDT)          :: triangulation
         character(:), allocatable       :: base_func
@@ -231,10 +234,12 @@ module UnstructuredInterpolant2D
         real(R8), intent(out)                   :: v(:)
 
         ! Auxiliary
-        integer(I8) :: i, ic, order, min_number_of_terms, &
-            info, nv, stencil_est, nc, counter, order_GR, n_el, nvpc
+        integer(I8) :: i, ic, min_number_of_terms, &
+            info, nv, stencil_est, nc, counter, order_GR, n_el, nvpc, &
+            s, n
         integer(I8), allocatable, dimension(:) :: ar, n_ar, tv, cNv, vxs
         integer(I8), allocatable :: cNvP(:,:)
+        real(R8) :: t_start, t_end
         real(R8), allocatable, dimension(:) :: xv, yv, temp, sol
         real(R8), allocatable, dimension(:,:) :: deriv_vals, A, invA, &
             invABT_array, B, invAB, invABT
@@ -270,8 +275,8 @@ module UnstructuredInterpolant2D
         ! Determine neccesary order of interpolant
         ! (number of term = (N + 1)**2) for interpolant phi = sum_i^N sum_j^N a_ij x^i y^j
         log = [min_number_of_terms .le. n_ar]
-        order = findloc(log, .true., 1)
-        interp%n = (order + 1)**2 ! number of terms in interpolant
+        interp%order = findloc(log, .true., 1)
+        interp%n = (interp%order + 1)**2 ! number of terms in interpolant
 
         ! Determine necessary order of gradient reconstruction
         ! Propose interp%C+1 and check ( so one order higher than the continuity requirement)
@@ -285,13 +290,16 @@ module UnstructuredInterpolant2D
         ! Continue computation if not yet done before for other field on the same grid
         if (.not. allocated(interp%invABT)) then
 
+            ! Timing
+            call wall_time(t_start)
+
             ! Compute GR coefficients
             call interp%GR%SetParameters('vert', 'vert', 'global', order_GR)
             call interp%GR%Construct(interp%triangulation)
             call interp%GR%Evaluate(v, deriv_vals)
 
             ! Stencil estimate
-            stencil_est = sum((/(i, i = 2, order + 1)/)) + 11
+            stencil_est = sum((/(i, i = 2, interp%order + 1)/)) + 11
 
             ! Construct Amask
             !allocate(Amask(36, (order+1)**2))
@@ -316,13 +324,9 @@ module UnstructuredInterpolant2D
                 ! Get coordinates
                 xv  = interp%triangulation%x(tv)
                 yv  = interp%triangulation%x(tv)
-
-                ! TEST
-                xv = [1, 2, 2]
-                yv = [1, 1, 2]
                 
                 ! Build A matrix
-                call ConstructA(interp, order, xv, yv, A)
+                call ConstructA(interp, xv, yv, A)
 
                 ! Compute inverse A
                 call SolveDenseLinearSystemDI(A, temp, sol, info, invA)
@@ -342,7 +346,6 @@ module UnstructuredInterpolant2D
                 cNv(counter+1:counter+nv) = vxs
                 counter = counter + nv
 
-
             end do
 
 
@@ -351,12 +354,34 @@ module UnstructuredInterpolant2D
             interp%cNv = cNv(1:counter)
             interp%cNvP = cNvP
 
+            ! Time 
+            call wall_time(t_end)
+
+            ! Display
+            print *, 'Tim to construct interpolant invAB matrix: ', t_end - t_start, 'seconds'
+
         end if
 
+        ! Timing
+        call wall_time(t_start)
+
         ! Compute aij
-        allocate(interp%aij(size(interp%cNv)))
-        !aij = matmul(invAB, v(vxs))
-        
+        allocate(interp%aij(interp%n*nc))
+        interp%aij = 0
+        do ic = 1, nc
+            s = interp%cNvP(ic, 1)
+            n = interp%cNvP(ic, 2)
+            invABT = interp%invABT(s:s+n-1,:)
+            vxs = interp%cNv(s:s+n-1)
+            invAB = transpose(invABT)
+            interp%aij(interp%n*(ic-1)+1:interp%n*ic) = matmul(invAB, v(vxs))
+        end do
+       
+        ! Time 
+        call wall_time(t_end)
+
+        ! Display
+        print *, 'Tim to construct interpolant aij coefficients: ', t_end - t_start, 'seconds'  
 
     end subroutine
 
@@ -394,11 +419,11 @@ module UnstructuredInterpolant2D
 
         case ('barycentric')
 
-            call EvaluationUnstructuredInterpolant2DBary(interp, xq, yq, derivx, derivy, vq)           
+            call EvaluateUnstructuredInterpolant2DBary(interp, xq, yq, derivx, derivy, vq)           
 
         case ('finite_element')
 
-            ! TODO
+            call EvaluateUnstructuredInterpolant2DFinElem(interp, xq, yq, derivx, derivy, vq)
 
         case default
 
@@ -410,8 +435,13 @@ module UnstructuredInterpolant2D
 
     end subroutine
 
-    subroutine EvaluationUnstructuredInterpolant2DBary(interp, xq, yq, derivx, derivy, vq)
+    subroutine EvaluateUnstructuredInterpolant2DBary(interp, xq, yq, derivx, derivy, vq)
 
+        ! Description
+        !============
+        ! Evaluate the barycentric interpolant. For each query point, one has to find
+        ! the correct triangle. Thereafter the carthesian to barycentric transformation
+        ! is used for a linear interpolation.
 
         ! Declare variables
         !==================
@@ -457,9 +487,9 @@ module UnstructuredInterpolant2D
 
                 ! Sanity check
                 if (lambda1 < 0_R8 .or. lambda2 < 0_R8 .or. lambda3 < 0_R8) then 
-                    print *, 'EvaluateFromSaddlePoint: point should lie in triangle, ' // & 
-                        'but negative barycentric coordinates present. May be a ' // &
-                        'bug '
+                    print *, 'EvaluateUnstructuredInterpolant2DBary: point should lie in  ' // & 
+                        'triangle, but negative barycentric coordinates present. ' // &
+                        'May be a bug. '
                 end if 
                 
                 ! Compute value
@@ -483,6 +513,106 @@ module UnstructuredInterpolant2D
 
         end do      
         
+    end subroutine
+
+    subroutine EvaluateUnstructuredInterpolant2DFinElem(interp, xq, yq, derivx, derivy, vq)
+
+        ! Description
+        !============
+        ! Evaluates the finite element type interpolant. For each query point, one has to find 
+        ! the correct triangle. Thereafter the carthesian to barycentric transformation
+        ! is used for a linear interpolation.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(UnstructuredInterpolant2DUDT)     :: interp 
+        real(R8), intent(in)                    :: xq(:), yq(:)
+        real(R8), intent(out)                   :: vq(:)
+        integer(I8), intent(in)                 :: derivx, derivy
+
+        ! Auxiliary
+        integer(I8) :: i, j, k, m, l, p, ctri, ind
+        integer(I8), allocatable, dimension(:)  :: vt1, vt2, vt3   
+        real(R8), allocatable, dimension(:)     :: vx, vy, v, dist, aij, A, vq_test(:)             
+        logical, allocatable, dimension(:)      :: in, on
+        real(R8)                                :: xq_test, yq_test
+
+        ! Initialize
+        allocate(A(interp%n))
+        allocate(vq_test(size(xq, 1)))
+        A = 0
+        vq_test = 0
+
+        ! Loop over query points
+        vt1 = interp%triangulation%cvert(:,1)
+        vt2 = interp%triangulation%cvert(:,2)
+        vt3 = interp%triangulation%cvert(:,3)
+        vx = interp%triangulation%x
+        vy = interp%triangulation%y
+        v = interp%v
+        vq = 0
+        do i = 1, size(xq, 1)
+
+            ! Get triangle
+            call InTriangle(vt1, vt2, vt3, vx, vy, xq(i), yq(i), in, on)
+            ctri = findloc(in .or. on, .true., 1)
+
+            ! Check if triangle was found
+            if (ctri /= 0) then 
+
+                ! Interpolate
+                !============
+                select case (interp%base_func)
+                case ('polynomial')
+
+                    ! Get aij coefficients
+                    aij = interp%aij(interp%n*(ctri-1)+1:interp%n*ctri) 
+
+                    xq_test = 2
+                    yq_test = 2
+ 
+                    ! Same as a row in A matrix
+                    do j = 0, interp%order
+                        do m = 0, interp%order
+
+                            ! Column index
+                            k = j*(interp%order+1) + (m+1)
+
+                            ! Pick correct row depending on derivatives
+                            p = derivx
+                            l = derivy
+                            A(k) = preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l)
+                            vq_test(i) = vq_test(i) + preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l) * aij(k)                           
+                            !A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
+                            !vq_test(i) = vq_test(i) + preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l) * aij(k)
+
+                        end do
+                    end do
+
+                    vq(i) = dot_product(A,aij)
+
+                case default
+                    call gdErrorHandler('EvaluateUnstructuredInterpolant2DFinElem: base function type not implemented')
+                end select
+
+            else if (interp%allowextrapolation) then
+
+                ! No triangle found, some extrapolation needed
+                ! Find nearest value point
+                dist = sqrt((vx - xq(i))**2 + (vy - yq(i))**2)
+                ind = minloc(dist, 1)
+                vq(i) = v(ind)  
+            else 
+
+                call gdErrorHandler('EvaluationUnstructuredInterpolant2DBary: triangle ' // & 
+                    'could not be found and no extrapolation allowed, ' // &
+                    'check if point actually lies in mesh or enable extrapolation.')
+
+            endif
+        end do
+
+        ! Timin
     end subroutine
 
     subroutine EvaluateWrapper(interp, v, xq, yq, derivx, derivy, vq)
@@ -581,7 +711,7 @@ module UnstructuredInterpolant2D
 
     end subroutine
 
-    subroutine ConstructA(interp, order, xv, yv, A)
+    subroutine ConstructA(interp, xv, yv, A)
 
         ! Description
         !============
@@ -591,7 +721,6 @@ module UnstructuredInterpolant2D
         !==================
         ! Arguments
         type(UnstructuredInterpolant2DUDT), intent(in)  :: interp
-        integer(I8), intent(in)                         :: order
         real(R8), intent(in)                            :: xv(:), yv(:)
         real(R8), intent(out)                           :: A(interp%n, interp%n) 
 
@@ -602,19 +731,19 @@ module UnstructuredInterpolant2D
         ! Initialize
         nv = size(xv)
         n_el = sum((/(i, i = 1, interp%GR%deriv+1)/)) * nv
-        allocate(Afull(n_el,(order+1)**2), Atest(n_el,(order+1)**2))
+        allocate(Afull(n_el,(interp%order+1)**2), Atest(n_el,(interp%order+1)**2))
         Afull = 0
 
         ! Populate depending on base function
         select case (interp%base_func)
         case ('polynomial')
 
-            ! Construct - TODO - try to generalized this - use continuity interp%C!!
-            do j = 0, order
-                do i = 0, order
+            ! Construct
+            do j = 0, interp%order
+                do i = 0, interp%order
 
                     ! Column index
-                    k = j*(order+1) + (i+1)
+                    k = j*(interp%order+1) + (i+1)
 
                     n = 0
                     do m = 0, interp%GR%deriv
@@ -683,7 +812,7 @@ module UnstructuredInterpolant2D
                 end do
             end do
 
-            if (.not. all(Atest == Afull)) call gdErrorHandler('Mistake')
+            !if (.not. all(Atest == Afull)) call gdErrorHandler('Mistake')
  
         case default
 
@@ -718,11 +847,11 @@ module UnstructuredInterpolant2D
         integer(I8), allocatable, dimension(:) :: vxs, vxs_loc, s(:), n(:)
         real(R8), allocatable, dimension(:,:) :: Bfull, coef_loc
 
-        ! Get the stencil and reduce to minimal cell stencil
+        ! Get the GR stencil and reduce to minimal cell stencil
         nv = size(tv)
         s = interp%GR%cNvP(tv, 1)
         n = interp%GR%cNvP(tv, 2)
-        vxs = (/(interp%GR%cNv(s(i):s(i)+n(i)), i = 1, nv)/)
+        vxs = (/(interp%GR%cNv(s(i):s(i)+n(i)-1), i = 1, nv)/)
         call Unique(vxs, vxsU)
 
         ! Determine number of gradients required for correct continuity
@@ -744,8 +873,8 @@ module UnstructuredInterpolant2D
             Bfull(i, ind) = 1
 
             ! Get stencil vertices and coefficients from gradient reconstruction
-            vxs_loc = interp%GR%cNv(s(i):s(i)+n(i))
-            coef_loc = interp%GR%coef(s(i):s(i)+n(i),:)
+            vxs_loc = interp%GR%cNv(s(i):s(i)+n(i)-1)
+            coef_loc = interp%GR%coef(s(i):s(i)+n(i)-1,:)
 
             ! Loop over stencil and put corresponding coefficient on correct location
             do j = 1, size(vxs_loc)
@@ -753,9 +882,13 @@ module UnstructuredInterpolant2D
                 ! Find column in B
                 ind = findloc(vxsU, vxs_loc(j), 1)
 
+                if (ind == 0) then
+                    call gdErrorHandler('ConstructB: vxs_loc(j) not found in vxsU')
+                end if
+
                 ! Loop over derivatives for correct continuity
                 do k = 1, n_dev 
-                    print *, k
+                    
                     Bfull(k*nv+i, ind) = coef_loc(j, k)
 
                 end do
@@ -766,8 +899,6 @@ module UnstructuredInterpolant2D
         ! Trim
         B = Bfull(1:interp%n,:)
     
-
-
     end subroutine
 
     function preprod(i,n) result(res)

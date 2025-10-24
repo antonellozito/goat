@@ -350,11 +350,6 @@ module mod_triangulation
                         ! Timing
                         !call wall_time(t_start2)
 
-                        ! Add to cNv
-                        cNvP(iv, 1) = counter + 1
-                        cNvP(iv, 2) = counterv
-                        cNv(counter+1:counter+counterv) = vxs(1:counterv)    
-
                         ! Compute coefficients
                         distx = tria%x(vxs(1:counterv)) - tria%x(iv)
                         disty = tria%y(vxs(1:counterv)) - tria%y(iv)
@@ -367,8 +362,6 @@ module mod_triangulation
                             allocate(weight(size(distx)))
                             weight = 1
                         end if
-                        w(counter+1:counter+counterv) = weight 
-                        if (allocated(weight)) deallocate(weight) 
 
                         ! Compute coefficients
                         call ComputeATA(distx, disty, GR%deriv, int, ATA_loc, info)
@@ -382,6 +375,14 @@ module mod_triangulation
                             vxs = 0
                             counterv = 0
                         else 
+                            ! Add to cNv
+                            cNvP(iv, 1) = counter + 1
+                            cNvP(iv, 2) = counterv
+                            cNv(counter+1:counter+counterv) = vxs(1:counterv)
+
+                            w(counter+1:counter+counterv) = weight 
+                            if (allocated(weight)) deallocate(weight) 
+
                             ! Save coefficients
                             ATA(counter+1:counter+counterv,:) = ATA_loc
                             counter = counter + counterv                            
@@ -412,6 +413,11 @@ module mod_triangulation
         GR%cNvP = cNvP   
         GR%coef = ATA(1:counter,:)
         GR%w = w(1:counter)
+
+        ! Check
+        if (size(GR%cNv) /= GR%cNvP(tria%nv,1)+GR%cNvP(tria%nv,2)-1) then
+            call gdErrorHandler('ConstructGRTria: incompatible size of cNv and cNvP')
+        end if
 
         ! Timing
         call wall_time(t_end)

@@ -341,6 +341,8 @@ module gamod_driver
         type(UnstructuredInterpolant2DUDT)  :: interp
         type(QualityMetricUDT)              :: qm
         real(R8), allocatable               :: field(:)
+        real(R8)                            :: vq_test(grid%cell%ntot), &
+            field_int(grid%cell%ntot), err_int(grid%cell%ntot)
 
         ! Interpolation
         !==============
@@ -362,6 +364,10 @@ module gamod_driver
                 options%apost_interpolationC, options%apost_interpolationM, triangulation, 'polynomial')
             field = (triangulation%y)**(options%apost_interpolationM)
             call interp%ConstructUnstructured(interp%triangulation%x, interp%triangulation%y, field)
+
+            call interp%Evaluate(grid%cell%x%Get(), grid%cell%y%Get(), 0, 0, vq_test)
+            field_int = (grid%cell%y%Get())**(options%apost_interpolationM)
+            err_int = vq_test - field_int
 
         end select
 
