@@ -17,6 +17,7 @@ module UnstructuredInterpolant2D
     use mod_utility
     use Interpolant2D
     use Interpolant2D_auxiliaries
+    use omp_lib
 
 
     implicit none
@@ -624,6 +625,143 @@ module UnstructuredInterpolant2D
 
             endif
         end do
+
+        ! Timing
+        call wall_time(t_end)
+
+        ! Display
+        print *, 'Time to evaluate interpolant: ', t_end - t_start, 'seconds'
+
+    end subroutine
+    subroutine EvaluateUnstructuredInterpolant2DFinElemOMP(interp, xq, yq, derivx, derivy, vq)
+
+        ! Description
+        !============
+        ! Evaluates the finite element type interpolant. For each query point, one has to find 
+        ! the correct triangle. Thereafter the carthesian to barycentric transformation
+        ! is used for a linear interpolation.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(UnstructuredInterpolant2DUDT)     :: interp 
+        real(R8), intent(in)                    :: xq(:), yq(:)
+        real(R8), intent(out)                   :: vq(:)
+        integer(I8), intent(in)                 :: derivx, derivy
+
+        ! Auxiliary
+        integer(I8) :: c, i, j, k, m, l, p, ctri, ind
+        integer(I8), allocatable, dimension(:)  :: vt1, vt2, vt3, ctri_found, ctri_not_found, &
+            ctri_array, indxq   
+        real(R8), allocatable, dimension(:)     :: vx, vy, v, dist, aij, A, vq_test(:)             
+        logical, allocatable, dimension(:)      :: in, on, log
+        real(R8)                                :: xq_test, yq_test, t_start, t_end
+
+        ! Timing
+        call wall_time(t_start)
+
+        ! Initialize
+        allocate(A(interp%n))
+        allocate(vq_test(size(xq, 1)), ctri_array(size(xq, 1)))
+        A = 0
+        vq_test = 0
+        
+        ! Pick correct row depending on derivatives
+        p = derivx
+        l = derivy
+
+        ! Loop over query points
+        vt1 = interp%triangulation%cvert(:,1)
+        vt2 = interp%triangulation%cvert(:,2)
+        vt3 = interp%triangulation%cvert(:,3)
+        vx = interp%triangulation%x
+        vy = interp%triangulation%y
+        v = interp%v
+        vq = 0
+        do i = 1, size(xq, 1)
+
+            ! Get triangle
+            call InTriangle(vt1, vt2, vt3, vx, vy, xq(i), yq(i), in, on)
+            ctri = findloc(in .or. on, .true., 1)
+            ctri_array(i) = ctri
+
+        end do
+
+        indxq = (/(i, i = 1, size(xq, 1))/)
+        log = ctri_array /= 0
+        allocate(ctri_found(count(log)), ctri_not_found(count(.not.log)))
+        ctri_found = pack(indxq, log)
+        ctri_not_found = pack(indxq, .not.log)
+
+        ! Check if triangle was found
+        !if (ctri /= 0) then 
+
+        ! Interpolate
+        !============
+        select case (interp%base_func)
+        case ('polynomial')
+
+            do c = 1, size(ctri_found)
+
+                ! Get index and triangle
+                i = ctri_found(c)
+                ctri = ctri_array(i)
+
+                ! Get aij coefficients
+                aij = interp%aij(interp%n*(ctri-1)+1:interp%n*ctri) 
+
+                !xq_test = 2
+                !yq_test = 2
+                !print *, 'Test values used!!'
+
+                ! Same as a row in A matrix
+                do j = 0, interp%order
+                    do m = 0, interp%order
+
+                        ! Column index
+                        k = j*(interp%order+1) + (m+1)
+
+
+                        !A(k) = preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l)
+                        !vq_test(i) = vq_test(i) + preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l) * aij(k)                           
+                        A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
+                        vq_test(i) = vq_test(i) + preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l) * aij(k)
+
+                    end do
+                end do
+
+                vq(i) = dot_product(A,aij)
+
+            end do
+
+        case default
+            call gdErrorHandler('EvaluateUnstructuredInterpolant2DFinElem: base function type not implemented')
+        end select
+
+        if (interp%allowextrapolation) then
+
+            do c = 1, size(ctri_not_found)
+
+                ! Get index and triangle
+                i = ctri_found(c)
+                ctri = ctri_array(i)
+
+                ! No triangle found, some extrapolation needed
+                ! Find nearest value point
+                dist = sqrt((vx - xq(i))**2 + (vy - yq(i))**2)
+                ind = minloc(dist, 1)
+                vq(i) = v(ind)  
+
+            end do
+
+
+        else if (size(ctri_not_found) /= 0) then
+
+                call gdErrorHandler('EvaluationUnstructuredInterpolant2DBary: triangle ' // & 
+                    'could not be found and no extrapolation allowed, ' // &
+                    'check if point actually lies in mesh or enable extrapolation.')
+
+        endif
 
         ! Timing
         call wall_time(t_end)
