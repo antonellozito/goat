@@ -93,7 +93,7 @@ module mod_gradient
     !                                                                  !
     !==================================================================!
 
-    subroutine ComputeATA(dx, dy, deriv, int, ATA)
+    subroutine ComputeATA(dx, dy, deriv, int, ATA, info)
 
         ! Description
         !============
@@ -105,13 +105,15 @@ module mod_gradient
         ! Declare variables
         !==================        
         ! Arguments
-        real(R8), intent(in) :: dx(:), dy(:)
-        real(R8), allocatable, intent(out) :: ATA(:,:)   
-        integer(I8), intent(in)            :: deriv
-        logical, intent(in)                 :: int              
+        real(R8), intent(in)                :: dx(:), dy(:)
+        integer(I8), intent(in)             :: deriv
+        logical, intent(in)                 :: int            
+        real(R8), allocatable, intent(out)  :: ATA(:,:)   
+        integer(I8), intent(out)            :: info
+          
         
         ! Auxiliary
-        integer(I8) :: i, j, k, n, m, info, start_d
+        integer(I8) :: i, j, k, n, m, start_d
         real(R8), allocatable :: A(:,:), AT(:,:), ATA_dummy(:,:), w(:), &
             temp(:), sol(:), C(:,:), invC(:,:)
         real(R8), allocatable :: prefact(:)
@@ -121,6 +123,7 @@ module mod_gradient
         do i = 0, deriv
             prefact(i) = 1.0_R8/factorial(i)
         end do
+        info = 0
 
         ! Determine number of column is A matrix
         if (.not.int) then

@@ -2317,11 +2317,11 @@ module gamod_types
         !==================
         ! Arguments
         class(GradientReconstructionGAUDT)  :: GR
-        type(GAGridUDT), intent(in)         :: grid
+        type(GAGridUDT), intent(inout)      :: grid
 
         ! Auxiliary
         integer(I8) :: ic, j, k, counterc, cvs(100), counter, cNv(grid%cell%ntot*20), &
-        cNvP(grid%cell%ntot,2), vs(grid%face%ntot,2), ifc
+        cNvP(grid%cell%ntot,2), vs(grid%face%ntot,2), ifc, info
         integer(I8), allocatable, dimension(:) :: tv, cvLookup, cv
         real(R8) :: ATA(grid%cell%ntot*20, 2)
         real(R8), allocatable :: distx(:), disty(:), ATA_loc(:,:), &
@@ -2375,9 +2375,15 @@ module gamod_types
                     distx = c%x%Get(cvs(1:counterc)) - c%x%Get(ic)
                     disty = c%y%Get(cvs(1:counterc)) - c%y%Get(ic)
 
-                    call ComputeATA(distx, disty, GR%deriv, .false., ATA_loc)
+                    call ComputeATA(distx, disty, GR%deriv, .false., ATA_loc, info)
                     ATA(counter+1:counter+counterc,:) = ATA_loc
                     counter = counter + counterc
+
+                    if (info /= 0) then
+                        print *, 'Could not converge at vertex: ', ic
+                        call grid%WriteErrorData(cvs(1:counterc), 1)
+                        call gdErrorHandler('ConstructGRTria: could not converge')
+                    end if
                 
                 end do 
 
@@ -2429,8 +2435,14 @@ module gamod_types
                     distx = c%x%Get(cvs(1:counterc)) - fcX(ifc)
                     disty = c%y%Get(cvs(1:counterc)) - fcY(ifc)
 
-                    call ComputeATA(distx, disty, GR%deriv, .true., ATA_loc)
+                    call ComputeATA(distx, disty, GR%deriv, .true., ATA_loc, info)
                     ATA(counter+1:counter+counterc,:) = ATA_loc
+
+                    if (info /= 0) then
+                        print *, 'Could not converge at vertex: ', ic
+                        call grid%WriteErrorData(cvs(1:counterc), 1)
+                        call gdErrorHandler('ConstructGRTria: could not converge')
+                    end if
 
                 end do
 
@@ -19632,7 +19644,7 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in)                    :: grid
+        class(GAGridUDT), intent(inout)                 :: grid
         type(MagneticFieldUDT), intent(in)              :: magneticField
         type(GAoptionsUDT), intent(inout)               :: options
         type(UnstructuredInterpolant2DUDT), intent(in)  :: interp    

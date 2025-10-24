@@ -680,8 +680,6 @@ module UnstructuredInterpolant2D
 
                     !end if
 
-
-
                 end do
             end do
 

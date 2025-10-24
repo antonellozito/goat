@@ -286,10 +286,12 @@ module mod_triangulation
 
         ! Auxiliary
         integer(I8) :: iv, j, n, n1, cNvP(size(tria%x),2), &
-            vxs(200), counterv, counter, stencil_est, min_stencil
+            vxs(200), counterv, counter, stencil_est, min_stencil, &
+            info, min_stencil_loc
         integer(I8), allocatable :: cNv(:)
         real(R8), allocatable :: ATA_loc(:,:), distx(:), disty(:), ATA(:,:), w(:), weight(:)
-        real(R8) :: t_start, t_end, delta_t1, t_start1, t_end1, t_start2, t_end2, delta_t2
+        real(R8) :: t_start, t_end
+        !real(R8) :: delta_t1, t_start1, t_end1, t_start2, t_end2, delta_t2
         logical :: int
 
 
@@ -305,8 +307,8 @@ module mod_triangulation
 
         ! Timing
         call wall_time(t_start) 
-        delta_t1 = 0   
-        delta_t2 = 0       
+        !delta_t1 = 0   
+        !delta_t2 = 0       
             
         ! Initialize
         if (int) then
@@ -331,45 +333,65 @@ module mod_triangulation
                 do iv = 1, tria%nv
 
                     ! Timing
-                    call wall_time(t_start1)
+                    !call wall_time(t_start1)
+                    info = 1
 
-                    ! ConstructStencil
-                    call tria%ConstructStencil(iv, min_stencil, vxs, counterv)
-                    
+                    ! While loop in case solver could not converge
+                    min_stencil_loc = min_stencil
+                    do while (info /= 0)
+
+                        ! ConstructStencil
+                        call tria%ConstructStencil(iv, min_stencil_loc, vxs, counterv)
+                        
+                        ! Timing
+                        !call wall_time(t_end1)
+                        !delta_t1 = max(t_end1-t_start1, delta_t1)
+
+                        ! Timing
+                        !call wall_time(t_start2)
+
+                        ! Add to cNv
+                        cNvP(iv, 1) = counter + 1
+                        cNvP(iv, 2) = counterv
+                        cNv(counter+1:counter+counterv) = vxs(1:counterv)    
+
+                        ! Compute coefficients
+                        distx = tria%x(vxs(1:counterv)) - tria%x(iv)
+                        disty = tria%y(vxs(1:counterv)) - tria%y(iv)
+
+                        ! Compute weight is necessary
+                        if (GR%deriv .gt. 1) then
+                            weight = 1/(distx**2 + disty**2)
+                            weight(1) = maxval(weight(2:size(distx)))*2
+                        else 
+                            allocate(weight(size(distx)))
+                            weight = 1
+                        end if
+                        w(counter+1:counter+counterv) = weight 
+                        if (allocated(weight)) deallocate(weight) 
+
+                        ! Compute coefficients
+                        call ComputeATA(distx, disty, GR%deriv, int, ATA_loc, info)
+
+                        ! Check convergence
+                        if (info /= 0) then
+                            print *, 'Could not converge at vertex: ', iv
+                            print *, 'Trying with larger stencil'
+                            call tria%WriteErrorData(vxs(1:counterv), 0)
+                            min_stencil_loc = min_stencil_loc + 5
+                            vxs = 0
+                            counterv = 0
+                        else 
+                            ! Save coefficients
+                            ATA(counter+1:counter+counterv,:) = ATA_loc
+                            counter = counter + counterv                            
+                        end if
+
+                    end do 
+
                     ! Timing
-                    call wall_time(t_end1)
-                    delta_t1 = max(t_end1-t_start1, delta_t1)
-
-                    ! Timing
-                    call wall_time(t_start2)
-
-                    ! Add to cNv
-                    cNvP(iv, 1) = counter + 1
-                    cNvP(iv, 2) = counterv
-                    cNv(counter+1:counter+counterv) = vxs(1:counterv)    
-
-                    ! Compute coefficients
-                    distx = tria%x(vxs(1:counterv)) - tria%x(iv)
-                    disty = tria%y(vxs(1:counterv)) - tria%y(iv)
-
-                    ! Compute weight is necessary
-                    if (GR%deriv .gt. 1) then
-                        weight = 1/(distx**2 + disty**2)
-                        weight(1) = maxval(weight(2:size(distx)))*2
-                    else 
-                        allocate(weight(size(distx)))
-                        weight = 1
-                    end if
-                    w(counter+1:counter+counterv) = weight 
-                    if (allocated(weight)) deallocate(weight) 
-
-                    call ComputeATA(distx, disty, GR%deriv, int, ATA_loc)
-                    ATA(counter+1:counter+counterv,:) = ATA_loc
-                    counter = counter + counterv
-
-                    ! Timing
-                    call wall_time(t_end2)
-                    delta_t2 = max(t_end2-t_start2, delta_t2)
+                    !call wall_time(t_end2)
+                    !delta_t2 = max(t_end2-t_start2, delta_t2)
 
                 end do
 
@@ -396,8 +418,8 @@ module mod_triangulation
 
         ! Display
         print *, 'Time to construct GR coefficients: ', t_end - t_start, ' seconds'
-        print *, 'Time to construct GR stencil per vertex: ', delta_t1, ' seconds'
-        print *, 'Time to construct GR compute coef per vertex: ', delta_t2, ' seconds'
+        !print *, 'Time to construct GR stencil per vertex: ', delta_t1, ' seconds'
+        !print *, 'Time to construct GR compute coef per vertex: ', delta_t2, ' seconds'
 
     end subroutine
 
