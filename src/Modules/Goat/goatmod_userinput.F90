@@ -1473,7 +1473,7 @@ module goatmod_userinput
         options%vdrddecaylengthxp   = 0.005
         options%vdrddensityatxp     = 2500.0_R8
         options%vdrddensityatinf    = 250.0_R8
-        options%vdrddecaylengthxp   = 0.1_R8
+        options%vdrddecaylengthsp   = 0.1_R8
         options%vdrddensityatsp     = 1000.0_R8
         options%vdrdoxp             = .false.
         options%vdrdosp             = .true.
