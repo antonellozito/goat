@@ -12819,6 +12819,7 @@ module ggmod_gridgeneration2D
         integer(I8), allocatable, dimension(:)      :: tv
         integer(I8), allocatable, dimension(:, :)   :: labels
         logical, allocatable, dimension(:)          :: includevesselvertex
+        real(R8)                                    :: xb(1:2), yb(1:2)
         real(R8), allocatable, dimension(:)         :: xp, yp, &
             valpLmin, valpLmax, decaylength, xv, yv, tempLmin, tempLmax, &
             tempdecaylength
@@ -12830,6 +12831,10 @@ module ggmod_gridgeneration2D
         ! Checks
         !=======
         if (allocated(GGTMlinerefiner)) deallocate(GGTMlinerefiner)
+
+        ! Set visualization bounds
+        xb = [minval(magneticField%R), maxval(magneticField%R)]
+        yb = [minval(magneticField%Z), maxval(magneticField%Z)]
 
         ! Select refiner
         !===============
@@ -12982,12 +12987,8 @@ module ggmod_gridgeneration2D
                     decaylength)
 
                 ! Visualize
-                call Lmin%Visualize([minval(topomesh%vert%x), maxval(topomesh%vert%x)], &
-                    [minval(topomesh%vert%y), maxval(topomesh%vert%y)], &
-                    100, 100, 'Lminpolref')
-                call Lmax%Visualize([minval(topomesh%vert%x), maxval(topomesh%vert%x)], &
-                    [minval(topomesh%vert%y), maxval(topomesh%vert%y)], &
-                    100, 100, 'Lmaxpolref')
+                call Lmin%Visualize(xb, yb, 100, 100, 'Lminpolref')
+                call Lmax%Visualize(xb, yb, 100, 100, 'Lmaxpolref')
 
                 ! Construct refiner
                 GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic', &
@@ -13019,12 +13020,8 @@ module ggmod_gridgeneration2D
                     decaylength)
 
                 ! Visualize
-                call Lmin%Visualize([minval(topomesh%vert%x), maxval(topomesh%vert%x)], &
-                    [minval(topomesh%vert%y), maxval(topomesh%vert%y)], &
-                    100, 100, 'Lminradref')
-                call Lmax%Visualize([minval(topomesh%vert%x), maxval(topomesh%vert%x)], &
-                    [minval(topomesh%vert%y), maxval(topomesh%vert%y)], &
-                    100, 100, 'Lmaxradref')
+                call Lmin%Visualize(xb, yb, 100, 100, 'Lminradref')
+                call Lmax%Visualize(xb, yb, 100, 100, 'Lmaxradref')
 
                 ! Construct refiner
                 GGTMlinerefiner = ConstructGGTMLineRefiner(Lmin, Lmax, 'classic', &

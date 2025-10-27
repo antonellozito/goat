@@ -8339,7 +8339,7 @@ module ggmod_topology2D
             hasnewfsIDnb1, hasnewfsIDnb2
         logical, allocatable, dimension(:)      :: vertexmark, facemark, &
             isedgealigned, isentirefacealigned, remf, keepc, isstartface, &
-            isalphapos, overridetubecase
+            isalphapos, overridetubecase, remv
         integer(I8)                             :: thisf, tubecase, nfs, &
             ntpc, nint, nstc, startind, endind, indtpc, intersectind, &
             insertloc, tfmarktraceind(1:2)
@@ -9375,8 +9375,21 @@ module ggmod_topology2D
             end if 
         end do 
 
+        ! Check if we need to remove vertices (only if they have no faces left)
+        allocate(remv(topomesh%vert%ntot))
+        remv = .false. 
+        do i = 1, topomesh%vert%ntot
+            tvf = topomesh%vert%GetFace(i)
+            if (all(remf(tvf))) then 
+                remv(i) = .true. 
+            end if 
+        end do 
+
         ! Remove faces
         call RemoveTopologicalMeshFaceLogical(topomesh, remf)
+
+        ! Remove vertices
+        call RemoveTopologicalMeshVertexLogical(topomesh, remv)
 
         ! Simplify 
         call SimplifyTopologicalMeshFaces(topomesh)
@@ -13008,6 +13021,8 @@ module ggmod_topology2D
         
         ! Sanity check
         if (any(v%cellP(:, 2) < 1)) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
+            print *, findloc(v%cellP(:, 2), 0, 1)
             call gdErrorHandler('AddTopologicalMeshInterconnectionData: ' // & 
                 'vertex without any cells detected. Check grid interconnectivity')
         end if 
@@ -14323,6 +14338,7 @@ module ggmod_topology2D
         integer(I8)                             :: nsp, tspfloc, &
             nextv, tsp
         integer(I8), allocatable, dimension(:)  ::sp, tspf, tfvert
+        logical, allocatable, dimension(:)      :: isfacefound
 
         ! Loop
         integer(I8)                 :: i
@@ -14334,7 +14350,7 @@ module ggmod_topology2D
         nsp = size(sp)
         
         ! Initialize array
-        allocate(ID(nsp))
+        allocate(ID(nsp), isfacefound(topomesh%face%ntot))
         ID = 0
 
         ! Associate
@@ -14346,50 +14362,63 @@ module ggmod_topology2D
         ! Loop
         !=====
         do i = 1, nsp
+            ! Initialize
+            isfacefound = .false. 
+
             ! Unpack 
             tsp = sp(i)
 
-            ! Get faces of this strike point
-            tspf = vert%GetFace(tsp)
+            ! Loop until vertex is found or until we reach the next 
+            ! boundary again
+            do while (.true.)
 
-            ! Get separatrix face
-            tspfloc = findloc(face%type(tspf), TMfacesepID, 1)
+                ! Get faces of this point
+                tspf = vert%GetFace(tsp)
 
-            ! Sanity check
-            if (tspfloc == 0) then 
-                call gdErrorHandler('GetStrikePointXPointIDs: could not ' // & 
-                    'find separatrix face, unexpected')
-            end if 
+                ! Get separatrix faces that have not yet been found
+                tspf = pack(tspf, (face%type(tspf) == TMfacesepID) .and. &
+                    (.not. isfacefound(tspf)))
+                
+                ! Sanity checks
+                if (size(tspf) < 1) then 
+                    call gdErrorHandler('GetStrikePointXPointIDs: could not ' // & 
+                        'find next separatrix segment, unexpected')
+                end if 
+                if (size(tspf) > 1) then 
+                    call gdErrorHandler('GetStrikePointXPointIDs: found more ' // & 
+                        'than one separatrix segment, unexpected')
+                end if 
 
-            ! Get the next vertex
-            tfvert = face%vert(tspf(tspfloc), :)
-            if (tfvert(1) == tsp) then 
-                nextv = tfvert(2)
-            elseif (tfvert(2) == tsp) then 
-                nextv = tfvert(1)
-            else
-                call gdErrorHandler('GetStrikePointXPointIDs: something ' // & 
-                    'wrong with topomesh interconnections, could not ' // & 
-                    'find current vertex in face vertices')
-            end if 
+                ! Set separatrix face as found
+                isfacefound(tspf) = .true. 
 
-            ! Check the point type
-            if (vert%type(nextv) == TMvertexsaddleID) then 
-                ! Found, add and cycle
-                ID(i) = nextv 
-                cycle
-            elseif (vert%type(nextv) == TMvertexbndID) then 
-                ! Shouldn't happen, error
-                call gdErrorHandler('GetStrikePointXPointIDs: could not ' // & 
-                    'find X-point of strike point')
-            end if 
+                ! Get the next vertex
+                tfvert = face%vert(tspf(1), :)
+                if (tfvert(1) == tsp) then 
+                    nextv = tfvert(2)
+                elseif (tfvert(2) == tsp) then 
+                    nextv = tfvert(1)
+                else
+                    call gdErrorHandler('GetStrikePointXPointIDs: something ' // & 
+                        'wrong with topomesh interconnections, could not ' // & 
+                        'find current vertex in face vertices')
+                end if 
 
-            ! If we got here, we need to keep on walking along the 
-            ! separatrix - this is not yet implemented
-            call gdErrorHandler('GetStrikePointXPointIDs: strike points ' // & 
-                'that do not directly connect to an x-point are not yet ' // & 
-                'supported')
-
+                ! Check the point type
+                if (vert%type(nextv) == TMvertexsaddleID) then 
+                    ! Found, add and exit
+                    ID(i) = nextv 
+                    exit 
+                elseif (vert%type(nextv) == TMvertexbndID) then 
+                    ! Shouldn't happen, error
+                    call gdErrorHandler('GetStrikePointXPointIDs: could not ' // & 
+                        'find X-point of strike point')
+                else
+                    ! Need to look further along the separatrix. Set the
+                    ! current vertex as the next vertex
+                    tsp = nextv 
+                end if 
+            end do 
         end do
 
         ! Housekeeping
