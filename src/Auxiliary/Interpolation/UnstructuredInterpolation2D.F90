@@ -235,15 +235,15 @@ module UnstructuredInterpolant2D
         real(R8), intent(out)                   :: v(:)
 
         ! Auxiliary
-        integer(I8) :: i, ic, min_number_of_terms, &
+        integer(I8) :: i, j, ic, min_number_of_terms, &
             info, nv, stencil_est, nc, counter, order_GR, n_el, nvpc, &
-            s, n
+            s, n, max_dev
         integer(I8), allocatable, dimension(:) :: ar, n_ar, tv, cNv, vxs
         integer(I8), allocatable :: cNvP(:,:)
         real(R8) :: t_start, t_end
         real(R8), allocatable, dimension(:) :: temp, sol
         real(R8), allocatable, dimension(:,:) :: deriv_vals, A, invA, &
-            invABT_array, B
+            invABT_array, B, preprodmat
         logical, allocatable :: log(:)
 
         ! Checks
@@ -318,7 +318,16 @@ module UnstructuredInterpolant2D
             allocate(cNv(nc*stencil_est), cNvP(nc,2))
             temp = 0
             sol = temp     
-            counter = 0       
+            counter = 0   
+            
+            ! Precompute preprodmatrix - TODO
+            max_dev = interp%GR%deriv
+            allocate(preprodmat(0:interp%order, 0:max_dev))
+            do j = 0, interp%order
+                do i = 0, max_dev
+                    preprodmat(j, i) = preprod(j, i)
+                end do
+            end do
 
             ! Loop over the cell
             do ic = 1, nc
@@ -327,7 +336,7 @@ module UnstructuredInterpolant2D
                 tv = tria%cvert(ic, :)
 
                 ! Build A matrix
-                call ConstructA(interp, tria%x(tv), tria%y(tv), A)
+                call ConstructA(interp, tria%x(tv), tria%y(tv), preprodmat, A)
 
                 ! Compute inverse A
                 info = 0
@@ -547,9 +556,10 @@ module UnstructuredInterpolant2D
         ! Auxiliary
         integer(I8) :: i, j, k, m, l, p, ctri, ind
         integer(I8), allocatable, dimension(:)  :: vt1, vt2, vt3   
-        real(R8), allocatable, dimension(:)     :: vx, vy, v, dist, aij, A, vq_test(:)             
+        real(R8), allocatable, dimension(:)     :: vx, vy, v, dist, aij, A, vq_test, Atest
+        real(R8), allocatable                   :: preprodmat(:,:)             
         logical, allocatable, dimension(:)      :: in, on
-        real(R8)                                :: xq_test, yq_test, t_start, t_end
+        real(R8)                                :: xq_test, yq_test, t_start, t_end, max_dev
 
         ! Timing
         call wall_time(t_start)
@@ -559,10 +569,20 @@ module UnstructuredInterpolant2D
         allocate(vq_test(size(xq, 1)))
         A = 0
         vq_test = 0
+        Atest = A
         
         ! Pick correct row depending on derivatives
         p = derivx
         l = derivy
+
+        ! Preprodmatrix 
+        max_dev = max(derivx, derivy)
+        allocate(preprodmat(0:interp%order, 0:max_dev))
+        do j = 0, interp%order
+            do i = 0, max_dev
+                preprodmat(j, i) = preprod(j, i)
+            end do
+        end do
 
         ! Loop over query points
         vt1 = interp%triangulation%cvert(:,1)
@@ -603,7 +623,8 @@ module UnstructuredInterpolant2D
 
                             !A(k) = preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l)
                             !vq_test(i) = vq_test(i) + preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l) * aij(k)                           
-                            A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
+                            !A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
+                            A(k) = preprodmat(m,p)*xq(i)**(m-p) * preprodmat(j,l)*yq(i)**(j-l)
                             !vq(i) = vq_test(i) + preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l) * aij(k)
 
                         end do
@@ -872,7 +893,7 @@ module UnstructuredInterpolant2D
 
     end subroutine
 
-    subroutine ConstructA(interp, xv, yv, A)
+    subroutine ConstructA(interp, xv, yv, preprodmat, A)
 
         ! Description
         !============
@@ -882,7 +903,8 @@ module UnstructuredInterpolant2D
         !==================
         ! Arguments
         type(UnstructuredInterpolant2DUDT), intent(in)  :: interp
-        real(R8), intent(in)                            :: xv(:), yv(:)
+        real(R8), intent(in)                            :: xv(:), yv(:), &
+            preprodmat(0:interp%order,0:interp%GR%deriv)
         real(R8), intent(out)                           :: A(interp%n, interp%n)
 
         ! Auxiliary
@@ -910,7 +932,8 @@ module UnstructuredInterpolant2D
                     do m = 0, interp%GR%deriv
                         do l = 0, m
                             p = m-l
-                            Afull(n*nv+1:n*nv+3, k) = preprod(i,p)*xv**(i-p) * preprod(j,l)*yv**(j-l)
+                            !Afull(n*nv+1:n*nv+3, k) = preprod(i,p)*xv**(i-p) * preprod(j,l)*yv**(j-l)
+                            Afull(n*nv+1:n*nv+3, k) = preprodmat(i,p)*xv**(i-p) * preprodmat(j,l)*yv**(j-l)
                             n = n + 1
                         end do
                     end do
@@ -1005,8 +1028,9 @@ module UnstructuredInterpolant2D
 
         ! Auxiliary
         integer(I8) :: i, j, k, ind, nv, n_dev, n_el, n_GR
-        integer(I8), allocatable, dimension(:) :: vxs, vxs_loc, s, n
-        real(R8), allocatable, dimension(:,:) :: Bfull, coef_loc
+        integer(I8), allocatable, dimension(:) :: vxs, vxs_loc, s, n, &
+            range
+        real(R8), allocatable, dimension(:,:) :: Bfull, coef_loc !, Btest
         real(R8), allocatable, dimension(:) :: w_loc
 
         ! Get the GR stencil and reduce to minimal cell stencil
@@ -1024,6 +1048,7 @@ module UnstructuredInterpolant2D
         ! Initialize B
         allocate(Bfull(n_el, size(vxsU))) 
         Bfull = 0
+        !Btest = Bfull
 
         ! Loop over vertices
         do i = 1, nv
@@ -1033,6 +1058,7 @@ module UnstructuredInterpolant2D
 
             ! Phi
             Bfull(i, ind) = 1
+            !Btest(i, ind) = 1
 
             ! Get stencil vertices and coefficients from gradient reconstruction
             vxs_loc = interp%GR%cNv(s(i):s(i)+n(i)-1)
@@ -1040,24 +1066,28 @@ module UnstructuredInterpolant2D
             w_loc = interp%GR%w(s(i):s(i)+n(i)-1)
 
             ! Loop over stencil and put corresponding coefficient on correct location
+            range = (/(k*nv+i, k = 1, n_dev)/)
             do j = 1, size(vxs_loc)
 
                 ! Find column in B
                 ind = findloc(vxsU, vxs_loc(j), 1)
 
-                if (ind == 0) then
-                    call gdErrorHandler('ConstructB: vxs_loc(j) not found in vxsU')
-                end if
+                !if (ind == 0) then
+                !    call gdErrorHandler('ConstructB: vxs_loc(j) not found in vxsU')
+                !end if
 
                 ! Loop over derivatives for correct continuity
-                do k = 1, n_dev 
-                    
-                    Bfull(k*nv+i, ind) = coef_loc(j, k)*w_loc(j)
+                !do k = 1, n_dev 
+                
+                !    Bfull(k*nv+i, ind) = coef_loc(j, k)*w_loc(j)
 
-                end do
+                !end do
+                Bfull(range, ind) = coef_loc(j,:)*w_loc(j)
 
             end do
         end do
+
+        !if (.not.all(Btest == Bfull)) call gdErrorHandler('Mistake')
 
         ! Trim
         B = Bfull(1:interp%n,:)
