@@ -6451,7 +6451,7 @@ module ggmod_gridgeneration2D
                             ! Intersection with first and last radial line
                             ! should be exactly the same! Only intersection
                             ! coordinate should differ
-                            tsegrc = segrcda(cc, ntf)%Get()
+                            tsegrc = segrcda(j, ntf)%Get()
                             endind = findloc(tsegrc, real(size(tempc(cc)%x)-1, kind=R8), 1)
                             if (endind == 0) then 
                                 print *, 'AddToplogicalMeshCellGriddingData: ' // & 
@@ -13692,6 +13692,12 @@ module ggmod_gridgeneration2D
                 print *, 'size error'
             end if
 
+            ! Hedge for closed surfaces: at least 3 segments required...
+            if (size(dll) < 3 .and. ggtmdata%seg(segID)%isclosed) then 
+                refineface = .true.
+                iscoarselegal = .false. 
+            end if 
+
             ! Determine which faces to refine/coarsen
             where (((dll > Lmaxvert(1:seg%nv-1)) .or. (dll > Lmaxvert(2:seg%nv))) &
                 .and. isreflegal) 
@@ -13705,7 +13711,7 @@ module ggmod_gridgeneration2D
                 coarsenface = .true.
                 isreflegal = .false.
             end where
-                
+
             ! Check exit conditions
             if ((.not. any(refineface)) .and. (.not. any(coarsenface))) then
                 if (any(dll < disttol)) then 
@@ -14312,6 +14318,12 @@ module ggmod_gridgeneration2D
             if (size(isreflegal) /= size(dll)) then 
                 print *, 'size error'
             end if
+
+            ! Hedge for closed surfaces: at least 3 segments required...
+            if (size(dll) < 3 .and. ggtmdata%seg(line%segID(1))%isclosed) then 
+                refineface = .true.
+                iscoarselegal = .false. 
+            end if 
 
             ! Determine which faces to refine/coarsen
             where (((dll > Lmaxvert(1:line%nv-1)) .or. (dll > Lmaxvert(2:line%nv))) &
@@ -17669,17 +17681,27 @@ module ggmod_gridgeneration2D
                 srfv => topomesh%face%vert(tmcell%srf, :), &
                 erfv => topomesh%face%vert(tmcell%erf, :))
 
-            ! Check field values
-            if (vert%fval(srfv(1)) > vert%fval(srfv(2))) then 
+            ! Get start/end vertex - don't do this based on field values, they may be off
+            if (any(srfv(1) == bndv)) then 
                 startv = srfv(1)
-            else 
+            elseif (any(srfv(2) == bndv)) then 
                 startv = srfv(2)
-            end if
-            if (vert%fval(erfv(1)) > vert%fval(erfv(2))) then 
+            else
+                ! Could not find vertex, throw error
+                call gdErrorHandler('ExtractTMCellAlignedBoundary: could not find ' // & 
+                    'start vertex for high field case, not present in high ' // &
+                    'field boundary vertices. Unexpected')
+            end if 
+            if (any(erfv(1) == bndv)) then 
                 endv = erfv(1)
-            else 
+            elseif (any(erfv(2) == bndv)) then 
                 endv = erfv(2)
-            end if
+            else
+                ! Could not find vertex, throw error
+                call gdErrorHandler('ExtractTMCellAlignedBoundary: could not find ' // & 
+                    'end vertex for high field case, not present in high ' // &
+                    'field boundary vertices. Unexpected')
+            end if 
 
             ! Houskeeping
             end associate
@@ -17697,17 +17719,27 @@ module ggmod_gridgeneration2D
                 srfvx   => facedata(tmcell%srf)%line%xv,     &
                 srfvy   => facedata(tmcell%srf)%line%yv)
 
-            ! Check field values
-            if (vert%fval(srfv(1)) < vert%fval(srfv(2))) then 
+            ! Get start/end vertex - don't do this based on field values, they may be off
+            if (any(srfv(1) == bndv)) then 
                 startv = srfv(1)
-            else 
+            elseif (any(srfv(2) == bndv)) then 
                 startv = srfv(2)
-            end if
-            if (vert%fval(erfv(1)) < vert%fval(erfv(2))) then 
+            else
+                ! Could not find vertex, throw error
+                call gdErrorHandler('ExtractTMCellAlignedBoundary: could not find ' // & 
+                    'start vertex for low field case, not present in low ' // &
+                    'field boundary vertices. Unexpected')
+            end if 
+            if (any(erfv(1) == bndv)) then 
                 endv = erfv(1)
-            else 
+            elseif (any(erfv(2) == bndv)) then 
                 endv = erfv(2)
-            end if
+            else
+                ! Could not find vertex, throw error
+                call gdErrorHandler('ExtractTMCellAlignedBoundary: could not find ' // & 
+                    'end vertex for low field case, not present in low ' // &
+                    'field boundary vertices. Unexpected')
+            end if 
 
             ! Houskeeping
             end associate
