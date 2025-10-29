@@ -480,7 +480,8 @@ module ggmod_topology2D
         ! Update the field tracer 
         fieldtracer = ConstructStructuredTracer(&
             reshape(Vf, [size(xgv), size(ygv)]), xgv, ygv, &
-            xtp, ytp, Ftp, IDs, fieldtracer%npmin, fieldtracer%npmax, fieldtracer%dl)
+            xtp, ytp, Ftp, IDs, spread(.false., 1, size(xtp)), &
+            fieldtracer%npmin, fieldtracer%npmax, fieldtracer%dl)
         
         !! Visualize by tracing contours
         !resc = 100
@@ -865,16 +866,16 @@ module ggmod_topology2D
         fytracer = fieldtracer 
         if (allocated(fxtracer%xs)) then 
             deallocate(fxtracer%xs, fxtracer%ys, fxtracer%vs, &
-                fxtracer%order, fxtracer%IDs)
+                fxtracer%order, fxtracer%IDs, fxtracer%issaddle)
         end if 
         allocate(fxtracer%xs(0), fxtracer%ys(0), fxtracer%vs(0), &
-            fxtracer%order(0), fxtracer%IDs(0))
+            fxtracer%order(0), fxtracer%IDs(0), fxtracer%issaddle(0))
         if (allocated(fytracer%xs)) then 
             deallocate(fytracer%xs, fytracer%ys, fytracer%vs, &
-            fytracer%order, fytracer%IDs)
+            fytracer%order, fytracer%IDs, fytracer%issaddle)
         end if 
         allocate(fytracer%xs(0), fytracer%ys(0), fytracer%vs(0), &
-            fytracer%order(0), fytracer%IDs(0))
+            fytracer%order(0), fytracer%IDs(0), fytracer%issaddle(0))
         call fxtracer%SetValues(fx)
         call fytracer%SetValues(fy)
         
@@ -1832,7 +1833,8 @@ module ggmod_topology2D
         fieldtracer%ys = pspy
         fieldtracer%vs = pspf
         fieldtracer%IDs = pspID
-        fieldtracer%order = 0*psptype   
+        fieldtracer%order = 0*psptype  
+        fieldtracer%issaddle = topomesh%vert%type(pspID) == TMvertexsaddleID 
 
         ! Trace contours
         !===============
@@ -16017,7 +16019,8 @@ module ggmod_topology2D
         ! Update the tracer 
         tracer = ConstructStructuredTracer(&
             reshape(Vf, [size(xgv), size(ygv)]), xgv, ygv, &
-            xtp, ytp, Ftp, IDs, tracer%npmin, tracer%npmax, tracer%dl)
+            xtp, ytp, Ftp, IDs, topomesh%vert%type(IDs) ==TMvertexsaddleID, &
+            tracer%npmin, tracer%npmax, tracer%dl)
 
     end subroutine
     !------------------------------------------------------------------!
