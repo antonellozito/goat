@@ -423,6 +423,13 @@ module gamod_driver
 
             end if
 
+            if (options%apost_meth == 'res') then
+                print *, 'Warning: here should be a routine to reduce the residuals of ' // &
+                ' the splitting cell to avoid resplitting the same cell over and over.' //&
+                ' In this implementation state_v should be changed '// &
+                'as this is the state used to interpolate from.'
+            end if
+
             ! Interpolant state on new grid (state = state_int)
             call grid%InterpolateState(interp, state_v, options, state_int)
 
