@@ -7,13 +7,13 @@ VERSION 1.00.00
 # See SetGOAToptions for a description of the options.
 # General options 
 'goat.debug'        '1'
-'goat.meth'         'GD'
+'goat.meth'         'GAGD'
 
 # Input file parser
 'goat.gridfilepath'             './traduit.out.b2us_new_test3'
 'goat.structurefilepath'        'structure.dat'
 'goat.magneticfieldfilepath'    'rzpsi.dat'
-'goat.writefilepath'            './traduit.out.b2us_new_test3GD'
+'goat.writefilepath'            './traduit.out.b2us_new_test3GAGD'
 
 'goat.read_b2fplasmf' '0'
 'goat.b2fplasmffile' 'b2fplasmf'
@@ -39,9 +39,9 @@ VERSION 1.00.00
 # face label mappings. 
 'goat.facelabelsubfrom'       '[]'
 'goat.facelabelsubto'         '[]'
-'goat.facelabelmappingGG'     '[1, 2, -21, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]'
-'goat.facelabelmappingGD'     '[1, 1,   2, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4, 3]'
-'goat.facelabelmappingGA'     '[4, 5,   2,   2, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1]'
+'goat.facelabelmappingGG'     '[1, 2, -25, -21, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]'
+'goat.facelabelmappingGD'     '[1, 1,   2,   2, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4, 3]'
+'goat.facelabelmappingGA'     '[4, 5,   2,   2, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1, 3]'
 
 #-------------------------------------------------------------------------#
 #                          GRID OPTIONS                                   #
@@ -344,7 +344,6 @@ VERSION 1.00.00
 'ga.timing' '0'
 'ga.meth'   'simple'
 'ga.debug'  '0'
-'ga.meth_post' 'grad_po'
 
 # GA operation options
 'ga.rem_small_trias'    '1'
@@ -359,7 +358,7 @@ VERSION 1.00.00
 'ga.merge_trap_into_stacked' '0'
 'ga.bunch_tria'      '0'
 'ga.bunch_pent'      '0'
-'ga.BLG'             '1'
+'ga.BLG'             '0'
 'ga.BLG_n_layers'    '3'
 'ga.BLG_rescaling_factor' '1.8'
 'ga.BLG_smoothing_factors' '[1.3, 1.8]'
