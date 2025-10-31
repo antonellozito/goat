@@ -554,12 +554,12 @@ module UnstructuredInterpolant2D
         integer(I8), intent(in)                 :: derivx, derivy
 
         ! Auxiliary
-        integer(I8) :: i, j, k, m, l, p, ctri, ind
+        integer(I8) :: i, j, k, m, l, p, ctri, ind, max_dev
         integer(I8), allocatable, dimension(:)  :: vt1, vt2, vt3   
         real(R8), allocatable, dimension(:)     :: vx, vy, v, dist, aij, A, vq_test, Atest
         real(R8), allocatable                   :: preprodmat(:,:)             
         logical, allocatable, dimension(:)      :: in, on
-        real(R8)                                :: xq_test, yq_test, t_start, t_end, max_dev
+        real(R8)                                :: t_start, t_end 
 
         ! Timing
         call wall_time(t_start)
@@ -609,10 +609,6 @@ module UnstructuredInterpolant2D
                     ! Get aij coefficients
                     aij = interp%aij(interp%n*(ctri-1)+1:interp%n*ctri) 
 
-                    !xq_test = 2
-                    !yq_test = 2
-                    !print *, 'Test values used!!'
-
                     ! Same as a row in A matrix
                     do j = 0, interp%order
                         do m = 0, interp%order
@@ -621,9 +617,7 @@ module UnstructuredInterpolant2D
                             k = j*(interp%order+1) + (m+1)
 
 
-                            !A(k) = preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l)
-                            !vq_test(i) = vq_test(i) + preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l) * aij(k)                           
-                            !A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
+                            ! Compute
                             A(k) = preprodmat(m,p)*xq(i)**(m-p) * preprodmat(j,l)*yq(i)**(j-l)
                             !vq(i) = vq_test(i) + preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l) * aij(k)
 
@@ -681,7 +675,7 @@ module UnstructuredInterpolant2D
             ctri_array, indxq   
         real(R8), allocatable, dimension(:)     :: vx, vy, v, dist, aij, A, vq_test(:)             
         logical, allocatable, dimension(:)      :: in, on, log
-        real(R8)                                :: xq_test, yq_test, t_start, t_end
+        real(R8)                                :: t_start, t_end
 
         ! Timing
         call wall_time(t_start)
@@ -736,22 +730,15 @@ module UnstructuredInterpolant2D
                 ! Get aij coefficients
                 aij = interp%aij(interp%n*(ctri-1)+1:interp%n*ctri) 
 
-                !xq_test = 2
-                !yq_test = 2
-                !print *, 'Test values used!!'
-
                 ! Same as a row in A matrix
                 do j = 0, interp%order
                     do m = 0, interp%order
 
                         ! Column index
                         k = j*(interp%order+1) + (m+1)
-
-
-                        !A(k) = preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l)
-                        !vq_test(i) = vq_test(i) + preprod(m,p)*xq_test**(m-p) * preprod(j,l)*yq_test**(j-l) * aij(k)                           
+                          
+                        ! Compute
                         A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
-                        vq_test(i) = vq_test(i) + preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l) * aij(k)
 
                     end do
                 end do
