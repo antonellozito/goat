@@ -568,6 +568,10 @@ module gamod_driver
             lb = lbls2(i)
             allocate(ind(count(fcLbl_loc == lb)))
             ind = pack(indFc,fcLbl_loc == lb )
+            if (lb .lt. 1 .or. lb .gt. size(options%fcRegmappingGA)) then
+                print *, 'Label out of range: ', lb
+                call gdErrorHandler('PostProcessGA: label out of range for fcRegmappingGA, check facelabelmapping')
+            end if
             fcReg(ind) = options%fcRegmappingGA(lb)
             deallocate(ind)
         end do

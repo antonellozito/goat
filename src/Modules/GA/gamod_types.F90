@@ -3142,7 +3142,7 @@ module gamod_types
                     print *, 'cx: ', c%x%Get(ic), ' cy: ', c%y%Get(ic)
                     print *, 'vx :', v%x%Get(tv)
                     print *, 'vy :', v%y%Get(tv)
-                    call grid%WriteErrorData(tv, 1)
+                    call grid%WriteErrorData(tv, 1, 1)
                     call gdErrorHandler('ReorderCellConn: probably overlap')
                 end if 
 
@@ -10782,6 +10782,9 @@ module gamod_types
         type(GAoptionsUDT), intent(inout)       :: options
         type(MagneticFieldUDT), intent(in)      :: magneticField
 
+        ! Auxiliary
+        integer(I8), allocatable :: verts(:)
+
         ! Get splitting case and do the split on cell cv
         call grid%OneSplit(magneticField, options,cv)
 
@@ -10792,7 +10795,11 @@ module gamod_types
             call grid%SplitPentsRec(magneticField, options, cv)
         end if
 
-        ! Do ordering for nice plots -  not necessary
+        ! Do ordering for nice plots
+        if (options%plt) then
+            verts = GetCellVertGA(grid%cell, cv)
+            call grid%WriteErrorData(verts, 0)
+        end if
 
     end subroutine
 
@@ -10841,7 +10848,7 @@ module gamod_types
                 if (options%debug) print *, caseID
                 if (options%plt) then
                     verts = GetCellVertGA(grid%cell, cv)
-                    call grid%WriteErrorData(verts, 0)
+                    call grid%WriteErrorData(verts, 0, 1)
                 end if
                 select case (caseID)
 
@@ -10870,7 +10877,7 @@ module gamod_types
                 if (options%debug) print *, caseID
                 if (options%plt) then
                     verts = GetCellVertGA(grid%cell, cv)
-                    call grid%WriteErrorData(verts, 0)
+                    call grid%WriteErrorData(verts, 0, 1)
                 end if
                 select case (caseID)
 
@@ -10899,7 +10906,7 @@ module gamod_types
                 if (options%debug) print *, caseID
                 if (options%plt) then
                     verts = GetCellVertGA(grid%cell, cv)
-                    call grid%WriteErrorData(verts, 0)
+                    call grid%WriteErrorData(verts, 0, 1)
                 end if
                 select case (caseID)
 
@@ -10932,7 +10939,7 @@ module gamod_types
             if (options%debug) print *, caseID
             if (options%plt) then
                 verts = GetCellVertGA(grid%cell, cv)
-                call grid%WriteErrorData(verts, 0)
+                call grid%WriteErrorData(verts, 0, 1)
             end if
 
             select case (caseID)
@@ -20116,17 +20123,21 @@ module gamod_types
 
     end subroutine
 
-    subroutine WriteErrorData(grid, verts, flag)
+    subroutine WriteErrorData(grid, verts, flag1, flag2)
 
         ! Description
         !============
         ! Write data for an error plot
+        ! Flag1 should be 1 if an error will occur after writing error data.
+        ! Flag2 should be present if reordening the cell connectivity
+        ! is not necessary.
 
         ! Declare variables
         !==================
         ! Arguments
         class(GAGridUDT), intent(inout) :: grid
-        integer(I8), intent(in)         :: verts(:), flag
+        integer(I8), intent(in)         :: verts(:), flag1
+        integer(I8), optional           :: flag2
 
         ! Auxiliary
         logical, allocatable :: is_ordered(:)
@@ -20135,13 +20146,13 @@ module gamod_types
         allocate(is_ordered(grid%cell%ntot))
 
         ! Reorder connectivity 
-        call grid%ReorderCellConn(is_ordered)
-
+        if (.not.present(flag2)) call grid%ReorderCellConn(is_ordered)
+    
         ! Write grid and array for vertices to indicate problematic area
         call grid%WriteData('grid_error')
         call WriteArray(verts, 'vertices_error')
 
-        if (flag == 1) print *, 'Error occurs: use pgaerror to visualize'
+        if (flag1 == 1) print *, 'Error occurs: use pgaerror to visualize'
 
     end subroutine
 
