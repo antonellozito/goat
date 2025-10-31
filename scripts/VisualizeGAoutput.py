@@ -129,29 +129,30 @@ except :
 
 # Reading triangulated grid
 #--------------------------
-#try :
-filepath = datadir + '/' + trianglefile
-tria_in = dh.ReadTriaGrid(filepath)
+try :
+    filepath = datadir + '/' + trianglefile
+    tria_in = dh.ReadTriaGrid(filepath)
 
-print((min(tria_in.vert.x)))
-print((min(tria_in.vert.y)))
+    print((min(tria_in.vert.x)))
+    print((min(tria_in.vert.y)))
 
-print('Before GA')
-print('---------')
-print('Total number of cells : ' + str(tria_in.cell.ntot))
-print('Total number of vertices: ' + str(tria_in.vert.ntot))
+    print('Before GA')
+    print('---------')
+    print('Total number of cells : ' + str(tria_in.cell.ntot))
+    print('Total number of vertices: ' + str(tria_in.vert.ntot))
 
-# Design
-#-------
-# Plot the grid
-plotter.PlotTriaCells(tria_in,4)
-#except :
-#    print('No triangle grid found')
+
+    # Design
+    #-------
+    # Plot the grid
+    plotter.PlotTriaCells(tria_in,4)
+except :
+    print('No triangle grid found')
 
 # Legend
 #-------
 print('Figure 0: grid at input')
-print('Figure 1: grid at outpu')
+print('Figure 1: grid at output')
 print('Figure 2: grid after rem small trias')
 print('Figure 3: flux tubes')
 
