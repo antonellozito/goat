@@ -7,13 +7,13 @@ VERSION 1.00.00
 # See SetGOAToptions for a description of the options. 
 # General options
 'goat.debug'        '1'
-'goat.meth'         'GAGD'
+'goat.meth'         'GA'
 
 # Input file parser
 'goat.gridpathfile'             'traduit.out.b2us'
 'goat.structurefilepath'        'structure.dat'
 'goat.magneticfieldfilepath'    'rzpsi.dat'
-'goat.writefilepath'            './traduit.out.b2us_testGAGD'
+'goat.writefilepath'            './traduit.out.b2us_test'
 
 # Output options 
 'goat.write_final'                  '1'
@@ -328,7 +328,7 @@ VERSION 1.00.00
 'ga.plt'    '1'
 'ga.plt_qm' '0'
 'ga.timing' '0'
-'ga.meth'   'aposteriori'
+'ga.meth'   'simple'
 
 # GA operation options
 'ga.rem_small_trias' '1'

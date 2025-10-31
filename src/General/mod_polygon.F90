@@ -153,6 +153,9 @@ module mod_polygon
         procedure, private  :: GetPolygonVertexID
         generic   :: GetVert            => GetPolygonVertexID
 
+        ! Adaptations
+        procedure :: Compress           => CompressPolygon  
+
     end type 
 
     ! The polygonset type
@@ -193,6 +196,9 @@ module mod_polygon
             GetPolygonSetVerticesID
         procedure :: GetLabels              => GetPolygonSetVertexLabels
         procedure :: UpdateCoordinates      => UpdatePolygonSetVertexCoordinates
+
+        ! Adaptations
+        procedure :: Compress               => CompressPolygonSet          
 
         ! I/O
         procedure :: WriteData              => WritePolygonSetData        
@@ -518,6 +524,33 @@ module mod_polygon
 
     end subroutine
 
+    ! Polygon set compressor 
+    subroutine CompressPolygonSet(polygonset)
+
+        ! Description
+        !============
+        ! 'Compress' the polygon set by removing points that do not 
+        ! contribute to the shape of the polygon. Primarily useful to 
+        ! simplify polygons that were refined before. Differences in the
+        ! order of machine precision may originate from using this 
+        ! function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT)                :: polygonset
+
+        ! Loop
+        integer(I8)                         :: i 
+
+        ! Call polygon compressor
+        !========================
+        do i = 1, polygonset%np
+            call polygonset%polygons(i)%Compress()
+        end do 
+
+    end subroutine
+
     ! Update polygonset coordinates
     subroutine UpdatePolygonSetVertexCoordinates(polygonset, xp, yp)
 
@@ -805,7 +838,7 @@ module mod_polygon
     end subroutine
 
     ! Orient nested closed polygons
-    subroutine OrientNestedClosedPolygons(polygonset, flag)
+    subroutine OrientNestedClosedPolygons(polygonset, flag, polygonlevels)
 
         ! Description
         !============
@@ -855,11 +888,22 @@ module mod_polygon
         ! 4:    open polygons present
         ! 5:    self-intersecting polygons present
 
+        ! Note 3: if desired, also the 'level' of the polygon is returned,
+        ! where the level indicates which nestedness level the polygon 
+        ! has. Here, level 0 indicates polygons that do not lie in any
+        ! other polygon, level 1 indicates polygons that lie in one 
+        ! upper polygon, etc. If for any reason the routine does not 
+        ! succeed, all levels are set to -1. Note that the polygon level
+        ! is easily obtained from the inpolygonmatrix, as this is simply
+        ! the column sum of that matrix (where true -> 1, false -> 0)
+
         ! Declare variables
         !==================
         ! Arguments
         class(PolygonSetUDT)        :: polygonset 
         integer(I8)                 :: flag
+        integer(I8), allocatable, dimension(:), intent(out), optional :: &
+            polygonlevels
 
         ! Auxiliary
         integer(I8)                 :: orientation, nv
@@ -878,18 +922,17 @@ module mod_polygon
         ! Set flag (zero for success, > 0 for failure)
         flag = 1
 
+        ! Set optional output if present
+        if (present(polygonlevels)) then 
+            if (allocated(polygonlevels)) deallocate(polygonlevels)
+            allocate(polygonlevels(polygonset%np))
+            polygonlevels = -1 ! initial value
+        end if 
+
         ! Associate
         associate( &
                 np  => polygonset%np, &
                 p   => polygonset%polygons)
-
-        ! Check if multiple polygons are present
-        !if (np > 1) then 
-        !    ! Issue warning
-        !    call PolygonWarningHandler('OrientNestedClosedPolygons: ' // &
-        !    'sorting part not yet verified for more than one vessel ' // &
-        !    'polygon, proceed with caution')
-        !end if 
 
         ! Check polygon status
         do i = 1, np
@@ -1003,6 +1046,14 @@ module mod_polygon
             end associate 
             deallocate(ipx, ipy, yf, dx)
         end do
+
+        ! Set levels
+        !===========
+        if (present(polygonlevels)) then 
+            do i = 1, np
+                polygonlevels(i) = count(inpolygonmatrix(:, i))
+            end do 
+        end if 
         
         ! Check orientation
         !==================
@@ -1853,6 +1904,100 @@ module mod_polygon
         
 
     end subroutine
+
+    ! Polygon compressor
+    subroutine CompressPolygon(polygon)
+
+        ! Description
+        !============
+        ! Wrapper of the CompressSimplePolygon for polygon objects. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonUDT)               :: polygon
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: x, y
+        integer(I8), allocatable, dimension(:, :)   :: labels
+
+        ! Loop
+
+        ! Initialize
+        !===========
+        ! Unpack original vertices ()
+        x = polygon%x(polygon%vert)
+        y = polygon%y(polygon%vert)
+        labels = polygon%labels(polygon%vert, :)
+
+        ! Compress
+        !=========
+        call CompressSimplePolygon(x, y, labels)
+
+        ! Reconstruct
+        !============
+        call Polygon%Construct(x, y, labels)
+
+    end subroutine
+
+    ! Simple polygon compression
+    subroutine CompressSimplePolygon(x, y, labels)
+
+        ! Description
+        !============
+        ! Compress a polygon by removing vertices that lie on straight
+        ! line segments (measured by computing the angle between 
+        ! neighbouring edges and comparing to pi). Machine precision 
+        ! effects may occur though, so use wisely. Useful for polygons
+        ! that have previously been refined and have to be coarsened 
+        ! again to their initial state. Should (apart from aforementioned
+        ! precision effects) not influence the shape of the polygon. 
+        ! Differences in labels are not accounted for. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        real(R8), allocatable, intent(inout)        :: x(:), y(:) 
+        integer(I8), allocatable, intent(inout)     :: labels(:, :)
+
+        ! Auxiliary
+        integer(I8)                                 :: np
+        real(R8), allocatable, dimension(:)         :: dx, dy, theta, &
+            tempx, tempy
+        logical, allocatable, dimension(:)          :: keepind 
+        integer(I8), allocatable                    :: templabels(:, :)
+
+        ! Loop
+        integer(I8)                                 :: i 
+
+        ! Initialize
+        !===========
+        np = size(x)
+        allocate(keepind(np-2)) ! first and last point can never be deleted
+        keepind = .true.
+
+        ! Compute angles
+        !===============
+        dx = x(2:) - x(1:np-1)
+        dy = y(2:) - y(1:np-1)
+        theta = atan2(dx(1:np-2)*dy(2:np-1) - dx(2:np-1)*dy(1:np-2), &
+            dx(1:np-2)*dx(2:np-1) + dy(2:np-1)*dy(1:np-2))
+
+        ! Simplify
+        !=========
+        where (abs(theta) <= 1e-8_R8) keepind = .false.
+        allocate(tempx(count(keepind)+2), tempy(count(keepind)+2), &
+            templabels(count(keepind)+2, size(labels, 2)))
+        tempx = [x(1), pack(x(2:size(x)-1), keepind), x(size(x))]
+        tempy = [y(1), pack(y(2:size(y)-1), keepind), y(size(y))]
+        do i = 1, size(labels, 2)
+            templabels(:, i) = [labels(1, i), pack(labels(2:size(x)-1, i), keepind), labels(size(x), i)]
+        end do 
+        x = tempx
+        y = tempy
+        labels = templabels  
+
+    end subroutine
     
     ! Allocator
     subroutine AllocatePolygon(polygon)
@@ -2611,6 +2756,11 @@ module mod_polygon
         ! has to be done 'manually' by checking for each branching polygon which
         ! vertices it has in common with another one. Support for this might be
         ! added in the future. 
+        ! Note: the current implementation to do this should have 
+        ! the same basic mechanics as finding the subgraphs of an 
+        ! undirected graph. Perhaps in the future, a graph-based 
+        ! implementation could be directly used here to increase 
+        ! readability and maintainability... 
     
         ! Arguments
         !==========
@@ -2626,9 +2776,9 @@ module mod_polygon
         !                   index of a new polygon. The edges of this 
         !                   polygon are all edges between this true value 
         !                   and the next. 
-        ! - isbranchingpolygon  : np-by-1 array indicating if the polygon
+        ! - isbranchingpolygon  : ne-by-1 array indicating if the polygon
         !                       is branching or not
-        ! - polygonID           :: np-by-1 array with polygon IDs 
+        ! - polygonID           :: ne-by-1 array with polygon IDs 
         !                       (optional). Useful to reconstruct branching
         !                       polygons
     
@@ -2697,14 +2847,14 @@ module mod_polygon
         logical                     :: allbranchingfound
         logical, allocatable        :: isedgesorted(:), isremedgesorted(:), &
             mask(:), isbranchingvertex(:, :), remisbranching(:, :), &
-            hasbv(:), sortedisbranchingvertex(:, :), pvb(:), &
-            isnonbranchingstartvertex(:, :)
+            hasbv(:), sortedisbranchingvertex(:, :), &
+            isnonbranchingstartvertex(:, :), isvertfound(:), tracevert(:)
     
         integer(I8)                 :: pID, ind 
         integer(I8), allocatable    :: remedges(:,:), edgeID(:), &
             remedgeID(:), temparray(:), allv(:), oc(:), el(:), sortind(:), &
             alloc(:), ps(:), tv(:), tvu(:), tvID(:), sortededges(:, :), &
-            pe(:), pse(:, :), pee(:, :), pv(:), sortind2(:)
+            pe(:), pse(:, :), pee(:, :), sortind2(:)
     
         ! Main program
         !=============
@@ -3001,62 +3151,77 @@ module mod_polygon
                 allocate(tvID(size(tvu)))
                 tvID = 0 
 
-                ! Start 'tracing' 
-                do i = 1, size(tvu)
-                    ! Check if ID was set
-                    if (tvID(i) == 0) then
-                        ! Set ID
-                        tvID(i) = pID 
+                ! Start 'tracing' - keep looping until all start vertices were
+                ! found 
+                allocate(isvertfound(size(tvu)), tracevert(size(tvu)))
+                isvertfound = .false. 
+                tracevert = .false. 
+                do while (.true.)
+                    ! Take a new vertex
+                    ind = findloc(isvertfound, .false., 1, back=.false.)
 
-                        ! Update counter
-                        pID = pID + 1
+                    ! Check exit condition
+                    if (ind == 0) then 
+                        ! All should be found, exit
+                        exit 
                     end if 
 
-                    ! Check which polygons have this vertex
-                    hasbv = pse(:, 1) == tvu(i) .or. pse(:, 2) == tvu(i) &
-                        .or. pee(:, 1) == tvu(i) .or. pee(:, 2) == tvu(i)
-                    
-                    ! Loop
-                    do j = 1, size(ps)
-                        if (hasbv(j)) then 
-                            ! Check 
-                            if (polygonID(ps(j)) == 0 .or. polygonID(ps(j)) == tvID(i)) then 
-                                ! Simply add
-                                polygonID(ps(j)) = tvID(i)
+                    ! Sanity check
+                    if (tvID(ind) /= 0) then 
+                        ! Starting at a vertex that was already 
+                        ! considered - this shouldn't happen
+                        call gdErrorHandler('SortPolygonEdges: starting at ' // &
+                            'a vertex that has already been added previously, ' // & 
+                            'this is a bug')
+                    end if 
 
-                                ! Check if other vertices are also 
-                                ! branching vertices to propagate IDs
-                                pvb = [sortedisbranchingvertex(ps(j), :), &
-                                    sortedisbranchingvertex(pe(j), :)]
-                                pv = [sortededges(ps(j), :), sortededges(pe(j), :)]
-                                do k = 1, size(pv)
-                                    if (pvb(k)) then 
-                                        ind = findloc(tvu, pv(k), 1)
-                                     
-                                        if (ind == 0) then 
-                                            call gdErrorHandler('unexpected error')
-                                        end if 
+                    ! Set ID
+                    tvID(ind) = pID 
 
-                                        ! Check if ID is non-zero - then throw error
-                                        if (tvID(ind) == 0 .or. tvID(ind) == tvID(i)) then
-                                            tvID(ind) = tvID(i)
-                                        else
-                                            ! Something weird going wrong here
-                                            call gdErrorHandler('SortPolygonEdges: ' // & 
-                                                'different branching polygons seem to ' // & 
-                                                'have common vertices, unexpected')
-                                        end if 
-                                    end if
-                                end do 
-                            else 
-                                ! Something weird going wrong here
-                                call gdErrorHandler('SortPolygonEdges: ' // & 
-                                'different branching polygons seem to ' // & 
-                                'have common vertices, unexpected')
-                            end if 
+                    ! Set vertex to be traced
+                    tracevert(ind) = .true. 
+
+                    ! Keep tracing until no more tracing vertices are found
+                    do while (.true.)
+                        ! Get the next vertex to trace
+                        ind = findloc(tracevert, .true., 1)
+                        if (ind == 0) then 
+                            exit 
                         end if 
+
+                        ! Check which polygons have this vertex
+                        hasbv = pse(:, 1) == tvu(ind) .or. pse(:, 2) == tvu(ind) &
+                            .or. pee(:, 1) == tvu(ind) .or. pee(:, 2) == tvu(ind)
+                        do j = 1, size(ps)
+                            if (hasbv(j)) then 
+                                ! Consistency check
+                                if (polygonID(ps(j)) == 0 .or. polygonID(ps(j)) == pID) then 
+                                    ! Add
+                                    polygonID(ps(j)) = pID
+
+                                    ! Check if any other vertices are 
+                                    ! polygon start vertices and should
+                                    ! be traced
+                                    tracevert = tracevert .or. &
+                                        (((pse(j, 1) == tvu) .or. (pse(j, 2) == tvu) .or. &
+                                        (pee(j, 1) == tvu) .or. (pee(j, 2) == tvu)) &
+                                        .and. .not. isvertfound)
+                                else
+                                    ! Something weird going wrong here
+                                    call gdErrorHandler('SortPolygonEdges: ' // & 
+                                        'different branching polygons seem to ' // & 
+                                        'have common vertices, unexpected')
+                                end if 
+                            end if 
+                        end do 
+
+                        ! Mark the current vertex as traced and found
+                        isvertfound(ind) = .true.
+                        tracevert(ind) = .false.
                     end do 
-                    
+
+                    ! Update branching polygon counter
+                    pID = pID + 1
                 end do 
 
                 ! Set polygon IDs for non-branching polygons

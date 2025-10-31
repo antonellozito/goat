@@ -1026,7 +1026,7 @@ module gdmod_constraints
         real(R8), allocatable           :: G_ffv(:), lambda_ffv(:)
         type(MySparseUDT)               :: gradG_ffv, hessG_ffv, &
             dG_ffvdvar, dgradG_ffvdvar
-        real(R8)                        :: tstart, tend
+
         ! Initialize
         !===========
         ! Check inputs
@@ -4852,6 +4852,13 @@ module gdmod_constraints
             cc = cc + ngoatedges
         end if 
 
+        ! If we use the original length, overwrite
+        if (opt%useoriginallength) then 
+            dx = vert%x(constraints%edgevert(:, 2)) - vert%x(constraints%edgevert(:, 1))
+            dy = vert%y(constraints%edgevert(:, 2)) - vert%y(constraints%edgevert(:, 1))
+            constraints%d = sqrt(dx**2 + dy**2)
+        end if 
+
         ! Monitor
         do i = 1, constraints%nedges 
             ! Unpack for ease
@@ -6050,8 +6057,8 @@ module gdmod_constraints
                 allocate(gxxf(nc), gxyf(nc), gyxf(nc), gyyf(nc))
                 call interp%Evaluate(xf, yf, 1, 1, gxxf)
                 call interp%Evaluate(xf, yf, 0, 2, gxyf)
-                call interp%Evaluate(xf, yf, 1, 1, gyxf)
-                call interp%Evaluate(xf, yf, 2, 0, gyyf)
+                call interp%Evaluate(xf, yf, 2, 0, gyxf)
+                call interp%Evaluate(xf, yf, 1, 1, gyyf)
                 gxxf = -gxxf ! correct sign
                 gxyf = -gxyf ! correct sign
 
@@ -6169,12 +6176,12 @@ module gdmod_constraints
 
                 call interp%Evaluate(xf, yf, 2, 1, gxxxf)
                 call interp%Evaluate(xf, yf, 1, 2, gxyxf)
-                call interp%Evaluate(xf, yf, 2, 1, gyxxf)
-                call interp%Evaluate(xf, yf, 3, 0, gyyxf)
+                call interp%Evaluate(xf, yf, 3, 0, gyxxf)
+                call interp%Evaluate(xf, yf, 2, 1, gyyxf)
                 call interp%Evaluate(xf, yf, 1, 2, gxxyf)
                 call interp%Evaluate(xf, yf, 0, 3, gxyyf)
-                call interp%Evaluate(xf, yf, 1, 2, gyxyf)
-                call interp%Evaluate(xf, yf, 2, 1, gyyyf)
+                call interp%Evaluate(xf, yf, 2, 1, gyxyf)
+                call interp%Evaluate(xf, yf, 1, 2, gyyyf)
 
                 !call EvaluateBicubicSplineInterpolant(xf, yf, gxxxf, &
                 !    interp, '2', '1')

@@ -273,6 +273,10 @@ def PlotGridCellArea(grid, fignum, doinverse=False):
         thisaxes.set_xlabel('x [m]')
         thisaxes.set_ylabel('y [m]')
 
+    # Plot minimal location
+    loc = np.argmin(abs(surfA))
+    PlotPoints2D(grid.cell.x[loc], grid.cell.y[loc], fignum, color='r', marker='o')
+
 #--------------------------------------------------------------------------#
 #                              Grid Optimization                           #
 #--------------------------------------------------------------------------#
@@ -968,7 +972,7 @@ def PlotTopologicalMeshFromFile(dirpath, fignum):
     PlotTopologicalMesh(topomesh, fignum)
 
 # Topological mesh plotting
-def PlotTopologicalMesh(topomesh, fignum):
+def PlotTopologicalMesh(topomesh, fignum, plotvertID=True):
     # Description
     #------------
     # Plot the topological mesh 
@@ -984,22 +988,23 @@ def PlotTopologicalMesh(topomesh, fignum):
     maxima = np.where(topomesh.vert.type == gt.TMvertexmaxID)
     tp1 = np.where(topomesh.vert.type == gt.TMvertextp1ID)
     tp2 = np.where(topomesh.vert.type == gt.TMvertextp2ID)
-    PlotPoints2DWithID(topomesh.vert.x[maxima], topomesh.vert.y[maxima], topomesh.vert.ID[maxima], fignum, color='b', 
-        marker='o', label='field maxima')
-    PlotPoints2DWithID(topomesh.vert.x[saddle], topomesh.vert.y[saddle], topomesh.vert.ID[saddle], fignum, color='b', 
-        marker='x', label='field saddle')
-    PlotPoints2DWithID(topomesh.vert.x[minima], topomesh.vert.y[minima], topomesh.vert.ID[minima], fignum, color='b', 
-        marker='s', label='field minima')
-    PlotPoints2DWithID(topomesh.vert.x[tp1], topomesh.vert.y[tp1], topomesh.vert.ID[tp1], fignum, color='r', 
-        marker='o', label='field tangency point type 1')
-    PlotPoints2DWithID(topomesh.vert.x[tp2], topomesh.vert.y[tp2], topomesh.vert.ID[tp2], fignum, color='r', 
-        marker='x', label='field tangency point type 2')
-    PlotPoints2DWithID(topomesh.vert.x[regular], topomesh.vert.y[regular], topomesh.vert.ID[regular], fignum, color='k', 
-        marker='.', label='regular vertex')
-    PlotPoints2DWithID(topomesh.vert.x[bnd], topomesh.vert.y[bnd], topomesh.vert.ID[bnd], fignum, color='k', 
-        marker='.', label='bnd vertex')
-    PlotPoints2DWithID(topomesh.vert.x[split], topomesh.vert.y[split], topomesh.vert.ID[split], fignum, color='g', 
-        marker='d', label='splitted face vertex')
+    if plotvertID:
+        PlotPoints2DWithID(topomesh.vert.x[maxima], topomesh.vert.y[maxima], topomesh.vert.ID[maxima], fignum, color='b', 
+            marker='o', label='field maxima')
+        PlotPoints2DWithID(topomesh.vert.x[saddle], topomesh.vert.y[saddle], topomesh.vert.ID[saddle], fignum, color='b', 
+            marker='x', label='field saddle')
+        PlotPoints2DWithID(topomesh.vert.x[minima], topomesh.vert.y[minima], topomesh.vert.ID[minima], fignum, color='b', 
+            marker='s', label='field minima')
+        PlotPoints2DWithID(topomesh.vert.x[tp1], topomesh.vert.y[tp1], topomesh.vert.ID[tp1], fignum, color='r', 
+            marker='o', label='field tangency point type 1')
+        PlotPoints2DWithID(topomesh.vert.x[tp2], topomesh.vert.y[tp2], topomesh.vert.ID[tp2], fignum, color='r', 
+            marker='x', label='field tangency point type 2')
+        PlotPoints2DWithID(topomesh.vert.x[regular], topomesh.vert.y[regular], topomesh.vert.ID[regular], fignum, color='k', 
+            marker='.', label='regular vertex')
+        PlotPoints2DWithID(topomesh.vert.x[bnd], topomesh.vert.y[bnd], topomesh.vert.ID[bnd], fignum, color='k', 
+            marker='.', label='bnd vertex')
+        PlotPoints2DWithID(topomesh.vert.x[split], topomesh.vert.y[split], topomesh.vert.ID[split], fignum, color='g', 
+            marker='d', label='splitted face vertex')
     
     PlotPoints2D(topomesh.vert.x[maxima], topomesh.vert.y[maxima],  fignum, color='b', 
         marker='o', label='field maxima')
@@ -1069,11 +1074,6 @@ def PlotTopologicalMesh(topomesh, fignum):
     # Set axes
     SetAxesLimits2D(plt.gca(), xb, yb)
 
-    # Set title and other descriptors
-    thisaxes = plt.gca()
-    thisaxes.set_title('topomesh')
-    thisaxes.set_xlabel('x [m]')
-    thisaxes.set_ylabel('y [m]')
     # thisaxes.legend(loc='upper right')
 
 # Topological cell plotting
@@ -2216,7 +2216,7 @@ def GetColorsFromValue(val, minval, maxval):
 
     return col
 
-def PlotCellBasedQuantity2D(grid, val, fignum, bounds=[-np.Inf, np.Inf]):
+def PlotCellBasedQuantity2D(grid, val, fignum, bounds=[-np.Inf, np.Inf], doguardcells=True):
     # Description
     #------------
     # Make a patchplot of a cell based quantity. If guard cells are 
@@ -2242,58 +2242,59 @@ def PlotCellBasedQuantity2D(grid, val, fignum, bounds=[-np.Inf, np.Inf]):
             verts.append(list(zip(grid.vert.x[tv], grid.vert.y[tv])))
 
         # Guard cells
-        for i in np.arange(grid.cell.nci, grid.cell.ntot): 
-            # Get the guard cell face
-            tf = grid.cell.GetFace(i)
-            if len(tf) == 1:
-                pass 
-            else:
-                raise ValueError('PlotCellBasedQuantity2D: guard cell does not ' \
-                'have exactly one face, unexpected.') 
-            tfind = tf[0]-1
+        if doguardcells:
+            for i in np.arange(grid.cell.nci, grid.cell.ntot): 
+                # Get the guard cell face
+                tf = grid.cell.GetFace(i)
+                if len(tf) == 1:
+                    pass 
+                else:
+                    raise ValueError('PlotCellBasedQuantity2D: guard cell does not ' \
+                    'have exactly one face, unexpected.') 
+                tfind = tf[0]-1
 
-            # Construct the cell connector
-            nb1 = grid.face.nb1[tfind]
-            nb2 = grid.face.nb2[tfind]
-            if nb1-1 == i: 
-                nbind = nb2-1
-            elif nb2-1 == i:
-                nbind = nb1-1
-            else:
-                raise ValueError('PlotCellBasedQuantity2D: guard face ' \
-                'does not have the guard cell as neighbour, unexpected.')
-            ccx = grid.face.x[tfind] - grid.cell.x[nbind]
-            ccy = grid.face.y[tfind] - grid.cell.y[nbind]
-            ccn = np.sqrt(ccx**2 + ccy**2)
-            ccx = ccx/ccn 
-            ccy = ccy/ccn 
+                # Construct the cell connector
+                nb1 = grid.face.nb1[tfind]
+                nb2 = grid.face.nb2[tfind]
+                if nb1-1 == i: 
+                    nbind = nb2-1
+                elif nb2-1 == i:
+                    nbind = nb1-1
+                else:
+                    raise ValueError('PlotCellBasedQuantity2D: guard face ' \
+                    'does not have the guard cell as neighbour, unexpected.')
+                ccx = grid.face.x[tfind] - grid.cell.x[nbind]
+                ccy = grid.face.y[tfind] - grid.cell.y[nbind]
+                ccn = np.sqrt(ccx**2 + ccy**2)
+                ccx = ccx/ccn 
+                ccy = ccy/ccn 
 
-            # Construct the outward facing face normal
-            tfv1ind = grid.face.v1[tfind]-1
-            tfv2ind = grid.face.v2[tfind]-1
-            nx = -(grid.vert.y[tfv2ind] - grid.vert.y[tfv1ind])
-            ny = grid.vert.x[tfv2ind] - grid.vert.x[tfv1ind]
-            nn = np.sqrt(nx**2 + ny**2)
-            nx = nx/nn 
-            ny = ny/nn
-            if (nx*ccx + ny*ccy) < 0:
-                nx = -nx 
-                ny = -ny
+                # Construct the outward facing face normal
+                tfv1ind = grid.face.v1[tfind]-1
+                tfv2ind = grid.face.v2[tfind]-1
+                nx = -(grid.vert.y[tfv2ind] - grid.vert.y[tfv1ind])
+                ny = grid.vert.x[tfv2ind] - grid.vert.x[tfv1ind]
+                nn = np.sqrt(nx**2 + ny**2)
+                nx = nx/nn 
+                ny = ny/nn
+                if (nx*ccx + ny*ccy) < 0:
+                    nx = -nx 
+                    ny = -ny
 
-            # Get the boundary vertices from the guard cell
-            nvc = grid.cell.vp2[i]
-            tv = grid.cell.GetVert(i)-1
+                # Get the boundary vertices from the guard cell
+                nvc = grid.cell.vp2[i]
+                tv = grid.cell.GetVert(i)-1
 
-            # Project the vertices along the connector vector
-            tvx = grid.vert.x[tv]
-            tvy = grid.vert.y[tv]
-            tgvx = tvx + nx*GUARD_CELL_WIDTH 
-            tgvy = tvy + ny*GUARD_CELL_WIDTH
-            tx = np.append(tvx, np.flipud(tgvx))
-            ty = np.append(tvy, np.flipud(tgvy))
-            
-            # Add vertex coordinates
-            verts.append(list(zip(tx, ty)))
+                # Project the vertices along the connector vector
+                tvx = grid.vert.x[tv]
+                tvy = grid.vert.y[tv]
+                tgvx = tvx + nx*GUARD_CELL_WIDTH 
+                tgvy = tvy + ny*GUARD_CELL_WIDTH
+                tx = np.append(tvx, np.flipud(tgvx))
+                ty = np.append(tvy, np.flipud(tgvy))
+                
+                # Add vertex coordinates
+                verts.append(list(zip(tx, ty)))
 
         
 

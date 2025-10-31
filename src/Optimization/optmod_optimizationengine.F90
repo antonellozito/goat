@@ -960,14 +960,14 @@ module optmod_optimizationengine
             linearsolverLS, linearsolverLM ! different solvers for each type of system to simplify reuse/optimization
 
         ! FD checkers
-        type(FDcheckerUDT)          :: FDcfv, FDeqcon, FDineqcon
+        type(FDcheckerUDT)          :: FDcfv, FDeqcon, FDineqcon, FDlag
 
         ! Diagnostics
         integer                     :: errstat
 
         ! Timing
         real(R8)                    :: t_it_s, t_it_e, &
-            t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e, tstart, tend
+            t_eval_s, t_eval_e, t_linsolve_s, t_linsolve_e
 
         ! Data
 
@@ -992,6 +992,8 @@ module optmod_optimizationengine
             solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_eqcon')
         call FDineqcon%Initialize(solver%numKKT%checkineqconvars, &
             solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_ineqcon')
+        call FDlag%Initialize(solver%numKKT%checklagvars, &
+            solver%numKKT%FDsteps, solver%numKKT%checkoutputfile // '_lag')
 
         ! Cost function 
         allocate(gradJ(nphi))
@@ -1114,10 +1116,10 @@ module optmod_optimizationengine
                     num%checkineqconeqs)
             end if 
 
-            !if (checkgradients .or. checkhessians) then 
-                !call CheckLagrangianLinearization(problem, solver, lambda, & 
-                !    mu, checkgradients, checkhessians)
-            !end if
+            if (num%checklaggradient .or. num%checklaghessian) then 
+                call CheckLagrangianLinearization(problem, FDlag, lambda, & 
+                    mu, num%checklaggradient, num%checklaghessian)
+            end if
 
             ! Evaluate cost function
             call problem%EvaluateCostFunction(J, gradJ, & 
@@ -1357,6 +1359,7 @@ module optmod_optimizationengine
             if (verbosity > 0) then 
                 ! Print out the iterate
                 call problem%monitor%PrintIterate()
+                print *, maxloc(abs(gradL))
 
             end if
 
@@ -2641,8 +2644,8 @@ module optmod_optimizationengine
         ! Sanity checks
         if (any(FDchecker%vars > nphi)) then
             ! Throw error
-            call gdErrorHandler('Design indices exceed the number &
-                & of design variables!')
+            call gdErrorHandler('Design indices exceed the number ' // &
+                'of design variables!')
         end if
 
         ! Initialize checker 
@@ -2772,7 +2775,7 @@ module optmod_optimizationengine
     !                           LAGRANGIAN                             !
     !------------------------------------------------------------------!
     ! Stand-alone driver 
-    subroutine CheckLagrangianLinearization(problem, solver, lambda, mu, &
+    subroutine CheckLagrangianLinearization(problem, FDchecker, lambda, mu, &
         checkgradient, checkhessian)
 
         ! Description
@@ -2786,37 +2789,31 @@ module optmod_optimizationengine
         !==================
         ! Arguments
         class(OptimizationProblemUDT)       :: problem 
-        class(OptimizationSolverUDT)        :: solver
         real(R8), allocatable               :: lambda(:), mu(:)
         logical                             :: checkgradient, &
             checkhessian
+        type(FDcheckerUDT), intent(inout)   :: FDchecker 
 
         ! Auxiliary
-        type(FDcheckerUDT)                  :: FDchecker 
-
-        integer(I8)                         :: nvars, nphi, neq, nineq 
-        integer(I8), allocatable            :: vars(:)
+        integer(I8)                         :: nphi, neq, nineq 
 
         ! Initialize
         !===========
         ! Get the problem dimensions
         call problem%GetProblemDimensions(nphi, neq, nineq)
 
-        ! Set the design variables to check
-        nvars = 5
-        allocate(vars(nvars))
-        vars = [1, 1+860, 3, 3+860, 5] ! some random variables for now
-
         ! Sanity checks
-        if (any(vars > nphi)) then
+        if (any(FDchecker%vars > nphi)) then
             ! Throw error
-            call gdErrorHandler('Design indices exceed the number &
-                & of design variables!')
+            call gdErrorHandler('Design indices exceed the number ' // &
+                'of design variables!')
         end if
 
         ! Initialize checker 
-        call FDchecker%Initialize(vars, real([1e-2, 1e-4, 1e-6, 1e-8], kind=R8), 'fd_check_lagrange')
-        allocate(DFLagrangianUDT::FDchecker%fun)
+        if (.not. allocated(FDchecker%fun)) then 
+            allocate(DFLagrangianUDT::FDchecker%fun)
+        end if
+
 
         ! Associate
         associate(&
@@ -2829,9 +2826,6 @@ module optmod_optimizationengine
 
             ! Set the problem
             fun%problem = problem
-            fun%solver  = solver
-            !allocate(fun%lambda(size(lambda)))
-            !allocate(fun%mu(size(mu)))
             fun%lambda = lambda 
             fun%mu = mu
 
@@ -2848,10 +2842,6 @@ module optmod_optimizationengine
         if (checkhessian) then 
             call FDchecker%CheckHessian()
         end if
-
-        ! Deallocate
-        deallocate(vars)
-
 
     end subroutine
 
@@ -2907,14 +2897,14 @@ module optmod_optimizationengine
         ! Cost function 
         allocate(gradJ(nphi))
         J = 0
-        gradJ(:) = 0
+        gradJ = 0
         hessJ%nrow = nphi 
         hessJ%ncol = nphi 
 
         ! Equality constraint 
         allocate(G(neq), lambda(neq))
-        G(:) = 0
-        lambda(:) = fun%lambda
+        G = 0
+        lambda = fun%lambda
         gradG%nrow = nphi 
         gradG%ncol = neq 
         hessG%nrow = nphi 
@@ -2922,8 +2912,8 @@ module optmod_optimizationengine
 
         ! Inequality constraint 
         allocate(H(nineq), mu(nineq))
-        H(:) = 0
-        mu(:) = fun%mu
+        H = 0
+        mu = fun%mu
         gradH%nrow = nphi 
         gradH%ncol = nineq 
         hessH%nrow = nphi 
@@ -2933,8 +2923,8 @@ module optmod_optimizationengine
         allocate(ncp(nineq), A(nineq), I(nineq))
         gradncp%nrow = nphi 
         gradncp%ncol = nineq
-        A(:) = .false.
-        I(:) = .not. A
+        A = .false.
+        I = .not. A
 
         ! Lagrangian 
         allocate(gradL(nphi + neq + nineq))

@@ -9,7 +9,7 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # General options
 'goat.debug'                        '0'
-'goat.meth'                         'GD'
+'goat.meth'                         'GG'
 
 # Input file locations 
 #'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
@@ -20,7 +20,7 @@ VERSION 1.00.00
 'goat.GDinputfilepath'              'GOAToptions.dat'
 
 # Output file locations 
-'goat.writefilepath'                'traduit.out.b2us_gd'  
+'goat.writefilepath'                'traduit.out.b2us'  
 
 # Output options 
 'goat.write_final'                  '1'
@@ -432,8 +432,9 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 
 # Read exising file? 
-'gg.tm.readexistingTM'          '1'
-'gg.tm.readexistingtracers'     '1'
+'gg.tm.readexistingTM'          '0'
+'gg.tm.readexistingtracers'     '0'
+'gg.tm.writedebugoutput'        '0'
 'gg.tm.TMfilepath'              './output/topomesh.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
@@ -457,17 +458,18 @@ VERSION 1.00.00
 'gg.tm.contour.dl'              '0.02'
 
 # Topomesh adaptations
-'gg.tm.doadaptations'           '0'
+'gg.tm.doadaptations'           '1'
 'gg.tm.addcoreboundaries'       '1'
 'gg.tm.addPFboundaries'         '0'
 'gg.tm.cbnd.frac'               '0.1'
 'gg.tm.PFbnd.frac'              '0.1'
 'gg.tm.removecoreregions'       '1'
 'gg.tm.removewidegridregions'   '0'
-'gg.tm.mergetangencypointtubes' '1'
-'gg.tm.mergeavptubes'           '1'
-'gg.tm.dpsimintangencypointtubes'   '0.0'
-'gg.tm.lradmintangencypointtubes'   '1.0e-2'
+
+'gg.tm.mergetubes'              '1'
+'gg.tm.mergetubes.meth'         'extensive'
+'gg.tm.dpsimintubes'            '0.0'
+'gg.tm.lradmintubes'            '1.0e-2'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'
@@ -496,11 +498,11 @@ VERSION 1.00.00
 'gg.ref.LB.doxp'                        '1'
 'gg.ref.LB.dovessel'                    '1'
 'gg.ref.LB.Lmininf'                     '0.02'
-'gg.ref.LB.Lmaxinf'                     '0.04'
-'gg.ref.LB.structureIDs'                '[5]'
-'gg.ref.LB.Lminstructure'               '[0.0001]'
-'gg.ref.LB.Lmaxstructure'               '[0.02]'
-'gg.ref.LB.decaylengthstructure'        '[0.1]'
+'gg.ref.LB.Lmaxinf'                     '0.1'
+'gg.ref.LB.structureIDs'                '[1, 2]'
+'gg.ref.LB.Lminstructure'               '[0.005, 0.005]'
+'gg.ref.LB.Lmaxstructure'               '[0.02, 0.02]'
+'gg.ref.LB.decaylengthstructure'        '[0.1, 0.1]'
 'gg.ref.LB.Lminxp'                      '0.002'
 'gg.ref.LB.Lmaxxp'                      '0.01'
 'gg.ref.LB.decaylengthxp'               '0.08'
@@ -540,9 +542,9 @@ VERSION 1.00.00
 
 # 'Boundary' layer options for radial direction
 'gg.radref.BL.dosp'                '0'
-'gg.radref.BL.ncsp'                '3'
-'gg.radref.BL.dlsp'                '[0.0020, 0.003, 0.0045]'
-'gg.radref.BL.dllengthbased'       '1'
+#'gg.radref.BL.ncsp'                '3'
+#'gg.radref.BL.dlsp'                '[0.0020, 0.003, 0.0045]'
+#'gg.radref.BL.dllengthbased'       '1'
 
 # Post-processing options
 'gg.vd.removefluxsurfaces'              '1' # Remove too narrow flux surfaces
@@ -557,16 +559,11 @@ VERSION 1.00.00
 'gg.vd.orthlinetracing.step'    '1' # relative step size (larger = less accurate but faster)
 'gg.vd.orthlinetracing.nsteps'  '500' # maximal number of steps to take 
 
-# Distribution of flux surfaces (radial)
-'gg.vd.rd.type'                         'densitybased'
-
 # Distribution of vertices on flux surfaces (poloidal)
 'gg.vd.pd.type'                         'densitybased'
 
 # Options for uniform distribution
 'gg.vd.pd.distribution.facelength'      '16e-1';
-
-'gg.vd.rd.distribution.fieldwidth'      '8e0';
 
 # Options for density based distribution
 'gg.vd.pd.distribution.plftype'            'none'
@@ -578,24 +575,22 @@ VERSION 1.00.00
 #'gg.vd.pd.distribution.points.d'        '[0.1, 0.1]'
 #'gg.vd.pd.distribution.points.val'      '[25, 25]'
 
-# Options for density based distribution, radial
-'gg.vd.rd.distribution.doxp'            '1'
-'gg.vd.rd.distribution.decaylengthxp'   '0.1';
-'gg.vd.rd.distribution.densityatxp'     '40';
-'gg.vd.rd.distribution.densityatinf'    '40';
-'gg.vd.rd.distribution.points.x'        '[]' #'[0.01, 0.07, 0.05]'
-'gg.vd.rd.distribution.points.y'        '[]' #'[4.2, 1.9, 0.5]'
-'gg.vd.rd.distribution.points.d'        '[]' #'[0.02, 0.2, 0.05]'
-'gg.vd.rd.distribution.points.val'      '[]' #'[200, 200, 200]'
+# Distribution of flux surfaces (radial)
+'gg.vd.rd.type'                         'densitybased'
+'gg.vd.rd.distribution.dosp'            '1'
+'gg.vd.rd.distribution.decaylengthsp'   '0.02'
+'gg.vd.rd.distribution.densityatsp'     '500'
+'gg.vd.rd.distribution.densityatinf'    '40'
+#'gg.vd.rd.distribution.points.x'        '[4.7]' 
+#'gg.vd.rd.distribution.points.y'        '[4.55]' 
+#'gg.vd.rd.distribution.points.d'        '[1.0]' 
+#'gg.vd.rd.distribution.points.val'      '[2]'
 
-# Options for remove flux surfaces
-'gg.vd.rfs.mark.psitol'                 '0'
-'gg.vd.rfs.mark.psirattol'              '1e-1'
-'gg.vd.rfs.debugplots'                  '0'
+'gg.vd.rd.distribution.doxp'            '0'
+'gg.vd.rd.distribution.decaylengthxp'   '0.2'
+'gg.vd.rd.distribution.densityatxp'     '80'
 
-# Options for remove narrow boundary triangles
-'gg.vd.rnbt.mark.criterion'             'angle'
-'gg.vd.rnbt.mark.minangle'              '15'
+'gg.vd.rd.distribution.facelength'      '0.1';
 
 
 

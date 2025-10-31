@@ -752,21 +752,27 @@ module goatmod_userinput
         !                       topomesh from a previous one. field and
         !                       vessel filepaths should be fully specified
         !                       in TMfieldtracerfilepath and TMvesseltracerfilepath
-        ! - mergetangencypointtubes     merge tubes that are too small 
-        !                       and that have tangency point tubes 
-        !                       as neighbours. 'too small' is based on 
-        !                       the (absolute) difference in flux values
-        !                       of the tube's radial face vertices
-        ! - mergeavptubes       merge tubes typically originating from 
-        !                       the aligned vessel parts topomesh 
-        !                       modification routine (same criteria as
-        !                       mergetangencypointtubes)
-        ! - dpsimintangencypointtubes   minimal delta psi for tangency 
-        !                       point tubes (if below, we attempt to 
-        !                       merge)
-        ! - lradmintangencypointtubes   minimal radial length for tangency
-        !                       point tubes (if below, we attempt to 
-        !                       merge)
+        ! - writedebugoutput    write (many) more intermediate topomesh 
+        !                       files for visual debuggging (default false)
+        ! - mergetubes          apply general merging (should outperform 
+        !                       mergetangencypointtubes and mergeavptubes)
+        ! - mergetubemeth       method to merge tubes, either 'extensive' or 'local'. 
+        !                       the extensive method considers several 
+        !                       tubes at the same time and often leads 
+        !                       to 'nicer' tubes for grid generation, but
+        !                       may not be able to merge some tubes when 
+        !                       when cycles are present in the tube graph.
+        !                       the local method considers only two tubes
+        !                       at the same time and can therefore merge    
+        !                       more tube pairs, but may lead to uglier tubes. 
+        ! - dpsimintubes        minimal psi difference for topomesh tubes (below
+        !                       which we try to merge - set to 0 to ignore)
+        ! - lradmintubes        minimal radial length for topomesh tubes
+        !                       (below which we try to merge - set to 0 to ignore)
+        ! - mtallowseparatrix   allow merging over the separatrix for 
+        !                       the general merge case
+        ! - mtallowcore, mtallowpf  same as separatrix, but for core and 
+        !                       pf contours
         ! - alignvesselparts    define certain vessel parts as aligned 
         !                       faces with a certain flux surface value 
         !                       and flux surface ID. Only certain boundary
@@ -781,25 +787,27 @@ module goatmod_userinput
         !                       considered as potential aligned part 
         !                       (avp: aligned vessel parts). This angle
         !                       should be given in degrees!
-        ! - avprefinevessel     switch to refine vessel boundaries, similar
+        ! - (deprecated) avprefinevessel     switch to refine vessel boundaries, similar
         !                       to full vessel refinement (see vessel options)
-        ! - avpmaxvesseldist    maximal vessel edge length
-        ! - avpminreffac        minimal refinement factor for vessel edge refinement                    
+        ! - (deprecated) avpmaxvesseldist    maximal vessel edge length
+        ! - (deprecated) avpminreffac        minimal refinement factor for vessel edge refinement                    
+        ! 
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax, avpminreffac
         integer(I8), allocatable, dimension(:)  :: rvrvesselIDs
         logical                 :: addcoreboundaries, removecoreregions, &
             fdonewton, vdonewton, removewidegridregions, addPFboundaries, &
-            readexistingTM, removenoncoreregions, mergetangencypointtubes, &
+            readexistingTM, removenoncoreregions, &
             doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
             rvrdocascade, rvrfullycovered, alignvesselparts, avprefinevessel, &
-            readexistingtracers, mergeavptubes
+            readexistingtracers, mergetubes, mtallowcore, &
+            mtallowpf, mtallowseparatrix, writedebugoutput, mtoldstyle
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
-            PFboundariesfrac, dpsimintangencypointtubes, lradmintangencypointtubes, &
-            avpminangle, avpmaxvesseldist
+            PFboundariesfrac, avpminangle, avpmaxvesseldist, &
+                dpsimintubes, lradmintubes
         character(:), allocatable   :: TMfilepath, rvrcascadedir, &
-            TMfieldtracerfilepath, TMvesseltracerfilepath
+            TMfieldtracerfilepath, TMvesseltracerfilepath, mergetubemeth
     contains 
 
         procedure :: Read           => ReadTopomeshOptions
@@ -855,7 +863,8 @@ module goatmod_userinput
         ! largely the same as poloidal one (but then vdr instead of vdp)
         ! but some differences
         ! - vdrtype:        (same as vdptype)
-        ! - vdrdoxp:            include x-point and separatrix points?
+        ! - vdrdoxp:            include x-points? (for refinement in core region)
+        ! - vdrdosp:        include strike points? (for refinement near targets)
         ! - vdrdfieldwidth: desired field with for uniform distribution
         ! - vdrddecaylength:    decay length parameter 
         ! - vdrddensityatxp:    desired density at separatrix
@@ -987,7 +996,7 @@ module goatmod_userinput
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
             radrefdlBLlengthbased, vdrdoxp, structurebasedlabels, &
             dogriddiagnostics, evtnoBL, refBLdostructure, &
-            forceSOLPStopology
+            forceSOLPStopology, vdrdosp
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp, refBLncstructure
@@ -995,8 +1004,9 @@ module goatmod_userinput
             refLBvertIDs, refBLstructureID
         real(R8)                    :: vdpdfacelength, vdpddecaylengthplf, &
             vdpddecaylengthxp, vdpddensityatvessel, vdpddensityatxp, &
-            vdpddensityatinf, vdrdfieldwidth, &
+            vdpddensityatinf, vdrdfieldwidth, vdrdfacelength, &
             vdrddecaylengthxp, vdrddensityatxp, vdrddensityatinf, &
+            vdrddecaylengthsp, vdrddensityatsp, &
             remfspsitol, remfspsirattol, rembndtriaminangle, &
             remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
             refLBLmaxxp, refLBdecaylengthxp, orthtracerstep, &
@@ -1395,6 +1405,7 @@ module goatmod_userinput
         options%TMfilepath = 'topomesh.dat'
         options%TMfieldtracerfilepath = './output/TMfieldtracer.dat'
         options%TMvesseltracerfilepath = './output/TMvesseltracer.dat'
+        options%writedebugoutput = .false.
         
         ! Contouring (field)
         options%fresx = 100
@@ -1428,10 +1439,14 @@ module goatmod_userinput
         options%removecoreregions           = .true. 
         options%removewidegridregions       = .true. 
         options%removenoncoreregions        = .false.
-        options%mergetangencypointtubes     = .false.
-        options%mergeavptubes               = .false.
-        options%dpsimintangencypointtubes   = 0.0_R8 ! zero to ignore
-        options%lradmintangencypointtubes   = 0.0_R8 ! zero to ignore
+        options%mergetubes                  = .false. 
+        options%mergetubemeth               = 'extensive'
+        options%mtallowcore                 = .false.
+        options%mtallowpf                   = .false.
+        options%mtallowseparatrix           = .false.
+        options%mtoldstyle                  = .false. 
+        options%dpsimintubes                = 0.0_R8 ! zero to ignore
+        options%lradmintubes                = 0.0_R8 ! zero to ignore
 
         options%removevesselregions         = .false. 
         if (allocated(options%rvrvesselIDs)) deallocate(options%rvrvesselIDs)
@@ -1544,11 +1559,15 @@ module goatmod_userinput
 
         ! Options for radial vertex distribution
         options%vdrtype             = 'uniform'
+        options%vdrdfacelength      = 0.01 
         options%vdrdfieldwidth      = 4e-3
         options%vdrddecaylengthxp   = 0.005
         options%vdrddensityatxp     = 2500.0_R8
         options%vdrddensityatinf    = 250.0_R8
-        options%vdrdoxp             = .true.
+        options%vdrddecaylengthsp   = 0.1_R8
+        options%vdrddensityatsp     = 1000.0_R8
+        options%vdrdoxp             = .false.
+        options%vdrdosp             = .true.
 
         ! Options for flux tube extensions
         options%extendtptubes       = .true. 
@@ -2392,6 +2411,8 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%readexistingTM)
         field = 'gg.tm.readexistingtracers'
         call ExtractOptionValueLogical0D(fid, field, options%readexistingtracers)
+        field = 'gg.tm.writedebugoutput'
+        call ExtractOptionValueLogical0D(fid, field, options%writedebugoutput)
         field = 'gg.tm.TMfilepath'
         call ExtractOptionValueCharacter(fid, field, options%TMfilepath)
         field = 'gg.tm.TMfieldtracerfilepath'
@@ -2445,14 +2466,22 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%PFboundariesfrac)
         field = 'gg.tm.removenoncoreregions'
         call ExtractOptionValueLogical0D(fid, field, options%removenoncoreregions)
-        field = 'gg.tm.mergetangencypointtubes'
-        call ExtractOptionValueLogical0D(fid, field, options%mergetangencypointtubes)
-        field = 'gg.tm.mergeavptubes'
-        call ExtractOptionValueLogical0D(fid, field, options%mergeavptubes)
-        field = 'gg.tm.dpsimintangencypointtubes'
-        call ExtractOptionValueReal0D(fid, field, options%dpsimintangencypointtubes)
-        field = 'gg.tm.lradmintangencypointtubes'
-        call ExtractOptionValueReal0D(fid, field, options%lradmintangencypointtubes)
+        field = 'gg.tm.mergetubes'
+        call ExtractOptionValueLogical0D(fid, field, options%mergetubes)
+        field = 'gg.tm.mergetubes.meth'
+        call ExtractOptionValueCharacter(fid, field, options%mergetubemeth)
+        field = 'gg.tm.mergetubes.allowseparatrix'
+        call ExtractOptionValueLogical0D(fid, field, options%mtallowseparatrix)
+        field = 'gg.tm.mergetubes.allowcore'
+        call ExtractOptionValueLogical0D(fid, field, options%mtallowcore)
+        field = 'gg.tm.mergetubes.allowpf'
+        call ExtractOptionValueLogical0D(fid, field, options%mtallowpf)
+        field = 'gg.tm.dpsimintubes'
+        call ExtractOptionValueReal0D(fid, field, options%dpsimintubes)
+        field = 'gg.tm.lradmintubes'
+        call ExtractOptionValueReal0D(fid, field, options%lradmintubes)
+        field = 'gg.tm.mergetubes.oldstyle'
+        call ExtractOptionValueLogical0D(fid, field, options%mtoldstyle)
 
         field = 'gg.tm.removevesselregions'
         call ExtractOptionValueLogical0D(fid, field, options%removevesselregions)
@@ -2685,12 +2714,20 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%vdrtype)
         field = 'gg.vd.rd.distribution.doxp'
         call ExtractOptionValueLogical0D(fid, field, options%vdrdoxp)
+        field = 'gg.vd.rd.distribution.dosp'
+        call ExtractOptionValueLogical0D(fid, field, options%vdrdosp)
         field = 'gg.vd.rd.distribution.fieldwidth'
         call ExtractOptionValueReal0D(fid, field, options%vdrdfieldwidth)
+        field = 'gg.vd.rd.distribution.facelength'
+        call ExtractOptionValueReal0D(fid, field, options%vdrdfacelength)
         field = 'gg.vd.rd.distribution.decaylengthxp'
         call ExtractOptionValueReal0D(fid, field, options%vdrddecaylengthxp)
         field = 'gg.vd.rd.distribution.densityatxp'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatxp)
+        field = 'gg.vd.rd.distribution.decaylengthsp'
+        call ExtractOptionValueReal0D(fid, field, options%vdrddecaylengthsp)
+        field = 'gg.vd.rd.distribution.densityatsp'
+        call ExtractOptionValueReal0D(fid, field, options%vdrddensityatsp)
         field = 'gg.vd.rd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatinf)
         field = 'gg.vd.rd.distribution.points.x'

@@ -10,7 +10,7 @@ VERSION 1.00.00
 'goat.meth'         'GA'
 
 # Input file parser
-'goat.gridfilepath'             './traduit.out.b2us_smalltrias'
+'goat.gridfilepath'             './traduit.out.b2us'
 'goat.structurefilepath'        'structure_smooth_corner2.dat'
 'goat.magneticfieldfilepath'    'rzpsi.dat'
 'goat.writefilepath'            './traduit.out.b2us_test_shell'
