@@ -340,9 +340,6 @@ module gamod_driver
         type(StateUDT)                      :: state_int
         type(UnstructuredInterpolant2DUDT)  :: interp
         type(QualityMetricUDT)              :: qm
-        real(R8), allocatable               :: field(:)
-        real(R8)                            :: vq_test(grid%cell%ntot), &
-            field_int(grid%cell%ntot), err_int(grid%cell%ntot), max_err_int
 
         ! Interpolation
         !==============
@@ -362,27 +359,6 @@ module gamod_driver
 
             call interp%SetParametersUS(options%apost_interpolation_meth, &
                 options%apost_interpolationC, options%apost_interpolationM, triangulation, 'polynomial')
-            field = (triangulation%x)**(options%apost_interpolationM)
-            call interp%ConstructUnstructured(interp%triangulation%x, interp%triangulation%y, field)
-
-            ! Zeroth order
-            call interp%Evaluate(grid%cell%x%Get(), grid%cell%y%Get(), 0, 0, vq_test)
-            field_int = (grid%cell%x%Get())**(options%apost_interpolationM)
-            err_int = vq_test - field_int
-            max_err_int = maxval(err_int)
-
-            ! First order x
-            call interp%Evaluate(grid%cell%x%Get(), grid%cell%y%Get(), 0, 1, vq_test)
-            field_int = options%apost_interpolationM * (grid%cell%x%Get())**(options%apost_interpolationM - 1)
-            err_int = vq_test - field_int
-            max_err_int = maxval(err_int)
-
-            call interp%Evaluate(grid%cell%x%Get(), grid%cell%y%Get(), 1, 0, vq_test)
-            field_int = options%apost_interpolationM * (grid%cell%x%Get())**(options%apost_interpolationM - 1)
-            err_int = vq_test - field_int
-            max_err_int = maxval(err_int/field_int)            
-            !call gdErrorHandler('Testing unstructured interpolant')
-
 
         end select
 

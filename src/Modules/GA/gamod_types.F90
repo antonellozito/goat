@@ -19812,27 +19812,27 @@ module gamod_types
 
             if (options%apost_use_te) then
                 statef = state_v%te
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%te)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%te)
             end if
             if (options%apost_use_ti) then
                 statef = state_v%ti
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%ti)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%ti)
             end if
             if (options%apost_use_tn) then
                 statef = state_v%tn
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%tn)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%tn)
             end if
             if (options%apost_use_po) then
                 statef = state_v%po
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%po)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%po)
             end if
             if (options%apost_use_kt) then
                 statef = state_v%kt
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%kt)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%kt)
             end if
             if (options%apost_use_zt) then
                 statef = state_v%zt
-                call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%zt)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%zt)
             end if
 
             ! Residuals if required
@@ -19852,31 +19852,31 @@ module gamod_types
 
                 if (options%apost_use_resmt) then
                     statef = state_v%resmt
-                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%resmt)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resmt)
                 end if
                 if (options%apost_use_reshe) then
                     statef = state_v%reshe
-                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshe)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reshe)
                 end if
                 if (options%apost_use_reshi) then
                     statef = state_v%reshi
-                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshi)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reshi)
                 end if
                 if (options%apost_use_reshn) then
                     statef = state_v%reshn
-                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reshn)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reshn)
                 end if
                 if (options%apost_use_respo) then
                     statef = state_v%respo
-                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%respo)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%respo)
                 end if
                 if (options%apost_use_reskt) then
                     statef = state_v%reskt
-                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reskt)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reskt)
                 end if
                 if (options%apost_use_reszt) then
                     statef = state_v%reszt
-                    call interp2%EvaluateWrapper(statef, xq, yq, 9, 0, state_int%reszt)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reszt)
                 end if            
             end if
 

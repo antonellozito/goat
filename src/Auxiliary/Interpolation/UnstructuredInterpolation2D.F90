@@ -215,16 +215,21 @@ module UnstructuredInterpolant2D
         ! Description
         !============
         ! We build the interpolant. The following steps are taken:
-        ! 0) Compute the required derivatives on the vertex nodes using gradient reconstruction
         ! 1) Determine required order of the interpolant depended on the wanted continuity
         !   The interpolant is of type phi(x,y) = sum_i^N sum_j^N a_ij x^i y^j
+        !   It was found to garantue the stability always C3-continuity is required. 
+        !   This implies the interpolant needs to be of 5th order, making 36 unknowns.
+        !   To match this number of unknowns with number of equations, all derivates up
+        !   to 3th order and two 4th order cross terms d4phidx3dy and d4phidxdy3,
+        !   are used on every vertex.
         ! 2) Compute the coefficients of the gradient reconstruction of the correct order
         ! 3) Build the system A*aij = B*v where A contains the interpolant and B
         !    contains the coefficient of the gradient reconstruction for the three 
-        !    vertex stencils. The matrix multiplication invA*B is saved to easily 
+        !    vertex stencils. The matrices A and B are saved to easily 
         !    construct new interpolant for other field.
-        ! 4) The aij vector for every cell by multiplying invAV with the field v. This aij
-        !    is saved and used to evaluate the interpolant.
+        ! 4) Compute the right hand side as rhs = B*v
+        ! 5) Compute the aij vector for every cell by solving the A*aij = rhs system.
+        !    The aij coefficients are saved and used to evaluate the interpolant.
 
 
         ! Declare variables
@@ -262,33 +267,7 @@ module UnstructuredInterpolant2D
             tria => interp%triangulation &
             )
 
-        ! Determine needed order of derivatives
-        ! This depends on the required continuity
-        ! F.e. C = 3 => for triangles required 3 * 10 equations
-        ! This would correspond with a 5th order interpolant because this has 36 terms
-        ! while 4th order only has 25 terms and insufficient.
         print *, 'Constructing unstructured interpolation with C',interp%C, 'continuity on triangulated mesh'
-
-        ! Compute number of terms
-        !nvpc = 3 ! number of vertices per cell
-        !ar = (/(i, i = 1, 20)/) ! Not general but rather save
-        !n_ar = (ar + 1)**2
-        !min_number_of_terms = sum((/(i, i = 1, interp%C+1)/)) * nvpc ! number of equation
-
-        ! Determine neccesary order of interpolant
-        ! (number of term = (N + 1)**2) for interpolant phi = sum_i^N sum_j^N a_ij x^i y^j
-        !log = [min_number_of_terms .le. n_ar]
-        !interp%order = findloc(log, .true., 1)
-        !interp%n = (interp%order + 1)**2 ! number of terms in interpolant
-
-        ! Determine necessary order of gradient reconstruction
-        ! Propose interp%C+1 and check ( so one order higher than the continuity requirement)
-        !order_GR = 1
-        !n_el = sum((/(i, i = 1, order_GR+1)/)) * nvpc
-        !do while (n_el .lt. interp%n)
-        !    order_GR = order_GR + 1
-        !    n_el = sum((/(i, i = 1, order_GR+1)/)) * nvpc
-        !end do
 
         ! Properties depending on continuity
         order_GR = 4
@@ -299,19 +278,8 @@ module UnstructuredInterpolant2D
         else if (interp%C .gt. 3) then
             call gdErrorHandler('ConstructUSI2DUSFinElem: not implemented for continuity higher than 3')
         end if
-        !if (interp%C .le. 1) then
-        !    order_GR = 1
-        !    interp%order = 2
-        !    interp%n = 9
-        !end if
-        !else if (interp%C .le. 3) then
-        !    order_GR = 4
-        !    interp%order = 5
-        !    interp%n = 36
-        !else
-        !    call gdErrorHandler('ConstructUSI2DUSFinElem: not implemented for continuity higher than 3')
-        !end if
 
+        ! Initialize
         n_dev = nint(interp%n/3.0_R8)
         nvpc = 3
         allocate(interp%aij(interp%n*interp%triangulation%nc))

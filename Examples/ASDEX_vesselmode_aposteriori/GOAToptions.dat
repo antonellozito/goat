@@ -345,8 +345,8 @@ VERSION 1.00.00
 'ga.timing' '0'
 'ga.meth'   'aposteriori'
 'ga.apost_interpolation_meth' 'finite_element'
-'ga.apost_interpolationC' '0'
-'ga.apost_interpolationM' '1'
+'ga.apost_interpolationC' '3'
+'ga.apost_interpolationM' '2'
 'ga.apost_meth' 'grad'
 'ga.apost_use_na' '1'
 
