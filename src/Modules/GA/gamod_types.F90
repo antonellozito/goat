@@ -19792,99 +19792,91 @@ module gamod_types
         call AllocateState(state_int, grid%cell%ntot, grid%face%ntot, state_v%ns)
 
         ! Construct interpolants for every field
-        select case (options%apost_interpolation_meth)
-        case ('barycentric')
-            interp2 = interp
-            xq = grid%cell%x%Get()
-            yq = grid%cell%y%Get()
+        interp2 = interp
+        xq = grid%cell%x%Get()
+        yq = grid%cell%y%Get()
+
+        do is = 1, state_v%ns
+            if (options%apost_use_na) then
+                statef = state_v%na(:,is)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%na(:,is))
+            end if
+
+            if (options%apost_use_ua) then
+                statef = state_v%ua(:,is)
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%ua(:,is))
+            end if
+        end do
+
+        if (options%apost_use_te) then
+            statef = state_v%te
+            call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%te)
+        end if
+        if (options%apost_use_ti) then
+            statef = state_v%ti
+            call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%ti)
+        end if
+        if (options%apost_use_tn) then
+            statef = state_v%tn
+            call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%tn)
+        end if
+        if (options%apost_use_po) then
+            statef = state_v%po
+            call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%po)
+        end if
+        if (options%apost_use_kt) then
+            statef = state_v%kt
+            call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%kt)
+        end if
+        if (options%apost_use_zt) then
+            statef = state_v%zt
+            call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%zt)
+        end if
+
+        ! Residuals if required
+        if (options%readstatemeth == 'b2fplasmf') then
 
             do is = 1, state_v%ns
-                if (options%apost_use_na) then
-                    statef = state_v%na(:,is)
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%na(:,is))
+                if (options%apost_use_resco) then
+                    statef = state_v%resco(:,is)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resco(:,is))
                 end if
 
-                if (options%apost_use_ua) then
-                    statef = state_v%ua(:,is)
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%ua(:,is))
+                if (options%apost_use_resmo) then
+                    statef = state_v%resmo(:,is)
+                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resmo(:,is))
                 end if
             end do
 
-            if (options%apost_use_te) then
-                statef = state_v%te
-                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%te)
+            if (options%apost_use_resmt) then
+                statef = state_v%resmt
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resmt)
             end if
-            if (options%apost_use_ti) then
-                statef = state_v%ti
-                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%ti)
+            if (options%apost_use_reshe) then
+                statef = state_v%reshe
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reshe)
             end if
-            if (options%apost_use_tn) then
-                statef = state_v%tn
-                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%tn)
+            if (options%apost_use_reshi) then
+                statef = state_v%reshi
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reshi)
             end if
-            if (options%apost_use_po) then
-                statef = state_v%po
-                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%po)
+            if (options%apost_use_reshn) then
+                statef = state_v%reshn
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reshn)
             end if
-            if (options%apost_use_kt) then
-                statef = state_v%kt
-                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%kt)
+            if (options%apost_use_respo) then
+                statef = state_v%respo
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%respo)
             end if
-            if (options%apost_use_zt) then
-                statef = state_v%zt
-                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%zt)
+            if (options%apost_use_reskt) then
+                statef = state_v%reskt
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reskt)
             end if
-
-            ! Residuals if required
-            if (options%readstatemeth == 'b2fplasmf') then
-
-                do is = 1, state_v%ns
-                    if (options%apost_use_resco) then
-                        statef = state_v%resco(:,is)
-                        call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resco(:,is))
-                    end if
-
-                    if (options%apost_use_resmo) then
-                        statef = state_v%resmo(:,is)
-                        call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resmo(:,is))
-                    end if
-                end do
-
-                if (options%apost_use_resmt) then
-                    statef = state_v%resmt
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%resmt)
-                end if
-                if (options%apost_use_reshe) then
-                    statef = state_v%reshe
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reshe)
-                end if
-                if (options%apost_use_reshi) then
-                    statef = state_v%reshi
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reshi)
-                end if
-                if (options%apost_use_reshn) then
-                    statef = state_v%reshn
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reshn)
-                end if
-                if (options%apost_use_respo) then
-                    statef = state_v%respo
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%respo)
-                end if
-                if (options%apost_use_reskt) then
-                    statef = state_v%reskt
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reskt)
-                end if
-                if (options%apost_use_reszt) then
-                    statef = state_v%reszt
-                    call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reszt)
-                end if            
-            end if
-
-        case default
-
-            call gdErrorHandler('InterpolateState: aposteriori interpolation method no implemented')
-
-        end select 
+            if (options%apost_use_reszt) then
+                statef = state_v%reszt
+                call interp2%EvaluateWrapper(statef, xq, yq, 0, 0, state_int%reszt)
+            end if            
+        end if
 
 
     end subroutine

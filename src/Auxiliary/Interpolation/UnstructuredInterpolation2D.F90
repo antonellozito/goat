@@ -282,8 +282,7 @@ module UnstructuredInterpolant2D
         ! Initialize
         n_dev = nint(interp%n/3.0_R8)
         nvpc = 3
-        allocate(interp%aij(interp%n*interp%triangulation%nc))
-        interp%aij = 0
+        nc = tria%nc
 
         ! Continue computation if not yet done before for other field on the same grid
         if (.not. allocated(interp%A)) then
@@ -293,15 +292,14 @@ module UnstructuredInterpolant2D
 
             ! Compute GR coefficients
             call interp%GR%SetParameters('vert', 'vert', 'global', order_GR)
-            call interp%GR%Construct(interp%triangulation)
+            call interp%GR%Construct(tria)
             !call interp%GR%Evaluate(v, deriv_vals)
 
             ! Stencil estimate
             stencil_est = sum((/(i, i = 2, interp%order + 1)/)) + 11
 
             ! Initialize
-            nc = interp%triangulation%nc
-            allocate(interp%A(interp%n*interp%triangulation%nc,interp%n))
+            allocate(interp%A(interp%n*nc,interp%n))
             allocate(A(interp%n,interp%n))
             allocate(BT_array(nc*stencil_est, interp%n))
             allocate(cNv(nc*stencil_est), cNvP(nc,2))    
@@ -358,6 +356,8 @@ module UnstructuredInterpolant2D
 
         ! Compute aij
         allocate(rhs(interp%n), sol(interp%n))
+        if (allocated(interp%aij)) deallocate(interp%aij)
+        allocate(interp%aij(interp%n*nc))
         interp%aij = 0
         do ic = 1, nc
             tv = tria%cvert(ic, :)
