@@ -67,7 +67,7 @@ module UnstructuredInterpolant2D
 
         type(GradientReconstructionTriaUDT) :: GR
         integer(I8), allocatable            :: cNv(:), cNvP(:,:)        
-        real(R8), allocatable               :: invABT(:,:), aij(:)
+        real(R8), allocatable               :: invABT(:,:), aij(:), A(:,:), BT(:,:)
 
 
         !real(R8), allocatable           :: xgv(:), ygv(:), A(:, :), &
@@ -164,7 +164,7 @@ module UnstructuredInterpolant2D
 
         case ('finite_element')
 
-            call ConstructUSI2DUSFinEelem(interp, xg, yg, v)
+            call ConstructUSI2DUSFinElem(interp, xg, yg, v)
 
         case default
 
@@ -210,7 +210,7 @@ module UnstructuredInterpolant2D
     
     end subroutine
 
-    subroutine ConstructUSI2DUSFinEelem(interp, xg, yg, v)
+    subroutine ConstructUSI2DUSFinElem(interp, xg, yg, v)
 
         ! Description
         !============
@@ -235,16 +235,14 @@ module UnstructuredInterpolant2D
         real(R8), intent(out)                   :: v(:)
 
         ! Auxiliary
-        integer(I8) :: i, j, ic, min_number_of_terms, &
-            info, nv, stencil_est, nc, counter, order_GR, n_el, nvpc, &
-            s, n, max_dev
-        integer(I8), allocatable, dimension(:) :: ar, n_ar, tv, cNv, vxs
+        integer(I8) :: i, j, k, ic,  &
+            info, nv, stencil_est, nc, counter, order_GR, nvpc, &
+            s, n, max_dev, n_dev
+        integer(I8), allocatable, dimension(:) :: tv, cNv, vxs
         integer(I8), allocatable :: cNvP(:,:)
         real(R8) :: t_start, t_end
-        real(R8), allocatable, dimension(:) :: temp, sol
-        real(R8), allocatable, dimension(:,:) :: deriv_vals, A, invA, &
-            invABT_array, B, preprodmat
-        logical, allocatable :: log(:)
+        real(R8), allocatable, dimension(:) :: sol, rhs
+        real(R8), allocatable, dimension(:,:) :: A, B, preprodmat, BT_array
 
         ! Checks
         if (size(xg, 1) /= size(yg, 1)) &
@@ -254,7 +252,7 @@ module UnstructuredInterpolant2D
         if (interp%triangulation%nv /= size(xg)) &
             call gdErrorHandler('ConstructUSI2DUSFinElem: size of xg and triangulation incompatible')
         if (interp%C .gt. 3) &
-            call gdErrorHandler('ConstructUSI2DUSFinEelem: higher than 3th order continuity not' // & 
+            call gdErrorHandler('ConstructUSI2DUSFinElem: higher than 3th order continuity not' // & 
               'implemented, and expansion to 4th order can be easily implemented')
 
         ! Save field information
@@ -272,28 +270,55 @@ module UnstructuredInterpolant2D
         print *, 'Constructing unstructured interpolation with C',interp%C, 'continuity on triangulated mesh'
 
         ! Compute number of terms
-        nvpc = 3 ! number of vertices per cell
-        ar = (/(i, i = 1, 20)/) ! Not general but rather save
-        n_ar = (ar + 1)**2
-        min_number_of_terms = sum((/(i, i = 1, interp%C+1)/)) * nvpc ! number of equation
+        !nvpc = 3 ! number of vertices per cell
+        !ar = (/(i, i = 1, 20)/) ! Not general but rather save
+        !n_ar = (ar + 1)**2
+        !min_number_of_terms = sum((/(i, i = 1, interp%C+1)/)) * nvpc ! number of equation
 
         ! Determine neccesary order of interpolant
         ! (number of term = (N + 1)**2) for interpolant phi = sum_i^N sum_j^N a_ij x^i y^j
-        log = [min_number_of_terms .le. n_ar]
-        interp%order = findloc(log, .true., 1)
-        interp%n = (interp%order + 1)**2 ! number of terms in interpolant
+        !log = [min_number_of_terms .le. n_ar]
+        !interp%order = findloc(log, .true., 1)
+        !interp%n = (interp%order + 1)**2 ! number of terms in interpolant
 
         ! Determine necessary order of gradient reconstruction
         ! Propose interp%C+1 and check ( so one order higher than the continuity requirement)
-        order_GR = 1
-        n_el = sum((/(i, i = 1, order_GR+1)/)) * nvpc
-        do while (n_el .lt. interp%n)
-            order_GR = order_GR + 1
-            n_el = sum((/(i, i = 1, order_GR+1)/)) * nvpc
-        end do
+        !order_GR = 1
+        !n_el = sum((/(i, i = 1, order_GR+1)/)) * nvpc
+        !do while (n_el .lt. interp%n)
+        !    order_GR = order_GR + 1
+        !    n_el = sum((/(i, i = 1, order_GR+1)/)) * nvpc
+        !end do
+
+        ! Properties depending on continuity
+        order_GR = 4
+        interp%order = 5
+        interp%n = 36
+        if (interp%C .lt. 3) then
+            print *, 'The continuity is set to 3th order for stability reasons'
+        else if (interp%C .gt. 3) then
+            call gdErrorHandler('ConstructUSI2DUSFinElem: not implemented for continuity higher than 3')
+        end if
+        !if (interp%C .le. 1) then
+        !    order_GR = 1
+        !    interp%order = 2
+        !    interp%n = 9
+        !end if
+        !else if (interp%C .le. 3) then
+        !    order_GR = 4
+        !    interp%order = 5
+        !    interp%n = 36
+        !else
+        !    call gdErrorHandler('ConstructUSI2DUSFinElem: not implemented for continuity higher than 3')
+        !end if
+
+        n_dev = nint(interp%n/3.0_R8)
+        nvpc = 3
+        allocate(interp%aij(interp%n*interp%triangulation%nc))
+        interp%aij = 0
 
         ! Continue computation if not yet done before for other field on the same grid
-        if (.not. allocated(interp%invABT)) then
+        if (.not. allocated(interp%A)) then
 
             ! Timing
             call wall_time(t_start)
@@ -301,26 +326,20 @@ module UnstructuredInterpolant2D
             ! Compute GR coefficients
             call interp%GR%SetParameters('vert', 'vert', 'global', order_GR)
             call interp%GR%Construct(interp%triangulation)
-            call interp%GR%Evaluate(v, deriv_vals)
+            !call interp%GR%Evaluate(v, deriv_vals)
 
             ! Stencil estimate
             stencil_est = sum((/(i, i = 2, interp%order + 1)/)) + 11
 
-            ! Construct Amask
-            !allocate(Amask(36, (order+1)**2))
-            !call ConstructAmask(order, Amask)
-
             ! Initialize
             nc = interp%triangulation%nc
-            allocate(A(interp%n,interp%n), invA(interp%n, interp%n))
-            allocate(temp(interp%n))
-            allocate(invABT_array(nc*stencil_est, interp%n))
-            allocate(cNv(nc*stencil_est), cNvP(nc,2))
-            temp = 0
-            sol = temp     
+            allocate(interp%A(interp%n*interp%triangulation%nc,interp%n))
+            allocate(A(interp%n,interp%n))
+            allocate(BT_array(nc*stencil_est, interp%n))
+            allocate(cNv(nc*stencil_est), cNvP(nc,2))    
             counter = 0   
             
-            ! Precompute preprodmatrix - TODO
+            ! Precompute preprodmatrix
             max_dev = interp%GR%deriv
             allocate(preprodmat(0:interp%order, 0:max_dev))
             do j = 0, interp%order
@@ -338,36 +357,23 @@ module UnstructuredInterpolant2D
                 ! Build A matrix
                 call ConstructA(interp, tria%x(tv), tria%y(tv), preprodmat, A)
 
-                ! Compute inverse A
-                info = 0
-                call SolveDenseLinearSystemDI(A, temp, sol, info, invA)
-
-                if (info /= 0) then
-                    print *, 'Could not invert A matrix for cell: ', ic
-                    call tria%WriteErrorData(tv, 0)
-                    !call gdErrorHandler('ConstructUSI2DUSFinEelem: could not invert A matrix')
-                end if
-
                 ! Build B matrix - size depends on cell stencil
                 call ConstructB(interp, tv, B, vxs)
 
-                ! Matrix multiplication
-                !invAB = matmul(invA, B)
-                !invABT = transpose(invAB)
-
                 ! Save 
                 nv = size(vxs)
-                invABT_array(counter+1:counter+nv,:) = transpose(matmul(invA, B))
+                BT_array(counter+1:counter+nv,:) = transpose(B)
                 cNvP(ic, 1) = counter + 1
                 cNvP(ic, 2) = nv
                 cNv(counter+1:counter+nv) = vxs
                 counter = counter + nv
+                interp%A(interp%n*(ic-1)+1:interp%n*ic,:) = A
 
             end do
 
 
             ! Save
-            interp%invABT = invABT_array(1:counter,:)
+            interp%BT = BT_array(1:counter,:)
             interp%cNv = cNv(1:counter)
             interp%cNvP = cNvP
 
@@ -375,7 +381,7 @@ module UnstructuredInterpolant2D
             call wall_time(t_end)
 
             ! Display
-            print *, 'Time to construct interpolant invAB matrix: ', t_end - t_start, 'seconds'
+            print *, 'Time to construct A and B matrix: ', t_end - t_start, 'seconds'
 
         end if
 
@@ -383,19 +389,47 @@ module UnstructuredInterpolant2D
         call wall_time(t_start)
 
         ! Compute aij
-        allocate(interp%aij(interp%n*nc))
+        allocate(rhs(interp%n), sol(interp%n))
         interp%aij = 0
         do ic = 1, nc
+            tv = tria%cvert(ic, :)
             s = interp%cNvP(ic, 1)
             n = interp%cNvP(ic, 2)
-            !invABT = interp%invABT(s:s+n-1,:)
+            A = interp%A(interp%n*(ic-1)+1:interp%n*ic,:)
+            B = transpose(interp%BT(s:s+n-1,:))
             vxs = interp%cNv(s:s+n-1)
-            !invAB = transpose(invABT)
-            interp%aij(interp%n*(ic-1)+1:interp%n*ic) = &
-                matmul(transpose(interp%invABT(s:s+n-1,:)), v(vxs))
+
+            ! Compute rhs
+            rhs = 0
+            do i = 1, n_dev
+                if (i /= 1) then
+                    do j = 1, nvpc
+                        k = (i-1)*nvpc+j
+                        rhs(k) = dot_product(B(k, :),v(vxs) - v(tv(j)))
+                    end do
+                else
+                    do j = 1, nvpc
+                        k = (i-1)*nvpc+j
+                        rhs(k) = dot_product(B(k, :),v(vxs))
+                    end do                    
+                end if
+            end do  
+            
+            ! Compute aij
+            info = 0
+            sol = 0
+            call SolveDenseLinearSystemDI(A, rhs, sol, info)
+
+            if (info /= 0) then
+                print *, 'Could not compute aij for cell (A*aij = rhs): ', ic
+                call tria%WriteErrorData(tv, 0)
+                call gdErrorHandler('ConstructUSI2DUSFinEelem: could not compute aij (A*aij = rhs)')
+            end if                
+
+            ! Save aij
+            interp%aij(interp%n*(ic-1)+1:interp%n*ic) = sol            
+
         end do
-
-
        
         ! Time 
         call wall_time(t_end)
@@ -992,7 +1026,15 @@ module UnstructuredInterpolant2D
         end select
 
         ! Take the correct slice
-        A = Afull(1:interp%n, 1:interp%n)        
+        if (interp%C .le. 1) then
+            A = Afull(1:interp%n, 1:interp%n)   
+        else if (interp%C .le. 3) then
+            A(1:30,:) = Afull(1:30,:) ! Every derivative up to 3th order
+            A(31:33, :) = Afull(34:36,:)  ! d4phidx3dy
+            A(34:36, :) = Afull(40:42,:)  ! d4phidxdy3
+        else
+            call gdErrorHandler('ConstructA: not implemented for interp%C .gt. 3')
+        end if
  
     end subroutine
 
@@ -1077,7 +1119,16 @@ module UnstructuredInterpolant2D
         !if (.not.all(Btest == Bfull)) call gdErrorHandler('Mistake')
 
         ! Trim
-        B = Bfull(1:interp%n,:)
+        if (interp%C .le. 1) then
+            B = Bfull(1:interp%n,:)
+        else if (interp%C .le. 3) then
+            allocate(B(36,size(vxsU)))
+            B(1:30,:) = Bfull(1:30,:) ! Every derivative up to 3th order
+            B(31:33, :) = Bfull(34:36,:)  ! d4phidx3dy
+            B(34:36, :) = Bfull(40:42,:)  ! d4phidxdy3
+        else
+            call gdErrorHandler('ConstructB: not implemented for interp%C .gt. 3')
+        end if
     
     end subroutine
 
