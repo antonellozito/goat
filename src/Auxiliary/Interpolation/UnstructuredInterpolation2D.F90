@@ -246,7 +246,7 @@ module UnstructuredInterpolant2D
         integer(I8), allocatable, dimension(:) :: tv, cNv, vxs
         integer(I8), allocatable :: cNvP(:,:)
         real(R8) :: t_start, t_end
-        real(R8), allocatable, dimension(:) :: sol, rhs, v_vxs
+        real(R8), allocatable, dimension(:) :: sol, rhs, v_vxs, v_tv
         real(R8), allocatable, dimension(:,:) :: A, B, preprodmat, BT_array, BT
 
         ! Checks
@@ -355,7 +355,7 @@ module UnstructuredInterpolant2D
         call wall_time(t_start)
 
         ! Compute aij
-        allocate(rhs(interp%n), sol(interp%n))
+        allocate(rhs(interp%n), sol(interp%n), v_tv(nvpc))
         if (allocated(interp%aij)) deallocate(interp%aij)
         allocate(interp%aij(interp%n*nc))
         interp%aij = 0
@@ -370,6 +370,7 @@ module UnstructuredInterpolant2D
             BT = interp%BT(s:s+n-1,:)
             vxs = interp%cNv(s:s+n-1)
             v_vxs = v(interp%cNv(s:s+n-1))
+            v_tv = v(tv)
 
             ! Compute rhs
             rhs = 0
@@ -377,7 +378,7 @@ module UnstructuredInterpolant2D
                 if (i /= 1) then
                     do j = 1, nvpc
                         k = (i-1)*nvpc+j
-                        rhs(k) = dot_product(BT(:, k),v_vxs - v(tv(j)))
+                        rhs(k) = dot_product(BT(:, k),v_vxs - v_tv(j))
                     end do
                 else
                     do j = 1, nvpc
@@ -408,7 +409,7 @@ module UnstructuredInterpolant2D
         call wall_time(t_end)
 
         ! Display
-        print *, 'Time to construct interpolant aij coefficients: ', t_end - t_start, 'seconds'
+        print *, 'Time to compute interpolant aij coefficients: ', t_end - t_start, 'seconds'
 
         end associate
 
