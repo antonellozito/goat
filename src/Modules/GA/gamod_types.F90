@@ -11710,7 +11710,7 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in)            :: grid
+        class(GAGridUDT), intent(inout)         :: grid
         integer(I8), intent(in)                 :: cv, fcs(:)
         character(:), allocatable, intent(in)   :: type
         character(:), allocatable, intent(out)  :: caseID
@@ -15862,7 +15862,7 @@ module gamod_types
         ! Declare variables
         !==================
         ! Arguments
-        class(GAGridUDT), intent(in)            :: grid
+        class(GAGridUDT), intent(inout)         :: grid
         integer(I8), intent(in)                 :: cv, faces(:)
         character(:), allocatable, intent(in)   :: type
         integer(I8), intent(out)                :: common_vert, qface
@@ -15976,6 +15976,8 @@ module gamod_types
             if (HaveCommonVert(f, rface1, rface2)) then
                 common_vert = GetCommonVert(grid, rface1, rface2)
             else
+                vxs = [GetFaceVertGA(f, rface1), GetFaceVertGA(f, rface2)]
+                call grid%WriteErrorData(vxs, 1, 1)
                 call gdErrorHandler('DetermineHangingNodePent: rface1 and rface2 do not have a common vertex')
             end if
 
