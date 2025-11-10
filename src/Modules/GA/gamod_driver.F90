@@ -373,6 +373,7 @@ module gamod_driver
 
         ! Select cell to split
         call grid%SelectSplitCellAposteriori(magneticField, options, interp, state, split_cv)
+        call qm%Initialize(grid)
 
         ! While a splitting cell is found
         j = 0
