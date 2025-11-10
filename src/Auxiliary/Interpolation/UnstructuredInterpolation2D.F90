@@ -452,7 +452,12 @@ module UnstructuredInterpolant2D
 
         case ('finite_element')
 
-            call EvaluateUnstructuredInterpolant2DFinElem(interp, xq, yq, derivx, derivy, vq)
+            if (size(xq) .gt. 1000) then
+                print *, 'Use OMP interpolant evaluation'
+                call EvaluateUnstructuredInterpolant2DFinElemOMP(interp, xq, yq, derivx, derivy, vq)
+            else 
+                 call EvaluateUnstructuredInterpolant2DFinElem(interp, xq, yq, derivx, derivy, vq)
+            end if
 
         case default
 
@@ -677,11 +682,12 @@ module UnstructuredInterpolant2D
         integer(I8), intent(in)                 :: derivx, derivy
 
         ! Auxiliary
-        integer(I8) :: c, i, j, k, m, l, p, ctri, ind
-        integer(I8), allocatable, dimension(:)  :: vt1, vt2, vt3, ctri_found, ctri_not_found, &
+        integer(I8) :: c, i, j, k, m, l, p, ctri, ind, max_dev
+        integer(I8), allocatable, dimension(:)  :: ctri_found, ctri_not_found, &
             ctri_array, indxq   
-        real(R8), allocatable, dimension(:)     :: vx, vy, v, dist, aij, A, vq_test(:)             
-        logical, allocatable, dimension(:)      :: in, on, log
+        real(R8), allocatable, dimension(:)     :: vx, vy, v, dist, aij, A, vq_test             
+        real(R8), allocatable                   :: preprodmat(:,:)
+        logical, allocatable, dimension(:)      :: log
         real(R8)                                :: t_start, t_end
 
         ! Timing
@@ -696,23 +702,22 @@ module UnstructuredInterpolant2D
         ! Pick correct row depending on derivatives
         p = derivx
         l = derivy
+        max_dev = max(derivx, derivy)
+        allocate(preprodmat(0:interp%order, 0:max_dev))
+        do j = 0, interp%order
+            do i = 0, max_dev
+                preprodmat(j, i) = preprod(j, i)
+            end do
+        end do        
 
-        ! Loop over query points
-        vt1 = interp%triangulation%cvert(:,1)
-        vt2 = interp%triangulation%cvert(:,2)
-        vt3 = interp%triangulation%cvert(:,3)
+        ! Find triangle for each query point
         vx = interp%triangulation%x
         vy = interp%triangulation%y
         v = interp%v
         vq = 0
-        do i = 1, size(xq, 1)
 
-            ! Get triangle
-            call InTriangle(vt1, vt2, vt3, vx, vy, xq(i), yq(i), in, on)
-            ctri = findloc(in .or. on, .true., 1)
-            ctri_array(i) = ctri
+        call InTriangleGrid(interp%triangulation, xq, yq, ctri_array)
 
-        end do
 
         indxq = (/(i, i = 1, size(xq, 1))/)
         log = ctri_array /= 0
@@ -728,6 +733,7 @@ module UnstructuredInterpolant2D
         select case (interp%base_func)
         case ('polynomial')
 
+            !$omp parallel do default(shared) private(c, i, ctri, aij, A, j, m, k)
             do c = 1, size(ctri_found)
 
                 ! Get index and triangle
@@ -745,7 +751,7 @@ module UnstructuredInterpolant2D
                         k = j*(interp%order+1) + (m+1)
                           
                         ! Compute
-                        A(k) = preprod(m,p)*xq(i)**(m-p) * preprod(j,l)*yq(i)**(j-l)
+                        A(k) = preprodmat(m,p)*xq(i)**(m-p) * preprodmat(j,l)*yq(i)**(j-l)
 
                     end do
                 end do
@@ -753,6 +759,7 @@ module UnstructuredInterpolant2D
                 vq(i) = dot_product(A,aij)
 
             end do
+            !$omp end parallel do
 
         case default
             call gdErrorHandler('EvaluateUnstructuredInterpolant2DFinElem: base function type not implemented')

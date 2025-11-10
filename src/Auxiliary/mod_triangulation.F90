@@ -40,7 +40,7 @@ module mod_triangulation
         ! - vcell   cells of vertices
         ! - vcellP  pointer array for vcell
 
-        real(R8), allocatable       :: x(:), y(:)
+        real(R8), allocatable       :: x(:), y(:), dx(:,:), dy(:,:)
         integer(I8), allocatable    :: cvert(:,:)
         integer(I8)                 :: nv, nc
         integer(I8), allocatable    :: vcellP(:,:), vcell(:)
@@ -109,6 +109,7 @@ module mod_triangulation
         ! Auxiliary
         integer(I8) :: i, iv, counter, n
         integer(I8), allocatable :: query(:,:), vcellP(:,:), vcell(:), cvs(:)
+        integer(I8), allocatable, dimension(:) :: v1, v2, v3
 
         ! Checks
         if (size(vertP1) /= size(vertP2)) &
@@ -147,6 +148,19 @@ module mod_triangulation
         end do
         triangulation%vcellP = vcellP
         triangulation%vcell = vcell(1:counter)
+
+        ! Compute vectors
+        allocate(triangulation%dx(triangulation%nc,3))
+        allocate(triangulation%dy(triangulation%nc,3))
+        v1 = triangulation%cvert(:,1)
+        v2 = triangulation%cvert(:,2)
+        v3 = triangulation%cvert(:,3)
+        triangulation%dx(:,1) = triangulation%x(v2) - triangulation%x(v1)
+        triangulation%dx(:,2) = triangulation%x(v3) - triangulation%x(v2)
+        triangulation%dx(:,3) = triangulation%x(v1) - triangulation%x(v3)
+        triangulation%dy(:,1) = triangulation%y(v2) - triangulation%y(v1)
+        triangulation%dy(:,2) = triangulation%y(v3) - triangulation%y(v2)
+        triangulation%dy(:,3) = triangulation%y(v1) - triangulation%y(v3)
 
 
 

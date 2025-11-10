@@ -18,6 +18,7 @@ module Interpolant2D_auxiliaries
     use mod_errorhandler
     use mod_sort
     use omp_lib
+    use mod_triangulation
 
     implicit none
 
@@ -391,6 +392,82 @@ module Interpolant2D_auxiliaries
             end if 
 
         end do 
+        !$omp end parallel do
+
+    end subroutine    
+
+   ! InTriangleGrid routine
+    subroutine InTriangleGrid(tria, xp, yp, ctri_array)
+
+        ! Description
+        !============
+        ! This routine checks if a points lies within or on a triangle.
+        ! The result is returned in ctri_arrays, containing the triangle number.
+        ! The query point is given as an array set of coordinates xp, yp. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(TriangulationUDT), intent(in)              :: tria
+        real(R8), intent(in)                            :: xp(:), yp(:) 
+        integer(I8), allocatable, intent(out)           :: ctri_array(:)
+
+        ! Auxiliary
+        real(R8)                        :: dx1p(tria%nc), dy1p(tria%nc), dx2p(tria%nc), &
+            dy2p(tria%nc), dx3p(tria%nc), dy3p(tria%nc), cp(tria%nc,1:3), &
+            x1(tria%nc), x2(tria%nc), x3(tria%nc), y1(tria%nc), y2(tria%nc), y3(tria%nc), &
+            dx1(tria%nc), dx2(tria%nc), dx3(tria%nc), &
+            dy1(tria%nc), dy2(tria%nc), dy3(tria%nc)
+        logical                         :: do_parallel, in(tria%nc)
+        
+        ! Loop
+        integer(I8)                         :: i, nc
+
+        ! Initialize
+        !===========
+        nc = tria%nc
+        in = .false. 
+        allocate(ctri_array(size(xp,1)))
+        ctri_array = 0
+
+        ! Compute
+        !========
+        ! Loop
+        do_parallel = .not. omp_in_parallel()
+
+        x1 = tria%x(tria%cvert(:,1)) 
+        x2 = tria%x(tria%cvert(:,2))
+        x3 = tria%x(tria%cvert(:,3))
+        y1 = tria%y(tria%cvert(:,1)) 
+        y2 = tria%y(tria%cvert(:,2))
+        y3 = tria%y(tria%cvert(:,3))
+        dx1 = tria%dx(:,1)
+        dx2 = tria%dx(:,2)
+        dx3 = tria%dx(:,3)
+        dy1 = tria%dy(:,1)
+        dy2 = tria%dy(:,2)
+        dy3 = tria%dy(:,3)
+
+        !$omp parallel do default(shared) schedule(static) if (do_parallel) &
+        !$omp private(i, dx1p, dx2p, dx3p, dy1p, dy2p, dy3p, cp)
+        do i = 1, size(xp)
+
+            ! Get vectors
+            dx1p = xp(i) - x1
+            dx2p = xp(i) - x2
+            dx3p = xp(i) - x3
+            dy1p = yp(i) - y1
+            dy2p = yp(i) - y2
+            dy3p = yp(i) - y3   
+            
+            ! Compute cross products
+            cp(:,1) = dx1*dy1p - dy1*dx1p 
+            cp(:,2) = dx2*dy2p - dy2*dx2p
+            cp(:,3) = dx3*dy3p - dy3*dx3p
+
+            in = all(cp >= 0, 2) .or. all(cp <= 0, 2) 
+            ctri_array(i) = findloc(in, .true., 1) 
+        end do   
         !$omp end parallel do
 
     end subroutine    
