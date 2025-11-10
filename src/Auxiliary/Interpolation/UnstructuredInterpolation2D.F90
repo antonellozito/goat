@@ -246,8 +246,8 @@ module UnstructuredInterpolant2D
         integer(I8), allocatable, dimension(:) :: tv, cNv, vxs
         integer(I8), allocatable :: cNvP(:,:)
         real(R8) :: t_start, t_end
-        real(R8), allocatable, dimension(:) :: sol, rhs
-        real(R8), allocatable, dimension(:,:) :: A, B, preprodmat, BT_array
+        real(R8), allocatable, dimension(:) :: sol, rhs, v_vxs
+        real(R8), allocatable, dimension(:,:) :: A, B, preprodmat, BT_array, BT
 
         ! Checks
         if (size(xg, 1) /= size(yg, 1)) &
@@ -367,8 +367,9 @@ module UnstructuredInterpolant2D
             s = interp%cNvP(ic, 1)
             n = interp%cNvP(ic, 2)
             A = interp%A(interp%n*(ic-1)+1:interp%n*ic,:)
-            B = transpose(interp%BT(s:s+n-1,:))
+            BT = interp%BT(s:s+n-1,:)
             vxs = interp%cNv(s:s+n-1)
+            v_vxs = v(interp%cNv(s:s+n-1))
 
             ! Compute rhs
             rhs = 0
@@ -376,12 +377,12 @@ module UnstructuredInterpolant2D
                 if (i /= 1) then
                     do j = 1, nvpc
                         k = (i-1)*nvpc+j
-                        rhs(k) = dot_product(B(k, :),v(vxs) - v(tv(j)))
+                        rhs(k) = dot_product(BT(:, k),v_vxs - v(tv(j)))
                     end do
                 else
                     do j = 1, nvpc
                         k = (i-1)*nvpc+j
-                        rhs(k) = dot_product(B(k, :),v(vxs))
+                        rhs(k) = dot_product(BT(:, k),v_vxs)
                     end do                    
                 end if
             end do  
