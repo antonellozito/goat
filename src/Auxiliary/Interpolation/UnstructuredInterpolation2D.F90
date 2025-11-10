@@ -359,7 +359,10 @@ module UnstructuredInterpolant2D
         if (allocated(interp%aij)) deallocate(interp%aij)
         allocate(interp%aij(interp%n*nc))
         interp%aij = 0
-        do ic = 1, nc
+        !!$omp parallel do default(none) schedule(static) private(tv, A, B, vxs) &
+        !!$omp private(ic, s, n, i, j, k, info, rhs, sol) & 
+        !!$omp shared(n_dev, nvpc, interp, v, nc)        
+        do ic = 1, nc ! Try to parallelize
             tv = tria%cvert(ic, :)
             s = interp%cNvP(ic, 1)
             n = interp%cNvP(ic, 2)
@@ -390,7 +393,7 @@ module UnstructuredInterpolant2D
 
             if (info /= 0) then
                 print *, 'Could not compute aij for cell (A*aij = rhs): ', ic
-                call tria%WriteErrorData(tv, 0)
+                call interp%triangulation%WriteErrorData(tv, 0)
                 call gdErrorHandler('ConstructUSI2DUSFinEelem: could not compute aij (A*aij = rhs)')
             end if                
 
@@ -398,6 +401,7 @@ module UnstructuredInterpolant2D
             interp%aij(interp%n*(ic-1)+1:interp%n*ic) = sol            
 
         end do
+        !!$omp end parallel do
        
         ! Time 
         call wall_time(t_end)
