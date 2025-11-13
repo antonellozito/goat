@@ -228,7 +228,8 @@ module ggmod_topology2D
         ! Note: in practice, this type is primarily used for tube 
         ! merging. 
 
-        real(R8)                                :: dpsimin, lradmin 
+        real(R8)                                :: dpsimin, lradmin, &
+            lpolsepmin 
         real(R8), allocatable, dimension(:)     :: tubedpsi, tubelrad
         integer(I8), allocatable, dimension(:)  :: illegalfsIDs
         type(RealDynamicArrayUDT), allocatable, dimension(:)    :: &
@@ -239,6 +240,7 @@ module ggmod_topology2D
 
         ! Store locally for convenience
         class(ContourtracerUDT), allocatable    :: fieldtracer
+        class(StreamlinetracerUDT), allocatable :: streamlinetracer
         type(MagneticFieldUDT)                  :: magneticField 
         type(VesselUDT)                         :: vessel
 
@@ -262,11 +264,16 @@ module ggmod_topology2D
         procedure   :: MergeTMTubesOC       => MergeTMTubesOCTA ! open-closed merge
         procedure   :: MergeTMTubesCC       => MergeTMTubesCCTA ! closed-closed merge
         procedure   :: MergeTMTubesS        => MergeTMTubesSTA ! separatrix (or other branching polygon) merge
+        procedure   :: CollapseTMSeparatrixTube     => CollapseTMSeparatrixTubeTA ! separatrix tube collapser
         procedure   :: SplitTMTubes         => SplitTMTubesTA ! tube splitter
         procedure   :: GetMergeTubePairs    => GetMergeTubePairsWrapper ! merge tube pair getter
         procedure   :: GetMergeTubePairsExtensive   => GetMergeTubePairsExtensiveTA
         procedure   :: GetMergeTubePairsLocal       => GetMergeTubePairsLocalTA
         procedure   :: GetMergeTubeCycles   => GetTopomeshTubeCyclesTA ! merge cyclic tube getter
+        procedure   :: CleanSplitTMTubes    => CleanSplitTMTubesTA
+
+        ! Separatrix simplification
+        procedure :: SimplifySeparatrices   => SimplifyTMSeparatricesTA 
 
         ! Auxiliary routines for tube merging
         procedure   :: IsTubePairMergeable  => IsTubePairMergeableTA
@@ -457,6 +464,11 @@ module ggmod_topology2D
         ! Tangency points & vessel geometry
         call AddTopologicalMeshTangencyPoints2(topomesh, vesseltracer, &
             vessel, magneticField, options)
+
+        ! Write output
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_aftertp', .false.)
+        end if 
 
         ! Construct refined grid based on tangency points and extrema
         ntp = count((topomesh%vert%type == TMvertextp1ID) .or. (topomesh%vert%type == TMvertextp2ID))
@@ -670,8 +682,8 @@ module ggmod_topology2D
         !===============
         ! Merge tubes (before aligned vessel parts)?
         ! Use adaptor
-        call tmadaptor%Initialize(topomesh, fieldtracer, magneticField, &
-            vessel, options)
+        call tmadaptor%Initialize(topomesh, fieldtracer, streamlinetracer, &
+            magneticField, vessel, options)
 
         call tmadaptor%MergeTMTubesDriver(topomesh, options)
 
@@ -711,8 +723,8 @@ module ggmod_topology2D
         end if 
 
         ! Merge tubes (after aligned vessel parts)?
-        call tmadaptor%Initialize(topomesh, fieldtracer, magneticField, &
-            vessel, options)
+        call tmadaptor%Initialize(topomesh, fieldtracer, streamlinetracer, &
+            magneticField, vessel, options)
 
         call tmadaptor%MergeTMTubesDriver(topomesh, options)
 
@@ -2064,9 +2076,9 @@ module ggmod_topology2D
                 allc = [allc, tc]
                 call curvetypes%Append(spread(TMfacesepID, 1, size(tc)))
                 
-                ! Add flux surface ID
-                nfs = nfs + 1
-                call fsIDs%Append(spread(nfs, 1, size(tc)))
+                ! Add flux surface ID - should be X-point flux surface ID 
+                ! nfs = nfs + 1
+                call fsIDs%Append(spread(topomesh%vert%fsID(pspID(i)), 1, size(tc)))
             end if 
         end do
 
@@ -3174,7 +3186,7 @@ module ggmod_topology2D
             allocate(keepind(size(tvIDs)))
             keepind = .true. 
             do j = 1, size(keepind)-1
-                if ((ts1r(j+1) - ts1r(j)) == 0_R8) then 
+                if (((ts1r(j+1) - ts1r(j)) == 0_R8) .or. (tvIDs(j+1) == tvIDs(j))) then ! Also check vertex ID, since s1r may be off by machine precision 
                     keepind(j+1) = .false. 
                 end if 
             end do 
@@ -5703,7 +5715,7 @@ module ggmod_topology2D
 
     ! Topomesh adaptor initialization
     subroutine InitializeTopomeshAdaptor(tmadaptor, topomesh, &
-        fieldtracer, magneticField, vessel, options)
+        fieldtracer, streamlinetracer, magneticField, vessel, options)
 
         ! Description
         !============
@@ -5715,6 +5727,7 @@ module ggmod_topology2D
         class(TopomeshAdaptorUDT)               :: tmadaptor 
         type(TopomeshUDT), intent(in)           :: topomesh 
         class(ContourtracerUDT), intent(in)     :: fieldtracer
+        class(StreamlinetracerUDT), intent(in)  :: streamlinetracer
         type(magneticFieldUDT), intent(in)      :: magneticField
         type(VesselUDT), intent(in)             :: vessel
         type(TopomeshOptionsUDT), intent(in)    :: options 
@@ -5740,6 +5753,7 @@ module ggmod_topology2D
         if (allocated(tmadaptor%tubedpsi)) deallocate(tmadaptor%tubedpsi)
         if (allocated(tmadaptor%tubelrad)) deallocate(tmadaptor%tubelrad)
         if (allocated(tmadaptor%fieldtracer)) deallocate(tmadaptor%fieldtracer)
+        if (allocated(tmadaptor%streamlinetracer)) deallocate(tmadaptor%streamlinetracer)
 
         ! Initialize
         allocate(tmadaptor%illegalfsIDs(0), tmadaptor%facepsi(face%ntot), &
@@ -5749,12 +5763,14 @@ module ggmod_topology2D
 
         ! Copy (for face data updating later on)
         tmadaptor%fieldtracer   = fieldtracer
+        tmadaptor%streamlinetracer  = streamlinetracer
         tmadaptor%magneticField = magneticField
         tmadaptor%vessel        = vessel
 
         ! Copy options
         tmadaptor%dpsimin = options%dpsimintubes
         tmadaptor%lradmin = options%lradmintubes
+        tmadaptor%lpolsepmin = options%lpolsepmin
         tmadaptor%allowsepmerge = options%mtallowseparatrix
         tmadaptor%allowcoremerge = options%mtallowcore
         tmadaptor%allowpfmerge  = options%mtallowpf
@@ -5922,6 +5938,9 @@ module ggmod_topology2D
             end if 
         end do 
 
+        ! Clean up splitted tubes
+        call tmadaptor%CleanSplitTMTubes(topomesh)
+
     end subroutine
 
     ! Simple flux tube merging
@@ -5987,7 +6006,7 @@ module ggmod_topology2D
         allocate(tube1(0), tube2(0))
         do i = 1, size(hftubes)
             ! Check sizes
-            if ((size(hftubes) /= 1) .or. (size(lftubes) /= 1)) then 
+            if ((hftubes(i)%Size() /= 1) .or. (lftubes(i)%Size() /= 1)) then 
                 cycle 
             end if 
 
@@ -6829,7 +6848,7 @@ module ggmod_topology2D
 
     end subroutine
 
-    ! Open-openn flux tube pair merging (non-separatrix)
+    ! Open-open flux tube pair merging (non-separatrix)
     subroutine MergeTMTubesOOTA(tmadaptor, topomesh, tube1, tube2, mergefaces, &
         wasmerged)
 
@@ -7407,10 +7426,31 @@ module ggmod_topology2D
         ! Description
         !============
         ! This routine performs the actual merge over a separatrix boundary
-        ! of whch the faces are given in 'mergefaces'. It is 
+        ! of which the faces are given in 'mergefaces'. It is 
         ! assumed that all required checks on the input are done 
         ! beforehand in the calling function, in this case MergeTMTubes.
-        ! See the algorithm section for more details. 
+        ! The merge algorithm(s) presented here are rather involved since
+        ! merging away separatrices is, at best, difficult. Therefore, 
+        ! there is a non-negligible possibility that this routine will 
+        ! fail and not merge away the tubes. Currently, not all 
+        ! separatrix merging cases are supported. The ones that are, 
+        ! are the following:
+        ! - merging where at least on one side all tubes have separatrices.
+        !   this is called a 'collapse' since we're basically collapsing
+        !   that tube. This is a very useful merge operation to simplify
+        !   topologies with x-points that lie very close together. In 
+        !   principle, this can only happen for a single tube. 
+
+        ! Algorithm
+        !==========
+        ! Collapse merge
+        !---------------
+        ! This merge can only proceed if one tube set is fully contained
+        ! by separatrix segments, and if that tube set has at least one
+        ! x-point in the low and high flux boundary. Essentially, both 
+        ! separatrices are merged together by taking pieces of both. All
+        ! x-points are retained. See the dedicated subroutine for 
+        ! more information
 
         ! Declare variables
         !==================
@@ -7420,11 +7460,949 @@ module ggmod_topology2D
         integer(I8), dimension(:), intent(in)   :: mergefaces, tube1, tube2
         logical                                 :: wasmerged
 
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: hfbndf, lfbndf, &
+            hfbndv, lfbndv, tubemergefaces
+        logical                                 :: iscollapsemerge, &
+            ishfxpfound, islfxpfound, isallsep
+        logical, allocatable, dimension(:)      :: collapsetube1, &
+            collapsetube2, ismergeface
+
+        ! Loop
+        integer(I8)                             :: i 
+
         ! Initialize
         !===========
-        ! Simply return for now
-        print *, 'MergeTMTubesS: method not yet implemented'
+        ! Set output
         wasmerged = .false. 
+
+        ! Associate for ease
+        associate(&
+            vert        => topomesh%vert,   &
+            face        => topomesh%face,   &
+            tube        => topomesh%tube    &
+            )
+
+        ! Determine possible merge cases
+        !===============================
+        ! Collapse merge
+        !---------------
+        ! Initialize switch
+        iscollapsemerge = .false.
+
+        ! Initialize additional data
+        collapsetube1 = spread(.false., 1, size(tube1)) 
+        collapsetube2 = spread(.false., 1, size(tube2))
+
+        ! Check tube1
+        do i = 1, size(tube1)
+            ! Initialize
+            ishfxpfound = .false.
+            islfxpfound = .false. 
+            isallsep = .true.  
+
+            ! Get boundary faces & vertices
+            hfbndf = tube%GetHighFluxBndFace(tube1(i))
+            lfbndf = tube%GetLowFluxBndFace(tube1(i))
+            hfbndv = [face%vert(hfbndf, 1), face%vert(hfbndf, 2)]
+            lfbndv = [face%vert(lfbndf, 1), face%vert(lfbndf, 2)]
+
+            ! Check if all boundaries are separatrices
+            if (.not. all(face%type([hfbndf, lfbndf]) == TMfacesepID)) then 
+                isallsep = .false.
+            end if 
+
+            ! Check if an X-point is found at high and low field side
+            if (any(vert%type(hfbndv) == TMvertexsaddleID)) then 
+                ishfxpfound = .true.
+            end if 
+            if (any(vert%type(lfbndv) == TMvertexsaddleID)) then 
+                islfxpfound = .true.
+            end if
+            
+            ! Check
+            if (ishfxpfound .and. islfxpfound .and. isallsep) then 
+                collapsetube1(i) = .true.
+            end if
+        end do 
+        
+
+        ! Check tube2
+        do i = 1, size(tube2)
+            ! Initialize
+            ishfxpfound = .false.
+            islfxpfound = .false. 
+            isallsep = .true. 
+
+            ! Get boundary faces & vertices
+            hfbndf = tube%GetHighFluxBndFace(tube2(i))
+            lfbndf = tube%GetLowFluxBndFace(tube2(i))
+            hfbndv = [face%vert(hfbndf, 1), face%vert(hfbndf, 2)]
+            lfbndv = [face%vert(lfbndf, 1), face%vert(lfbndf, 2)]
+
+            ! Check if all boundaries are separatrices
+            if (.not. all(face%type([hfbndf, lfbndf]) == TMfacesepID)) then 
+                isallsep = .false.
+                exit 
+            end if 
+
+            ! Check if an X-point is found at high and low field side
+            if (any(vert%type(hfbndv) == TMvertexsaddleID)) then 
+                ishfxpfound = .true.
+            end if 
+            if (any(vert%type(lfbndv) == TMvertexsaddleID)) then 
+                islfxpfound = .true.
+            end if 
+
+            ! Check
+            if (ishfxpfound .and. islfxpfound .and. isallsep) then 
+                collapsetube2(i) = .true.
+            end if
+        end do 
+        
+
+        ! Check final conditions
+        if (any(collapsetube1) .or. any(collapsetube2)) then 
+            iscollapsemerge = .true.
+        end if 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+        ! Merge
+        !======
+        if (iscollapsemerge) then 
+            ! Loop until either a tube was merged or until all tubes
+            ! were considered
+            allocate(ismergeface(topomesh%face%ntot))
+            ismergeface = .false.
+            ismergeface(mergefaces) = .true. 
+            do i = 1, size(tube1)
+                if (collapsetube1(i)) then 
+                    ! Determine the current merge faces
+                    hfbndf = topomesh%tube%GetHighFluxBndFace(tube1(i))
+                    lfbndf = topomesh%tube%GetLowFluxBndFace(tube1(i))
+                    if (all(ismergeface(hfbndf)) .and. .not. any(ismergeface(lfbndf))) then 
+                        tubemergefaces = hfbndf 
+                    elseif (all(ismergeface(lfbndf)) .and. .not. any(ismergeface(hfbndf))) then
+                        tubemergefaces = lfbndf
+                    else
+                        ! Seems like neither side is fully marked as merge faces, unexpected. Throw error
+                        call gdErrorHandler('MergeTMTubesSTA: neither ' // & 
+                            'high nor low flux side tube faces are all marked ' // & 
+                            'as merging faces, unexpected')
+                    end if  
+
+                    ! Merge tube
+                    call tmadaptor%CollapseTMSeparatrixTube(topomesh, &
+                        tube1(i), tubemergefaces, wasmerged)
+
+                    ! Check if we merged, if so, exit
+                    if (wasmerged) then 
+                        exit 
+                    end if 
+                end if 
+            end do
+            if (.not. wasmerged) then 
+                do i = 1, size(tube2)
+                    if (collapsetube2(i)) then 
+                        ! Determine the current merge faces
+                        hfbndf = topomesh%tube%GetHighFluxBndFace(tube2(i))
+                        lfbndf = topomesh%tube%GetLowFluxBndFace(tube2(i))
+                        if (all(ismergeface(hfbndf)) .and. .not. any(ismergeface(lfbndf))) then 
+                            tubemergefaces = hfbndf 
+                        elseif (all(ismergeface(lfbndf)) .and. .not. any(ismergeface(hfbndf))) then
+                            tubemergefaces = lfbndf
+                        else
+                            ! Seems like neither side is fully marked as merge faces, unexpected. Throw error
+                            call gdErrorHandler('MergeTMTubesSTA: neither ' // & 
+                                'high nor low flux side tube faces are all marked ' // & 
+                                'as merging faces, unexpected')
+                        end if  
+
+                        ! Merge tube
+                        call tmadaptor%CollapseTMSeparatrixTube(topomesh, &
+                            tube2(i), tubemergefaces, wasmerged)
+
+                        ! Check if we merged, if so, exit
+                        if (wasmerged) then 
+                            exit 
+                        end if 
+                    end if 
+                end do 
+            end if 
+        end if
+
+    end subroutine
+
+    ! Separatrix tube collapsing
+    subroutine CollapseTMSeparatrixTubeTA(tmadaptor, topomesh, mergetube, &
+        mergefaces, wasmerged)
+
+        ! Description
+        !============
+        ! This routine 'collapses' a tube that has only separatrix
+        ! boundaries and at least one x-point on both hf and lf side. It
+        ! is assumed that these conditions have been checked beforehand 
+        ! (this routine should only be called from MergeTMTubesSTA). If
+        ! this is not the case, the merge is likely not going to be 
+        ! successful. The tube is collapsed by removing all faces in 
+        ! mergefaces eventually while retaining the x-point. The latter
+        ! has to be inserted in some way in the other separatrix segment. 
+        ! This may cause quite some local distortion depending on how 
+        ! far away this x-point is from the other separatrix. In some
+        ! (exceptional) cases this insertion may fail, which will abort
+        ! the merge. 
+
+        ! Algorithm
+        !==========
+        ! 1)    Extract the non-merged separatrix from the tube
+        ! 2)    Find the x-point(s) to be inserted in the non-merged 
+        !       separatrix segment
+        ! 3)    Insert the x-point(s) by finding the intersection between
+        !       its streamline(s) and the non-merged separatrix. If the 
+        !       same x-point appears multiple times in the separatrix, 
+        !       then it has to be inserted as many times as it appears
+        !       (e.g. when the x-point is close to a core region). If
+        !       the streamline intersects with a vessel boundary of the
+        !       tube, abort the merge.
+        ! 4)    If desired/possible/necessary, smooth/simplify the 
+        !       separatrix near the inserted x-point(s)
+        ! 5)    Remove the merge faces and rebuild the topomesh
+
+        ! Note: in step 3, there may be alternatives in order to let the
+        ! merge proceed. For example, one could insert an aligned vessel
+        ! part between the intersection and the next separatrix and
+        ! consider that to be a separatrix segment. This is not yet 
+        ! implemented as it is quite unlikely for current configurations
+        ! to appear (although it was also quite unlikely a few weeks ago
+        ! that this routine would be necessary, so, yeah.)
+
+        ! Note: currently, no actual streamlines are traced, but a 
+        ! line segment between the x-point and the closes point of the 
+        ! separatrix that will be retained is determined. We could
+        ! also trace streamlines, but typically these are quite badly
+        ! behaved and hard to handle near X-points. 
+
+        ! Note: we explicitly do *not* update the separatrix face IDs to
+        ! be consistent after merging, as this may lead to issues 
+        ! when determining the high and low field side of the tube. This
+        ! is also the most consistent approach, since the flux surface 
+        ! IDs are, in principle, not the same and also the values 
+        ! are different. 
+
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshAdaptorUDT)               :: tmadaptor 
+        type(TopomeshUDT), intent(inout)        :: topomesh
+        integer(I8), dimension(:), intent(in)   :: mergefaces
+        integer(I8), intent(in)                 :: mergetube
+        logical, intent(out)                    :: wasmerged
+
+        ! Auxiliary
+        integer(I8)                             :: tracedir, tf1, tf2, &
+            nint, nsl, ntf, nxp, newfsID
+        integer(I8), allocatable, dimension(:)  :: allhf, alllf, &
+            sepfaces, thf, tlf, mergevert, mergesepfaces, tf, tubefaces, &
+            radialbndf, s1, s2, sepfaceID, xpointID, news2, usepfaceID, &
+            txp, tnews2, sortindex, v1, v2
+        logical                                 :: ishfsep, islfsep, &
+            isintersectionfound
+        logical, allocatable, dimension(:)      :: ismergeface, &
+            isseparatrixface, ishfface, islfface, remf, remv
+        real(R8)                                :: x1, y1, x2, y2,&
+            xb(1:2), yb(1:2), fsfval, xxp, yxp, mindist, tdist, tx1, ty1, &
+            tx2, ty2
+        real(R8), allocatable, dimension(:)     :: xt, yt, xs, ys, xf, &
+            yf, xint, yint, s1r, s2r, newx, newy, news2r, tnews2r, ds, &
+            txv, tyv
+        type(StreamlineUDT), allocatable        :: streamlines(:)
+        type(RealDynamicArrayUDT), allocatable      :: xintrda(:, :), yintrda(:, :), &
+            s1rrda(:, :), s2rrda(:, :), xfnew(:), yfnew(:)
+        type(IntegerDynamicArrayUDT), allocatable   :: s1ida(:, :), &
+            s2ida(:, :)
+
+        ! Loop
+        integer(I8)                             :: i, j, cc
+
+        ! Initialize
+        !===========
+        ! Set output
+        wasmerged = .false. 
+
+        ! Sanity checks
+        if (mergetube == 0) then 
+            print *, 'CollapseTMSeparatrixTubeTA: no tubes given as input, returning...'
+            wasmerged = .true.
+            return 
+        end if 
+        if (size(mergefaces) == 0) then 
+            call gdErrorHandler('CollapseTMSeparatrixTubeTA: no merge faces ' // & 
+                'given, cannot proceed')
+        end if
+
+        ! Unpack for ease
+        associate(&
+            vert    => topomesh%vert,   &
+            face    => topomesh%face,   &
+            tube    => topomesh%tube    &
+            )
+
+        ! Set some useful logicals
+        allocate(ismergeface(face%ntot), isseparatrixface(face%ntot))
+        ismergeface = .false.
+        isseparatrixface = .false. 
+        ismergeface(mergefaces) = .true.
+
+        ! Extract separatrix 
+        !===================
+        ! Check high flux side
+        allocate(allhf(0))
+        ishfsep = .true.
+        thf = tube%GetHighFluxBndFace(mergetube)
+        allhf = [allhf, thf]
+
+        ! Check
+        if (any(ismergeface(thf))) then 
+            ishfsep = .false. 
+        end if 
+
+        ! Check low flux side
+        allocate(alllf(0))
+        islfsep = .true.
+        tlf = tube%GetLowFluxBndFace(mergetube)
+        alllf = [alllf, tlf]
+
+        ! Check
+        if (any(ismergeface(tlf))) then 
+            islfsep = .false. 
+        end if 
+
+        ! Sanity checks
+        if (ishfsep .and. islfsep) then 
+            ! This indicates something wrong in the input
+            call gdErrorHandler('CollapseTMSeparatrixTubeTA: both high and ' // & 
+                'low flux faces have been identified as final separatrix, unexpected')
+        elseif ((.not. ishfsep) .and. (.not. islfsep)) then 
+            ! This indicates something wrong in the input
+            call gdErrorHandler('CollapseTMSeparatrixTubeTA: neither high and ' // & 
+                'low flux faces have been identified as final separatrix, unexpected')
+        end if 
+        if (ishfsep) then 
+            if (.not. all(ismergeface(alllf))) then 
+                ! Normally all low flux surfaces should be the merge 
+                ! faces now
+                call gdErrorHandler('CollapseTMSeparatrixTubeTA: not all ' // & 
+                    'low flux faces are merge faces though high flux faces ' // & 
+                    'are non-merging separatrix faces, unexpected')
+            end if
+        end if
+        if (islfsep) then 
+            if (.not. all(ismergeface(allhf))) then 
+                ! Normally all high flux surfaces should be the merge 
+                ! faces now
+                call gdErrorHandler('CollapseTMSeparatrixTubeTA: not all ' // & 
+                    'high flux faces are merge faces though low flux faces ' // & 
+                    'are non-merging separatrix faces, unexpected')
+            end if
+        end if
+
+        ! Extract vessel faces (has to be two or zero)
+        radialbndf = tube%GetFace(mergetube)
+        radialbndf = pack(radialbndf, face%type(radialbndf) == TMfacebndID)
+
+        ! Sanity checks
+        if (size(radialbndf) == 0) then 
+            ! The tubes form a closed region  - take any radial face
+            tf = tube%GetFace(mergetube)
+            radialbndf = [radialbndf, tf(1)]
+        elseif (size(radialbndf) == 2) then 
+            ! all good
+        else
+            ! This indicates some complicated topology which we don't yet
+            ! support
+            print *, 'CollapseTMSeparatrixTubeTA: could not exactly find ' // & 
+                'zero or two vessel boundary faces, unexpected. Aborting merge'
+            return 
+        end if 
+
+        ! Orden the faces of the tube
+        tubefaces = GetClosedPolygonFromTopomeshFaces(topomesh, [radialbndf, allhf, alllf])
+
+        ! Extract (sorted) separatrix faces - need to flip one of the two
+        ! to have them oriented in the same direction
+        allocate(islfface(face%ntot), ishfface(face%ntot))
+        islfface = .false.
+        ishfface = .false.
+        islfface(alllf) = .true.
+        ishfface(allhf) = .true.
+        if (ishfsep) then 
+            allocate(sepfaces(size(allhf)), mergesepfaces(size(alllf)))
+            sepfaces = pack(tubefaces, ishfface(tubefaces))
+            sepfaces = sepfaces(size(sepfaces):1:-1)
+            mergesepfaces = pack(tubefaces, islfface(tubefaces))
+        elseif (islfsep) then 
+            allocate(sepfaces(size(alllf)), mergesepfaces(size(allhf)))
+            sepfaces = pack(tubefaces, islfface(tubefaces))
+            sepfaces = sepfaces(size(sepfaces):1:-1)
+            mergesepfaces = pack(tubefaces, ishfface(tubefaces))
+        end if         
+
+        ! Extract sorted vertices from sorted merge separatrix faces
+        call ExtractPolygonVertices(topomesh%face%vert(mergefaces, :), &
+            size(mergefaces), mergevert)
+
+        ! Sanity checks
+        if (vert%type(mergevert(1)) == TMvertexsaddleID) then 
+            print *, 'vertex: ', mergevert(1)
+            print *, 'CollapseTMSeparatrixTubeTA: first sorted vertex of ' // & 
+                'merging faces is X-point, unexpected. Aborting merge...'
+            return 
+        end if 
+        if (vert%type(mergevert(size(mergevert))) == TMvertexsaddleID) then 
+            print *, 'vertex: ', mergevert(size(mergevert))
+            print *, 'CollapseTMSeparatrixTubeTA: last sorted vertex of ' // & 
+                'merging faces is X-point, unexpected. Aborting merge...'
+            return 
+        end if 
+
+        ! Insert X-points
+        !================ 
+        ! Sanity checks
+        nxp = count(vert%type(mergevert) == TMvertexsaddleID)
+
+        ! Sanity check
+        if (nxp == 0) then
+            print *, 'CollapseTMSeparatrixTubeTA: could not find any ' // & 
+                'x-points, aborting merge...'
+            return 
+        end if
+
+        ! Determine tracing direction
+        if (ishfsep) then 
+            ! Need to trace downstream, so opposite of the gradient
+            tracedir = -1
+        else
+            ! Need to trace upstream, so along the gradient
+            tracedir = 1
+        end if 
+
+        ! Determine lines
+        allocate(xt(nxp), yt(nxp), xpointID(nxp), streamlines(nxp))
+        xb(1) = -posinfval_R8()
+        xb(2) = posinfval_R8()
+        yb = xb
+        cc = 0
+        do i = 1, size(mergevert)
+            if (vert%type(mergevert(i)) == TMvertexsaddleID) then
+                ! Update counter
+                cc = cc + 1
+
+                ! Determine segment by finding the point that is closest
+                ! to the x-point and of which the vector formed by the
+                ! x-point and point lies within the domain (determined 
+                ! by tangent vectors of separatrix faces neighbouring 
+                ! the x-point)
+                tf1 = mergesepfaces(i-1)
+                tf2 = mergesepfaces(i)
+                xpointID(cc) = mergevert(i)
+                if (face%vert(tf1, 1) == mergevert(i)) then 
+                    ! Need to take second vertex
+                    x1 = face%x(tf1)%Get(2)
+                    y1 = face%y(tf1)%Get(2)
+                elseif  (face%vert(tf1, 2) == mergevert(i)) then 
+                    ! Need to take N-1 vertex
+                    x1 = face%x(tf1)%Get(face%x(tf1)%Size()-1)
+                    y1 = face%y(tf1)%Get(face%y(tf1)%Size()-1)
+                else
+                    ! Unexpected
+                    call gdErrorHandler('CollapseTMSeparatrixTubeTA: ' // &
+                        'could not find x-point in face that is expected ' // & 
+                        'to have x-point')
+                end if
+                if (face%vert(tf2, 1) == mergevert(i)) then 
+                    ! Need to take second vertex
+                    x2 = face%x(tf2)%Get(2)
+                    y2 = face%y(tf2)%Get(2)
+                elseif  (face%vert(tf1, 2) == mergevert(i)) then 
+                    ! Need to take N-1 vertex
+                    x2 = face%x(tf2)%Get(face%x(tf2)%Size()-1)
+                    y2 = face%y(tf2)%Get(face%y(tf2)%Size()-1)
+                else
+                    ! Unexpected
+                    call gdErrorHandler('CollapseTMSeparatrixTubeTA: ' // &
+                        'could not find x-point in face that is expected ' // & 
+                        'to have x-point')
+                end if
+
+                ! Construct the tangent vectors
+                xxp = vert%x(mergevert(i))
+                yxp = vert%y(mergevert(i))
+                tx1 = x1 - xxp
+                ty1 = y1 - yxp
+                tx2 = x2 - xxp
+                ty2 = y2 - yxp
+
+                ! Determine the connecting point and face
+                mindist = posinfval_R8()
+                do j = 1, size(sepfaces)
+                    ! Unpack
+                    xs = face%x(sepfaces(j))%Get()
+                    ys = face%y(sepfaces(j))%Get()
+
+                    ! Compute (squared) distance
+                    ds = (xs - xxp)**2 + (ys - yxp)**2
+
+                    ! Compute vector
+                    txv = xs - xxp
+                    tyv = ys - yxp
+
+                    ! Set distance to infinity where the vector does not
+                    ! lie between the tangent vectors (i.e. this vector 
+                    ! lies outside of the domain)
+                    where ((txv*tx1 + tyv*ty1 < 0) .or. (txv*tx2 + tyv*ty2 < 0)) ds = posinfval_R8()
+
+                    ! If all distances are infinite, skip
+                    if (all(ds == posinfval_R8())) then 
+                        cycle
+                    end if 
+
+                    ! Find the current minimal distance
+                    tdist = minval(ds)
+
+                    ! Check
+                    if (tdist < mindist) then 
+                        mindist = tdist
+                        streamlines(cc)%x = [xxp, xs(minloc(ds, 1))]
+                        streamlines(cc)%y = [yxp, ys(minloc(ds, 1))]
+                    end if 
+
+                end do
+                
+                ! Sanity check
+                if (mindist == posinfval_R8()) then 
+                    ! Not a single point found, unexpected
+                    call gdErrorHandler('CollapseTMSeparatrixTubeTA: ' // & 
+                        'could not find a single point that could ' // & 
+                        'be connected to the x-point, unexpected ')
+                end if 
+            end if 
+        end do 
+
+        ! Trace (in both directions, cause we can't trust )
+        !streamlines = tmadaptor%streamlinetracer%TraceStreamlines(&
+        !    xt, yt, xb, yb, spread(tracedir, 1, size(xt)))
+
+        ! Determine streamline intersections
+        nsl = size(streamlines)
+        ntf = size(tubefaces)
+        allocate(xintrda(nsl, ntf), yintrda(nsl, ntf), s1rrda(nsl, ntf), &
+            s2rrda(nsl, ntf), s1ida(nsl, ntf), s2ida(nsl, ntf))
+        do i = 1, nsl
+            ! Unpack
+            xs = streamlines(i)%x
+            ys = streamlines(i)%y
+            do j  = 1, ntf
+                ! Compute intersections
+                xf = face%x(tubefaces(j))%Get()
+                yf = face%y(tubefaces(j))%Get()
+                call SimplePolygonIntersections(xs, ys, xf, yf, xint, &
+                    yint, s1, s2, s1r, s2r)
+
+                ! Save intersections
+                xintrda(i, j) = ConstructRealDynamicArray(xint)
+                yintrda(i, j) = ConstructRealDynamicArray(yint)
+                s1rrda(i, j) = ConstructRealDynamicArray(s1r)
+                s2rrda(i, j) = ConstructRealDynamicArray(s2r)
+                s1ida(i, j) = ConstructIntegerDynamicArray(s1)
+                s2ida(i, j) = ConstructIntegerDynamicArray(s2)
+                
+            end do 
+        end do 
+
+        ! Process intersections & do checks
+        allocate(newx(nsl), newy(nsl), sepfaceID(nsl), news2r(nsl), news2(nsl))
+        do i = 1, nsl
+            ! Check if one of the intersections is in a non-separatrix 
+            ! boundary
+            isintersectionfound = .false. 
+            do j = 1, ntf
+                if (any(tubefaces(j) == sepfaces)) then 
+                    if (xintrda(i, j)%Size() /= 0) then 
+                        ! Intersection found, need to do checks 
+                        if (isintersectionfound) then 
+                            ! Intersection was already found, so duplicate
+                            ! intersections are present. Unexpected, abort merge
+                            print *, 'CollapseTMSeparatrixTubeTA: multiple ' // &
+                                'intersections found with separatrix, unexpected. Aborting merge'
+                            return 
+                        else
+                            if (xintrda(i, j)%Size() > 1) then 
+                                ! Intersection was already found, so duplicate
+                                ! intersections are present. Unexpected, abort merge
+                                print *, 'CollapseTMSeparatrixTubeTA: multiple ' // &
+                                    'intersections found with separatrix with same face, unexpected. Aborting merge'
+                                return 
+                            else
+                                ! Just one intersection, add that one
+                                isintersectionfound = .true.
+                                newx(i) = xintrda(i, j)%Get(1)
+                                newy(i) = yintrda(i, j)%Get(1)
+                                news2r(i) = s2rrda(i, j)%Get(1)
+                                news2(i) = s2ida(i, j)%Get(1)
+                                sepfaceID(i) = tubefaces(j)
+                            end if 
+
+                        end if 
+                    end if 
+                else
+                    ! Can't have any intersections with other 
+                    ! faces (yet) except merging faces
+                    if (xintrda(i, j)%Size() /= 0) then 
+                        if (any(tubefaces(j) == mergesepfaces)) then 
+                            ! All good
+                        else
+                            print *, 'CollapseTMSeparatrixTubeTA: intersections ' // & 
+                                'of streamline with non-separatrix face found, unexpected. Aborting merge...'
+                            return 
+                        end if 
+                    end if 
+                end if 
+            end do 
+
+            ! If we got here, check if an intersection was found
+            if (.not. isintersectionfound) then 
+                ! Exit
+                print *, 'CollapseTMSeparatrixTubeTA: could not ' // &
+                    'find intersection between streamline and separatrix, ' // & 
+                    'exiting'
+                return 
+            end if 
+        end do 
+
+        ! Housekeeping
+        end associate
+
+        ! Determine flux surface ID for new faces
+        call Unique(sepfaceID, usepfaceID)
+        newfsID = topomesh%face%fsID(usepfaceID(1))
+        do i = 1, size(usepfaceID)
+            ! Sanity checks
+            if (topomesh%face%fsID(usepfaceID(i)) /= newfsID) then 
+                ! This can only happen if we didn't manage the flux surface
+                ! IDs properly
+                print *, 'CollapseTMSeparatixTubeTA: different flux surface ' // & 
+                    'IDs found for same separatrix, tube construction in ' // & 
+                    'grid generation stage may go wrong'
+            end if 
+        end do 
+
+        ! Construct new aligned faces from old faces
+        do i = 1, size(usepfaceID)
+            ! Gather all intersections for this face
+            nint = count(sepfaceID == usepfaceID(i))
+            allocate(txp(nint), tnews2r(nint), tnews2(nint), sortindex(nint))
+            txp = pack(xpointID, sepfaceID == usepfaceID(i))
+            tnews2 = pack(news2, sepfaceID == usepfaceID(i))
+            tnews2r = pack(news2r, sepfaceID == usepfaceID(i))
+
+            ! Sort along s2r
+            call Sort(tnews2r, ind=sortindex, ascend=.true.)
+            txp = txp(sortindex)
+            tnews2 = tnews2(sortindex)
+
+            ! Add end points
+            txp = [topomesh%face%vert(usepfaceID(i), 1), txp, topomesh%face%vert(usepfaceID(i), 2)]
+            tnews2 = [1, tnews2, topomesh%face%pol(usepfaceID(i))%ne]
+
+            ! New aligned faces are simply lines for now
+            call ExtractTopologicalFacesFromPolygon(topomesh%face%pol(usepfaceID(i)), &
+                txp, tnews2, topomesh%vert%x, topomesh%vert%y, v1, v2, xfnew, yfnew)
+
+            ! Add to faces
+            do j = 1, size(xfnew)
+                if (topomesh%face%fsID(usepfaceID(i)) /= 0) then 
+                    fsfval = topomesh%fsfval%Get(topomesh%face%fsID(usepfaceID(i)))
+                else
+                    fsfval = 0.0_R8
+                end if 
+                call AddTopologicalMeshFace(topomesh, [v1(j), v2(j)], xfnew(j), &
+                    yfnew(j), topomesh%face%type(usepfaceID(i)), topomesh%face%fsID(usepfaceID(i)), fsfval)
+            end do 
+
+            ! Housekeeping
+            deallocate(txp, tnews2r, tnews2, sortindex)
+        end do 
+
+        ! Update the adaptor data
+        call tmadaptor%AddFaceData(topomesh)
+
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp1', .false.)
+
+        ! Adjust topomesh
+        !================
+        ! Mark faces and vertices for removal
+        allocate(remf(topomesh%face%ntot), remv(topomesh%vert%ntot))
+        remf = .false. 
+        remv = .false. 
+        remf([mergesepfaces, usepfaceID]) = .true. ! separatrix faces to be removed
+        tf = topomesh%tube%GetFace(mergetube)
+        where (topomesh%face%type(tf) /= TMfacebndID) remf(tf) = .true. ! remove non-boundary radial faces of tube
+        do i = 1, size(mergevert)
+            if (.not. any(topomesh%vert%type(mergevert(i)) == &  
+                [TMvertexsaddleID, TMvertexbndID])) then 
+                remv(mergevert(i)) = .true. ! boundary vertices will be removed by the simplification step
+            end if 
+        end do 
+
+        ! Remove faces
+        call RemoveTopologicalMeshFaceLogical(topomesh, remf)
+        call tmadaptor%RemoveFaceDataLogical(remf)
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp2', .false.)
+
+        ! Remove vertices
+        call RemoveTopologicalMeshVertexLogical(topomesh, remv)
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp3', .false.)
+
+        ! Simplify
+        call SimplifyTopologicalMeshFaces(topomesh, remf)
+        if (any(remf)) then
+            call tmadaptor%RemoveFaceData(remf)
+            call tmadaptor%AddFaceData(topomesh)
+        end if 
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp4', .false.)
+
+        ! Split faces if necessary
+        call SplitTopologicalMeshFaces(topomesh, remf)   
+        if (any(remf)) then 
+            call tmadaptor%RemoveFaceData(remf)
+            call tmadaptor%AddFaceData(topomesh)
+        end if 
+        call WriteTopologicalMesh(topomesh, 'topomesh_temp5', .false.)
+        ! Recompute all interconnections, cells, etc
+        ! Vertex faces
+        call AddTopologicalMeshVertexFaces(topomesh)
+
+        ! Data
+        call AddTopologicalMeshData(topomesh)
+
+        ! Add cells
+        call AddTopologicalMeshCells(topomesh)
+
+        ! Data (recompute)
+        call AddTopologicalMeshData(topomesh)
+
+        ! Compute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
+
+        ! Simplify separatrices
+        !======================
+        call tmadaptor%SimplifySeparatrices(topomesh)
+
+        ! Set output
+        wasmerged = .true.
+        
+    end subroutine
+
+    ! Separatrix simplification
+    subroutine SimplifyTMSeparatricesTA(tmadaptor, topomesh)
+
+        ! Description
+        !============
+        ! This routine simplifies the separatrix by applying a specific
+        ! set of adaptations:
+        ! - Merging of X-point(s) into one higher order X-point
+        ! - Moving radial line points on X-points
+        ! Note that these operations can in principle only occur after
+        ! separatrix tubes have been merged or when connected topologies
+        ! are encountered. Options should be propagated through the 
+        ! topomesh adaptor object.
+
+        ! It is *very* important to realize that this routine cannot
+        ! hedge for any strange side effects that will occur when these
+        ! adaptations are applied for X-points etc that lie far away 
+        ! from each other, which is not the intended use. In fact, there 
+        ! is likely no way to properly treat that, nor is it desired, 
+        ! since these points are essential for the topological mesh and 
+        ! since these should not pose any challenge during grid generation.  
+
+        ! Algorithm
+        !==========
+        ! Simply check for each X-point each other vertex that is 
+        ! connected through a separatrix segment. If the distance w.r.t.
+        ! that vertex is lower than a defined tolerance, the vertex 
+        ! it connects to is replaced by the X-point. This is done 
+        ! iteratively until no more connections can be made. No checks
+        ! are made a posteriori to see if faces cross etc, so handle 
+        ! with care. The distance used here is the distance of the face.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshAdaptorUDT)               :: tmadaptor 
+        type(TopomeshUDT), intent(inout)        :: topomesh
+
+        ! Auxiliary
+        integer(I8)                             :: tv 
+        integer(I8), allocatable, dimension(:)  :: tf, tvf
+        real(R8)                                :: lface
+        real(R8), allocatable, dimension(:)     :: xf, yf
+        logical, allocatable, dimension(:)      :: remf, remv
+        type(RealDynamicArrayUDT)               :: xfrda, yfrda
+
+        ! Loop
+        integer(I8)                             :: i, j, k
+
+        ! Initialize
+        !===========
+        ! Loop until no more operations are done
+        k = 1
+        do while (k <= topomesh%vert%ntot)
+            ! Cycle if this point is not an x-point
+            if (topomesh%vert%type(k) /= TMvertexsaddleID) then 
+                ! Increment counter
+                k = k + 1
+
+                ! Cycle
+                cycle
+            end if 
+
+            ! Get all faces next to this X-point
+            tf = topomesh%vert%GetFace(k)
+
+            ! Loop over all faces
+            do i = 1, size(tf)
+                ! Check if it is a separatrix segment
+                if (topomesh%face%type(tf(i)) /= TMfacesepID) then 
+                    ! Skip
+                    cycle
+                end if
+                
+                ! Compute its distance
+                xf = topomesh%face%x(tf(i))%Get()
+                yf = topomesh%face%y(tf(i))%Get() 
+                lface = sum(sqrt((xf(2:) - xf(1:size(xf)-1))**2 + &
+                    (yf(2:) - yf(1:size(yf)-1))**2))
+
+                ! Compare to minimal length
+                if (lface >= tmadaptor%lpolsepmin) then 
+                    ! Skip
+                    cycle
+                end if 
+
+                ! Get non-x-point vertex
+                if (topomesh%face%vert(tf(i), 1) == k) then 
+                    tv = topomesh%face%vert(tf(i), 2)
+                elseif (topomesh%face%vert(tf(i), 2) == k) then 
+                    tv = topomesh%face%vert(tf(i), 1)
+                else
+                    ! Vertex not found, something wrong with topological
+                    ! mesh interconnection
+                    call gdErrorHandler('SimplifyTMSeparatrixTA: could ' // & 
+                        'not find current X-point in face that should ' // & 
+                        'have the X-point - unexpected error in topological ' // & 
+                        'mesh interconnection')
+                end if 
+
+                ! Move the point: construct new faces and mark old ones
+                ! for deletion
+                allocate(remf(topomesh%face%ntot), remv(topomesh%vert%ntot))
+                remf = .false. 
+                remv = .false. 
+                tvf = topomesh%vert%GetFace(tv)
+                remf(tvf) = .true.
+                remv(tv) = .true. 
+
+                ! Construct and add new faces
+                do j = 1, size(tvf)
+                    ! Skip if the current face is the one being removed
+                    if (tvf(j) == tf(i)) then 
+                        cycle
+                    end if 
+
+                    ! Construct the new face
+                    xfrda = topomesh%face%x(tvf(j))
+                    yfrda = topomesh%face%y(tvf(j))
+                    if (topomesh%face%vert(tvf(j), 1) == tv) then 
+                        ! Adjust coordinates
+                        call xfrda%Set(1, topomesh%vert%x(k))
+                        call yfrda%Set(1, topomesh%vert%y(k))
+
+                        ! Add face
+                        call AddTopologicalMeshFace(topomesh, [k, topomesh%face%vert(tvf(j), 2)], xfrda, yfrda, &
+                            topomesh%face%type(tvf(j)), topomesh%face%fsID(tvf(j)), 0.0_R8)
+                    elseif (topomesh%face%vert(tvf(j), 2) == tv) then 
+                        ! Adjust coordinates
+                        call xfrda%Set(xfrda%Size(), topomesh%vert%x(k))
+                        call yfrda%Set(yfrda%Size(), topomesh%vert%y(k))
+
+                        ! Add face
+                        call AddTopologicalMeshFace(topomesh, [topomesh%face%vert(tvf(j), 1), k], xfrda, yfrda, &
+                            topomesh%face%type(tvf(j)), topomesh%face%fsID(tvf(j)), 0.0_R8)
+                    else
+                        call gdErrorHandler('SimplifyTMSeparatrixTA: ' // & 
+                            'something wrong with interconnection')
+                    end if 
+
+                    ! Extend the deletion vector
+                    remf = [remf, .false.]
+
+                end do 
+
+                ! Update the adaptor data
+                call tmadaptor%AddFaceData(topomesh)
+
+                ! Remove faces
+                call RemoveTopologicalMeshFaceLogical(topomesh, remf)
+                call tmadaptor%RemoveFaceDataLogical(remf)
+
+                ! Remove vertices
+                call RemoveTopologicalMeshVertexLogical(topomesh, remv)
+
+                ! Simplify
+                call SimplifyTopologicalMeshFaces(topomesh, remf)
+                if (any(remf)) then
+                    call tmadaptor%RemoveFaceData(remf)
+                    call tmadaptor%AddFaceData(topomesh)
+                end if 
+
+                ! Split faces if necessary
+                call SplitTopologicalMeshFaces(topomesh, remf)   
+                if (any(remf)) then 
+                    call tmadaptor%RemoveFaceData(remf)
+                    call tmadaptor%AddFaceData(topomesh)
+                end if 
+
+                ! Recompute necessary interconnections
+                ! Vertex faces
+                call AddTopologicalMeshVertexFaces(topomesh)
+
+                ! Reset k and cycle
+                k = 1
+                cycle
+                
+            end do 
+
+            ! If we got here, then nothing happened. Update the counter
+            k = k + 1
+        end do 
+
+        ! Update topomesh
+        !================
+        ! Data
+        call AddTopologicalMeshData(topomesh)
+
+        ! Add cells
+        call AddTopologicalMeshCells(topomesh)
+
+        ! Data (recompute)
+        call AddTopologicalMeshData(topomesh)
+
+        ! Compute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
 
     end subroutine
 
@@ -7918,6 +8896,52 @@ module ggmod_topology2D
         if (options%writedebugoutput) then 
             call WriteTopologicalMesh(topomesh, 'topomesh_aftertubesplitting')
         end if
+
+    end subroutine
+
+    ! Clean-up of split TM tubes
+    subroutine CleanSplitTMTubesTA(tmadaptor, topomesh)
+
+        ! Description
+        !============
+        ! This routine serves to clean up any remaining splitted tubes
+        ! that have not been involved in tube merging after the entire
+        ! merging operation is done. In practice, we simply set the 
+        ! merging criterion to infinity and call only the simple merging
+        ! routine. This should only allow simple merges to be performed
+        ! without any additional topological changes. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshAdaptorUDT)               :: tmadaptor
+        type(TopomeshUDT), intent(inout)        :: topomesh 
+
+        ! Auxiliary
+        real(R8)                                :: lradmin_orig 
+        logical                                 :: wasmerged
+
+        ! Initialize
+        !===========
+        ! Copy original option for merging
+        lradmin_orig = tmadaptor%lradmin
+
+        ! Set length to infinity
+        tmadaptor%lradmin = posinfval_R8()
+
+        ! Simplify
+        !=========
+        ! Keep merging until no merge could be performed anymore
+        do while (.true.)
+            call tmadaptor%MergeTMTubesSimple(topomesh, wasmerged)
+            if (.not. wasmerged) then 
+                exit
+            end if 
+        end do 
+
+        ! Reset
+        !======
+        tmadaptor%lradmin = lradmin_orig
 
     end subroutine
 
@@ -14337,7 +15361,7 @@ module ggmod_topology2D
         integer(I8), allocatable    :: ID(:)
 
         ! Auxiliary
-        integer(I8)                             :: nsp, tspfloc, &
+        integer(I8)                             :: nsp, &
             nextv, tsp
         integer(I8), allocatable, dimension(:)  ::sp, tspf, tfvert
         logical, allocatable, dimension(:)      :: isfacefound
@@ -15029,8 +16053,14 @@ module ggmod_topology2D
             psif = tmadaptor%facepsi(tubef(i))%Get()
 
             ! Hedge for psimin/psimax not lying on this face
-            psimin = max(psimin, minval(psif))
-            psimax = min(psimax, maxval(psif))
+            if (all(psimin > psif) .or. all(psimin < psif)) then 
+                psimin = minval(psif)
+            end if 
+            if (all(psimax > psif) .or. all(psimax < psif)) then 
+                psimax = maxval(psif)
+            end if 
+            !psimin = max(psimin, minval(psif))
+            !psimax = min(psimax, maxval(psif))
 
             ! Compute the monotonized face radial length distribution
             dlcradf = tmadaptor%facedlcrad(tubef(i))%Get()
