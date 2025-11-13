@@ -6479,12 +6479,14 @@ module ggmod_gridgeneration2D
                         nv = nv + 1
                         vertexID(cc, ntf) = nv
                     end if 
-                    xint(cc, ntf) = xintda(j, ntf)%Get(endind)
-                    yint(cc, ntf) = yintda(j, ntf)%Get(endind)
-                    segc(cc, ntf) = segcda(j, ntf)%Get(endind)
-                    segrf(cc, ntf) = segrfda(j, ntf)%Get(endind)
-                    segrc(cc, ntf) = segrcda(j, ntf)%Get(endind)
-                    segrrf(cc, ntf) = segrrfda(j, ntf)%Get(endind)
+                    if (ntf /= tfloc) then ! skip if last face is tracing location
+                        xint(cc, ntf) = xintda(j, ntf)%Get(endind)
+                        yint(cc, ntf) = yintda(j, ntf)%Get(endind)
+                        segc(cc, ntf) = segcda(j, ntf)%Get(endind)
+                        segrf(cc, ntf) = segrfda(j, ntf)%Get(endind)
+                        segrc(cc, ntf) = segrcda(j, ntf)%Get(endind)
+                        segrrf(cc, ntf) = segrrfda(j, ntf)%Get(endind)
+                    end if 
 
                 end if 
             end do 
@@ -15406,6 +15408,19 @@ module ggmod_gridgeneration2D
                         simgrid%face%aligned(i) = 1_I8
                 end if 
             end if 
+        end do 
+
+        ! Ensure that all topological faces are aligned faces (it may be
+        ! that certain of these faces have different field line ID 
+        ! leading to false non-aligned faces) - except for aligned 
+        ! boundary faces
+        do i = 1, simgrid%face%ntot
+            if (simgrid%face%TMfacelabel(i) /= 0) then 
+                if (any(topomesh%face%type(simgrid%face%TMfacelabel(i)) == TMfacealignedID) .and.  &
+                    .not. (topomesh%face%type(simgrid%face%TMfacelabel(i)) == TMfacealbndID)) then 
+                    simgrid%face%aligned(i) = 1_I8
+                end if 
+            end if
         end do 
         end associate 
 
